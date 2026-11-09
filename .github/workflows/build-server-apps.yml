@@ -210,6 +210,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       IDOLY_RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      IDOLY_PAYLOAD_SHA: ${{ needs.prepare.outputs.payload_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -233,6 +234,45 @@ jobs:
         with:
           name: server-data-v0.2.7
           path: data
+      - name: Prepare verified host catalog references before Android build
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          from zipfile import ZipFile
+
+          payload = Path('data/dist') / os.environ['IDOLY_PAYLOAD_NAME']
+          expected = os.environ['IDOLY_PAYLOAD_SHA']
+          if not re.fullmatch(r'[0-9a-f]{64}', expected) or not payload.is_file():
+              raise SystemExit('Verified Android QA payload or its expected SHA-256 is missing')
+          with payload.open('rb') as stream:
+              actual = hashlib.file_digest(stream, 'sha256').hexdigest()
+          if actual != expected:
+              raise SystemExit('Android QA payload failed its preparation SHA-256 check')
+          required = ('protocol/idolypride-6.1.1.pb', 'master-json/AreaGroup.json',
+                      'master-json/Area.json', 'master-json/Quest.json',
+                      'master-json/HierarchyDetailGrade.json', 'master-json/HierarchyGrade.json')
+          with ZipFile(payload) as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit('Android QA payload failed ZIP CRC validation')
+              for relative in required:
+                  content = archive.read('data/' + relative)
+                  if not content or relative.endswith('.json') and not json.loads(content):
+                      raise SystemExit('Required Android QA reference is empty: ' + relative)
+                  destination = Path('data') / relative
+                  if destination.is_file() and destination.read_bytes() != content:
+                      raise SystemExit('Host Android QA reference differs from the verified payload: ' + relative)
+                  destination.parent.mkdir(parents=True, exist_ok=True)
+                  destination.write_bytes(content)
+          if not all((Path('data') / relative).is_file() for relative in required):
+              raise SystemExit('Required Android QA schema or catalog reference is missing')
+          print('Prepared the verified schema and five canonical host catalog tables')
+          PY
       - name: Install Android SDK and host QA dependencies
         shell: bash
         run: |
