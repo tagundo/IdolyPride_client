@@ -83,6 +83,34 @@ class _Catalog:
         value = source.read_text(encoding="utf-8").strip()
         return value or None
 
+    def hierarchy_grade(self, points: int = 0, best_id: str = "") -> str:
+        """Resolve a real point-based grade without inventing global ranking."""
+        details = self.ids("HierarchyDetailGrade", required=True)
+        grades = self.ids("HierarchyGrade", required=True)
+        if points < 0 or (best_id and best_id not in details):
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local hierarchy state has invalid master references")
+        eligible = []
+        for key, row in details.items():
+            try:
+                if type(row["requiredHierarchyPoint"]) not in (int, str):
+                    raise ValueError("Non-integer hierarchy threshold")
+                threshold = int(row["requiredHierarchyPoint"])
+                rank = row["requiredHierarchyRank"]
+            except (KeyError, ValueError, TypeError, OverflowError):
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Invalid local hierarchy grade definition") from None
+            if (row.get("hierarchyGradeId") not in grades or threshold < 0
+                    or type(rank) is not int or rank < 0):
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Invalid local hierarchy grade references")
+            if rank == 0 and threshold <= points:
+                eligible.append((threshold, key))
+        if not eligible:
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local hierarchy catalog has no eligible base grade")
+        highest = max(threshold for threshold, _ in eligible)
+        candidates = [key for threshold, key in eligible if threshold == highest]
+        if len(candidates) != 1:
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local hierarchy grade threshold is ambiguous")
+        return candidates[0]
+
 
 class Gameplay:
     """Handle an explicit local feature allowlist; other methods return None."""
@@ -302,6 +330,12 @@ class Gameplay:
         elif path == "/api.Home/Enter":
             snapshot = self._snapshot()
             result.currentMainAreaId = self._current_area(snapshot)
+            # HomeTop.SetHomeEnterData immediately dereferences this master
+            # grade (Android 6.1.1 0x566c1c4..0x566c1d4). Presence alone is
+            # insufficient: an empty currentDetailGradeId resolves to null.
+            result.hierarchyNotiInfo.currentDetailGradeId = self.catalog.hierarchy_grade(
+                snapshot.hierarchy.currentFixedPoint + snapshot.hierarchy.currentVariablePoint,
+                snapshot.hierarchy.bestDetailGradeId)
             # Presence is deliberate for the client's home/activity container
             # reads. Pending rewards/events remain absent, not fabricated.
             for field in ("fanEventInfo", "promotionInfo", "refreshInfo", "bannerInfo", "eventInfo",
@@ -415,6 +449,7 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     stamina = next((row.get("maxStamina") for row in stamina_rows if row.get("level") == 1), None)
     if type(stamina) is not int or stamina < 0:
         raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter activity stamina is missing from master")
+    base_hierarchy_grade = catalog.hierarchy_grade()
     now = _now_ms()
     snapshot = schema.response_type(_USER_GET)()
     # UserGet singleton models exist even when a local collection is empty.
@@ -425,6 +460,7 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.user.managerLevel = 1
     snapshot.user.gameStartTime = now
     snapshot.user.deckSequence = 1
+    snapshot.hierarchy.bestDetailGradeId = base_hierarchy_grade
     snapshot.decks.add(number=1, name="Local deck")
     owned_costumes, owned_hairs = set(), set()
     for key in ids:

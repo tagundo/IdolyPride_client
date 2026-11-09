@@ -41,6 +41,9 @@ def synthetic_schema(path):
                               ("lastLoginTime", 3), ("deckSequence", 3), ("isReviewed", 8), ("tutorialClearedTime", 3)))
     message("Public", fields(("serverUserId", 9), ("publicUserId", 9)))
     message("TotalCount", fields(("loginCount", 3)))
+    message("Hierarchy", fields(("bestDetailGradeId", 9), ("currentFixedPoint", 3), ("currentVariablePoint", 3)))
+    message("HierarchyNotiInfo", fields(("currentDetailGradeId", 9), ("currentRank", 5))
+            + [("rewardIds", 9, True), ("divisionRewardIds", 9, True)])
     message("Profile", [("favoriteCharacterIds", 9, True)])
     message("Character", fields(("characterId", 9), ("favoriteCostumeId", 9), ("liveCostumeId", 9),
                                 ("favoriteHairId", 9), ("liveHairId", 9), ("activityLevel", 5),
@@ -60,7 +63,7 @@ def synthetic_schema(path):
     message("HomePosition", fields(("homePositionType", "HomePositionType"), ("characterId", 9),
                                    ("isCharacterRandom", 8), ("isCostumeRandom", 8)))
     snapshot_fields = fields(("user", "Manager"), ("userPublic", "Public"), ("totalCount", "TotalCount"),
-                             ("profile", "Profile"), ("balance", "Empty"))
+                             ("profile", "Profile"), ("balance", "Empty"), ("hierarchy", "Hierarchy"))
     snapshot_fields += [(name, kind, True) for name, kind in (
         ("characters", "Character"), ("costumes", "Costume"), ("hairs", "Hair"), ("cards", "Card"),
         ("decks", "LocalDeck"), ("deckPositions", "DeckPosition"), ("photos", "Photo"), ("accessories", "Accessory"),
@@ -79,9 +82,9 @@ def synthetic_schema(path):
     message("LessonProgress", fields(("currentAreaId", 9), ("lastReceiveTime", 3), ("maxRewardTime", 3)))
     message("LessonInfo", fields(("lessonProgress", "LessonProgress")))
     home_fields = fields(("currentMainAreaId", 9), ("lessonProgress", "LessonProgress"), ("lessonInfo", "LessonInfo"),
-                          ("commonResponse", "CommonResponse"))
+                          ("commonResponse", "CommonResponse"), ("hierarchyNotiInfo", "HierarchyNotiInfo"))
     home_fields += fields(*[(name, "Empty") for name in ("fanEventInfo", "promotionInfo", "refreshInfo", "bannerInfo",
-                          "eventInfo", "pvpInfo", "hierarchyNotiInfo", "notiStoneShopItem", "notiNormalShopItem",
+                          "eventInfo", "pvpInfo", "notiStoneShopItem", "notiNormalShopItem",
                           "notiShowcaseShopItem", "leagueInfo", "loveInfo", "companyInfo", "homeFishHeavenInfo", "payslip")])
     message("HomeEnterResponse", home_fields)
     message("ActionResponse", fields(("commonResponse", "CommonResponse")))
@@ -146,6 +149,11 @@ def master_dir(tmp_path):
                      {"type": 2, "stepInfo": [{"step": 1}]}],
         "Card": [{"id": "card-" + key, "characterId": "char-" + key} for key in ("a", "b")],
         "Accessory": [{"id": "ac-a", "categoryType": 1}, {"id": "ac-b", "categoryType": 2}],
+        "HierarchyGrade": [{"id": "hie-base"}, {"id": "hie-next"}, {"id": "hie-ranked"}],
+        "HierarchyDetailGrade": [
+            {"id": "hie-base-1", "hierarchyGradeId": "hie-base", "requiredHierarchyPoint": "0", "requiredHierarchyRank": 0},
+            {"id": "hie-next-1", "hierarchyGradeId": "hie-next", "requiredHierarchyPoint": "1000", "requiredHierarchyRank": 0},
+            {"id": "hie-ranked-1", "hierarchyGradeId": "hie-ranked", "requiredHierarchyPoint": "2000", "requiredHierarchyRank": 1}],
     }
     for name, value in rows.items():
         (directory / (name + ".json")).write_text(json.dumps(value))
@@ -350,6 +358,10 @@ def test_home_enter_uses_main_area_and_present_containers_without_rewards_or_mut
     assert response.currentMainAreaId == "area-main-001"
     assert response.lessonProgress.currentAreaId == "area-main-001"
     assert response.lessonInfo.lessonProgress == response.lessonProgress
+    assert response.hierarchyNotiInfo.currentDetailGradeId == "hie-base-1"
+    assert snapshot(game).hierarchy.bestDetailGradeId == "hie-base-1"
+    assert response.hierarchyNotiInfo.currentRank == 0
+    assert not response.hierarchyNotiInfo.rewardIds and not response.hierarchyNotiInfo.divisionRewardIds
     for name in ("fanEventInfo", "promotionInfo", "refreshInfo", "bannerInfo", "eventInfo"):
         assert response.HasField(name)
     assert not response.HasField("payslip")
@@ -360,6 +372,62 @@ def test_home_enter_uses_main_area_and_present_containers_without_rewards_or_mut
         return user.SerializeToString()
     game.state.mutate_snapshot(game.profile, game.schema.fingerprint, completed)
     assert call(game, "/api.Home/Enter").currentMainAreaId == "area-main-002"
+
+
+def test_home_hierarchy_resolves_points_without_mutating_imported_history_or_ranking(game):
+    def imported(payload):
+        user = game.schema.response_type("/api.User/Get").FromString(payload)
+        user.hierarchy.bestDetailGradeId = "hie-ranked-1"  # Historical best is not current global rank.
+        user.hierarchy.currentFixedPoint = 700
+        user.hierarchy.currentVariablePoint = 4000
+        return user.SerializeToString() + b"\x80\x4b\x7b"
+    game.state.mutate_snapshot(game.profile, game.schema.fingerprint, imported)
+    before = game.state.snapshot(game.profile)
+    token, _ = game.state.login(game.profile)
+    result = call(game, "/api.Home/Enter").hierarchyNotiInfo
+    assert result.currentDetailGradeId == "hie-next-1"
+    assert result.currentRank == 0
+    assert not result.rewardIds and not result.divisionRewardIds
+    assert game.state.snapshot(game.profile) == before
+    assert game.state.authenticated(token, game.profile)
+
+
+def test_home_empty_imported_hierarchy_gets_response_only_base_grade(game):
+    def legacy(payload):
+        user = game.schema.response_type("/api.User/Get").FromString(payload)
+        user.ClearField("hierarchy")
+        return user.SerializeToString()
+    game.state.mutate_snapshot(game.profile, game.schema.fingerprint, legacy)
+    before = game.state.snapshot(game.profile)
+    assert call(game, "/api.Home/Enter").hierarchyNotiInfo.currentDetailGradeId == "hie-base-1"
+    assert game.state.snapshot(game.profile) == before
+
+
+@pytest.mark.parametrize("failure", ("missing-parent", "missing-catalog", "bad-best", "negative-point", "bad-threshold"))
+def test_home_hierarchy_invalid_master_or_state_never_returns_missing_grade(game, failure):
+    if failure == "missing-catalog":
+        (game.catalog.directory / "HierarchyGrade.json").unlink()
+    elif failure in ("missing-parent", "bad-threshold"):
+        path = game.catalog.directory / "HierarchyDetailGrade.json"
+        rows = json.loads(path.read_text())
+        rows[0]["hierarchyGradeId" if failure == "missing-parent" else "requiredHierarchyPoint"] = (
+            "missing" if failure == "missing-parent" else 0.5)
+        path.write_text(json.dumps(rows))
+    else:
+        def broken(payload):
+            user = game.schema.response_type("/api.User/Get").FromString(payload)
+            if failure == "bad-best":
+                user.hierarchy.bestDetailGradeId = "missing"
+            else:
+                user.hierarchy.currentFixedPoint = -1
+            return user.SerializeToString()
+        game.state.mutate_snapshot(game.profile, game.schema.fingerprint, broken)
+    # Starter validation cached a separate catalog; this handler has not read its tables.
+    before = game.state.snapshot(game.profile)
+    with pytest.raises(RpcFailure) as error:
+        call(game, "/api.Home/Enter")
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert game.state.snapshot(game.profile) == before
 
 
 def test_explicit_empty_local_catalogs_and_master_version(game):
