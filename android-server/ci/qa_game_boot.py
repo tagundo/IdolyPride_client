@@ -19,6 +19,7 @@ import subprocess
 import time
 
 from qa_emulator import ACTIVITY, PACKAGE, QA, wait_server
+from qa_diagnostics import _tap_initial_start
 from idoly_local.schema import Schema
 
 
@@ -212,7 +213,7 @@ def main():
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         port = qa.forward(50051)
         schema = Schema.from_descriptor_set(args.descriptor_set)
-        qa.tap("서버 시작", "server-start")
+        result["startup_system_dialog_actions"] = _tap_initial_start(qa)
         server_started = True
         wait_server(schema, port, timeout=args.startup_timeout)
         qa.capture("server-running")
