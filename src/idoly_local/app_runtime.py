@@ -28,6 +28,14 @@ class Runtime:
         self._last_error = None
         self._grpc_address = None
         self._asset_url = None
+        from .diagnostics import ClientDiagnostics
+        self._diagnostics = ClientDiagnostics(self._log)
+        self._transfer_lock = threading.Lock()
+        self._transfers = {}
+        self._transfer_status = {"active_requests": 0, "path": "", "sent_bytes": 0,
+                                 "total_bytes": 0, "status": "idle", "http_status": 0,
+                                 "completed_requests": 0, "failed_requests": 0,
+                                 "session_bytes_sent": 0}
 
     def _log(self, message):
         # Transport logging contains method paths and fixed diagnostic messages,
@@ -50,7 +58,34 @@ class Runtime:
                       "last_error": self._last_error}
         with self._log_lock:
             result["logs"] = list(self._logs)
+        diagnostics = self._diagnostics.status()
+        result["client_diagnostics"] = {key: value for key, value in diagnostics.items() if key != "events"}
+        with self._transfer_lock:
+            result["asset_transfer"] = dict(self._transfer_status)
         return result
+
+    def diagnostics_snapshot(self) -> dict:
+        """Export only safe runtime observations, never profiles or credentials."""
+        return {"schema": 1, "runtime": self.status(),
+                "client_diagnostics": self._diagnostics.status()}
+
+    def _observe_transfer(self, event):
+        with self._transfer_lock:
+            key, phase = event["transfer_id"], event["phase"]
+            previous = self._transfers.get(key, 0)
+            sent = event["sent_bytes"]
+            self._transfer_status["session_bytes_sent"] += max(0, sent - previous)
+            self._transfers[key] = sent
+            if phase in ("completed", "failed"):
+                self._transfers.pop(key, None)
+                counter = "completed_requests" if phase == "completed" else "failed_requests"
+                self._transfer_status[counter] += 1
+            self._transfer_status.update(active_requests=len(self._transfers), path=event["path"],
+                                         sent_bytes=sent, total_bytes=event["total_bytes"],
+                                         status=phase, http_status=event["http_status"])
+        if phase in ("completed", "failed"):
+            word = "완료" if phase == "completed" else "중단"
+            self._log(f"마스터 파일 전송 {word}: {event['path']} · {sent}/{event['total_bytes']} 바이트")
 
     def stop(self):
         """Stop both listeners and release their ports; repeated calls are safe."""
@@ -140,7 +175,9 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         else:
             runtime._log("Loaded local profile " + profile)
         archive = root / "original-master"
-        runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets")
+        runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets",
+                                             diagnostics=runtime._diagnostics,
+                                             transfer_callback=runtime._observe_transfer)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.

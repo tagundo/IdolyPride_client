@@ -91,6 +91,16 @@ jobs:
           PY
           uv run --locked --all-extras pytest -q tests android-server/ci \
             | tee data/android-game-debug/tests.txt
+      - name: Build the clearly marked emulator-only software AES variant
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked --all-extras python tools/package_qa_aes_client.py \
+            data/ci-input/Game-local-r2.apk \
+            --output data/dist/Game-QA-software-AES.apk \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --report data/android-game-debug/qa-aes-report.json \
+            | tee data/android-game-debug/qa-aes-build.txt
       - name: Build the current x86_64 server app
         shell: bash
         run: |
@@ -106,7 +116,7 @@ jobs:
             > data/android-game-debug/game-package.txt
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs data/dist/Server-game-debug.apk \
             > data/android-game-debug/server-signature.txt
-      - name: Capture the actual ARM64 game on a translated emulator
+      - name: Capture the software-AES QA game on a translated emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -123,7 +133,7 @@ jobs:
           script: >-
             uv run --locked python android-server/ci/qa_game_boot.py
             --server-apk data/dist/Server-game-debug.apk
-            --game-apk data/ci-input/Game-local-r2.apk
+            --game-apk data/dist/Game-QA-software-AES.apk
             --descriptor-set data/protocol/idolypride-6.1.1.pb
             --artifacts data/android-game-debug --duration 180 --interval 10 --startup-timeout 600
       - name: Preserve game screenshots and diagnostic evidence
