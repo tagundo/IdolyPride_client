@@ -122,9 +122,32 @@ def test_optional_reentry_absence_or_blockers_do_not_fail_or_tap(title_qa, monke
 
     monkeypatch.setattr(qa, "_observe_title_frame", observe)
     assert qa.tap_observed_title_reentry() is None
-    assert clock.now == 190
+    assert clock.now == 280
     assert len(inputs) == 1
-    assert json.loads((qa.artifacts / "title-reentry-result.json").read_text())["performed"] is False
+    report = json.loads((qa.artifacts / "title-reentry-result.json").read_text())
+    assert report["performed"] is False
+    assert report["timeout_seconds"] == report["waited_seconds"] == 180
+
+
+def test_observed_late_title_reentry_after_full_master_download_can_receive_second_tap(title_qa, monkeypatch):
+    qa, clock, inputs = title_qa
+
+    def observe(prefix, *, inspect_loading):
+        # The actual probe was still loading within 90s and showed title again
+        # roughly 110..140s after the first action. Do not infer a title earlier.
+        if clock.now < 220:
+            return None
+        return frame(clock.now, prefix)
+
+    monkeypatch.setattr(qa, "_observe_title_frame", observe)
+    action = qa.tap_observed_title_reentry()
+    assert [when for when, args in inputs] == [100, 223]
+    assert action["stable_previous_observation"]["captured_at"] == 220
+    assert action["captured_at"] == 223
+    assert action["performed_seconds"] - qa.title_actions[0]["performed_seconds"] == 123
+    report = json.loads((qa.artifacts / "title-reentry-result.json").read_text())
+    assert report["performed"] is True
+    assert report["timeout_seconds"] == 180
 
 
 def test_second_title_is_disabled_by_default(title_qa):

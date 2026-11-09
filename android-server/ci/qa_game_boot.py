@@ -270,7 +270,9 @@ class GameQA(QA):
             time.sleep(max(0, min(5 - (time.monotonic() - began), deadline - time.monotonic())))
         raise RuntimeError("No confident fresh TAP TO START phrase appeared within 180 seconds; no game tap performed")
 
-    def tap_observed_title_reentry(self, timeout=90):
+    def tap_observed_title_reentry(self, timeout=180):
+        # The full first master download and title reload took >90s in actual
+        # probe 42647043103. Keep a bounded 180s window with the same input guards.
         if (getattr(self, "max_title_taps", 1) != 2 or len(getattr(self, "title_actions", [])) != 1
                 or not self.title_actions[0].get("performed")):
             raise RuntimeError("Second title observation requires one completed action and opt-in max-title-taps=2")
@@ -290,7 +292,8 @@ class GameQA(QA):
                                stable_frames_minimum_gap_seconds=3)
                 action = self._perform_title_action(current)
                 (self.artifacts / "title-reentry-result.json").write_text(json.dumps(
-                    {"performed": True, "waited_seconds": round(time.monotonic() - began, 2),
+                    {"performed": True, "timeout_seconds": timeout,
+                     "waited_seconds": round(time.monotonic() - began, 2),
                      "action_number": action["action_number"]}, indent=2) + "\n")
                 return action
             candidate = current if eligible else None
@@ -299,7 +302,8 @@ class GameQA(QA):
         # A game that proceeds elsewhere needs no second title input. Preserve
         # observations and continue capturing without treating absence as error.
         (self.artifacts / "title-reentry-result.json").write_text(json.dumps(
-            {"performed": False, "reason": "No stable nonloading title reentry observed",
+            {"performed": False, "timeout_seconds": timeout,
+             "reason": "No stable nonloading title reentry observed",
              "waited_seconds": round(time.monotonic() - began, 2)}, indent=2) + "\n")
         return None
 
