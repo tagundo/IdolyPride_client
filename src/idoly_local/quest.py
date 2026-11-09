@@ -1,8 +1,9 @@
 """Read-only main-live progress for 6.1.1 Quest.Top and Quest.ListMain.
 
 The wire schema comes from the public game client. Its LiveTop response reader
-at Android RVA 0x5755020 requires pvpInfo and hierarchyNotiInfo; the former
-explicitly permits an absent latestPvpSeason. No battles, clears, rewards,
+at Android RVA 0x5755020 requires pvpInfo and hierarchyNotiInfo, and its
+post-await code also requires contestArea (0x5759ce8). PvP explicitly permits
+an absent latestPvpSeason. No battles, clears, rewards,
 competitive seasons, ticket refills or profile mutations are synthesized here.
 """
 from __future__ import annotations
