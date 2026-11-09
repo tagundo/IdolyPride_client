@@ -58,6 +58,111 @@ def test_home_positions_require_four_distinct_owned_characters_and_original_home
 
 
 @pytest.fixture
+def initial_inventory(tmp_path):
+    user = _client_schema().response_type("/api.User/Get")()
+    user.user.deckSequence = 1
+    user.decks.add(number=1, name="Local deck")
+    tables = {name: [] for name in ("Reward", "Item", "Card", "CardParameter", "CardRarity",
+                                    "CardLevelRelease", "Skill", "Setting", "Character", "Costume", "Hair")}
+    resources = []
+    for i in range(17):
+        character, card, costume, hair, skill = (prefix + str(i) for prefix in ("char-", "card-", "costume-", "hair-", "skill-"))
+        resources.extend(({"resourceType": 4, "resourceId": character, "amount": 1},
+                          {"resourceType": 2, "resourceId": card, "amount": 1}))
+        tables["Character"].append({"id": character})
+        tables["Costume"].append({"id": costume, "characterId": character})
+        tables["Hair"].append({"id": hair, "characterId": character, "wearableCostumeIds": [costume]})
+        tables["Card"].append({"id": card, "characterId": character, "initialRarity": 1,
+            "cardParameterId": "parameters", "cardLevelReleaseId": "release",
+            "vocalRatioPermil": 404, "danceRatioPermil": 316, "visualRatioPermil": 280,
+            "staminaRatioPermil": 1000, "skillId1": skill, "skillId2": "locked-skill"})
+        tables["Skill"].append({"id": skill, "levels": [{"level": 1, "requiredCardLevel": 1}]})
+        user.characters.add(characterId=character)
+        user.costumes.add(costumeId=costume)
+        user.hairs.add(hairId=hair)
+        # Independently stated expected results: floor(257*ratio/1000), then
+        # floor(value*1250/1000); collapsing floors would make vocal 129.
+        user.cards.add(cardId=card, obtainedTime=123456, level=1, baseLevel=1, rarity=1, displayType=1,
+            vocal=128, baseVocal=128, dance=101, baseDance=101, visual=88, baseVisual=88,
+            stamina=1253, baseStamina=1253, mental=100, technique=101,
+            skillId1=skill, baseSkillId1=skill, skillLevel1=1, baseSkillLevel1=1,
+            photoEquipableCount=1, basePhotoEquipableCount=1)
+        if i < 5:
+            user.deckPositions.add(number=1, position=i + 1, cardId=card, costumeId=costume, hairId=hair)
+    for identity, amount in (("initial-item-a", 200), ("initial-item-b", 400)):
+        resources.append({"resourceType": 1, "resourceId": identity, "amount": amount})
+        tables["Item"].append({"id": identity})
+        user.items.add(itemId=identity, amount=amount)
+    tables["Reward"].append({"id": "initial_user_reward", "resources": resources})
+    tables["CardParameter"].append({"id": "parameters", "level": 1, "value": "257", "staminaValue": "1003"})
+    tables["CardRarity"].append({"rarity": 1, "parameterBonusPermil": 1250})
+    tables["CardLevelRelease"].append({"id": "release", "level": 1,
+        "targets": [{"type": 1, "number": 1}, {"type": 7, "number": 1}, {"type": 4, "number": 1}]})
+    tables["Setting"].append({"cardDefaultMental": 100, "cardDefaultTechnique": 101})
+    master = tmp_path / "master-json"
+    master.mkdir()
+    for name, rows in tables.items():
+        (master / (name + ".json")).write_text(json.dumps(rows))
+    return user, tables, tmp_path
+
+
+def test_initial_inventory_uses_public_reward_exact_parameters_and_five_owned_slots(initial_inventory):
+    user, _tables, directory = initial_inventory
+    assert engine._initial_inventory_reference(user, directory) == {
+        "initial_card_count": 17, "initial_item_count": 2, "default_unit_slot_count": 5}
+
+
+@pytest.mark.parametrize("changed", ("card-missing", "collapsed-stat-floors", "wrong-base-stat", "locked-skill",
+    "wrong-base-skill", "ability-released", "wrong-photo-slots", "no-obtained-time", "wrong-item-amount",
+    "expired-item", "extra-item", "duplicate-unit-card", "missing-unit-slot", "duplicate-unit-slot",
+    "unowned-unit-card", "wrong-costume-owner", "wrong-hair-owner", "hair-not-wearable", "unowned-character"))
+def test_initial_inventory_rejects_bad_grants_parameters_or_default_unit(initial_inventory, changed):
+    user, tables, directory = initial_inventory
+    if changed == "card-missing":
+        del user.cards[-1]
+    elif changed == "collapsed-stat-floors":
+        user.cards[0].vocal = user.cards[0].baseVocal = 129
+    elif changed == "wrong-base-stat":
+        user.cards[0].baseStamina += 1
+    elif changed == "locked-skill":
+        user.cards[0].skillId2 = "locked-skill"
+        user.cards[0].skillLevel2 = 1
+    elif changed == "wrong-base-skill":
+        user.cards[0].baseSkillLevel1 = 0
+    elif changed == "ability-released":
+        user.cards[0].liveAbilityLevel = 1
+    elif changed == "wrong-photo-slots":
+        user.cards[0].photoEquipableCount = 2
+    elif changed == "no-obtained-time":
+        user.cards[0].obtainedTime = 0
+    elif changed == "wrong-item-amount":
+        user.items[0].amount += 1
+    elif changed == "expired-item":
+        user.items[0].expiredTime = 123
+    elif changed == "extra-item":
+        user.items.add(itemId="gift-item", amount=1)
+    elif changed == "duplicate-unit-card":
+        user.deckPositions[4].cardId = user.deckPositions[0].cardId
+    elif changed == "missing-unit-slot":
+        del user.deckPositions[-1]
+    elif changed == "duplicate-unit-slot":
+        user.deckPositions[-1].position = 4
+    elif changed == "unowned-unit-card":
+        user.deckPositions[0].cardId = "unowned-card"
+    elif changed == "unowned-character":
+        del user.characters[-1]
+    else:
+        table = "Costume" if changed == "wrong-costume-owner" else "Hair"
+        if changed == "hair-not-wearable":
+            tables[table][0]["wearableCostumeIds"] = []
+        else:
+            tables[table][0]["characterId"] = "char-1"
+        (directory / ("master-json/" + table + ".json")).write_text(json.dumps(tables[table]))
+    with pytest.raises(RuntimeError):
+        engine._initial_inventory_reference(user, directory)
+
+
+@pytest.fixture
 def quest_catalog(tmp_path):
     schema = _client_schema()
     master = tmp_path / "master-json"

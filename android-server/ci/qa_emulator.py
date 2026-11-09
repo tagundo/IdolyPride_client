@@ -229,6 +229,125 @@ def assert_quest_catalog(top, main, master_dir, user):
     return first.questId
 
 
+def assert_initial_inventory(user, master_dir):
+    """Check bootstrap inventory directly against public tables, not seeding code."""
+    master = Path(master_dir)
+    tables = {name: json.loads((master / (name + ".json")).read_text()) for name in
+              ("Reward", "Item", "Card", "CardParameter", "CardRarity", "CardLevelRelease", "Skill",
+               "Setting", "Character", "Costume", "Hair")}
+
+    def one(name, predicate):
+        matches = [row for row in tables[name] if predicate(row)]
+        if len(matches) != 1:
+            raise RuntimeError("Initial inventory needs one matching public " + name + " row")
+        return matches[0]
+
+    def indexed(name):
+        values = tables[name]
+        result = {row["id"]: row for row in values}
+        if len(result) != len(values):
+            raise RuntimeError("Initial inventory has duplicate public " + name + " identities")
+        return result
+
+    reward = one("Reward", lambda row: row.get("id") == "initial_user_reward")
+    resources = reward["resources"]
+    if any(row.get("resourceType") not in (1, 2, 4) for row in resources):
+        raise RuntimeError("Initial reward contains unsupported resources")
+    grants = {kind: [row for row in resources if row["resourceType"] == kind] for kind in (1, 2, 4)}
+    card_ids = [row["resourceId"] for row in grants[2]]
+    character_ids = [row["resourceId"] for row in grants[4]]
+    item_amounts = {row["resourceId"]: int(row["amount"]) for row in grants[1]}
+    if (len(card_ids) != 17 or len(set(card_ids)) != 17
+            or len(character_ids) != 17 or len(set(character_ids)) != 17
+            or len(grants[1]) != 2 or len(item_amounts) != 2
+            or any(int(row["amount"]) != 1 for kind in (2, 4) for row in grants[kind])):
+        raise RuntimeError("Canonical initial reward must contain 17 unique cards/characters and two items")
+    cards, skills, items = indexed("Card"), indexed("Skill"), indexed("Item")
+    characters, costumes, hairs = indexed("Character"), indexed("Costume"), indexed("Hair")
+    if (not set(character_ids).issubset(characters) or not set(item_amounts).issubset(items)
+            or not set(character_ids).issubset(row.characterId for row in user.characters)):
+        raise RuntimeError("Initial reward resources do not resolve to public character/item tables")
+    if (len(user.cards) != 17 or {row.cardId for row in user.cards} != set(card_ids)
+            or len(user.items) != 2 or {row.itemId: row.amount for row in user.items} != item_amounts
+            or any(row.expiredTime for row in user.items) or user.balance.SerializeToString()):
+        raise RuntimeError("User.Get does not contain exactly the canonical initial cards/items without premium currency")
+    setting = one("Setting", lambda _row: True)
+    owners = set()
+    for observed in user.cards:
+        card = cards.get(observed.cardId)
+        if card is None or card.get("characterId") not in character_ids or card["characterId"] in owners:
+            raise RuntimeError("Initial cards must resolve to distinct canonical reward characters")
+        owners.add(card["characterId"])
+        rarity = one("CardRarity", lambda row: row.get("rarity") == card["initialRarity"])
+        parameter = one("CardParameter", lambda row: row.get("id") == card["cardParameterId"] and row.get("level") == 1)
+        release = one("CardLevelRelease", lambda row: row.get("id") == card["cardLevelReleaseId"] and row.get("level") == 1)
+        expected = type(observed)(cardId=observed.cardId, level=1, baseLevel=1, rarity=card["initialRarity"],
+                                  mental=setting["cardDefaultMental"], technique=setting["cardDefaultTechnique"], displayType=1)
+        for name in ("vocal", "dance", "visual", "stamina"):
+            base = int(parameter["staminaValue"] if name == "stamina" else parameter["value"])
+            # Both integer floors are observable in the client parameter calculation.
+            value = (base * int(card[name + "RatioPermil"]) // 1000) * int(rarity["parameterBonusPermil"]) // 1000
+            setattr(expected, name, value)
+            setattr(expected, "base" + name.capitalize(), value)
+        targets = release["targets"]
+        if any(row["type"] not in (1, 4, 7) for row in targets):
+            raise RuntimeError("Initial level-one release contains unsupported skill/ability targets")
+        unlocked = {row["number"] for row in targets if row["type"] == 1}
+        if 1 not in unlocked or not unlocked.issubset({1, 2, 3, 4}):
+            raise RuntimeError("Initial card release does not define a valid first learned skill")
+        expected.photoEquipableCount = expected.basePhotoEquipableCount = sum(
+            row["number"] for row in targets if row["type"] == 7)
+        for position in unlocked:
+            skill_id = card["skillId" + str(position)]
+            skill = skills.get(skill_id)
+            first = [row for row in skill.get("levels", []) if row.get("level") == 1] if skill else []
+            if len(first) != 1 or int(first[0].get("requiredCardLevel", 0)) > 1:
+                raise RuntimeError("Initial learned skill does not resolve to a usable first skill level")
+            for prefix in ("skillId", "baseSkillId"):
+                setattr(expected, prefix + str(position), skill_id)
+            for prefix in ("skillLevel", "baseSkillLevel"):
+                setattr(expected, prefix + str(position), 1)
+        actual = type(observed)()
+        actual.CopyFrom(observed)
+        actual.ClearField("obtainedTime")
+        if (observed.obtainedTime <= 0
+                or actual.SerializeToString(deterministic=True) != expected.SerializeToString(deterministic=True)):
+            raise RuntimeError("Initial UserCard fields differ from public level-one parameters/releases/skills")
+    if owners != set(character_ids):
+        raise RuntimeError("Initial cards do not cover the canonical reward characters")
+    if (len(user.decks) != 1 or user.decks[0].number != 1 or user.user.deckSequence != 1
+            or len(user.deckPositions) != 5 or {row.number for row in user.deckPositions} != {1}
+            or {row.position for row in user.deckPositions} != {1, 2, 3, 4, 5}
+            or len({row.cardId for row in user.deckPositions}) != 5):
+        raise RuntimeError("Default unit must contain five distinct owned cards in deck-one slots 1..5")
+    owned_cards = {row.cardId for row in user.cards}
+    owned_costumes = {row.costumeId for row in user.costumes}
+    owned_hairs = {row.hairId for row in user.hairs}
+    unit_characters = set()
+    for position in user.deckPositions:
+        card = cards.get(position.cardId)
+        owner = card.get("characterId") if card else None
+        costume, hair = costumes.get(position.costumeId), hairs.get(position.hairId)
+        if (position.cardId not in owned_cards or owner in unit_characters
+                or position.costumeId not in owned_costumes or position.hairId not in owned_hairs
+                or costume is None or hair is None
+                or costume.get("characterId") != owner or hair.get("characterId") != owner
+                or (hair.get("wearableCostumeIds") is not None and position.costumeId not in hair["wearableCostumeIds"])
+                or position.part1AccessoryId or position.part2AccessoryId or position.photoIds):
+            raise RuntimeError("Default unit has an unowned, repeated or mismatched card/appearance reference")
+        unit_characters.add(owner)
+    return {"initial_card_count": len(user.cards), "initial_item_count": len(user.items), "default_unit_slot_count": 5}
+
+
+def _without_initial_inventory(user):
+    """Remove only independently verified new inventory and default unit rows."""
+    projected = type(user)()
+    projected.CopyFrom(user)
+    for field in ("cards", "items", "deckPositions"):
+        projected.ClearField(field)
+    return projected
+
+
 def _legacy_projection(user):
     """Remove only the 12 office actors and their unshared owned appearances."""
     projected = type(user)()
@@ -292,7 +411,7 @@ def _preserved_tables(db):
     return {name: db.execute("SELECT * FROM " + name + " ORDER BY 1").fetchall() for name in PRESERVED_TABLES}
 
 
-def stage_legacy_starter(qa, schema, expected_user, *, legacy_roster=True):
+def stage_legacy_starter(qa, schema, expected_user, *, master_dir, legacy_roster=True, inventory_only=False):
     """Recreate an old starter layout only inside this disposable emulator.
 
     Private DB/WAL bytes live in a TemporaryDirectory and memory, never QA
@@ -306,7 +425,7 @@ def stage_legacy_starter(qa, schema, expected_user, *, legacy_roster=True):
             identity = db.execute("SELECT name FROM profiles").fetchall()
             snapshots = db.execute("SELECT profile,response,schema_sha256 FROM snapshots").fetchall()
             marker = db.execute("SELECT profile,version FROM starter_profiles").fetchall()
-            if identity != [("sandbox",)] or len(snapshots) != 1 or marker != [("sandbox", 3)]:
+            if identity != [("sandbox",)] or len(snapshots) != 1 or marker != [("sandbox", 4)]:
                 raise RuntimeError("Legacy upgrade fixture requires the fresh synthetic sandbox only")
             profile, payload, fingerprint = snapshots[0]
             if profile != "sandbox" or fingerprint != schema.fingerprint:
@@ -314,16 +433,24 @@ def stage_legacy_starter(qa, schema, expected_user, *, legacy_roster=True):
             user = schema.response_type("/api.User/Get").FromString(payload)
             assert_starter_roster(user)
             assert_starter_home_positions(user)
+            assert_initial_inventory(user, master_dir)
             if user.SerializeToString(deterministic=True) != expected_user.SerializeToString(deterministic=True):
                 raise RuntimeError("Stopped synthetic snapshot differs from the tested RPC state")
             if tuple(user.profile.favoriteCharacterIds) != PHOTO_CHARACTERS:
                 raise RuntimeError("Legacy upgrade fixture does not match the five photo idols")
+            starts = [row for row in user.tutorials if row.tutorialType == 1]
+            if len(starts) != 1 or starts[0].step not in (0, 10) or inventory_only and legacy_roster:
+                raise RuntimeError("Legacy inventory fixture requires the unchanged known pre-live tutorial state")
             preserved = _preserved_tables(db)
-            legacy = _legacy_home_projection(_legacy_projection(user) if legacy_roster else user)
+            legacy = _without_initial_inventory(user)
+            if legacy_roster:
+                legacy = _legacy_projection(legacy)
+            if not inventory_only:
+                legacy = _legacy_home_projection(legacy)
             if legacy_roster and (len(legacy.characters) != 5
                                   or {row.characterId for row in legacy.characters} != set(PHOTO_CHARACTERS)):
                 raise RuntimeError("Legacy upgrade fixture did not produce exactly five idols")
-            if any(row.characterId != PHOTO_CHARACTERS[0] for row in legacy.homePositions):
+            if not inventory_only and any(row.characterId != PHOTO_CHARACTERS[0] for row in legacy.homePositions):
                 raise RuntimeError("Legacy upgrade fixture did not explicitly restore all four old Kotono assignments")
             if legacy_roster:
                 legacy = type(user).FromString(legacy.SerializeToString() + QA_UNKNOWN_PB)
@@ -331,7 +458,7 @@ def stage_legacy_starter(qa, schema, expected_user, *, legacy_roster=True):
             if legacy_roster:
                 db.execute("DELETE FROM starter_profiles WHERE profile=?", (profile,))
             else:
-                db.execute("UPDATE starter_profiles SET version=2 WHERE profile=?", (profile,))
+                db.execute("UPDATE starter_profiles SET version=? WHERE profile=?", (3 if inventory_only else 2, profile))
             db.commit()
             if _preserved_tables(db) != preserved:
                 raise RuntimeError("Legacy fixture changed preserved synthetic database rows")
@@ -360,7 +487,7 @@ def verify_upgrade_database(qa, preserved):
             _checkpoint(db)
             if _preserved_tables(db) != preserved:
                 raise RuntimeError("Native starter upgrade changed identity, sessions or settings")
-            if db.execute("SELECT profile,version FROM starter_profiles").fetchall() != [("sandbox", 3)]:
+            if db.execute("SELECT profile,version FROM starter_profiles").fetchall() != [("sandbox", 4)]:
                 raise RuntimeError("Native starter upgrade did not persist its migration marker")
         finally:
             db.close()
@@ -406,6 +533,8 @@ def main():
             raise RuntimeError("Local User.Get snapshot is absent")
         assert_starter_roster(user)
         assert_starter_home_positions(user)
+        result.update(assert_initial_inventory(user, args.master_dir))
+        result.update(initial_inventory_master_backed=True, default_unit_complete=True)
         result["starter_roster_complete"] = True
         result["home_positions_distinct"] = True
         quest_top = rpc(schema, grpc_port, "/api.Quest/Top", login.gameAuthToken)
@@ -420,7 +549,7 @@ def main():
         quest_user = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if quest_user.SerializeToString(deterministic=True) != user.SerializeToString(deterministic=True):
             raise RuntimeError("Read-only Quest.Top/ListMain mutated the local user snapshot")
-        result.update(quest_top_list_main=True, quest_catalog_readonly=True)
+        result.update(quest_top_list_main=True, quest_catalog_readonly=True, initial_inventory_readonly=True)
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
         home_request.settingInfo.soundEffect = 29
@@ -459,7 +588,7 @@ def main():
         # Stop the whole process, preserving its private DB, then exercise a
         # fresh service instance and the previously issued local session.
         qa.adb("shell", "am", "force-stop", PACKAGE)
-        legacy, preserved = stage_legacy_starter(qa, schema, changed)
+        legacy, preserved = stage_legacy_starter(qa, schema, changed, master_dir=args.master_dir)
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         print("Restarting the app to verify the native five-to-seventeen starter upgrade", flush=True)
         qa.tap("서버 시작", "05-restart")
@@ -469,7 +598,8 @@ def main():
             raise RuntimeError("Restart did not preserve the local profile")
         assert_starter_roster(restored)
         assert_starter_home_positions(restored)
-        if (_legacy_home_projection(_legacy_projection(restored)).SerializeToString(deterministic=True)
+        assert_initial_inventory(restored, args.master_dir)
+        if (_legacy_home_projection(_legacy_projection(_without_initial_inventory(restored))).SerializeToString(deterministic=True)
                 != legacy.SerializeToString(deterministic=True)):
             raise RuntimeError("Native starter upgrade changed existing snapshot fields or appearance rows")
         old_home1 = next(row.SerializeToString() for row in legacy.homePositions if row.homePositionType == 1)
@@ -483,7 +613,7 @@ def main():
         wait_server(schema, grpc_port, expected=False, timeout=30)
         qa.adb("shell", "am", "force-stop", PACKAGE)
         verify_upgrade_database(qa, preserved)
-        legacy_v2, preserved_v2 = stage_legacy_starter(qa, schema, restored, legacy_roster=False)
+        legacy_v2, preserved_v2 = stage_legacy_starter(qa, schema, restored, master_dir=args.master_dir, legacy_roster=False)
         if preserved_v2 != preserved:
             raise RuntimeError("Version-2 fixture changed original identity, sessions or settings")
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
@@ -493,7 +623,8 @@ def main():
         repaired_v2 = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         assert_starter_roster(repaired_v2)
         assert_starter_home_positions(repaired_v2)
-        if (_legacy_home_projection(repaired_v2).SerializeToString(deterministic=True)
+        assert_initial_inventory(repaired_v2, args.master_dir)
+        if (_legacy_home_projection(_without_initial_inventory(repaired_v2)).SerializeToString(deterministic=True)
                 != legacy_v2.SerializeToString(deterministic=True)):
             raise RuntimeError("Version-2 home repair changed fields beyond the three allowed home character IDs")
         if (next(row.SerializeToString() for row in repaired_v2.homePositions if row.homePositionType == 1) != old_home1
@@ -504,7 +635,38 @@ def main():
         result.update(version2_home_positions_upgraded=True, upgrade_home1_preserved=True,
                       upgrade_unknown_fields_preserved=True, upgrade_tutorial_preserved=True)
         qa.capture("09-version2-restarted")
-        qa.tap("서버 중지", "10-final-stop")
+        qa.tap("서버 중지", "10-home-upgrade-stop")
+        wait_server(schema, grpc_port, expected=False, timeout=30)
+        qa.adb("shell", "am", "force-stop", PACKAGE)
+        verify_upgrade_database(qa, preserved)
+        legacy_v3, preserved_v3 = stage_legacy_starter(qa, schema, repaired_v2, master_dir=args.master_dir,
+                                                     legacy_roster=False, inventory_only=True)
+        if preserved_v3 != preserved:
+            raise RuntimeError("Version-3 fixture changed original identity, sessions or settings")
+        qa.adb("shell", "am", "start", "-n", ACTIVITY)
+        print("Restarting the native version-3 empty inventory to verify its initial cards and unit", flush=True)
+        qa.tap("서버 시작", "11-version3-restart")
+        wait_server(schema, grpc_port, timeout=args.startup_timeout)
+        repaired_v3 = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
+        assert_initial_inventory(repaired_v3, args.master_dir)
+        if (_without_initial_inventory(repaired_v3).SerializeToString(deterministic=True)
+                != legacy_v3.SerializeToString(deterministic=True)):
+            raise RuntimeError("Version-3 inventory repair changed pre-existing snapshot fields")
+        result["version3_inventory_upgraded"] = True
+        qa.capture("12-version3-restarted")
+        qa.tap("서버 중지", "13-inventory-upgrade-stop")
+        wait_server(schema, grpc_port, expected=False, timeout=30)
+        qa.adb("shell", "am", "force-stop", PACKAGE)
+        verify_upgrade_database(qa, preserved)
+        qa.adb("shell", "am", "start", "-n", ACTIVITY)
+        qa.tap("서버 시작", "14-inventory-persistence-restart")
+        wait_server(schema, grpc_port, timeout=args.startup_timeout)
+        persisted = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
+        if persisted.SerializeToString(deterministic=True) != repaired_v3.SerializeToString(deterministic=True):
+            raise RuntimeError("Marker-4 restart changed the completed starter inventory or other snapshot fields")
+        result["starter_inventory_persisted"] = True
+        qa.capture("15-inventory-persisted")
+        qa.tap("서버 중지", "16-final-stop")
         wait_server(schema, grpc_port, expected=False, timeout=30)
         qa.adb("shell", "am", "force-stop", PACKAGE)
         verify_upgrade_database(qa, preserved)
@@ -517,7 +679,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("11-final")
+            qa.capture("17-final")
         except Exception:
             pass
         qa.close()

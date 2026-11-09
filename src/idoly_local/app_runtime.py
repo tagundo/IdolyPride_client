@@ -160,7 +160,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         from .assets import create_asset_server, prepare_master_tag
         from .catalog import FixtureStore
         from .h2_server import create_server
-        from .gameplay import repair_starter_home_positions, repair_starter_roster, seed_starter_profile
+        from .gameplay import (repair_starter_home_positions, repair_starter_inventory,
+                               repair_starter_roster, seed_starter_profile)
         from .schema import Schema
         from .state import State
 
@@ -177,6 +178,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                 runtime._log("홈 표시용 기본 캐릭터 데이터를 보완했습니다.")
             if repair_starter_home_positions(state, schema, profile, master_dir):
                 runtime._log("기본 홈 배치의 중복 캐릭터를 보완했습니다.")
+            if repair_starter_inventory(state, schema, profile, master_dir):
+                runtime._log("기본 카드·아이템과 유닛 편성을 준비했습니다.")
             runtime._log("Loaded local profile " + profile)
         archive = root / "original-master"
         runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets",

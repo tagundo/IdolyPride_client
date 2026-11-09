@@ -3,16 +3,20 @@ from importlib.util import module_from_spec, spec_from_file_location
 import json
 from pathlib import Path
 import sqlite3
+import sys
 from types import SimpleNamespace
 
 import pytest
 
-from idoly_local.gameplay import repair_starter_home_positions, repair_starter_roster, seed_starter_profile
+from idoly_local.gameplay import (repair_starter_home_positions, repair_starter_inventory,
+                                 repair_starter_roster, seed_starter_profile)
 from idoly_local.schema import Schema
 from idoly_local.state import State
 
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests"))
+from test_gameplay import initial_inventory_rows
 SPEC = spec_from_file_location("starter_native_qa", Path(__file__).with_name("qa_emulator.py"))
 qa = module_from_spec(SPEC)
 SPEC.loader.exec_module(qa)
@@ -40,6 +44,8 @@ def fixture(tmp_path):
         "HierarchyGrade": [{"id": "hie-007"}],
         "HierarchyDetailGrade": [{"id": "hie-007-003", "hierarchyGradeId": "hie-007",
                                   "requiredHierarchyPoint": "0", "requiredHierarchyRank": 0}]}
+    rows["Setting"][0].update(cardDefaultMental=100, cardDefaultTechnique=100)
+    rows.update(initial_inventory_rows(sorted(qa.STARTER_CHARACTERS)))
     for key in sorted(qa.STARTER_CHARACTERS):
         rows["Character"].append({"id": key, "type": 1, "defaultCostumeId": "cos-" + key,
                                   "defaultLiveCostumeId": "live-" + key})
@@ -111,33 +117,49 @@ def test_both_native_legacy_fixture_cycles_preserve_all_allowed_state(fixture, t
     monkeypatch.setattr(qa, "subprocess", SimpleNamespace(run=device.run))
     home1 = next(row.SerializeToString() for row in user.homePositions if row.homePositionType == 1)
     first_preserved = None
-    for legacy_roster in (True, False):
-        legacy, preserved = qa.stage_legacy_starter(device, schema, user, legacy_roster=legacy_roster)
+    for legacy_version in (None, 2, 3):
+        legacy_roster = legacy_version is None
+        inventory_only = legacy_version == 3
+        legacy, preserved = qa.stage_legacy_starter(device, schema, user, master_dir=master,
+                                                   legacy_roster=legacy_roster, inventory_only=inventory_only)
         assert len(legacy.characters) == (5 if legacy_roster else 17)
-        assert {row.characterId for row in legacy.homePositions} == {"char-ktn"}
+        assert not legacy.cards and not legacy.items and not legacy.deckPositions
+        if not inventory_only:
+            assert {row.characterId for row in legacy.homePositions} == {"char-ktn"}
+        else:
+            qa.assert_starter_home_positions(legacy)
         assert next(row.SerializeToString() for row in legacy.homePositions if row.homePositionType == 1) == home1
         if first_preserved is None:
             first_preserved = preserved
         assert preserved == first_preserved
         assert preserved["profile_settings"]  # Nonempty settings are actually covered.
-        db_path = tmp_path / ("legacy5.db" if legacy_roster else "legacy2.db")
+        db_path = tmp_path / ("legacy" + str(legacy_version) + ".db")
         db_path.write_bytes(device.files[qa.PRIVATE_DATABASE])
         state = State(db_path)
-        assert state.starter_version("sandbox") == (None if legacy_roster else 2)
+        assert state.starter_version("sandbox") == legacy_version
         assert repair_starter_roster(state, schema, "sandbox", master) is legacy_roster
-        assert repair_starter_home_positions(state, schema, "sandbox", master) is True
-        assert state.starter_version("sandbox") == 3
+        assert repair_starter_home_positions(state, schema, "sandbox", master) is not inventory_only
+        assert repair_starter_inventory(state, schema, "sandbox", master) is True
+        assert state.starter_version("sandbox") == 4
         assert state.authenticated(token, "sandbox")
         user = schema.response_type("/api.User/Get").FromString(state.snapshot("sandbox")[0])
         qa.assert_starter_home_positions(user)
         qa.assert_starter_roster(user)
-        projected = qa._legacy_projection(user) if legacy_roster else user
-        assert qa._legacy_home_projection(projected).SerializeToString(deterministic=True) == legacy.SerializeToString(deterministic=True)
+        qa.assert_initial_inventory(user, master)
+        projected = qa._without_initial_inventory(user)
+        if legacy_roster:
+            projected = qa._legacy_projection(projected)
+        if not inventory_only:
+            projected = qa._legacy_home_projection(projected)
+        assert projected.SerializeToString(deterministic=True) == legacy.SerializeToString(deterministic=True)
         assert user.user.name == "Preserved manager" and user.user.isReviewed
         assert user.totalCount.loginCount == 7 and user.tutorials[0].step == 10
         assert qa.QA_UNKNOWN_PB in user.SerializeToString()
         device.files = {qa.PRIVATE_DATABASE: db_path.read_bytes()}
         qa.verify_upgrade_database(device, first_preserved)
+        saved = state.snapshot("sandbox")
+        assert not repair_starter_inventory(state, schema, "sandbox", master)
+        assert state.snapshot("sandbox") == saved
 
 
 def test_quest_qa_checks_catalog_and_does_not_accept_a_fabricated_clear(fixture):

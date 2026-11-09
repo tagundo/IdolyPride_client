@@ -178,6 +178,116 @@ def _home_positions_distinct(user):
             and next(row.characterId for row in positions if row.homePositionType == 1) == "char-ktn")
 
 
+def _initial_inventory_reference(user, data_dir):
+    """Check bootstrap inventory directly against public tables, not seeding code."""
+    master = Path(data_dir) / "master-json"
+    tables = {name: json.loads((master / (name + ".json")).read_text()) for name in
+              ("Reward", "Item", "Card", "CardParameter", "CardRarity", "CardLevelRelease", "Skill",
+               "Setting", "Character", "Costume", "Hair")}
+
+    def one(name, predicate):
+        matches = [row for row in tables[name] if predicate(row)]
+        if len(matches) != 1:
+            raise RuntimeError("Initial inventory needs one matching public " + name + " row")
+        return matches[0]
+
+    def indexed(name):
+        values = tables[name]
+        result = {row["id"]: row for row in values}
+        if len(result) != len(values):
+            raise RuntimeError("Initial inventory has duplicate public " + name + " identities")
+        return result
+
+    reward = one("Reward", lambda row: row.get("id") == "initial_user_reward")
+    resources = reward["resources"]
+    if any(row.get("resourceType") not in (1, 2, 4) for row in resources):
+        raise RuntimeError("Initial reward contains unsupported resources")
+    grants = {kind: [row for row in resources if row["resourceType"] == kind] for kind in (1, 2, 4)}
+    card_ids = [row["resourceId"] for row in grants[2]]
+    character_ids = [row["resourceId"] for row in grants[4]]
+    item_amounts = {row["resourceId"]: int(row["amount"]) for row in grants[1]}
+    if (len(card_ids) != 17 or len(set(card_ids)) != 17
+            or len(character_ids) != 17 or len(set(character_ids)) != 17
+            or len(grants[1]) != 2 or len(item_amounts) != 2
+            or any(int(row["amount"]) != 1 for kind in (2, 4) for row in grants[kind])):
+        raise RuntimeError("Canonical initial reward must contain 17 unique cards/characters and two items")
+    cards, skills, items = indexed("Card"), indexed("Skill"), indexed("Item")
+    characters, costumes, hairs = indexed("Character"), indexed("Costume"), indexed("Hair")
+    if (not set(character_ids).issubset(characters) or not set(item_amounts).issubset(items)
+            or not set(character_ids).issubset(row.characterId for row in user.characters)):
+        raise RuntimeError("Initial reward resources do not resolve to public character/item tables")
+    if (len(user.cards) != 17 or {row.cardId for row in user.cards} != set(card_ids)
+            or len(user.items) != 2 or {row.itemId: row.amount for row in user.items} != item_amounts
+            or any(row.expiredTime for row in user.items) or user.balance.SerializeToString()):
+        raise RuntimeError("User.Get does not contain exactly the canonical initial cards/items without premium currency")
+    setting = one("Setting", lambda _row: True)
+    owners = set()
+    for observed in user.cards:
+        card = cards.get(observed.cardId)
+        if card is None or card.get("characterId") not in character_ids or card["characterId"] in owners:
+            raise RuntimeError("Initial cards must resolve to distinct canonical reward characters")
+        owners.add(card["characterId"])
+        rarity = one("CardRarity", lambda row: row.get("rarity") == card["initialRarity"])
+        parameter = one("CardParameter", lambda row: row.get("id") == card["cardParameterId"] and row.get("level") == 1)
+        release = one("CardLevelRelease", lambda row: row.get("id") == card["cardLevelReleaseId"] and row.get("level") == 1)
+        expected = type(observed)(cardId=observed.cardId, level=1, baseLevel=1, rarity=card["initialRarity"],
+                                  mental=setting["cardDefaultMental"], technique=setting["cardDefaultTechnique"], displayType=1)
+        for name in ("vocal", "dance", "visual", "stamina"):
+            base = int(parameter["staminaValue"] if name == "stamina" else parameter["value"])
+            # Both integer floors are observable in the client parameter calculation.
+            value = (base * int(card[name + "RatioPermil"]) // 1000) * int(rarity["parameterBonusPermil"]) // 1000
+            setattr(expected, name, value)
+            setattr(expected, "base" + name.capitalize(), value)
+        targets = release["targets"]
+        if any(row["type"] not in (1, 4, 7) for row in targets):
+            raise RuntimeError("Initial level-one release contains unsupported skill/ability targets")
+        unlocked = {row["number"] for row in targets if row["type"] == 1}
+        if 1 not in unlocked or not unlocked.issubset({1, 2, 3, 4}):
+            raise RuntimeError("Initial card release does not define a valid first learned skill")
+        expected.photoEquipableCount = expected.basePhotoEquipableCount = sum(
+            row["number"] for row in targets if row["type"] == 7)
+        for position in unlocked:
+            skill_id = card["skillId" + str(position)]
+            skill = skills.get(skill_id)
+            first = [row for row in skill.get("levels", []) if row.get("level") == 1] if skill else []
+            if len(first) != 1 or int(first[0].get("requiredCardLevel", 0)) > 1:
+                raise RuntimeError("Initial learned skill does not resolve to a usable first skill level")
+            for prefix in ("skillId", "baseSkillId"):
+                setattr(expected, prefix + str(position), skill_id)
+            for prefix in ("skillLevel", "baseSkillLevel"):
+                setattr(expected, prefix + str(position), 1)
+        actual = type(observed)()
+        actual.CopyFrom(observed)
+        actual.ClearField("obtainedTime")
+        if (observed.obtainedTime <= 0
+                or actual.SerializeToString(deterministic=True) != expected.SerializeToString(deterministic=True)):
+            raise RuntimeError("Initial UserCard fields differ from public level-one parameters/releases/skills")
+    if owners != set(character_ids):
+        raise RuntimeError("Initial cards do not cover the canonical reward characters")
+    if (len(user.decks) != 1 or user.decks[0].number != 1 or user.user.deckSequence != 1
+            or len(user.deckPositions) != 5 or {row.number for row in user.deckPositions} != {1}
+            or {row.position for row in user.deckPositions} != {1, 2, 3, 4, 5}
+            or len({row.cardId for row in user.deckPositions}) != 5):
+        raise RuntimeError("Default unit must contain five distinct owned cards in deck-one slots 1..5")
+    owned_cards = {row.cardId for row in user.cards}
+    owned_costumes = {row.costumeId for row in user.costumes}
+    owned_hairs = {row.hairId for row in user.hairs}
+    unit_characters = set()
+    for position in user.deckPositions:
+        card = cards.get(position.cardId)
+        owner = card.get("characterId") if card else None
+        costume, hair = costumes.get(position.costumeId), hairs.get(position.hairId)
+        if (position.cardId not in owned_cards or owner in unit_characters
+                or position.costumeId not in owned_costumes or position.hairId not in owned_hairs
+                or costume is None or hair is None
+                or costume.get("characterId") != owner or hair.get("characterId") != owner
+                or (hair.get("wearableCostumeIds") is not None and position.costumeId not in hair["wearableCostumeIds"])
+                or position.part1AccessoryId or position.part2AccessoryId or position.photoIds):
+            raise RuntimeError("Default unit has an unowned, repeated or mismatched card/appearance reference")
+        unit_characters.add(owner)
+    return {"initial_card_count": len(user.cards), "initial_item_count": len(user.items), "default_unit_slot_count": 5}
+
+
 def _quest_tutorial_pending(user):
     starts = [row for row in user.tutorials if row.tutorialType == 1]
     if len(starts) > 1 or starts and starts[0].step < 0:
@@ -284,6 +394,8 @@ def smoke(data_dir, server_data, report_path):
               "starter_roster_complete": False, "home_positions_distinct": False,
               "quest_top_list_main": False, "quest_catalog_readonly": False,
               "quest_contest_area_locked": False, "quest_tutorial_context": False,
+              "initial_inventory_master_backed": False, "default_unit_complete": False,
+              "initial_inventory_readonly": False, "starter_inventory_persisted": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     try:
@@ -330,6 +442,8 @@ def smoke(data_dir, server_data, report_path):
         report["home_positions_distinct"] = _home_positions_distinct(before)
         if not report["home_positions_distinct"]:
             raise RuntimeError("User.Get must assign four distinct owned home characters and preserve Home1 char-ktn")
+        report.update(_initial_inventory_reference(before, data_dir))
+        report["initial_inventory_master_backed"] = report["default_unit_complete"] = True
         saved_before_quests = State(Path(data_dir) / "state.db").snapshot("sandbox")
         top = _rpc(address, schema, "/api.Quest/Top", token=token)
         main = _rpc(address, schema, "/api.Quest/ListMain", token=token)
@@ -347,6 +461,7 @@ def smoke(data_dir, server_data, report_path):
             and after_quests.SerializeToString() == before.SerializeToString())
         if not report["quest_catalog_readonly"]:
             raise RuntimeError("Read-only Quest.Top/ListMain changed the local snapshot")
+        report["initial_inventory_readonly"] = True
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
         home_request.settingInfo.soundEffect = 29
@@ -386,6 +501,7 @@ def smoke(data_dir, server_data, report_path):
         runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
         restored = _rpc(runtime.status()["grpc_address"], schema, "/api.User/Get", token=token)
         report["profile_persisted"] = restored.SerializeToString() == saved_user
+        report["starter_inventory_persisted"] = report["profile_persisted"]
         settings = State(Path(data_dir) / "state.db").settings("sandbox")
         report["settings_persisted"] = settings == (expected_settings, schema.fingerprint)
     finally:
@@ -397,6 +513,7 @@ def smoke(data_dir, server_data, report_path):
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
                 "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "home_positions_distinct",
                 "quest_top_list_main", "quest_catalog_readonly", "quest_contest_area_locked", "quest_tutorial_context",
+                "initial_inventory_master_backed", "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
