@@ -16,7 +16,7 @@ from idoly_local.schema import Schema
 from idoly_local.catalog import FixtureStore
 
 
-TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade")
+TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill")
 
 
 def digest(path):

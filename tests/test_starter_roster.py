@@ -11,7 +11,7 @@ from idoly_local import gameplay
 from idoly_local.rpc import RpcCode, RpcFailure
 from idoly_local.schema import Schema
 from idoly_local.state import State
-from test_gameplay import synthetic_schema
+from test_gameplay import initial_inventory_rows, synthetic_schema
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -43,7 +43,8 @@ def roster_master(tmp_path):
     directory.mkdir()
     identities = (*BASELINE, *LOCKED, "char-view-gated", "char-npc")
     rows = {
-        "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": list(PHOTO)}],
+        "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": list(PHOTO),
+                     "cardDefaultMental": 100, "cardDefaultTechnique": 100}],
         "Character": [], "Costume": [], "Hair": [],
         "CharacterActivityLevel": [{"level": 1, "maxStamina": 800}],
         "Area": [{"id": "area-main-001", "type": 1, "order": 1, "questIds": ["quest-1"]}],
@@ -52,6 +53,7 @@ def roster_master(tmp_path):
         "HierarchyDetailGrade": [{"id": "hie-007-003", "hierarchyGradeId": "hie-007",
                                   "requiredHierarchyPoint": "0", "requiredHierarchyRank": 0}],
     }
+    rows.update(initial_inventory_rows(BASELINE))
     for key in identities:
         rows["Character"].append({"id": key, "type": 2 if key == "char-npc" else 1,
             "viewConditionId": "view-gate" if key == "char-view-gated" else "",
@@ -132,10 +134,26 @@ def legacy_profile(state, schema, master, *, version=None, alter=None):
     return token
 
 
-def assert_roster(user, master):
+def assert_roster(user, master, *, initial_inventory=False):
     assert {row.characterId for row in user.characters} == set(BASELINE)
     assert not (set(LOCKED) & {row.characterId for row in user.characters})
-    assert not user.cards
+    if initial_inventory:
+        reward = next(row for row in json.loads((master / "Reward.json").read_text())
+                      if row["id"] == "initial_user_reward")
+        expected_cards = [row["resourceId"] for row in reward["resources"] if row["resourceType"] == 2]
+        expected_items = {row["resourceId"]: int(row["amount"]) for row in reward["resources"]
+                          if row["resourceType"] == 1}
+        assert [row.cardId for row in user.cards] == expected_cards
+        assert {row.itemId: row.amount for row in user.items} == expected_items
+        cards = {row["id"]: row for row in json.loads((master / "Card.json").read_text())}
+        assert len(user.deckPositions) == 5
+        assert [(row.number, row.position, cards[row.cardId]["characterId"]) for row in user.deckPositions] == [
+            (1, number, character) for number, character in enumerate(PHOTO, 1)]
+        assert all(row.level == row.baseLevel == row.skillLevel1 == row.baseSkillLevel1 == 1
+                   for row in user.cards)
+        assert all(row.photoEquipableCount == row.basePhotoEquipableCount == 2 for row in user.cards)
+    else:
+        assert not user.cards and not user.items and not user.deckPositions
     assert not user.balance.ListFields()
     costumes = {r["id"]: r for r in json.loads((master / "Costume.json").read_text())}
     hairs = {r["id"]: r for r in json.loads((master / "Hair.json").read_text())}
@@ -147,14 +165,14 @@ def assert_roster(user, master):
             assert hair_id in {owned.hairId for owned in user.hairs}
 
 
-def test_fresh_seed_covers_unconditional_office_roster_without_granting_cards_or_currency(tmp_path, roster_schema, roster_master):
+def test_fresh_seed_covers_office_roster_and_canonical_inventory_without_currency(tmp_path, roster_schema, roster_master):
     state = State(tmp_path / "state.db")
     payload = gameplay.seed_starter_profile(state, roster_schema, "sandbox", roster_master)
     user = roster_schema.response_type("/api.User/Get").FromString(payload)
-    assert_roster(user, roster_master)
+    assert_roster(user, roster_master, initial_inventory=True)
     assert set(PHOTO) <= {row.characterId for row in user.characters}
     assert list(user.profile.favoriteCharacterIds) == list(PHOTO)
-    assert state.starter_version("sandbox") == 3
+    assert state.starter_version("sandbox") == 4
     assert gameplay.repair_starter_roster(state, roster_schema, "sandbox", roster_master) is False
 
 
@@ -276,5 +294,6 @@ def test_actual_611_schema_and_master_define_seventeen_ungated_normal_characters
     state = State(tmp_path / "state.db")
     payload = gameplay.seed_starter_profile(state, schema, "actual", master)
     user = schema.response_type("/api.User/Get").FromString(payload)
-    assert_roster(user, master)
-    assert state.starter_version("actual") == 3
+    assert_roster(user, master, initial_inventory=True)
+    assert len(user.cards) == 17
+    assert state.starter_version("actual") == 4

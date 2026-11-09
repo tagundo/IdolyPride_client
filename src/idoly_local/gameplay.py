@@ -622,18 +622,92 @@ def repair_starter_home_positions(state, schema, profile: str, master_dir: Path)
     return state.mutate_starter_snapshot(profile, schema.fingerprint, repair) is not None
 
 
+def _fill_starter_deck(snapshot, catalog, photo_ids):
+    """Put the five initial photo idols in the local default unit.
+
+    This is a local starting formation, not a recovered official tutorial deck
+    template. It uses only initial-reward cards and already owned live outfits.
+    """
+    if (len(photo_ids) != 5 or snapshot.deckPositions or len(snapshot.decks) != 1
+            or snapshot.decks[0].number != 1):
+        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter formation needs five idols and one empty local deck")
+    master = catalog.ids("Card", required=True)
+    characters = {row.characterId: row for row in snapshot.characters}
+    costumes = {row.costumeId for row in snapshot.costumes}
+    hairs = {row.hairId for row in snapshot.hairs}
+    selected = []
+    for key in photo_ids:
+        cards = [row.cardId for row in snapshot.cards
+                 if row.cardId in master and master[row.cardId].get("characterId") == key]
+        character = characters.get(key)
+        if (len(cards) != 1 or character is None or character.liveCostumeId not in costumes
+                or character.liveHairId not in hairs):
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter formation has invalid owned card or appearance references")
+        selected.append((cards[0], character.liveCostumeId, character.liveHairId))
+    for position, (card, costume, hair) in enumerate(selected, 1):
+        snapshot.deckPositions.add(number=1, position=position, cardId=card,
+                                   costumeId=costume, hairId=hair)
+
+
+def repair_starter_inventory(state, schema, profile: str, master_dir: Path) -> bool:
+    """Fill only the old tagged, empty, pre-live local starter once.
+
+    Imports, custom decks/inventory and progressed accounts are excluded. The
+    snapshot, origin marker and opaque fields share one SQLite transaction;
+    settings and sessions are not replaced.
+    """
+    current = state.snapshot(profile)
+    if (current is None or state.starter_version(profile) != 3
+            or current[1] != schema.fingerprint):
+        return False
+    from .initial_inventory import prepare_initial_inventory, apply_initial_inventory
+
+    catalog = _Catalog(master_dir)
+    photo_ids, _ids, _appearances, _stamina = _starter_roster(catalog)
+    plan = None
+
+    def repair(payload, origin):
+        nonlocal plan
+        if origin != 3:
+            return None
+        try:
+            snapshot = schema.response_type(_USER_GET).FromString(payload)
+        except DecodeError:
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local starter snapshot is malformed") from None
+        starts = [row for row in snapshot.tutorials if row.tutorialType == _GAME_START]
+        if (not snapshot.HasField("user") or snapshot.user.managerLevel != 1
+                or snapshot.user.deckSequence != 1 or snapshot.user.tutorialClearedTime
+                or len(snapshot.decks) != 1 or snapshot.decks[0].number != 1
+                or snapshot.decks[0].name != "Local deck"
+                or snapshot.cards or snapshot.items or snapshot.deckPositions
+                or snapshot.photos or snapshot.accessories or snapshot.balance.SerializeToString()
+                or len(starts) != 1 or starts[0].step not in (0, 10)
+                or snapshot.quests or any(row.clearQuestCount or row.lastClearedTime for row in snapshot.areas)):
+            return None
+        if plan is None:
+            plan = prepare_initial_inventory(schema, master_dir)
+        apply_initial_inventory(snapshot, plan, obtained_time=_now_ms())
+        _fill_starter_deck(snapshot, catalog, photo_ids)
+        return snapshot.SerializeToString(), 4
+
+    return state.mutate_starter_snapshot(profile, schema.fingerprint, repair) is not None
+
+
 def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manager_name: str = "Local Manager") -> bytes:
     """Create a new, master-backed tutorial-start snapshot, never an import.
 
     This prepares the unconditional normal office characters, their default
-    appearances and one empty deck. No cards, currencies or clears are granted.
-    Catalog validation finishes before any profile snapshot is written.
+    appearances and the canonical initial reward inventory. The first five
+    photo idols form the local default deck. No clears or event rewards are
+    granted. Catalog validation finishes before any profile is written.
     """
     if state.snapshot(profile) is not None:
         raise RpcFailure(RpcCode.ALREADY_EXISTS, "Starter seeding requires a profile without a snapshot")
     if not isinstance(manager_name, str) or not manager_name.strip():
         raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Starter manager name must not be empty")
     catalog = _Catalog(master_dir)
+    from .initial_inventory import prepare_initial_inventory, apply_initial_inventory
+    inventory = prepare_initial_inventory(schema, master_dir)
     photo_ids, ids, appearances, stamina = _starter_roster(catalog)
     home_positions = _starter_home_positions(schema, photo_ids, ids)
     areas = catalog.main_areas()
@@ -654,6 +728,8 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.hierarchy.bestDetailGradeId = base_hierarchy_grade
     snapshot.decks.add(number=1, name="Local deck")
     _append_starter_characters(snapshot, ids, appearances, stamina, now)
+    apply_initial_inventory(snapshot, inventory, obtained_time=now)
+    _fill_starter_deck(snapshot, catalog, photo_ids)
     for kind, character_id in home_positions.items():
         snapshot.homePositions.add(homePositionType=kind, characterId=character_id)
     snapshot.areas.add(areaId=areas[0]["id"])
@@ -663,5 +739,5 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.userPublic.serverUserId = identity["server_id"]
     snapshot.userPublic.publicUserId = identity["public_id"]
     payload = snapshot.SerializeToString()
-    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=3)
+    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=4)
     return payload

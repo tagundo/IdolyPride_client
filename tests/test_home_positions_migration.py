@@ -38,7 +38,7 @@ def test_new_seed_uses_distinct_owned_characters_in_real_home_enum_order(tmp_pat
     assert len(set(positions(user).values())) == 4
     assert set(positions(user).values()) <= {row.characterId for row in user.characters}
     assert all(not row.isCharacterRandom and not row.isCostumeRandom for row in user.homePositions)
-    assert state.starter_version("sandbox") == 3
+    assert state.starter_version("sandbox") == 4
     before = snapshot_tables(state)
     assert not gameplay.repair_starter_home_positions(state, roster_schema, "sandbox", roster_master)
     assert snapshot_tables(state) == before

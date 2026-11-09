@@ -50,7 +50,21 @@ def synthetic_schema(path):
                                 ("activityStamina", 5), ("staminaUpdatedTime", 3)))
     message("Costume", fields(("costumeId", 9), ("checked", 8), ("obtainedTime", 3)))
     message("Hair", fields(("hairId", 9), ("checked", 8)))
-    message("Card", fields(("cardId", 9), ("photoEquipableCount", 5)))
+    message("Card", fields(("cardId", 9), ("totalExp", 3), ("rarityTotalExp", 5),
+        ("skillLevel1", 5), ("skillLevel2", 5), ("skillLevel3", 5), ("skillLevel4", 5),
+        ("liveAbilityLevel", 5), ("activityAbilityLevel", 5), ("obtainedTime", 3),
+        ("supported", 8), ("lastEnhanceTime", 3), ("rankTotalExp", 5), ("displayType", 5),
+        ("evolutionLevelTotalExp", 3), ("level", 5), ("rarity", 5),
+        ("vocal", 3), ("dance", 3), ("visual", 3), ("stamina", 3),
+        ("mental", 3), ("technique", 3), ("skillId1", 9), ("skillId2", 9),
+        ("skillId3", 9), ("skillId4", 9), ("liveAbilityId", 9), ("activityAbilityId", 9),
+        ("photoEquipableCount", 5), ("baseLevel", 5), ("baseVocal", 3), ("baseDance", 3),
+        ("baseVisual", 3), ("baseStamina", 3), ("baseSkillLevel1", 5), ("baseSkillLevel2", 5),
+        ("baseSkillLevel3", 5), ("baseSkillLevel4", 5), ("baseLiveAbilityLevel", 5),
+        ("baseActivityAbilityLevel", 5), ("baseSkillId1", 9), ("baseSkillId2", 9),
+        ("baseSkillId3", 9), ("baseSkillId4", 9), ("baseLiveAbilityId", 9),
+        ("baseActivityAbilityId", 9), ("basePhotoEquipableCount", 5), ("rank", 5), ("evolutionLevel", 5)))
+    message("Item", fields(("itemId", 9), ("amount", 3), ("expiredTime", 3)))
     message("LocalDeck", fields(("number", 5), ("name", 9)))
     position_fields = fields(("position", 5), ("cardId", 9), ("part1AccessoryId", 9),
                              ("part2AccessoryId", 9), ("costumeId", 9), ("hairId", 9)) + [("photoIds", 9, True)]
@@ -59,15 +73,17 @@ def synthetic_schema(path):
     message("Photo", fields(("photoId", 9)))
     message("Accessory", fields(("accessoryId", 9), ("amount", 3)))
     message("Area", fields(("areaId", 9), ("clearQuestCount", 5), ("lastClearedTime", 3)))
+    message("QuestState", fields(("questId", 9), ("lastClearedTime", 3), ("highestScore", 3),
+                                 ("highestRank", 3), ("highestScoreRank", 5)))
     message("TutorialState", fields(("tutorialType", "TutorialType"), ("step", 3)))
     message("HomePosition", fields(("homePositionType", "HomePositionType"), ("characterId", 9),
                                    ("isCharacterRandom", 8), ("isCostumeRandom", 8)))
     snapshot_fields = fields(("user", "Manager"), ("userPublic", "Public"), ("totalCount", "TotalCount"),
                              ("profile", "Profile"), ("balance", "Empty"), ("hierarchy", "Hierarchy"))
     snapshot_fields += [(name, kind, True) for name, kind in (
-        ("characters", "Character"), ("costumes", "Costume"), ("hairs", "Hair"), ("cards", "Card"),
+        ("characters", "Character"), ("costumes", "Costume"), ("hairs", "Hair"), ("cards", "Card"), ("items", "Item"),
         ("decks", "LocalDeck"), ("deckPositions", "DeckPosition"), ("photos", "Photo"), ("accessories", "Accessory"),
-        ("areas", "Area"), ("tutorials", "TutorialState"), ("homePositions", "HomePosition"))]
+        ("areas", "Area"), ("quests", "QuestState"), ("tutorials", "TutorialState"), ("homePositions", "HomePosition"))]
     message("UserGetResponse", snapshot_fields)
     message("UpdatedData", snapshot_fields)
     message("DeletedData", [("decks", "LocalDeck", True), ("deckPositions", "DeckPosition", True)])
@@ -119,6 +135,36 @@ def synthetic_schema(path):
     return Schema.from_descriptor_set(path)
 
 
+def initial_inventory_rows(character_ids, *, card_ids=None):
+    """Independent public-reward shape with one ordinary level-one card per idol."""
+    character_ids = tuple(character_ids)
+    card_ids = tuple(card_ids) if card_ids is not None else tuple("card-" + key for key in character_ids)
+    assert len(character_ids) == len(card_ids)
+    return {
+        "Reward": [{"id": "initial_user_reward", "resources": [
+            *[{"resourceType": 4, "resourceId": key, "amount": 1} for key in character_ids],
+            *[{"resourceType": 2, "resourceId": key, "amount": 1} for key in card_ids],
+            {"resourceType": 1, "resourceId": "item-photo", "amount": 1},
+            {"resourceType": 1, "resourceId": "item-enhance", "amount": 100}]}],
+        "Item": [{"id": "item-photo"}, {"id": "item-enhance"}],
+        "Card": [{"id": card_id, "characterId": character_id, "initialRarity": 3,
+            "cardParameterId": "parameter-common", "vocalRatioPermil": 400,
+            "danceRatioPermil": 320, "visualRatioPermil": 280, "staminaRatioPermil": 1000,
+            "cardLevelReleaseId": "release-common", "skillId1": "skill-" + card_id,
+            "skillId2": "locked-" + card_id, "skillId3": "", "skillId4": "",
+            "liveAbilityId": "", "activityAbilityId": "", "rewardCostumeId": "", "rewardHairIds": []}
+            for character_id, card_id in zip(character_ids, card_ids)],
+        "CardParameter": [{"id": "parameter-common", "level": 1, "value": "213", "staminaValue": "850"}],
+        "CardRarity": [{"rarity": 3, "parameterBonusPermil": 1100}],
+        "CardLevelRelease": [
+            {"id": "release-common", "level": 1, "targets": [{"type": 1, "number": 1},
+                {"type": 4, "number": 1}, {"type": 7, "number": 2}]},
+            {"id": "release-common", "level": 20, "targets": [{"type": 1, "number": 2}]}],
+        "Skill": [{"id": prefix + key, "levels": [{"level": 1, "requiredCardLevel": required}]}
+            for key in card_ids for prefix, required in (("skill-", 1), ("locked-", 20))],
+    }
+
+
 @pytest.fixture(scope="module", params=("synthetic", "client-6.1.1"))
 def schema(request, tmp_path_factory):
     if request.param == "synthetic":
@@ -134,12 +180,13 @@ def master_dir(tmp_path):
     directory = tmp_path / "master"
     directory.mkdir()
     rows = {
-        "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": ["char-a", "char-b", "char-c", "char-d"]}],
+        "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": ["char-" + key for key in "abcde"],
+                     "cardDefaultMental": 100, "cardDefaultTechnique": 100}],
         "Character": [{"id": "char-" + key, "type": 1, "defaultCostumeId": "costume-" + key,
-                       "defaultLiveCostumeId": "costume-" + key} for key in ("a", "b", "c", "d")],
+                       "defaultLiveCostumeId": "costume-" + key} for key in "abcde"],
         "Costume": [{"id": "costume-" + key, "characterId": "char-" + key, "defaultHairId": "hair-" + key}
-                    for key in ("a", "b", "c", "d")],
-        "Hair": [{"id": "hair-" + key, "characterId": "char-" + key} for key in ("a", "b", "c", "d")],
+                    for key in "abcde"],
+        "Hair": [{"id": "hair-" + key, "characterId": "char-" + key} for key in "abcde"],
         "Area": [{"id": "area-main-001", "type": 1, "order": 1, "questIds": ["quest-1"]},
                  {"id": "area-main-002", "type": 1, "order": 2, "questIds": ["quest-2"]},
                  {"id": "contest", "type": 2, "order": 999, "questIds": []}],
@@ -147,7 +194,6 @@ def master_dir(tmp_path):
         "CharacterActivityLevel": [{"level": 1, "maxStamina": 800}],
         "Tutorial": [{"type": 1, "stepInfo": [{"step": step} for step in (10, 100, 110, 120, 130, 140, 150)]},
                      {"type": 2, "stepInfo": [{"step": 1}]}],
-        "Card": [{"id": "card-" + key, "characterId": "char-" + key} for key in ("a", "b")],
         "Accessory": [{"id": "ac-a", "categoryType": 1}, {"id": "ac-b", "categoryType": 2}],
         "HierarchyGrade": [{"id": "hie-base"}, {"id": "hie-next"}, {"id": "hie-ranked"}],
         "HierarchyDetailGrade": [
@@ -155,6 +201,8 @@ def master_dir(tmp_path):
             {"id": "hie-next-1", "hierarchyGradeId": "hie-next", "requiredHierarchyPoint": "1000", "requiredHierarchyRank": 0},
             {"id": "hie-ranked-1", "hierarchyGradeId": "hie-ranked", "requiredHierarchyPoint": "2000", "requiredHierarchyRank": 1}],
     }
+    rows.update(initial_inventory_rows(["char-" + key for key in "abcde"],
+                                       card_ids=["card-" + key for key in "abcde"]))
     for name, value in rows.items():
         (directory / (name + ".json")).write_text(json.dumps(value))
     (directory / "!version.txt").write_text("fixture-master-v1\n")
@@ -182,6 +230,10 @@ def snapshot(game):
 def prepare_deck_inventory(game):
     def update(payload):
         user = game.schema.response_type("/api.User/Get").FromString(payload)
+        # These deck-edit tests intentionally use their own two-card inventory
+        # and one-photo capacity rather than the canonical initial formation.
+        user.ClearField("cards")
+        user.ClearField("deckPositions")
         for key in ("a", "b"):
             user.cards.add(cardId="card-" + key, photoEquipableCount=1)
             user.photos.add(photoId="photo-" + key)
@@ -280,13 +332,21 @@ def test_starter_is_master_backed_new_only_and_persists_identity(game):
     assert user.user.name == "Local manager"
     assert user.user.managerLevel == 1
     assert user.user.gameStartTime > 1000000000000
-    assert {row.characterId for row in user.characters} == {"char-a", "char-b", "char-c", "char-d"}
-    assert {row.costumeId for row in user.costumes} == {"costume-a", "costume-b", "costume-c", "costume-d"}
-    assert {row.hairId for row in user.hairs} == {"hair-a", "hair-b", "hair-c", "hair-d"}
+    assert {row.characterId for row in user.characters} == {"char-" + key for key in "abcde"}
+    assert {row.costumeId for row in user.costumes} == {"costume-" + key for key in "abcde"}
+    assert {row.hairId for row in user.hairs} == {"hair-" + key for key in "abcde"}
     assert all(row.activityStamina == 800 for row in user.characters)
     assert {row.homePositionType: row.characterId for row in user.homePositions} == {
         1: "char-a", 2: "char-b", 3: "char-c", 4: "char-d"}
-    assert not user.cards
+    assert {row.cardId for row in user.cards} == {"card-" + key for key in "abcde"}
+    assert [(row.number, row.position, row.cardId) for row in user.deckPositions] == [
+        (1, number, "card-" + key) for number, key in enumerate("abcde", 1)]
+    assert {row.itemId: row.amount for row in user.items} == {"item-photo": 1, "item-enhance": 100}
+    assert all(row.level == row.baseLevel == row.skillLevel1 == row.baseSkillLevel1 == 1 for row in user.cards)
+    assert all(row.photoEquipableCount == row.basePhotoEquipableCount == 2 for row in user.cards)
+    assert all(not row.skillId2 and not row.baseSkillId2 and row.skillLevel2 == row.baseSkillLevel2 == 0
+               for row in user.cards)
+    assert game.state.starter_version(game.profile) == 4
     assert user.tutorials[0].step == 0
     before = game.state.snapshot(game.profile)
     identity = game.state.profile(game.profile)

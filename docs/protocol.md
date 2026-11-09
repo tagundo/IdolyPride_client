@@ -45,7 +45,7 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 
 `Auth.Login`은 요청을 protobuf로 검증한 뒤 Firebase ID token을 사용하지 않고 `local-` 접두사의 임의 토큰을 발급합니다. SQLite에는 토큰의 SHA-256과 프로필·만료 시각만 저장하며 만료는 발급 후 30일입니다. 동일 프로필의 `serverUserId`·`publicUserId`는 재시작 후에도 유지됩니다.
 
-`new-profile`은 이름·레벨 1·로컬 식별자의 최소 `User.Get` snapshot을 생성합니다. `import-profile`은 기존 `User.Get`의 protobuf 바이트와 스키마 지문을 보존하며, 응답에 public identity가 있으면 함께 유지합니다. 인증 정보는 가져오지 않습니다. 상태 변경·튜토리얼·카드·콘텐츠 해금 로직은 아직 구현하지 않았습니다.
+`new-profile`은 이름·레벨 1·로컬 식별자의 최소 `User.Get` snapshot을 생성합니다. `import-profile`은 기존 `User.Get`의 protobuf 바이트와 스키마 지문을 보존하며, 응답에 public identity가 있으면 함께 유지합니다. 인증 정보는 가져오지 않습니다. 배포 앱은 별도의 마스터 기반 초기 캐릭터·카드·아이템·기본 편성을 준비합니다. 홈·설정·일부 튜토리얼·덱 변경과 라이브 목록 조회는 구현했으며, 실제 전투·일반 보상·콘텐츠 전체 해금은 미구현입니다. 세부 범위는 [게임 상태 구현 범위](gameplay-status.md)를 참고합니다.
 
 보호된 RPC는 metadata의 `x-auth-token`을 요구합니다. 서버 프로세스는 `--profile`로 지정한 단일 프로필을 처리하고 다른 프로필의 세션을 거부합니다. 기본 응답과 오류는 다음과 같습니다.
 
@@ -57,7 +57,8 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 | `Master.Rule`, `Master.GetHelpCategory` | 로그인 전에도 준비한 fixture 제공; 없으면 `UNIMPLEMENTED` |
 | `Master.Get` | 준비한 MasterTag 응답, 또는 fixture; 둘 다 없으면 `UNIMPLEMENTED` |
 | `User.Get` | 요청 해시별 fixture → 일반 fixture → SQLite snapshot; 모두 없으면 `UNIMPLEMENTED` |
-| `Home.*` 및 기타 알려진 RPC | 요청 해시별 fixture 우선, 다음 일반 fixture; 없으면 `UNIMPLEMENTED` |
+| `Home.*`, `Tutorial.Init/Progress/Skip`, `Deck.Save/Delete`, `Quest.Top/ListMain` | fixture 우선, 없으면 구현한 로컬 상태·목록 처리 |
+| 그 밖의 알려진 RPC | fixture 또는 구현이 없으면 `UNIMPLEMENTED` |
 | 알 수 없는 RPC 경로 | `UNIMPLEMENTED` |
 | 보호된 RPC의 세션 누락·불일치·만료 | `UNAUTHENTICATED` |
 | 잘못된 envelope·protobuf | `INVALID_ARGUMENT` |
