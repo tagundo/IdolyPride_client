@@ -1,10 +1,10 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈 API 요청의 성공을 확인했습니다. 홈 화면 표시와 라이브 플레이는 아직 검증 중입니다.
+아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인과 홈 화면 진입을 확인했습니다. 중앙 캐릭터 표시와 라이브 플레이는 검증 중입니다.
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.5에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.7에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터·메인 라이브 목록용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 
 Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후속 APK를 업데이트 설치하면 DB를 유지합니다. **서버 앱 삭제·데이터 지우기는 로컬 프로필을 삭제합니다.** Mac 데이터는 `~/Library/Application Support/IdolyPrideLocal`에 보관하며 서버 앱의 **데이터 폴더**에서 열 수 있습니다. 자세한 설치·저장 위치·확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)를 참고합니다.
 
-Android에서 홈 API 성공 뒤 로딩이 계속된다면 [별도 진단 게임](https://github.com/tagundo/IdolyPride_client/releases/tag/local-diagnostics-v0.2.0)을 설치합니다. 서버 v0.2.5의 **진단 게임 실행**으로 열면 관측된 Unity 예외·셰이더 대기 상태를 서버 앱에서 확인하고 **진단 기록 내보내기**로 저장할 수 있습니다. 마스터 파일은 서버가 실제 전송한 바이트를 표시합니다. 전체 3D 리소스 다운로드 진행률과 게임의 홈 화면 성공은 아직 확인하지 않았습니다.
+Android에서 문제가 발생하면 [별도 진단 게임 v0.2.1](https://github.com/tagundo/IdolyPride_client/releases/tag/local-diagnostics-v0.2.1)을 사용합니다. 서버의 **진단 게임 실행**으로 열면 관측된 Unity 예외·홈 단계·전체 앱 통신량을 확인하고 **진단 기록 내보내기**로 저장할 수 있습니다. 서버 앱 업데이트 뒤에는 게임을 강제 종료했다가 다시 열어 새 응답과 배치를 적용합니다. 마스터 파일 전송량과 전체 앱 통신량은 전체 3D 리소스 다운로드 완료율이 아닙니다.
 
 ## 현재 범위
 
@@ -31,12 +31,13 @@ Android에서 홈 API 성공 뒤 로딩이 계속된다면 [별도 진단 게임
 | `User.Get` | 계정별 fixture 우선, 다음 SQLite snapshot 제공 |
 | 홈·설정·튜토리얼 10개 RPC | `Home.Login/Enter/SetReview/SetCharacterPosition`, `Dokan.List`, `Notice.List`, `Master.GetVersion`, `Tutorial.Init/Progress/Skip` 구현 |
 | `Deck.Save/Delete` | 기존 덱 수동 편집·삭제, 보유 카드·의상·헤어·사진·장비 참조 검증 |
-| 신규 앱 프로필 | 홈 배경 선택에 필요한 기본 캐릭터 17명·외형, 레벨 1, 빈 덱 생성; 구형 로컬 초기 데이터는 누락분만 보완 |
+| `Quest.Top/ListMain` | 실제 마스터·저장된 진행도로 메인 라이브 목록 조회; 전투·클리어·보상 생성 없음 |
+| 신규 앱 프로필 | 기본 캐릭터 17명·외형, 서로 다른 홈 4곳의 기본 배치, 레벨 1, 빈 덱 생성; 알려진 구형 기본 데이터만 보완 |
 | 공개 약관·도움말 | `Master.Rule`·`Master.GetHelpCategory`의 요청별 공개 응답 10개 동봉 |
 | `Master.Get`·파일 제공 | 현재 원본 마스터 202개·77,283,328바이트 보존·제공 |
 | 기존 계정 보존 | `User.Get` snapshot 가져오기와 제한된 공식 세션 읽기 수집 구현; 실제 계정 수집은 미검증 |
 | 카드 지급·전투·보상·가챠·구매·전체 게임 진행 | 미구현 |
-| 실제 게임 앱의 홈 진입·플레이 | 미검증 |
+| 실제 게임 앱의 홈 진입·플레이 | Android 홈 진입 확인; 중앙 모델·라이브 플레이 검증 중 |
 
 홈·튜토리얼 변경은 SQLite 트랜잭션으로 저장하며 활성 로컬 세션과 알 수 없는 protobuf 필드를 유지합니다. 신규 시작 데이터에는 카드·통화·클리어 보상·전체 해금이 없습니다. 구현된 RPC의 세부 동작과 근거는 [게임 상태 구현 범위](docs/gameplay-status.md)에 정리했습니다. 구현이나 fixture가 없는 RPC는 `UNIMPLEMENTED`입니다.
 

@@ -25,7 +25,9 @@ class Application:
         self.profile = profile
         self.master_response = master_response
         from .gameplay import Gameplay
+        from .quest import Quest
         self.gameplay = Gameplay(schema, state, profile, master_dir)
+        self.quest = Quest(schema, state, profile, master_dir)
         self.public_fixtures = FixtureStore(Path(master_dir).parent / "public-fixtures", schema) if master_dir is not None else None
 
     def handle(self, path, raw, context):
@@ -90,6 +92,8 @@ class Application:
         from .rpc import RpcFailure
         try:
             response = self.gameplay.handle(path, plain)
+            if response is None:
+                response = self.quest.handle(path, plain)
         except RpcFailure as failure:
             context.abort(failure.code, failure.details)
         except ValueError:

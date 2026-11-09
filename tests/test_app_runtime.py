@@ -15,7 +15,7 @@ import grpc
 from google.protobuf import descriptor_pb2
 
 from idoly_local import app_runtime, codec
-from idoly_local.gameplay import repair_starter_roster
+from idoly_local.gameplay import repair_starter_home_positions, repair_starter_roster
 from idoly_local.profiles import new_profile
 from idoly_local.schema import Schema
 from idoly_local.state import State
@@ -100,7 +100,8 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.module_patcher = mock.patch.dict(sys.modules, {
             "idoly_local.application": SimpleNamespace(Application=_Application),
             "idoly_local.gameplay": SimpleNamespace(seed_starter_profile=seed,
-                                                    repair_starter_roster=repair_starter_roster),
+                                                    repair_starter_roster=repair_starter_roster,
+                                                    repair_starter_home_positions=repair_starter_home_positions),
         })
         self.module_patcher.start()
         self.addCleanup(self.module_patcher.stop)
