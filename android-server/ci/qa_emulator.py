@@ -33,7 +33,9 @@ class QA:
         self.forwarded = []
 
     def adb(self, *args, binary=False, check=True):
-        result = subprocess.run([*self.command, *args], capture_output=True, text=not binary, timeout=90)
+        # A cold 98 MB install may compile DEX under software CPU emulation.
+        timeout = 300 if args and args[0] == "install" else 90
+        result = subprocess.run([*self.command, *args], capture_output=True, text=not binary, timeout=timeout)
         if check and result.returncode:
             raise RuntimeError("adb command failed: " + " ".join(args[:3]))
         return result.stdout
@@ -85,6 +87,7 @@ def rpc(schema, port, method, token=None):
 
 def wait_server(schema, port, expected=True, timeout=120):
     deadline = time.monotonic() + timeout
+    next_progress = time.monotonic() + 15
     while time.monotonic() < deadline:
         try:
             rpc(schema, port, "/api.System/Check")
@@ -93,6 +96,9 @@ def wait_server(schema, port, expected=True, timeout=120):
             ready = False
         if ready == expected:
             return
+        if time.monotonic() >= next_progress:
+            print("Waiting for native server " + ("startup" if expected else "shutdown"), flush=True)
+            next_progress = time.monotonic() + 15
         time.sleep(0.5)
     raise RuntimeError("Server did not " + ("start" if expected else "stop") + " before the timeout")
 
@@ -104,20 +110,27 @@ def main():
     parser.add_argument("--artifacts", type=Path, default=Path("data/android-server-qa"))
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--serial", default="emulator-5554")
+    parser.add_argument("--startup-timeout", type=float, default=600,
+                        help="Seconds allowed for native Python startup, including a cold software-emulator launch")
     args = parser.parse_args()
+    if args.startup_timeout <= 0:
+        parser.error("--startup-timeout must be positive")
     qa = QA(args.adb, args.serial, args.artifacts)
     result = {"ok": False, "target": "Android emulator", "device_game_client_tested": False}
     try:
         if qa.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
             raise RuntimeError("This QA driver accepts an emulator only")
+        print("Installing the native server APK", flush=True)
         qa.adb("install", "-r", "-g", str(args.apk.resolve()))
         qa.adb("logcat", "-c")
         qa.adb("shell", "am", "force-stop", PACKAGE)
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         grpc_port, asset_port = qa.forward(50051), qa.forward(8080)
         schema = Schema.from_descriptor_set(args.descriptor_set)
+        print("Starting the server through its native UI", flush=True)
         qa.tap("서버 시작", "01-start")
-        wait_server(schema, grpc_port)
+        wait_server(schema, grpc_port, timeout=args.startup_timeout)
+        print("Native server ready; checking encrypted RPCs and HTTP files", flush=True)
         qa.capture("02-running")
         check = rpc(schema, grpc_port, "/api.System/Check")
         login = rpc(schema, grpc_port, "/api.Auth/Login")
@@ -153,8 +166,9 @@ def main():
         # fresh service instance and the previously issued local session.
         qa.adb("shell", "am", "force-stop", PACKAGE)
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
+        print("Restarting the app to verify saved state and sessions", flush=True)
         qa.tap("서버 시작", "05-restart")
-        wait_server(schema, grpc_port)
+        wait_server(schema, grpc_port, timeout=args.startup_timeout)
         restored = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if restored.user.name != user.user.name or not restored.user.isReviewed:
             raise RuntimeError("Restart did not preserve the local profile")

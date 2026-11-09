@@ -37,6 +37,13 @@ def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def dump_native_failure(evidence: Path):
+    for name in ("app-smoke.checkpoint.json", "app-smoke.json", "native-app-stdout.log", "native-app-stderr.log"):
+        path = evidence / name
+        if path.is_file():
+            print(f"Native diagnostic {name}:\n{path.read_text(errors='replace')[-8000:]}", file=sys.stderr)
+
+
 def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float = 75):
     """Launch the actual bundle executable with owned output and process group."""
     executable = app / "Contents/MacOS" / APP_NAME
@@ -53,14 +60,21 @@ def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float =
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait(timeout=5)
+            dump_native_failure(evidence)
             checkpoint = evidence / "app-smoke.checkpoint.json"
             phase = json.loads(checkpoint.read_text()).get("phase", "unknown") if checkpoint.is_file() else "no-launch-checkpoint"
             raise ValueError("Native app smoke timed out at phase: " + phase) from None
     if returncode != 0:
+        dump_native_failure(evidence)
         details = (evidence / "native-app-stderr.log").read_text(errors="replace")[-6000:]
         raise ValueError(f"Native app exited with status {returncode}: {details}")
-    report = json.loads((evidence / "app-smoke.json").read_text())
+    report_path = evidence / "app-smoke.json"
+    if not report_path.is_file():
+        dump_native_failure(evidence)
+        raise ValueError("Native app did not write its visible-window smoke report")
+    report = json.loads(report_path.read_text())
     if not all(report.get(key) is True for key in ("gui_started", "window_visible", "server_started", "server_stopped")):
+        dump_native_failure(evidence)
         raise ValueError("Native visible-window app did not complete its start/stop smoke check")
     return report
 

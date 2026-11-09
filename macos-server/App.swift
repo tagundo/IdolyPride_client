@@ -5,7 +5,6 @@ import Darwin
 
 @MainActor
 final class ServerModel: ObservableObject {
-    static weak var active: ServerModel?
     @Published var running = false
     @Published var busy = true
     @Published var canStop = false
@@ -42,7 +41,6 @@ final class ServerModel: ObservableObject {
             let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             dataDirectory = support.appendingPathComponent("IdolyPrideLocal", isDirectory: true)
         }
-        ServerModel.active = self
         checkpoint("model_initialized")
     }
 
@@ -243,10 +241,11 @@ final class ServerModel: ObservableObject {
         checkpoint("shutdown_requested")
         let process = child
         if process?.isRunning == true { send("quit") }
-        try? input?.fileHandleForWriting.close()
-        output?.fileHandleForReading.readabilityHandler = nil
-        errors?.fileHandleForReading.readabilityHandler = nil
+        let writer = input?.fileHandleForWriting
+        let reader = output?.fileHandleForReading
+        let errorReader = errors?.fileHandleForReading
         DispatchQueue.global(qos: .userInitiated).async {
+            try? writer?.close()
             if let process = process {
                 let deadline = Date().addingTimeInterval(8)
                 while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
@@ -257,37 +256,63 @@ final class ServerModel: ObservableObject {
                     if process.isRunning { kill(process.processIdentifier, SIGKILL) }
                 }
             }
-            DispatchQueue.main.async { completion() }
+            // Keep draining both pipes until the owned child exits. Removing a
+            // readability handler while its read is pending can block cleanup.
+            reader?.readabilityHandler = nil
+            errorReader?.readabilityHandler = nil
+            DispatchQueue.main.async {
+                self.checkpoint("shutdown_cleanup_complete")
+                completion()
+            }
         }
     }
 }
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private let model = ServerModel()
+    private var window: NSWindow?
+    private var quitPending = false
+    private var readyToTerminate = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        let controller = NSHostingController(rootView: ServerView(model: model))
+        let visibleWindow = NSWindow(contentViewController: controller)
+        visibleWindow.title = "아이프라 로컬 서버"
+        visibleWindow.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        visibleWindow.isReleasedWhenClosed = false
+        visibleWindow.setContentSize(NSSize(width: 760, height: 520))
+        visibleWindow.minSize = NSSize(width: 650, height: 450)
+        visibleWindow.center()
+        window = visibleWindow
+        visibleWindow.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        ServerModel.active?.applicationReady()
+        model.applicationReady()
     }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let model = ServerModel.active else { return .terminateNow }
-        model.shutdown { sender.reply(toApplicationShouldTerminate: true) }
-        return .terminateLater
+        if readyToTerminate { return .terminateNow }
+        if !quitPending {
+            quitPending = true
+            model.shutdown {
+                self.readyToTerminate = true
+                sender.terminate(nil)
+            }
+        }
+        // Keep the ordinary main run loop alive while owned-process cleanup
+        // completes, then reissue Quit once it is safe to terminate.
+        return .terminateCancel
     }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }
 
-@main
 @MainActor
-struct IdolyLocalServerApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var model: ServerModel
-    init() {
-        let initialModel = ServerModel()
-        _model = StateObject(wrappedValue: initialModel)
-    }
-    var body: some Scene {
-        WindowGroup("아이프라 로컬 서버") {
-            VStack(alignment: .leading, spacing: 18) {
+struct ServerView: View {
+    @ObservedObject var model: ServerModel
+    var body: some View {
+VStack(alignment: .leading, spacing: 18) {
                 HStack {
                     Image(systemName: "server.rack").font(.largeTitle).foregroundStyle(.purple)
                     VStack(alignment: .leading, spacing: 5) {
@@ -315,11 +340,28 @@ struct IdolyLocalServerApp: App {
                 }.background(Color(nsColor: .textBackgroundColor)).clipShape(RoundedRectangle(cornerRadius: 8))
                 Text("앱을 종료하면 서버도 중지됩니다. 업데이트해도 데이터는 별도 폴더에 보관됩니다.")
                     .font(.caption).foregroundStyle(.secondary)
-            }.padding(24).frame(minWidth: 650, minHeight: 450).task { model.launch() }
+            }.padding(24).frame(minWidth: 650, minHeight: 450)
                 .alert("아이프라 로컬 서버", isPresented: Binding(
                     get: { model.alertMessage != nil }, set: { if !$0 { model.alertMessage = nil } })) {
                     Button("확인") { model.alertMessage = nil }
                 } message: { Text(model.alertMessage ?? "") }
-        }.windowResizability(.contentMinSize)
+    }
+}
+
+@main
+struct IdolyLocalServerApp {
+    @MainActor static func main() {
+        let application = NSApplication.shared
+        application.setActivationPolicy(.regular)
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "아이프라 로컬 서버 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+        application.mainMenu = mainMenu
+        let delegate = AppDelegate()
+        application.delegate = delegate
+        withExtendedLifetime(delegate) { application.run() }
     }
 }

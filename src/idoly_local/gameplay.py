@@ -26,7 +26,7 @@ _ROUTES = {
     "/api.Home/Login", "/api.Home/Enter", "/api.Home/SetReview",
     "/api.Home/SetCharacterPosition", "/api.Dokan/List", "/api.Notice/List",
     "/api.Master/GetVersion", "/api.Tutorial/Init", "/api.Tutorial/Progress",
-    "/api.Tutorial/Skip",
+    "/api.Tutorial/Skip", "/api.Deck/Save", "/api.Deck/Delete",
 }
 
 
@@ -170,6 +170,98 @@ class Gameplay:
                 current = areas[min(index + 1, len(areas) - 1)]["id"]
         return current
 
+    def _save_deck(self, snapshot, request, result):
+        # Auto composition and borrowed buddies need additional live/rental
+        # contracts; transaction.UserDeckPosition cannot represent buddyUserId.
+        if request.deckEditType != 1 or any(row.buddyUserId for row in request.userDeckPositions):
+            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Only manual local-card deck editing is supported")
+        if request.number < 0:
+            raise RpcFailure(RpcCode.INVALID_ARGUMENT, "A nonnegative deck number is required")
+        if request.number == 0:
+            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Creating a deck needs the client deck-number allocation contract")
+        deck = next((row for row in snapshot.decks if row.number == request.number), None)
+        if deck is None:
+            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Creating a deck needs the client deck-number allocation contract")
+        requested = list(request.userDeckPositions)
+        if (any(not 1 <= row.position <= 5 for row in requested)
+                or len({row.position for row in requested}) != len(requested)):
+            raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck positions must have distinct indices from 1 to 5")
+        if request.questId and request.questId not in self.catalog.ids("Quest", required=True):
+            raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Unknown local quest reference")
+        cards = {row.cardId: row for row in snapshot.cards}
+        master_cards = self.catalog.ids("Card", required=bool(requested))
+        costumes = {row.costumeId for row in snapshot.costumes}
+        hairs = {row.hairId for row in snapshot.hairs}
+        photos = {row.photoId for row in snapshot.photos}
+        accessories = {row.accessoryId: row.amount for row in snapshot.accessories}
+        costume_master = self.catalog.ids("Costume")
+        hair_master = self.catalog.ids("Hair")
+        accessory_master = self.catalog.ids("Accessory", required=any(
+            row.part1AccessoryId or row.part2AccessoryId for row in requested))
+        used_cards, used_photos, used_accessories = set(), set(), {}
+        for row in requested:
+            if not row.cardId or row.cardId not in cards or row.cardId not in master_cards or row.cardId in used_cards:
+                raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck cards must be distinct owned master cards")
+            used_cards.add(row.cardId)
+            character = master_cards[row.cardId].get("characterId")
+            for key, owned, master, label in ((row.costumeId, costumes, costume_master, "costume"),
+                                             (row.hairId, hairs, hair_master, "hair")):
+                if key and (key not in owned or key not in master or master[key].get("characterId") != character):
+                    raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck " + label + " must belong to the owned card character")
+            if (len(set(row.photoIds)) != len(row.photoIds) or any(key not in photos or key in used_photos for key in row.photoIds)
+                    or len(row.photoIds) > cards[row.cardId].photoEquipableCount):
+                raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck photos must be owned, distinct and within the card limit")
+            used_photos.update(row.photoIds)
+            for slot, key in ((1, row.part1AccessoryId), (2, row.part2AccessoryId)):
+                if not key:
+                    continue
+                used_accessories[key] = used_accessories.get(key, 0) + 1
+                if (used_accessories[key] > accessories.get(key, 0) or key not in accessory_master
+                        or accessory_master[key].get("categoryType") != slot):
+                    raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck accessory must be owned and match its slot")
+                restriction = accessory_master[key].get("characterId")
+                if restriction and restriction != character:
+                    raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck accessory belongs to a different character")
+                if accessory_master[key].get("characterGroupId"):
+                    raise RpcFailure(RpcCode.UNIMPLEMENTED, "Character-group accessory restrictions require their master catalog")
+        old = [row for row in snapshot.deckPositions if row.number == request.number]
+        kept = [row for row in snapshot.deckPositions if row.number != request.number]
+        for row in old:
+            if row.position not in {entry.position for entry in requested}:
+                result.commonResponse.deletedData.deckPositions.add().CopyFrom(row)
+        del snapshot.deckPositions[:]
+        snapshot.deckPositions.extend(kept)
+        old_by_position = {row.position: row for row in old}
+        for row in requested:
+            target = snapshot.deckPositions.add()
+            if row.position in old_by_position:
+                target.CopyFrom(old_by_position[row.position])  # Preserve unknown fields.
+            target.number, target.position = request.number, row.position
+            for name in ("cardId", "part1AccessoryId", "part2AccessoryId", "costumeId", "hairId"):
+                setattr(target, name, getattr(row, name))
+            del target.photoIds[:]
+            target.photoIds.extend(row.photoIds)
+        deck.name = request.name
+        return ("decks", "deckPositions")
+
+    @staticmethod
+    def _delete_deck(snapshot, request, result):
+        if request.number <= 0:
+            raise RpcFailure(RpcCode.INVALID_ARGUMENT, "A positive existing deck number is required")
+        decks = [row for row in snapshot.decks if row.number == request.number]
+        if not decks:
+            raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Unknown local deck number")
+        positions = [row for row in snapshot.deckPositions if row.number == request.number]
+        result.commonResponse.deletedData.decks.extend(decks)
+        result.commonResponse.deletedData.deckPositions.extend(positions)
+        kept_decks = [row for row in snapshot.decks if row.number != request.number]
+        kept_positions = [row for row in snapshot.deckPositions if row.number != request.number]
+        del snapshot.decks[:]
+        snapshot.decks.extend(kept_decks)
+        del snapshot.deckPositions[:]
+        snapshot.deckPositions.extend(kept_positions)
+        return ("decks", "deckPositions")
+
     def handle(self, path: str, request_bytes: bytes) -> bytes | None:
         if path not in _ROUTES:
             return None
@@ -179,7 +271,11 @@ class Gameplay:
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Malformed gameplay protobuf request") from None
         result = self.schema.response_type(path)()
 
-        if path == "/api.Master/GetVersion":
+        if path == "/api.Deck/Save":
+            self._mutate(result, lambda snapshot: self._save_deck(snapshot, request, result))
+        elif path == "/api.Deck/Delete":
+            self._mutate(result, lambda snapshot: self._delete_deck(snapshot, request, result))
+        elif path == "/api.Master/GetVersion":
             version = self.catalog.version()
             if version is None:
                 return None

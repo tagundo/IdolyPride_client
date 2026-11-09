@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: native-server-apps-v0.2.0
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   GH_REPO: ${{ github.repository }}
@@ -283,7 +283,7 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
-          target: google_apis
+          target: aosp_atd
           arch: x86_64
           profile: pixel_6
           cores: 2
@@ -298,6 +298,7 @@ jobs:
             --apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
             --descriptor-set data/protocol/idolypride-6.1.1.pb
             --artifacts data/android-server-qa
+            --startup-timeout 600
       - name: Upload the arm64 APK only after emulator QA passes
         id: publish
         shell: bash
@@ -513,7 +514,7 @@ jobs:
           - Android: IdolyPride-Local-Server-Android.apk 설치 후 아이프라 서버 → 서버 시작.
           - Mac: IdolyPride-Local-Server-macOS-arm64.app.zip을 풀어 응용 프로그램으로 옮긴 뒤 서버 시작. macOS 13 이상; ad-hoc 서명, Apple 공증 미포함.
           - 게임은 기존 local-client-v0.1.0 초안의 Android APK 또는 PlayCover IPA를 같은 기기에 설치합니다.
-          - 공개 마스터 202개·약관·도움말을 포함합니다. 홈·설정·튜토리얼 일부 상태를 저장하며 기존 프로필을 덮어쓰지 않습니다.
+          - 공개 마스터 202개·약관·도움말을 포함합니다. 홈·설정·튜토리얼 일부 상태와 기존 덱의 수동 편집·삭제를 저장하며 기존 프로필을 덮어쓰지 않습니다.
           - Android 에뮬레이터와 실제 Mac 앱에서 시작·중지·암호화 통신·재시작 후 상태 보존을 검증했습니다. 실제 아이프라 게임의 홈 진입·전투·전체 플레이는 미검증이며 전투·보상·카드 육성은 아직 미구현입니다.
 
           서버 앱 업데이트 시 사용자 데이터는 유지합니다. Android 서버 앱 삭제·데이터 지우기는 로컬 DB를 삭제합니다.

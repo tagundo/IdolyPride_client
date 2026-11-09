@@ -27,6 +27,7 @@ Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후�
 | `System.Check`, `System.GetMetadata`, `System.CheckApp`, `Auth.Login` | 로컬 응답·SQLite 프로필·세션 구현 |
 | `User.Get` | 계정별 fixture 우선, 다음 SQLite snapshot 제공 |
 | 홈·설정·튜토리얼 10개 RPC | `Home.Login/Enter/SetReview/SetCharacterPosition`, `Dokan.List`, `Notice.List`, `Master.GetVersion`, `Tutorial.Init/Progress/Skip` 구현 |
+| `Deck.Save/Delete` | 기존 덱 수동 편집·삭제, 보유 카드·의상·헤어·사진·장비 참조 검증 |
 | 신규 앱 프로필 | 마스터 참조를 검증한 시작 캐릭터 5명·의상·헤어, 레벨 1, 빈 덱 생성; 기존 snapshot은 유지 |
 | 공개 약관·도움말 | `Master.Rule`·`Master.GetHelpCategory`의 요청별 공개 응답 10개 동봉 |
 | `Master.Get`·파일 제공 | 현재 원본 마스터 202개·77,283,328바이트 보존·제공 |
