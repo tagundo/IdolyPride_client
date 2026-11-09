@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 import sys
 import threading
 import time
@@ -6,6 +7,23 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import engine
+
+
+def test_home_hierarchy_reference_requires_both_master_rows(tmp_path):
+    master = tmp_path / "master-json"
+    master.mkdir()
+    (master / "HierarchyDetailGrade.json").write_text(json.dumps([
+        {"id": "hie-007-003", "hierarchyGradeId": "hie-007"}]))
+    (master / "HierarchyGrade.json").write_text(json.dumps([{"id": "hie-007"}]))
+    home = SimpleNamespace(hierarchyNotiInfo=SimpleNamespace(currentDetailGradeId="hie-007-003"))
+    assert engine._home_hierarchy_reference(home, tmp_path) is True
+    home.hierarchyNotiInfo.currentDetailGradeId = ""
+    assert engine._home_hierarchy_reference(home, tmp_path) is False
+    home.hierarchyNotiInfo.currentDetailGradeId = "missing"
+    assert engine._home_hierarchy_reference(home, tmp_path) is False
+    home.hierarchyNotiInfo.currentDetailGradeId = "hie-007-003"
+    (master / "HierarchyGrade.json").write_text("[]")
+    assert engine._home_hierarchy_reference(home, tmp_path) is False
 
 
 class Runtime:

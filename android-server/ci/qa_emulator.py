@@ -159,6 +159,8 @@ def main():
         home = rpc(schema, grpc_port, "/api.Home/Enter", login.gameAuthToken)
         if not home.currentMainAreaId:
             raise RuntimeError("Local Home.Enter did not resolve the bundled starting area")
+        if not home.HasField("hierarchyNotiInfo") or not home.hierarchyNotiInfo.currentDetailGradeId:
+            raise RuntimeError("Local Home.Enter did not resolve the bundled hierarchy grade")
         rpc(schema, grpc_port, "/api.Home/SetReview", login.gameAuthToken)
         changed = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if not changed.user.isReviewed or changed.user.lastLoginTime <= 0:
@@ -174,6 +176,7 @@ def main():
             if response.status != 206 or len(response.read()) != 32:
                 raise RuntimeError("Local master HTTP byte range failed")
         result.update(system_check=check.keepAliveTimeMilliseconds > 0, local_auth=True, home_rpcs=True,
+                      home_hierarchy_reference=True,
                       user_snapshot=True, master_packs=len(master.masterTag.masterTagPacks), asset_range=True)
         qa.tap("서버 중지", "03-stop")
         wait_server(schema, grpc_port, expected=False, timeout=30)

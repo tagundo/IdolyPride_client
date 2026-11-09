@@ -10,10 +10,10 @@ Java 17 이상, Android SDK 34, Python 3.13을 준비한 뒤 저장소 루트에
 cd android-server
 ./gradlew :app:assembleDebug \
   -PbuildPython=/path/to/python3.13 \
-  -PserverData=/path/to/IdolyPride-ServerData-v0.2.1.zip
+  -PserverData=/path/to/IdolyPride-ServerData-v0.2.2.zip
 ```
 
-기본 ABI는 `arm64-v8a`입니다. CI 에뮬레이터용 빌드는 `-PserverAbi=x86_64`를 추가합니다. 결과는 `app/build/outputs/apk/debug/app-debug.apk`입니다. v0.2.1의 Android 버전 코드는 3이며 같은 개발 서명을 사용하므로 설치된 서버 앱 위에 업데이트합니다. Chaquopy 17과 Python 3.13을 사용하며 protobuf·HTTP/2는 순수 Python, AES는 Android의 `javax.crypto`를 사용합니다.
+기본 ABI는 `arm64-v8a`입니다. CI 에뮬레이터용 빌드는 `-PserverAbi=x86_64`를 추가합니다. 결과는 `app/build/outputs/apk/debug/app-debug.apk`입니다. v0.2.2의 Android 버전 코드는 4이며 같은 개발 서명을 사용하므로 설치된 서버 앱 위에 업데이트합니다. Chaquopy 17과 Python 3.13을 사용하며 protobuf·HTTP/2는 순수 Python, AES는 Android의 `javax.crypto`를 사용합니다.
 
 `local-server-development.keystore`는 이 프로젝트의 **공개 개발용 키**입니다. 별칭은 `idoly-local-server`, 저장소·키 비밀번호는 모두 `android`입니다. 실험용 서버 APK를 동일한 서명으로 업데이트하여 로컬 DB를 보존하려고 저장소에 포함했습니다. 운영용 비밀 키로 사용하지 않습니다. 향후 별도의 릴리스 서명이 필요하면 `IDOLY_SERVER_KEYSTORE`, `IDOLY_SERVER_STORE_PASSWORD`, `IDOLY_SERVER_KEY_ALIAS`, `IDOLY_SERVER_KEY_PASSWORD`를 설정할 수 있습니다.
 

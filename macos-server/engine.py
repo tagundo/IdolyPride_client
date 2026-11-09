@@ -154,6 +154,20 @@ def _rpc(address, schema, method, request=None, token=None):
     return schema.response_type(method).FromString(codec.decode(bytes(body[5:])))
 
 
+def _home_hierarchy_reference(home, data_dir):
+    grade_id = home.hierarchyNotiInfo.currentDetailGradeId
+    if not grade_id:
+        return False
+    master_dir = Path(data_dir) / "master-json"
+    details = json.loads((master_dir / "HierarchyDetailGrade.json").read_text())
+    grades = json.loads((master_dir / "HierarchyGrade.json").read_text())
+    matches = [row for row in details if row.get("id") == grade_id]
+    if len(matches) != 1:
+        return False
+    parent_id = matches[0].get("hierarchyGradeId")
+    return bool(parent_id) and sum(row.get("id") == parent_id for row in grades) == 1
+
+
 def smoke(data_dir, server_data, report_path):
     from http.client import HTTPConnection
     from urllib.parse import quote, urlsplit
@@ -166,6 +180,7 @@ def smoke(data_dir, server_data, report_path):
     report = {"frozen_runtime": bool(getattr(sys, "frozen", False)), "server_started": False,
               "encrypted_system_check": False, "anonymous_refund_term": False, "anonymous_public_text": False,
               "local_auth": False, "home_login": False, "home_enter": False,
+              "home_hierarchy_reference": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     try:
@@ -204,6 +219,9 @@ def smoke(data_dir, server_data, report_path):
         report["home_login"] = home_login.HasField("commonResponse")
         home = _rpc(address, schema, "/api.Home/Enter", token=token)
         report["home_enter"] = bool(home.currentMainAreaId and home.HasField("lessonProgress"))
+        report["home_hierarchy_reference"] = _home_hierarchy_reference(home, data_dir)
+        if not report["home_hierarchy_reference"]:
+            raise RuntimeError("Home.Enter hierarchy grade does not resolve through the bundled master tables")
         _rpc(address, schema, "/api.Home/SetReview", token=token)
         changed = _rpc(address, schema, "/api.User/Get", token=token)
         if changed.user.name != before.user.name or not changed.user.isReviewed or changed.user.lastLoginTime <= 0:
@@ -235,7 +253,7 @@ def smoke(data_dir, server_data, report_path):
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
-                "home_enter", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+                "home_enter", "home_hierarchy_reference", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
 
