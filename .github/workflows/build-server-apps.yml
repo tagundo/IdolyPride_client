@@ -521,7 +521,7 @@ jobs:
           """
           body += '\nSource commit: ' + os.environ['GITHUB_SHA'] + '\n'
           path = Path(os.environ['RUNNER_TEMP']) / 'idoly-tested-server-release.json'
-          path.write_text(json.dumps({'draft': True, 'target_commitish': os.environ['GITHUB_SHA'], 'body': body}))
+          path.write_text(json.dumps({'draft': True, 'tag_name': os.environ['IDOLY_SERVER_TAG'], 'target_commitish': os.environ['GITHUB_SHA'], 'body': body}))
           PY
           gh api --method PATCH "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
             --input "$RUNNER_TEMP/idoly-tested-server-release.json" > /dev/null
