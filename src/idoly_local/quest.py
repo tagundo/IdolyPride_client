@@ -68,15 +68,26 @@ class Quest:
             result[identity] = row
         return result
 
-    def _main_catalog(self):
+    @staticmethod
+    def _tutorial_pending(snapshot):
+        starts = [row for row in snapshot.tutorials if row.tutorialType == 1]
+        if len(starts) > 1 or starts and starts[0].step < 0:
+            _invalid("Invalid local GameStart tutorial state")
+        return not starts or starts[0].step < 150
+
+    def _main_catalog(self, *, tutorial_pending: bool):
         areas = self.catalog.ids("Area", required=True)
         quests = self.catalog.ids("Quest", required=True)
         groups = self.catalog.ids("AreaGroup", required=True)
         if any(type(row.get("type")) is not int for row in areas.values()):
             _invalid("Invalid local area type")
-        main = {key: row for key, row in areas.items() if row.get("type") == 1}
-        if not main:
+        normal = {key: row for key, row in areas.items() if row["type"] == 1}
+        tutorial = {key: row for key, row in areas.items() if row["type"] == 101}
+        if not normal:
             _invalid("The quest catalog needs main areas in the local master")
+        if tutorial_pending and not tutorial:
+            _invalid("The quest catalog needs the local tutorial area")
+        main = normal | tutorial if tutorial_pending else normal
         ordered_groups = sorted(groups.values(), key=lambda row: (
             _integer(row.get("order", 0), "area group ordering"), row["id"]))
         ordered = []
@@ -87,8 +98,8 @@ class Quest:
                 _invalid("Invalid local area group references")
             if any(not isinstance(key, str) or key not in areas for key in area_ids):
                 _invalid("Invalid local area group references")
-            # The actual table also has area-main-group-999 containing the
-            # dedicated tutorial area (type101). It is not a main-live group.
+            # The actual table also has group999 containing type101. The
+            # client explicitly searches it while GameStart is still pending.
             if not any(key in main for key in area_ids):
                 continue
             group_areas = []
@@ -115,6 +126,44 @@ class Quest:
             _invalid("Local main area groups are incomplete")
         return areas, quests, ordered
 
+    @staticmethod
+    def _copy_result(info, row, rank_values):
+        if row is None:
+            return
+        if min(row.lastClearedTime, row.highestScore, row.highestRank) < 0:
+            _invalid("Local quest progress contains negative values")
+        if row.highestScoreRank not in rank_values:
+            _invalid("Local quest progress has an unknown result rank")
+        info.cleared = bool(row.lastClearedTime)
+        info.highestScore = row.highestScore
+        info.highestRank = _integer(row.highestRank, "quest ranking", maximum=(1 << 31) - 1)
+        info.rankType = row.highestScoreRank
+
+    def _contest_catalog(self, result, areas, quests, progress, rank_values):
+        # LiveTop.RequestLiveProgressAsync dereferences model.ContestArea
+        # unconditionally at 0x5759ce8..0x5759cf4. Its quests are inspected for
+        # campaign labels even when contest entry is locked. An absent optional
+        # protobuf message therefore is not a valid inactive-state response.
+        candidates = [row for row in areas.values() if row["type"] == 2]
+        if len(candidates) != 1:
+            _invalid("Quest.Top needs one local contest area")
+        area = candidates[0]
+        identities = area.get("questIds")
+        if (not isinstance(identities, list) or not identities
+                or any(not isinstance(key, str) or key not in quests for key in identities)
+                or len(identities) != len(set(identities))):
+            _invalid("Invalid local contest quest references")
+        result.contestArea.areaId = area["id"]
+        # This exposes the real catalog/history required by the menu, without
+        # claiming that competitive battle entry or quotas are implemented.
+        result.contestArea.unlocked = False
+        for key in identities:
+            if quests[key].get("areaId") != area["id"]:
+                _invalid("Local contest quest does not belong to its area")
+            info = result.contestArea.quests.add(questId=key)
+            self._copy_result(info, progress.get(key), rank_values)
+            info.isPlayable = False
+
     def handle(self, path: str, request_bytes: bytes) -> bytes | None:
         if path not in (_TOP, _LIST_MAIN):
             return None
@@ -123,7 +172,7 @@ class Quest:
         except DecodeError:
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Malformed quest catalog protobuf request") from None
         snapshot = self._snapshot()
-        areas, quests, groups = self._main_catalog()
+        areas, quests, groups = self._main_catalog(tutorial_pending=self._tutorial_pending(snapshot))
         area_progress = self._progress(snapshot.areas, "areaId", "area progress")
         quest_progress = self._progress(snapshot.quests, "questId", "quest progress")
         if any(key not in areas for key in area_progress) or any(key not in quests for key in quest_progress):
@@ -142,10 +191,21 @@ class Quest:
         rank_values = self.schema.response_type(path).DESCRIPTOR.fields_by_name[
             group_field].message_type.fields_by_name["areas"].message_type.fields_by_name[
             "quests"].message_type.fields_by_name["rankType"].enum_type.values_by_number
+        if path == _TOP:
+            self._contest_catalog(result, areas, quests, quest_progress, rank_values)
         preceding_complete = True
         for group, group_areas in groups:
             output_group = output_groups.add(areaGroupId=group["id"])
             for area, area_quests in group_areas:
+                if area["type"] == 101:
+                    # FindCurrentAreaGroupInfo's GameStart branch requires a
+                    # type101 area with a playable quest (0x575d4b0..0x575d5cc).
+                    # Full/short are alternatives, not sequential live clears.
+                    output_area = output_group.areas.add(areaId=area["id"], unlocked=True)
+                    for quest in area_quests:
+                        info = output_area.quests.add(questId=quest["id"], isPlayable=True)
+                        self._copy_result(info, quest_progress.get(quest["id"]), rank_values)
+                    continue
                 progress = area_progress.get(area["id"])
                 clear_count = _integer(progress.clearQuestCount if progress else 0,
                                        "main area clear count", maximum=len(area_quests))
@@ -169,12 +229,7 @@ class Quest:
                 for index, (quest, is_cleared) in enumerate(zip(area_quests, cleared)):
                     row = quest_progress.get(quest["id"])
                     info = output_area.quests.add(questId=quest["id"], cleared=is_cleared)
-                    if row is not None:
-                        if row.highestScoreRank not in rank_values:
-                            _invalid("Local quest progress has an unknown result rank")
-                        info.highestScore = row.highestScore
-                        info.highestRank = _integer(row.highestRank, "quest ranking", maximum=(1 << 31) - 1)
-                        info.rankType = row.highestScoreRank
+                    self._copy_result(info, row, rank_values)
                     # An unknown condition is not silently satisfied. Cleared
                     # quests remain browseable; battle entry is separate.
                     condition = quest.get("unlockConditionId", "")

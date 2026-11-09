@@ -36,11 +36,13 @@ def minimal_schema(path):
     message("UserQuest", fields(("questId", 9), ("lastClearedTime", 3), ("highestScore", 3),
                                 ("highestRank", 3), ("highestScoreRank", "Rank")))
     message("Hierarchy", fields(("currentFixedPoint", 3), ("currentVariablePoint", 3), ("bestDetailGradeId", 9)))
+    message("TutorialState", fields(("tutorialType", 5), ("step", 5)))
     message("UserGetResponse", fields(("user", "Manager"), ("hierarchy", "Hierarchy"))
-            + [("areas", "UserArea", True), ("quests", "UserQuest", True)])
+            + [("areas", "UserArea", True), ("quests", "UserQuest", True), ("tutorials", "TutorialState", True)])
     message("QuestInfo", fields(("questId", 9), ("cleared", 8), ("highestScore", 3),
                                 ("rankType", "Rank"), ("plus", 5), ("highestRank", 5),
-                                ("isPlayable", 8), ("playableCount", 5)))
+                                ("isPlayable", 8), ("playableCount", 5))
+            + [("campaignDropRewardIds", 9, True)])
     message("AreaInfo", fields(("areaId", 9), ("unlocked", 8)) + [("quests", "QuestInfo", True)])
     message("AreaGroupInfo", fields(("areaGroupId", 9)) + [("areas", "AreaInfo", True)])
     message("PvpInfo", fields(("rank", 5), ("remainingChallengeCount", 5), ("latestPvpSeason", "Empty")))
@@ -81,14 +83,19 @@ def game(schema, tmp_path):
     directory.mkdir()
     rows = {
         "AreaGroup": [{"id": "group-2", "order": 2, "areaIds": ["area-3"]},
-                      {"id": "group-1", "order": 1, "areaIds": ["area-1", "area-2"]}],
+                      {"id": "group-1", "order": 1, "areaIds": ["area-1", "area-2"]},
+                      {"id": "tutorial-group", "order": 999, "areaIds": ["tutorial"]}],
         "Area": [{"id": "area-" + str(i), "type": 1, "order": i,
                   "areaGroupId": "group-1" if i < 3 else "group-2",
                   "questIds": ["quest-" + str(i) + "-1", "quest-" + str(i) + "-2"]}
-                 for i in (1, 2, 3)] + [{"id": "contest", "type": 2, "questIds": ["contest-quest"]}],
+                 for i in (1, 2, 3)] + [{"id": "tutorial", "type": 101, "areaGroupId": "tutorial-group",
+                                        "questIds": ["tutorial-full", "tutorial-short"]},
+                                       {"id": "contest", "type": 2, "questIds": ["contest-quest"]}],
         "Quest": [{"id": "quest-" + str(i) + "-" + str(j), "areaId": "area-" + str(i),
                    "order": j, "clearScore": "1000"} for i in (1, 2, 3) for j in (1, 2)]
-                 + [{"id": "contest-quest", "areaId": "contest"}],
+                 + [{"id": "contest-quest", "areaId": "contest"},
+                    {"id": "tutorial-full", "areaId": "tutorial", "order": 1},
+                    {"id": "tutorial-short", "areaId": "tutorial", "order": 1}],
         "HierarchyGrade": [{"id": "grade"}],
         "HierarchyDetailGrade": [{"id": "grade-1", "hierarchyGradeId": "grade",
                                   "requiredHierarchyPoint": "0", "requiredHierarchyRank": 0}],
@@ -100,6 +107,7 @@ def game(schema, tmp_path):
     snapshot.user.name = "Existing manager"
     snapshot.hierarchy.bestDetailGradeId = "grade-1"
     snapshot.areas.add(areaId="area-1")
+    snapshot.tutorials.add(tutorialType=1, step=150)
     # Preserve an unknown protobuf field as well as all known account data.
     payload = snapshot.SerializeToString() + b"\xf8\x7f\x01"
     state.save_snapshot("player", payload, schema.fingerprint)
@@ -126,7 +134,7 @@ def database(state):
         return list(db.iterdump())
 
 
-def test_fresh_catalog_is_real_ordered_and_only_first_main_quest_available(game):
+def test_main_catalog_is_real_ordered_and_only_first_main_quest_available(game):
     result = top(game)
     assert [group.areaGroupId for group in result.mainAreaGroups] == ["group-1", "group-2"]
     areas = [area for group in result.mainAreaGroups for area in group.areas]
@@ -137,7 +145,13 @@ def test_fresh_catalog_is_real_ordered_and_only_first_main_quest_available(game)
     assert result.HasField("pvpInfo") and not result.pvpInfo.HasField("latestPvpSeason")
     assert result.pvpInfo.rank == result.pvpInfo.remainingChallengeCount == 0
     assert result.hierarchyNotiInfo.currentDetailGradeId == "grade-1"
-    assert not any(result.HasField(name) for name in ("towerArea", "contestArea", "gvgInfo"))
+    assert result.HasField("contestArea")
+    assert result.contestArea.areaId == "contest"
+    assert [row.questId for row in result.contestArea.quests] == ["contest-quest"]
+    assert not result.contestArea.unlocked
+    assert not any(row.isPlayable or row.cleared or row.highestScore or row.campaignDropRewardIds
+                   for row in result.contestArea.quests)
+    assert not any(result.HasField(name) for name in ("towerArea", "gvgInfo"))
     assert not result.isDailyPlayable
     assert result.HasField("commonResponse")
     assert not result.commonResponse.HasField("updatedData")
@@ -215,12 +229,63 @@ def test_list_main_shares_validated_top_progress_and_preserves_database(game):
     assert database(game[1]) == before
 
 
-def test_non_main_tutorial_group_is_not_a_main_live_group(game):
-    game[3]["Area"].append({"id": "tutorial", "type": 101, "questIds": ["tutorial-quest"]})
-    game[3]["AreaGroup"].append({"id": "tutorial-group", "order": 999, "areaIds": ["tutorial"]})
-    for table in ("Area", "AreaGroup"):
-        (game[2] / (table + ".json")).write_text(json.dumps(game[3][table]))
+def test_required_contest_catalog_projects_existing_history_without_enabling_battles(game):
+    update(game, lambda snapshot: snapshot.quests.add(questId="contest-quest", lastClearedTime=123,
+                                                      highestScore=45678, highestRank=345, highestScoreRank=5))
+    before = database(game[1])
+    result = top(game)
+    # Regression for LiveTop's unconditional model.ContestArea.quests read at
+    # 0x5759ce8..0x5759cf4, after the callback itself has accepted null.
+    assert result.HasField("contestArea")
+    row = result.contestArea.quests[0]
+    assert (row.questId, row.cleared, row.highestScore, row.highestRank, row.rankType) == (
+        "contest-quest", True, 45678, 345, 5)
+    assert not result.contestArea.unlocked and not row.isPlayable and row.playableCount == 0
+    assert database(game[1]) == before
+
+
+@pytest.mark.parametrize("change", [
+    lambda rows: rows.pop(),
+    lambda rows: rows.append({"id": "second-contest", "type": 2, "questIds": ["contest-quest"]}),
+    lambda rows: rows[-1].update(questIds=[]),
+    lambda rows: rows[-1].update(questIds=["quest-1-1"]),
+])
+def test_missing_ambiguous_or_invalid_contest_catalog_is_not_empty_success(game, change):
+    change(game[3]["Area"])
+    (game[2] / "Area.json").write_text(json.dumps(game[3]["Area"]))
+    before = database(game[1])
+    with pytest.raises(RpcFailure) as caught:
+        top(game)
+    assert caught.value.code == RpcCode.FAILED_PRECONDITION
+    assert database(game[1]) == before
+
+
+@pytest.mark.parametrize("step", [150, 1000000])
+def test_finished_game_start_omits_dedicated_tutorial_group(game, step):
+    update(game, lambda snapshot: setattr(snapshot.tutorials[0], "step", step))
     assert [row.areaGroupId for row in top(game).mainAreaGroups] == ["group-1", "group-2"]
+
+
+@pytest.mark.parametrize("step", [None, 0, 10, 100, 149])
+def test_pending_game_start_exposes_real_playable_alternates_without_progress_writes(game, step):
+    def progress(snapshot):
+        if step is None:
+            del snapshot.tutorials[:]
+        else:
+            snapshot.tutorials[0].step = step
+    update(game, progress)
+    before = database(game[1])
+    result = top(game)
+    tutorial = result.mainAreaGroups[-1]
+    assert tutorial.areaGroupId == "tutorial-group"
+    assert tutorial.areas[0].areaId == "tutorial" and tutorial.areas[0].unlocked
+    assert [(row.questId, row.isPlayable, row.cleared) for row in tutorial.areas[0].quests] == [
+        ("tutorial-full", True, False), ("tutorial-short", True, False)]
+    assert database(game[1]) == before
+    listing = game[0].schema.response_type("/api.Quest/ListMain").FromString(
+        game[0].handle("/api.Quest/ListMain", b""))
+    assert listing.areaGroups[-1].SerializeToString() == tutorial.SerializeToString()
+    assert database(game[1]) == before
 
 
 def test_read_only_preserves_exact_snapshot_other_profile_and_sessions(game):
