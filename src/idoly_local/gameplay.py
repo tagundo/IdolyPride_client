@@ -419,11 +419,161 @@ class Gameplay:
         return result.SerializeToString()
 
 
+def _starter_roster(catalog):
+    """Close the office actor pool over the unconditional normal characters.
+
+    Android 6.1.1 GetSubCharacterCandidate selects unlocked normal master rows,
+    without filtering UserCharacter ownership. CreateActorDescriptor then
+    dereferences FindById. The five photo-tutorial characters are not that pool.
+    """
+    settings = catalog.rows("Setting", required=True)
+    if len(settings) != 1:
+        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter seeding needs one Setting master row")
+    photo_ids = settings[0].get("tutorialPhotoShootingCharacterIds")
+    if (not isinstance(photo_ids, list) or not photo_ids
+            or any(not isinstance(key, str) or not key for key in photo_ids)
+            or len(set(photo_ids)) != len(photo_ids)):
+        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter character identities are missing from Setting")
+    characters = catalog.ids("Character", required=True)
+    baseline = []
+    for key, row in characters.items():
+        if type(row.get("type")) is not int or row["type"] != 1:
+            continue
+        conditions = [row.get(name, "") for name in ("viewConditionId", "unlockConditionId")]
+        if any(not isinstance(value, str) for value in conditions):
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Invalid starter character conditions")
+        if not any(conditions):
+            baseline.append(key)
+    if not baseline or not set(photo_ids).issubset(baseline):
+        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter office roster is incomplete in master")
+    ids = list(dict.fromkeys([*photo_ids, *sorted(baseline)]))
+    costumes = catalog.ids("Costume", required=True)
+    hairs = catalog.ids("Hair", required=True)
+    appearances = {}
+    for key in ids:
+        character = characters[key]
+        default = character.get("defaultCostumeId")
+        live = character.get("defaultLiveCostumeId") or default
+        selected = []
+        for costume_id in (default, live):
+            costume = costumes.get(costume_id)
+            if costume is None or costume.get("characterId") != key or costume.get("isUserUnavailable", False):
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter costume does not belong to its character")
+            hair_id = costume.get("defaultHairId")
+            hair = hairs.get(hair_id)
+            if hair is None or hair.get("characterId") != key:
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter hair does not belong to its character")
+            wearable = hair.get("wearableCostumeIds")
+            if wearable is not None and (not isinstance(wearable, list) or costume_id not in wearable):
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter hair cannot wear its costume")
+            selected.append((costume_id, hair_id))
+        appearances[key] = selected
+    stamina_rows = catalog.rows("CharacterActivityLevel", required=True)
+    stamina = next((row.get("maxStamina") for row in stamina_rows if row.get("level") == 1), None)
+    if type(stamina) is not int or stamina < 0:
+        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter activity stamina is missing from master")
+    return photo_ids, ids, appearances, stamina
+
+
+def _append_starter_characters(snapshot, ids, appearances, stamina, now):
+    owned_characters = {row.characterId for row in snapshot.characters}
+    owned_costumes = {row.costumeId for row in snapshot.costumes}
+    owned_hairs = {row.hairId for row in snapshot.hairs}
+    for key in ids:
+        if key in owned_characters:
+            continue
+        (default, hair), (live, live_hair) = appearances[key]
+        for costume_id, hair_id in appearances[key]:
+            if costume_id not in owned_costumes:
+                snapshot.costumes.add(costumeId=costume_id, checked=True, obtainedTime=now)
+                owned_costumes.add(costume_id)
+            if hair_id not in owned_hairs:
+                snapshot.hairs.add(hairId=hair_id, checked=True)
+                owned_hairs.add(hair_id)
+        snapshot.characters.add(characterId=key, favoriteCostumeId=default, liveCostumeId=live,
+                                favoriteHairId=hair, liveHairId=live_hair, activityLevel=1,
+                                activityStamina=stamina, staminaUpdatedTime=now)
+
+
+def _legacy_starter(snapshot, photo_ids, appearances, identity):
+    """Recognize only the old server's otherwise unmarked starter layout."""
+    starter_lists = {"characters", "costumes", "hairs", "decks", "areas", "tutorials", "homePositions"}
+    mutable_singletons = {"user", "userPublic", "totalCount", "profile", "hierarchy"}
+    for field in snapshot.DESCRIPTOR.fields:
+        value = getattr(snapshot, field.name)
+        if field.is_repeated and field.name not in starter_lists and value:
+            return False
+        if (field.message_type is not None and not field.is_repeated
+                and field.name not in mutable_singletons and value.SerializeToString()):
+            return False
+    if (identity is None or snapshot.user.managerLevel != 1 or snapshot.user.deckSequence != 1
+            or snapshot.user.gameStartTime <= 0 or len(snapshot.decks) != 1
+            or snapshot.decks[0].number != 1 or snapshot.decks[0].name != "Local deck"
+            or snapshot.cards or snapshot.deckPositions
+            or len(snapshot.characters) != len(photo_ids)
+            or {row.characterId for row in snapshot.characters} != set(photo_ids)
+            or list(snapshot.profile.favoriteCharacterIds) != photo_ids
+            or snapshot.userPublic.serverUserId != identity["server_id"]
+            or snapshot.userPublic.publicUserId != identity["public_id"]):
+        return False
+    expected_costumes, expected_hairs = set(), set()
+    for row in snapshot.characters:
+        (default, hair), (live, live_hair) = appearances[row.characterId]
+        if ((row.favoriteCostumeId, row.favoriteHairId, row.liveCostumeId, row.liveHairId)
+                != (default, hair, live, live_hair)):
+            return False
+        expected_costumes.update((default, live))
+        expected_hairs.update((hair, live_hair))
+    if (len(snapshot.costumes) != len(expected_costumes) or len(snapshot.hairs) != len(expected_hairs)
+            or {row.costumeId for row in snapshot.costumes} != expected_costumes
+            or {row.hairId for row in snapshot.hairs} != expected_hairs):
+        return False
+    field = snapshot.DESCRIPTOR.fields_by_name["homePositions"].message_type.fields_by_name["homePositionType"]
+    kinds = {value.number for value in field.enum_type.values if value.number}
+    return (len(snapshot.homePositions) == len(kinds)
+            and {row.homePositionType for row in snapshot.homePositions} == kinds
+            and all(row.characterId == photo_ids[0] and not row.isCharacterRandom and not row.isCostumeRandom
+                    for row in snapshot.homePositions))
+
+
+def repair_starter_roster(state, schema, profile: str, master_dir: Path) -> bool:
+    """Add missing office actors only to a tagged or recognized local starter.
+
+    Explicit imports are version 0 and never repaired. Older databases have no
+    marker, so their five-character layout must match the original seeder.
+    Existing rows, progress, identities, unknown fields and sessions survive.
+    """
+    current = state.snapshot(profile)
+    version = state.starter_version(profile)
+    if current is None or version == 0 or (version is not None and version >= 2):
+        return False
+    if current[1] != schema.fingerprint:
+        return False
+    photo_ids, ids, appearances, stamina = _starter_roster(_Catalog(master_dir))
+    identity = state.profile(profile)
+
+    def repair(payload, origin):
+        if origin == 0 or (origin is not None and origin >= 2):
+            return None
+        try:
+            snapshot = schema.response_type(_USER_GET).FromString(payload)
+        except DecodeError:
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local starter snapshot is malformed") from None
+        if not snapshot.HasField("user"):
+            return None
+        if origin is None and not _legacy_starter(snapshot, photo_ids, appearances, identity):
+            return None
+        _append_starter_characters(snapshot, ids, appearances, stamina, _now_ms())
+        return snapshot.SerializeToString(), 2
+
+    return state.mutate_starter_snapshot(profile, schema.fingerprint, repair) is not None
+
+
 def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manager_name: str = "Local Manager") -> bytes:
     """Create a new, master-backed tutorial-start snapshot, never an import.
 
-    This grants the five tutorial shooting characters' default appearances and
-    one empty deck. It grants no cards, currencies, battle clears or rewards.
+    This prepares the unconditional normal office characters, their default
+    appearances and one empty deck. No cards, currencies or clears are granted.
     Catalog validation finishes before any profile snapshot is written.
     """
     if state.snapshot(profile) is not None:
@@ -431,24 +581,11 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     if not isinstance(manager_name, str) or not manager_name.strip():
         raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Starter manager name must not be empty")
     catalog = _Catalog(master_dir)
-    settings = catalog.rows("Setting", required=True)
-    if len(settings) != 1:
-        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter seeding needs one Setting master row")
-    ids = settings[0].get("tutorialPhotoShootingCharacterIds")
-    if (not isinstance(ids, list) or not ids or any(not isinstance(key, str) for key in ids)
-            or len(set(ids)) != len(ids)):
-        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter character identities are missing from Setting")
-    characters = catalog.ids("Character", required=True)
-    costumes = catalog.ids("Costume", required=True)
-    hairs = catalog.ids("Hair", required=True)
+    photo_ids, ids, appearances, stamina = _starter_roster(catalog)
     areas = catalog.main_areas()
     quests = catalog.ids("Quest", required=True)
     if not areas or not areas[0].get("questIds") or any(key not in quests or quests[key].get("areaId") != areas[0]["id"] for key in areas[0]["questIds"]):
         raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter main area and quest identities do not match")
-    stamina_rows = catalog.rows("CharacterActivityLevel", required=True)
-    stamina = next((row.get("maxStamina") for row in stamina_rows if row.get("level") == 1), None)
-    if type(stamina) is not int or stamina < 0:
-        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter activity stamina is missing from master")
     base_hierarchy_grade = catalog.hierarchy_grade()
     now = _now_ms()
     snapshot = schema.response_type(_USER_GET)()
@@ -462,41 +599,17 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.user.deckSequence = 1
     snapshot.hierarchy.bestDetailGradeId = base_hierarchy_grade
     snapshot.decks.add(number=1, name="Local deck")
-    owned_costumes, owned_hairs = set(), set()
-    for key in ids:
-        character = characters.get(key)
-        if character is None:
-            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter character is absent from master")
-        default = character.get("defaultCostumeId")
-        live = character.get("defaultLiveCostumeId") or default
-        selected = []
-        for costume_id in (default, live):
-            costume = costumes.get(costume_id)
-            if costume is None or costume.get("characterId") != key or costume.get("isUserUnavailable", False):
-                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter costume does not belong to its character")
-            hair_id = costume.get("defaultHairId")
-            if hair_id not in hairs or hairs[hair_id].get("characterId") != key:
-                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter hair does not belong to its character")
-            selected.append(hair_id)
-            if costume_id not in owned_costumes:
-                snapshot.costumes.add(costumeId=costume_id, checked=True, obtainedTime=now)
-                owned_costumes.add(costume_id)
-            if hair_id not in owned_hairs:
-                snapshot.hairs.add(hairId=hair_id, checked=True)
-                owned_hairs.add(hair_id)
-        snapshot.characters.add(characterId=key, favoriteCostumeId=default, liveCostumeId=live,
-                                favoriteHairId=selected[0], liveHairId=selected[1], activityLevel=1,
-                                activityStamina=stamina, staminaUpdatedTime=now)
+    _append_starter_characters(snapshot, ids, appearances, stamina, now)
     field = snapshot.DESCRIPTOR.fields_by_name["homePositions"].message_type.fields_by_name["homePositionType"]
     for value in field.enum_type.values:
         if value.number:
-            snapshot.homePositions.add(homePositionType=value.number, characterId=ids[0])
+            snapshot.homePositions.add(homePositionType=value.number, characterId=photo_ids[0])
     snapshot.areas.add(areaId=areas[0]["id"])
     snapshot.tutorials.add(tutorialType=_GAME_START, step=0)
-    snapshot.profile.favoriteCharacterIds.extend(ids)
+    snapshot.profile.favoriteCharacterIds.extend(photo_ids)
     identity = state.ensure_profile(profile)
     snapshot.userPublic.serverUserId = identity["server_id"]
     snapshot.userPublic.publicUserId = identity["public_id"]
     payload = snapshot.SerializeToString()
-    state.save_snapshot(profile, payload, schema.fingerprint)
+    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=2)
     return payload

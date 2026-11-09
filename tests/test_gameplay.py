@@ -135,7 +135,7 @@ def master_dir(tmp_path):
     directory.mkdir()
     rows = {
         "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": ["char-a", "char-b"]}],
-        "Character": [{"id": "char-" + key, "defaultCostumeId": "costume-" + key,
+        "Character": [{"id": "char-" + key, "type": 1, "defaultCostumeId": "costume-" + key,
                        "defaultLiveCostumeId": "costume-" + key} for key in ("a", "b")],
         "Costume": [{"id": "costume-" + key, "characterId": "char-" + key, "defaultHairId": "hair-" + key}
                     for key in ("a", "b")],
@@ -519,7 +519,7 @@ def test_real_master_references_when_local_sources_are_available(tmp_path, schem
     state = State(tmp_path / "state.db")
     payload = seed_starter_profile(state, schema, "actual-master", directory)
     user = schema.response_type("/api.User/Get").FromString(payload)
-    assert len(user.characters) == 5
+    assert len(user.characters) == 17
     costumes = {row["id"]: row for row in json.loads((directory / "Costume.json").read_text())}
     hairs = {row["id"]: row for row in json.loads((directory / "Hair.json").read_text())}
     for character in user.characters:

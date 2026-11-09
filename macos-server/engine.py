@@ -181,6 +181,7 @@ def smoke(data_dir, server_data, report_path):
               "encrypted_system_check": False, "anonymous_refund_term": False, "anonymous_public_text": False,
               "local_auth": False, "home_login": False, "home_enter": False,
               "home_hierarchy_reference": False,
+              "starter_roster_complete": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     try:
@@ -208,6 +209,22 @@ def smoke(data_dir, server_data, report_path):
             raise RuntimeError("Local Auth.Login did not issue a local session")
         report["local_auth"] = True
         before = _rpc(address, schema, "/api.User/Get", token=token)
+        # HomeOfficeActors selects from the master's unlocked normal roster,
+        # then requires a matching UserCharacter with owned favorite/live
+        # appearances. Checking the actual RPC catches the former five-row
+        # seed even if initialization and Home.Enter themselves succeed.
+        required_characters = {"char-ai", "char-aoi", "char-chs", "char-hrk", "char-kkr", "char-ktn",
+            "char-mei", "char-ngs", "char-rei", "char-rio", "char-rui", "char-ski", "char-skr",
+            "char-smr", "char-suz", "char-szk", "char-yu"}
+        characters = {row.characterId: row for row in before.characters}
+        costumes = {row.costumeId for row in before.costumes if row.costumeId}
+        hairs = {row.hairId for row in before.hairs if row.hairId}
+        report["starter_roster_complete"] = required_characters.issubset(characters) and all(
+            characters[key].favoriteCostumeId in costumes and characters[key].liveCostumeId in costumes
+            and characters[key].favoriteHairId in hairs and characters[key].liveHairId in hairs
+            for key in required_characters)
+        if not report["starter_roster_complete"]:
+            raise RuntimeError("User.Get must contain all 17 starter characters and their owned favorite/live appearances")
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
         home_request.settingInfo.soundEffect = 29
@@ -253,7 +270,7 @@ def smoke(data_dir, server_data, report_path):
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
-                "home_enter", "home_hierarchy_reference", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+                "home_enter", "home_hierarchy_reference", "starter_roster_complete", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
 

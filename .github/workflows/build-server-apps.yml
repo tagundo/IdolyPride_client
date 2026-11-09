@@ -10,13 +10,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-server-apps-v0.2.3
+  group: native-server-apps-v0.2.4
   cancel-in-progress: true
 
 env:
   GH_REPO: ${{ github.repository }}
-  IDOLY_SERVER_TAG: local-server-v0.2.3
-  IDOLY_PAYLOAD_NAME: IdolyPride-ServerData-v0.2.3.zip
+  IDOLY_SERVER_TAG: local-server-v0.2.4
+  IDOLY_PAYLOAD_NAME: IdolyPride-ServerData-v0.2.4.zip
 
 jobs:
   prepare:
@@ -132,7 +132,7 @@ jobs:
         run: |
           set -euo pipefail
           IDOLY_RELEASE_IDS="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
-            --jq '.[] | select(.tag_name == "local-server-v0.2.3") | .id')"
+            --jq '.[] | select(.tag_name == "local-server-v0.2.4") | .id')"
           if [[ "$IDOLY_RELEASE_IDS" == *$'\n'* ]]; then
             echo 'More than one release has the target server tag' >&2
             exit 1
@@ -144,7 +144,7 @@ jobs:
               "$RUNNER_TEMP/idoly-existing-draft.json" > /dev/null
           else
             jq -n --arg tag "$IDOLY_SERVER_TAG" --arg commit "$GITHUB_SHA" \
-              '{tag_name:$tag,target_commitish:$commit,name:"Idoly Pride local server apps v0.2.3",draft:true,
+              '{tag_name:$tag,target_commitish:$commit,name:"Idoly Pride local server apps v0.2.4",draft:true,
                 body:("Experimental Android arm64 server APK and Apple Silicon macOS app with bundled public data. " +
                       "Local Home and Tutorial handling is partial; actual IDOLY PRIDE client gameplay has not been verified. " +
                       "Android emulator and macOS native app evidence are attached after their checks pass. " +
@@ -154,7 +154,7 @@ jobs:
               --input "$RUNNER_TEMP/idoly-new-draft.json" --jq '.id')"
           fi
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-server-v0.2.3"' | grep -qx true
+            --jq '.draft and .tag_name == "local-server-v0.2.4"' | grep -qx true
           echo "release_id=$IDOLY_RELEASE_ID" >> "$GITHUB_OUTPUT"
       - name: Upload the tested payload to the draft only
         shell: bash
@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-server-v0.2.3"' | grep -qx true
+            --jq '.draft and .tag_name == "local-server-v0.2.4"' | grep -qx true
           gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber "data/dist/$IDOLY_PAYLOAD_NAME"
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-payload-upload.json"
           uv run --locked python - "$RUNNER_TEMP/idoly-payload-upload.json" <<'PY'
@@ -185,9 +185,9 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: server-data-v0.2.3
+          name: server-data-v0.2.4
           path: |
-            data/dist/IdolyPride-ServerData-v0.2.3.zip
+            data/dist/IdolyPride-ServerData-v0.2.4.zip
             data/dist/server-data-build.json
             data/protocol/idolypride-6.1.1.pb
           if-no-files-found: error
@@ -195,7 +195,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: server-preparation-evidence-v0.2.3
+          name: server-preparation-evidence-v0.2.4
           path: data/preparation-evidence
           if-no-files-found: warn
 
@@ -231,7 +231,7 @@ jobs:
           log-accepted-android-sdk-licenses: false
       - uses: actions/download-artifact@v4
         with:
-          name: server-data-v0.2.3
+          name: server-data-v0.2.4
           path: data
       - name: Install Android SDK and host QA dependencies
         shell: bash
@@ -316,6 +316,9 @@ jobs:
           assert result.get('restart_session_preserved') is True and result.get('port_rebound') is True
           assert result.get('home_rpcs') is True and result.get('gameplay_change_preserved') is True
           assert result.get('home_hierarchy_reference') is True
+          assert all(result.get(key) is True for key in
+              ('starter_roster_complete', 'legacy_starter_upgraded', 'upgrade_snapshot_fields_preserved',
+               'upgrade_identity_preserved', 'upgrade_sessions_preserved', 'upgrade_settings_preserved'))
           assert result.get('anonymous_refund_term') is True
           assert result.get('refund_term_inactive') is True
           assert result.get('bootstrap_rpc_order') == ['System.Check', 'Refund.GetTerm', 'Auth.Login']
@@ -327,7 +330,7 @@ jobs:
           uv run --locked python -m zipfile -c data/dist/IdolyPride-Local-Server-Android-QA.zip data/android-server-qa
           uv run --locked python -m zipfile -c data/dist/IdolyPride-Local-Server-Diagnostics-QA.zip data/android-diagnostics-qa
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-server-v0.2.3"' | grep -qx true
+            --jq '.draft and .tag_name == "local-server-v0.2.4"' | grep -qx true
           gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
             data/dist/IdolyPride-Local-Server-Android.apk data/dist/IdolyPride-Local-Server-Android-QA.zip \
             data/dist/IdolyPride-Local-Server-Diagnostics-QA.zip
@@ -355,7 +358,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-server-emulator-qa-v0.2.3
+          name: android-server-emulator-qa-v0.2.4
           path: |
             data/android-server-qa
             data/android-diagnostics-qa
@@ -390,7 +393,7 @@ jobs:
           version: "0.13.5"
       - uses: actions/download-artifact@v4
         with:
-          name: server-data-v0.2.3
+          name: server-data-v0.2.4
           path: data
       - name: Install the base project and pinned macOS build tools
         shell: bash
@@ -409,7 +412,7 @@ jobs:
             --server-data "data/dist/$IDOLY_PAYLOAD_NAME" \
             --output data/macos/IdolyPrideLocalServer.app \
             --archive data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip \
-            --evidence data/macos-evidence --version 0.2.3 \
+            --evidence data/macos-evidence --version 0.2.4 \
             | tee data/macos-evidence/build.log
       - name: Upload the Mac app only after frozen runtime and native GUI checks pass
         id: publish
@@ -425,13 +428,14 @@ jobs:
           app = json.loads((evidence / 'app-smoke.json').read_text())
           assert all(engine.get(key) is True for key in
               ('frozen_runtime', 'server_started', 'encrypted_system_check', 'anonymous_public_text', 'anonymous_refund_term',
-               'local_auth', 'home_login', 'home_enter', 'home_hierarchy_reference', 'settings_persisted', 'profile_persisted',
+               'local_auth', 'home_login', 'home_enter', 'home_hierarchy_reference', 'starter_roster_complete',
+               'settings_persisted', 'profile_persisted',
                'asset_range', 'server_stopped'))
           assert all(app.get(key) is True for key in ('gui_started', 'server_started', 'server_stopped'))
           PY
           .venv/bin/python -m zipfile -c data/dist/IdolyPride-Local-Server-macOS-QA.zip data/macos-evidence
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-server-v0.2.3"' | grep -qx true
+            --jq '.draft and .tag_name == "local-server-v0.2.4"' | grep -qx true
           gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
             data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip data/dist/IdolyPride-Local-Server-macOS-QA.zip
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-macos-upload.json"
@@ -457,7 +461,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-server-native-evidence-v0.2.3
+          name: macos-server-native-evidence-v0.2.4
           path: data/macos-evidence
           if-no-files-found: warn
 
@@ -513,22 +517,23 @@ jobs:
               'draft': True, 'release_id': release['id'], 'tag': release['tag_name'],
               'source_commit': os.environ['GITHUB_SHA'], 'assets': records,
               'android_server_emulator_qa_passed': True, 'macos_frozen_engine_and_native_gui_passed': True,
+              'starter_roster_verified_on_both_platforms': True, 'android_legacy_starter_upgrade_verified': True,
               'actual_game_client_gameplay_tested': False,
           }, indent=2) + '\n')
           PY
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-server-v0.2.3"' | grep -qx true
+            --jq '.draft and .tag_name == "local-server-v0.2.4"' | grep -qx true
           gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
             data/release-verification/SHA256SUMS data/release-verification/RELEASE-VERIFICATION.json
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-server-v0.2.3"' | grep -qx true
+            --jq '.draft and .tag_name == "local-server-v0.2.4"' | grep -qx true
           {
             echo 'All three server deliverables and platform QA evidence are present with verified SHA-256 digests.'
-            echo 'The dedicated local-server-v0.2.3 release remains a draft; the existing client release was not modified.'
+            echo 'The dedicated local-server-v0.2.4 release remains a draft; the existing client release was not modified.'
             echo 'Home/Tutorial support remains partial. Actual IDOLY PRIDE game-client gameplay is not covered by these app checks.'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: native-server-release-verification-v0.2.3
+          name: native-server-release-verification-v0.2.4
           path: data/release-verification
           if-no-files-found: error

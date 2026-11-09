@@ -39,9 +39,13 @@
 
 `seed_starter_profile(state, schema, profile, master_dir)`는 snapshot이 없는 프로필에서만 사용합니다. 기존 공식 계정 snapshot이나 이미 생성한 로컬 프로필에는 자동 적용하지 않습니다.
 
-시작 캐릭터는 `Setting.tutorialPhotoShootingCharacterIds`에서 가져옵니다. 현재 마스터에서는 5명입니다. 이 목록은 촬영 튜토리얼의 대상이며, 여기서는 신규 로컬 프로필의 기본 편성으로 사용합니다. 공식 신규 계정의 전체 보유 목록을 재현한 것은 아닙니다. 각 캐릭터의 기본·라이브 의상과 기본 헤어를 실제 `Character`·`Costume`·`Hair` 소유 관계로 검증합니다. 캐릭터 활동 레벨 1의 최대 체력은 `CharacterActivityLevel`에서 가져옵니다. 최초 메인 지역의 퀘스트 참조도 검증합니다.
+시작 캐릭터는 `Character.type=1`이며 `viewConditionId`·`unlockConditionId`가 모두 빈 일반 캐릭터 17명입니다. Android 6.1.1의 `GetSubCharacterCandidate`는 보유 목록을 검사하지 않고 이 마스터 풀에서 홈 배경 인물을 선택합니다. 이어 `CreateActorDescriptor`는 `UserCharacter.FindById` 결과를 무조건 읽으므로 5명만 준비하면 나머지 12명 선택 시 null 참조가 발생할 수 있습니다. 조건이 있는 `char-kan/kor/mhk` 등은 제외합니다. 이 17명은 실제 `initial_user_reward`의 캐릭터 목록과도 일치합니다.
+
+`Setting.tutorialPhotoShootingCharacterIds`의 5명은 기본 즐겨찾기·홈 배치에 사용합니다. 각 캐릭터의 기본·라이브 의상과 헤어 소유 관계·착용 가능성을 실제 마스터로 검증합니다. 활동 레벨 1 체력은 `CharacterActivityLevel`에서 가져오며 최초 메인 지역의 퀘스트 참조도 검증합니다.
 
 최소 데이터에는 레벨 1 매니저, 위 캐릭터·외형, 홈 배치, 빈 덱 하나와 GameStart step 0이 포함됩니다. 카드·통화·보상·라이브 클리어·기능 전체 해금은 지급하지 않습니다. 마스터 참조 검증이 실패하면 부분 snapshot을 남기지 않습니다.
+
+`repair_starter_roster`는 출처 표시가 있는 구형 로컬 프로필 또는 이전 서버의 5명·기본 외형·빈 `Local deck`·고정 홈 배치·식별자가 일치하는 구성을 보완합니다. 출처 없는 데이터에 다른 인벤토리·잔액이 있으면 보정하지 않습니다. 가져오기는 출처 0으로 표시하여 제외하며, 신규 기본 데이터는 버전 2입니다. 누락 캐릭터 추가와 버전 갱신은 한 SQLite 트랜잭션으로 수행합니다. 기존 캐릭터·외형·진행·이름·설정·세션·알 수 없는 protobuf 필드는 유지합니다.
 
 사용하는 마스터 파일은 `Setting.json`, `Character.json`, `Costume.json`, `Hair.json`, `CharacterActivityLevel.json`, `Area.json`, `Quest.json`, `Tutorial.json`, `Card.json`, `Accessory.json`, `HierarchyDetailGrade.json`, `HierarchyGrade.json`, `!version.txt`입니다. 번들의 정규 JSON은 protobuf 필드 이름과 숫자 enum을 사용합니다.
 
@@ -56,7 +60,7 @@
 
 ## 다음 구현 근거
 
-- 같은 버전의 `Reward.initial_user_reward`에는 캐릭터 17명과 실제 3성 카드 17장 등이 있습니다. 공식 지급 시점은 아직 확인하지 못했으므로 기존 snapshot에 자동 적용하지 않습니다. 향후 신규 로컬 프로필 정책으로 명시하거나 정상 응답에서 지급 시점을 확인해야 합니다.
+- 같은 버전의 `Reward.initial_user_reward`에는 기본 캐릭터 17명과 실제 3성 카드 17장 등이 있습니다. 위 홈 표시용 캐릭터 구성 이외의 카드·보상 지급 시점은 아직 확인하지 못했으므로 전체 보상은 자동 적용하지 않습니다.
 - 덱의 신규 번호 발급·자동 편성·버디 대여와 캐릭터 그룹 장비 제한은 추가 계약·마스터 검증이 필요합니다.
 - Android `LiveTutorialPresenter.RequestFullTutorialLiveAsync`의 `0x42f8664`에서 `Tutorial.StartQuestAsync` 호출을 확인했습니다. 응답에는 라이브 차트·스킬·사용자 정보가 필요합니다. `Setting`의 `qt-tutorial-short/full` 퀘스트만으로 빈 성공 응답을 만들 수는 없습니다.
 - 부팅의 `OctoSetupAsync`와 홈의 3D 환경 로딩이 남아 있습니다. 원본 마스터 제공과 별개로 모델·음성 등 Octo 리소스의 보존·주소 연결을 구현하고 게임 기기에서 확인해야 합니다.

@@ -112,11 +112,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         body.addView(diagnosticControls);
         body.addView(text(R.string.game_state_title, 15, Color.WHITE));
         gameStatus = text(R.string.game_state_waiting, 13, Color.rgb(192, 212, 222));
+        gameStatus.setTextIsSelectable(true);
         gameStatus.setMaxLines(3);
         gameStatus.setEllipsize(TextUtils.TruncateAt.END);
         gameStatus.setPadding(0, dp(4), 0, dp(8));
         body.addView(gameStatus);
         lastException = text(R.string.game_state_waiting, 12, Color.rgb(255, 192, 154));
+        lastException.setTextIsSelectable(true);
         lastException.setMaxLines(3);
         lastException.setEllipsize(TextUtils.TruncateAt.END);
         lastException.setVisibility(View.GONE);

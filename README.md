@@ -4,7 +4,7 @@
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.3에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.4에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
@@ -19,7 +19,7 @@
 
 Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후속 APK를 업데이트 설치하면 DB를 유지합니다. **서버 앱 삭제·데이터 지우기는 로컬 프로필을 삭제합니다.** Mac 데이터는 `~/Library/Application Support/IdolyPrideLocal`에 보관하며 서버 앱의 **데이터 폴더**에서 열 수 있습니다. 자세한 설치·저장 위치·확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)를 참고합니다.
 
-Android에서 홈 API 성공 뒤 로딩이 계속된다면 [별도 진단 게임](https://github.com/tagundo/IdolyPride_client/releases/tag/local-diagnostics-v0.1.0)을 설치합니다. 서버 v0.2.3의 **진단 게임 실행**으로 열면 관측된 Unity 예외·셰이더 대기 상태를 서버 앱에서 확인하고 **진단 기록 내보내기**로 저장할 수 있습니다. 마스터 파일은 서버가 실제 전송한 바이트를 표시합니다. 전체 3D 리소스 다운로드 진행률과 게임의 홈 화면 성공은 아직 확인하지 않았습니다.
+Android에서 홈 API 성공 뒤 로딩이 계속된다면 [별도 진단 게임](https://github.com/tagundo/IdolyPride_client/releases/tag/local-diagnostics-v0.1.0)을 설치합니다. 서버 v0.2.4의 **진단 게임 실행**으로 열면 관측된 Unity 예외·셰이더 대기 상태를 서버 앱에서 확인하고 **진단 기록 내보내기**로 저장할 수 있습니다. 마스터 파일은 서버가 실제 전송한 바이트를 표시합니다. 전체 3D 리소스 다운로드 진행률과 게임의 홈 화면 성공은 아직 확인하지 않았습니다.
 
 ## 현재 범위
 
@@ -31,7 +31,7 @@ Android에서 홈 API 성공 뒤 로딩이 계속된다면 [별도 진단 게임
 | `User.Get` | 계정별 fixture 우선, 다음 SQLite snapshot 제공 |
 | 홈·설정·튜토리얼 10개 RPC | `Home.Login/Enter/SetReview/SetCharacterPosition`, `Dokan.List`, `Notice.List`, `Master.GetVersion`, `Tutorial.Init/Progress/Skip` 구현 |
 | `Deck.Save/Delete` | 기존 덱 수동 편집·삭제, 보유 카드·의상·헤어·사진·장비 참조 검증 |
-| 신규 앱 프로필 | 마스터 참조를 검증한 시작 캐릭터 5명·의상·헤어, 레벨 1, 빈 덱 생성; 기존 snapshot은 유지 |
+| 신규 앱 프로필 | 홈 배경 선택에 필요한 기본 캐릭터 17명·외형, 레벨 1, 빈 덱 생성; 구형 로컬 초기 데이터는 누락분만 보완 |
 | 공개 약관·도움말 | `Master.Rule`·`Master.GetHelpCategory`의 요청별 공개 응답 10개 동봉 |
 | `Master.Get`·파일 제공 | 현재 원본 마스터 202개·77,283,328바이트 보존·제공 |
 | 기존 계정 보존 | `User.Get` snapshot 가져오기와 제한된 공식 세션 읽기 수집 구현; 실제 계정 수집은 미검증 |
@@ -106,7 +106,7 @@ uv run idoly-local new-profile sandbox --manager-name '로컬 매니저'
 uv run idoly-local serve --profile sandbox
 ```
 
-위 CLI의 `new-profile`은 매니저 이름·레벨 1·로컬 식별자만 초기화하는 최소 프로필입니다. 배포 서버 앱은 별도의 신규 전용 초기화로 마스터에서 검증한 시작 캐릭터 5명·외형과 빈 덱을 준비합니다. 기존 snapshot에는 자동 적용하지 않습니다. 카드 지급·전투·보상은 구현하지 않았으며 실제 게임의 홈 진입은 미검증입니다.
+위 CLI의 `new-profile`은 매니저 이름·레벨 1·로컬 식별자만 초기화하는 최소 프로필입니다. 배포 서버 앱은 마스터에서 검증한 기본 캐릭터 17명·외형과 빈 덱을 준비합니다. 구형 서버가 만든 5명 구성을 인식하면 누락된 기본 캐릭터만 추가하며 명시적으로 가져온 snapshot은 수정하지 않습니다. 카드 지급·전투·보상은 구현하지 않았으며 실제 게임의 홈 진입은 미검증입니다.
 
 기존 계정의 복호화된 `User.Get` 응답이 있으면 그대로 보존할 수 있습니다.
 
