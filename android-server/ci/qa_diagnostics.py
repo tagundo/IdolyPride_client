@@ -56,6 +56,25 @@ def _picker_node(tree, *, texts=(), descriptions=()):
     return None
 
 
+def _capture_picker(qa, stage, *, texts=(), timeout=20):
+    """Wait through a cold DocumentsUI launch without repeating the UI tap."""
+    deadline = time.monotonic() + timeout
+    errors = []
+    while time.monotonic() < deadline:
+        try:
+            tree = qa.capture(stage)
+        except RuntimeError as error:
+            errors.append(str(error))
+            (qa.artifacts / (stage + "-capture-errors.txt")).write_text("\n".join(errors) + "\n")
+        else:
+            packages = {node.get("package", "") for node in tree.iter("node")}
+            if any("documentsui" in package.lower() for package in packages):
+                if not texts or _picker_node(tree, texts=texts) is not None:
+                    return tree
+        time.sleep(0.5)
+    return None
+
+
 def optional_export(qa):
     """Exercise real SAF UI; unavailable images remain explicitly unverified.
 
@@ -66,17 +85,12 @@ def optional_export(qa):
                       "-a", "android.intent.action.CREATE_DOCUMENT",
                       "-c", "android.intent.category.OPENABLE", "-t", "application/json", check=False)
     (qa.artifacts / "document-picker-resolver.txt").write_text(resolver, encoding="utf-8")
-    if not any("/" in line and " " not in line.strip() for line in resolver.splitlines()):
-        return {"checked": False, "reason": "document_picker_unavailable"}
+    # Resolver output varies across Android versions. Retain it as evidence,
+    # then let the actual app intent and observed picker establish availability.
     qa.adb("shell", "rm", "-f", "/sdcard/Download/IdolyPride-diagnostics.json")
-    try:
-        qa.tap("진단 기록 내보내기", "export-open")
-        time.sleep(0.5)
-        tree = qa.capture("export-picker")
-    except RuntimeError:
-        return {"checked": False, "reason": "document_picker_unavailable"}
-    picker_packages = {node.get("package", "") for node in tree.iter("node")}
-    if not any("documentsui" in package.lower() for package in picker_packages):
+    qa.tap("진단 기록 내보내기", "export-open")
+    tree = _capture_picker(qa, "export-picker")
+    if tree is None:
         return {"checked": False, "reason": "document_picker_not_opened"}
 
     save = _picker_node(tree, texts=("SAVE", "Save", "저장", "保存"))
@@ -90,12 +104,16 @@ def optional_export(qa):
         if roots is None:
             return {"checked": False, "reason": "document_picker_save_unavailable"}
         _tap_node(qa, roots)
-        tree = qa.capture("export-roots")
+        tree = _capture_picker(qa, "export-roots", texts=("Downloads", "Download", "다운로드", "ダウンロード"))
+        if tree is None:
+            return {"checked": False, "reason": "document_picker_downloads_unavailable"}
         downloads = _picker_node(tree, texts=("Downloads", "Download", "다운로드", "ダウンロード"))
         if downloads is None:
             return {"checked": False, "reason": "document_picker_downloads_unavailable"}
         _tap_node(qa, downloads)
-        tree = qa.capture("export-downloads")
+        tree = _capture_picker(qa, "export-downloads", texts=("SAVE", "Save", "저장", "保存"))
+        if tree is None:
+            return {"checked": False, "reason": "document_picker_save_unavailable"}
         save = _picker_node(tree, texts=("SAVE", "Save", "저장", "保存"))
         if save is None:
             return {"checked": False, "reason": "document_picker_save_unavailable"}
