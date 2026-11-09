@@ -2,6 +2,9 @@ name: Build local clients into draft release
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/build-local-clients.yml]
 
 permissions:
   contents: write
