@@ -78,8 +78,11 @@ read-only `User.Get` calls. It requires completed main tutorial step10 and an
 uncleared profile, and calls no tutorial progress/skip or purchase/grant RPC.
 The client derives its next step100 from stored step10; this preparation does
 not prove that the corresponding game screen appeared. `profile-fixture.json`
-records these fixture calls separately without authentication tokens. All
-subsequent game input remains one fresh OCR-observed title tap.
+records these fixture calls separately without authentication tokens. The debug
+workflow permits at most two fresh OCR-observed title taps. A second tap requires
+two stable, non-loading title observations at least three seconds apart and at
+least twenty seconds after the first. It addresses the normal title-background
+reload path; no other game UI is operated.
 
 ```sh
 uv run --locked --all-extras pytest -q qa-native-aes android-server/ci

@@ -51,6 +51,15 @@ def test_16k_check_rejects_a_library_requiring_4k_pages(tmp_path):
     BUILDER.check_arm64_16k(path)
 
 
+def test_native_builder_rejects_an_unpinned_ndk_even_when_the_compiler_exists(tmp_path):
+    compiler = tmp_path / "toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang"
+    compiler.parent.mkdir(parents=True)
+    compiler.touch()
+    (tmp_path / "source.properties").write_text("Pkg.Revision = 27.0.0\n")
+    with pytest.raises(ValueError, match="pinned NDK"):
+        BUILDER.find_ndk(tmp_path)
+
+
 def test_actual_local_bootstrap_windows_if_a_built_client_is_available():
     from zipfile import ZipFile
 

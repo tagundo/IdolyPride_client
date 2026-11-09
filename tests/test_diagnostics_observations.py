@@ -81,8 +81,11 @@ def test_new_collector_clears_stale_current_observations_but_preserves_history()
     assert latest["summary"] == "게임 진단 수집 시작"
 
 
-def test_native_probe_failure_remains_explicit_without_a_fake_exception():
+@pytest.mark.parametrize("code", ["probe_unavailable", "probe_init_failed", "probe_selftest_failed",
+                                  "probe_profile_mismatch", "probe_install_failed"])
+def test_native_probe_failure_remains_explicit_without_a_fake_exception(code):
     model = ClientDiagnostics()
-    send(model, status("probe_unavailable"))
-    assert model.status()["native_probe_status"] == "probe_unavailable"
+    send(model, status(code))
+    assert model.status()["native_probe_status"] == code
+    assert model.status()["phase"] is None
     assert not model.status()["latest_exception"]

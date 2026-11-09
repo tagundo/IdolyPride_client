@@ -35,6 +35,10 @@ _STATUS = {
     "shader_warmup_wait": ("shader_wait", "셰이더 준비 완료 대기 중"),
     "probe_ready": ("probe_ready", "홈 단계 추적 준비됨"),
     "probe_unavailable": ("probe_unavailable", "홈 단계 추적을 시작하지 못했습니다"),
+    "probe_init_failed": ("probe_init_failed", "기기에서 단계 추적 초기화가 실패했습니다"),
+    "probe_selftest_failed": ("probe_selftest_failed", "단계 추적 자가 검사를 통과하지 못했습니다"),
+    "probe_profile_mismatch": ("probe_profile_mismatch", "게임 버전이 단계 추적 대상과 일치하지 않습니다"),
+    "probe_install_failed": ("probe_install_failed", "게임 단계 관측기를 설치하지 못했습니다"),
     "network_unavailable": ("network_unavailable", "게임 전체 네트워크 수신량을 읽을 수 없습니다"),
     "home_enter": ("home_enter", "홈 진입 처리 시작"),
     "environment_begin": ("environment_begin", "홈 환경 전환 요청"),
@@ -51,10 +55,13 @@ _STATUS = {
     "actor_cache_build": ("actor_cache_build", "캐릭터 캐시 생성 요청"),
     "actor_result_received": ("actor_result_received", "캐릭터 로딩 결과 수신"),
     "actor_cache_wait": ("actor_cache_wait", "캐릭터 캐시 점검 단계"),
+    "actor_load_failed": ("actor_load_failed", "캐릭터 로드 실패 기록"),
     "buttons_begin": ("buttons_begin", "홈 버튼 리소스 준비 진입"),
 }
-_PHASES = set(_STATUS) - {"collector_started", "logcat_started", "logcat_stopped",
-                         "probe_ready", "probe_unavailable", "network_unavailable"}
+_PROBE_CODES = {"probe_ready", "probe_unavailable", "probe_init_failed", "probe_selftest_failed",
+                "probe_profile_mismatch", "probe_install_failed"}
+_PHASES = set(_STATUS) - _PROBE_CODES - {"collector_started", "logcat_started", "logcat_stopped",
+                                       "network_unavailable"}
 
 
 def _unique_object(pairs):
@@ -196,7 +203,7 @@ class ClientDiagnostics:
                         self._shader_warmup_wait = True
                     elif code == "network_unavailable":
                         self._network_unavailable = True
-                    elif code in ("probe_ready", "probe_unavailable"):
+                    elif code in _PROBE_CODES:
                         self._native_probe_status = code
                     if code in _PHASES:
                         self._phase = {"code": code, "summary": summary}

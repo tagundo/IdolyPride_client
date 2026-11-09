@@ -13,7 +13,9 @@ import time
 PACKAGE = "game.qualiarts.idolypride.phase_selftest"
 ACTIVITY = PACKAGE + "/.SelfTestActivity"
 CHECKS = ("baseline", "initialized", "installed", "original_instruction", "gpr", "simd", "sp", "nzcv",
-          "fpcr", "fpsr", "callback_context", "callback_hits", "hook_failure_fail_open", "unintercept")
+          "fpcr", "fpsr", "callback_context", "callback_hits", "hook_failure_fail_open", "unintercept",
+          "bl_baseline", "bl_installed", "bl_original_instruction", "bl_original_lr",
+          "bl_callback_context", "bl_callback_hits", "bl_unintercept")
 
 
 def validate_report(report):
@@ -21,7 +23,8 @@ def validate_report(report):
             or report.get("synthetic_only") is not True or report.get("abi") != "arm64-v8a"
             or report.get("shadowhook_version") != "2.0.1"
             or any(type(report.get(name)) is not int or report[name] != 0
-                   for name in ("init_result", "init_errno", "install_errno"))
+                   for name in ("init_result", "init_errno", "install_errno", "bl_install_errno",
+                                "add_unintercept_result", "bl_unintercept_result"))
             or any(report.get(name) is not True for name in CHECKS)):
         raise ValueError("Synthetic ARM64 instruction preservation check failed")
 

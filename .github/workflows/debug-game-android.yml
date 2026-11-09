@@ -141,6 +141,7 @@ jobs:
             --artifacts data/android-game-debug --duration 180 --interval 10 --startup-timeout 600
             --force-gles30
             --tap-observed-title
+            --max-title-taps 2
             --prepare-restarted-tutorial
       - name: Preserve game screenshots and diagnostic evidence
         if: always()

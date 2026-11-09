@@ -46,7 +46,8 @@ public final class LogSanitizerTest {
         String[] phases = {"home_enter", "environment_begin", "background_begin", "background_load_returned",
                 "shader_completion_flag", "shader_wait_begin", "home_open_begin", "loading_hide", "front_loading_finished",
                 "home_show_in_returned", "actors_begin", "actor_motion_wait", "actor_cache_build", "actor_result_received",
-                "actor_cache_wait", "buttons_begin", "probe_ready", "probe_unavailable"};
+                "actor_cache_wait", "buttons_begin", "probe_ready", "probe_unavailable",
+                "probe_init_failed", "probe_selftest_failed", "probe_profile_mismatch", "probe_install_failed"};
         for (String phase : phases) log.accept("I/Unity (1234): IDOLY_PHASE:" + phase);
         events = log.drain();
         check(events.size() == phases.length, "all audited phase codes accepted");
@@ -58,6 +59,11 @@ public final class LogSanitizerTest {
                 "IDOLY_PHASE:unknown", "IDOLY_PHASE:shader_ready", "IDOLY_PHASE:actor_ready",
                 "IDOLY_PHASE:https://example.invalid/PRIVATE", "IDOLY_PHASE:home_enter\nPRIVATE"}) log.accept(line);
         check(log.drain().isEmpty(), "reject arbitrary, unknown, legacy and multiline phase payloads");
+
+        log.accept("E/Unity(123): [ActorManager] 想定外の状況によりActorロード失敗 PRIVATE https://example.invalid/secret");
+        events = log.drain();
+        check(events.size() == 1 && "actor_load_failed".equals(events.get(0).code)
+                && events.get(0).frames.isEmpty(), "fixed actor failure contains no message or address");
 
         log.accept("NullReferenceException: PRIVATE");
         for (int i = 0; i < 30; i++) log.accept(" at Solis.Home.Method" + i + " (PRIVATE)");

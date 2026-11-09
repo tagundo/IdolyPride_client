@@ -75,6 +75,10 @@ def find_ndk(ndk=None):
     compiler = toolchain / "aarch64-linux-android28-clang"
     if not compiler.is_file():
         raise ValueError("Native diagnostics requires Linux NDK 26.3.11579264; pass --ndk")
+    properties = dict(line.split("=", 1) for line in (root / "source.properties").read_text().splitlines() if "=" in line)
+    revision = next((value.strip() for key, value in properties.items() if key.strip() == "Pkg.Revision"), None)
+    if revision != "26.3.11579264":
+        raise ValueError("Native diagnostics requires the pinned NDK 26.3.11579264 revision")
     return root, compiler
 
 
@@ -123,14 +127,33 @@ def build_native(output: Path, *, ndk=None, cache_dir=None):
     libraries = output / "lib/arm64-v8a"
     libraries.mkdir(parents=True, exist_ok=True)
     target = libraries / "libidoly_phase_probe.so"
-    command = [str(compiler), "-std=c11", "-O2", "-fPIC", "-shared", "-Werror", "-Wall", "-Wextra",
-        "-fvisibility=hidden", "-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384",
-        "-Wl,-z,relro,-z,now", "-Wl,--build-id=sha1", "-Wl,-soname,libidoly_phase_probe.so",
-        "-I", str(include), "-I", str(generated), str(HERE / "phase_probe.c"),
+    cpp_compiler = compiler.with_name("aarch64-linux-android28-clang++")
+    common = ["-O2", "-fPIC", "-Werror", "-Wall", "-Wextra", "-fvisibility=hidden",
+              "-I", str(include), "-I", str(generated), "-I", str(HERE)]
+    objects = output / "objects"
+    objects.mkdir(exist_ok=True)
+    sources = [(HERE / "phase_probe.c", compiler, ["-std=c11"]),
+               (HERE / "machine_state_check.cpp", cpp_compiler, ["-std=c++17", "-fno-exceptions", "-fno-rtti"]),
+               (HERE / "checkpoint.S", compiler, [])]
+    compiled = []
+    for source, executable, flags in sources:
+        obj = objects / (source.name + ".o")
+        command = [str(executable), *common, *flags, "-c", str(source), "-o", str(obj)]
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode:
+            raise ValueError("Native phase probe compilation failed: " + result.stderr[-2400:])
+        compiled.append(str(obj))
+    command = [str(cpp_compiler), "-shared", "-nostdlib++", "-Wl,--no-undefined",
+        "-Wl,-z,max-page-size=16384", "-Wl,-z,common-page-size=16384", "-Wl,-z,relro,-z,now",
+        "-Wl,--build-id=sha1", "-Wl,-soname,libidoly_phase_probe.so", *compiled,
         "-L", str(dependency_libs), "-lshadowhook", "-llog", "-ldl", "-o", str(target)]
     result = subprocess.run(command, capture_output=True, text=True)
     if result.returncode:
-        raise ValueError("Native phase probe compilation failed: " + result.stderr[-2400:])
+        raise ValueError("Native phase probe linking failed: " + result.stderr[-2400:])
+    dynamic = subprocess.run([str(compiler.with_name("llvm-readelf")), "-d", str(target)],
+                             capture_output=True, text=True, check=True).stdout
+    if "libc++" in dynamic:
+        raise ValueError("Native phase probe must not require a C++ shared runtime")
     for source in dependency_libs.glob("*.so"):
         shutil.copyfile(source, libraries / source.name)
     for library in libraries.glob("*.so"):
@@ -140,7 +163,10 @@ def build_native(output: Path, *, ndk=None, cache_dir=None):
         "shadowhook": dependency, "phase_profile_sha256": digest(profile_path),
         "phase_count": len(profile["sites"]), "observations_only": True,
         "managed_memory_read": False, "register_context_modified": False,
-        "source_sha256": {path.name: digest(path) for path in [HERE / "phase_probe.c", Path(__file__)]},
+        "per_device_preflight_required": True,
+        "preflight_checks": ["ADD", "BL", "original_link_register", "GPR", "FPSIMD", "SP", "NZCV", "FPCR", "FPSR", "unintercept"],
+        "source_sha256": {path.name: digest(path) for path in [HERE / "phase_probe.c", Path(__file__),
+            HERE / "machine_state_check.cpp", HERE / "machine_state_check.h", HERE / "checkpoint.S"]},
         "library_sha256": {path.name: digest(path) for path in sorted(libraries.glob("*.so"))}}
     (output / "native-provenance.json").write_text(json.dumps(report, indent=2) + "\n")
     return report

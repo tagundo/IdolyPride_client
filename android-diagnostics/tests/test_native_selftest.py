@@ -14,6 +14,7 @@ SPEC.loader.exec_module(DRIVER)
 def report():
     return {"schema": 1, "ok": True, "synthetic_only": True, "abi": "arm64-v8a",
             "shadowhook_version": "2.0.1", "init_result": 0, "init_errno": 0, "install_errno": 0,
+            "bl_install_errno": 0, "add_unintercept_result": 0, "bl_unintercept_result": 0,
             **{name: True for name in DRIVER.CHECKS}}
 
 

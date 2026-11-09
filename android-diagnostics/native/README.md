@@ -19,6 +19,17 @@ checked. If removal fails, the ELF remains pinned and some fixed observational
 callbacks may remain active after `probe_unavailable`.
 An unavailable probe must not block game startup.
 
+After ShadowHook initialization, the shared `machine_state_check` routine runs
+synthetic ADD and direct BL instructions in this diagnostic library before any
+game checkpoint is intercepted. It checks all GPR/SIMD state, SP, NZCV, FPCR,
+FPSR and the BL return link (`original instruction + 4`), then confirms both
+synthetic interceptors were removed. Any failed check prevents every game hook.
+Callback data has static lifetime even if removal fails. This routine is also
+compiled unchanged into the standalone test APK; it uses no C++ shared runtime.
+`probe_ready` is emitted only after this per-device check and all sixteen game
+interceptors succeed. Distinct fixed failure codes identify initialization,
+machine-state preflight, profile, or installation failures without raw errors.
+
 ShadowHook's instruction intercept API executes the original instruction after
 the callback. The `SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE` flag preserves the
 ARM64 general register context, SP, PC, PSTATE, q0–q31, FPSR and FPCR. Our callback

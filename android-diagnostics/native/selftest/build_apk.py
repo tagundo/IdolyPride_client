@@ -14,6 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 
 HERE = Path(__file__).resolve().parent
+COMMON = HERE.parent
 PACKAGE = "game.qualiarts.idolypride.phase_selftest"
 AAR_SHA256 = "2cad01ff4d59542958775e19f281981a7e84b39670b5fae75905b8511e10c7cd"
 
@@ -37,7 +38,8 @@ def build(output, *, shadowhook_aar, ndk, build_tools, android_jar, javac):
         raise ValueError("Expected one NDK host toolchain")
     clang = hosts[0] / "bin/aarch64-linux-android28-clang++"
     keytool = javac.with_name("keytool")
-    sources = [HERE / name for name in ("SelfTestActivity.java", "selftest.cpp", "checkpoint.S", "AndroidManifest.xml")]
+    sources = [HERE / name for name in ("SelfTestActivity.java", "selftest.cpp", "AndroidManifest.xml")]
+    sources += [COMMON / name for name in ("machine_state_check.h", "machine_state_check.cpp", "checkpoint.S")]
     for path in [javac, keytool, clang, android_jar, *sources,
                  *(tools / name for name in ("aapt2", "d8", "zipalign", "apksigner"))]:
         if not path.is_file():
@@ -65,7 +67,8 @@ def build(output, *, shadowhook_aar, ndk, build_tools, android_jar, javac):
         native = libraries / "libidoly_phase_selftest.so"
         run([clang, "-shared", "-fPIC", "-O2", "-std=c++17", "-fno-exceptions", "-fno-rtti",
              "-fvisibility=hidden", "-nostdlib++", "-Wl,--no-undefined", "-Wl,-z,max-page-size=16384",
-             "-Wl,-z,common-page-size=16384", "-I" + str(include), HERE / "selftest.cpp", HERE / "checkpoint.S",
+             "-Wl,-z,common-page-size=16384", "-I" + str(include), "-I" + str(COMMON),
+             HERE / "selftest.cpp", COMMON / "machine_state_check.cpp", COMMON / "checkpoint.S",
              "-L" + str(libraries), "-lshadowhook", "-o", native])
         dynamic = run([hosts[0] / "bin/llvm-readelf", "-d", native])
         if "libc++_shared" in dynamic or "libshadowhook.so" not in dynamic:
@@ -98,7 +101,7 @@ def build(output, *, shadowhook_aar, ndk, build_tools, android_jar, javac):
         badging = run([tools / "aapt2", "dump", "badging", signed])
         if "package: name='" + PACKAGE + "'" not in badging or "native-code: 'arm64-v8a'" not in badging:
             raise ValueError("Self-test package or ABI inventory mismatch")
-        if any(digest(HERE / name) != value for name, value in source_hashes.items()):
+        if any(digest(path) != source_hashes[path.name] for path in sources):
             raise ValueError("Self-test source changed during build")
         report = {"schema": 1, "package": PACKAGE, "synthetic_only": True, "game_included": False,
                   "runtime_verified": False, "abi": "arm64-v8a", "ndk": "26.3.11579264",

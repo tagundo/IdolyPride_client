@@ -14,6 +14,7 @@
 
 #include "shadowhook.h"
 #include "phase_sites.h"
+#include "machine_state_check.h"
 
 static atomic_bool started = false;
 static atomic_uint emitted = 0;
@@ -40,6 +41,7 @@ static void emit(unsigned index, const char *code) {
 }
 
 static void unavailable(void) { emit(PHASE_COUNT + 1, "probe_unavailable"); }
+_Static_assert(PHASE_COUNT + 6 <= 32, "Fixed event mask must fit in 32 bits");
 
 static void checkpoint(shadowhook_cpu_context_t *context, void *data) {
     (void)context;  // Never read managed memory, change registers or invoke JNI.
@@ -154,10 +156,16 @@ static void *install(void *unused) {
         dlclose(pin); unavailable(); return NULL;
     }
     image = held;
-    if (!profile_matches(&image) || shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false) != 0) {
-        dlclose(pin); unavailable(); return NULL;
+    if (!profile_matches(&image)) {
+        dlclose(pin); emit(PHASE_COUNT + 2, "probe_profile_mismatch"); return NULL;
+    }
+    if (shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false) != 0) {
+        dlclose(pin); emit(PHASE_COUNT + 3, "probe_init_failed"); return NULL;
     }
     shadowhook_set_recordable(false);
+    if (!idoly_phase_machine_check()) {
+        dlclose(pin); emit(PHASE_COUNT + 4, "probe_selftest_failed"); return NULL;
+    }
     void *stubs[PHASE_COUNT] = {0};
     for (size_t i = 0; i < PHASE_COUNT; ++i) {
         stubs[i] = shadowhook_intercept_instr_addr((void *)(image.base + PHASE_SITES[i].rva),
@@ -169,7 +177,7 @@ static void *install(void *unused) {
             }
             if (removed) dlclose(pin);
             else pinned_il2cpp = pin;
-            unavailable(); return NULL;
+            emit(PHASE_COUNT + 5, "probe_install_failed"); return NULL;
         }
     }
     pinned_il2cpp = pin;  // Retain the ELF for the lifetime of active hooks.

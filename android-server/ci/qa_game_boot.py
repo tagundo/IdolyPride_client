@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Capture an actual ARM64 game launch on a disposable translated emulator.
 
-The optional title action taps one freshly OCR-observed TAP TO START phrase.
-No other game input is performed. A capture is diagnostic evidence, not proof
-that the game reached home or that gameplay works.
+The optional title action taps a freshly OCR-observed TAP TO START phrase.
+An opt-in second action requires two fresh stable, nonloading title frames.
+No other game input is performed. Captures do not establish home success.
 """
 from __future__ import annotations
 
@@ -77,6 +77,37 @@ def observed_title(tsv, width, height):
                                 "bounds": [left, top, right, bottom],
                                 "point": [(left + right) // 2, (top + bottom) // 2]})
     return matches[0] if len(matches) == 1 else None
+
+
+def raw_loading_state(tsv):
+    """Treat any recognized LOADING as a veto, irrespective of confidence."""
+    lines = {}
+    for row in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
+        if row.get("level") != "5" or not row.get("text", "").strip():
+            continue
+        line = tuple(row.get(key, "") for key in ("page_num", "block_num", "par_num", "line_num"))
+        letters = re.sub("[^A-Z]", "", row["text"].upper())
+        if letters:
+            lines.setdefault(line, []).append(letters)
+    # Also handle an animated word split into several OCR tokens on one line.
+    return {"raw_ocr_has_words": bool(lines),
+            "raw_loading_detected": any("LOADING" in "".join(words) for words in lines.values())}
+
+
+def stable_title_pair(previous, current):
+    """Require two separate, foreground, nonloading observations >=3s apart."""
+    for frame in (previous, current):
+        if (frame is None or frame.get("phrase") != "TAP TO START" or not frame.get("foreground_game")
+                or not frame.get("raw_ocr_has_words") or frame.get("raw_loading_detected") is not False):
+            return False
+    if (current["captured_at"] - previous["captured_at"] < 3
+            or current["source_image"] == previous["source_image"]
+            or current["image_size"] != previous["image_size"]):
+        return False
+    a, b = previous["bounds"], current["bounds"]
+    overlap = max(0, min(a[2], b[2]) - max(a[0], b[0])) * max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - overlap
+    return union > 0 and overlap / union >= 0.9
 
 
 def game_launch_args(force_gles30=False, game_package=GAME):
@@ -157,54 +188,120 @@ class GameQA(QA):
                     raise
                 time.sleep(1)
 
-    def tap_observed_title(self, timeout=180):
-        if getattr(self, "title_tap_attempted", False):
-            raise RuntimeError("The observed title action may be attempted only once")
+    def _observe_title_frame(self, prefix, *, inspect_loading=False):
         image_tool = shutil.which("magick") or shutil.which("convert")
         if image_tool is None or shutil.which("tesseract") is None:
             raise RuntimeError("Observed title QA requires ImageMagick and Tesseract")
+        prefix = self.artifacts / prefix
+        source = prefix.with_suffix(".png")
+        mask = prefix.with_name(prefix.name + "-ocr-mask").with_suffix(".png")
+        captured_at = time.monotonic()
+        raw = self.adb("exec-out", "screencap", "-p", binary=True)
+        if raw[:8] != b"\x89PNG\r\n\x1a\n":
+            raise RuntimeError("Fresh title screenshot is not PNG")
+        source.write_bytes(raw)
+        width, height = struct.unpack_from(">II", raw, 16)
+        # Mask the entire fresh frame; no historical coordinate/crop is used.
+        subprocess.run([image_tool, str(source), "-alpha", "off", "-colorspace", "gray",
+                        "-threshold", "99%", "-negate", str(mask)], check=True, capture_output=True, timeout=15)
+        ocr = subprocess.run(["tesseract", str(mask), "stdout", "--psm", "11", "-l", "eng", "tsv"],
+                             check=True, capture_output=True, text=True, timeout=15)
+        prefix.with_suffix(".tsv").write_text(ocr.stdout, encoding="utf-8")
+        phrase = observed_title(ocr.stdout, width, height)
+        if phrase is None:
+            return None
+        activity = self.adb("shell", "dumpsys", "activity", "activities")
+        prefix.with_suffix(".activity.txt").write_text(activity, encoding="utf-8")
+        foreground = bool(re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b"
+                                    + re.escape(getattr(self, "game_package", GAME)) + r"/", activity))
+        phrase.update(source_image=source.name, ocr_mask=mask.name, ocr_tsv=prefix.with_suffix(".tsv").name,
+                      captured_at=captured_at, image_size=[width, height], foreground_game=foreground,
+                      elapsed_seconds=round(captured_at - self.started, 2))
+        if inspect_loading:
+            # Check the unmasked frame too: a white-only title mask can omit a
+            # colored/dimmed LOADING indicator. Preserve both OCR inputs.
+            raw_ocr = subprocess.run(["tesseract", str(source), "stdout", "--psm", "11", "-l", "eng", "tsv"],
+                                     check=True, capture_output=True, text=True, timeout=15)
+            raw_tsv = prefix.with_name(prefix.name + "-raw").with_suffix(".tsv")
+            raw_tsv.write_text(raw_ocr.stdout, encoding="utf-8")
+            phrase.update(raw_ocr_tsv=raw_tsv.name, **raw_loading_state(raw_ocr.stdout))
+        prefix.with_suffix(".observation.json").write_text(json.dumps(phrase, indent=2) + "\n")
+        return phrase
+
+    def _perform_title_action(self, phrase):
+        actions = getattr(self, "title_actions", [])
+        maximum = getattr(self, "max_title_taps", 1)
+        if len(actions) >= maximum or len(actions) >= 2:
+            raise RuntimeError("The configured observed title action limit was reached")
+        if not phrase.get("foreground_game"):
+            raise RuntimeError("OCR title phrase is not in the foreground game activity")
+        action = dict(phrase, action_number=len(actions) + 1, performed=False)
+        actions.append(action)
+        self.title_actions = actions
+        record = self.artifacts / f"observed-title-action-{len(actions)}.json"
+
+        def save():
+            record.write_text(json.dumps(action, indent=2) + "\n")
+            # Preserve the first action's original filename for earlier probes.
+            if len(actions) == 1:
+                (self.artifacts / "observed-title-action.json").write_text(json.dumps(action, indent=2) + "\n")
+            (self.artifacts / "observed-title-actions.json").write_text(json.dumps(actions, indent=2) + "\n")
+
+        save()
+        x, y = action["point"]
+        self.adb("shell", "input", "tap", str(x), str(y))
+        self.last_title_tap_at = time.monotonic()
+        action.update(performed=True, performed_seconds=round(self.last_title_tap_at - self.started, 2))
+        save()
+        print(f"Tapped fresh OCR-observed TAP TO START action {len(actions)}", flush=True)
+        return action
+
+    def tap_observed_title(self, timeout=180):
+        if getattr(self, "title_actions", []):
+            raise RuntimeError("The first observed title action may be attempted only once")
         deadline = time.monotonic() + timeout
         attempt = 0
         while time.monotonic() < deadline:
             began = time.monotonic()
-            prefix = self.artifacts / f"title-wait-{attempt:02d}"
-            source = prefix.with_suffix(".png")
-            mask = prefix.with_name(prefix.name + "-ocr-mask").with_suffix(".png")
-            raw = self.adb("exec-out", "screencap", "-p", binary=True)
-            if raw[:8] != b"\x89PNG\r\n\x1a\n":
-                raise RuntimeError("Fresh title screenshot is not PNG")
-            source.write_bytes(raw)
-            width, height = struct.unpack_from(">II", raw, 16)
-            # The title uses white letters over detailed art. Mask the entire
-            # fresh frame; no historical coordinate or fixed crop is used.
-            subprocess.run([image_tool, str(source), "-alpha", "off", "-colorspace", "gray",
-                            "-threshold", "99%", "-negate", str(mask)], check=True, capture_output=True, timeout=15)
-            ocr = subprocess.run(["tesseract", str(mask), "stdout", "--psm", "11", "-l", "eng", "tsv"],
-                                 check=True, capture_output=True, text=True, timeout=15)
-            prefix.with_suffix(".tsv").write_text(ocr.stdout, encoding="utf-8")
-            phrase = observed_title(ocr.stdout, width, height)
+            phrase = self._observe_title_frame(f"title-wait-{attempt:02d}")
             if phrase is not None and time.monotonic() < deadline:
-                activity = self.adb("shell", "dumpsys", "activity", "activities")
-                prefix.with_suffix(".activity.txt").write_text(activity, encoding="utf-8")
-                if not re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b"
-                                 + re.escape(getattr(self, "game_package", GAME)) + r"/", activity):
-                    raise RuntimeError("OCR title phrase is not in the foreground game activity")
-                if time.monotonic() >= deadline:
-                    raise RuntimeError("Title observation timed out before input; no game tap performed")
-                phrase.update(source_image=source.name, ocr_mask=mask.name, ocr_tsv=prefix.with_suffix(".tsv").name,
-                              elapsed_seconds=round(time.monotonic() - self.started, 2), performed=False)
-                record = self.artifacts / "observed-title-action.json"
-                record.write_text(json.dumps(phrase, indent=2) + "\n")
-                self.title_tap_attempted = True
-                x, y = phrase["point"]
-                self.adb("shell", "input", "tap", str(x), str(y))
-                phrase["performed"] = True
-                record.write_text(json.dumps(phrase, indent=2) + "\n")
-                print("Tapped one freshly OCR-observed TAP TO START phrase", flush=True)
-                return phrase
+                return self._perform_title_action(phrase)
             attempt += 1
             time.sleep(max(0, min(5 - (time.monotonic() - began), deadline - time.monotonic())))
         raise RuntimeError("No confident fresh TAP TO START phrase appeared within 180 seconds; no game tap performed")
+
+    def tap_observed_title_reentry(self, timeout=90):
+        if (getattr(self, "max_title_taps", 1) != 2 or len(getattr(self, "title_actions", [])) != 1
+                or not self.title_actions[0].get("performed")):
+            raise RuntimeError("Second title observation requires one completed action and opt-in max-title-taps=2")
+        began = time.monotonic()
+        deadline = began + timeout
+        earliest = self.last_title_tap_at + 20
+        candidate = None
+        attempt = 0
+        while time.monotonic() < deadline:
+            frame_start = time.monotonic()
+            current = self._observe_title_frame(f"title-reentry-{attempt:02d}", inspect_loading=True)
+            eligible = (current is not None and current["captured_at"] >= earliest
+                        and current.get("foreground_game") and current.get("raw_ocr_has_words")
+                        and current.get("raw_loading_detected") is False)
+            if eligible and stable_title_pair(candidate, current) and time.monotonic() < deadline:
+                current.update(stable_previous_observation=candidate, minimum_seconds_after_first_tap=20,
+                               stable_frames_minimum_gap_seconds=3)
+                action = self._perform_title_action(current)
+                (self.artifacts / "title-reentry-result.json").write_text(json.dumps(
+                    {"performed": True, "waited_seconds": round(time.monotonic() - began, 2),
+                     "action_number": action["action_number"]}, indent=2) + "\n")
+                return action
+            candidate = current if eligible else None
+            attempt += 1
+            time.sleep(max(0, min(3 - (time.monotonic() - frame_start), deadline - time.monotonic())))
+        # A game that proceeds elsewhere needs no second title input. Preserve
+        # observations and continue capturing without treating absence as error.
+        (self.artifacts / "title-reentry-result.json").write_text(json.dumps(
+            {"performed": False, "reason": "No stable nonloading title reentry observed",
+             "waited_seconds": round(time.monotonic() - began, 2)}, indent=2) + "\n")
+        return None
 
     def capture_game(self, stage):
         """Keep screenshots even if Unity's accessibility tree is unavailable."""
@@ -248,20 +345,26 @@ def main():
     parser.add_argument("--force-gles30", action="store_true",
                         help="QA-only Unity launch override to avoid emulator Vulkan translation; changes no APK bytes")
     parser.add_argument("--tap-observed-title", action="store_true",
-                        help="Tap exactly one freshly OCR-observed TAP TO START phrase, then observe 180 seconds")
+                        help="Tap a freshly OCR-observed TAP TO START phrase, then observe 180 seconds")
+    parser.add_argument("--max-title-taps", type=int, choices=(1, 2), default=1,
+                        help="QA-only opt-in: at most two title taps; the second requires two fresh stable nonloading frames")
     parser.add_argument("--prepare-restarted-tutorial", action="store_true",
                         help="QA ONLY: local Auth/Login + Tutorial/Init(QAManager) before launch; no tutorial skip/grants")
     args = parser.parse_args()
     if not 90 <= args.duration <= 180 or args.interval < 5 or args.startup_timeout <= 0:
         parser.error("duration must be 90..180, interval >=5, and startup-timeout positive")
+    if args.max_title_taps == 2 and not args.tap_observed_title:
+        parser.error("max-title-taps=2 requires tap-observed-title")
     qa = GameQA(args.adb, args.serial, args.artifacts)
     qa.game_package = args.game_package
+    qa.max_title_taps = args.max_title_taps
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
               "game_observation_completed": False,
               "home_screen_verified": False, "game_input_performed": False, "game_input_count": 0,
               "target": "disposable Android emulator", "captures": [],
               "game_package": args.game_package,
+              "max_title_taps": args.max_title_taps, "observed_title_actions": [],
               "profile_fixture": {"enabled": False, "rpc_calls": []},
               "qa_launch_override": {"force_gles30_requested": args.force_gles30,
                   "intent_string_extras": {"unity": "-force-gles30"} if args.force_gles30 else {},
@@ -318,6 +421,11 @@ def main():
             result["observed_title_action"] = qa.tap_observed_title()
             result["game_input_performed"] = True
             result["game_input_count"] = 1
+            if args.max_title_taps == 2:
+                result["captures"].append(qa.capture_game("after-title-action-1"))
+                result["title_reentry_action"] = qa.tap_observed_title_reentry()
+            result["observed_title_actions"] = qa.title_actions
+            result["game_input_count"] = sum(action["performed"] for action in qa.title_actions)
         duration = 180 if args.tap_observed_title else args.duration
         result["post_title_observation_seconds"] = duration if args.tap_observed_title else None
         begin = time.monotonic()
@@ -329,6 +437,8 @@ def main():
             if scheduled >= duration:
                 break
         result["game_observation_completed"] = True
+        if args.tap_observed_title:
+            result["elapsed_seconds_after_last_title_tap"] = round(time.monotonic() - qa.last_title_tap_at, 2)
         # Return to the server only after capturing the game's uninterrupted run.
         qa.adb("shell", "am", "start", "-W", "-n", ACTIVITY)
         hierarchy = qa.capture_server("server-after-game")
@@ -343,6 +453,9 @@ def main():
         result.update(error_type=type(error).__name__, error=str(error))
         raise
     finally:
+        result["observed_title_actions"] = getattr(qa, "title_actions", [])
+        result["game_input_count"] = sum(action["performed"] for action in result["observed_title_actions"])
+        result["game_input_performed"] = result["game_input_count"] > 0
         try:
             result["captures"].append(qa.capture_game("final"))
             if server_started:

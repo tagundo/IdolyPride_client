@@ -18,13 +18,15 @@ public final class LogSanitizer {
     private static final int MAX_FRAMES = 16;
     private static final int MAX_EVENTS = 64;
     private static final String SHADER_WAIT = "ShaderWarmUpが終わっていないので待機する";
+    private static final String ACTOR_LOAD_FAILED = "想定外の状況によりActorロード失敗";
     private static final String PHASE_PREFIX = "IDOLY_PHASE:";
     private static final Set<String> PHASE_CODES = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
             "home_enter", "environment_begin", "background_begin", "background_load_returned",
             "shader_completion_flag", "shader_wait_begin", "home_open_begin", "loading_hide", "front_loading_finished",
             "home_show_in_returned",
             "actors_begin", "actor_motion_wait", "actor_cache_build", "actor_result_received",
-            "actor_cache_wait", "buttons_begin", "probe_ready", "probe_unavailable")));
+            "actor_cache_wait", "buttons_begin", "probe_ready", "probe_unavailable",
+            "probe_init_failed", "probe_selftest_failed", "probe_profile_mismatch", "probe_install_failed")));
     private static final Pattern BRIEF = Pattern.compile(
             "^[VDIWEFAS]/[^\\r\\n:]{1,64}\\(\\s*[0-9]+\\): ?(.*)$");
     private static final Pattern TYPE_START = Pattern.compile(
@@ -70,6 +72,11 @@ public final class LogSanitizer {
                 enqueue(new Event("status", null, "shader_warmup_wait", Collections.<String>emptyList()));
                 shaderPending = true;
             }
+            return;
+        }
+        if (content.contains(ACTOR_LOAD_FAILED)) {
+            flushException();
+            enqueue(new Event("status", null, "actor_load_failed", Collections.<String>emptyList()));
             return;
         }
         Matcher type = TYPE_START.matcher(content);

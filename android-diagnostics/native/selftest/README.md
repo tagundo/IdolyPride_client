@@ -1,18 +1,27 @@
 This disposable fixture tests ShadowHook 2.0.1 ARM64 instruction interception.
 It includes no game binaries, credentials, server state or production client.
 
-`checkpoint.S` creates known GPR and SIMD state, snapshots every x0–x30 and
-q0–q31 plus SP/NZCV/FPCR/FPSR, and executes an intercepted `add x0,x0,#7`.
+The shared `../checkpoint.S` and `../machine_state_check.cpp` are compiled
+unchanged into both production and this fixture. They create known GPR and
+SIMD state, snapshot every x0–x30 and q0–q31 plus SP/NZCV/FPCR/FPSR, and test
+both an intercepted `add x0,x0,#7` and a direct `bl` to a local ADD7/RET callee.
 The interceptor leaves its CPU-context argument unchanged while deliberately
 clobbering live caller-saved registers, SIMD registers and floating-point flags.
 Android's reserved x18 is retained and compared, never assigned a sentinel.
-The second snapshot checks the ADD executed and all other state survived.
+The second snapshot checks ADD7 executed and all other state survived. The BL
+case additionally requires x30 to equal the original BL instruction address
+plus four after return, rather than a trampoline return address.
 The output-pointer x28 is deliberately advanced by exactly 800 bytes outside
 the intercepted instruction; the comparison accounts for that adjustment.
 
-The test also checks an uninstrumented baseline, rejected null-address install
-followed by normal execution, three interceptor callbacks, and execution after
-unintercept. It captures numeric initialization result and TLS errno immediately
+The test checks both uninstrumented baselines, rejected null-address install
+followed by normal execution, three callbacks per instruction, and execution
+after both successful unintercepts. Shared callback contexts and snapshots have
+static lifetime even if cleanup fails. The production preflight is one-shot and
+returns true only after every check and both removals pass; subsequent calls
+use the cached result. It never initializes ShadowHook or calls game methods.
+The standalone wrapper runs shared baselines before initialization so an init
+failure remains distinguishable from a baseline failure. It captures numeric initialization result and TLS errno immediately
 after initialization, before the deliberately invalid install overwrites errno.
 `install_errno` is `-1` when initialization prevented installation. The JSON
 contains only fixed booleans, numeric API statuses and version strings, without
