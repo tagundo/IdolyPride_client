@@ -1,5 +1,7 @@
 import importlib.util
 from pathlib import Path
+import hashlib
+import json
 import plistlib
 import sqlite3
 from contextlib import closing
@@ -17,10 +19,10 @@ BUNDLE = exporter.BUNDLES[0]
 SECRET = "private-token-must-never-be-printed"
 
 
-def archive_blob():
+def archive_blob(token=SECRET):
     return plistlib.dumps({"$archiver": "NSKeyedArchiver", "$version": 100000,
                           "$top": {"root": plistlib.UID(1)},
-                          "$objects": ["$null", {"accessToken": SECRET}]}, fmt=plistlib.FMT_BINARY)
+                          "$objects": ["$null", {"accessToken": token}]}, fmt=plistlib.FMT_BINARY)
 
 
 @pytest.fixture
@@ -91,11 +93,11 @@ def test_ambiguous_scoped_rows_fail_and_optional_google_app_id_resolves(mac_home
     home, _, database = mac_home
     with closing(sqlite3.connect(database)) as connection:
         connection.execute("INSERT INTO genp VALUES (?,?,?,?)", (
-            "other-group", exporter.ACCOUNTS[0], "firebase_auth_1:999:ios:ffff", archive_blob(),
+            "other-group", exporter.ACCOUNTS[0], "firebase_auth_1:999:ios:ffff", archive_blob("different-private-token"),
         ))
         connection.commit()
     output = tmp_path / "private/archive"
-    with pytest.raises(exporter.ExportError, match="Multiple Firebase archives"):
+    with pytest.raises(exporter.ExportError, match="Multiple distinct Firebase archives"):
         exporter.export_archive(BUNDLE, output, home)
     assert not output.exists()
     exporter.export_archive(BUNDLE, output, home, APP_ID)
@@ -147,3 +149,79 @@ def test_export_requires_explicit_bundle_and_does_not_create_output(tmp_path):
         exporter.main(["--output", str(output)])
     assert failure.value.code == 2
     assert not output.exists()
+
+
+def test_identical_archive_bytes_across_rows_groups_and_account_kinds_export_once(mac_home, tmp_path):
+    home, settings, database = mac_home
+    with closing(sqlite3.connect(database)) as connection:
+        connection.executemany("INSERT INTO genp VALUES (?,?,?,?)", [
+            ("second-private-group", exporter.ACCOUNTS[0], "firebase_auth_" + APP_ID, archive_blob()),
+            ("third-private-group", exporter.ACCOUNTS[1], "firebase_auth_" + APP_ID, archive_blob()),
+        ])
+        connection.commit()
+    before = settings.read_bytes(), database.read_bytes()
+    output = tmp_path / "private/user.archive"
+    exporter.export_archive(BUNDLE, output, home, APP_ID)
+    assert output.read_bytes() == archive_blob()
+    assert output.stat().st_mode & 0o777 == 0o600
+    assert before == (settings.read_bytes(), database.read_bytes())
+
+
+def test_distinct_default_and_shared_archives_remain_ambiguous_when_scoped(mac_home, tmp_path):
+    home, _, database = mac_home
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("INSERT INTO genp VALUES (?,?,?,?)", (
+            "fixture-group", exporter.ACCOUNTS[1], "firebase_auth_" + APP_ID, archive_blob("different-token"),
+        ))
+        connection.commit()
+    output = tmp_path / "private/user.archive"
+    with pytest.raises(exporter.ExportError, match="--diagnose"):
+        exporter.export_archive(BUNDLE, output, home, APP_ID)
+    assert not output.exists()
+    diagnostic = exporter.diagnose_archives(BUNDLE, home, APP_ID)
+    assert diagnostic == {
+        "matched_rows": 2, "distinct_archive_count": 2,
+        "counts_by_account_kind": {"default": 1, "shared": 1},
+        "groups": [{"group_number": 1, "matched_rows": 2, "distinct_archive_count": 2,
+                    "counts_by_account_kind": {"default": 1, "shared": 1}}],
+    }
+
+
+def test_diagnose_prints_only_counts_and_numbered_groups_without_source_changes(mac_home, capsys):
+    _, settings, database = mac_home
+    private_group = "private-team-and-user-group"
+    with closing(sqlite3.connect(database)) as connection:
+        connection.executemany("INSERT INTO genp VALUES (?,?,?,?)", [
+            (private_group, exporter.ACCOUNTS[0], "firebase_auth_" + APP_ID, archive_blob()),
+            (private_group, exporter.ACCOUNTS[1], "firebase_auth_" + APP_ID, archive_blob("private-other-user")),
+            ("unrelated-other-service", exporter.ACCOUNTS[0], "firebase_auth_1:999:ios:ffff", archive_blob("not-scoped")),
+        ])
+        connection.commit()
+    before = settings.read_bytes(), database.read_bytes()
+    assert exporter.main(["--bundle", BUNDLE, "--google-app-id", APP_ID, "--diagnose"]) == 0
+    captured = capsys.readouterr()
+    output = captured.out + captured.err
+    for private_value in [SECRET, private_group, "fixture-group", "private-other-user", APP_ID,
+                          exporter.ACCOUNTS[0], exporter.ACCOUNTS[1], archive_blob().hex(),
+                          hashlib.sha256(archive_blob()).hexdigest()]:
+        assert private_value not in output
+    diagnostic = json.loads(captured.out)
+    assert diagnostic["matched_rows"] == 3
+    assert diagnostic["distinct_archive_count"] == 2
+    assert diagnostic["counts_by_account_kind"] == {"default": 2, "shared": 1}
+    assert diagnostic["groups"] == [
+        {"group_number": 1, "matched_rows": 1, "distinct_archive_count": 1,
+         "counts_by_account_kind": {"default": 1, "shared": 0}},
+        {"group_number": 2, "matched_rows": 2, "distinct_archive_count": 2,
+         "counts_by_account_kind": {"default": 1, "shared": 1}},
+    ]
+    assert before == (settings.read_bytes(), database.read_bytes())
+
+
+def test_diagnose_requires_bundle_and_cannot_export_in_same_command(tmp_path):
+    with pytest.raises(SystemExit) as missing_bundle:
+        exporter.main(["--diagnose"])
+    assert missing_bundle.value.code == 2
+    with pytest.raises(SystemExit) as mixed_actions:
+        exporter.main(["--bundle", BUNDLE, "--diagnose", "--output", str(tmp_path / "archive")])
+    assert mixed_actions.value.code == 2

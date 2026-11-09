@@ -105,30 +105,60 @@ def google_app_id_from_ipa(path: Path) -> str:
     return value
 
 
-def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | None = None) -> None:
-    settings_path, database_path = _paths(bundle, home)
-    settings = _settings(settings_path)
-    if settings is None or settings.get("playChain") is not True:
-        raise ExportError("PlayChain is not already enabled for this app. " + _IN_PROCESS)
+def _archive_rows(database_path: Path, google_app_id: str | None) -> list[tuple]:
     if google_app_id is not None and not _GOOGLE_APP_ID.fullmatch(google_app_id):
         raise ExportError("Invalid iOS Google app identifier")
     try:
         with closing(_connect(database_path)) as database:
             _check_schema(database)
-            query = ('SELECT "v_Data" FROM "genp" WHERE "acct" IN (?, ?) '
+            query = ('SELECT "agrp", "acct", "v_Data" FROM "genp" WHERE "acct" IN (?, ?) '
                      'AND substr("svce", 1, ?) = ?')
             parameters = [*ACCOUNTS, len(_SERVICE_PREFIX), _SERVICE_PREFIX]
             if google_app_id is not None:
                 query += ' AND "svce" = ?'
                 parameters.append(_SERVICE_PREFIX + google_app_id)
-            rows = database.execute(query + " LIMIT 2", parameters).fetchall()
+            return database.execute(query + ' ORDER BY "agrp", "acct"', parameters).fetchall()
     except sqlite3.Error:
         raise ExportError("Cannot read the scoped Firebase archive from PlayChain") from None
+
+
+def diagnose_archives(bundle: str, home: Path, google_app_id: str | None = None) -> dict:
+    """Return counts only; opaque groups and archives are never returned."""
+    _, database_path = _paths(bundle, home)
+    rows = _archive_rows(database_path, google_app_id)
+    groups = {}
+    for group, account, blob in rows:
+        groups.setdefault(group, []).append((account, blob))
+
+    def counts(records):
+        return {"matched_rows": len(records), "distinct_archive_count": len({blob for _, blob in records}),
+                "counts_by_account_kind": {
+                    "default": sum(account == ACCOUNTS[0] for account, _ in records),
+                    "shared": sum(account == ACCOUNTS[1] for account, _ in records)}}
+
+    result = counts([(account, blob) for _, account, blob in rows])
+    result["groups"] = [{"group_number": number, **counts(records)}
+                        for number, records in enumerate(groups.values(), start=1)]
+    return result
+
+
+def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | None = None) -> None:
+    settings_path, database_path = _paths(bundle, home)
+    settings = _settings(settings_path)
+    if settings is None or settings.get("playChain") is not True:
+        raise ExportError("PlayChain is not already enabled for this app. " + _IN_PROCESS)
+    rows = _archive_rows(database_path, google_app_id)
     if not rows:
         raise ExportError("No recognized Firebase user archive matched. " + _IN_PROCESS)
-    if len(rows) != 1:
-        raise ExportError("Multiple Firebase archives matched; specify the IPA or Google app identifier")
-    blob = rows[0][0]
+    # Repeated PlayChain rows may contain exactly the same opaque archive.
+    # Exporting those identical bytes requires no guess about an active group.
+    archives = {row[2] for row in rows}
+    if len(archives) != 1:
+        raise ExportError("Multiple distinct Firebase archives matched; specify --ipa or --google-app-id. "
+                          "If already scoped, run --bundle <installed-bundle> "
+                          "--google-app-id <public-app-id> --diagnose for redacted counts. "
+                          "No active group was selected.")
+    blob = archives.pop()
     try:
         value = plistlib.loads(blob)
     except (ValueError, TypeError, plistlib.InvalidFileException):
@@ -155,15 +185,20 @@ def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | N
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", choices=BUNDLES, help="Exact installed game bundle identifier")
-    parser.add_argument("--output", type=Path, help="New private file for one Firebase user archive")
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument("--output", type=Path, help="New private file for one distinct Firebase user archive")
+    action.add_argument("--diagnose", action="store_true", help="Print only scoped archive, account-kind and numbered-group counts")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--google-app-id", help="Public iOS GOOGLE_APP_ID to scope the Firebase service")
     scope.add_argument("--ipa", type=Path, help="Read public GOOGLE_APP_ID from this installed game's source IPA")
     args = parser.parse_args(argv)
-    if args.output and not args.bundle:
-        parser.error("--output requires an explicit --bundle")
+    if (args.output or args.diagnose) and not args.bundle:
+        parser.error("--output and --diagnose require an explicit --bundle")
     try:
-        if args.output:
+        if args.diagnose:
+            app_id = google_app_id_from_ipa(args.ipa) if args.ipa else args.google_app_id
+            print(json.dumps(diagnose_archives(args.bundle, Path.home(), app_id), indent=2))
+        elif args.output:
             app_id = google_app_id_from_ipa(args.ipa) if args.ipa else args.google_app_id
             export_archive(args.bundle, args.output, Path.home(), app_id)
             print("Exported one Firebase user archive with mode 0600; no token values were printed.")
