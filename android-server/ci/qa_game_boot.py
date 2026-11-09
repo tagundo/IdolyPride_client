@@ -21,6 +21,16 @@ GAME = "game.qualiarts.idolypride.local"
 GAME_ACTIVITY = GAME + "/com.google.firebase.MessagingUnityPlayerActivity"
 
 
+def game_launch_args(force_gles30=False):
+    command = ["shell", "am", "start", "-W", "-n", GAME_ACTIVITY]
+    if force_gles30:
+        # Audited classes3.dex: Firebase onCreate calls UnityPlayerActivity,
+        # whose onCreate forwards this string through the unchanged
+        # updateUnityCommandLineArguments before constructing UnityPlayer.
+        command.extend(["--es", "unity", "-force-gles30"])
+    return command
+
+
 class GameQA(QA):
     def capture_game(self, stage):
         """Keep screenshots even if Unity's accessibility tree is unavailable."""
@@ -60,6 +70,8 @@ def main():
     parser.add_argument("--duration", type=int, default=180)
     parser.add_argument("--interval", type=int, default=10)
     parser.add_argument("--startup-timeout", type=float, default=600)
+    parser.add_argument("--force-gles30", action="store_true",
+                        help="QA-only Unity launch override to avoid emulator Vulkan translation; changes no APK bytes")
     args = parser.parse_args()
     if not 90 <= args.duration <= 180 or args.interval < 5 or args.startup_timeout <= 0:
         parser.error("duration must be 90..180, interval >=5, and startup-timeout positive")
@@ -67,7 +79,10 @@ def main():
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
               "home_screen_verified": False, "game_input_performed": False,
-              "target": "disposable Android emulator", "captures": []}
+              "target": "disposable Android emulator", "captures": [],
+              "qa_launch_override": {"force_gles30_requested": args.force_gles30,
+                  "intent_string_extras": {"unity": "-force-gles30"} if args.force_gles30 else {},
+                  "apk_bytes_changed_for_graphics": False}}
     logger = None
     logger_file = None
     server_started = False
@@ -101,7 +116,10 @@ def main():
         # These readiness System.Check probes do not create a session. All game
         # Auth/Login, User, Home and asset requests below originate in the APK.
         qa.adb("shell", "am", "force-stop", GAME)
-        launch = qa.adb("shell", "am", "start", "-W", "-n", GAME_ACTIVITY)
+        command = game_launch_args(args.force_gles30)
+        (args.artifacts / "game-launch-command.json").write_text(json.dumps(
+            {"qa_only": True, "adb_arguments": command}, indent=2) + "\n")
+        launch = qa.adb(*command)
         (args.artifacts / "game-launch.txt").write_text(launch, encoding="utf-8")
         if "Error:" in launch or "Exception" in launch:
             raise RuntimeError("Game activity did not launch; inspect game-launch.txt")

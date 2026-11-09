@@ -136,6 +136,7 @@ jobs:
             --game-apk data/dist/Game-QA-software-AES.apk
             --descriptor-set data/protocol/idolypride-6.1.1.pb
             --artifacts data/android-game-debug --duration 180 --interval 10 --startup-timeout 600
+            --force-gles30
       - name: Preserve game screenshots and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
