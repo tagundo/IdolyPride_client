@@ -18,12 +18,16 @@ import struct
 import subprocess
 import time
 
+import grpc
+
 from qa_emulator import ACTIVITY, PACKAGE, QA, wait_server
 from qa_diagnostics import _tap_initial_start
+from idoly_local import codec
 from idoly_local.schema import Schema
 
 
 GAME = "game.qualiarts.idolypride.local"
+GAME_PACKAGES = (GAME, GAME + ".diagnostics")
 GAME_ACTIVITY = GAME + "/com.google.firebase.MessagingUnityPlayerActivity"
 
 
@@ -75,14 +79,55 @@ def observed_title(tsv, width, height):
     return matches[0] if len(matches) == 1 else None
 
 
-def game_launch_args(force_gles30=False):
-    command = ["shell", "am", "start", "-W", "-n", GAME_ACTIVITY]
+def game_launch_args(force_gles30=False, game_package=GAME):
+    if game_package not in GAME_PACKAGES:
+        raise ValueError("Only the two dedicated local QA game packages are accepted")
+    command = ["shell", "am", "start", "-W", "-n",
+               game_package + "/com.google.firebase.MessagingUnityPlayerActivity"]
     if force_gles30:
         # Audited classes3.dex: Firebase onCreate calls UnityPlayerActivity,
         # whose onCreate forwards this string through the unchanged
         # updateUnityCommandLineArguments before constructing UnityPlayer.
         command.extend(["--es", "unity", "-force-gles30"])
     return command
+
+
+def prepare_restarted_tutorial(schema, port, *, caller=None):
+    """Name a fresh local QA profile, without skipping or granting anything.
+
+    Stored completed step10 is the client input for its next current step100.
+    That client-derived value is not a protobuf field or a visual observation.
+    """
+    if caller is None:
+        def caller(method, values, token):
+            request = schema.request_type(method)(**values)
+            metadata = (("x-auth-token", token),) if token else ()
+            with grpc.insecure_channel("127.0.0.1:" + str(port)) as channel:
+                raw = channel.unary_unary(method)(codec.encode(request.SerializeToString()),
+                                                  metadata=metadata, timeout=15)
+            return schema.response_type(method).FromString(codec.decode(raw))
+
+    calls = []
+
+    def invoke(method, values, token=None):
+        response = caller(method, values, token)
+        # Deliberately retain method/status only, never authentication values.
+        calls.append({"method": method, "status": "OK", "origin": "profile_fixture"})
+        return response
+
+    auth = invoke("/api.Auth/Login", {"firebaseIDToken": "local"})
+    if not auth.gameAuthToken:
+        raise RuntimeError("Local QA fixture login did not return a session")
+    invoke("/api.Tutorial/Init", {"name": "QAManager"}, auth.gameAuthToken)
+    snapshot = invoke("/api.User/Get", {}, auth.gameAuthToken)
+    tutorials = [row.step for row in snapshot.tutorials if row.tutorialType == 1]
+    if (tutorials != [10] or snapshot.user.name != "QAManager"
+            or snapshot.user.tutorialClearedTime != 0):
+        raise RuntimeError("Restarted tutorial fixture requires an unprogressed disposable profile; no skip performed")
+    return {"enabled": True, "qa_only": True, "status": "ready", "rpc_calls": calls, "manager_name": "QAManager",
+            "completed_tutorial_step": 10, "expected_client_next_tutorial_step": 100,
+            "client_next_step_visually_verified": False, "tutorial_cleared": False,
+            "tutorial_progress_or_skip_called": False, "purchase_or_grant_called": False}
 
 
 class GameQA(QA):
@@ -115,7 +160,8 @@ class GameQA(QA):
             if phrase is not None and time.monotonic() < deadline:
                 activity = self.adb("shell", "dumpsys", "activity", "activities")
                 prefix.with_suffix(".activity.txt").write_text(activity, encoding="utf-8")
-                if not re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b" + re.escape(GAME) + r"/", activity):
+                if not re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b"
+                                 + re.escape(getattr(self, "game_package", GAME)) + r"/", activity):
                     raise RuntimeError("OCR title phrase is not in the foreground game activity")
                 if time.monotonic() >= deadline:
                     raise RuntimeError("Title observation timed out before input; no game tap performed")
@@ -157,7 +203,7 @@ class GameQA(QA):
                     report[suffix + "_error"] = str(process.stderr)[:1000]
             except (OSError, subprocess.TimeoutExpired) as error:
                 report[suffix + "_error"] = type(error).__name__
-        report["game_pid"] = self.adb("shell", "pidof", GAME, check=False).strip()
+        report["game_pid"] = self.adb("shell", "pidof", getattr(self, "game_package", GAME), check=False).strip()
         return report
 
 
@@ -165,6 +211,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server-apk", type=Path, required=True)
     parser.add_argument("--game-apk", type=Path, required=True)
+    parser.add_argument("--game-package", choices=GAME_PACKAGES, default=GAME)
     parser.add_argument("--descriptor-set", type=Path, required=True)
     parser.add_argument("--artifacts", type=Path, default=Path("data/android-game-debug"))
     parser.add_argument("--adb", default="adb")
@@ -176,14 +223,19 @@ def main():
                         help="QA-only Unity launch override to avoid emulator Vulkan translation; changes no APK bytes")
     parser.add_argument("--tap-observed-title", action="store_true",
                         help="Tap exactly one freshly OCR-observed TAP TO START phrase, then observe 180 seconds")
+    parser.add_argument("--prepare-restarted-tutorial", action="store_true",
+                        help="QA ONLY: local Auth/Login + Tutorial/Init(QAManager) before launch; no tutorial skip/grants")
     args = parser.parse_args()
     if not 90 <= args.duration <= 180 or args.interval < 5 or args.startup_timeout <= 0:
         parser.error("duration must be 90..180, interval >=5, and startup-timeout positive")
     qa = GameQA(args.adb, args.serial, args.artifacts)
+    qa.game_package = args.game_package
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
               "home_screen_verified": False, "game_input_performed": False, "game_input_count": 0,
               "target": "disposable Android emulator", "captures": [],
+              "game_package": args.game_package,
+              "profile_fixture": {"enabled": False, "rpc_calls": []},
               "qa_launch_override": {"force_gles30_requested": args.force_gles30,
                   "intent_string_extras": {"unity": "-force-gles30"} if args.force_gles30 else {},
                   "apk_bytes_changed_for_graphics": False}}
@@ -217,10 +269,16 @@ def main():
         server_started = True
         wait_server(schema, port, timeout=args.startup_timeout)
         qa.capture("server-running")
-        # These readiness System.Check probes do not create a session. All game
-        # Auth/Login, User, Home and asset requests below originate in the APK.
-        qa.adb("shell", "am", "force-stop", GAME)
-        command = game_launch_args(args.force_gles30)
+        # Readiness and the explicitly selected profile fixture are separate
+        # from subsequent game-originated RPCs; neither proves game UI success.
+        if args.prepare_restarted_tutorial:
+            result["profile_fixture"] = {"enabled": True, "qa_only": True, "status": "preparing",
+                                         "rpc_calls": [], "home_screen_verified": False}
+            result["profile_fixture"] = prepare_restarted_tutorial(schema, port)
+            (args.artifacts / "profile-fixture.json").write_text(
+                json.dumps(result["profile_fixture"], indent=2) + "\n")
+        qa.adb("shell", "am", "force-stop", args.game_package)
+        command = game_launch_args(args.force_gles30, args.game_package)
         (args.artifacts / "game-launch-command.json").write_text(json.dumps(
             {"qa_only": True, "adb_arguments": command}, indent=2) + "\n")
         launch = qa.adb(*command)

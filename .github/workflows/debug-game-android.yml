@@ -91,9 +91,9 @@ jobs:
               for table in ('HierarchyDetailGrade', 'HierarchyGrade'):
                   assert 'data/master-json/' + table + '.json' in archive.namelist(), table
           PY
-          uv run --locked --all-extras pytest -q tests android-server/ci \
+          uv run --locked --all-extras pytest -q tests android-server/ci qa-native-aes \
             | tee data/android-game-debug/tests.txt
-      - name: Build the clearly marked emulator-only software AES variant
+      - name: Build the clearly marked emulator-only AES and no-store variant
         shell: bash
         run: |
           set -euo pipefail
@@ -101,6 +101,7 @@ jobs:
             data/ci-input/Game-local-r2.apk \
             --output data/dist/Game-QA-software-AES.apk \
             --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --emulator-no-store \
             --report data/android-game-debug/qa-aes-report.json \
             | tee data/android-game-debug/qa-aes-build.txt
       - name: Build the current x86_64 server app
@@ -140,6 +141,7 @@ jobs:
             --artifacts data/android-game-debug --duration 180 --interval 10 --startup-timeout 600
             --force-gles30
             --tap-observed-title
+            --prepare-restarted-tutorial
       - name: Preserve game screenshots and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
