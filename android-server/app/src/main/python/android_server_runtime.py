@@ -10,9 +10,6 @@ import tempfile
 import threading
 from zipfile import ZipFile
 
-# Chaquopy receives the universal protobuf wheel, which needs no native module.
-os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
-
 _LOCK = threading.RLock()
 _RUNTIME = None
 _LAST_STATUS = {"running": False, "message": "서버 대기"}
@@ -113,6 +110,9 @@ def _copy_asset(assets, destination: Path, expected_sha256: str) -> None:
 def start(files_dir, assets, callback):
     """Start the embedded loopback runtime; called on the service worker."""
     global _RUNTIME, _LAST_STATUS
+    # Select the universal wheel's implementation before importing the engine.
+    # Merely importing the asset installer must not change a host test process.
+    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
     with _LOCK:
         if _RUNTIME is not None and _RUNTIME.status().get("running"):
             return status_json()

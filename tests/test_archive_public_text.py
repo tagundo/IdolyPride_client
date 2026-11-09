@@ -37,7 +37,7 @@ def schema():
     master.method.add(name="Rule", input_type=".api.RuleRequest", output_type=".api.PublicResponse")
     master.method.add(name="GetHelpCategory", input_type=".api.HelpRequest", output_type=".api.PublicResponse")
     pool = descriptor_pool.DescriptorPool()
-    descriptor = pool.Add(file)
+    descriptor = pool.AddSerializedFile(file.SerializeToString())
     return Schema(pool, [descriptor], "public-text-fixture")
 
 

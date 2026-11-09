@@ -1,7 +1,10 @@
 """Exercise bundled public data installation without an Android process."""
 import hashlib
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from zipfile import ZipFile
@@ -14,6 +17,14 @@ spec.loader.exec_module(bridge)
 
 
 class InstallationTests(unittest.TestCase):
+    def test_import_does_not_change_the_host_protobuf_backend(self):
+        code = ("import importlib.util,os; "
+                f"spec=importlib.util.spec_from_file_location('bridge',{str(SCRIPT)!r}); "
+                "module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+                "assert os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION']=='upb'")
+        subprocess.run([sys.executable, "-c", code], check=True,
+                       env=dict(os.environ, PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION="upb"))
+
     def write_zip(self, root, extra=None):
         archive = root / "bundle.zip"
         entries = {"data/protocol/idolypride-6.1.1.pb": b"schema", "data/original-master/master-tag.json": b"{}",

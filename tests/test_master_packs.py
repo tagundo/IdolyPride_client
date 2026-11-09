@@ -34,7 +34,7 @@ def _synthetic_schema():
                           extendee=".google.protobuf.MessageOptions")
     options.extension.add(name="pk", number=50008, type=8, label=1,
                           extendee=".google.protobuf.FieldOptions")
-    options_file = pool.Add(options)
+    options_file = pool.AddSerializedFile(options.SerializeToString())
     message_options = message_factory.GetMessageClass(
         pool.FindMessageTypeByName("google.protobuf.MessageOptions"))
     field_options = message_factory.GetMessageClass(
@@ -62,7 +62,7 @@ def _synthetic_schema():
                 annotation = field_options()
                 annotation.Extensions[pk_extension] = True
                 field.options.ParseFromString(annotation.SerializeToString())
-    master_file = pool.Add(master)
+    master_file = pool.AddSerializedFile(master.SerializeToString())
     return SimpleNamespace(pool=pool, files=[options_file, master_file],
                            fingerprint=hashlib.sha256(master.SerializeToString()).hexdigest())
 

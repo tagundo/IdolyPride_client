@@ -37,7 +37,7 @@ def schema():
                            input_type=".api.HomeEnterRequest" if service_name == "Home" else ".api.Empty",
                            output_type=".api.MasterGetResponse" if service_name == "Master" else ".api.Response")
     pool = descriptor_pool.DescriptorPool()
-    loaded = pool.Add(file)
+    loaded = pool.AddSerializedFile(file.SerializeToString())
     return Schema(pool, [loaded], "collector-test")
 
 
