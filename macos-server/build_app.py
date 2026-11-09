@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import plistlib
+import signal
 import shutil
 import subprocess
 import sys
@@ -34,6 +35,34 @@ def digest(path: Path) -> str:
 
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float = 75):
+    """Launch the actual bundle executable with owned output and process group."""
+    executable = app / "Contents/MacOS" / APP_NAME
+    command = [str(executable), "--app-smoke", "--smoke-report", str(evidence / "app-smoke.json"),
+               "--data-dir", str(data_dir)]
+    with (evidence / "native-app-stdout.log").open("w") as stdout, (evidence / "native-app-stderr.log").open("w") as stderr:
+        process = subprocess.Popen(command, stdout=stdout, stderr=stderr, start_new_session=True)
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+            checkpoint = evidence / "app-smoke.checkpoint.json"
+            phase = json.loads(checkpoint.read_text()).get("phase", "unknown") if checkpoint.is_file() else "no-launch-checkpoint"
+            raise ValueError("Native app smoke timed out at phase: " + phase) from None
+    if returncode != 0:
+        details = (evidence / "native-app-stderr.log").read_text(errors="replace")[-6000:]
+        raise ValueError(f"Native app exited with status {returncode}: {details}")
+    report = json.loads((evidence / "app-smoke.json").read_text())
+    if not all(report.get(key) is True for key in ("gui_started", "window_visible", "server_started", "server_stopped")):
+        raise ValueError("Native visible-window app did not complete its start/stop smoke check")
+    return report
 
 
 def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True):
@@ -112,11 +141,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             moved = temporary / "이동한 앱" / "IdolyPride Local Server.app"
             moved.parent.mkdir()
             shutil.copytree(output, moved, symlinks=True)
-            run(["/usr/bin/open", "-W", "-n", moved, "--args", "--app-smoke", "--smoke-report",
-                 evidence / "app-smoke.json", "--data-dir", temporary / "gui-smoke-data"], timeout=90)
-            report = json.loads((evidence / "app-smoke.json").read_text())
-            if not all(report.get(key) is True for key in ("gui_started", "server_started", "server_stopped")):
-                raise ValueError("The native app did not complete its start/stop smoke check")
+            smoke_native_app(moved, evidence, temporary / "gui-smoke-data")
             run(["/usr/bin/codesign", "--verify", "--deep", "--strict", moved])
         run(["/usr/bin/codesign", "--verify", "--deep", "--strict", output])
         archive.parent.mkdir(parents=True, exist_ok=True)

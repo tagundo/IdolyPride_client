@@ -24,6 +24,9 @@ final class ServerModel: ObservableObject {
     private var shutdownRequested = false
     private var smokeStarted = false
     private var smokeStopping = false
+    private var smokeFinished = false
+    private var visibleWindowObserved = false
+    private var phases: [String] = []
 
     init() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -40,11 +43,31 @@ final class ServerModel: ObservableObject {
             dataDirectory = support.appendingPathComponent("IdolyPrideLocal", isDirectory: true)
         }
         ServerModel.active = self
+        checkpoint("model_initialized")
+    }
+
+    private func checkpoint(_ phase: String) {
+        guard smoke, let report = smokeReport else { return }
+        phases.append(phase)
+        let destination = report.deletingPathExtension().appendingPathExtension("checkpoint.json")
+        let value: [String: Any] = ["phase": phase, "phases": Array(phases.suffix(40)),
+            "window_count": NSApp?.windows.count ?? 0, "engine_running": child?.isRunning ?? false]
+        do {
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = try JSONSerialization.data(withJSONObject: value, options: .prettyPrinted)
+            try data.write(to: destination, options: .atomic)
+        } catch { fputs("Cannot write native app checkpoint.\n", stderr) }
+    }
+
+    func applicationReady() {
+        checkpoint("application_did_finish_launching")
+        launch()
     }
 
     func launch() {
         guard !launched else { return }
         launched = true
+        checkpoint("engine_launch_requested")
         guard let resources = Bundle.main.resourceURL else {
             fail("앱 리소스를 찾지 못했습니다.")
             return
@@ -95,12 +118,14 @@ final class ServerModel: ObservableObject {
         child = process; input = writer; output = reader; errors = errorReader
         do {
             try process.run()
+            checkpoint("engine_process_started")
         } catch {
             fail("서버 엔진을 실행하지 못했습니다. 앱 파일을 다시 확인해 주세요.")
         }
         if smoke {
             DispatchQueue.main.asyncAfter(deadline: .now() + 45) { [weak self] in
-                guard let self = self, !self.shutdownRequested else { return }
+                guard let self = self, !self.shutdownRequested, !self.smokeFinished else { return }
+                self.checkpoint("smoke_deadline")
                 self.finishSmoke(success: false)
             }
         }
@@ -124,17 +149,31 @@ final class ServerModel: ObservableObject {
                 busy = state["starting"] as? Bool ?? false
                 canStop = state["can_stop"] as? Bool ?? (running || busy)
                 status = running ? "로컬 서버가 실행 중입니다." : (busy ? "서버를 시작하고 있습니다." : "서버가 중지되어 있습니다.")
-                if smoke && !busy {
-                    if running && !smokeStopping {
-                        smokeStarted = true; smokeStopping = true; stop()
-                    } else if !running && smokeStopping {
-                        finishSmoke(success: smokeStarted && !canStop)
-                    } else if !running && !smokeStarted {
-                        start()
-                    }
-                }
+                checkpoint(running ? "server_running" : (busy ? "server_starting" : "server_stopped"))
+                if smoke { advanceSmoke() }
             default: break
             }
+        }
+    }
+
+    private func advanceSmoke() {
+        guard smoke, !smokeFinished, !shutdownRequested else { return }
+        let visible = NSApp.windows.contains { $0.isVisible }
+        if visible && !visibleWindowObserved {
+            visibleWindowObserved = true
+            checkpoint("visible_window_observed")
+        }
+        if !visible {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.advanceSmoke() }
+            return
+        }
+        guard !busy else { return }
+        if running && !smokeStopping {
+            smokeStarted = true; smokeStopping = true; stop()
+        } else if !running && smokeStopping {
+            finishSmoke(success: smokeStarted && !canStop)
+        } else if !running && !smokeStarted {
+            start()
         }
     }
 
@@ -183,19 +222,25 @@ final class ServerModel: ObservableObject {
         if !smoke { alertMessage = message }
     }
     private func finishSmoke(success: Bool) {
+        guard !smokeFinished else { return }
+        smokeFinished = true
+        checkpoint(success ? "smoke_complete" : "smoke_failed")
         if let destination = smokeReport {
-            let report: [String: Any] = ["gui_started": true, "server_started": smokeStarted,
-                "server_stopped": success && !running, "game_client_tested": false]
-            if let data = try? JSONSerialization.data(withJSONObject: report, options: .prettyPrinted) {
-                try? FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? data.write(to: destination, options: .atomic)
-            }
+            let report: [String: Any] = ["gui_started": visibleWindowObserved,
+                "window_visible": NSApp.windows.contains { $0.isVisible }, "server_started": smokeStarted,
+                "server_stopped": success && !running && !canStop, "game_client_tested": false]
+            do {
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let data = try JSONSerialization.data(withJSONObject: report, options: .prettyPrinted)
+                try data.write(to: destination, options: .atomic)
+            } catch { fputs("Cannot write native app smoke report.\n", stderr) }
         }
         NSApp.terminate(nil)
     }
     func shutdown(_ completion: @escaping () -> Void) {
         guard !shutdownRequested else { completion(); return }
         shutdownRequested = true
+        checkpoint("shutdown_requested")
         let process = child
         if process?.isRunning == true { send("quit") }
         try? input?.fileHandleForWriting.close()
@@ -219,6 +264,10 @@ final class ServerModel: ObservableObject {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.activate(ignoringOtherApps: true)
+        ServerModel.active?.applicationReady()
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let model = ServerModel.active else { return .terminateNow }
         model.shutdown { sender.reply(toApplicationShouldTerminate: true) }
@@ -231,7 +280,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 struct IdolyLocalServerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-    @StateObject private var model = ServerModel()
+    @StateObject private var model: ServerModel
+    init() {
+        let initialModel = ServerModel()
+        _model = StateObject(wrappedValue: initialModel)
+    }
     var body: some Scene {
         WindowGroup("아이프라 로컬 서버") {
             VStack(alignment: .leading, spacing: 18) {

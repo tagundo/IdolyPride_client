@@ -201,7 +201,7 @@ jobs:
 
   android:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 55
     permissions:
       contents: write
@@ -262,16 +262,23 @@ jobs:
             data/dist/IdolyPride-Local-Server-Android.apk > data/android-server-qa/arm64-signature.txt
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
             data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk > data/android-server-qa/x86_64-signature.txt
-      - name: Enable KVM for the Android emulator
+      - name: Configure Android emulator acceleration
+        id: acceleration
         shell: bash
         run: |
-          set -euo pipefail
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-idoly-kvm.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-          test -r /dev/kvm
-          test -w /dev/kvm
+          set -euxo pipefail
+          if [[ -c /dev/kvm ]]; then
+            sudo chmod 0666 /dev/kvm
+            ls -l /dev/kvm
+            test -r /dev/kvm
+            test -w /dev/kvm
+            echo 'options=-accel on' >> "$GITHUB_OUTPUT"
+            echo 'disable_linux_hw_accel=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'KVM is absent; running the same emulator checks with software acceleration.'
+            echo 'options=-accel off' >> "$GITHUB_OUTPUT"
+            echo 'disable_linux_hw_accel=true' >> "$GITHUB_OUTPUT"
+          fi
       - name: Exercise the actual native server UI and encrypted RPCs
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -282,9 +289,10 @@ jobs:
           cores: 2
           ram-size: 4096M
           disk-size: 8G
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect ${{ steps.acceleration.outputs.options }}
+          disable-linux-hw-accel: ${{ steps.acceleration.outputs.disable_linux_hw_accel }}
           disable-animations: true
-          emulator-boot-timeout: 600
+          emulator-boot-timeout: 1200
           script: >-
             uv run --locked python android-server/ci/qa_emulator.py
             --apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
@@ -302,6 +310,7 @@ jobs:
           result = json.loads(Path('data/android-server-qa/result.json').read_text())
           assert result.get('ok') is True and result.get('final_stop') is True
           assert result.get('restart_session_preserved') is True and result.get('port_rebound') is True
+          assert result.get('home_rpcs') is True and result.get('gameplay_change_preserved') is True
           PY
           uv run --locked python -m zipfile -c data/dist/IdolyPride-Local-Server-Android-QA.zip data/android-server-qa
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
@@ -399,7 +408,9 @@ jobs:
           engine = json.loads((evidence / 'engine-smoke.json').read_text())
           app = json.loads((evidence / 'app-smoke.json').read_text())
           assert all(engine.get(key) is True for key in
-              ('frozen_runtime', 'server_started', 'encrypted_system_check', 'asset_range', 'server_stopped'))
+              ('frozen_runtime', 'server_started', 'encrypted_system_check', 'anonymous_public_text',
+               'local_auth', 'home_login', 'home_enter', 'settings_persisted', 'profile_persisted',
+               'asset_range', 'server_stopped'))
           assert all(app.get(key) is True for key in ('gui_started', 'server_started', 'server_stopped'))
           PY
           .venv/bin/python -m zipfile -c data/dist/IdolyPride-Local-Server-macOS-QA.zip data/macos-evidence
@@ -492,6 +503,27 @@ jobs:
             --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
           gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
             data/release-verification/SHA256SUMS data/release-verification/RELEASE-VERIFICATION.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          body = """Android 서버 APK와 Apple Silicon Mac 서버 앱입니다. Python·Termux 설치 없이 앱의 서버 시작 버튼을 사용합니다.
+
+          - Android: IdolyPride-Local-Server-Android.apk 설치 후 아이프라 서버 → 서버 시작.
+          - Mac: IdolyPride-Local-Server-macOS-arm64.app.zip을 풀어 응용 프로그램으로 옮긴 뒤 서버 시작. macOS 13 이상; ad-hoc 서명, Apple 공증 미포함.
+          - 게임은 기존 local-client-v0.1.0 초안의 Android APK 또는 PlayCover IPA를 같은 기기에 설치합니다.
+          - 공개 마스터 202개·약관·도움말을 포함합니다. 홈·설정·튜토리얼 일부 상태를 저장하며 기존 프로필을 덮어쓰지 않습니다.
+          - Android 에뮬레이터와 실제 Mac 앱에서 시작·중지·암호화 통신·재시작 후 상태 보존을 검증했습니다. 실제 아이프라 게임의 홈 진입·전투·전체 플레이는 미검증이며 전투·보상·카드 육성은 아직 미구현입니다.
+
+          서버 앱 업데이트 시 사용자 데이터는 유지합니다. Android 서버 앱 삭제·데이터 지우기는 로컬 DB를 삭제합니다.
+          """
+          body += '\nSource commit: ' + os.environ['GITHUB_SHA'] + '\n'
+          path = Path(os.environ['RUNNER_TEMP']) / 'idoly-tested-server-release.json'
+          path.write_text(json.dumps({'draft': True, 'target_commitish': os.environ['GITHUB_SHA'], 'body': body}))
+          PY
+          gh api --method PATCH "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --input "$RUNNER_TEMP/idoly-tested-server-release.json" > /dev/null
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
             --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
           {
