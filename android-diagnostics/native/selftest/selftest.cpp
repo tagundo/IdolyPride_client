@@ -89,6 +89,10 @@ Java_game_qualiarts_idolypride_phase_1selftest_SelfTestActivity_runNative(JNIEnv
     idoly_selftest_checkpoint(&output);
     bool baseline = check(output).ok();
     int initialized = shadowhook_init(SHADOWHOOK_MODE_UNIQUE, false);
+    // The AAR header declares get_init_errno(), but the pinned ARM64 library
+    // does not export it. Capture TLS errno immediately, before another API
+    // (especially the intentionally invalid intercept below) overwrites it.
+    int init_errno = shadowhook_get_errno();
     shadowhook_set_recordable(false);
     callback_hits = 0;
     callback_context_ok = true;
@@ -98,9 +102,14 @@ Java_game_qualiarts_idolypride_phase_1selftest_SelfTestActivity_runNative(JNIEnv
     if (rejected != nullptr) shadowhook_unintercept(rejected);
     idoly_selftest_checkpoint(&output);
     bool fail_open = failure_rejected && check(output).ok() && callback_hits == 0;
-    void* stub = initialized == 0 ? shadowhook_intercept_instr_addr(
-            reinterpret_cast<void*>(idoly_selftest_instruction), intercept, &output,
-            SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE) : nullptr;
+    void* stub = nullptr;
+    int install_errno = -1;  // Installation was not attempted when init failed.
+    if (initialized == 0) {
+        stub = shadowhook_intercept_instr_addr(
+                reinterpret_cast<void*>(idoly_selftest_instruction), intercept, &output,
+                SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE);
+        install_errno = shadowhook_get_errno();
+    }
     Checks checks;
     if (stub == nullptr) {
         checks.original = checks.gpr = checks.simd = checks.sp = false;
@@ -124,10 +133,12 @@ Java_game_qualiarts_idolypride_phase_1selftest_SelfTestActivity_runNative(JNIEnv
     snprintf(report, sizeof(report),
         "{\"schema\":1,\"ok\":%s,\"abi\":\"arm64-v8a\",\"synthetic_only\":true,"
         "\"shadowhook_version\":\"2.0.1\",\"baseline\":%s,\"initialized\":%s,\"installed\":%s,"
+        "\"init_result\":%d,\"init_errno\":%d,\"install_errno\":%d,"
         "\"original_instruction\":%s,\"gpr\":%s,\"simd\":%s,\"sp\":%s,\"nzcv\":%s,"
         "\"fpcr\":%s,\"fpsr\":%s,\"callback_context\":%s,\"callback_hits\":%s,"
         "\"hook_failure_fail_open\":%s,\"unintercept\":%s}",
         boolean(ok), boolean(baseline), boolean(initialized == 0), boolean(stub != nullptr),
+        initialized, init_errno, install_errno,
         boolean(checks.original), boolean(checks.gpr), boolean(checks.simd), boolean(checks.sp),
         boolean(checks.nzcv), boolean(checks.fpcr), boolean(checks.fpsr), boolean(callback_context_ok),
         boolean(hits), boolean(fail_open), boolean(restored));

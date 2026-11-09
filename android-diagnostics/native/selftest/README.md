@@ -12,7 +12,10 @@ the intercepted instruction; the comparison accounts for that adjustment.
 
 The test also checks an uninstrumented baseline, rejected null-address install
 followed by normal execution, three interceptor callbacks, and execution after
-unintercept. The JSON contains only fixed booleans and version strings, without
+unintercept. It captures numeric initialization result and TLS errno immediately
+after initialization, before the deliberately invalid install overwrites errno.
+`install_errno` is `-1` when initialization prevented installation. The JSON
+contains only fixed booleans, numeric API statuses and version strings, without
 register values, memory addresses, stack contents or application data.
 
 Build with installed SDK/NDK/JDK tools (NDK 26.3.11579264 is required):
@@ -50,3 +53,10 @@ reporting results. This permits testing an advertised ABI, not a compatibility
 claim: upstream documents unsupported architectures including Houdini in
 errors 34/35, so translated execution can fail. A built APK alone does not
 verify runtime preservation.
+
+On failure the driver retains only fixture-scoped logcat and package exit data.
+If the UID/time-filtered log is empty, it retries all tags and buffers with both
+the fixture PID and UID, without the timestamp filter. A readable `/proc/PID/status`
+is checked to reject a PID reused by another UID. Environment evidence normalizes
+the public native-bridge property to `libndk_translation.so`, `libhoudini.so`,
+`none` or `other`; it never preserves arbitrary property text.

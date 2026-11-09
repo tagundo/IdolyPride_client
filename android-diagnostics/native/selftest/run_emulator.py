@@ -20,6 +20,8 @@ def validate_report(report):
     if (not isinstance(report, dict) or report.get("schema") != 1 or report.get("ok") is not True
             or report.get("synthetic_only") is not True or report.get("abi") != "arm64-v8a"
             or report.get("shadowhook_version") != "2.0.1"
+            or any(type(report.get(name)) is not int or report[name] != 0
+                   for name in ("init_result", "init_errno", "install_errno"))
             or any(report.get(name) is not True for name in CHECKS)):
         raise ValueError("Synthetic ARM64 instruction preservation check failed")
 
@@ -37,13 +39,20 @@ def run(apk, *, adb, serial, artifacts):
 
     if not serial.startswith("emulator-") or execute("shell", "getprop", "ro.kernel.qemu").strip() != "1":
         raise ValueError("Self-test accepts a disposable emulator only")
-    if "arm64-v8a" not in execute("shell", "getprop", "ro.product.cpu.abilist").strip().split(","):
+    available_abis = execute("shell", "getprop", "ro.product.cpu.abilist").strip().split(",")
+    if "arm64-v8a" not in available_abis:
         raise ValueError("Self-test requires an ARM64-capable emulator (native or native bridge)")
     primary_abi = execute("shell", "getprop", "ro.product.cpu.abi").strip()
     mode = "native_arm64" if primary_abi == "arm64-v8a" else (
         "native_bridge" if primary_abi in ("x86_64", "x86") else "unknown")
+    raw_bridge = execute("shell", "getprop", "ro.dalvik.vm.native.bridge").strip()
+    bridge = raw_bridge if raw_bridge in ("libndk_translation.so", "libhoudini.so") else (
+        "none" if raw_bridge in ("", "0", "none") else "other")
+    standard_abis = ("arm64-v8a", "armeabi-v7a", "armeabi", "x86_64", "x86", "riscv64")
     (artifacts / "environment.json").write_text(json.dumps(
-        {"disposable_emulator": True, "arm64_execution_mode": mode}, indent=2) + "\n")
+        {"disposable_emulator": True, "arm64_execution_mode": mode, "native_bridge": bridge,
+         "primary_abi": primary_abi if primary_abi in standard_abis else "other",
+         "abilist": [abi for abi in available_abis if abi in standard_abis]}, indent=2) + "\n")
     # Only this fixture's throwaway install is replaced; no other app is touched.
     execute("uninstall", PACKAGE, check=False)
     execute("install", str(Path(apk).resolve()))
@@ -58,19 +67,39 @@ def run(apk, *, adb, serial, artifacts):
         return raw
 
     def capture_failure():
+        nonlocal pid
+        try:
+            current_pid = execute("shell", "pidof", "-s", PACKAGE, check=False).strip()
+            if current_pid.isdigit():
+                pid = current_pid
+        except (OSError, RuntimeError, subprocess.TimeoutExpired):
+            pass
         # A freshly installed fixture can receive a reused UID. Scope logcat to
         # both its exact UID and a device timestamp from immediately pre-launch.
+        uid_output = ""
         try:
             if uid is not None and since is not None:
-                raw = execute("logcat", "-b", "all", "-d", "-v", "threadtime", "--uid=" + uid,
-                              "-T", since, "*:V", check=False)
-                (artifacts / "failure-own-uid-logcat.txt").write_text(bounded(raw))
-            elif pid is not None:
-                raw = execute("logcat", "-b", "all", "-d", "-v", "threadtime", "--pid=" + pid,
-                              "*:V", check=False)
-                (artifacts / "failure-own-pid-logcat.txt").write_text(bounded(raw))
+                uid_output = execute("logcat", "-b", "all", "-d", "-v", "threadtime", "--uid=" + uid,
+                                     "-T", since, "*:V", check=False)
+                (artifacts / "failure-own-uid-logcat.txt").write_text(bounded(uid_output))
         except (OSError, RuntimeError, subprocess.TimeoutExpired):
             (artifacts / "failure-logcat-unavailable.txt").write_text("Fixture-scoped logcat unavailable.\n")
+        if not uid_output.strip() and pid is not None and uid is not None:
+            try:
+                # A timestamp/zone mismatch must not hide the native init log.
+                # Keep both known fixture PID and UID filters without -T; never
+                # fall back to an unfiltered all-app log dump. If the PID was
+                # reused by another UID, discard it before requesting logs.
+                status = execute("shell", "cat", "/proc/" + pid + "/status", check=False)
+                uid_lines = [line.split()[1:] for line in status.splitlines() if line.startswith("Uid:")]
+                if uid_lines and any(value != uid for value in uid_lines[0]):
+                    (artifacts / "failure-pid-reused.txt").write_text("Fixture PID now belongs to another UID; capture skipped.\n")
+                else:
+                    raw = execute("logcat", "-b", "all", "-d", "-v", "threadtime", "--pid=" + pid,
+                                  "--uid=" + uid, "*:V", check=False)
+                    (artifacts / "failure-own-pid-logcat.txt").write_text(bounded(raw))
+            except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                (artifacts / "failure-pid-logcat-unavailable.txt").write_text("Fixture PID logcat unavailable.\n")
         try:
             raw = execute("shell", "dumpsys", "activity", "exit-info", PACKAGE, check=False)
             (artifacts / "failure-fixture-exit-info.txt").write_text(bounded(raw))

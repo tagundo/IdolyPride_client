@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 import json
+import xml.etree.ElementTree as ET
 
 import pytest
 
-from qa_game_boot import GAME, game_launch_args, prepare_restarted_tutorial
+import qa_game_boot
+from qa_game_boot import GAME, GameQA, game_launch_args, prepare_restarted_tutorial
 
 
 def test_restarted_tutorial_fixture_calls_only_login_name_init_and_read():
@@ -52,3 +54,46 @@ def test_game_package_allowlist_keeps_override_on_qa_apps():
     assert game_launch_args(True, GAME + ".diagnostics")[5].startswith(GAME + ".diagnostics/")
     with pytest.raises(ValueError, match="dedicated local QA"):
         game_launch_args(False, "game.qualiarts.idolypride")
+
+
+def test_server_capture_retries_observed_empty_tree_then_checks_fresh_package(tmp_path, monkeypatch):
+    qa = GameQA("adb", "emulator-disposable", tmp_path)
+    stages = []
+    expected = ET.fromstring('<hierarchy><node package="game.qualiarts.idolypride.localserver"/></hierarchy>')
+
+    def capture(stage):
+        stages.append(stage)
+        if len(stages) == 1:
+            raise RuntimeError("uiautomator did not return a UI hierarchy")
+        return expected
+
+    monkeypatch.setattr(qa, "capture", capture)
+    monkeypatch.setattr(qa, "adb", lambda *args, **kwargs: b"fresh screenshot")
+    monkeypatch.setattr(qa_game_boot.time, "sleep", lambda delay: None)
+    assert qa.capture_server("server-after-game") is expected
+    assert stages == ["server-after-game", "server-after-game-retry-1"]
+    assert "uiautomator" in (tmp_path / "server-after-game.error.txt").read_text()
+    assert (tmp_path / "server-after-game.png").read_bytes() == b"fresh screenshot"
+
+
+def test_server_capture_does_not_mask_persistent_or_other_failures(tmp_path, monkeypatch):
+    qa = GameQA("adb", "emulator-disposable", tmp_path)
+    calls = []
+
+    def wrong_app(stage):
+        calls.append(stage)
+        return ET.fromstring('<hierarchy><node package="game.qualiarts.idolypride.local"/></hierarchy>')
+
+    monkeypatch.setattr(qa, "capture", wrong_app)
+    monkeypatch.setattr(qa, "adb", lambda *args, **kwargs: b"fresh screenshot")
+    monkeypatch.setattr(qa_game_boot.time, "sleep", lambda delay: None)
+    with pytest.raises(RuntimeError, match="not reached foreground"):
+        qa.capture_server("server-after-game")
+    assert len(calls) == 3
+
+    def unrelated(stage):
+        raise RuntimeError("adb command failed")
+
+    monkeypatch.setattr(qa, "capture", unrelated)
+    with pytest.raises(RuntimeError, match="adb command failed"):
+        qa.capture_server("unrelated")

@@ -131,6 +131,32 @@ def prepare_restarted_tutorial(schema, port, *, caller=None):
 
 
 class GameQA(QA):
+    def capture_server(self, stage):
+        """Allow Unity's observed pause delay without dropping capture checks."""
+        for attempt in range(3):
+            capture_stage = stage if attempt == 0 else f"{stage}-retry-{attempt}"
+            try:
+                hierarchy = self.capture(capture_stage)
+                if not any(node.get("package") == PACKAGE for node in hierarchy.iter("node")):
+                    raise RuntimeError("Server activity has not reached foreground")
+                return hierarchy
+            except RuntimeError as error:
+                # The actual no-store probe finished all game observations but
+                # Unity paused slowly; uiautomator returned no hierarchy once.
+                # Retry only these transition states, always with fresh input.
+                if str(error) not in ("uiautomator did not return a UI hierarchy",
+                                      "Server activity has not reached foreground"):
+                    raise
+                (self.artifacts / (capture_stage + ".error.txt")).write_text(str(error) + "\n")
+                try:
+                    (self.artifacts / (capture_stage + ".png")).write_bytes(
+                        self.adb("exec-out", "screencap", "-p", binary=True))
+                except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                    pass
+                if attempt == 2:
+                    raise
+                time.sleep(1)
+
     def tap_observed_title(self, timeout=180):
         if getattr(self, "title_tap_attempted", False):
             raise RuntimeError("The observed title action may be attempted only once")
@@ -232,6 +258,7 @@ def main():
     qa.game_package = args.game_package
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
+              "game_observation_completed": False,
               "home_screen_verified": False, "game_input_performed": False, "game_input_count": 0,
               "target": "disposable Android emulator", "captures": [],
               "game_package": args.game_package,
@@ -268,7 +295,7 @@ def main():
         result["startup_system_dialog_actions"] = _tap_initial_start(qa)
         server_started = True
         wait_server(schema, port, timeout=args.startup_timeout)
-        qa.capture("server-running")
+        qa.capture_server("server-running")
         # Readiness and the explicitly selected profile fixture are separate
         # from subsequent game-originated RPCs; neither proves game UI success.
         if args.prepare_restarted_tutorial:
@@ -301,9 +328,10 @@ def main():
             print("Captured actual game at " + str(int(elapsed)) + "s; no further game input", flush=True)
             if scheduled >= duration:
                 break
+        result["game_observation_completed"] = True
         # Return to the server only after capturing the game's uninterrupted run.
-        qa.adb("shell", "am", "start", "-n", ACTIVITY)
-        hierarchy = qa.capture("server-after-game")
+        qa.adb("shell", "am", "start", "-W", "-n", ACTIVITY)
+        hierarchy = qa.capture_server("server-after-game")
         texts = [node.get("text", "") for node in hierarchy.iter("node") if node.get("text")]
         (args.artifacts / "server-ui-log.txt").write_text("\n".join(texts) + "\n", encoding="utf-8")
         sequence = [{"method": match.group(1), "status": match.group(2)}
@@ -318,8 +346,8 @@ def main():
         try:
             result["captures"].append(qa.capture_game("final"))
             if server_started:
-                qa.adb("shell", "am", "start", "-n", ACTIVITY)
-                qa.capture("server-final")
+                qa.adb("shell", "am", "start", "-W", "-n", ACTIVITY)
+                qa.capture_server("server-final")
                 qa.tap("서버 중지", "server-stop")
         except Exception as error:
             result["cleanup_error"] = type(error).__name__
