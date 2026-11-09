@@ -41,6 +41,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data/android-game-debug data/ci-input data/dist
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr imagemagick
           # Hosted runner only: retain the SDK and remove unused large toolchains.
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk
           df -h . | tee data/android-game-debug/disk.txt
@@ -137,6 +139,7 @@ jobs:
             --descriptor-set data/protocol/idolypride-6.1.1.pb
             --artifacts data/android-game-debug --duration 180 --interval 10 --startup-timeout 600
             --force-gles30
+            --tap-observed-title
       - name: Preserve game screenshots and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4

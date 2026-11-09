@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """Capture an actual ARM64 game launch on a disposable translated emulator.
 
-This driver never taps inside the game. A completed capture is diagnostic
-evidence, not proof that the game reached home or that gameplay works.
+The optional title action taps one freshly OCR-observed TAP TO START phrase.
+No other game input is performed. A capture is diagnostic evidence, not proof
+that the game reached home or that gameplay works.
 """
 from __future__ import annotations
 
 import argparse
+import csv
+import io
 import json
 from pathlib import Path
 import re
+import shutil
+import struct
 import subprocess
 import time
 
@@ -19,6 +24,54 @@ from idoly_local.schema import Schema
 
 GAME = "game.qualiarts.idolypride.local"
 GAME_ACTIVITY = GAME + "/com.google.firebase.MessagingUnityPlayerActivity"
+
+
+def observed_title(tsv, width, height):
+    """Return one confident contiguous phrase; coordinates come only from OCR."""
+    lines = {}
+    # Tesseract text can contain literal quotes; TSV does not CSV-escape them.
+    for row in csv.DictReader(io.StringIO(tsv), delimiter="\t", quoting=csv.QUOTE_NONE):
+        if row.get("level") != "5" or not row.get("text", "").strip():
+            continue
+        try:
+            word = {"text": row["text"].strip().upper(), "confidence": float(row["conf"]),
+                    "word": int(row["word_num"]), "left": int(row["left"]), "top": int(row["top"]),
+                    "width": int(row["width"]), "height": int(row["height"])}
+            line = tuple(int(row[key]) for key in ("page_num", "block_num", "par_num", "line_num"))
+        except (KeyError, ValueError):
+            continue
+        lines.setdefault(line, []).append(word)
+    matches = []
+    for words in lines.values():
+        words.sort(key=lambda word: word["word"])
+        for start in range(len(words)):
+            for count in (1, 2, 3):
+                selected = words[start:start + count]
+                # Tesseract can merge TO START into TOSTART. Require exact
+                # recognized letters, with whitespace merging only; no fuzzy
+                # spelling or coordinates inferred from a previous frame.
+                if len(selected) != count or "".join(word["text"] for word in selected) != "TAPTOSTART":
+                    continue
+                if any(not word["confidence"] >= 85 or not 10 <= word["height"] <= height * 0.08
+                       or word["width"] <= 0 or word["left"] < 0 or word["top"] < 0
+                       or word["left"] + word["width"] > width or word["top"] + word["height"] > height
+                       for word in selected):
+                    continue
+                if any(right["word"] != left["word"] + 1 or right["left"] <= left["left"]
+                       or right["left"] - left["left"] - left["width"] > height * 0.08
+                       or min(left["top"] + left["height"], right["top"] + right["height"])
+                          - max(left["top"], right["top"]) < min(left["height"], right["height"]) * 0.5
+                       for left, right in zip(selected, selected[1:])):
+                    continue
+                left, top = min(word["left"] for word in selected), min(word["top"] for word in selected)
+                right = max(word["left"] + word["width"] for word in selected)
+                bottom = max(word["top"] + word["height"] for word in selected)
+                if not width * 0.1 <= right - left <= width * 0.9 or bottom - top > height * 0.08:
+                    continue
+                matches.append({"phrase": "TAP TO START", "ocr_words": selected,
+                                "bounds": [left, top, right, bottom],
+                                "point": [(left + right) // 2, (top + bottom) // 2]})
+    return matches[0] if len(matches) == 1 else None
 
 
 def game_launch_args(force_gles30=False):
@@ -32,6 +85,54 @@ def game_launch_args(force_gles30=False):
 
 
 class GameQA(QA):
+    def tap_observed_title(self, timeout=180):
+        if getattr(self, "title_tap_attempted", False):
+            raise RuntimeError("The observed title action may be attempted only once")
+        image_tool = shutil.which("magick") or shutil.which("convert")
+        if image_tool is None or shutil.which("tesseract") is None:
+            raise RuntimeError("Observed title QA requires ImageMagick and Tesseract")
+        deadline = time.monotonic() + timeout
+        attempt = 0
+        while time.monotonic() < deadline:
+            began = time.monotonic()
+            prefix = self.artifacts / f"title-wait-{attempt:02d}"
+            source = prefix.with_suffix(".png")
+            mask = prefix.with_name(prefix.name + "-ocr-mask").with_suffix(".png")
+            raw = self.adb("exec-out", "screencap", "-p", binary=True)
+            if raw[:8] != b"\x89PNG\r\n\x1a\n":
+                raise RuntimeError("Fresh title screenshot is not PNG")
+            source.write_bytes(raw)
+            width, height = struct.unpack_from(">II", raw, 16)
+            # The title uses white letters over detailed art. Mask the entire
+            # fresh frame; no historical coordinate or fixed crop is used.
+            subprocess.run([image_tool, str(source), "-alpha", "off", "-colorspace", "gray",
+                            "-threshold", "99%", "-negate", str(mask)], check=True, capture_output=True, timeout=15)
+            ocr = subprocess.run(["tesseract", str(mask), "stdout", "--psm", "11", "-l", "eng", "tsv"],
+                                 check=True, capture_output=True, text=True, timeout=15)
+            prefix.with_suffix(".tsv").write_text(ocr.stdout, encoding="utf-8")
+            phrase = observed_title(ocr.stdout, width, height)
+            if phrase is not None and time.monotonic() < deadline:
+                activity = self.adb("shell", "dumpsys", "activity", "activities")
+                prefix.with_suffix(".activity.txt").write_text(activity, encoding="utf-8")
+                if not re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b" + re.escape(GAME) + r"/", activity):
+                    raise RuntimeError("OCR title phrase is not in the foreground game activity")
+                if time.monotonic() >= deadline:
+                    raise RuntimeError("Title observation timed out before input; no game tap performed")
+                phrase.update(source_image=source.name, ocr_mask=mask.name, ocr_tsv=prefix.with_suffix(".tsv").name,
+                              elapsed_seconds=round(time.monotonic() - self.started, 2), performed=False)
+                record = self.artifacts / "observed-title-action.json"
+                record.write_text(json.dumps(phrase, indent=2) + "\n")
+                self.title_tap_attempted = True
+                x, y = phrase["point"]
+                self.adb("shell", "input", "tap", str(x), str(y))
+                phrase["performed"] = True
+                record.write_text(json.dumps(phrase, indent=2) + "\n")
+                print("Tapped one freshly OCR-observed TAP TO START phrase", flush=True)
+                return phrase
+            attempt += 1
+            time.sleep(max(0, min(5 - (time.monotonic() - began), deadline - time.monotonic())))
+        raise RuntimeError("No confident fresh TAP TO START phrase appeared within 180 seconds; no game tap performed")
+
     def capture_game(self, stage):
         """Keep screenshots even if Unity's accessibility tree is unavailable."""
         report = {"stage": stage, "elapsed_seconds": round(time.monotonic() - self.started, 2)}
@@ -72,13 +173,15 @@ def main():
     parser.add_argument("--startup-timeout", type=float, default=600)
     parser.add_argument("--force-gles30", action="store_true",
                         help="QA-only Unity launch override to avoid emulator Vulkan translation; changes no APK bytes")
+    parser.add_argument("--tap-observed-title", action="store_true",
+                        help="Tap exactly one freshly OCR-observed TAP TO START phrase, then observe 180 seconds")
     args = parser.parse_args()
     if not 90 <= args.duration <= 180 or args.interval < 5 or args.startup_timeout <= 0:
         parser.error("duration must be 90..180, interval >=5, and startup-timeout positive")
     qa = GameQA(args.adb, args.serial, args.artifacts)
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
-              "home_screen_verified": False, "game_input_performed": False,
+              "home_screen_verified": False, "game_input_performed": False, "game_input_count": 0,
               "target": "disposable Android emulator", "captures": [],
               "qa_launch_override": {"force_gles30_requested": args.force_gles30,
                   "intent_string_extras": {"unity": "-force-gles30"} if args.force_gles30 else {},
@@ -125,13 +228,19 @@ def main():
             raise RuntimeError("Game activity did not launch; inspect game-launch.txt")
         result["actual_game_client_launched"] = True
         result["game_input_performed"] = False
+        if args.tap_observed_title:
+            result["observed_title_action"] = qa.tap_observed_title()
+            result["game_input_performed"] = True
+            result["game_input_count"] = 1
+        duration = 180 if args.tap_observed_title else args.duration
+        result["post_title_observation_seconds"] = duration if args.tap_observed_title else None
         begin = time.monotonic()
-        for index, scheduled in enumerate(range(0, args.duration + args.interval, args.interval)):
-            time.sleep(max(0, begin + min(scheduled, args.duration) - time.monotonic()))
+        for index, scheduled in enumerate(range(0, duration + args.interval, args.interval)):
+            time.sleep(max(0, begin + min(scheduled, duration) - time.monotonic()))
             elapsed = time.monotonic() - begin
             result["captures"].append(qa.capture_game(f"game-{index:02d}-{int(elapsed):03d}s"))
-            print("Captured actual game at " + str(int(elapsed)) + "s; no game taps", flush=True)
-            if scheduled >= args.duration:
+            print("Captured actual game at " + str(int(elapsed)) + "s; no further game input", flush=True)
+            if scheduled >= duration:
                 break
         # Return to the server only after capturing the game's uninterrupted run.
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
