@@ -374,6 +374,23 @@ def test_home_enter_uses_main_area_and_present_containers_without_rewards_or_mut
     assert call(game, "/api.Home/Enter").currentMainAreaId == "area-main-002"
 
 
+def test_home_enter_keeps_inactive_fish_event_absent_on_the_wire(game):
+    before = game.state.snapshot(game.profile)
+    for skip_update in (False, True):
+        home = call(game, "/api.Home/Enter", skipUpdate=skip_update)
+        # Message presence controls HomeTop.ShouldHideLoading. An empty
+        # protobuf message survives serialization and suppresses Hide too.
+        assert not home.HasField("homeFishHeavenInfo")
+        assert "homeFishHeavenInfo" not in {field.name for field, _ in home.ListFields()}
+        empty_event = type(home)()
+        empty_event.CopyFrom(home)
+        empty_event.homeFishHeavenInfo.SetInParent()
+        decoded = type(home).FromString(empty_event.SerializeToString())
+        assert decoded.HasField("homeFishHeavenInfo")
+        assert decoded.homeFishHeavenInfo.ByteSize() == 0
+    assert game.state.snapshot(game.profile) == before
+
+
 def test_home_hierarchy_resolves_points_without_mutating_imported_history_or_ranking(game):
     def imported(payload):
         user = game.schema.response_type("/api.User/Get").FromString(payload)

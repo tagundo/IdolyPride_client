@@ -336,11 +336,14 @@ class Gameplay:
             result.hierarchyNotiInfo.currentDetailGradeId = self.catalog.hierarchy_grade(
                 snapshot.hierarchy.currentFixedPoint + snapshot.hierarchy.currentVariablePoint,
                 snapshot.hierarchy.bestDetailGradeId)
-            # Presence is deliberate for the client's home/activity container
-            # reads. Pending rewards/events remain absent, not fabricated.
+            # These ordinary home/activity containers have empty-state readers.
+            # Keep optional special-event messages absent: Android 6.1.1
+            # HomeTop.ShouldHideLoading (0x566c9b0) checks whether
+            # homeFishHeavenInfo is null. Even an empty message suppresses
+            # LoadingManager.Hide (0x5675ff4..0x5676008).
             for field in ("fanEventInfo", "promotionInfo", "refreshInfo", "bannerInfo", "eventInfo",
                           "pvpInfo", "hierarchyNotiInfo", "notiStoneShopItem", "notiNormalShopItem",
-                          "notiShowcaseShopItem", "leagueInfo", "loveInfo", "companyInfo", "homeFishHeavenInfo"):
+                          "notiShowcaseShopItem", "leagueInfo", "loveInfo", "companyInfo"):
                 if field in result.DESCRIPTOR.fields_by_name:
                     getattr(result, field).SetInParent()
             result.lessonProgress.currentAreaId = result.currentMainAreaId
