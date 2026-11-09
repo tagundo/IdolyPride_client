@@ -82,7 +82,8 @@ class Schema:
                 if any(dependency in pending for dependency in file.dependency):
                     continue
                 try:
-                    files.append(pool.Add(file))
+                    pool.Add(file)
+                    files.append(pool.FindFileByName(file.name))
                 except (TypeError, ValueError) as exc:
                     raise ValueError(f"Cannot load descriptor {name}: {exc}") from None
                 del pending[name]

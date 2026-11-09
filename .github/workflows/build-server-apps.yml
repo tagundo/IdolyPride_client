@@ -1,0 +1,503 @@
+name: Build native server apps into draft release
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/build-server-apps.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-server-apps-v0.2.0
+  cancel-in-progress: false
+
+env:
+  GH_REPO: ${{ github.repository }}
+  IDOLY_SERVER_TAG: local-server-v0.2.0
+  IDOLY_PAYLOAD_NAME: IdolyPride-ServerData-v0.2.0.zip
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.draft.outputs.release_id }}
+      payload_sha256: ${{ steps.payload.outputs.payload_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - name: Install locked Linux preparation and test dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Download the pinned existing public server-data asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/ci-input data/dist data/preparation-evidence
+          gh api "repos/$GH_REPO/releases/assets/726977995" \
+            --header 'Accept: application/octet-stream' \
+            > data/ci-input/ServerData-source.zip
+          printf '%s  %s\n' \
+            '2df8ca651fbb3104b10910dc60a2a87f8cac1db3b5defff56eb4703c769be6b3' \
+            'data/ci-input/ServerData-source.zip' | sha256sum --check --strict
+          uv run --locked python - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+
+          with ZipFile('data/ci-input/ServerData-source.zip') as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit('Source ServerData ZIP failed CRC validation')
+              for item in archive.infolist():
+                  path = PurePosixPath(item.filename)
+                  if path.is_absolute() or '..' in path.parts or not path.parts or path.parts[0] != 'data':
+                      raise SystemExit('Unexpected source archive path')
+              archive.extractall(Path.cwd())
+          PY
+      - name: Archive anonymous title-screen rules and help
+        run: >-
+          uv run --locked python tools/archive_public_text.py
+          --descriptor-set data/protocol/idolypride-6.1.1.pb
+          --output data/public-fixtures
+      - name: Build and verify the native-app payload
+        id: payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked --all-extras python tools/build_server_payload.py \
+            --output "data/dist/$IDOLY_PAYLOAD_NAME" \
+            | tee data/dist/server-data-build.json
+          uv run --locked python - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          payload = Path('data/dist') / os.environ['IDOLY_PAYLOAD_NAME']
+          with ZipFile(payload) as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit('Prepared payload failed CRC validation')
+              archive.extractall(Path.cwd())
+          with payload.open('rb') as stream:
+              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+              output.write('payload_sha256=' + digest + '\n')
+          print('Prepared payload SHA-256: ' + digest)
+          PY
+      - name: Run all core and portable platform checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked --all-extras pytest -q tests android-server/ci macos-server/tests \
+            | tee data/preparation-evidence/tests.txt
+          uv run --locked python -m compileall -q src tools android-server/app/src/main/python macos-server
+      - name: Verify production startup with pure Python protobuf and no grpcio import
+        env:
+          PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked python - <<'PY'
+          import importlib.abc
+          import os
+          from pathlib import Path
+          import runpy
+          import sys
+
+          class NoGrpc(importlib.abc.MetaPathFinder):
+              def find_spec(self, fullname, path=None, target=None):
+                  if fullname == 'grpc' or fullname.startswith('grpc.'):
+                      raise RuntimeError('Embedded engine attempted to import grpcio')
+
+          sys.meta_path.insert(0, NoGrpc())
+          sys.path.insert(0, str(Path('macos-server').resolve()))
+          sys.argv = ['macos-server/engine.py', '--smoke', '--data-dir',
+              str(Path(os.environ['RUNNER_TEMP']) / 'idoly-pure-runtime'),
+              '--server-data', str(Path('data/dist') / os.environ['IDOLY_PAYLOAD_NAME']),
+              '--report', 'data/preparation-evidence/pure-python-engine-smoke.json']
+          runpy.run_path('macos-server/engine.py', run_name='__main__')
+          PY
+      - name: Create or require the dedicated draft release
+        id: draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          IDOLY_RELEASE_IDS="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "local-server-v0.2.0") | .id')"
+          if [[ "$IDOLY_RELEASE_IDS" == *$'\n'* ]]; then
+            echo 'More than one release has the target server tag' >&2
+            exit 1
+          fi
+          if [[ -n "$IDOLY_RELEASE_IDS" ]]; then
+            IDOLY_RELEASE_ID="$IDOLY_RELEASE_IDS"
+            gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-existing-draft.json"
+            jq -e --arg tag "$IDOLY_SERVER_TAG" '.draft == true and .tag_name == $tag' \
+              "$RUNNER_TEMP/idoly-existing-draft.json" > /dev/null
+          else
+            jq -n --arg tag "$IDOLY_SERVER_TAG" --arg commit "$GITHUB_SHA" \
+              '{tag_name:$tag,target_commitish:$commit,name:"Idoly Pride local server apps v0.2.0",draft:true,
+                body:("Experimental Android arm64 server APK and Apple Silicon macOS app with bundled public data. " +
+                      "Local Home and Tutorial handling is partial; actual IDOLY PRIDE client gameplay has not been verified. " +
+                      "Android emulator and macOS native app evidence are attached after their checks pass. " +
+                      "This release remains a draft. Source commit: " + $commit)}' \
+              > "$RUNNER_TEMP/idoly-new-draft.json"
+            IDOLY_RELEASE_ID="$(gh api --method POST "repos/$GH_REPO/releases" \
+              --input "$RUNNER_TEMP/idoly-new-draft.json" --jq '.id')"
+          fi
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
+          echo "release_id=$IDOLY_RELEASE_ID" >> "$GITHUB_OUTPUT"
+      - name: Upload the tested payload to the draft only
+        shell: bash
+        env:
+          IDOLY_RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
+          gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber "data/dist/$IDOLY_PAYLOAD_NAME"
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-payload-upload.json"
+          uv run --locked python - "$RUNNER_TEMP/idoly-payload-upload.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          release = json.loads(Path(sys.argv[1]).read_text())
+          assert release['draft'] is True and release['tag_name'] == os.environ['IDOLY_SERVER_TAG']
+          name = os.environ['IDOLY_PAYLOAD_NAME']
+          asset = next(asset for asset in release['assets'] if asset['name'] == name)
+          path = Path('data/dist') / name
+          with path.open('rb') as stream:
+              digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+          assert asset['size'] == path.stat().st_size and asset.get('digest') == digest
+          print('GitHub verified the payload size and SHA-256')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-data-v0.2.0
+          path: |
+            data/dist/IdolyPride-ServerData-v0.2.0.zip
+            data/dist/server-data-build.json
+            data/protocol/idolypride-6.1.1.pb
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: server-preparation-evidence
+          path: data/preparation-evidence
+          if-no-files-found: warn
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      contents: write
+    outputs:
+      apk_sha256: ${{ steps.publish.outputs.apk_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDOLY_RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: android-actions/setup-android@v3
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-data-v0.2.0
+          path: data
+      - name: Install Android SDK and host QA dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0'
+          uv sync --locked --python 3.12
+          mkdir -p data/android-server-qa data/dist
+          chmod +x android-server/gradlew
+          python -c 'import sys; assert sys.version_info[:2] == (3, 13)'
+          echo "IDOLY_BUILD_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
+      - name: Build the arm64 deliverable and x86_64 QA APK separately
+        shell: bash
+        run: |
+          set -euo pipefail
+          IDOLY_PAYLOAD="$GITHUB_WORKSPACE/data/dist/$IDOLY_PAYLOAD_NAME"
+          ./android-server/gradlew -p android-server :app:assembleDebug \
+            --no-daemon --console=plain --stacktrace \
+            -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PserverAbi=arm64-v8a \
+            | tee data/android-server-qa/build-arm64.log
+          cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android.apk
+          ./android-server/gradlew -p android-server :app:clean :app:assembleDebug \
+            --no-daemon --console=plain --stacktrace \
+            -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PserverAbi=x86_64 \
+            | tee data/android-server-qa/build-x86_64.log
+          cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
+            data/dist/IdolyPride-Local-Server-Android.apk > data/android-server-qa/arm64-signature.txt
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
+            data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk > data/android-server-qa/x86_64-signature.txt
+      - name: Enable KVM for the Android emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-idoly-kvm.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+      - name: Exercise the actual native server UI and encrypted RPCs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          cores: 2
+          ram-size: 4096M
+          disk-size: 8G
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect
+          disable-animations: true
+          emulator-boot-timeout: 600
+          script: >-
+            uv run --locked python android-server/ci/qa_emulator.py
+            --apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
+            --descriptor-set data/protocol/idolypride-6.1.1.pb
+            --artifacts data/android-server-qa
+      - name: Upload the arm64 APK only after emulator QA passes
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked python - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path('data/android-server-qa/result.json').read_text())
+          assert result.get('ok') is True and result.get('final_stop') is True
+          assert result.get('restart_session_preserved') is True and result.get('port_rebound') is True
+          PY
+          uv run --locked python -m zipfile -c data/dist/IdolyPride-Local-Server-Android-QA.zip data/android-server-qa
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
+          gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
+            data/dist/IdolyPride-Local-Server-Android.apk data/dist/IdolyPride-Local-Server-Android-QA.zip
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-android-upload.json"
+          uv run --locked python - "$RUNNER_TEMP/idoly-android-upload.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          release = json.loads(Path(sys.argv[1]).read_text())
+          assert release['draft'] is True and release['tag_name'] == os.environ['IDOLY_SERVER_TAG']
+          assets = {asset['name']: asset for asset in release['assets']}
+          for name in ('IdolyPride-Local-Server-Android.apk', 'IdolyPride-Local-Server-Android-QA.zip'):
+              path = Path('data/dist') / name
+              with path.open('rb') as stream:
+                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+              assert assets[name]['size'] == path.stat().st_size and assets[name].get('digest') == 'sha256:' + digest
+              if name.endswith('.apk'):
+                  with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+                      output.write('apk_sha256=' + digest + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-server-emulator-qa
+          path: |
+            data/android-server-qa
+            data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
+          if-no-files-found: warn
+          compression-level: 0
+
+  macos:
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 35
+    permissions:
+      contents: write
+    outputs:
+      app_sha256: ${{ steps.publish.outputs.app_sha256 }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDOLY_RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require an Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: arm64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-data-v0.2.0
+          path: data
+      - name: Install the base project and pinned macOS build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked --python 3.12
+          uv pip install --python .venv/bin/python -r macos-server/requirements-build.txt
+          .venv/bin/python -c 'import platform; assert platform.machine() == "arm64"'
+          .venv/bin/python -m pytest macos-server/tests -q
+      - name: Build the frozen engine and exercise the actual relocated SwiftUI app
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/macos-evidence data/dist
+          .venv/bin/python macos-server/build_app.py \
+            --server-data "data/dist/$IDOLY_PAYLOAD_NAME" \
+            --output data/macos/IdolyPrideLocalServer.app \
+            --archive data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip \
+            --evidence data/macos-evidence --version 0.2.0 \
+            | tee data/macos-evidence/build.log
+      - name: Upload the Mac app only after frozen runtime and native GUI checks pass
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+
+          evidence = Path('data/macos-evidence')
+          engine = json.loads((evidence / 'engine-smoke.json').read_text())
+          app = json.loads((evidence / 'app-smoke.json').read_text())
+          assert all(engine.get(key) is True for key in
+              ('frozen_runtime', 'server_started', 'encrypted_system_check', 'asset_range', 'server_stopped'))
+          assert all(app.get(key) is True for key in ('gui_started', 'server_started', 'server_stopped'))
+          PY
+          .venv/bin/python -m zipfile -c data/dist/IdolyPride-Local-Server-macOS-QA.zip data/macos-evidence
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
+          gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
+            data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip data/dist/IdolyPride-Local-Server-macOS-QA.zip
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-macos-upload.json"
+          .venv/bin/python - "$RUNNER_TEMP/idoly-macos-upload.json" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          release = json.loads(Path(sys.argv[1]).read_text())
+          assert release['draft'] is True and release['tag_name'] == os.environ['IDOLY_SERVER_TAG']
+          assets = {asset['name']: asset for asset in release['assets']}
+          for name in ('IdolyPride-Local-Server-macOS-arm64.app.zip', 'IdolyPride-Local-Server-macOS-QA.zip'):
+              path = Path('data/dist') / name
+              with path.open('rb') as stream:
+                  digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+              assert assets[name]['size'] == path.stat().st_size and assets[name].get('digest') == 'sha256:' + digest
+              if name.endswith('.app.zip'):
+                  with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
+                      output.write('app_sha256=' + digest + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: macos-server-native-evidence
+          path: data/macos-evidence
+          if-no-files-found: warn
+
+  verify:
+    needs: [prepare, android, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDOLY_RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      IDOLY_PAYLOAD_SHA: ${{ needs.prepare.outputs.payload_sha256 }}
+      IDOLY_APK_SHA: ${{ needs.android.outputs.apk_sha256 }}
+      IDOLY_APP_SHA: ${{ needs.macos.outputs.app_sha256 }}
+    steps:
+      - name: Require all three primary draft assets and verified GitHub digests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/release-verification
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-server-final-draft.json"
+          python3 - "$RUNNER_TEMP/idoly-server-final-draft.json" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import sys
+
+          release = json.loads(Path(sys.argv[1]).read_text())
+          assert release['draft'] is True and release['tag_name'] == os.environ['IDOLY_SERVER_TAG']
+          assets = {asset['name']: asset for asset in release['assets']}
+          expected = {
+              os.environ['IDOLY_PAYLOAD_NAME']: os.environ['IDOLY_PAYLOAD_SHA'],
+              'IdolyPride-Local-Server-Android.apk': os.environ['IDOLY_APK_SHA'],
+              'IdolyPride-Local-Server-macOS-arm64.app.zip': os.environ['IDOLY_APP_SHA'],
+          }
+          names = [*expected, 'IdolyPride-Local-Server-Android-QA.zip', 'IdolyPride-Local-Server-macOS-QA.zip']
+          records, sums = [], []
+          for name in sorted(names):
+              asset = assets.get(name, {})
+              digest = asset.get('digest', '')
+              if asset.get('size', 0) <= 0 or not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
+                  raise SystemExit('Missing or invalid uploaded asset size/digest: ' + name)
+              if name in expected and digest != 'sha256:' + expected[name]:
+                  raise SystemExit('Uploaded bytes differ from the successful build: ' + name)
+              records.append({'name': name, 'bytes': asset['size'], 'digest': digest})
+              sums.append(digest.removeprefix('sha256:') + '  ' + name + '\n')
+          root = Path('data/release-verification')
+          (root / 'SHA256SUMS').write_text(''.join(sums), encoding='ascii')
+          (root / 'RELEASE-VERIFICATION.json').write_text(json.dumps({
+              'draft': True, 'release_id': release['id'], 'tag': release['tag_name'],
+              'source_commit': os.environ['GITHUB_SHA'], 'assets': records,
+              'android_server_emulator_qa_passed': True, 'macos_frozen_engine_and_native_gui_passed': True,
+              'actual_game_client_gameplay_tested': False,
+          }, indent=2) + '\n')
+          PY
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
+          gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
+            data/release-verification/SHA256SUMS data/release-verification/RELEASE-VERIFICATION.json
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-server-v0.2.0"' | grep -qx true
+          {
+            echo 'All three server deliverables and platform QA evidence are present with verified SHA-256 digests.'
+            echo 'The dedicated local-server-v0.2.0 release remains a draft; the existing client release was not modified.'
+            echo 'Home/Tutorial support remains partial. Actual IDOLY PRIDE game-client gameplay is not covered by these app checks.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-server-release-verification
+          path: data/release-verification
+          if-no-files-found: error

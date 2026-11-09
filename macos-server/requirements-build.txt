@@ -1,0 +1,2 @@
+# Build tools only. The final .app includes Python and all server dependencies.
+pyinstaller==6.16.0

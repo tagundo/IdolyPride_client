@@ -1,31 +1,46 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·iOS 클라이언트를 위한 로컬 서버와 연결용 클라이언트 개발 프로젝트입니다. 서버 패키지 이름은 `idolypride-local`입니다. **암호화된 gRPC 통신, 로컬 프로필·로그인, 응답 재생, 별도 설치용 APK·PlayCover IPA 생성**을 구현했습니다. 실제 기기에서 로그인·홈 화면 진입은 아직 검증하지 않았습니다.
+아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 게임 클라이언트의 실제 로그인·홈 화면 진입과 라이브 플레이는 아직 검증하지 않았습니다.
+
+## 앱으로 실행하기
+
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.0에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
+
+| 기기 | 서버 앱 | 게임 클라이언트 |
+| --- | --- | --- |
+| Android ARM64, Android 8 이상 | `IdolyPride-Local-Server-Android.apk` | `IdolyPride-6.1.1-Local-Android.apk` |
+| Apple Silicon Mac, macOS 13 이상 | `IdolyPride-Local-Server-macOS-arm64.app.zip` | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
+
+1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
+2. **아이프라 서버 / 아이프라 로컬 서버**에서 **서버 시작**을 누릅니다.
+3. 실행 중으로 바뀌면 **아이프라 로컬 실행 / 아이프라 열기**를 누릅니다. 게임을 사용하는 동안 서버를 켜 둡니다.
+
+게임과 서버는 **같은 Android 또는 같은 Mac**에서 실행합니다. 기본 주소는 게임 API `127.0.0.1:50051`, 마스터 파일 `127.0.0.1:8080`입니다. 로컬 게임의 식별자는 `game.qualiarts.idolypride.local`, 이름은 **아이프라 로컬**이며 기존 공식 앱과 별도로 설치됩니다. 공식 계정이 자동으로 복원되지는 않습니다.
+
+Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후속 APK를 업데이트 설치하면 DB를 유지합니다. **서버 앱 삭제·데이터 지우기는 로컬 프로필을 삭제합니다.** Mac 데이터는 `~/Library/Application Support/IdolyPrideLocal`에 보관하며 서버 앱의 **데이터 폴더**에서 열 수 있습니다. 자세한 설치·저장 위치·확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)를 참고합니다.
 
 ## 현재 범위
 
 | 기능 | 상태 |
 | --- | --- |
-| protobuf 스키마 로딩·내보내기 | 구현 |
-| 클라이언트 암호화 envelope | SolisClient와 양방향 호환 검증 |
-| `System.Check`, `System.GetMetadata`, `System.CheckApp` | 로컬 응답 구현 |
-| `Auth.Login` | SQLite 단일 로컬 프로필·세션 구현 |
-| `User.Get` | fixture 우선, 다음 SQLite 프로필 snapshot; 없으면 `UNIMPLEMENTED` |
-| `Home.*` 등 | 가져온 fixture 응답 재생; 없으면 `UNIMPLEMENTED` |
-| 신규·기존 로컬 프로필 | 최소 신규 snapshot 생성·기존 `User.Get` snapshot 가져오기 |
-| 기존 공식 세션 보존 | 지정된 5개 읽기 RPC 수집 구현; 실제 세션으로는 미검증 |
-| `Master.Get` | 원본·재구성 MasterTag와 일치하는 로컬 암호화 팩 제공 시 지원 |
-| 원본 마스터 보존·JSON 재구성 | 익명 원본 조회 검증·SQLCipher 팩 재구성 구현 |
-| 실제 게임 진행·계정 데이터의 게임 로직 이식 | 미구현 |
-| Android·PlayCover 연결용 클라이언트 | 주소 변경·로컬 인증 부팅·별도 앱 패키징 구현; 실기 미검증 |
+| 6.1.1 protobuf·암호화 gRPC | 스키마 로딩, SolisClient 양방향 호환, 실제 localhost HTTP/2 교환 검증 |
+| `System.Check`, `System.GetMetadata`, `System.CheckApp`, `Auth.Login` | 로컬 응답·SQLite 프로필·세션 구현 |
+| `User.Get` | 계정별 fixture 우선, 다음 SQLite snapshot 제공 |
+| 홈·설정·튜토리얼 10개 RPC | `Home.Login/Enter/SetReview/SetCharacterPosition`, `Dokan.List`, `Notice.List`, `Master.GetVersion`, `Tutorial.Init/Progress/Skip` 구현 |
+| 신규 앱 프로필 | 마스터 참조를 검증한 시작 캐릭터 5명·의상·헤어, 레벨 1, 빈 덱 생성; 기존 snapshot은 유지 |
+| 공개 약관·도움말 | `Master.Rule`·`Master.GetHelpCategory`의 요청별 공개 응답 10개 동봉 |
+| `Master.Get`·파일 제공 | 현재 원본 마스터 202개·77,283,328바이트 보존·제공 |
+| 기존 계정 보존 | `User.Get` snapshot 가져오기와 제한된 공식 세션 읽기 수집 구현; 실제 계정 수집은 미검증 |
+| 카드 지급·전투·보상·가챠·구매·전체 게임 진행 | 미구현 |
+| 실제 게임 앱의 홈 진입·플레이 | 미검증 |
 
-`serve`·`smoke`는 공식 API에 접속하지 않습니다. `Auth.Login`은 Firebase 토큰을 검증하거나 저장하지 않고 새 로컬 세션을 발급합니다. 게임 아이디·비밀번호 없이 개발용 smoke test를 실행할 수 있습니다. `archive-master`는 인증 없이 공개 마스터를 보존하고, `collect-session`은 기존 세션으로 공식 TLS API의 제한된 읽기 요청을 수행합니다.
+홈·튜토리얼 변경은 SQLite 트랜잭션으로 저장하며 활성 로컬 세션과 알 수 없는 protobuf 필드를 유지합니다. 신규 시작 데이터에는 카드·통화·클리어 보상·전체 해금이 없습니다. 구현된 RPC의 세부 동작과 근거는 [게임 상태 구현 범위](docs/gameplay-status.md)에 정리했습니다. 구현이나 fixture가 없는 RPC는 `UNIMPLEMENTED`입니다.
 
-## 연결용 클라이언트
+`Auth.Login`은 Firebase 토큰을 검증하거나 저장하지 않고 로컬 세션을 발급합니다. 연결용 클라이언트는 공식 Seed·Firebase 인증 부팅을 버전별 네이티브 패치로 대체하고 로컬 `Auth.Login`을 유지합니다. Analytics·스토어 SDK와 Octo 리소스 경로는 남아 있으므로 완전한 오프라인 플레이를 의미하지 않습니다.
 
-6.1.1 원본에서 Android APK와 PlayCover용 IPA를 생성합니다. 기본 서버 주소는 `http://127.0.0.1:50051`이며 같은 Android의 Termux 서버 또는 같은 MacBook의 서버에 연결합니다. 두 앱의 식별자는 `game.qualiarts.idolypride.local`, 표시 이름은 `아이프라 로컬`입니다.
+## 개발용 클라이언트 패키징
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에 APK·IPA와 `ServerData.zip` 개발용 빌드를 제공합니다. 서버 데이터 ZIP은 저장소 루트에 풀어 사용하는 스키마·원본 마스터 묶음이며 계정 정보는 포함하지 않습니다.
+아래는 원본 6.1.1에서 연결용 게임 클라이언트를 다시 만드는 개발 명령입니다. 배포된 APK·IPA를 사용하는 경우 실행하지 않습니다.
 
 ```sh
 # Android: JDK, Android SDK build-tools, APKEditor.jar 필요
@@ -35,11 +50,11 @@ uv run --all-extras python tools/package_android_client.py /path/to/client.xapk 
 uv run --all-extras python tools/patch_ios_client.py /path/to/client-decrypted.ipa --output data/clients/local.ipa
 ```
 
-다른 서버 주소는 `--endpoint http://192.168.0.10:50051`로 지정합니다. 설치·서버 준비 절차와 확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)에 정리했습니다.
+다른 API 주소는 `--endpoint http://192.168.0.10:50051`로 지정합니다. 기본 패치는 알려진 6.1.1 원본의 해시·진입 바이트를 확인하며 다른 바이너리는 거부합니다. 서버 앱 빌드는 [Android](android-server/README.md)·[macOS](macos-server/README.md) 문서를 참고합니다.
 
-연결용 빌드는 공식 seed·Firebase 로그인 초기화 대신 로컬 서버의 `Auth.Login`을 호출하도록 버전별 네이티브 패치 6개를 적용합니다. ARM64 반환 ABI, 앱 서명·패키징, 모든 protobuf 스키마 보존을 검증했습니다. Analytics·스토어 SDK 호출과 미구현 게임 API가 남아 있으므로 완전한 오프라인 플레이를 의미하지 않습니다.
+## 개발용 소스 실행
 
-## 시작하기
+앱 설치 대신 서버 코드를 개발·시험하는 경우의 절차입니다. 일반 사용자는 위의 서버 앱을 사용합니다. Termux·소스 실행 helper는 [설치 안내의 개발용 절차](docs/client-setup.md#개발용-소스termux-실행)를 참고합니다.
 
 Python 3.12 이상과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 새 clone에는 게임 파일·추출 스키마가 포함되지 않으므로, 먼저 releases에서 받은 6.1.1 XAPK로 스키마를 준비합니다. 이 저장소 루트에서 실행합니다.
 
@@ -87,7 +102,7 @@ uv run idoly-local new-profile sandbox --manager-name '로컬 매니저'
 uv run idoly-local serve --profile sandbox
 ```
 
-신규 프로필은 매니저 이름·레벨 1·로컬 식별자만 초기화합니다. 카드 지급, 튜토리얼 완료, 콘텐츠 해금은 구현하지 않았으며 이 snapshot만으로 홈 진입이 보장되지 않습니다.
+위 CLI의 `new-profile`은 매니저 이름·레벨 1·로컬 식별자만 초기화하는 최소 프로필입니다. 배포 서버 앱은 별도의 신규 전용 초기화로 마스터에서 검증한 시작 캐릭터 5명·외형과 빈 덱을 준비합니다. 기존 snapshot에는 자동 적용하지 않습니다. 카드 지급·전투·보상은 구현하지 않았으며 실제 게임의 홈 진입은 미검증입니다.
 
 기존 계정의 복호화된 `User.Get` 응답이 있으면 그대로 보존할 수 있습니다.
 
@@ -150,7 +165,7 @@ uv run idoly-local import-response /api.User/Get /path/to/user.pb --request /pat
 
 `--wire` 입력에는 gRPC의 5바이트 프레임 헤더를 포함하지 않습니다. 요청별 fixture는 요청 바이트의 SHA-256으로 구분하며, 일치하는 fixture가 일반 fixture보다 우선합니다. 응답은 스키마로 파싱 가능한지 확인한 뒤 저장합니다. `Auth.*` 응답은 가져올 수 없습니다.
 
-이 기능은 고정 응답을 재생합니다. 계정 상태를 게임 데이터 모델로 이식하거나 이후 게임 진행을 계산하는 기능은 아직 없습니다. 응답에는 개인 게임 데이터가 포함될 수 있으므로 `data/`와 원본 캡처는 로컬에 보관합니다. `data/`, `private/`, DB, APK·IPA, 인증서·키는 Git에서 제외합니다.
+fixture는 고정 응답을 재생하며 일치하는 로컬 동작보다 우선합니다. 홈 설정·배치·튜토리얼의 일부 상태 변경은 별도 핸들러가 저장하지만, 기존 계정 전체의 게임 진행을 계산하는 기능은 아직 없습니다. 응답에는 개인 게임 데이터가 포함될 수 있으므로 `data/`와 원본 캡처는 로컬에 보관합니다. `data/`, `private/`, DB, APK·IPA, 인증서·키는 Git에서 제외합니다.
 
 ## 마스터 팩 제공
 
@@ -192,15 +207,15 @@ uv run idoly-local serve \
 
 예시 IP는 서버 PC의 실제 LAN 주소로 바꿉니다. `--asset-base-url`은 게임 기기에서 접근 가능한 origin이어야 합니다. 서버는 파일명·크기·경로를 검증하고 다운로드 URL만 `/master/<fileName>`으로 바꿉니다. 버전, 암호화 키, 팩 바이트는 유지합니다. HTTP 서버는 `GET`·`HEAD`·단일 byte range를 지원하며 누락 파일을 자동 다운로드하지 않습니다.
 
-gRPC TLS는 `--tls-cert`와 `--tls-key`를 함께 지정하면 사용할 수 있습니다. Android·iOS 클라이언트의 채널 주소 변경과 인증서 신뢰는 별도 구현이 필요합니다.
+gRPC TLS는 `--tls-cert`와 `--tls-key`를 함께 지정하면 사용할 수 있습니다. 배포 연결용 클라이언트는 같은 기기의 HTTP/2 cleartext 주소를 사용합니다. 별도 HTTPS 서버에는 해당 주소와 인증서 신뢰 설정이 필요합니다.
 
 ## 보존 우선순위
 
 1. 사용 중인 Android·iOS 클라이언트와 해시, 버전별 protobuf descriptor를 보존합니다.
 2. 원본 MasterTag 응답, 버전별 암호화 MasterDB 팩, Octo manifest와 실제 CDN 파일을 함께 보존합니다.
 3. 서비스 이용이 가능한 동안 본인 계정의 부팅·홈·라이브·스토리 응답을 수집하고, 인증 토큰을 fixture에서 제외합니다.
-4. 두 플랫폼의 로컬 주소 변경·TLS 경로를 구현한 뒤 실제 로그인·홈 화면 진입을 검증합니다.
-5. 고정 응답 재생을 유저 상태 저장과 게임 로직으로 대체합니다.
+4. 배포한 Android·PlayCover 연결용 클라이언트로 실제 로그인·홈 진입을 검증하고 누락된 요청을 확인합니다.
+5. 홈·튜토리얼 상태 보존을 바탕으로 전투·보상 등 게임 로직을 구현합니다.
 
 확인한 Octo revision 1087에는 AssetBundle 49,370개와 resource 5,072개가 있으며 원본 합계는 **39,322,868,160바이트**입니다. 현재 manifest 보존은 완료됐지만 실제 CDN 파일 전체 보존을 뜻하지 않습니다. 분석 환경의 남은 공간 약 30GB보다 크므로 전체 보존에는 추가 공간이 필요합니다.
 
@@ -218,7 +233,7 @@ gRPC TLS는 `--tls-cert`와 `--tls-key`를 함께 지정하면 사용할 수 있
 | [idoly-musics](https://github.com/tagundo/idoly-musics) | 음악 메타데이터 참고 |
 | [mitmproxy](https://github.com/mitmproxy/mitmproxy), [jadx](https://github.com/skylot/jadx), [REA](https://github.com/morluto/rea) | 통신·APK·네이티브 분석 도구 |
 
-기존 참고 저장소는 수정하지 않았습니다. 전송 형식과 확인 범위는 [프로토콜 메모](docs/protocol.md)에 정리했습니다.
+elichika에서는 요청별 상태 처리, SQLite 영속성, 메모리 마스터 조회와 로컬 파일 제공 구조를 참고했습니다. SIFAS의 인증·암호화·게임 규칙을 그대로 사용하지 않고 아이돌리 프라이드 6.1.1의 protobuf·envelope·세션에 맞춰 별도로 구현했습니다. 기존 참고 저장소는 수정하지 않았습니다. 전송 형식과 확인 범위는 [프로토콜 메모](docs/protocol.md)에 정리했습니다.
 
 ## 검증·라이선스
 

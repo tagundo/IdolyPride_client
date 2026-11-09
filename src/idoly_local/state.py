@@ -33,6 +33,11 @@ class State:
                     response BLOB NOT NULL,
                     schema_sha256 TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS profile_settings (
+                    profile TEXT PRIMARY KEY REFERENCES profiles(name),
+                    response BLOB NOT NULL,
+                    schema_sha256 TEXT NOT NULL
+                );
             """)
         path.chmod(0o600)
 
@@ -100,6 +105,36 @@ class State:
         with self.connect() as db:
             row = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?", (profile,)).fetchone()
             return (bytes(row["response"]), row["schema_sha256"]) if row is not None else None
+
+    def settings(self, profile: str) -> tuple[bytes, str] | None:
+        with self.connect() as db:
+            row = db.execute("SELECT response,schema_sha256 FROM profile_settings WHERE profile=?", (profile,)).fetchone()
+            return (bytes(row["response"]), row["schema_sha256"]) if row is not None else None
+
+    def mutate_snapshot(self, profile: str, schema_sha256: str, callback, *, setting_info: bytes | None = None) -> bytes:
+        """Apply a game action atomically, preserving the active local session.
+
+        Import deliberately invalidates sessions; ordinary game updates do not.
+        Callback or settings failures roll back the entire action.
+        """
+        if setting_info is not None and not isinstance(setting_info, bytes):
+            raise ValueError("Settings must be protobuf bytes")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?", (profile,)).fetchone()
+            if row is None:
+                raise ValueError("Local profile has no snapshot")
+            if row["schema_sha256"] != schema_sha256:
+                raise ValueError("Local profile snapshot uses a different schema")
+            payload = callback(bytes(row["response"]))
+            if not isinstance(payload, bytes):
+                raise ValueError("Snapshot mutation must return protobuf bytes")
+            db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            if setting_info is not None:
+                db.execute("INSERT INTO profile_settings VALUES (?,?,?) ON CONFLICT(profile) DO UPDATE SET "
+                           "response=excluded.response,schema_sha256=excluded.schema_sha256",
+                           (profile, setting_info, schema_sha256))
+        return payload
 
     def authenticated(self, token: str, profile: str) -> bool:
         if not token:

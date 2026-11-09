@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">아이프라 서버</string>
+    <string name="server_description">이 기기에서 아이프라 로컬 서버를 실행합니다.</string>
+    <string name="start_server">서버 시작</string>
+    <string name="stop_server">서버 중지</string>
+    <string name="launch_client">아이프라 로컬 실행</string>
+    <string name="client_missing">아이프라 로컬 클라이언트 APK를 먼저 설치해 주세요.</string>
+    <string name="client_launch_failed">로컬 클라이언트를 열지 못했습니다.</string>
+    <string name="server_start_failed">서버 서비스를 시작하지 못했습니다.</string>
+    <string name="server_ports">이 기기 · 127.0.0.1
+게임 연결 50051 · 파일 전송 8080</string>
+    <string name="server_logs">서버 기록</string>
+    <string name="waiting_logs">서버를 시작하면 진행 상황이 표시됩니다.</string>
+    <string name="status_stopped">중지됨</string>
+    <string name="status_starting">시작 중</string>
+    <string name="status_running">실행 중</string>
+    <string name="status_stopping">중지 중</string>
+    <string name="status_failed">시작 실패</string>
+    <string name="notification_channel">로컬 서버 실행</string>
+    <string name="notification_text">127.0.0.1 · 게임 50051 / 파일 8080</string>
+    <string name="first_launch_note">첫 실행에서는 포함된 서버 데이터를 준비합니다. 기존 로컬 계정과 저장 데이터는 유지됩니다.</string>
+</resources>
