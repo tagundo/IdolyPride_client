@@ -29,9 +29,14 @@ def fixture(tmp_path):
     rows = {"Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": list(qa.PHOTO_CHARACTERS)}],
         "Character": [], "Costume": [], "Hair": [],
         "CharacterActivityLevel": [{"level": 1, "maxStamina": 800}],
-        "Area": [{"id": "area-1", "type": 1, "order": 1, "areaGroupId": "group-1", "questIds": ["quest-1"]}],
-        "AreaGroup": [{"id": "group-1", "order": 1, "areaIds": ["area-1"]}],
-        "Quest": [{"id": "quest-1", "areaId": "area-1"}],
+        "Area": [{"id": "area-1", "type": 1, "order": 1, "areaGroupId": "group-1", "questIds": ["quest-1"]},
+                 {"id": "area-tutorial", "type": 101, "areaGroupId": "area-main-group-999", "questIds": ["qt-tutorial-full", "qt-tutorial-short"]},
+                 {"id": "area-contest-001", "type": 2, "questIds": ["contest-" + str(i) for i in range(23)]}],
+        "AreaGroup": [{"id": "group-1", "order": 1, "areaIds": ["area-1"]},
+                      {"id": "area-main-group-999", "order": 999, "areaIds": ["area-tutorial"]}],
+        "Quest": [{"id": "quest-1", "areaId": "area-1"},
+                  {"id": "qt-tutorial-full", "areaId": "area-tutorial"}, {"id": "qt-tutorial-short", "areaId": "area-tutorial"},
+                  *({"id": "contest-" + str(i), "areaId": "area-contest-001"} for i in range(23))],
         "HierarchyGrade": [{"id": "hie-007"}],
         "HierarchyDetailGrade": [{"id": "hie-007-003", "hierarchyGradeId": "hie-007",
                                   "requiredHierarchyPoint": "0", "requiredHierarchyRank": 0}]}
@@ -137,7 +142,7 @@ def test_both_native_legacy_fixture_cycles_preserve_all_allowed_state(fixture, t
 
 def test_quest_qa_checks_catalog_and_does_not_accept_a_fabricated_clear(fixture):
     from idoly_local.quest import Quest
-    schema, master, _token, files, _user = fixture
+    schema, master, _token, files, user = fixture
     # Open the recovered source DB through State rather than manufacturing responses.
     import tempfile
     with tempfile.TemporaryDirectory() as directory:
@@ -147,8 +152,45 @@ def test_quest_qa_checks_catalog_and_does_not_accept_a_fabricated_clear(fixture)
         handler = Quest(schema, State(path), "sandbox", master)
         top = schema.response_type("/api.Quest/Top").FromString(handler.handle("/api.Quest/Top", b""))
         main = schema.response_type("/api.Quest/ListMain").FromString(handler.handle("/api.Quest/ListMain", b""))
-        assert qa.assert_quest_catalog(top, main, master) == "quest-1"
+        assert qa.assert_quest_catalog(top, main, master, user) == "quest-1"
         top.mainAreaGroups[0].areas[0].quests[0].cleared = True
         main.areaGroups[0].areas[0].quests[0].cleared = True
         with pytest.raises(RuntimeError, match="uncleared playable quest"):
-            qa.assert_quest_catalog(top, main, master)
+            qa.assert_quest_catalog(top, main, master, user)
+
+
+def test_quest_qa_requires_contest_and_the_snapshot_tutorial_context(fixture):
+    from idoly_local.quest import Quest
+    import tempfile
+    schema, master, _token, files, user = fixture
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "state.db"
+        path.write_bytes(files[qa.PRIVATE_DATABASE])
+        path.with_name("state.db-wal").write_bytes(files[qa.PRIVATE_DATABASE + "-wal"])
+        state = State(path)
+        handler = Quest(schema, state, "sandbox", master)
+        def responses():
+            return tuple(schema.response_type(method).FromString(handler.handle(method, b""))
+                         for method in ("/api.Quest/Top", "/api.Quest/ListMain"))
+        top, main = responses()
+        top.ClearField("contestArea")
+        with pytest.raises(RuntimeError, match="23 real contest quests"):
+            qa.assert_quest_catalog(top, main, master, user)
+        top, main = responses()
+        top.contestArea.quests[0].campaignDropRewardIds.append("fabricated")
+        with pytest.raises(RuntimeError, match="23 real contest quests"):
+            qa.assert_quest_catalog(top, main, master, user)
+        top, main = responses()
+        del top.mainAreaGroups[-1]
+        del main.areaGroups[-1]
+        with pytest.raises(RuntimeError, match="actual bundled main-live catalog"):
+            qa.assert_quest_catalog(top, main, master, user)
+        def completed(payload):
+            snapshot = schema.response_type("/api.User/Get").FromString(payload)
+            snapshot.tutorials[0].step = 150
+            return snapshot.SerializeToString()
+        state.mutate_snapshot("sandbox", schema.fingerprint, completed)
+        done = schema.response_type("/api.User/Get").FromString(state.snapshot("sandbox")[0])
+        top, main = responses()
+        assert qa.assert_quest_catalog(top, main, master, done) == "quest-1"
+        assert len(top.mainAreaGroups) == 1 and not qa.tutorial_pending(done)

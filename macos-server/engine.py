@@ -178,7 +178,14 @@ def _home_positions_distinct(user):
             and next(row.characterId for row in positions if row.homePositionType == 1) == "char-ktn")
 
 
-def _quest_catalog_reference(top, main, data_dir):
+def _quest_tutorial_pending(user):
+    starts = [row for row in user.tutorials if row.tutorialType == 1]
+    if len(starts) > 1 or starts and starts[0].step < 0:
+        raise RuntimeError("Quest smoke check needs an unambiguous GameStart tutorial state")
+    return not starts or starts[0].step < 150
+
+
+def _quest_catalog_reference(top, main, data_dir, user):
     """Check encrypted responses against the bundled public table references."""
     if ([group.SerializeToString() for group in top.mainAreaGroups]
             != [group.SerializeToString() for group in main.areaGroups]):
@@ -196,7 +203,14 @@ def _quest_catalog_reference(top, main, data_dir):
         return {row["id"]: row for row in values}
 
     groups, areas, quests = rows("AreaGroup"), rows("Area"), rows("Quest")
-    main_ids = {key for key, row in areas.items() if row.get("type") == 1}
+    tutorial_pending = _quest_tutorial_pending(user)
+    normal_ids = {key for key, row in areas.items() if row.get("type") == 1}
+    tutorial_ids = {key for key, row in areas.items() if row.get("type") == 101}
+    main_ids = normal_ids | tutorial_ids if tutorial_pending else normal_ids
+    if tutorial_pending and (tutorial_ids != {"area-tutorial"}
+            or areas["area-tutorial"].get("areaGroupId") != "area-main-group-999"
+            or areas["area-tutorial"].get("questIds") != ["qt-tutorial-full", "qt-tutorial-short"]):
+        raise RuntimeError("Pending GameStart needs the real tutorial group and full/short quest alternatives")
     ordered_groups = sorted(groups.values(), key=lambda row: (int(row.get("order", 0)), row["id"]))
     expected_groups = []
     for group in ordered_groups:
@@ -226,10 +240,28 @@ def _quest_catalog_reference(top, main, data_dir):
                 if (quest_id in seen_quests or quest_id not in quests
                         or quests[quest_id].get("areaId") != area_id):
                     raise RuntimeError("Quest does not belong to its bundled main area")
+                if output_quest.campaignDropRewardIds:
+                    raise RuntimeError("Local quest catalog advertised an unsupported campaign")
                 seen_quests.add(quest_id)
-    if not main_ids or seen_areas != main_ids or not seen_quests:
+            if area_id in tutorial_ids and (not output_area.unlocked
+                    or not all(quest.isPlayable for quest in output_area.quests)):
+                raise RuntimeError("Pending tutorial full/short alternatives must be available")
+    if not normal_ids or seen_areas != main_ids or not seen_quests:
         raise RuntimeError("Quest responses did not cover the bundled main catalog")
-    first_area = top.mainAreaGroups[0].areas[0]
+    contest_rows = [row for row in areas.values() if row.get("type") == 2]
+    if len(contest_rows) != 1 or contest_rows[0]["id"] != "area-contest-001":
+        raise RuntimeError("Quest.Top needs the real type-2 contest area")
+    contest = contest_rows[0]
+    contest_ids = contest.get("questIds")
+    if (not isinstance(contest_ids, list) or len(contest_ids) != 23 or len(set(contest_ids)) != 23
+            or any(key not in quests or quests[key].get("areaId") != contest["id"] for key in contest_ids)):
+        raise RuntimeError("Bundled contest area must reference its 23 real quests")
+    if (not top.HasField("contestArea") or top.contestArea.areaId != contest["id"]
+            or [quest.questId for quest in top.contestArea.quests] != contest_ids
+            or top.contestArea.unlocked
+            or any(quest.isPlayable or quest.playableCount or quest.campaignDropRewardIds for quest in top.contestArea.quests)):
+        raise RuntimeError("Quest.Top contest catalog must be complete, locked, unplayable and campaign-free")
+    first_area = next(area for group in top.mainAreaGroups for area in group.areas if area.areaId in normal_ids)
     first_quest = first_area.quests[0]
     if not first_area.unlocked or not first_quest.isPlayable or first_quest.cleared:
         raise RuntimeError("Fresh starter's first main quest must be playable and uncleared")
@@ -251,6 +283,7 @@ def smoke(data_dir, server_data, report_path):
               "home_hierarchy_reference": False, "home_fish_heaven_absent": False,
               "starter_roster_complete": False, "home_positions_distinct": False,
               "quest_top_list_main": False, "quest_catalog_readonly": False,
+              "quest_contest_area_locked": False, "quest_tutorial_context": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     try:
@@ -300,7 +333,13 @@ def smoke(data_dir, server_data, report_path):
         saved_before_quests = State(Path(data_dir) / "state.db").snapshot("sandbox")
         top = _rpc(address, schema, "/api.Quest/Top", token=token)
         main = _rpc(address, schema, "/api.Quest/ListMain", token=token)
-        report["quest_catalog_first_quest"] = _quest_catalog_reference(top, main, data_dir)
+        report["quest_catalog_first_quest"] = _quest_catalog_reference(top, main, data_dir, before)
+        report["quest_catalog_group_count"] = len(top.mainAreaGroups)
+        report["quest_catalog_area_count"] = sum(len(group.areas) for group in top.mainAreaGroups)
+        report["quest_catalog_quest_count"] = sum(len(area.quests) for group in top.mainAreaGroups for area in group.areas)
+        report["quest_contest_quest_count"] = len(top.contestArea.quests)
+        report["quest_tutorial_pending"] = _quest_tutorial_pending(before)
+        report["quest_contest_area_locked"] = report["quest_tutorial_context"] = True
         report["quest_top_list_main"] = True
         after_quests = _rpc(address, schema, "/api.User/Get", token=token)
         report["quest_catalog_readonly"] = (
@@ -357,7 +396,8 @@ def smoke(data_dir, server_data, report_path):
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
                 "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "home_positions_distinct",
-                "quest_top_list_main", "quest_catalog_readonly", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+                "quest_top_list_main", "quest_catalog_readonly", "quest_contest_area_locked", "quest_tutorial_context",
+                "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
 

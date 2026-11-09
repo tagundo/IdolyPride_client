@@ -65,12 +65,17 @@ def quest_catalog(tmp_path):
     rows = {
         "AreaGroup": [{"id": "later", "order": 20, "areaIds": ["a3"]},
                       {"id": "first", "order": 10, "areaIds": ["a2", "a1"]},
-                      {"id": "tutorial", "order": 999, "areaIds": ["tutorial"]}],
+                      {"id": "area-main-group-999", "order": 999, "areaIds": ["area-tutorial"]}],
         "Area": [{"id": key, "type": 1, "areaGroupId": "later" if key == "a3" else "first",
                   "questIds": [key + "-q2", key + "-q1"]} for key in ("a1", "a2", "a3")]
-                + [{"id": "tutorial", "type": 101, "questIds": ["tutorial-q"]}],
+                + [{"id": "area-tutorial", "type": 101, "areaGroupId": "area-main-group-999",
+                    "questIds": ["qt-tutorial-full", "qt-tutorial-short"]},
+                   {"id": "area-contest-001", "type": 2,
+                    "questIds": ["contest-q" + str(i) for i in range(23)]}],
         "Quest": [{"id": key + suffix, "areaId": key} for key in ("a1", "a2", "a3")
-                  for suffix in ("-q1", "-q2")] + [{"id": "tutorial-q", "areaId": "tutorial"}],
+                  for suffix in ("-q1", "-q2")]
+                 + [{"id": key, "areaId": "area-tutorial"} for key in ("qt-tutorial-full", "qt-tutorial-short")]
+                 + [{"id": "contest-q" + str(i), "areaId": "area-contest-001"} for i in range(23)],
         "HierarchyDetailGrade": [{"id": "detail", "hierarchyGradeId": "grade"}],
         "HierarchyGrade": [{"id": "grade"}],
     }
@@ -87,7 +92,15 @@ def quest_catalog(tmp_path):
                 area.quests.add(questId=area_id + suffix)
     top.mainAreaGroups[0].areas[0].unlocked = True
     top.mainAreaGroups[0].areas[0].quests[0].isPlayable = True
-    return schema, top, rows, tmp_path
+    tutorial = top.mainAreaGroups.add(areaGroupId="area-main-group-999").areas.add(areaId="area-tutorial", unlocked=True)
+    for key in ("qt-tutorial-full", "qt-tutorial-short"):
+        tutorial.quests.add(questId=key, isPlayable=True)
+    top.contestArea.areaId = "area-contest-001"
+    for i in range(23):
+        top.contestArea.quests.add(questId="contest-q" + str(i))
+    user = schema.response_type("/api.User/Get")()
+    user.tutorials.add(tutorialType=1, step=0)
+    return schema, top, rows, tmp_path, user
 
 
 def _matching_main(schema, top):
@@ -97,15 +110,15 @@ def _matching_main(schema, top):
 
 
 def test_quest_catalog_uses_real_group_order_and_explicit_child_references(quest_catalog):
-    schema, top, _rows, directory = quest_catalog
-    assert engine._quest_catalog_reference(top, _matching_main(schema, top), directory) == "a2-q2"
+    schema, top, _rows, directory, user = quest_catalog
+    assert engine._quest_catalog_reference(top, _matching_main(schema, top), directory, user) == "a2-q2"
 
 
 @pytest.mark.parametrize("changed", ("different-list", "group-order", "area-order", "quest-order",
                                     "missing-pvp", "missing-hierarchy", "locked-first", "cleared-first",
                                     "wrong-area-parent", "wrong-quest-parent", "missing-main-area"))
 def test_quest_catalog_rejects_mismatched_references_or_unusable_first_quest(quest_catalog, changed):
-    schema, top, rows, directory = quest_catalog
+    schema, top, rows, directory, user = quest_catalog
     if changed == "group-order":
         copy = type(top)()
         copy.CopyFrom(top)
@@ -137,7 +150,63 @@ def test_quest_catalog_rejects_mismatched_references_or_unusable_first_quest(que
     if changed == "different-list":
         main.areaGroups[0].areas[0].quests[0].highestScore = 10
     with pytest.raises(RuntimeError):
-        engine._quest_catalog_reference(top, main, directory)
+        engine._quest_catalog_reference(top, main, directory, user)
+
+
+@pytest.mark.parametrize("step", (None, 0, 149, 150, 151))
+def test_quest_catalog_tutorial_group_follows_actual_game_start_step(quest_catalog, step):
+    schema, top, _rows, directory, user = quest_catalog
+    if step is None:
+        del user.tutorials[:]
+    else:
+        user.tutorials[0].step = step
+    if step is not None and step >= 150:
+        del top.mainAreaGroups[-1]
+    assert engine._quest_catalog_reference(top, _matching_main(schema, top), directory, user) == "a2-q2"
+
+
+@pytest.mark.parametrize("changed", ("missing-contest", "empty-contest", "wrong-contest-id", "contest-unlocked",
+                                    "contest-playable", "contest-quota", "contest-campaign", "contest-order", "contest-parent",
+                                    "missing-tutorial", "completed-tutorial-present", "tutorial-locked",
+                                    "tutorial-unplayable", "tutorial-alternative-missing", "tutorial-campaign",
+                                    "ambiguous-tutorial"))
+def test_quest_catalog_rejects_incomplete_contest_or_wrong_tutorial_context(quest_catalog, changed):
+    schema, top, rows, directory, user = quest_catalog
+    if changed == "missing-contest":
+        top.ClearField("contestArea")
+    elif changed == "empty-contest":
+        del top.contestArea.quests[:]
+    elif changed == "wrong-contest-id":
+        top.contestArea.areaId = "unknown"
+    elif changed == "contest-unlocked":
+        top.contestArea.unlocked = True
+    elif changed == "contest-playable":
+        top.contestArea.quests[0].isPlayable = True
+    elif changed == "contest-quota":
+        top.contestArea.quests[0].playableCount = 1
+    elif changed == "contest-campaign":
+        top.contestArea.quests[0].campaignDropRewardIds.append("unsupported")
+    elif changed == "contest-order":
+        top.contestArea.quests[0].questId = "contest-q1"
+    elif changed == "contest-parent":
+        rows["Quest"][-1]["areaId"] = "a1"
+        (directory / "master-json/Quest.json").write_text(json.dumps(rows["Quest"]))
+    elif changed == "missing-tutorial":
+        del top.mainAreaGroups[-1]
+    elif changed == "completed-tutorial-present":
+        user.tutorials[0].step = 150
+    elif changed == "tutorial-locked":
+        top.mainAreaGroups[-1].areas[0].unlocked = False
+    elif changed == "tutorial-unplayable":
+        top.mainAreaGroups[-1].areas[0].quests[1].isPlayable = False
+    elif changed == "tutorial-alternative-missing":
+        del top.mainAreaGroups[-1].areas[0].quests[1]
+    elif changed == "tutorial-campaign":
+        top.mainAreaGroups[-1].areas[0].quests[0].campaignDropRewardIds.append("unsupported")
+    elif changed == "ambiguous-tutorial":
+        user.tutorials.add(tutorialType=1, step=150)
+    with pytest.raises(RuntimeError):
+        engine._quest_catalog_reference(top, _matching_main(schema, top), directory, user)
 
 
 class Runtime:

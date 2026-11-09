@@ -160,21 +160,35 @@ def _legacy_home_projection(user):
     return projected
 
 
-def assert_quest_catalog(top, main, master_dir):
+def tutorial_pending(user):
+    starts = [row for row in user.tutorials if row.tutorialType == 1]
+    if len(starts) > 1 or starts and starts[0].step < 0:
+        raise RuntimeError("Invalid GameStart tutorial context in the tested user snapshot")
+    return not starts or starts[0].step < 150
+
+
+def assert_quest_catalog(top, main, master_dir, user):
     """Compare encrypted read-only responses with the actual bundled catalog."""
     master_dir = Path(master_dir)
     tables = {name: json.loads((master_dir / (name + ".json")).read_text())
               for name in ("AreaGroup", "Area", "Quest")}
     areas = {row["id"]: row for row in tables["Area"]}
     quests = {row["id"]: row for row in tables["Quest"]}
+    pending = tutorial_pending(user)
+    active_types = {1, 101} if pending else {1}
+    tutorial_rows = [row for row in tables["Area"] if row["type"] == 101]
+    if pending and (len(tutorial_rows) != 1 or tutorial_rows[0]["id"] != "area-tutorial"
+                    or tutorial_rows[0].get("areaGroupId") != "area-main-group-999"
+                    or tutorial_rows[0].get("questIds") != ["qt-tutorial-full", "qt-tutorial-short"]):
+        raise RuntimeError("Pending GameStart needs the actual group999 tutorial full/short alternatives")
     expected = []
     for group in sorted(tables["AreaGroup"], key=lambda row: (int(row.get("order", 0)), row["id"])):
-        if not any(areas[key]["type"] == 1 for key in group["areaIds"]):
+        if not any(areas[key]["type"] in active_types for key in group["areaIds"]):
             continue
         group_areas = []
         for key in group["areaIds"]:
             area = areas[key]
-            if area["type"] != 1 or area["areaGroupId"] != group["id"]:
+            if area["type"] not in active_types or area["areaGroupId"] != group["id"]:
                 raise RuntimeError("Bundled main-live area does not resolve to its group")
             if any(quests[quest_id]["areaId"] != key for quest_id in area["questIds"]):
                 raise RuntimeError("Bundled main-live quest does not resolve to its area")
@@ -185,13 +199,33 @@ def assert_quest_catalog(top, main, master_dir):
     if (not expected or actual != expected or [row.SerializeToString() for row in top.mainAreaGroups]
             != [row.SerializeToString() for row in main.areaGroups]):
         raise RuntimeError("Quest.Top/ListMain groups do not match the actual bundled main-live catalog")
-    first_area = top.mainAreaGroups[0].areas[0]
+    tutorial_areas = [area for group in top.mainAreaGroups for area in group.areas
+                      if areas[area.areaId]["type"] == 101]
+    if (pending and not tutorial_areas or not pending and tutorial_areas
+            or any(not area.unlocked or not area.quests or any(not row.isPlayable for row in area.quests)
+                   for area in tutorial_areas)):
+        raise RuntimeError("Quest.Top/ListMain omitted or misrepresented the user's tutorial context")
+    if any(row.campaignDropRewardIds for group in top.mainAreaGroups for area in group.areas for row in area.quests):
+        raise RuntimeError("Read-only quest catalog fabricated campaign rewards")
+    first_area = next(area for group in top.mainAreaGroups for area in group.areas
+                      if areas[area.areaId]["type"] == 1)
     first = first_area.quests[0]
     if not first_area.unlocked or not first.isPlayable or first.cleared:
         raise RuntimeError("Fresh main-live catalog did not expose the first uncleared playable quest")
     if (not top.HasField("pvpInfo") or top.pvpInfo.HasField("latestPvpSeason")
             or not top.HasField("hierarchyNotiInfo") or not top.hierarchyNotiInfo.currentDetailGradeId):
         raise RuntimeError("Quest.Top omitted required containers or fabricated a competitive season")
+    contests = [row for row in tables["Area"] if row["type"] == 2]
+    if len(contests) != 1 or contests[0]["id"] != "area-contest-001":
+        raise RuntimeError("Bundled contest catalog does not contain the actual type-2 area")
+    contest = contests[0]
+    expected_contest = contest["questIds"]
+    if (len(expected_contest) != 23 or len(set(expected_contest)) != 23
+            or any(quests[key]["areaId"] != contest["id"] for key in expected_contest)
+            or not top.HasField("contestArea") or top.contestArea.areaId != contest["id"]
+            or top.contestArea.unlocked or [row.questId for row in top.contestArea.quests] != expected_contest
+            or any(row.isPlayable or row.playableCount or row.campaignDropRewardIds for row in top.contestArea.quests)):
+        raise RuntimeError("Quest.Top must expose all 23 real contest quests as locked, unplayable and without campaigns")
     return first.questId
 
 
@@ -376,7 +410,13 @@ def main():
         result["home_positions_distinct"] = True
         quest_top = rpc(schema, grpc_port, "/api.Quest/Top", login.gameAuthToken)
         quest_main = rpc(schema, grpc_port, "/api.Quest/ListMain", login.gameAuthToken)
-        result["quest_catalog_first_quest"] = assert_quest_catalog(quest_top, quest_main, args.master_dir)
+        result["quest_catalog_first_quest"] = assert_quest_catalog(quest_top, quest_main, args.master_dir, user)
+        result.update(quest_contest_area_locked=True, quest_tutorial_context=True,
+                      quest_tutorial_pending=tutorial_pending(user),
+                      quest_contest_quest_count=len(quest_top.contestArea.quests),
+                      quest_catalog_group_count=len(quest_top.mainAreaGroups),
+                      quest_catalog_area_count=sum(len(group.areas) for group in quest_top.mainAreaGroups),
+                      quest_catalog_quest_count=sum(len(area.quests) for group in quest_top.mainAreaGroups for area in group.areas))
         quest_user = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if quest_user.SerializeToString(deterministic=True) != user.SerializeToString(deterministic=True):
             raise RuntimeError("Read-only Quest.Top/ListMain mutated the local user snapshot")
