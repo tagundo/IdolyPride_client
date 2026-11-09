@@ -134,12 +134,12 @@ def master_dir(tmp_path):
     directory = tmp_path / "master"
     directory.mkdir()
     rows = {
-        "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": ["char-a", "char-b"]}],
+        "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": ["char-a", "char-b", "char-c", "char-d"]}],
         "Character": [{"id": "char-" + key, "type": 1, "defaultCostumeId": "costume-" + key,
-                       "defaultLiveCostumeId": "costume-" + key} for key in ("a", "b")],
+                       "defaultLiveCostumeId": "costume-" + key} for key in ("a", "b", "c", "d")],
         "Costume": [{"id": "costume-" + key, "characterId": "char-" + key, "defaultHairId": "hair-" + key}
-                    for key in ("a", "b")],
-        "Hair": [{"id": "hair-" + key, "characterId": "char-" + key} for key in ("a", "b")],
+                    for key in ("a", "b", "c", "d")],
+        "Hair": [{"id": "hair-" + key, "characterId": "char-" + key} for key in ("a", "b", "c", "d")],
         "Area": [{"id": "area-main-001", "type": 1, "order": 1, "questIds": ["quest-1"]},
                  {"id": "area-main-002", "type": 1, "order": 2, "questIds": ["quest-2"]},
                  {"id": "contest", "type": 2, "order": 999, "questIds": []}],
@@ -280,11 +280,12 @@ def test_starter_is_master_backed_new_only_and_persists_identity(game):
     assert user.user.name == "Local manager"
     assert user.user.managerLevel == 1
     assert user.user.gameStartTime > 1000000000000
-    assert {row.characterId for row in user.characters} == {"char-a", "char-b"}
-    assert {row.costumeId for row in user.costumes} == {"costume-a", "costume-b"}
-    assert {row.hairId for row in user.hairs} == {"hair-a", "hair-b"}
+    assert {row.characterId for row in user.characters} == {"char-a", "char-b", "char-c", "char-d"}
+    assert {row.costumeId for row in user.costumes} == {"costume-a", "costume-b", "costume-c", "costume-d"}
+    assert {row.hairId for row in user.hairs} == {"hair-a", "hair-b", "hair-c", "hair-d"}
     assert all(row.activityStamina == 800 for row in user.characters)
-    assert all(row.characterId == "char-a" for row in user.homePositions)
+    assert {row.homePositionType: row.characterId for row in user.homePositions} == {
+        1: "char-a", 2: "char-b", 3: "char-c", 4: "char-d"}
     assert not user.cards
     assert user.tutorials[0].step == 0
     before = game.state.snapshot(game.profile)

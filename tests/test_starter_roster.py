@@ -154,7 +154,7 @@ def test_fresh_seed_covers_unconditional_office_roster_without_granting_cards_or
     assert_roster(user, roster_master)
     assert set(PHOTO) <= {row.characterId for row in user.characters}
     assert list(user.profile.favoriteCharacterIds) == list(PHOTO)
-    assert state.starter_version("sandbox") == 2
+    assert state.starter_version("sandbox") == 3
     assert gameplay.repair_starter_roster(state, roster_schema, "sandbox", roster_master) is False
 
 
@@ -277,4 +277,4 @@ def test_actual_611_schema_and_master_define_seventeen_ungated_normal_characters
     payload = gameplay.seed_starter_profile(state, schema, "actual", master)
     user = schema.response_type("/api.User/Get").FromString(payload)
     assert_roster(user, master)
-    assert state.starter_version("actual") == 2
+    assert state.starter_version("actual") == 3

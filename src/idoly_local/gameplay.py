@@ -572,6 +572,56 @@ def repair_starter_roster(state, schema, profile: str, master_dir: Path) -> bool
     return state.mutate_starter_snapshot(profile, schema.fingerprint, repair) is not None
 
 
+def _starter_home_positions(schema, photo_ids, character_ids):
+    """Assign a distinct owned starter to each of the four 6.1.1 home pages.
+
+    The client swaps an already assigned character when editing a page.
+    Distinct IDs also keep separate page-loading jobs from repositioning and
+    changing renderer references on the same cached default actor.
+    """
+    field = schema.response_type(_USER_GET).DESCRIPTOR.fields_by_name["homePositions"]
+    kinds = sorted(value.number for value in field.message_type.fields_by_name[
+        "homePositionType"].enum_type.values if value.number)
+    choices = list(dict.fromkeys([*photo_ids, *character_ids]))
+    if kinds != [1, 2, 3, 4] or len(choices) < len(kinds):
+        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Starter home pages need four distinct characters")
+    return dict(zip(kinds, choices))
+
+
+def repair_starter_home_positions(state, schema, profile: str, master_dir: Path) -> bool:
+    """Repair only the version-2 starter's exact repeated fixed-page layout.
+
+    Imports, unmarked snapshots and customized/random assignments are never
+    changed. Legacy roster repair must run first to establish version 2.
+    Character rows, other protobuf fields and existing sessions are preserved.
+    """
+    current = state.snapshot(profile)
+    if (current is None or state.starter_version(profile) != 2
+            or current[1] != schema.fingerprint):
+        return False
+    photo_ids, ids, _appearances, _stamina = _starter_roster(_Catalog(master_dir))
+    positions = _starter_home_positions(schema, photo_ids, ids)
+
+    def repair(payload, origin):
+        if origin != 2:
+            return None
+        try:
+            snapshot = schema.response_type(_USER_GET).FromString(payload)
+        except DecodeError:
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local starter snapshot is malformed") from None
+        if (not snapshot.HasField("user") or len(snapshot.homePositions) != len(positions)
+                or {row.homePositionType for row in snapshot.homePositions} != set(positions)
+                or any(row.characterId != photo_ids[0] or row.isCharacterRandom or row.isCostumeRandom
+                       for row in snapshot.homePositions)
+                or not set(positions.values()).issubset({row.characterId for row in snapshot.characters})):
+            return None
+        for row in snapshot.homePositions:
+            row.characterId = positions[row.homePositionType]
+        return snapshot.SerializeToString(), 3
+
+    return state.mutate_starter_snapshot(profile, schema.fingerprint, repair) is not None
+
+
 def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manager_name: str = "Local Manager") -> bytes:
     """Create a new, master-backed tutorial-start snapshot, never an import.
 
@@ -585,6 +635,7 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
         raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Starter manager name must not be empty")
     catalog = _Catalog(master_dir)
     photo_ids, ids, appearances, stamina = _starter_roster(catalog)
+    home_positions = _starter_home_positions(schema, photo_ids, ids)
     areas = catalog.main_areas()
     quests = catalog.ids("Quest", required=True)
     if not areas or not areas[0].get("questIds") or any(key not in quests or quests[key].get("areaId") != areas[0]["id"] for key in areas[0]["questIds"]):
@@ -603,10 +654,8 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.hierarchy.bestDetailGradeId = base_hierarchy_grade
     snapshot.decks.add(number=1, name="Local deck")
     _append_starter_characters(snapshot, ids, appearances, stamina, now)
-    field = snapshot.DESCRIPTOR.fields_by_name["homePositions"].message_type.fields_by_name["homePositionType"]
-    for value in field.enum_type.values:
-        if value.number:
-            snapshot.homePositions.add(homePositionType=value.number, characterId=photo_ids[0])
+    for kind, character_id in home_positions.items():
+        snapshot.homePositions.add(homePositionType=kind, characterId=character_id)
     snapshot.areas.add(areaId=areas[0]["id"])
     snapshot.tutorials.add(tutorialType=_GAME_START, step=0)
     snapshot.profile.favoriteCharacterIds.extend(photo_ids)
@@ -614,5 +663,5 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.userPublic.serverUserId = identity["server_id"]
     snapshot.userPublic.publicUserId = identity["public_id"]
     payload = snapshot.SerializeToString()
-    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=2)
+    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=3)
     return payload
