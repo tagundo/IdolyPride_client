@@ -180,7 +180,7 @@ def smoke(data_dir, server_data, report_path):
     report = {"frozen_runtime": bool(getattr(sys, "frozen", False)), "server_started": False,
               "encrypted_system_check": False, "anonymous_refund_term": False, "anonymous_public_text": False,
               "local_auth": False, "home_login": False, "home_enter": False,
-              "home_hierarchy_reference": False,
+              "home_hierarchy_reference": False, "home_fish_heaven_absent": False,
               "starter_roster_complete": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
@@ -236,6 +236,9 @@ def smoke(data_dir, server_data, report_path):
         report["home_login"] = home_login.HasField("commonResponse")
         home = _rpc(address, schema, "/api.Home/Enter", token=token)
         report["home_enter"] = bool(home.currentMainAreaId and home.HasField("lessonProgress"))
+        report["home_fish_heaven_absent"] = not home.HasField("homeFishHeavenInfo")
+        if not report["home_fish_heaven_absent"]:
+            raise RuntimeError("Home.Enter advertised an inactive fish-heaven event and may suppress LoadingManager.Hide")
         report["home_hierarchy_reference"] = _home_hierarchy_reference(home, data_dir)
         if not report["home_hierarchy_reference"]:
             raise RuntimeError("Home.Enter hierarchy grade does not resolve through the bundled master tables")
@@ -270,7 +273,7 @@ def smoke(data_dir, server_data, report_path):
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
-                "home_enter", "home_hierarchy_reference", "starter_roster_complete", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+                "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
 

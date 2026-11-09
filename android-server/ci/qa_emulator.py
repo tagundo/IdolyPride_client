@@ -311,6 +311,9 @@ def main():
             raise RuntimeError("Local Home.Enter did not resolve the bundled starting area")
         if not home.HasField("hierarchyNotiInfo") or not home.hierarchyNotiInfo.currentDetailGradeId:
             raise RuntimeError("Local Home.Enter did not resolve the bundled hierarchy grade")
+        if home.HasField("homeFishHeavenInfo"):
+            raise RuntimeError("Local Home.Enter advertised an inactive fish-heaven event and may suppress LoadingManager.Hide")
+        result["home_fish_heaven_absent"] = True
         rpc(schema, grpc_port, "/api.Home/SetReview", login.gameAuthToken)
         changed = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if not changed.user.isReviewed or changed.user.lastLoginTime <= 0:
