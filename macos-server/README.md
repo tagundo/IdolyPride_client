@@ -19,7 +19,7 @@ uv sync --locked --python 3.12
 uv pip install --python .venv/bin/python -r macos-server/requirements-build.txt
 .venv/bin/python -m pytest macos-server/tests -q
 .venv/bin/python macos-server/build_app.py \
-  --server-data data/clients/IdolyPride-ServerData-v0.2.6.zip \
+  --server-data data/clients/IdolyPride-ServerData-v0.2.7.zip \
   --output data/macos-built/IdolyPrideLocalServer.app \
   --archive data/clients/IdolyPride-Local-Server-macOS-arm64.app.zip \
   --evidence data/macos-evidence

@@ -168,6 +168,74 @@ def _home_hierarchy_reference(home, data_dir):
     return bool(parent_id) and sum(row.get("id") == parent_id for row in grades) == 1
 
 
+def _home_positions_distinct(user):
+    positions = list(user.homePositions)
+    assigned = {row.characterId for row in positions}
+    owned = {row.characterId for row in user.characters}
+    return (len(positions) == 4 and {row.homePositionType for row in positions} == {1, 2, 3, 4}
+            and len(assigned) == 4 and assigned.issubset(owned)
+            and all(not row.isCharacterRandom and not row.isCostumeRandom for row in positions)
+            and next(row.characterId for row in positions if row.homePositionType == 1) == "char-ktn")
+
+
+def _quest_catalog_reference(top, main, data_dir):
+    """Check encrypted responses against the bundled public table references."""
+    if ([group.SerializeToString() for group in top.mainAreaGroups]
+            != [group.SerializeToString() for group in main.areaGroups]):
+        raise RuntimeError("Quest.Top and Quest.ListMain returned different main area groups")
+    if (not top.HasField("pvpInfo") or top.pvpInfo.HasField("latestPvpSeason")
+            or not top.HasField("hierarchyNotiInfo") or not _home_hierarchy_reference(top, data_dir)):
+        raise RuntimeError("Quest.Top omitted required local PvP/hierarchy references")
+    master_dir = Path(data_dir) / "master-json"
+
+    def rows(name):
+        values = json.loads((master_dir / (name + ".json")).read_text())
+        identities = [row.get("id") for row in values]
+        if not values or any(not isinstance(key, str) or not key for key in identities) or len(set(identities)) != len(values):
+            raise RuntimeError("Quest smoke check needs unique bundled " + name + " identities")
+        return {row["id"]: row for row in values}
+
+    groups, areas, quests = rows("AreaGroup"), rows("Area"), rows("Quest")
+    main_ids = {key for key, row in areas.items() if row.get("type") == 1}
+    ordered_groups = sorted(groups.values(), key=lambda row: (int(row.get("order", 0)), row["id"]))
+    expected_groups = []
+    for group in ordered_groups:
+        area_ids = group.get("areaIds")
+        if not isinstance(area_ids, list) or not area_ids or any(key not in areas for key in area_ids):
+            raise RuntimeError("Bundled AreaGroup references an absent area")
+        if any(key in main_ids for key in area_ids):
+            expected_groups.append(group)
+    if [group.areaGroupId for group in top.mainAreaGroups] != [group["id"] for group in expected_groups]:
+        raise RuntimeError("Quest group identities/order do not match the bundled AreaGroup catalog")
+    seen_areas, seen_quests = set(), set()
+    for output_group, group in zip(top.mainAreaGroups, expected_groups):
+        if [area.areaId for area in output_group.areas] != group["areaIds"]:
+            raise RuntimeError("Quest area identities/order do not match bundled AreaGroup references")
+        for output_area in output_group.areas:
+            area_id = output_area.areaId
+            area = areas[area_id]
+            if (area_id not in main_ids or area_id in seen_areas
+                    or area.get("areaGroupId") != group["id"]):
+                raise RuntimeError("Quest area does not belong to its bundled main group")
+            seen_areas.add(area_id)
+            quest_ids = area.get("questIds")
+            if not quest_ids or [quest.questId for quest in output_area.quests] != quest_ids:
+                raise RuntimeError("Quest identities/order do not match bundled Area references")
+            for output_quest in output_area.quests:
+                quest_id = output_quest.questId
+                if (quest_id in seen_quests or quest_id not in quests
+                        or quests[quest_id].get("areaId") != area_id):
+                    raise RuntimeError("Quest does not belong to its bundled main area")
+                seen_quests.add(quest_id)
+    if not main_ids or seen_areas != main_ids or not seen_quests:
+        raise RuntimeError("Quest responses did not cover the bundled main catalog")
+    first_area = top.mainAreaGroups[0].areas[0]
+    first_quest = first_area.quests[0]
+    if not first_area.unlocked or not first_quest.isPlayable or first_quest.cleared:
+        raise RuntimeError("Fresh starter's first main quest must be playable and uncleared")
+    return first_quest.questId
+
+
 def smoke(data_dir, server_data, report_path):
     from http.client import HTTPConnection
     from urllib.parse import quote, urlsplit
@@ -181,7 +249,8 @@ def smoke(data_dir, server_data, report_path):
               "encrypted_system_check": False, "anonymous_refund_term": False, "anonymous_public_text": False,
               "local_auth": False, "home_login": False, "home_enter": False,
               "home_hierarchy_reference": False, "home_fish_heaven_absent": False,
-              "starter_roster_complete": False,
+              "starter_roster_complete": False, "home_positions_distinct": False,
+              "quest_top_list_main": False, "quest_catalog_readonly": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     try:
@@ -225,6 +294,20 @@ def smoke(data_dir, server_data, report_path):
             for key in required_characters)
         if not report["starter_roster_complete"]:
             raise RuntimeError("User.Get must contain all 17 starter characters and their owned favorite/live appearances")
+        report["home_positions_distinct"] = _home_positions_distinct(before)
+        if not report["home_positions_distinct"]:
+            raise RuntimeError("User.Get must assign four distinct owned home characters and preserve Home1 char-ktn")
+        saved_before_quests = State(Path(data_dir) / "state.db").snapshot("sandbox")
+        top = _rpc(address, schema, "/api.Quest/Top", token=token)
+        main = _rpc(address, schema, "/api.Quest/ListMain", token=token)
+        report["quest_catalog_first_quest"] = _quest_catalog_reference(top, main, data_dir)
+        report["quest_top_list_main"] = True
+        after_quests = _rpc(address, schema, "/api.User/Get", token=token)
+        report["quest_catalog_readonly"] = (
+            State(Path(data_dir) / "state.db").snapshot("sandbox") == saved_before_quests
+            and after_quests.SerializeToString() == before.SerializeToString())
+        if not report["quest_catalog_readonly"]:
+            raise RuntimeError("Read-only Quest.Top/ListMain changed the local snapshot")
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
         home_request.settingInfo.soundEffect = 29
@@ -273,7 +356,8 @@ def smoke(data_dir, server_data, report_path):
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
-                "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+                "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "home_positions_distinct",
+                "quest_top_list_main", "quest_catalog_readonly", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
 

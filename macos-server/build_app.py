@@ -154,6 +154,9 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                 raise ValueError("The bundled engine did not use its frozen Python runtime")
             if engine_report.get("home_fish_heaven_absent") is not True:
                 raise ValueError("The bundled engine did not verify the inactive home fish-heaven event is absent")
+            if not all(engine_report.get(key) is True for key in
+                       ("home_positions_distinct", "quest_top_list_main", "quest_catalog_readonly")):
+                raise ValueError("The bundled engine did not verify distinct home actors and the read-only main-live catalog")
             moved = temporary / "이동한 앱" / "IdolyPride Local Server.app"
             moved.parent.mkdir()
             shutil.copytree(output, moved, symlinks=True)
@@ -174,7 +177,7 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="New IdolyPrideLocalServer.app path")
     parser.add_argument("--archive", required=True, type=Path, help="New deliverable .app.zip path")
     parser.add_argument("--evidence", required=True, type=Path)
-    parser.add_argument("--version", default="0.2.6")
+    parser.add_argument("--version", default="0.2.7")
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     args = parser.parse_args(argv)
     try:

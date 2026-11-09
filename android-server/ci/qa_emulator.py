@@ -31,6 +31,7 @@ STARTER_CHARACTERS = frozenset(("char-ai", "char-aoi", "char-chs", "char-hrk", "
     *PHOTO_CHARACTERS, "char-rei", "char-rio", "char-rui", "char-skr", "char-smr", "char-szk", "char-yu"))
 PRIVATE_DATABASE = "files/data/state.db"
 PRESERVED_TABLES = ("profiles", "sessions", "profile_settings")
+QA_UNKNOWN_PB = b"\x80\x4b\x7b"  # Unknown response field 1200, value 123.
 
 
 class QA:
@@ -85,8 +86,9 @@ class QA:
             self.adb("forward", "--remove", "tcp:" + str(port), check=False)
 
 
-def rpc(schema, port, method, token=None):
-    request = schema.request_type(method)()
+def rpc(schema, port, method, token=None, request=None):
+    if request is None:
+        request = schema.request_type(method)()
     metadata = (("x-auth-token", token),) if token else ()
     with grpc.insecure_channel("127.0.0.1:" + str(port)) as channel:
         raw = channel.unary_unary(method)(codec.encode(request.SerializeToString()), metadata=metadata, timeout=2)
@@ -136,6 +138,61 @@ def assert_starter_roster(user):
                 or not row.favoriteHairId or row.favoriteHairId not in hairs
                 or not row.liveHairId or row.liveHairId not in hairs):
             raise RuntimeError("Native starter character is missing an owned favorite/live appearance")
+
+
+def assert_starter_home_positions(user):
+    positions = {row.homePositionType: row for row in user.homePositions}
+    expected = dict(zip((1, 2, 3, 4), PHOTO_CHARACTERS[:4]))
+    if (len(user.homePositions) != 4 or set(positions) != set(expected)
+            or any(positions[kind].characterId != key for kind, key in expected.items())
+            or any(row.isCharacterRandom or row.isCostumeRandom for row in positions.values())
+            or not set(expected.values()).issubset({row.characterId for row in user.characters})):
+        raise RuntimeError("Native starter home pages must contain four distinct owned fixed characters")
+
+
+def _legacy_home_projection(user):
+    """Normalize only the three home character IDs the version-3 repair owns."""
+    projected = type(user)()
+    projected.CopyFrom(user)
+    for row in projected.homePositions:
+        if row.homePositionType in (2, 3, 4):
+            row.characterId = PHOTO_CHARACTERS[0]
+    return projected
+
+
+def assert_quest_catalog(top, main, master_dir):
+    """Compare encrypted read-only responses with the actual bundled catalog."""
+    master_dir = Path(master_dir)
+    tables = {name: json.loads((master_dir / (name + ".json")).read_text())
+              for name in ("AreaGroup", "Area", "Quest")}
+    areas = {row["id"]: row for row in tables["Area"]}
+    quests = {row["id"]: row for row in tables["Quest"]}
+    expected = []
+    for group in sorted(tables["AreaGroup"], key=lambda row: (int(row.get("order", 0)), row["id"])):
+        if not any(areas[key]["type"] == 1 for key in group["areaIds"]):
+            continue
+        group_areas = []
+        for key in group["areaIds"]:
+            area = areas[key]
+            if area["type"] != 1 or area["areaGroupId"] != group["id"]:
+                raise RuntimeError("Bundled main-live area does not resolve to its group")
+            if any(quests[quest_id]["areaId"] != key for quest_id in area["questIds"]):
+                raise RuntimeError("Bundled main-live quest does not resolve to its area")
+            group_areas.append((key, list(area["questIds"])))
+        expected.append((group["id"], group_areas))
+    actual = [(group.areaGroupId, [(area.areaId, [row.questId for row in area.quests])
+                                  for area in group.areas]) for group in top.mainAreaGroups]
+    if (not expected or actual != expected or [row.SerializeToString() for row in top.mainAreaGroups]
+            != [row.SerializeToString() for row in main.areaGroups]):
+        raise RuntimeError("Quest.Top/ListMain groups do not match the actual bundled main-live catalog")
+    first_area = top.mainAreaGroups[0].areas[0]
+    first = first_area.quests[0]
+    if not first_area.unlocked or not first.isPlayable or first.cleared:
+        raise RuntimeError("Fresh main-live catalog did not expose the first uncleared playable quest")
+    if (not top.HasField("pvpInfo") or top.pvpInfo.HasField("latestPvpSeason")
+            or not top.HasField("hierarchyNotiInfo") or not top.hierarchyNotiInfo.currentDetailGradeId):
+        raise RuntimeError("Quest.Top omitted required containers or fabricated a competitive season")
+    return first.questId
 
 
 def _legacy_projection(user):
@@ -201,8 +258,8 @@ def _preserved_tables(db):
     return {name: db.execute("SELECT * FROM " + name + " ORDER BY 1").fetchall() for name in PRESERVED_TABLES}
 
 
-def stage_legacy_starter(qa, schema, expected_user):
-    """Recreate the old five-idol layout only inside this disposable emulator.
+def stage_legacy_starter(qa, schema, expected_user, *, legacy_roster=True):
+    """Recreate an old starter layout only inside this disposable emulator.
 
     Private DB/WAL bytes live in a TemporaryDirectory and memory, never QA
     artifacts. All identity, session, settings and other snapshot fields remain.
@@ -215,23 +272,32 @@ def stage_legacy_starter(qa, schema, expected_user):
             identity = db.execute("SELECT name FROM profiles").fetchall()
             snapshots = db.execute("SELECT profile,response,schema_sha256 FROM snapshots").fetchall()
             marker = db.execute("SELECT profile,version FROM starter_profiles").fetchall()
-            if identity != [("sandbox",)] or len(snapshots) != 1 or marker != [("sandbox", 2)]:
+            if identity != [("sandbox",)] or len(snapshots) != 1 or marker != [("sandbox", 3)]:
                 raise RuntimeError("Legacy upgrade fixture requires the fresh synthetic sandbox only")
             profile, payload, fingerprint = snapshots[0]
             if profile != "sandbox" or fingerprint != schema.fingerprint:
                 raise RuntimeError("Legacy upgrade fixture does not match the tested schema")
             user = schema.response_type("/api.User/Get").FromString(payload)
             assert_starter_roster(user)
+            assert_starter_home_positions(user)
             if user.SerializeToString(deterministic=True) != expected_user.SerializeToString(deterministic=True):
                 raise RuntimeError("Stopped synthetic snapshot differs from the tested RPC state")
             if tuple(user.profile.favoriteCharacterIds) != PHOTO_CHARACTERS:
                 raise RuntimeError("Legacy upgrade fixture does not match the five photo idols")
             preserved = _preserved_tables(db)
-            legacy = _legacy_projection(user)
-            if len(legacy.characters) != 5 or {row.characterId for row in legacy.characters} != set(PHOTO_CHARACTERS):
+            legacy = _legacy_home_projection(_legacy_projection(user) if legacy_roster else user)
+            if legacy_roster and (len(legacy.characters) != 5
+                                  or {row.characterId for row in legacy.characters} != set(PHOTO_CHARACTERS)):
                 raise RuntimeError("Legacy upgrade fixture did not produce exactly five idols")
+            if any(row.characterId != PHOTO_CHARACTERS[0] for row in legacy.homePositions):
+                raise RuntimeError("Legacy upgrade fixture did not explicitly restore all four old Kotono assignments")
+            if legacy_roster:
+                legacy = type(user).FromString(legacy.SerializeToString() + QA_UNKNOWN_PB)
             db.execute("UPDATE snapshots SET response=? WHERE profile=?", (legacy.SerializeToString(), profile))
-            db.execute("DELETE FROM starter_profiles WHERE profile=?", (profile,))
+            if legacy_roster:
+                db.execute("DELETE FROM starter_profiles WHERE profile=?", (profile,))
+            else:
+                db.execute("UPDATE starter_profiles SET version=2 WHERE profile=?", (profile,))
             db.commit()
             if _preserved_tables(db) != preserved:
                 raise RuntimeError("Legacy fixture changed preserved synthetic database rows")
@@ -260,7 +326,7 @@ def verify_upgrade_database(qa, preserved):
             _checkpoint(db)
             if _preserved_tables(db) != preserved:
                 raise RuntimeError("Native starter upgrade changed identity, sessions or settings")
-            if db.execute("SELECT profile,version FROM starter_profiles").fetchall() != [("sandbox", 2)]:
+            if db.execute("SELECT profile,version FROM starter_profiles").fetchall() != [("sandbox", 3)]:
                 raise RuntimeError("Native starter upgrade did not persist its migration marker")
         finally:
             db.close()
@@ -270,6 +336,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--descriptor-set", type=Path, default=Path("data/protocol/idolypride-6.1.1.pb"))
+    parser.add_argument("--master-dir", type=Path, default=Path("data/master-json"))
     parser.add_argument("--artifacts", type=Path, default=Path("data/android-server-qa"))
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--serial", default="emulator-5554")
@@ -304,8 +371,23 @@ def main():
         if not user.HasField("user") or not user.user.name:
             raise RuntimeError("Local User.Get snapshot is absent")
         assert_starter_roster(user)
+        assert_starter_home_positions(user)
         result["starter_roster_complete"] = True
-        rpc(schema, grpc_port, "/api.Home/Login", login.gameAuthToken)
+        result["home_positions_distinct"] = True
+        quest_top = rpc(schema, grpc_port, "/api.Quest/Top", login.gameAuthToken)
+        quest_main = rpc(schema, grpc_port, "/api.Quest/ListMain", login.gameAuthToken)
+        result["quest_catalog_first_quest"] = assert_quest_catalog(quest_top, quest_main, args.master_dir)
+        quest_user = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
+        if quest_user.SerializeToString(deterministic=True) != user.SerializeToString(deterministic=True):
+            raise RuntimeError("Read-only Quest.Top/ListMain mutated the local user snapshot")
+        result.update(quest_top_list_main=True, quest_catalog_readonly=True)
+        home_request = schema.request_type("/api.Home/Login")()
+        home_request.settingInfo.soundBgm = 37
+        home_request.settingInfo.soundEffect = 29
+        home_request.settingInfo.soundVoice = 61
+        home_request.settingInfo.frameRate = 30
+        home_request.settingInfo.nightMode = True
+        rpc(schema, grpc_port, "/api.Home/Login", login.gameAuthToken, home_request)
         home = rpc(schema, grpc_port, "/api.Home/Enter", login.gameAuthToken)
         if not home.currentMainAreaId:
             raise RuntimeError("Local Home.Enter did not resolve the bundled starting area")
@@ -346,13 +428,43 @@ def main():
         if restored.user.name != user.user.name or not restored.user.isReviewed:
             raise RuntimeError("Restart did not preserve the local profile")
         assert_starter_roster(restored)
-        if (_legacy_projection(restored).SerializeToString(deterministic=True)
+        assert_starter_home_positions(restored)
+        if (_legacy_home_projection(_legacy_projection(restored)).SerializeToString(deterministic=True)
                 != legacy.SerializeToString(deterministic=True)):
             raise RuntimeError("Native starter upgrade changed existing snapshot fields or appearance rows")
+        old_home1 = next(row.SerializeToString() for row in legacy.homePositions if row.homePositionType == 1)
+        if next(row.SerializeToString() for row in restored.homePositions if row.homePositionType == 1) != old_home1:
+            raise RuntimeError("Native starter upgrade changed the original Home1 assignment")
         result.update(restart_session_preserved=True, gameplay_change_preserved=True, port_rebound=True)
-        result.update(legacy_starter_upgraded=True, upgrade_snapshot_fields_preserved=True)
+        result.update(legacy_starter_upgraded=True, legacy_home_positions_upgraded=True,
+                      upgrade_snapshot_fields_preserved=True)
         qa.capture("06-restarted")
-        qa.tap("서버 중지", "07-final-stop")
+        qa.tap("서버 중지", "07-legacy-upgrade-stop")
+        wait_server(schema, grpc_port, expected=False, timeout=30)
+        qa.adb("shell", "am", "force-stop", PACKAGE)
+        verify_upgrade_database(qa, preserved)
+        legacy_v2, preserved_v2 = stage_legacy_starter(qa, schema, restored, legacy_roster=False)
+        if preserved_v2 != preserved:
+            raise RuntimeError("Version-2 fixture changed original identity, sessions or settings")
+        qa.adb("shell", "am", "start", "-n", ACTIVITY)
+        print("Restarting the native version-2 all-Kotono starter to verify distinct home pages", flush=True)
+        qa.tap("서버 시작", "08-version2-restart")
+        wait_server(schema, grpc_port, timeout=args.startup_timeout)
+        repaired_v2 = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
+        assert_starter_roster(repaired_v2)
+        assert_starter_home_positions(repaired_v2)
+        if (_legacy_home_projection(repaired_v2).SerializeToString(deterministic=True)
+                != legacy_v2.SerializeToString(deterministic=True)):
+            raise RuntimeError("Version-2 home repair changed fields beyond the three allowed home character IDs")
+        if (next(row.SerializeToString() for row in repaired_v2.homePositions if row.homePositionType == 1) != old_home1
+                or QA_UNKNOWN_PB not in repaired_v2.SerializeToString()
+                or [row.SerializeToString() for row in repaired_v2.tutorials]
+                != [row.SerializeToString() for row in legacy_v2.tutorials]):
+            raise RuntimeError("Version-2 home repair changed Home1, unknown protobuf data or tutorial progress")
+        result.update(version2_home_positions_upgraded=True, upgrade_home1_preserved=True,
+                      upgrade_unknown_fields_preserved=True, upgrade_tutorial_preserved=True)
+        qa.capture("09-version2-restarted")
+        qa.tap("서버 중지", "10-final-stop")
         wait_server(schema, grpc_port, expected=False, timeout=30)
         qa.adb("shell", "am", "force-stop", PACKAGE)
         verify_upgrade_database(qa, preserved)
@@ -365,7 +477,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("08-final")
+            qa.capture("11-final")
         except Exception:
             pass
         qa.close()
