@@ -9,23 +9,23 @@ struct alignas(16) Snapshot {
     uint64_t sp, nzcv, fpcr, fpsr, padding;
     uint8_t simd[32][16];
 };
-struct Snapshots { Snapshot before, after; };
+struct Snapshots { Snapshot before, after; uint64_t stored; };
 static_assert(sizeof(Snapshot) == 800, "assembly snapshot size");
 static_assert(offsetof(Snapshot, simd) == 288, "assembly SIMD offset");
 extern "C" void idoly_machine_checkpoint_add(Snapshots*);
-extern "C" void idoly_machine_checkpoint_bl(Snapshots*);
 extern "C" void idoly_machine_instruction_add();
-extern "C" void idoly_machine_instruction_bl();
+enum Kind { ADD = 0, MOV = 2, LDR, LDP, SUBSP, STRPRE, LDPPOST };
+#define DECLARE_CASE(name) extern "C" void idoly_machine_checkpoint_##name(Snapshots*); \
+    extern "C" void idoly_machine_instruction_##name();
+DECLARE_CASE(mov) DECLARE_CASE(ldr) DECLARE_CASE(ldp)
+DECLARE_CASE(subsp) DECLARE_CASE(strpre) DECLARE_CASE(ldppost)
 struct CaseContext {
     Snapshots snapshots;
     unsigned hits;
-    bool context_ok, is_bl;
+    bool context_ok;
+    Kind kind;
 };
-// Every callback context and snapshot outlives even a failed unintercept.
-static CaseContext add_context, bl_context;
-static idoly_machine_report_t report;
-static unsigned baseline_state, check_state; // 0=new, 1=running, 2=finished.
-
+// Every callback context outlives even an uncertain removal.
 static void intercept(shadowhook_cpu_context_t* cpu, void* opaque) {
     CaseContext& context = *static_cast<CaseContext*>(opaque);
     const Snapshot& before = context.snapshots.before;
@@ -55,27 +55,54 @@ static void intercept(shadowhook_cpu_context_t* cpu, void* opaque) {
 }
 
 static void execute(CaseContext& context) {
-    if (context.is_bl) idoly_machine_checkpoint_bl(&context.snapshots);
-    else idoly_machine_checkpoint_add(&context.snapshots);
+    switch (context.kind) {
+    case ADD: idoly_machine_checkpoint_add(&context.snapshots); break;
+    case MOV: idoly_machine_checkpoint_mov(&context.snapshots); break;
+    case LDR: idoly_machine_checkpoint_ldr(&context.snapshots); break;
+    case LDP: idoly_machine_checkpoint_ldp(&context.snapshots); break;
+    case SUBSP: idoly_machine_checkpoint_subsp(&context.snapshots); break;
+    case STRPRE: idoly_machine_checkpoint_strpre(&context.snapshots); break;
+    case LDPPOST: idoly_machine_checkpoint_ldppost(&context.snapshots); break;
+    }
 }
 
 static idoly_machine_case_report_t inspect(const CaseContext& context) {
     idoly_machine_case_report_t result{};
     const Snapshot& before = context.snapshots.before;
     const Snapshot& after = context.snapshots.after;
-    uint64_t expected_lr = context.is_bl ? reinterpret_cast<uintptr_t>(idoly_machine_instruction_bl) + 4
-                                         : before.regs[30];
-    result.original_instruction = before.regs[0] == 0x101 && after.regs[0] == before.regs[0] + 7;
+    uint64_t expected_lr = context.kind == LDPPOST ? 0x9001 : before.regs[30];
+    result.original_instruction = true;
     result.gpr = result.simd = true;
     for (unsigned i = 0; i < 31; ++i) {
-        uint64_t expected = i == 30 ? expected_lr : before.regs[i] + (i == 0 ? 7 : i == 28 ? 800 : 0);
+        uint64_t expected = before.regs[i] + (i == 28 ? 800 : 0);
+        if (i == 30) expected = expected_lr;
+        if (i == 0 && context.kind == ADD) expected += 7;
+        if (i == 0 && context.kind == MOV) expected = before.regs[1];
+        if (i == 1 && context.kind == LDR) expected = 0x9001;
+        if (i == 1 && context.kind == LDP) expected = 0x9002;
+        if (i == 2 && context.kind == LDP) expected = 0x9001;
+        if (i == 19 && context.kind == LDPPOST) expected = 0x9002;
         result.gpr = result.gpr && after.regs[i] == expected;
-        if (i != 18 && i != 28) result.gpr = result.gpr && before.regs[i] == 0x101 + i;
+        bool scratch_base = i == 19 && (context.kind == LDR || context.kind == LDP);
+        if (i != 18 && i != 28 && !scratch_base)
+            result.gpr = result.gpr && before.regs[i] == 0x101 + i;
+    }
+    switch (context.kind) {
+    case ADD: result.original_instruction = after.regs[0] == 0x108; break;
+    case MOV: result.original_instruction = after.regs[0] == 0x102; break;
+    case LDR: result.original_instruction = after.regs[1] == 0x9001; break;
+    case LDP: result.original_instruction = after.regs[2] == 0x9001 && after.regs[1] == 0x9002; break;
+    case SUBSP: result.original_instruction = after.sp == before.sp - 0x90; break;
+    case STRPRE: result.original_instruction = after.sp == before.sp - 16
+            && context.snapshots.stored == before.regs[30]; break;
+    case LDPPOST: result.original_instruction = after.regs[30] == 0x9001 && after.regs[19] == 0x9002
+            && after.sp == before.sp + 16; break;
     }
     for (unsigned i = 0; i < 32; ++i)
         for (unsigned j = 0; j < 16; ++j)
             result.simd = result.simd && before.simd[i][j] == i + 1 && after.simd[i][j] == i + 1;
-    result.sp = before.sp != 0 && (before.sp & 15) == 0 && before.sp == after.sp;
+    result.sp = before.sp != 0 && (before.sp & 15) == 0 && after.sp == before.sp + (context.kind == LDPPOST ? 16 : 0)
+            - (context.kind == SUBSP ? 0x90 : context.kind == STRPRE ? 16 : 0);
     result.nzcv = before.nzcv == 0xa0000000 && before.nzcv == after.nzcv;
     result.fpcr = before.fpcr == 0x400000 && before.fpcr == after.fpcr;
     result.fpsr = before.fpsr == 0x8000000 && before.fpsr == after.fpsr;
@@ -88,31 +115,26 @@ static bool state_ok(const idoly_machine_case_report_t& value) {
             && value.fpcr && value.fpsr && value.link_register;
 }
 
-extern "C" bool idoly_phase_machine_baseline(void) {
-    unsigned expected = 0;
-    if (!__atomic_compare_exchange_n(&baseline_state, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-        return expected == 2 && report.add.baseline && report.bl.baseline;
-    report.add.install_errno = report.bl.install_errno = -1;
-    report.add.unintercept_result = report.bl.unintercept_result = -1;
-    bl_context.is_bl = true;
-    execute(add_context);
-    report.add.baseline = state_ok(inspect(add_context));
-    execute(bl_context);
-    report.bl.baseline = state_ok(inspect(bl_context));
-    __atomic_store_n(&baseline_state, 2, __ATOMIC_RELEASE);
-    return report.add.baseline && report.bl.baseline;
-}
-
 // False means an installed hook could not be proven removed. All callback
 // data stays static; after such a failure no further fixture is installed.
 static bool run_case(CaseContext& context, idoly_machine_case_report_t& value, void* instruction) {
+    unsigned char original[16];
+    memcpy(original, instruction, sizeof(original));
     context.hits = 0;
     context.context_ok = true;
     void* stub = shadowhook_intercept_instr_addr(instruction, intercept, &context,
             SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE);
     value.install_errno = shadowhook_get_errno();
     value.installed = stub != nullptr;
-    if (stub == nullptr) return true; // No hook remains; its report still fails.
+    if (stub == nullptr) return memcmp(instruction, original, sizeof(original)) == 0;
+    uint32_t first;
+    memcpy(&first, instruction, sizeof(first));
+    value.neighbors = (first & 0xfc000000u) == 0x14000000u
+            && memcmp(static_cast<unsigned char*>(instruction) + 4, original + 4, 12) == 0;
+    if (!value.neighbors) {
+        value.unintercept_result = shadowhook_unintercept(stub);
+        return value.unintercept_result == 0 && memcmp(instruction, original, sizeof(original)) == 0;
+    }
     value.original_instruction = value.gpr = value.simd = value.sp = true;
     value.nzcv = value.fpcr = value.fpsr = value.link_register = true;
     for (unsigned iteration = 0; iteration < 3; ++iteration) {
@@ -125,39 +147,71 @@ static bool run_case(CaseContext& context, idoly_machine_case_report_t& value, v
     value.callback_context = context.context_ok;
     value.callback_hits = context.hits == 3;
     value.unintercept_result = shadowhook_unintercept(stub);
-    if (value.unintercept_result != 0) return false;
+    if (value.unintercept_result != 0 || memcmp(instruction, original, sizeof(original)) != 0) return false;
     unsigned previous_hits = context.hits;
     execute(context);
-    value.unintercept = state_ok(inspect(context)) && context.hits == previous_hits;
+    value.unintercept = state_ok(inspect(context)) && context.hits == previous_hits
+            && memcmp(instruction, original, sizeof(original)) == 0;
     return value.unintercept;
 }
 
 static bool case_ok(const idoly_machine_case_report_t& value) {
     return value.baseline && value.installed && state_ok(value) && value.callback_context
-            && value.callback_hits && value.unintercept && value.install_errno == 0 && value.unintercept_result == 0;
+            && value.callback_hits && value.unintercept && value.neighbors && value.install_errno == 0 && value.unintercept_result == 0;
 }
 
-extern "C" bool idoly_phase_machine_check(void) {
+// Ordinary-only API. The historical full BL guard is immutable in the c814 phone checker.
+static idoly_machine_ordinary_report_t ordinary_report;
+static CaseContext ordinary_contexts[IDOLY_ORDINARY_CASE_COUNT];
+static unsigned ordinary_state, ordinary_baseline_state;
+extern "C" bool idoly_phase_machine_baseline_ordinary(void) {
     unsigned expected = 0;
-    if (!__atomic_compare_exchange_n(&check_state, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
-        return expected == 2 && report.ok;
-    report.attempted = true;
-    if (idoly_phase_machine_baseline()) {
-        void* rejected = shadowhook_intercept_instr_addr(nullptr, intercept, &add_context,
+    if (!__atomic_compare_exchange_n(&ordinary_baseline_state, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        if (expected != 2) return false;  // Do not read a baseline report still being written.
+        bool ok = true;
+        for (const auto& value : ordinary_report.cases) ok &= value.baseline;
+        return ok;
+    }
+    const Kind kinds[] = {ADD, MOV, LDR, LDP, SUBSP, STRPRE, LDPPOST};
+    bool baselines = true;
+    for (unsigned i = 0; i < IDOLY_ORDINARY_CASE_COUNT; ++i) {
+        ordinary_contexts[i].kind = kinds[i];
+        auto& value = ordinary_report.cases[i];
+        value.install_errno = value.unintercept_result = -1;
+        execute(ordinary_contexts[i]);
+        value.baseline = state_ok(inspect(ordinary_contexts[i]));
+        baselines &= value.baseline;
+    }
+    __atomic_store_n(&ordinary_baseline_state, 2, __ATOMIC_RELEASE);
+    return baselines;
+}
+extern "C" bool idoly_phase_machine_check_ordinary(void) {
+    unsigned expected = 0;
+    if (!__atomic_compare_exchange_n(&ordinary_state, &expected, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
+        return expected == 2 && ordinary_report.ok;
+    ordinary_report.attempted = true;
+    void* instructions[] = {reinterpret_cast<void*>(idoly_machine_instruction_add),
+        reinterpret_cast<void*>(idoly_machine_instruction_mov), reinterpret_cast<void*>(idoly_machine_instruction_ldr),
+        reinterpret_cast<void*>(idoly_machine_instruction_ldp), reinterpret_cast<void*>(idoly_machine_instruction_subsp),
+        reinterpret_cast<void*>(idoly_machine_instruction_strpre), reinterpret_cast<void*>(idoly_machine_instruction_ldppost)};
+    if (idoly_phase_machine_baseline_ordinary()) {
+        void* rejected = shadowhook_intercept_instr_addr(nullptr, intercept, &ordinary_contexts[0],
                 SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE);
         int rejected_errno = shadowhook_get_errno();
-        bool rejected_removed = rejected == nullptr || shadowhook_unintercept(rejected) == 0;
-        execute(add_context);
-        report.hook_failure_fail_open = rejected == nullptr && rejected_errno != 0
-                && state_ok(inspect(add_context)) && add_context.hits == 0;
-        if (rejected_removed) {
-            bool add_removed = run_case(add_context, report.add, reinterpret_cast<void*>(idoly_machine_instruction_add));
-            if (add_removed) run_case(bl_context, report.bl, reinterpret_cast<void*>(idoly_machine_instruction_bl));
-        }
-        report.ok = report.hook_failure_fail_open && case_ok(report.add) && case_ok(report.bl);
+        bool removed = rejected == nullptr || shadowhook_unintercept(rejected) == 0;
+        execute(ordinary_contexts[0]);
+        ordinary_report.hook_failure_fail_open = rejected == nullptr && rejected_errno != 0
+                && state_ok(inspect(ordinary_contexts[0])) && ordinary_contexts[0].hits == 0;
+        ordinary_report.ok = ordinary_report.hook_failure_fail_open;
+        if (removed) {
+            for (unsigned i = 0; i < IDOLY_ORDINARY_CASE_COUNT; ++i) {
+                bool removed_one = run_case(ordinary_contexts[i], ordinary_report.cases[i], instructions[i]);
+                ordinary_report.ok &= case_ok(ordinary_report.cases[i]);
+                if (!removed_one) { ordinary_report.ok = false; break; }
+            }
+        } else ordinary_report.ok = false;
     }
-    __atomic_store_n(&check_state, 2, __ATOMIC_RELEASE);
-    return report.ok;
+    __atomic_store_n(&ordinary_state, 2, __ATOMIC_RELEASE);
+    return ordinary_report.ok;
 }
-
-extern "C" const idoly_machine_report_t* idoly_phase_machine_report(void) { return &report; }
+extern "C" const idoly_machine_ordinary_report_t* idoly_phase_machine_ordinary_report(void) { return &ordinary_report; }

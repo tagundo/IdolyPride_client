@@ -35,6 +35,24 @@ def test_generated_profile_rejects_incomplete_or_duplicate_windows(tmp_path):
         BUILDER.generate_header(profile, tmp_path / "header.h")
 
 
+@pytest.mark.parametrize("word", [0x94000000, 0x14000000, 0xd61f0000, 0xd65f03c0,
+    0x90000000, 0x10000000, 0x58000000, 0xd503201f, 0x91000000])
+def test_profile_rejects_control_pc_relative_system_and_unreviewed_ordinary_words(tmp_path, word):
+    profile = json.loads((NATIVE / "phase-profile.json").read_text())
+    expected = bytes.fromhex(profile["sites"][0]["expected16"])
+    profile["sites"][0]["expected16"] = (struct.pack("<I", word) + expected[4:]).hex()
+    with pytest.raises(ValueError, match="ordinary instruction allowlist"):
+        BUILDER.generate_header(profile, tmp_path / "header.h")
+
+
+@pytest.mark.parametrize("key,value", [("schema", 1), ("instruction_scope", "legacy-bl"), ("overwrite_bytes", 16)])
+def test_profile_rejects_legacy_scope_and_wider_overwrites(tmp_path, key, value):
+    profile = json.loads((NATIVE / "phase-profile.json").read_text())
+    profile[key] = value
+    with pytest.raises(ValueError, match="ordinary-v2"):
+        BUILDER.generate_header(profile, tmp_path / "header.h")
+
+
 def test_16k_check_rejects_a_library_requiring_4k_pages(tmp_path):
     header = bytearray(120)
     header[:6] = b"\x7fELF\x02\x01"

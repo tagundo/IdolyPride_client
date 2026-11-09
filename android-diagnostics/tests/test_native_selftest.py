@@ -12,25 +12,32 @@ SPEC.loader.exec_module(DRIVER)
 
 
 def report():
-    return {"schema": 1, "ok": True, "synthetic_only": True, "abi": "arm64-v8a",
-            "shadowhook_version": "2.0.1", "init_result": 0, "init_errno": 0, "install_errno": 0,
-            "bl_install_errno": 0, "add_unintercept_result": 0, "bl_unintercept_result": 0,
-            **{name: True for name in DRIVER.CHECKS}}
+    return {"schema": 2, "scope": "ordinary-v2", "ok": True, "synthetic_only": True, "abi": "arm64-v8a",
+            "shadowhook_version": "2.0.1", "init_result": 0, "init_errno": 0,
+            **{name: True for name in DRIVER.CHECKS},
+            "cases": {name: {**{flag: True for flag in DRIVER.CASE_CHECKS}, "install_errno": 0,
+                             "unintercept_result": 0} for name in DRIVER.CASES}}
 
 
 def test_every_state_check_required():
     DRIVER.validate_report(report())
     for name in DRIVER.CHECKS:
-        failed = report()
-        failed[name] = False
-        with pytest.raises(ValueError):
-            DRIVER.validate_report(failed)
+        failed = report(); failed[name] = False
+        with pytest.raises(ValueError): DRIVER.validate_report(failed)
+    for case in DRIVER.CASES:
+        for flag in DRIVER.CASE_CHECKS:
+            failed = report(); failed["cases"][case][flag] = False
+            with pytest.raises(ValueError): DRIVER.validate_report(failed)
+        for errno in ("install_errno", "unintercept_result"):
+            for wrong in (-1, 35, False, "0"):
+                failed = report(); failed["cases"][case][errno] = wrong
+                with pytest.raises(ValueError): DRIVER.validate_report(failed)
 
 
 def test_unverified_or_non_arm64_reports_rejected():
     for changes in ({"ok": False}, {"abi": "x86_64"}, {"synthetic_only": False},
-                    {"shadowhook_version": "unverified"}, {"gpr": 1}, {"init_result": 12},
-                    {"init_errno": 35}, {"install_errno": -1}, {"init_result": False}):
+                    {"shadowhook_version": "unverified"}, {"baseline": 1}, {"init_result": 12},
+                    {"init_errno": 35}, {"scope": "legacy-bl"}, {"init_result": False}, {"cases": {}}):
         with pytest.raises(ValueError):
             DRIVER.validate_report({**report(), **changes})
 

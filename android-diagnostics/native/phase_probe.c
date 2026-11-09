@@ -119,7 +119,9 @@ static bool profile_matches(const struct image *image) {
     if (!build_id_matches(image)) return false;
     for (size_t i = 0; i < PHASE_COUNT; ++i) {
         uintptr_t address = image->base + PHASE_SITES[i].rva;
-        if (!mapped(image, address, 16, PF_R | PF_X)
+        uint32_t word;
+        memcpy(&word, PHASE_SITES[i].expected, sizeof(word));
+        if (!phase_word_is_ordinary(word) || !mapped(image, address, 16, PF_R | PF_X)
                 || memcmp((const void *)address, PHASE_SITES[i].expected, 16) != 0) return false;
     }
     return true;
@@ -163,17 +165,23 @@ static void *install(void *unused) {
         dlclose(pin); emit(PHASE_COUNT + 3, "probe_init_failed"); return NULL;
     }
     shadowhook_set_recordable(false);
-    if (!idoly_phase_machine_check()) {
+    if (!idoly_phase_machine_check_ordinary()) {
         dlclose(pin); emit(PHASE_COUNT + 4, "probe_selftest_failed"); return NULL;
     }
     void *stubs[PHASE_COUNT] = {0};
     for (size_t i = 0; i < PHASE_COUNT; ++i) {
         stubs[i] = shadowhook_intercept_instr_addr((void *)(image.base + PHASE_SITES[i].rva),
             checkpoint, (void *)(uintptr_t)i, SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE);
-        if (!stubs[i]) {
+        uint32_t installed_word = 0;
+        memcpy(&installed_word, (void *)(image.base + PHASE_SITES[i].rva), sizeof(installed_word));
+        bool narrow = (installed_word & 0xfc000000u) == 0x14000000u
+            && memcmp((void *)(image.base + PHASE_SITES[i].rva + 4), PHASE_SITES[i].expected + 4, 12) == 0;
+        if (!stubs[i] || !narrow) {
             bool removed = true;
-            for (size_t j = 0; j < i; ++j) {
-                if (shadowhook_unintercept(stubs[j]) != 0) removed = false;
+            for (size_t j = 0; j <= i; ++j) {
+                if (stubs[j] && shadowhook_unintercept(stubs[j]) != 0) removed = false;
+                if (memcmp((void *)(image.base + PHASE_SITES[j].rva), PHASE_SITES[j].expected, 16) != 0)
+                    removed = false;
             }
             if (removed) dlclose(pin);
             else pinned_il2cpp = pin;

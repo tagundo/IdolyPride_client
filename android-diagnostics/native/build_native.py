@@ -95,20 +95,45 @@ def check_arm64_16k(path):
             raise ValueError("Diagnostic library PT_LOAD segments must support 16 KiB pages")
 
 
+# A positive allowlist of the exact ordinary words reviewed for this profile.
+# It deliberately admits no control flow, PC-relative, system or literal load.
+ORDINARY_WORDS = {
+    0xaa1403e0: "mov x0, x20", 0xaa1f03e3: "mov x3, xzr",
+    0xaa1f03e2: "mov x2, xzr", 0xaa1f03e1: "mov x1, xzr", 0xaa1f03e0: "mov x0, xzr",
+    0xa9420662: "ldp x2, x1, [x19, #0x20]", 0xa8c14ffe: "ldp x30, x19, [sp], #0x10",
+    0xf9401a61: "ldr x1, [x19, #0x30]", 0xf9401b08: "ldr x8, [x24, #0x30]",
+    0xd10243ff: "sub sp, sp, #0x90", 0xf81f0ffe: "str x30, [sp, #-0x10]!",
+}
+
+
 def generate_header(profile, output):
+    if (profile.get("schema") != 2 or profile.get("instruction_scope") != "ordinary-v2"
+            or profile.get("overwrite_bytes") != 4):
+        raise ValueError("Only the reviewed ordinary-v2 four-byte profile is supported")
     sites = profile["sites"]
     if len(sites) != 16 or len({row["code"] for row in sites}) != len(sites):
         raise ValueError("The pinned phase profile must contain sixteen unique checkpoints")
     rows = []
+    addresses = set()
     for site in sites:
         expected = bytes.fromhex(site["expected16"])
         if len(expected) != 16:
             raise ValueError("Phase site requires a complete 16-byte native window")
+        address = int(site["rva"], 16)
+        if address & 3 or address in addresses:
+            raise ValueError("Phase instruction addresses must be aligned and unique")
+        addresses.add(address)
+        word = int.from_bytes(expected[:4], "little")
+        if word not in ORDINARY_WORDS or site.get("instruction") != ORDINARY_WORDS[word]:
+            raise ValueError("Phase instruction is outside the exact ordinary instruction allowlist")
         rows.append("    {" + site["rva"] + ", {" + ",".join(hex(b) for b in expected) + "}, "
                     + json.dumps(site["code"]) + "},")
     build_id = bytes.fromhex(profile["elf_build_id"])
     output.write_text("#include <stdint.h>\n"
         "struct phase_site { uintptr_t rva; unsigned char expected[16]; const char *code; };\n"
+        + "static int phase_word_is_ordinary(uint32_t word) { switch (word) {\n"
+        + "".join("case " + hex(word) + "u: " for word in ORDINARY_WORDS)
+        + "return 1; default: return 0; } }\n"
         + "#define PHASE_COUNT " + str(len(sites)) + "\n"
         + "static const unsigned char EXPECTED_BUILD_ID[] = {" + ",".join(hex(b) for b in build_id) + "};\n"
         + "static const struct phase_site PHASE_SITES[PHASE_COUNT] = {\n" + "\n".join(rows) + "\n};\n")
@@ -164,7 +189,10 @@ def build_native(output: Path, *, ndk=None, cache_dir=None):
         "phase_count": len(profile["sites"]), "observations_only": True,
         "managed_memory_read": False, "register_context_modified": False,
         "per_device_preflight_required": True,
-        "preflight_checks": ["ADD", "BL", "original_link_register", "GPR", "FPSIMD", "SP", "NZCV", "FPCR", "FPSR", "unintercept"],
+        "instruction_scope": "ordinary-v2", "overwrite_bytes": 4,
+        "post_install_neighbor_guard": True,
+        "preflight_checks": ["ADD", "MOV", "LDR", "LDP", "SUB_SP", "STR_preindex", "LDP_postindex",
+            "documented_link_register_effect", "neighbor_bytes", "GPR", "FPSIMD", "SP", "NZCV", "FPCR", "FPSR", "unintercept"],
         "source_sha256": {path.name: digest(path) for path in [HERE / "phase_probe.c", Path(__file__),
             HERE / "machine_state_check.cpp", HERE / "machine_state_check.h", HERE / "checkpoint.S"]},
         "library_sha256": {path.name: digest(path) for path in sorted(libraries.glob("*.so"))}}

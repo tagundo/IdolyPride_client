@@ -10,28 +10,38 @@ Each checkpoint is emitted once per process as `Unity: IDOLY_PHASE:<fixed code>`
 worker waits for the Unity and IL2CPP ELF mappings, then delays another
 500 ms before initializing ShadowHook. It validates the ELF build ID, executable
 mapping ranges, and **all sixteen 16-byte windows before installing any hook**.
-A mismatch, timeout, missing library, or installation error produces only the
-fixed `probe_unavailable` event. Before reading ELF headers or instruction
+A timeout or missing library produces `probe_unavailable`; profile,
+initialization, preflight and installation failures have distinct fixed codes. Before reading ELF headers or instruction
 windows, the worker pins the exact loaded path with `RTLD_NOLOAD`, then
 refreshes its mappings. The reference remains held while hooks are active.
 Partial installation attempts are rolled back and every removal result is
 checked. If removal fails, the ELF remains pinned and some fixed observational
-callbacks may remain active after `probe_unavailable`.
+callbacks may remain active after `probe_install_failed`.
 An unavailable probe must not block game startup.
 
-After ShadowHook initialization, the shared `machine_state_check` routine runs
-synthetic ADD and direct BL instructions in this diagnostic library before any
-game checkpoint is intercepted. It checks all GPR/SIMD state, SP, NZCV, FPCR,
-FPSR and the BL return link (`original instruction + 4`), then confirms both
-synthetic interceptors were removed. Any failed check prevents every game hook.
-Callback data has static lifetime even if removal fails. This routine is also
-compiled unchanged into the standalone test APK; it uses no C++ shared runtime.
-`probe_ready` is emitted only after this per-device check and all sixteen game
-interceptors succeed. Distinct fixed failure codes identify initialization,
-machine-state preflight, profile, or installation failures without raw errors.
+After ShadowHook initialization, the version 2 ordinary-instruction guard runs
+seven synthetic cases before any game checkpoint is intercepted: ADD, MOV,
+scalar LDR, pair LDP, SUB of SP, pre-index STR of LR, and post-index LDP of LR.
+It requires all GPR/SIMD state, SP, NZCV, FPCR and FPSR, permitting exactly each
+instruction's specified register, stack and memory effects. Every fixture must
+pass its baseline, three callbacks, untouched-context check and removal check.
+The same guard is compiled into the standalone test APK; it uses no C++ shared
+runtime. A failure prevents every game hook. Callback storage remains static
+if removal fails. `probe_ready` requires all seven checks and sixteen installs.
+
+Version 2 allows only the exact reviewed ordinary instruction words. Ten
+checkpoints moved four bytes before their old BL sites; the original BL remains
+untouched. The pinned ShadowHook 2.0.1 ARM64 binary uses a four-byte branch island
+without a wider fallback. Each actual install additionally verifies that only
+the first word became a direct B and the neighboring twelve bytes stayed intact;
+a mismatch triggers rollback, with all sixteen original bytes checked afterward.
+BL, other control flow and PC-relative instructions are forbidden. The earlier
+BL fixture exposed a trampoline link-register difference on the phone; its
+strict historical comparison is retained in the separate immutable c814 phone
+checker. No assertion about ordinary CPU preservation has been weakened.
 
 ShadowHook's instruction intercept API executes the original instruction after
-the callback. The `SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE` flag preserves the
+the callback. The `SHADOWHOOK_INTERCEPT_WITH_FPSIMD_READ_WRITE` flag requests preservation of the
 ARM64 general register context, SP, PC, PSTATE, q0–q31, FPSR and FPCR. Our callback
 does not access that context and calls only the Android public log API with a
 fixed string. The game ELF on disk, metadata, original DEX files, and FastAES are
@@ -53,7 +63,10 @@ addresses with another client build. The packager also requires the exact known
 
 ShadowHook 2.0.1 is downloaded from Maven Central with a fixed SHA-256. The build
 uses NDK 26.3.11579264, API 28, ARM64 only, with 16 KiB ELF and APK alignment.
-Native hooks still need actual ARM64 execution testing. Upstream documents a
+The old ADD case passed on a physical ARM64 phone. All seven new uninstrumented
+fixtures passed ARM64 Unicorn execution; the new complete device guard runs on
+each phone before game instrumentation. These results do not claim that all
+seven new interceptors or the game startup have passed on hardware. Upstream documents a
 native crash-handler ordering risk when ShadowHook initializes before other
 crash SDKs; the deferred worker reduces early startup interference but is not a
 guarantee. The prior Java-only diagnostic APK remains a separate fallback.

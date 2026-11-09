@@ -1,31 +1,33 @@
 This disposable fixture tests ShadowHook 2.0.1 ARM64 instruction interception.
 It includes no game binaries, credentials, server state or production client.
 
-The shared `../checkpoint.S` and `../machine_state_check.cpp` are compiled
-unchanged into both production and this fixture. They create known GPR and
-SIMD state, snapshot every x0–x30 and q0–q31 plus SP/NZCV/FPCR/FPSR, and test
-both an intercepted `add x0,x0,#7` and a direct `bl` to a local ADD7/RET callee.
-The interceptor leaves its CPU-context argument unchanged while deliberately
-clobbering live caller-saved registers, SIMD registers and floating-point flags.
-Android's reserved x18 is retained and compared, never assigned a sentinel.
-The second snapshot checks ADD7 executed and all other state survived. The BL
-case additionally requires x30 to equal the original BL instruction address
-plus four after return, rather than a trampoline return address.
-The output-pointer x28 is deliberately advanced by exactly 800 bytes outside
-the intercepted instruction; the comparison accounts for that adjustment.
+The version 2 fixture calls the same ordinary-only guard as production. It
+covers seven instructions: ADD, MOV, scalar LDR, pair LDP, SUB SP, STR LR with
+pre-index stack allocation and LDP LR/register with post-index stack release.
+Every case snapshots all x0–x30, q0–q31, SP, NZCV, FPCR and FPSR. The comparison
+allows only the specific instruction's documented register, SP and memory
+effects. Android's reserved x18 remains unchanged. The output-pointer x28 is
+advanced exactly 800 bytes outside the intercepted instruction.
 
-The test checks both uninstrumented baselines, rejected null-address install
-followed by normal execution, three callbacks per instruction, and execution
-after both successful unintercepts. Shared callback contexts and snapshots have
-static lifetime even if cleanup fails. The production preflight is one-shot and
-returns true only after every check and both removals pass; subsequent calls
-use the cached result. It never initializes ShadowHook or calls game methods.
-The standalone wrapper runs shared baselines before initialization so an init
-failure remains distinguishable from a baseline failure. It captures numeric initialization result and TLS errno immediately
-after initialization, before the deliberately invalid install overwrites errno.
-`install_errno` is `-1` when initialization prevented installation. The JSON
-contains only fixed booleans, numeric API statuses and version strings, without
-register values, memory addresses, stack contents or application data.
+The wrapper runs all seven baselines before ShadowHook initialization. It then
+captures numeric initialization result/errno immediately and, if init succeeds,
+runs rejected-address fail-open and three callbacks per case, each with an
+unchanged CPU context and deliberately clobbered live caller/SIMD/flag state.
+Every install must overwrite only one word with B and preserve the neighboring
+twelve bytes. Every removal must restore all sixteen bytes and normal execution.
+The production preflight is one-shot; any failure prevents every game hook.
+Callbacks and snapshots have static storage even if removal fails.
+
+Schema 2 reports `scope: ordinary-v2`, initialization/attempted/fail-open status,
+and seven named `cases`, each with every CPU, instruction-effect, callback,
+neighbor, cleanup flag and numeric status. The driver requires every flag true
+and all numeric statuses zero. A native bridge that declines initialization
+still exposes the seven baseline results, but does not prove interception.
+
+The older strict ADD/BL comparison remains available in the immutable c814
+phone checker under `tools/native_phone_check/`. BL replay was shown to change
+LR through the pinned library's trampoline; production version 2 forbids all
+BL/control/PC-relative sites rather than allowing that register difference.
 
 Build with installed SDK/NDK/JDK tools (NDK 26.3.11579264 is required):
 

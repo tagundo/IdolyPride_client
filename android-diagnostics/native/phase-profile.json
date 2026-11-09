@@ -7,99 +7,118 @@
   "sites": [
     {
       "code": "home_enter",
-      "rva": "0x56757d0",
-      "expected16": "2cdaff97e9180290e083c03ce80f40f9",
-      "meaning": "Before BL HomeTop.HomeEnterAsync; request begins, not response completion."
+      "rva": "0x56757cc",
+      "expected16": "e00314aa2cdaff97e9180290e083c03c",
+      "meaning": "Before BL HomeTop.HomeEnterAsync; request begins, not response completion. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x0, x20"
     },
     {
       "code": "environment_begin",
-      "rva": "0x56759e0",
-      "expected16": "8582ef97f50300aa200340f9f60301aa",
-      "meaning": "Before BL OutGame3D.ChangeEnvironmentAsync(type2); this branch is camera state, not a scene asset await."
+      "rva": "0x56759dc",
+      "expected16": "e3031faa8582ef97f50300aa200340f9",
+      "meaning": "Before BL OutGame3D.ChangeEnvironmentAsync(type2); this branch is camera state, not a scene asset await. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x3, xzr"
     },
     {
       "code": "background_begin",
-      "rva": "0x5641f60",
-      "expected16": "4e51f097f50300aa000340f9f60301aa",
-      "meaning": "Before BL OutGame3D.LoadBackgroundSceneAsync."
+      "rva": "0x5641f5c",
+      "expected16": "e3031faa4e51f097f50300aa000340f9",
+      "meaning": "Before BL OutGame3D.LoadBackgroundSceneAsync. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x3, xzr"
     },
     {
       "code": "background_load_returned",
       "rva": "0x56420e0",
       "expected16": "620642a9098d5ba9e00314aa20013fd6",
-      "meaning": "Background scene await returned and IsLoadingScene=false was stored; virtual AfterLoadEnvironmentAsync has not run yet, actors are not guaranteed ready."
+      "meaning": "Background scene await returned and IsLoadingScene=false was stored; virtual AfterLoadEnvironmentAsync has not run yet, actors are not guaranteed ready. Keep original ordinary-instruction checkpoint; its own documented register/SP effects still execute normally.",
+      "instruction": "ldp x2, x1, [x19, #0x20]"
     },
     {
       "code": "shader_completion_flag",
       "rva": "0x45c4c64",
       "expected16": "fe4fc1a8c0035fd63f0000f1e0079f1a",
-      "meaning": "OnDispose already wrote IsEndShaderWarmUp=true; cleanup gate released, not proof shaders succeeded."
+      "meaning": "OnDispose already wrote IsEndShaderWarmUp=true; cleanup gate released, not proof shaders succeeded. Keep original ordinary-instruction checkpoint; its own documented register/SP effects still execute normally.",
+      "instruction": "ldp x30, x19, [sp], #0x10"
     },
     {
       "code": "home_open_begin",
-      "rva": "0x5675e48",
-      "expected16": "9c42ff97f50300aa200340f9f60301aa",
-      "meaning": "Before HomePageGroup.OnOpenInAsync call, after shader wait gate."
+      "rva": "0x5675e44",
+      "expected16": "e2031faa9c42ff97f50300aa200340f9",
+      "meaning": "Before HomePageGroup.OnOpenInAsync call, after shader wait gate. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x2, xzr"
     },
     {
       "code": "loading_hide",
-      "rva": "0x5676008",
-      "expected16": "6010bd97882640f9a81700b4003940f9",
-      "meaning": "Before LoadingManager.Hide call, not proof complete home visibility."
+      "rva": "0x5676004",
+      "expected16": "e0031faa6010bd97882640f9a81700b4",
+      "meaning": "Before LoadingManager.Hide call, not proof complete home visibility. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x0, xzr"
     },
     {
       "code": "front_loading_finished",
       "rva": "0x5676024",
       "expected16": "611a40f9e00314aaf4daff97f50300aa",
-      "meaning": "After HomeFrontLoadingView.FinishLoading returned; before later HomeTop.ShowInAsync await, not whole-home completion."
+      "meaning": "After HomeFrontLoadingView.FinishLoading returned; before later HomeTop.ShowInAsync await, not whole-home completion. Keep original ordinary-instruction checkpoint; its own documented register/SP effects still execute normally.",
+      "instruction": "ldr x1, [x19, #0x30]"
     },
     {
       "code": "actors_begin",
       "rva": "0x563b778",
       "expected16": "ff4302d1fe2b00f9f85f06a9f65707a9",
-      "meaning": "HomeOfficeActors.LoadActorsAsync wrapper entry."
+      "meaning": "HomeOfficeActors.LoadActorsAsync wrapper entry. Keep original ordinary-instruction checkpoint; its own documented register/SP effects still execute normally.",
+      "instruction": "sub sp, sp, #0x90"
     },
     {
       "code": "actor_motion_wait",
-      "rva": "0x5635ca4",
-      "expected16": "73ffdc94fb1740f9d35002f068f26739",
-      "meaning": "UniTaskExtensions.GetAwaiter for four-motion join; join examined, not proof it suspended."
+      "rva": "0x5635ca0",
+      "expected16": "e1031faa73ffdc94fb1740f9d35002f0",
+      "meaning": "UniTaskExtensions.GetAwaiter for four-motion join; join examined, not proof it suspended. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x1, xzr"
     },
     {
       "code": "actor_cache_build",
-      "rva": "0x5635f68",
-      "expected16": "84c3bd97e81502d0e08744ad08a142f9",
-      "meaning": "Before SolisActorUtility.UpdateCacheActorAsync call after cache miss."
+      "rva": "0x5635f64",
+      "expected16": "e2031faa84c3bd97e81502d0e08744ad",
+      "meaning": "Before SolisActorUtility.UpdateCacheActorAsync call after cache miss. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x2, xzr"
     },
     {
       "code": "actor_result_received",
       "rva": "0x56360fc",
       "expected16": "081b40f9880100b429190290295542f9",
-      "meaning": "Cache-hit or successful cache-build merge; actor available before further setup/fade."
+      "meaning": "Cache-hit or successful cache-build merge; actor available before further setup/fade. Keep original ordinary-instruction checkpoint; its own documented register/SP effects still execute normally.",
+      "instruction": "ldr x8, [x24, #0x30]"
     },
     {
       "code": "actor_cache_wait",
-      "rva": "0x8834584",
-      "expected16": "9be71494f5c00090a8f26739e00706a9",
-      "meaning": "Before UniTask.WaitWhile(cache-busy predicate); not proof waiting duration."
+      "rva": "0x8834580",
+      "expected16": "e3031faa9be71494f5c00090a8f26739",
+      "meaning": "Before UniTask.WaitWhile(cache-busy predicate); not proof waiting duration. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x3, xzr"
     },
     {
       "code": "buttons_begin",
       "rva": "0x561dfdc",
       "expected16": "fe0f1ff8001040f9600000b4fe0741f8",
-      "meaning": "HomeCenterPagePresenter.WaitForButtonLoadAsync entry; not button completion."
+      "meaning": "HomeCenterPagePresenter.WaitForButtonLoadAsync entry; not button completion. Keep original ordinary-instruction checkpoint; its own documented register/SP effects still execute normally.",
+      "instruction": "str x30, [sp, #-0x10]!"
     },
     {
       "code": "home_show_in_returned",
-      "rva": "0x56761cc",
-      "expected16": "c3d5be97140900b4885640f9e80800b4",
-      "meaning": "HomeTop.ShowInAsync await has returned; next call is NotificationManager.Resume, then separate HomeEntering/tutorial work."
+      "rva": "0x56761c8",
+      "expected16": "e0031faac3d5be97140900b4885640f9",
+      "meaning": "HomeTop.ShowInAsync await has returned; next call is NotificationManager.Resume, then separate HomeEntering/tutorial work. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x0, xzr"
     },
     {
       "code": "shader_wait_begin",
-      "rva": "0x5675c4c",
-      "expected16": "67e1db9448f36739e00706a9c8000035",
-      "meaning": "Reached only when shader completion flag was false: before UniTask.WaitUntil for IsEndShaderWarmUp. Does not read/write context or flag. Later home_open_begin proves this gate passed."
+      "rva": "0x5675c48",
+      "expected16": "e3031faa67e1db9448f36739e00706a9",
+      "meaning": "Reached only when shader completion flag was false: before UniTask.WaitUntil for IsEndShaderWarmUp. Does not read/write context or flag. Later home_open_begin proves this gate passed. Observe immediately before the final ordinary argument-setting instruction preceding the original unmodified BL.",
+      "instruction": "mov x3, xzr"
     }
-  ]
+  ],
+  "schema": 2,
+  "instruction_scope": "ordinary-v2",
+  "overwrite_bytes": 4
 }

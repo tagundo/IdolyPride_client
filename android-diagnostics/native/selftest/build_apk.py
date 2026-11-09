@@ -104,7 +104,8 @@ def build(output, *, shadowhook_aar, ndk, build_tools, android_jar, javac):
         if any(digest(path) != source_hashes[path.name] for path in sources):
             raise ValueError("Self-test source changed during build")
         report = {"schema": 1, "package": PACKAGE, "synthetic_only": True, "game_included": False,
-                  "runtime_verified": False, "abi": "arm64-v8a", "ndk": "26.3.11579264",
+                  "runtime_verified": False, "report_schema": 2, "instruction_scope": "ordinary-v2",
+                  "fixture_cases": ["add", "mov", "ldr", "ldp", "subsp", "strpre", "ldppost"], "abi": "arm64-v8a", "ndk": "26.3.11579264",
                   "shadowhook_version": "2.0.1", "shadowhook_aar_sha256": AAR_SHA256,
                   "source_sha256": source_hashes, "output_sha256": digest(signed),
                   "output_bytes": signed.stat().st_size,
