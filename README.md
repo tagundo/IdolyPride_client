@@ -25,6 +25,8 @@
 
 6.1.1 원본에서 Android APK와 PlayCover용 IPA를 생성합니다. 기본 서버 주소는 `http://127.0.0.1:50051`이며 같은 Android의 Termux 서버 또는 같은 MacBook의 서버에 연결합니다. 두 앱의 식별자는 `game.qualiarts.idolypride.local`, 표시 이름은 `아이프라 로컬`입니다.
 
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에 APK·IPA와 `ServerData.zip` 개발용 빌드를 제공합니다. 서버 데이터 ZIP은 저장소 루트에 풀어 사용하는 스키마·원본 마스터 묶음이며 계정 정보는 포함하지 않습니다.
+
 ```sh
 # Android: JDK, Android SDK build-tools, APKEditor.jar 필요
 uv run --all-extras python tools/package_android_client.py /path/to/client.xapk --output data/clients/local.apk
@@ -123,7 +125,15 @@ uv run python tools/export_playcover_auth.py
 uv run python tools/export_playcover_auth.py --bundle game.qualiarts.idolypride --ipa /path/to/installed-game.ipa --output private/firebase-user.archive
 ```
 
-도구는 해당 앱의 PlayChain DB를 read-only로 열고 단일 Firebase 레코드만 새 0600 파일로 저장합니다. `playChain`이나 디버그 설정을 바꾸지 않으며 native Keychain을 읽지 않습니다. PlayChain을 사용하지 않는 설치는 in-process 내보내기가 필요하다는 메시지와 함께 중단합니다. 이 archive는 현재 게임 세션 metadata가 아니므로 `collect-session`의 입력으로 바로 사용할 수 없습니다. archive·토큰은 Mac에 보관하고 채팅에 보내지 않습니다. 실제 PlayCover에서의 내보내기는 아직 미검증입니다.
+동일한 archive의 중복 행은 하나로 취급합니다. 서로 다른 기록이 여러 개면 `--diagnose`로 개수만 확인하거나, 다음 명령으로 전체 기록을 새 비공개 디렉터리에 보존할 수 있습니다.
+
+```sh
+python3 tools/export_playcover_auth.py --bundle game.qualiarts.idolypride --google-app-id 1:543065248020:ios:babf05d967621a37ab3201 --output-dir private/firebase-archives
+```
+
+전체 내보내기는 모든 archive 형식을 검증한 뒤 `001.archive` 등의 파일과 개수·파일명만 담은 manifest를 저장합니다. 디렉터리는 0700, 파일은 0600이며 기존 출력 경로는 덮어쓰지 않습니다. 현재 활성 계정을 자동 선택하거나 로그인하지 않습니다.
+
+도구는 PlayChain DB를 read-only로 엽니다. `playChain`이나 디버그 설정을 바꾸지 않으며 native Keychain을 읽지 않습니다. PlayChain을 사용하지 않는 설치는 in-process 내보내기가 필요하다는 메시지와 함께 중단합니다. 이 archive는 현재 게임 세션 metadata가 아니므로 `collect-session`의 입력으로 바로 사용할 수 없습니다. archive·토큰은 Mac에 보관하고 채팅에 보내지 않습니다. 실제 PlayCover의 전체 내보내기는 아직 미검증입니다.
 
 ## 보존한 응답 가져오기
 

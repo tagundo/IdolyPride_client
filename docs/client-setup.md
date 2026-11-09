@@ -16,6 +16,8 @@ cd IdolyPride_client
 bash tools/setup_local_server.sh
 ```
 
+릴리스의 `IdolyPride-6.1.1-Local-ServerData.zip`을 저장소 루트에 풀면 스키마와 원본 마스터 202개가 `data/`에 준비됩니다. 계정·프로필 데이터는 포함하지 않습니다. 이 경우 원본 IPA를 다시 추출하거나 마스터를 내려받는 단계 없이 `.venv/bin/python tools/run_local_server.py`로 시작할 수 있습니다.
+
 [클라이언트 릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 받은 원본 복호화 6.1.1 IPA가 다운로드 폴더에 있다면 처음 한 번 다음 명령을 실행합니다. 실제 파일 위치가 다르면 `--client` 경로를 바꿉니다.
 
 ```sh
@@ -53,7 +55,7 @@ bash tools/setup_local_server.sh
 termux-setup-storage
 ```
 
-원본 XAPK를 `idolypride-6.1.1.xapk`라는 이름으로 다운로드 폴더에 준비한 경우:
+`ServerData.zip`을 사용한다면 그 안의 `data/` 폴더를 저장소 루트에 풀고 `.venv/bin/python tools/run_local_server.py`로 실행합니다. 원본 XAPK에서 직접 준비하려면 `idolypride-6.1.1.xapk`를 다운로드 폴더에 둔 뒤 다음 명령을 사용합니다.
 
 ```sh
 .venv/bin/python tools/run_local_server.py \
@@ -100,5 +102,7 @@ ARM64 스텁은 두 플랫폼의 실제 원본 해시·진입 바이트를 확�
 Firebase Analytics·푸시 알림·구매 SDK 호출과 Octo 리소스 경로는 아직 남아 있습니다. 현재 패치는 인증 부팅의 온라인 의존성을 줄이며 완전한 네트워크 격리나 전체 게임 플레이를 보장하지 않습니다. 원본 마스터 202개 보존은 모델·음성·영상 등 전체 Octo 리소스 보존과도 구분합니다.
 
 Android를 다시 빌드할 때는 `data/client-signing/local-client.p12`와 `local-client.password`를 함께 보존합니다. 같은 로컬 앱의 업데이트에는 같은 서명 키가 필요합니다. 이 파일이나 공식 계정 인증 archive·세션 metadata는 공유하지 않습니다. PlayCover용 IPA는 PlayCover가 로컬에서 재서명합니다.
+
+현재 GitHub Actions 초안 빌드는 작업마다 임시 Android 개발 키를 만들고 종료 시 삭제합니다. Actions에서 다시 만든 APK를 기존 설치의 업데이트로 사용하려면 먼저 고정 서명 키를 구성해야 합니다. 같은 PC에서 직접 패키징할 때는 위 로컬 키를 재사용합니다.
 
 설치·실행 helper는 셸 문법, 플랫폼 명령 선택을 모의한 테스트, 실제 SQLite 프로필·세션 보존, 추출·다운로드·서버 경계 테스트를 통과했습니다. 실제 macOS·Termux 설치 성공과 앱 화면 동작은 아직 확인하지 않았습니다.
