@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 import time
 from urllib.request import urlopen
@@ -35,22 +36,74 @@ def get_status(port):
         return json.loads(response.read())
 
 
+def _tap_node(qa, node):
+    """Tap bounds taken from the current UI hierarchy, never guessed pixels."""
+    bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+    if bounds is None or node.get("enabled") != "true":
+        raise RuntimeError("Observed document-picker control has no enabled bounds")
+    left, top, right, bottom = map(int, bounds.groups())
+    if left >= right or top >= bottom:
+        raise RuntimeError("Observed document-picker control has empty bounds")
+    qa.adb("shell", "input", "tap", str((left + right) // 2), str((top + bottom) // 2))
+
+
+def _picker_node(tree, *, texts=(), descriptions=()):
+    for node in tree.iter("node"):
+        if node.get("enabled") != "true":
+            continue
+        if node.get("text", "") in texts or node.get("content-desc", "") in descriptions:
+            return node
+    return None
+
+
 def optional_export(qa):
-    """Use the system document picker when it exists in this emulator image."""
+    """Exercise real SAF UI; unavailable images remain explicitly unverified.
+
+    Standard emulator images have DocumentsUI, while ATD images may omit it.
+    Every picker action below uses a newly captured accessibility hierarchy.
+    """
+    resolver = qa.adb("shell", "cmd", "package", "resolve-activity", "--brief",
+                      "-a", "android.intent.action.CREATE_DOCUMENT",
+                      "-c", "android.intent.category.OPENABLE", "-t", "application/json", check=False)
+    (qa.artifacts / "document-picker-resolver.txt").write_text(resolver, encoding="utf-8")
+    if not any("/" in line and " " not in line.strip() for line in resolver.splitlines()):
+        return {"checked": False, "reason": "document_picker_unavailable"}
+    qa.adb("shell", "rm", "-f", "/sdcard/Download/IdolyPride-diagnostics.json")
     try:
         qa.tap("진단 기록 내보내기", "export-open")
+        time.sleep(0.5)
         tree = qa.capture("export-picker")
     except RuntimeError:
         return {"checked": False, "reason": "document_picker_unavailable"}
-    labels = {node.get("text", "") for node in tree.iter("node")}
-    save = next((label for label in ("SAVE", "Save", "저장") if label in labels), None)
+    picker_packages = {node.get("package", "") for node in tree.iter("node")}
+    if not any("documentsui" in package.lower() for package in picker_packages):
+        return {"checked": False, "reason": "document_picker_not_opened"}
+
+    save = _picker_node(tree, texts=("SAVE", "Save", "저장", "保存"))
     if save is None:
-        qa.adb("shell", "input", "keyevent", "4")
-        return {"checked": False, "reason": "document_picker_save_unavailable"}
-    qa.tap(save, "export-save")
-    deadline = time.monotonic() + 15
+        # Fresh standard images normally start in Downloads. Only navigate when
+        # the observed picker has no enabled Save control in its current root.
+        roots = _picker_node(tree, descriptions=("Show roots", "탐색 메뉴 표시", "ルートを表示"))
+        if roots is None:
+            roots = next((node for node in tree.iter("node")
+                          if node.get("resource-id") == "android:id/home" and node.get("enabled") == "true"), None)
+        if roots is None:
+            return {"checked": False, "reason": "document_picker_save_unavailable"}
+        _tap_node(qa, roots)
+        tree = qa.capture("export-roots")
+        downloads = _picker_node(tree, texts=("Downloads", "Download", "다운로드", "ダウンロード"))
+        if downloads is None:
+            return {"checked": False, "reason": "document_picker_downloads_unavailable"}
+        _tap_node(qa, downloads)
+        tree = qa.capture("export-downloads")
+        save = _picker_node(tree, texts=("SAVE", "Save", "저장", "保存"))
+        if save is None:
+            return {"checked": False, "reason": "document_picker_save_unavailable"}
+    _tap_node(qa, save)
+    document_path = "/sdcard/Download/IdolyPride-diagnostics.json"
+    deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
-        raw = qa.adb("shell", "cat", "/sdcard/Download/IdolyPride-diagnostics.json", check=False)
+        raw = qa.adb("shell", "cat", document_path, check=False)
         try:
             exported = json.loads(raw)
         except ValueError:
@@ -61,9 +114,10 @@ def optional_export(qa):
         if FRAME not in text or "NullReferenceException" not in text:
             raise RuntimeError("Saved diagnostic export omitted the synthetic exception")
         (qa.artifacts / "server-export.json").write_text(json.dumps(exported, ensure_ascii=False, indent=2) + "\n")
+        (qa.artifacts / "server-export-document-path.txt").write_text(document_path + "\n")
         qa.capture("export-saved")
-        return {"checked": True, "safe": True}
-    return {"checked": False, "reason": "document_not_readable_from_default_downloads"}
+        return {"checked": True, "safe": True, "document_path": document_path}
+    return {"checked": False, "reason": "document_not_readable_from_selected_downloads"}
 
 
 def main():
@@ -76,6 +130,7 @@ def main():
     parser.add_argument("--serial", default="emulator-5554")
     parser.add_argument("--startup-timeout", type=float, default=600)
     parser.add_argument("--timeout", type=float, default=120)
+    parser.add_argument("--require-export", action="store_true", help="Fail unless real SAF export is verified")
     args = parser.parse_args()
     if args.startup_timeout <= 0 or args.timeout <= 0:
         parser.error("Timeouts must be positive")
@@ -142,6 +197,8 @@ def main():
         clean(server_log)
         (args.artifacts / "server-own-pid-logcat.txt").write_text(server_log, encoding="utf-8")
         result["export"] = optional_export(qa)
+        if args.require_export and result["export"].get("checked") is not True:
+            raise RuntimeError("Required SAF export was not verified: " + result["export"].get("reason", "unknown"))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         qa.tap("서버 중지", "05-server-stop")
         wait_server(schema, grpc_port, expected=False, timeout=30)

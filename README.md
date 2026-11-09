@@ -4,11 +4,11 @@
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.2에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.3에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 8 이상 | `IdolyPride-Local-Server-Android.apk` | `IdolyPride-6.1.1-Local-Android.apk` |
+| Android ARM64, Android 9 이상 | `IdolyPride-Local-Server-Android.apk` | `IdolyPride-6.1.1-Local-Android.apk` |
 | Apple Silicon Mac, macOS 13 이상 | `IdolyPride-Local-Server-macOS-arm64.app.zip` | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
@@ -18,6 +18,8 @@
 게임과 서버는 **같은 Android 또는 같은 Mac**에서 실행합니다. 기본 주소는 게임 API `127.0.0.1:50051`, 마스터 파일 `127.0.0.1:8080`입니다. 로컬 게임의 식별자는 `game.qualiarts.idolypride.local`, 이름은 **아이프라 로컬**이며 기존 공식 앱과 별도로 설치됩니다. 공식 계정이 자동으로 복원되지는 않습니다.
 
 Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후속 APK를 업데이트 설치하면 DB를 유지합니다. **서버 앱 삭제·데이터 지우기는 로컬 프로필을 삭제합니다.** Mac 데이터는 `~/Library/Application Support/IdolyPrideLocal`에 보관하며 서버 앱의 **데이터 폴더**에서 열 수 있습니다. 자세한 설치·저장 위치·확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)를 참고합니다.
+
+Android에서 홈 API 성공 뒤 로딩이 계속된다면 [별도 진단 게임](https://github.com/tagundo/IdolyPride_client/releases/tag/local-diagnostics-v0.1.0)을 설치합니다. 서버 v0.2.3의 **진단 게임 실행**으로 열면 관측된 Unity 예외·셰이더 대기 상태를 서버 앱에서 확인하고 **진단 기록 내보내기**로 저장할 수 있습니다. 마스터 파일은 서버가 실제 전송한 바이트를 표시합니다. 전체 3D 리소스 다운로드 진행률과 게임의 홈 화면 성공은 아직 확인하지 않았습니다.
 
 ## 현재 범위
 

@@ -1,0 +1,104 @@
+name: Verify Android diagnostics export
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diagnostics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-server-emulator-qa-v0.2.3
+          run-id: 42622485369
+          github-token: ${{ github.token }}
+          path: data/baseline-android
+      - uses: actions/download-artifact@v4
+        with:
+          name: server-data-v0.2.3
+          run-id: 42622485369
+          github-token: ${{ github.token }}
+          path: data/baseline-data
+      - name: Prepare the unchanged server and production collector probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/dist data/android-diagnostics-export-qa
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+          uv sync --locked --all-extras --python 3.12
+          uv run --locked python - <<'PY'
+          from pathlib import Path
+          import hashlib, shutil
+          apk, = Path('data/baseline-android').rglob('IdolyPride-Local-Server-Android-x86_64-QA.apk')
+          descriptor, = Path('data/baseline-data').rglob('idolypride-6.1.1.pb')
+          assert hashlib.sha256(apk.read_bytes()).hexdigest() == 'a03839aa9de3dab3913dd1094567c3521a2ec381ac5b2397d108601410d01256'
+          shutil.copyfile(apk, 'data/dist/Server-QA.apk')
+          shutil.copyfile(descriptor, 'data/dist/schema.pb')
+          print('Unchanged v0.2.3 QA server SHA256:', hashlib.sha256(apk.read_bytes()).hexdigest())
+          PY
+          uv run --locked python android-diagnostics/ci/build_probe.py \
+            --output data/dist/Diagnostics-Probe.apk \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar"
+      - name: Verify real native UI and system document export
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          ram-size: 4096M
+          disk-size: 4G
+          cores: 2
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-boot-timeout: 1200
+          script: >-
+            uv run --locked python android-server/ci/qa_diagnostics.py
+            --server-apk data/dist/Server-QA.apk
+            --probe-apk data/dist/Diagnostics-Probe.apk
+            --descriptor-set data/dist/schema.pb
+            --artifacts data/android-diagnostics-export-qa --startup-timeout 600 --require-export
+      - name: Require the actual system picker export
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('data/android-diagnostics-export-qa')
+          result = json.loads((root / 'result.json').read_text())
+          assert result['ok'] and result['own_pid_events_verified'] and result['raw_values_absent'], result
+          assert result['export']['checked'] and result['export']['safe'], result
+          assert (root / 'server-export.json').is_file()
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-diagnostics-export-${{ github.run_id }}
+          path: data/android-diagnostics-export-qa
+          retention-days: 7
+          if-no-files-found: warn
