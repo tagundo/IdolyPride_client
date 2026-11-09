@@ -225,3 +225,136 @@ def test_diagnose_requires_bundle_and_cannot_export_in_same_command(tmp_path):
     with pytest.raises(SystemExit) as mixed_actions:
         exporter.main(["--bundle", BUNDLE, "--diagnose", "--output", str(tmp_path / "archive")])
     assert mixed_actions.value.code == 2
+
+
+def test_backup_all_128_scoped_archives_is_private_complete_and_read_only(mac_home, tmp_path, capsys, monkeypatch):
+    _, settings, database = mac_home
+    originals = [archive_blob()] + [archive_blob(f"private-record-{i}") for i in range(1, 128)]
+    with closing(sqlite3.connect(database)) as connection:
+        connection.executemany("INSERT INTO genp VALUES (?,?,?,?)", [
+            ("fixture-group", exporter.ACCOUNTS[0], "firebase_auth_" + APP_ID, blob)
+            for blob in originals[1:]
+        ])
+        connection.commit()
+    before = settings.read_bytes(), database.read_bytes()
+    destination = tmp_path / "private/firebase-archives"
+    original_rename = Path.rename
+    published = []
+
+    def checked_rename(staging, target):
+        if staging.name.startswith(".firebase-archives-"):
+            assert not destination.exists()
+            assert len(list(staging.glob("*.archive"))) == 128
+            assert (staging / "manifest.json").is_file()
+            published.append(True)
+        return original_rename(staging, target)
+
+    monkeypatch.setattr(Path, "rename", checked_rename)
+    assert exporter.main(["--bundle", BUNDLE, "--google-app-id", APP_ID,
+                          "--output-dir", str(destination)]) == 0
+    messages = capsys.readouterr()
+    assert json.loads(messages.out) == {"matched_rows": 128, "distinct_archive_count": 128, "saved_archives": 128}
+    assert messages.err == ""
+    for value in [SECRET, APP_ID, BUNDLE, "fixture-group", "private-record-", str(destination)]:
+        assert value not in messages.out
+    assert published == [True]
+    assert destination.stat().st_mode & 0o777 == 0o700
+    manifest = json.loads((destination / "manifest.json").read_text())
+    assert manifest == {"matched_rows": 128, "distinct_archive_count": 128,
+                        "files": [f"{i:03d}.archive" for i in range(1, 129)]}
+    assert {file.read_bytes() for file in destination.glob("*.archive")} == set(originals)
+    assert all(file.stat().st_mode & 0o777 == 0o600 for file in destination.iterdir())
+    assert not list(destination.parent.glob(".firebase-archives-*"))
+    assert before == (settings.read_bytes(), database.read_bytes())
+
+
+def test_backup_all_deduplicates_identical_bytes_without_choosing_account(mac_home, tmp_path):
+    home, _, database = mac_home
+    with closing(sqlite3.connect(database)) as connection:
+        connection.executemany("INSERT INTO genp VALUES (?,?,?,?)", [
+            ("another-private-group", exporter.ACCOUNTS[1], "firebase_auth_" + APP_ID, archive_blob()),
+            ("another-private-group", exporter.ACCOUNTS[0], "firebase_auth_" + APP_ID, archive_blob("another-user")),
+        ])
+        connection.commit()
+    destination = tmp_path / "private/all"
+    assert exporter.export_archives(BUNDLE, destination, home, APP_ID) == {
+        "matched_rows": 3, "distinct_archive_count": 2, "saved_archives": 2}
+    assert len(list(destination.glob("*.archive"))) == 2
+
+
+def test_backup_all_validates_every_blob_before_publishing_any_file(mac_home, tmp_path, capsys):
+    _, settings, database = mac_home
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("INSERT INTO genp VALUES (?,?,?,?)", (
+            "fixture-group", exporter.ACCOUNTS[0], "firebase_auth_" + APP_ID, b"invalid-private-archive",
+        ))
+        connection.commit()
+    before = settings.read_bytes(), database.read_bytes()
+    destination = tmp_path / "private/all"
+    assert exporter.main(["--bundle", BUNDLE, "--google-app-id", APP_ID,
+                          "--output-dir", str(destination)]) == 1
+    messages = capsys.readouterr()
+    assert "NSKeyedArchiver" in messages.err
+    assert "invalid-private-archive" not in messages.out + messages.err
+    assert not destination.exists()
+    assert not destination.parent.exists()
+    assert before == (settings.read_bytes(), database.read_bytes())
+
+
+def test_backup_all_write_failure_removes_staging_and_publishes_nothing(mac_home, tmp_path, monkeypatch):
+    home, _, database = mac_home
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute("INSERT INTO genp VALUES (?,?,?,?)", (
+            "fixture-group", exporter.ACCOUNTS[0], "firebase_auth_" + APP_ID, archive_blob("another-user"),
+        ))
+        connection.commit()
+    write_private = exporter._write_private
+    writes = []
+
+    def failing_write(path, data):
+        writes.append(path.name)
+        if len(writes) == 2:
+            raise OSError("private-details-must-not-be-printed")
+        write_private(path, data)
+
+    monkeypatch.setattr(exporter, "_write_private", failing_write)
+    destination = tmp_path / "private/all"
+    with pytest.raises(exporter.ExportError, match="Cannot save") as error:
+        exporter.export_archives(BUNDLE, destination, home, APP_ID)
+    assert "private-details" not in str(error.value)
+    assert not destination.exists()
+    assert not list(destination.parent.glob(".firebase-archives-*"))
+
+
+@pytest.mark.parametrize("existing_kind", ["empty-directory", "directory", "file", "dangling-symlink"])
+def test_backup_all_requires_new_directory_and_never_overwrites(mac_home, tmp_path, existing_kind):
+    home, _, _ = mac_home
+    destination = tmp_path / "existing"
+    if existing_kind in ("empty-directory", "directory"):
+        destination.mkdir()
+        if existing_kind == "directory":
+            (destination / "preserve.txt").write_bytes(b"keep this existing backup")
+    elif existing_kind == "file":
+        destination.write_bytes(b"keep this existing file")
+    else:
+        destination.symlink_to(tmp_path / "not-present")
+    with pytest.raises(exporter.ExportError, match="already exists"):
+        exporter.export_archives(BUNDLE, destination, home, APP_ID)
+    if existing_kind == "directory":
+        assert (destination / "preserve.txt").read_bytes() == b"keep this existing backup"
+    elif existing_kind == "file":
+        assert destination.read_bytes() == b"keep this existing file"
+    elif existing_kind == "dangling-symlink":
+        assert destination.is_symlink()
+
+
+def test_backup_all_requires_explicit_bundle_and_cannot_mix_export_actions(tmp_path):
+    destination = tmp_path / "backup"
+    with pytest.raises(SystemExit) as missing:
+        exporter.main(["--output-dir", str(destination)])
+    assert missing.value.code == 2
+    with pytest.raises(SystemExit) as mixed:
+        exporter.main(["--bundle", BUNDLE, "--output", str(tmp_path / "archive"),
+                       "--output-dir", str(destination)])
+    assert mixed.value.code == 2
+    assert not destination.exists()

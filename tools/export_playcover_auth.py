@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect PlayCover's PlayChain and optionally export one Firebase archive.
+"""Inspect PlayCover's PlayChain and optionally back up scoped Firebase archives.
 
 Local files only; no network, native Keychain access, flag changes or token output.
 Storage layout follows PlayTools fbc88801b63c791e4ef597a2746676c69864ccc6,
@@ -15,8 +15,10 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shutil
 import sqlite3
 import sys
+import tempfile
 from zipfile import BadZipFile, ZipFile
 
 
@@ -142,7 +144,7 @@ def diagnose_archives(bundle: str, home: Path, google_app_id: str | None = None)
     return result
 
 
-def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | None = None) -> None:
+def _export_rows(bundle: str, home: Path, google_app_id: str | None) -> list[tuple]:
     settings_path, database_path = _paths(bundle, home)
     settings = _settings(settings_path)
     if settings is None or settings.get("playChain") is not True:
@@ -150,15 +152,10 @@ def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | N
     rows = _archive_rows(database_path, google_app_id)
     if not rows:
         raise ExportError("No recognized Firebase user archive matched. " + _IN_PROCESS)
-    # Repeated PlayChain rows may contain exactly the same opaque archive.
-    # Exporting those identical bytes requires no guess about an active group.
-    archives = {row[2] for row in rows}
-    if len(archives) != 1:
-        raise ExportError("Multiple distinct Firebase archives matched; specify --ipa or --google-app-id. "
-                          "If already scoped, run --bundle <installed-bundle> "
-                          "--google-app-id <public-app-id> --diagnose for redacted counts. "
-                          "No active group was selected.")
-    blob = archives.pop()
+    return rows
+
+
+def _validate_archive(blob: bytes) -> None:
     try:
         value = plistlib.loads(blob)
     except (ValueError, TypeError, plistlib.InvalidFileException):
@@ -167,6 +164,64 @@ def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | N
             or value.get("$archiver") != "NSKeyedArchiver"
             or not isinstance(value.get("$objects"), list) or not isinstance(value.get("$top"), dict)):
         raise ExportError("Matched record is not a Firebase NSKeyedArchiver archive")
+
+
+def _write_private(path: Path, contents: bytes) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(contents)
+
+
+def export_archives(bundle: str, output_dir: Path, home: Path,
+                    google_app_id: str | None = None) -> dict:
+    """Back up every distinct scoped archive; never infer an active account.
+
+    Validate all records before writing. Only a fully populated staging directory
+    is published; the requested destination must not already exist.
+    """
+    output_dir = Path(output_dir)
+    if os.path.lexists(output_dir):
+        raise ExportError("Output directory already exists; choose a new private directory")
+    rows = _export_rows(bundle, home, google_app_id)
+    archives = list(dict.fromkeys(row[2] for row in rows))
+    for blob in archives:
+        _validate_archive(blob)
+    manifest = {"matched_rows": len(rows), "distinct_archive_count": len(archives),
+                "files": [f"{index:03d}.archive" for index in range(1, len(archives) + 1)]}
+    staging = None
+    try:
+        output_dir.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        staging = Path(tempfile.mkdtemp(dir=output_dir.parent, prefix=".firebase-archives-"))
+        staging.chmod(0o700)
+        for filename, blob in zip(manifest["files"], archives):
+            _write_private(staging / filename, blob)
+        _write_private(staging / "manifest.json", (json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+        if os.path.lexists(output_dir):
+            raise ExportError("Output directory already exists; choose a new private directory")
+        staging.rename(output_dir)
+        staging = None
+    except OSError:
+        raise ExportError("Cannot save the private Firebase archive backup") from None
+    finally:
+        if staging is not None:
+            shutil.rmtree(staging, ignore_errors=True)
+    return {"matched_rows": len(rows), "distinct_archive_count": len(archives),
+            "saved_archives": len(archives)}
+
+
+def export_archive(bundle: str, output: Path, home: Path, google_app_id: str | None = None) -> None:
+    rows = _export_rows(bundle, home, google_app_id)
+    # Repeated PlayChain rows may contain exactly the same opaque archive.
+    # Exporting those identical bytes requires no guess about an active group.
+    archives = {row[2] for row in rows}
+    if len(archives) != 1:
+        raise ExportError("Multiple distinct Firebase archives matched; specify --ipa or --google-app-id. "
+                          "If already scoped, run --bundle <installed-bundle> "
+                          "--google-app-id <public-app-id> --diagnose for redacted counts. "
+                          "Use --output-dir to back up all scoped archives without selecting an active account.")
+    blob = archives.pop()
+    _validate_archive(blob)
     try:
         output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         descriptor = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -187,17 +242,21 @@ def main(argv=None) -> int:
     parser.add_argument("--bundle", choices=BUNDLES, help="Exact installed game bundle identifier")
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--output", type=Path, help="New private file for one distinct Firebase user archive")
+    action.add_argument("--output-dir", type=Path, help="New private directory backing up every distinct scoped archive")
     action.add_argument("--diagnose", action="store_true", help="Print only scoped archive, account-kind and numbered-group counts")
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument("--google-app-id", help="Public iOS GOOGLE_APP_ID to scope the Firebase service")
     scope.add_argument("--ipa", type=Path, help="Read public GOOGLE_APP_ID from this installed game's source IPA")
     args = parser.parse_args(argv)
-    if (args.output or args.diagnose) and not args.bundle:
-        parser.error("--output and --diagnose require an explicit --bundle")
+    if (args.output or args.output_dir or args.diagnose) and not args.bundle:
+        parser.error("--output, --output-dir and --diagnose require an explicit --bundle")
     try:
         if args.diagnose:
             app_id = google_app_id_from_ipa(args.ipa) if args.ipa else args.google_app_id
             print(json.dumps(diagnose_archives(args.bundle, Path.home(), app_id), indent=2))
+        elif args.output_dir:
+            app_id = google_app_id_from_ipa(args.ipa) if args.ipa else args.google_app_id
+            print(json.dumps(export_archives(args.bundle, args.output_dir, Path.home(), app_id), indent=2))
         elif args.output:
             app_id = google_app_id_from_ipa(args.ipa) if args.ipa else args.google_app_id
             export_archive(args.bundle, args.output, Path.home(), app_id)
