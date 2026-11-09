@@ -1,6 +1,6 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·iOS 클라이언트를 위한 로컬 서버 개발 프로젝트입니다. 서버 코드는 `IdolyPride_client` 저장소에 있으며 패키지 이름은 `idolypride-local`입니다. 현재 구현은 **암호화된 gRPC 통신, 로컬 프로필·로그인, 보존한 응답의 재생**까지입니다. 실제 APK·IPA의 로그인 및 홈 화면 진입은 아직 검증하지 않았습니다.
+아이돌리 프라이드 Android·iOS 클라이언트를 위한 로컬 서버와 연결용 클라이언트 개발 프로젝트입니다. 서버 패키지 이름은 `idolypride-local`입니다. **암호화된 gRPC 통신, 로컬 프로필·로그인, 응답 재생, 별도 설치용 APK·PlayCover IPA 생성**을 구현했습니다. 실제 기기에서 로그인·홈 화면 진입은 아직 검증하지 않았습니다.
 
 ## 현재 범위
 
@@ -17,9 +17,25 @@
 | `Master.Get` | 원본·재구성 MasterTag와 일치하는 로컬 암호화 팩 제공 시 지원 |
 | 원본 마스터 보존·JSON 재구성 | 익명 원본 조회 검증·SQLCipher 팩 재구성 구현 |
 | 실제 게임 진행·계정 데이터의 게임 로직 이식 | 미구현 |
-| Android·iOS 접속 주소 변경·인증서 신뢰 설정 | 미구현 |
+| Android·PlayCover 연결용 클라이언트 | 주소 변경·로컬 인증 부팅·별도 앱 패키징 구현; 실기 미검증 |
 
 `serve`·`smoke`는 공식 API에 접속하지 않습니다. `Auth.Login`은 Firebase 토큰을 검증하거나 저장하지 않고 새 로컬 세션을 발급합니다. 게임 아이디·비밀번호 없이 개발용 smoke test를 실행할 수 있습니다. `archive-master`는 인증 없이 공개 마스터를 보존하고, `collect-session`은 기존 세션으로 공식 TLS API의 제한된 읽기 요청을 수행합니다.
+
+## 연결용 클라이언트
+
+6.1.1 원본에서 Android APK와 PlayCover용 IPA를 생성합니다. 기본 서버 주소는 `http://127.0.0.1:50051`이며 같은 Android의 Termux 서버 또는 같은 MacBook의 서버에 연결합니다. 두 앱의 식별자는 `game.qualiarts.idolypride.local`, 표시 이름은 `아이프라 로컬`입니다.
+
+```sh
+# Android: JDK, Android SDK build-tools, APKEditor.jar 필요
+uv run --all-extras python tools/package_android_client.py /path/to/client.xapk --output data/clients/local.apk
+
+# PlayCover: 검증된 복호화 6.1.1 IPA 필요
+uv run --all-extras python tools/patch_ios_client.py /path/to/client-decrypted.ipa --output data/clients/local.ipa
+```
+
+다른 서버 주소는 `--endpoint http://192.168.0.10:50051`로 지정합니다. 설치·서버 준비 절차와 확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)에 정리했습니다.
+
+연결용 빌드는 공식 seed·Firebase 로그인 초기화 대신 로컬 서버의 `Auth.Login`을 호출하도록 버전별 네이티브 패치 6개를 적용합니다. ARM64 반환 ABI, 앱 서명·패키징, 모든 protobuf 스키마 보존을 검증했습니다. Analytics·스토어 SDK 호출과 미구현 게임 API가 남아 있으므로 완전한 오프라인 플레이를 의미하지 않습니다.
 
 ## 시작하기
 

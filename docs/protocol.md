@@ -15,7 +15,7 @@ Android IL2CPP 바이너리에서 protobuf descriptor 359개 파일·68개 서�
 
 descriptor 파일은 `data/protocol/idolypride-6.1.1.pb` 위치를 기본값으로 사용하며 SHA-256은 `c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad`입니다. `tools/extract_client_schema.py`로 원본 XAPK에서 다시 추출할 수 있습니다. 현재 서버는 427개 unary RPC를 등록합니다. server-streaming `/api.Health/Watch`는 등록하지 않으며 호출 시 `UNIMPLEMENTED`를 반환합니다.
 
-`inspect`의 `schema_sha256`은 파일 순서와 로딩 경로를 정규화한 스키마 지문이며 원본 파일 해시와 구분합니다. 동일한 스키마를 Solis 모듈이나 내보낸 descriptor set으로 읽어도 같은 지문을 사용합니다.
+`inspect`의 `schema_sha256`은 파일 순서와 로딩 경로를 정규화한 스키마 지문이며 원본 파일 해시와 구분합니다. 현재 6.1.1의 정규화된 지문은 `0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3`입니다. 동일한 스키마를 Solis 모듈이나 내보낸 descriptor set으로 읽어도 같은 지문을 사용합니다.
 
 공개 [SolisClient](https://github.com/vilebbit/SolisClient/tree/a72ee470a4771858f7868a0963bece2e998a43f5)의 구형 스키마도 읽을 수 있지만 6.1.1과 필드 번호·형식 차이가 있습니다. 서비스 이름이 같다는 이유로 전체 메시지 호환성을 가정하지 않습니다.
 
@@ -89,7 +89,7 @@ PlayChain을 이미 사용하는 경우의 [실제 DB 경로](https://github.com
 
 ## 마스터·Octo 보존
 
-공식 TLS endpoint에서 인증 없는 `System.Check`·`Master.Get` 응답을 실제로 받아 복호화·protobuf 파싱에 성공했습니다. 현재 MasterTag는 202개 팩·합계 77,283,328바이트이며 버전 `961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`은 보유한 master-diff와 일치합니다. 이것은 익명 마스터 조회 검증이며 유저 계정 수집 검증과 구분합니다.
+공식 TLS endpoint에서 인증 없는 `System.Check`·`Master.Get` 응답을 실제로 받아 복호화·protobuf 파싱에 성공했고, 원본 202개 팩·77,283,328바이트를 모두 `data/original-master/`에 보존했습니다. 버전 `961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`은 보유한 master-diff와 일치합니다. 이것은 익명 마스터 조회·보존 검증이며 유저 계정 수집 검증과 구분합니다.
 
 `Master.Get`용 준비 과정은 원본 MasterTag의 버전·cryptoKey·fileName·fileSize를 유지하고 `downloadUrl`만 로컬 origin으로 바꿉니다. 암호화된 MasterDB 팩을 `--asset-root/master/`에서 그대로 제공할 수 있습니다.
 
