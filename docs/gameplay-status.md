@@ -2,6 +2,14 @@
 
 `Gameplay`는 6.1.1 스키마와 같은 버전의 마스터를 사용합니다. 현재 구현은 부팅·홈 응답, 일부 사용자 설정·배치·튜토리얼·덱 상태의 보존입니다. 실제 게임 앱의 홈 진입·라이브 플레이를 검증한 상태는 아닙니다.
 
+## 제목 화면의 환불 기간 조회
+
+`Refund.GetTerm`은 `System.Check` 다음, `Auth.Login` 전에 호출되는 익명 조회입니다. v0.2.1은 로그인 없이 `startDatetime=endDatetime=4102444800000`(2100-01-01 UTC), `shopInvalidStartDatetime=0`을 반환합니다. 공식 환불 신청·잔액 조회는 실행하지 않습니다.
+
+6.1.1의 `TitleView.StartAnimationAsync` 상태 머신(`0x5173d0c`)은 시작·종료 값 0을 무제한 기간으로 취급하므로 둘 다 0으로 두면 환불 버튼이 나타납니다. 미래 시작·종료를 사용해 환불 화면을 비활성화합니다. `CheckOpenStoneShop`(`0x528d338`)은 `IsBefore(shopInvalidStartDatetime)`을 사용하므로 0은 유료 상점 진입을 닫습니다. `GetPaidStone`과 사용자 데이터에는 기존 인증 검사를 유지합니다.
+
+실제 Android에서 관측한 `System.Check → Refund.GetTerm`을 재현한 뒤 `Auth.Login`으로 이어지는 흐름을 HTTP/2·grpcio와 에뮬레이터 검사에 포함하며, 이 조회가 기존 프로필·세션을 바꾸지 않는지 검증합니다.
+
 ## 구현한 RPC
 
 | RPC | 로컬 동작 | 저장되는 내용 |

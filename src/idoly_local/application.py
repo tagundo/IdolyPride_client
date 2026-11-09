@@ -11,6 +11,11 @@ from .catalog import FixtureStore
 
 LOG = logging.getLogger(__name__)
 
+# 2100-01-01 UTC. The recovered title treats a zero refund start/end as
+# unbounded, so zeros would expose the official refund flow. A future window
+# keeps it inactive; shopInvalidStartDatetime=0 closes paid-shop entry.
+LOCAL_REFUND_DATETIME_MS = 4102444800000
+
 
 class Application:
     def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None, master_dir=None):
@@ -51,6 +56,13 @@ class Application:
             return result.SerializeToString()
         if path in ("/api.System/GetMetadata", "/api.System/CheckApp"):
             return response_type().SerializeToString()
+        if path == "/api.Refund/GetTerm":
+            # TitlePresenter calls this immediately after System.Check, before
+            # Auth.Login. It is an anonymous schedule query, not account data.
+            # Local profiles have no official cash purchase/refund operations.
+            return response_type(startDatetime=LOCAL_REFUND_DATETIME_MS,
+                                 endDatetime=LOCAL_REFUND_DATETIME_MS,
+                                 shopInvalidStartDatetime=0).SerializeToString()
         # These title-screen text APIs are anonymous in the Toolkit's observed
         # official flow, and may be needed before a local login is possible.
         if path in ("/api.Master/Rule", "/api.Master/GetHelpCategory"):

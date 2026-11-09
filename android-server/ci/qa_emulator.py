@@ -23,6 +23,7 @@ from idoly_local.schema import Schema
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
 ACTIVITY = PACKAGE + "/.MainActivity"
+LOCAL_REFUND_DATE = 4102444800000  # 2100-01-01 UTC, safely convertible to JST.
 
 
 class QA:
@@ -85,6 +86,20 @@ def rpc(schema, port, method, token=None):
     return schema.response_type(method).FromString(codec.decode(raw))
 
 
+def bootstrap(schema, port):
+    """Follow the observed title-screen order without a prior local login."""
+    check = rpc(schema, port, "/api.System/Check")
+    term = rpc(schema, port, "/api.Refund/GetTerm")
+    # In the client, zero refund dates mean an unbounded active refund period.
+    # A future period hides that entry, while shopInvalid=0 closes the unsupported
+    # financial shop. Positive shopInvalid would advertise a normal stone shop.
+    actual = (term.endDatetime, term.startDatetime, term.shopInvalidStartDatetime)
+    if actual != (LOCAL_REFUND_DATE, LOCAL_REFUND_DATE, 0) or term.startDatetime <= time.time() * 1000:
+        raise RuntimeError("Anonymous Refund.GetTerm did not disable local refund and financial entries")
+    login = rpc(schema, port, "/api.Auth/Login")
+    return check, login
+
+
 def wait_server(schema, port, expected=True, timeout=120):
     deadline = time.monotonic() + timeout
     next_progress = time.monotonic() + 15
@@ -132,8 +147,9 @@ def main():
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
         print("Native server ready; checking encrypted RPCs and HTTP files", flush=True)
         qa.capture("02-running")
-        check = rpc(schema, grpc_port, "/api.System/Check")
-        login = rpc(schema, grpc_port, "/api.Auth/Login")
+        check, login = bootstrap(schema, grpc_port)
+        result.update(anonymous_refund_term=True, refund_term_inactive=True,
+                      bootstrap_rpc_order=["System.Check", "Refund.GetTerm", "Auth.Login"])
         if not login.gameAuthToken:
             raise RuntimeError("Local login did not return a session")
         user = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)

@@ -164,7 +164,7 @@ def smoke(data_dir, server_data, report_path):
     install_payload(server_data, data_dir)
     runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
     report = {"frozen_runtime": bool(getattr(sys, "frozen", False)), "server_started": False,
-              "encrypted_system_check": False, "anonymous_public_text": False,
+              "encrypted_system_check": False, "anonymous_refund_term": False, "anonymous_public_text": False,
               "local_auth": False, "home_login": False, "home_enter": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
@@ -175,6 +175,12 @@ def smoke(data_dir, server_data, report_path):
         address = status["grpc_address"]
         check = _rpc(address, schema, "/api.System/Check")
         report["encrypted_system_check"] = check.keepAliveTimeMilliseconds > 0
+        refund = _rpc(address, schema, "/api.Refund/GetTerm")
+        report["anonymous_refund_term"] = (
+            refund.endDatetime, refund.startDatetime, refund.shopInvalidStartDatetime
+        ) == (4102444800000, 4102444800000, 0)
+        if not report["anonymous_refund_term"]:
+            raise RuntimeError("Local refund period must be inactive and the unsupported financial shop closed")
         # These title-screen calls must succeed before any local Auth.Login.
         rule_request = schema.request_type("/api.Master/Rule")(ruleType=1)
         rule = _rpc(address, schema, "/api.Master/Rule", rule_request)
@@ -228,7 +234,7 @@ def smoke(data_dir, server_data, report_path):
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
-    required = ("server_started", "encrypted_system_check", "anonymous_public_text", "local_auth", "home_login",
+    required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
                 "home_enter", "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")

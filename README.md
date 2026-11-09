@@ -4,7 +4,7 @@
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.0에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. 서버 앱 v0.2.1에는 6.1.1 스키마, 원본 마스터 202개, 시작 데이터용 마스터 JSON, 공개 약관·도움말 응답이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
@@ -25,6 +25,7 @@ Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후�
 | --- | --- |
 | 6.1.1 protobuf·암호화 gRPC | 스키마 로딩, SolisClient 양방향 호환, 실제 localhost HTTP/2 교환 검증 |
 | `System.Check`, `System.GetMetadata`, `System.CheckApp`, `Auth.Login` | 로컬 응답·SQLite 프로필·세션 구현 |
+| `Refund.GetTerm` | 제목 화면에서 로그인 없이 조회; 로컬 환불 기간 비활성·유료 상점 닫힘 |
 | `User.Get` | 계정별 fixture 우선, 다음 SQLite snapshot 제공 |
 | 홈·설정·튜토리얼 10개 RPC | `Home.Login/Enter/SetReview/SetCharacterPosition`, `Dokan.List`, `Notice.List`, `Master.GetVersion`, `Tutorial.Init/Progress/Skip` 구현 |
 | `Deck.Save/Delete` | 기존 덱 수동 편집·삭제, 보유 카드·의상·헤어·사진·장비 참조 검증 |
