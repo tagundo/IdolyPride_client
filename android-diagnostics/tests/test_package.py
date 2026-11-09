@@ -42,7 +42,8 @@ def test_provider_rejects_installed_game_identities(tmp_path, identity):
         package.add_provider(tmp_path)
 
 
-def test_pure_java_sanitizer_privacy_and_bounds(tmp_path):
+@pytest.mark.parametrize("name", ["LogSanitizer", "TrafficSampler"])
+def test_pure_java_diagnostics_contracts(tmp_path, name):
     javac = shutil.which("javac")
     if not javac:
         candidate = Path(os.environ.get("JAVA_HOME", "/nonexistent")) / "bin/javac"
@@ -50,8 +51,8 @@ def test_pure_java_sanitizer_privacy_and_bounds(tmp_path):
     if not javac:
         pytest.skip("A JDK is required for the pure Java diagnostics harness")
     java = Path(javac).resolve().with_name("java")
-    source = ROOT / "android-diagnostics/src/game/qualiarts/idolypride/diagnostics/LogSanitizer.java"
-    harness = ROOT / "android-diagnostics/tests/LogSanitizerTest.java"
+    source = ROOT / ("android-diagnostics/src/game/qualiarts/idolypride/diagnostics/" + name + ".java")
+    harness = ROOT / ("android-diagnostics/tests/" + name + "Test.java")
     subprocess.run([javac, "--release", "8", "-encoding", "UTF-8", "-d", str(tmp_path), str(source), str(harness)], check=True, capture_output=True)
-    result = subprocess.run([str(java), "-cp", str(tmp_path), "LogSanitizerTest"], check=True, capture_output=True, text=True)
-    assert result.stdout.strip() == "LogSanitizerTest passed"
+    result = subprocess.run([str(java), "-cp", str(tmp_path), name + "Test"], check=True, capture_output=True, text=True)
+    assert result.stdout.strip() == name + "Test passed"

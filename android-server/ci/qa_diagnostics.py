@@ -21,6 +21,8 @@ from idoly_local.schema import Schema
 PROBE = "game.qualiarts.idolypride.local.diagnostics"
 PROBE_ACTIVITY = PROBE + "/game.qualiarts.idolypride.diagnostics.ProbeActivity"
 FRAME = "Solis.DiagnosticsProbe.SafeFrame"
+PHASE = "actor_motion_wait"
+PHASE_SUMMARY = "캐릭터 모션 로딩 단계"
 FORBIDDEN = ("IDOLY_DIAGNOSTICS_FAKE_SECRET", "/FAKE_DIAGNOSTICS_PRIVATE/", "secret.cs:123",
              "System.String value=", "[0x00000]")
 
@@ -34,6 +36,25 @@ def clean(value):
 def get_status(port):
     with urlopen("http://127.0.0.1:" + str(port) + "/diagnostics/status", timeout=3) as response:
         return json.loads(response.read())
+
+
+def network_observation(status):
+    """Validate the actual production provider's cumulative own-UID sample.
+
+    The fixture emits logs only; neither it nor this QA script submits network
+    events. Samples must arrive through the unchanged TrafficStats producer.
+    """
+    if status.get("network_unavailable") is True:
+        raise RuntimeError("Production own-UID TrafficStats counters are unavailable")
+    network = status.get("network")
+    if network is None:
+        return None
+    fields = ("rx_bytes", "tx_bytes", "elapsed_ms")
+    if (not isinstance(network, dict) or set(network) != set(fields)
+            or any(type(network[field]) is not int or network[field] < 0 for field in fields)
+            or network["elapsed_ms"] < 5000):
+        raise RuntimeError("Production network sample is not nonnegative cumulative counters after five seconds")
+    return {field: network[field] for field in fields}
 
 
 def _tap_node(qa, node):
@@ -221,6 +242,7 @@ def main():
         qa.capture("03-probe-running")
         deadline = time.monotonic() + args.timeout
         latest = {}
+        network_samples = []
         while time.monotonic() < deadline:
             try:
                 latest = get_status(asset_port)
@@ -228,29 +250,49 @@ def main():
             except (OSError, ValueError):
                 time.sleep(0.5)
                 continue
+            network = network_observation(latest)
+            if network is not None and (not network_samples or network != network_samples[-1]):
+                if network_samples and any(network[key] < network_samples[-1][key]
+                                           for key in ("rx_bytes", "tx_bytes", "elapsed_ms")):
+                    raise RuntimeError("Production own-UID network counters decreased within the collector session")
+                network_samples.append(network)
             exception = latest.get("latest_exception") or {}
+            phase = latest.get("phase") or {}
             if (latest.get("collector_started") is True and latest.get("logcat_running") is True
                     and latest.get("shader_warmup_wait") is True
                     and exception.get("type") == "NullReferenceException"
-                    and FRAME in exception.get("frames", [])):
+                    and FRAME in exception.get("frames", [])
+                    and phase.get("code") == PHASE and phase.get("summary") == PHASE_SUMMARY
+                    and len(network_samples) >= 2
+                    and network_samples[-1]["elapsed_ms"] - network_samples[0]["elapsed_ms"] >= 5000):
                 break
             time.sleep(0.5)
         else:
-            raise RuntimeError("Production own-PID diagnostic events did not reach the server before timeout")
+            raise RuntimeError("Production exception, phase and cumulative TrafficStats observations did not reach the server before timeout")
         (args.artifacts / "diagnostics-status.json").write_text(json.dumps(latest, ensure_ascii=False, indent=2) + "\n")
+        (args.artifacts / "production-network-observations.json").write_text(
+            json.dumps(network_samples, indent=2) + "\n")
         # Evidence must prove the raw input was actually emitted in the probe's
         # own PID. The raw QA log is deliberately separate from server exports.
         pid = qa.adb("shell", "pidof", "-s", PROBE).strip()
         raw_probe = qa.adb("logcat", "-d", "--pid=" + pid, "-v", "brief", "Unity:V", "*:S")
-        if FORBIDDEN[0] not in raw_probe or FORBIDDEN[1] not in raw_probe:
-            raise RuntimeError("Synthetic raw exception input was not observed in probe logcat")
+        if (FORBIDDEN[0] not in raw_probe or FORBIDDEN[1] not in raw_probe
+                or raw_probe.count("IDOLY_PHASE:" + PHASE) < 2):
+            raise RuntimeError("Synthetic exception and repeating fixed phase input were not observed in probe own-PID logcat")
         (args.artifacts / "synthetic-probe-logcat.txt").write_text(raw_probe, encoding="utf-8")
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
-        tree = qa.capture("04-server-diagnostics")
-        text = "\n".join(node.get("text", "") for node in tree.iter("node"))
-        clean(text)
-        if "NullReferenceException" not in text:
-            raise RuntimeError("Native server UI omitted the received exception")
+        ui_deadline = time.monotonic() + 30
+        while time.monotonic() < ui_deadline:
+            tree = qa.capture("04-server-diagnostics")
+            text = "\n".join(node.get("text", "") for node in tree.iter("node"))
+            clean(text)
+            if ("NullReferenceException" in text and PHASE_SUMMARY in text
+                    and "게임 전체 네트워크 수신" in text and "송신" in text
+                    and "초 누적" in text and "다운로드 진행률 아님" in text):
+                break
+            time.sleep(0.5)
+        else:
+            raise RuntimeError("Native server UI omitted the received exception, phase summary or cumulative network labels")
         (args.artifacts / "server-ui.txt").write_text(text, encoding="utf-8")
         server_pid = qa.adb("shell", "pidof", "-s", PACKAGE).strip()
         server_log = qa.adb("logcat", "-d", "--pid=" + server_pid, "-v", "brief")
@@ -267,6 +309,9 @@ def main():
         result.update(ok=True, own_pid_events_verified=True, raw_values_absent=True,
                       production_provider_e2e=True, collector_started=True, logcat_running=True,
                       sanitized_exception=True, static_frame=True, shader_wait=True,
+                      phase_code=PHASE, phase_summary_visible=True,
+                      production_traffic_stats=True, cumulative_network_samples=len(network_samples),
+                      cumulative_network_visible=True,
                       server_status_safe=True, server_ui_safe=True, final_stop=True)
     except BaseException as error:
         result.update(error_type=type(error).__name__, error=str(error))

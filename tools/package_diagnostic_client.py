@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -57,7 +58,7 @@ def compile_dex(work: Path, java: str, sdk: Path, android_jar: Path) -> Path:
     classes.mkdir()
     output.mkdir()
     sources = sorted((SOURCES / "src").rglob("*.java"))
-    if len(sources) != 2:
+    if {path.name for path in sources} != {"DiagnosticsProvider.java", "LogSanitizer.java", "NativePhaseProbe.java", "TrafficSampler.java"}:
         raise AndroidPackagingError("Diagnostics Java source inventory did not match")
     _run([javac, "--release", "8", "-encoding", "UTF-8", "-classpath", android_jar,
           "-d", classes, *sources], "Diagnostics Java compilation")
@@ -68,7 +69,7 @@ def compile_dex(work: Path, java: str, sdk: Path, android_jar: Path) -> Path:
     return output / "classes.dex"
 
 
-def package(source: Path, output: Path, *, apkeditor=None, build_tools=None, java=None, android_jar=None):
+def package(source: Path, output: Path, *, apkeditor=None, build_tools=None, java=None, android_jar=None, ndk=None):
     source, output = Path(source).resolve(strict=True), Path(output).resolve()
     evidence = output.with_suffix(output.suffix + ".evidence.json")
     if output.exists() or evidence.exists() or output.suffix != ".apk":
@@ -82,6 +83,11 @@ def package(source: Path, output: Path, *, apkeditor=None, build_tools=None, jav
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".diagnostic-client-", dir=output.parent) as temporary:
         work = Path(temporary)
+        spec = importlib.util.spec_from_file_location("idoly_diagnostic_native", SOURCES / "native/build_native.py")
+        native_builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(native_builder)
+        native_output = work / "native"
+        native_report = native_builder.build_native(native_output, ndk=ndk)
         dex = compile_dex(work, java, sdk, platform)
         base = work / "separate-local-client.apk"
         # Reuse the existing audited clone/native/metadata pipeline, then add
@@ -99,11 +105,31 @@ def package(source: Path, output: Path, *, apkeditor=None, build_tools=None, jav
             dex_hashes = {name: hashlib.sha256(archive.read(name)).hexdigest()
                           for name in archive.namelist() if DEX_NAME.fullmatch(name)}
             native_hashes = {name: hashlib.sha256(archive.read(name)).hexdigest()
-                             for name in (METADATA_NAME, LIBRARY_NAME)}
+                             for name in archive.namelist() if name == METADATA_NAME or name.endswith(".so")}
+            profile = json.loads((SOURCES / "native/phase-profile.json").read_text())
+            if native_hashes[LIBRARY_NAME] != profile["local_bootstrap_native_sha256"]:
+                raise AndroidPackagingError("Native diagnostics requires the pinned 6.1.1 offline bootstrap library")
         decoded = work / "decoded"
         _run([java, "-jar", editor, "d", "-dex", "-t", "xml", "-i", base, "-o", decoded], "Diagnostics APK decode")
         added_name = add_provider(decoded)
         shutil.copyfile(dex, decoded / "dex" / added_name)
+        added_libraries = {}
+        for library in sorted((native_output / "lib/arm64-v8a").glob("*.so")):
+            relative = "lib/arm64-v8a/" + library.name
+            if relative in native_hashes:
+                raise AndroidPackagingError("A native diagnostic library collides with an original game library")
+            target = decoded / "root" / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(library, target)
+            added_libraries[relative] = _hash(library)
+        license_path = decoded / "root/assets/idoly-diagnostics-licenses/ShadowHook-MIT.txt"
+        license_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(SOURCES / "native/SHADOWHOOK-LICENSE", license_path)
+        shutil.copyfile(SOURCES / "native/THIRD-PARTY-NOTICES.txt", license_path.with_name("ShadowHook-third-party.txt"))
+        provenance_path = decoded / "root/assets/idoly-diagnostics-native.json"
+        provenance_path.write_text(json.dumps({"schema": 1, "native": native_report, "profile": profile}, indent=2) + "\n")
+        added_assets = {str(path.relative_to(decoded / "root")): _hash(path)
+                        for path in (license_path, license_path.with_name("ShadowHook-third-party.txt"), provenance_path)}
         unsigned, cleaned, aligned, signed = (work / name for name in ("rebuilt.apk", "clean.apk", "aligned.apk", "signed.apk"))
         _run([java, "-jar", editor, "b", "-i", decoded, "-o", unsigned], "Diagnostics APK rebuild")
         strip_apk_signatures(unsigned, cleaned)
@@ -119,7 +145,7 @@ def package(source: Path, output: Path, *, apkeditor=None, build_tools=None, jav
         with ZipFile(signed) as archive:
             if {name for name in archive.namelist() if DEX_NAME.fullmatch(name)} != set(dex_hashes) | {added_name}:
                 raise AndroidPackagingError("Diagnostics changed the original DEX inventory")
-            for name, expected in {**dex_hashes, **native_hashes, added_name: _hash(dex)}.items():
+            for name, expected in {**dex_hashes, **native_hashes, **added_libraries, **added_assets, added_name: _hash(dex)}.items():
                 if hashlib.sha256(archive.read(name)).hexdigest() != expected:
                     raise AndroidPackagingError("Diagnostics did not preserve an original executable or added DEX")
         if _hash(source) != report["input_sha256"]:
@@ -130,6 +156,8 @@ def package(source: Path, output: Path, *, apkeditor=None, build_tools=None, jav
                 "endpoint": "http://127.0.0.1:8080/diagnostics/client", "own_pid_only": True,
                 "raw_logs_saved": False, "session_minutes": 30,
                 "public_development_signing_key": True,
+                "native_phase_probe": native_report,
+                "native_attribution_assets_sha256": added_assets,
                 "source_sha256": {str(p.relative_to(ROOT)): _hash(p) for p in sorted((SOURCES / "src").rglob("*.java"))}},
             signer=[line for line in signature.stdout.splitlines() if "certificate SHA-256 digest:" in line])
         with output.open("xb") as destination, signed.open("rb") as incoming:
@@ -148,10 +176,11 @@ def main(argv=None):
     parser.add_argument("--build-tools", type=Path)
     parser.add_argument("--java")
     parser.add_argument("--android-jar", type=Path)
+    parser.add_argument("--ndk", type=Path, help="Linux Android NDK 26.3.11579264 for the ARM64 phase probe")
     args = parser.parse_args(argv)
     try:
         report = package(args.source, args.output, apkeditor=args.apkeditor, build_tools=args.build_tools,
-                         java=args.java, android_jar=args.android_jar)
+                         java=args.java, android_jar=args.android_jar, ndk=args.ndk)
     except (AndroidPackagingError, OSError, ValueError) as error:
         parser.exit(1, f"Diagnostics packaging failed: {error}\n")
     print(json.dumps(report, ensure_ascii=False, indent=2))

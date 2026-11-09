@@ -38,8 +38,26 @@ public final class LogSanitizerTest {
         events = log.drain();
         check(events.size() == 1 && "shader_warmup_wait".equals(events.get(0).code), "status deduplicated");
         check(events.get(0).type == null && events.get(0).frames.isEmpty(), "fixed status only");
-        log.accept("ShaderWarmUpが終わっていないので待機する PRIVATE");
-        check(log.drain().isEmpty(), "status requires exact literal");
+        log.accept("[logger PRIVATE] ShaderWarmUpが終わっていないので待機する PRIVATE");
+        events = log.drain();
+        check(events.size() == 1 && "shader_warmup_wait".equals(events.get(0).code), "recognize shader literal inside logger prefix");
+        check(events.get(0).type == null && events.get(0).frames.isEmpty(), "shader message never copied");
+
+        String[] phases = {"home_enter", "environment_begin", "background_begin", "background_load_returned",
+                "shader_completion_flag", "shader_wait_begin", "home_open_begin", "loading_hide", "front_loading_finished",
+                "home_show_in_returned", "actors_begin", "actor_motion_wait", "actor_cache_build", "actor_result_received",
+                "actor_cache_wait", "buttons_begin", "probe_ready", "probe_unavailable"};
+        for (String phase : phases) log.accept("I/Unity (1234): IDOLY_PHASE:" + phase);
+        events = log.drain();
+        check(events.size() == phases.length, "all audited phase codes accepted");
+        for (int i = 0; i < phases.length; i++) {
+            check("status".equals(events.get(i).kind) && phases[i].equals(events.get(i).code), "fixed phase code only");
+            check(events.get(i).type == null && events.get(i).frames.isEmpty(), "phase has no copied log text");
+        }
+        for (String line : new String[]{"IDOLY_PHASE:home_enter PRIVATE", "PRIVATE IDOLY_PHASE:home_enter",
+                "IDOLY_PHASE:unknown", "IDOLY_PHASE:shader_ready", "IDOLY_PHASE:actor_ready",
+                "IDOLY_PHASE:https://example.invalid/PRIVATE", "IDOLY_PHASE:home_enter\nPRIVATE"}) log.accept(line);
+        check(log.drain().isEmpty(), "reject arbitrary, unknown, legacy and multiline phase payloads");
 
         log.accept("NullReferenceException: PRIVATE");
         for (int i = 0; i < 30; i++) log.accept(" at Solis.Home.Method" + i + " (PRIVATE)");

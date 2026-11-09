@@ -28,6 +28,10 @@
     <string name="export_picker_failed">파일 저장 화면을 열지 못했습니다.</string>
     <string name="game_state_title">게임 로딩 상태</string>
     <string name="game_state_waiting">진단 게임의 상태 수신 대기</string>
+    <string name="game_last_phase">마지막 단계 · %1$s</string>
+    <string name="game_network_waiting">게임 전체 네트워크 수신/송신 측정 대기</string>
+    <string name="game_network_unavailable">게임 전체 네트워크 수신/송신을 측정할 수 없습니다.</string>
+    <string name="game_network_totals">게임 전체 네트워크 수신 %1$s · 송신 %2$s\n진단 시작 후 %3$d초 누적 · 다운로드 진행률 아님</string>
     <string name="master_transfer_waiting">이 세션 마스터 파일 전송 대기</string>
     <string name="master_transfer_active">이 세션 마스터 파일 전송 · %1$s / %2$s</string>
     <string name="master_transfer_finished">이 세션 마스터 파일 · 완료 %1$d건 · 마지막 전송 %2$s</string>

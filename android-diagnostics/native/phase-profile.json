@@ -1,0 +1,105 @@
+{
+  "client_version": "6.1.1",
+  "architecture": "arm64-v8a",
+  "original_native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+  "local_bootstrap_native_sha256": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3",
+  "elf_build_id": "b094bb4a4f4acdffb41e1c6a8e8d77cffbd689fd",
+  "sites": [
+    {
+      "code": "home_enter",
+      "rva": "0x56757d0",
+      "expected16": "2cdaff97e9180290e083c03ce80f40f9",
+      "meaning": "Before BL HomeTop.HomeEnterAsync; request begins, not response completion."
+    },
+    {
+      "code": "environment_begin",
+      "rva": "0x56759e0",
+      "expected16": "8582ef97f50300aa200340f9f60301aa",
+      "meaning": "Before BL OutGame3D.ChangeEnvironmentAsync(type2); this branch is camera state, not a scene asset await."
+    },
+    {
+      "code": "background_begin",
+      "rva": "0x5641f60",
+      "expected16": "4e51f097f50300aa000340f9f60301aa",
+      "meaning": "Before BL OutGame3D.LoadBackgroundSceneAsync."
+    },
+    {
+      "code": "background_load_returned",
+      "rva": "0x56420e0",
+      "expected16": "620642a9098d5ba9e00314aa20013fd6",
+      "meaning": "Background scene await returned and IsLoadingScene=false was stored; virtual AfterLoadEnvironmentAsync has not run yet, actors are not guaranteed ready."
+    },
+    {
+      "code": "shader_completion_flag",
+      "rva": "0x45c4c64",
+      "expected16": "fe4fc1a8c0035fd63f0000f1e0079f1a",
+      "meaning": "OnDispose already wrote IsEndShaderWarmUp=true; cleanup gate released, not proof shaders succeeded."
+    },
+    {
+      "code": "home_open_begin",
+      "rva": "0x5675e48",
+      "expected16": "9c42ff97f50300aa200340f9f60301aa",
+      "meaning": "Before HomePageGroup.OnOpenInAsync call, after shader wait gate."
+    },
+    {
+      "code": "loading_hide",
+      "rva": "0x5676008",
+      "expected16": "6010bd97882640f9a81700b4003940f9",
+      "meaning": "Before LoadingManager.Hide call, not proof complete home visibility."
+    },
+    {
+      "code": "front_loading_finished",
+      "rva": "0x5676024",
+      "expected16": "611a40f9e00314aaf4daff97f50300aa",
+      "meaning": "After HomeFrontLoadingView.FinishLoading returned; before later HomeTop.ShowInAsync await, not whole-home completion."
+    },
+    {
+      "code": "actors_begin",
+      "rva": "0x563b778",
+      "expected16": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "meaning": "HomeOfficeActors.LoadActorsAsync wrapper entry."
+    },
+    {
+      "code": "actor_motion_wait",
+      "rva": "0x5635ca4",
+      "expected16": "73ffdc94fb1740f9d35002f068f26739",
+      "meaning": "UniTaskExtensions.GetAwaiter for four-motion join; join examined, not proof it suspended."
+    },
+    {
+      "code": "actor_cache_build",
+      "rva": "0x5635f68",
+      "expected16": "84c3bd97e81502d0e08744ad08a142f9",
+      "meaning": "Before SolisActorUtility.UpdateCacheActorAsync call after cache miss."
+    },
+    {
+      "code": "actor_result_received",
+      "rva": "0x56360fc",
+      "expected16": "081b40f9880100b429190290295542f9",
+      "meaning": "Cache-hit or successful cache-build merge; actor available before further setup/fade."
+    },
+    {
+      "code": "actor_cache_wait",
+      "rva": "0x8834584",
+      "expected16": "9be71494f5c00090a8f26739e00706a9",
+      "meaning": "Before UniTask.WaitWhile(cache-busy predicate); not proof waiting duration."
+    },
+    {
+      "code": "buttons_begin",
+      "rva": "0x561dfdc",
+      "expected16": "fe0f1ff8001040f9600000b4fe0741f8",
+      "meaning": "HomeCenterPagePresenter.WaitForButtonLoadAsync entry; not button completion."
+    },
+    {
+      "code": "home_show_in_returned",
+      "rva": "0x56761cc",
+      "expected16": "c3d5be97140900b4885640f9e80800b4",
+      "meaning": "HomeTop.ShowInAsync await has returned; next call is NotificationManager.Resume, then separate HomeEntering/tutorial work."
+    },
+    {
+      "code": "shader_wait_begin",
+      "rva": "0x5675c4c",
+      "expected16": "67e1db9448f36739e00706a9c8000035",
+      "meaning": "Reached only when shader completion flag was false: before UniTask.WaitUntil for IsEndShaderWarmUp. Does not read/write context or flag. Later home_open_begin proves this gate passed."
+    }
+  ]
+}

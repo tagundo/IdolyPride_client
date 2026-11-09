@@ -35,7 +35,8 @@ def build(output, build_tools, android_jar, javac):
         raise ValueError("Choose a new .apk output path")
     build_tools, android_jar, javac = Path(build_tools).resolve(), Path(android_jar).resolve(), Path(javac).resolve()
     production = sorted((DIAGNOSTICS / "src").rglob("*.java"))
-    if [path.name for path in production] != ["DiagnosticsProvider.java", "LogSanitizer.java"]:
+    if [path.name for path in production] != ["DiagnosticsProvider.java", "LogSanitizer.java",
+                                              "NativePhaseProbe.java", "TrafficSampler.java"]:
         raise ValueError("Unexpected production diagnostic Java source inventory")
     sources = [*production, FIXTURE / "ProbeActivity.java"]
     manifest = FIXTURE / "AndroidManifest.xml"

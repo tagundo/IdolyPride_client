@@ -2,7 +2,7 @@
 
 The HTTP transport belongs to ``assets``. This module accepts only structured
 exception identities and four known collector signals; raw Unity/logcat lines,
-URLs, arguments, timestamps and authentication data are outside the contract.
+URLs, arguments, wall-clock timestamps and authentication data are outside the contract.
 Snapshots describe the latest observations, not a proof that a wait has ended.
 """
 from __future__ import annotations
@@ -33,7 +33,28 @@ _STATUS = {
     "logcat_started": ("collecting", "게임 로그 수집 시작"),
     "logcat_stopped": ("collector_stopped", "게임 로그 수집 중지"),
     "shader_warmup_wait": ("shader_wait", "셰이더 준비 완료 대기 중"),
+    "probe_ready": ("probe_ready", "홈 단계 추적 준비됨"),
+    "probe_unavailable": ("probe_unavailable", "홈 단계 추적을 시작하지 못했습니다"),
+    "network_unavailable": ("network_unavailable", "게임 전체 네트워크 수신량을 읽을 수 없습니다"),
+    "home_enter": ("home_enter", "홈 진입 처리 시작"),
+    "environment_begin": ("environment_begin", "홈 환경 전환 요청"),
+    "background_begin": ("background_begin", "홈 배경 장면 불러오기 시작"),
+    "background_load_returned": ("background_load_returned", "홈 배경 장면 로딩 대기 통과"),
+    "shader_completion_flag": ("shader_completion_flag", "셰이더 완료 플래그 기록됨"),
+    "shader_wait_begin": ("shader_wait_begin", "셰이더 플래그 대기 진입"),
+    "home_open_begin": ("home_open_begin", "홈 페이지 열기 요청"),
+    "loading_hide": ("loading_hide", "로딩 화면 숨김 요청"),
+    "front_loading_finished": ("front_loading_finished", "전면 로딩 종료 함수 반환"),
+    "home_show_in_returned": ("home_show_in_returned", "홈 표시 전환 대기 통과"),
+    "actors_begin": ("actors_begin", "홈 배경 캐릭터 불러오기 시작"),
+    "actor_motion_wait": ("actor_motion_wait", "캐릭터 모션 로딩 단계"),
+    "actor_cache_build": ("actor_cache_build", "캐릭터 캐시 생성 요청"),
+    "actor_result_received": ("actor_result_received", "캐릭터 로딩 결과 수신"),
+    "actor_cache_wait": ("actor_cache_wait", "캐릭터 캐시 점검 단계"),
+    "buttons_begin": ("buttons_begin", "홈 버튼 리소스 준비 진입"),
 }
+_PHASES = set(_STATUS) - {"collector_started", "logcat_started", "logcat_stopped",
+                         "probe_ready", "probe_unavailable", "network_unavailable"}
 
 
 def _unique_object(pairs):
@@ -52,6 +73,13 @@ def _invalid_constant(_value):
 def _event(value):
     if not isinstance(value, dict):
         raise ValueError("Client diagnostics event must be an object")
+    if value.get("kind") == "network":
+        if set(value) != {"kind", "rx_bytes", "tx_bytes", "elapsed_ms"}:
+            raise ValueError("Invalid client network observation fields")
+        if any(type(value[key]) is not int or not 0 <= value[key] <= 2**63 - 1
+               for key in ("rx_bytes", "tx_bytes", "elapsed_ms")):
+            raise ValueError("Invalid client network observation counters")
+        return dict(value)
     if value.get("kind") == "status":
         if (set(value) != {"kind", "code"} or not isinstance(value["code"], str)
                 or value["code"] not in _STATUS):
@@ -94,6 +122,8 @@ def _batch(raw):
 
 
 def _summary(event):
+    if event["kind"] == "network":
+        return None
     if event["kind"] == "status":
         return _STATUS[event["code"]][1]
     text = "게임 예외: " + event["type"]
@@ -125,6 +155,10 @@ class ClientDiagnostics:
         self._logcat_running = False
         self._shader_warmup_wait = False
         self._latest_exception = None
+        self._phase = None
+        self._network = None
+        self._network_unavailable = False
+        self._native_probe_status = None
 
     def receive(self, raw: bytes) -> dict:
         events = _batch(raw)
@@ -133,29 +167,50 @@ class ClientDiagnostics:
             for event, summary in zip(events, summaries):
                 self._events.append(event)
                 self._received += 1
-                self._summary = summary
+                if summary is not None and event.get("code") != "network_unavailable":
+                    self._summary = summary
                 if event["kind"] == "exception":
                     self._stage = "unity_exception"
                     self._latest_exception = event
+                elif event["kind"] == "network":
+                    self._network = {key: event[key] for key in ("rx_bytes", "tx_bytes", "elapsed_ms")}
+                    self._network_unavailable = False
                 else:
                     code = event["code"]
-                    self._stage = _STATUS[code][0]
+                    if code != "network_unavailable":
+                        self._stage = _STATUS[code][0]
                     if code == "collector_started":
                         self._collector_started = True
+                        self._logcat_running = False
+                        self._shader_warmup_wait = False
+                        self._latest_exception = None
+                        self._phase = None
+                        self._network = None
+                        self._network_unavailable = False
+                        self._native_probe_status = None
                     elif code == "logcat_started":
                         self._logcat_running = True
                     elif code == "logcat_stopped":
                         self._logcat_running = False
-                    elif code == "shader_warmup_wait":
+                    elif code in ("shader_warmup_wait", "shader_wait_begin"):
                         self._shader_warmup_wait = True
+                    elif code == "network_unavailable":
+                        self._network_unavailable = True
+                    elif code in ("probe_ready", "probe_unavailable"):
+                        self._native_probe_status = code
+                    if code in _PHASES:
+                        self._phase = {"code": code, "summary": summary}
         if self._callback is not None:
             for summary in summaries:
+                if summary is None:
+                    continue
                 try:
                     self._callback(summary)
                 except Exception:
                     # Native UI logging is advisory and cannot own intake.
                     pass
-        return {"accepted": len(events), "summary": summaries[-1]}
+        with self._lock:
+            return {"accepted": len(events), "summary": self._summary}
 
     def status(self) -> dict:
         """Return an independent, JSON-serializable snapshot of safe fields."""
@@ -169,5 +224,9 @@ class ClientDiagnostics:
                 "logcat_running": self._logcat_running,
                 "shader_warmup_wait": self._shader_warmup_wait,
                 "latest_exception": self._latest_exception,
+                "phase": self._phase,
+                "network": self._network,
+                "network_unavailable": self._network_unavailable,
+                "native_probe_status": self._native_probe_status,
                 "events": list(self._events),
             })

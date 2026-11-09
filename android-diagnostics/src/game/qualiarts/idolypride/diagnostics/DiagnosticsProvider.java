@@ -5,6 +5,7 @@ import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.net.Uri;
+import android.net.TrafficStats;
 import android.os.Process;
 import android.os.SystemClock;
 import java.io.BufferedReader;
@@ -17,6 +18,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -29,7 +32,18 @@ public final class DiagnosticsProvider extends ContentProvider {
     private final LogSanitizer sanitizer = new LogSanitizer();
     private final ArrayDeque<JSONObject> queue = new ArrayDeque<>();
     private volatile java.lang.Process readerProcess;
+    private final CountDownLatch readerStarted = new CountDownLatch(1);
     private volatile boolean active = true;
+
+    private static final class AndroidCounters implements TrafficSampler.Counters {
+        private final int uid;
+
+        AndroidCounters(int uid) { this.uid = uid; }
+
+        @Override public long elapsedRealtime() { return SystemClock.elapsedRealtime(); }
+        @Override public long rxBytes() { return TrafficStats.getUidRxBytes(uid); }
+        @Override public long txBytes() { return TrafficStats.getUidTxBytes(uid); }
+    }
 
     @Override public boolean onCreate() {
         if (getContext() == null || !PACKAGE.equals(getContext().getPackageName())
@@ -70,6 +84,7 @@ public final class DiagnosticsProvider extends ContentProvider {
                     "Unity:V", "IdolyprideLog:V", "AndroidRuntime:E", "*:S")
                     .redirectErrorStream(true).start();
             enqueue(status("logcat_started"));
+            readerStarted.countDown();
             try (BufferedReader input = new BufferedReader(new InputStreamReader(
                     readerProcess.getInputStream(), StandardCharsets.UTF_8), 2048)) {
                 StringBuilder line = new StringBuilder();
@@ -92,14 +107,45 @@ public final class DiagnosticsProvider extends ContentProvider {
         }
     }
 
+    private void sampleTraffic(TrafficSampler sampler, long deadline) {
+        try {
+            while (active && SystemClock.elapsedRealtime() < deadline) {
+                TrafficSampler.Sample sample = sampler.poll();
+                if (sample != null) {
+                    if (sample.unavailable) {
+                        enqueue(status("network_unavailable"));
+                        return;
+                    }
+                    enqueue(new JSONObject().put("kind", "network").put("rx_bytes", sample.rxBytes)
+                            .put("tx_bytes", sample.txBytes).put("elapsed_ms", sample.elapsedMs));
+                }
+                Thread.sleep(1000);
+            }
+        } catch (Exception ignored) {
+            if (active) try { enqueue(status("network_unavailable")); } catch (Exception ignoredAgain) { }
+        }
+    }
+
     private void runSession() {
         long deadline = SystemClock.elapsedRealtime() + SESSION_MS;
         long retryDelay = 2000;
         try {
             enqueue(status("collector_started"));
+            final int uid = Process.myUid();
+            try {
+                TrafficSampler sampler = new TrafficSampler(new AndroidCounters(uid));
+                Thread traffic = new Thread(() -> sampleTraffic(sampler, deadline), "idoly-own-uid-bytes");
+                traffic.setDaemon(true);
+                traffic.start();
+            } catch (Exception ignored) { enqueue(status("network_unavailable")); }
             Thread reader = new Thread(this::readLogs, "idoly-own-pid-logcat");
             reader.setDaemon(true);
             reader.start();
+            // Wait for the own-PID logcat reader before the optional native
+            // probe logs its first fixed checkpoint. Java-only probes omit it.
+            if (readerStarted.await(2, TimeUnit.SECONDS)) {
+                try { NativePhaseProbe.start(); } catch (Throwable ignored) { enqueue(status("probe_unavailable")); }
+            } else { enqueue(status("probe_unavailable")); }
             while (SystemClock.elapsedRealtime() < deadline) {
                 collect();
                 List<JSONObject> batch = new ArrayList<>();

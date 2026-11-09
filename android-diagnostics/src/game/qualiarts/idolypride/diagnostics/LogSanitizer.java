@@ -2,8 +2,11 @@ package game.qualiarts.idolypride.diagnostics;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,6 +18,13 @@ public final class LogSanitizer {
     private static final int MAX_FRAMES = 16;
     private static final int MAX_EVENTS = 64;
     private static final String SHADER_WAIT = "ShaderWarmUpが終わっていないので待機する";
+    private static final String PHASE_PREFIX = "IDOLY_PHASE:";
+    private static final Set<String> PHASE_CODES = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            "home_enter", "environment_begin", "background_begin", "background_load_returned",
+            "shader_completion_flag", "shader_wait_begin", "home_open_begin", "loading_hide", "front_loading_finished",
+            "home_show_in_returned",
+            "actors_begin", "actor_motion_wait", "actor_cache_build", "actor_result_received",
+            "actor_cache_wait", "buttons_begin", "probe_ready", "probe_unavailable")));
     private static final Pattern BRIEF = Pattern.compile(
             "^[VDIWEFAS]/[^\\r\\n:]{1,64}\\(\\s*[0-9]+\\): ?(.*)$");
     private static final Pattern TYPE_START = Pattern.compile(
@@ -49,8 +59,14 @@ public final class LogSanitizer {
         }
         Matcher brief = BRIEF.matcher(line);
         String content = (brief.matches() ? brief.group(1) : line).trim();
-        if (SHADER_WAIT.equals(content)) {
+        if (content.startsWith(PHASE_PREFIX) && PHASE_CODES.contains(content.substring(PHASE_PREFIX.length()))) {
+            flushException();
+            enqueue(new Event("status", null, content.substring(PHASE_PREFIX.length()), Collections.<String>emptyList()));
+            return;
+        }
+        if (content.contains(SHADER_WAIT)) {
             if (!shaderPending) {
+                flushException();
                 enqueue(new Event("status", null, "shader_warmup_wait", Collections.<String>emptyList()));
                 shaderPending = true;
             }

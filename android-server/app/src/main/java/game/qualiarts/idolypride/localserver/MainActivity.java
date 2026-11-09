@@ -30,6 +30,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private TextView gameStatus;
     private TextView transferStatus;
     private TextView lastException;
+    private TextView networkStatus;
     private ProgressBar transferProgress;
     private Button export;
     private static final int EXPORT_DIAGNOSTICS = 50052;
@@ -123,6 +124,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         lastException.setEllipsize(TextUtils.TruncateAt.END);
         lastException.setVisibility(View.GONE);
         body.addView(lastException);
+        networkStatus = text(R.string.game_network_waiting, 12, Color.rgb(160, 181, 194));
+        networkStatus.setTextIsSelectable(true);
+        networkStatus.setPadding(0, dp(4), 0, dp(8));
+        body.addView(networkStatus);
         transferStatus = text(R.string.master_transfer_waiting, 12, Color.rgb(160, 181, 194));
         body.addView(transferStatus);
         transferProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -223,11 +228,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
         catch (Exception ignored) { details = new JSONObject(); }
         JSONObject client = details.optJSONObject("client_diagnostics");
         String summary = client == null ? "" : client.optString("summary", "");
+        JSONObject phase = client == null ? null : client.optJSONObject("phase");
+        String phaseSummary = phase == null ? "" : phase.optString("summary", "");
+        if (!phaseSummary.isEmpty()) summary = getString(R.string.game_last_phase, phaseSummary);
         if (client == null || client.optLong("received_events", 0) == 0 || summary.isEmpty()) {
-            gameStatus.setText(R.string.game_state_waiting);
+            setTextIfChanged(gameStatus, getString(R.string.game_state_waiting));
             gameStatus.setTextColor(Color.rgb(192, 212, 222));
         } else {
-            gameStatus.setText(summary);
+            setTextIfChanged(gameStatus, summary);
             gameStatus.setTextColor(client.optJSONObject("latest_exception") == null
                     ? Color.rgb(192, 212, 222) : Color.rgb(255, 192, 154));
         }
@@ -236,10 +244,21 @@ public final class MainActivity extends Activity implements ServerService.Observ
             String identity = exception.optString("type", "");
             org.json.JSONArray frames = exception.optJSONArray("frames");
             if (frames != null && frames.length() > 0) identity += " @ " + frames.optString(0, "");
-            lastException.setText(getString(R.string.latest_game_exception, identity));
+            setTextIfChanged(lastException, getString(R.string.latest_game_exception, identity));
             lastException.setVisibility(View.VISIBLE);
         } else {
             lastException.setVisibility(View.GONE);
+        }
+        JSONObject network = client == null ? null : client.optJSONObject("network");
+        if (client != null && client.optBoolean("network_unavailable", false)) {
+            setTextIfChanged(networkStatus, getString(R.string.game_network_unavailable));
+        } else if (network != null) {
+            long rx = Math.max(0, network.optLong("rx_bytes", 0));
+            long tx = Math.max(0, network.optLong("tx_bytes", 0));
+            long elapsedSeconds = Math.max(0, network.optLong("elapsed_ms", 0)) / 1000;
+            setTextIfChanged(networkStatus, getString(R.string.game_network_totals, formatBytes(rx), formatBytes(tx), elapsedSeconds));
+        } else {
+            setTextIfChanged(networkStatus, getString(R.string.game_network_waiting));
         }
         JSONObject transfer = details.optJSONObject("asset_transfer");
         long sent = transfer == null ? 0 : Math.max(0, transfer.optLong("sent_bytes", 0));
@@ -264,6 +283,11 @@ public final class MainActivity extends Activity implements ServerService.Observ
             transferProgress.setIndeterminate(false);
             transferProgress.setProgress((int) Math.max(0, Math.min(1000, ((double) sent / total) * 1000)));
         }
+    }
+
+    private static void setTextIfChanged(TextView view, String value) {
+        // Repeated service polls must not reset an unchanged text selection.
+        if (!value.contentEquals(view.getText())) view.setText(value);
     }
 
     private static String formatBytes(long bytes) {
