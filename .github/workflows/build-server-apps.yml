@@ -288,7 +288,7 @@ jobs:
           profile: pixel_6
           cores: 2
           ram-size: 4096M
-          disk-size: 8G
+          disk-size: 4G
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot-save -gpu swiftshader_indirect ${{ steps.acceleration.outputs.options }}
           disable-linux-hw-accel: ${{ steps.acceleration.outputs.disable_linux_hw_accel }}
           disable-animations: true
