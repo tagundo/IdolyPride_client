@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "idolypride-local"
+version = "0.1.0"
+description = "An offline Idoly Pride gRPC protocol and response replay server"
+requires-python = ">=3.12"
+license = "AGPL-3.0-or-later"
+dependencies = [
+  "grpcio>=1.76,<2",
+  "protobuf>=6.31.1,<8",
+  "pycryptodome>=3.23,<5",
+  "googleapis-common-protos>=1.70,<2",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[project.optional-dependencies]
+extract = ["capstone>=5,<6"]
+master = ["sqlcipher3-binary>=0.5.4,<1"]
+
+[project.scripts]
+idoly-local = "idoly_local.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

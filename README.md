@@ -1,0 +1,205 @@
+# IDOLY PRIDE 로컬 서버 프로토타입
+
+아이돌리 프라이드 Android·iOS 클라이언트를 위한 로컬 서버 개발 프로젝트입니다. 서버 코드는 `IdolyPride_client` 저장소에 있으며 패키지 이름은 `idolypride-local`입니다. 현재 구현은 **암호화된 gRPC 통신, 로컬 프로필·로그인, 보존한 응답의 재생**까지입니다. 실제 APK·IPA의 로그인 및 홈 화면 진입은 아직 검증하지 않았습니다.
+
+## 현재 범위
+
+| 기능 | 상태 |
+| --- | --- |
+| protobuf 스키마 로딩·내보내기 | 구현 |
+| 클라이언트 암호화 envelope | SolisClient와 양방향 호환 검증 |
+| `System.Check`, `System.GetMetadata`, `System.CheckApp` | 로컬 응답 구현 |
+| `Auth.Login` | SQLite 단일 로컬 프로필·세션 구현 |
+| `User.Get` | fixture 우선, 다음 SQLite 프로필 snapshot; 없으면 `UNIMPLEMENTED` |
+| `Home.*` 등 | 가져온 fixture 응답 재생; 없으면 `UNIMPLEMENTED` |
+| 신규·기존 로컬 프로필 | 최소 신규 snapshot 생성·기존 `User.Get` snapshot 가져오기 |
+| 기존 공식 세션 보존 | 지정된 5개 읽기 RPC 수집 구현; 실제 세션으로는 미검증 |
+| `Master.Get` | 원본·재구성 MasterTag와 일치하는 로컬 암호화 팩 제공 시 지원 |
+| 원본 마스터 보존·JSON 재구성 | 익명 원본 조회 검증·SQLCipher 팩 재구성 구현 |
+| 실제 게임 진행·계정 데이터의 게임 로직 이식 | 미구현 |
+| Android·iOS 접속 주소 변경·인증서 신뢰 설정 | 미구현 |
+
+`serve`·`smoke`는 공식 API에 접속하지 않습니다. `Auth.Login`은 Firebase 토큰을 검증하거나 저장하지 않고 새 로컬 세션을 발급합니다. 게임 아이디·비밀번호 없이 개발용 smoke test를 실행할 수 있습니다. `archive-master`는 인증 없이 공개 마스터를 보존하고, `collect-session`은 기존 세션으로 공식 TLS API의 제한된 읽기 요청을 수행합니다.
+
+## 시작하기
+
+Python 3.12 이상과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 새 clone에는 게임 파일·추출 스키마가 포함되지 않으므로, 먼저 releases에서 받은 6.1.1 XAPK로 스키마를 준비합니다. 이 저장소 루트에서 실행합니다.
+
+```sh
+uv sync --extra extract
+uv run --extra extract python tools/extract_client_schema.py /path/to/idolypride-6.1.1.xapk --output data/protocol/idolypride-6.1.1.pb
+uv run idoly-local inspect
+uv run idoly-local smoke
+uv run idoly-local serve
+```
+
+기본 gRPC 주소는 `127.0.0.1:50051`, 상태 DB는 `data/state.db`, fixture 디렉터리는 `data/fixtures`입니다. `smoke`는 임시 DB와 실제 localhost gRPC 연결로 통신·로그인·fixture·세션 보존을 확인하며 공식 서버에 접속하지 않습니다.
+
+스키마는 `data/protocol/idolypride-6.1.1.pb`가 있으면 우선 사용하고, 없으면 형제 디렉터리 `../SolisClient`의 생성된 protobuf 모듈을 읽습니다. 대체 경로를 지정할 수도 있습니다. **전역 옵션은 하위 명령 앞에 둡니다.**
+
+```sh
+uv run idoly-local --descriptor-set /path/to/client-schema.pb inspect
+uv run idoly-local --solis-dir ../SolisClient smoke
+uv run idoly-local --solis-dir ../SolisClient export-schema data/protocol/solis.pb
+```
+
+게임 파일 없이 전송 계층만 시험하려면 [SolisClient](https://github.com/vilebbit/SolisClient)의 분석 기준 커밋을 준비할 수 있습니다.
+
+```sh
+git clone https://github.com/vilebbit/SolisClient.git ../SolisClient
+git -C ../SolisClient checkout a72ee470a4771858f7868a0963bece2e998a43f5
+uv run idoly-local --solis-dir ../SolisClient smoke
+```
+
+이 구형 스키마와 6.1.1 스키마에는 필드 차이가 있으므로, 현재 클라이언트와 연결할 때는 해당 버전에서 추출한 descriptor를 사용합니다.
+
+추출한 6.1.1 스키마는 359개 파일·68개 서비스·428개 RPC이며 descriptor pool 로딩과 smoke test를 통과했습니다. 전송 계층에 unary RPC 경로 427개를 등록하며, 실제 기능 구현은 위 표의 범위입니다. server-streaming `Health.Watch`는 아직 구현하지 않았습니다. 같은 버전 iOS의 359개 descriptor도 Android와 바이트 단위로 일치함을 확인했습니다.
+
+복호화된 iOS IPA에서도 독립적으로 추출할 수 있습니다.
+
+```sh
+uv run --extra extract python tools/extract_ios_schema.py /path/to/idolypride-6.1.1-decrypted.ipa --output data/protocol/idolypride-6.1.1-ios.pb
+uv run idoly-local --descriptor-set data/protocol/idolypride-6.1.1-ios.pb inspect
+```
+
+## 신규·기존 로컬 프로필
+
+```sh
+uv run idoly-local new-profile sandbox --manager-name '로컬 매니저'
+uv run idoly-local serve --profile sandbox
+```
+
+신규 프로필은 매니저 이름·레벨 1·로컬 식별자만 초기화합니다. 카드 지급, 튜토리얼 완료, 콘텐츠 해금은 구현하지 않았으며 이 snapshot만으로 홈 진입이 보장되지 않습니다.
+
+기존 계정의 복호화된 `User.Get` 응답이 있으면 그대로 보존할 수 있습니다.
+
+```sh
+uv run idoly-local import-profile restored /path/to/USER.pb
+uv run idoly-local serve --profile restored --fixtures data/restored/fixtures
+```
+
+암호화된 응답은 `import-profile`에 `--wire`를 붙입니다. snapshot은 사용한 스키마 지문과 함께 SQLite에 저장하며, 다른 스키마로 제공하려 하면 `FAILED_PRECONDITION`으로 거부합니다. 계정별 fixture 디렉터리도 분리해야 합니다. 기존 게임 계정의 모든 상태를 서버 로직으로 이식하는 기능과는 구분합니다.
+
+## 로그인된 공식 세션에서 보존
+
+현재 공식 요청의 metadata를 담은 로컬 JSON을 준비한 경우에만 사용합니다. 최소 `x-app-version`, `x-auth-token`, `x-master-version`이 필요하며 최상위 JSON 객체에 metadata 키·문자열 값을 둡니다. **이 명령은 Android·PlayCover에서 토큰을 추출하지 않습니다.** 기존 세션을 내보내는 기기별 절차는 아직 준비 중입니다. 인증 파일이나 토큰을 채팅에 보낼 필요는 없습니다.
+
+```sh
+uv run idoly-local collect-session private/session-metadata.json --output data/restored --profile restored
+uv run idoly-local serve --profile restored --fixtures data/restored/fixtures
+```
+
+공식 `api.game-idolypride.jp:443`에 TLS로 접속해 `Master.Get`, `User.Get`, `Home.Enter`, `Dokan.List`, `Notice.List`를 각 한 번 읽습니다. `Home.Enter`는 `skipUpdate=true`를 사용합니다. 로그인·인증 갱신·계정 생성·일일 초기화·자동 재시도는 수행하지 않습니다. 인증 만료나 날짜 변경 오류가 나면 중단하며 원본 게임에서 먼저 정상 세션을 갱신해야 합니다.
+
+성공한 응답은 `data/restored/fixtures`, MasterTag는 `data/restored/master-tag.json`에 저장합니다. `--profile restored`의 snapshot 가져오기는 5개 수집이 모두 성공한 뒤 수행합니다. 중간 오류가 나도 앞서 저장한 응답은 보존됩니다. 세션 metadata는 출력물에 기록하지 않습니다. 이 흐름은 테스트로 검증했으며 실제 사용자 세션 수집은 아직 실행하지 않았습니다.
+
+### PlayCover 로컬 진단·Firebase archive
+
+Mac의 PlayCover 설치 환경에서는 먼저 다음 명령으로 알려진 두 bundle의 기존 설정·DB 존재 여부와 스키마만 확인합니다. 인증값은 출력하지 않습니다.
+
+```sh
+uv run python tools/export_playcover_auth.py
+```
+
+이미 `playChain=true`인 앱만 Firebase 사용자 archive를 내보낼 수 있습니다. 실제 설치한 bundle ID와 해당 IPA를 지정합니다. 번역판의 bundle은 `.kr`일 수 있습니다.
+
+```sh
+uv run python tools/export_playcover_auth.py --bundle game.qualiarts.idolypride --ipa /path/to/installed-game.ipa --output private/firebase-user.archive
+```
+
+도구는 해당 앱의 PlayChain DB를 read-only로 열고 단일 Firebase 레코드만 새 0600 파일로 저장합니다. `playChain`이나 디버그 설정을 바꾸지 않으며 native Keychain을 읽지 않습니다. PlayChain을 사용하지 않는 설치는 in-process 내보내기가 필요하다는 메시지와 함께 중단합니다. 이 archive는 현재 게임 세션 metadata가 아니므로 `collect-session`의 입력으로 바로 사용할 수 없습니다. archive·토큰은 Mac에 보관하고 채팅에 보내지 않습니다. 실제 PlayCover에서의 내보내기는 아직 미검증입니다.
+
+## 보존한 응답 가져오기
+
+```sh
+# 복호화된 protobuf 응답
+uv run idoly-local import-response /api.User/Get /path/to/user.pb
+
+# 암호화된 application envelope 응답
+uv run idoly-local import-response /api.Home/Enter /path/to/home.bin --wire
+
+# 특정 요청에만 적용: 요청 파일은 복호화된 protobuf
+uv run idoly-local import-response /api.User/Get /path/to/user.pb --request /path/to/request.pb
+```
+
+`--wire` 입력에는 gRPC의 5바이트 프레임 헤더를 포함하지 않습니다. 요청별 fixture는 요청 바이트의 SHA-256으로 구분하며, 일치하는 fixture가 일반 fixture보다 우선합니다. 응답은 스키마로 파싱 가능한지 확인한 뒤 저장합니다. `Auth.*` 응답은 가져올 수 없습니다.
+
+이 기능은 고정 응답을 재생합니다. 계정 상태를 게임 데이터 모델로 이식하거나 이후 게임 진행을 계산하는 기능은 아직 없습니다. 응답에는 개인 게임 데이터가 포함될 수 있으므로 `data/`와 원본 캡처는 로컬에 보관합니다. `data/`, `private/`, DB, APK·IPA, 인증서·키는 Git에서 제외합니다.
+
+## 마스터 팩 제공
+
+계정 없이 공식 MasterTag와 암호화 원본 팩을 보존할 수 있습니다. 익명 `System.Check`·`Master.Get`의 실제 응답을 검증했고, 현재 마스터의 202개 팩·77,283,328바이트를 모두 내려받았습니다. 파일 크기와 SHA-256으로 재개·손상 검증을 수행합니다.
+
+```sh
+uv run idoly-local archive-master --output data/original-master
+```
+
+보존한 `master-tag.json`과 `assets/master/`를 아래 서버 옵션에 연결합니다. 누락된 원본이 있을 때는 JSON 테이블을 SQLCipher 4 팩으로 재구성할 수도 있습니다.
+
+```sh
+uv sync --extra master
+uv run --extra master python tools/build_master_packs.py --master-dir ../ipr-master-diff --schema data/protocol/idolypride-6.1.1.pb --output data/rebuilt-master
+```
+
+현재 JSON으로 202개 테이블·238,940개 행·78,475,264바이트를 생성했고 전체 테이블의 복호화·역직렬화 round trip을 검증했습니다. 재구성 팩은 원본과 다른 로컬 키·버전을 사용하며 실제 클라이언트 소비는 아직 검증하지 않았습니다. 원본과 재구성 결과는 각각 다른 디렉터리에 보관합니다.
+
+서버에는 `MasterTag` 객체의 JSON과 일치하는 암호화 팩이 필요합니다. 일반 JSON 테이블을 파일 서버에 직접 올리는 것으로 대체할 수는 없습니다.
+
+```text
+data/original-master/
+  master-tag.json
+  assets/
+    master/
+      <MasterTag의 fileName과 동일한 원본 파일>
+```
+
+```sh
+uv run idoly-local serve \
+  --profile sandbox \
+  --bind 0.0.0.0:50051 \
+  --master-tag data/original-master/master-tag.json \
+  --asset-root data/original-master/assets \
+  --asset-host 0.0.0.0 \
+  --asset-port 8080 \
+  --asset-base-url http://192.168.0.10:8080
+```
+
+예시 IP는 서버 PC의 실제 LAN 주소로 바꿉니다. `--asset-base-url`은 게임 기기에서 접근 가능한 origin이어야 합니다. 서버는 파일명·크기·경로를 검증하고 다운로드 URL만 `/master/<fileName>`으로 바꿉니다. 버전, 암호화 키, 팩 바이트는 유지합니다. HTTP 서버는 `GET`·`HEAD`·단일 byte range를 지원하며 누락 파일을 자동 다운로드하지 않습니다.
+
+gRPC TLS는 `--tls-cert`와 `--tls-key`를 함께 지정하면 사용할 수 있습니다. Android·iOS 클라이언트의 채널 주소 변경과 인증서 신뢰는 별도 구현이 필요합니다.
+
+## 보존 우선순위
+
+1. 사용 중인 Android·iOS 클라이언트와 해시, 버전별 protobuf descriptor를 보존합니다.
+2. 원본 MasterTag 응답, 버전별 암호화 MasterDB 팩, Octo manifest와 실제 CDN 파일을 함께 보존합니다.
+3. 서비스 이용이 가능한 동안 본인 계정의 부팅·홈·라이브·스토리 응답을 수집하고, 인증 토큰을 fixture에서 제외합니다.
+4. 두 플랫폼의 로컬 주소 변경·TLS 경로를 구현한 뒤 실제 로그인·홈 화면 진입을 검증합니다.
+5. 고정 응답 재생을 유저 상태 저장과 게임 로직으로 대체합니다.
+
+확인한 Octo revision 1087에는 AssetBundle 49,370개와 resource 5,072개가 있으며 원본 합계는 **39,322,868,160바이트**입니다. 현재 manifest 보존은 완료됐지만 실제 CDN 파일 전체 보존을 뜻하지 않습니다. 분석 환경의 남은 공간 약 30GB보다 크므로 전체 보존에는 추가 공간이 필요합니다.
+
+## 참고 저장소
+
+| 저장소 | 역할 |
+| --- | --- |
+| [IdolyPride_client](https://github.com/tagundo/IdolyPride_client/releases) | 분석 대상 Android·iOS 릴리스 |
+| [SolisClient](https://github.com/vilebbit/SolisClient) | 공개 gRPC·protobuf·envelope 참고 구현 |
+| [elichika](https://github.com/tagundo/elichika) | SIFAS 로컬 서버 구조 참고; 게임 프로토콜은 다름 |
+| [HoshimiToolkit](https://github.com/tagundo/HoshimiToolkit) | Octo·MasterDB·리소스 보존 도구 |
+| [Hoshimi-localify](https://github.com/tagundo/Hoshimi-localify), [iOS 구현](https://github.com/tagundo/hoshimi-localify-ios), [ipr-patcher](https://github.com/tagundo/ipr-patcher) | 플랫폼별 훅·번역·클라이언트 패키징 참고 |
+| [ipr-master-diff](https://github.com/tagundo/ipr-master-diff), [ipr-adv-txts](https://github.com/tagundo/ipr-adv-txts) | 마스터 JSON 변경 이력·원문 스토리 |
+| [hoshimi-station](https://github.com/tagundo/hoshimi-station), [번역 데이터](https://github.com/tagundo/ipr-translation-data-ko) | 번역 편집·출력 데이터 |
+| [idoly-musics](https://github.com/tagundo/idoly-musics) | 음악 메타데이터 참고 |
+| [mitmproxy](https://github.com/mitmproxy/mitmproxy), [jadx](https://github.com/skylot/jadx), [REA](https://github.com/morluto/rea) | 통신·APK·네이티브 분석 도구 |
+
+기존 참고 저장소는 수정하지 않았습니다. 전송 형식과 확인 범위는 [프로토콜 메모](docs/protocol.md)에 정리했습니다.
+
+## 검증·라이선스
+
+```sh
+uv run pytest
+```
+
+테스트는 암호화 호환성, 실제 localhost gRPC, 세션 영속성, fixture 검증, 로컬 파일 전송을 다룹니다. SolisClient 호환성 테스트는 해당 체크아웃이 있을 때 실행합니다. 테스트 통과는 게임 기기에서의 동작 확인과 구분합니다.
+
+서버 코드는 [AGPL-3.0-or-later](LICENSE)입니다. 공개 프로토콜 참고 구현은 SolisClient에 출처를 두며, 게임 클라이언트·리소스는 저장소에 포함하지 않습니다.

@@ -1,0 +1,106 @@
+# 프로토콜 분석 메모
+
+이 문서는 관찰한 바이너리·공개 소스와 현재 서버 동작을 구분합니다. Android·iOS 실기에서 로컬 서버 로그인·홈 화면 진입을 확인한 기록은 아직 없습니다.
+
+## 분석 입력
+
+입력은 [IdolyPride_client releases](https://github.com/tagundo/IdolyPride_client/releases)의 6.1.1입니다. 내려받은 XAPK·복호화 IPA의 SHA-256을 릴리스 asset digest와 대조했습니다.
+
+| 플랫폼 | 확인한 버전 | 파일 SHA-256 |
+| --- | --- | --- |
+| Android arm64-v8a | 6.1.1 / versionCode 414 | `ab3bd9186ccc2659f91fcf2a48e25b591e94b4209c505f2ca401be8b22e5de36` |
+| iOS | 6.1.1 / build 156 | `33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848` |
+
+Android IL2CPP 바이너리에서 protobuf descriptor 359개 파일·68개 서비스·428개 RPC·최상위 메시지 1,723개를 복구했고 descriptor pool 로딩과 서버 smoke test를 통과했습니다. 같은 버전 iOS 바이너리에서 독립적으로 확인한 359개 descriptor도 Android와 바이트 단위로 일치합니다. 이 결과는 스키마의 일치이며 기기 연결 성공을 뜻하지 않습니다.
+
+descriptor 파일은 `data/protocol/idolypride-6.1.1.pb` 위치를 기본값으로 사용하며 SHA-256은 `c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad`입니다. `tools/extract_client_schema.py`로 원본 XAPK에서 다시 추출할 수 있습니다. 현재 서버는 427개 unary RPC를 등록합니다. server-streaming `/api.Health/Watch`는 등록하지 않으며 호출 시 `UNIMPLEMENTED`를 반환합니다.
+
+`inspect`의 `schema_sha256`은 파일 순서와 로딩 경로를 정규화한 스키마 지문이며 원본 파일 해시와 구분합니다. 동일한 스키마를 Solis 모듈이나 내보낸 descriptor set으로 읽어도 같은 지문을 사용합니다.
+
+공개 [SolisClient](https://github.com/vilebbit/SolisClient/tree/a72ee470a4771858f7868a0963bece2e998a43f5)의 구형 스키마도 읽을 수 있지만 6.1.1과 필드 번호·형식 차이가 있습니다. 서비스 이름이 같다는 이유로 전체 메시지 호환성을 가정하지 않습니다.
+
+## 전송 형식
+
+두 클라이언트에서 `Grpc.Net.Client`, `Cysharp.Net.Http.YetAnotherHttpHandler`, `Qua.Network.DefaultMarshallerFactory`와 관련 문자열을 확인했습니다. 공개 [marshaller.py](https://github.com/vilebbit/SolisClient/blob/a72ee470a4771858f7868a0963bece2e998a43f5/marshaller.py)를 참고해 독립 구현한 codec은 SolisClient와 바이트 일치·양방향 복호화 테스트를 통과했습니다.
+
+RPC 경로는 `/api.System/Check`, `/api.Auth/Login`, `/api.User/Get` 형태입니다. 일반 protobuf 직렬화에 다음 application envelope를 적용합니다.
+
+| 바이트 위치 | 의미 |
+| --- | --- |
+| 0–1 | unsigned 16-bit little-endian `DataSize = key 길이 + 2` |
+| 2 | 압축 여부: `00` 일반, `01` gzip |
+| 3 | IV 파생에 쓸 key material의 바이트 길이 |
+| 4부터 key 길이만큼 | IV 파생용 key material |
+| `4 + key 길이` 이후 | AES-CBC·PKCS#7 암호문 |
+
+클라이언트 요청 encoder는 8바이트 .NET ticks를 key material로 사용하므로 `0a 00 <압축 여부> 08`로 시작합니다. .NET ticks는 서기 1년부터 100ns 단위이며 Unix epoch 오프셋은 `621355968000000000`입니다. 공식 서버의 익명 응답에서는 18바이트·30바이트 key material도 실제 확인했으므로 decoder는 길이를 고정하지 않습니다.
+
+AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key material`에 대한 MD5입니다. gzip 플래그가 있으면 복호화 후 압축을 풉니다. 빈 protobuf 바이트는 빈 전송 본문으로 보존합니다. envelope에는 별도 무결성 태그가 없습니다.
+
+서버가 내보내는 envelope는 비압축이며, 수신 시 gzip도 허용합니다. 잘못된 헤더·AES 블록·패딩·gzip은 거부하고 압축 해제 결과는 연결된 gzip member를 합쳐 최대 16MiB로 제한합니다. gRPC 메시지 송수신 한도 역시 16MiB입니다.
+
+이 envelope는 gRPC 라이브러리가 다루는 메시지 본문입니다. 캡처에서 수동 추출할 때 gRPC 프레임의 `압축 플래그 1바이트 + 길이 4바이트`는 별도로 제거해야 합니다. 캡처 도구가 이미 프레임을 제거했다면 다시 5바이트를 버리지 않습니다.
+
+## 로컬 인증·응답 재생
+
+`Auth.Login`은 요청을 protobuf로 검증한 뒤 Firebase ID token을 사용하지 않고 `local-` 접두사의 임의 토큰을 발급합니다. SQLite에는 토큰의 SHA-256과 프로필·만료 시각만 저장하며 만료는 발급 후 30일입니다. 동일 프로필의 `serverUserId`·`publicUserId`는 재시작 후에도 유지됩니다.
+
+`new-profile`은 이름·레벨 1·로컬 식별자의 최소 `User.Get` snapshot을 생성합니다. `import-profile`은 기존 `User.Get`의 protobuf 바이트와 스키마 지문을 보존하며, 응답에 public identity가 있으면 함께 유지합니다. 인증 정보는 가져오지 않습니다. 상태 변경·튜토리얼·카드·콘텐츠 해금 로직은 아직 구현하지 않았습니다.
+
+보호된 RPC는 metadata의 `x-auth-token`을 요구합니다. 서버 프로세스는 `--profile`로 지정한 단일 프로필을 처리하고 다른 프로필의 세션을 거부합니다. 기본 응답과 오류는 다음과 같습니다.
+
+| 요청 | 동작 |
+| --- | --- |
+| `System.Check` | 점검·심사 아님, keepalive 값 반환 |
+| `System.GetMetadata`, `System.CheckApp` | 빈 정상 응답 |
+| `Auth.Login` | 로컬 프로필·세션 발급 |
+| `Master.Rule`, `Master.GetHelpCategory` | 로그인 전에도 준비한 fixture 제공; 없으면 `UNIMPLEMENTED` |
+| `Master.Get` | 준비한 MasterTag 응답, 또는 fixture; 둘 다 없으면 `UNIMPLEMENTED` |
+| `User.Get` | 요청 해시별 fixture → 일반 fixture → SQLite snapshot; 모두 없으면 `UNIMPLEMENTED` |
+| `Home.*` 및 기타 알려진 RPC | 요청 해시별 fixture 우선, 다음 일반 fixture; 없으면 `UNIMPLEMENTED` |
+| 알 수 없는 RPC 경로 | `UNIMPLEMENTED` |
+| 보호된 RPC의 세션 누락·불일치·만료 | `UNAUTHENTICATED` |
+| 잘못된 envelope·protobuf | `INVALID_ARGUMENT` |
+| 현재 스키마와 다른 지문의 프로필 snapshot | `FAILED_PRECONDITION` |
+
+fixture 저장은 protobuf 문법 검증을 거치지만 게임 규칙·아이디 참조의 의미적 일관성까지 검증하지 않습니다. 정적 응답 재생은 라이브 점수 계산, 보상 지급, 스토리 진행 같은 상태 변경을 구현하지 않습니다. fixture에는 개인 유저 데이터가 포함될 수 있으며 `Auth.*` fixture는 금지합니다.
+
+## 기존 공식 세션 수집
+
+`collect-session`은 이미 준비된 현재 공식 요청 metadata의 JSON을 사용합니다. 최상위 객체에 문자열 키·값을 두며 `x-app-version`, `x-auth-token`, `x-master-version`이 필수입니다. Android·PlayCover의 인증 저장소 내보내기는 이 명령에 포함하지 않았습니다. 기기에 로그인되어 있다는 사실만으로 클라우드 환경에 세션이 전달되지는 않습니다.
+
+목적지는 공식 TLS endpoint `api.game-idolypride.jp:443`으로 고정합니다. 수집 목록은 `Master.Get`, `User.Get`, `Home.Enter(skipUpdate=true)`, `Dokan.List`, `Notice.List`의 5개 요청이며 각 한 번 실행합니다. 로그인·Firebase 토큰 갱신·계정 생성·`Home.Login` 일일 초기화·자동 재시도는 하지 않습니다. gRPC 오류나 `x-error-code`가 나오면 중단하며 오류 출력에 원격 메시지·세션 metadata를 포함하지 않습니다.
+
+정상 응답은 복호화·protobuf 검증 뒤 fixture로 저장하고 MasterTag JSON을 함께 보존합니다. 중간까지 성공한 파일은 유지합니다. `--profile` 가져오기는 전체 수집 성공 뒤 실행합니다. 입력 세션 metadata는 출력물에 저장하지 않습니다. 자동 테스트는 통과했지만 실제 계정 세션으로 이 흐름을 실행한 기록은 아직 없습니다.
+
+### Android·PlayCover의 저장소 조사
+
+Android는 HoshimiToolkit의 `--auth-xml`이 Firebase SharedPreferences의 `GET_TOKEN_RESPONSE` 레코드를 읽는 기존 경로를 제공합니다. 이 Firebase 인증 레코드와 게임 요청의 `x-auth-token` metadata는 서로 다른 데이터입니다. XML만으로 `collect-session` 입력이 준비된다고 가정하지 않습니다.
+
+iOS 6.1.1 바이너리에서는 Firebase의 `AuthKeychainServices`, `AuthStoredUserManager`, `AuthKeychainStorageReal`, `SecItemCopyMatching` 및 `firebase_auth_1_` 등의 문자열을 확인했습니다. [공개 Firebase Auth 구현](https://github.com/firebase/firebase-ios-sdk/blob/11.14.0/FirebaseAuth/Sources/Swift/Auth/Auth.swift#L1828-L1838)은 `firebase_auth_<GOOGLE_APP_ID>` service에 직렬화한 사용자 객체를 저장합니다. [Keychain query 구현](https://github.com/firebase/firebase-ios-sdk/blob/11.14.0/FirebaseAuth/Sources/Swift/Storage/AuthKeychainServices.swift#L224-L234)은 account에 `firebase_auth_1_` 접두사를 붙이며 DataProtection Keychain을 사용합니다. prefs plist의 토큰 저장 경로는 확인하지 못했습니다.
+
+PlayCover는 설정에 따라 저장소가 달라집니다. 조사한 [PlayTools 커밋](https://github.com/PlayCover/PlayTools/tree/fbc88801b63c791e4ef597a2746676c69864ccc6)의 기존 `playChain` 값은 `~/Library/Containers/io.playcover.PlayCover/App Settings/<실제 bundle ID>.plist`에 있습니다. [SecItem 중계 코드](https://github.com/PlayCover/PlayTools/blob/fbc88801b63c791e4ef597a2746676c69864ccc6/PlayTools/PlayLoader.m#L104-L140)는 true일 때만 PlayChain을 사용하고 false일 때는 macOS Keychain을 호출합니다.
+
+PlayChain을 이미 사용하는 경우의 [실제 DB 경로](https://github.com/PlayCover/PlayTools/blob/fbc88801b63c791e4ef597a2746676c69864ccc6/PlayTools/MysticRunes/PlayedAppleDB.swift#L238-L258)는 `~/Library/Containers/io.playcover.PlayCover/PlayChain/<실제 bundle ID>.db`입니다. generic-password의 `genp` 테이블은 `agrp`·`acct`·`svce`로 항목을 구분하며 `v_Data` BLOB에 값을 저장합니다. 실제 사용자 설치 버전·설정·저장 레코드는 아직 확인하지 않았습니다.
+
+`tools/export_playcover_auth.py`는 두 알려진 게임 bundle의 기존 설정·DB 존재 여부와 스키마만 기본 진단합니다. `playChain=true`인 bundle을 명시한 경우에만 SQLite를 read-only로 열고, Firebase service와 알려진 기본·공유 account에 일치하는 단일 `NSKeyedArchiver` BLOB을 새 0600 파일로 내보냅니다. `--ipa` 또는 `--google-app-id`로 service를 좁힐 수 있으며 여러 항목이 일치하면 거부합니다. native Keychain은 읽지 않고 인증값을 터미널에 출력하지 않습니다. 실제 사용자 설치에서의 내보내기는 아직 미검증입니다.
+
+기존 인증을 보존하려면 `playChain`을 바꾸지 않습니다. `playChainDebugging`도 켜지 않습니다. 해당 디버그 경로는 Keychain query와 결과 전체를 기록합니다. Firebase archive 내보내기와 현재 게임 세션 metadata 수집은 별도 단계입니다. archive는 `collect-session`의 JSON 입력이 아니며 in-process 세션 수집은 아직 구현하지 않았습니다.
+
+## 마스터·Octo 보존
+
+공식 TLS endpoint에서 인증 없는 `System.Check`·`Master.Get` 응답을 실제로 받아 복호화·protobuf 파싱에 성공했습니다. 현재 MasterTag는 202개 팩·합계 77,283,328바이트이며 버전 `961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`은 보유한 master-diff와 일치합니다. 이것은 익명 마스터 조회 검증이며 유저 계정 수집 검증과 구분합니다.
+
+`Master.Get`용 준비 과정은 원본 MasterTag의 버전·cryptoKey·fileName·fileSize를 유지하고 `downloadUrl`만 로컬 origin으로 바꿉니다. 암호화된 MasterDB 팩을 `--asset-root/master/`에서 그대로 제공할 수 있습니다.
+
+원본 팩이 없는 경우 `tools/build_master_packs.py`가 정확한 descriptor의 `master.table`·`master.pk` annotation을 사용해 JSON 행을 protobuf로 검증하고 로컬 SQLCipher 4 팩으로 재구성합니다. 현재 master-diff의 202개 테이블·238,940개 행을 78,475,264바이트로 생성하고 전체 202개 테이블의 복호화·역직렬화 round trip을 확인했습니다. 생성 팩의 키·버전은 로컬 재구성용이며 원본 팩과 구분합니다. 클라이언트가 생성 팩을 소비하는지는 아직 기기에서 검증하지 않았습니다.
+
+보존한 Octo cache의 SHA-256은 `a93dae963319b056ac7e01932cb379dc9675885d670ca2f3dde1efe53d3e12be`입니다. revision 1087을 해독한 manifest에는 AssetBundle 49,370개·resource 5,072개, 파일 크기 합계 39,322,868,160바이트가 기록돼 있습니다. 이 manifest는 파일 목록·해시·크기이며 실제 콘텐츠가 아닙니다. 현재 서버는 Octo API나 전체 CDN의 동작을 에뮬레이션하지 않습니다.
+
+## 기기 연결에서 남은 확인
+
+바이너리의 공식 API 문자열은 `https://api.game-idolypride.jp`, Octo 문자열은 `https://api.octo-cloud.com/`입니다. 문자열을 찾은 것만으로 주소 변경 훅이 작동한다고 볼 수 없습니다. 두 플랫폼의 채널 생성·호스트 변경 경로를 확인하고 실제 로컬 서버로 연결해야 합니다.
+
+Android manifest는 기본 system trust와 debug user trust 구성을 갖지만 네이티브 HTTP handler가 적용하는 신뢰·pinning 동작은 실기 확인 전입니다. iOS도 네이티브 TLS 검증과 로컬 인증서 적용 경로가 미검증입니다. 서버의 TLS 옵션은 제공하지만 클라이언트 주소 변경·신뢰 설정은 구현하지 않았습니다.
+
+현재 검증 증거는 Python codec 호환성, 실제 localhost gRPC 통합 테스트, SQLite 재로딩, fixture·파일 전송·재구성 마스터 round trip, 공식 익명 System.Check·Master.Get 조회입니다. APK·IPA의 로그인·홈·라이브·스토리 성공이나 실제 계정 수집 성공으로 확대 해석하지 않습니다.
