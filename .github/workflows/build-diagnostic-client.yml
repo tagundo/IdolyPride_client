@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: diagnostic-game-v0.2.0
+  group: diagnostic-game-v0.2.1
   cancel-in-progress: false
 
 jobs:
@@ -25,7 +25,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
-      IDOLY_DIAGNOSTIC_TAG: local-diagnostics-v0.2.0
+      IDOLY_DIAGNOSTIC_TAG: local-diagnostics-v0.2.1
       IDOLY_DIAGNOSTIC_APK: IdolyPride-Local-Diagnostic-Android-arm64.apk
     steps:
       - uses: actions/checkout@v4
@@ -147,6 +147,12 @@ jobs:
           assert report['diagnostics']['raw_logs_saved'] is False
           assert report['diagnostics']['public_development_signing_key'] is True
           assert report['signature_verified'] is True and report['device_tested'] is False
+          probe = report['diagnostics']['native_phase_probe']
+          assert probe['instruction_scope'] == 'ordinary-v2'
+          assert probe['overwrite_bytes'] == 4 and probe['post_install_neighbor_guard'] is True
+          assert probe['per_device_preflight_required'] is True
+          assert {'ADD', 'MOV', 'LDR', 'LDP', 'SUB_SP', 'STR_preindex', 'LDP_postindex'} <= set(probe['preflight_checks'])
+          assert 'BL' not in probe['preflight_checks']
           report['build_source_commit'] = os.environ['GITHUB_SHA']
           apk.with_suffix('.apk.evidence.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
           outputs = [apk, apk.with_suffix('.apk.evidence.json')]
@@ -162,7 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           IDOLY_RELEASE_IDS="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
-            --jq '.[] | select(.tag_name == "local-diagnostics-v0.2.0") | .id')"
+            --jq '.[] | select(.tag_name == "local-diagnostics-v0.2.1") | .id')"
           if [[ "$IDOLY_RELEASE_IDS" == *$'\n'* ]]; then
             echo 'More than one release has the diagnostics tag' >&2
             exit 1
@@ -171,13 +177,13 @@ jobs:
             IDOLY_RELEASE_ID="$IDOLY_RELEASE_IDS"
           else
             jq -n --arg tag "$IDOLY_DIAGNOSTIC_TAG" --arg commit "$GITHUB_SHA" \
-              '{tag_name:$tag,target_commitish:$commit,name:"Idoly Pride diagnostic game v0.2.0",draft:true,
+              '{tag_name:$tag,target_commitish:$commit,name:"Idoly Pride diagnostic game v0.2.1",draft:true,
                 body:("Separate Android arm64 game identity with an optional own-PID Unity log bridge. " +
-                      "Only exception types, static stack method names, and a fixed shader-wait status are sent to the local server. " +
+                      "Only exception types, static stack method names, fixed phases, and cumulative own-UID byte counts are sent to the local server. " +
                       "The intentionally public development key permits future diagnostic updates. " +
-                      "This build verifies privacy filters, executable preservation, alignment and signatures; " +
+                      "Only vetted ordinary instructions are intercepted after strict per-device CPU-state checks; control-transfer instructions are excluded. This build verifies privacy filters, executable preservation, alignment and signatures; " +
                       "it does not verify game home entry or device execution. " +
-                      "Release remains a draft pending the separate server receiver and own-UID device probe. Source: " + $commit)}' \
+                      "Compatible with server v0.2.5. Release remains a draft pending build and provenance review. Source: " + $commit)}' \
               > "$RUNNER_TEMP/idoly-diagnostics-draft.json"
             IDOLY_RELEASE_ID="$(gh api --method POST "repos/$GH_REPO/releases" \
               --input "$RUNNER_TEMP/idoly-diagnostics-draft.json" --jq '.id')"
@@ -193,7 +199,7 @@ jobs:
         run: |
           set -euo pipefail
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
-            --jq '.draft and .tag_name == "local-diagnostics-v0.2.0"' | grep -qx true
+            --jq '.draft and .tag_name == "local-diagnostics-v0.2.1"' | grep -qx true
           gh release upload "$IDOLY_DIAGNOSTIC_TAG" --repo "$GH_REPO" --clobber \
             "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" \
             "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK.evidence.json" data/diagnostic-dist/SHA256SUMS
@@ -204,7 +210,7 @@ jobs:
           from pathlib import Path
 
           release = json.loads(Path('data/diagnostic-evidence/uploaded-draft.json').read_text())
-          assert release['draft'] is True and release['tag_name'] == 'local-diagnostics-v0.2.0'
+          assert release['draft'] is True and release['tag_name'] == 'local-diagnostics-v0.2.1'
           assets = {asset['name']: asset for asset in release['assets']}
           for path in Path('data/diagnostic-dist').iterdir():
               with path.open('rb') as stream:
@@ -214,19 +220,19 @@ jobs:
           print('Verified diagnostics draft asset sizes and SHA-256 digests')
           PY
           {
-            echo 'The separate diagnostic APK, report and checksums were uploaded only to local-diagnostics-v0.2.0 (draft).'
+            echo 'The separate diagnostic APK, report and checksums were uploaded only to local-diagnostics-v0.2.1 (draft).'
             echo 'Privacy tests, original DEX preservation, alignment and signature verification passed.'
-            echo 'No device execution or game home-entry claim is made. Publication awaits the separate own-UID probe and server receiver QA.'
+            echo 'No device execution or game home-entry claim is made. Publication awaits build and provenance review; server v0.2.5 already supports these fixed events.'
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: diagnostic-game-build-evidence-v0.2.0
+          name: diagnostic-game-build-evidence-v0.2.1
           path: data/diagnostic-evidence
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
-          name: diagnostic-game-android-arm64-v0.2.0
+          name: diagnostic-game-android-arm64-v0.2.1
           path: data/diagnostic-dist
           if-no-files-found: error
           compression-level: 0
