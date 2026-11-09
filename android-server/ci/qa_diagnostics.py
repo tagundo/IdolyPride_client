@@ -40,10 +40,10 @@ def _tap_node(qa, node):
     """Tap bounds taken from the current UI hierarchy, never guessed pixels."""
     bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
     if bounds is None or node.get("enabled") != "true":
-        raise RuntimeError("Observed document-picker control has no enabled bounds")
+        raise RuntimeError("Observed UI control has no enabled bounds")
     left, top, right, bottom = map(int, bounds.groups())
     if left >= right or top >= bottom:
-        raise RuntimeError("Observed document-picker control has empty bounds")
+        raise RuntimeError("Observed UI control has empty bounds")
     qa.adb("shell", "input", "tap", str((left + right) // 2), str((top + bottom) // 2))
 
 
@@ -54,6 +54,48 @@ def _picker_node(tree, *, texts=(), descriptions=()):
         if node.get("text", "") in texts or node.get("content-desc", "") in descriptions:
             return node
     return None
+
+
+def _tap_initial_start(qa, timeout=60):
+    """Await native controls; dismiss only the observed emulator launcher ANR."""
+    deadline = time.monotonic() + timeout
+    attempt = 0
+    actions = []
+    capture_errors = []
+    while time.monotonic() < deadline:
+        try:
+            tree = qa.capture("01-server-start-" + str(attempt))
+        except RuntimeError as error:
+            capture_errors.append(str(error))
+            (qa.artifacts / "startup-capture-errors.txt").write_text("\n".join(capture_errors) + "\n")
+        else:
+            # API30 Google images can present a cold-launch Pixel Launcher ANR
+            # over a ready server. Never dismiss our app's ANR or an unknown dialog.
+            launcher_anr = any(node.get("package") == "android"
+                               and node.get("resource-id") == "android:id/alertTitle"
+                               and node.get("text") == "Pixel Launcher isn't responding"
+                               for node in tree.iter("node"))
+            if launcher_anr and not actions:
+                close = next((node for node in tree.iter("node")
+                              if node.get("package") == "android"
+                              and node.get("resource-id") == "android:id/aerr_close"
+                              and node.get("text") == "Close app"
+                              and node.get("enabled") == "true"), None)
+                if close is not None:
+                    _tap_node(qa, close)
+                    actions.append("Dismissed observed Pixel Launcher ANR using system Close app")
+                    (qa.artifacts / "startup-system-dialog-actions.json").write_text(json.dumps(actions) + "\n")
+                    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+            elif not launcher_anr:
+                start = next((node for node in tree.iter("node")
+                              if node.get("package") == PACKAGE and node.get("text") == "서버 시작"
+                              and node.get("enabled") == "true"), None)
+                if start is not None:
+                    _tap_node(qa, start)
+                    return actions
+        attempt += 1
+        time.sleep(0.5)
+    raise RuntimeError("Native server Start control was not available within 60 seconds")
 
 
 def _capture_picker(qa, stage, *, texts=(), timeout=20):
@@ -168,7 +210,7 @@ def main():
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         grpc_port, asset_port = qa.forward(50051), qa.forward(8080)
         schema = Schema.from_descriptor_set(args.descriptor_set)
-        qa.tap("서버 시작", "01-server-start")
+        result["startup_system_dialog_actions"] = _tap_initial_start(qa)
         server_started = True
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
         qa.capture("02-server-ready")
