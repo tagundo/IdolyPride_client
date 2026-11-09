@@ -6,6 +6,9 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.Context;
+import android.net.Uri;
+import android.widget.Toast;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
@@ -18,6 +21,10 @@ import com.chaquo.python.Python;
 import com.chaquo.python.android.AndroidPlatform;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
+
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -42,14 +49,26 @@ public final class ServerService extends Service {
     private static volatile String status = "중지됨";
     private static volatile boolean running = false;
     private static volatile boolean busy = false;
+    private static volatile String runtimeDetails = "{}";
+    private static volatile String lastDiagnostics = "{}";
+    private static volatile ServerService activeService;
+    private static final AtomicBoolean EXPORT_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService EXPORT_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "diagnostic-export");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopQueued = new AtomicBoolean(false);
     private final AtomicBoolean startQueued = new AtomicBoolean(false);
     private PyObject runtime;
+    private volatile boolean destroyed = false;
+    private final AtomicBoolean pollQueued = new AtomicBoolean(false);
+    private final Runnable pollState = () -> queuePoll();
 
     public interface Observer {
-        void onServerChanged(String state, boolean isRunning, boolean isBusy, List<String> logs);
+        void onServerChanged(String state, boolean isRunning, boolean isBusy, List<String> logs, String detailsJson);
     }
 
     public static void observe(Observer observer) {
@@ -69,9 +88,10 @@ public final class ServerService extends Service {
         final String currentStatus = status;
         final boolean currentRunning = running;
         final boolean currentBusy = busy;
+        final String currentDetails = runtimeDetails;
         MAIN.post(() -> {
             for (Observer observer : OBSERVERS) {
-                observer.onServerChanged(currentStatus, currentRunning, currentBusy, snapshot);
+                observer.onServerChanged(currentStatus, currentRunning, currentBusy, snapshot, currentDetails);
             }
         });
     }
@@ -102,6 +122,7 @@ public final class ServerService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        activeService = this;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(CHANNEL,
                     getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW);
@@ -146,6 +167,7 @@ public final class ServerService extends Service {
         }
         foreground();
         if (!startQueued.compareAndSet(false, true)) return START_NOT_STICKY;
+        runtimeDetails = "{}";
         state(getString(R.string.status_starting), false, true);
         appendLog("서버 데이터를 준비하고 있습니다.");
         worker.execute(() -> {
@@ -157,12 +179,14 @@ public final class ServerService extends Service {
                 runtime = Python.getInstance().getModule("android_server_runtime");
                 runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback());
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
+                runtimeDetails = details.toString();
                 if (!details.optBoolean("running", false)) {
                     throw new IllegalStateException("Runtime did not start");
                 }
                 if (!stopQueued.get()) {
                     state(getString(R.string.status_running), true, false);
                     appendLog("게임 연결 127.0.0.1:50051 · 파일 전송 127.0.0.1:8080");
+                    MAIN.postDelayed(pollState, 1500);
                 }
             } catch (Throwable error) {
                 Log.e("IdolyLocalServer", "Embedded server startup failed", error);
@@ -178,11 +202,17 @@ public final class ServerService extends Service {
 
     private void queueStop(boolean finishService, boolean keepFailure) {
         if (!stopQueued.compareAndSet(false, true)) return;
+        MAIN.removeCallbacks(pollState);
         if (!keepFailure) state(getString(R.string.status_stopping), running, true);
         try {
             worker.execute(() -> {
                 try {
-                    if (runtime != null) runtime.callAttr("stop");
+                    if (runtime != null) {
+                        lastDiagnostics = captureDiagnostics();
+                        runtime.callAttr("stop");
+                        runtimeDetails = runtime.callAttr("status_json").toString();
+                        lastDiagnostics = captureDiagnostics();
+                    }
                 } catch (Throwable error) {
                     appendLog("서버 정리 중 오류 (" + error.getClass().getSimpleName() + ").");
                 } finally {
@@ -202,9 +232,102 @@ public final class ServerService extends Service {
     }
 
     @Override public void onDestroy() {
+        destroyed = true;
+        MAIN.removeCallbacks(pollState);
+        if (activeService == this) activeService = null;
         queueStop(false);
         worker.shutdown();
         super.onDestroy();
+    }
+
+    /** Poll only on the same worker that owns Python lifecycle calls. */
+    private void queuePoll() {
+        if (destroyed || stopQueued.get() || !running || !pollQueued.compareAndSet(false, true)) return;
+        try {
+            worker.execute(() -> {
+                try {
+                    if (runtime != null && !stopQueued.get()) {
+                        String value = runtime.callAttr("status_json").toString();
+                        if (!value.equals(runtimeDetails)) {
+                            runtimeDetails = value;
+                            dispatch();
+                        }
+                    }
+                } catch (Throwable error) {
+                    // Keep the server running when only a display refresh fails.
+                    Log.w("IdolyLocalServer", "Diagnostic status refresh failed: " + error.getClass().getSimpleName());
+                } finally {
+                    pollQueued.set(false);
+                    if (!destroyed && !stopQueued.get() && running) MAIN.postDelayed(pollState, 1500);
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            pollQueued.set(false);
+        }
+    }
+
+    private String captureDiagnostics() {
+        try {
+            if (runtime != null) return runtime.callAttr("diagnostics_json").toString();
+        } catch (Throwable error) {
+            Log.w("IdolyLocalServer", "Diagnostic snapshot unavailable: " + error.getClass().getSimpleName());
+        }
+        return lastDiagnostics;
+    }
+
+    public static boolean isExporting() { return EXPORT_BUSY.get(); }
+
+    /** User-picked document only; capture Python on the service worker, write off it. */
+    public static void exportDiagnostics(Context context, Uri destination) {
+        Context application = context.getApplicationContext();
+        if (!EXPORT_BUSY.compareAndSet(false, true)) return;
+        dispatch();
+        ServerService service = activeService;
+        if (service != null && !service.destroyed) {
+            try {
+                service.worker.execute(() -> {
+                    lastDiagnostics = service.captureDiagnostics();
+                    writeExport(application, destination, lastDiagnostics);
+                });
+                return;
+            } catch (RejectedExecutionException ignored) {
+                // The stopped service's last safe snapshot remains available.
+            }
+        }
+        writeExport(application, destination, lastDiagnostics);
+    }
+
+    private static void writeExport(Context context, Uri destination, String snapshot) {
+        final String details = runtimeDetails;
+        final List<String> lines;
+        synchronized (LOGS) { lines = new ArrayList<>(LOGS); }
+        EXPORT_IO.execute(() -> {
+            boolean success = false;
+            try {
+                JSONObject document = new JSONObject();
+                document.put("schema", 1);
+                document.put("server_version", BuildConfig.VERSION_NAME);
+                document.put("server_version_code", BuildConfig.VERSION_CODE);
+                document.put("bundled_data_sha256", BuildConfig.SERVER_DATA_SHA256);
+                document.put("runtime", new JSONObject(details));
+                document.put("diagnostics", new JSONObject(snapshot));
+                document.put("server_logs", new JSONArray(lines));
+                byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);
+                try (OutputStream stream = context.getContentResolver().openOutputStream(destination, "wt")) {
+                    if (stream == null) throw new java.io.IOException("Document is unavailable");
+                    stream.write(encoded);
+                }
+                success = true;
+            } catch (Exception error) {
+                Log.w("IdolyLocalServer", "Diagnostic export failed: " + error.getClass().getSimpleName());
+            } finally {
+                EXPORT_BUSY.set(false);
+                boolean saved = success;
+                MAIN.post(() -> Toast.makeText(context, saved ? R.string.export_saved : R.string.export_failed,
+                                               Toast.LENGTH_LONG).show());
+                dispatch();
+            }
+        });
     }
 
     @Override public IBinder onBind(Intent intent) { return null; }

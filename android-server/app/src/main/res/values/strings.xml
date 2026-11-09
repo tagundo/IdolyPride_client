@@ -20,4 +20,17 @@
     <string name="notification_channel">로컬 서버 실행</string>
     <string name="notification_text">127.0.0.1 · 게임 50051 / 파일 8080</string>
     <string name="first_launch_note">첫 실행에서는 포함된 서버 데이터를 준비합니다. 기존 로컬 계정과 저장 데이터는 유지됩니다.</string>
+    <string name="launch_diagnostic_client">진단 게임 실행</string>
+    <string name="diagnostic_client_missing">아이프라 진단 클라이언트 APK를 먼저 설치해 주세요.</string>
+    <string name="export_diagnostics">진단 기록 내보내기</string>
+    <string name="export_saved">진단 기록을 저장했습니다.</string>
+    <string name="export_failed">진단 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
+    <string name="export_picker_failed">파일 저장 화면을 열지 못했습니다.</string>
+    <string name="game_state_title">게임 로딩 상태</string>
+    <string name="game_state_waiting">진단 게임의 상태 수신 대기</string>
+    <string name="master_transfer_waiting">이 세션 마스터 파일 전송 대기</string>
+    <string name="master_transfer_active">이 세션 마스터 파일 전송 · %1$s / %2$s</string>
+    <string name="master_transfer_finished">이 세션 마스터 파일 · 완료 %1$d건 · 마지막 전송 %2$s</string>
+    <string name="latest_game_exception">최근 게임 예외: %1$s</string>
+    <string name="master_transfer_failed">마스터 파일 전송 오류 · %1$s / %2$s</string>
 </resources>

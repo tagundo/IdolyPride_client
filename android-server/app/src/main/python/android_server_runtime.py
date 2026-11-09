@@ -13,6 +13,7 @@ from zipfile import ZipFile
 _LOCK = threading.RLock()
 _RUNTIME = None
 _LAST_STATUS = {"running": False, "message": "서버 대기"}
+_LAST_DIAGNOSTICS = {"running": False}
 _PUBLIC_FOLDERS = {"protocol", "original-master", "master-json"}
 
 
@@ -147,10 +148,11 @@ def start(files_dir, assets, callback):
 
 
 def stop():
-    global _RUNTIME, _LAST_STATUS
+    global _RUNTIME, _LAST_STATUS, _LAST_DIAGNOSTICS
     with _LOCK:
         if _RUNTIME is not None:
             _RUNTIME.stop()
+            _LAST_DIAGNOSTICS = _RUNTIME.diagnostics_snapshot()
             _LAST_STATUS = _RUNTIME.status()
             _RUNTIME = None
         _LAST_STATUS = dict(_LAST_STATUS, running=False)
@@ -160,4 +162,11 @@ def stop():
 def status_json():
     with _LOCK:
         value = _RUNTIME.status() if _RUNTIME is not None else _LAST_STATUS
+        return json.dumps(value, ensure_ascii=False)
+
+
+def diagnostics_json():
+    """Return bounded diagnostic events only; never open profiles or state.db."""
+    with _LOCK:
+        value = _RUNTIME.diagnostics_snapshot() if _RUNTIME is not None else _LAST_DIAGNOSTICS
         return json.dumps(value, ensure_ascii=False)

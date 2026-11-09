@@ -1,0 +1,228 @@
+name: Build diagnostic game into dedicated draft
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-diagnostic-client.yml
+      - android-diagnostics/**
+      - tools/package_diagnostic_client.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostic-game-v0.1.0
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      IDOLY_DIAGNOSTIC_TAG: local-diagnostics-v0.1.0
+      IDOLY_DIAGNOSTIC_APK: IdolyPride-Local-Diagnostic-Android-arm64.apk
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+      - name: Install locked dependencies and Android SDK 34
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv sync --locked --all-extras --python 3.12
+          IDOLY_SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:?Android SDK root is missing}}"
+          sdkmanager --sdk_root="$IDOLY_SDK_ROOT" "build-tools;34.0.0" "platforms;android-34"
+          test -x "$IDOLY_SDK_ROOT/build-tools/34.0.0/d8"
+          test -f "$IDOLY_SDK_ROOT/platforms/android-34/android.jar"
+          echo "IDOLY_BUILD_TOOLS=$IDOLY_SDK_ROOT/build-tools/34.0.0" >> "$GITHUB_ENV"
+          echo "IDOLY_ANDROID_JAR=$IDOLY_SDK_ROOT/platforms/android-34/android.jar" >> "$GITHUB_ENV"
+      - name: Download and verify the pinned original XAPK and APKEditor
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/diagnostic-input data/diagnostic-dist data/diagnostic-evidence
+          gh api "repos/$GH_REPO/releases/assets/725772331" \
+            --header 'Accept: application/octet-stream' > data/diagnostic-input/idolypride-6.1.1.xapk
+          curl --fail --location --retry 2 --max-time 120 \
+            https://github.com/REAndroid/APKEditor/releases/download/V1.4.1/APKEditor-1.4.1.jar \
+            --output data/diagnostic-input/APKEditor-1.4.1.jar
+          uv run --locked python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          expected = {
+              'idolypride-6.1.1.xapk': 'ab3bd9186ccc2659f91fcf2a48e25b591e94b4209c505f2ca401be8b22e5de36',
+              'APKEditor-1.4.1.jar': '4a98ae6a755264357603f1906b92e62e757d59229014e33395f4e03ff019fda8',
+          }
+          for name, digest in expected.items():
+              with (Path('data/diagnostic-input') / name).open('rb') as stream:
+                  if hashlib.file_digest(stream, 'sha256').hexdigest() != digest:
+                      raise SystemExit('Pinned input digest mismatch: ' + name)
+          Path('data/diagnostic-evidence/inputs.json').write_text(json.dumps({
+              'source_commit': os.environ['GITHUB_SHA'], 'sha256': expected}, indent=2) + '\n')
+          PY
+      - name: Run the full diagnostics privacy and provider manifest checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$JAVA_HOME/bin/javac"
+          uv run --locked --all-extras pytest -q android-diagnostics/tests tests/test_diagnostics.py \
+            --junitxml=data/diagnostic-evidence/privacy-tests.xml \
+            | tee data/diagnostic-evidence/privacy-tests.txt
+          uv run --locked python -m compileall -q tools/package_diagnostic_client.py
+      - name: Build the separately installed diagnostic game
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv run --locked python tools/package_diagnostic_client.py \
+            data/diagnostic-input/idolypride-6.1.1.xapk \
+            --output "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" \
+            --apkeditor data/diagnostic-input/APKEditor-1.4.1.jar \
+            --java "$JAVA_HOME/bin/java" \
+            --build-tools "$IDOLY_BUILD_TOOLS" --android-jar "$IDOLY_ANDROID_JAR" \
+            | tee data/diagnostic-evidence/packaging.json
+      - name: Record signature and complete executable inventory evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$IDOLY_BUILD_TOOLS/apksigner" verify --verbose --print-certs \
+            "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" > data/diagnostic-evidence/signature.txt
+          "$IDOLY_BUILD_TOOLS/zipalign" -c -v 16384 \
+            "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" > data/diagnostic-evidence/alignment.txt
+          "$IDOLY_BUILD_TOOLS/aapt2" dump badging \
+            "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" > data/diagnostic-evidence/badging.txt
+          "$IDOLY_BUILD_TOOLS/aapt2" dump xmltree \
+            "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" --file AndroidManifest.xml \
+            > data/diagnostic-evidence/manifest.txt
+          uv run --locked python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          dist = Path('data/diagnostic-dist')
+          apk = dist / os.environ['IDOLY_DIAGNOSTIC_APK']
+          with ZipFile('data/diagnostic-input/idolypride-6.1.1.xapk') as xapk:
+              with ZipFile(io.BytesIO(xapk.read('game.qualiarts.idolypride.apk'))) as original, ZipFile(apk) as built:
+                  dexes = [name for name in original.namelist() if name.startswith('classes') and name.endswith('.dex')]
+                  if len(dexes) != 4 or any(original.read(name) != built.read(name) for name in dexes):
+                      raise SystemExit('The four original release DEX files were changed')
+                  inventory = []
+                  for entry in built.infolist():
+                      if not entry.is_dir():
+                          with built.open(entry) as stream:
+                              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                          inventory.append({'name': entry.filename, 'bytes': entry.file_size, 'sha256': digest})
+          evidence = Path('data/diagnostic-evidence')
+          (evidence / 'inventory.json').write_text(json.dumps({
+              'original_release_dex_preserved': True, 'original_dex_count': len(dexes),
+              'entries': inventory, 'device_tested': False, 'game_home_verified': False}, indent=2) + '\n')
+          report = json.loads(apk.with_suffix('.apk.evidence.json').read_text())
+          assert report['package'] == 'game.qualiarts.idolypride.local.diagnostics'
+          assert report['diagnostics']['exported'] is False
+          assert report['diagnostics']['own_pid_only'] is True
+          assert report['diagnostics']['raw_logs_saved'] is False
+          assert report['diagnostics']['public_development_signing_key'] is True
+          assert report['signature_verified'] is True and report['device_tested'] is False
+          report['build_source_commit'] = os.environ['GITHUB_SHA']
+          apk.with_suffix('.apk.evidence.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+          outputs = [apk, apk.with_suffix('.apk.evidence.json')]
+          with (dist / 'SHA256SUMS').open('w', encoding='ascii') as sums:
+              for path in outputs:
+                  with path.open('rb') as stream:
+                      digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+                  sums.write(digest + '  ' + path.name + '\n')
+          PY
+      - name: Create or require the dedicated diagnostics draft
+        id: draft
+        shell: bash
+        run: |
+          set -euo pipefail
+          IDOLY_RELEASE_IDS="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" \
+            --jq '.[] | select(.tag_name == "local-diagnostics-v0.1.0") | .id')"
+          if [[ "$IDOLY_RELEASE_IDS" == *$'\n'* ]]; then
+            echo 'More than one release has the diagnostics tag' >&2
+            exit 1
+          fi
+          if [[ -n "$IDOLY_RELEASE_IDS" ]]; then
+            IDOLY_RELEASE_ID="$IDOLY_RELEASE_IDS"
+          else
+            jq -n --arg tag "$IDOLY_DIAGNOSTIC_TAG" --arg commit "$GITHUB_SHA" \
+              '{tag_name:$tag,target_commitish:$commit,name:"Idoly Pride diagnostic game v0.1.0",draft:true,
+                body:("Separate Android arm64 game identity with an optional own-PID Unity log bridge. " +
+                      "Only exception types, static stack method names, and a fixed shader-wait status are sent to the local server. " +
+                      "The intentionally public development key permits future diagnostic updates. " +
+                      "This build verifies privacy filters, executable preservation, alignment and signatures; " +
+                      "it does not verify game home entry or device execution. " +
+                      "Release remains a draft pending the separate server receiver and own-UID device probe. Source: " + $commit)}' \
+              > "$RUNNER_TEMP/idoly-diagnostics-draft.json"
+            IDOLY_RELEASE_ID="$(gh api --method POST "repos/$GH_REPO/releases" \
+              --input "$RUNNER_TEMP/idoly-diagnostics-draft.json" --jq '.id')"
+          fi
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > "$RUNNER_TEMP/idoly-diagnostics-target.json"
+          jq -e --arg tag "$IDOLY_DIAGNOSTIC_TAG" '.draft == true and .tag_name == $tag' \
+            "$RUNNER_TEMP/idoly-diagnostics-target.json" > /dev/null
+          echo "release_id=$IDOLY_RELEASE_ID" >> "$GITHUB_OUTPUT"
+      - name: Upload only to the diagnostics draft and verify received bytes
+        env:
+          IDOLY_RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
+            --jq '.draft and .tag_name == "local-diagnostics-v0.1.0"' | grep -qx true
+          gh release upload "$IDOLY_DIAGNOSTIC_TAG" --repo "$GH_REPO" --clobber \
+            "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK" \
+            "data/diagnostic-dist/$IDOLY_DIAGNOSTIC_APK.evidence.json" data/diagnostic-dist/SHA256SUMS
+          gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" > data/diagnostic-evidence/uploaded-draft.json
+          uv run --locked python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          release = json.loads(Path('data/diagnostic-evidence/uploaded-draft.json').read_text())
+          assert release['draft'] is True and release['tag_name'] == 'local-diagnostics-v0.1.0'
+          assets = {asset['name']: asset for asset in release['assets']}
+          for path in Path('data/diagnostic-dist').iterdir():
+              with path.open('rb') as stream:
+                  digest = 'sha256:' + hashlib.file_digest(stream, 'sha256').hexdigest()
+              assert assets[path.name]['size'] == path.stat().st_size
+              assert assets[path.name].get('digest') == digest
+          print('Verified diagnostics draft asset sizes and SHA-256 digests')
+          PY
+          {
+            echo 'The separate diagnostic APK, report and checksums were uploaded only to local-diagnostics-v0.1.0 (draft).'
+            echo 'Privacy tests, original DEX preservation, alignment and signature verification passed.'
+            echo 'No device execution or game home-entry claim is made. Publication awaits the separate own-UID probe and server receiver QA.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostic-game-build-evidence-v0.1.0
+          path: data/diagnostic-evidence
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diagnostic-game-android-arm64-v0.1.0
+          path: data/diagnostic-dist
+          if-no-files-found: error
+          compression-level: 0
