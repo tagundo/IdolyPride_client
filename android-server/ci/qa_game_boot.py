@@ -2,7 +2,8 @@
 """Capture an actual ARM64 game launch on a disposable translated emulator.
 
 The optional title action taps a freshly OCR-observed TAP TO START phrase.
-An opt-in second action requires two fresh stable, nonloading title frames.
+An opt-in second action requires observed post-tap loading followed by two
+fresh stable, nonloading returned-title frames.
 No other game input is performed. Captures do not establish home success.
 """
 from __future__ import annotations
@@ -208,31 +209,35 @@ class GameQA(QA):
                              check=True, capture_output=True, text=True, timeout=15)
         prefix.with_suffix(".tsv").write_text(ocr.stdout, encoding="utf-8")
         phrase = observed_title(ocr.stdout, width, height)
-        if phrase is None:
-            return None
+        # A non-title frame is still an observation. In particular, raw LOADING
+        # without TAP TO START is positive departure evidence, not OCR absence.
+        observation = {"phrase": None, "source_image": source.name, "ocr_mask": mask.name,
+                       "ocr_tsv": prefix.with_suffix(".tsv").name, "captured_at": captured_at,
+                       "image_size": [width, height], "elapsed_seconds": round(captured_at - self.started, 2)}
+        if phrase is not None:
+            observation.update(phrase)
         activity = self.adb("shell", "dumpsys", "activity", "activities")
         prefix.with_suffix(".activity.txt").write_text(activity, encoding="utf-8")
-        foreground = bool(re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b"
+        observation["foreground_game"] = bool(re.search(r"(?:mResumedActivity|topResumedActivity)[^\n]*\b"
                                     + re.escape(getattr(self, "game_package", GAME)) + r"/", activity))
-        phrase.update(source_image=source.name, ocr_mask=mask.name, ocr_tsv=prefix.with_suffix(".tsv").name,
-                      captured_at=captured_at, image_size=[width, height], foreground_game=foreground,
-                      elapsed_seconds=round(captured_at - self.started, 2))
         if inspect_loading:
-            # Check the unmasked frame too: a white-only title mask can omit a
-            # colored/dimmed LOADING indicator. Preserve both OCR inputs.
+            # Check the unmasked frame even when the title phrase is absent:
+            # a white-only mask can omit a colored/dimmed LOADING indicator.
             raw_ocr = subprocess.run(["tesseract", str(source), "stdout", "--psm", "11", "-l", "eng", "tsv"],
                                      check=True, capture_output=True, text=True, timeout=15)
             raw_tsv = prefix.with_name(prefix.name + "-raw").with_suffix(".tsv")
             raw_tsv.write_text(raw_ocr.stdout, encoding="utf-8")
-            phrase.update(raw_ocr_tsv=raw_tsv.name, **raw_loading_state(raw_ocr.stdout))
-        prefix.with_suffix(".observation.json").write_text(json.dumps(phrase, indent=2) + "\n")
-        return phrase
+            observation.update(raw_ocr_tsv=raw_tsv.name, **raw_loading_state(raw_ocr.stdout))
+        prefix.with_suffix(".observation.json").write_text(json.dumps(observation, indent=2) + "\n")
+        return observation
 
     def _perform_title_action(self, phrase):
         actions = getattr(self, "title_actions", [])
         maximum = getattr(self, "max_title_taps", 1)
         if len(actions) >= maximum or len(actions) >= 2:
             raise RuntimeError("The configured observed title action limit was reached")
+        if phrase.get("phrase") != "TAP TO START":
+            raise RuntimeError("A game tap requires a confident fresh title phrase")
         if not phrase.get("foreground_game"):
             raise RuntimeError("OCR title phrase is not in the foreground game activity")
         action = dict(phrase, action_number=len(actions) + 1, performed=False)
@@ -259,16 +264,20 @@ class GameQA(QA):
     def tap_observed_title(self, timeout=180):
         if getattr(self, "title_actions", []):
             raise RuntimeError("The first observed title action may be attempted only once")
+        if not 0 < timeout <= 180:
+            raise ValueError("Title observation must be bounded to at most 180 seconds")
         deadline = time.monotonic() + timeout
         attempt = 0
         while time.monotonic() < deadline:
             began = time.monotonic()
-            phrase = self._observe_title_frame(f"title-wait-{attempt:02d}")
-            if phrase is not None and time.monotonic() < deadline:
+            phrase = self._observe_title_frame(f"title-wait-{attempt:02d}", inspect_loading=True)
+            if (phrase is not None and phrase.get("phrase") == "TAP TO START"
+                    and phrase.get("foreground_game") and phrase.get("raw_ocr_has_words")
+                    and phrase.get("raw_loading_detected") is False and time.monotonic() < deadline):
                 return self._perform_title_action(phrase)
             attempt += 1
             time.sleep(max(0, min(5 - (time.monotonic() - began), deadline - time.monotonic())))
-        raise RuntimeError("No confident fresh TAP TO START phrase appeared within 180 seconds; no game tap performed")
+        raise RuntimeError(f"No confident fresh nonloading TAP TO START phrase appeared within {timeout:g} seconds; no game tap performed")
 
     def tap_observed_title_reentry(self, timeout=180):
         # The full first master download and title reload took >90s in actual
@@ -276,25 +285,39 @@ class GameQA(QA):
         if (getattr(self, "max_title_taps", 1) != 2 or len(getattr(self, "title_actions", [])) != 1
                 or not self.title_actions[0].get("performed")):
             raise RuntimeError("Second title observation requires one completed action and opt-in max-title-taps=2")
+        if not 0 < timeout <= 180:
+            raise ValueError("Title reentry observation must be bounded to at most 180 seconds")
         began = time.monotonic()
         deadline = began + timeout
         earliest = self.last_title_tap_at + 20
+        first = self.title_actions[0]
+        busy = None
         candidate = None
         attempt = 0
         while time.monotonic() < deadline:
             frame_start = time.monotonic()
             current = self._observe_title_frame(f"title-reentry-{attempt:02d}", inspect_loading=True)
-            eligible = (current is not None and current["captured_at"] >= earliest
+            fresh = (current is not None and current["captured_at"] > self.last_title_tap_at
+                     and current.get("source_image") != first["source_image"])
+            if (fresh and current.get("foreground_game") is True and current.get("raw_ocr_has_words")
+                    and current.get("raw_loading_detected") is True):
+                busy = current
+                candidate = None
+            eligible = (fresh and busy is not None and current.get("phrase") == "TAP TO START"
+                        and current["captured_at"] >= earliest and current["captured_at"] > busy["captured_at"]
+                        and current.get("source_image") != busy["source_image"]
                         and current.get("foreground_game") and current.get("raw_ocr_has_words")
                         and current.get("raw_loading_detected") is False)
             if eligible and stable_title_pair(candidate, current) and time.monotonic() < deadline:
-                current.update(stable_previous_observation=candidate, minimum_seconds_after_first_tap=20,
+                current.update(stable_previous_observation=candidate, returned_after_loading_observation=busy,
+                               minimum_seconds_after_first_tap=20,
                                stable_frames_minimum_gap_seconds=3)
                 action = self._perform_title_action(current)
                 (self.artifacts / "title-reentry-result.json").write_text(json.dumps(
                     {"performed": True, "timeout_seconds": timeout,
                      "waited_seconds": round(time.monotonic() - began, 2),
-                     "action_number": action["action_number"]}, indent=2) + "\n")
+                     "action_number": action["action_number"], "busy_phase_observed": True,
+                     "busy_observation": busy}, indent=2) + "\n")
                 return action
             candidate = current if eligible else None
             attempt += 1
@@ -303,7 +326,9 @@ class GameQA(QA):
         # observations and continue capturing without treating absence as error.
         (self.artifacts / "title-reentry-result.json").write_text(json.dumps(
             {"performed": False, "timeout_seconds": timeout,
-             "reason": "No stable nonloading title reentry observed",
+             "reason": ("No stable returned title after observed loading" if busy is not None
+                        else "No positive foreground loading phase observed after the first tap"),
+             "busy_phase_observed": busy is not None, "busy_observation": busy,
              "waited_seconds": round(time.monotonic() - began, 2)}, indent=2) + "\n")
         return None
 
@@ -351,7 +376,7 @@ def main():
     parser.add_argument("--tap-observed-title", action="store_true",
                         help="Tap a freshly OCR-observed TAP TO START phrase, then observe 180 seconds")
     parser.add_argument("--max-title-taps", type=int, choices=(1, 2), default=1,
-                        help="QA-only opt-in: at most two title taps; the second requires two fresh stable nonloading frames")
+                        help="QA-only opt-in: at most two title taps; the second requires observed loading then a fresh stable returned title")
     parser.add_argument("--prepare-restarted-tutorial", action="store_true",
                         help="QA ONLY: local Auth/Login + Tutorial/Init(QAManager) before launch; no tutorial skip/grants")
     args = parser.parse_args()
@@ -426,8 +451,10 @@ def main():
             result["game_input_performed"] = True
             result["game_input_count"] = 1
             if args.max_title_taps == 2:
-                result["captures"].append(qa.capture_game("after-title-action-1"))
+                # Start departure OCR immediately. A slow Unity accessibility
+                # capture here could miss the complete loading/reload phase.
                 result["title_reentry_action"] = qa.tap_observed_title_reentry()
+                result["captures"].append(qa.capture_game("after-title-reentry-observation"))
             result["observed_title_actions"] = qa.title_actions
             result["game_input_count"] = sum(action["performed"] for action in qa.title_actions)
         duration = 180 if args.tap_observed_title else args.duration
