@@ -72,6 +72,8 @@ v0.2.2에는 6.1.1 스키마, 원본 암호화 마스터 202개, 시작 데이�
 
 ARM64 스텁은 원본 해시·진입 바이트를 검사하며 Unicorn에서 반환 구조·레지스터·스택 보존을 실행 검증했습니다. Android 게임 APK의 서명·16KiB 정렬도 확인했습니다. native 코드 분석에서 `http` 주소가 `YetAnotherHttpHandler.Http2Only`를 설정하는 h2c 경로와 `https` 전용 인증서 분기를 확인했습니다. 정적 분석에 더해 실제 Android 게임에서 `System.Check`, `Refund.GetTerm`, `Auth.Login`, `Master.Get`, `User.Get`, `Home.Login/Enter`가 로컬 서버에서 성공한 기록을 확인했습니다. 홈 진입·라이브 플레이의 성공은 아직 검증하지 않았습니다.
 
+별도 실제 게임 APK 실행 프로브에서는 API30 x86_64의 ARM64 번역을 확인했지만, `libFastAES.so`의 ARM `AESIMC` 명령을 번역하지 못해 게임이 초기 단계에서 `SIGILL`로 종료됐습니다. 이 결과로 실제 홈 화면 표시 성공을 주장하지 않습니다. 휴대폰에서 관측된 `Home.Enter` 이후 정체와는 다른 에뮬레이터 호환성 한계이며, 배포 게임의 암호화 구현을 우회하거나 변경하지 않았습니다.
+
 Firebase Analytics·푸시 알림·구매 SDK 호출과 Octo 리소스 경로는 남아 있습니다. 현재 패치는 인증 부팅의 온라인 의존성을 줄이며 완전한 네트워크 격리나 전체 게임 플레이를 보장하지 않습니다.
 
 Android 서버의 공개 개발 키와 게임 클라이언트의 서명 키는 별개입니다. 게임 APK를 직접 다시 빌드한다면 `data/client-signing/local-client.p12`와 `local-client.password`를 보존해야 같은 서명으로 업데이트할 수 있습니다. 기존 게임 클라이언트의 초기 CI 빌드는 임시 개발 키를 사용하므로 임의 재빌드 APK와 업데이트 호환을 가정하지 않습니다. PlayCover용 IPA는 PlayCover가 재서명합니다.
