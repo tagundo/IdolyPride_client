@@ -312,7 +312,7 @@ def test_download_modal_context_is_rechecked_after_refresh_before_input(download
 
 
 @pytest.mark.parametrize("collection_seconds,allowed", ((0.5, True), (10.01, False)))
-def test_slow_unity_query_does_not_age_the_response_but_late_android_collection_does(
+def test_slow_unity_queries_cannot_refresh_an_already_stale_android_surface(
         snapshot, tmp_path, monkeypatch, collection_seconds, allowed):
     snapshot["startup_observation"] = {"content_blocking": False, "input_releasing": False}
     clock = [0.0]
@@ -367,6 +367,65 @@ def test_slow_unity_query_does_not_age_the_response_but_late_android_collection_
         assert qa.inputs == [] and explorer.actions == []
         assert explorer.input_errors == {"ui_observation_became_stale": 1}
         assert not list(tmp_path.glob("ui-action-*"))
+
+
+@pytest.mark.parametrize("second_query_seconds,change,allowed,error", (
+    (0.5, None, True, None),
+    (10.01, None, False, "ui_observation_became_stale"),
+    (0.5, "identity", False, "selected_node_no_longer_present"),
+    (0.5, "blocking", False, "content_blocking"),
+))
+def test_slow_android_dump_is_followed_by_a_fresh_guarded_unity_query(
+        snapshot, tmp_path, monkeypatch, second_query_seconds, change, allowed, error):
+    snapshot["nodes"][0].update(path="Canvas/TitleButton", name="TitleButton", callback_registered=True)
+    snapshot["startup_observation"] = {"content_blocking": False, "input_releasing": False}
+    clock, queries, inputs = [0.0], [], []
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def adb(*args, **kwargs):
+        if args == ("exec-out", "screencap", "-p"):
+            clock[0] += 4
+            return b"\x89PNG\r\n\x1a\n" + bytes(8) + struct.pack(">II", 1080, 2280)
+        if args == ("shell", "wm", "size"):
+            clock[0] += 1
+            return "Physical size: 1080x2280\n"
+        if args == ("exec-out", "uiautomator", "dump", "/dev/tty"):
+            clock[0] += 9
+            return XML
+        if args[:3] == ("shell", "input", "tap"):
+            inputs.append(args)
+            return ""
+        raise AssertionError(args)
+
+    def query():
+        queries.append(clock[0])
+        current = deepcopy(snapshot)
+        if len(queries) == 2:
+            clock[0] += second_query_seconds
+            current["generation"] += 1
+            current["nodes"][0]["bounds"] = [20, 900, 120, 980]
+            if change == "identity":
+                current["nodes"][0]["instance_id"] -= 1
+            elif change == "blocking":
+                current["startup_observation"]["content_blocking"] = True
+        return current
+
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, touch_hold_ms=0,
+                         forward=lambda port: 12345, adb=adb)
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", query)
+    assert explorer._tap(snapshot, ui.buttons(snapshot)[0], "observed_title", 1) is allowed
+    assert queries == [0, 14]
+    if allowed:
+        # Bounds are from the final Unity tree, not the obsolete selection.
+        assert inputs == [("shell", "input", "tap", "140", "1928")]
+        action = explorer.actions[0]
+        assert action["generation"] == 3
+        assert action["observation_to_input_milliseconds"] == 0
+        assert action["android_geometry_to_input_milliseconds"] == 500
+    else:
+        assert inputs == [] and explorer.actions == []
+        assert explorer.input_errors == {error: 1}
 
 
 HOME_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot/"

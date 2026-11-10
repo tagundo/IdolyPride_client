@@ -374,18 +374,16 @@ class UiExplorer:
         finally:
             connection.close()
 
-    def _tap(self, snapshot, node, reason, frame):
-        # Refresh object identity/bounds after selection, then obtain a current
-        # Android tree. Coordinates never come from screenshot/OCR detection.
-        query_began = time.monotonic()
-        fresh = self._snapshot()
-        # Queueing for the Unity thread precedes generation of this response;
-        # it is not the age of the freshly returned UI tree.
-        observed_at = time.monotonic()
+    def _input_target(self, fresh, node, reason):
+        """Recheck identity and blockers before collecting geometry or touching."""
+        def reject(code):
+            self._input_error(code)
+            return None
+
         current = next((item for item in buttons(fresh) if item.get("instance_id") == node.get("instance_id")
                         and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
         if fresh.get("ok") is not True or current is None:
-            return self._input_error("selected_node_no_longer_present")
+            return reject("selected_node_no_longer_present")
         selectors = {"observed_notice_close": notice_close_target,
                      "observed_manager_level_close": manager_level_close_target,
                      "observed_lesson_reward_close": lesson_reward_close_target}
@@ -393,21 +391,31 @@ class UiExplorer:
             close = selectors[reason](fresh)
             if (close is None or close.get("instance_id") != current.get("instance_id")
                     or close.get("path") != current.get("path")):
-                return self._input_error("notice_dialog_changed" if reason == "observed_notice_close"
+                return reject("notice_dialog_changed" if reason == "observed_notice_close"
                                          else "selected_modal_changed")
         elif visible_global_dialogs(fresh) or visible_manager_level_overlay(fresh):
-            return self._input_error("visible_global_dialog_blocks_input")
+            return reject("visible_global_dialog_blocks_input")
         if reason == "observed_title" and (blocked := title_block_reason(fresh, current)):
-            return self._input_error(blocked)
+            return reject(blocked)
         if reason == "observed_title" and visible_action_sheet(fresh):
-            return self._input_error("title_obscured_by_action_sheet")
+            return reject("title_obscured_by_action_sheet")
         if reason == "observed_resource_download_confirmation":
             confirmation = download_confirmation(fresh)
             if (confirmation is None or confirmation.get("instance_id") != current.get("instance_id")
                     or confirmation.get("path") != current.get("path")):
-                return self._input_error("download_confirmation_changed")
+                return reject("download_confirmation_changed")
         if reason.startswith(("menu_", "route_")) and (blocked := navigation_block_reason(fresh)):
-            return self._input_error(blocked)
+            return reject(blocked)
+        return current
+
+    def _tap(self, snapshot, node, reason, frame):
+        # Reject an obsolete selection before the relatively slow Android dump.
+        query_began = time.monotonic()
+        fresh = self._snapshot()
+        observed_at = time.monotonic()
+        current = self._input_target(fresh, node, reason)
+        if current is None:
+            return False
         raw = self.qa.adb("exec-out", "screencap", "-p", binary=True)
         if raw[:8] != b"\x89PNG\r\n\x1a\n":
             return self._input_error("display_capture_unavailable")
@@ -421,11 +429,23 @@ class UiExplorer:
         if begin < 0 or end < 0:
             return self._input_error("android_ui_tree_unavailable")
         xml = xml[begin:end + len("</hierarchy>")]
+        geometry_observed_at = time.monotonic()
+        if geometry_observed_at - observed_at > 10:
+            # A software-rendered guest can take >10s to return uiautomator's
+            # current surface. Refresh Unity *after* that work instead of
+            # touching from the older tree or increasing the freshness limit.
+            query_began = time.monotonic()
+            fresh = self._snapshot()
+            observed_at = time.monotonic()
+            current = self._input_target(fresh, node, reason)
+            if current is None:
+                return False
         try:
             point = mapped_point(fresh, current, xml, self.game_package, size)
         except ValueError as error:
             return self._input_error(str(error))
-        if time.monotonic() - observed_at > 10:
+        now = time.monotonic()
+        if now - observed_at > 10 or now - geometry_observed_at > 10:
             return self._input_error("ui_observation_became_stale")
         prefix = self.qa.artifacts / f"ui-action-{len(self.actions) + 1:02d}"
         prefix.with_suffix(".png").write_bytes(raw)
@@ -436,6 +456,7 @@ class UiExplorer:
                   "point": point, "coordinate_source": "fresh_unity_tree_and_android_surface", "performed": False}
         action["ui_query_milliseconds"] = round((observed_at - query_began) * 1000)
         action["observation_to_input_milliseconds"] = round((time.monotonic() - observed_at) * 1000)
+        action["android_geometry_to_input_milliseconds"] = round((time.monotonic() - geometry_observed_at) * 1000)
         hold = getattr(self.qa, "touch_hold_ms", 0)
         action["touch_hold_milliseconds"] = hold
         if hold == 150:
