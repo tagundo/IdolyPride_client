@@ -14,6 +14,10 @@ jobs:
   firstboot:
     runs-on: macos-15
     timeout-minutes: 15
+    # GitHub requires write access to read an unpublished release asset.
+    # This job only downloads the pinned draft backend; it never publishes.
+    permissions:
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
