@@ -449,6 +449,8 @@ def main():
                         help="Use fresh Android UI-tree game-view coordinates; OCR only recognizes the title")
     parser.add_argument("--qa-ui-explore", action="store_true",
                         help="Use the emulator-only authenticated Unity tree for bounded menu exploration")
+    parser.add_argument("--touch-hold-ms", type=int, choices=(0, 150), default=0,
+                        help="QA UI input differential: 0 uses Android tap; 150 uses a stationary short touch")
     args = parser.parse_args()
     if not 90 <= args.duration <= (900 if args.tree_title_input else 180) or args.interval < 5 or args.startup_timeout <= 0:
         parser.error("duration must be 90..180 (or 900 with tree input), interval >=5, and startup-timeout positive")
@@ -463,6 +465,7 @@ def main():
     qa = GameQA(args.adb, args.serial, args.artifacts)
     qa.game_package = args.game_package
     qa.max_title_taps = args.max_title_taps
+    qa.touch_hold_ms = args.touch_hold_ms
     qa.tree_title_input = args.tree_title_input
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
@@ -471,6 +474,7 @@ def main():
               "target": "disposable Android emulator", "captures": [],
               "game_package": args.game_package,
               "max_title_taps": args.max_title_taps, "observed_title_actions": [],
+              "qa_touch_hold_milliseconds": args.touch_hold_ms,
               "profile_fixture": {"enabled": False, "rpc_calls": []},
               "qa_launch_override": {"force_gles30_requested": args.force_gles30,
                   "intent_string_extras": {"unity": "-force-gles30"} if args.force_gles30 else {},

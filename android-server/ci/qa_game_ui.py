@@ -202,7 +202,17 @@ class UiExplorer:
         action = {"reason": reason, "frame": frame, "instance_id": current.get("instance_id"),
                   "generation": fresh.get("generation"), "path": current["path"], "label": current["label"],
                   "point": point, "coordinate_source": "fresh_unity_tree_and_android_surface", "performed": False}
-        self.qa.adb("shell", "input", "tap", str(point[0]), str(point[1]))
+        hold = getattr(self.qa, "touch_hold_ms", 0)
+        action["touch_hold_milliseconds"] = hold
+        if hold == 150:
+            # Normal Android DOWN/MOVE/UP at the same point. The original
+            # title's long-tap threshold is 500ms and its drag threshold is30.
+            self.qa.adb("shell", "input", "touchscreen", "swipe", str(point[0]), str(point[1]),
+                        str(point[0]), str(point[1]), "150")
+        elif hold == 0:
+            self.qa.adb("shell", "input", "tap", str(point[0]), str(point[1]))
+        else:
+            return self._input_error("unsupported_touch_duration")
         action["performed"] = True
         self.actions.append(action)
         self.last_action = time.monotonic()

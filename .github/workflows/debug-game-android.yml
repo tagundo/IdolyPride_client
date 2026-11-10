@@ -2,6 +2,12 @@ name: Debug actual Android game boot
 
 on:
   workflow_dispatch:
+    inputs:
+      touch_hold_ms:
+        description: Normal Android touch duration differential
+        type: choice
+        options: ["0", "150"]
+        default: "0"
 
 permissions:
   contents: read
@@ -227,6 +233,7 @@ jobs:
             --tap-observed-title
             --tree-title-input
             --qa-ui-explore
+            --touch-hold-ms ${{ inputs.touch_hold_ms || '0' }}
             --max-title-taps 5
             --prepare-completed-opening
       - name: Summarize observed input and menu evidence
