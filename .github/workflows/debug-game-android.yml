@@ -1,4 +1,4 @@
-name: Debug actual Android game boot
+name: Legacy modified Android game QA (disabled by default)
 
 on:
   workflow_dispatch:
@@ -23,6 +23,9 @@ concurrency:
 
 jobs:
   game:
+    # The software GPU and modified APK are not an original-client baseline.
+    # Keep historical research reproducible without resuming it by accident.
+    if: ${{ vars.IDOLY_LEGACY_GAME_QA_ENABLED == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:

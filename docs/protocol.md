@@ -1,6 +1,6 @@
 # 프로토콜 분석 메모
 
-이 문서는 관찰한 바이너리·공개 소스와 현재 서버 동작을 구분합니다. Android·iOS 실기에서 로컬 서버 로그인·홈 화면 진입을 확인한 기록은 아직 없습니다.
+이 문서는 원본 바이너리 분석·공개 캡처·현재 서버 동작을 구분합니다. 사용자 Android에서는 로컬 연결판의 로그인·홈·초기 튜토리얼 진행을 확인했지만, 우리 환경에서 원본 APK의 공식 로그인 후 통신을 직접 수집한 기록은 없습니다. 원본 기준 검증과 미구현 경로는 [원본 클라이언트 기준 분석](original-client-baseline.md)에 정리했습니다.
 
 ## 분석 입력
 
@@ -100,8 +100,8 @@ PlayChain을 이미 사용하는 경우의 [실제 DB 경로](https://github.com
 
 ## 기기 연결에서 남은 확인
 
-바이너리의 공식 API 문자열은 `https://api.game-idolypride.jp`, Octo 문자열은 `https://api.octo-cloud.com/`입니다. 문자열을 찾은 것만으로 주소 변경 훅이 작동한다고 볼 수 없습니다. 두 플랫폼의 채널 생성·호스트 변경 경로를 확인하고 실제 로컬 서버로 연결해야 합니다.
+바이너리의 공식 API 문자열은 `https://api.game-idolypride.jp`, Octo 문자열은 `https://api.octo-cloud.com/`입니다. 두 플랫폼의 정적 채널·호스트 분기를 분석했고 Android 로컬 연결판에서는 실제 h2c 요청을 확인했습니다. 이것은 원본 APK의 공식 HTTPS 인증 통신 검증과 다릅니다. iOS 로컬 연결판의 게임 화면 진행은 아직 미검증입니다.
 
-Android manifest는 기본 system trust와 debug user trust 구성을 갖지만 네이티브 HTTP handler가 적용하는 신뢰·pinning 동작은 실기 확인 전입니다. iOS도 네이티브 TLS 검증과 로컬 인증서 적용 경로가 미검증입니다. 서버의 TLS 옵션은 제공하지만 클라이언트 주소 변경·신뢰 설정은 구현하지 않았습니다.
+Android manifest는 기본 system trust와 debug user trust 구성을 갖지만 네이티브 HTTP handler가 적용하는 신뢰·pinning 동작은 원본 실행에서 확인하지 못했습니다. iOS도 원본의 네이티브 TLS 검증과 로컬 인증서 적용 경로가 미검증입니다. 서버의 TLS 옵션과 연결판의 주소 변경은 제공하지만, 로컬 h2c 연결 성공으로 원본 HTTPS의 프록시·CA 처리를 검증했다고 볼 수 없습니다.
 
-현재 검증 증거는 Python codec 호환성, 실제 localhost gRPC 통합 테스트, SQLite 재로딩, fixture·파일 전송·재구성 마스터 round trip, 공식 익명 System.Check·Master.Get 조회입니다. APK·IPA의 로그인·홈·라이브·스토리 성공이나 실제 계정 수집 성공으로 확대 해석하지 않습니다.
+이 문서의 전송 형식 검증은 codec 호환성, localhost gRPC 통합, SQLite 재로딩, fixture·파일 전송·마스터 round trip과 공식 익명 조회입니다. 별도 Android 로컬 연결판의 홈·튜토리얼 진행 결과는 [실제 게임 점검](actual-game-qa.md)을 따릅니다. 이를 원본 APK의 공식 인증 통신이나 계정 수집 성공으로 확대 해석하지 않습니다.
