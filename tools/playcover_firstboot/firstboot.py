@@ -20,7 +20,10 @@ import time
 from zipfile import ZipFile
 
 PLAYCOVER = 'io.playcover.PlayCover'
-GAME = 'game.qualiarts.idolypride.local'
+CLIENTS = {
+    'local': ('game.qualiarts.idolypride.local', '아이프라 로컬'),
+    'original': ('game.qualiarts.idolypride', 'アイプラ'),
+}
 BACKEND_SOURCE = '42158bade5fce76af03524d2adebafb9334bb44f'
 
 
@@ -30,14 +33,18 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--ax-driver', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=480)
+    parser.add_argument('--ipa-variant', choices=tuple(CLIENTS), default='local')
     parser.add_argument('--compare-canonical-launch', action='store_true',
         help='After the known UIKit check-in failure, compare normal LaunchServices opening of the prepared installed bundle')
     args = parser.parse_args()
+    game, expected_label = CLIENTS[args.ipa_variant]
     args.input = args.input.resolve(); args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + min(max(args.timeout, 1), 480)
     report = {'schema': 1, 'environment': 'ephemeral_GitHub_hosted_Mac_not_user_Mac',
-              'source_commit': os.environ.get('GITHUB_SHA'), 'workflow_run_id': os.environ.get('GITHUB_RUN_ID'), 'game_bundle': GAME,
+              'source_commit': os.environ.get('GITHUB_SHA'), 'workflow_run_id': os.environ.get('GITHUB_RUN_ID'), 'game_bundle': game,
+              'client_variant': args.ipa_variant, 'local_client_patch_present': args.ipa_variant == 'local',
+              'backend_applies_to_client': args.ipa_variant == 'local',
               'playcover_source': 'a7b1693d4fa4310367990cd35d4ebafb20e5c965',
               'game_launched': False, 'gameplay_verified': False, 'credentials_supplied': False,
               'security_settings_changed': False, 'unknown_dialog_stopped': False}
@@ -86,9 +93,9 @@ def main():
             or not state.get('tree'))
         # Losing focus after process exit is an observation, not an input.
         # Before any subsequent launch, recheck the foreground PlayCover UI.
-        observed_game_exit = action is None and bundle == GAME and state.get('running') is False
+        observed_game_exit = action is None and bundle == game and state.get('running') is False
         if (not starting_without_window and not observed_game_exit
-                and state.get('frontmost_bundle') not in (None, '', PLAYCOVER, GAME)):
+                and state.get('frontmost_bundle') not in (None, '', PLAYCOVER, game)):
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_frontmost_UI_observed')
         return state
@@ -195,11 +202,11 @@ def main():
         if not initialization or not all(initialization[-1].values()):
             raise RuntimeError('official_PlayCover_initialization_not_complete')
         report['official_PlayCover_initialization_ready'] = True
-        ipa = args.input / 'IdolyPride-Local-PlayCover.ipa'
+        ipa = args.input / 'IdolyPride-Under-Test.ipa'
         command(['/usr/bin/open', '-a', target, ipa])
         time.sleep(3)
         observe('01-import-requested')
-        installed = applications / (GAME + '.app')
+        installed = applications / (game + '.app')
         until = min(deadline, time.monotonic() + 150)
         while time.monotonic() < until and not (installed / 'Info.plist').is_file():
             observe('02-import-wait')
@@ -207,10 +214,11 @@ def main():
         if not (installed / 'Info.plist').is_file():
             raise RuntimeError('official_IPA_import_not_complete')
         info = plistlib.loads((installed / 'Info.plist').read_bytes())
-        if info.get('CFBundleIdentifier') != GAME:
+        if info.get('CFBundleIdentifier') != game:
             raise RuntimeError('installed_game_bundle_mismatch')
         command(['/usr/bin/codesign', '--verify', '--deep', '--strict', installed])
-        report['local_IPA_installed'] = True
+        report['IPA_installed'] = True
+        report[args.ipa_variant + '_IPA_installed'] = True
         report['installed_game_version'] = info.get('CFBundleShortVersionString')
         # Preserve the converted bundle contract before launching. These are
         # installation metadata, not the game's account or preferences files.
@@ -234,8 +242,8 @@ def main():
                 value = {'capture_error': type(error).__name__}
             (args.output / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
         label = info.get('CFBundleDisplayName') or info.get('CFBundleName')
-        if label != '아이프라 로컬':
-            raise RuntimeError('unexpected_local_game_display_name')
+        if label != expected_label:
+            raise RuntimeError('unexpected_game_display_name')
         # Read the installer-created alias without delaying the first process
         # observation after the normal game launch. Do not modify either path.
         alias = Path.home() / 'Applications/PlayCover' / (label + '.app')
@@ -258,7 +266,7 @@ def main():
         started_this_phase = False
         report['launch_phases'] = [{'kind': phase, 'samples': samples}]
         while time.monotonic() < until:
-            state = observe('05-game-' + phase + '-' + str(len(samples)), GAME)
+            state = observe('05-game-' + phase + '-' + str(len(samples)), game)
             samples.append({'running': state.get('running'), 'pid': state.get('pid')})
             if state.get('running') is True and state.get('pid'):
                 started_this_phase = True
@@ -289,7 +297,7 @@ def main():
         report['game_samples'] = samples
         if not started_this_phase:
             raise RuntimeError('game_process_not_observed')
-        report['outcome'] = 'local_game_process_observed_UI_and_loading_require_review'
+        report['outcome'] = 'game_process_observed_UI_and_loading_require_review'
     except Exception as error:
         report['error_type'] = type(error).__name__
         report['error'] = str(error)[:300]
@@ -310,7 +318,7 @@ def main():
             subprocess.run(['/usr/bin/hdiutil', 'detach', mounted], capture_output=True, timeout=10)
         report['driver_sha256'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         (args.output / 'result.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
-        print(json.dumps({key: report.get(key) for key in ('playcover_installed', 'local_IPA_installed',
+        print(json.dumps({key: report.get(key) for key in ('client_variant', 'playcover_installed', 'IPA_installed',
             'game_launched', 'outcome', 'error_type', 'error', 'unknown_dialog_stopped')}, ensure_ascii=False))
     return 0 if report.get('game_launched') and not report.get('error') else 1
 

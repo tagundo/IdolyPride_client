@@ -1,8 +1,16 @@
-name: Observe local IPA first boot in PlayCover on qualified Mac
+name: Observe Idoly Pride IPA first boot in PlayCover on qualified Mac
 
 on:
   workflow_dispatch:
     inputs:
+      ipa_variant:
+        description: Pinned unmodified QualiArts IPA or local connection client
+        type: choice
+        required: true
+        default: local
+        options:
+          - local
+          - original
       compare_canonical_launch:
         description: Compare canonical LaunchServices opening after the observed PlayCover UIKit check-in failure
         type: boolean
@@ -26,6 +34,7 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+      IDOLY_IPA_VARIANT: ${{ inputs.ipa_variant || 'local' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,13 +71,14 @@ jobs:
           output.write_text(json.dumps(report, indent=2) + '\n')
           assert report.get('candidate_eligible') is True, 'Ephemeral Mac failed the host capability checks'
           PY
-      - name: Download and verify the exact PlayCover, local IPA and backend
+      - name: Download and verify the exact PlayCover, selected IPA and backend
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import hashlib
           import json
+          import os
           from pathlib import Path
           import subprocess
 
@@ -76,10 +86,13 @@ jobs:
           assets = [
               ('PlayCover/PlayCover', 617729765, 'PlayCover.dmg', 7031217,
                '54e01381205ed7de05f8316ca229eab39ab8f6202b0dda4de07e98396e64d79e'),
-              ('tagundo/IdolyPride_client', 726978003, 'IdolyPride-Local-PlayCover.ipa', 146399786,
-               'f02993302c186ac353d2b96f5aefbe93d3794d5309e142184be08547f9f8cfb3'),
               ('tagundo/IdolyPride_client', 731458081, 'IdolyPride-Server-macOS.app.zip', 94633315,
                'f1cbabf133015587ed2cd72e9f2d80fdf8eded7f92d70a4314d277e72030cb99')]
+          clients = {
+              'local': (726978003, 146399786, 'f02993302c186ac353d2b96f5aefbe93d3794d5309e142184be08547f9f8cfb3'),
+              'original': (725761399, 146438450, '33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848')}
+          identity, size, digest = clients[os.environ['IDOLY_IPA_VARIANT']]
+          assets.append(('tagundo/IdolyPride_client', identity, 'IdolyPride-Under-Test.ipa', size, digest))
           evidence = []
           for repo, identity, name, size, digest in assets:
               destination = folder / name
@@ -94,7 +107,7 @@ jobs:
                                'bytes': size, 'sha256': digest})
           Path('data/playcover-firstboot/inputs.json').write_text(json.dumps(evidence, indent=2) + '\n')
           PY
-      - name: Install through PlayCover and observe one local game launch
+      - name: Install through PlayCover and observe the selected game client
         env:
           IDOLY_COMPARE_CANONICAL_LAUNCH: ${{ inputs.compare_canonical_launch }}
         shell: bash
@@ -106,7 +119,8 @@ jobs:
           fi
           python3 tools/playcover_firstboot/firstboot.py \
             --input data/playcover-firstboot/input --output data/playcover-firstboot/evidence \
-            --ax-driver "$RUNNER_TEMP/playcover-ax-driver" --timeout 480 "$@"
+            --ax-driver "$RUNNER_TEMP/playcover-ax-driver" --timeout 480 \
+            --ipa-variant "$IDOLY_IPA_VARIANT" "$@"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
