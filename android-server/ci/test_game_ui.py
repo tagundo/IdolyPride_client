@@ -9,6 +9,7 @@ from qa_game_ui import choose_button, download_confirmation, mapped_point, title
 
 
 PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
+NORMAL_PACKAGE = "game.qualiarts.idolypride.local"
 XML = ('<hierarchy><node package="' + PACKAGE + '" resource-id="' + PACKAGE
        + ':id/unitySurfaceView" bounds="[0,48][1080,2208]"/></hierarchy>')
 
@@ -28,6 +29,101 @@ def test_selects_actual_custom_button_from_its_descendant_label(snapshot):
     node = choose_button(snapshot, "ライブ")
     assert node["instance_id"] == -50 and node["label"] == "ライブ"
     assert mapped_point(snapshot, node, XML, PACKAGE, [1080, 2280]) == [110, 1928]
+
+
+@pytest.mark.parametrize("package", (PACKAGE, NORMAL_PACKAGE))
+def test_fixed_qa_packages_map_only_their_current_android_surface(snapshot, package):
+    xml = XML.replace(PACKAGE, package)
+    assert mapped_point(snapshot, snapshot["nodes"][0], xml, package, [1080, 2280]) == [110, 1928]
+    for other in (PACKAGE, NORMAL_PACKAGE, "game.qualiarts.idolypride", "unknown.game"):
+        if other != package:
+            with pytest.raises(ValueError, match="unique current Unity"):
+                mapped_point(snapshot, snapshot["nodes"][0], xml.replace(package, other), package, [1080, 2280])
+    foreign = XML.replace(PACKAGE, "game.qualiarts.idolypride").replace("<hierarchy>", "").replace("</hierarchy>", "")
+    with pytest.raises(ValueError, match="unique current Unity"):
+        mapped_point(snapshot, snapshot["nodes"][0], xml.replace("</hierarchy>", foreign + "</hierarchy>"), package, [1080, 2280])
+
+
+@pytest.mark.parametrize("package", ("game.qualiarts.idolypride", "unknown.game", NORMAL_PACKAGE + ".other", None, []))
+def test_original_and_unknown_packages_are_rejected_before_forward_token_or_mapping(snapshot, package):
+    qa = SimpleNamespace(game_package=package, forward=lambda port: pytest.fail("Rejected package must not forward"))
+    with pytest.raises(ValueError, match="fixed emulator QA packages"):
+        ui.UiExplorer(qa)
+    with pytest.raises(ValueError, match="fixed emulator QA packages"):
+        mapped_point(snapshot, snapshot["nodes"][0], XML, package, [1080, 2280])
+
+
+@pytest.mark.parametrize("package", (PACKAGE, NORMAL_PACKAGE))
+def test_snapshot_token_is_read_only_from_selected_private_qa_package(monkeypatch, package):
+    commands, requests = [], []
+    token = "a" * 64
+
+    class Connection:
+        def __init__(self, host, port, timeout):
+            assert host == "127.0.0.1" and port == 12345
+
+        def request(self, method, path, headers):
+            requests.append((method, path))
+            assert headers == {"Authorization": "Bearer " + token}
+
+        def getresponse(self):
+            return SimpleNamespace(status=200, read=lambda maximum: b'{"ok":true,"nodes":[]}')
+
+        def close(self):
+            pass
+
+    def adb(*args, **kwargs):
+        commands.append(args)
+        assert kwargs == {"check": False}
+        return token + "\n"
+
+    monkeypatch.setattr(ui, "HTTPConnection", Connection)
+    qa = SimpleNamespace(game_package=package, forward=lambda port: 12345, adb=adb)
+    explorer = ui.UiExplorer(qa)
+    assert explorer._snapshot()["ok"] is True
+    assert commands == [("exec-out", "run-as", package, "cat", "files/idoly-qa-ui-token")]
+    assert requests == [("GET", "/snapshot")]
+    assert explorer.report()["game_package"] == package
+    assert token not in str(explorer.report())
+
+
+@pytest.mark.parametrize("package", (PACKAGE, NORMAL_PACKAGE))
+@pytest.mark.parametrize("surface", ("matching", "other-qa", "original", "unknown"))
+def test_normal_input_rechecks_selected_package_in_fresh_android_tree(snapshot, tmp_path, monkeypatch, package, surface):
+    snapshot["startup_observation"] = {"content_blocking": False, "input_releasing": False}
+    observed_package = {"matching": package, "other-qa": NORMAL_PACKAGE if package == PACKAGE else PACKAGE,
+                        "original": "game.qualiarts.idolypride", "unknown": "unknown.game"}[surface]
+    commands = []
+
+    def adb(*args, **kwargs):
+        if args == ("exec-out", "screencap", "-p"):
+            return b"\x89PNG\r\n\x1a\n" + bytes(8) + struct.pack(">II", 1080, 2280)
+        if args == ("shell", "wm", "size"):
+            return "Physical size: 1080x2280\n"
+        if args == ("exec-out", "uiautomator", "dump", "/dev/tty"):
+            return XML.replace(PACKAGE, observed_package)
+        commands.append(args)
+        return ""
+
+    qa = SimpleNamespace(game_package=package, artifacts=tmp_path, forward=lambda port: port,
+                         touch_hold_ms=0, adb=adb)
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: snapshot)
+    assert explorer._tap(snapshot, choose_button(snapshot, "ライブ"), "menu_live", 1) is (surface == "matching")
+    assert commands == ([("shell", "input", "tap", "110", "1928")] if surface == "matching" else [])
+    assert explorer.report()["native_click_used"] is False
+
+
+@pytest.mark.parametrize("package", (PACKAGE, NORMAL_PACKAGE))
+def test_restart_uses_same_qa_identity_and_normal_profile_has_no_graphics_override(package):
+    commands = []
+    qa = SimpleNamespace(game_package=package, forward=lambda port: port,
+                         adb=lambda *args: commands.append(args))
+    explorer = ui.UiExplorer(qa)
+    explorer._restart()
+    assert commands[0] == ("shell", "am", "force-stop", package)
+    expected = ("shell", "am", "start", "-W", "-n", package + "/com.google.firebase.MessagingUnityPlayerActivity")
+    assert commands[1] == expected + (("--es", "unity", "-force-gles30") if package == PACKAGE else ())
 
 
 def test_ambiguous_button_text_causes_no_selection(snapshot):

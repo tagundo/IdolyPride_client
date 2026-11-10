@@ -16,7 +16,9 @@ import time
 import xml.etree.ElementTree as ET
 
 
-_PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
+_DIAGNOSTIC_PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
+_NORMAL_PACKAGE = "game.qualiarts.idolypride.local"
+_QA_PACKAGES = frozenset((_DIAGNOSTIC_PACKAGE, _NORMAL_PACKAGE))
 _MAX_BODY = 72 * 1024
 _FORBIDDEN = re.compile(r"購入|課金|ガチャを引|データ削除|アカウント削除|buy|purchase|deleteaccount", re.I)
 _ERROR = re.compile(r"Unimplemented|Unauthenticated|NullReferenceException|サーバーとの通信に失敗", re.I)
@@ -270,7 +272,14 @@ def navigation_block_reason(snapshot):
     return "input_releasing" if startup.get("input_releasing") is True else None
 
 
+def qa_package(package):
+    if not isinstance(package, str) or package not in _QA_PACKAGES:
+        raise ValueError("UI exploration accepts only the two fixed emulator QA packages")
+    return package
+
+
 def mapped_point(snapshot, node, xml, package, image_size):
+    package = qa_package(package)
     screen = snapshot.get("screen", {})
     width, height = screen.get("width"), screen.get("height")
     if (screen.get("origin") != "top-left" or screen.get("units") != "unity-screen-pixels"
@@ -285,7 +294,9 @@ def mapped_point(snapshot, node, xml, package, image_size):
         raise ValueError("Unity button bounds are outside its screen")
     views = []
     for item in ET.fromstring(xml).iter("node"):
-        if item.get("package") == package and item.get("resource-id", "").endswith(":id/unitySurfaceView"):
+        if item.get("resource-id", "").endswith(":id/unitySurfaceView"):
+            if item.get("package") != package:
+                raise ValueError("A unique current Unity accessibility surface is required")
             match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", item.get("bounds", ""))
             if match:
                 views.append(tuple(map(int, match.groups())))
@@ -312,8 +323,7 @@ def mapped_point(snapshot, node, xml, package, image_size):
 
 class UiExplorer:
     def __init__(self, qa):
-        if qa.game_package != _PACKAGE:
-            raise ValueError("UI exploration accepts only the emulator diagnostic package")
+        self.game_package = qa_package(qa.game_package)
         self.qa = qa
         self.port = qa.forward(50052)
         self.actions, self.outcomes = [], []
@@ -345,7 +355,7 @@ class UiExplorer:
         return False
 
     def _snapshot(self):
-        token = self.qa.adb("exec-out", "run-as", _PACKAGE, "cat", "files/idoly-qa-ui-token", check=False).strip()
+        token = self.qa.adb("exec-out", "run-as", self.game_package, "cat", "files/idoly-qa-ui-token", check=False).strip()
         if re.fullmatch(r"[0-9a-f]{64}", token) is None:
             return {"ok": False, "error": "bridge_token_unavailable"}
         connection = HTTPConnection("127.0.0.1", self.port, timeout=14)
@@ -412,7 +422,7 @@ class UiExplorer:
             return self._input_error("android_ui_tree_unavailable")
         xml = xml[begin:end + len("</hierarchy>")]
         try:
-            point = mapped_point(fresh, current, xml, _PACKAGE, size)
+            point = mapped_point(fresh, current, xml, self.game_package, size)
         except ValueError as error:
             return self._input_error(str(error))
         if time.monotonic() - observed_at > 10:
@@ -449,9 +459,13 @@ class UiExplorer:
         if self.goal_index >= len(_GOALS):
             self.stopped, self.stop_reason = True, "all_goal_outcomes_collected"
             return
-        self.qa.adb("shell", "am", "force-stop", _PACKAGE)
-        self.qa.adb("shell", "am", "start", "-W", "-n", _PACKAGE + "/com.google.firebase.MessagingUnityPlayerActivity",
-                    "--es", "unity", "-force-gles30")
+        self.qa.adb("shell", "am", "force-stop", self.game_package)
+        arguments = ["shell", "am", "start", "-W", "-n", self.game_package + "/com.google.firebase.MessagingUnityPlayerActivity"]
+        if self.game_package == _DIAGNOSTIC_PACKAGE:
+            # Retain the legacy diagnostic launch. The normal-local profile
+            # uses the client's default graphics selection without overrides.
+            arguments.extend(("--es", "unity", "-force-gles30"))
+        self.qa.adb(*arguments)
         self.last_action = time.monotonic()
         self.session_titles, self.wait_frames = 0, 0
 
@@ -593,7 +607,7 @@ class UiExplorer:
                 self.navigation_deferrals[key] = self.navigation_deferrals.get(key, 0) + 1
 
     def report(self):
-        return {"qa_only": True, "actions": self.actions, "outcomes": self.outcomes,
+        return {"qa_only": True, "game_package": self.game_package, "actions": self.actions, "outcomes": self.outcomes,
                 "goals": [goal[0] for goal in _GOALS], "native_click_used": False,
                 "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
                 "input_errors": self.input_errors,
