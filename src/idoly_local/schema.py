@@ -23,6 +23,20 @@ class Schema:
         }
         if "/api.System/Check" not in self.methods:
             raise ValueError("Schema does not contain api.System/Check")
+        # upb's native class cache is weak. A GC-cleared dynamic MessageMeta
+        # can remain visible there with a NULL descriptor (observed in 7.36.2
+        # while resolving FromString). Keep every class, including nested and
+        # non-RPC messages, alive for exactly as long as its owning schema.
+        self._message_types = {}
+
+        def retain(descriptor):
+            self._message_types[descriptor.full_name] = message_factory.GetMessageClass(descriptor)
+            for nested in descriptor.nested_types:
+                retain(nested)
+
+        for file in files:
+            for descriptor in file.message_types_by_name.values():
+                retain(descriptor)
 
     def method(self, path: str):
         try:
