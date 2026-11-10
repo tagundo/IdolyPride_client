@@ -157,11 +157,15 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             if not all(engine_report.get(key) is True for key in
                        ("home_positions_distinct", "quest_top_list_main", "quest_catalog_readonly",
                         "quest_contest_area_locked", "quest_tutorial_context", "initial_inventory_master_backed",
-                        "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted")):
+                        "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted",
+                        "quest_list_asset", "quest_list_asset_tutorial_full", "quest_list_asset_tutorial_short",
+                        "quest_list_asset_ordinary_buddy_name", "quest_list_asset_rental_rejected", "quest_list_asset_readonly")):
                 raise ValueError("The bundled engine did not verify the local starter inventory, formation and read-only main-live catalog")
             if tuple(engine_report.get(key) for key in
                      ("initial_card_count", "initial_item_count", "default_unit_slot_count")) != (17, 2, 5):
                 raise ValueError("The bundled engine did not verify the canonical initial inventory and five-slot unit")
+            if engine_report.get("quest_list_asset_count") != 5:
+                raise ValueError("The bundled engine did not verify exactly five ordered live character assets")
             moved = temporary / "이동한 앱" / "IdolyPride Local Server.app"
             moved.parent.mkdir()
             shutil.copytree(output, moved, symlinks=True)
@@ -182,7 +186,7 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="New IdolyPrideLocalServer.app path")
     parser.add_argument("--archive", required=True, type=Path, help="New deliverable .app.zip path")
     parser.add_argument("--evidence", required=True, type=Path)
-    parser.add_argument("--version", default="0.2.9")
+    parser.add_argument("--version", default="0.2.10")
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     args = parser.parse_args(argv)
     try:

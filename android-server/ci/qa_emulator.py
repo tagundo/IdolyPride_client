@@ -339,6 +339,54 @@ def assert_initial_inventory(user, master_dir):
     return {"initial_card_count": len(user.cards), "initial_item_count": len(user.items), "default_unit_slot_count": 5}
 
 
+def assert_live_assets(response, user, master_dir, deck_number=1):
+    """Check the native fixture's explicit owned unit against public references.
+
+    The starter unit stores its live appearance IDs in every slot. Comparing
+    those exact IDs independently also detects missing, reordered or unrelated
+    assets without treating a successful preflight as a completed download.
+    """
+    master = Path(master_dir)
+    tables = {name: json.loads((master / (name + ".json")).read_text())
+              for name in ("Card", "Character", "Costume", "Hair")}
+    cards, costumes, hairs = ({row["id"]: row for row in tables[name]}
+                              for name in ("Card", "Costume", "Hair"))
+    characters = {row["id"] for row in tables["Character"]}
+    positions = sorted((row for row in user.deckPositions if row.number == deck_number),
+                       key=lambda row: row.position)
+    if (len([row for row in user.decks if row.number == deck_number]) != 1
+            or [row.position for row in positions] != [1, 2, 3, 4, 5]):
+        raise RuntimeError("ListAsset QA needs one saved five-slot unit")
+    owned_cards = {row.cardId for row in user.cards}
+    owned_characters = {row.characterId for row in user.characters}
+    owned_costumes = {row.costumeId for row in user.costumes}
+    owned_hairs = {row.hairId for row in user.hairs}
+    expected = []
+    for position in positions:
+        card = cards.get(position.cardId)
+        owner = card.get("characterId") if card else None
+        costume, hair = costumes.get(position.costumeId), hairs.get(position.hairId)
+        allowed = hair.get("wearableCostumeIds", []) if hair else []
+        denied = hair.get("notWearableCostumeIds", []) if hair else []
+        compatible = (not allowed and not denied or position.costumeId in allowed
+                      or bool(denied) and position.costumeId not in denied)
+        if (position.cardId not in owned_cards or owner not in owned_characters or owner not in characters
+                or position.costumeId not in owned_costumes or position.hairId not in owned_hairs
+                or costume is None or hair is None
+                or costume.get("characterId") != owner or hair.get("characterId") != owner
+                or not compatible):
+            raise RuntimeError("ListAsset QA unit has an unowned or incompatible explicit appearance")
+        expected.append((owner, position.costumeId, position.hairId))
+    exact = type(response)()
+    exact.commonResponse.SetInParent()
+    for owner, costume, hair in expected:
+        exact.characterAssets.add(characterId=owner, costumeId=costume, hairId=hair)
+    if (len({row[0] for row in expected}) != 5
+            or response.SerializeToString(deterministic=True) != exact.SerializeToString(deterministic=True)):
+        raise RuntimeError("ListAsset must return exactly five owned slot-ordered appearances without state updates")
+    return len(response.characterAssets)
+
+
 def _without_initial_inventory(user):
     """Remove only independently verified new inventory and default unit rows."""
     projected = type(user)()
@@ -550,6 +598,32 @@ def main():
         if quest_user.SerializeToString(deterministic=True) != user.SerializeToString(deterministic=True):
             raise RuntimeError("Read-only Quest.Top/ListMain mutated the local user snapshot")
         result.update(quest_top_list_main=True, quest_catalog_readonly=True, initial_inventory_readonly=True)
+        deck = next(row for row in user.decks if row.number == 1)
+        if not deck.name:
+            raise RuntimeError("ListAsset QA needs the saved unit's ordinary nonempty name")
+        for quest_id, flag in (("qt-tutorial-full", "quest_list_asset_tutorial_full"),
+                               ("qt-tutorial-short", "quest_list_asset_tutorial_short"),
+                               (result["quest_catalog_first_quest"], "quest_list_asset_ordinary_buddy_name")):
+            request = schema.request_type("/api.Quest/ListAsset")(
+                questId=quest_id, deckNumber=deck.number, buddyDeckName=deck.name)
+            assets = rpc(schema, grpc_port, "/api.Quest/ListAsset", login.gameAuthToken, request)
+            result["quest_list_asset_count"] = assert_live_assets(assets, user, args.master_dir, deck.number)
+            result[flag] = True
+        rental = schema.request_type("/api.Quest/ListAsset")(
+            questId=result["quest_catalog_first_quest"], deckNumber=deck.number, buddyDeckName=deck.name)
+        rental.userBuddyDeckPositions.add(position=1, cardId=user.deckPositions[0].cardId,
+                                         buddyUserId="unsupported-local-rental")
+        try:
+            rpc(schema, grpc_port, "/api.Quest/ListAsset", login.gameAuthToken, rental)
+        except grpc.RpcError as error:
+            if error.code() != grpc.StatusCode.UNIMPLEMENTED:
+                raise RuntimeError("ListAsset rental positions must remain explicitly unsupported") from error
+        else:
+            raise RuntimeError("ListAsset accepted unsupported rental positions")
+        after_assets = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
+        if after_assets.SerializeToString(deterministic=True) != user.SerializeToString(deterministic=True):
+            raise RuntimeError("Read-only Quest.ListAsset changed the whole saved user snapshot")
+        result.update(quest_list_asset=True, quest_list_asset_readonly=True, quest_list_asset_rental_rejected=True)
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
         home_request.settingInfo.soundEffect = 29

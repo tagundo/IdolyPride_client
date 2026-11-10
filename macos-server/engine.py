@@ -112,11 +112,11 @@ class Controller:
         self.stop()
 
 
-def _rpc(address, schema, method, request=None, token=None):
+def _rpc(address, schema, method, request=None, token=None, *, expected_status="0"):
     """Exercise the frozen pure-Python HTTP/2 stack without importing grpcio."""
     from h2.config import H2Configuration
     from h2.connection import H2Connection
-    from h2.events import DataReceived, StreamEnded, TrailersReceived
+    from h2.events import DataReceived, ResponseReceived, StreamEnded, TrailersReceived
     from idoly_local import codec
 
     if request is None:
@@ -142,14 +142,20 @@ def _rpc(address, schema, method, request=None, token=None):
                 if isinstance(event, DataReceived):
                     body.extend(event.data)
                     client.acknowledge_received_data(event.flow_controlled_length, event.stream_id)
-                elif isinstance(event, TrailersReceived):
-                    status = dict(event.headers).get("grpc-status")
+                elif isinstance(event, (ResponseReceived, TrailersReceived)):
+                    status = dict(event.headers).get("grpc-status", status)
                 elif isinstance(event, StreamEnded):
                     ended = True
             pending = client.data_to_send()
             if pending:
                 stream.sendall(pending)
-    if status != "0" or len(body) < 5 or body[0] != 0 or int.from_bytes(body[1:5], "big") != len(body) - 5:
+    if status != expected_status:
+        raise RuntimeError("Local RPC returned an unexpected gRPC status: " + method)
+    if expected_status != "0":
+        if body:
+            raise RuntimeError("Rejected local RPC unexpectedly returned a message: " + method)
+        return None
+    if len(body) < 5 or body[0] != 0 or int.from_bytes(body[1:5], "big") != len(body) - 5:
         raise RuntimeError("Local RPC returned an invalid gRPC response: " + method)
     return schema.response_type(method).FromString(codec.decode(bytes(body[5:])))
 
@@ -295,6 +301,61 @@ def _quest_tutorial_pending(user):
     return not starts or starts[0].step < 150
 
 
+def _quest_list_asset_reference(response, user, data_dir):
+    """Verify the seeded explicit unit against owned state and public tables.
+
+    This smoke fixture has explicit compatible costume/hair IDs in every slot;
+    sparse-deck fallback behavior is tested by the server's own request tests.
+    """
+    def indexed(values, key, description):
+        result = {}
+        for row in values:
+            identity = row.get(key) if isinstance(row, dict) else getattr(row, key)
+            if not isinstance(identity, str) or not identity or identity in result:
+                raise RuntimeError("Live asset check needs unique " + description + " identities")
+            result[identity] = row
+        return result
+
+    master = Path(data_dir) / "master-json"
+    tables = {}
+    for name in ("Card", "Character", "Costume", "Hair"):
+        rows = json.loads((master / (name + ".json")).read_text())
+        if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+            raise RuntimeError("Live asset check needs a public " + name + " table")
+        tables[name] = indexed(rows, "id", "public " + name)
+    owned = {name: indexed(getattr(user, name), key, "owned " + name)
+             for name, key in (("cards", "cardId"), ("characters", "characterId"),
+                               ("costumes", "costumeId"), ("hairs", "hairId"))}
+    decks = [row for row in user.decks if row.number == 1]
+    positions = sorted((row for row in user.deckPositions if row.number == 1), key=lambda row: row.position)
+    if (len(decks) != 1 or len(positions) != 5
+            or [row.position for row in positions] != [1, 2, 3, 4, 5]):
+        raise RuntimeError("Live asset check needs a complete five-slot deck one")
+    expected = type(response)()
+    expected.commonResponse.SetInParent()
+    seen_characters = set()
+    for position in positions:
+        card = tables["Card"].get(position.cardId)
+        character_id = card.get("characterId") if card else None
+        costume = tables["Costume"].get(position.costumeId)
+        hair = tables["Hair"].get(position.hairId)
+        allowed = (hair.get("wearableCostumeIds") or []) if hair else []
+        denied = (hair.get("notWearableCostumeIds") or []) if hair else []
+        wearable = (not allowed and not denied) or position.costumeId in allowed or (
+            bool(denied) and position.costumeId not in denied)
+        if (position.cardId not in owned["cards"] or character_id not in owned["characters"]
+                or character_id not in tables["Character"] or character_id in seen_characters
+                or position.costumeId not in owned["costumes"] or position.hairId not in owned["hairs"]
+                or costume is None or hair is None or costume.get("characterId") != character_id
+                or hair.get("characterId") != character_id or not wearable):
+            raise RuntimeError("Live asset unit has an unowned or incompatible card/character/appearance")
+        seen_characters.add(character_id)
+        expected.characterAssets.add(characterId=character_id, costumeId=position.costumeId, hairId=position.hairId)
+    if response.SerializeToString(deterministic=True) != expected.SerializeToString(deterministic=True):
+        raise RuntimeError("Quest.ListAsset must return exactly five ordered owned appearances and an empty common response")
+    return 5
+
+
 def _quest_catalog_reference(top, main, data_dir, user):
     """Check encrypted responses against the bundled public table references."""
     if ([group.SerializeToString() for group in top.mainAreaGroups]
@@ -394,6 +455,9 @@ def smoke(data_dir, server_data, report_path):
               "starter_roster_complete": False, "home_positions_distinct": False,
               "quest_top_list_main": False, "quest_catalog_readonly": False,
               "quest_contest_area_locked": False, "quest_tutorial_context": False,
+              "quest_list_asset": False, "quest_list_asset_tutorial_full": False,
+              "quest_list_asset_tutorial_short": False, "quest_list_asset_ordinary_buddy_name": False,
+              "quest_list_asset_rental_rejected": False, "quest_list_asset_readonly": False,
               "initial_inventory_master_backed": False, "default_unit_complete": False,
               "initial_inventory_readonly": False, "starter_inventory_persisted": False,
               "settings_persisted": False, "profile_persisted": False,
@@ -462,6 +526,32 @@ def smoke(data_dir, server_data, report_path):
         if not report["quest_catalog_readonly"]:
             raise RuntimeError("Read-only Quest.Top/ListMain changed the local snapshot")
         report["initial_inventory_readonly"] = True
+        saved_before_assets = State(Path(data_dir) / "state.db").snapshot("sandbox")
+        deck = next(row for row in before.decks if row.number == 1)
+        if not deck.name:
+            raise RuntimeError("Live asset smoke needs the saved ordinary nonempty deck name")
+        for quest_id, flag in (("qt-tutorial-full", "quest_list_asset_tutorial_full"),
+                               ("qt-tutorial-short", "quest_list_asset_tutorial_short"),
+                               (report["quest_catalog_first_quest"], "quest_list_asset_ordinary_buddy_name")):
+            request = schema.request_type("/api.Quest/ListAsset")(
+                questId=quest_id, deckNumber=1, buddyDeckName=deck.name)
+            assets = _rpc(address, schema, "/api.Quest/ListAsset", request, token)
+            report["quest_list_asset_count"] = _quest_list_asset_reference(assets, before, data_dir)
+            report[flag] = True
+        rental = schema.request_type("/api.Quest/ListAsset")(
+            questId=report["quest_catalog_first_quest"], deckNumber=1, buddyDeckName=deck.name)
+        position = next(row for row in before.deckPositions if row.number == 1 and row.position == 1)
+        rental.userBuddyDeckPositions.add(position=1, cardId=position.cardId,
+            costumeId=position.costumeId, hairId=position.hairId, buddyUserId="unsupported-local-rental")
+        _rpc(address, schema, "/api.Quest/ListAsset", rental, token, expected_status="12")
+        report["quest_list_asset_rental_rejected"] = True
+        after_assets = _rpc(address, schema, "/api.User/Get", token=token)
+        report["quest_list_asset_readonly"] = (
+            State(Path(data_dir) / "state.db").snapshot("sandbox") == saved_before_assets
+            and after_assets.SerializeToString(deterministic=True) == before.SerializeToString(deterministic=True))
+        if not report["quest_list_asset_readonly"]:
+            raise RuntimeError("Quest.ListAsset success or rejected rental request changed the whole local snapshot")
+        report["quest_list_asset"] = True
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
         home_request.settingInfo.soundEffect = 29
@@ -513,6 +603,8 @@ def smoke(data_dir, server_data, report_path):
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
                 "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "home_positions_distinct",
                 "quest_top_list_main", "quest_catalog_readonly", "quest_contest_area_locked", "quest_tutorial_context",
+                "quest_list_asset", "quest_list_asset_tutorial_full", "quest_list_asset_tutorial_short",
+                "quest_list_asset_ordinary_buddy_name", "quest_list_asset_rental_rejected", "quest_list_asset_readonly",
                 "initial_inventory_master_backed", "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):

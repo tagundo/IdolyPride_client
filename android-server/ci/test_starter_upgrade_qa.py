@@ -216,3 +216,67 @@ def test_quest_qa_requires_contest_and_the_snapshot_tutorial_context(fixture):
         top, main = responses()
         assert qa.assert_quest_catalog(top, main, master, done) == "quest-1"
         assert len(top.mainAreaGroups) == 1 and not qa.tutorial_pending(done)
+
+
+def _live_assets_response(schema, master, user):
+    cards = {row["id"]: row for row in json.loads((master / "Card.json").read_text())}
+    response = schema.response_type("/api.Quest/ListAsset")()
+    response.commonResponse.SetInParent()
+    for position in sorted(user.deckPositions, key=lambda row: row.position):
+        response.characterAssets.add(characterId=cards[position.cardId]["characterId"],
+                                     costumeId=position.costumeId, hairId=position.hairId)
+    return response
+
+
+def test_live_asset_qa_accepts_five_slot_ordered_owned_appearances(fixture):
+    schema, master, _token, _files, user = fixture
+    response = _live_assets_response(schema, master, user)
+    assert qa.assert_live_assets(response, user, master) == 5
+
+
+@pytest.mark.parametrize("compatibility", ({}, {"wearableCostumeIds": [], "notWearableCostumeIds": []},
+                                           {"notWearableCostumeIds": ["unrelated-costume"]}))
+def test_live_asset_qa_accepts_unrestricted_and_nonmatching_blacklist_hair(fixture, compatibility):
+    schema, master, _token, _files, user = fixture
+    response = _live_assets_response(schema, master, user)
+    rows = json.loads((master / "Hair.json").read_text())
+    for row in rows:
+        if row["id"] == response.characterAssets[0].hairId:
+            row.pop("wearableCostumeIds", None)
+            row.update(compatibility)
+    (master / "Hair.json").write_text(json.dumps(rows))
+    assert qa.assert_live_assets(response, user, master) == 5
+
+
+@pytest.mark.parametrize("changed", ("missing", "duplicate", "wrong_owner", "wrong_costume", "wrong_hair",
+                                     "reordered", "state_update", "unowned", "incompatible"))
+def test_live_asset_qa_rejects_incomplete_or_unowned_asset_lists(fixture, changed):
+    schema, master, _token, _files, user = fixture
+    response = _live_assets_response(schema, master, user)
+    if changed == "missing":
+        del response.characterAssets[-1]
+    elif changed == "duplicate":
+        response.characterAssets[-1].CopyFrom(response.characterAssets[0])
+    elif changed == "wrong_owner":
+        response.characterAssets[0].characterId = "unknown-character"
+    elif changed == "wrong_costume":
+        response.characterAssets[0].costumeId = response.characterAssets[1].costumeId
+    elif changed == "wrong_hair":
+        response.characterAssets[0].hairId = response.characterAssets[1].hairId
+    elif changed == "reordered":
+        first = type(response.characterAssets[0])()
+        first.CopyFrom(response.characterAssets[0])
+        response.characterAssets[0].CopyFrom(response.characterAssets[1])
+        response.characterAssets[1].CopyFrom(first)
+    elif changed == "state_update":
+        response.commonResponse.updatedData.user.name = "Unexpected mutation"
+    elif changed == "unowned":
+        del user.costumes[:]
+    elif changed == "incompatible":
+        rows = json.loads((master / "Hair.json").read_text())
+        for row in rows:
+            if row["id"] == response.characterAssets[0].hairId:
+                row["wearableCostumeIds"] = ["unrelated-costume"]
+        (master / "Hair.json").write_text(json.dumps(rows))
+    with pytest.raises(RuntimeError, match="ListAsset"):
+        qa.assert_live_assets(response, user, master)

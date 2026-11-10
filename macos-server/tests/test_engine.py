@@ -162,6 +162,90 @@ def test_initial_inventory_rejects_bad_grants_parameters_or_default_unit(initial
         engine._initial_inventory_reference(user, directory)
 
 
+def _live_asset_response():
+    response = _client_schema().response_type("/api.Quest/ListAsset")()
+    response.commonResponse.SetInParent()
+    for number in range(5):
+        response.characterAssets.add(characterId="char-" + str(number),
+            costumeId="costume-" + str(number), hairId="hair-" + str(number))
+    return response
+
+
+def test_live_assets_require_exact_ordered_owned_appearances_without_mutation(initial_inventory):
+    user, _tables, directory = initial_inventory
+    saved = user.SerializeToString(deterministic=True)
+    response = _live_asset_response()
+    assert engine._quest_list_asset_reference(response, user, directory) == 5
+    assert user.SerializeToString(deterministic=True) == saved
+    # Stored protobuf row order is not slot order; the RPC follows positions 1..5.
+    positions = [type(row).FromString(row.SerializeToString()) for row in user.deckPositions]
+    del user.deckPositions[:]
+    user.deckPositions.extend(reversed(positions))
+    assert engine._quest_list_asset_reference(response, user, directory) == 5
+
+
+@pytest.mark.parametrize("allowed,denied", (([], []), ([], ["costume-other"]),
+                                           (["costume-other"], ["costume-another"])))
+def test_live_assets_accept_native_unrestricted_or_nonmatching_deny_hair(initial_inventory, allowed, denied):
+    user, tables, directory = initial_inventory
+    tables["Hair"][0].update(wearableCostumeIds=allowed, notWearableCostumeIds=denied)
+    (directory / "master-json/Hair.json").write_text(json.dumps(tables["Hair"]))
+    assert engine._quest_list_asset_reference(_live_asset_response(), user, directory) == 5
+
+
+@pytest.mark.parametrize("changed", ("missing", "extra", "order", "character", "costume", "hair",
+                                    "missing-common", "common-mutation", "unknown-field"))
+def test_live_assets_reject_inexact_response_or_mutation_payload(initial_inventory, changed):
+    user, _tables, directory = initial_inventory
+    response = _live_asset_response()
+    if changed == "missing":
+        del response.characterAssets[-1]
+    elif changed == "extra":
+        response.characterAssets.add(characterId="char-5", costumeId="costume-5", hairId="hair-5")
+    elif changed == "order":
+        first = type(response.characterAssets[0]).FromString(response.characterAssets[0].SerializeToString())
+        response.characterAssets[0].CopyFrom(response.characterAssets[1])
+        response.characterAssets[1].CopyFrom(first)
+    elif changed in ("character", "costume", "hair"):
+        setattr(response.characterAssets[0], changed + "Id", changed + "-1")
+    elif changed == "missing-common":
+        response.ClearField("commonResponse")
+    elif changed == "common-mutation":
+        response.commonResponse.updatedData.SetInParent()
+    else:
+        response.MergeFromString(b"\xa0\x06\x01")  # Unexpected field 100 must not pass an exact response check.
+    with pytest.raises(RuntimeError):
+        engine._quest_list_asset_reference(response, user, directory)
+
+
+@pytest.mark.parametrize("changed", ("missing-slot", "duplicate-slot", "unowned-card", "unowned-character",
+                                    "unowned-costume", "unowned-hair", "wrong-costume-owner",
+                                    "wrong-hair-owner", "incompatible-hair", "denied-hair", "empty-costume", "empty-hair"))
+def test_live_asset_reference_rejects_invalid_or_sparse_seeded_unit(initial_inventory, changed):
+    user, tables, directory = initial_inventory
+    if changed == "missing-slot":
+        del user.deckPositions[-1]
+    elif changed == "duplicate-slot":
+        user.deckPositions[-1].position = 4
+    elif changed.startswith("unowned-"):
+        collection = {"card": user.cards, "character": user.characters,
+                      "costume": user.costumes, "hair": user.hairs}[changed.removeprefix("unowned-")]
+        del collection[0]
+    elif changed in ("empty-costume", "empty-hair"):
+        setattr(user.deckPositions[0], changed.removeprefix("empty-") + "Id", "")
+    else:
+        table = "Costume" if changed == "wrong-costume-owner" else "Hair"
+        if changed in ("incompatible-hair", "denied-hair"):
+            tables[table][0]["wearableCostumeIds"] = ["costume-1"]
+            if changed == "denied-hair":
+                tables[table][0]["notWearableCostumeIds"] = ["costume-0"]
+        else:
+            tables[table][0]["characterId"] = "char-1"
+        (directory / ("master-json/" + table + ".json")).write_text(json.dumps(tables[table]))
+    with pytest.raises(RuntimeError):
+        engine._quest_list_asset_reference(_live_asset_response(), user, directory)
+
+
 @pytest.fixture
 def quest_catalog(tmp_path):
     schema = _client_schema()
