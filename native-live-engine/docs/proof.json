@@ -1,0 +1,86 @@
+{
+  "scope": "calculation library proof only; Quest.Start/account settlement/app wiring are absent",
+  "upstream_commit": "9b67c06939403d7035e1795745f791340a775868",
+  "ruleset": "live-v5",
+  "local_rules_only": true,
+  "source_archive_sha256": "24bc1024da38737958b987e91654ce35fa189f0898edec8e4568824b7b41846c",
+  "code_matches_prior_source_archive": true,
+  "linux_execution": {
+    "abi_version": 1,
+    "ruleset": "live-v5",
+    "local_rules_only": true,
+    "official_score_equivalence_tested": false,
+    "schema_sha256": "0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3",
+    "library_sha256": "54bc8376784889d3ff4cafed1c92421b9e277ad8033720f16a45374aa6dd1422",
+    "result_sha256": "a2abaed3db19345f8bdc7653a39f338f9703f138a0b0a2f7f7fbc5d213b6162d",
+    "result_bytes": 34708,
+    "stock_score": 4781,
+    "stock_clear": true,
+    "zero_attribute_score": 0,
+    "zero_attribute_clear": false,
+    "chart_events": 183,
+    "beat_entries": 855,
+    "five_cards_one_user_per_snapshot": true,
+    "same_seed_exact_bytes": true,
+    "parallel_calls_exact_bytes": true,
+    "source_stock_harness_exact_result": true,
+    "input_immutable": true,
+    "malformed_size_and_null_boundary_checks": true,
+    "unsupported_explicit_error": true,
+    "caller_freed_success_and_error_buffers": true,
+    "repeated_success_and_error_calls": 32,
+    "unknown_fields": false,
+    "trace_score_conserved": true,
+    "detail_analysis_disabled": true,
+    "account_settlement_implemented": false,
+    "android_execution_tested": false,
+    "macos_build_tested": false
+  },
+  "linux_original_library_sha256": "54bc8376784889d3ff4cafed1c92421b9e277ad8033720f16a45374aa6dd1422",
+  "android_cross_build": {
+    "go_version": "go version go1.27.3 linux/amd64",
+    "ndk_revision": "26.3.11579264",
+    "android_min_api": 26,
+    "linker_max_page_size": 16384,
+    "library_bytes": 11169664,
+    "library_sha256": "94c469290491bc1cbaac63c280a2637c02fcbf5e49f093d3b3e9b80663c3ccc6",
+    "no_db_or_server_dependencies": true,
+    "device_execution_tested": false
+  },
+  "android_elf": {
+    "machine": "AArch64",
+    "needed": [
+      "liblog.so",
+      "libdl.so",
+      "libc.so"
+    ],
+    "load_segment_alignment": [
+      16384,
+      16384,
+      16384,
+      16384
+    ],
+    "exports": [
+      "IdolyLiveABIVersion",
+      "IdolyLiveSimulate",
+      "IdolyLiveFree"
+    ],
+    "text_relocations": false,
+    "runpath_or_rpath": false,
+    "elf_16k_load_alignment_verified": true
+  },
+  "pure_upstream_tests": {
+    "top_level_passed": 23,
+    "subtests_passed": 90
+  },
+  "macos_build_tested": false,
+  "promotion_checks": {
+    "source_archive_members_byte_identical": 29,
+    "linux_rebuilt_library_byte_identical": true,
+    "android_rebuilt_library_byte_identical": true,
+    "wrong_go_program_rejected": true,
+    "source_and_adapter_manifest_verified": true,
+    "no_binary_sdk_or_archive_files_in_source_folder": true,
+    "production_package_discovery_unchanged": true
+  }
+}

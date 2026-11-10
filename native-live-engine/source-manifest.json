@@ -1,0 +1,139 @@
+{
+  "upstream_repository": "https://github.com/vertesan/solis-server",
+  "upstream_commit": "9b67c06939403d7035e1795745f791340a775868",
+  "ruleset": "live-v5",
+  "copied_files": [
+    {
+      "file": "internal/makino/live/beat_coefficient.go",
+      "bytes": 2116,
+      "sha256": "e8611d817955db9bc6fb8c8fed5a008cb0f23c20c404633d2cba646a64d671b4",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/compile.go",
+      "bytes": 17973,
+      "sha256": "68f8d70d3631b79d6ef9db286249979341f5ee0e12df352d7eee04757aa3129f",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/descriptions.go",
+      "bytes": 3870,
+      "sha256": "9f9ade53123aad87c10f3817d236becfa89d369b03d0de1448589de9a48b9781",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/effects.go",
+      "bytes": 11736,
+      "sha256": "b91a5ffe510fc743700afdbd6215912b8900f9d054524f5556c9955c282b91d8",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/engine.go",
+      "bytes": 17448,
+      "sha256": "b73281d28cf4f4533cabc832aa86535b0d5daa38d8f31a532ef63c63e08ae74c",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/input.go",
+      "bytes": 2500,
+      "sha256": "d6ecb088da2ddd47689922e683a2a668bcbda84bbbc2c569c2d61a124d92100f",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/migration.go",
+      "bytes": 2558,
+      "sha256": "b01320d9551e2dc4a7b08f47e6c89608e474333b90356da221e00194ee945923",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/preparation.go",
+      "bytes": 11387,
+      "sha256": "ede5c2b77077ed3b4917d33cb1a758e34805c2a8e52585138f517f48d16814ea",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/scoring.go",
+      "bytes": 13904,
+      "sha256": "fb5b421f307ee3320d7644f8482239031df4cc027883974c22a8006a1c511cfa",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/selectors.go",
+      "bytes": 11821,
+      "sha256": "ade4dccba9884c6fdfd9bfb1d1c7f15b809334197594f9d6e1c5ae8fec55fc07",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/skills.go",
+      "bytes": 12483,
+      "sha256": "310514d96eec28fb3954979f68bd08eb40740900f0958e47722159f0d95844aa",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/status.go",
+      "bytes": 12432,
+      "sha256": "3f04375da6df3bcef7b524d527cea8eaf5780409d5bc7a2483c49dd35d8ae022",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/scoring.yaml",
+      "bytes": 290,
+      "sha256": "b078eec3e8acfdefe578be04d675c5d274df07dd00164d9ea756db21a147f3fa",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/npc_balance.yaml",
+      "bytes": 338,
+      "sha256": "5a3dc29916b587989d995fc8d30a2cf4285f6c73af7db662f20d42df17d5301b",
+      "verbatim": true
+    },
+    {
+      "file": "internal/makino/live/npc_rosters.yaml",
+      "bytes": 53330,
+      "sha256": "519856c55f5df67215780d78f9c8ff3a8fbdcec7fd99839747812c667771df55",
+      "verbatim": true
+    },
+    {
+      "file": "internal/proto/papi/papi.pb.go",
+      "bytes": 3169808,
+      "sha256": "43a144ecb5cb7805c1140a1e5faa9fc9cb5d9395f9df467b60e1f54b18da3a3c",
+      "verbatim": true
+    },
+    {
+      "file": "internal/proto/penum/penum.pb.go",
+      "bytes": 639299,
+      "sha256": "6004f82ac01817d5604dc18cb82946e90cda32a33adc0e86f560693ee5a96064",
+      "verbatim": true
+    },
+    {
+      "file": "internal/proto/pmaster/pmaster.pb.go",
+      "bytes": 1059903,
+      "sha256": "8a8d47452998b690d036a1b834ca9eee7176e7bfa21b2b4802e04338de14b9d4",
+      "verbatim": true
+    },
+    {
+      "file": "internal/proto/ptransaction/ptransaction.pb.go",
+      "bytes": 192076,
+      "sha256": "fc0203aa01d8f1c7bf290fd6e2b52c82ba62792a0474e09b8870b7ba8a93237c",
+      "verbatim": true
+    },
+    {
+      "file": "LICENSE",
+      "bytes": 34522,
+      "sha256": "20b067f86de375aae6db0f283ab2e65de24d537733b89bd58432c101259d84cf",
+      "verbatim": true
+    }
+  ],
+  "excluded": [
+    "papi_grpc.pb.go",
+    "octo",
+    "DB stores",
+    "server",
+    "HTTP/gRPC adapters"
+  ],
+  "external_modules": {
+    "google.golang.org/protobuf": "v1.36.12",
+    "go.yaml.in/yaml/v3": "v3.0.5"
+  },
+  "adapter_sha256": "e843147ee298565ca0531cfb7d0fc9b02ee91550b987d1c967dee428dcd044bf"
+}

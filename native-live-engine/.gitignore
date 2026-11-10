@@ -1,0 +1,14 @@
+/build/
+/dist/
+/cache/
+__pycache__/
+*.py[cod]
+*.so
+*.dylib
+*.dll
+*.a
+*.o
+*.exe
+*.tar
+*.tar.gz
+*.zip

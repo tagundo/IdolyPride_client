@@ -1,0 +1,5 @@
+Contains AGPL-3.0 upstream live-v5 code and generated protocol definitions.
+https://github.com/vertesan/solis-server commit 9b67c06939403d7035e1795745f791340a775868
+Original files are copied verbatim; LICENSE is preserved.
+C ABI adapter is independently written for this proof, AGPL-3.0-or-later.
+Scores use explicit local rules; official equivalence is not claimed.
