@@ -1,0 +1,89 @@
+name: Observe published local Android client on stock Google Play image
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_level:
+        description: One official image comparison; no client repacking
+        type: choice
+        options: ["35", "36"]
+        default: "35"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stock-local-android-baseline
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RESULTS: data/stock-local-android-baseline
+      BASELINE_API_LEVEL: ${{ inputs.api_level || '35' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools build-tools;35.0.0
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare stock SDK and verify published normal local inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS"
+          df -h . > "$RESULTS/disk-before.txt"
+          sudo rm -rf /usr/share/dotnet /opt/ghc
+          if [[ -c /dev/kvm ]]; then sudo chmod 0666 /dev/kvm; fi
+          { lscpu; free -h; test ! -c /dev/kvm || ls -l /dev/kvm; } > "$RESULTS/host.txt"
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libpulse0
+          sdkmanager 'emulator'
+          "$ANDROID_HOME/emulator/emulator" -version > "$RESULTS/emulator-version.txt" 2>&1
+          "$ANDROID_HOME/emulator/emulator" -accel-check > "$RESULTS/acceleration.txt" 2>&1 || true
+          uv sync --locked
+          gh api repos/tagundo/IdolyPride_client/releases/assets/726978000 \
+            -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/stock-local-client.apk"
+          gh api repos/tagundo/IdolyPride_client/releases/assets/730745727 \
+            -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/stock-local-public-data.zip"
+          uv run --locked python tools/run_stock_local_android.py --prepare \
+            --apk "$RUNNER_TEMP/stock-local-client.apk" \
+            --payload "$RUNNER_TEMP/stock-local-public-data.zip" --output "$RESULTS"
+      - name: Run current host server and observe unchanged published local client
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ inputs.api_level || '35' }}
+          target: google_apis_playstore
+          arch: x86_64
+          profile: pixel_4
+          cores: 2
+          ram-size: 4096M
+          disk-size: 4G
+          disable-linux-hw-accel: auto
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu software
+          script: uv run --locked python tools/run_stock_local_android.py --apk "$RUNNER_TEMP/stock-local-client.apk" --payload "$RUNNER_TEMP/stock-local-public-data.zip" --output "$RESULTS" --api-level "$BASELINE_API_LEVEL" --observe-seconds 180
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stock-local-android-baseline-${{ github.run_id }}
+          path: data/stock-local-android-baseline/
+          if-no-files-found: error
+          retention-days: 14
