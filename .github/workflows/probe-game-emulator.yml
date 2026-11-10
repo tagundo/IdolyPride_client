@@ -46,6 +46,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RESULTS"
+          # Disposable hosted runner only: API35 userdata needs more than its
+          # configured partition size. Retain the SDK/JDK/NDK used by this probe.
+          df -h . | tee "$RESULTS/disk-before.txt"
+          sudo rm -rf /usr/share/dotnet /opt/ghc
+          df -h . | tee "$RESULTS/disk-after.txt"
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
@@ -60,9 +65,10 @@ jobs:
           grep -E 'OpenGL renderer string:.*llvmpipe' "$RESULTS/host-glxinfo.txt"
           vulkaninfo --summary > "$RESULTS/host-vulkan.txt" 2>&1 || true
           sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264' 'emulator'
-          ldd "$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64" \
+          LD_LIBRARY_PATH="$ANDROID_HOME/emulator/lib64:$ANDROID_HOME/emulator/lib64/qt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            ldd "$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64" \
             | tee "$RESULTS/emulator-host-libraries.txt"
-          ! grep -F 'not found' "$RESULTS/emulator-host-libraries.txt"
+          if grep -F 'not found' "$RESULTS/emulator-host-libraries.txt"; then exit 1; fi
           "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee "$RESULTS/emulator-version.txt"
           "$ANDROID_HOME/emulator/emulator" -help-gpu 2>&1 | tee "$RESULTS/emulator-gpu-options.txt"
           if [ '${{ matrix.gpu }}' = lavapipe ]; then
