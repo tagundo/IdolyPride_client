@@ -38,6 +38,7 @@ class Application:
         from .story_reads import StoryReads
         from .appearance import Appearance
         from .profile_names import ProfileNames
+        from .profile_top import ProfileTop
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
@@ -52,6 +53,7 @@ class Application:
             self.main_lives = MainLives(schema, state, profile, master_dir, engine=live_engine, enabled=True)
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture)
+        self.profile_top = ProfileTop(schema, state, profile, self.gameplay.catalog)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
         self.tutorial_replays = TutorialReplays(schema, state, profile, master_dir)
@@ -146,6 +148,8 @@ class Application:
                 response = self.appearance.handle(path, plain)
             if response is None:
                 response = self.profile_names.handle(path, plain)
+            if response is None:
+                response = self.profile_top.handle(path, plain)
             if response is None and self.main_lives is not None:
                 request_ids = [value for key, value in context.invocation_metadata() if key == "x-app-request-id"]
                 if path == "/api.Quest/Start" and len(request_ids) != 1:
