@@ -16,7 +16,7 @@ from idoly_local.schema import Schema
 from idoly_local.catalog import FixtureStore
 
 
-TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill")
+TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill", "Music", "MusicChartPattern", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget", "Stage")
 
 
 def digest(path):
@@ -93,8 +93,16 @@ def build_payload(data_dir: Path, output: Path) -> dict:
         version = catalog / "!version.txt"
         version.write_text(response.masterTag.version, encoding="ascii")
         files.append((version, "data/master-json/!version.txt"))
+        from idoly_local.tutorial_replay import validate_replays
+        replay_root = data_dir / "public-tutorial"
+        replay_report = validate_replays(schema, catalog, replay_root)
+        for name in ("manifest.json", "tutorial-short.pb", "tutorial-full.pb"):
+            source = (replay_root / name).resolve()
+            if not source.is_relative_to(replay_root.resolve()) or not source.is_file():
+                raise ValueError("Required public tutorial replay is missing or outside its directory")
+            files.append((source, "data/public-tutorial/" + name))
         summary = {"schema": 1, "master_version": response.masterTag.version,
-                   "schema_sha256": schema.fingerprint, "tables": counts,
+                   "schema_sha256": schema.fingerprint, "tables": counts, "tutorial_replays": replay_report,
                    "files": [{"path": name, "bytes": path.stat().st_size, "sha256": digest(path)} for path, name in files]}
         payload = stage / "ServerData.zip"
         with ZipFile(payload, "x", compression=ZIP_DEFLATED, compresslevel=6) as zipped:

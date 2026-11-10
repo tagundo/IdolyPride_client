@@ -41,9 +41,10 @@ def _integer(value, description: str, *, maximum: int = (1 << 63) - 1) -> int:
 class Quest:
     """Serve the main-live catalog, progress and ListAsset resource references."""
 
-    def __init__(self, schema, state, profile: str, master_dir: Path | None = None):
+    def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, tutorial_replays=None):
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
+        self.tutorial_replays = tutorial_replays
 
     def _snapshot(self):
         saved = self.state.snapshot(self.profile)
@@ -176,7 +177,10 @@ class Quest:
         snapshot = self._snapshot()
         if path == _LIST_ASSET:
             from .live_assets import project_live_assets
-            return project_live_assets(self.schema, snapshot, request, self.catalog).SerializeToString()
+            result = project_live_assets(self.schema, snapshot, request, self.catalog)
+            if self.tutorial_replays is not None:
+                self.tutorial_replays.append_assets(result, snapshot, request.questId)
+            return result.SerializeToString()
         areas, quests, groups = self._main_catalog(tutorial_pending=self._tutorial_pending(snapshot))
         area_progress = self._progress(snapshot.areas, "areaId", "area progress")
         quest_progress = self._progress(snapshot.quests, "questId", "quest progress")
