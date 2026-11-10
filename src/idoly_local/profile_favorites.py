@@ -1,8 +1,10 @@
 """Persist the ordered profile favorites without changing ownership or missions.
 
 The recovered 6.1.1 caller submits the selected character ID list and consumes
-the common user-data delta. This bounded local policy accepts zero to three
-distinct, owned, master-valid characters; an empty selection clears the list.
+the common user-data delta. This local policy accepts distinct, owned,
+master-valid characters, naturally bounded by the profile's inventory; an empty
+selection clears the list. No unevidenced fixed-count cap is applied: the
+existing local starter already stores five favorites.
 It does not infer official eligibility, moderation or profile mission triggers.
 """
 from __future__ import annotations
@@ -30,9 +32,9 @@ class ProfileFavorites:
         except (DecodeError, UnicodeError):
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Malformed profile favorite request") from None
         selected = tuple(request.favoriteCharacterIds)
-        if len(selected) > 3 or any(not identity for identity in selected) or len(set(selected)) != len(selected):
+        if any(not identity for identity in selected) or len(set(selected)) != len(selected):
             raise RpcFailure(RpcCode.INVALID_ARGUMENT,
-                             "Local profile favorites require zero to three distinct nonempty character IDs")
+                             "Local profile favorites require distinct nonempty character IDs")
         result = self.schema.response_type(path)()
 
         def update(raw):

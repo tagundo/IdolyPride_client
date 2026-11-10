@@ -63,7 +63,7 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 | `Profile.Top` | fixture 우선; 없으면 저장된 계층 포인트와 홈의 마스터 규칙으로 계급 조회, 순위 0·빈 로컬 친구 목록, 상태 변경 없음 |
 | `Profile.UpdateName` | fixture 우선; 없으면 이름만 원자적으로 저장하고 `commonResponse.updatedData.user` 반환; UTF-16 1–10단위·로컬 한 줄 입력 정책, 공식 금칙어·미션 진행 제외 |
 | `Profile.UpdateMessage` | fixture 우선; 없으면 기존 `profile.message`만 원자적으로 저장하고 `commonResponse.updatedData.profile` 반환; UTF-16 1–60단위·공백만인 입력과 탭 거부, 공식 금칙어·미션·보상 제외 |
-| `Profile.UpdateFavoriteCharacters` | fixture 우선; 없으면 기존 프로필의 보유·마스터 유효 캐릭터 0–3명을 순서대로 저장; 빈 선택은 해제, 전체 profile delta 반환; 인원·소유 제한은 로컬 정책, 미션·보상 없음 |
+| `Profile.UpdateFavoriteCharacters` | fixture 우선; 없으면 기존 프로필의 보유·마스터 유효 캐릭터를 순서대로 저장; 빈 선택은 해제, 전체 profile delta 반환; 소유·중복 검증은 로컬 정책, 미션·보상 없음 |
 | `Mission.List` | fixture 우선; 없으면 마스터와 정확한 현재 임계값을 검증한 저장된 카드 레벨 미션 한 행만 읽기 전용 반환; 행·마스터 없으면 `FAILED_PRECONDITION` |
 | `Card.Enhance` | 카드·소비 아이템과 기존 카드 레벨 미션의 최고 도달 레벨을 같은 트랜잭션에 저장; 실제 진행 증가만 mission delta 반환, 수령·보상 없음 |
 | 그 밖의 알려진 RPC | fixture 또는 구현이 없으면 `UNIMPLEMENTED` |
@@ -74,7 +74,7 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 
 fixture 저장은 protobuf 문법 검증을 거치지만 게임 규칙·아이디 참조의 의미적 일관성까지 검증하지 않습니다. 정적 응답 재생은 라이브 점수 계산, 보상 지급, 스토리 진행 같은 상태 변경을 구현하지 않습니다. fixture에는 개인 유저 데이터가 포함될 수 있으며 `Auth.*` fixture는 금지합니다.
 
-`Profile.Top`의 순위 0은 전역 순위를 계산했다는 뜻이 아니며 빈 친구 목록은 현재 로컬 친구 관계의 범위입니다. `Profile.UpdateName`은 비어 있지 않은 이름의 공백·Unicode 정규화를 그대로 보존합니다. 원본 UI가 제출 전에 제거하는 줄바꿈·탭은 서버의 로컬 정책으로 거부하며 공식 서버의 직접 요청 처리 규칙으로 단정하지 않습니다. `Profile.UpdateMessage`도 수락한 공백·Unicode 정규화와 CR/LF를 보존합니다. 원본 소개문 입력 필드의 줄바꿈 모드는 아직 확정하지 않았으며 탭·공백만인 입력 거부는 로컬 정책입니다. `Profile.UpdateFavoriteCharacters`는 6.1.1의 반복 문자열 요청과 기존 profile delta 계약을 사용합니다. 원본 호출부는 선택 목록을 그대로 제출하지만, 0–3명·중복 금지·보유 검증은 명시적인 로컬 정책이며 공식 서버의 전체 자격 규칙을 재현했다고 주장하지 않습니다. 빈 목록은 저장된 선호를 해제하며 소유·마스터 상태를 새로 만들지 않습니다. 네 경로는 원본 응답 소비 코드와 6.1.1 스키마를 대조하고 자동 검증했지만 실제 프로필 UI 검증은 아직 없습니다. `Auth.Create`는 계속 미지원이며 로컬 `Auth.Login`을 원본 신규 계정 생성 구현으로 취급하지 않습니다.
+`Profile.Top`의 순위 0은 전역 순위를 계산했다는 뜻이 아니며 빈 친구 목록은 현재 로컬 친구 관계의 범위입니다. `Profile.UpdateName`은 비어 있지 않은 이름의 공백·Unicode 정규화를 그대로 보존합니다. 원본 UI가 제출 전에 제거하는 줄바꿈·탭은 서버의 로컬 정책으로 거부하며 공식 서버의 직접 요청 처리 규칙으로 단정하지 않습니다. `Profile.UpdateMessage`도 수락한 공백·Unicode 정규화와 CR/LF를 보존합니다. 원본 소개문 입력 필드의 줄바꿈 모드는 아직 확정하지 않았으며 탭·공백만인 입력 거부는 로컬 정책입니다. `Profile.UpdateFavoriteCharacters`는 6.1.1의 반복 문자열 요청과 기존 profile delta 계약을 사용합니다. 원본 호출부는 선택 목록을 그대로 제출하지만, 중복 금지·보유 검증은 명시적인 로컬 정책이며 공식 서버의 전체 자격 규칙을 재현했다고 주장하지 않습니다. 빈 목록은 저장된 선호를 해제하며 소유·마스터 상태를 새로 만들지 않습니다. 네 경로는 원본 응답 소비 코드와 6.1.1 스키마를 대조하고 자동 검증했지만 실제 프로필 UI 검증은 아직 없습니다. `Auth.Create`는 계속 미지원이며 로컬 `Auth.Login`을 원본 신규 계정 생성 구현으로 취급하지 않습니다.
 
 미션의 범위는 `ms-normal-card_level_achievement` 한 행입니다. 공개 원본 응답의 카드 레벨·진행도 `1→2`, `41→42`와 원본 소비 코드를 대조했습니다. 서버는 저장된 최고 도달 기록을 내리지 않고, 실제 강화가 최고 레벨을 높인 경우에만 시각·진행도·delta를 갱신합니다. 현재 임계값과 기존 `Clear/NotReceived/Received` 상태는 보존하며, `Progress(1)→Clear(2)` 경계는 로컬 준비 완료 정책입니다. 공식 경계 동작·전체 활성 목록·일일/주간 초기화·`Mission.Receive`·보상은 지원하지 않습니다. 신규 로컬 starter origin 5와 출처가 확실한 4→5 이행만 행을 초기화합니다. 가져온 계정에서 이미 존재하는 유효 행은 진행시킬 수 있지만 누락 행은 만들지 않습니다. 이전 payload에 `Mission.json`이 없으면 기존 강화·홈을 유지하고, List는 실패 조건을 명시합니다. 세부 상태·스키마 호환 범위는 [게임 상태 문서](gameplay-status.md)를 따릅니다.
 

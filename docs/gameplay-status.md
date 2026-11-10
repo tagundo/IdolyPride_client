@@ -41,7 +41,7 @@ Android 설치 앱과 Mac 묶음 엔진 모두 실제 10초 경과 후 기본 �
 | `Profile.Top` | 홈과 같은 마스터 규칙의 계급 조회; 전역 순위 미계산·빈 로컬 친구 목록 | 없음 |
 | `Profile.UpdateName` | UTF-16 1–10단위 이름 저장; 공식 금칙어·프로필 미션 제외 | `user.name`만 원자적으로 변경·전체 user delta 반환 |
 | `Profile.UpdateMessage` | UTF-16 1–60단위 소개문 저장; 입력·개행은 문서화한 로컬 정책, 공식 금칙어·미션 제외 | `profile.message`만 원자적으로 변경·전체 profile delta 반환 |
-| `Profile.UpdateFavoriteCharacters` | 보유·마스터 유효 캐릭터 0–3명의 순서 있는 선택과 빈 선택 해제; 인원·소유 검증은 로컬 정책, 미션·보상 없음 | `profile.favoriteCharacterIds`만 원자적으로 변경·전체 profile delta 반환 |
+| `Profile.UpdateFavoriteCharacters` | 보유·마스터 유효 캐릭터의 순서 있는 선택과 빈 선택 해제; 소유·중복 검증은 로컬 정책, 미션·보상 없음 | `profile.favoriteCharacterIds`만 원자적으로 변경·전체 profile delta 반환 |
 | `Mission.List` | 마스터·현재 임계값을 검증한 저장된 카드 레벨 도달 미션 한 행만 조회; 행·마스터 없으면 `FAILED_PRECONDITION` | 읽기 전용; 전체 활성 목록·반복 미션·수령·보상 없음 |
 | `Home.SetCharacterPosition` | 소유 캐릭터·배치 유형을 검증하고 갱신 | `homePositions` |
 | `Dokan.List` | 비어 있는 로컬 팝업 목록 | 없음 |
@@ -65,7 +65,7 @@ Android 설치 앱과 Mac 묶음 엔진 모두 실제 10초 경과 후 기본 �
 | `Card.Enhance` | 소유한 초기 형태 카드의 목표 레벨·소비·능력치 계산과 기존 카드 레벨 미션의 최고 도달 레벨 갱신 | 카드·소비 아이템·해당 미션을 원자적으로 저장; 동일 목표 재시도는 추가 소비·미션 시각 변경 없음 |
 | `Message.ListGroup/Timeline/Receive/Save/Finish` | 초기 사쿠라 메시지의 도착·선택·완료 | 로컬 도착 시각·선택지·상태·스케줄; 신뢰도 보상 없음 |
 
-선호 캐릭터 설정은 원본 6.1.1 `ProfileTopScreenPresenter.UpdateFavoriteCharaAsync` 상태 머신의 네트워크 호출(`0x433b1ec`)과 `Profile.UpdateFavoriteCharactersAsync` 요청 생성(`0x474c014`, 반복 ID 복사 `0x474c09c`–`0x474c0bc`)을 대조했습니다. 인원 0–3명·중복 금지·현재 보유 검증은 로컬 정책입니다. 목록 순서는 보존하고 빈 목록은 기존 선택을 해제합니다. 기존 user/profile이 없는 snapshot은 생성하지 않으며, 비어 있지 않은 선택은 `Character` 마스터와 해당 프로필의 보유 목록이 있어야 합니다. 이름·소개문·의상·재화·미션·설정·세션은 바꾸지 않습니다. 정확한 같은 요청의 재시도는 원래 snapshot 바이트를 유지합니다. 자동 검증은 실제 프로필 UI 확인과 구분합니다.
+선호 캐릭터 설정은 원본 6.1.1 `ProfileTopScreenPresenter.UpdateFavoriteCharaAsync` 상태 머신의 네트워크 호출(`0x433b1ec`)과 `Profile.UpdateFavoriteCharactersAsync` 요청 생성(`0x474c014`, 반복 ID 복사 `0x474c09c`–`0x474c0bc`)을 대조했습니다. 중복 금지·현재 보유 검증은 로컬 정책입니다. 근거 없는 고정 인원 제한은 적용하지 않으며 선택은 현재 보유한 마스터 유효 캐릭터 수로 한정됩니다. 기존 로컬 starter가 저장하는 5명도 그대로 저장·재정렬할 수 있습니다. 목록 순서는 보존하고 빈 목록은 기존 선택을 해제합니다. 기존 user/profile이 없는 snapshot은 생성하지 않으며, 비어 있지 않은 선택은 `Character` 마스터와 해당 프로필의 보유 목록이 있어야 합니다. 이름·소개문·의상·재화·미션·설정·세션은 바꾸지 않습니다. 정확한 같은 요청의 재시도는 원래 snapshot 바이트를 유지합니다. 자동 검증은 실제 프로필 UI 확인과 구분합니다.
 
 `Deck.Save`는 배치 1~5와 중복 참조·장비 수량·슬롯·캐릭터 제한을 검증합니다. Android의 새 덱은 번호 0을 보내며, 서버는 `deckSequence`와 기존 번호보다 큰 번호를 트랜잭션 안에서 할당하고 `Setting.deckCountMax`를 지킵니다. 번호 0 재요청에는 멱등 키가 없으므로 별도 덱을 생성합니다. `deckEditType=2`는 클라이언트가 이미 자동 선택한 배치를 저장합니다. 버디 대여·캐릭터 그룹 제한 장비·서버의 자동 편성 계산은 아직 미구현입니다.
 

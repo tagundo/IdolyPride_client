@@ -7,10 +7,12 @@ from google.protobuf import descriptor_pb2
 import pytest
 
 from idoly_local.profile_favorites import ProfileFavorites
+from idoly_local.gameplay import seed_starter_profile
 from idoly_local.rpc import RpcCode, RpcFailure
 from idoly_local.schema import Schema
 from idoly_local.state import State
 from test_profile_names import USER, UNKNOWN, dump, game, protected, small_schema as name_schema
+from test_gameplay import master_dir
 
 
 PATH = "/api.Profile/UpdateFavoriteCharacters"
@@ -51,11 +53,11 @@ def favorites(game, tmp_path):
     master = tmp_path / "master"
     master.mkdir()
     (master / "Character.json").write_text(json.dumps([{"id": key} for key in
-        ("character-a", "character-b", "character-c", "not-owned")]))
+        ("character-a", "character-b", "character-c", "character-d", "character-e", "not-owned")]))
     def prepare(raw):
         value = provider.schema.response_type(USER).FromString(raw)
         value.profile.MergeFromString(UNKNOWN)
-        for key in ("character-a", "character-b", "character-c"):
+        for key in ("character-a", "character-b", "character-c", "character-d", "character-e"):
             value.characters.add(characterId=key).MergeFromString(UNKNOWN)
         value.missions.add(missionId="ms-unrelated", progress=123).MergeFromString(UNKNOWN)
         return value.SerializeToString()
@@ -73,7 +75,9 @@ def call(favorites, ids):
 
 
 @pytest.mark.parametrize("ids", ((), ("character-a",), ("character-c", "character-a"),
-                                ("character-c", "character-b", "character-a")))
+                                ("character-c", "character-b", "character-a"),
+                                ("character-d", "character-b", "character-c", "character-a"),
+                                ("character-e", "character-d", "character-c", "character-b", "character-a")))
 def test_ordered_selection_and_clearing_change_only_profile_favorites(game, favorites, ids):
     state = game[1]
     expected = snapshot(game)
@@ -104,6 +108,26 @@ def test_reordering_is_saved_instead_of_treated_as_a_set(game, favorites):
     assert list(snapshot(game).profile.favoriteCharacterIds) == ["character-b", "character-a"]
 
 
+def test_production_starter_five_favorites_round_trip_reorder_and_clear(schema, tmp_path, master_dir):
+    state = State(tmp_path / "starter.db")
+    original = seed_starter_profile(state, schema, "starter", master_dir)
+    value = schema.response_type(USER).FromString(original)
+    selected = tuple(value.profile.favoriteCharacterIds)
+    assert len(selected) == 5
+    favorites = ProfileFavorites(schema, state, "starter", master_dir)
+    assert tuple(call(favorites, selected).commonResponse.updatedData.profile.favoriteCharacterIds) == selected
+    assert state.snapshot("starter")[0] == original
+    reversed_ids = tuple(reversed(selected))
+    expected = schema.response_type(USER).FromString(original)
+    del expected.profile.favoriteCharacterIds[:]
+    expected.profile.favoriteCharacterIds.extend(reversed_ids)
+    assert tuple(call(favorites, reversed_ids).commonResponse.updatedData.profile.favoriteCharacterIds) == reversed_ids
+    assert state.snapshot("starter")[0] == expected.SerializeToString()
+    assert not call(favorites, []).commonResponse.updatedData.profile.favoriteCharacterIds
+    del expected.profile.favoriteCharacterIds[:]
+    assert state.snapshot("starter")[0] == expected.SerializeToString()
+
+
 def test_identical_retry_preserves_even_noncanonical_original_wire_order(game, favorites):
     call(favorites, ["character-a"])
     state = game[1]
@@ -119,7 +143,6 @@ def test_identical_retry_preserves_even_noncanonical_original_wire_order(game, f
 
 @pytest.mark.parametrize("ids,code", (([""], RpcCode.INVALID_ARGUMENT),
     (["character-a", "character-a"], RpcCode.INVALID_ARGUMENT),
-    (["character-a", "character-b", "character-c", "not-owned"], RpcCode.INVALID_ARGUMENT),
     (["unknown"], RpcCode.INVALID_ARGUMENT), (["not-owned"], RpcCode.PERMISSION_DENIED)))
 def test_invalid_or_unowned_selection_leaves_entire_database_unchanged(game, favorites, ids, code):
     before = dump(game[1])
