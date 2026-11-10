@@ -260,15 +260,17 @@ jobs:
               actual = hashlib.file_digest(stream, 'sha256').hexdigest()
           if actual != expected:
               raise SystemExit('Android QA payload failed its preparation SHA-256 check')
-          tables = ('Character', 'CharacterActivityLevel', 'Costume', 'Hair', 'Card', 'Area', 'AreaGroup',
-                    'Quest', 'Setting', 'Tutorial', 'CardParameter', 'CardRarity', 'Accessory',
-                    'HierarchyDetailGrade', 'HierarchyGrade', 'Reward', 'Item', 'CardLevelRelease', 'Skill',
-                    'Music', 'MusicChartPattern', 'Emblem', 'SkillEfficacy', 'SkillTrigger', 'SkillTarget', 'Stage')
-          required = ('protocol/idolypride-6.1.1.pb', *(f'master-json/{name}.json' for name in tables),
-                      'public-tutorial/manifest.json', 'public-tutorial/tutorial-short.pb', 'public-tutorial/tutorial-full.pb')
           with ZipFile(payload) as archive:
               if archive.testzip() is not None:
                   raise SystemExit('Android QA payload failed ZIP CRC validation')
+              manifest = json.loads(archive.read('data/payload-manifest.json'))
+              tables = manifest.get('tables')
+              if (not isinstance(tables, dict) or not tables
+                      or any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9]*', name) for name in tables)
+                      or not {'CardLevel', 'ManagerLevel', 'Consumption', 'Message', 'MessageGroup'}.issubset(tables)):
+                  raise SystemExit('Android QA payload has no complete progression master catalog')
+              required = ('protocol/idolypride-6.1.1.pb', *(f'master-json/{name}.json' for name in tables),
+                          'public-tutorial/manifest.json', 'public-tutorial/tutorial-short.pb', 'public-tutorial/tutorial-full.pb')
               for relative in required:
                   content = archive.read('data/' + relative)
                   if not content or relative.endswith('.json') and not json.loads(content):
@@ -280,7 +282,7 @@ jobs:
                   destination.write_bytes(content)
           if not all((Path('data') / relative).is_file() for relative in required):
               raise SystemExit('Required Android QA schema or catalog reference is missing')
-          print('Prepared the verified schema, twenty-six canonical tables and three public tutorial replay files')
+          print(f'Prepared the verified schema, {len(tables)} canonical tables and three public tutorial replay files')
           PY
       - name: Install Android SDK and host QA dependencies
         shell: bash
