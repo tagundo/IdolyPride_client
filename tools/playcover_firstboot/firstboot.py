@@ -48,7 +48,7 @@ def main():
         return subprocess.run([str(value) for value in argv], capture_output=True, text=True,
                               timeout=min(timeout, remaining), check=check)
 
-    def observe(stage, bundle=PLAYCOVER, action=None, label=None):
+    def observe(stage, bundle=PLAYCOVER, action=None, label=None, allow_starting=False):
         destination = (args.output / stage).with_suffix('.json')
         argv = [args.ax_driver, '--output', destination]
         if action:
@@ -69,7 +69,8 @@ def main():
         if state.get('visible_dialog_present') is True:
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_dialog_observed')
-        if state.get('frontmost_bundle') not in (None, '', PLAYCOVER, GAME):
+        if (not (allow_starting and state.get('running') is False)
+                and state.get('frontmost_bundle') not in (None, '', PLAYCOVER, GAME)):
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_frontmost_UI_observed')
         return state
@@ -139,11 +140,35 @@ def main():
         command(['/usr/bin/codesign', '--verify', '--deep', '--strict', target])
         report['playcover_installed'] = True
         command(['/usr/bin/hdiutil', 'detach', mounted]); mounted = None
+        # Pinned PlayCover initializes AppsVM.shared from its main library
+        # view. A cold file-open event can reach Installer.wrap before that
+        # initialization has created Applications. Let the official app finish
+        # its normal startup and bundled PlayTools copy before importing.
+        command(['/usr/bin/open', '-a', target])
+        applications = Path.home() / 'Library/Containers/io.playcover.PlayCover/Applications'
+        playtools = Path.home() / 'Library/Frameworks/PlayTools.framework'
+        until = min(deadline, time.monotonic() + 90)
+        initialization = []
+        while time.monotonic() < until:
+            initial = observe('00-PlayCover-initialization-' + str(len(initialization)), allow_starting=True)
+            ready = {'main_window_present': initial.get('running') is True
+                     and any(row.get('role') == 'AXWindow' for row in initial.get('tree', [])),
+                     'applications_directory_present': applications.is_dir(),
+                     'playtools_binary_readable': os.access(playtools / 'PlayTools', os.R_OK),
+                     'playtools_plugin_present': (playtools / 'PlugIns/AKInterface.bundle').is_dir()}
+            initialization.append(ready)
+            if all(ready.values()):
+                break
+            time.sleep(2)
+        report['official_initialization_observations'] = initialization
+        if not initialization or not all(initialization[-1].values()):
+            raise RuntimeError('official_PlayCover_initialization_not_complete')
+        report['official_PlayCover_initialization_ready'] = True
         ipa = args.input / 'IdolyPride-Local-PlayCover.ipa'
         command(['/usr/bin/open', '-a', target, ipa])
         time.sleep(3)
         observe('01-import-requested')
-        installed = Path.home() / 'Library/Containers/io.playcover.PlayCover/Applications' / (GAME + '.app')
+        installed = applications / (GAME + '.app')
         until = min(deadline, time.monotonic() + 150)
         while time.monotonic() < until and not (installed / 'Info.plist').is_file():
             observe('02-import-wait')
