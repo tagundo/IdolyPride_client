@@ -34,6 +34,7 @@ static struct {
     const void *(*assembly_get_image)(const void *);
     const char *(*image_get_name)(const void *);
     Klass *(*class_from_name)(const void *, const char *, const char *);
+    Klass *(*class_get_parent)(Klass *);
     const Method *(*class_get_method_from_name)(Klass *, const char *, int);
     const Method *(*class_get_methods)(Klass *, void **);
     const Field *(*class_get_field_from_name)(Klass *, const char *);
@@ -72,8 +73,12 @@ static struct methods {
 
 static struct {
     Klass *title_presenter, *title_view, *solis_button, *event_system, *input_module;
+    Klass *initializer, *home_top, *home_model, *home_environment;
+    Klass *purchase_parent, *unity_purchase;
     const Field *callback, *title_initialized, *view, *title_button, *interceptor;
     const Field *current_input_module, *is_releasing;
+    const Field *shader_ended, *home_top_model, *home_called_enter, *home_scene_loading;
+    const Field *purchase_instance, *unity_purchase_instance, *purchase_initialized;
     const Method *initialization_succeeded, *content_blocking;
 } observations;
 struct observed_bool { bool available, value; };
@@ -140,6 +145,7 @@ static bool load_api(void) {
 #define LOAD(field) do { void *p = dlsym(handle, "il2cpp_" #field); memcpy(&api.field, &p, sizeof(p)); } while (0)
     LOAD(domain_get); LOAD(domain_get_assemblies); LOAD(assembly_get_image); LOAD(image_get_name);
     LOAD(class_from_name); LOAD(class_get_method_from_name); LOAD(class_get_type); LOAD(type_get_object);
+    LOAD(class_get_parent);
     LOAD(class_get_methods); LOAD(method_get_name); LOAD(method_get_param_count); LOAD(method_get_param); LOAD(type_get_type);
     LOAD(class_get_field_from_name); LOAD(field_get_type); LOAD(field_get_flags); LOAD(field_get_value); LOAD(field_static_get_value);
     LOAD(object_get_class); LOAD(class_is_assignable_from); LOAD(array_new);
@@ -244,6 +250,10 @@ static bool initialize(void) {
     observations.solis_button = klass("solis-submodule.Runtime.dll", "Solis.Common", "SolisButtonBase");
     observations.event_system = klass("UnityEngine.UI.dll", "UnityEngine.EventSystems", "EventSystem");
     observations.input_module = klass("Assembly-CSharp.dll", "Solis.Common", "SolisInputModule");
+    observations.initializer = klass("Assembly-CSharp.dll", "Solis.Common", "SolisInitializer");
+    observations.home_top = klass("Assembly-CSharp.dll", "Solis.OutGame", "HomeTopScreenPresenter");
+    observations.home_model = klass("Assembly-CSharp.dll", "Solis.OutGame", "HomeTopScreenModel");
+    observations.home_environment = klass("Assembly-CSharp.dll", "Solis.OutGame", "HomePlaceEnvironmentPresenterBase");
     observations.callback = api.class_get_field_from_name(methods.qua_button, "onClickedCallback");
     if (observations.title_presenter) {
         observations.title_initialized = api.class_get_field_from_name(observations.title_presenter, "_isInitialized");
@@ -257,7 +267,24 @@ static bool initialize(void) {
         observations.current_input_module = api.class_get_field_from_name(observations.event_system, "m_CurrentInputModule");
     if (observations.input_module)
         observations.is_releasing = api.class_get_field_from_name(observations.input_module, "<IsReleasing>k__BackingField");
-    observations.initialization_succeeded = method(klass("Assembly-CSharp.dll", "Solis.Common", "SolisInitializer"), "get_IsSuccess", 0);
+    if (observations.initializer)
+        observations.shader_ended = api.class_get_field_from_name(observations.initializer, "<IsEndShaderWarmUp>k__BackingField");
+    if (observations.home_top)
+        observations.home_top_model = api.class_get_field_from_name(observations.home_top, "_model");
+    if (observations.home_model)
+        observations.home_called_enter = api.class_get_field_from_name(observations.home_model, "<CalledHomeEnter>k__BackingField");
+    if (observations.home_environment)
+        observations.home_scene_loading = api.class_get_field_from_name(observations.home_environment, "<IsLoadingScene>k__BackingField");
+    Klass *purchase = klass("Assembly-CSharp.dll", "Solis.Common.Purchase", "InAppPurchaseManager");
+    observations.purchase_parent = purchase ? api.class_get_parent(purchase) : NULL;
+    observations.unity_purchase = klass("quaunity-inapp-purchase-manager.dll", "Qua.InAppPurchasing", "UnityPurchaseManager");
+    if (observations.purchase_parent) {
+        observations.purchase_instance = api.class_get_field_from_name(observations.purchase_parent, "_instance");
+        observations.unity_purchase_instance = api.class_get_field_from_name(observations.purchase_parent, "_unityPurchaseManager");
+    }
+    if (observations.unity_purchase)
+        observations.purchase_initialized = api.class_get_field_from_name(observations.unity_purchase, "<IsInitializeSucceeded>k__BackingField");
+    observations.initialization_succeeded = method(observations.initializer, "get_IsSuccess", 0);
     observations.content_blocking = method(klass("Assembly-CSharp.dll", "Solis.Common", "SolisBlockingManager"), "IsActive", 1);
     initialized = true; return true;
 }
@@ -329,6 +356,53 @@ static struct observed_bool field_boolean(Klass *owner, Obj *o, const Field *fie
     if (value > 1) return (struct observed_bool){false, false};
     return (struct observed_bool){true, value != 0};
 }
+static struct observed_bool static_boolean(Klass *owner, const Field *field) {
+    if (!field_valid(owner, NULL, field, true, false)) return (struct observed_bool){false, false};
+    unsigned char value = 0;
+    api.field_static_get_value(field, &value);
+    if (value > 1) return (struct observed_bool){false, false};
+    return (struct observed_bool){true, value != 0};
+}
+static struct observed_bool purchase_initialized(void) {
+    Obj *manager = NULL, *unity = NULL;
+    if (!field_reference(observations.purchase_parent, NULL, observations.purchase_instance, true, &manager)
+            || !manager || !field_reference(observations.purchase_parent, manager,
+                observations.unity_purchase_instance, false, &unity) || !unity)
+        return (struct observed_bool){false, false};
+    /* Read only already existing objects. Neither get_Instance nor the lazy
+     * get_UnityPurchaseManager accessor may be called by this observer. */
+    return field_boolean(observations.unity_purchase, unity, observations.purchase_initialized);
+}
+static struct observed_bool home_boolean(Klass *owner, const Field *field, bool model_field) {
+    struct observed_bool result = {false, false};
+    if (!owner || !field || (model_field && (!observations.home_top_model || !observations.home_model))) return result;
+    bool ok = true;
+    Obj *type = api.type_get_object(api.class_get_type(owner)); void *args[] = {type};
+    Obj *array = invoke(methods.find_all, NULL, args, false, &ok);
+    uint32_t root = array ? api.gchandle_new(array, false) : 0;
+    if (!ok || !root) { if (root) api.gchandle_free(root); return result; }
+    uintptr_t count = api.array_length(array); unsigned active = 0;
+    if (count > 64) { api.gchandle_free(root); return result; }
+    for (uintptr_t ix = 0; ix < count; ++ix) {
+        int32_t index = (int32_t)ix; void *at[] = {&index};
+        Obj *instance = invoke(methods.array_get, array, at, false, &ok);
+        if (!ok) break;
+        if (!usable(instance, &ok)) { if (!ok) break; continue; }
+        if (++active > 1 && model_field) { ok = false; break; }
+        Klass *value_owner = owner;
+        if (model_field) {
+            Obj *model = NULL;
+            if (!field_reference(owner, instance, observations.home_top_model, false, &model) || !model) { ok = false; break; }
+            instance = model; value_owner = observations.home_model;
+        }
+        struct observed_bool value = field_boolean(value_owner, instance, field);
+        if (!value.available) { ok = false; break; }
+        result.available = true; result.value |= value.value;
+    }
+    api.gchandle_free(root);
+    if (!ok || active == 0) result.available = false;
+    return result;
+}
 static struct observed_bool query_boolean(const Method *m, void **args) {
     bool ok = true;
     Obj *value = invoke(m, NULL, args, false, &ok);
@@ -387,6 +461,10 @@ static void startup_json(struct ui_json *out) {
     struct observed_bool releasing = input_releasing();
     int32_t content_order = 155; void *content_args[] = {&content_order};
     struct observed_bool blocking = query_boolean(observations.content_blocking, content_args);
+    struct observed_bool shader = static_boolean(observations.initializer, observations.shader_ended);
+    struct observed_bool scene_loading = home_boolean(observations.home_environment, observations.home_scene_loading, false);
+    struct observed_bool enter_called = home_boolean(observations.home_top, observations.home_called_enter, true);
+    struct observed_bool purchase = purchase_initialized();
     Obj *interceptor = NULL;
     bool interceptor_ok = field_reference(observations.solis_button, NULL, observations.interceptor, true, &interceptor);
     bool titles_ok = observations.title_presenter != NULL, initialized_missing = false, button_missing = false;
@@ -438,6 +516,10 @@ static void startup_json(struct ui_json *out) {
     ui_raw(out, ",\"click_interceptor_present\":"); boolean_json(out, (struct observed_bool){interceptor_ok, interceptor != NULL});
     ui_raw(out, ",\"input_releasing\":"); boolean_json(out, releasing);
     ui_raw(out, ",\"content_blocking\":"); boolean_json(out, blocking);
+    ui_raw(out, ",\"shader_warmup_ended\":"); boolean_json(out, shader);
+    ui_raw(out, ",\"home_scene_loading\":"); boolean_json(out, scene_loading);
+    ui_raw(out, ",\"home_enter_called\":"); boolean_json(out, enter_called);
+    ui_raw(out, ",\"purchase_initialized\":"); boolean_json(out, purchase);
     ui_raw(out, ",\"unavailable\":["); size_t missing = 0;
     unavailable_key(out, "callback_registered", callback_observation_missing, &missing);
     unavailable_key(out, "title_presenters", !titles_ok, &missing);
@@ -447,6 +529,10 @@ static void startup_json(struct ui_json *out) {
     unavailable_key(out, "click_interceptor_present", !interceptor_ok, &missing);
     unavailable_key(out, "input_releasing", !releasing.available, &missing);
     unavailable_key(out, "content_blocking", !blocking.available, &missing);
+    unavailable_key(out, "shader_warmup_ended", !shader.available, &missing);
+    unavailable_key(out, "home_scene_loading", !scene_loading.available, &missing);
+    unavailable_key(out, "home_enter_called", !enter_called.available, &missing);
+    unavailable_key(out, "purchase_initialized", !purchase.available, &missing);
     ui_raw(out, "]}");
 }
 static bool button_bounds(Obj *button, struct bounds *out) {

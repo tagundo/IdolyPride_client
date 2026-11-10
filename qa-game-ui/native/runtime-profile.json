@@ -160,6 +160,11 @@
       "name": "il2cpp_field_static_get_value",
       "rva": "0x419e1a4",
       "expected16": "85f30014b1f30014080440f908214039"
+    },
+    {
+      "name": "il2cpp_class_get_parent",
+      "rva": "0x419daf4",
+      "expected16": "5e88fe174692fe176a87fe175988fe17"
     }
   ],
   "runtime_validation": "ELF build ID + exact export addresses and 16-byte windows; build provenance pins source APK/native separately; no code is modified"

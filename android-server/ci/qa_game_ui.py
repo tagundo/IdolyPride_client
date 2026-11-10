@@ -28,10 +28,33 @@ _GOALS = (
     ("stories", r"ストーリー", r"story.*button|button.*story"),
     ("gifts", r"プレゼント", r"gift|present"),
 )
+_HOME_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot/"
+_HOME_ROLES = {
+    "lesson": ("HomePage/SlideRoot/ActivityLesson/ActivityLessonButton", "ActivityLessonButton"),
+    "live": ("HomePage/SlideRoot/Live", "Live"),
+    "idols": ("ScreenPager/HomeFooter/FooterRoot/HomeGlobalMenu/Character", "Character"),
+    "work": ("ScreenPager/HomeFooter/FooterRoot/HomeGlobalMenu/Activity", "Activity"),
+    "stories": ("CharacterPage/SlideRoot/Character/HomeRenewalRoot/RenewalStory", "RenewalStory"),
+    "gifts": ("HomePage/SlideRoot/DelayMove3/Container/GiftRoot/Gift", "Gift"),
+    "home": ("ScreenPager/HomeFooter/FooterRoot/HomeGlobalMenu/Home", "Home"),
+}
 
 
 def text(value):
     return " ".join(re.sub(r"<[^>]*>", "", str(value)).split())
+
+
+def usable_bounds(snapshot, node):
+    screen = snapshot.get("screen", {})
+    width, height = screen.get("width"), screen.get("height")
+    bounds = node.get("bounds")
+    if (screen.get("origin") != "top-left" or screen.get("units") != "unity-screen-pixels"
+            or type(width) is not int or type(height) is not int or not 64 <= width <= 8192 or not 64 <= height <= 8192
+            or not isinstance(bounds, list) or len(bounds) != 4
+            or any(type(value) not in (int, float) or not math.isfinite(value) for value in bounds)):
+        return False
+    left, top, right, bottom = bounds
+    return 0 <= left < right <= width and 0 <= top < bottom <= height
 
 
 def buttons(snapshot):
@@ -42,13 +65,21 @@ def buttons(snapshot):
     labels = [node for node in nodes if isinstance(node, dict) and node.get("kind") in ("text", "tmp_text") and node.get("active") is True]
     for node in nodes:
         if (not isinstance(node, dict) or node.get("kind") != "button"
-                or node.get("active") is not True or node.get("interactable") is not True):
+                or node.get("active") is not True or node.get("interactable") is not True
+                or not usable_bounds(snapshot, node)):
             continue
         path = node.get("path", "")
         if not isinstance(path, str) or not path:
             continue
-        label = text(" ".join([str(node.get("text", "")), *(str(row.get("text", "")) for row in labels
-                            if row.get("path") == path or str(row.get("path", "")).startswith(path + "/"))]))
+        parts, seen = [], set()
+        for row in [node, *labels]:
+            row_path, label_text = str(row.get("path", "")), text(row.get("text", ""))
+            if (row_path == path or row_path.startswith(path + "/")) and label_text:
+                identity = (row_path, label_text)
+                if identity not in seen:
+                    seen.add(identity)
+                    parts.append(label_text)
+        label = " ".join(parts)
         if _FORBIDDEN.search(label + " " + str(node.get("name", ""))):
             continue
         result.append(dict(node, label=label))
@@ -69,6 +100,31 @@ def choose_button(snapshot, label_pattern, name_pattern=None):
         named = [node for node in candidates if re.search(name_pattern, str(node.get("name", "")), re.I)]
         if len(named) == 1:
             return named[0]
+    return None
+
+
+def _home_role(snapshot, role):
+    if role not in _HOME_ROLES:
+        return None
+    suffix, name = _HOME_ROLES[role]
+    matches = [node for node in buttons(snapshot)
+               if node.get("path") == _HOME_ROOT + suffix and node.get("name") == name]
+    return matches[0] if len(matches) == 1 else None
+
+
+def goal_button(snapshot, goal):
+    """Select only a bounded role observed in the actual Home hierarchy."""
+    return _home_role(snapshot, goal) if goal in {row[0] for row in _GOALS} else None
+
+
+def route_button(snapshot, goal):
+    """Expose a hidden page first; an existing unbounded leaf is not absent."""
+    if goal_button(snapshot, goal) is not None:
+        return None
+    if goal == "stories":
+        return _home_role(snapshot, "idols")
+    if goal in ("lesson", "live", "gifts"):
+        return _home_role(snapshot, "home")
     return None
 
 
@@ -109,6 +165,15 @@ def download_confirmation(snapshot):
 def visible_action_sheet(snapshot):
     return any(row.get("active") is True and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))
                for row in snapshot.get("nodes", []))
+
+
+def navigation_block_reason(snapshot):
+    startup = snapshot.get("startup_observation")
+    if not isinstance(startup, dict) or type(startup.get("content_blocking")) is not bool:
+        return "content_blocking_state_unavailable"
+    if startup["content_blocking"]:
+        return "content_blocking"
+    return "input_releasing" if startup.get("input_releasing") is True else None
 
 
 def mapped_point(snapshot, node, xml, package, image_size):
@@ -166,6 +231,10 @@ class UiExplorer:
         self.title_deferrals = {}
         self.title_instance = None
         self.stop_reason = None
+        self.navigation_deferrals = {}
+        self.route_pending = None
+        self.pending_dialog_frame = None
+        self.restart_pending = False
 
     def _input_error(self, code):
         self.input_errors[code] = self.input_errors.get(code, 0) + 1
@@ -213,6 +282,8 @@ class UiExplorer:
             if (confirmation is None or confirmation.get("instance_id") != current.get("instance_id")
                     or confirmation.get("path") != current.get("path")):
                 return self._input_error("download_confirmation_changed")
+        if reason.startswith(("menu_", "route_")) and (blocked := navigation_block_reason(fresh)):
+            return self._input_error(blocked)
         raw = self.qa.adb("exec-out", "screencap", "-p", binary=True)
         if raw[:8] != b"\x89PNG\r\n\x1a\n":
             return self._input_error("display_capture_unavailable")
@@ -258,6 +329,8 @@ class UiExplorer:
         return True
 
     def _restart(self):
+        self.route_pending = None
+        self.pending_dialog_frame = None
         if self.goal_index >= len(_GOALS):
             self.stopped, self.stop_reason = True, "all_goal_outcomes_collected"
             return
@@ -269,7 +342,12 @@ class UiExplorer:
 
     @staticmethod
     def _signature(snapshot):
-        nodes = [(n.get("kind"), n.get("path"), n.get("instance_id")) for n in snapshot.get("nodes", []) if isinstance(n, dict)]
+        # All pager pages exist while offscreen. Button geometry distinguishes
+        # a page becoming actionable without treating timer text as navigation.
+        nodes = [(n.get("kind"), n.get("path"), n.get("instance_id"),
+                  n.get("bounds") if n.get("kind") == "button" and usable_bounds(snapshot, n) else None)
+                 for n in snapshot.get("nodes", []) if isinstance(n, dict)]
+        nodes.sort(key=lambda row: tuple(str(value) for value in row[:3]))
         return hashlib.sha256(json.dumps(nodes, sort_keys=True).encode()).hexdigest()
 
     def step(self, frame):
@@ -285,21 +363,30 @@ class UiExplorer:
         if self.stopped or snapshot.get("ok") is not True or time.monotonic() - self.last_action < 12:
             return
         visible = " ".join(text(row.get("text", "")) for row in snapshot.get("nodes", []) if isinstance(row, dict))
-        if _ERROR.search(visible):
+        if _ERROR.search(visible) and not self.restart_pending:
             self.outcomes.append({"goal": self.pending[0] if self.pending else "startup", "status": "game_error_observed", "frame": frame})
             if self.pending is None:
                 self.stopped, self.stop_reason = True, "observed_startup_error"
                 return
             self.goal_index += 1
             self.pending = None
-            self._restart()
+            self.route_pending = None
+            self.pending_dialog_frame = None
+            self.restart_pending = True
+            if navigation_block_reason(snapshot) is None:
+                self.restart_pending = False
+                self._restart()
             return
         download = download_confirmation(snapshot)
         if download is not None:
+            if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
+                self.pending_dialog_frame = frame
             self._tap(snapshot, download, "observed_resource_download_confirmation", frame)
             return
         close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
         if close is not None and re.search(r"dialog|modal|popup|sheet", str(close.get("path", "")), re.I):
+            if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
+                self.pending_dialog_frame = frame
             self._tap(snapshot, close, "observed_dialog", frame)
             return
         if visible_action_sheet(snapshot):
@@ -320,30 +407,44 @@ class UiExplorer:
             if self.session_titles < self.qa.max_title_taps and self._tap(snapshot, title, "observed_title", frame):
                 self.session_titles += 1
             return
+        blocked = navigation_block_reason(snapshot)
+        if blocked:
+            self.navigation_deferrals[blocked] = self.navigation_deferrals.get(blocked, 0) + 1
+            return
+        if self.restart_pending:
+            self.restart_pending = False
+            self._restart()
+            return
         if self.pending:
             goal, started, previous = self.pending
             if frame - started >= 2:
                 self.outcomes.append({"goal": goal, "status": ("different_ui_tree_observed" if self._signature(snapshot) != previous
+                                                               or self.pending_dialog_frame is not None
                                                                else "no_ui_change_observed"), "frame": frame,
-                                      "note": "View and RPC evidence require separate review"})
+                                      "transient_dialog_frame": self.pending_dialog_frame,
+                                      "note": "View and RPC evidence require separate review; this is not menu success"})
                 self.goal_index += 1
                 self.pending = None
+                self.pending_dialog_frame = None
                 self._restart()
             return
         if self.goal_index < len(_GOALS):
-            goal, label, name = _GOALS[self.goal_index]
-            target = choose_button(snapshot, label, name)
+            goal = _GOALS[self.goal_index][0]
+            target = goal_button(snapshot, goal)
             if target is not None and self._tap(snapshot, target, "menu_" + goal, frame):
                 self.pending = (goal, frame, self._signature(snapshot))
+                self.pending_dialog_frame = None
+                self.route_pending = None
                 self.wait_frames = 0
-            elif any(choose_button(snapshot, other[1], other[2]) is not None for other in _GOALS[1:]):
-                self.wait_frames += 1
-                if self.wait_frames >= 2:
-                    self.outcomes.append({"goal": goal, "status": "target_not_present_in_observed_tree", "frame": frame})
-                    self.goal_index += 1
+            elif target is None:
+                route = route_button(snapshot, goal) if self.route_pending is None else None
+                if route is not None and self._tap(snapshot, route, "route_" + goal, frame):
+                    self.route_pending = {"goal": goal, "frame": frame, "path": route["path"]}
                     self.wait_frames = 0
-                    if self.goal_index >= len(_GOALS):
-                        self.stopped, self.stop_reason = True, "all_goal_outcomes_collected"
+                    return
+                self.wait_frames += 1
+                key = "route_destination_not_ready" if self.route_pending else "goal_target_not_actionable"
+                self.navigation_deferrals[key] = self.navigation_deferrals.get(key, 0) + 1
 
     def report(self):
         return {"qa_only": True, "actions": self.actions, "outcomes": self.outcomes,
@@ -352,4 +453,6 @@ class UiExplorer:
                 "input_errors": self.input_errors,
                 "title_deferrals": self.title_deferrals,
                 "stop_reason": self.stop_reason,
+                "navigation_deferrals": self.navigation_deferrals,
+                "pending_route": self.route_pending,
                 "gameplay_rpc_injected_during_exploration": False, "menu_success_requires_evidence_review": True}

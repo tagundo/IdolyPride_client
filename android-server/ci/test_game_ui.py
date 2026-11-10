@@ -218,6 +218,7 @@ def test_download_modal_context_is_rechecked_after_refresh_before_input(download
 @pytest.mark.parametrize("collection_seconds,allowed", ((0.5, True), (10.01, False)))
 def test_slow_unity_query_does_not_age_the_response_but_late_android_collection_does(
         snapshot, tmp_path, monkeypatch, collection_seconds, allowed):
+    snapshot["startup_observation"] = {"content_blocking": False, "input_releasing": False}
     clock = [0.0]
     monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: clock[0]))
 
@@ -270,3 +271,283 @@ def test_slow_unity_query_does_not_age_the_response_but_late_android_collection_
         assert qa.inputs == [] and explorer.actions == []
         assert explorer.input_errors == {"ui_observation_became_stale": 1}
         assert not list(tmp_path.glob("ui-action-*"))
+
+
+HOME_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot/"
+HOME_FOOTER = HOME_ROOT + "ScreenPager/HomeFooter/FooterRoot/HomeGlobalMenu/"
+STORY_PATH = HOME_ROOT + "CharacterPage/SlideRoot/Character/HomeRenewalRoot/RenewalStory"
+
+
+@pytest.fixture
+def home_snapshot():
+    # Minimal public hierarchy observed in run42764587884 frames43/53. Active
+    # page objects can have null bounds while their pages are offscreen.
+    nodes = []
+
+    def add_button(identity, path, name, bounds, *labels):
+        nodes.append({"kind": "button", "active": True, "interactable": True,
+                      "callback_registered": True, "instance_id": identity,
+                      "path": path, "name": name, "text": "", "bounds": bounds})
+        for label in labels:
+            nodes.append({"kind": "tmp_text", "active": True,
+                          "path": path + "/Label", "text": label})
+
+    add_button(-3146, HOME_FOOTER + "Character", "Character", [6.0, 1193.4, 133.2, 1307.4], "アイドル", "アイドル")
+    add_button(-3210, HOME_FOOTER + "Home", "Home", [260.4, 1193.4, 387.6, 1307.4], "ホーム", "ホーム")
+    add_button(-3242, HOME_FOOTER + "Activity", "Activity", [387.6, 1193.4, 514.8, 1307.4], "お仕事", "お仕事")
+    add_button(-5710, HOME_ROOT + "HomePage/SlideRoot/Live", "Live", [379.8, 948.6, 607.8, 1176.6])
+    add_button(-5934, HOME_ROOT + "HomePage/SlideRoot/ActivityLesson/ActivityLessonButton",
+               "ActivityLessonButton", [249.6, 982.8, 350.4, 1069.2], "TAP", "自主トレ")
+    add_button(-6108, HOME_ROOT + "HomePage/SlideRoot/DelayMove3/Container/GiftRoot/Gift",
+               "Gift", [567.63, 696.0, 639.63, 768.0])
+    add_button(-4526, STORY_PATH, "RenewalStory", None, "ストーリー")
+    add_button(-4972, HOME_ROOT + "CardPage/SlideRoot/Card/Enhance", "Enhance", None, "アイドル強化")
+    add_button(858280, "WindowSystem/WindowRoot/FooterCanvas/ContentArea/FooterContent/Background/Frame/ButtonGroups/HomeButton",
+               "HomeButton", None, "ホーム")
+    return {"ok": True, "generation": 47,
+            "screen": {"width": 648, "height": 1368, "origin": "top-left", "units": "unity-screen-pixels"},
+            "startup_observation": {"content_blocking": False, "input_releasing": False}, "nodes": nodes}
+
+
+@pytest.mark.parametrize("bounds", [None, [], [0, 0, 0, 1], [0, 0, 1, 1081], [0, 0, 541, 1],
+                                    [float("nan"), 0, 1, 1], [0, float("inf"), 1, 1],
+                                    [-1, 0, 1, 1], [True, 0, 1, 1], "[0,0,1,1]"])
+def test_button_candidates_exclude_null_invalid_and_outside_geometry(snapshot, bounds):
+    snapshot["nodes"][0]["bounds"] = bounds
+    assert ui.buttons(snapshot) == []
+    assert choose_button(snapshot, "ライブ") is None
+
+
+def test_duplicate_same_path_labels_describe_one_footer_button_once(home_snapshot):
+    target = choose_button(home_snapshot, r"^アイドル$")
+    assert target["instance_id"] == -3146
+    assert target["label"] == "アイドル"
+
+
+def test_label_dedup_preserves_different_text_or_different_descendant_path(home_snapshot):
+    path = HOME_FOOTER + "Character"
+    home_snapshot["nodes"].extend([
+        {"kind": "tmp_text", "active": True, "path": path + "/Label", "text": "NEW"},
+        {"kind": "tmp_text", "active": True, "path": path + "/Badge", "text": "アイドル"}])
+    target = next(node for node in ui.buttons(home_snapshot) if node["instance_id"] == -3146)
+    assert target["label"] == "アイドル NEW アイドル"
+
+
+@pytest.mark.parametrize("goal,identity", [("lesson", -5934), ("live", -5710), ("idols", -3146),
+                                          ("work", -3242), ("gifts", -6108)])
+def test_home_goals_select_the_observed_role_even_when_labels_are_empty_or_different(home_snapshot, goal, identity):
+    target = ui.goal_button(home_snapshot, goal)
+    assert target["instance_id"] == identity
+    assert ui.route_button(home_snapshot, goal) is None
+
+
+def test_home_role_selection_ignores_matching_labels_and_names_outside_home_root(home_snapshot):
+    live = next(node for node in home_snapshot["nodes"] if node.get("instance_id") == -5710)
+    live["bounds"] = None
+    impostor = deepcopy(live)
+    impostor.update(instance_id=123, path="OtherWindow/HomePage/SlideRoot/Live", bounds=[0, 0, 100, 100], text="ライブ")
+    home_snapshot["nodes"].append(impostor)
+    assert ui.goal_button(home_snapshot, "live") is None
+    assert ui.route_button(home_snapshot, "live")["instance_id"] == -3210
+
+
+def test_stories_route_through_character_then_require_fresh_bounded_story(home_snapshot):
+    assert ui.goal_button(home_snapshot, "stories") is None
+    assert ui.route_button(home_snapshot, "stories")["instance_id"] == -3146
+    fresh = deepcopy(home_snapshot)
+    fresh["generation"] += 1
+    story = next(node for node in fresh["nodes"] if node.get("path") == STORY_PATH and node.get("kind") == "button")
+    story["bounds"] = [100, 500, 300, 650]
+    assert ui.goal_button(fresh, "stories")["instance_id"] == -4526
+    assert ui.route_button(fresh, "stories") is None
+
+
+@pytest.mark.parametrize("goal,identity", [("lesson", -5934), ("live", -5710), ("gifts", -6108)])
+def test_offscreen_home_leaf_routes_only_through_actual_home_footer(home_snapshot, goal, identity):
+    next(node for node in home_snapshot["nodes"] if node.get("instance_id") == identity)["bounds"] = None
+    assert ui.goal_button(home_snapshot, goal) is None
+    assert ui.route_button(home_snapshot, goal)["instance_id"] == -3210
+
+
+@pytest.mark.parametrize("goal,identity", [("idols", -3146), ("work", -3242), ("unknown", None)])
+def test_absent_other_goals_have_no_fallback_route(home_snapshot, goal, identity):
+    if identity is not None:
+        next(node for node in home_snapshot["nodes"] if node.get("instance_id") == identity)["bounds"] = None
+    assert ui.goal_button(home_snapshot, goal) is None
+    assert ui.route_button(home_snapshot, goal) is None
+
+
+@pytest.mark.parametrize("startup", [None, {}, {"input_releasing": False},
+                                     {"content_blocking": None, "input_releasing": False},
+                                     {"content_blocking": 0, "input_releasing": False},
+                                     {"content_blocking": True, "input_releasing": False},
+                                     {"content_blocking": False, "input_releasing": True}])
+def test_navigation_requires_known_clear_content_and_rejects_observed_input_blocking(home_snapshot, startup):
+    home_snapshot["startup_observation"] = startup
+    assert ui.navigation_block_reason(home_snapshot) is not None
+
+
+@pytest.mark.parametrize("startup", [{"content_blocking": False},
+                                     {"content_blocking": False, "input_releasing": False},
+                                     {"content_blocking": False, "input_releasing": None},
+                                     {"content_blocking": False, "input_releasing": 0}])
+def test_navigation_accepts_known_clear_content_without_claiming_unknown_input_is_blocking(home_snapshot, startup):
+    home_snapshot["startup_observation"] = startup
+    assert ui.navigation_block_reason(home_snapshot) is None
+
+
+@pytest.mark.parametrize("reason,goal", [("menu_live", "live"), ("route_stories", "stories")])
+@pytest.mark.parametrize("field,value", [("content_blocking", True), ("input_releasing", True),
+                                        ("content_blocking", None)])
+def test_navigation_refresh_rechecks_blockers_for_leaf_and_route_inputs(
+        home_snapshot, tmp_path, monkeypatch, reason, goal, field, value):
+    selected = ui.goal_button(home_snapshot, goal) if reason.startswith("menu_") else ui.route_button(home_snapshot, goal)
+    fresh = deepcopy(home_snapshot)
+    fresh["generation"] += 1
+    fresh["startup_observation"][field] = value
+
+    def unexpected_adb(*args, **kwargs):
+        raise AssertionError("Blocked navigation must not collect or inject Android input")
+
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: 12345,
+                         adb=unexpected_adb)
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: fresh)
+    assert explorer._tap(home_snapshot, selected, reason, 43) is False
+    assert explorer.actions == [] and len(explorer.input_errors) == 1
+    assert not list(tmp_path.glob("ui-action-*"))
+
+
+def test_ui_change_signature_tracks_bounds_but_ignores_timer_text_and_snapshot_generation(home_snapshot):
+    home_snapshot["nodes"].append({"kind": "tmp_text", "active": True, "instance_id": 22,
+                                    "path": HOME_ROOT + "Timer", "text": "00:10", "bounds": [0, 0, 20, 20]})
+    initial = ui.UiExplorer._signature(home_snapshot)
+    fresh = deepcopy(home_snapshot)
+    fresh["generation"] += 1
+    fresh["nodes"][-1]["text"] = "00:09"
+    assert ui.UiExplorer._signature(fresh) == initial
+    next(node for node in fresh["nodes"] if node.get("instance_id") == -5710)["bounds"] = [100, 200, 300, 400]
+    assert ui.UiExplorer._signature(fresh) != initial
+
+
+def test_pending_goal_under_loading_has_no_outcome_or_restart(home_snapshot, tmp_path, monkeypatch):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: 12345)
+    explorer = ui.UiExplorer(qa)
+    explorer.goal_index = next(i for i, goal in enumerate(ui._GOALS) if goal[0] == "live")
+    explorer.pending = ("live", 1, explorer._signature(home_snapshot))
+    pending = explorer.pending
+    blocked = deepcopy(home_snapshot)
+    blocked["startup_observation"]["content_blocking"] = True
+    next(node for node in blocked["nodes"] if node.get("instance_id") == -5710)["bounds"] = None
+    restarts, taps = [], []
+    monkeypatch.setattr(explorer, "_snapshot", lambda: blocked)
+    monkeypatch.setattr(explorer, "_restart", lambda: restarts.append(True))
+    monkeypatch.setattr(explorer, "_tap", lambda *args: taps.append(args))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for frame in (43, 53, 70):
+        explorer.step(frame)
+    assert explorer.pending == pending
+    assert explorer.goal_index == 1 and explorer.outcomes == []
+    assert restarts == [] and taps == []
+
+
+def test_absent_goal_is_not_completed_merely_because_other_home_buttons_exist(home_snapshot, tmp_path, monkeypatch):
+    for node in home_snapshot["nodes"]:
+        if node.get("instance_id") in (-5934, -3210):
+            node["bounds"] = None
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: 12345)
+    explorer = ui.UiExplorer(qa)
+    restarts, taps = [], []
+    monkeypatch.setattr(explorer, "_snapshot", lambda: home_snapshot)
+    monkeypatch.setattr(explorer, "_restart", lambda: restarts.append(True))
+    monkeypatch.setattr(explorer, "_tap", lambda *args: taps.append(args))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for frame in (43, 53, 70):
+        explorer.step(frame)
+    assert explorer.goal_index == 0 and explorer.pending is None
+    assert explorer.outcomes == [] and restarts == [] and taps == []
+
+
+def test_story_page_route_waits_without_repeating_then_uses_fresh_bounded_destination(home_snapshot, tmp_path, monkeypatch):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: 12345)
+    explorer = ui.UiExplorer(qa)
+    goal_index = next(i for i, goal in enumerate(ui._GOALS) if goal[0] == "stories")
+    explorer.goal_index = goal_index
+    current = [home_snapshot]
+    taps = []
+
+    def tap(snapshot, node, reason, frame):
+        taps.append((reason, node["instance_id"], snapshot["generation"]))
+        return True
+
+    monkeypatch.setattr(explorer, "_snapshot", lambda: current[0])
+    monkeypatch.setattr(explorer, "_tap", tap)
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for frame in (43, 44, 53):
+        explorer.step(frame)
+    assert taps == [("route_stories", -3146, 47)]
+    assert explorer.pending is None and explorer.goal_index == goal_index
+    assert explorer.route_pending == {"goal": "stories", "frame": 43, "path": HOME_FOOTER + "Character"}
+    assert explorer.outcomes == []
+
+    fresh = deepcopy(home_snapshot)
+    fresh["generation"] += 1
+    next(node for node in fresh["nodes"] if node.get("instance_id") == -4526)["bounds"] = [100, 500, 300, 650]
+    current[0] = fresh
+    explorer.step(54)
+    assert taps[-1] == ("menu_stories", -4526, 48)
+    assert explorer.pending == ("stories", 54, explorer._signature(fresh))
+    assert explorer.route_pending is None and explorer.outcomes == []
+
+
+def test_transient_dialog_evidence_waits_for_clear_navigation_before_pending_outcome(home_snapshot, tmp_path, monkeypatch):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: 12345)
+    explorer = ui.UiExplorer(qa)
+    explorer.goal_index = next(i for i, goal in enumerate(ui._GOALS) if goal[0] == "live")
+    explorer.pending = ("live", 1, explorer._signature(home_snapshot))
+    dialog = deepcopy(home_snapshot)
+    dialog["startup_observation"]["content_blocking"] = True
+    dialog["nodes"].append({"kind": "button", "active": True, "interactable": True,
+                            "instance_id": 300, "name": "Close", "path": "Window/Dialog/Close",
+                            "text": "OK", "bounds": [100, 500, 300, 650]})
+    current, restarts, taps = [dialog], [], []
+    monkeypatch.setattr(explorer, "_snapshot", lambda: current[0])
+    monkeypatch.setattr(explorer, "_restart", lambda: restarts.append(True))
+    monkeypatch.setattr(explorer, "_tap", lambda snapshot, node, reason, frame: taps.append(reason) or True)
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    explorer.step(43)
+    assert taps == ["observed_dialog"]
+    assert explorer.pending_dialog_frame == 43 and explorer.outcomes == [] and restarts == []
+    current[0] = deepcopy(home_snapshot)
+    current[0]["startup_observation"]["content_blocking"] = True
+    explorer.step(53)
+    assert explorer.pending is not None and explorer.outcomes == [] and restarts == []
+    current[0]["startup_observation"]["content_blocking"] = False
+    explorer.step(54)
+    assert len(explorer.outcomes) == 1
+    assert explorer.outcomes[0]["status"] == "different_ui_tree_observed"
+    assert explorer.outcomes[0]["transient_dialog_frame"] == 43
+    assert explorer.pending is None and restarts == [True]
+
+
+def test_observed_game_error_defers_restart_until_loading_clears(home_snapshot, tmp_path, monkeypatch):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: 12345)
+    explorer = ui.UiExplorer(qa)
+    explorer.goal_index = next(i for i, goal in enumerate(ui._GOALS) if goal[0] == "live")
+    explorer.pending = ("live", 1, explorer._signature(home_snapshot))
+    blocked = deepcopy(home_snapshot)
+    blocked["startup_observation"]["content_blocking"] = True
+    blocked["nodes"].append({"kind": "tmp_text", "active": True,
+                             "path": "Window/Dialog/Error", "text": "NullReferenceException"})
+    current, restarts = [blocked], []
+    monkeypatch.setattr(explorer, "_snapshot", lambda: current[0])
+    monkeypatch.setattr(explorer, "_restart", lambda: restarts.append(True))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for frame in (43, 53):
+        explorer.step(frame)
+    assert len(explorer.outcomes) == 1 and explorer.outcomes[0]["status"] == "game_error_observed"
+    assert explorer.restart_pending is True and restarts == []
+    current[0] = home_snapshot
+    explorer.step(54)
+    assert len(explorer.outcomes) == 1 and explorer.restart_pending is False
+    assert restarts == [True]
