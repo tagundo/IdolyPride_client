@@ -1,17 +1,17 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했습니다. 배포된 v0.2.16는 초기 메인 지역의 일반 레슨 보상, 로컬 선물함·친구 목록, 공개 스토리 기본 목록과 첫 열람·스킵 보상, 보유 의상·헤어 선택·확인 상태 저장을 제공합니다.
+아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했습니다. v0.3.0 베타는 기존 일반 레슨·스토리·외형 저장에 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행 저장을 추가했습니다. 새 APK의 ARM64 실행, 기존 데이터 보완·업데이트·재시작 보존과 Mac 앱 실행을 검사했습니다.
 
-개발 중인 v0.3.0 소스에는 **첫 메인 라이브 실험 기능**을 추가했습니다. 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 현재 배포된 v0.2.16입니다. 개발 소스에는 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션의 목록·진행 저장도 추가했습니다. 미션 보상 수령은 아직 지원하지 않습니다.
+v0.3.0 베타에는 **첫 메인 라이브 실험 기능**도 포함합니다. 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 검증한 v0.3.0 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [서버 앱 v0.2.16](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.2.16)에는 6.1.1 스키마, 원본 마스터 202개, 시작·라이브·튜토리얼용 마스터 JSON 35개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [서버 앱 v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | `IdolyPride-Local-Server-Android.apk` | `IdolyPride-6.1.1-Local-Android.apk` |
-| Apple Silicon Mac, macOS 13 이상 | `IdolyPride-Local-Server-macOS-arm64.app.zip` | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
+| Android ARM64, Android 9 이상 | [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.0/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
+| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.0/IdolyPride-Local-Server-macOS-arm64.app.zip) | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
 2. **아이프라 서버 / 아이프라 로컬 서버**에서 **서버 시작**을 누릅니다.
@@ -35,9 +35,9 @@ Android에서 문제가 발생하면 [별도 진단 게임 v0.2.1](https://githu
 | `Deck.Save/Delete` | 새 번호 할당, 기존 덱 편집·삭제, 클라이언트가 자동 선택한 편성 저장과 보유 참조 검증 |
 | `Quest.Top/ListMain/ListAsset` | 메인·튜토리얼 목록과 저장된 5인 덱의 캐릭터·의상·헤어 리소스 참조 조회; 잠긴 하이스코어 정보 제공, 전투·보상 생성 없음 |
 | `Tutorial.StartQuest` | 검증된 공식 short/full 기록의 고정 시연 편성 재생; 로컬 사용자 표시·필요 리소스 연결, 계정 상태 변경 없음 |
-| 첫 일반 라이브 — v0.3.0 개발 소스 | 기본값 꺼짐인 실험 기능; 첫 메인 퀘스트만 현재 덱·능력치·스킬로 로컬 계산, 첫 성공 보상·경험치 1회와 결과 저장, 동일 요청 재시도 시 원래 응답 반환 |
-| 프로필 — 개발 소스 | 저장된 계층 정보 조회, 이름·소개문·즐겨찾기 순서 저장·해제; 공식 금칙어·미션 보상 제외 |
-| 카드 레벨 미션 — 개발 소스 | 검증된 `ms-normal-card_level_achievement` 목록과 보유 카드의 최고 레벨 진행 저장; 다른 미션·보상 수령 제외 |
+| 첫 일반 라이브 — v0.3.0 베타 | 기본값 꺼짐인 실험 기능; 첫 메인 퀘스트만 현재 덱·능력치·스킬로 로컬 계산, 첫 성공 보상·경험치 1회와 결과 저장, 동일 요청 재시도 시 원래 응답 반환 |
+| 프로필 — v0.3.0 베타 | 저장된 계층 정보 조회, 이름·소개문·즐겨찾기 순서 저장·해제; 공식 금칙어·미션 보상 제외 |
+| 카드 레벨 미션 — v0.3.0 베타 | 검증된 `ms-normal-card_level_achievement` 목록과 보유 카드의 최고 레벨 진행 저장; 다른 미션·보상 수령 제외 |
 | 튜토리얼 후반 | 레슨 보상 1회 지급·초기 카드 강화·사쿠라 메시지 조회/선택 저장/완료; 명시적 `Progress150`으로 완료 |
 | `Activity.ReceiveLessonReward` | 초기 메인 지역의 기본 레슨 보상을 10초 단위로 최대 12시간 누적·수령; 재시도·재시작 후 시간과 재화 보존 |
 | 선물함·친구 목록 | 비어 있는 로컬 선물함·수령 이력·친구·신청·검색 목록 조회; 수령·관계 변경은 미구현 |

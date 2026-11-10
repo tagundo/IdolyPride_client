@@ -15,7 +15,7 @@ Android IL2CPP 바이너리에서 protobuf descriptor 359개 파일·68개 서�
 
 descriptor 파일은 `data/protocol/idolypride-6.1.1.pb` 위치를 기본값으로 사용하며 SHA-256은 `c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad`입니다. `tools/extract_client_schema.py`로 원본 XAPK에서 다시 추출할 수 있습니다. 현재 서버는 427개 unary RPC를 등록합니다. server-streaming `/api.Health/Watch`는 등록하지 않으며 호출 시 `UNIMPLEMENTED`를 반환합니다.
 
-현재 미배포 소스의 기본 명시 처리 경로는 54개이며 제한된 자체 처리 52개와 공개 fixture 전용 2개를 포함합니다. 나머지 unary 373개는 가져온 사용자 fixture가 없으면 기본 자체 처리가 없고, `Quest.Start`의 첫 메인 퀘스트 실험도 기본 OFF입니다. 추가 기능을 담은 새 APK·Mac 앱은 아직 배포하지 않았으며 공개 v0.2.16의 지원 범위와 구분합니다. 등록된 경로 수를 전체 기능 구현 수로 계산하지 않습니다. 경로별 타입과 제한은 [RPC 분류 CSV](rpc-coverage-6.1.1.csv)를 따릅니다.
+v0.3.0 베타의 기본 명시 처리 경로는 54개이며 제한된 자체 처리 52개와 공개 fixture 전용 2개를 포함합니다. 나머지 unary 373개는 가져온 사용자 fixture가 없으면 기본 자체 처리가 없고, `Quest.Start`의 첫 메인 퀘스트 실험도 기본 OFF입니다. 추가 기능을 담은 APK·Mac 앱과 범위별 검증 기록은 [v0.3.0 릴리스](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0)에 있으며, 접근 권한이 있는 GitHub 로그인이 필요합니다. 실제 서버 앱 검사와 게임 화면 검증을 구분합니다. 등록된 경로 수를 전체 기능 구현 수로 계산하지 않습니다. 경로별 타입과 제한은 [RPC 분류 CSV](rpc-coverage-6.1.1.csv)를 따릅니다.
 
 `inspect`의 `schema_sha256`은 파일 순서와 로딩 경로를 정규화한 스키마 지문이며 원본 파일 해시와 구분합니다. 현재 6.1.1의 정규화된 지문은 `0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3`입니다. 동일한 스키마를 Solis 모듈이나 내보낸 descriptor set으로 읽어도 같은 지문을 사용합니다.
 
@@ -106,7 +106,7 @@ PlayChain을 이미 사용하는 경우의 [실제 DB 경로](https://github.com
 
 `Master.Get`용 준비 과정은 원본 MasterTag의 버전·cryptoKey·fileName·fileSize를 유지하고 `downloadUrl`만 로컬 origin으로 바꿉니다. 암호화된 MasterDB 팩을 `--asset-root/master/`에서 그대로 제공할 수 있습니다.
 
-현재 미배포 앱 payload는 원본 암호화 팩 202개를 모두 보존하고 서버가 직접 읽는 JSON 40개를 준비합니다. 추가한 `Mission`은 원본 7,087행이며 카드 레벨 미션의 유형·빈 조건·17개 임계값과 inline 보상 참조를 검증합니다. `rd_auto;stone;;50`은 원본 native resolver가 해석하는 참조이므로 `Reward` 테이블 행이 없어도 클라이언트에 표시할 수 있습니다. 이 검증이 서버의 보상 지급 구현을 뜻하지 않습니다. `Condition` JSON·일반 미션 자격 판정은 추가하지 않았습니다.
+v0.3.0 앱 payload는 원본 암호화 팩 202개를 모두 보존하고 서버가 직접 읽는 JSON 40개를 준비합니다. 추가한 `Mission`은 원본 7,087행이며 카드 레벨 미션의 유형·빈 조건·17개 임계값과 inline 보상 참조를 검증합니다. `rd_auto;stone;;50`은 원본 native resolver가 해석하는 참조이므로 `Reward` 테이블 행이 없어도 클라이언트에 표시할 수 있습니다. 이 검증이 서버의 보상 지급 구현을 뜻하지 않습니다. `Condition` JSON·일반 미션 자격 판정은 추가하지 않았습니다.
 
 원본 팩이 없는 경우 `tools/build_master_packs.py`가 정확한 descriptor의 `master.table`·`master.pk` annotation을 사용해 JSON 행을 protobuf로 검증하고 로컬 SQLCipher 4 팩으로 재구성합니다. 현재 master-diff의 202개 테이블·238,940개 행을 78,475,264바이트로 생성하고 전체 202개 테이블의 복호화·역직렬화 round trip을 확인했습니다. 생성 팩의 키·버전은 로컬 재구성용이며 원본 팩과 구분합니다. 클라이언트가 생성 팩을 소비하는지는 아직 기기에서 검증하지 않았습니다.
 
