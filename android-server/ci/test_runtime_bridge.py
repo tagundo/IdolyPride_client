@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -97,6 +98,66 @@ class InstallationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 bridge.install_bundle(archive, root / "private", "0" * 64)
             self.assertFalse((root / "private").exists())
+
+    def test_story_bundle_install_and_update_preserve_all_local_account_rows(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            files = root / "private"
+            data = files / "data"
+            data.mkdir(parents=True)
+            database = data / "state.db"
+            with sqlite3.connect(database) as db:
+                db.executescript("""
+                    CREATE TABLE profiles(name TEXT, public_id TEXT);
+                    CREATE TABLE sessions(profile TEXT, token_hash TEXT);
+                    CREATE TABLE profile_settings(profile TEXT, response BLOB);
+                    CREATE TABLE snapshots(profile TEXT, response BLOB);
+                    INSERT INTO profiles VALUES ('local-fixture', 'synthetic-public-id');
+                    INSERT INTO sessions VALUES ('local-fixture', 'synthetic-session-hash');
+                    INSERT INTO profile_settings VALUES ('local-fixture', X'000102');
+                    INSERT INTO snapshots VALUES ('local-fixture', X'FF8001');
+                """)
+            db.close()
+            preserved = database.read_bytes()
+            original, original_digest = self.write_zip(root)
+            bridge.install_bundle(original, files, original_digest)
+            self.assertEqual(database.read_bytes(), preserved)
+            for revision in (1, 2):
+                contents = {"data/public-story/manifest.json": ('{"schema":1,"revision":%d}' % revision).encode(),
+                            "data/public-story/story-list-event.pb": b"public event " + bytes([revision]),
+                            "data/public-story/story-list-extra.pb": b"public extra " + bytes([revision])}
+                archive, digest = self.write_zip(root, contents)
+                self.assertEqual(bridge.install_bundle(archive, files, digest), data)
+                for name, expected in contents.items():
+                    self.assertEqual((files / name).read_bytes(), expected)
+                self.assertEqual(database.read_bytes(), preserved)
+                self.assertEqual((files / ".server-data-sha256").read_text().strip(), digest)
+                self.assertEqual(bridge.install_bundle(archive, files, digest), data)
+                self.assertEqual(database.read_bytes(), preserved)
+            self.assertFalse(list(data.rglob(".server-data-*")))
+
+    def test_public_story_rejects_nonfixed_paths_before_any_install_write(self):
+        forbidden = ("data/public-story/other.pb", "data/public-story/state.db", "data/public-story/session.json",
+                     "data/public-story/private.archive", "data/public-story/nested/story-list-event.pb",
+                     "data/public-story/../state.db", "data/public-story/story-list-extra.pb/secret",
+                     "data/public-story/story-list-extra.pb.bak", "data/public-story/manifest.json/private",
+                     "data/public-story/story-list-event\\.pb", "data/public-story//story-list-event.pb",
+                     "data/public-story/./story-list-event.pb")
+        for name in forbidden:
+            with self.subTest(path=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                files = root / "private"
+                (files / "data").mkdir(parents=True)
+                database = files / "data/state.db"
+                database.write_bytes(b"existing local profile/session/settings")
+                archive, digest = self.write_zip(root, {"data/public-story/manifest.json": b'{"schema":1}',
+                                                       name: b"must not be installed"})
+                with self.assertRaises(ValueError):
+                    bridge.install_bundle(archive, files, digest)
+                self.assertEqual(database.read_bytes(), b"existing local profile/session/settings")
+                self.assertFalse((files / "data/public-story").exists())
+                self.assertFalse((files / "data/protocol").exists())
+                self.assertFalse((files / ".server-data-sha256").exists())
 
 
 if __name__ == "__main__":

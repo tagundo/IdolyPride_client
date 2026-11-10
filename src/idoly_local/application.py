@@ -31,9 +31,12 @@ class Application:
         from .tutorial_messages import TutorialMessages
         from .lessons import OrdinaryLessons
         from .social import SocialInbox
+        from .story_catalog import StoryCatalog
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
-        self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons)
+        self.stories = StoryCatalog(schema, master_dir)
+        self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
+                                 story_extra_fixture=lambda: self.fixtures.get("/api.Story/ListExtra", b""))
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
         self.tutorial_replays = TutorialReplays(schema, state, profile, master_dir)
@@ -106,6 +109,8 @@ class Application:
                 response = self.lessons.handle(path, plain)
             if response is None:
                 response = self.social.handle(path, plain)
+            if response is None:
+                response = self.stories.handle(path, plain)
             if response is None:
                 response = self.tutorial_progression.handle(path, plain)
             if response is None:

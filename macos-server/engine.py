@@ -584,6 +584,8 @@ def smoke(data_dir, server_data, report_path):
               "local_auth": False, "home_login": False, "home_enter": False,
               "home_hierarchy_reference": False, "home_fish_heaven_absent": False,
               "starter_roster_complete": False, "home_positions_distinct": False,
+              "story_catalog_event": False, "story_catalog_extra": False,
+              "story_catalog_home_consistent": False, "story_catalog_readonly": False,
               "quest_top_list_main": False, "quest_catalog_readonly": False,
               "quest_contest_area_locked": False, "quest_tutorial_context": False,
               "quest_list_asset": False, "quest_list_asset_tutorial_full": False,
@@ -648,6 +650,12 @@ def smoke(data_dir, server_data, report_path):
             raise RuntimeError("User.Get must assign four distinct owned home characters and preserve Home1 char-ktn")
         report.update(_initial_inventory_reference(before, data_dir))
         report["initial_inventory_master_backed"] = report["default_unit_complete"] = True
+        from idoly_local.story_qa import run_story_catalog_checks
+        story_database_before = _whole_database_state(data_dir)
+        report.update(run_story_catalog_checks(schema,
+            lambda path, request: _rpc(address, schema, path, request, token), Path(data_dir) / "master-json"))
+        if _whole_database_state(data_dir) != story_database_before:
+            raise RuntimeError("Read-only story catalogs changed the whole local database")
         saved_before_quests = State(Path(data_dir) / "state.db").snapshot("sandbox")
         top = _rpc(address, schema, "/api.Quest/Top", token=token)
         main = _rpc(address, schema, "/api.Quest/ListMain", token=token)
@@ -801,6 +809,7 @@ def smoke(data_dir, server_data, report_path):
     report_path.write_text(json.dumps(report, indent=2) + "\n")
     required = ("server_started", "encrypted_system_check", "anonymous_refund_term", "anonymous_public_text", "local_auth", "home_login",
                 "home_enter", "home_hierarchy_reference", "home_fish_heaven_absent", "starter_roster_complete", "home_positions_distinct",
+                "story_catalog_event", "story_catalog_extra", "story_catalog_home_consistent", "story_catalog_readonly",
                 "quest_top_list_main", "quest_catalog_readonly", "quest_contest_area_locked", "quest_tutorial_context",
                 "quest_list_asset", "quest_list_asset_tutorial_full", "quest_list_asset_tutorial_short",
                 "quest_list_asset_ordinary_buddy_name", "quest_list_asset_rental_rejected", "quest_list_asset_readonly",

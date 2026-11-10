@@ -17,6 +17,11 @@ PUBLIC = {
     "data/master-json/!version.txt": b"public-version",
     "data/payload-manifest.json": b"{}",
 }
+PUBLIC_STORY = {
+    "data/public-story/manifest.json": b'{"schema":1,"public":true}',
+    "data/public-story/story-list-event.pb": b"trusted public event story list",
+    "data/public-story/story-list-extra.pb": b"trusted public extra story list",
+}
 
 
 def archive(path, contents=None):
@@ -123,6 +128,59 @@ def test_only_the_three_fixed_public_tutorial_files_are_installed_and_preserved(
 def test_public_tutorial_paths_reject_private_arbitrary_and_traversal_files(path):
     with pytest.raises(ValueError):
         member_path(path)
+
+
+def test_story_update_adds_only_three_public_files_and_preserves_the_existing_tree(tmp_path):
+    data = tmp_path / "Application Support/IdolyPrideLocal"
+    baseline = archive(tmp_path / "baseline.zip")
+    assert install_payload(baseline, data) == {"copied": 6, "preserved": 0}
+    for name, payload in {"state.db": b"opaque private database bytes",
+                          "private/profiles/sandbox.pb": b"opaque private profile bytes",
+                          "private/sessions/current.bin": b"opaque private session bytes",
+                          "private/settings/preferences.bin": b"opaque private settings bytes"}.items():
+        path = data / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+    before = {path.relative_to(data).as_posix(): path.read_bytes() for path in data.rglob("*") if path.is_file()}
+    contents = {**PUBLIC, **PUBLIC_STORY}
+    contents["data/protocol/idolypride-6.1.1.pb"] = b"new archive contents do not replace an existing file"
+    update = archive(tmp_path / "story-update.zip", contents)
+    assert install_payload(update, data) == {"copied": 3, "preserved": 6}
+    expected = {**before, **{name.removeprefix("data/"): payload for name, payload in PUBLIC_STORY.items()}}
+    after = {path.relative_to(data).as_posix(): path.read_bytes() for path in data.rglob("*") if path.is_file()}
+    assert after == expected
+    # Preserve-existing also applies to public story files; repeated installs
+    # never refresh or overwrite a current owner file.
+    current = data / "public-story/story-list-event.pb"
+    current.write_bytes(b"existing owner story list")
+    expected["public-story/story-list-event.pb"] = current.read_bytes()
+    assert install_payload(update, data) == {"copied": 0, "preserved": 9}
+    repeated = {path.relative_to(data).as_posix(): path.read_bytes() for path in data.rglob("*") if path.is_file()}
+    assert repeated == expected
+    assert not list(data.rglob(".server-data-*"))
+
+
+@pytest.mark.parametrize("path", ["data/public-story/private.archive", "data/public-story/story-list-main.pb",
+    "data/public-story/nested/story-list-event.pb", "data/public-story/../state.db",
+    "data/public-story/../../private/session.bin", "data/public-story/story-list-extra.pb.bak",
+    "data/public-story/manifest.json/private", "data/public-story/story-list-event\\.pb",
+    "data/public-story/./story-list-event.pb"])
+def test_story_update_rejects_arbitrary_private_nested_and_traversal_files_before_writing(tmp_path, path):
+    with pytest.raises(ValueError):
+        member_path(path)
+    data = tmp_path / "data"
+    data.mkdir()
+    database = data / "state.db"
+    database.write_bytes(b"opaque existing private database")
+    before = {file.relative_to(data).as_posix(): file.read_bytes() for file in data.rglob("*") if file.is_file()}
+    contents = {**PUBLIC, **PUBLIC_STORY}
+    contents[path] = b"must not be installed"
+    update = archive(tmp_path / "invalid-story-update.zip", contents)
+    with pytest.raises(ValueError):
+        install_payload(update, data)
+    after = {file.relative_to(data).as_posix(): file.read_bytes() for file in data.rglob("*") if file.is_file()}
+    assert after == before
+    assert not (data / "public-story").exists()
 
 
 @pytest.mark.parametrize("path", ["data/public-fixtures/private.archive", "data/public-fixtures/responses/nested/private.pb",

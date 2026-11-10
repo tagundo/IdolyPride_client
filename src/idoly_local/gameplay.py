@@ -115,10 +115,13 @@ class _Catalog:
 class Gameplay:
     """Handle an explicit local feature allowlist; other methods return None."""
 
-    def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, lessons=None):
+    def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, lessons=None, stories=None,
+                 story_extra_fixture=None):
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
         self.lessons = lessons
+        self.stories = stories
+        self.story_extra_fixture = story_extra_fixture
 
     def _parse_user(self, payload: bytes):
         try:
@@ -367,6 +370,17 @@ class Gameplay:
                           "notiShowcaseShopItem", "leagueInfo", "loveInfo", "companyInfo"):
                 if field in result.DESCRIPTOR.fields_by_name:
                     getattr(result, field).SetInParent()
+            if self.stories is not None:
+                extra = (self.story_extra_fixture() if self.story_extra_fixture is not None
+                         and "/api.Story/ListExtra" in self.schema.methods else None)
+                if extra is not None and "extraStoryPartInfos" in result.DESCRIPTOR.fields_by_name:
+                    try:
+                        captured = self.schema.response_type("/api.Story/ListExtra").FromString(extra)
+                    except DecodeError:
+                        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Account story catalog fixture is malformed") from None
+                    result.extraStoryPartInfos.extend(captured.infos)
+                else:
+                    self.stories.fill_home(result)
             # Older/minimal descriptors and catalogs predate ordinary lesson
             # support. The shipped 6.1.1 catalog declares its step duration.
             ordinary = (self.lessons is not None and "/api.Activity/ReceiveLessonReward" in self.schema.methods

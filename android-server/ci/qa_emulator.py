@@ -811,6 +811,9 @@ def main():
         result.update(initial_inventory_master_backed=True, default_unit_complete=True)
         result["starter_roster_complete"] = True
         result["home_positions_distinct"] = True
+        from idoly_local.story_qa import run_story_catalog_checks
+        result.update(run_story_catalog_checks(schema,
+            lambda path, request: rpc(schema, grpc_port, path, login.gameAuthToken, request), args.master_dir))
         quest_top = rpc(schema, grpc_port, "/api.Quest/Top", login.gameAuthToken)
         quest_main = rpc(schema, grpc_port, "/api.Quest/ListMain", login.gameAuthToken)
         result["quest_catalog_first_quest"] = assert_quest_catalog(quest_top, quest_main, args.master_dir, user)

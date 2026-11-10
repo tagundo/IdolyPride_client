@@ -16,7 +16,7 @@ from idoly_local.schema import Schema
 from idoly_local.catalog import FixtureStore
 
 
-TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill", "Music", "MusicChartPattern", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget", "Stage", "ManagerLevel", "CardLevel", "Consumption", "Message", "MessageGroup")
+TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill", "Music", "MusicChartPattern", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget", "Stage", "ManagerLevel", "CardLevel", "Consumption", "Message", "MessageGroup", "EventStory", "ExtraStoryPart", "ExtraStory", "Story")
 
 
 def digest(path):
@@ -101,8 +101,17 @@ def build_payload(data_dir: Path, output: Path) -> dict:
             if not source.is_relative_to(replay_root.resolve()) or not source.is_file():
                 raise ValueError("Required public tutorial replay is missing or outside its directory")
             files.append((source, "data/public-tutorial/" + name))
+        from idoly_local.story_catalog import validate_story_catalog
+        story_root = data_dir / "public-story"
+        story_report = validate_story_catalog(schema, catalog, story_root)
+        for name in ("manifest.json", "story-list-event.pb", "story-list-extra.pb"):
+            source = (story_root / name).resolve()
+            if not source.is_relative_to(story_root.resolve()) or not source.is_file():
+                raise ValueError("Required public story catalog is missing or outside its directory")
+            files.append((source, "data/public-story/" + name))
         summary = {"schema": 1, "master_version": response.masterTag.version,
                    "schema_sha256": schema.fingerprint, "tables": counts, "tutorial_replays": replay_report,
+                   "story_catalog": story_report,
                    "files": [{"path": name, "bytes": path.stat().st_size, "sha256": digest(path)} for path, name in files]}
         payload = stage / "ServerData.zip"
         with ZipFile(payload, "x", compression=ZIP_DEFLATED, compresslevel=6) as zipped:
