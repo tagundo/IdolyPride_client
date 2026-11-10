@@ -205,7 +205,9 @@ class UiExplorer:
             self.pending = None
             self._restart()
             return
-        title = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap")
+        # In the original Title scene, the full-canvas TitleButton and
+        # UIContentArea/TAP TO START label are siblings, not parent/child.
+        title = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap|^TitleButton$")
         if title is not None:
             if self.session_titles < self.qa.max_title_taps and self._tap(snapshot, title, "observed_title", frame):
                 self.session_titles += 1

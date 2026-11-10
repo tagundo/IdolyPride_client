@@ -34,6 +34,13 @@ def test_ambiguous_button_text_causes_no_selection(snapshot):
     assert choose_button(snapshot, "ライブ") is None
 
 
+def test_original_title_button_is_selected_when_tap_label_is_a_sibling(snapshot):
+    snapshot["nodes"][0].update(path="Canvas/TitleButton", name="TitleButton")
+    snapshot["nodes"][1].update(path="Canvas/UIContentArea/TAP TO START", text="TAP TO START")
+    target = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap|^TitleButton$")
+    assert target["instance_id"] == -50 and not target["label"]
+
+
 @pytest.mark.parametrize("field", ["active", "interactable"])
 def test_inactive_or_disabled_button_is_not_selected(snapshot, field):
     snapshot["nodes"][0][field] = False
