@@ -270,3 +270,38 @@ def test_normal_signature_requires_published_cert_and_java_guard_pins_same_input
     provider = (qa.JAVA_ROOT / "game/qualiarts/idolypride/qa/ui/QaUiProvider.java").read_text()
     assert f'NORMAL_INPUT_SHA256 = "{qa.PINNED_NORMAL}"' in provider
     assert f'NORMAL_PACKAGE = "{qa.NORMAL_PACKAGE}"' in provider
+
+
+def test_caller_managed_qa_key_is_reused_without_creating_or_exposing_secrets(tmp_path, monkeypatch):
+    key = tmp_path / "private-qa.p12"
+    key.write_bytes(b"synthetic key fixture")
+    key.chmod(0o600)
+    monkeypatch.setenv("IDOLY_QA_UI_KEY_PASSWORD", "synthetic-test-password")
+    selected, environment = qa.qa_signing_material(key)
+    assert selected == key and selected.read_bytes() == b"synthetic key fixture"
+    assert environment["IDOLY_QA_UI_KEY_PASSWORD"] == "synthetic-test-password"
+    assert list(tmp_path.iterdir()) == [key]
+
+
+@pytest.mark.parametrize("problem", ("directory", "group-readable", "missing-password"))
+def test_caller_managed_qa_key_fails_closed_on_unsafe_material(tmp_path, monkeypatch, problem):
+    key = tmp_path / "private-qa.p12"
+    if problem == "directory":
+        key.mkdir(mode=0o700)
+    else:
+        key.write_bytes(b"synthetic key fixture")
+        key.chmod(0o640 if problem == "group-readable" else 0o600)
+    monkeypatch.setenv("IDOLY_QA_UI_KEY_PASSWORD", "synthetic-test-password")
+    if problem == "missing-password":
+        monkeypatch.delenv("IDOLY_QA_UI_KEY_PASSWORD")
+    with pytest.raises(qa.AndroidPackagingError):
+        qa.qa_signing_material(key)
+
+
+def test_default_qa_key_password_is_fresh_and_does_not_reuse_inherited_value(monkeypatch):
+    monkeypatch.setenv("IDOLY_QA_UI_KEY_PASSWORD", "inherited-value-not-used-for-ephemeral-key")
+    first, first_env = qa.qa_signing_material()
+    second, second_env = qa.qa_signing_material()
+    assert first is second is None
+    assert first_env["IDOLY_QA_UI_KEY_PASSWORD"] != second_env["IDOLY_QA_UI_KEY_PASSWORD"]
+    assert first_env["IDOLY_QA_UI_KEY_PASSWORD"] != "inherited-value-not-used-for-ephemeral-key"

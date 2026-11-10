@@ -52,12 +52,22 @@ uv run --locked python tools/package_qa_ui_client.py data/clients/Game-r2-pinned
 
 The new QA copy keeps `game.qualiarts.idolypride.local`, uses the fixed
 nonexported authority `game.qualiarts.idolypride.local.qa.ui`, becomes debuggable,
-and receives an ephemeral QA signature. All input ZIP members other than the
+and receives a QA signature (ephemeral by default). All input ZIP members other than the
 manifest/signatures are checked unchanged. The source APK is never overwritten.
 The appended marker/report identify the selected input profile and preserved
 member hashes. Runtime activation requires the matching package/profile marker,
 the pinned normal input hash, and both existing emulator guards; the original
 production package is never allowed. This preparation is not device validation.
+
+For repeated updates of the same disposable QA installation, provide
+`--qa-keystore /private/path/key.p12` with alias `qa-ui-only` and supply its
+password through `IDOLY_QA_UI_KEY_PASSWORD`. The existing key must be a private
+regular file (no group/other permissions). Retain that QA key and password
+outside the repository and published artifacts; neither is copied into the APK
+or report. This option reuses a caller-managed key and never deletes app data.
+The default ephemeral key cannot update an installation signed by a different
+key. A data-preserving reinstall requires a separate explicit backup/restore
+plan, including any UID-bound platform identity limitations.
 
 A later emulator run can use the current host Python server with a fresh
 synthetic `sandbox` profile and the prepared payload directory, then reverse

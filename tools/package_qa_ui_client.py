@@ -269,14 +269,34 @@ def verify_provider_xml(xml, input_profile=DIAGNOSTIC_PROFILE):
         raise AndroidPackagingError("Compiled QA provider/exported/debuggable manifest contract differs")
 
 
+def qa_signing_material(keystore=None):
+    """Reuse only an explicitly supplied private QA key, with an env password.
+
+    The caller owns key retention and permissions. No password or key path is
+    copied into the APK or report. The default remains a throwaway QA key.
+    """
+    environment = dict(os.environ)
+    if keystore is None:
+        environment["IDOLY_QA_UI_KEY_PASSWORD"] = secrets.token_urlsafe(32)
+        return None, environment
+    path = Path(keystore).resolve(strict=True)
+    if not path.is_file() or path.stat().st_mode & 0o077:
+        raise AndroidPackagingError("A caller-managed QA keystore must be a private regular file")
+    if not environment.get("IDOLY_QA_UI_KEY_PASSWORD"):
+        raise AndroidPackagingError("Caller-managed QA signing requires IDOLY_QA_UI_KEY_PASSWORD")
+    return path, environment
+
+
 def package(source, output, *, qa_aes_report=None, expected_source_sha256, native_library, emulator_only=False,
-            input_profile=DIAGNOSTIC_PROFILE, apkeditor=None, build_tools=None, java=None, android_jar=None, report_path=None):
+            input_profile=DIAGNOSTIC_PROFILE, apkeditor=None, build_tools=None, java=None, android_jar=None, report_path=None,
+            qa_keystore=None):
     if emulator_only is not True:
         raise AndroidPackagingError("Explicit --emulator-only is required for this QA APK")
     source, output = Path(source).resolve(strict=True), Path(output).resolve()
     report_path = Path(report_path).resolve() if report_path else output.with_suffix(output.suffix + ".evidence.json")
     if output.suffix != ".apk" or output.exists() or report_path.exists() or output == source or output == report_path:
         raise AndroidPackagingError("Choose a new .apk and report path; existing clients/outputs are preserved")
+    signing_key, signing_environment = qa_signing_material(qa_keystore)
     package_name = profile_package(input_profile)
     members, provenance = validate_input(source, qa_aes_report, expected_source_sha256, input_profile)
     native_library = Path(native_library).resolve(strict=True)
@@ -331,11 +351,12 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
                 item.external_attr = 0o100644 << 16
                 outgoing.writestr(item, raw)
         _run([sdk / "zipalign", "-f", "16384", unsigned, aligned], "QA UI APK alignment")
-        environment = dict(os.environ, IDOLY_QA_UI_KEY_PASSWORD=secrets.token_urlsafe(32))
-        key = work / "ephemeral-qa-ui.p12"
-        _run([keytool, "-genkeypair", "-keystore", key, "-storetype", "PKCS12", "-alias", "qa-ui-only",
-              "-keyalg", "RSA", "-keysize", "2048", "-validity", "30", "-dname", "CN=Idoly disposable emulator UI QA only",
-              "-storepass:env", "IDOLY_QA_UI_KEY_PASSWORD", "-keypass:env", "IDOLY_QA_UI_KEY_PASSWORD"], "QA UI ephemeral signing key", environment)
+        environment = signing_environment
+        key = signing_key or work / "ephemeral-qa-ui.p12"
+        if signing_key is None:
+            _run([keytool, "-genkeypair", "-keystore", key, "-storetype", "PKCS12", "-alias", "qa-ui-only",
+                  "-keyalg", "RSA", "-keysize", "2048", "-validity", "30", "-dname", "CN=Idoly disposable emulator UI QA only",
+                  "-storepass:env", "IDOLY_QA_UI_KEY_PASSWORD", "-keypass:env", "IDOLY_QA_UI_KEY_PASSWORD"], "QA UI ephemeral signing key", environment)
         _run([sdk / "apksigner", "sign", "--ks", key, "--ks-key-alias", "qa-ui-only", "--ks-pass", "env:IDOLY_QA_UI_KEY_PASSWORD",
               "--key-pass", "env:IDOLY_QA_UI_KEY_PASSWORD", "--out", signed, aligned], "QA UI APK signing", environment)
         verification = _run([sdk / "apksigner", "verify", "--verbose", "--print-certs", signed], "QA UI signature verification")
@@ -362,7 +383,8 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
             "preserved_dex_sha256": {name: value for name, value in members.items() if DEX_NAME.fullmatch(name)},
             "preserved_metadata_sha256": members[METADATA_NAME], "preserved_il2cpp_sha256": members[IL2CPP],
             "preserved_aes_sha256": members[FAST_AES],
-            "signature": "ephemeral QA key; disposable emulator installation only",
+            "signature": ("caller-managed private QA key; disposable emulator installation only" if signing_key is not None
+                          else "ephemeral QA key; disposable emulator installation only"),
             "signer_sha256": [line.split(": ", 1)[-1] for line in verification.stdout.splitlines() if "certificate SHA-256 digest:" in line]}
         with output.open("xb") as dst, signed.open("rb") as src:
             shutil.copyfileobj(src, dst, 1024 * 1024)
@@ -387,12 +409,14 @@ def main(argv=None):
     parser.add_argument("--java")
     parser.add_argument("--android-jar", type=Path)
     parser.add_argument("--report", type=Path)
+    parser.add_argument("--qa-keystore", type=Path,
+                        help="Reuse a privately retained QA key (alias qa-ui-only); password from IDOLY_QA_UI_KEY_PASSWORD")
     args = parser.parse_args(argv)
     try:
         report = package(args.source, args.output, qa_aes_report=args.qa_aes_report,
             expected_source_sha256=args.expected_source_sha256, native_library=args.native_library,
             emulator_only=args.emulator_only, input_profile=args.input_profile, apkeditor=args.apkeditor, build_tools=args.build_tools,
-            java=args.java, android_jar=args.android_jar, report_path=args.report)
+            java=args.java, android_jar=args.android_jar, report_path=args.report, qa_keystore=args.qa_keystore)
     except (AndroidPackagingError, OSError, ValueError, KeyError) as error:
         parser.exit(1, f"QA UI packaging failed: {error}\n")
     print(json.dumps(report, indent=2))
