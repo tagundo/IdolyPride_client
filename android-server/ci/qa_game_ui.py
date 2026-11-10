@@ -85,6 +85,32 @@ def title_block_reason(snapshot, node):
     return None
 
 
+def download_confirmation(snapshot):
+    """Recognize the real client's observed resource download action sheet."""
+    nodes = snapshot.get("nodes", [])
+    roots = {str(row.get("path", "")).split("/SimpleActionSheet(Clone)/", 1)[0] + "/SimpleActionSheet(Clone)/"
+             for row in nodes if row.get("active") is True and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))}
+    if len(roots) != 1:
+        return None
+    titles = [row for row in nodes if row.get("active") is True and row.get("kind") in ("text", "tmp_text")
+              and text(row.get("text", "")) == "ダウンロード確認"
+              and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))]
+    if len(titles) != 1:
+        return None
+    root = roots.pop()
+    local = [row for row in nodes if str(row.get("path", "")).startswith(root)]
+    descriptions = [text(row.get("text", "")) for row in local if row.get("active") is True]
+    if (not any(re.fullmatch(r"必要なデータをダウンロードします\s*\([^)]*\)", label) for label in descriptions)
+            or _FORBIDDEN.search(" ".join(descriptions))):
+        return None
+    return choose_button(dict(snapshot, nodes=local), r"^ダウンロード$")
+
+
+def visible_action_sheet(snapshot):
+    return any(row.get("active") is True and "/SimpleActionSheet(Clone)/" in str(row.get("path", ""))
+               for row in snapshot.get("nodes", []))
+
+
 def mapped_point(snapshot, node, xml, package, image_size):
     screen = snapshot.get("screen", {})
     width, height = screen.get("width"), screen.get("height")
@@ -139,6 +165,7 @@ class UiExplorer:
         self.input_errors = {}
         self.title_deferrals = {}
         self.title_instance = None
+        self.stop_reason = None
 
     def _input_error(self, code):
         self.input_errors[code] = self.input_errors.get(code, 0) + 1
@@ -168,14 +195,24 @@ class UiExplorer:
     def _tap(self, snapshot, node, reason, frame):
         # Refresh object identity/bounds after selection, then obtain a current
         # Android tree. Coordinates never come from screenshot/OCR detection.
-        began = time.monotonic()
+        query_began = time.monotonic()
         fresh = self._snapshot()
+        # Queueing for the Unity thread precedes generation of this response;
+        # it is not the age of the freshly returned UI tree.
+        observed_at = time.monotonic()
         current = next((item for item in buttons(fresh) if item.get("instance_id") == node.get("instance_id")
                         and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
         if fresh.get("ok") is not True or current is None:
             return self._input_error("selected_node_no_longer_present")
         if reason == "observed_title" and (blocked := title_block_reason(fresh, current)):
             return self._input_error(blocked)
+        if reason == "observed_title" and visible_action_sheet(fresh):
+            return self._input_error("title_obscured_by_action_sheet")
+        if reason == "observed_resource_download_confirmation":
+            confirmation = download_confirmation(fresh)
+            if (confirmation is None or confirmation.get("instance_id") != current.get("instance_id")
+                    or confirmation.get("path") != current.get("path")):
+                return self._input_error("download_confirmation_changed")
         raw = self.qa.adb("exec-out", "screencap", "-p", binary=True)
         if raw[:8] != b"\x89PNG\r\n\x1a\n":
             return self._input_error("display_capture_unavailable")
@@ -193,7 +230,7 @@ class UiExplorer:
             point = mapped_point(fresh, current, xml, _PACKAGE, size)
         except ValueError as error:
             return self._input_error(str(error))
-        if time.monotonic() - began > 10:
+        if time.monotonic() - observed_at > 10:
             return self._input_error("ui_observation_became_stale")
         prefix = self.qa.artifacts / f"ui-action-{len(self.actions) + 1:02d}"
         prefix.with_suffix(".png").write_bytes(raw)
@@ -202,6 +239,8 @@ class UiExplorer:
         action = {"reason": reason, "frame": frame, "instance_id": current.get("instance_id"),
                   "generation": fresh.get("generation"), "path": current["path"], "label": current["label"],
                   "point": point, "coordinate_source": "fresh_unity_tree_and_android_surface", "performed": False}
+        action["ui_query_milliseconds"] = round((observed_at - query_began) * 1000)
+        action["observation_to_input_milliseconds"] = round((time.monotonic() - observed_at) * 1000)
         hold = getattr(self.qa, "touch_hold_ms", 0)
         action["touch_hold_milliseconds"] = hold
         if hold == 150:
@@ -220,6 +259,7 @@ class UiExplorer:
 
     def _restart(self):
         if self.goal_index >= len(_GOALS):
+            self.stopped, self.stop_reason = True, "all_goal_outcomes_collected"
             return
         self.qa.adb("shell", "am", "force-stop", _PACKAGE)
         self.qa.adb("shell", "am", "start", "-W", "-n", _PACKAGE + "/com.google.firebase.MessagingUnityPlayerActivity",
@@ -240,21 +280,30 @@ class UiExplorer:
         else:
             code = str(snapshot.get("error", "unknown"))
             self.snapshot_errors[code] = self.snapshot_errors.get(code, 0) + 1
-        if self.stopped or snapshot.get("ok") is not True or len(self.actions) >= 30 or time.monotonic() - self.last_action < 12:
+        if len(self.actions) >= 30:
+            self.stopped, self.stop_reason = True, "action_limit_reached"
+        if self.stopped or snapshot.get("ok") is not True or time.monotonic() - self.last_action < 12:
             return
         visible = " ".join(text(row.get("text", "")) for row in snapshot.get("nodes", []) if isinstance(row, dict))
         if _ERROR.search(visible):
             self.outcomes.append({"goal": self.pending[0] if self.pending else "startup", "status": "game_error_observed", "frame": frame})
             if self.pending is None:
-                self.stopped = True
+                self.stopped, self.stop_reason = True, "observed_startup_error"
                 return
             self.goal_index += 1
             self.pending = None
             self._restart()
             return
+        download = download_confirmation(snapshot)
+        if download is not None:
+            self._tap(snapshot, download, "observed_resource_download_confirmation", frame)
+            return
         close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
-        if close is not None and re.search(r"dialog|modal|popup", str(close.get("path", "")), re.I):
+        if close is not None and re.search(r"dialog|modal|popup|sheet", str(close.get("path", "")), re.I):
             self._tap(snapshot, close, "observed_dialog", frame)
+            return
+        if visible_action_sheet(snapshot):
+            self.title_deferrals["unhandled_action_sheet"] = self.title_deferrals.get("unhandled_action_sheet", 0) + 1
             return
         # In the original Title scene, the full-canvas TitleButton and
         # UIContentArea/TAP TO START label are siblings, not parent/child.
@@ -293,6 +342,8 @@ class UiExplorer:
                     self.outcomes.append({"goal": goal, "status": "target_not_present_in_observed_tree", "frame": frame})
                     self.goal_index += 1
                     self.wait_frames = 0
+                    if self.goal_index >= len(_GOALS):
+                        self.stopped, self.stop_reason = True, "all_goal_outcomes_collected"
 
     def report(self):
         return {"qa_only": True, "actions": self.actions, "outcomes": self.outcomes,
@@ -300,4 +351,5 @@ class UiExplorer:
                 "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
                 "input_errors": self.input_errors,
                 "title_deferrals": self.title_deferrals,
+                "stop_reason": self.stop_reason,
                 "gameplay_rpc_injected_during_exploration": False, "menu_success_requires_evidence_review": True}

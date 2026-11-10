@@ -452,8 +452,9 @@ def main():
     parser.add_argument("--touch-hold-ms", type=int, choices=(0, 150), default=0,
                         help="QA UI input differential: 0 uses Android tap; 150 uses a stationary short touch")
     args = parser.parse_args()
-    if not 90 <= args.duration <= (900 if args.tree_title_input else 180) or args.interval < 5 or args.startup_timeout <= 0:
-        parser.error("duration must be 90..180 (or 900 with tree input), interval >=5, and startup-timeout positive")
+    maximum_duration = 1800 if args.qa_ui_explore else 900 if args.tree_title_input else 180
+    if not 90 <= args.duration <= maximum_duration or args.interval < 5 or args.startup_timeout <= 0:
+        parser.error(f"duration must be 90..{maximum_duration}, interval >=5, and startup-timeout positive")
     if args.max_title_taps > 1 and not args.tap_observed_title:
         parser.error("multiple title actions require tap-observed-title")
     if args.max_title_taps > 2 and not args.tree_title_input:
@@ -555,6 +556,9 @@ def main():
             result["captures"].append(qa.capture_game(f"game-{index:02d}-{int(elapsed):03d}s"))
             if explorer is not None:
                 explorer.step(index)
+                if explorer.stopped:
+                    result["observation_end_reason"] = explorer.stop_reason
+                    break
             elif args.tree_title_input and args.tap_observed_title and len(getattr(qa, "title_actions", [])) < args.max_title_taps:
                 current = qa._observe_title_frame(f"interactive-title-{index:02d}", inspect_loading=True)
                 cooled = time.monotonic() - getattr(qa, "last_title_tap_at", -1000) >= 20
