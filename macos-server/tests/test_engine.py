@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import sqlite3
 import sys
 import threading
 import time
@@ -244,6 +245,170 @@ def test_live_asset_reference_rejects_invalid_or_sparse_seeded_unit(initial_inve
         (directory / ("master-json/" + table + ".json")).write_text(json.dumps(tables[table]))
     with pytest.raises(RuntimeError):
         engine._quest_list_asset_reference(_live_asset_response(), user, directory)
+
+
+@pytest.mark.parametrize("captured,expected_count", (((0, 1, 2, 5, 6, 7), 8), ((0, 1, 5, 6, 7, 8), 9)))
+def test_tutorial_assets_append_recorded_six_in_order_with_full_triple_dedup(initial_inventory, captured, expected_count):
+    user, _tables, directory = initial_inventory
+    replay = _client_schema().response_type("/api.Tutorial/StartQuest")()
+    deck = replay.result.userInfos.add().userDeck
+    for index, character in enumerate(captured[:5], 1):
+        deck.cards.add(index=index, displayCharacterId="char-" + str(character),
+            displayCostumeId="costume-" + str(character), displayHairId="hair-" + str(character))
+    character = captured[-1]
+    deck.extraCharacterInfos.add(position=6, characterId="char-" + str(character),
+        costumeId="costume-" + str(character), hairId="hair-" + str(character))
+    assets = _live_asset_response()
+    for character in captured:
+        if character >= 5:
+            assets.characterAssets.add(characterId="char-" + str(character),
+                costumeId="costume-" + str(character), hairId="hair-" + str(character))
+    assert engine._quest_list_asset_reference(assets, user, directory, replay) == expected_count
+    del assets.characterAssets[-1]
+    with pytest.raises(RuntimeError):
+        engine._quest_list_asset_reference(assets, user, directory, replay)
+
+
+@pytest.fixture
+def tutorial_replays(initial_inventory):
+    user, tables, directory = initial_inventory
+    schema = _client_schema()
+    originals = Path(__file__).resolve().parents[2] / "data/public-tutorial"
+    if not all((originals / ("tutorial-" + kind + ".pb")).is_file() for kind in ("short", "full")):
+        pytest.skip("Optional pinned public tutorial fixtures are unavailable")
+    public = directory / "public-tutorial"
+    public.mkdir()
+    canonical = {}
+    for kind in ("short", "full"):
+        raw = (originals / ("tutorial-" + kind + ".pb")).read_bytes()
+        (public / ("tutorial-" + kind + ".pb")).write_bytes(raw)
+        canonical[kind] = schema.response_type("/api.Tutorial/StartQuest").FromString(raw)
+    tables.update({"Quest": [{"id": "qt-tutorial-" + kind, "areaId": "area-tutorial", "musicId": "demo-music",
+                               "stageId": "demo-stage", "musicChartPatternId": "demo-pattern"} for kind in canonical],
+        "Area": [{"id": "area-tutorial", "type": 101}], "Music": [{"id": "demo-music"}],
+        "Stage": [{"id": "demo-stage"}], "Emblem": [{"id": "emb-001"}, {"id": "emb-local"}],
+        "SkillEfficacy": [{"id": "demo-efficacy", "skillTargetId": "demo-target"}],
+        "SkillTrigger": [{"id": "demo-trigger"}], "SkillTarget": [{"id": "demo-target"}]})
+    tables["Setting"][0].update(tutorialShortQuestId="qt-tutorial-short", tutorialFullQuestId="qt-tutorial-full")
+    chart_keys = {(chart.number, chart.chartType) for replay in canonical.values() for chart in replay.result.charts}
+    tables["MusicChartPattern"] = [{"id": "demo-pattern", "number": number, "type": kind}
+                                    for number, kind in sorted(chart_keys)]
+    for replay in canonical.values():
+        for character, costume, hair in engine._tutorial_appearances(replay):
+            for name, row in (("Character", {"id": character}),
+                              ("Costume", {"id": costume, "characterId": character}),
+                              ("Hair", {"id": hair, "characterId": character, "wearableCostumeIds": [costume]})):
+                if not any(saved["id"] == row["id"] for saved in tables[name]):
+                    tables[name].append(row)
+        for card in replay.result.userInfos[0].userDeck.cards:
+            if not any(row["id"] == card.cardId for row in tables["Card"]):
+                tables["Card"].append({"id": card.cardId, "characterId": card.displayCharacterId,
+                    **{"skillId" + str(i): skill.skillId for i, skill in enumerate(card.skills, 1)}})
+            if not any(row.cardId == card.cardId for row in user.cards):
+                user.cards.add(cardId=card.cardId, **{field: getattr(card, field) for field in
+                    ("level", "rarity", "vocal", "dance", "visual", "stamina", "mental", "technique",
+                     "skillLevel1", "skillLevel2", "skillLevel3", "skillLevel4")})
+            for skill in card.skills:
+                if not any(row["id"] == skill.skillId for row in tables["Skill"]):
+                    tables["Skill"].append({"id": skill.skillId, "levels": [{"level": skill.skillLevel,
+                        "triggerId": "demo-trigger", "skillDetails": [{"efficacyId": "demo-efficacy"}]}]})
+    for name, rows in tables.items():
+        (directory / "master-json" / (name + ".json")).write_text(json.dumps(rows))
+    user.userPublic.publicUserId, user.user.name, user.user.emblemId = "local-public-id", "Local demo", "emb-local"
+    return user, canonical, tables, directory
+
+
+def _localized_replay(canonical, user):
+    response = type(canonical)()
+    response.CopyFrom(canonical)
+    info = response.result.userInfos[0]
+    info.userId, info.name, info.emblemId = user.userPublic.publicUserId, user.user.name, user.user.emblemId
+    return response
+
+
+@pytest.mark.parametrize("kind,charts,score", (("short", 158, 8813), ("full", 156, 10717)))
+def test_tutorial_replay_keeps_whole_official_record_except_three_local_identity_fields(tutorial_replays, kind, charts, score):
+    user, canonical, _tables, directory = tutorial_replays
+    response = _localized_replay(canonical[kind], user)
+    assert engine._tutorial_replay_reference(response, user, directory, kind) == {
+        "tutorial_replay_" + kind + "_charts": charts, "tutorial_replay_" + kind + "_score": score}
+    user.user.emblemId = "invalid-local-emblem"
+    response.result.userInfos[0].emblemId = canonical[kind].result.userInfos[0].emblemId
+    assert engine._tutorial_replay_reference(response, user, directory, kind)
+
+
+@pytest.mark.parametrize("changed", ("score", "missing-chart", "chart-order", "rank", "card-stat", "missing-extra",
+                                    "user-id", "name", "emblem", "detail", "detail-available", "common", "unknown"))
+def test_tutorial_replay_rejects_record_identity_privacy_or_mutation_changes(tutorial_replays, changed):
+    user, canonical, _tables, directory = tutorial_replays
+    response = _localized_replay(canonical["short"], user)
+    info = response.result.userInfos[0]
+    if changed == "score": info.userResult.score += 1
+    elif changed == "missing-chart": del response.result.charts[-1]
+    elif changed == "chart-order": response.result.charts[0].number += 1
+    elif changed == "rank": response.rankPatterns[0].thresholdScore += 1
+    elif changed == "card-stat": info.userDeck.cards[0].stamina += 1
+    elif changed == "missing-extra": del info.userDeck.extraCharacterInfos[:]
+    elif changed == "user-id": info.userId = "different-private-id"
+    elif changed == "name": info.name = "other name"
+    elif changed == "emblem": info.emblemId = "invalid-emblem"
+    elif changed == "detail": response.result.detailLogId = "private-detail"
+    elif changed == "detail-available": response.result.isDisplayDetailAvailable = True
+    elif changed == "common": response.commonResponse.updatedData.SetInParent()
+    else: response.MergeFromString(b"\xa0\x06\x01")
+    with pytest.raises(RuntimeError):
+        engine._tutorial_replay_reference(response, user, directory, "short")
+
+
+@pytest.mark.parametrize("table,field,value", (("Quest", "musicId", "missing"), ("Quest", "stageId", "missing"),
+    ("Quest", "musicChartPatternId", "missing"), ("SkillEfficacy", "skillTargetId", "missing"),
+    ("Costume", "characterId", "wrong")))
+def test_tutorial_replay_rejects_broken_public_master_references(tutorial_replays, table, field, value):
+    user, canonical, tables, directory = tutorial_replays
+    row = tables[table][0] if table != "Costume" else next(row for row in tables[table] if row["id"] == "cos-skr-schl-00")
+    row[field] = value
+    (directory / "master-json" / (table + ".json")).write_text(json.dumps(tables[table]))
+    with pytest.raises(RuntimeError):
+        engine._tutorial_replay_reference(_localized_replay(canonical["short"], user), user, directory, "short")
+
+
+def test_tutorial_replay_accepts_untargeted_score_efficacy(tutorial_replays):
+    user, canonical, tables, directory = tutorial_replays
+    tables["SkillEfficacy"][0]["skillTargetId"] = ""
+    (directory / "master-json/SkillEfficacy.json").write_text(json.dumps(tables["SkillEfficacy"]))
+    assert engine._tutorial_replay_reference(_localized_replay(canonical["short"], user), user, directory, "short")
+
+
+def test_tutorial_fixture_rejects_unpinned_bytes(tutorial_replays):
+    user, canonical, _tables, directory = tutorial_replays
+    path = directory / "public-tutorial/tutorial-short.pb"
+    path.write_bytes(path.read_bytes() + b"\xa0\x06\x01")
+    with pytest.raises(RuntimeError, match="pinned"):
+        engine._tutorial_replay_reference(_localized_replay(canonical["short"], user), user, directory, "short")
+
+
+def test_tutorial_replay_rejects_parameters_different_from_the_verified_owned_card(tutorial_replays):
+    user, canonical, _tables, directory = tutorial_replays
+    card = next(row for row in user.cards if row.cardId == "card-skr-03-schl-00")
+    card.vocal += 1
+    with pytest.raises(RuntimeError, match="parameters"):
+        engine._tutorial_replay_reference(_localized_replay(canonical["short"], user), user, directory, "short")
+
+
+def test_whole_database_guard_detects_unrelated_marker_and_currency_writes(tmp_path):
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        connection.executescript("CREATE TABLE profiles(snapshot BLOB); INSERT INTO profiles VALUES(X'0102');"
+                                 "CREATE TABLE markers(version INTEGER); INSERT INTO markers VALUES(4);"
+                                 "CREATE TABLE currency(amount INTEGER); INSERT INTO currency VALUES(0);")
+    before = engine._whole_database_state(tmp_path)
+    assert engine._whole_database_state(tmp_path) == before
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        connection.execute("UPDATE markers SET version=5")
+    assert engine._whole_database_state(tmp_path) != before
+    with sqlite3.connect(tmp_path / "state.db") as connection:
+        connection.execute("UPDATE markers SET version=4")
+        connection.execute("UPDATE currency SET amount=1")
+    assert engine._whole_database_state(tmp_path) != before
 
 
 @pytest.fixture

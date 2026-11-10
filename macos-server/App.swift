@@ -331,6 +331,8 @@ VStack(alignment: .leading, spacing: 18) {
                     Button("데이터 폴더") { model.revealData() }
                 }
                 Text("서버 127.0.0.1:50051 · 리소스 127.0.0.1:8080").font(.caption).foregroundStyle(.secondary)
+                Text("튜토리얼 라이브는 원본 기록을 재생합니다. 일반 라이브 계산은 개발 중입니다.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Divider()
                 Text("실행 기록").font(.subheadline.bold())
                 ScrollView {

@@ -11,6 +11,9 @@ from zipfile import ZipFile
 FIXED_FILES = {
     "payload-manifest.json",
     "public-fixtures/manifest.json",
+    "public-tutorial/manifest.json",
+    "public-tutorial/tutorial-short.pb",
+    "public-tutorial/tutorial-full.pb",
     "protocol/idolypride-6.1.1.pb",
     "protocol/idolypride-6.1.1.evidence.json",
     "original-master/response.pb",

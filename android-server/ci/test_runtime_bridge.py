@@ -51,7 +51,10 @@ class InstallationTests(unittest.TestCase):
 
     def test_rejects_private_paths_and_traversal_before_writing(self):
         for name in ("data/state.db", "data/private/session.json", "../outside", "/tmp/outside", "data/../state.db",
-                     "data/public-fixtures/state.db", "data/public-fixtures/responses/private.json"):
+                     "data/public-fixtures/state.db", "data/public-fixtures/responses/private.json",
+                     "data/public-tutorial/state.db", "data/public-tutorial/private.archive",
+                     "data/public-tutorial/responses/other.pb", "data/public-tutorial/other.pb",
+                     "data/public-tutorial/../state.db", "data/public-tutorial/tutorial-short.pb/extra"):
             with self.subTest(path=name), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 archive, digest = self.write_zip(root, {name: b"do not install"})
@@ -69,6 +72,23 @@ class InstallationTests(unittest.TestCase):
             })
             data = bridge.install_bundle(archive, root / "private", digest)
             self.assertEqual((data / "public-fixtures/responses/rule.pb").read_bytes(), b"public terms")
+
+    def test_installs_only_the_fixed_public_tutorial_files_and_preserves_progress(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            contents = {"data/public-tutorial/manifest.json": b'{"fixed_demo":true}',
+                        "data/public-tutorial/tutorial-short.pb": b"sanitized public short replay",
+                        "data/public-tutorial/tutorial-full.pb": b"sanitized public full replay"}
+            archive, digest = self.write_zip(root, contents)
+            files = root / "private"
+            (files / "data").mkdir(parents=True)
+            (files / "data/state.db").write_bytes(b"existing progress")
+            data = bridge.install_bundle(archive, files, digest)
+            for name, expected in contents.items():
+                self.assertEqual((files / name).read_bytes(), expected)
+            self.assertEqual((data / "state.db").read_bytes(), b"existing progress")
+            self.assertEqual(bridge.install_bundle(archive, files, digest), data)
+            self.assertEqual((data / "state.db").read_bytes(), b"existing progress")
 
     def test_corrupt_hash_does_not_mutate_private_storage(self):
         with tempfile.TemporaryDirectory() as temporary:

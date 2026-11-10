@@ -98,6 +98,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         // Keep lifecycle controls visible while diagnostics and logs scroll.
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
+        TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
+        replayNotice.setPadding(0, dp(6), 0, dp(8));
+        body.addView(replayNotice);
         Button launch = button(R.string.launch_client);
         body.addView(launch, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout diagnosticControls = new LinearLayout(this);

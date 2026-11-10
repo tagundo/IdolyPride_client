@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">아이프라 서버</string>
     <string name="server_description">이 기기에서 아이프라 로컬 서버를 실행합니다.</string>
+    <string name="tutorial_replay_notice">튜토리얼 라이브는 원본 기록을 재생합니다. 일반 라이브 계산은 개발 중입니다.</string>
     <string name="start_server">서버 시작</string>
     <string name="stop_server">서버 중지</string>
     <string name="launch_client">아이프라 로컬 실행</string>

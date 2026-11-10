@@ -7,6 +7,7 @@ screenshots, UI XML, logcat and a credential-free result report are retained.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -32,6 +33,10 @@ STARTER_CHARACTERS = frozenset(("char-ai", "char-aoi", "char-chs", "char-hrk", "
 PRIVATE_DATABASE = "files/data/state.db"
 PRESERVED_TABLES = ("profiles", "sessions", "profile_settings")
 QA_UNKNOWN_PB = b"\x80\x4b\x7b"  # Unknown response field 1200, value 123.
+TUTORIAL_REPLAYS = {
+    "short": (31243, "719068e48099082fad71760d65a88047182be8b858a3586f33f87b812103fba7", 158, 8813),
+    "full": (32251, "29ecb24412bd6a2034a8b31803fcb34a8cd6b6632c2f0a96fe0319c15236d562", 156, 10717),
+}
 
 
 class QA:
@@ -339,7 +344,41 @@ def assert_initial_inventory(user, master_dir):
     return {"initial_card_count": len(user.cards), "initial_item_count": len(user.items), "default_unit_slot_count": 5}
 
 
-def assert_live_assets(response, user, master_dir, deck_number=1):
+def load_tutorial_replay(schema, directory, kind):
+    """Read the pinned, sanitized public demonstration, never a user capture."""
+    directory = Path(directory)
+    manifest = json.loads((directory / "manifest.json").read_text())
+    size, digest, charts, score = TUTORIAL_REPLAYS[kind]
+    entry = next(row for row in manifest["replays"] if row["kind"] == kind)
+    expected_file = "tutorial-" + kind + ".pb"
+    payload = (directory / expected_file).read_bytes()
+    if (manifest.get("fixed_demo") is not True or manifest.get("schema_sha256") != schema.fingerprint
+            or manifest.get("source_repository") != "Project-Hoshimi/sumire-sr-data"
+            or manifest.get("source_commit") != "c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02"
+            or entry.get("file") != expected_file or entry.get("quest_id") != "qt-tutorial-" + kind
+            or entry.get("bytes") != size or entry.get("sha256") != digest
+            or len(payload) != size or hashlib.sha256(payload).hexdigest() != digest):
+        raise RuntimeError("Tutorial QA needs the exact pinned sanitized public demonstration")
+    canonical = schema.response_type("/api.Tutorial/StartQuest").FromString(payload)
+    if (len(canonical.result.userInfos) != 1 or len(canonical.result.charts) != charts
+            or canonical.result.userInfos[0].userResult.score != score
+            or canonical.result.userInfos[0].userId or canonical.result.userInfos[0].name
+            or canonical.result.detailLogId or canonical.result.isDisplayDetailAvailable
+            or not canonical.HasField("commonResponse") or canonical.commonResponse.SerializeToString()):
+        raise RuntimeError("Tutorial QA canonical record contains identity, state updates or invalid totals")
+    return canonical
+
+
+def tutorial_assets(canonical):
+    deck = canonical.result.userInfos[0].userDeck
+    assets = [(row.displayCharacterId, row.displayCostumeId, row.displayHairId) for row in deck.cards]
+    assets.extend((row.characterId, row.costumeId, row.hairId) for row in deck.extraCharacterInfos)
+    if len(deck.cards) != 5 or len(deck.extraCharacterInfos) != 1 or len(set(assets)) != 6:
+        raise RuntimeError("Tutorial QA needs all six real recorded model appearances")
+    return assets
+
+
+def assert_live_assets(response, user, master_dir, deck_number=1, *, replay=None):
     """Check the native fixture's explicit owned unit against public references.
 
     The starter unit stores its live appearance IDs in every slot. Comparing
@@ -377,14 +416,94 @@ def assert_live_assets(response, user, master_dir, deck_number=1):
                 or not compatible):
             raise RuntimeError("ListAsset QA unit has an unowned or incompatible explicit appearance")
         expected.append((owner, position.costumeId, position.hairId))
+    if len({row[0] for row in expected}) != 5:
+        raise RuntimeError("ListAsset QA needs five distinct owned unit characters")
+    if replay is not None:
+        for owner, costume_id, hair_id in tutorial_assets(replay):
+            costume, hair = costumes.get(costume_id), hairs.get(hair_id)
+            if (owner not in characters or costume is None or hair is None
+                    or costume.get("characterId") != owner or hair.get("characterId") != owner):
+                raise RuntimeError("Tutorial ListAsset has an unresolved recorded appearance")
+            appearance = (owner, costume_id, hair_id)
+            if appearance not in expected:
+                expected.append(appearance)
     exact = type(response)()
     exact.commonResponse.SetInParent()
     for owner, costume, hair in expected:
         exact.characterAssets.add(characterId=owner, costumeId=costume, hairId=hair)
-    if (len({row[0] for row in expected}) != 5
-            or response.SerializeToString(deterministic=True) != exact.SerializeToString(deterministic=True)):
-        raise RuntimeError("ListAsset must return exactly five owned slot-ordered appearances without state updates")
+    if response.SerializeToString(deterministic=True) != exact.SerializeToString(deterministic=True):
+        raise RuntimeError("ListAsset must return the exact ordered owned unit and required recorded appearances without state updates")
     return len(response.characterAssets)
+
+
+def assert_tutorial_replay(response, canonical, user, master_dir, kind):
+    """Compare every replay value, permitting only the local display identity."""
+    master = Path(master_dir)
+    tables = {name: json.loads((master / (name + ".json")).read_text()) for name in
+              ("Card", "Character", "Costume", "Hair", "CardParameter", "CardRarity", "Skill", "Setting", "Emblem",
+               "Quest", "Area", "Music", "MusicChartPattern", "Stage", "SkillEfficacy", "SkillTrigger", "SkillTarget")}
+    indexed = {name: {row["id"]: row for row in tables[name]} for name in
+               ("Card", "Character", "Costume", "Hair", "Skill", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget")}
+    setting = tables["Setting"][0]
+    quest_id = setting["tutorial" + kind.capitalize() + "QuestId"]
+    quests = [row for row in tables["Quest"] if row["id"] == quest_id]
+    if (quest_id != "qt-tutorial-" + kind or len(quests) != 1
+            or quests[0]["areaId"] not in {row["id"] for row in tables["Area"] if row["type"] == 101}
+            or quests[0]["musicId"] not in {row["id"] for row in tables["Music"]}
+            or quests[0]["stageId"] not in {row["id"] for row in tables["Stage"]}):
+        raise RuntimeError("Tutorial replay quest, area, music or stage does not resolve to the public master")
+    pattern = {row["number"]: row for row in tables["MusicChartPattern"] if row["id"] == quests[0]["musicChartPatternId"]}
+    if (not pattern or any(chart.number not in pattern or chart.chartType != pattern[chart.number]["type"]
+                           for chart in canonical.result.charts)):
+        raise RuntimeError("Tutorial replay timeline does not match the public music chart pattern")
+    for owner, costume_id, hair_id in tutorial_assets(canonical):
+        hair = indexed["Hair"].get(hair_id, {})
+        allowed, denied = hair.get("wearableCostumeIds", []), hair.get("notWearableCostumeIds", [])
+        compatible = not allowed and not denied or costume_id in allowed or bool(denied) and costume_id not in denied
+        if (owner not in indexed["Character"] or costume_id not in indexed["Costume"]
+                or hair_id not in indexed["Hair"] or indexed["Costume"][costume_id]["characterId"] != owner
+                or indexed["Hair"][hair_id]["characterId"] != owner or not compatible):
+            raise RuntimeError("Tutorial replay has an invalid public appearance reference")
+    for card in canonical.result.userInfos[0].userDeck.cards:
+        public = indexed["Card"].get(card.cardId)
+        if public is None or public["characterId"] != card.displayCharacterId or card.level != 1:
+            raise RuntimeError("Tutorial replay card does not resolve to its level-one public master")
+        parameter = [row for row in tables["CardParameter"] if row["id"] == public["cardParameterId"] and row["level"] == 1]
+        rarity = [row for row in tables["CardRarity"] if row["rarity"] == card.rarity]
+        if len(parameter) != 1 or len(rarity) != 1 or card.rarity != public["initialRarity"]:
+            raise RuntimeError("Tutorial replay card parameters do not resolve to the public master")
+        for name in ("vocal", "dance", "visual", "stamina"):
+            base = int(parameter[0]["staminaValue"] if name == "stamina" else parameter[0]["value"])
+            value = (base * int(public[name + "RatioPermil"]) // 1000) * int(rarity[0]["parameterBonusPermil"]) // 1000
+            if getattr(card, name) != value or name == "stamina" and card.startStamina != value:
+                raise RuntimeError("Tutorial replay numeric parameters differ from the public master")
+        if card.mental != setting["cardDefaultMental"] or card.technique != setting["cardDefaultTechnique"]:
+            raise RuntimeError("Tutorial replay mental/technique differ from the public master")
+        for skill in card.skills:
+            public_skill = indexed["Skill"].get(skill.skillId)
+            levels = [row for row in public_skill["levels"] if row["level"] == skill.skillLevel] if public_skill else []
+            if (skill.skillId not in [public.get("skillId" + str(i)) for i in (1, 2, 3, 4)]
+                    or len(levels) != 1):
+                raise RuntimeError("Tutorial replay skill does not resolve to the public master")
+            level = levels[0]
+            if level.get("triggerId") and level["triggerId"] not in indexed["SkillTrigger"]:
+                raise RuntimeError("Tutorial replay skill trigger does not resolve to the public master")
+            for detail in level.get("skillDetails", []):
+                efficacy = indexed["SkillEfficacy"].get(detail.get("efficacyId"))
+                if (efficacy is None or efficacy.get("skillTargetId") and efficacy["skillTargetId"] not in indexed["SkillTarget"]
+                        or detail.get("triggerId") and detail["triggerId"] not in indexed["SkillTrigger"]):
+                    raise RuntimeError("Tutorial replay skill detail does not resolve to the public master")
+    expected = type(canonical)()
+    expected.CopyFrom(canonical)
+    info = expected.result.userInfos[0]
+    info.userId, info.name = user.userPublic.publicUserId, user.user.name
+    if user.user.emblemId in indexed["Emblem"]:
+        info.emblemId = user.user.emblemId
+    if (not info.userId or not info.name or info.emblemId not in indexed["Emblem"]
+            or response.SerializeToString(deterministic=True) != expected.SerializeToString(deterministic=True)):
+        raise RuntimeError("Tutorial reply differs from the original fixed demonstration beyond local display identity")
+    return {"tutorial_replay_" + kind + "_charts": len(response.result.charts),
+            "tutorial_replay_" + kind + "_score": response.result.userInfos[0].userResult.score}
 
 
 def _without_initial_inventory(user):
@@ -453,6 +572,16 @@ def _checkpoint(db):
         raise RuntimeError("Synthetic emulator database failed SQLite integrity check")
     if db.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0] != 0:
         raise RuntimeError("Synthetic emulator database WAL could not be checkpointed")
+
+
+def private_database_snapshot(qa):
+    """Keep the complete synthetic DB only in memory and a private temp dir."""
+    with tempfile.TemporaryDirectory(prefix="idoly-native-readonly-") as directory:
+        path = _copy_private_database(qa, directory)
+        with sqlite3.connect(path) as db:
+            if db.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                raise RuntimeError("Synthetic emulator read-only database failed integrity check")
+            return tuple(db.iterdump())
 
 
 def _preserved_tables(db):
@@ -546,6 +675,7 @@ def main():
     parser.add_argument("--apk", type=Path, required=True)
     parser.add_argument("--descriptor-set", type=Path, default=Path("data/protocol/idolypride-6.1.1.pb"))
     parser.add_argument("--master-dir", type=Path, default=Path("data/master-json"))
+    parser.add_argument("--public-tutorial-dir", type=Path, default=Path("data/public-tutorial"))
     parser.add_argument("--artifacts", type=Path, default=Path("data/android-server-qa"))
     parser.add_argument("--adb", default="adb")
     parser.add_argument("--serial", default="emulator-5554")
@@ -566,6 +696,7 @@ def main():
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         grpc_port, asset_port = qa.forward(50051), qa.forward(8080)
         schema = Schema.from_descriptor_set(args.descriptor_set)
+        replays = {kind: load_tutorial_replay(schema, args.public_tutorial_dir, kind) for kind in TUTORIAL_REPLAYS}
         print("Starting the server through its native UI", flush=True)
         qa.tap("서버 시작", "01-start")
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
@@ -607,8 +738,15 @@ def main():
             request = schema.request_type("/api.Quest/ListAsset")(
                 questId=quest_id, deckNumber=deck.number, buddyDeckName=deck.name)
             assets = rpc(schema, grpc_port, "/api.Quest/ListAsset", login.gameAuthToken, request)
-            result["quest_list_asset_count"] = assert_live_assets(assets, user, args.master_dir, deck.number)
+            kind = {"qt-tutorial-full": "full", "qt-tutorial-short": "short"}.get(quest_id)
+            count = assert_live_assets(assets, user, args.master_dir, deck.number,
+                                       replay=replays[kind] if kind else None)
+            if kind:
+                result["quest_list_asset_tutorial_" + kind + "_count"] = count
+            else:
+                result["quest_list_asset_count"] = count
             result[flag] = True
+        result["tutorial_replay_assets_covered"] = True
         rental = schema.request_type("/api.Quest/ListAsset")(
             questId=result["quest_catalog_first_quest"], deckNumber=deck.number, buddyDeckName=deck.name)
         rental.userBuddyDeckPositions.add(position=1, cardId=user.deckPositions[0].cardId,
@@ -732,6 +870,7 @@ def main():
         wait_server(schema, grpc_port, expected=False, timeout=30)
         qa.adb("shell", "am", "force-stop", PACKAGE)
         verify_upgrade_database(qa, preserved)
+        tutorial_database_before = private_database_snapshot(qa)
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         qa.tap("서버 시작", "14-inventory-persistence-restart")
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
@@ -739,11 +878,23 @@ def main():
         if persisted.SerializeToString(deterministic=True) != repaired_v3.SerializeToString(deterministic=True):
             raise RuntimeError("Marker-4 restart changed the completed starter inventory or other snapshot fields")
         result["starter_inventory_persisted"] = True
+        for kind, canonical in replays.items():
+            request = schema.request_type("/api.Tutorial/StartQuest")(questId="qt-tutorial-" + kind)
+            replay = rpc(schema, grpc_port, "/api.Tutorial/StartQuest", login.gameAuthToken, request)
+            result.update(assert_tutorial_replay(replay, canonical, persisted, args.master_dir, kind))
+            result["tutorial_replay_" + kind] = True
+        after_replays = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
+        if after_replays.SerializeToString(deterministic=True) != persisted.SerializeToString(deterministic=True):
+            raise RuntimeError("Tutorial demonstration changed the whole user snapshot")
+        result.update(tutorial_replay_canonical=True, tutorial_replay_master_references=True)
         qa.capture("15-inventory-persisted")
         qa.tap("서버 중지", "16-final-stop")
         wait_server(schema, grpc_port, expected=False, timeout=30)
         qa.adb("shell", "am", "force-stop", PACKAGE)
         verify_upgrade_database(qa, preserved)
+        if private_database_snapshot(qa) != tutorial_database_before:
+            raise RuntimeError("Tutorial demonstration changed synthetic identity, session, settings, marker or snapshot database rows")
+        result["tutorial_replay_readonly"] = True
         result.update(upgrade_identity_preserved=True, upgrade_sessions_preserved=True, upgrade_settings_preserved=True)
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)

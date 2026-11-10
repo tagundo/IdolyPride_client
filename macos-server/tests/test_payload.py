@@ -99,6 +99,32 @@ def test_public_terms_help_manifest_and_response_paths_are_supported(tmp_path):
     assert (data / "public-fixtures/responses/api.Master-Rule-public.pb").read_bytes() == b"public terms protobuf"
 
 
+def test_only_the_three_fixed_public_tutorial_files_are_installed_and_preserved(tmp_path):
+    contents = dict(PUBLIC)
+    contents.update({"data/public-tutorial/manifest.json": b'{"schema":1}',
+                     "data/public-tutorial/tutorial-short.pb": b"sanitized public short replay",
+                     "data/public-tutorial/tutorial-full.pb": b"sanitized public full replay"})
+    source = archive(tmp_path / "ServerData.zip", contents)
+    data = tmp_path / "data"
+    assert install_payload(source, data) == {"copied": 9, "preserved": 0}
+    database = data / "state.db"
+    database.write_bytes(b"existing local account")
+    existing = data / "public-tutorial/tutorial-short.pb"
+    existing.write_bytes(b"existing owner file")
+    assert install_payload(source, data) == {"copied": 0, "preserved": 9}
+    assert existing.read_bytes() == b"existing owner file"
+    assert database.read_bytes() == b"existing local account"
+
+
+@pytest.mark.parametrize("path", ["data/public-tutorial/private.archive", "data/public-tutorial/other.pb",
+    "data/public-tutorial/nested/tutorial-short.pb", "data/public-tutorial/../state.db",
+    "data/public-tutorial/tutorial-full.pb/secret", "data/public-tutorial/tutorial-short.pb.bak",
+    "data/public-tutorial/tutorial-short\\.pb", "data/public-tutorial/manifest.json/private"])
+def test_public_tutorial_paths_reject_private_arbitrary_and_traversal_files(path):
+    with pytest.raises(ValueError):
+        member_path(path)
+
+
 @pytest.mark.parametrize("path", ["data/public-fixtures/private.archive", "data/public-fixtures/responses/nested/private.pb",
                                   "data/public-fixtures/responses/../state.db", "data/public-fixtures/responses/token.json",
                                   "data/public-fixtures/responses/.pb", "data/public-fixtures/responses/unsafe\\name.pb"])

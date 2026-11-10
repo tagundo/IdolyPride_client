@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import signal
 import socket
+import sqlite3
 import sys
 import threading
 import time
@@ -14,6 +16,10 @@ import time
 from payload import install_payload
 
 _OUTPUT_LOCK = threading.Lock()
+_TUTORIAL_PINS = {
+    "short": ("719068e48099082fad71760d65a88047182be8b858a3586f33f87b812103fba7", 158, 8813),
+    "full": ("29ecb24412bd6a2034a8b31803fcb34a8cd6b6632c2f0a96fe0319c15236d562", 156, 10717),
+}
 
 
 def emit(event: str, **values):
@@ -301,7 +307,7 @@ def _quest_tutorial_pending(user):
     return not starts or starts[0].step < 150
 
 
-def _quest_list_asset_reference(response, user, data_dir):
+def _quest_list_asset_reference(response, user, data_dir, tutorial=None):
     """Verify the seeded explicit unit against owned state and public tables.
 
     This smoke fixture has explicit compatible costume/hair IDs in every slot;
@@ -351,9 +357,126 @@ def _quest_list_asset_reference(response, user, data_dir):
             raise RuntimeError("Live asset unit has an unowned or incompatible card/character/appearance")
         seen_characters.add(character_id)
         expected.characterAssets.add(characterId=character_id, costumeId=position.costumeId, hairId=position.hairId)
+    if tutorial is not None:
+        seen = {(row.characterId, row.costumeId, row.hairId) for row in expected.characterAssets}
+        for triple in _tutorial_appearances(tutorial):
+            if triple not in seen:
+                expected.characterAssets.add(characterId=triple[0], costumeId=triple[1], hairId=triple[2])
+                seen.add(triple)
     if response.SerializeToString(deterministic=True) != expected.SerializeToString(deterministic=True):
-        raise RuntimeError("Quest.ListAsset must return exactly five ordered owned appearances and an empty common response")
-    return 5
+        raise RuntimeError("Quest.ListAsset must return ordered owned appearances, required recorded extras and an empty common response")
+    return len(expected.characterAssets)
+
+
+def _tutorial_fixture(response_type, data_dir, kind):
+    raw = (Path(data_dir) / "public-tutorial" / ("tutorial-" + kind + ".pb")).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != _TUTORIAL_PINS[kind][0]:
+        raise RuntimeError("Public tutorial fixture does not match the pinned sanitized official capture")
+    return response_type.FromString(raw)
+
+
+def _tutorial_appearances(replay):
+    if len(replay.result.userInfos) != 1:
+        raise RuntimeError("Tutorial replay must retain the single captured demonstration user")
+    deck = replay.result.userInfos[0].userDeck
+    if ([row.index for row in deck.cards] != [1, 2, 3, 4, 5]
+            or len(deck.extraCharacterInfos) != 1 or deck.extraCharacterInfos[0].position != 6):
+        raise RuntimeError("Tutorial replay needs the five recorded cards and its sixth appearance")
+    return [(row.displayCharacterId, row.displayCostumeId, row.displayHairId) for row in deck.cards] + [
+        (row.characterId, row.costumeId, row.hairId) for row in deck.extraCharacterInfos]
+
+
+def _tutorial_replay_reference(response, user, data_dir, kind):
+    """Compare the complete official recording after the three local identity fields."""
+    canonical = _tutorial_fixture(type(response), data_dir, kind)
+    master = Path(data_dir) / "master-json"
+
+    def rows(name):
+        values = json.loads((master / (name + ".json")).read_text())
+        if not isinstance(values, list) or not values or any(not isinstance(row, dict) for row in values):
+            raise RuntimeError("Tutorial replay needs a public " + name + " table")
+        return values
+
+    def indexed(name):
+        values = rows(name)
+        result = {row.get("id"): row for row in values}
+        if len(result) != len(values) or any(not isinstance(key, str) or not key for key in result):
+            raise RuntimeError("Tutorial replay needs unique public " + name + " identities")
+        return result
+
+    tables = {name: indexed(name) for name in ("Quest", "Area", "Music", "Stage", "Emblem", "Card",
+              "Character", "Costume", "Hair", "Skill", "SkillEfficacy", "SkillTrigger", "SkillTarget")}
+    settings = rows("Setting")
+    field = "tutorial" + kind.capitalize() + "QuestId"
+    quest_id = settings[0].get(field) if len(settings) == 1 else None
+    quest = tables["Quest"].get(quest_id)
+    if (quest_id != "qt-tutorial-" + kind or quest is None
+            or quest.get("areaId") not in tables["Area"]
+            or tables["Area"][quest["areaId"]].get("type") != 101
+            or quest.get("musicId") not in tables["Music"] or quest.get("stageId") not in tables["Stage"]):
+        raise RuntimeError("Tutorial quest/music/stage does not resolve through the bundled master")
+    chart_keys = {(row.get("number"), row.get("type")) for row in rows("MusicChartPattern")
+                  if row.get("id") == quest.get("musicChartPatternId")}
+    if not chart_keys or any((row.number, row.chartType) not in chart_keys for row in canonical.result.charts):
+        raise RuntimeError("Recorded tutorial charts do not resolve through the quest music pattern")
+    for character, costume, hair in _tutorial_appearances(canonical):
+        costume_row, hair_row = tables["Costume"].get(costume), tables["Hair"].get(hair)
+        allowed = (hair_row.get("wearableCostumeIds") or []) if hair_row else []
+        denied = (hair_row.get("notWearableCostumeIds") or []) if hair_row else []
+        wearable = (not allowed and not denied) or costume in allowed or (bool(denied) and costume not in denied)
+        if (character not in tables["Character"] or costume_row is None or hair_row is None
+                or costume_row.get("characterId") != character or hair_row.get("characterId") != character or not wearable):
+            raise RuntimeError("Recorded tutorial appearance does not resolve through the bundled master")
+    owned_cards = {row.cardId: row for row in user.cards}
+    for card in canonical.result.userInfos[0].userDeck.cards:
+        public = tables["Card"].get(card.cardId)
+        if public is None or public.get("characterId") != card.displayCharacterId:
+            raise RuntimeError("Recorded tutorial card does not resolve to its displayed character")
+        owned_card = owned_cards.get(card.cardId)
+        parameters = ("level", "rarity", "vocal", "dance", "visual", "stamina", "mental", "technique",
+                      "skillLevel1", "skillLevel2", "skillLevel3", "skillLevel4")
+        # smoke() has independently checked every initial UserCard against
+        # public CardParameter/Rarity's two integer floors and skill releases.
+        if (owned_card is None or card.startStamina != card.stamina
+                or any(getattr(card, field) != getattr(owned_card, field) for field in parameters)):
+            raise RuntimeError("Recorded tutorial parameters differ from the master-verified initial owned card")
+        for skill in card.skills:
+            public_skill = tables["Skill"].get(skill.skillId)
+            levels = [row for row in public_skill.get("levels", []) if row.get("level") == skill.skillLevel] if public_skill else []
+            if skill.skillId not in {public.get("skillId" + str(i)) for i in range(1, 5)} or len(levels) != 1:
+                raise RuntimeError("Recorded tutorial skill does not resolve through its public card/level")
+            level = levels[0]
+            if level.get("triggerId") and level["triggerId"] not in tables["SkillTrigger"]:
+                raise RuntimeError("Recorded tutorial skill trigger is absent from the public master")
+            for detail in level.get("skillDetails", []):
+                efficacy = tables["SkillEfficacy"].get(detail.get("efficacyId"))
+                if (efficacy is None
+                        or (efficacy.get("skillTargetId") and efficacy["skillTargetId"] not in tables["SkillTarget"])
+                        or (detail.get("triggerId") and detail["triggerId"] not in tables["SkillTrigger"])):
+                    raise RuntimeError("Recorded tutorial skill detail does not resolve through the public master")
+    if not user.userPublic.publicUserId:
+        raise RuntimeError("Tutorial replay smoke needs the local public user ID")
+    expected = type(response)()
+    expected.CopyFrom(canonical)
+    info = expected.result.userInfos[0]
+    info.userId, info.name = user.userPublic.publicUserId, user.user.name
+    if user.user.emblemId in tables["Emblem"]:
+        info.emblemId = user.user.emblemId
+    if info.emblemId not in tables["Emblem"]:
+        raise RuntimeError("Tutorial replay emblem does not resolve through the bundled master")
+    if response.SerializeToString(deterministic=True) != expected.SerializeToString(deterministic=True):
+        raise RuntimeError("Tutorial replay differs from the pinned official result/ranks beyond local identity")
+    chart_count, score = len(response.result.charts), response.result.userInfos[0].userResult.score
+    if (chart_count, score) != _TUTORIAL_PINS[kind][1:]:
+        raise RuntimeError("Tutorial replay changed its official chart count or score")
+    return {"tutorial_replay_" + kind + "_charts": chart_count, "tutorial_replay_" + kind + "_score": score}
+
+
+def _whole_database_state(data_dir):
+    """Keep a logical all-table snapshot in memory; never export account rows."""
+    path = (Path(data_dir) / "state.db").resolve()
+    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
+        return tuple(connection.iterdump())
 
 
 def _quest_catalog_reference(top, main, data_dir, user):
@@ -458,6 +581,9 @@ def smoke(data_dir, server_data, report_path):
               "quest_list_asset": False, "quest_list_asset_tutorial_full": False,
               "quest_list_asset_tutorial_short": False, "quest_list_asset_ordinary_buddy_name": False,
               "quest_list_asset_rental_rejected": False, "quest_list_asset_readonly": False,
+              "tutorial_replay_short": False, "tutorial_replay_full": False,
+              "tutorial_replay_canonical": False, "tutorial_replay_master_references": False,
+              "tutorial_replay_readonly": False, "tutorial_replay_assets_covered": False,
               "initial_inventory_master_backed": False, "default_unit_complete": False,
               "initial_inventory_readonly": False, "starter_inventory_persisted": False,
               "settings_persisted": False, "profile_persisted": False,
@@ -527,6 +653,7 @@ def smoke(data_dir, server_data, report_path):
             raise RuntimeError("Read-only Quest.Top/ListMain changed the local snapshot")
         report["initial_inventory_readonly"] = True
         saved_before_assets = State(Path(data_dir) / "state.db").snapshot("sandbox")
+        whole_before_replays = _whole_database_state(data_dir)
         deck = next(row for row in before.decks if row.number == 1)
         if not deck.name:
             raise RuntimeError("Live asset smoke needs the saved ordinary nonempty deck name")
@@ -536,8 +663,14 @@ def smoke(data_dir, server_data, report_path):
             request = schema.request_type("/api.Quest/ListAsset")(
                 questId=quest_id, deckNumber=1, buddyDeckName=deck.name)
             assets = _rpc(address, schema, "/api.Quest/ListAsset", request, token)
-            report["quest_list_asset_count"] = _quest_list_asset_reference(assets, before, data_dir)
+            kind = quest_id.removeprefix("qt-tutorial-") if quest_id.startswith("qt-tutorial-") else None
+            canonical = _tutorial_fixture(schema.response_type("/api.Tutorial/StartQuest"), data_dir, kind) if kind else None
+            count = _quest_list_asset_reference(assets, before, data_dir, canonical)
+            report["quest_list_asset_tutorial_" + kind + "_count" if kind else "quest_list_asset_count"] = count
             report[flag] = True
+        if (report["quest_list_asset_tutorial_short_count"], report["quest_list_asset_tutorial_full_count"]) != (8, 9):
+            raise RuntimeError("Tutorial ListAsset did not include the selected unit plus the six recorded appearances")
+        report["tutorial_replay_assets_covered"] = True
         rental = schema.request_type("/api.Quest/ListAsset")(
             questId=report["quest_catalog_first_quest"], deckNumber=1, buddyDeckName=deck.name)
         position = next(row for row in before.deckPositions if row.number == 1 and row.position == 1)
@@ -545,12 +678,24 @@ def smoke(data_dir, server_data, report_path):
             costumeId=position.costumeId, hairId=position.hairId, buddyUserId="unsupported-local-rental")
         _rpc(address, schema, "/api.Quest/ListAsset", rental, token, expected_status="12")
         report["quest_list_asset_rental_rejected"] = True
+        settings = json.loads((Path(data_dir) / "master-json/Setting.json").read_text())
+        if len(settings) != 1:
+            raise RuntimeError("Tutorial replay smoke needs the single public Setting row")
+        for kind in ("short", "full"):
+            request = schema.request_type("/api.Tutorial/StartQuest")(
+                questId=settings[0]["tutorial" + kind.capitalize() + "QuestId"])
+            replay = _rpc(address, schema, "/api.Tutorial/StartQuest", request, token)
+            report.update(_tutorial_replay_reference(replay, before, data_dir, kind))
+            report["tutorial_replay_" + kind] = True
+        report["tutorial_replay_canonical"] = report["tutorial_replay_master_references"] = True
         after_assets = _rpc(address, schema, "/api.User/Get", token=token)
         report["quest_list_asset_readonly"] = (
             State(Path(data_dir) / "state.db").snapshot("sandbox") == saved_before_assets
             and after_assets.SerializeToString(deterministic=True) == before.SerializeToString(deterministic=True))
-        if not report["quest_list_asset_readonly"]:
-            raise RuntimeError("Quest.ListAsset success or rejected rental request changed the whole local snapshot")
+        report["tutorial_replay_readonly"] = report["quest_list_asset_readonly"] and (
+            _whole_database_state(data_dir) == whole_before_replays)
+        if not report["tutorial_replay_readonly"]:
+            raise RuntimeError("Tutorial/asset replay requests changed the local snapshot or another database table")
         report["quest_list_asset"] = True
         home_request = schema.request_type("/api.Home/Login")()
         home_request.settingInfo.soundBgm = 37
@@ -605,6 +750,8 @@ def smoke(data_dir, server_data, report_path):
                 "quest_top_list_main", "quest_catalog_readonly", "quest_contest_area_locked", "quest_tutorial_context",
                 "quest_list_asset", "quest_list_asset_tutorial_full", "quest_list_asset_tutorial_short",
                 "quest_list_asset_ordinary_buddy_name", "quest_list_asset_rental_rejected", "quest_list_asset_readonly",
+                "tutorial_replay_short", "tutorial_replay_full", "tutorial_replay_canonical",
+                "tutorial_replay_master_references", "tutorial_replay_readonly", "tutorial_replay_assets_covered",
                 "initial_inventory_master_backed", "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):

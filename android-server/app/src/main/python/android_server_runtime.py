@@ -15,6 +15,8 @@ _RUNTIME = None
 _LAST_STATUS = {"running": False, "message": "서버 대기"}
 _LAST_DIAGNOSTICS = {"running": False}
 _PUBLIC_FOLDERS = {"protocol", "original-master", "master-json"}
+_TUTORIAL_FILES = {"data/public-tutorial/manifest.json", "data/public-tutorial/tutorial-short.pb",
+                   "data/public-tutorial/tutorial-full.pb"}
 
 
 def _digest(path: Path) -> str:
@@ -47,6 +49,7 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
             public = (len(path.parts) >= 3 and path.parts[0] == "data" and path.parts[1] in _PUBLIC_FOLDERS)
             public = public or info.filename == "data/payload-manifest.json"
             public = public or info.filename == "data/public-fixtures/manifest.json"
+            public = public or info.filename in _TUTORIAL_FILES
             public = public or (len(path.parts) == 4 and path.parts[:3] == ("data", "public-fixtures", "responses")
                                 and path.suffix == ".pb")
             if (path.is_absolute() or ".." in path.parts or "\\" in info.filename

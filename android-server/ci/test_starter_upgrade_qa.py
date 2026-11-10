@@ -280,3 +280,104 @@ def test_live_asset_qa_rejects_incomplete_or_unowned_asset_lists(fixture, change
         (master / "Hair.json").write_text(json.dumps(rows))
     with pytest.raises(RuntimeError, match="ListAsset"):
         qa.assert_live_assets(response, user, master)
+
+
+def _tutorial_case(fixture):
+    schema, master, _token, _files, user = fixture
+    cards = {row.cardId: row for row in user.cards}
+    public_cards = {row["id"]: row for row in json.loads((master / "Card.json").read_text())}
+    canonical = schema.response_type("/api.Tutorial/StartQuest")()
+    canonical.commonResponse.SetInParent()
+    info = canonical.result.userInfos.add(index=1, emblemId="emb-001")
+    info.userResult.score = 8813
+    for index, position in enumerate(sorted(user.deckPositions, key=lambda row: row.position), 1):
+        source = cards[position.cardId]
+        card = info.userDeck.cards.add(index=index, cardId=source.cardId,
+            displayCharacterId=public_cards[source.cardId]["characterId"],
+            displayCostumeId=position.costumeId, displayHairId=position.hairId,
+            level=1, rarity=source.rarity, stamina=source.stamina, startStamina=source.stamina,
+            vocal=source.vocal, dance=source.dance, visual=source.visual,
+            mental=source.mental, technique=source.technique)
+        card.skills.add(index=1, skillId=source.skillId1, skillLevel=1)
+    extra = next(row for row in user.characters if row.characterId not in qa.PHOTO_CHARACTERS)
+    info.userDeck.extraCharacterInfos.add(position=6, characterId=extra.characterId,
+        costumeId=extra.liveCostumeId, hairId=extra.liveHairId)
+    canonical.result.charts.add(number=1, chartType=1)
+    canonical.rankPatterns.add(thresholdScore=6000)
+    setting = json.loads((master / "Setting.json").read_text())
+    setting[0]["tutorialShortQuestId"] = "qt-tutorial-short"
+    (master / "Setting.json").write_text(json.dumps(setting))
+    quests = json.loads((master / "Quest.json").read_text())
+    for row in quests:
+        if row["id"] == "qt-tutorial-short":
+            row.update(musicId="music-qa", stageId="stage-qa", musicChartPatternId="chart-qa")
+    (master / "Quest.json").write_text(json.dumps(quests))
+    skill_rows = json.loads((master / "Skill.json").read_text())
+    for row in skill_rows:
+        row["levels"][0].update(triggerId="trigger-qa", skillDetails=[{"efficacyId": "efficacy-qa"}])
+    for name, rows in {"Music": [{"id": "music-qa"}], "Stage": [{"id": "stage-qa"}],
+        "MusicChartPattern": [{"id": "chart-qa", "number": 1, "type": 1}],
+        "Emblem": [{"id": "emb-001"}], "Skill": skill_rows,
+        "SkillTrigger": [{"id": "trigger-qa"}], "SkillTarget": [{"id": "target-qa"}],
+        "SkillEfficacy": [{"id": "efficacy-qa", "skillTargetId": "target-qa"}]}.items():
+        (master / (name + ".json")).write_text(json.dumps(rows))
+    reply = type(canonical)()
+    reply.CopyFrom(canonical)
+    reply.result.userInfos[0].userId = user.userPublic.publicUserId
+    reply.result.userInfos[0].name = user.user.name
+    return schema, master, user, canonical, reply
+
+
+def test_tutorial_qa_compares_complete_record_and_local_display_identity(fixture):
+    _schema, master, user, canonical, reply = _tutorial_case(fixture)
+    assert qa.assert_tutorial_replay(reply, canonical, user, master, "short") == {
+        "tutorial_replay_short_charts": 1, "tutorial_replay_short_score": 8813}
+    assets = _live_assets_response(_schema, master, user)
+    extra = canonical.result.userInfos[0].userDeck.extraCharacterInfos[0]
+    assets.characterAssets.add(characterId=extra.characterId, costumeId=extra.costumeId, hairId=extra.hairId)
+    assert qa.assert_live_assets(assets, user, master, replay=canonical) == 6
+    del assets.characterAssets[-1]
+    with pytest.raises(RuntimeError, match="ListAsset"):
+        qa.assert_live_assets(assets, user, master, replay=canonical)
+
+
+def test_tutorial_qa_permits_master_score_effects_without_an_explicit_target(fixture):
+    _schema, master, user, canonical, reply = _tutorial_case(fixture)
+    rows = json.loads((master / "SkillEfficacy.json").read_text())
+    rows[0]["skillTargetId"] = ""
+    (master / "SkillEfficacy.json").write_text(json.dumps(rows))
+    assert qa.assert_tutorial_replay(reply, canonical, user, master, "short")["tutorial_replay_short_score"] == 8813
+
+
+@pytest.mark.parametrize("changed", ("identity", "detail", "detail-available", "numeric", "timeline", "rank", "state-update"))
+def test_tutorial_qa_rejects_changes_outside_local_display_identity(fixture, changed):
+    _schema, master, user, canonical, reply = _tutorial_case(fixture)
+    if changed == "identity":
+        reply.result.userInfos[0].userId = "remote-capture-id"
+    elif changed == "detail":
+        reply.result.detailLogId = "remote-detail-log"
+    elif changed == "detail-available":
+        reply.result.isDisplayDetailAvailable = True
+    elif changed == "numeric":
+        reply.result.userInfos[0].userDeck.cards[0].stamina += 1
+    elif changed == "timeline":
+        reply.result.charts[0].beats.add(cardIndex=1, score=1)
+    elif changed == "rank":
+        reply.rankPatterns[0].thresholdScore += 1
+    else:
+        reply.commonResponse.updatedData.user.name = "mutated"
+    with pytest.raises(RuntimeError, match="Tutorial reply differs"):
+        qa.assert_tutorial_replay(reply, canonical, user, master, "short")
+
+
+@pytest.mark.parametrize("table,field", (("CardParameter", "value"), ("MusicChartPattern", "type"),
+                                        ("SkillTarget", "id"), ("Stage", "id")))
+def test_tutorial_qa_rejects_mismatched_public_parameters_and_references(fixture, table, field):
+    _schema, master, user, canonical, reply = _tutorial_case(fixture)
+    rows = json.loads((master / (table + ".json")).read_text())
+    for row in rows:
+        row[field] = str(int(row[field]) + 10) if table == "CardParameter" else (
+            row[field] + 1 if isinstance(row[field], int) else "unresolved-master-id")
+    (master / (table + ".json")).write_text(json.dumps(rows))
+    with pytest.raises(RuntimeError, match="Tutorial replay"):
+        qa.assert_tutorial_replay(reply, canonical, user, master, "short")
