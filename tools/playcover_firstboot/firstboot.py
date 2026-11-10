@@ -30,6 +30,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--ax-driver', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=480)
+    parser.add_argument('--compare-canonical-launch', action='store_true',
+        help='After the known UIKit check-in failure, compare normal LaunchServices opening of the prepared installed bundle')
     args = parser.parse_args()
     args.input = args.input.resolve(); args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -79,6 +81,19 @@ def main():
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_frontmost_UI_observed')
         return state
+
+    def game_log(pid, name):
+        captured = command(['/usr/bin/log', 'show', '--last', '3m', '--info', '--style', 'compact',
+            '--predicate', 'processIdentifier == ' + str(int(pid))], timeout=15, check=False)
+        selected = []
+        for line in captured.stdout.splitlines():
+            if re.search(r'token|authorization|bearer|password|firebase|api.?key|idfa|advertising', line, re.I):
+                continue
+            if re.search(r'Unity|Metal|Exception|Error|render|initializ|shader|loading|UISApplicationSupportService', line, re.I):
+                selected.append(line[:1000])
+        text = '\n'.join(selected[-300:]) + '\n'
+        (args.output / name).write_text(text)
+        return text
 
     try:
         # Both payloads are independently hash-pinned by the workflow. Reject
@@ -210,21 +225,55 @@ def main():
         label = info.get('CFBundleDisplayName') or info.get('CFBundleName')
         if label != '아이프라 로컬':
             raise RuntimeError('unexpected_local_game_display_name')
+        # Read the installer-created alias without delaying the first process
+        # observation after the normal game launch. Do not modify either path.
+        alias = Path.home() / 'Applications/PlayCover' / (label + '.app')
+        alias_report = {'path': str(alias), 'exists': alias.is_dir()}
+        if alias.is_dir():
+            alias_info = alias / 'Info.plist'
+            alias_report['info_matches_installed'] = alias_info.read_bytes() == (installed / 'Info.plist').read_bytes()
+            alias_executable = alias / info['CFBundleExecutable']
+            alias_report['executable_is_symlink'] = alias_executable.is_symlink()
+            alias_report['executable_resolved_path'] = str(alias_executable.resolve())
+            verification = command(['/usr/bin/codesign', '--verify', '--deep', '--strict', alias], check=False)
+            alias_report['codesign_verify_exit_code'] = verification.returncode
+            alias_report['codesign_verify_stderr'] = verification.stderr[:8192]
+        (args.output / 'installed-game-alias.json').write_text(json.dumps(alias_report, ensure_ascii=False, indent=2) + '\n')
         observe('03-before-launch')
         observe('04-normal-doubleclick', action='--double-click-label', label=label)
         until = min(deadline, time.monotonic() + 120)
         samples = []
+        phase = 'official_PlayCover_GUI'
+        started_this_phase = False
+        report['launch_phases'] = [{'kind': phase, 'samples': samples}]
         while time.monotonic() < until:
-            state = observe('05-game-observation-' + str(len(samples)), GAME)
+            state = observe('05-game-' + phase + '-' + str(len(samples)), GAME)
             samples.append({'running': state.get('running'), 'pid': state.get('pid')})
             if state.get('running') is True and state.get('pid'):
+                started_this_phase = True
                 report['game_launched'] = True
                 report['game_pid'] = state['pid']
-            if report['game_launched'] and state.get('running') is not True:
+            if started_this_phase and state.get('running') is not True:
+                if args.compare_canonical_launch and phase == 'official_PlayCover_GUI':
+                    original_log = game_log(report['game_pid'], 'game-official-filtered-log.txt')
+                    if 'UIKit applications must check-in via UISApplicationSupportService before creating scenes' not in original_log:
+                        raise RuntimeError('canonical_comparison_requires_observed_UIKit_checkin_failure')
+                    report['launch_phases'][-1]['error'] = 'UIKit_checkin_failure_and_process_exit'
+                    # This is a normal LaunchServices application open, after
+                    # official PlayCover preparation and the observed failure.
+                    # Never execute the game binary directly.
+                    command(['/usr/bin/open', installed])
+                    report['canonical_comparison_attempted'] = True
+                    phase = 'prepared_canonical_LaunchServices'
+                    started_this_phase = False
+                    samples = []
+                    report['launch_phases'].append({'kind': phase, 'samples': samples})
+                    until = min(deadline, time.monotonic() + 120)
+                    continue
                 raise RuntimeError('game_process_exited_after_launch')
             time.sleep(10)
         report['game_samples'] = samples
-        if not report['game_launched']:
+        if not started_this_phase:
             raise RuntimeError('game_process_not_observed')
         report['outcome'] = 'local_game_process_observed_UI_and_loading_require_review'
     except Exception as error:
@@ -235,15 +284,7 @@ def main():
     finally:
         if report.get('game_pid'):
             try:
-                logs = command(['/usr/bin/log', 'show', '--last', '3m', '--style', 'compact',
-                    '--predicate', 'processIdentifier == ' + str(int(report['game_pid']))], timeout=10, check=False)
-                selected = []
-                for line in logs.stdout.splitlines():
-                    if re.search(r'token|authorization|bearer|password|firebase|api.?key|idfa|advertising', line, re.I):
-                        continue
-                    if re.search(r'Unity|Metal|Exception|Error|render|initializ|shader|loading', line, re.I):
-                        selected.append(line[:500])
-                (args.output / 'game-filtered-log.txt').write_text('\n'.join(selected[-200:]) + '\n')
+                game_log(report['game_pid'], 'game-filtered-log.txt')
             except Exception:
                 report['game_log_capture_failed'] = True
         if backend is not None and backend.poll() is None:
