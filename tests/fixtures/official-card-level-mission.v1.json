@@ -1,0 +1,163 @@
+{
+  "schema": 1,
+  "scope": "Sanitized external public evidence for the next card-level mission implementation; no local support or reward equivalence claimed.",
+  "source_repository": "Project-Hoshimi/sumire-sr-data",
+  "source_commit": "c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02",
+  "captures": [
+    {
+      "label": "user",
+      "source_path": "captures/2026-09-14_a12r/raw/00005.resp-plain.User:Get.bin",
+      "size": 36414,
+      "sha256": "bb6bcaf0ba95f01bef57baaa08a7bc0a27394e612512a6dd4a2fb3ce29ddd642",
+      "git_blob": "d3fce1dcae77731e830e7aee89b6f011f011dc03"
+    },
+    {
+      "label": "fresh-user",
+      "source_path": "captures/2026-10-25_fresh_official/raw/00005.resp-plain.User:Get.bin",
+      "size": 6402,
+      "sha256": "ce8509ce43215e4058d29945ae94259c79bd11163b49eb8a097778721b112a76",
+      "git_blob": "6d60a24f0e8c824276f954f9f1adabdfd5eef3b3"
+    },
+    {
+      "label": "fresh-card-enhance",
+      "source_path": "captures/2026-10-25_fresh_official/raw/00040.resp-plain.Card:Enhance.bin",
+      "size": 438,
+      "sha256": "543c2fbe5e94b897dc2fd2245916a3bf8087fa2214fdb884a7daca5d0caeebb6",
+      "git_blob": "5b6a0f2659381aa7f11af11394b3f54881eac634"
+    },
+    {
+      "label": "a12r-card-enhance",
+      "source_path": "captures/2026-09-14_a12r/raw/00040.resp-plain.Card:Enhance.bin",
+      "size": 416,
+      "sha256": "25eadbab6b8c7f34379678086632916e0279a878b42113a43b1e0517c1d1bab7",
+      "git_blob": "123998cfdea6a204cda279b6b2d6947f86838a2f"
+    }
+  ],
+  "mission_master": {
+    "master_version": "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60",
+    "source": "original encrypted archived Mission pack",
+    "pack_file": "2eac5ea2a0d9d8ef470ac877676e7af1b890c893560096cf1bd67dcdb3058791",
+    "pack_sha256": "9c9cbec8de1ef1d7c9fb89b6b4319bf75ea5875fc9d7b13de877bcb43eaa1647",
+    "rows": 7087,
+    "card_level_achievement": {
+      "id": "ms-normal-card_level_achievement",
+      "categoryType": 3,
+      "missionType": 13,
+      "name": "アイドルLv{threshold}到達",
+      "shortDescription": "アイドルLv{threshold}到達",
+      "longDescription": "アイドルLvを{threshold}まであげましょう。",
+      "order": 1,
+      "linkType": 11,
+      "progresses": [
+        {
+          "threshold": "5",
+          "rewardSetId": "rd_auto;stone;;50"
+        },
+        {
+          "threshold": "10",
+          "rewardSetId": "rd_auto;stone;;50"
+        },
+        {
+          "threshold": "20",
+          "rewardSetId": "rd_auto;stone;;50"
+        },
+        {
+          "threshold": "30",
+          "rewardSetId": "rd_auto;stone;;50"
+        },
+        {
+          "threshold": "40",
+          "rewardSetId": "rd_auto;stone;;50"
+        },
+        {
+          "threshold": "50",
+          "rewardSetId": "rd_auto;stone;;70"
+        },
+        {
+          "threshold": "60",
+          "rewardSetId": "rd_auto;stone;;70"
+        },
+        {
+          "threshold": "70",
+          "rewardSetId": "rd_auto;stone;;70"
+        },
+        {
+          "threshold": "80",
+          "rewardSetId": "rd_auto;stone;;70"
+        },
+        {
+          "threshold": "90",
+          "rewardSetId": "rd_auto;stone;;70"
+        },
+        {
+          "threshold": "100",
+          "rewardSetId": "rd_auto;stone;;100"
+        },
+        {
+          "threshold": "110",
+          "rewardSetId": "rd_auto;stone;;100"
+        },
+        {
+          "threshold": "120",
+          "rewardSetId": "rd_auto;stone;;100"
+        },
+        {
+          "threshold": "130",
+          "rewardSetId": "rd_auto;stone;;100"
+        },
+        {
+          "threshold": "140",
+          "rewardSetId": "rd_auto;stone;;100"
+        },
+        {
+          "threshold": "150",
+          "rewardSetId": "rd_auto;stone;;200"
+        },
+        {
+          "threshold": "160",
+          "rewardSetId": "rd_auto;stone;;200"
+        }
+      ],
+      "targetIds": [],
+      "viewConditionId": "",
+      "linkDetail": "",
+      "eventMissionId": "",
+      "companyEnjoyCharacterId": "",
+      "companyEnjoyCharacterMissionCategoryType": 0,
+      "companyTrustMissionCategoryType": 0
+    }
+  },
+  "observations": [
+    {
+      "case": "fresh",
+      "owned_cards_before": 17,
+      "highest_card_level_before": 1,
+      "mission_progress_before": 1,
+      "card_level_after": 2,
+      "mission_progress_after": 2,
+      "current_threshold": 5,
+      "status": "Progress"
+    },
+    {
+      "case": "older",
+      "owned_cards_before": 28,
+      "highest_card_level_before": 41,
+      "mission_progress_before": 41,
+      "card_level_after": 42,
+      "mission_progress_after": 42
+    }
+  ],
+  "implementation_gaps": [
+    "Starter snapshots currently contain no missions.",
+    "Decoded app payload excludes Mission and Condition tables.",
+    "Card.Enhance updates cards/items but omits this mission delta."
+  ],
+  "unproven": [
+    "Removal, synchronization and imported account reconciliation semantics.",
+    "Full Mission.List active catalog, initialization and eligibility.",
+    "Inline rd_auto reward decoding and claim receipts."
+  ],
+  "excluded_data": [
+    "User identifiers, authentication, names and raw account snapshots."
+  ]
+}
