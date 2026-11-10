@@ -1,0 +1,70 @@
+name: Probe native Mac PlayCover host capabilities
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-playcover-host
+  cancel-in-progress: false
+
+jobs:
+  host:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Compile the read-only native capability probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/playcover-host-probe
+          swiftc tools/probe_playcover_host.swift -o "$RUNNER_TEMP/probe-playcover-host" \
+            2> data/playcover-host-probe/compile-stderr.txt
+      - name: Observe actual Metal rendering and existing GUI permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+
+          destination = Path('data/playcover-host-probe')
+          report = {'schema': 1, 'candidate_eligible': False}
+          try:
+              result = subprocess.run([str(Path(os.environ['RUNNER_TEMP']) / 'probe-playcover-host')],
+                  capture_output=True, text=True, timeout=45)
+              if len(result.stdout.encode()) > 65536:
+                  raise ValueError('probe_report_too_large')
+              report = json.loads(result.stdout)
+              assert result.returncode == 0 and report.get('schema') == 1
+              assert report.get('capability_probe_only') is True
+              assert all(report.get(key) is False for key in ('game_installed_or_launched',
+                  'playcover_installed_or_launched', 'screenshots_taken',
+                  'tcc_prompt_requested', 'security_settings_changed'))
+          except (OSError, subprocess.TimeoutExpired, ValueError, AssertionError) as error:
+              report = {'schema': 1, 'candidate_eligible': False, 'probe_error': type(error).__name__}
+          report['source_commit'] = os.environ['GITHUB_SHA']
+          report['source_sha256'] = hashlib.sha256(Path('tools/probe_playcover_host.swift').read_bytes()).hexdigest()
+          (destination / 'result.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
+          print(json.dumps({'candidate_eligible': report.get('candidate_eligible'),
+              'failed_requirements': report.get('failed_requirements', []),
+              'probe_error': report.get('probe_error')}))
+          if report.get('candidate_eligible') is not True:
+              raise SystemExit('Host capability checks failed; no PlayCover/game installation was attempted.')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playcover-host-capabilities-${{ github.run_id }}
+          path: data/playcover-host-probe
+          if-no-files-found: error
+          retention-days: 14
