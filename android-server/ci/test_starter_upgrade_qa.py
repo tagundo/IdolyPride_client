@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from idoly_local.gameplay import (repair_starter_home_positions, repair_starter_inventory,
-                                 repair_starter_roster, seed_starter_profile)
+                                 repair_starter_roster, repair_starter_card_level_mission, seed_starter_profile)
 from idoly_local.schema import Schema
 from idoly_local.state import State
 
@@ -83,6 +83,33 @@ def fixture(tmp_path):
     return schema, master, token, files, user
 
 
+def _with_card_mission(fixture, tmp_path, *, unknown=True):
+    schema, master, token, files, _user = fixture
+    evidence = ROOT / "tests/fixtures/official-card-level-mission.v1.json"
+    (master / "Mission.json").write_text(json.dumps([
+        json.loads(evidence.read_text())["mission_master"]["card_level_achievement"]]))
+    (master / "CardLevel.json").write_text(json.dumps([{"level": 1}]))
+    path = tmp_path / "mission.db"
+    path.write_bytes(files[qa.PRIVATE_DATABASE])
+    if files.get(qa.PRIVATE_DATABASE + "-wal"):
+        path.with_name(path.name + "-wal").write_bytes(files[qa.PRIVATE_DATABASE + "-wal"])
+    state = State(path)
+    assert repair_starter_card_level_mission(state, schema, "sandbox", master)
+    def unknown_fields(raw):
+        user = schema.response_type("/api.User/Get").FromString(raw)
+        user.missions[0].MergeFromString(qa.QA_UNKNOWN_PB)
+        other = user.missions.add(missionId="qa-unrelated-mission", currentThreshold=7,
+                                  progress=3, statusType=1, lastUpdateTime=222)
+        other.MergeFromString(qa.QA_UNKNOWN_PB)
+        return user.SerializeToString()
+    if unknown:
+        state.mutate_snapshot("sandbox", schema.fingerprint, unknown_fields)
+    user = schema.response_type("/api.User/Get").FromString(state.snapshot("sandbox")[0])
+    with sqlite3.connect(path) as db:
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    return schema, master, token, {qa.PRIVATE_DATABASE: path.read_bytes()}, user
+
+
 class Device:
     command = ["fixture-adb", "-s", "emulator-5554"]
 
@@ -111,13 +138,18 @@ class Device:
         return SimpleNamespace(returncode=0)
 
 
-def test_both_native_legacy_fixture_cycles_preserve_all_allowed_state(fixture, tmp_path, monkeypatch):
+@pytest.mark.parametrize("mission_enabled", (False, True))
+def test_both_native_legacy_fixture_cycles_preserve_all_allowed_state(fixture, tmp_path, monkeypatch, mission_enabled):
+    if mission_enabled:
+        fixture = _with_card_mission(fixture, tmp_path)
     schema, master, token, files, user = fixture
     device = Device(files)
     monkeypatch.setattr(qa, "subprocess", SimpleNamespace(run=device.run))
     home1 = next(row.SerializeToString() for row in user.homePositions if row.homePositionType == 1)
     first_preserved = None
-    for legacy_version in (None, 2, 3):
+    mission_enabled = (master / "Mission.json").is_file()
+    original_missions = [row.SerializeToString() for row in user.missions]
+    for legacy_version in ((2, 3) if mission_enabled else (None, 2, 3)):
         legacy_roster = legacy_version is None
         inventory_only = legacy_version == 3
         legacy, preserved = qa.stage_legacy_starter(device, schema, user, master_dir=master,
@@ -141,11 +173,14 @@ def test_both_native_legacy_fixture_cycles_preserve_all_allowed_state(fixture, t
         assert repair_starter_home_positions(state, schema, "sandbox", master) is not inventory_only
         assert repair_starter_inventory(state, schema, "sandbox", master) is True
         assert state.starter_version("sandbox") == 4
+        assert repair_starter_card_level_mission(state, schema, "sandbox", master) is mission_enabled
+        assert state.starter_version("sandbox") == (5 if mission_enabled else 4)
         assert state.authenticated(token, "sandbox")
         user = schema.response_type("/api.User/Get").FromString(state.snapshot("sandbox")[0])
         qa.assert_starter_home_positions(user)
         qa.assert_starter_roster(user)
         qa.assert_initial_inventory(user, master)
+        assert [row.SerializeToString() for row in user.missions] == original_missions
         projected = qa._without_initial_inventory(user)
         if legacy_roster:
             projected = qa._legacy_projection(projected)
@@ -159,6 +194,7 @@ def test_both_native_legacy_fixture_cycles_preserve_all_allowed_state(fixture, t
         qa.verify_upgrade_database(device, first_preserved)
         saved = state.snapshot("sandbox")
         assert not repair_starter_inventory(state, schema, "sandbox", master)
+        assert not repair_starter_card_level_mission(state, schema, "sandbox", master)
         assert state.snapshot("sandbox") == saved
 
 
@@ -381,3 +417,102 @@ def test_tutorial_qa_rejects_mismatched_public_parameters_and_references(fixture
     (master / (table + ".json")).write_text(json.dumps(rows))
     with pytest.raises(RuntimeError, match="Tutorial replay"):
         qa.assert_tutorial_replay(reply, canonical, user, master, "short")
+
+
+def test_new_payload_historical_unmarked_fixture_allows_only_the_new_supported_mission(
+        fixture, tmp_path, monkeypatch):
+    schema, master, token, files, user = _with_card_mission(fixture, tmp_path, unknown=False)
+    device = Device(files)
+    monkeypatch.setattr(qa, "subprocess", SimpleNamespace(run=device.run))
+    legacy, preserved = qa.stage_legacy_starter(device, schema, user, master_dir=master)
+    assert not legacy.missions
+    path = tmp_path / "unmarked.db"
+    path.write_bytes(device.files[qa.PRIVATE_DATABASE])
+    state = State(path)
+    assert repair_starter_roster(state, schema, "sandbox", master)
+    assert repair_starter_home_positions(state, schema, "sandbox", master)
+    assert repair_starter_inventory(state, schema, "sandbox", master)
+    assert state.starter_version("sandbox") == 4
+    assert repair_starter_card_level_mission(state, schema, "sandbox", master)
+    assert state.starter_version("sandbox") == 5 and state.authenticated(token, "sandbox")
+    restored = schema.response_type("/api.User/Get").FromString(state.snapshot("sandbox")[0])
+    assert len(restored.missions) == 1
+    row = restored.missions[0]
+    assert (row.missionId, row.progress, row.currentThreshold, row.statusType) == (
+        "ms-normal-card_level_achievement", 1, 5, 1)
+    projected = qa.starter_mission_projection(restored, legacy, master)
+    assert not projected.missions
+    projected = qa._legacy_home_projection(qa._legacy_projection(qa._without_initial_inventory(projected)))
+    assert projected.SerializeToString(deterministic=True) == legacy.SerializeToString(deterministic=True)
+    device.files = {qa.PRIVATE_DATABASE: path.read_bytes()}
+    qa.verify_upgrade_database(device, preserved)
+    for name, value in (("progress", 2), ("currentThreshold", 10), ("statusType", 2), ("lastUpdateTime", 0)):
+        changed = type(restored)()
+        changed.CopyFrom(restored)
+        setattr(changed.missions[0], name, value)
+        with pytest.raises(RuntimeError, match="unsupported mission delta"):
+            qa.starter_mission_projection(changed, legacy, master)
+    changed = type(restored)()
+    changed.CopyFrom(restored)
+    changed.missions[0].MergeFromString(qa.QA_UNKNOWN_PB)
+    with pytest.raises(RuntimeError, match="unsupported mission delta"):
+        qa.starter_mission_projection(changed, legacy, master)
+    changed.missions.add(missionId="unexpected-extra")
+    with pytest.raises(RuntimeError, match="existing or unrelated missions"):
+        qa.starter_mission_projection(changed, legacy, master)
+
+
+@pytest.mark.parametrize("marker", (4, 6))
+def test_mission_ready_qa_requires_exact_marker_five(fixture, tmp_path, monkeypatch, marker):
+    schema, master, _token, files, _user = _with_card_mission(fixture, tmp_path)
+    path = tmp_path / "wrong-marker.db"
+    path.write_bytes(files[qa.PRIVATE_DATABASE])
+    with sqlite3.connect(path) as db:
+        preserved = qa._preserved_tables(db)
+        db.execute("UPDATE starter_profiles SET version=?", (marker,))
+        db.commit()
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    device = Device({qa.PRIVATE_DATABASE: path.read_bytes()})
+    qa.bind_starter_contract(device, schema, master)
+    monkeypatch.setattr(qa, "subprocess", SimpleNamespace(run=device.run))
+    with pytest.raises(RuntimeError, match="migration marker"):
+        qa.verify_upgrade_database(device, preserved)
+
+
+def test_mission_projection_never_ignores_changed_existing_or_unrelated_rows(fixture, tmp_path):
+    schema, master, _token, _files, user = _with_card_mission(fixture, tmp_path)
+    identical = qa.starter_mission_projection(user, user, master)
+    assert identical.SerializeToString() == user.SerializeToString()
+    for index in (0, 1):
+        changed = type(user)()
+        changed.CopyFrom(user)
+        changed.missions[index].lastUpdateTime += 1
+        with pytest.raises(RuntimeError, match="existing or unrelated missions"):
+            qa.starter_mission_projection(changed, user, master)
+
+
+@pytest.mark.parametrize("change", ("unknown", "progress"))
+def test_unmarked_fixture_never_strips_nonfresh_supported_mission_data(
+        fixture, tmp_path, monkeypatch, change):
+    schema, master, _token, files, _user = _with_card_mission(fixture, tmp_path, unknown=False)
+    path = tmp_path / "nonfresh.db"
+    path.write_bytes(files[qa.PRIVATE_DATABASE])
+    state = State(path)
+    def alter(raw):
+        user = schema.response_type("/api.User/Get").FromString(raw)
+        if change == "unknown":
+            user.missions[0].MergeFromString(qa.QA_UNKNOWN_PB)
+        else:
+            user.missions[0].progress = 6
+            user.missions[0].statusType = 2
+        return user.SerializeToString()
+    state.mutate_snapshot("sandbox", schema.fingerprint, alter)
+    user = schema.response_type("/api.User/Get").FromString(state.snapshot("sandbox")[0])
+    with sqlite3.connect(path) as db:
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    original = {qa.PRIVATE_DATABASE: path.read_bytes()}
+    device = Device(dict(original))
+    monkeypatch.setattr(qa, "subprocess", SimpleNamespace(run=device.run))
+    with pytest.raises(RuntimeError, match="unsupported mission delta"):
+        qa.stage_legacy_starter(device, schema, user, master_dir=master)
+    assert device.files == original

@@ -129,6 +129,7 @@ def assert_default_off(schema, port, token):
 
 def exercise(qa, schema, grpc_port, master_dir, startup_timeout):
     """Use one original session across four real native process starts."""
+    native.bind_starter_contract(qa, schema, master_dir)
     launch(qa)
     check_mode(qa, False, "01-default-mode")
     start(qa, schema, grpc_port, startup_timeout, "02-default-start")

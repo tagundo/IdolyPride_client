@@ -606,12 +606,68 @@ def _preserved_tables(db):
     return {name: db.execute("SELECT * FROM " + name + " ORDER BY 1").fetchall() for name in PRESERVED_TABLES}
 
 
+
+def bind_starter_contract(qa, schema, master_dir):
+    """Bind real schema/master inputs, never a caller-supplied marker number."""
+    qa.starter_schema, qa.starter_master_dir = schema, master_dir
+    return _starter_contract(qa)
+
+
+def _starter_contract(qa):
+    schema = getattr(qa, "starter_schema", None)
+    if schema is None or "missions" not in schema.response_type("/api.User/Get").DESCRIPTOR.fields_by_name:
+        return 4, None
+    from idoly_local.card_level_missions import mission_master
+    from idoly_local.gameplay import _Catalog
+    thresholds = mission_master(_Catalog(qa.starter_master_dir), optional=True)
+    return (5, thresholds) if thresholds is not None else (4, None)
+
+
+def _verify_starter_mission(snapshot, thresholds):
+    if thresholds is not None:
+        from idoly_local.card_level_missions import saved_mission
+        saved_mission(snapshot, thresholds, required=True)
+
+
+def starter_mission_projection(snapshot, before, master_dir):
+    """Project away only a fully checked newly appended starter achievement.
+
+    Existing mission rows, their order, unknown fields and unrelated rows must
+    remain byte-for-byte. This permits the intentional old-origin4 ->5 repair
+    while keeping the legacy snapshot comparison strict for everything else.
+    """
+    result = type(snapshot)()
+    result.CopyFrom(snapshot)
+    if "missions" not in result.DESCRIPTOR.fields_by_name:
+        return result
+    original = [row.SerializeToString() for row in before.missions]
+    current = [row.SerializeToString() for row in snapshot.missions]
+    if current == original:
+        return result
+    from idoly_local.card_level_missions import MISSION_ID, mission_master, owned_card_level
+    from idoly_local.gameplay import _Catalog
+    catalog = _Catalog(master_dir)
+    thresholds = mission_master(catalog, optional=True)
+    if (thresholds is None or any(row.missionId == MISSION_ID for row in before.missions)
+            or len(current) != len(original) + 1 or current[:-1] != original):
+        raise RuntimeError("Starter repair changed existing or unrelated missions")
+    row = snapshot.missions[-1]
+    highest = owned_card_level(snapshot, catalog)
+    expected = type(row)(missionId=MISSION_ID, currentThreshold=thresholds[0], progress=highest,
+                         statusType=2 if highest >= thresholds[0] else 1,
+                         lastUpdateTime=row.lastUpdateTime)
+    if row.lastUpdateTime <= 0 or row.SerializeToString() != expected.SerializeToString():
+        raise RuntimeError("Starter repair added an unsupported mission delta")
+    del result.missions[-1]
+    return result
+
 def stage_legacy_starter(qa, schema, expected_user, *, master_dir, legacy_roster=True, inventory_only=False):
     """Recreate an old starter layout only inside this disposable emulator.
 
     Private DB/WAL bytes live in a TemporaryDirectory and memory, never QA
     artifacts. All identity, session, settings and other snapshot fields remain.
     """
+    expected_marker, thresholds = bind_starter_contract(qa, schema, master_dir)
     with tempfile.TemporaryDirectory(prefix="idoly-native-upgrade-") as directory:
         path = _copy_private_database(qa, directory)
         db = sqlite3.connect(path)
@@ -620,12 +676,13 @@ def stage_legacy_starter(qa, schema, expected_user, *, master_dir, legacy_roster
             identity = db.execute("SELECT name FROM profiles").fetchall()
             snapshots = db.execute("SELECT profile,response,schema_sha256 FROM snapshots").fetchall()
             marker = db.execute("SELECT profile,version FROM starter_profiles").fetchall()
-            if identity != [("sandbox",)] or len(snapshots) != 1 or marker != [("sandbox", 4)]:
+            if identity != [("sandbox",)] or len(snapshots) != 1 or marker != [("sandbox", expected_marker)]:
                 raise RuntimeError("Legacy upgrade fixture requires the fresh synthetic sandbox only")
             profile, payload, fingerprint = snapshots[0]
             if profile != "sandbox" or fingerprint != schema.fingerprint:
                 raise RuntimeError("Legacy upgrade fixture does not match the tested schema")
             user = schema.response_type("/api.User/Get").FromString(payload)
+            _verify_starter_mission(user, thresholds)
             assert_starter_roster(user)
             assert_starter_home_positions(user)
             assert_initial_inventory(user, master_dir)
@@ -640,6 +697,19 @@ def stage_legacy_starter(qa, schema, expected_user, *, master_dir, legacy_roster
             legacy = _without_initial_inventory(user)
             if legacy_roster:
                 legacy = _legacy_projection(legacy)
+                # Missions did not exist in the otherwise unmarked historical
+                # five-idol fixture. Do not erase unrelated imported rows.
+                if thresholds is not None:
+                    from idoly_local.card_level_missions import MISSION_ID
+                    if len(legacy.missions) != 1 or legacy.missions[0].missionId != MISSION_ID:
+                        raise RuntimeError("Unmarked legacy fixture requires only the fresh starter mission")
+                    empty = type(user)()
+                    empty.CopyFrom(user)
+                    del empty.missions[:]
+                    # Exact fresh shape only: reject historical progress,
+                    # receipts, unknown fields or extra data before removal.
+                    starter_mission_projection(user, empty, master_dir)
+                    del legacy.missions[:]
             if not inventory_only:
                 legacy = _legacy_home_projection(legacy)
             if legacy_roster and (len(legacy.characters) != 5
@@ -675,6 +745,7 @@ def stage_legacy_starter(qa, schema, expected_user, *, master_dir, legacy_roster
 
 
 def verify_upgrade_database(qa, preserved):
+    expected_marker, thresholds = _starter_contract(qa)
     with tempfile.TemporaryDirectory(prefix="idoly-native-upgrade-verify-") as directory:
         path = _copy_private_database(qa, directory)
         db = sqlite3.connect(path)
@@ -682,8 +753,14 @@ def verify_upgrade_database(qa, preserved):
             _checkpoint(db)
             if _preserved_tables(db) != preserved:
                 raise RuntimeError("Native starter upgrade changed identity, sessions or settings")
-            if db.execute("SELECT profile,version FROM starter_profiles").fetchall() != [("sandbox", 4)]:
+            if db.execute("SELECT profile,version FROM starter_profiles").fetchall() != [("sandbox", expected_marker)]:
                 raise RuntimeError("Native starter upgrade did not persist its migration marker")
+            if thresholds is not None:
+                rows = db.execute("SELECT profile,response,schema_sha256 FROM snapshots").fetchall()
+                if len(rows) != 1 or rows[0][0] != "sandbox" or rows[0][2] != qa.starter_schema.fingerprint:
+                    raise RuntimeError("Native starter mission does not match the tested schema")
+                user = qa.starter_schema.response_type("/api.User/Get").FromString(rows[0][1])
+                _verify_starter_mission(user, thresholds)
         finally:
             db.close()
 
@@ -992,6 +1069,8 @@ def main():
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         grpc_port, asset_port = qa.forward(50051), qa.forward(8080)
         schema = Schema.from_descriptor_set(args.descriptor_set)
+        expected_marker, _thresholds = bind_starter_contract(qa, schema, args.master_dir)
+        result["expected_starter_marker"] = expected_marker
         replays = {kind: load_tutorial_replay(schema, args.public_tutorial_dir, kind) for kind in TUTORIAL_REPLAYS}
         print("Starting the server through its native UI", flush=True)
         qa.tap("서버 시작", "01-start")
@@ -1110,7 +1189,8 @@ def main():
         assert_starter_roster(restored)
         assert_starter_home_positions(restored)
         assert_initial_inventory(restored, args.master_dir)
-        if (_legacy_home_projection(_legacy_projection(_without_initial_inventory(restored))).SerializeToString(deterministic=True)
+        comparable = starter_mission_projection(restored, legacy, args.master_dir)
+        if (_legacy_home_projection(_legacy_projection(_without_initial_inventory(comparable))).SerializeToString(deterministic=True)
                 != legacy.SerializeToString(deterministic=True)):
             raise RuntimeError("Native starter upgrade changed existing snapshot fields or appearance rows")
         old_home1 = next(row.SerializeToString() for row in legacy.homePositions if row.homePositionType == 1)
@@ -1135,7 +1215,8 @@ def main():
         assert_starter_roster(repaired_v2)
         assert_starter_home_positions(repaired_v2)
         assert_initial_inventory(repaired_v2, args.master_dir)
-        if (_legacy_home_projection(_without_initial_inventory(repaired_v2)).SerializeToString(deterministic=True)
+        comparable = starter_mission_projection(repaired_v2, legacy_v2, args.master_dir)
+        if (_legacy_home_projection(_without_initial_inventory(comparable)).SerializeToString(deterministic=True)
                 != legacy_v2.SerializeToString(deterministic=True)):
             raise RuntimeError("Version-2 home repair changed fields beyond the three allowed home character IDs")
         if (next(row.SerializeToString() for row in repaired_v2.homePositions if row.homePositionType == 1) != old_home1
@@ -1160,7 +1241,8 @@ def main():
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
         repaired_v3 = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         assert_initial_inventory(repaired_v3, args.master_dir)
-        if (_without_initial_inventory(repaired_v3).SerializeToString(deterministic=True)
+        comparable = starter_mission_projection(repaired_v3, legacy_v3, args.master_dir)
+        if (_without_initial_inventory(comparable).SerializeToString(deterministic=True)
                 != legacy_v3.SerializeToString(deterministic=True)):
             raise RuntimeError("Version-3 inventory repair changed pre-existing snapshot fields")
         result["version3_inventory_upgraded"] = True
@@ -1175,7 +1257,7 @@ def main():
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
         persisted = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if persisted.SerializeToString(deterministic=True) != repaired_v3.SerializeToString(deterministic=True):
-            raise RuntimeError("Marker-4 restart changed the completed starter inventory or other snapshot fields")
+            raise RuntimeError("Starter restart changed the completed inventory or other snapshot fields")
         result["starter_inventory_persisted"] = True
         for kind, canonical in replays.items():
             request = schema.request_type("/api.Tutorial/StartQuest")(questId="qt-tutorial-" + kind)
