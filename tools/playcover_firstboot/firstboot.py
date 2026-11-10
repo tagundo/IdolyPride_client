@@ -76,7 +76,10 @@ def main():
         starting_without_window = allow_starting and (
             state.get('running') is False or state.get('ax_windows_available') is False
             or not state.get('tree'))
-        if (not starting_without_window
+        # Losing focus after process exit is an observation, not an input.
+        # Before any subsequent launch, recheck the foreground PlayCover UI.
+        observed_game_exit = action is None and bundle == GAME and state.get('running') is False
+        if (not starting_without_window and not observed_game_exit
                 and state.get('frontmost_bundle') not in (None, '', PLAYCOVER, GAME)):
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_frontmost_UI_observed')
@@ -262,6 +265,9 @@ def main():
                     # This is a normal LaunchServices application open, after
                     # official PlayCover preparation and the observed failure.
                     # Never execute the game binary directly.
+                    command(['/usr/bin/open', '-a', target])
+                    time.sleep(1)
+                    observe('06-before-canonical-launch')
                     command(['/usr/bin/open', installed])
                     report['canonical_comparison_attempted'] = True
                     phase = 'prepared_canonical_LaunchServices'
