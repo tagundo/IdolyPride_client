@@ -8,6 +8,11 @@ on:
         type: choice
         default: '35'
         options: ['35', '36']
+      render_profile:
+        description: Stock rendering comparison; compact also lowers Android display size
+        type: choice
+        default: default
+        options: [default, compact_gles]
 
 permissions:
   contents: read
@@ -27,6 +32,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       RESULTS: data/original-android-baseline
+      BASELINE_RENDER_PROFILE: ${{ inputs.render_profile || 'default' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,6 +64,27 @@ jobs:
           sdkmanager 'emulator'
           "$ANDROID_HOME/emulator/emulator" -version > "$RESULTS/emulator-version.txt" 2>&1
           "$ANDROID_HOME/emulator/emulator" -accel-check > "$RESULTS/acceleration.txt" 2>&1 || true
+          "$ANDROID_HOME/emulator/emulator" -help-gpu > "$RESULTS/emulator-help-gpu.txt" 2>&1
+          "$ANDROID_HOME/emulator/emulator" -help-feature > "$RESULTS/emulator-help-feature.txt" 2>&1
+          case "$BASELINE_RENDER_PROFILE" in
+            default)
+              echo 'BASELINE_EMULATOR_OPTIONS=-no-window -no-audio -no-boot-anim -no-snapshot -gpu software -tcpdump /tmp/idoly-original-baseline.pcap' >> "$GITHUB_ENV"
+              ;;
+            compact_gles)
+              cp "$ANDROID_HOME/emulator/lib/advancedFeatures.ini" "$RESULTS/emulator-advancedFeatures.ini"
+              python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          results = Path(os.environ['RESULTS'])
+          assert re.search(r'^\s*swiftshader\s+->', (results / 'emulator-help-gpu.txt').read_text(), re.M), 'Stock SwiftShader mode is unavailable'
+          assert 'disable an emulator feature by name' in (results / 'emulator-help-feature.txt').read_text(), 'Stock feature override is unavailable'
+          assert re.search(r'^Vulkan\s*=', (results / 'emulator-advancedFeatures.ini').read_text(), re.M), 'Stock Vulkan feature is unavailable'
+          PY
+              echo 'BASELINE_EMULATOR_OPTIONS=-no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -feature -Vulkan -tcpdump /tmp/idoly-original-baseline.pcap' >> "$GITHUB_ENV"
+              ;;
+            *) exit 1 ;;
+          esac
           gh api repos/tagundo/IdolyPride_client/releases/assets/725772331 \
             -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/original.xapk"
           python3 tools/run_original_android_baseline.py --prepare \
@@ -75,8 +102,8 @@ jobs:
           disable-linux-hw-accel: auto
           disable-animations: true
           emulator-boot-timeout: 600
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -tcpdump /tmp/idoly-original-baseline.pcap
-          script: python3 tools/run_original_android_baseline.py --output "$RESULTS" --observe-seconds 180 --api-level "${{ inputs.api_level || '35' }}" --pcap /tmp/idoly-original-baseline.pcap
+          emulator-options: ${{ env.BASELINE_EMULATOR_OPTIONS }}
+          script: python3 tools/run_original_android_baseline.py --output "$RESULTS" --observe-seconds 180 --api-level "${{ inputs.api_level || '35' }}" --render-profile "$BASELINE_RENDER_PROFILE" --pcap /tmp/idoly-original-baseline.pcap
       - uses: actions/upload-artifact@v4
         if: always()
         with:

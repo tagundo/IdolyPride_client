@@ -46,31 +46,44 @@ def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n')
 
 
-def fullscreen_hint(xml: bytes) -> tuple[int, int, int, int] | None:
-    """Recognize the exact OS-owned hint observed in the untouched first run."""
-    expected = {'android:id/immersive_cling_title': 'Viewing full screen',
-                'android:id/immersive_cling_description': 'To exit, swipe down from the top of your screen',
-                'android:id/ok': 'Got it'}
+def _fullscreen_hint_match(xml: bytes) -> tuple[str, tuple[int, int, int, int]] | None:
+    """Recognize only the two exact OS-owned variants captured on API35/36."""
     try:
         nodes = list(ET.fromstring(xml).iter('node'))
     except ET.ParseError:
         return None
-    if {node.get('text') for node in nodes if node.get('text')} != set(expected.values()):
-        return None
-    for identity, text in expected.items():
-        matches = [node for node in nodes if node.get('resource-id') == identity]
-        if len(matches) != 1 or matches[0].get('text') != text or matches[0].get('package') != 'android':
-            return None
-        if matches[0].get('enabled') != 'true' or matches[0].get('visible-to-user', 'true') != 'true':
-            return None
-    button = next(node for node in nodes if node.get('resource-id') == 'android:id/ok')
-    if button.get('class') != 'android.widget.Button' or button.get('clickable') != 'true':
-        return None
-    bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', button.get('bounds', ''))
-    if bounds is None:
-        return None
-    left, top, right, bottom = map(int, bounds.groups())
-    return (left, top, right, bottom) if left < right and top < bottom else None
+    variants = []
+    for owner in ('android', 'com.android.systemui'):
+        expected = {owner + ':id/immersive_cling_title': 'Viewing full screen',
+                    owner + ':id/immersive_cling_description': 'To exit, swipe down from the top of your screen',
+                    owner + ':id/ok': 'Got it'}
+        if {node.get('text') for node in nodes if node.get('text')} != set(expected.values()):
+            continue
+        matched = {}
+        for identity, text in expected.items():
+            matches = [node for node in nodes if node.get('resource-id') == identity]
+            if (len(matches) != 1 or matches[0].get('text') != text or matches[0].get('package') != owner
+                    or matches[0].get('enabled') != 'true'
+                    or matches[0].get('visible-to-user', 'true') != 'true'):
+                break
+            matched[identity] = matches[0]
+        if len(matched) != 3:
+            continue
+        button = matched[owner + ':id/ok']
+        if button.get('class') != 'android.widget.Button' or button.get('clickable') != 'true':
+            continue
+        bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', button.get('bounds', ''))
+        if bounds is None:
+            continue
+        left, top, right, bottom = map(int, bounds.groups())
+        if left < right and top < bottom:
+            variants.append((owner, (left, top, right, bottom)))
+    return variants[0] if len(variants) == 1 else None
+
+
+def fullscreen_hint(xml: bytes) -> tuple[int, int, int, int] | None:
+    match = _fullscreen_hint_match(xml)
+    return match[1] if match else None
 
 
 def dump_ui(output: Path, name: str) -> bytes | None:
@@ -89,10 +102,12 @@ def dismiss_fullscreen_hint(output: Path, report: dict) -> None:
     report['system_UI_actions'].append(action)
     first = dump_ui(output, 'systemui-hint-before-1.xml')
     second = dump_ui(output, 'systemui-hint-before-2.xml')
-    bounds = fullscreen_hint(first or b'')
-    if bounds is None or bounds != fullscreen_hint(second or b''):
+    match = _fullscreen_hint_match(first or b'')
+    if match is None or match != _fullscreen_hint_match(second or b''):
         action['outcome'] = 'fresh exact hint mismatch; no input'
         return
+    owner, bounds = match
+    action['observed_owner'] = owner
     screenshot = optional_adb('exec-out', 'screencap', '-p', timeout=30)
     if screenshot.returncode != 0 or not screenshot.stdout.startswith(b'\x89PNG') or len(screenshot.stdout) < 24:
         action['outcome'] = 'fresh screenshot unavailable; no input'
@@ -114,8 +129,37 @@ def dismiss_fullscreen_hint(output: Path, report: dict) -> None:
     post_image = optional_adb('exec-out', 'screencap', '-p', timeout=30)
     if post_image.returncode == 0 and post_image.stdout.startswith(b'\x89PNG'):
         (output / 'systemui-hint-after.png').write_bytes(post_image.stdout)
-    action['hint_absent_after'] = after is not None and b'android:id/immersive_cling_title' not in after
+    action['hint_absent_after'] = after is not None and not any(identity in after for identity in (
+        b'android:id/immersive_cling_title', b'com.android.systemui:id/immersive_cling_title'))
     action['outcome'] = 'hint dismissed' if tap.returncode == 0 and action['hint_absent_after'] else 'dismissal not verified; no further input'
+
+
+def observe_os_state(xml: bytes | None) -> dict:
+    """Export fixed ANR indicators and focus metadata, never app text dumps."""
+    text = set()
+    if xml is not None:
+        try:
+            text = {node.get('text', '') for node in ET.fromstring(xml).iter('node')}
+        except ET.ParseError:
+            pass
+    windows = optional_adb('shell', 'dumpsys', 'window', 'windows')
+    activities = optional_adb('shell', 'dumpsys', 'activity', 'activities')
+    window_lines = decoded(windows).splitlines()
+    focus = [line.strip()[:512] for line in window_lines
+             if re.match(r'\s*m(?:CurrentFocus|FocusedApp)=', line)]
+    activity_focus = [line.strip()[:512] for line in decoded(activities).splitlines()
+                      if re.match(r'\s*(?:mResumedActivity|topResumedActivity)[=:]', line)]
+    anr_windows = [line.strip()[:512] for line in window_lines
+                   if ('Application Error:' in line or 'Application Not Responding:' in line)
+                   and any(package in line for package in ('com.android.systemui', 'com.google.android.apps.nexuslauncher'))]
+    return {'uiautomator_window_available': xml is not None,
+            'systemui_anr_dialog_text_visible': any(value in text for value in (
+                "System UI isn't responding", 'System UI isn’t responding')),
+            'launcher_anr_dialog_text_visible': any(value in text for value in (
+                "Pixel Launcher isn't responding", 'Pixel Launcher isn’t responding')),
+            'os_anr_windows': anr_windows, 'window_focus': focus, 'activity_focus': activity_focus,
+            'window_dump_returncode': windows.returncode, 'activity_dump_returncode': activities.returncode,
+            'scope': 'fixed current-window indicators only; screenshots may reveal obscured dialogs'}
 
 
 def prepare(xapk: Path, output: Path) -> None:
@@ -214,9 +258,13 @@ def packet_metadata(path: Path) -> dict:
                                              for key, value in sorted(flows.items())]}
 
 
-def observe(output: Path, duration: int, pcap: Path | None, api_level: int = 35) -> None:
+def observe(output: Path, duration: int, pcap: Path | None, api_level: int = 35,
+            render_profile: str = 'default') -> None:
     report = {'workflow_sha': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
               'original_apks_unmodified': True, 'UI_input_performed': False, 'gameplay_verified': False,
+              'api_level_requested': api_level, 'render_profile': render_profile,
+              'emulator_options': os.environ.get('BASELINE_EMULATOR_OPTIONS'),
+              'app_graphics_launch_arguments_added': False,
               'system_UI_input_performed': False, 'system_UI_actions': [],
               'gameplay_UI_input_performed': False, 'account_UI_input_performed': False,
               'account_credentials_supplied': False, 'observation_seconds_requested': duration, 'samples': []}
@@ -226,6 +274,17 @@ def observe(output: Path, duration: int, pcap: Path | None, api_level: int = 35)
                       'ro.product.cpu.abilist', 'ro.dalvik.vm.native.bridge', 'ro.hardware.egl', 'ro.boot.qemu.avd_name']
         report['image_properties'] = {key: decoded(adb('shell', 'getprop', key)).strip() for key in properties}
         assert report['image_properties']['ro.build.version.sdk'] == str(api_level), 'Unexpected guest API level'
+        assert render_profile in ('default', 'compact_gles'), 'Unknown rendering profile'
+        if render_profile == 'compact_gles':
+            adb('shell', 'wm', 'size', '540x1140')
+            adb('shell', 'wm', 'density', '220')
+        display = {'size': decoded(adb('shell', 'wm', 'size')).strip(),
+                   'density': decoded(adb('shell', 'wm', 'density')).strip()}
+        report['display_configuration'] = display
+        write_json(output / 'display-configuration.json', display)
+        if render_profile == 'compact_gles':
+            assert 'Override size: 540x1140' in display['size'], 'Compact Android display size was not applied'
+            assert 'Override density: 220' in display['density'], 'Compact Android display density was not applied'
         image = Path(os.environ['ANDROID_HOME']) / f'system-images/android-{api_level}/google_apis_playstore/x86_64'
         source_properties = (image / 'source.properties').read_text()
         (output / 'image-source.properties').write_text(source_properties)
@@ -244,6 +303,9 @@ def observe(output: Path, duration: int, pcap: Path | None, api_level: int = 35)
         activity = decoded(adb('shell', 'cmd', 'package', 'resolve-activity', '--brief', PACKAGE)).strip().splitlines()[-1]
         assert activity == PACKAGE + '/com.google.firebase.MessagingUnityPlayerActivity', 'Unexpected official launch activity'
         report['launch_activity'] = activity
+        before_xml = dump_ui(output, 'ui-before-launch.xml')
+        report['os_before_launch'] = observe_os_state(before_xml)
+        write_json(output / 'os-before-launch.json', report['os_before_launch'])
         adb('logcat', '-c')
         started = optional_adb('shell', 'am', 'start', '-W', '-n', activity, timeout=60)
         (output / 'start.txt').write_text(decoded(started))
@@ -263,16 +325,24 @@ def observe(output: Path, duration: int, pcap: Path | None, api_level: int = 35)
                 sample['screenshot'] = True
             tree = optional_adb('shell', 'uiautomator', 'dump', '--compressed', '/sdcard/idoly-baseline-window.xml')
             sample['ui_dump_returncode'] = tree.returncode
+            xml_data = None
             if tree.returncode == 0:
                 xml = optional_adb('exec-out', 'cat', '/sdcard/idoly-baseline-window.xml')
                 if xml.returncode == 0:
+                    xml_data = xml.stdout[:262144]
                     (output / f'ui-{target:03d}.xml').write_bytes(xml.stdout[:262144])
+                    sample['os_state'] = observe_os_state(xml_data)
                     if not report['system_UI_actions'] and fullscreen_hint(xml.stdout) is not None:
                         dismiss_fullscreen_hint(output, report)
+            if xml_data is None:
+                sample['os_state'] = observe_os_state(None)
+            write_json(output / f'os-state-{target:03d}.json', sample['os_state'])
             report['samples'].append(sample)
             write_json(output / 'result.json', report)
         report['observed_game_pids'] = sorted(pids)
         report['process_alive_at_end'] = bool(report['samples'][-1]['pids'])
+        report['outcome'] = ('process remained alive; title/home/gameplay require visual review'
+            if report['process_alive_at_end'] else 'game process exited during baseline observation')
         report['baseline_observation_completed'] = True
     except Exception as error:
         report['error'] = str(error)[:2048]
@@ -294,6 +364,7 @@ def main() -> None:
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--observe-seconds', type=int, default=180, choices=[180])
     parser.add_argument('--api-level', type=int, default=35, choices=[35, 36])
+    parser.add_argument('--render-profile', default='default', choices=['default', 'compact_gles'])
     parser.add_argument('--pcap', type=Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -301,7 +372,7 @@ def main() -> None:
         assert args.xapk is not None, '--xapk is required to prepare originals'
         prepare(args.xapk, args.output)
     else:
-        observe(args.output, args.observe_seconds, args.pcap, args.api_level)
+        observe(args.output, args.observe_seconds, args.pcap, args.api_level, args.render_profile)
 
 
 if __name__ == '__main__':
