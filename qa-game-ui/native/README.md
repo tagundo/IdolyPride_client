@@ -205,12 +205,20 @@ time can help compare successive observations. Sampling itself also takes time.
 Only the exact observed `Canvas/TitleButton` and
 `Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/TabDialogBase/DialogCanvas/Dialog/Footer/CloseButton`
 nodes receive `input_observation`. Child and similarly named paths are excluded. It contains nullable
-`long_tap_time_seconds`, `suppress_long_tap_click`, `is_pressed`, `is_dragged`,
+`long_tap_time_seconds`, `last_press_realtime_seconds`, `suppress_long_tap_click`, `is_pressed`, `is_dragged`,
 `canvas_effective_alpha`, `canvas_interactable`, `canvas_blocks_raycasts`,
 `canvas_group_count`, and `unavailable` keys. The gesture is read from the
 already existing `SolisButtonBase._longTapGesture` reference using checked
 metadata field types. No lazy gesture getter, event handler or setter is called.
 An absent gesture is unknown, not an invented default configuration.
+
+`last_press_realtime_seconds` reads the existing `_lastPressTime` Single. The
+original 6.1.1 `OnPointerDown` records `Time.realtimeSinceStartup` there, and
+`OnPointerUp` leaves it intact. A changed value across real input can therefore
+show that this particular gesture received DOWN even if `is_pressed` is already
+false when the next slow frame is sampled. It does not establish UP, CLICK or
+the click callback's execution. Nonfinite, negative, missing or mistyped values
+are unavailable; this observer never reads or changes the clock to produce it.
 
 `canvas_effective_alpha` is specifically the existing target CanvasRenderer's
 `GetInheritedAlpha()` value; if the target has no renderer it remains null.

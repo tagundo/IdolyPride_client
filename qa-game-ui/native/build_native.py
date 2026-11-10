@@ -89,6 +89,7 @@ def build_native(output, *, ndk=None):
         "read_only_input_telemetry": {
             "scope": "frame_observation and exact Canvas/TitleButton or NoticeDialog CloseButton only",
             "gesture": "existing SolisButtonBase._longTapGesture metadata fields; no lazy getter",
+            "last_press_time": "existing LongTapGesture._lastPressTime nullable System.Single; original OnPointerDown records realtimeSinceStartup",
             "canvas_alpha": "existing target CanvasRenderer.GetInheritedAlpha; unavailable if absent",
             "canvas_flags": "target and ancestors until ignoreParentGroups; max32 ancestors; multiple groups per transform unavailable",
             "frames": "Time.frameCount/unscaledDeltaTime/timeScale, nullable typed getters",

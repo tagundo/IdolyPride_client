@@ -90,7 +90,7 @@ struct observed_float { bool available; float value; };
 static void unavailable_key(struct ui_json *, const char *, bool, size_t *);
 static struct {
     Klass *gesture, *canvas_group, *canvas_renderer;
-    const Field *gesture_reference, *long_tap_time, *suppress, *pressed, *dragged;
+    const Field *gesture_reference, *long_tap_time, *last_press_time, *suppress, *pressed, *dragged;
     const Method *get_components, *get_component, *group_interactable, *group_blocks, *group_ignore;
     const Method *inherited_alpha, *frame_count, *unscaled_delta, *time_scale;
 } input_observations;
@@ -325,6 +325,7 @@ static bool initialize(void) {
         input_observations.gesture_reference = api.class_get_field_from_name(observations.solis_button, "_longTapGesture");
     if (input_observations.gesture) {
         input_observations.long_tap_time = api.class_get_field_from_name(input_observations.gesture, "<LongTapTime>k__BackingField");
+        input_observations.last_press_time = api.class_get_field_from_name(input_observations.gesture, "_lastPressTime");
         input_observations.suppress = api.class_get_field_from_name(input_observations.gesture, "<SuppressLongTapClick>k__BackingField");
         input_observations.pressed = api.class_get_field_from_name(input_observations.gesture, "<IsPressed>k__BackingField");
         input_observations.dragged = api.class_get_field_from_name(input_observations.gesture, "<IsDragged>k__BackingField");
@@ -567,16 +568,18 @@ static void button_input_json(struct ui_json *out, Obj *button) {
     bool found = field_reference(observations.solis_button, button, input_observations.gesture_reference,
                                 false, &gesture) && gesture && input_observations.gesture
         && api.class_is_assignable_from(input_observations.gesture, api.object_get_class(gesture));
-    struct observed_float long_time = {0};
+    struct observed_float long_time = {0}, last_press_time = {0};
     struct observed_bool suppress = {0}, pressed = {0}, dragged = {0};
     if (found) {
         long_time = field_single(input_observations.gesture, gesture, input_observations.long_tap_time);
+        last_press_time = field_single(input_observations.gesture, gesture, input_observations.last_press_time);
         suppress = field_boolean(input_observations.gesture, gesture, input_observations.suppress);
         pressed = field_boolean(input_observations.gesture, gesture, input_observations.pressed);
         dragged = field_boolean(input_observations.gesture, gesture, input_observations.dragged);
     }
     struct canvas_observation canvas = canvas_observation(button);
     ui_raw(out, ",\"input_observation\":{\"long_tap_time_seconds\":"); float_json(out, long_time);
+    ui_raw(out, ",\"last_press_realtime_seconds\":"); float_json(out, last_press_time);
     ui_raw(out, ",\"suppress_long_tap_click\":"); boolean_json(out, suppress);
     ui_raw(out, ",\"is_pressed\":"); boolean_json(out, pressed);
     ui_raw(out, ",\"is_dragged\":"); boolean_json(out, dragged);
@@ -587,6 +590,7 @@ static void button_input_json(struct ui_json *out, Obj *button) {
     if (canvas.interactable.available && canvas.blocks.available) ui_number(out, canvas.groups); else ui_raw(out, "null");
     ui_raw(out, ",\"unavailable\":["); size_t missing = 0;
     unavailable_key(out, "long_tap_time_seconds", !long_time.available, &missing);
+    unavailable_key(out, "last_press_realtime_seconds", !last_press_time.available, &missing);
     unavailable_key(out, "suppress_long_tap_click", !suppress.available, &missing);
     unavailable_key(out, "is_pressed", !pressed.available, &missing);
     unavailable_key(out, "is_dragged", !dragged.available, &missing);

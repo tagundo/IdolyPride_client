@@ -49,9 +49,9 @@ static int parsed_m, array_m, find_m, name_m, transform_m, parent_m, default_m, 
 static int bool_field, callback_field, view_field, title_button_field, static_field, wrong_field, current_input_field, releasing_field;
 static int shader_field, home_model_field, home_enter_field, home_scene_field, purchase_instance_field, purchase_unity_field, purchase_bool_field;
 static int success_m, releasing_m, blocking_m, field_reads;
-static int float_field, component_m, components_m, alpha_m, group_interact_m, group_blocks_m, group_ignore_m;
+static int float_field, last_press_field, component_m, components_m, alpha_m, group_interact_m, group_blocks_m, group_ignore_m;
 static int frames_m, delta_m, scale_m;
-static float float_value=.5f, alpha_value=.75f, delta_value=.25f, scale_value=1.f;
+static float float_value=.5f, last_press_value=123.25f, alpha_value=.75f, delta_value=.25f, scale_value=1.f;
 static int32_t frames_value=42;
 static bool group_interact=true, group_blocks=false, group_ignore=true;
 static unsigned char observed_initialized;
@@ -92,12 +92,13 @@ static const void *param(const Method *m,uint32_t n) { (void)m;assert(n==0);retu
 static int type_kind(const void *t) { return t==(void*)2?2:t==(void*)0xc?0xc:t==(void*)0x12?0x12:t==(void*)0x15?0x15:8; }
 static const Field *find_field(Klass *k,const char *n) { (void)k;(void)n;return NULL; }
 static uint32_t field_flags(const Field *f) { return f==&static_field?0x16:f==&shader_field?0x10:f==&purchase_instance_field?0x14:0; }
-static const void *field_type(const Field *f) { return f==&float_field?(void*)0xc:(f==&bool_field||f==&releasing_field||f==&shader_field||f==&home_enter_field||f==&home_scene_field||f==&purchase_bool_field)?(void*)2:f==&wrong_field?(void*)8:(f==&static_field||f==&purchase_instance_field)?(void*)0x15:(void*)0x12; }
+static const void *field_type(const Field *f) { return (f==&float_field||f==&last_press_field)?(void*)0xc:(f==&bool_field||f==&releasing_field||f==&shader_field||f==&home_enter_field||f==&home_scene_field||f==&purchase_bool_field)?(void*)2:f==&wrong_field?(void*)8:(f==&static_field||f==&purchase_instance_field)?(void*)0x15:(void*)0x12; }
 static Klass *object_class(Obj *o) { assert(o);return (Klass*)0x103; }
 static bool assignable(Klass *expected,Klass *actual) { return expected&&actual; }
 static void read_field(Obj *o,const Field *f,void *value) {
  assert(o);++field_reads;
  if(f==&float_field){memcpy(value,&float_value,4);return;}
+ if(f==&last_press_field){memcpy(value,&last_press_value,4);return;}
  if(f==&bool_field){memcpy(value,&observed_initialized,1);return;}
  if(f==&releasing_field){unsigned char b=releasing_value?1:0;memcpy(value,&b,1);return;}
  if(f==&home_enter_field||f==&home_scene_field||f==&purchase_bool_field){unsigned char b=f==&home_enter_field?home_enter_value:f==&home_scene_field?home_scene_value:purchase_value;memcpy(value,&b,1);return;}
@@ -283,11 +284,29 @@ int main(void) {
  observations.solis_button=(Klass*)0x103;
  input_observations.gesture=(Klass*)0x103;input_observations.gesture_reference=&callback_field;
  input_observations.long_tap_time=&float_field;input_observations.suppress=&bool_field;
+ input_observations.last_press_time=&last_press_field;
  input_observations.pressed=&home_enter_field;input_observations.dragged=&home_scene_field;
  observed_callback=(Obj*)0x1111;observed_initialized=1;home_enter_value=false;
  memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
  assert(strstr(startup,"\"long_tap_time_seconds\":0.5")&&strstr(startup,"\"suppress_long_tap_click\":true"));
  assert(strstr(startup,"\"is_pressed\":false")&&strstr(startup,"\"is_dragged\":false"));
+ assert(strstr(startup,"\"last_press_realtime_seconds\":123.25"));
+ /* The persisted time can show DOWN after UP without invoking any handler. */
+ last_press_value=456.5f;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
+ assert(strstr(startup,"\"last_press_realtime_seconds\":456.5")&&strstr(startup,"\"is_pressed\":false"));
+ last_press_value=NAN;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
+ assert(strstr(startup,"\"last_press_realtime_seconds\":null"));
+ last_press_value=-1;
+ assert(!field_single(input_observations.gesture,(Obj*)1,&last_press_field).available);
+ last_press_value=456.5f;input_observations.last_press_time=&wrong_field;
+ int reads_before_wrong_time=field_reads;
+ assert(!field_single(input_observations.gesture,(Obj*)1,input_observations.last_press_time).available&&field_reads==reads_before_wrong_time);
+ input_observations.last_press_time=NULL;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
+ assert(strstr(startup,"\"last_press_realtime_seconds\":null"));
+ input_observations.last_press_time=&last_press_field;
  assert(strstr(startup,"\"canvas_effective_alpha\":null"));
  input_observations.canvas_renderer=input_observations.canvas_group=(Klass*)0x103;
  input_observations.get_component=&component_m;input_observations.get_components=&components_m;
@@ -302,6 +321,7 @@ int main(void) {
  int read_guard=field_reads;assert(!field_single(input_observations.gesture,(Obj*)1,&wrong_field).available&&read_guard==field_reads);
  observed_callback=NULL;memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
  assert(strstr(startup,"\"long_tap_time_seconds\":null")&&strstr(startup,"\"is_pressed\":null"));
+ assert(strstr(startup,"\"last_press_realtime_seconds\":null"));
  input_observations.frame_count=&frames_m;input_observations.unscaled_delta=&delta_m;input_observations.time_scale=&scale_m;
  memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};frame_json(&startup_out);
  assert(strstr(startup,"\"frame_count\":42")&&strstr(startup,"\"unscaled_delta_time\":0.25")&&strstr(startup,"\"time_scale\":1"));
