@@ -11,7 +11,7 @@
 - Linux amd64 공유 라이브러리를 `ctypes`와 C 프로그램에서 실제 호출했습니다.
 - 공개 마스터로 준비한 첫 퀘스트 입력은 4,781점·성공, 능력치를 0으로 바꾸면 0점·실패였습니다. 차트 183개·beat 855개와 누적 점수 보존을 확인했습니다.
 - 동일 seed·입력의 결과가 반복·병렬 호출에서 일치했습니다. 잘못된 입력, 미지원 정의, 오류·결과 버퍼 해제도 검사했습니다.
-- NDK 26.3.11579264/API 26으로 Android arm64 교차 빌드와 16KB ELF LOAD 정렬을 확인했습니다. Android 기기·Chaquopy 로딩과 macOS 빌드는 아직 검증하지 않았습니다.
+- NDK 26.3.11579264/API 26으로 Android arm64 교차 빌드와 16KB ELF LOAD 정렬을 확인했습니다. Android 기기·Chaquopy 로딩은 아직 검증하지 않았습니다. Apple Silicon macOS13 이상용 빌드·서명과 실제 `ctypes`·공개 C 헤더 호출은 [네이티브 CI](https://github.com/tagundo/IdolyPride_client/actions/runs/42790638305)에서 통과했습니다. Mac에서 전체 스타터 시뮬레이션이나 앱 연결을 검증한 것은 아닙니다.
 - 기존 원본 순수 테스트는 최상위 23개·하위 90개를 통과했습니다. 이는 로컬 규칙 검증이며 공식 점수·계정 정산 검증이 아닙니다.
 
 소스 동일성과 기존 실행 증거의 요약은 [docs/proof.json](docs/proof.json)에 있습니다. 바이너리·SDK·입력 마스터·계정 자료는 이 폴더에 커밋하지 않습니다.
@@ -35,9 +35,14 @@ python3 native-live-engine/scripts/build.py --target android \
   --go /path/to/go1.27.3/bin/go \
   --ndk /path/to/android-ndk/26.3.11579264 \
   --output /tmp/idoly-live/android-arm64 --cache /tmp/idoly-live/cache
+
+# 실제 Apple Silicon Mac에서 실행
+python3 native-live-engine/scripts/build.py --target macos \
+  --go /path/to/go1.27.3/bin/go \
+  --output /tmp/idoly-live/macos --cache /tmp/idoly-live/cache
 ```
 
-Android 교차 빌드는 Linux x86_64 호스트와 해당 NDK를 대상으로 합니다. `libidoly_live.so`, 생성 헤더, `build-report.json`을 출력합니다. 기본 출력은 이 폴더의 무시되는 `build/` 아래이며, 예시는 저장소 밖에 출력합니다. `-mod=readonly`, `-buildvcs=false`, `-trimpath`를 사용하고 서버·DB 의존성이 생기면 거부합니다. Android에는 `-Wl,-z,max-page-size=16384`를 적용합니다.
+Android 교차 빌드는 Linux x86_64 호스트와 해당 NDK를 대상으로 합니다. `libidoly_live.so`, 생성 헤더, `build-report.json`을 출력합니다. 기본 출력은 이 폴더의 무시되는 `build/` 아래이며, 예시는 저장소 밖에 출력합니다. `-mod=readonly`, `-buildvcs=false`, `-trimpath`를 사용하고 서버·DB 의존성이 생기면 거부합니다. Android에는 `-Wl,-z,max-page-size=16384`를 적용합니다. Mac은 `MACOSX_DEPLOYMENT_TARGET=13.0`과 `@rpath/libidoly_live.dylib`를 검증하고 ad-hoc 서명 후 최종 해시를 기록합니다. [독립 호스트 CI](../.github/workflows/verify-live-engine.yml)는 Linux와 Mac의 실제 라이브러리 로딩·ABI 오류/버퍼 해제·C 헤더 링크를 검사하며, 전체 시뮬레이션 성공으로 표시하지 않습니다.
 
 ## C ABI와 검증
 

@@ -73,7 +73,7 @@
     "top_level_passed": 23,
     "subtests_passed": 90
   },
-  "macos_build_tested": false,
+  "macos_build_tested": true,
   "promotion_checks": {
     "source_archive_members_byte_identical": 29,
     "linux_rebuilt_library_byte_identical": true,
@@ -82,5 +82,28 @@
     "source_and_adapter_manifest_verified": true,
     "no_binary_sdk_or_archive_files_in_source_folder": true,
     "production_package_discovery_unchanged": true
+  },
+  "native_host_abi_ci": {
+    "workflow_run": 42790638305,
+    "source_commit": "057888d50cb0927edcee99beb22d50ff0de70725",
+    "linux_and_macos_passed": true,
+    "abi_version": 1,
+    "macos_architecture": "arm64",
+    "macos_deployment_target": "13.0",
+    "macos_library_sha256": "3eb36576243e235d917202f54243dfdb2600456b26acc542ac11aa05ae16b914",
+    "macos_install_name": "@rpath/libidoly_live.dylib",
+    "ad_hoc_codesign_verified": true,
+    "ctypes_invalid_cases": 15,
+    "repeated_calls": 16,
+    "parallel_calls": 16,
+    "public_c_header_link_and_execution": true,
+    "full_simulation_tested": false,
+    "server_or_app_integration_tested": false,
+    "optional_metal_probe": {
+      "device": "Apple Paravirtual device",
+      "mac2": true,
+      "apple7": false,
+      "playcover_game_tested": false
+    }
   }
 }
