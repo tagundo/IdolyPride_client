@@ -2,7 +2,7 @@
 from copy import deepcopy
 import pytest
 
-from qa_game_ui import choose_button, mapped_point
+from qa_game_ui import choose_button, mapped_point, title_block_reason
 
 
 PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
@@ -39,6 +39,20 @@ def test_original_title_button_is_selected_when_tap_label_is_a_sibling(snapshot)
     snapshot["nodes"][1].update(path="Canvas/UIContentArea/TAP TO START", text="TAP TO START")
     target = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap|^TitleButton$")
     assert target["instance_id"] == -50 and not target["label"]
+
+
+def test_known_startup_blocking_defers_title_input_but_success_flag_is_not_a_prerequisite(snapshot):
+    node = snapshot["nodes"][0]
+    snapshot["startup_observation"] = {"solis_initialization_succeeded": False,
+                                      "input_releasing": None, "content_blocking": None}
+    assert title_block_reason(snapshot, node) is None
+    node["callback_registered"] = False
+    assert title_block_reason(snapshot, node) == "title_callback_not_registered"
+    node["callback_registered"] = True
+    for field in ("input_releasing", "content_blocking"):
+        snapshot["startup_observation"][field] = True
+        assert title_block_reason(snapshot, node) == field
+        snapshot["startup_observation"][field] = False
 
 
 @pytest.mark.parametrize("field", ["active", "interactable"])

@@ -4,9 +4,10 @@
 The optional title action taps a freshly OCR-observed TAP TO START phrase.
 An opt-in second action requires observed post-tap loading followed by two
 fresh stable, nonloading returned-title frames.
-An opt-in UI-tree mode permits up to five observed title actions during a
-longer capture. No other game input is performed. Captures alone do not
-establish home success.
+An opt-in UI-tree mode permits up to five title actions per observed Title
+scene. The separate QA UI explorer can also open named menus through normal
+touch input using fresh Unity UI bounds. Captures alone do not establish home
+success.
 """
 from __future__ import annotations
 

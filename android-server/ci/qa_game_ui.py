@@ -72,6 +72,19 @@ def choose_button(snapshot, label_pattern, name_pattern=None):
     return None
 
 
+def title_block_reason(snapshot, node):
+    """Only known blocking observations suppress ordinary touch attempts."""
+    if node.get("callback_registered") is False:
+        return "title_callback_not_registered"
+    startup = snapshot.get("startup_observation")
+    if not isinstance(startup, dict):
+        return None
+    for field in ("input_releasing", "content_blocking"):
+        if startup.get(field) is True:
+            return field
+    return None
+
+
 def mapped_point(snapshot, node, xml, package, image_size):
     screen = snapshot.get("screen", {})
     width, height = screen.get("width"), screen.get("height")
@@ -124,6 +137,8 @@ class UiExplorer:
         self.wait_frames, self.session_titles, self.stopped = 0, 0, False
         self.snapshot_successes, self.snapshot_errors = 0, {}
         self.input_errors = {}
+        self.title_deferrals = {}
+        self.title_instance = None
 
     def _input_error(self, code):
         self.input_errors[code] = self.input_errors.get(code, 0) + 1
@@ -159,6 +174,8 @@ class UiExplorer:
                         and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
         if fresh.get("ok") is not True or current is None:
             return self._input_error("selected_node_no_longer_present")
+        if reason == "observed_title" and (blocked := title_block_reason(fresh, current)):
+            return self._input_error(blocked)
         raw = self.qa.adb("exec-out", "screencap", "-p", binary=True)
         if raw[:8] != b"\x89PNG\r\n\x1a\n":
             return self._input_error("display_capture_unavailable")
@@ -225,16 +242,24 @@ class UiExplorer:
             self.pending = None
             self._restart()
             return
-        # In the original Title scene, the full-canvas TitleButton and
-        # UIContentArea/TAP TO START label are siblings, not parent/child.
-        title = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap|^TitleButton$")
-        if title is not None:
-            if self.session_titles < self.qa.max_title_taps and self._tap(snapshot, title, "observed_title", frame):
-                self.session_titles += 1
-            return
         close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
         if close is not None and re.search(r"dialog|modal|popup", str(close.get("path", "")), re.I):
             self._tap(snapshot, close, "observed_dialog", frame)
+            return
+        # In the original Title scene, the full-canvas TitleButton and
+        # UIContentArea/TAP TO START label are siblings, not parent/child.
+        # Master initialization can replace this scene with a new Title scene.
+        title = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap|^TitleButton$")
+        if title is not None:
+            identity = title.get("instance_id")
+            if identity != self.title_instance:
+                self.title_instance, self.session_titles = identity, 0
+            blocked = title_block_reason(snapshot, title)
+            if blocked:
+                self.title_deferrals[blocked] = self.title_deferrals.get(blocked, 0) + 1
+                return
+            if self.session_titles < self.qa.max_title_taps and self._tap(snapshot, title, "observed_title", frame):
+                self.session_titles += 1
             return
         if self.pending:
             goal, started, previous = self.pending
@@ -264,4 +289,5 @@ class UiExplorer:
                 "goals": [goal[0] for goal in _GOALS], "native_click_used": False,
                 "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
                 "input_errors": self.input_errors,
+                "title_deferrals": self.title_deferrals,
                 "gameplay_rpc_injected_during_exploration": False, "menu_success_requires_evidence_review": True}
