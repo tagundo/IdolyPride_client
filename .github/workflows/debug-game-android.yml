@@ -47,8 +47,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p data/android-game-debug data/ci-input data/dist
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends tesseract-ocr imagemagick
+          # Native Unity UI observations do not use the legacy OCR/image tools.
           # Hosted runner only: retain the SDK and remove unused large toolchains.
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk
           df -h . | tee data/android-game-debug/disk.txt
