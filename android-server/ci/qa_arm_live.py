@@ -202,7 +202,9 @@ def exercise(qa, schema, grpc_port, master_dir, startup_timeout):
     return {
         "qa_scope": SCOPE, "device_game_client_tested": False,
         "full_legacy_regression_tested": False,
-        "target": "Android ARM64 native server under emulator translation",
+        "target": ("Android ARM64-only native server on Cuttlefish"
+                   if getattr(qa, "target_evidence", {}).get("kind") == "cuttlefish_arm64_only"
+                   else "Android ARM64 native server under emulator translation"),
         "system_check": True, "local_auth": True, "starter_roster_complete": True,
         "home_positions_distinct": True, "initial_inventory_master_backed": True,
         "default_unit_complete": True, **inventory,
@@ -236,6 +238,7 @@ def main(argv=None):
     verified_target = False
     try:
         result["target_evidence"] = verify_disposable_target(qa.adb, args.serial)
+        qa.target_evidence = result["target_evidence"]
         apk = args.apk.resolve(strict=True)
         with apk.open("rb") as stream:
             result["apk_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
