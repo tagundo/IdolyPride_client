@@ -23,6 +23,9 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
       GH_TOKEN: ${{ github.token }}
+      DISPLAY: ":99"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
     steps:
       - uses: actions/checkout@v4
         with:
@@ -61,7 +64,16 @@ jobs:
           ls -l /dev/kvm | tee data/android-game-debug/kvm.txt
           python -c 'import sys; assert sys.version_info[:2] == (3, 13)'
           echo "IDOLY_BUILD_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
-          sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb xauth mesa-utils libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers libpulse0
+          Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp -ac > data/android-game-debug/xvfb.log 2>&1 &
+          for attempt in $(seq 1 20); do
+            if glxinfo -B > data/android-game-debug/host-glxinfo.txt 2>&1; then break; fi
+            sleep 1
+          done
+          grep -E 'OpenGL renderer string:.*llvmpipe' data/android-game-debug/host-glxinfo.txt
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'emulator'
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee data/android-game-debug/emulator-version.txt
           uv sync --locked --all-extras --python 3.12
       - name: Download the published diagnostic game and complete public payload
         shell: bash
@@ -150,6 +162,7 @@ jobs:
         run: |
           set -euo pipefail
           sdkmanager 'ndk;26.3.11579264'
+          python tools/emulator_environment_probe/build.py --sdk "$ANDROID_HOME" --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" --output data/dist/EnvironmentProbe.apk > data/android-game-debug/environment-probe-build.json
           uv run --locked python qa-game-ui/native/build_native.py \
             --output data/android-game-debug/qa-ui-native \
             --ndk "$ANDROID_HOME/ndk/26.3.11579264" \
@@ -213,31 +226,20 @@ jobs:
       - name: Explore the real game using native UI observations and adb input
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          api-level: 35
           target: google_apis
           arch: x86_64
           profile: pixel_4
           cores: 4
           ram-size: 6144M
           disk-size: 8G
-          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu lavapipe -accel on
           disable-linux-hw-accel: false
           disable-animations: true
           emulator-boot-timeout: 1200
-          script: >-
-            uv run --locked python android-server/ci/qa_game_boot.py
-            --server-apk data/dist/Server-game-debug.apk
-            --game-apk data/dist/Game-QA-UI.apk
-            --game-package game.qualiarts.idolypride.local.diagnostics
-            --descriptor-set data/protocol/idolypride-6.1.1.pb
-            --artifacts data/android-game-debug --duration 1800 --interval 20 --startup-timeout 600
-            --force-gles30
-            --tap-observed-title
-            --tree-title-input
-            --qa-ui-explore
-            --touch-hold-ms ${{ inputs.touch_hold_ms || '0' }}
-            --max-title-taps 5
-            --prepare-completed-opening
+          script: |
+            python tools/emulator_environment_probe/run_probe.py --apk data/dist/EnvironmentProbe.apk --output data/android-game-debug/environment-preflight --timeout 60 --record-root
+            uv run --locked python android-server/ci/qa_game_boot.py --server-apk data/dist/Server-game-debug.apk --game-apk data/dist/Game-QA-UI.apk --game-package game.qualiarts.idolypride.local.diagnostics --descriptor-set data/protocol/idolypride-6.1.1.pb --artifacts data/android-game-debug --duration 1800 --interval 20 --startup-timeout 600 --force-gles30 --tap-observed-title --tree-title-input --qa-ui-explore --touch-hold-ms ${{ inputs.touch_hold_ms || '0' }} --max-title-taps 5 --prepare-completed-opening
       - name: Summarize observed input and menu evidence
         if: always()
         shell: bash
