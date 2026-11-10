@@ -22,6 +22,7 @@ import grpc
 
 from idoly_local import codec
 from idoly_local.schema import Schema
+from qa_target import verify_disposable_target
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
@@ -555,9 +556,7 @@ def _legacy_projection(user):
 
 
 def _guard_stopped_emulator(qa):
-    if (not qa.command[-1].startswith("emulator-")
-            or qa.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1"):
-        raise RuntimeError("Private database upgrade QA accepts a disposable emulator only")
+    verify_disposable_target(qa.adb, qa.command[-1])
     if qa.adb("shell", "pidof", "-s", PACKAGE, check=False).strip():
         raise RuntimeError("Private database upgrade QA requires a force-stopped server process")
 
@@ -982,9 +981,10 @@ def main():
         parser.error("--startup-timeout must be positive")
     qa = QA(args.adb, args.serial, args.artifacts)
     result = {"ok": False, "target": "Android emulator", "device_game_client_tested": False}
+    verified_target = False
     try:
-        if not args.serial.startswith("emulator-") or qa.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
-            raise RuntimeError("This QA driver accepts an emulator only")
+        result["target_evidence"] = verify_disposable_target(qa.adb, args.serial)
+        verified_target = True
         print("Installing the native server APK", flush=True)
         qa.adb("install", "-r", "-g", str(args.apk.resolve()))
         qa.adb("logcat", "-c")
@@ -1212,11 +1212,12 @@ def main():
         result["error"] = str(error)
         raise
     finally:
-        try:
-            qa.capture("55-final")
-        except Exception:
-            pass
-        qa.close()
+        if verified_target:
+            try:
+                qa.capture("55-final")
+            except Exception:
+                pass
+            qa.close()
         (args.artifacts / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, ensure_ascii=False))
 

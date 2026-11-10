@@ -16,6 +16,7 @@ from urllib.request import urlopen
 
 from qa_emulator import ACTIVITY, PACKAGE, QA, wait_server
 from idoly_local.schema import Schema
+from qa_target import verify_disposable_target
 
 
 PROBE = "game.qualiarts.idolypride.local.diagnostics"
@@ -220,8 +221,7 @@ def main():
               "synthetic_probe": True, "production_provider_e2e": False}
     server_started = guarded = False
     try:
-        if not args.serial.startswith("emulator-") or qa.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
-            raise RuntimeError("Diagnostics probe QA accepts a disposable emulator only")
+        result["target_evidence"] = verify_disposable_target(qa.adb, args.serial)
         guarded = True
         qa.adb("install", "-r", "-g", str(args.server_apk.resolve()))
         qa.adb("install", "-r", "-g", str(args.probe_apk.resolve()))

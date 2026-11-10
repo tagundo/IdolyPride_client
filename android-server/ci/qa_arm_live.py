@@ -20,6 +20,7 @@ import time
 import grpc
 
 import qa_emulator as native
+from qa_target import verify_disposable_target
 from idoly_local import main_live_qa, tutorial_qa
 
 
@@ -233,8 +234,7 @@ def main(argv=None):
               "full_legacy_regression_tested": False}
     verified_target = False
     try:
-        if not args.serial.startswith("emulator-") or qa.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
-            raise RuntimeError("Focused native proof accepts a disposable emulator only")
+        result["target_evidence"] = verify_disposable_target(qa.adb, args.serial)
         apk = args.apk.resolve(strict=True)
         with apk.open("rb") as stream:
             result["apk_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
