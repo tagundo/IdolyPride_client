@@ -1,0 +1,187 @@
+name: Verify native live engine
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'native-live-engine/**'
+      - '.github/workflows/verify-live-engine.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-live-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            runner: ubuntu-24.04
+            system: Linux
+            machine: x86_64
+            python_arch: x64
+            library: libidoly_live.so
+          - target: macos
+            runner: macos-15
+            system: Darwin
+            machine: arm64
+            python_arch: arm64
+            library: libidoly_live.dylib
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      LIVE_TARGET: ${{ matrix.target }}
+      LIVE_SYSTEM: ${{ matrix.system }}
+      LIVE_MACHINE: ${{ matrix.machine }}
+      LIVE_LIBRARY: ${{ matrix.library }}
+      LIVE_BUILD: ${{ github.workspace }}/data/idoly-live/${{ matrix.target }}
+      LIVE_CACHE: ${{ github.workspace }}/data/idoly-live-cache
+      LIVE_ARTIFACTS: ${{ github.workspace }}/data/idoly-live-artifacts/${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: ${{ matrix.python_arch }}
+      - name: Require the real target host
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import platform
+          import sys
+
+          destination = Path(os.environ['LIVE_ARTIFACTS'])
+          destination.mkdir(parents=True, exist_ok=True)
+          host = {'system': platform.system(), 'machine': platform.machine(),
+                  'python_version': platform.python_version(),
+                  'target': os.environ['LIVE_TARGET'], 'source_commit': os.environ['GITHUB_SHA']}
+          (destination / 'host.json').write_text(json.dumps(host, indent=2) + '\n')
+          assert host['system'] == os.environ['LIVE_SYSTEM']
+          assert host['machine'] == os.environ['LIVE_MACHINE']
+          assert sys.version_info[:2] == (3, 12)
+          PY
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Check target guards and attributed source pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s native-live-engine/tests -p 'test_build.py' -v
+          python3 native-live-engine/scripts/build.py --verify-only > "$LIVE_ARTIFACTS/source-verification.json"
+          git archive --format=tar.gz --output="$LIVE_ARTIFACTS/native-live-engine-source.tar.gz" \
+            HEAD native-live-engine .github/workflows/verify-live-engine.yml
+      - name: Build the host library and validate dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 native-live-engine/scripts/build.py --target "$LIVE_TARGET" \
+            --go "$(command -v go)" --output "$LIVE_BUILD" --cache "$LIVE_CACHE"
+          git diff --exit-code -- native-live-engine/go.mod native-live-engine/go.sum
+          cp "$LIVE_BUILD/build-report.json" "$LIVE_ARTIFACTS/"
+      - name: Execute ctypes and public C header checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 native-live-engine/scripts/check_abi.py --library "$LIVE_BUILD/$LIVE_LIBRARY" \
+            --report "$LIVE_ARTIFACTS/abi-report.json"
+          cc -std=c11 -Wall -Wextra -Werror -I native-live-engine/include \
+            native-live-engine/tests/c_api_smoke.c -L "$LIVE_BUILD" -lidoly_live \
+            -Wl,-rpath,"$LIVE_BUILD" -o "$LIVE_BUILD/c_api_smoke"
+          "$LIVE_BUILD/c_api_smoke"
+          cp "$LIVE_BUILD/$LIVE_LIBRARY" "$LIVE_ARTIFACTS/"
+          cp "$LIVE_BUILD/libidoly_live.h" "$LIVE_ARTIFACTS/generated-go-header.h"
+          cp native-live-engine/include/idoly_live.h "$LIVE_ARTIFACTS/"
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import platform
+
+          output = Path(os.environ['LIVE_ARTIFACTS'])
+          build = json.loads((output / 'build-report.json').read_text())
+          abi = json.loads((output / 'abi-report.json').read_text())
+          library = output / os.environ['LIVE_LIBRARY']
+          sha = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
+          assert build['target'] == os.environ['LIVE_TARGET']
+          assert build['go_version'].startswith('go version go1.27.3 ')
+          assert build['no_db_or_server_dependencies'] is True
+          assert build['library_sha256'] == abi['library_sha256'] == sha(library)
+          assert abi['ok'] is True and abi['abi_version'] == 1
+          assert abi['platform'] == os.environ['LIVE_SYSTEM']
+          assert abi['machine'] == os.environ['LIVE_MACHINE']
+          assert abi['full_simulation_tested'] is False
+          if os.environ['LIVE_TARGET'] == 'macos':
+              assert build['ad_hoc_codesign_verified'] is True
+              assert build['architecture'] == 'arm64'
+              assert build['macos_deployment_target'] == '13.0'
+          report = {'source_commit': os.environ['GITHUB_SHA'], 'target': os.environ['LIVE_TARGET'],
+                    'host_system': platform.system(), 'host_machine': platform.machine(),
+                    'library_sha256': sha(library), 'public_header_sha256': sha(output / 'idoly_live.h'),
+                    'c_smoke_sha256': sha(Path(os.environ['LIVE_BUILD']) / 'c_api_smoke'),
+                    'source_manifest_verified': True, 'dependency_check_passed': True,
+                    'ctypes_abi_executed': True, 'public_c_header_link_and_execution': True,
+                    'full_simulation_tested': False, 'official_score_equivalence': False,
+                    'server_or_app_integration_tested': False}
+          (output / 'ci-verification.json').write_text(json.dumps(report, indent=2) + '\n')
+          PY
+      - name: Record optional read-only Metal capabilities
+        if: matrix.target == 'macos'
+        continue-on-error: true
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          cat > "$LIVE_ARTIFACTS/metal-probe.swift" <<'SWIFT'
+          import Metal
+          let gpu = MTLCreateSystemDefaultDevice()
+          print("device=\(gpu?.name ?? "none"); apple7=\(gpu?.supportsFamily(.apple7) ?? false); mac2=\(gpu?.supportsFamily(.mac2) ?? false)")
+          SWIFT
+          set +e
+          xcrun swift "$LIVE_ARTIFACTS/metal-probe.swift" \
+            > "$LIVE_ARTIFACTS/metal-probe.txt" 2> "$LIVE_ARTIFACTS/metal-probe.stderr.txt"
+          probe_exit=$?
+          python3 - "$probe_exit" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          result = {'swift_exit_code': int(sys.argv[1]), 'engine_verification_gate': False,
+                    'game_client_tested': False, 'probe': 'MTLCreateSystemDefaultDevice and supportsFamily only'}
+          (Path(os.environ['LIVE_ARTIFACTS']) / 'metal-probe.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+      - name: Hash available build and source evidence
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+
+          output = Path(os.environ['LIVE_ARTIFACTS'])
+          output.mkdir(parents=True, exist_ok=True)
+          lines = [hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name
+                   for path in sorted(output.iterdir()) if path.is_file() and path.name != 'SHA256SUMS']
+          (output / 'SHA256SUMS').write_text('\n'.join(lines) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: native-live-engine-${{ matrix.target }}-${{ github.sha }}
+          path: ${{ env.LIVE_ARTIFACTS }}
+          if-no-files-found: error
+          compression-level: 0
