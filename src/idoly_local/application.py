@@ -39,6 +39,7 @@ class Application:
         from .appearance import Appearance
         from .profile_names import ProfileNames
         from .profile_messages import ProfileMessages
+        from .profile_favorites import ProfileFavorites
         from .profile_top import ProfileTop
         from .card_level_missions import CardLevelMissions
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
@@ -50,6 +51,7 @@ class Application:
         self.appearance = Appearance(schema, state, profile, master_dir)
         self.profile_names = ProfileNames(schema, state, profile)
         self.profile_messages = ProfileMessages(schema, state, profile)
+        self.profile_favorites = ProfileFavorites(schema, state, profile, master_dir)
         self.main_lives = None
         if experimental_main_live:
             from .main_live import MainLives
@@ -154,6 +156,8 @@ class Application:
                 response = self.profile_names.handle(path, plain)
             if response is None:
                 response = self.profile_messages.handle(path, plain)
+            if response is None:
+                response = self.profile_favorites.handle(path, plain)
             if response is None:
                 response = self.profile_top.handle(path, plain)
             if response is None:
