@@ -820,6 +820,56 @@ def exercise_story_read_checks(qa, schema, grpc_port, token, master_dir, startup
             "story_read_restart_no_grant": True}
 
 
+
+def verify_appearance_database(qa, schema, receipt=None, *, expected_clock=None):
+    from idoly_local.appearance_qa import assert_appearance_snapshot
+    with tempfile.TemporaryDirectory(prefix="idoly-native-appearance-verify-") as directory:
+        path = _copy_private_database(qa, directory)
+        with sqlite3.connect(path) as db:
+            clock = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile=?",
+                               ("sandbox",)).fetchone()
+            snapshot = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                                  ("sandbox",)).fetchone()
+            if (clock is None or snapshot is None or clock[1] != schema.fingerprint
+                    or snapshot[1] != schema.fingerprint):
+                raise RuntimeError("Native appearance snapshot/lesson clock was not persisted")
+            if expected_clock is not None and clock != expected_clock:
+                raise RuntimeError("Native appearance requests changed the raw persistent lesson clock")
+            if receipt is not None:
+                assert_appearance_snapshot(schema, snapshot[0], receipt)
+            return clock
+
+
+def exercise_appearance_checks(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
+    from idoly_local.appearance_qa import assert_appearance_retries, run_appearance_checks
+    original_clock = verify_appearance_database(qa, schema)
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "36-appearance-start")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    invoke = lambda path, request: rpc(schema, grpc_port, path, token, request)
+    receipt = run_appearance_checks(schema, invoke, master_dir, label="Android native")
+    qa.capture("37-appearance-completed")
+    qa.tap("서버 중지", "38-appearance-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_appearance_database(qa, schema, receipt, expected_clock=original_clock)
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "39-appearance-persistence-restart")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    assert_appearance_retries(schema, invoke, master_dir, receipt)
+    qa.capture("40-appearance-persisted")
+    qa.tap("서버 중지", "41-appearance-final-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_appearance_database(qa, schema, receipt, expected_clock=original_clock)
+    return {"appearance": receipt, "appearance_persisted": True, "appearance_clock_preserved": True,
+            "appearance_resources_preserved": True, "appearance_identity_preserved": True,
+            "appearance_sessions_preserved": True, "appearance_settings_preserved": True,
+            "appearance_restart_no_change": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -1055,6 +1105,8 @@ def main():
                                                     args.master_dir, args.startup_timeout, preserved))
         result.update(exercise_story_read_checks(qa, schema, grpc_port, login.gameAuthToken,
                                                  args.master_dir, args.startup_timeout, preserved))
+        result.update(exercise_appearance_checks(qa, schema, grpc_port, login.gameAuthToken,
+                                                 args.master_dir, args.startup_timeout, preserved))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:
@@ -1063,7 +1115,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("35-final")
+            qa.capture("45-final")
         except Exception:
             pass
         qa.close()

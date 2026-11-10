@@ -605,6 +605,10 @@ def smoke(data_dir, server_data, report_path):
               "story_read_resources_preserved": False, "story_read_identity_preserved": False,
               "story_read_sessions_preserved": False, "story_read_settings_preserved": False,
               "story_read_restart_no_grant": False,
+              "appearance_persisted": False, "appearance_clock_preserved": False,
+              "appearance_resources_preserved": False, "appearance_identity_preserved": False,
+              "appearance_sessions_preserved": False, "appearance_settings_preserved": False,
+              "appearance_restart_no_change": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     engine_label = "macOS frozen" if report["frozen_runtime"] else "source engine"
@@ -831,6 +835,27 @@ def smoke(data_dir, server_data, report_path):
                       story_read_resources_preserved=True, story_read_identity_preserved=True,
                       story_read_sessions_preserved=True, story_read_settings_preserved=True,
                       story_read_restart_no_grant=True)
+        from idoly_local.appearance_qa import assert_appearance_retries, run_appearance_checks
+        appearance = run_appearance_checks(schema,
+            lambda path, request: _rpc(address, schema, path, request, token),
+            Path(data_dir) / "master-json", label=engine_label)
+        report["appearance"] = appearance
+        if State(Path(data_dir) / "state.db").lesson_progress("sandbox") != lesson:
+            raise RuntimeError("Appearance requests changed the raw persistent lesson clock")
+        runtime.stop()
+        runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
+        address = runtime.status()["grpc_address"]
+        assert_appearance_retries(schema,
+            lambda path, request: _rpc(address, schema, path, request, token),
+            Path(data_dir) / "master-json", appearance)
+        if State(Path(data_dir) / "state.db").lesson_progress("sandbox") != lesson:
+            raise RuntimeError("Appearance restart or retries changed the raw lesson clock")
+        if _preserved_database_state(data_dir) != preserved:
+            raise RuntimeError("Appearance requests changed identity, sessions, settings or the starter marker")
+        report.update(appearance_persisted=True, appearance_clock_preserved=True,
+                      appearance_resources_preserved=True, appearance_identity_preserved=True,
+                      appearance_sessions_preserved=True, appearance_settings_preserved=True,
+                      appearance_restart_no_change=True)
     finally:
         runtime.stop()
         report["server_stopped"] = runtime.status()["running"] is False
@@ -853,6 +878,9 @@ def smoke(data_dir, server_data, report_path):
                 "story_read_persisted", "story_read_clock_persisted", "story_read_resources_preserved",
                 "story_read_identity_preserved", "story_read_sessions_preserved", "story_read_settings_preserved",
                 "story_read_restart_no_grant",
+                "appearance_persisted", "appearance_clock_preserved", "appearance_resources_preserved",
+                "appearance_identity_preserved", "appearance_sessions_preserved", "appearance_settings_preserved",
+                "appearance_restart_no_change",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")

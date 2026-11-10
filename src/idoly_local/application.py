@@ -33,12 +33,14 @@ class Application:
         from .social import SocialInbox
         from .story_catalog import StoryCatalog
         from .story_reads import StoryReads
+        from .appearance import Appearance
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
         self.story_reads = StoryReads(schema, state, profile, master_dir, story_catalog=self.stories,
                                       fixtures=self.fixtures, extra_fixture=self._story_extra_fixture,
                                       event_fixture=self._story_event_fixture)
+        self.appearance = Appearance(schema, state, profile, master_dir)
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
@@ -131,6 +133,8 @@ class Application:
                 response = self.stories.handle(path, plain)
             if response is None:
                 response = self.story_reads.handle(path, plain)
+            if response is None:
+                response = self.appearance.handle(path, plain)
             if response is None:
                 response = self.tutorial_progression.handle(path, plain)
             if response is None:
