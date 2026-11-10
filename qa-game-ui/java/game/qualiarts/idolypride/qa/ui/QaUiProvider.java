@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.json.JSONObject;
 
-/** Nonexported, temporary QA bootstrap. Physical devices never start a bridge. */
+/** Nonexported temporary QA bootstrap for pinned inputs and emulator indicators. */
 public final class QaUiProvider extends ContentProvider {
     private static final String DIAGNOSTIC_PACKAGE = "game.qualiarts.idolypride.local.diagnostics";
     private static final String NORMAL_PACKAGE = "game.qualiarts.idolypride.local";
@@ -70,18 +70,36 @@ public final class QaUiProvider extends ContentProvider {
         } catch (Exception ignored) { return false; }
     }
 
-    private static boolean emulatorProperty() {
+    static final class EmulatorIndicators {
+        static boolean matches(String hardware, String bootHardware, String device, String qemu) {
+            if ("cutf_cvm".equals(hardware)) {
+                return "cutf_cvm".equals(bootHardware) && "vsoc_arm64_only".equals(device);
+            }
+            return ("ranchu".equals(hardware) || "goldfish".equals(hardware)) && "1".equals(qemu);
+        }
+    }
+
+    private static String property(String name, long timeoutSeconds) {
         Process process = null;
         try {
-            process = new ProcessBuilder("/system/bin/getprop", "ro.kernel.qemu").start();
-            if (!process.waitFor(1, TimeUnit.SECONDS) || process.exitValue() != 0) return false;
-            byte[] value = new byte[8];
+            process = new ProcessBuilder("/system/bin/getprop", name).start();
+            if (!process.waitFor(timeoutSeconds, TimeUnit.SECONDS) || process.exitValue() != 0) return "";
+            byte[] value = new byte[128];
             try (InputStream stream = process.getInputStream()) {
                 int count = stream.read(value);
-                return count > 0 && new String(value, 0, count, StandardCharsets.US_ASCII).trim().equals("1");
+                return count > 0 ? new String(value, 0, count, StandardCharsets.US_ASCII).trim() : "";
             }
-        } catch (Exception ignored) { return false; }
+        } catch (Exception ignored) { return ""; }
         finally { if (process != null) process.destroy(); }
+    }
+
+    private static boolean emulatorProperty() {
+        if ("cutf_cvm".equals(Build.HARDWARE)) {
+            // Stock Cuttlefish has no ro.kernel.qemu property. Require its
+            // observed boot hardware and exact ARM64-only product instead.
+            return EmulatorIndicators.matches(Build.HARDWARE, property("ro.boot.hardware", 3), Build.DEVICE, "");
+        }
+        return EmulatorIndicators.matches(Build.HARDWARE, "", Build.DEVICE, property("ro.kernel.qemu", 1));
     }
 
     private static final class Bootstrap implements Runnable {
