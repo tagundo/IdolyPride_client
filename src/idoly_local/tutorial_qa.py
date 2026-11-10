@@ -19,6 +19,49 @@ def _digest(user):
     return hashlib.sha256(user.SerializeToString(deterministic=True)).hexdigest()
 
 
+def _mission_payloads(value):
+    if "missions" not in value.DESCRIPTOR.fields_by_name:
+        return ()
+    return tuple(row.SerializeToString(deterministic=True) for row in value.missions)
+
+
+def _assert_enhancement_missions(before, after, response, master_dir, card_id):
+    """Validate the one supported high-water delta, preserving all other bytes."""
+    identity = "ms-normal-card_level_achievement"
+    expected = type(before).FromString(before.SerializeToString())
+    saved = [row for row in getattr(expected, "missions", ()) if row.missionId == identity]
+    _require(len(saved) <= 1, "card-level achievement is duplicated")
+    source = Path(master_dir) / "Mission.json"
+    changed = None
+    # Old payloads and imported snapshots without this achievement do not gain
+    # an active mission catalog merely by running the continuation.
+    if source.is_file() and saved:
+        masters = [row for row in json.loads(source.read_text(encoding="utf-8")) if row["id"] == identity]
+        _require(len(masters) == 1, "card-level achievement master is ambiguous")
+        thresholds = [int(row["threshold"]) for row in masters[0]["progresses"]]
+        row = saved[0]
+        _require(row.currentThreshold in thresholds and row.statusType in (1, 2, 3, 4)
+                 and row.progress >= 0 and row.lastUpdateTime >= 0
+                 and (row.statusType == 1 or row.progress >= row.currentThreshold),
+                 "saved card-level achievement is invalid")
+        highest = max((card.level for card in after.cards), default=0)
+        _require(highest > 0, "enhancement has no owned-card level")
+        if highest > row.progress:
+            cards = [card for card in after.cards if card.cardId == card_id]
+            _require(len(cards) == 1 and cards[0].lastEnhanceTime > 0,
+                     "enhancement has no bounded mission update time")
+            row.progress = highest
+            row.lastUpdateTime = max(row.lastUpdateTime, cards[0].lastEnhanceTime)
+            if row.statusType == 1 and highest >= row.currentThreshold:
+                row.statusType = 2
+            changed = row
+    _require(_mission_payloads(after) == _mission_payloads(expected),
+             "enhancement changed unexpected mission state")
+    delta = _mission_payloads(response.commonResponse.updatedData)
+    wanted = () if changed is None else (changed.SerializeToString(deterministic=True),)
+    _require(delta == wanted, "enhancement mission response delta differs")
+
+
 def assert_tutorial_continuation_snapshot(schema, payload, receipt):
     user = schema.response_type("/api.User/Get").FromString(payload) if isinstance(payload, bytes) else payload
     _require(_digest(user) == receipt["snapshot_sha256"], "restart changed the completed snapshot")
@@ -64,6 +107,7 @@ def run_tutorial_continuation(schema, invoke, master_dir, *, label="native"):
     _require([(r.resourceType, r.resourceId, r.amount) for r in reward.rewards]
              == [(8, "", gold), (14, "", exp), (1, "item-card_enhance", item_amount)], "lesson reward definitions differ")
     rewarded = user()
+    _require(_mission_payloads(rewarded) == _mission_payloads(before), "lesson changed mission state")
     _require(point(rewarded) == point(before) + gold, "gold delta differs")
     _require(pieces(rewarded) == pieces(before) + item_amount, "lesson piece delta differs")
     _require(rewarded.user.managerExp == before.user.managerExp + exp, "manager EXP delta differs")
@@ -79,7 +123,7 @@ def run_tutorial_continuation(schema, invoke, master_dir, *, label="native"):
     _require(card is not None and card.baseLevel == 1 and not card.supported, "missing initial Kotono card")
     levels = {row["level"]: int(row["requiredExp"]) for row in rows("CardLevel")}
     cost = levels[2] - card.totalExp
-    rpc("/api.Card/Enhance", cardId=card.cardId, level=2)
+    enhancement = rpc("/api.Card/Enhance", cardId=card.cardId, level=2)
     enhanced = user()
     updated = next(row for row in enhanced.cards if row.cardId == card.cardId)
     _require(updated.level == updated.baseLevel == 2 and updated.totalExp == levels[2], "card did not reach level two")
@@ -88,7 +132,9 @@ def run_tutorial_continuation(schema, invoke, master_dir, *, label="native"):
     _require(updated.obtainedTime == card.obtainedTime, "enhancement changed original obtained time")
     _require(pieces(enhanced) == pieces(rewarded) - cost and point(enhanced) == point(rewarded),
              "enhancement consumption differs")
-    rpc("/api.Card/Enhance", cardId=card.cardId, level=2)
+    _assert_enhancement_missions(rewarded, enhanced, enhancement, directory, card.cardId)
+    retry = rpc("/api.Card/Enhance", cardId=card.cardId, level=2)
+    _require(not _mission_payloads(retry.commonResponse.updatedData), "same-level retry emitted a mission delta")
     _require(_digest(user()) == _digest(enhanced), "same-level retry consumed resources or changed the card")
 
     stage(130)
@@ -158,10 +204,17 @@ def run_tutorial_continuation(schema, invoke, master_dir, *, label="native"):
     _require(_digest(user()) == _digest(final), "completion retry changed the completion time")
     _require(final.userPublic == before.userPublic and final.user.name == before.user.name,
              "continuation changed local display/identity")
+    _require(_mission_payloads(final) == _mission_payloads(enhanced),
+             "post-enhancement continuation changed mission state")
     # Compare every unrelated top-level container, including its unknown fields.
     allowed = {"user", "totalCount", "tutorials", "items", "points", "cards", "decks", "deckPositions", "messages", "messageSchedules"}
     unchanged_before = type(before).FromString(before.SerializeToString())
     unchanged_after = type(final).FromString(final.SerializeToString())
+    # The complete ordered mission collection was compared above against the
+    # independently projected enhancement delta, including unknown row fields.
+    if "missions" in unchanged_before.DESCRIPTOR.fields_by_name:
+        unchanged_before.ClearField("missions")
+        unchanged_after.ClearField("missions")
     for field in allowed:
         unchanged_before.ClearField(field)
         unchanged_after.ClearField(field)
