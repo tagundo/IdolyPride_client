@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
     inputs:
       playcover_version:
-        description: Pinned PlayCover release; 3.1.0 build 1633 matches the working user setup
+        description: Package tag; 4.0 prerelease contains app 3.1.0 build 1633, tag 3.1.0 contains build 856
         type: choice
         required: true
-        default: '3.1.0'
+        default: '4.0.0-prerelease'
         options:
           - '3.1.0'
           - '4.0.0-prerelease'
@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: playcover-firstboot-${{ inputs.playcover_version || '3.1.0' }}-${{ inputs.ipa_variant || 'local' }}
+  group: playcover-firstboot-${{ inputs.playcover_version || '4.0.0-prerelease' }}-${{ inputs.ipa_variant || 'local' }}
   cancel-in-progress: false
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       IDOLY_IPA_VARIANT: ${{ inputs.ipa_variant || 'local' }}
-      IDOLY_PLAYCOVER_VERSION: ${{ inputs.playcover_version || '3.1.0' }}
+      IDOLY_PLAYCOVER_VERSION: ${{ inputs.playcover_version || '4.0.0-prerelease' }}
     steps:
       - uses: actions/checkout@v4
         with:
