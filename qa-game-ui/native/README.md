@@ -136,3 +136,43 @@ IL2CPP thread. It makes no game API calls, writes no game fields, and reads no
 account storage. The host tests check JSON escaping/overflow, exported API
 coverage, virtual dispatch and fail-closed exception, thread, generation and
 enabled-state paths. Actual Unity execution is a separate emulator CI check.
+
+## Notice input and frame observations
+
+`frame_observation` reports `sample_monotonic_ms`, nullable `frame_count`,
+`unscaled_delta_time` and `time_scale`, with missing field names in
+`unavailable`. Values come from uniquely resolved, typed Unity `Time` getters
+on UnityMain. Delta time describes Unity's most recent frame; it is not a
+direct FPS measurement. Frame-count differences divided by monotonic sample
+time can help compare successive observations. Sampling itself also takes time.
+
+Only the exact observed
+`Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/TabDialogBase/DialogCanvas/Dialog/Footer/CloseButton`
+node receives `input_observation`. It contains nullable
+`long_tap_time_seconds`, `suppress_long_tap_click`, `is_pressed`, `is_dragged`,
+`canvas_effective_alpha`, `canvas_interactable`, `canvas_blocks_raycasts`,
+`canvas_group_count`, and `unavailable` keys. The gesture is read from the
+already existing `SolisButtonBase._longTapGesture` reference using checked
+metadata field types. No lazy gesture getter, event handler or setter is called.
+An absent gesture is unknown, not an invented default configuration.
+
+`canvas_effective_alpha` is specifically the existing target CanvasRenderer's
+`GetInheritedAlpha()` value; if the target has no renderer it remains null.
+It does not claim to include every material/color/fader/culling effect.
+CanvasGroup flags are read on the target transform and its ancestors, stopping
+at `ignoreParentGroups`, with a 32-ancestor ceiling. No groups means known true
+flags and count zero. Multiple groups on one transform have order-sensitive
+ignore rules, so effective flags/count remain unavailable in that case rather
+than guessing. These values do not prove the final EventSystem raycast winner,
+window animation completion or Android pointer delivery. No `ready=true` value
+is synthesized and the normal-input driver does not bypass a handler or gate.
+
+New getters are checked for unique name, parameter/return kinds and static
+flags before invocation. Both additional IL2CPP signature-query exports are
+covered by the same ELF build-ID/address/16-byte guards, now 34 exports. The
+audited getter classes have no managed static constructors. Unity engine getters
+may resolve their native iCall cache on first use; this is not a claim that no
+engine memory is ever written. The observer writes no managed game fields,
+creates no game singleton and invokes no purchase, click or gameplay handler.
+These new observations require actual emulator validation before any claim
+about why the Notice close input failed.

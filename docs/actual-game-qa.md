@@ -6,11 +6,15 @@
 
 API35 `google_apis;x86_64`의 ARM64 변환 환경에서 고정 해시를 확인한 공개 진단 게임의 별도 복사본을 실행합니다. Lavapipe·소프트웨어 AES·스토어 없는 초기화·GLES3와 QA UI 브리지를 사용하며 일반 배포 게임은 바꾸지 않습니다. 결제 초기화 등에서 실제 기기와 동작 차이가 남을 수 있습니다.
 
+수동 실행의 `display_size`는 기본 `1080x2280` 또는 부하 비교용 `540x1140`을 선택합니다. 각각 density 440/220으로 같은 dp 비율을 유지하고 실제 크기를 자료에 기록합니다. 렌더링 부하를 줄이는 실험이며, 성능이나 입력 개선은 실제 Unity 화면 크기·프레임 관측과 대조해야 합니다.
+
 튜토리얼 완료 프로필은 알려진 로컬 RPC로 준비하고 `profile-fixture.json`에 별도 기록합니다. 이 준비 과정은 게임으로 튜토리얼을 플레이한 증거에 포함하지 않습니다.
 
 드라이버는 새 Unity UI 트리의 버튼 ID·경로·좌표를 다시 확인하고 현재 Android 게임 뷰·화면 크기와 맞춘 뒤 일반 ADB 터치를 보냅니다. 브리지는 버튼 delegate를 직접 실행하지 않습니다. 메뉴 탐색 중 gameplay RPC도 주입하지 않습니다.
 
 현재 대상은 레슨·라이브·아이돌·업무·스토리·선물 메뉴입니다. 알려진 타이틀 콜백 미등록·입력 해제 중·콘텐츠 차단 상태에서는 입력을 기다립니다. 관측할 수 없는 값은 `null`과 `unavailable`에 남기며, interceptor 존재 자체는 차단으로 단정하지 않습니다. 시작 상태를 관측하기 위해 게임·SDK 생성자나 싱글턴 생성을 추가하지 않습니다.
+
+Android 전체화면 안내는 정확한 시스템 UI 식별자·버튼 상태·현재 화면 범위를 확인하고, 입력 직전 다시 조회한 트리가 일치할 때만 닫습니다. 시스템 안내 입력은 게임 입력과 별도로 기록하며 같은 프레임에 게임을 누르지 않습니다. 활성 `GlobalDialog`가 있으면 그 뒤의 메뉴 입력·메뉴 결과 판정·앱 재시작을 막습니다. 알려진 공지 X도 전체 창의 문맥을 다시 확인하며, 해결되지 않는 창이 반복되면 조기에 관측을 끝냅니다.
 
 ## 결과 파일
 
@@ -21,6 +25,8 @@ API35 `google_apis;x86_64`의 ARM64 변환 환경에서 고정 해시를 확인�
 | `unity-ui-*.json` | 시각별 버튼·렌더링된 텍스트·시작 상태 |
 | `ui-action-*.unity.json/.xml/.png` | 입력 직전 Unity·Android 트리와 화면 |
 | `game-*.png/.xml` | 입력 사이의 게임 화면·Android 트리 |
+| `system-dialog-*.json/.xml/.png` | 알려진 Android 안내 입력 전 재검증·입력 후 화면과 별도 처리 기록 |
+| `environment-preflight/` | 같은 AVD의 CPU·GLES 합성 검사, 실제 루트 지원과 변환기 해시 |
 | `server-rpc-sequence.json` | 서버 UI의 요청·상태 순서; 앞부분의 프로필 준비 호출은 별도 기록과 대조 |
 | `qa-aes-report.json`, `qa-ui-report.json` | 원본·변환 복사본의 해시와 변경 범위 |
 
@@ -52,3 +58,15 @@ Android 서버 APK·Mac 앱의 별도 빌드 검사는 암호화 RPC와 재시�
 현재 Linux 실행기에 MuMu를 설치해 실행했다는 주장은 하지 않습니다. [별도 환경 검사](https://github.com/tagundo/IdolyPride_client/actions/runs/42785150482)의 API35·Lavapipe 구성은 실제 `adb root`와 `whoami=root`, 원본 실패 명령 `FCVTZS S1,S1`의 양·음수 절삭, vertex/fragment 각300개 vec4 uniform의 실제 컴파일·링크·활성 배열 크기 검사를 통과했습니다. 게임·계정 정보가 없는 ARM64 전용 합성 APK로 확인했습니다. 기본 `-gpu host` 구성의 결과와 구분합니다.
 
 성공 구성은 emulator37.2.13(build16740729), Android35 image12960925, native bridge SHA256 `9b5808354a85d722a290ae879400b909aa961955e80ea1a7e807aea9416d92f9`, `-gpu lavapipe`입니다. 렌더러는 ANGLE의 Mesa Vulkan llvmpipe, GLES3.1이며 두 uniform 한도는 각각4096입니다. Xvfb와 Mesa·`libpulse0`, `LIBGL_ALWAYS_SOFTWARE=1`, `GALLIUM_DRIVER=llvmpipe`를 사용합니다. 게임 검사도 시작 전에 같은 합성 검사를 다시 통과해야 진행하며, 성공한 합성 검사 자체를 홈·메뉴 플레이 검증으로 취급하지 않습니다.
+
+## API35 실제 게임에서 확인한 범위
+
+[실행42785951638](https://github.com/tagundo/IdolyPride_client/actions/runs/42785951638)은 게임 PID가 1800초 동안 유지됐지만 Android의 `Viewing full screen / Got it` 안내가 남았습니다. 게임 입력은 0회였고 실제 요청은 `System.Check/Refund.GetTerm`뿐입니다. 이 실행은 홈·메뉴 검증 자료가 아닙니다.
+
+[실행42793871383](https://github.com/tagundo/IdolyPride_client/actions/runs/42793871383)은 시스템 안내를 닫고 실제 타이틀 입력·1.07GB 다운로드 확인·다운로드 화면을 거쳐 `Auth.Login/Master.Get/User.Get/Home.Login/Home.Enter/Notice.List → OK`까지 진행했습니다. 그러나 `INFORMATION` 공지 창이 홈을 덮었습니다. 그 뒤의 레슨·라이브·아이돌·업무 버튼 입력과 트리 변화 기록은 메뉴 검증으로 사용할 수 없습니다. 스토리·선물은 시도하지 않았으며, 해당 메뉴의 요청도 관측하지 못했습니다.
+
+[실행42801877846](https://github.com/tagundo/IdolyPride_client/actions/runs/42801877846), 소스 `6c856f8`은 공지 창의 정확한 X 버튼을 새 Unity·Android 트리로 확인하고 일반 입력을 두 번 보냈습니다. 창이 남아 `global_dialog_not_dismissed`로 조기에 끝냈으며, 메뉴 입력·결과는 0개입니다. 게임 입력 7회는 타이틀 4회·다운로드 확인 1회·공지 X 2회이고, Android 안내 처리 1회는 별도입니다. 명령이 전송됐다는 기록은 Unity 클릭 콜백 실행을 보장하지 않습니다.
+
+이 마지막 실행은 동일한 API35 사전검사를 통과했고 게임 PID4433도 종료되지 않았습니다. 관측한 게임 로그에 새 관리 예외·`SIGILL`·GLSL 링크 오류는 없었습니다. 실제 게임에서 `Home.Login/Enter/Notice.List`가 성공했지만, 공지 창에 가리지 않은 홈 3D 모델과 메뉴 화면은 아직 검증하지 못했습니다. `UNIMPLEMENTED`가 없었던 것도 메뉴 기능이 모두 구현됐다는 뜻은 아닙니다. 초기 준비용 RPC 31회와 서버 준비 확인은 실제 게임 요청에서 분리합니다.
+
+현재 메뉴 탐색기는 메뉴 입력 뒤 트리 변화를 기록하는 범위이며, 일반 퀘스트 선택·시작·재생·결과 화면까지 진행하지 않습니다. [첫 메인 라이브 실험 기능](first-live-support.md)의 엔진·API 검사는 이 실제 게임 기록과 별개이며, 일반 라이브의 실제 화면 재생을 증명하지 않습니다.

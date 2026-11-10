@@ -20,6 +20,7 @@
 #define NODE_LIMIT 512
 #define JSON_LIMIT 65536
 #define ARRAY_LIMIT 8192
+#define NOTICE_CLOSE_PATH "Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/TabDialogBase/DialogCanvas/Dialog/Footer/CloseButton"
 typedef void Obj;
 typedef void Klass;
 typedef void Method;
@@ -60,6 +61,8 @@ static struct {
     const char *(*method_get_name)(const Method *);
     uint32_t (*method_get_param_count)(const Method *);
     const void *(*method_get_param)(const Method *, uint32_t);
+    const void *(*method_get_return_type)(const Method *);
+    uint32_t (*method_get_flags)(const Method *, uint32_t *);
     int (*type_get_type)(const void *);
 } api;
 
@@ -82,6 +85,14 @@ static struct {
     const Method *initialization_succeeded, *content_blocking;
 } observations;
 struct observed_bool { bool available, value; };
+struct observed_float { bool available; float value; };
+static void unavailable_key(struct ui_json *, const char *, bool, size_t *);
+static struct {
+    Klass *gesture, *canvas_group, *canvas_renderer;
+    const Field *gesture_reference, *long_tap_time, *suppress, *pressed, *dragged;
+    const Method *get_components, *get_component, *group_interactable, *group_blocks, *group_ignore;
+    const Method *inherited_alpha, *frame_count, *unscaled_delta, *time_scale;
+} input_observations;
 static bool callback_observation_missing;
 
 struct retained { int32_t id; uint32_t handle; bool qua; };
@@ -147,6 +158,7 @@ static bool load_api(void) {
     LOAD(class_from_name); LOAD(class_get_method_from_name); LOAD(class_get_type); LOAD(type_get_object);
     LOAD(class_get_parent);
     LOAD(class_get_methods); LOAD(method_get_name); LOAD(method_get_param_count); LOAD(method_get_param); LOAD(type_get_type);
+    LOAD(method_get_return_type); LOAD(method_get_flags);
     LOAD(class_get_field_from_name); LOAD(field_get_type); LOAD(field_get_flags); LOAD(field_get_value); LOAD(field_static_get_value);
     LOAD(object_get_class); LOAD(class_is_assignable_from); LOAD(array_new);
     LOAD(runtime_invoke); LOAD(object_get_virtual_method); LOAD(object_unbox);
@@ -177,6 +189,25 @@ static const Method *array_get_int32(Klass *k) {
                 && api.type_get_type(api.method_get_param(m, 0)) == 0x08) return m;
     }
     return NULL;
+}
+static const Method *typed_method(Klass *k, const char *name, bool is_static, int result_kind,
+                                 unsigned args, int argument_kind) {
+    if (!k || !api.method_get_return_type || !api.method_get_flags) return NULL;
+    void *iter = NULL; const Method *m, *found = NULL; unsigned count = 0;
+    while ((m = api.class_get_methods(k, &iter))) {
+        if (++count > 512) return NULL;
+        if (strcmp(api.method_get_name(m), name) || api.method_get_param_count(m) != args) continue;
+        uint32_t impl = 0, flags = api.method_get_flags(m, &impl);
+        const void *type = api.method_get_return_type(m);
+        if (((flags & 0x10u) != 0) != is_static || !type || api.type_get_type(type) != result_kind) continue;
+        if (args) {
+            type = api.method_get_param(m, 0);
+            if (args != 1 || !type || api.type_get_type(type) != argument_kind) continue;
+        }
+        if (found) return NULL;
+        found = m;
+    }
+    return found;
 }
 static Obj *invoke(const Method *m, Obj *o, void **args, bool virt, bool *ok) {
     if (!*ok || !m) { *ok = false; return NULL; }
@@ -286,6 +317,27 @@ static bool initialize(void) {
         observations.purchase_initialized = api.class_get_field_from_name(observations.unity_purchase, "<IsInitializeSucceeded>k__BackingField");
     observations.initialization_succeeded = method(observations.initializer, "get_IsSuccess", 0);
     observations.content_blocking = method(klass("Assembly-CSharp.dll", "Solis.Common", "SolisBlockingManager"), "IsActive", 1);
+    input_observations.gesture = klass("quaunity-ui.Runtime.dll", "Qua.UI", "LongTapGesture");
+    input_observations.canvas_group = klass("UnityEngine.UIModule.dll", "UnityEngine", "CanvasGroup");
+    input_observations.canvas_renderer = klass("UnityEngine.UIModule.dll", "UnityEngine", "CanvasRenderer");
+    if (observations.solis_button)
+        input_observations.gesture_reference = api.class_get_field_from_name(observations.solis_button, "_longTapGesture");
+    if (input_observations.gesture) {
+        input_observations.long_tap_time = api.class_get_field_from_name(input_observations.gesture, "<LongTapTime>k__BackingField");
+        input_observations.suppress = api.class_get_field_from_name(input_observations.gesture, "<SuppressLongTapClick>k__BackingField");
+        input_observations.pressed = api.class_get_field_from_name(input_observations.gesture, "<IsPressed>k__BackingField");
+        input_observations.dragged = api.class_get_field_from_name(input_observations.gesture, "<IsDragged>k__BackingField");
+    }
+    input_observations.get_components = typed_method(component, "GetComponents", false, 0x1d, 1, 0x12);
+    input_observations.get_component = typed_method(component, "GetComponent", false, 0x12, 1, 0x12);
+    input_observations.group_interactable = typed_method(input_observations.canvas_group, "get_interactable", false, 0x02, 0, 0);
+    input_observations.group_blocks = typed_method(input_observations.canvas_group, "get_blocksRaycasts", false, 0x02, 0, 0);
+    input_observations.group_ignore = typed_method(input_observations.canvas_group, "get_ignoreParentGroups", false, 0x02, 0, 0);
+    input_observations.inherited_alpha = typed_method(input_observations.canvas_renderer, "GetInheritedAlpha", false, 0x0c, 0, 0);
+    Klass *time_class = klass("UnityEngine.CoreModule.dll", "UnityEngine", "Time");
+    input_observations.frame_count = typed_method(time_class, "get_frameCount", true, 0x08, 0, 0);
+    input_observations.unscaled_delta = typed_method(time_class, "get_unscaledDeltaTime", true, 0x0c, 0, 0);
+    input_observations.time_scale = typed_method(time_class, "get_timeScale", true, 0x0c, 0, 0);
     initialized = true; return true;
 }
 static bool unity_thread(JNIEnv *e) {
@@ -411,6 +463,137 @@ static struct observed_bool query_boolean(const Method *m, void **args) {
 }
 static void boolean_json(struct ui_json *j, struct observed_bool value) {
     ui_raw(j, !value.available ? "null" : value.value ? "true" : "false");
+}
+static struct observed_float single_value(Obj *value, bool ok) {
+    void *p = ok && value ? api.object_unbox(value) : NULL;
+    float number = 0;
+    if (!p) return (struct observed_float){false, 0};
+    memcpy(&number, p, sizeof(number));
+    return (struct observed_float){isfinite(number) && number >= 0, number};
+}
+static struct observed_float field_single(Klass *owner, Obj *o, const Field *field) {
+    if (!owner || !o || !field || (api.field_get_flags(field) & 0x10u)
+            || !api.class_is_assignable_from(owner, api.object_get_class(o)))
+        return (struct observed_float){false, 0};
+    const void *type = api.field_get_type(field);
+    if (!type || api.type_get_type(type) != 0x0c) return (struct observed_float){false, 0};
+    float value = 0; api.field_get_value(o, field, &value);
+    return (struct observed_float){isfinite(value) && value >= 0, value};
+}
+static struct observed_float method_single(const Method *m, Obj *instance) {
+    bool ok = true;
+    Obj *value = invoke(m, instance, NULL, false, &ok);
+    return single_value(value, ok);
+}
+static void float_json(struct ui_json *out, struct observed_float value) {
+    if (!value.available) { ui_raw(out, "null"); return; }
+    char number[48]; snprintf(number, sizeof(number), "%.9g", (double)value.value); ui_raw(out, number);
+}
+static void frame_json(struct ui_json *out) {
+    bool ok = true;
+    int32_t frames = value_int(invoke(input_observations.frame_count, NULL, NULL, false, &ok), &ok);
+    ok = ok && frames >= 0;
+    struct observed_float delta = method_single(input_observations.unscaled_delta, NULL);
+    struct observed_float scale = method_single(input_observations.time_scale, NULL);
+    ui_raw(out, ",\"frame_observation\":{\"sample_monotonic_ms\":"); ui_number(out, snapshot_time);
+    ui_raw(out, ",\"frame_count\":"); if (ok) ui_number(out, frames); else ui_raw(out, "null");
+    ui_raw(out, ",\"unscaled_delta_time\":"); float_json(out, delta);
+    ui_raw(out, ",\"time_scale\":"); float_json(out, scale);
+    ui_raw(out, ",\"unavailable\":["); size_t missing = 0;
+    unavailable_key(out, "frame_count", !ok, &missing);
+    unavailable_key(out, "unscaled_delta_time", !delta.available, &missing);
+    unavailable_key(out, "time_scale", !scale.available, &missing);
+    ui_raw(out, "]}");
+}
+struct canvas_observation {
+    struct observed_float alpha;
+    struct observed_bool interactable, blocks;
+    unsigned groups;
+};
+static struct canvas_observation canvas_observation(Obj *button) {
+    struct canvas_observation result = {0};
+    if (!input_observations.get_component || !input_observations.canvas_renderer
+            || !input_observations.inherited_alpha) goto groups;
+    bool ok = true;
+    Obj *renderer_type = api.type_get_object(api.class_get_type(input_observations.canvas_renderer));
+    void *renderer_args[] = {renderer_type};
+    Obj *renderer = invoke(input_observations.get_component, button, renderer_args, false, &ok);
+    if (ok && renderer && api.class_is_assignable_from(input_observations.canvas_renderer, api.object_get_class(renderer)))
+        result.alpha = method_single(input_observations.inherited_alpha, renderer);
+groups:
+    if (!input_observations.get_components || !input_observations.canvas_group
+            || !input_observations.group_interactable || !input_observations.group_blocks
+            || !input_observations.group_ignore) return result;
+    bool valid = true, interactable = true, blocks = true;
+    Obj *at = invoke(methods.transform, button, NULL, false, &valid);
+    Obj *group_type = api.type_get_object(api.class_get_type(input_observations.canvas_group));
+    if (!at || !group_type) return result;
+    unsigned depth = 0;
+    while (at && valid && depth++ < 32) {
+        void *args[] = {group_type};
+        Obj *array = invoke(input_observations.get_components, at, args, false, &valid);
+        uint32_t root = valid && array ? api.gchandle_new(array, false) : 0;
+        if (!root) { valid = false; break; }
+        uintptr_t count = api.array_length(array);
+        /* Multiple groups on one transform have order-sensitive ignore rules.
+         * Leave effective flags unavailable rather than guess that ordering. */
+        if (count > 1) { api.gchandle_free(root); valid = false; break; }
+        bool ignore = false;
+        if (count == 1) {
+            int32_t zero = 0; void *index[] = {&zero};
+            Obj *group = invoke(methods.array_get, array, index, false, &valid);
+            if (!group || !api.class_is_assignable_from(input_observations.canvas_group, api.object_get_class(group))) valid = false;
+            if (valid) {
+                bool value = value_bool(invoke(input_observations.group_interactable, group, NULL, false, &valid), &valid);
+                interactable = interactable && value;
+                value = value_bool(invoke(input_observations.group_blocks, group, NULL, false, &valid), &valid);
+                blocks = blocks && value;
+                ignore = value_bool(invoke(input_observations.group_ignore, group, NULL, false, &valid), &valid);
+                ++result.groups;
+            }
+        }
+        api.gchandle_free(root);
+        if (!valid || ignore) { at = NULL; break; }
+        at = invoke(methods.parent, at, NULL, false, &valid);
+    }
+    if (at) valid = false;
+    result.interactable = (struct observed_bool){valid, interactable};
+    result.blocks = (struct observed_bool){valid, blocks};
+    return result;
+}
+static void notice_input_json(struct ui_json *out, Obj *button) {
+    Obj *gesture = NULL;
+    bool found = field_reference(observations.solis_button, button, input_observations.gesture_reference,
+                                false, &gesture) && gesture && input_observations.gesture
+        && api.class_is_assignable_from(input_observations.gesture, api.object_get_class(gesture));
+    struct observed_float long_time = {0};
+    struct observed_bool suppress = {0}, pressed = {0}, dragged = {0};
+    if (found) {
+        long_time = field_single(input_observations.gesture, gesture, input_observations.long_tap_time);
+        suppress = field_boolean(input_observations.gesture, gesture, input_observations.suppress);
+        pressed = field_boolean(input_observations.gesture, gesture, input_observations.pressed);
+        dragged = field_boolean(input_observations.gesture, gesture, input_observations.dragged);
+    }
+    struct canvas_observation canvas = canvas_observation(button);
+    ui_raw(out, ",\"input_observation\":{\"long_tap_time_seconds\":"); float_json(out, long_time);
+    ui_raw(out, ",\"suppress_long_tap_click\":"); boolean_json(out, suppress);
+    ui_raw(out, ",\"is_pressed\":"); boolean_json(out, pressed);
+    ui_raw(out, ",\"is_dragged\":"); boolean_json(out, dragged);
+    ui_raw(out, ",\"canvas_effective_alpha\":"); float_json(out, canvas.alpha);
+    ui_raw(out, ",\"canvas_interactable\":"); boolean_json(out, canvas.interactable);
+    ui_raw(out, ",\"canvas_blocks_raycasts\":"); boolean_json(out, canvas.blocks);
+    ui_raw(out, ",\"canvas_group_count\":");
+    if (canvas.interactable.available && canvas.blocks.available) ui_number(out, canvas.groups); else ui_raw(out, "null");
+    ui_raw(out, ",\"unavailable\":["); size_t missing = 0;
+    unavailable_key(out, "long_tap_time_seconds", !long_time.available, &missing);
+    unavailable_key(out, "suppress_long_tap_click", !suppress.available, &missing);
+    unavailable_key(out, "is_pressed", !pressed.available, &missing);
+    unavailable_key(out, "is_dragged", !dragged.available, &missing);
+    unavailable_key(out, "canvas_effective_alpha", !canvas.alpha.available, &missing);
+    unavailable_key(out, "canvas_interactable", !canvas.interactable.available, &missing);
+    unavailable_key(out, "canvas_blocks_raycasts", !canvas.blocks.available, &missing);
+    unavailable_key(out, "canvas_group_count", !canvas.interactable.available || !canvas.blocks.available, &missing);
+    ui_raw(out, "]}");
 }
 static struct observed_bool callback_registered(Obj *button) {
     Obj *callback = NULL;
@@ -630,7 +813,8 @@ static bool add_kind(struct ui_json *out, Klass *k, const char *kind, const Meth
         ui_raw(out, ",\"game_object_id\":"); ui_number(out, game_id);
         ui_raw(out, ",\"kind\":\""); ui_raw(out, kind); ui_raw(out, "\",\"name\":");
         Obj *name = invoke(methods.name, o, NULL, false, &ok); string_json(out, name, 128);
-        ui_raw(out, ",\"path\":"); path_json(out, transform, &ok);
+        ui_raw(out, ",\"path\":"); size_t path_begin = out->length; path_json(out, transform, &ok);
+        bool notice_close = ok && !out->failed && !strcmp(out->data + path_begin, "\"" NOTICE_CLOSE_PATH "\"");
         ui_raw(out, ",\"text\":");
         Obj *text = text_method ? invoke(text_method, o, NULL, true, &ok) : NULL;
         string_json(out, text, 512);
@@ -646,6 +830,7 @@ static bool add_kind(struct ui_json *out, Klass *k, const char *kind, const Meth
             ui_raw(out, ",\"callback_registered\":"); boolean_json(out, callback);
             callback_observation_missing |= !callback.available;
         }
+        if (button && qua && notice_close) notice_input_json(out, o);
         ui_raw(out, "}");
         if (!ok || out->failed || out->length > JSON_LIMIT - 4096) {
             out->length = before; out->data[before] = 0; out->failed = false;
@@ -682,6 +867,7 @@ Java_game_qualiarts_idolypride_qa_ui_NativeUiBridge_nativeSnapshot(JNIEnv *e, jc
     ui_raw(&out, ",\"screen\":{\"width\":"); ui_number(&out, screen_ok ? width : 0);
     ui_raw(&out, ",\"height\":"); ui_number(&out, screen_ok ? height : 0);
     ui_raw(&out, ",\"origin\":\"top-left\",\"units\":\"unity-screen-pixels\"}");
+    frame_json(&out);
     ui_raw(&out, ",\"nodes\":["); size_t nodes = 0; bool truncated = false;
     bool ok = (!methods.qua_button || add_kind(&out, methods.qua_button, "button", NULL, true, &nodes, &truncated))
         && add_kind(&out, methods.button, "button", NULL, false, &nodes, &truncated)

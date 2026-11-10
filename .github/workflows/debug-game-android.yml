@@ -8,6 +8,11 @@ on:
         type: choice
         options: ["0", "150"]
         default: "0"
+      display_size:
+        description: QA display size; compact tests lower rendering load
+        type: choice
+        options: ["1080x2280", "540x1140"]
+        default: "1080x2280"
 
 permissions:
   contents: read
@@ -239,6 +244,14 @@ jobs:
           emulator-boot-timeout: 1200
           script: |
             python tools/emulator_environment_probe/run_probe.py --apk data/dist/EnvironmentProbe.apk --output data/android-game-debug/environment-preflight --timeout 60 --record-root
+            adb -s emulator-5554 shell am force-stop org.idolypride.environmentprobe
+            case '${{ inputs.display_size || '1080x2280' }}' in
+              1080x2280) adb -s emulator-5554 shell wm size 1080x2280; adb -s emulator-5554 shell wm density 440 ;;
+              540x1140) adb -s emulator-5554 shell wm size 540x1140; adb -s emulator-5554 shell wm density 220 ;;
+              *) exit 1 ;;
+            esac
+            adb -s emulator-5554 shell wm size > data/android-game-debug/display-size.txt
+            adb -s emulator-5554 shell wm density > data/android-game-debug/display-density.txt
             uv run --locked python android-server/ci/qa_game_boot.py --server-apk data/dist/Server-game-debug.apk --game-apk data/dist/Game-QA-UI.apk --game-package game.qualiarts.idolypride.local.diagnostics --descriptor-set data/protocol/idolypride-6.1.1.pb --artifacts data/android-game-debug --duration 1800 --interval 20 --startup-timeout 600 --force-gles30 --tap-observed-title --tree-title-input --qa-ui-explore --touch-hold-ms ${{ inputs.touch_hold_ms || '0' }} --max-title-taps 5 --prepare-completed-opening
       - name: Summarize observed input and menu evidence
         if: always()

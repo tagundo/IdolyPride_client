@@ -86,6 +86,13 @@ def build_native(output, *, ndk=None):
         "bootstrap_native_sha256": profile["bootstrap_native_sha256"],
         "elf_build_id": profile["elf_build_id"], "runtime_profile_sha256": digest(profile_path),
         "limits": {"nodes": 512, "json_bytes": 65535, "array_scan": 8192},
+        "read_only_input_telemetry": {
+            "scope": "frame_observation and the exact NoticeDialog CloseButton only",
+            "gesture": "existing SolisButtonBase._longTapGesture metadata fields; no lazy getter",
+            "canvas_alpha": "existing target CanvasRenderer.GetInheritedAlpha; unavailable if absent",
+            "canvas_flags": "target and ancestors until ignoreParentGroups; max32 ancestors; multiple groups per transform unavailable",
+            "frames": "Time.frameCount/unscaledDeltaTime/timeScale, nullable typed getters",
+            "no_readiness_claim": "Does not prove final raycast winner or Android input delivery"},
         "source_sha256": {p.name: digest(p) for p in [HERE / "ui_bridge.c", HERE / "ui_json.h", Path(__file__)]},
         "library_sha256": {target.name: digest(target)}}
     (output / "native-provenance.json").write_text(json.dumps(report, indent=2) + "\n")

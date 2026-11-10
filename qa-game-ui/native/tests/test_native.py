@@ -19,7 +19,7 @@ def test_profile_covers_every_loaded_export(tmp_path):
     profile = json.loads((HERE / "runtime-profile.json").read_text())
     loaded = {"il2cpp_" + name for name in re.findall(r"LOAD\((\w+)\);", (HERE / "ui_bridge.c").read_text())}
     assert loaded == {row["name"] for row in profile["exports"]}
-    assert len(loaded) == 32
+    assert len(loaded) == 34
     build.header(profile, tmp_path / "ui_profile.h")
     assert "UI_EXPORT_COUNT" in (tmp_path / "ui_profile.h").read_text()
     for field, value in [("schema", 2), ("architecture", "x86_64"), ("client_version", "6.1.0")]:
@@ -49,6 +49,11 @@ static int parsed_m, array_m, find_m, name_m, transform_m, parent_m, default_m, 
 static int bool_field, callback_field, view_field, title_button_field, static_field, wrong_field, current_input_field, releasing_field;
 static int shader_field, home_model_field, home_enter_field, home_scene_field, purchase_instance_field, purchase_unity_field, purchase_bool_field;
 static int success_m, releasing_m, blocking_m, field_reads;
+static int float_field, component_m, components_m, alpha_m, group_interact_m, group_blocks_m, group_ignore_m;
+static int frames_m, delta_m, scale_m;
+static float float_value=.5f, alpha_value=.75f, delta_value=.25f, scale_value=1.f;
+static int32_t frames_value=42;
+static bool group_interact=true, group_blocks=false, group_ignore=true;
 static unsigned char observed_initialized;
 static Obj *observed_callback = (Obj*)0x1111;
 static bool releasing_value, blocking_value;
@@ -84,14 +89,15 @@ static const Method *next_method(Klass *k,void **iter) { (void)k;if(*iter)return
 static const char *method_name(const Method *m) { assert(m==&array_m);return "GetValue"; }
 static uint32_t param_count(const Method *m) { (void)m;return 1; }
 static const void *param(const Method *m,uint32_t n) { (void)m;assert(n==0);return (void*)1; }
-static int type_kind(const void *t) { return t==(void*)2?2:t==(void*)0x12?0x12:t==(void*)0x15?0x15:8; }
+static int type_kind(const void *t) { return t==(void*)2?2:t==(void*)0xc?0xc:t==(void*)0x12?0x12:t==(void*)0x15?0x15:8; }
 static const Field *find_field(Klass *k,const char *n) { (void)k;(void)n;return NULL; }
 static uint32_t field_flags(const Field *f) { return f==&static_field?0x16:f==&shader_field?0x10:f==&purchase_instance_field?0x14:0; }
-static const void *field_type(const Field *f) { return (f==&bool_field||f==&releasing_field||f==&shader_field||f==&home_enter_field||f==&home_scene_field||f==&purchase_bool_field)?(void*)2:f==&wrong_field?(void*)8:(f==&static_field||f==&purchase_instance_field)?(void*)0x15:(void*)0x12; }
+static const void *field_type(const Field *f) { return f==&float_field?(void*)0xc:(f==&bool_field||f==&releasing_field||f==&shader_field||f==&home_enter_field||f==&home_scene_field||f==&purchase_bool_field)?(void*)2:f==&wrong_field?(void*)8:(f==&static_field||f==&purchase_instance_field)?(void*)0x15:(void*)0x12; }
 static Klass *object_class(Obj *o) { assert(o);return (Klass*)0x103; }
 static bool assignable(Klass *expected,Klass *actual) { return expected&&actual; }
 static void read_field(Obj *o,const Field *f,void *value) {
  assert(o);++field_reads;
+ if(f==&float_field){memcpy(value,&float_value,4);return;}
  if(f==&bool_field){memcpy(value,&observed_initialized,1);return;}
  if(f==&releasing_field){unsigned char b=releasing_value?1:0;memcpy(value,&b,1);return;}
  if(f==&home_enter_field||f==&home_scene_field||f==&purchase_bool_field){unsigned char b=f==&home_enter_field?home_enter_value:f==&home_scene_field?home_scene_value:purchase_value;memcpy(value,&b,1);return;}
@@ -149,6 +155,15 @@ static Obj *call(const Method *m,Obj *o,void **p,Obj **exception) {
  if(m==&success_m)return &truth;
  if(m==&releasing_m){static_input_invoked=true;return &releasing_value;}
  if(m==&blocking_m){assert(p&&*(int32_t*)p[0]==155);return &blocking_value;}
+ if(m==&component_m)return (Obj*)0x23;
+ if(m==&components_m)return (Obj*)0x1234;
+ if(m==&alpha_m)return &alpha_value;
+ if(m==&group_interact_m)return &group_interact;
+ if(m==&group_blocks_m)return &group_blocks;
+ if(m==&group_ignore_m)return &group_ignore;
+ if(m==&frames_m)return &frames_value;
+ if(m==&delta_m)return &delta_value;
+ if(m==&scale_m)return &scale_value;
  return NULL;
 }
 static void expect(JNIEnv *e,int id,long version,const char *message) {
@@ -258,6 +273,35 @@ int main(void) {
  assert(!startup_out.failed&&strstr(startup,"\"title_presenters\":null")&&!strstr(startup,"\"title_presenters\":[]"));
  assert(strstr(startup,"\"solis_initialization_succeeded\":null")&&strstr(startup,"\"content_blocking\":null"));
  assert(strstr(startup,"\"home_scene_loading\":null")&&strstr(startup,"\"home_enter_called\":null"));
+ /* Notice readiness is typed, nullable and never invokes gesture handlers. */
+ observations.solis_button=(Klass*)0x103;
+ input_observations.gesture=(Klass*)0x103;input_observations.gesture_reference=&callback_field;
+ input_observations.long_tap_time=&float_field;input_observations.suppress=&bool_field;
+ input_observations.pressed=&home_enter_field;input_observations.dragged=&home_scene_field;
+ observed_callback=(Obj*)0x1111;observed_initialized=1;home_enter_value=false;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};notice_input_json(&startup_out,(Obj*)1);
+ assert(strstr(startup,"\"long_tap_time_seconds\":0.5")&&strstr(startup,"\"suppress_long_tap_click\":true"));
+ assert(strstr(startup,"\"is_pressed\":false")&&strstr(startup,"\"is_dragged\":false"));
+ assert(strstr(startup,"\"canvas_effective_alpha\":null"));
+ input_observations.canvas_renderer=input_observations.canvas_group=(Klass*)0x103;
+ input_observations.get_component=&component_m;input_observations.get_components=&components_m;
+ input_observations.inherited_alpha=&alpha_m;input_observations.group_interactable=&group_interact_m;
+ input_observations.group_blocks=&group_blocks_m;input_observations.group_ignore=&group_ignore_m;
+ struct canvas_observation cv=canvas_observation((Obj*)1);
+ assert(cv.alpha.available&&cv.alpha.value==.75f&&cv.interactable.available&&cv.interactable.value);
+ assert(cv.blocks.available&&!cv.blocks.value&&cv.groups==1);
+ array_size=2;cv=canvas_observation((Obj*)1);assert(!cv.interactable.available&&!cv.blocks.available&&cv.alpha.available);
+ array_size=0;cv=canvas_observation((Obj*)1);assert(cv.interactable.available&&cv.interactable.value&&cv.blocks.value&&cv.groups==0);array_size=1;
+ float_value=NAN;assert(!field_single(input_observations.gesture,(Obj*)1,&float_field).available);float_value=.5f;
+ int read_guard=field_reads;assert(!field_single(input_observations.gesture,(Obj*)1,&wrong_field).available&&read_guard==field_reads);
+ observed_callback=NULL;memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};notice_input_json(&startup_out,(Obj*)1);
+ assert(strstr(startup,"\"long_tap_time_seconds\":null")&&strstr(startup,"\"is_pressed\":null"));
+ input_observations.frame_count=&frames_m;input_observations.unscaled_delta=&delta_m;input_observations.time_scale=&scale_m;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};frame_json(&startup_out);
+ assert(strstr(startup,"\"frame_count\":42")&&strstr(startup,"\"unscaled_delta_time\":0.25")&&strstr(startup,"\"time_scale\":1"));
+ delta_value=NAN;scale_value=-1;frames_value=-1;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};frame_json(&startup_out);
+ assert(strstr(startup,"\"frame_count\":null")&&strstr(startup,"\"unscaled_delta_time\":null")&&strstr(startup,"\"time_scale\":null"));
  puts("host safety checks passed");return 0;
 }
 '''
@@ -276,3 +320,55 @@ def test_host_native_safety(tmp_path):
         str(source), "-ldl", "-lpthread", "-lm", "-o", str(executable)], check=True, capture_output=True)
     result = subprocess.run([str(executable)], check=True, text=True, capture_output=True)
     assert result.stdout == "host safety checks passed\n"
+
+
+TYPED_METHOD_HARNESS = r'''
+#define _GNU_SOURCE
+#include <assert.h>
+#include "ui_bridge.c"
+struct signature { const char *name; uint32_t flags, args; int result, argument; };
+static struct signature rows[3];
+static unsigned row_count;
+static const Method *next(Klass *k,void **iter) {
+ (void)k;uintptr_t ix=(uintptr_t)*iter;
+ if(ix>=row_count)return NULL;
+ *iter=(void*)(ix+1);return (Method*)(rows+ix);
+}
+static const char *name(const Method *m){return ((const struct signature*)m)->name;}
+static uint32_t argc(const Method *m){return ((const struct signature*)m)->args;}
+static uint32_t flags(const Method *m,uint32_t *impl){*impl=0;return ((const struct signature*)m)->flags;}
+static const void *result(const Method *m){return (void*)(uintptr_t)((const struct signature*)m)->result;}
+static const void *argument(const Method *m,uint32_t i){assert(i==0);return (void*)(uintptr_t)((const struct signature*)m)->argument;}
+static int kind(const void *t){return (int)(uintptr_t)t;}
+int main(void){
+ api.class_get_methods=next;api.method_get_name=name;api.method_get_param_count=argc;
+ api.method_get_flags=flags;api.method_get_return_type=result;api.method_get_param=argument;api.type_get_type=kind;
+ rows[0]=(struct signature){"get_timeScale",0x16,0,0x0c,0};row_count=1;
+ assert(typed_method((Klass*)1,"get_timeScale",true,0x0c,0,0)==(Method*)rows);
+ assert(!typed_method((Klass*)1,"get_timeScale",false,0x0c,0,0));
+ assert(!typed_method((Klass*)1,"get_timeScale",true,0x08,0,0));
+ rows[1]=rows[0];row_count=2;assert(!typed_method((Klass*)1,"get_timeScale",true,0x0c,0,0));
+ rows[0]=(struct signature){"GetComponents",0x86,1,0x01,0x15};
+ rows[1]=(struct signature){"GetComponents",0x86,1,0x1d,0x12};
+ assert(typed_method((Klass*)1,"GetComponents",false,0x1d,1,0x12)==(Method*)(rows+1));
+ rows[1].argument=0x0e;assert(!typed_method((Klass*)1,"GetComponents",false,0x1d,1,0x12));
+ return 0;
+}
+'''
+
+
+def test_new_getter_resolution_rejects_ambiguity_wrong_types_and_static_mismatch(tmp_path):
+    compiler = shutil.which("cc")
+    java = Path(os.environ.get("JAVA_HOME", "/usr/lib/jvm/java-21-openjdk-amd64"))
+    if not compiler or not (java / "include/jni.h").is_file():
+        pytest.skip("Host C compiler and JAVA_HOME JNI headers required")
+    build.header(json.loads((HERE / "runtime-profile.json").read_text()), tmp_path / "ui_profile.h")
+    source = tmp_path / "typed.c"
+    source.write_text(TYPED_METHOD_HARNESS)
+    executable = tmp_path / "typed"
+    subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-unused-variable",
+                    "-I", str(HERE), "-I", str(tmp_path),
+                    "-I", str(java / "include"), "-I", str(java / "include/linux"),
+                    str(source), "-ldl", "-lpthread", "-lm", "-o", str(executable)],
+                   check=True, capture_output=True)
+    subprocess.run([str(executable)], check=True)
