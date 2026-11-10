@@ -138,6 +138,10 @@ def title_block_reason(snapshot, node):
     """Only known blocking observations suppress ordinary touch attempts."""
     if node.get("callback_registered") is False:
         return "title_callback_not_registered"
+    if any(row.get("active") is True and row.get("kind") in ("text", "tmp_text")
+           and text(row.get("text", "")).upper() == "LOADING"
+           for row in snapshot.get("nodes", []) if isinstance(row, dict)):
+        return "title_loading_visible"
     startup = snapshot.get("startup_observation")
     if not isinstance(startup, dict):
         return None
@@ -145,6 +149,29 @@ def title_block_reason(snapshot, node):
         if startup.get(field) is True:
             return field
     return None
+
+
+def title_touch_anchor(snapshot, button):
+    """Use the observed title prompt inside its full-screen button, if present."""
+    if button.get("path") != "Canvas/TitleButton":
+        return button
+    prompts = [row for row in snapshot.get("nodes", []) if isinstance(row, dict)
+               and row.get("path") == "Canvas/UIContentArea/TAP TO START"
+               and row.get("active") is True]
+    if not prompts:
+        return button  # Preserve the existing layout's ordinary button center.
+    if len(prompts) != 1:
+        raise ValueError("title_prompt_ambiguous")
+    prompt = prompts[0]
+    if (prompt.get("kind") not in ("text", "tmp_text")
+            or not re.fullmatch(r"TAP\s+TO\s+START", text(prompt.get("text", "")), re.I)
+            or not usable_bounds(snapshot, prompt) or not usable_bounds(snapshot, button)):
+        raise ValueError("title_prompt_invalid")
+    left, top, right, bottom = button["bounds"]
+    x0, y0, x1, y1 = prompt["bounds"]
+    if not (left <= x0 < x1 <= right and top <= y0 < y1 <= bottom):
+        raise ValueError("title_prompt_outside_button")
+    return prompt
 
 
 def download_confirmation(snapshot):
@@ -441,7 +468,8 @@ class UiExplorer:
             if current is None:
                 return False
         try:
-            point = mapped_point(fresh, current, xml, self.game_package, size)
+            anchor = title_touch_anchor(fresh, current) if reason == "observed_title" else current
+            point = mapped_point(fresh, anchor, xml, self.game_package, size)
         except ValueError as error:
             return self._input_error(str(error))
         now = time.monotonic()
@@ -454,6 +482,7 @@ class UiExplorer:
         action = {"reason": reason, "frame": frame, "instance_id": current.get("instance_id"),
                   "generation": fresh.get("generation"), "path": current["path"], "label": current["label"],
                   "point": point, "coordinate_source": "fresh_unity_tree_and_android_surface", "performed": False}
+        action["coordinate_anchor_path"] = anchor["path"]
         action["ui_query_milliseconds"] = round((observed_at - query_began) * 1000)
         action["observation_to_input_milliseconds"] = round((time.monotonic() - observed_at) * 1000)
         action["android_geometry_to_input_milliseconds"] = round((time.monotonic() - geometry_observed_at) * 1000)

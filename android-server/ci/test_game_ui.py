@@ -140,6 +140,64 @@ def test_original_title_button_is_selected_when_tap_label_is_a_sibling(snapshot)
     assert target["instance_id"] == -50 and not target["label"]
 
 
+@pytest.mark.parametrize("active,label,expected", ((True, "LOADING", "title_loading_visible"),
+                                                  (True, "<b>loading</b>", "title_loading_visible"),
+                                                  (False, "LOADING", None),
+                                                  (True, "Download complete", None)))
+def test_active_loading_text_blocks_title_even_after_callback_binding(snapshot, active, label, expected):
+    snapshot["nodes"].append({"kind": "tmp_text", "active": active, "text": label})
+    snapshot["nodes"][0]["callback_registered"] = True
+    assert title_block_reason(snapshot, snapshot["nodes"][0]) == expected
+
+
+@pytest.mark.parametrize("change,error", ((None, None), ("duplicate", "title_prompt_ambiguous"),
+                                         ("label", "title_prompt_invalid"),
+                                         ("outside", "title_prompt_outside_button")))
+def test_title_prompt_anchor_is_unique_visible_and_inside_the_selected_button(snapshot, change, error):
+    button = dict(snapshot["nodes"][0], path="Canvas/TitleButton", bounds=[0, 0, 540, 1080])
+    prompt = {"path": "Canvas/UIContentArea/TAP TO START", "kind": "tmp_text", "active": True,
+              "text": "TAP TO START", "bounds": [100, 900, 400, 940]}
+    snapshot["nodes"].append(prompt)
+    if change == "duplicate":
+        snapshot["nodes"].append(dict(prompt))
+    elif change == "label":
+        prompt["text"] = "Purchase"
+    elif change == "outside":
+        button["bounds"] = [0, 0, 540, 800]
+    if error:
+        with pytest.raises(ValueError, match=error):
+            ui.title_touch_anchor(snapshot, button)
+    else:
+        assert ui.title_touch_anchor(snapshot, button) is prompt
+        prompt["active"] = False
+        assert ui.title_touch_anchor(snapshot, button) is button
+
+
+def test_title_tap_uses_final_tree_prompt_and_records_button_identity(snapshot, tmp_path, monkeypatch):
+    selected = dict(snapshot["nodes"][0], path="Canvas/TitleButton", name="TitleButton", bounds=[0, 0, 540, 1080])
+    snapshot["nodes"] = [selected, {"path": "Canvas/UIContentArea/TAP TO START", "kind": "tmp_text",
+                                  "active": True, "text": "TAP TO START", "bounds": [100, 900, 400, 940]}]
+    inputs = []
+    responses = {("exec-out", "screencap", "-p"): b"\x89PNG\r\n\x1a\n" + bytes(8) + struct.pack(">II", 1080, 2280),
+                 ("shell", "wm", "size"): "Physical size: 1080x2280\n",
+                 ("exec-out", "uiautomator", "dump", "/dev/tty"): XML}
+
+    def adb(*args, **kwargs):
+        if args[:3] == ("shell", "input", "tap"):
+            inputs.append(args)
+            return ""
+        return responses[args]
+
+    explorer = ui.UiExplorer(SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, touch_hold_ms=0,
+                                             forward=lambda port: 12345, adb=adb))
+    monkeypatch.setattr(explorer, "_snapshot", lambda: snapshot)
+    assert explorer._tap(snapshot, selected, "observed_title", 1)
+    assert inputs == [("shell", "input", "tap", "500", "1888")]
+    action = explorer.actions[0]
+    assert action["path"] == "Canvas/TitleButton" and action["instance_id"] == selected["instance_id"]
+    assert action["coordinate_anchor_path"] == "Canvas/UIContentArea/TAP TO START"
+
+
 def test_known_startup_blocking_defers_title_input_but_success_flag_is_not_a_prerequisite(snapshot):
     node = snapshot["nodes"][0]
     snapshot["startup_observation"] = {"solis_initialization_succeeded": False,
