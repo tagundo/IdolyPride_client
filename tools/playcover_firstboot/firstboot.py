@@ -56,6 +56,8 @@ def main():
         else:
             argv += ['--inspect', bundle]
         result = command(argv, timeout=20, check=False)
+        destination.with_suffix('.driver-stderr.txt').write_text(result.stderr[:8192])
+        destination.with_suffix('.driver-stdout.txt').write_text(result.stdout[:8192])
         # The driver writes snapshots itself even when refusing an input.
         snapshot = destination.with_suffix('.json')
         if snapshot.is_file():
@@ -63,13 +65,16 @@ def main():
         elif result.stdout.strip().startswith('{'):
             state = json.loads(result.stdout)
         else:
-            raise RuntimeError('AX_observation_unavailable')
+            raise RuntimeError('AX_observation_unavailable_exit_' + str(result.returncode))
         if result.returncode:
             raise RuntimeError('AX_driver_refused_or_failed')
         if state.get('visible_dialog_present') is True:
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_dialog_observed')
-        if (not (allow_starting and state.get('running') is False)
+        starting_without_window = allow_starting and (
+            state.get('running') is False or state.get('ax_windows_available') is False
+            or not state.get('tree'))
+        if (not starting_without_window
                 and state.get('frontmost_bundle') not in (None, '', PLAYCOVER, GAME)):
             report['unknown_dialog_stopped'] = True
             raise RuntimeError('unknown_frontmost_UI_observed')

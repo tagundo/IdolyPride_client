@@ -100,12 +100,13 @@ private struct Snapshot {
     let app: NSRunningApplication
     let scan: Scan
     let tree: [[String: Any]]
+    let windowsAvailable: Bool
     var modalPresent: Bool {
         scan.observations.contains { $0.visible && ($0.role == kAXSheetRole ||
             $0.role == "AXDialog" || $0.role == kAXMenuRole || $0.subrole.contains("Dialog")) }
     }
     func unique(_ label: String, button: Bool) throws -> Observation {
-        guard !scan.truncated else { throw DriverError.invalid("AX_tree_incomplete") }
+        guard windowsAvailable && !scan.truncated else { throw DriverError.invalid("AX_tree_incomplete") }
         let candidates = scan.observations.filter { value in
             value.visible && value.labels.contains(label) && value.enabled != false &&
             (!button || (value.role == kAXButtonRole && value.enabled == true && value.actions.contains(kAXPressAction)))
@@ -124,9 +125,11 @@ private func snapshot(_ bundle: String) throws -> Snapshot {
     }
     let app = AXUIElementCreateApplication(application.processIdentifier)
     AXUIElementSetMessagingTimeout(app, 0.25)
-    guard let windows = attribute(app, kAXWindowsAttribute) as? [AXUIElement] else {
-        throw DriverError.invalid("AX_windows_unavailable")
-    }
+    // A running application may publish AXWindows only after its first view
+    // finishes initialization. Inspect this state without treating it as input
+    // ready; unique() still refuses every action while windows are unavailable.
+    let available = attribute(app, kAXWindowsAttribute) as? [AXUIElement]
+    let windows = available ?? []
     let scan = Scan(), screen = CGDisplayBounds(CGMainDisplayID())
     if windows.count > 32 { scan.truncated = true }
     var tree: [[String: Any]] = []
@@ -136,7 +139,7 @@ private func snapshot(_ bundle: String) throws -> Snapshot {
             windowTitle: title, clip: screen, ancestorVisible: true) { tree.append(node) }
         if scan.truncated { break }
     }
-    return Snapshot(app: application, scan: scan, tree: tree)
+    return Snapshot(app: application, scan: scan, tree: tree, windowsAvailable: available != nil)
 }
 
 @available(macOS 14.0, *)
@@ -209,6 +212,7 @@ private func observationReport(bundle: String, mode: String, snapshot: Snapshot?
      "frontmost_bundle": NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 as Any } ?? NSNull(),
      "mode": mode, "tree": snapshot?.tree ?? [], "element_count": snapshot?.scan.count ?? 0,
      "tree_truncated": snapshot?.scan.truncated ?? false,
+     "ax_windows_available": snapshot?.windowsAvailable ?? false,
      "visible_dialog_present": snapshot?.modalPresent ?? false, "action": action,
      "textfield_values_read": false, "credential_input": false,
      "tcc_prompt_requested": false, "security_settings_changed": false,
@@ -224,6 +228,34 @@ private func saveReport(_ value: [String: Any], output: URL) throws {
     let encoded = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
     try encoded.write(to: output, options: .atomic)
     FileHandle.standardOutput.write(Data((output.path + "\n").utf8))
+}
+
+@available(macOS 14.0, *)
+private func saveInitialFailure(_ error: Error) {
+    let args = Array(CommandLine.arguments.dropFirst())
+    func value(_ option: String) -> String? {
+        guard let index = args.firstIndex(of: option), index + 1 < args.count else { return nil }
+        return args[index + 1]
+    }
+    guard let destination = value("--output"), !destination.isEmpty else { return }
+    let output = URL(fileURLWithPath: destination)
+    // Keep the richer action-refusal snapshot already saved by run().
+    guard !FileManager.default.fileExists(atPath: output.path) else { return }
+    let bundle = value("--bundle") ?? value("--inspect") ?? "unknown"
+    try? FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
+    var observed: Snapshot? = nil
+    if AXIsProcessTrusted() { observed = try? snapshot(bundle) }
+    var report = observationReport(bundle: bundle, mode: "initial_failure", snapshot: observed,
+        action: ["posted": false, "refused": true])
+    report["driver_error"] = String(describing: error)
+    if observed == nil {
+        let applications = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
+        report["running"] = !applications.isEmpty
+        if applications.count == 1, let application = applications.first {
+            report["pid"] = application.processIdentifier
+        }
+    }
+    try? saveReport(report, output: output)
 }
 
 @available(macOS 14.0, *)
@@ -298,6 +330,7 @@ do {
     try run()
 }
 catch {
+    if #available(macOS 14.0, *) { saveInitialFailure(error) }
     FileHandle.standardError.write(Data(("AX driver: " + String(describing: error) + "\n").utf8))
     exit(1)
 }
