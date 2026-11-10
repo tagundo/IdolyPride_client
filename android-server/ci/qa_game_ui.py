@@ -228,6 +228,7 @@ class UiExplorer:
         self.wait_frames, self.session_titles, self.stopped = 0, 0, False
         self.snapshot_successes, self.snapshot_errors = 0, {}
         self.input_errors = {}
+        self.surface_input_failures = 0
         self.title_deferrals = {}
         self.title_instance = None
         self.stop_reason = None
@@ -238,6 +239,12 @@ class UiExplorer:
 
     def _input_error(self, code):
         self.input_errors[code] = self.input_errors.get(code, 0) + 1
+        if code == "A unique current Unity accessibility surface is required":
+            self.surface_input_failures += 1
+            if self.surface_input_failures >= 3:
+                self.stopped, self.stop_reason = True, "android_surface_unavailable"
+        else:
+            self.surface_input_failures = 0
         print("Unity UI input skipped: " + code, flush=True)
         return False
 
@@ -325,6 +332,7 @@ class UiExplorer:
             return self._input_error("unsupported_touch_duration")
         action["performed"] = True
         self.actions.append(action)
+        self.surface_input_failures = 0
         self.last_action = time.monotonic()
         return True
 
@@ -451,6 +459,7 @@ class UiExplorer:
                 "goals": [goal[0] for goal in _GOALS], "native_click_used": False,
                 "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
                 "input_errors": self.input_errors,
+                "repeated_android_surface_failures": self.surface_input_failures,
                 "title_deferrals": self.title_deferrals,
                 "stop_reason": self.stop_reason,
                 "navigation_deferrals": self.navigation_deferrals,

@@ -36,6 +36,50 @@ GAME_PACKAGES = (GAME, GAME + ".diagnostics")
 GAME_ACTIVITY = GAME + "/com.google.firebase.MessagingUnityPlayerActivity"
 
 
+def immersive_cling_target(xml, image_size):
+    """Recognize only the observed Android fullscreen education dialog."""
+    try:
+        root = ET.fromstring(xml)
+        width, height = image_size
+    except (ET.ParseError, TypeError, ValueError):
+        return None
+    if (type(width) is not int or type(height) is not int
+            or not 64 <= width <= 8192 or not 64 <= height <= 8192):
+        return None
+    nodes = list(root.iter("node"))
+    if not nodes or any(node.get("package") != "android" for node in nodes):
+        return None
+    required = (
+        ("android:id/immersive_cling_title", "android.widget.TextView", "Viewing full screen"),
+        ("android:id/immersive_cling_description", "android.widget.TextView",
+         "To exit, swipe down from the top of your screen"),
+        ("android:id/ok", "android.widget.Button", "Got it"),
+    )
+    matched = []
+    for resource, kind, label in required:
+        found = [node for node in nodes if node.get("resource-id") == resource]
+        if len(found) != 1:
+            return None
+        node = found[0]
+        if node.get("class") != kind or node.get("text") != label or node.get("enabled") != "true":
+            return None
+        bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+        if not bounds:
+            return None
+        left, top, right, bottom = map(int, bounds.groups())
+        if not 0 <= left < right <= width or not 0 <= top < bottom <= height:
+            return None
+        matched.append([left, top, right, bottom])
+    button = next(node for node in nodes if node.get("resource-id") == "android:id/ok")
+    if (button.get("clickable") != "true" or any(node.get("clickable") == "true"
+            and node is not button for node in nodes)):
+        return None
+    left, top, right, bottom = matched[-1]
+    return {"package": "android", "resource_id": "android:id/ok", "bounds": matched[-1],
+            "dialog_bounds": matched, "image_size": [width, height],
+            "point": [(left + right) // 2, (top + bottom) // 2]}
+
+
 def game_process_gone(captures):
     """Recognize a lost game without confusing adb failures with an exit."""
     recent = captures[-3:]
@@ -224,6 +268,77 @@ def unity_surface_target(xml, package, image_size):
 
 
 class GameQA(QA):
+    def dismiss_immersive_cling(self, stage):
+        """Defer game input after an OS action; stop after three unresolved windows."""
+        actions = getattr(self, "system_dialog_actions", [])
+        self.system_dialog_actions = actions
+
+        def read_capture(name):
+            xml = (self.artifacts / (name + ".xml")).read_text(encoding="utf-8")
+            png = (self.artifacts / (name + ".png")).read_bytes()
+            if len(png) < 24 or png[:8] != b"\x89PNG\r\n\x1a\n":
+                raise ValueError("invalid_system_dialog_capture")
+            return xml, list(struct.unpack_from(">II", png, 16))
+
+        try:
+            xml, dimensions = read_capture(stage)
+            tree = ET.fromstring(xml)
+        except (OSError, ValueError, ET.ParseError):
+            # Let the existing missing-surface watchdog classify unavailable captures.
+            return True
+        foreign = any(node.get("package") not in ("", None, getattr(self, "game_package", GAME))
+                      for node in tree.iter("node"))
+        if not foreign:
+            self.unresolved_system_dialogs = 0
+            return True
+        action = {"kind": "android_immersive_cling", "capture": stage,
+                  "performed": False, "dismissed": False}
+        actions.append(action)
+        record = self.artifacts / f"system-dialog-{len(actions):03d}.json"
+
+        def save():
+            record.write_text(json.dumps(action, indent=2) + "\n", encoding="utf-8")
+
+        try:
+            candidate = immersive_cling_target(xml, dimensions)
+            if candidate is None:
+                action["reason"] = "unrecognized_system_window"
+            else:
+                action["target"] = candidate
+                fresh = f"system-dialog-{len(actions):03d}-before"
+                self.capture(fresh)
+                fresh_xml, fresh_dimensions = read_capture(fresh)
+                action["input_tree"] = fresh + ".xml"
+                if immersive_cling_target(fresh_xml, fresh_dimensions) != candidate:
+                    action["reason"] = "system_dialog_changed_before_input"
+                else:
+                    self.adb("shell", "input", "tap", *(str(value) for value in candidate["point"]))
+                    action["performed"] = True
+                    save()
+                    after = f"system-dialog-{len(actions):03d}-after"
+                    self.capture(after)
+                    after_xml, after_dimensions = read_capture(after)
+                    action["after_capture"] = after
+                    after_tree = ET.fromstring(after_xml)
+                    game_package = getattr(self, "game_package", GAME)
+                    if any(node.get("package") not in ("", None, game_package)
+                           for node in after_tree.iter("node")):
+                        action["reason"] = "system_window_remains_after_input"
+                    else:
+                        unity_surface_target(after_xml, game_package, after_dimensions)
+                        action.update(dismissed=True, reason="known_system_dialog_dismissed")
+        except (OSError, ValueError, RuntimeError, ET.ParseError) as error:
+            action["reason"] = "system_dialog_verification_failed"
+            action["error_type"] = type(error).__name__
+        save()
+        if action["dismissed"]:
+            self.unresolved_system_dialogs = 0
+        else:
+            self.unresolved_system_dialogs = getattr(self, "unresolved_system_dialogs", 0) + 1
+            if self.unresolved_system_dialogs >= 3:
+                raise RuntimeError("Android system overlay unresolved in three consecutive captures")
+        return False
+
     def capture_server(self, stage):
         """Allow Unity's observed pause delay without dropping capture checks."""
         for attempt in range(3):
@@ -481,6 +596,7 @@ def main():
     result = {"capture_completed": False, "actual_game_client_launched": False,
               "game_observation_completed": False,
               "home_screen_verified": False, "game_input_performed": False, "game_input_count": 0,
+              "system_dialog_actions": [],
               "game_process_exited": False,
               "target": "disposable Android emulator", "captures": [],
               "game_package": args.game_package,
@@ -563,11 +679,14 @@ def main():
         for index, scheduled in enumerate(range(0, duration + args.interval, args.interval)):
             time.sleep(max(0, begin + min(scheduled, duration) - time.monotonic()))
             elapsed = time.monotonic() - begin
-            result["captures"].append(qa.capture_game(f"game-{index:02d}-{int(elapsed):03d}s"))
+            stage = f"game-{index:02d}-{int(elapsed):03d}s"
+            result["captures"].append(qa.capture_game(stage))
             if game_process_gone(result["captures"]):
                 result.update(game_process_exited=True, game_exit_frame=index,
                               observation_end_reason="game_process_exited")
                 break
+            if not qa.dismiss_immersive_cling(stage):
+                continue
             if explorer is not None:
                 explorer.step(index)
                 if explorer.stopped:
@@ -601,6 +720,7 @@ def main():
         result.update(error_type=type(error).__name__, error=str(error))
         raise
     finally:
+        result["system_dialog_actions"] = getattr(qa, "system_dialog_actions", [])
         result["observed_title_actions"] = getattr(qa, "title_actions", [])
         result["game_input_count"] = sum(action["performed"] for action in result["observed_title_actions"])
         result["game_input_performed"] = result["game_input_count"] > 0

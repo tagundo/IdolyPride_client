@@ -551,3 +551,24 @@ def test_observed_game_error_defers_restart_until_loading_clears(home_snapshot, 
     explorer.step(54)
     assert len(explorer.outcomes) == 1 and explorer.restart_pending is False
     assert restarts == [True]
+
+
+def test_repeated_missing_android_surface_stops_without_fabricating_menu_results():
+    qa = SimpleNamespace(game_package=PACKAGE, forward=lambda port: port)
+    explorer = ui.UiExplorer(qa)
+    for count in range(1, 4):
+        assert explorer._input_error("A unique current Unity accessibility surface is required") is False
+        assert explorer.stopped is (count == 3)
+    assert explorer.stop_reason == "android_surface_unavailable"
+    assert explorer.report()["repeated_android_surface_failures"] == 3
+    assert explorer.actions == [] and explorer.outcomes == []
+
+
+def test_other_input_guard_failure_resets_the_repeated_surface_failure_window():
+    qa = SimpleNamespace(game_package=PACKAGE, forward=lambda port: port)
+    explorer = ui.UiExplorer(qa)
+    explorer._input_error("A unique current Unity accessibility surface is required")
+    explorer._input_error("A unique current Unity accessibility surface is required")
+    explorer._input_error("ui_observation_became_stale")
+    explorer._input_error("A unique current Unity accessibility surface is required")
+    assert explorer.surface_input_failures == 1 and not explorer.stopped
