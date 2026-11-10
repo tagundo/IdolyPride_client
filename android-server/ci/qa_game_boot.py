@@ -446,6 +446,8 @@ def main():
     parser.add_argument("--master-dir", type=Path, default=Path("data/master-json"))
     parser.add_argument("--tree-title-input", action="store_true",
                         help="Use fresh Android UI-tree game-view coordinates; OCR only recognizes the title")
+    parser.add_argument("--qa-ui-explore", action="store_true",
+                        help="Use the emulator-only authenticated Unity tree for bounded menu exploration")
     args = parser.parse_args()
     if not 90 <= args.duration <= (900 if args.tree_title_input else 180) or args.interval < 5 or args.startup_timeout <= 0:
         parser.error("duration must be 90..180 (or 900 with tree input), interval >=5, and startup-timeout positive")
@@ -455,6 +457,8 @@ def main():
         parser.error("more than two title actions require tree-title-input")
     if args.prepare_completed_opening and args.prepare_restarted_tutorial:
         parser.error("choose one disposable profile fixture")
+    if args.qa_ui_explore and (not args.tree_title_input or args.game_package != GAME + ".diagnostics"):
+        parser.error("QA UI exploration requires tree-title-input and the isolated diagnostics package")
     qa = GameQA(args.adb, args.serial, args.artifacts)
     qa.game_package = args.game_package
     qa.max_title_taps = args.max_title_taps
@@ -473,6 +477,7 @@ def main():
     logger = None
     logger_file = None
     server_started = False
+    explorer = None
     try:
         if not args.serial.startswith("emulator-") or qa.adb("shell", "getprop", "ro.kernel.qemu").strip() != "1":
             raise RuntimeError("This driver accepts only a disposable emulator target")
@@ -521,7 +526,10 @@ def main():
             raise RuntimeError("Game activity did not launch; inspect game-launch.txt")
         result["actual_game_client_launched"] = True
         result["game_input_performed"] = False
-        if args.tap_observed_title and not args.tree_title_input:
+        if args.qa_ui_explore:
+            from qa_game_ui import UiExplorer
+            explorer = UiExplorer(qa)
+        if args.tap_observed_title and not args.tree_title_input and explorer is None:
             result["observed_title_action"] = qa.tap_observed_title()
             result["game_input_performed"] = True
             result["game_input_count"] = 1
@@ -540,7 +548,9 @@ def main():
             time.sleep(max(0, begin + min(scheduled, duration) - time.monotonic()))
             elapsed = time.monotonic() - begin
             result["captures"].append(qa.capture_game(f"game-{index:02d}-{int(elapsed):03d}s"))
-            if args.tree_title_input and args.tap_observed_title and len(getattr(qa, "title_actions", [])) < args.max_title_taps:
+            if explorer is not None:
+                explorer.step(index)
+            elif args.tree_title_input and args.tap_observed_title and len(getattr(qa, "title_actions", [])) < args.max_title_taps:
                 current = qa._observe_title_frame(f"interactive-title-{index:02d}", inspect_loading=True)
                 cooled = time.monotonic() - getattr(qa, "last_title_tap_at", -1000) >= 20
                 if cooled and stable_title_pair(title_candidate, current):
@@ -571,6 +581,11 @@ def main():
         result["observed_title_actions"] = getattr(qa, "title_actions", [])
         result["game_input_count"] = sum(action["performed"] for action in result["observed_title_actions"])
         result["game_input_performed"] = result["game_input_count"] > 0
+        if explorer is not None:
+            result["ui_exploration"] = explorer.report()
+            result["game_input_count"] += len(explorer.actions)
+            result["game_input_performed"] = result["game_input_count"] > 0
+            (args.artifacts / "ui-exploration.json").write_text(json.dumps(result["ui_exploration"], ensure_ascii=False, indent=2) + "\n")
         try:
             result["captures"].append(qa.capture_game("final"))
             if server_started:

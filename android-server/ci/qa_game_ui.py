@@ -1,0 +1,244 @@
+"""Explore a disposable game's real UI using its authenticated Unity tree.
+
+The bridge only observes UI. Every input goes through Android's normal touch
+dispatch using current Unity bounds and the current accessibility game view.
+This driver never calls gameplay handlers, purchase APIs or native clicks.
+"""
+from __future__ import annotations
+
+from http.client import HTTPConnection, HTTPException
+import hashlib
+import json
+import math
+import re
+import struct
+import time
+import xml.etree.ElementTree as ET
+
+
+_PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
+_MAX_BODY = 72 * 1024
+_FORBIDDEN = re.compile(r"購入|課金|ガチャを引|データ削除|アカウント削除|buy|purchase|deleteaccount", re.I)
+_ERROR = re.compile(r"Unimplemented|Unauthenticated|NullReferenceException|サーバーとの通信に失敗", re.I)
+_GOALS = (
+    ("lesson", r"レッスン", r"lesson.*button|button.*lesson"),
+    ("live", r"ライブ", r"live.*button|button.*live"),
+    ("idols", r"アイドル", r"idol.*button|button.*idol"),
+    ("work", r"お仕事", r"work.*button|button.*work"),
+    ("stories", r"ストーリー", r"story.*button|button.*story"),
+    ("gifts", r"プレゼント", r"gift|present"),
+)
+
+
+def text(value):
+    return " ".join(re.sub(r"<[^>]*>", "", str(value)).split())
+
+
+def buttons(snapshot):
+    result = []
+    nodes = snapshot.get("nodes", [])
+    if not isinstance(nodes, list) or len(nodes) > 512:
+        raise ValueError("Invalid Unity UI node count")
+    labels = [node for node in nodes if isinstance(node, dict) and node.get("kind") in ("text", "tmp_text") and node.get("active") is True]
+    for node in nodes:
+        if (not isinstance(node, dict) or node.get("kind") != "button"
+                or node.get("active") is not True or node.get("interactable") is not True):
+            continue
+        path = node.get("path", "")
+        if not isinstance(path, str) or not path:
+            continue
+        label = text(" ".join([str(node.get("text", "")), *(str(row.get("text", "")) for row in labels
+                            if row.get("path") == path or str(row.get("path", "")).startswith(path + "/"))]))
+        if _FORBIDDEN.search(label + " " + str(node.get("name", ""))):
+            continue
+        result.append(dict(node, label=label))
+    return result
+
+
+def choose_button(snapshot, label_pattern, name_pattern=None):
+    candidates = buttons(snapshot)
+    exact = [node for node in candidates if re.fullmatch(label_pattern, node["label"], re.I)]
+    if len(exact) == 1:
+        return exact[0]
+    if exact:
+        return None
+    matched = [node for node in candidates if re.search(label_pattern, node["label"], re.I)]
+    if len(matched) == 1:
+        return matched[0]
+    if name_pattern:
+        named = [node for node in candidates if re.search(name_pattern, str(node.get("name", "")), re.I)]
+        if len(named) == 1:
+            return named[0]
+    return None
+
+
+def mapped_point(snapshot, node, xml, package, image_size):
+    screen = snapshot.get("screen", {})
+    width, height = screen.get("width"), screen.get("height")
+    if (screen.get("origin") != "top-left" or screen.get("units") != "unity-screen-pixels"
+            or type(width) is not int or type(height) is not int or not 64 <= width <= 8192 or not 64 <= height <= 8192):
+        raise ValueError("Invalid Unity UI screen geometry")
+    bounds = node.get("bounds")
+    if (not isinstance(bounds, list) or len(bounds) != 4
+            or any(type(value) not in (int, float) or not math.isfinite(value) for value in bounds)):
+        raise ValueError("The selected Unity button has no usable bounds")
+    left, top, right, bottom = bounds
+    if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+        raise ValueError("Unity button bounds are outside its screen")
+    views = []
+    for item in ET.fromstring(xml).iter("node"):
+        if item.get("package") == package and item.get("resource-id", "").endswith(":id/unitySurfaceView"):
+            match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", item.get("bounds", ""))
+            if match:
+                views.append(tuple(map(int, match.groups())))
+    if len(views) != 1:
+        raise ValueError("A unique current Unity accessibility surface is required")
+    x0, y0, x1, y1 = views[0]
+    if not (0 <= x0 < x1 <= image_size[0] and 0 <= y0 < y1 <= image_size[1]):
+        raise ValueError("Android game surface is outside the current display")
+    if abs(((x1 - x0) / (y1 - y0)) / (width / height) - 1) > 0.04:
+        raise ValueError("Unity and Android screen aspect ratios disagree")
+    return [round(x0 + (left + right) / 2 * (x1 - x0) / width),
+            round(y0 + (top + bottom) / 2 * (y1 - y0) / height)]
+
+
+class UiExplorer:
+    def __init__(self, qa):
+        if qa.game_package != _PACKAGE:
+            raise ValueError("UI exploration accepts only the emulator diagnostic package")
+        self.qa = qa
+        self.port = qa.forward(50052)
+        self.actions, self.outcomes = [], []
+        self.goal_index, self.pending = 0, None
+        self.last_action = -1000.0
+        self.wait_frames, self.session_titles, self.stopped = 0, 0, False
+        self.snapshot_successes, self.snapshot_errors = 0, {}
+
+    def _snapshot(self):
+        token = self.qa.adb("exec-out", "run-as", _PACKAGE, "cat", "files/idoly-qa-ui-token", check=False).strip()
+        if re.fullmatch(r"[0-9a-f]{64}", token) is None:
+            return {"ok": False, "error": "bridge_token_unavailable"}
+        connection = HTTPConnection("127.0.0.1", self.port, timeout=14)
+        try:
+            connection.request("GET", "/snapshot", headers={"Authorization": "Bearer " + token})
+            response = connection.getresponse()
+            raw = response.read(_MAX_BODY + 1)
+            if response.status != 200 or len(raw) > _MAX_BODY:
+                return {"ok": False, "error": "bridge_response_rejected"}
+            result = json.loads(raw)
+            if not isinstance(result, dict):
+                raise ValueError("UI response is not an object")
+            return result
+        except (OSError, ValueError, HTTPException):
+            return {"ok": False, "error": "bridge_snapshot_unavailable"}
+        finally:
+            connection.close()
+
+    def _tap(self, snapshot, node, reason, frame):
+        # Refresh object identity/bounds after selection, then obtain a current
+        # Android tree. Coordinates never come from screenshot/OCR detection.
+        began = time.monotonic()
+        fresh = self._snapshot()
+        current = next((item for item in buttons(fresh) if item.get("instance_id") == node.get("instance_id")
+                        and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
+        if fresh.get("ok") is not True or current is None:
+            return False
+        raw = self.qa.adb("exec-out", "screencap", "-p", binary=True)
+        if raw[:8] != b"\x89PNG\r\n\x1a\n":
+            return False
+        size = struct.unpack_from(">II", raw, 16)
+        xml = self.qa.adb("exec-out", "uiautomator", "dump", "/dev/tty")
+        begin, end = xml.find("<hierarchy"), xml.rfind("</hierarchy>")
+        if begin < 0 or end < 0:
+            return False
+        xml = xml[begin:end + len("</hierarchy>")]
+        try:
+            point = mapped_point(fresh, current, xml, _PACKAGE, size)
+        except ValueError:
+            return False
+        if time.monotonic() - began > 10:
+            return False
+        prefix = self.qa.artifacts / f"ui-action-{len(self.actions) + 1:02d}"
+        prefix.with_suffix(".png").write_bytes(raw)
+        prefix.with_suffix(".xml").write_text(xml, encoding="utf-8")
+        prefix.with_suffix(".unity.json").write_text(json.dumps(fresh, ensure_ascii=False, indent=2) + "\n")
+        action = {"reason": reason, "frame": frame, "instance_id": current.get("instance_id"),
+                  "generation": fresh.get("generation"), "path": current["path"], "label": current["label"],
+                  "point": point, "coordinate_source": "fresh_unity_tree_and_android_surface", "performed": False}
+        self.qa.adb("shell", "input", "tap", str(point[0]), str(point[1]))
+        action["performed"] = True
+        self.actions.append(action)
+        self.last_action = time.monotonic()
+        return True
+
+    def _restart(self):
+        if self.goal_index >= len(_GOALS):
+            return
+        self.qa.adb("shell", "am", "force-stop", _PACKAGE)
+        self.qa.adb("shell", "am", "start", "-W", "-n", _PACKAGE + "/com.google.firebase.MessagingUnityPlayerActivity",
+                    "--es", "unity", "-force-gles30")
+        self.last_action = time.monotonic()
+        self.session_titles, self.wait_frames = 0, 0
+
+    @staticmethod
+    def _signature(snapshot):
+        nodes = [(n.get("kind"), n.get("path"), n.get("instance_id")) for n in snapshot.get("nodes", []) if isinstance(n, dict)]
+        return hashlib.sha256(json.dumps(nodes, sort_keys=True).encode()).hexdigest()
+
+    def step(self, frame):
+        snapshot = self._snapshot()
+        (self.qa.artifacts / f"unity-ui-{frame:03d}.json").write_text(json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n")
+        if snapshot.get("ok") is True:
+            self.snapshot_successes += 1
+        else:
+            code = str(snapshot.get("error", "unknown"))
+            self.snapshot_errors[code] = self.snapshot_errors.get(code, 0) + 1
+        if self.stopped or snapshot.get("ok") is not True or len(self.actions) >= 30 or time.monotonic() - self.last_action < 12:
+            return
+        visible = " ".join(text(row.get("text", "")) for row in snapshot.get("nodes", []) if isinstance(row, dict))
+        if _ERROR.search(visible):
+            self.outcomes.append({"goal": self.pending[0] if self.pending else "startup", "status": "game_error_observed", "frame": frame})
+            if self.pending is None:
+                self.stopped = True
+                return
+            self.goal_index += 1
+            self.pending = None
+            self._restart()
+            return
+        title = choose_button(snapshot, r"TAP\s*TO\s*START", r"tap.*start|start.*tap")
+        if title is not None:
+            if self.session_titles < self.qa.max_title_taps and self._tap(snapshot, title, "observed_title", frame):
+                self.session_titles += 1
+            return
+        close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
+        if close is not None and re.search(r"dialog|modal|popup", str(close.get("path", "")), re.I):
+            self._tap(snapshot, close, "observed_dialog", frame)
+            return
+        if self.pending:
+            goal, started, previous = self.pending
+            if frame - started >= 2:
+                self.outcomes.append({"goal": goal, "status": ("different_ui_tree_observed" if self._signature(snapshot) != previous
+                                                               else "no_ui_change_observed"), "frame": frame,
+                                      "note": "View and RPC evidence require separate review"})
+                self.goal_index += 1
+                self.pending = None
+                self._restart()
+            return
+        if self.goal_index < len(_GOALS):
+            goal, label, name = _GOALS[self.goal_index]
+            target = choose_button(snapshot, label, name)
+            if target is not None and self._tap(snapshot, target, "menu_" + goal, frame):
+                self.pending = (goal, frame, self._signature(snapshot))
+                self.wait_frames = 0
+            elif any(choose_button(snapshot, other[1], other[2]) is not None for other in _GOALS[1:]):
+                self.wait_frames += 1
+                if self.wait_frames >= 2:
+                    self.outcomes.append({"goal": goal, "status": "target_not_present_in_observed_tree", "frame": frame})
+                    self.goal_index += 1
+                    self.wait_frames = 0
+
+    def report(self):
+        return {"qa_only": True, "actions": self.actions, "outcomes": self.outcomes,
+                "goals": [goal[0] for goal in _GOALS], "native_click_used": False,
+                "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
+                "gameplay_rpc_injected_during_exploration": False, "menu_success_requires_evidence_review": True}

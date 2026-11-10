@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "client_version": "6.1.1",
+  "architecture": "arm64-v8a",
+  "original_native_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+  "bootstrap_native_sha256": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3",
+  "elf_build_id": "b094bb4a4f4acdffb41e1c6a8e8d77cffbd689fd",
+  "exports": [
+    {
+      "name": "il2cpp_domain_get",
+      "rva": "0x419dfb8",
+      "expected16": "1ea9ff17e00301aaf60bff17fe4fbfa9"
+    },
+    {
+      "name": "il2cpp_domain_get_assemblies",
+      "rva": "0x419dfc4",
+      "expected16": "fe4fbfa9f30301aada0bff97002040a9"
+    },
+    {
+      "name": "il2cpp_assembly_get_image",
+      "rva": "0x419da88",
+      "expected16": "7291fe17ef86fe177186fe1708d44439"
+    },
+    {
+      "name": "il2cpp_image_get_name",
+      "rva": "0x419e694",
+      "expected16": "6f8efe176e8efe17e1ca0014fe0f1ff8"
+    },
+    {
+      "name": "il2cpp_class_from_name",
+      "rva": "0x419dac0",
+      "expected16": "a58ffe17df86fe17e586fe171887fe17"
+    },
+    {
+      "name": "il2cpp_class_get_method_from_name",
+      "rva": "0x419dae8",
+      "expected16": "d787fe171f88fe172088fe175e88fe17"
+    },
+    {
+      "name": "il2cpp_class_get_methods",
+      "rva": "0x419dae4",
+      "expected16": "a487fe17d787fe171f88fe172088fe17"
+    },
+    {
+      "name": "il2cpp_class_get_type",
+      "rva": "0x419db6c",
+      "expected16": "00800091c0035fd6001c41b9c0035fd6"
+    },
+    {
+      "name": "il2cpp_type_get_object",
+      "rva": "0x419e46c",
+      "expected16": "9512ff1735d60014aad90014ff0301d1"
+    },
+    {
+      "name": "il2cpp_runtime_invoke",
+      "rva": "0x419e3dc",
+      "expected16": "3df90014e6f10014d0fa0014d1fa0014"
+    },
+    {
+      "name": "il2cpp_object_get_virtual_method",
+      "rva": "0x419e390",
+      "expected16": "2f0cff17fe0f1ff8df0bff97fe0741f8"
+    },
+    {
+      "name": "il2cpp_object_unbox",
+      "rva": "0x419e3b4",
+      "expected16": "ef0cff17ae0bff1749b4ff174ab4ff17"
+    },
+    {
+      "name": "il2cpp_gchandle_new",
+      "rva": "0x419e228",
+      "expected16": "210000126848ff17ff0301d1fe4f03a9"
+    },
+    {
+      "name": "il2cpp_gchandle_get_target",
+      "rva": "0x419e268",
+      "expected16": "a549ff17ff8300d1e1fb00a9e00300f9"
+    },
+    {
+      "name": "il2cpp_gchandle_free",
+      "rva": "0x419e2b0",
+      "expected16": "fe49ff1700028052c0035fd600048052"
+    },
+    {
+      "name": "il2cpp_array_length",
+      "rva": "0x419da68",
+      "expected16": "030cff179d0cff17af0cff17b50cff17"
+    },
+    {
+      "name": "il2cpp_string_length",
+      "rva": "0x419e3f0",
+      "expected16": "db3bff17d83bff17e6270014e5270014"
+    },
+    {
+      "name": "il2cpp_string_chars",
+      "rva": "0x419e3f4",
+      "expected16": "d83bff17e6270014e527001410280014"
+    },
+    {
+      "name": "il2cpp_thread_current",
+      "rva": "0x419e410",
+      "expected16": "3da8ff178eb6ff17b5b6ff1738b8ff17"
+    },
+    {
+      "name": "il2cpp_method_get_name",
+      "rva": "0x419e2fc",
+      "expected16": "1d86fe174db3ff174fb3ff1772b3ff17"
+    },
+    {
+      "name": "il2cpp_method_get_param_count",
+      "rva": "0x419e30c",
+      "expected16": "75b3ff1776b3ff17f8b2ff1791b3ff17"
+    },
+    {
+      "name": "il2cpp_method_get_param",
+      "rva": "0x419e310",
+      "expected16": "76b3ff17f8b2ff1791b3ff17f6b2ff17"
+    },
+    {
+      "name": "il2cpp_type_get_type",
+      "rva": "0x419e470",
+      "expected16": "35d60014aad90014ff0301d1fe1300f9"
+    },
+    {
+      "name": "il2cpp_object_get_class",
+      "rva": "0x419e388",
+      "expected16": "328ffe17140cff172f0cff17fe0f1ff8"
+    },
+    {
+      "name": "il2cpp_class_is_assignable_from",
+      "rva": "0x419daa8",
+      "expected16": "4d89fe1742000012fc89fe172089fe17"
+    },
+    {
+      "name": "il2cpp_array_new",
+      "rva": "0x419da70",
+      "expected16": "af0cff17b50cff17010cff1742000012"
+    }
+  ],
+  "runtime_validation": "ELF build ID + exact export addresses and 16-byte windows; build provenance pins source APK/native separately; no code is modified"
+}

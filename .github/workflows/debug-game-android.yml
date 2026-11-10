@@ -123,6 +123,7 @@ jobs:
         run: |
           set -euo pipefail
           uv run --locked --all-extras pytest -q tests android-server/ci qa-native-aes \
+            qa-game-ui/tests qa-game-ui/native/tests \
             | tee data/android-game-debug/tests.txt
       - name: Build the clearly marked emulator-only AES and no-store variant
         shell: bash
@@ -136,6 +137,53 @@ jobs:
             --emulator-no-store \
             --report data/android-game-debug/qa-aes-report.json \
             | tee data/android-game-debug/qa-aes-build.txt
+      - name: Build the ARM64 QA UI bridge and verify the manifest editor
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;26.3.11579264'
+          uv run --locked python qa-game-ui/native/build_native.py \
+            --output data/android-game-debug/qa-ui-native \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" \
+            | tee data/android-game-debug/qa-ui-native-build.json
+          curl --fail --location --retry 2 --max-time 120 \
+            https://github.com/REAndroid/APKEditor/releases/download/V1.4.1/APKEditor-1.4.1.jar \
+            --output data/ci-input/APKEditor-1.4.1.jar
+          printf '%s  %s\n' \
+            '4a98ae6a755264357603f1906b92e62e757d59229014e33395f4e03ff019fda8' \
+            'data/ci-input/APKEditor-1.4.1.jar' \
+            | sha256sum --check --strict | tee data/android-game-debug/qa-ui-apkeditor-sha256.txt
+      - name: Package the separate ephemeral UI QA game
+        shell: bash
+        run: |
+          set -euo pipefail
+          IDOLY_QA_UI_INPUT_SHA="$(uv run --locked python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          source = Path('data/dist/Game-QA-software-AES.apk')
+          report = json.loads(Path('data/android-game-debug/qa-aes-report.json').read_text())
+          with source.open('rb') as stream:
+              digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+          if report['output_apk_sha256'] != digest or report['output_bytes'] != source.stat().st_size:
+              raise SystemExit('QA AES intermediate differs from its execution report')
+          print(digest)
+          PY
+          )"
+          uv run --locked --all-extras python tools/package_qa_ui_client.py \
+            data/dist/Game-QA-software-AES.apk \
+            --qa-aes-report data/android-game-debug/qa-aes-report.json \
+            --expected-source-sha256 "$IDOLY_QA_UI_INPUT_SHA" \
+            --native-library data/android-game-debug/qa-ui-native/lib/arm64-v8a/libidoly_qa_ui_bridge.so \
+            --emulator-only \
+            --apkeditor data/ci-input/APKEditor-1.4.1.jar \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --java "$JAVA_HOME/bin/java" \
+            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --output data/dist/Game-QA-UI.apk \
+            --report data/android-game-debug/qa-ui-report.json \
+            | tee data/android-game-debug/qa-ui-packaging.txt
       - name: Build the current x86_64 server app
         shell: bash
         run: |
@@ -147,12 +195,14 @@ jobs:
             -PserverData="$GITHUB_WORKSPACE/data/ci-input/ServerData-published-v0.2.12.zip" \
             | tee data/android-game-debug/server-build.txt
           cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/Server-game-debug.apk
-          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging data/dist/Game-QA-software-AES.apk \
+          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging data/dist/Game-QA-UI.apk \
             > data/android-game-debug/game-package.txt
           grep -F "package: name='game.qualiarts.idolypride.local.diagnostics'" data/android-game-debug/game-package.txt
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs data/dist/Game-QA-UI.apk \
+            > data/android-game-debug/qa-ui-signature.txt
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs data/dist/Server-game-debug.apk \
             > data/android-game-debug/server-signature.txt
-      - name: Capture the software-AES QA game on a translated emulator
+      - name: Explore the real game using native UI observations and adb input
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 30
@@ -169,13 +219,14 @@ jobs:
           script: >-
             uv run --locked python android-server/ci/qa_game_boot.py
             --server-apk data/dist/Server-game-debug.apk
-            --game-apk data/dist/Game-QA-software-AES.apk
+            --game-apk data/dist/Game-QA-UI.apk
             --game-package game.qualiarts.idolypride.local.diagnostics
             --descriptor-set data/protocol/idolypride-6.1.1.pb
             --artifacts data/android-game-debug --duration 600 --interval 20 --startup-timeout 600
             --force-gles30
             --tap-observed-title
             --tree-title-input
+            --qa-ui-explore
             --max-title-taps 5
             --prepare-completed-opening
       - name: Preserve game screenshots and diagnostic evidence
