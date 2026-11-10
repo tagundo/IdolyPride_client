@@ -203,11 +203,17 @@ class Gameplay:
         return current
 
     def _save_deck(self, snapshot, request, result):
-        # Auto (2) sends the client's already selected positions. It does not
-        # ask this endpoint to calculate a formation. Borrowed buddies need a
-        # rental contract that transaction.UserDeckPosition cannot represent.
-        if request.deckEditType not in (1, 2) or any(row.buddyUserId for row in request.userDeckPositions):
-            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Only manual or client-selected local-card deck editing is supported")
+        # The recovered 6.1.1 request contains the client's selected positions,
+        # not optimizer inputs. QuestAuto (4) is set after the client builds and
+        # serializes its entrusted formation (0x51fe7e8..0x51fe82c). ManualAuto
+        # (3) is another known save provenance, with the same request contract.
+        # Keep that layout, including explicit removals, instead of replacing it
+        # with a guessed team. Borrowed buddies still require a rental contract
+        # that transaction.UserDeckPosition cannot represent.
+        if request.deckEditType not in (1, 2, 3, 4):
+            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Unknown local deck editing mode")
+        if any(row.buddyUserId for row in request.userDeckPositions):
+            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Borrowed buddy deck positions are not supported")
         if request.number < 0:
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "A nonnegative deck number is required")
         deck = next((row for row in snapshot.decks if row.number == request.number), None)

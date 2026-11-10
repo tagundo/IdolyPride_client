@@ -285,7 +285,7 @@ def test_deck_invalid_reference_rolls_back_entire_snapshot(game, position):
 def test_deck_unsupported_modes_and_buddies_preserve_state(game):
     prepare_deck_inventory(game)
     before = game.state.snapshot(game.profile)
-    for values in ({"number": 1, "deckEditType": 3}, {"number": 1, "deckEditType": 4},
+    for values in ({"number": 1, "deckEditType": 0}, {"number": 1, "deckEditType": 5},
                    {"number": 1, "deckEditType": 1, "userDeckPositions": [{"position": 1, "buddyUserId": "other"}]}):
         with pytest.raises(RpcFailure) as error:
             call(game, "/api.Deck/Save", **values)
