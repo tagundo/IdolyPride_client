@@ -186,6 +186,27 @@ def main():
         command(['/usr/bin/codesign', '--verify', '--deep', '--strict', installed])
         report['local_IPA_installed'] = True
         report['installed_game_version'] = info.get('CFBundleShortVersionString')
+        # Preserve the converted bundle contract before launching. These are
+        # installation metadata, not the game's account or preferences files.
+        metadata_keys = ('CFBundleIdentifier', 'CFBundleExecutable', 'CFBundleShortVersionString',
+            'CFBundleSupportedPlatforms', 'LSRequiresIPhoneOS', 'UIDeviceFamily',
+            'UIApplicationSceneManifest', 'UISupportsTrueScreenSizeOnMac',
+            'UIRequiresFullScreen', 'UIRequiredDeviceCapabilities', 'MinimumOSVersion')
+        (args.output / 'installed-game-info.json').write_text(json.dumps(
+            {key: info.get(key) for key in metadata_keys}, ensure_ascii=False, indent=2) + '\n')
+        metadata_commands = {
+            'installed-game-entitlements': ['/usr/bin/codesign', '--display', '--entitlements', ':-', installed],
+            'installed-game-main-load-commands': ['/usr/bin/otool', '-l', installed / info['CFBundleExecutable']],
+            'installed-game-unity-load-commands': ['/usr/bin/otool', '-l',
+                installed / 'Frameworks/UnityFramework.framework/UnityFramework']}
+        for name, argv in metadata_commands.items():
+            try:
+                captured = command(argv, timeout=10, check=False)
+                value = {'exit_code': captured.returncode, 'stdout': captured.stdout[:65536],
+                         'stderr': captured.stderr[:8192]}
+            except (OSError, subprocess.TimeoutExpired) as error:
+                value = {'capture_error': type(error).__name__}
+            (args.output / (name + '.json')).write_text(json.dumps(value, indent=2) + '\n')
         label = info.get('CFBundleDisplayName') or info.get('CFBundleName')
         if label != '아이프라 로컬':
             raise RuntimeError('unexpected_local_game_display_name')
