@@ -1,13 +1,9 @@
 """Target selection must not turn a cross-build into an Apple runtime claim."""
 import importlib.util
-import hashlib
-import json
 from pathlib import Path
-import shutil
 import struct
 import tempfile
 import unittest
-from unittest.mock import patch
 
 
 SPEC = importlib.util.spec_from_file_location("live_engine_build", Path(__file__).resolve().parents[1] / "scripts/build.py")
@@ -75,90 +71,6 @@ class BuildTargetTests(unittest.TestCase):
                       struct.pack("<8I", 0xFEEDFACF, 0x0100000C, 0, 2, 0, 0, 0, 0)):
             with self.assertRaisesRegex(ValueError, "Mach-O"):
                 build.check_macos_library(wrong)
-
-
-class RuntimeOverlayTests(unittest.TestCase):
-    def test_patch_is_exactly_one_android_midr_guard_and_keeps_go_license(self):
-        manifest, original, modified = build.verify_runtime_patch()
-        self.assertEqual(original.count(build.MIDR_ANCHOR), 1)
-        self.assertEqual(modified, original.replace(build.MIDR_ANCHOR, build.MIDR_REPLACEMENT))
-        self.assertIn(b'ARM64.HasCPUID = isSet(HWCap, hwcap_CPUID)', modified)
-        self.assertEqual(list(build.RUNTIME_PATCH.rglob('*.go')), [])
-        self.assertEqual(manifest['original_sha256'], hashlib.sha256(original).hexdigest())
-        self.assertEqual(manifest['license_sha256'], hashlib.sha256(
-            (build.ROOT / 'third-party-licenses/Go-LICENSE').read_bytes()).hexdigest())
-
-    def test_all_other_targets_never_inspect_an_installed_go_sdk(self):
-        for target in ('linux', 'macos', 'android-x86_64'):
-            with self.subTest(target=target), patch.object(build, 'run', side_effect=AssertionError('SDK read')):
-                self.assertEqual(build.runtime_overlay(target, 'go', 'arbitrary version', {}, '/unused'),
-                                 ([], {'applied': False}))
-
-    def make_sdk(self, directory):
-        _, original, _ = build.verify_runtime_patch()
-        sdk = directory / 'sdk'
-        source = sdk / 'src/internal/cpu/cpu_arm64_hwcap.go'
-        source.parent.mkdir(parents=True)
-        source.write_bytes(original)
-        (sdk / 'LICENSE').write_bytes((build.ROOT / 'third-party-licenses/Go-LICENSE').read_bytes())
-        return sdk, source, original
-
-    def test_exact_sdk_is_read_only_and_overlay_is_outside_it(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            sdk, source, original = self.make_sdk(directory)
-            with patch.object(build, 'run', return_value=str(sdk)) as run:
-                flags, report = build.runtime_overlay('android', 'real-go', 'go version go1.27.3 linux/amd64',
-                                                       {'GOOS': 'android'}, directory / 'cache')
-            run.assert_called_once_with(['real-go', 'env', 'GOROOT'], {'GOOS': 'android'})
-            self.assertEqual(source.read_bytes(), original)
-            self.assertEqual(flags[0], '-overlay')
-            replace = json.loads(Path(flags[1]).read_text())['Replace']
-            self.assertEqual(list(replace), [str(source)])
-            staged = Path(replace[str(source)])
-            self.assertFalse(staged.is_relative_to(sdk))
-            self.assertNotEqual(staged.suffix, '.go')
-            self.assertEqual(hashlib.sha256(staged.read_bytes()).hexdigest(), report['patched_sha256'])
-            self.assertFalse(report['hwcap_assignments_changed'])
-            build.check_runtime_overlay(flags, report)
-            self.assertTrue(report['sdk_and_overlay_source_reverified_after_build'])
-            staged.write_bytes(b'changed after Go compile')
-            with self.assertRaisesRegex(ValueError, 'changed during'):
-                build.check_runtime_overlay(flags, report)
-
-    def test_unexpected_version_sdk_hash_license_or_sdk_output_fail_closed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            sdk, source, original = self.make_sdk(directory)
-            with patch.object(build, 'run', return_value=str(sdk)):
-                for version in ('go version go1.27.2 linux/amd64', 'go version go1.28 linux/amd64', 'go1.27.3'):
-                    with self.subTest(version=version), self.assertRaisesRegex(ValueError, 'exact Go 1.27.3'):
-                        build.runtime_overlay('android', 'go', version, {}, directory / 'cache')
-                source.write_bytes(original + b'\n')
-                with self.assertRaisesRegex(ValueError, 'original SHA-256'):
-                    build.runtime_overlay('android', 'go', 'go version go1.27.3 linux/amd64', {}, directory / 'cache')
-                source.write_bytes(original)
-                (sdk / 'LICENSE').write_bytes(b'changed license')
-                with self.assertRaisesRegex(ValueError, 'license differs'):
-                    build.runtime_overlay('android', 'go', 'go version go1.27.3 linux/amd64', {}, directory / 'cache')
-                (sdk / 'LICENSE').write_bytes((build.ROOT / 'third-party-licenses/Go-LICENSE').read_bytes())
-                with self.assertRaisesRegex(ValueError, 'outside the installed SDK'):
-                    build.runtime_overlay('android', 'go', 'go version go1.27.3 linux/amd64', {}, sdk / 'cache')
-
-    def test_missing_or_duplicate_anchor_and_unrelated_patch_fail_closed(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            copied = Path(temporary) / 'patch'
-            shutil.copytree(build.RUNTIME_PATCH, copied)
-            original = (copied / 'original/cpu_arm64_hwcap.go.txt').read_bytes()
-            for bad in (original.replace(build.MIDR_ANCHOR, b'\tif false {\n'), original + build.MIDR_ANCHOR):
-                (copied / 'original/cpu_arm64_hwcap.go.txt').write_bytes(bad)
-                with patch.object(build, 'RUNTIME_PATCH', copied), self.assertRaisesRegex(ValueError, 'exactly one'):
-                    build.verify_runtime_patch()
-            (copied / 'original/cpu_arm64_hwcap.go.txt').write_bytes(original)
-            patched = copied / 'patched/cpu_arm64_hwcap.go.txt'
-            patched.write_bytes(patched.read_bytes() + b'// unrelated change\n')
-            with patch.object(build, 'RUNTIME_PATCH', copied), self.assertRaisesRegex(ValueError, 'only the MIDR guard'):
-                build.verify_runtime_patch()
 
 
 if __name__ == "__main__":

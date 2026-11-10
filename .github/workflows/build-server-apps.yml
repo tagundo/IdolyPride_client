@@ -2,9 +2,6 @@ name: Build native server apps into draft release
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: [.github/workflows/build-server-apps.yml]
 
 permissions:
   contents: read
@@ -230,6 +227,9 @@ jobs:
           if-no-files-found: warn
 
   android:
+    # Paused: replace the ARM-on-x86 translation test with a native ARM
+    # runtime target before enabling this release gate again.
+    if: ${{ vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true' }}
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -412,14 +412,6 @@ jobs:
               assert build['abi_version'] == 1 and build['ruleset'] == 'live-v5'
               assert build['android_abi'] == abi and build['elf_16k_load_alignment_verified'] is True
               assert build['official_score_equivalence'] is False and build['no_db_or_server_dependencies'] is True
-              overlay = build['toolchain_overlay']
-              if abi == 'arm64-v8a':
-                  assert overlay['applied'] is True and overlay['go_version'] == 'go1.27.3'
-                  assert overlay['sdk_modified_in_place'] is False
-                  assert overlay['hwcap_assignments_changed'] is False
-                  assert overlay['sdk_and_overlay_source_reverified_after_build'] is True
-              else:
-                  assert overlay == {'applied': False}
               with ZipFile(apk) as archive:
                   names = [name for name in archive.namelist() if name.endswith('/libidoly_live.so')]
                   assert names == ['lib/' + abi + '/libidoly_live.so']
@@ -742,7 +734,6 @@ jobs:
           assert included['architecture'] == 'arm64' and included['macos_deployment_target'] == '13.0'
           assert included['install_name'] == '@rpath/libidoly_live.dylib'
           assert included['input_sha256'] == native['library_sha256']
-          assert native['toolchain_overlay'] == {'applied': False}
           assert len(included['embedded_sha256']) == 64 and included['embedded_bytes'] > 0
           assert included['ad_hoc_codesign_verified'] is True and len(included['license_sha256']) == 6
           assert app['experimental_main_live_requested'] is True and app['experimental_main_live_observed'] is True
@@ -988,11 +979,9 @@ jobs:
                   'supported_method': 'Quest.Start', 'quest_id': 'qt-main-1-001-01',
                   'ruleset': 'live-v5', 'native_c_abi': 1, 'master_table_count': 39,
                   'official_score_equivalence': False,
-                  'execution_verified': ['Linux_x86_64_source', 'Android_x86_64_Chaquopy',
-                      'Android_arm64_Chaquopy_under_API35_translation', 'macOS_arm64_frozen'],
+                  'execution_verified': ['Linux_x86_64_source', 'Android_x86_64_Chaquopy', 'macOS_arm64_frozen'],
                   'android_physical_arm64_tested': False,
-                  'android_arm64_qa_scope': 'first_main_live_native_integration',
-                  'android_arm64_cpu_model_probe': 'optional_MIDR_skipped_by_pinned_Go_source_overlay',
+                  'android_arm64_qa_scope': 'pending_native_arm_environment',
                   'android_root_and_cpu_graphics_preflight': True,
                   'request_id_receipts_persisted': True, 'repeated_request_exact_response': True,
                   'seed_and_started_time_preserved_after_restart': True,

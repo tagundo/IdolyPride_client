@@ -50,16 +50,6 @@ python3 native-live-engine/scripts/build.py --target macos \
 
 Android 교차 빌드는 Linux x86_64 호스트와 해당 NDK를 대상으로 합니다. `libidoly_live.so`, 생성 헤더, `build-report.json`을 출력합니다. 기본 출력은 이 폴더의 무시되는 `build/` 아래이며, 예시는 저장소 밖에 출력합니다. `-mod=readonly`, `-buildvcs=false`, `-trimpath`를 사용하고 서버·DB 의존성이 생기면 거부합니다. Android에는 `-Wl,-z,max-page-size=16384`를 적용합니다. Mac은 `MACOSX_DEPLOYMENT_TARGET=13.0`과 `@rpath/libidoly_live.dylib`를 검증하고 ad-hoc 서명 후 최종 해시를 기록합니다. [독립 호스트 CI](../.github/workflows/verify-live-engine.yml)는 Linux와 Mac의 실제 라이브러리 로딩·ABI 오류/버퍼 해제·C 헤더 링크를 검사하며, 전체 시뮬레이션 성공으로 표시하지 않습니다.
 
-### Android ARM64의 Go CPU 탐지 수정
-
-Android ARM64 빌드는 정확한 Go 1.27.3의 CPU 탐지 소스에 [한 줄 변경](runtime-patches/go1.27.3/android-midr.patch)을 `-overlay`로 적용합니다. [원본·수정본과 해시 기록](runtime-patches/go1.27.3/manifest.json), Go Authors의 BSD [라이선스](third-party-licenses/Go-LICENSE)를 보존합니다. 설치된 SDK 파일에는 쓰지 않으며 Linux·macOS·Android x86_64 빌드에는 적용하지 않습니다. 다른 Go 버전, 원본 해시·라이선스 불일치, 변경 위치 누락·중복은 빌드를 중단합니다. `build-report.json`의 `toolchain_overlay`에 적용 범위와 원본·수정본·diff 해시, 빌드 후 소스 재검사 결과를 기록합니다.
-
-보관한 소스는 `.go.txt`, 생성한 overlay 대체 파일은 `.go.overlay` 확장자를 사용합니다. 실제 Go SDK의 `.go` 파일 경로를 overlay의 키로 지정하므로 컴파일에는 적용되며, 이 모듈의 `go test ./...`가 불완전한 별도 `cpu` 패키지로 검색하지 않습니다.
-
-[Android 네이티브 검사](https://github.com/tagundo/IdolyPride_client/actions/runs/42808349533)에서 x86_64 서버의 첫 일반 라이브·보상·캐시·재시작은 통과했습니다. 같은 실행의 ARM64 서버는 라이브러리 초기화 중 `MRS MIDR_EL1`에서 `SIGILL`로 종료됐습니다. Android 15의 ARM 변환기가 `HWCAP_CPUID`를 보고하면서 이 명령을 처리하지 못한 것이 원인이었습니다. 수정은 Android에서 선택적인 Neoverse 모델별 메모리 복사 최적화 탐지만 건너뜁니다. HWCAP 플래그, 암호화 기능 탐지, 라이브 계산식은 그대로입니다. `GODEBUG`는 이 명령이 실행된 뒤 적용되므로 대안이 되지 않습니다.
-
-이 변경은 Go 소스의 조건 분기를 추가합니다. 컴파일 결과에 `getMIDR` 함수나 해당 명령이 남을 수 있으며, Android 초기화 경로가 그 호출을 건너뛰는지가 검증 대상입니다. 교차 빌드·소스·분기 검사는 실제 ARM 서버의 라이브러리 로딩과 계산 실행 검사와 구분합니다. 이 수정 이후의 Android 실행 성공은 별도 CI 결과가 필요합니다.
-
 ## C ABI와 검증
 
 공개 인터페이스는 [include/idoly_live.h](include/idoly_live.h), 구현은 [cmd/livebridge/bridge.go](cmd/livebridge/bridge.go)입니다.
