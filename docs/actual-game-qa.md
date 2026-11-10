@@ -104,3 +104,11 @@ PlayCover `4.0.0-prerelease`와 로컬 IPA 6.1.1, Mac 서버 후보의 정확한
 게임의 설치 메타데이터도 실제로 수집했습니다. Main·Unity 바이너리는 둘 다 Mac Catalyst 플랫폼6이며 App Sandbox가 활성화돼 PlayCover 소스의 예상값과 일치했습니다. 설치본의 서명 검사는 통과했고, Info.plist 복사본과 나머지 항목의 심볼릭 링크로 구성된 PlayCover 별칭은 엄격한 서명 검사에 실패했습니다. 별칭의 이 구조만으로 게임 종료 원인이라고 판정하지 않습니다.
 
 [실행 경로 비교42842193479](https://github.com/tagundo/IdolyPride_client/actions/runs/42842193479), 소스 `3acba8d`에서 공식 PlayCover 준비와 GUI 실행 후 같은 UIKit 오류·PID4529 종료를 확인했습니다. 그 뒤 실제 설치본 `.app`를 일반 `open`으로 여는 명령이 종료 코드1로 거절됐습니다. 두 번째 게임 프로세스를 관측하지 못했으므로 "실제 설치 경로에서도 같은 UIKit 크래시가 재현됐다"고 해석하지 않습니다. 이 실행에서 명령의 세부 stderr가 보존되지 않은 점을 확인하고 후속 드라이버에 실패 명령 기록을 추가했습니다. 서버 게임 RPC는 여전히 0건이며, 아직 검증된 게임 시작 수정안은 없습니다.
+
+### 퀄리아츠 원본 IPA 대조 실행
+
+[원본 실행42844904332](https://github.com/tagundo/IdolyPride_client/actions/runs/42844904332), 소스 `3df7e63`은 사용자가 릴리스에 첨부한 `game.qualiarts.idolypride-6.1.1-Decrypted.ipa` 자산 `725761399`를 입력으로 사용했습니다. 146,438,450바이트와 SHA-256 `33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848`를 대조했습니다. 로컬 연결 패치를 넣지 않은 원본이며, 설치에 필요한 PlayCover의 일반 변환·재서명만 적용했습니다.
+
+동일한 종류의 `macos-15` 실행기와 같은 PlayCover 배포 파일에서 원본 bundle `game.qualiarts.idolypride`, 표시 이름 **アイプラ**의 설치·공식 GUI 더블클릭 실행을 확인했습니다. PID2022는 Unity `2022.3.57f1` 초기화 후 로컬 연결용 IPA와 같은 `UISApplicationSupportService` check-in 거부 및 `_mainSceneIdentifier should have been set by now!` 예외로 종료됐습니다. 첫 게임 창·타이틀 진행은 확인하지 못했습니다. 따라서 이 첫 장면 오류는 로컬 연결 패치 없이도 재현됩니다. 사용자의 실제 Mac이나 모든 PlayCover 환경에서 원본이 실행 불가능하다는 뜻은 아닙니다.
+
+원본은 로컬 서버로 연결하도록 바꾸지 않았으므로 백그라운드 로컬 서버의 RPC 수로 공식 서버 연결을 판정하지 않습니다. 사용자 로그인·계정 데이터는 사용하지 않았습니다. 아티팩트 `13778166295`의 SHA-256은 `382c6c5db11f53498c5b188981854c3fbd5bbdae771cb7eb21bee1f75a6a7d62`이며 입력 해시, 설치 메타데이터, 실제 프로세스 경로·화면·오류를 포함합니다.
