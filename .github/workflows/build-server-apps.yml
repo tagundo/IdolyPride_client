@@ -275,7 +275,7 @@ jobs:
                       or any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9]*', name) for name in tables)
                       or not {'CardLevel', 'ManagerLevel', 'Consumption', 'Message', 'MessageGroup', 'EventStory', 'ExtraStoryPart', 'ExtraStory', 'Story'}.issubset(tables)):
                   raise SystemExit('Android QA payload has no complete progression master catalog')
-              required = ('protocol/idolypride-6.1.1.pb', *(f'master-json/{name}.json' for name in tables),
+              required = ('protocol/idolypride-6.1.1.pb', 'master-json/!version.txt', *(f'master-json/{name}.json' for name in tables),
                           'public-tutorial/manifest.json', 'public-tutorial/tutorial-short.pb', 'public-tutorial/tutorial-full.pb',
                           'public-story/manifest.json', 'public-story/story-list-event.pb', 'public-story/story-list-extra.pb')
               for relative in required:
