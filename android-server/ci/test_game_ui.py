@@ -729,3 +729,158 @@ def test_unknown_global_dialog_stops_after_three_observations_without_generic_cl
         explorer.step(frame)
     assert explorer.stopped and explorer.stop_reason == "unrecognized_global_dialog"
     assert explorer.actions == explorer.outcomes == []
+
+
+LESSON_ROOT = "Singleton/GlobalDialog/DialogManager/ActivityLessonReceiveDIalog(Clone)/"
+LESSON_BASE = LESSON_ROOT + "BasicDialogBase/DialogCanvas/Dialog/"
+LEVEL_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ManagerLvUpOverlay(Clone)/"
+LEVEL_BASE = LEVEL_ROOT + "OverlayCanvas/SlideRoot/ContentArea/ContentRoot/"
+
+
+@pytest.fixture
+def layered_lesson(home_snapshot):
+    # Minimal real frame31/32 nodes from run42810660579 at 540x1140.
+    result = deepcopy(home_snapshot)
+    result["screen"].update(width=540, height=1140)
+    for node in result["nodes"]:
+        if isinstance(node.get("bounds"), list):
+            node["bounds"] = [v * 5 / 6 for v in node["bounds"]]
+
+    def label(path, value, bounds=None):
+        result["nodes"].append({"kind": "tmp_text", "path": path, "text": value,
+                                "active": True, "bounds": bounds})
+
+    def button(path, ident, bounds, enabled=True, callback=True):
+        result["nodes"].append({"kind": "button", "name": path.rsplit("/", 1)[-1],
+                                "path": path, "instance_id": ident, "bounds": bounds,
+                                "active": True, "interactable": enabled, "callback_registered": callback,
+                                "text": ""})
+
+    label(LEVEL_BASE + "Content/PrevLevelAnchor/prevLevel", "2", [174, 340, 366, 500])
+    label(LEVEL_BASE + "Content/CurrentLevelAnchor/currentLevel", "3", [150, 320, 390, 520])
+    button(LEVEL_BASE + "CloseButton", -26340, [240, 1050, 300, 1110])
+    button(LEVEL_BASE + "ActionButton", -26358, [210.5, 918, 329.5, 1037], callback=False)
+    label(LESSON_BASE + "Header/Title", "00:02:00 の自主トレ")
+    label(LESSON_BASE + "Body/MainContentsRoot/MainLive", "メインライブ")
+    label(LESSON_BASE + "Body/MainContentsRoot/LiveName", "#01 Rapture渋谷")
+    label(LESSON_BASE + "Body/Rewards/RewardRoot/RewardTitle", "成果")
+    button(LESSON_BASE + "Footer/CloseButton", -20874, [240, 812.5, 300, 872.5], enabled=False)
+    button(LESSON_ROOT + "BasicDialogBase/DialogCanvas/Background", -20476, [0, 0, 540, 1140])
+    button(LESSON_BASE + "FloatButtonRoot/PromoteButton", -20900, [347.5, 725, 512.5, 890], callback=False)
+    return result
+
+
+def without_level_overlay(snapshot):
+    result = deepcopy(snapshot)
+    result["nodes"] = [n for n in result["nodes"] if not n.get("path", "").startswith(LEVEL_ROOT)]
+    next(n for n in result["nodes"] if n.get("path") == LESSON_BASE + "Footer/CloseButton")["interactable"] = True
+    return result
+
+
+def test_actual_layered_level_up_must_close_before_disabled_reward_footer(layered_lesson):
+    assert ui.visible_manager_level_overlay(layered_lesson)
+    assert ui.manager_level_close_target(layered_lesson)["instance_id"] == -26340
+    assert ui.lesson_reward_close_target(layered_lesson) is None
+    reward = without_level_overlay(layered_lesson)
+    assert not ui.visible_manager_level_overlay(reward)
+    assert ui.manager_level_close_target(reward) is None
+    assert ui.lesson_reward_close_target(reward)["instance_id"] == -20874
+    assert "PromoteButton" not in ui.lesson_reward_close_target(reward)["path"]
+
+
+@pytest.mark.parametrize("change", ["missing_previous", "wrong_current", "no_callback", "bounds", "competing"])
+def test_level_up_missing_context_or_competing_modal_is_not_acknowledged(layered_lesson, change):
+    if change == "missing_previous":
+        layered_lesson["nodes"] = [n for n in layered_lesson["nodes"] if not n.get("path", "").endswith("/prevLevel")]
+    elif change == "wrong_current":
+        next(n for n in layered_lesson["nodes"] if n.get("path", "").endswith("/currentLevel"))["text"] = "4"
+    elif change == "no_callback":
+        next(n for n in layered_lesson["nodes"] if n.get("path") == LEVEL_BASE + "CloseButton")["callback_registered"] = False
+    elif change == "bounds":
+        next(n for n in layered_lesson["nodes"] if n.get("path") == LEVEL_BASE + "CloseButton")["bounds"] = [0, 0, 600, 1200]
+    else:
+        competing_modal(layered_lesson)
+    assert ui.manager_level_close_target(layered_lesson) is None
+    assert ui.lesson_reward_close_target(layered_lesson) is None
+
+
+@pytest.mark.parametrize("change", ["disabled", "missing_header", "ambiguous", "competing", "level_reappeared"])
+def test_reward_close_requires_fresh_unobscured_enabled_unique_footer(layered_lesson, change):
+    reward = without_level_overlay(layered_lesson)
+    close = next(n for n in reward["nodes"] if n.get("path") == LESSON_BASE + "Footer/CloseButton")
+    if change == "disabled":
+        close["interactable"] = False
+    elif change == "missing_header":
+        reward["nodes"] = [n for n in reward["nodes"] if n.get("path") != LESSON_BASE + "Header/Title"]
+    elif change == "ambiguous":
+        reward["nodes"].append(dict(close, instance_id=-77))
+    elif change == "competing":
+        competing_modal(reward)
+    else:
+        reward["nodes"].extend(n for n in layered_lesson["nodes"] if n.get("path", "").startswith(LEVEL_ROOT))
+    assert ui.lesson_reward_close_target(reward) is None
+
+
+@pytest.mark.parametrize("reason", ["observed_manager_level_close", "observed_lesson_reward_close"])
+@pytest.mark.parametrize("change", ["competing", "closed"])
+def test_layered_modal_target_is_revalidated_and_no_stale_close_is_dispatched(layered_lesson, tmp_path, monkeypatch, reason, change):
+    original = layered_lesson if reason == "observed_manager_level_close" else without_level_overlay(layered_lesson)
+    target = (ui.manager_level_close_target(original) if reason == "observed_manager_level_close"
+              else ui.lesson_reward_close_target(original))
+    fresh = deepcopy(original)
+    if change == "competing":
+        competing_modal(fresh)
+    else:
+        root = LEVEL_ROOT if reason == "observed_manager_level_close" else LESSON_ROOT
+        fresh["nodes"] = [n for n in fresh["nodes"] if not n.get("path", "").startswith(root)]
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port,
+                         adb=lambda *args, **kwargs: pytest.fail("Stale acknowledgement must not reach adb"))
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: fresh)
+    assert not explorer._tap(original, target, reason, 31)
+    error = "selected_modal_changed" if change == "competing" else "selected_node_no_longer_present"
+    assert explorer.actions == [] and explorer.input_errors == {error: 1}
+
+
+def test_level_then_reward_then_home_are_separate_observations_without_background_outcome(layered_lesson, tmp_path, monkeypatch):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port)
+    explorer = ui.UiExplorer(qa)
+    current = [layered_lesson]
+    explorer.pending = ("lesson", 29, explorer._signature(layered_lesson))
+    taps, restarts = [], []
+    monkeypatch.setattr(explorer, "_snapshot", lambda: current[0])
+    monkeypatch.setattr(explorer, "_tap", lambda snapshot, node, reason, frame: taps.append((reason, node["instance_id"])) or True)
+    monkeypatch.setattr(explorer, "_restart", lambda: restarts.append(True))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    explorer.step(31)
+    explorer.step(32)
+    assert taps == [("observed_manager_level_close", -26340)] * 2
+    assert explorer.pending and explorer.outcomes == [] and restarts == []
+    current[0] = without_level_overlay(layered_lesson)
+    explorer.step(33)  # A different acknowledged layer resets the repeat guard.
+    assert taps[-1] == ("observed_lesson_reward_close", -20874)
+    assert explorer.pending_dialog_frame == 33 and explorer.outcomes == [] and not explorer.stopped
+    current[0]["nodes"] = [n for n in current[0]["nodes"] if not n.get("path", "").startswith(LESSON_ROOT)]
+    home = deepcopy(current[0])
+    next(n for n in current[0]["nodes"] if n.get("name") == "Home")["bounds"] = None
+    explorer.step(34)
+    assert explorer.pending and explorer.outcomes == [] and restarts == []
+    current[0] = home
+    explorer.step(35)
+    assert len(explorer.outcomes) == 1 and explorer.outcomes[0]["transient_dialog_frame"] == 33
+    assert restarts == [True]
+    assert all("PromoteButton" not in str(row) for row in taps)
+
+
+def test_level_overlay_without_global_dialog_still_blocks_background_menu_and_outcome(layered_lesson, tmp_path, monkeypatch):
+    layered_lesson["nodes"] = [n for n in layered_lesson["nodes"] if not n.get("path", "").startswith(LESSON_ROOT)]
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port)
+    explorer = ui.UiExplorer(qa)
+    explorer.pending = ("lesson", 1, explorer._signature(layered_lesson))
+    monkeypatch.setattr(explorer, "_snapshot", lambda: layered_lesson)
+    monkeypatch.setattr(explorer, "_tap", lambda *args: pytest.fail("Unknown overlay context cannot authorize input"))
+    monkeypatch.setattr(explorer, "_restart", lambda: pytest.fail("No restart behind level overlay"))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for n in (31, 32, 33):
+        explorer.step(n)
+    assert explorer.stopped and explorer.outcomes == []

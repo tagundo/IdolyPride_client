@@ -31,6 +31,8 @@ _GOALS = (
 _HOME_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot/"
 _GLOBAL_DIALOG_ROOT = "Singleton/GlobalDialog/DialogManager/"
 _NOTICE_ROOT = _GLOBAL_DIALOG_ROOT + "NoticeDialog(Clone)/"
+_LESSON_REWARD_ROOT = _GLOBAL_DIALOG_ROOT + "ActivityLessonReceiveDIalog(Clone)/"
+_MANAGER_LEVEL_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ManagerLvUpOverlay(Clone)/"
 _HOME_ROLES = {
     "lesson": ("HomePage/SlideRoot/ActivityLesson/ActivityLessonButton", "ActivityLessonButton"),
     "live": ("HomePage/SlideRoot/Live", "Live"),
@@ -188,7 +190,7 @@ def visible_global_dialogs(snapshot):
 
 def notice_close_target(snapshot):
     """Select the observed textless Notice X, only with its full known context."""
-    if visible_global_dialogs(snapshot) != {_NOTICE_ROOT}:
+    if visible_manager_level_overlay(snapshot) or visible_global_dialogs(snapshot) != {_NOTICE_ROOT}:
         return None
     base = _NOTICE_ROOT + "TabDialogBase/DialogCanvas/Dialog/"
     nodes = snapshot.get("nodes", [])
@@ -212,6 +214,51 @@ def notice_close_target(snapshot):
     close = [node for node in candidates if node.get("path") == base + "Footer/CloseButton"
              and node.get("name") == "CloseButton" and node.get("callback_registered") is True]
     return close[0] if len(close) == 1 else None
+
+
+def visible_manager_level_overlay(snapshot):
+    return any(isinstance(node, dict) and node.get("active") is True
+               and str(node.get("path", "")).startswith(_MANAGER_LEVEL_ROOT)
+               and usable_bounds(snapshot, node) for node in snapshot.get("nodes", []))
+
+
+def _unique_label(snapshot, path, expected):
+    matches = [node for node in snapshot.get("nodes", []) if isinstance(node, dict)
+               and node.get("path") == path and node.get("active") is True
+               and node.get("kind") in ("text", "tmp_text")]
+    return len(matches) == 1 and re.fullmatch(expected, text(matches[0].get("text", ""))) is not None
+
+
+def _exact_close(snapshot, path):
+    matches = [node for node in buttons(snapshot) if node.get("path") == path
+               and node.get("name") == "CloseButton" and node.get("callback_registered") is True]
+    return matches[0] if len(matches) == 1 else None
+
+
+def manager_level_close_target(snapshot):
+    """Only the observed 2->3 acknowledgement above the first lesson reward."""
+    if (not visible_manager_level_overlay(snapshot)
+            or visible_global_dialogs(snapshot) != {_LESSON_REWARD_ROOT}):
+        return None
+    base = _MANAGER_LEVEL_ROOT + "OverlayCanvas/SlideRoot/ContentArea/ContentRoot/"
+    if (not _unique_label(snapshot, base + "Content/PrevLevelAnchor/prevLevel", "2")
+            or not _unique_label(snapshot, base + "Content/CurrentLevelAnchor/currentLevel", "3")):
+        return None
+    return _exact_close(snapshot, base + "CloseButton")
+
+
+def lesson_reward_close_target(snapshot):
+    """Close a received reward view; never select its two-hour promotion action."""
+    if (visible_manager_level_overlay(snapshot)
+            or visible_global_dialogs(snapshot) != {_LESSON_REWARD_ROOT}):
+        return None
+    base = _LESSON_REWARD_ROOT + "BasicDialogBase/DialogCanvas/Dialog/"
+    if (not _unique_label(snapshot, base + "Header/Title", r"\d{2}:[0-5]\d:[0-5]\d の自主トレ")
+            or not _unique_label(snapshot, base + "Body/MainContentsRoot/MainLive", "メインライブ")
+            or not _unique_label(snapshot, base + "Body/MainContentsRoot/LiveName", r"\#01 Rapture渋谷")
+            or not _unique_label(snapshot, base + "Body/Rewards/RewardRoot/RewardTitle", "成果")):
+        return None
+    return _exact_close(snapshot, base + "Footer/CloseButton")
 
 
 def navigation_block_reason(snapshot):
@@ -284,6 +331,7 @@ class UiExplorer:
         self.pending_dialog_frame = None
         self.restart_pending = False
         self.global_dialog_observations = 0
+        self.blocking_modal_identity = None
 
     def _input_error(self, code):
         self.input_errors[code] = self.input_errors.get(code, 0) + 1
@@ -328,12 +376,16 @@ class UiExplorer:
                         and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
         if fresh.get("ok") is not True or current is None:
             return self._input_error("selected_node_no_longer_present")
-        if reason == "observed_notice_close":
-            close = notice_close_target(fresh)
+        selectors = {"observed_notice_close": notice_close_target,
+                     "observed_manager_level_close": manager_level_close_target,
+                     "observed_lesson_reward_close": lesson_reward_close_target}
+        if reason in selectors:
+            close = selectors[reason](fresh)
             if (close is None or close.get("instance_id") != current.get("instance_id")
                     or close.get("path") != current.get("path")):
-                return self._input_error("notice_dialog_changed")
-        elif visible_global_dialogs(fresh):
+                return self._input_error("notice_dialog_changed" if reason == "observed_notice_close"
+                                         else "selected_modal_changed")
+        elif visible_global_dialogs(fresh) or visible_manager_level_overlay(fresh):
             return self._input_error("visible_global_dialog_blocks_input")
         if reason == "observed_title" and (blocked := title_block_reason(fresh, current)):
             return self._input_error(blocked)
@@ -426,24 +478,34 @@ class UiExplorer:
         if self.stopped or snapshot.get("ok") is not True or time.monotonic() - self.last_action < 12:
             return
         dialogs = visible_global_dialogs(snapshot)
-        if not dialogs:
+        manager_overlay = visible_manager_level_overlay(snapshot)
+        identity = ("manager_level",) if manager_overlay else tuple(sorted(dialogs)) if dialogs else None
+        if identity != self.blocking_modal_identity:
             self.global_dialog_observations = 0
+            self.blocking_modal_identity = identity
         download = download_confirmation(snapshot)
-        if download is not None and not dialogs:
+        if download is not None and not dialogs and not manager_overlay:
             if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
                 self.pending_dialog_frame = frame
             self._tap(snapshot, download, "observed_resource_download_confirmation", frame)
             return
-        if dialogs:
+        if dialogs or manager_overlay:
             self.global_dialog_observations += 1
-            close = notice_close_target(snapshot)
+            close = manager_level_close_target(snapshot) if manager_overlay else notice_close_target(snapshot)
+            reason = "observed_manager_level_close" if manager_overlay else "observed_notice_close"
+            if close is None and not manager_overlay:
+                close = lesson_reward_close_target(snapshot)
+                reason = "observed_lesson_reward_close"
             if self.global_dialog_observations >= 3:
                 self.stopped = True
                 self.stop_reason = ("global_dialog_not_dismissed" if close is not None
                                     else "unrecognized_global_dialog")
                 return
             if close is not None:
-                self._tap(snapshot, close, "observed_notice_close", frame)
+                if (reason == "observed_lesson_reward_close" and self.pending
+                        and self.pending[0] == "lesson" and self.pending_dialog_frame is None):
+                    self.pending_dialog_frame = frame
+                self._tap(snapshot, close, reason, frame)
             else:
                 key = "unrecognized_global_dialog"
                 self.navigation_deferrals[key] = self.navigation_deferrals.get(key, 0) + 1
@@ -497,6 +559,10 @@ class UiExplorer:
             return
         if self.pending:
             goal, started, previous = self.pending
+            if goal == "lesson" and (_home_role(snapshot, "home") is None or goal_button(snapshot, "lesson") is None):
+                key = "lesson_home_not_ready"
+                self.navigation_deferrals[key] = self.navigation_deferrals.get(key, 0) + 1
+                return
             if frame - started >= 2:
                 self.outcomes.append({"goal": goal, "status": ("different_ui_tree_observed" if self._signature(snapshot) != previous
                                                                or self.pending_dialog_frame is not None

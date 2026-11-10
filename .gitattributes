@@ -1,1 +1,3 @@
 android-server/gradlew.bat text eol=crlf
+# Unified patch context prefixes precede the Go source's tab indentation.
+native-live-engine/runtime-patches/**/*.patch whitespace=-space-before-tab

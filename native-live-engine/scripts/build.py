@@ -2,6 +2,7 @@
 """Verify the attributed sources and build the isolated local-rules C ABI."""
 from pathlib import Path
 import argparse
+import difflib
 import hashlib
 import json
 import os
@@ -12,6 +13,84 @@ import struct
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+RUNTIME_PATCH = ROOT / "runtime-patches/go1.27.3"
+MIDR_ANCHOR = b'\tif ARM64.HasCPUID {\n'
+MIDR_REPLACEMENT = b'\tif ARM64.HasCPUID && os != "android" {\n'
+
+
+def verify_runtime_patch():
+    """Keep the small BSD Go runtime change auditable without a Go SDK."""
+    manifest = json.loads((RUNTIME_PATCH / "manifest.json").read_text())
+    expected = {"schema": 1, "go_version": "go1.27.3", "target": "android/arm64",
+                "toolchain_file": "src/internal/cpu/cpu_arm64_hwcap.go",
+                "original_file": "original/cpu_arm64_hwcap.go.txt",
+                "patched_file": "patched/cpu_arm64_hwcap.go.txt", "diff_file": "android-midr.patch",
+                "license_file": "third-party-licenses/Go-LICENSE", "sdk_modified_in_place": False}
+    if any(manifest.get(key) != value for key, value in expected.items()):
+        raise ValueError("Go Android runtime patch has an unsupported version or scope")
+    original = (RUNTIME_PATCH / manifest["original_file"]).read_bytes()
+    patched = (RUNTIME_PATCH / manifest["patched_file"]).read_bytes()
+    if original.count(MIDR_ANCHOR) != 1:
+        raise ValueError("Go Android MIDR source must contain exactly one original guard")
+    if patched != original.replace(MIDR_ANCHOR, MIDR_REPLACEMENT):
+        raise ValueError("Go Android runtime patch must change only the MIDR guard")
+    diff = "".join(difflib.unified_diff(original.decode().splitlines(True), patched.decode().splitlines(True),
+                    fromfile="a/" + manifest["toolchain_file"], tofile="b/" + manifest["toolchain_file"])).encode()
+    if (RUNTIME_PATCH / manifest["diff_file"]).read_bytes() != diff:
+        raise ValueError("Go Android runtime patch diff does not match its sources")
+    for key, raw in (("original", original), ("patched", patched), ("diff", diff),
+                     ("license", (ROOT / manifest["license_file"]).read_bytes())):
+        if hashlib.sha256(raw).hexdigest() != manifest.get(key + "_sha256"):
+            raise ValueError("Go Android runtime patch " + key + " differs from its SHA-256 pin")
+    return manifest, original, patched
+
+
+def runtime_overlay(target, go, version, env, cache):
+    """Overlay the exact Go source only for the Android ARM64 build."""
+    if target != "android":
+        return [], {"applied": False}
+    if not re.fullmatch(r"go version go1\.27\.3 \S+", version):
+        raise ValueError("Android ARM64 MIDR overlay requires exact Go 1.27.3")
+    manifest, original, patched = verify_runtime_patch()
+    goroot = Path(run([go, "env", "GOROOT"], env).strip()).resolve(strict=True)
+    source = goroot / manifest["toolchain_file"]
+    if source.read_bytes() != original:
+        raise ValueError("Installed Go Android MIDR source differs from its original SHA-256 pin")
+    if hashlib.sha256((goroot / "LICENSE").read_bytes()).hexdigest() != manifest["license_sha256"]:
+        raise ValueError("Installed Go toolchain license differs from its SHA-256 pin")
+    destination = (Path(cache) / "runtime-overlay/go1.27.3").resolve()
+    if destination.is_relative_to(goroot):
+        raise ValueError("Go runtime overlay output must stay outside the installed SDK")
+    destination.mkdir(parents=True, exist_ok=True)
+    replacement = destination / "cpu_arm64_hwcap.go.overlay"
+    replacement.write_bytes(patched)
+    overlay = destination / "overlay.json"
+    overlay.write_text(json.dumps({"Replace": {str(source): str(replacement)}}, indent=2) + "\n")
+    # Preserve the exact source/patch/license receipt alongside the generated
+    # overlay. The installed GOROOT is only read, never patched in place.
+    for relative in ("manifest.json", "android-midr.patch"):
+        shutil.copy2(RUNTIME_PATCH / relative, destination / relative)
+    return ["-overlay", str(overlay)], {"applied": True, "target": manifest["target"],
+        "go_version": manifest["go_version"], "toolchain_file": manifest["toolchain_file"],
+        "original_sha256": manifest["original_sha256"], "patched_sha256": manifest["patched_sha256"],
+        "diff_sha256": manifest["diff_sha256"], "license_file": manifest["license_file"],
+        "license_sha256": manifest["license_sha256"], "reason": manifest["reason"],
+        "sdk_modified_in_place": False, "hwcap_assignments_changed": False,
+        "scope": "optional_android_cpu_model_tuning_only"}
+
+
+def check_runtime_overlay(flags, report):
+    """Check the source bytes again after Go has completed the build."""
+    if not report["applied"]:
+        return
+    replacements = json.loads(Path(flags[1]).read_text())["Replace"]
+    if len(replacements) != 1:
+        raise ValueError("Go Android runtime overlay must replace exactly one source")
+    source, replacement = next(iter(replacements.items()))
+    for path, pin in ((source, "original_sha256"), (replacement, "patched_sha256")):
+        if hashlib.sha256(Path(path).read_bytes()).hexdigest() != report[pin]:
+            raise ValueError("Go runtime source or overlay changed during compilation")
+    report["sdk_and_overlay_source_reverified_after_build"] = True
 
 
 def verify_sources():
@@ -25,6 +104,7 @@ def verify_sources():
             raise ValueError("Upstream source differs from its pin: " + entry["file"])
     if hashlib.sha256((ROOT / "cmd/livebridge/bridge.go").read_bytes()).hexdigest() != manifest["adapter_sha256"]:
         raise ValueError("C ABI adapter differs from its verified pin")
+    verify_runtime_patch()
     return manifest
 
 
@@ -136,6 +216,7 @@ def main(argv=None):
     if not re.fullmatch(r"go version go\d+\.\d+(?:\.\d+)? \S+", version):
         parser.error("Selected program is not the Go compiler; /usr/bin/go may be a board-game program")
     env.update(target_env)
+    overlay_flags, overlay_report = runtime_overlay(args.target, go, version, env, cache)
     output.mkdir(parents=True, exist_ok=True)
     library = output / library_name
     linker_flags = "-s -w"
@@ -143,9 +224,10 @@ def main(argv=None):
         linker_flags += " -extldflags=-Wl,-z,max-page-size=16384"
     elif args.target == "macos":
         linker_flags += " -extldflags=-Wl,-install_name,@rpath/libidoly_live.dylib"
-    run([go, "build", "-mod=readonly", "-buildvcs=false", "-trimpath", "-buildmode=c-shared",
+    run([go, "build", *overlay_flags, "-mod=readonly", "-buildvcs=false", "-trimpath", "-buildmode=c-shared",
          "-ldflags=" + linker_flags, "-o", library, "./cmd/livebridge"], env)
-    dependencies = run([go, "list", "-mod=readonly", "-deps", "./cmd/livebridge"], env).splitlines()
+    dependencies = run([go, "list", *overlay_flags, "-mod=readonly", "-deps", "./cmd/livebridge"], env).splitlines()
+    check_runtime_overlay(overlay_flags, overlay_report)
     forbidden = [name for name in dependencies if any(value in name for value in
                  ("mongo", "grpc", "gofiber", "sqlcipher", "/db/", "/server/"))]
     if forbidden:
@@ -163,6 +245,7 @@ def main(argv=None):
               "build_host": {"system": platform.system(), "machine": platform.machine()},
               "library_bytes": len(raw), "library_sha256": hashlib.sha256(raw).hexdigest(),
               "no_db_or_server_dependencies": True, "dependencies": dependencies,
+              "toolchain_overlay": overlay_report,
               "official_score_equivalence": False}
     if args.target in ("android", "android-x86_64"):
         alignments = check_android_library(raw, args.target)

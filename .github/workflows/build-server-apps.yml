@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv run --locked --all-extras pytest -q tests android-server/ci macos-server/tests \
+          uv run --locked --all-extras pytest -q tests android-server/ci macos-server/tests native-live-engine/tests \
             | tee data/preparation-evidence/tests.txt
           uv run --locked python -m compileall -q src tools android-server/app/src/main/python macos-server
       - name: Verify production startup with pure Python protobuf and no grpcio import
@@ -412,6 +412,14 @@ jobs:
               assert build['abi_version'] == 1 and build['ruleset'] == 'live-v5'
               assert build['android_abi'] == abi and build['elf_16k_load_alignment_verified'] is True
               assert build['official_score_equivalence'] is False and build['no_db_or_server_dependencies'] is True
+              overlay = build['toolchain_overlay']
+              if abi == 'arm64-v8a':
+                  assert overlay['applied'] is True and overlay['go_version'] == 'go1.27.3'
+                  assert overlay['sdk_modified_in_place'] is False
+                  assert overlay['hwcap_assignments_changed'] is False
+                  assert overlay['sdk_and_overlay_source_reverified_after_build'] is True
+              else:
+                  assert overlay == {'applied': False}
               with ZipFile(apk) as archive:
                   names = [name for name in archive.namelist() if name.endswith('/libidoly_live.so')]
                   assert names == ['lib/' + abi + '/libidoly_live.so']
@@ -476,7 +484,7 @@ jobs:
             test "$(adb -s emulator-5554 shell getprop ro.kernel.qemu | tr -d '\r')" = 1
             adb -s emulator-5554 shell am force-stop game.qualiarts.idolypride.localserver
             test "$(adb -s emulator-5554 shell pm clear game.qualiarts.idolypride.localserver | tr -d '\r')" = Success
-            uv run --locked python android-server/ci/qa_emulator.py --apk data/dist/IdolyPride-Local-Server-Android.apk --descriptor-set data/protocol/idolypride-6.1.1.pb --artifacts data/android-server-qa/production-arm64 --startup-timeout 600
+            uv run --locked python android-server/ci/qa_arm_live.py --apk data/dist/IdolyPride-Local-Server-Android.apk --descriptor-set data/protocol/idolypride-6.1.1.pb --artifacts data/android-server-qa/production-arm64 --startup-timeout 600
             adb -s emulator-5554 shell dumpsys package game.qualiarts.idolypride.localserver > data/android-server-qa/production-arm64/package.txt
             grep -F 'primaryCpuAbi=arm64-v8a' data/android-server-qa/production-arm64/package.txt
       - name: Upload the arm64 APK only after emulator QA passes
@@ -490,6 +498,11 @@ jobs:
 
           result = json.loads(Path('data/android-server-qa/result.json').read_text())
           arm = json.loads(Path('data/android-server-qa/production-arm64/result.json').read_text())
+          assert arm['qa_scope'] == 'first_main_live_native_integration'
+          assert arm['full_legacy_regression_tested'] is False
+          assert all(arm.get(key) is True for key in ('native_go_init_verified', 'mode_setting_persisted',
+              'starter_roster_complete', 'initial_inventory_master_backed'))
+          assert tuple(arm[key] for key in ('initial_card_count', 'initial_item_count', 'default_unit_slot_count')) == (17, 2, 5)
           for native in (result, arm):
               assert native.get('ok') is True and native.get('final_stop') is True
               assert all(native.get(key) is True for key in
@@ -729,6 +742,7 @@ jobs:
           assert included['architecture'] == 'arm64' and included['macos_deployment_target'] == '13.0'
           assert included['install_name'] == '@rpath/libidoly_live.dylib'
           assert included['input_sha256'] == native['library_sha256']
+          assert native['toolchain_overlay'] == {'applied': False}
           assert len(included['embedded_sha256']) == 64 and included['embedded_bytes'] > 0
           assert included['ad_hoc_codesign_verified'] is True and len(included['license_sha256']) == 6
           assert app['experimental_main_live_requested'] is True and app['experimental_main_live_observed'] is True
@@ -977,6 +991,8 @@ jobs:
                   'execution_verified': ['Linux_x86_64_source', 'Android_x86_64_Chaquopy',
                       'Android_arm64_Chaquopy_under_API35_translation', 'macOS_arm64_frozen'],
                   'android_physical_arm64_tested': False,
+                  'android_arm64_qa_scope': 'first_main_live_native_integration',
+                  'android_arm64_cpu_model_probe': 'optional_MIDR_skipped_by_pinned_Go_source_overlay',
                   'android_root_and_cpu_graphics_preflight': True,
                   'request_id_receipts_persisted': True, 'repeated_request_exact_response': True,
                   'seed_and_started_time_preserved_after_restart': True,

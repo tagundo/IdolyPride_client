@@ -3,3 +3,13 @@ https://github.com/vertesan/solis-server commit 9b67c06939403d7035e1795745f79134
 Original files are copied verbatim; LICENSE is preserved.
 C ABI adapter is independently written for this proof, AGPL-3.0-or-later.
 Scores use explicit local rules; official equivalence is not claimed.
+
+Android ARM64 builds modify one Go 1.27.3 standard-library CPU-detection guard
+through a source overlay. IdolyPride_client contributors changed this on
+2026-11-10 to skip the optional MIDR/Neoverse tuning probe on Android, where
+the API35 ARM translator advertises CPUID but rejects MRS MIDR_EL1.
+All hardware-capability assignments and live-calculation sources are unchanged.
+Original and modified Go source, the exact diff and SHA-256 pins are in
+runtime-patches/go1.27.3/. This Go source remains under the Go Authors' BSD
+license, preserved in third-party-licenses/Go-LICENSE. The installed Go SDK
+is never modified; Linux, macOS and Android x86_64 do not use this overlay.
