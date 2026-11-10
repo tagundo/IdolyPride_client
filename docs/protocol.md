@@ -15,7 +15,7 @@ Android IL2CPP 바이너리에서 protobuf descriptor 359개 파일·68개 서�
 
 descriptor 파일은 `data/protocol/idolypride-6.1.1.pb` 위치를 기본값으로 사용하며 SHA-256은 `c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad`입니다. `tools/extract_client_schema.py`로 원본 XAPK에서 다시 추출할 수 있습니다. 현재 서버는 427개 unary RPC를 등록합니다. server-streaming `/api.Health/Watch`는 등록하지 않으며 호출 시 `UNIMPLEMENTED`를 반환합니다.
 
-소스 `b18f711`의 기본 명시 처리 경로는 52개이며 제한된 자체 처리 50개와 공개 fixture 전용 2개를 포함합니다. 나머지 unary 375개는 가져온 사용자 fixture가 없으면 기본 자체 처리가 없고, `Quest.Start`의 첫 메인 퀘스트 실험도 기본 OFF입니다. 등록된 경로 수를 전체 기능 구현 수로 계산하지 않습니다. 경로별 타입과 제한은 [RPC 분류 CSV](rpc-coverage-6.1.1.csv)를 따릅니다.
+현재 미배포 소스의 기본 명시 처리 경로는 53개이며 제한된 자체 처리 51개와 공개 fixture 전용 2개를 포함합니다. 나머지 unary 374개는 가져온 사용자 fixture가 없으면 기본 자체 처리가 없고, `Quest.Start`의 첫 메인 퀘스트 실험도 기본 OFF입니다. 추가 기능을 담은 새 APK·Mac 앱은 아직 배포하지 않았으며 공개 v0.2.16의 지원 범위와 구분합니다. 등록된 경로 수를 전체 기능 구현 수로 계산하지 않습니다. 경로별 타입과 제한은 [RPC 분류 CSV](rpc-coverage-6.1.1.csv)를 따릅니다.
 
 `inspect`의 `schema_sha256`은 파일 순서와 로딩 경로를 정규화한 스키마 지문이며 원본 파일 해시와 구분합니다. 현재 6.1.1의 정규화된 지문은 `0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3`입니다. 동일한 스키마를 Solis 모듈이나 내보낸 descriptor set으로 읽어도 같은 지문을 사용합니다.
 
@@ -63,6 +63,8 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 | `Profile.Top` | fixture 우선; 없으면 저장된 계층 포인트와 홈의 마스터 규칙으로 계급 조회, 순위 0·빈 로컬 친구 목록, 상태 변경 없음 |
 | `Profile.UpdateName` | fixture 우선; 없으면 이름만 원자적으로 저장하고 `commonResponse.updatedData.user` 반환; UTF-16 1–10단위·로컬 한 줄 입력 정책, 공식 금칙어·미션 진행 제외 |
 | `Profile.UpdateMessage` | fixture 우선; 없으면 기존 `profile.message`만 원자적으로 저장하고 `commonResponse.updatedData.profile` 반환; UTF-16 1–60단위·공백만인 입력과 탭 거부, 공식 금칙어·미션·보상 제외 |
+| `Mission.List` | fixture 우선; 없으면 마스터와 정확한 현재 임계값을 검증한 저장된 카드 레벨 미션 한 행만 읽기 전용 반환; 행·마스터 없으면 `FAILED_PRECONDITION` |
+| `Card.Enhance` | 카드·소비 아이템과 기존 카드 레벨 미션의 최고 도달 레벨을 같은 트랜잭션에 저장; 실제 진행 증가만 mission delta 반환, 수령·보상 없음 |
 | 그 밖의 알려진 RPC | fixture 또는 구현이 없으면 `UNIMPLEMENTED` |
 | 알 수 없는 RPC 경로 | `UNIMPLEMENTED` |
 | 보호된 RPC의 세션 누락·불일치·만료 | `UNAUTHENTICATED` |
@@ -72,6 +74,8 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 fixture 저장은 protobuf 문법 검증을 거치지만 게임 규칙·아이디 참조의 의미적 일관성까지 검증하지 않습니다. 정적 응답 재생은 라이브 점수 계산, 보상 지급, 스토리 진행 같은 상태 변경을 구현하지 않습니다. fixture에는 개인 유저 데이터가 포함될 수 있으며 `Auth.*` fixture는 금지합니다.
 
 `Profile.Top`의 순위 0은 전역 순위를 계산했다는 뜻이 아니며 빈 친구 목록은 현재 로컬 친구 관계의 범위입니다. `Profile.UpdateName`은 비어 있지 않은 이름의 공백·Unicode 정규화를 그대로 보존합니다. 원본 UI가 제출 전에 제거하는 줄바꿈·탭은 서버의 로컬 정책으로 거부하며 공식 서버의 직접 요청 처리 규칙으로 단정하지 않습니다. `Profile.UpdateMessage`도 수락한 공백·Unicode 정규화와 CR/LF를 보존합니다. 원본 소개문 입력 필드의 줄바꿈 모드는 아직 확정하지 않았으며 탭·공백만인 입력 거부는 로컬 정책입니다. 세 경로는 원본 응답 소비 코드와 6.1.1 스키마를 대조하고 자동 검증했지만 실제 프로필 UI 검증은 아직 없습니다. `Auth.Create`는 계속 미지원이며 로컬 `Auth.Login`을 원본 신규 계정 생성 구현으로 취급하지 않습니다.
+
+미션의 범위는 `ms-normal-card_level_achievement` 한 행입니다. 공개 원본 응답의 카드 레벨·진행도 `1→2`, `41→42`와 원본 소비 코드를 대조했습니다. 서버는 저장된 최고 도달 기록을 내리지 않고, 실제 강화가 최고 레벨을 높인 경우에만 시각·진행도·delta를 갱신합니다. 현재 임계값과 기존 `Clear/NotReceived/Received` 상태는 보존하며, `Progress(1)→Clear(2)` 경계는 로컬 준비 완료 정책입니다. 공식 경계 동작·전체 활성 목록·일일/주간 초기화·`Mission.Receive`·보상은 지원하지 않습니다. 신규 로컬 starter origin 5와 출처가 확실한 4→5 이행만 행을 초기화합니다. 가져온 계정에서 이미 존재하는 유효 행은 진행시킬 수 있지만 누락 행은 만들지 않습니다. 이전 payload에 `Mission.json`이 없으면 기존 강화·홈을 유지하고, List는 실패 조건을 명시합니다. 세부 상태·스키마 호환 범위는 [게임 상태 문서](gameplay-status.md)를 따릅니다.
 
 ## 기존 공식 세션 수집
 
@@ -101,6 +105,8 @@ PlayChain을 이미 사용하는 경우의 [실제 DB 경로](https://github.com
 
 `Master.Get`용 준비 과정은 원본 MasterTag의 버전·cryptoKey·fileName·fileSize를 유지하고 `downloadUrl`만 로컬 origin으로 바꿉니다. 암호화된 MasterDB 팩을 `--asset-root/master/`에서 그대로 제공할 수 있습니다.
 
+현재 미배포 앱 payload는 원본 암호화 팩 202개를 모두 보존하고 서버가 직접 읽는 JSON 40개를 준비합니다. 추가한 `Mission`은 원본 7,087행이며 카드 레벨 미션의 유형·빈 조건·17개 임계값과 inline 보상 참조를 검증합니다. `rd_auto;stone;;50`은 원본 native resolver가 해석하는 참조이므로 `Reward` 테이블 행이 없어도 클라이언트에 표시할 수 있습니다. 이 검증이 서버의 보상 지급 구현을 뜻하지 않습니다. `Condition` JSON·일반 미션 자격 판정은 추가하지 않았습니다.
+
 원본 팩이 없는 경우 `tools/build_master_packs.py`가 정확한 descriptor의 `master.table`·`master.pk` annotation을 사용해 JSON 행을 protobuf로 검증하고 로컬 SQLCipher 4 팩으로 재구성합니다. 현재 master-diff의 202개 테이블·238,940개 행을 78,475,264바이트로 생성하고 전체 202개 테이블의 복호화·역직렬화 round trip을 확인했습니다. 생성 팩의 키·버전은 로컬 재구성용이며 원본 팩과 구분합니다. 클라이언트가 생성 팩을 소비하는지는 아직 기기에서 검증하지 않았습니다.
 
 보존한 Octo cache의 SHA-256은 `a93dae963319b056ac7e01932cb379dc9675885d670ca2f3dde1efe53d3e12be`입니다. revision 1087을 해독한 manifest에는 AssetBundle 49,370개·resource 5,072개, 파일 크기 합계 39,322,868,160바이트가 기록돼 있습니다. 이 manifest는 파일 목록·해시·크기이며 실제 콘텐츠가 아닙니다. 현재 서버는 Octo API나 전체 CDN의 동작을 에뮬레이션하지 않습니다.
@@ -116,3 +122,5 @@ Android manifest는 기본 system trust와 debug user trust 구성을 갖지만 
 원본 APK 기준 [실행 `42858431492`](https://github.com/tagundo/IdolyPride_client/actions/runs/42858431492), 소스 `465c14b`에서는 원본 서명을 보존해 Google Play API 35 x86_64 이미지에 설치했습니다. GitHub 호스트의 KVM과 SwiftShader·Google ARM 번역을 사용했으며, 약 160초에 `libndk_translation.so`·Unity가 포함된 네이티브 `SIGSEGV`를 기록했습니다. 수집 화면은 Android 전체 화면 안내에 가려져 타이틀·홈 진입을 관측하지 못했습니다. 에뮬레이터 전체의 암호화 패킷 메타데이터는 RPC 내용이나 공식 로그인 검증 자료가 아닙니다.
 
 후속 [실행 `42861039882`](https://github.com/tagundo/IdolyPride_client/actions/runs/42861039882), 소스 `09e8f9a`에서는 일반 Android 안내만 닫고 사라진 것을 검증했습니다. 게임 PID는 180초까지 살아 있었지만, 30–180초 화면은 회색 게임 화면 위의 Pixel Launcher ANR 대화상자였고 Unity 초기화·타이틀·홈 진입을 관측하지 못했습니다. 정상 실행이나 크래시 해결을 입증한 결과가 아닙니다. 공식 API 36 비교 [실행 `42862969552`](https://github.com/tagundo/IdolyPride_client/actions/runs/42862969552), 소스 `34ca8d5`도 System UI ANR과 회색 화면에 막혔습니다. 일반 연결판 [실행 `42863334749`](https://github.com/tagundo/IdolyPride_client/actions/runs/42863334749), 소스 `b18f711`은 현재 호스트 서버에 RPC를 보내기 전에 게임 프로세스가 SIGSEGV로 종료됐습니다. 원본의 공식 인증 RPC 캡처와 이 환경에서의 메뉴 성공은 아직 없습니다.
+
+최종 축소 화면 원본 [실행 `42865818735`](https://github.com/tagundo/IdolyPride_client/actions/runs/42865818735), 소스 `c633fc9`는 게임 실행 전부터 System UI ANR이 보였고 Unity 초기화·타이틀·홈을 관측하지 못했습니다. 이 환경의 정상 OS·게임 구동을 확인한 결과가 아닙니다. 공식 ARM64 Cuttlefish의 TCG 부팅·ADB 연결은 별도의 예비 관측이며 OS 준비 완료와 게임 실행은 아직 검증하지 않았습니다.
