@@ -120,7 +120,8 @@ def test_explicit_import_replaces_snapshot_but_stores_no_request_credentials(tmp
     assert not state.authenticated(token, "profile")
     with sqlite3.connect(path) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        assert tables == {"profiles", "sessions", "snapshots", "profile_settings", "starter_profiles"}
+        assert tables == {"profiles", "sessions", "snapshots", "profile_settings", "starter_profiles",
+                          "profile_lesson_progress"}
         assert db.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
         assert db.execute("SELECT response FROM snapshots WHERE profile='profile'").fetchone()[0] == source.read_bytes()
     assert not list(tmp_path.glob("*.json"))

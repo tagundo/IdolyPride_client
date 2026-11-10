@@ -4,7 +4,9 @@
 The optional title action taps a freshly OCR-observed TAP TO START phrase.
 An opt-in second action requires observed post-tap loading followed by two
 fresh stable, nonloading returned-title frames.
-No other game input is performed. Captures do not establish home success.
+An opt-in UI-tree mode permits up to five observed title actions during a
+longer capture. No other game input is performed. Captures alone do not
+establish home success.
 """
 from __future__ import annotations
 
@@ -18,6 +20,7 @@ import shutil
 import struct
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 
 import grpc
 
@@ -162,6 +165,54 @@ def prepare_restarted_tutorial(schema, port, *, caller=None):
             "tutorial_progress_or_skip_called": False, "purchase_or_grant_called": False}
 
 
+def prepare_completed_opening(schema, port, master_dir):
+    """Create a disposable post-tutorial fixture through verified local RPCs.
+
+    This is setup for exploring the actual game's later UI, never evidence
+    that this emulator played the tutorial. It grants no arbitrary inventory.
+    """
+    from idoly_local.tutorial_qa import run_tutorial_continuation
+    with grpc.insecure_channel(f"127.0.0.1:{port}") as channel:
+        calls = []
+        token = None
+
+        def invoke(path, request):
+            call = channel.unary_unary(path, request_serializer=codec.encode, response_deserializer=codec.decode)
+            raw = call(request.SerializeToString(), metadata=(("x-auth-token", token),) if token else (), timeout=20)
+            calls.append({"method": path, "status": "OK", "origin": "profile_fixture"})
+            return schema.response_type(path).FromString(raw)
+
+        auth = invoke("/api.Auth/Login", schema.request_type("/api.Auth/Login")(firebaseIDToken="local"))
+        token = auth.gameAuthToken
+        if not token:
+            raise RuntimeError("The disposable profile did not receive a local session")
+        invoke("/api.Tutorial/Init", schema.request_type("/api.Tutorial/Init")(name="QAManager"))
+        receipt = run_tutorial_continuation(schema, invoke, master_dir, label="actual-game fixture setup")
+    return {"enabled": True, "qa_only": True, "status": "ready", "rpc_calls": calls,
+            "completed_tutorial_step": 150, "tutorial_cleared": True,
+            "actual_game_tutorial_played": False, "continuation": receipt}
+
+
+def unity_surface_target(xml, package, image_size):
+    """Select the current game view from the fresh Android accessibility tree."""
+    candidates = []
+    for node in ET.fromstring(xml).iter("node"):
+        if (node.get("package") != package or not node.get("resource-id", "").endswith(":id/unitySurfaceView")
+                or node.get("enabled") == "false"):
+            continue
+        match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+        if not match:
+            continue
+        left, top, right, bottom = map(int, match.groups())
+        width, height = image_size
+        if 0 <= left < right <= width and 0 <= top < bottom <= height and right - left >= 100 and bottom - top >= 100:
+            candidates.append({"resource_id": node.get("resource-id"), "bounds": [left, top, right, bottom],
+                               "point": [(left + right) // 2, (top + bottom) // 2]})
+    if len(candidates) != 1:
+        raise RuntimeError("A unique current Unity game view was not present in the UI tree")
+    return candidates[0]
+
+
 class GameQA(QA):
     def capture_server(self, stage):
         """Allow Unity's observed pause delay without dropping capture checks."""
@@ -234,13 +285,24 @@ class GameQA(QA):
     def _perform_title_action(self, phrase):
         actions = getattr(self, "title_actions", [])
         maximum = getattr(self, "max_title_taps", 1)
-        if len(actions) >= maximum or len(actions) >= 2:
+        if len(actions) >= maximum or len(actions) >= (5 if getattr(self, "tree_title_input", False) else 2):
             raise RuntimeError("The configured observed title action limit was reached")
         if phrase.get("phrase") != "TAP TO START":
             raise RuntimeError("A game tap requires a confident fresh title phrase")
         if not phrase.get("foreground_game"):
             raise RuntimeError("OCR title phrase is not in the foreground game activity")
         action = dict(phrase, action_number=len(actions) + 1, performed=False)
+        if getattr(self, "tree_title_input", False):
+            xml = self.adb("exec-out", "uiautomator", "dump", "/dev/tty")
+            start, end = xml.find("<hierarchy"), xml.rfind("</hierarchy>")
+            if start < 0 or end < 0:
+                raise RuntimeError("Title input requires a fresh Android UI tree")
+            xml = xml[start:end + len("</hierarchy>")]
+            source = self.artifacts / f"title-input-{len(actions) + 1}.xml"
+            source.write_text(xml, encoding="utf-8")
+            target = unity_surface_target(xml, getattr(self, "game_package", GAME), phrase["image_size"])
+            action.update(point=target["point"], input_coordinate_source="fresh_android_ui_tree",
+                          input_tree=source.name, input_target=target)
         actions.append(action)
         self.title_actions = actions
         record = self.artifacts / f"observed-title-action-{len(actions)}.json"
@@ -258,7 +320,7 @@ class GameQA(QA):
         self.last_title_tap_at = time.monotonic()
         action.update(performed=True, performed_seconds=round(self.last_title_tap_at - self.started, 2))
         save()
-        print(f"Tapped fresh OCR-observed TAP TO START action {len(actions)}", flush=True)
+        print(f"Tapped observed title action {len(actions)}", flush=True)
         return action
 
     def tap_observed_title(self, timeout=180):
@@ -375,18 +437,28 @@ def main():
                         help="QA-only Unity launch override to avoid emulator Vulkan translation; changes no APK bytes")
     parser.add_argument("--tap-observed-title", action="store_true",
                         help="Tap a freshly OCR-observed TAP TO START phrase, then observe 180 seconds")
-    parser.add_argument("--max-title-taps", type=int, choices=(1, 2), default=1,
-                        help="QA-only opt-in: at most two title taps; the second requires observed loading then a fresh stable returned title")
+    parser.add_argument("--max-title-taps", type=int, choices=range(1, 6), default=1,
+                        help="QA-only title action limit; more than two requires tree-title-input")
     parser.add_argument("--prepare-restarted-tutorial", action="store_true",
                         help="QA ONLY: local Auth/Login + Tutorial/Init(QAManager) before launch; no tutorial skip/grants")
+    parser.add_argument("--prepare-completed-opening", action="store_true",
+                        help="QA ONLY: prepare the verified local opening progression before exploring the actual game's later UI")
+    parser.add_argument("--master-dir", type=Path, default=Path("data/master-json"))
+    parser.add_argument("--tree-title-input", action="store_true",
+                        help="Use fresh Android UI-tree game-view coordinates; OCR only recognizes the title")
     args = parser.parse_args()
-    if not 90 <= args.duration <= 180 or args.interval < 5 or args.startup_timeout <= 0:
-        parser.error("duration must be 90..180, interval >=5, and startup-timeout positive")
-    if args.max_title_taps == 2 and not args.tap_observed_title:
-        parser.error("max-title-taps=2 requires tap-observed-title")
+    if not 90 <= args.duration <= (900 if args.tree_title_input else 180) or args.interval < 5 or args.startup_timeout <= 0:
+        parser.error("duration must be 90..180 (or 900 with tree input), interval >=5, and startup-timeout positive")
+    if args.max_title_taps > 1 and not args.tap_observed_title:
+        parser.error("multiple title actions require tap-observed-title")
+    if args.max_title_taps > 2 and not args.tree_title_input:
+        parser.error("more than two title actions require tree-title-input")
+    if args.prepare_completed_opening and args.prepare_restarted_tutorial:
+        parser.error("choose one disposable profile fixture")
     qa = GameQA(args.adb, args.serial, args.artifacts)
     qa.game_package = args.game_package
     qa.max_title_taps = args.max_title_taps
+    qa.tree_title_input = args.tree_title_input
     qa.started = time.monotonic()
     result = {"capture_completed": False, "actual_game_client_launched": False,
               "game_observation_completed": False,
@@ -436,6 +508,9 @@ def main():
             result["profile_fixture"] = prepare_restarted_tutorial(schema, port)
             (args.artifacts / "profile-fixture.json").write_text(
                 json.dumps(result["profile_fixture"], indent=2) + "\n")
+        elif args.prepare_completed_opening:
+            result["profile_fixture"] = prepare_completed_opening(schema, port, args.master_dir)
+            (args.artifacts / "profile-fixture.json").write_text(json.dumps(result["profile_fixture"], indent=2) + "\n")
         qa.adb("shell", "am", "force-stop", args.game_package)
         command = game_launch_args(args.force_gles30, args.game_package)
         (args.artifacts / "game-launch-command.json").write_text(json.dumps(
@@ -446,7 +521,7 @@ def main():
             raise RuntimeError("Game activity did not launch; inspect game-launch.txt")
         result["actual_game_client_launched"] = True
         result["game_input_performed"] = False
-        if args.tap_observed_title:
+        if args.tap_observed_title and not args.tree_title_input:
             result["observed_title_action"] = qa.tap_observed_title()
             result["game_input_performed"] = True
             result["game_input_count"] = 1
@@ -457,18 +532,27 @@ def main():
                 result["captures"].append(qa.capture_game("after-title-reentry-observation"))
             result["observed_title_actions"] = qa.title_actions
             result["game_input_count"] = sum(action["performed"] for action in qa.title_actions)
-        duration = 180 if args.tap_observed_title else args.duration
-        result["post_title_observation_seconds"] = duration if args.tap_observed_title else None
+        duration = 180 if args.tap_observed_title and not args.tree_title_input else args.duration
+        result["post_title_observation_seconds"] = duration if args.tap_observed_title and not args.tree_title_input else None
         begin = time.monotonic()
+        title_candidate = None
         for index, scheduled in enumerate(range(0, duration + args.interval, args.interval)):
             time.sleep(max(0, begin + min(scheduled, duration) - time.monotonic()))
             elapsed = time.monotonic() - begin
             result["captures"].append(qa.capture_game(f"game-{index:02d}-{int(elapsed):03d}s"))
-            print("Captured actual game at " + str(int(elapsed)) + "s; no further game input", flush=True)
+            if args.tree_title_input and args.tap_observed_title and len(getattr(qa, "title_actions", [])) < args.max_title_taps:
+                current = qa._observe_title_frame(f"interactive-title-{index:02d}", inspect_loading=True)
+                cooled = time.monotonic() - getattr(qa, "last_title_tap_at", -1000) >= 20
+                if cooled and stable_title_pair(title_candidate, current):
+                    qa._perform_title_action(current)
+                    title_candidate = None
+                else:
+                    title_candidate = current
+            print("Captured actual game at " + str(int(elapsed)) + "s", flush=True)
             if scheduled >= duration:
                 break
         result["game_observation_completed"] = True
-        if args.tap_observed_title:
+        if args.tap_observed_title and hasattr(qa, "last_title_tap_at"):
             result["elapsed_seconds_after_last_title_tap"] = round(time.monotonic() - qa.last_title_tap_at, 2)
         # Return to the server only after capturing the game's uninterrupted run.
         qa.adb("shell", "am", "start", "-W", "-n", ACTIVITY)

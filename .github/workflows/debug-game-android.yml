@@ -46,6 +46,10 @@ jobs:
           # Hosted runner only: retain the SDK and remove unused large toolchains.
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android/sdk/ndk
           df -h . | tee data/android-game-debug/disk.txt
+          {
+            echo "Host CPUs: $(nproc)"
+            free -h
+          } | tee data/android-game-debug/host-resources.txt
           test -c /dev/kvm
           sudo chmod 0666 /dev/kvm
           test -r /dev/kvm && test -w /dev/kvm
@@ -54,43 +58,70 @@ jobs:
           echo "IDOLY_BUILD_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
           sdkmanager 'platforms;android-34' 'build-tools;34.0.0'
           uv sync --locked --all-extras --python 3.12
-      - name: Download and verify the pinned game and public server-data source
+      - name: Download the published diagnostic game and complete public payload
         shell: bash
         run: |
           set -euo pipefail
-          gh api "repos/$GH_REPO/releases/assets/726978000" \
-            --header 'Accept: application/octet-stream' > data/ci-input/Game-local-r2.apk
-          gh api "repos/$GH_REPO/releases/assets/726977995" \
-            --header 'Accept: application/octet-stream' > data/ci-input/ServerData-source.zip
+          gh api "repos/$GH_REPO/releases/assets/728205797" \
+            --header 'Accept: application/octet-stream' > data/ci-input/Game-local-diagnostics.apk
+          gh api "repos/$GH_REPO/releases/assets/729811409" \
+            --header 'Accept: application/octet-stream' > data/ci-input/ServerData-published-v0.2.12.zip
           printf '%s  %s\n' \
-            '28ecc6a617867d0842a5e88eac3d5736199809a49d4d433ce47816d6a40ba77b' 'data/ci-input/Game-local-r2.apk' \
-            '2df8ca651fbb3104b10910dc60a2a87f8cac1db3b5defff56eb4703c769be6b3' 'data/ci-input/ServerData-source.zip' \
+            'f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df' 'data/ci-input/Game-local-diagnostics.apk' \
+            'c3f833d9dca637fa7c7c82dce0d08378bf288beb3cde050e259b6ec8aea39110' 'data/ci-input/ServerData-published-v0.2.12.zip' \
             | sha256sum --check --strict | tee data/android-game-debug/input-checksums.txt
           uv run --locked python - <<'PY'
+          import hashlib
+          import json
           from pathlib import Path, PurePosixPath
+          import stat
           from zipfile import ZipFile
-          with ZipFile('data/ci-input/ServerData-source.zip') as archive:
-              assert archive.testzip() is None
+
+          payload = Path('data/ci-input/ServerData-published-v0.2.12.zip')
+          with ZipFile(payload) as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit('Published payload failed ZIP CRC validation')
+              names = set()
+              public_roots = {'protocol', 'original-master', 'master-json', 'public-fixtures', 'public-tutorial'}
               for item in archive.infolist():
                   path = PurePosixPath(item.filename)
-                  assert not path.is_absolute() and '..' not in path.parts and path.parts[0] == 'data'
+                  if (path.is_absolute() or '..' in path.parts or '\\' in item.filename
+                          or not path.parts or path.parts[0] != 'data'
+                          or str(path) != item.filename.rstrip('/')
+                          or stat.S_ISLNK(item.external_attr >> 16)
+                          or item.filename in names):
+                      raise SystemExit('Published payload contains an unsafe or duplicate ZIP path')
+                  if not item.is_dir() and (len(path.parts) < 3 or path.parts[1] not in public_roots):
+                      if item.filename != 'data/payload-manifest.json':
+                          raise SystemExit('Published payload contains a non-public file')
+                  names.add(item.filename)
+              manifest = json.loads(archive.read('data/payload-manifest.json'))
+              records = manifest['files']
+              expected = {row['path'] for row in records} | {'data/payload-manifest.json'}
+              actual = {item.filename for item in archive.infolist() if not item.is_dir()}
+              if len({row['path'] for row in records}) != len(records) or expected != actual:
+                  raise SystemExit('Published payload manifest does not describe its exact file set')
+              for row in records:
+                  content = archive.read(row['path'])
+                  if len(content) != row['bytes'] or hashlib.sha256(content).hexdigest() != row['sha256']:
+                      raise SystemExit('Published payload file failed its manifest size/SHA-256 check')
+              required = {
+                  'data/protocol/idolypride-6.1.1.pb', 'data/original-master/master-tag.json',
+                  'data/public-fixtures/manifest.json', 'data/public-tutorial/manifest.json',
+                  'data/public-tutorial/tutorial-short.pb', 'data/public-tutorial/tutorial-full.pb',
+                  *('data/master-json/' + name + '.json' for name in
+                    ('HierarchyDetailGrade', 'HierarchyGrade', 'Setting', 'Tutorial', 'Card',
+                     'ManagerLevel', 'CardLevel', 'Consumption', 'Message', 'MessageGroup')),
+              }
+              if not required.issubset(actual):
+                  raise SystemExit('Published payload is missing the current public fixtures or continuation tables')
               archive.extractall(Path.cwd())
+          print('Verified and extracted the complete published payload; original ZIP bytes are retained for the APK')
           PY
-      - name: Prepare current public fixtures and master tables
+      - name: Check the current source against the extracted complete public data
         shell: bash
         run: |
           set -euo pipefail
-          uv run --locked python tools/archive_public_text.py \
-            --descriptor-set data/protocol/idolypride-6.1.1.pb --output data/public-fixtures
-          uv run --locked --all-extras python tools/build_server_payload.py \
-            --output data/dist/ServerData-game-debug.zip | tee data/android-game-debug/payload-build.json
-          uv run --locked python - <<'PY'
-          from zipfile import ZipFile
-          with ZipFile('data/dist/ServerData-game-debug.zip') as archive:
-              assert archive.testzip() is None
-              for table in ('HierarchyDetailGrade', 'HierarchyGrade'):
-                  assert 'data/master-json/' + table + '.json' in archive.namelist(), table
-          PY
           uv run --locked --all-extras pytest -q tests android-server/ci qa-native-aes \
             | tee data/android-game-debug/tests.txt
       - name: Build the clearly marked emulator-only AES and no-store variant
@@ -98,9 +129,10 @@ jobs:
         run: |
           set -euo pipefail
           uv run --locked --all-extras python tools/package_qa_aes_client.py \
-            data/ci-input/Game-local-r2.apk \
+            data/ci-input/Game-local-diagnostics.apk \
             --output data/dist/Game-QA-software-AES.apk \
             --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+            --expected-source-sha256 f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df \
             --emulator-no-store \
             --report data/android-game-debug/qa-aes-report.json \
             | tee data/android-game-debug/qa-aes-build.txt
@@ -112,11 +144,12 @@ jobs:
           ./android-server/gradlew -p android-server :app:assembleDebug \
             --no-daemon --console=plain --stacktrace \
             -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverAbi=x86_64 \
-            -PserverData="$GITHUB_WORKSPACE/data/dist/ServerData-game-debug.zip" \
+            -PserverData="$GITHUB_WORKSPACE/data/ci-input/ServerData-published-v0.2.12.zip" \
             | tee data/android-game-debug/server-build.txt
           cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/Server-game-debug.apk
-          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging data/ci-input/Game-local-r2.apk \
+          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging data/dist/Game-QA-software-AES.apk \
             > data/android-game-debug/game-package.txt
+          grep -F "package: name='game.qualiarts.idolypride.local.diagnostics'" data/android-game-debug/game-package.txt
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --print-certs data/dist/Server-game-debug.apk \
             > data/android-game-debug/server-signature.txt
       - name: Capture the software-AES QA game on a translated emulator
@@ -126,9 +159,9 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_4
-          cores: 2
-          ram-size: 4096M
-          disk-size: 4G
+          cores: 4
+          ram-size: 6144M
+          disk-size: 8G
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
           disable-linux-hw-accel: false
           disable-animations: true
@@ -137,12 +170,14 @@ jobs:
             uv run --locked python android-server/ci/qa_game_boot.py
             --server-apk data/dist/Server-game-debug.apk
             --game-apk data/dist/Game-QA-software-AES.apk
+            --game-package game.qualiarts.idolypride.local.diagnostics
             --descriptor-set data/protocol/idolypride-6.1.1.pb
-            --artifacts data/android-game-debug --duration 180 --interval 10 --startup-timeout 600
+            --artifacts data/android-game-debug --duration 600 --interval 20 --startup-timeout 600
             --force-gles30
             --tap-observed-title
-            --max-title-taps 2
-            --prepare-restarted-tutorial
+            --tree-title-input
+            --max-title-taps 5
+            --prepare-completed-opening
       - name: Preserve game screenshots and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4

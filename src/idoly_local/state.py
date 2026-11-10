@@ -42,6 +42,11 @@ class State:
                     profile TEXT PRIMARY KEY REFERENCES profiles(name),
                     version INTEGER NOT NULL CHECK(version >= 0)
                 );
+                CREATE TABLE IF NOT EXISTS profile_lesson_progress (
+                    profile TEXT PRIMARY KEY REFERENCES profiles(name),
+                    response BLOB NOT NULL,
+                    schema_sha256 TEXT NOT NULL
+                );
             """)
         path.chmod(0o600)
 
@@ -89,7 +94,9 @@ class State:
         """Replace a local snapshot and supplied identities in one transaction.
 
         Existing sessions are invalidated so clients log in with the imported
-        identity and reload state. Other profiles and sessions are unaffected.
+        identity and reload state. The profile's local lesson clock is reset;
+        an imported account never inherits the previous snapshot's earnings.
+        Other profiles and sessions are unaffected.
         The default records an explicit import marker (version zero), preventing
         an imported snapshot from being mistaken for an older local starter.
         Only a known starter creator should supply a positive starter version.
@@ -113,6 +120,9 @@ class State:
             db.execute("INSERT INTO starter_profiles(profile,version) VALUES (?,?) "
                        "ON CONFLICT(profile) DO UPDATE SET version=excluded.version", (profile, origin_version))
             db.execute("DELETE FROM sessions WHERE profile=?", (profile,))
+            # A replacement/import starts a new local earning timeline. Never
+            # carry time accumulated by the previous snapshot/account into it.
+            db.execute("DELETE FROM profile_lesson_progress WHERE profile=?", (profile,))
 
     def snapshot(self, profile: str) -> tuple[bytes, str] | None:
         with self.connect() as db:
@@ -123,6 +133,58 @@ class State:
         with self.connect() as db:
             row = db.execute("SELECT response,schema_sha256 FROM profile_settings WHERE profile=?", (profile,)).fetchone()
             return (bytes(row["response"]), row["schema_sha256"]) if row is not None else None
+
+    def lesson_progress(self, profile: str) -> tuple[bytes, str] | None:
+        """Return the opaque local ActivityLessonProgress, if initialized."""
+        with self.connect() as db:
+            row = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile=?",
+                             (profile,)).fetchone()
+            return (bytes(row["response"]), row["schema_sha256"]) if row is not None else None
+
+    def mutate_lesson_snapshot(self, profile: str, schema_sha256: str, callback) -> tuple[bytes, bytes]:
+        """Update a snapshot and its local lesson clock in one transaction.
+
+        ``callback(snapshot_bytes, lesson_bytes_or_none)`` returns both new
+        protobuf byte strings. The activity service owns timestamp, cap and
+        reward calculations; State never interprets those messages. A missing
+        clock is explicit so the service can anchor at first supported access
+        without estimating historical earnings. Callback failures roll back
+        both rows. Sessions, identities, settings and starter markers remain
+        intact, and unchanged snapshot bytes are not rewritten.
+        """
+        if not isinstance(schema_sha256, str) or not schema_sha256:
+            raise ValueError("Lesson schema fingerprint is required")
+        if not callable(callback):
+            raise ValueError("Lesson mutation callback must be callable")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT s.response,s.schema_sha256,l.response AS lesson_response,"
+                "l.schema_sha256 AS lesson_schema FROM snapshots AS s "
+                "LEFT JOIN profile_lesson_progress AS l ON l.profile=s.profile WHERE s.profile=?",
+                (profile,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Local profile has no snapshot")
+            if row["schema_sha256"] != schema_sha256:
+                raise ValueError("Local profile snapshot uses a different schema")
+            if row["lesson_response"] is not None and row["lesson_schema"] != schema_sha256:
+                raise ValueError("Local lesson progress uses a different schema")
+            original = bytes(row["response"])
+            lesson = bytes(row["lesson_response"]) if row["lesson_response"] is not None else None
+            result = callback(original, lesson)
+            if not isinstance(result, tuple) or len(result) != 2:
+                raise ValueError("Lesson mutation must return snapshot and progress bytes")
+            payload, progress = result
+            if not isinstance(payload, bytes) or not isinstance(progress, bytes):
+                raise ValueError("Lesson mutation must return snapshot and progress bytes")
+            if payload != original:
+                db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            if lesson is None or progress != lesson:
+                db.execute("INSERT INTO profile_lesson_progress VALUES (?,?,?) "
+                           "ON CONFLICT(profile) DO UPDATE SET response=excluded.response,"
+                           "schema_sha256=excluded.schema_sha256", (profile, progress, schema_sha256))
+        return payload, progress
 
     def starter_version(self, profile: str) -> int | None:
         """Return zero for an explicit import, positive for a known starter.

@@ -1,0 +1,56 @@
+{
+  "schema": 1,
+  "source_commit": "c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02",
+  "master_version": "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60",
+  "scope": "Public official initial-area rate fields and timestamp differences only; not a settlement or campaign oracle.",
+  "captures": [
+    {
+      "source_url": "https://raw.githubusercontent.com/Project-Hoshimi/sumire-sr-data/c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02/captures/2026-10-25_fresh_official/raw/00033.resp-plain.Home%3AEnter.bin",
+      "source_blob_sha1": "752438f94c1dcb40fc909d6254ffc8a7bbce40ef",
+      "source_sha256": "d956979f9d04a6a69ffc640ba6c2650f5bc7f34ece0236b466b37bdfcee5a193",
+      "currentAreaId": "area-main-001",
+      "step_rewards": {
+        "stepRewardGold": 5,
+        "stepRewardManagerExp": 8,
+        "stepRewardCardEnhanceItem": 3
+      },
+      "storage_window_ms": 43200000
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/Project-Hoshimi/sumire-sr-data/c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02/captures/2026-10-25_fresh_official/raw/00036.resp-plain.Home%3AEnter.bin",
+      "source_blob_sha1": "6b6605d9833233672ca6aa269962ad55fe4d4261",
+      "source_sha256": "dda3163597c5ef6be76087408ff2fdfbc7d7a7efffb4743936da811f60bea18f",
+      "currentAreaId": "area-main-001",
+      "step_rewards": {
+        "stepRewardGold": 5,
+        "stepRewardManagerExp": 8,
+        "stepRewardCardEnhanceItem": 3
+      },
+      "storage_window_ms": 43200000
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/Project-Hoshimi/sumire-sr-data/c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02/captures/2026-10-25_fresh_official/raw/00046.resp-plain.Home%3AEnter.bin",
+      "source_blob_sha1": "8bd612a91515158062f63e40a50332955eb1c242",
+      "source_sha256": "eb37302af2e89de010a35852721d1a665c0158e3781e6d93c2542acad7ad6e42",
+      "currentAreaId": "area-main-001",
+      "step_rewards": {
+        "stepRewardGold": 5,
+        "stepRewardManagerExp": 8,
+        "stepRewardCardEnhanceItem": 3
+      },
+      "storage_window_ms": 43200000
+    },
+    {
+      "source_url": "https://raw.githubusercontent.com/Project-Hoshimi/sumire-sr-data/c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02/captures/2026-10-25_fresh_official/raw/00055.resp-plain.Home%3AEnter.bin",
+      "source_blob_sha1": "886a727702a5fc917c44b2720dfb00e7d731306c",
+      "source_sha256": "36781f4b990aad5b87b08be88ab1ab669f827cd0da38254e799146550c617e0a",
+      "currentAreaId": "area-main-001",
+      "step_rewards": {
+        "stepRewardGold": 5,
+        "stepRewardManagerExp": 8,
+        "stepRewardCardEnhanceItem": 3
+      },
+      "storage_window_ms": 43200000
+    }
+  ]
+}

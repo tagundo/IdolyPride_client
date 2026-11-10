@@ -115,9 +115,10 @@ class _Catalog:
 class Gameplay:
     """Handle an explicit local feature allowlist; other methods return None."""
 
-    def __init__(self, schema, state, profile: str, master_dir: Path | None = None):
+    def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, lessons=None):
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
+        self.lessons = lessons
 
     def _parse_user(self, payload: bytes):
         try:
@@ -366,9 +367,16 @@ class Gameplay:
                           "notiShowcaseShopItem", "leagueInfo", "loveInfo", "companyInfo"):
                 if field in result.DESCRIPTOR.fields_by_name:
                     getattr(result, field).SetInParent()
-            result.lessonProgress.currentAreaId = result.currentMainAreaId
-            result.lessonProgress.lastReceiveTime = _now_ms()
-            result.lessonProgress.maxRewardTime = result.lessonProgress.lastReceiveTime
+            # Older/minimal descriptors and catalogs predate ordinary lesson
+            # support. The shipped 6.1.1 catalog declares its step duration.
+            ordinary = (self.lessons is not None and "/api.Activity/ReceiveLessonReward" in self.schema.methods
+                        and any("secondsPerActivityLessonStep" in row for row in self.catalog.rows("Setting")))
+            if ordinary:
+                result.lessonProgress.CopyFrom(self.lessons.progress(result.currentMainAreaId))
+            else:
+                result.lessonProgress.currentAreaId = result.currentMainAreaId
+                result.lessonProgress.lastReceiveTime = _now_ms()
+                result.lessonProgress.maxRewardTime = result.lessonProgress.lastReceiveTime
             if "lessonInfo" in result.DESCRIPTOR.fields_by_name:
                 result.lessonInfo.lessonProgress.CopyFrom(result.lessonProgress)
             self._common(result)

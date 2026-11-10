@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 import pytest
 
 import qa_game_boot
-from qa_game_boot import GAME, GameQA, game_launch_args, prepare_restarted_tutorial
+from qa_game_boot import GAME, GameQA, game_launch_args, prepare_restarted_tutorial, unity_surface_target
 
 
 def test_restarted_tutorial_fixture_calls_only_login_name_init_and_read():
@@ -54,6 +54,38 @@ def test_game_package_allowlist_keeps_override_on_qa_apps():
     assert game_launch_args(True, GAME + ".diagnostics")[5].startswith(GAME + ".diagnostics/")
     with pytest.raises(ValueError, match="dedicated local QA"):
         game_launch_args(False, "game.qualiarts.idolypride")
+
+
+def test_title_input_coordinates_come_from_fresh_accessibility_tree(tmp_path):
+    import time
+    qa = GameQA("adb", "emulator-disposable", tmp_path)
+    qa.game_package, qa.max_title_taps, qa.tree_title_input = GAME, 5, True
+    qa.started = time.monotonic()
+    xml = ('<hierarchy><node package="' + GAME + '" resource-id="' + GAME
+           + ':id/unitySurfaceView" enabled="true" bounds="[0,0][1080,2148]"/></hierarchy>')
+    calls = []
+
+    def adb(*args):
+        calls.append(args)
+        return xml if args[:2] == ("exec-out", "uiautomator") else ""
+
+    qa.adb = adb
+    observed = {"phrase": "TAP TO START", "foreground_game": True,
+                "point": [900, 1900], "image_size": [1080, 2280]}
+    action = qa._perform_title_action(observed)
+    assert calls[-1] == ("shell", "input", "tap", "540", "1074")
+    assert action["input_coordinate_source"] == "fresh_android_ui_tree"
+    assert action["point"] != observed["point"]
+
+
+@pytest.mark.parametrize("xml", [
+    '<hierarchy/>',
+    '<hierarchy><node package="other" resource-id="other:id/unitySurfaceView" bounds="[0,0][1080,2148]"/></hierarchy>',
+    '<hierarchy><node package="' + GAME + '" resource-id="' + GAME + ':id/unitySurfaceView" bounds="[0,0][1080,9999]"/></hierarchy>',
+])
+def test_surface_target_fails_closed_without_a_unique_current_game_node(xml):
+    with pytest.raises(RuntimeError, match="unique current Unity"):
+        unity_surface_target(xml, GAME, [1080, 2280])
 
 
 def test_server_capture_retries_observed_empty_tree_then_checks_fresh_package(tmp_path, monkeypatch):
