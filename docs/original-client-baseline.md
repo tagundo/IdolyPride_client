@@ -91,7 +91,9 @@ TLS 패킷을 수집해도 RPC 경로와 본문은 그대로 보이지 않습니
 
 후속 [실행 `42861039882`](https://github.com/tagundo/IdolyPride_client/actions/runs/42861039882), 소스 `09e8f9a`에서는 관측한 Android 전체 화면 안내의 일반적인 `Got It` 버튼을 닫았고 안내가 사라진 것을 확인했습니다. 게임 PID `3865`는 180초까지 살아 있었지만, 30–180초 수집 화면에는 회색 게임 화면 위로 `Pixel Launcher isn't responding` 대화상자가 나타났습니다. Unity 초기화 로그·타이틀·홈 화면은 관측하지 못했습니다. 프로세스 생존을 정상 게임 실행이나 이전 크래시 해결의 증거로 취급하지 않습니다. 게임·계정 UI에는 입력하지 않았습니다.
 
-공식 API 36 이미지로 비교하는 세 번째 [실행 `42862969552`](https://github.com/tagundo/IdolyPride_client/actions/runs/42862969552), 소스 `34ca8d5`의 결과는 아직 대기 중입니다. 정상 메뉴에 도달하면 요청/응답과 상태 변화를 정리하고, 최소 연결 변경판을 대조한 뒤 필요한 구간에 진단판을 사용합니다. 현재까지 원본의 공식 로그인 후 RPC 캡처는 확보하지 못했습니다.
+공식 API 36 이미지의 세 번째 [실행 `42862969552`](https://github.com/tagundo/IdolyPride_client/actions/runs/42862969552), 소스 `34ca8d5`도 정상 구동하지 못했습니다. 180초 화면에는 회색 Surface 위로 `System UI isn't responding`과 전체화면 안내가 겹쳤습니다. API 36의 안내 소유자·resource ID가 `com.android.systemui`로 바뀌어 API 35 전용 입력 검사는 입력하지 않았습니다. PID 생존과 빈 crash buffer를 게임 초기화 성공으로 계산하지 않습니다.
+
+일반 연결판의 [실행 `42863334749`](https://github.com/tagundo/IdolyPride_client/actions/runs/42863334749), 소스 `b18f711`에서는 공개된 APK의 해시·서명을 보존하고 현재 서버 코어를 호스트에서 실행했습니다. 서버 시작·종료와 `adb reverse`는 정상이나 게임 RPC 0건·파일 전송 0바이트였습니다. 게임은 약 122초에 `SIGSEGV`로 종료됐습니다. 따라서 이 실행에서 미구현 메뉴 호출을 직접 관측한 것은 아닙니다. 현재까지 원본의 공식 로그인 후 RPC 캡처도 확보하지 못했습니다.
 
 루팅·시스템 CA·관측 도구를 추가한 조건은 별도로 기록합니다. Google Play 이미지와 root 가능한 이미지의 차이도 구분합니다. 계정·세션 원문은 비공개 로컬 자료로 유지하며 채팅·공개 저장소에 넣지 않습니다.
 
