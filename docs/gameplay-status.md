@@ -39,7 +39,8 @@ Android 설치 앱과 Mac 묶음 엔진 모두 실제 10초 경과 후 기본 �
 | `Notice.List` | 비어 있는 로컬 공지 목록 | 없음 |
 | `Gift.List/ListHistory` | 비어 있는 로컬 선물함·수령 이력과 페이지 종료 상태 | 없음 |
 | `Friend.List/ListApplying/ListApplied/Search` | 외부 플레이어와 연결되지 않은 로컬 친구·신청·검색 목록 | 없음 |
-| `Story.ListEvent/ListExtra` | 검증된 고정 공개 기본 목록과 Home의 특별 스토리 캐시 제공 | 읽기 전용; UserStory·보상·조건을 변경하지 않음 |
+| `Story.ListEvent/ListExtra` | 검증된 고정 공개 기본 목록과 Home의 특별 스토리 캐시 제공 | 목록 조회는 UserStory·보상·조건을 변경하지 않음 |
+| `Story.Read/ReadEvent/ReadExtra` | 공개 기본 목록 425개 Story의 완료·스킵·첫 열람 보상 | 계정별 잠금 우선, 읽음과 무료 스톤 30개를 한 번만 저장; 다른 스토리·해금은 미지원 |
 | `Master.GetVersion` | 묶음의 `!version.txt` 반환 | 없음 |
 | `Tutorial.Init` | 이름과 최초 GameStart 체크포인트 설정 | `user.name`, GameStart step 최소 10 |
 | `Tutorial.Progress` | 알려진 유형·마스터 체크포인트의 진행을 단조 증가 | `tutorials`, GameStart 완료 시각 |
@@ -144,4 +145,4 @@ v0.2.9의 `repair_starter_inventory`는 버전 3으로 표시된 로컬 기본 �
 
 ## 공개 스토리 기본 목록
 
-v0.2.14는 공개된 신규 계정 기록의 이벤트55개·272에피소드와 특별3개 분류·41개·154에피소드를 제공합니다. 현재 전체 마스터를 모두 해금하는 규칙이 아니며, 고정 기준은2026-10-25입니다. 네 종류의 마스터와425개 Story 참조를 검사합니다. 기존 계정별 응답과 잠금·빈 목록을 우선하며, 동적으로 만드는 Home도 계정별 ListExtra와 일치시킵니다. 기존 UserStory 읽음·unknown 필드·DB·설정·세션은 유지합니다. Story.Read와 보상 지급은 미구현입니다. 출처·정제 범위·해시는 [스토리 데이터](story-catalog-data.md)에 기록했습니다.
+v0.2.14는 공개된 신규 계정 기록의 이벤트55개·272에피소드와 특별3개 분류·41개·154에피소드를 제공합니다. 현재 전체 마스터를 모두 해금하는 규칙이 아니며, 고정 기준은2026-10-25입니다. 네 종류의 마스터와425개 Story 참조를 검사합니다. 기존 계정별 응답과 잠금·빈 목록을 우선하며, 동적으로 만드는 Home도 계정별 ListExtra와 일치시킵니다. 기존 UserStory 읽음·unknown 필드·DB·설정·세션은 유지합니다. v0.2.15는 이 425개 고유 Story의 `Read/ReadEvent/ReadExtra` 완료·스킵과 첫 열람 보상도 처리합니다. 143개는 읽음만 저장하며, 보상이 있는 282개는 무료 스톤 30개와 읽음을 원자적으로 한 번만 반영합니다. 재시작·다른 읽기 경로로 재시도해도 중복 지급하지 않습니다. 상세 범위·잠금·상한 정책은 [스토리 읽기](story-read-support.md)에 있습니다. 출처·정제 범위·해시는 [스토리 데이터](story-catalog-data.md)에 기록했습니다.

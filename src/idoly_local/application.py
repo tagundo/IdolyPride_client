@@ -32,16 +32,29 @@ class Application:
         from .lessons import OrdinaryLessons
         from .social import SocialInbox
         from .story_catalog import StoryCatalog
+        from .story_reads import StoryReads
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
+        self.story_reads = StoryReads(schema, state, profile, master_dir, story_catalog=self.stories,
+                                      fixtures=self.fixtures, extra_fixture=self._story_extra_fixture,
+                                      event_fixture=self._story_event_fixture)
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
-                                 story_extra_fixture=lambda: self.fixtures.get("/api.Story/ListExtra", b""))
+                                 story_extra_fixture=self._story_extra_fixture)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
         self.tutorial_replays = TutorialReplays(schema, state, profile, master_dir)
         self.quest = Quest(schema, state, profile, master_dir, tutorial_replays=self.tutorial_replays)
         self.public_fixtures = FixtureStore(Path(master_dir).parent / "public-fixtures", schema) if master_dir is not None else None
+
+    def _story_extra_fixture(self):
+        """Use the same account eligibility for Home, lists and read actions."""
+        from .story_reads import _private_story_permissions
+        return _private_story_permissions(self.schema, self.fixtures, "/api.Story/ListExtra")
+
+    def _story_event_fixture(self):
+        from .story_reads import _private_story_permissions
+        return _private_story_permissions(self.schema, self.fixtures, "/api.Story/ListEvent")
 
     def handle(self, path, raw, context):
         method = self.schema.methods.get(path)
@@ -104,6 +117,11 @@ class Application:
                 return payload
         from .rpc import RpcFailure
         try:
+            if path in ("/api.Story/ListEvent", "/api.Story/ListExtra"):
+                captured = (self._story_extra_fixture() if path == "/api.Story/ListExtra"
+                            else self._story_event_fixture())
+                if captured is not None:
+                    return captured
             response = self.gameplay.handle(path, plain)
             if response is None:
                 response = self.lessons.handle(path, plain)
@@ -111,6 +129,8 @@ class Application:
                 response = self.social.handle(path, plain)
             if response is None:
                 response = self.stories.handle(path, plain)
+            if response is None:
+                response = self.story_reads.handle(path, plain)
             if response is None:
                 response = self.tutorial_progression.handle(path, plain)
             if response is None:

@@ -35,3 +35,11 @@ Android 서버 APK·Mac 앱의 별도 빌드 검사는 암호화 RPC와 재시�
 다음 드라이버는 새 UI 응답의 정확한 다운로드 제목·설명·버튼·단일 창을 다시 확인하고 일반 Android 입력으로 진행합니다. 알 수 없는 action sheet가 있으면 뒤의 타이틀을 누르지 않습니다. Unity 응답을 기다리는 시간과 응답 이후 UI 수집 시간을 따로 기록해 실제로 새로 반환된 트리를 과거 트리로 오인하지 않도록 했습니다.
 
 [실행42764587884](https://github.com/tagundo/IdolyPride_client/actions/runs/42764587884)은 실제 다운로드 확인·다운로드 UI와 게임에서 발생한 `Home.Login/Enter → OK`까지 진행했습니다. 이후 촬영은 계속 전체 로딩 화면이었고 `content_blocking=true`였습니다. 이 실행의 메뉴 결과는 로딩 아래의 UI를 선택한 탐색기 오류 때문에 메뉴 완료 검증에 사용할 수 없습니다. 앱 재시작 사이의 홈 연속 관측은 각각 약40·120·80초였으므로 장시간 정지로 단정하지 않습니다. 다음 탐색기는 차단 상태에서 메뉴 입력·결과 판정·재시작을 모두 기다리도록 수정합니다.
+
+## 연속 관측 중 확인한 에뮬레이터 제약
+
+[실행42772231854](https://github.com/tagundo/IdolyPride_client/actions/runs/42772231854)은 로딩 중 메뉴 입력·재시작 없이 연속 관측했습니다. `Home.Login/Enter → OK` 이후 `home_scene_loading=false`, `home_enter_called=true`였지만 `content_blocking=true`와 전체 로딩 화면이 유지됐습니다. 자료 수집 워크플로 성공은 **홈 화면·메뉴 검증 성공을 뜻하지 않습니다**. `shader_warmup_ended=true`도 정리 단계의 플래그이며 셰이더 링크 성공을 보장하지 않습니다.
+
+게임 PID5060의 로그에는 07:23:05~07:27:47 UTC에 `Environment/Default` GLSL 링크 오류가 550회 기록됐습니다. SwiftShader의 vertex uniform 한도256 초과251회, fragment uniform 한도261 초과299회입니다. 이어 07:27:48에 ARM 변환기가 원본 `lib_burst_generated.so+0x2fff0`의 `FCVTZS S1,S1`을 지원하지 못해 UnityMain이 `SIGILL`로 종료됐습니다. 원본 라이브러리의 해당 명령 바이트와 크래시 로그를 대조했습니다. 셰이더 오류와 명령 변환 실패는 별도 환경 제약으로 기록하며, 셰이더 오류가 종료를 일으켰다고 단정하지 않습니다.
+
+프레임59부터 게임 PID와 UI 브리지 리스너가 함께 사라지고 서버 앱이 전면에 나타났습니다. 이후의 `bridge_snapshot_unavailable`는 정상 30분 세션 만료가 아니며, 이 실행은 홈·메뉴 검증 미완료로 남깁니다. 종료 지점에 미구현 RPC나 OOM 증거는 없고, `purchase_initialized=false`만으로 원인을 판단하지 않습니다. 드라이버는 수집 오류 없이 **3회 연속 게임 PID가 없으면** `game_process_exited`를 기록하고 관측을 중단하도록 보강했습니다. 이 조사로 일반 배포 게임이나 서버 동작을 우회하는 패치는 추가하지 않았습니다.

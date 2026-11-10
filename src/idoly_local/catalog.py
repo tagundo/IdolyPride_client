@@ -104,6 +104,15 @@ class FixtureStore:
             return self._responses[key]
         return self._responses.get((method, None))
 
+    def variants(self, method: str) -> tuple[bytes, ...]:
+        """Return every validated response for a method without choosing a request.
+
+        Request digests alone cannot establish which capture is current. Callers
+        interpreting shared account permissions must reconcile all variants.
+        The tuple and its byte values expose no mutable store state.
+        """
+        return tuple(data for (path, _request), data in self._responses.items() if path == method)
+
 
 def _atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -765,6 +765,61 @@ def exercise_ordinary_lesson_claim(qa, schema, grpc_port, token, master_dir, sta
             "ordinary_lesson_settings_preserved": True}
 
 
+def verify_story_read_database(qa, schema, receipt=None, *, expected_clock=None):
+    """Keep DB bytes private; check the new receipt and the unmodified raw clock."""
+    from idoly_local.story_read_qa import assert_story_read_progress, assert_story_read_snapshot
+
+    with tempfile.TemporaryDirectory(prefix="idoly-native-story-read-verify-") as directory:
+        path = _copy_private_database(qa, directory)
+        with sqlite3.connect(path) as db:
+            clock = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile=?",
+                               ("sandbox",)).fetchone()
+            snapshot = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                                  ("sandbox",)).fetchone()
+            if (clock is None or snapshot is None or clock[1] != schema.fingerprint
+                    or snapshot[1] != schema.fingerprint):
+                raise RuntimeError("Native story read snapshot/lesson clock was not persisted")
+            if expected_clock is not None and clock != expected_clock:
+                raise RuntimeError("Native story reads changed the raw persistent lesson clock")
+            if receipt is not None:
+                assert_story_read_snapshot(schema, snapshot[0], receipt)
+                assert_story_read_progress(schema, clock[0], receipt)
+            return clock
+
+
+def exercise_story_read_checks(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
+    """Run after ordinary lesson's completed restart/hash check, then restart."""
+    from idoly_local.story_read_qa import (assert_story_read_retries, run_story_read_checks)
+
+    original_clock = verify_story_read_database(qa, schema)
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "29-story-read-start")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    invoke = lambda path, request: rpc(schema, grpc_port, path, token, request)
+    receipt = run_story_read_checks(schema, invoke, master_dir, label="Android native")
+    qa.capture("30-story-read-completed")
+    qa.tap("서버 중지", "31-story-read-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_story_read_database(qa, schema, receipt, expected_clock=original_clock)
+
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "32-story-read-persistence-restart")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    assert_story_read_retries(schema, invoke, master_dir, receipt)
+    qa.capture("33-story-read-persisted")
+    qa.tap("서버 중지", "34-story-read-final-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_story_read_database(qa, schema, receipt, expected_clock=original_clock)
+    return {"story_read": receipt, "story_read_persisted": True, "story_read_clock_persisted": True,
+            "story_read_resources_preserved": True, "story_read_identity_preserved": True,
+            "story_read_sessions_preserved": True, "story_read_settings_preserved": True,
+            "story_read_restart_no_grant": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -998,6 +1053,8 @@ def main():
                                                     args.master_dir, args.startup_timeout, preserved))
         result.update(exercise_ordinary_lesson_claim(qa, schema, grpc_port, login.gameAuthToken,
                                                     args.master_dir, args.startup_timeout, preserved))
+        result.update(exercise_story_read_checks(qa, schema, grpc_port, login.gameAuthToken,
+                                                 args.master_dir, args.startup_timeout, preserved))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:
@@ -1006,7 +1063,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("29-final")
+            qa.capture("35-final")
         except Exception:
             pass
         qa.close()

@@ -601,6 +601,10 @@ def smoke(data_dir, server_data, report_path):
               "ordinary_lesson_persisted": False, "ordinary_lesson_clock_persisted": False,
               "ordinary_lesson_resources_persisted": False, "ordinary_lesson_identity_preserved": False,
               "ordinary_lesson_sessions_preserved": False, "ordinary_lesson_settings_preserved": False,
+              "story_read_persisted": False, "story_read_clock_persisted": False,
+              "story_read_resources_preserved": False, "story_read_identity_preserved": False,
+              "story_read_sessions_preserved": False, "story_read_settings_preserved": False,
+              "story_read_restart_no_grant": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     engine_label = "macOS frozen" if report["frozen_runtime"] else "source engine"
@@ -801,6 +805,32 @@ def smoke(data_dir, server_data, report_path):
         report.update(ordinary_lesson_persisted=True, ordinary_lesson_clock_persisted=True,
                       ordinary_lesson_resources_persisted=True, ordinary_lesson_identity_preserved=True,
                       ordinary_lesson_sessions_preserved=True, ordinary_lesson_settings_preserved=True)
+        # Ordinary lesson's receipt has been checked above. Story reads create
+        # a new snapshot receipt; never compare that mutated state to old hashes.
+        from idoly_local.story_read_qa import (assert_story_read_progress, assert_story_read_retries,
+                                              run_story_read_checks)
+        story_read = run_story_read_checks(schema,
+            lambda path, request: _rpc(address, schema, path, request, token),
+            Path(data_dir) / "master-json", label=engine_label)
+        report["story_read"] = story_read
+        if State(Path(data_dir) / "state.db").lesson_progress("sandbox") != lesson:
+            raise RuntimeError("Story reads changed the raw persistent lesson clock")
+        runtime.stop()
+        runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
+        address = runtime.status()["grpc_address"]
+        assert_story_read_retries(schema,
+            lambda path, request: _rpc(address, schema, path, request, token),
+            Path(data_dir) / "master-json", story_read)
+        stored_lesson = State(Path(data_dir) / "state.db").lesson_progress("sandbox")
+        if stored_lesson != lesson:
+            raise RuntimeError("Story read restart or repeated requests changed the raw lesson clock")
+        assert_story_read_progress(schema, stored_lesson[0], story_read)
+        if _preserved_database_state(data_dir) != preserved:
+            raise RuntimeError("Story reads changed identity, sessions, settings or the starter marker")
+        report.update(story_read_persisted=True, story_read_clock_persisted=True,
+                      story_read_resources_preserved=True, story_read_identity_preserved=True,
+                      story_read_sessions_preserved=True, story_read_settings_preserved=True,
+                      story_read_restart_no_grant=True)
     finally:
         runtime.stop()
         report["server_stopped"] = runtime.status()["running"] is False
@@ -820,6 +850,9 @@ def smoke(data_dir, server_data, report_path):
                 "tutorial_continuation_sessions_preserved", "tutorial_continuation_settings_preserved",
                 "ordinary_lesson_persisted", "ordinary_lesson_clock_persisted", "ordinary_lesson_resources_persisted",
                 "ordinary_lesson_identity_preserved", "ordinary_lesson_sessions_preserved", "ordinary_lesson_settings_preserved",
+                "story_read_persisted", "story_read_clock_persisted", "story_read_resources_preserved",
+                "story_read_identity_preserved", "story_read_sessions_preserved", "story_read_settings_preserved",
+                "story_read_restart_no_grant",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")

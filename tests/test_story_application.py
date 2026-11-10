@@ -208,14 +208,53 @@ def test_dynamic_home_uses_account_extra_catalog_including_explicit_empty_withou
     assert database(state) == before
 
 
-def test_story_read_does_not_become_an_unearned_read_or_reward_action(accounts, tmp_path):
+@pytest.mark.parametrize("empty", (False, True), ids=("locked-home-catalog", "explicit-empty-home"))
+def test_home_only_account_fixture_controls_extra_list_without_copying_account_updates(
+        accounts, tmp_path, empty):
+    game = accounts[0]
+    catalog, state = game[:2]
+    home_path, extra_path = "/api.Home/Enter", ROUTES[1]
+    baseline = catalog.schema.response_type(extra_path).FromString(catalog.handle(extra_path, b""))
+    assert baseline.infos and first_episode(baseline, extra_path).unlocked
+    captured = catalog.schema.response_type(home_path)()
+    if not empty:
+        captured.extraStoryPartInfos.extend(baseline.infos)
+        captured.extraStoryPartInfos[0].unlocked = False
+        captured.extraStoryPartInfos[0].stories[0].unlocked = False
+        captured.extraStoryPartInfos[0].stories[0].episodes[0].unlocked = False
+        # ListExtra may inherit only the eligibility DTOs, never unrelated
+        # account updates stored in an explicit Home response fixture.
+        captured.commonResponse.updatedData.user.name = "Private Home response update"
+    source, fixture_directory = tmp_path / "account-home-only.pb", tmp_path / "home-only-fixtures"
+    source.write_bytes(captured.SerializeToString())
+    import_response(source, fixture_directory, catalog.schema, home_path)
+    fixtures = FixtureStore(fixture_directory, catalog.schema)
+    assert fixtures.get(extra_path, b"") is None
+    if empty:
+        assert source.read_bytes() == b""
+    before = database(state)
+    original_snapshot = state.snapshot("player")
+    with connected(game, fixture_directory) as invoke:
+        assert invoke(home_path) == source.read_bytes()
+        for _ in range(2):
+            response = catalog.schema.response_type(extra_path).FromString(invoke(extra_path))
+            assert [row.SerializeToString() for row in response.infos] == [
+                row.SerializeToString() for row in captured.extraStoryPartInfos]
+            assert response.HasField("commonResponse")
+            assert not response.commonResponse.updatedData.ListFields()
+            assert not response.commonResponse.deletedData.ListFields()
+        assert invoke(USER_GET) == original_snapshot[0]
+    assert database(state) == before
+
+
+def test_story_read_fails_closed_without_its_audited_schema_and_master_version(accounts, tmp_path):
     game, _other_token, story_id = accounts
     catalog, state = game[:2]
     path = "/api.Story/Read"
     request = catalog.schema.request_type(path)(storyId=story_id, isLast=True)
     before = database(state)
     with connected(game, tmp_path / "fixtures") as invoke:
-        with pytest.raises(grpc.RpcError) as unsupported:
+        with pytest.raises(grpc.RpcError) as unaudited:
             invoke(path, raw=request.SerializeToString())
-        assert unsupported.value.code() == grpc.StatusCode.UNIMPLEMENTED
+        assert unaudited.value.code() == grpc.StatusCode.FAILED_PRECONDITION
     assert database(state) == before

@@ -41,6 +41,27 @@ def test_exact_precedes_wildcard_and_empty_response_is_not_missing(tmp_path, sch
     assert store.get("/api.User/Missing", b"") is None
 
 
+def test_variants_include_scoped_and_empty_responses_without_changing_exact_lookup(tmp_path, schema):
+    wildcard = schema.response(name="wildcard").SerializeToString()
+    scoped = schema.response(name="scoped").SerializeToString()
+    for name, payload in (("wildcard.pb", wildcard), ("scoped.pb", scoped), ("empty.pb", b"")):
+        (tmp_path / name).write_bytes(payload)
+    write_manifest(tmp_path, [
+        {"method": "/api.User/Get", "file": "wildcard.pb"},
+        {"method": "/api.User/Get", "file": "scoped.pb", "request_sha256": hashlib.sha256(b"scoped").hexdigest()},
+        {"method": "/api.User/Get", "file": "empty.pb", "request_sha256": hashlib.sha256(b"empty").hexdigest()},
+    ])
+    store = FixtureStore(tmp_path, schema)
+    values = store.variants("/api.User/Get")
+    assert isinstance(values, tuple) and set(values) == {wildcard, scoped, b""}
+    values += (b"caller-local addition",)
+    assert set(store.variants("/api.User/Get")) == {wildcard, scoped, b""}
+    assert store.variants("/api.User/Missing") == ()
+    assert store.get("/api.User/Get", b"scoped") == scoped
+    assert store.get("/api.User/Get", b"empty") == b""
+    assert store.get("/api.User/Get", b"unmatched") == wildcard
+
+
 @pytest.mark.parametrize("filename", ["../outside.pb", "/tmp/outside.pb", "responses/../../outside.pb", "..\\outside.pb"])
 def test_rejects_file_escape(tmp_path, schema, filename):
     write_manifest(tmp_path, [{"method": "/api.User/Get", "file": filename}])

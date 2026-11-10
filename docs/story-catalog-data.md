@@ -11,7 +11,7 @@
 
 `public-story/manifest.json`은 기본 목록·스키마·마스터 버전과 원본 및 정제본의 해시를 기록합니다. 서버는 `EventStory`, `ExtraStoryPart`, `ExtraStory`, `Story` 마스터를 통해 부모 관계와 425개 Story 참조를 검증합니다. 새 마스터의 모든 항목을 자동 해금하지 않으며 일반 조건 평가 기능은 제공하지 않습니다.
 
-두 RPC의 `CommonResponse.updatedData`와 `deletedData`는 명시적으로 존재하는 빈 메시지입니다. 읽음 상태는 별도의 `User.Get.stories`에서 유지됩니다. 목록 조회는 `UserStory`를 생성하거나 변경하지 않습니다. 현재 프로필의 응답 fixture가 우선하며, 홈에 기존 특별 스토리 목록이 있으면 그대로 유지합니다. 이 기능은 목록 조회 범위이며 스토리 읽기·보상 수령은 별도 구현이 필요합니다.
+두 RPC의 `CommonResponse.updatedData`와 `deletedData`는 명시적으로 존재하는 빈 메시지입니다. 읽음 상태는 별도의 `User.Get.stories`에서 유지됩니다. 목록 조회는 `UserStory`를 생성하거나 변경하지 않습니다. 현재 프로필의 응답 fixture가 우선하며, 홈에 기존 특별 스토리 목록이 있으면 그대로 유지합니다. 목록 조회와 별도로 v0.2.15는 이 목록의 425개 고유 Story에 한정해 [읽음·스킵과 첫 보상](story-read-support.md)을 처리합니다.
 
 개발 빌드에서 공개 자료를 준비하려면 다음을 실행합니다. 일반 앱 사용자는 앱에 포함된 자료를 사용합니다.
 

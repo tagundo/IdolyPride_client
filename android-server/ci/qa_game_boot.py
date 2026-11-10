@@ -36,6 +36,15 @@ GAME_PACKAGES = (GAME, GAME + ".diagnostics")
 GAME_ACTIVITY = GAME + "/com.google.firebase.MessagingUnityPlayerActivity"
 
 
+def game_process_gone(captures):
+    """Recognize a lost game without confusing adb failures with an exit."""
+    recent = captures[-3:]
+    return len(recent) == 3 and all(
+        "game_pid" in row and not row["game_pid"]
+        and not any(key.endswith("_error") for key in row)
+        for row in recent)
+
+
 def observed_title(tsv, width, height):
     """Return one confident contiguous phrase; coordinates come only from OCR."""
     lines = {}
@@ -472,6 +481,7 @@ def main():
     result = {"capture_completed": False, "actual_game_client_launched": False,
               "game_observation_completed": False,
               "home_screen_verified": False, "game_input_performed": False, "game_input_count": 0,
+              "game_process_exited": False,
               "target": "disposable Android emulator", "captures": [],
               "game_package": args.game_package,
               "max_title_taps": args.max_title_taps, "observed_title_actions": [],
@@ -554,6 +564,10 @@ def main():
             time.sleep(max(0, begin + min(scheduled, duration) - time.monotonic()))
             elapsed = time.monotonic() - begin
             result["captures"].append(qa.capture_game(f"game-{index:02d}-{int(elapsed):03d}s"))
+            if game_process_gone(result["captures"]):
+                result.update(game_process_exited=True, game_exit_frame=index,
+                              observation_end_reason="game_process_exited")
+                break
             if explorer is not None:
                 explorer.step(index)
                 if explorer.stopped:
