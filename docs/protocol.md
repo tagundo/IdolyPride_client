@@ -57,7 +57,7 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 | `Master.Rule`, `Master.GetHelpCategory` | 로그인 전에도 준비한 fixture 제공; 없으면 `UNIMPLEMENTED` |
 | `Master.Get` | 준비한 MasterTag 응답, 또는 fixture; 둘 다 없으면 `UNIMPLEMENTED` |
 | `User.Get` | 요청 해시별 fixture → 일반 fixture → SQLite snapshot; 모두 없으면 `UNIMPLEMENTED` |
-| `Home.*`, `Tutorial.Init/Progress/Skip`, `Deck.Save/Delete`, `Quest.Top/ListMain` | fixture 우선, 없으면 구현한 로컬 상태·목록 처리 |
+| `Home.*`, `Tutorial.Init/Progress/Skip`, `Deck.Save/Delete`, `Quest.Top/ListMain/ListAsset` | fixture 우선, 없으면 구현한 로컬 상태·목록 처리 |
 | 그 밖의 알려진 RPC | fixture 또는 구현이 없으면 `UNIMPLEMENTED` |
 | 알 수 없는 RPC 경로 | `UNIMPLEMENTED` |
 | 보호된 RPC의 세션 누락·불일치·만료 | `UNAUTHENTICATED` |

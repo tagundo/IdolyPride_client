@@ -1,4 +1,4 @@
-"""Read-only main-live progress for 6.1.1 Quest.Top and Quest.ListMain.
+"""Read-only live progress and saved-unit appearances for the 6.1.1 client.
 
 The wire schema comes from the public game client. Its LiveTop response reader
 at Android RVA 0x5755020 requires pvpInfo and hierarchyNotiInfo, and its
@@ -18,6 +18,7 @@ from .rpc import RpcCode, RpcFailure
 
 _TOP = "/api.Quest/Top"
 _LIST_MAIN = "/api.Quest/ListMain"
+_LIST_ASSET = "/api.Quest/ListAsset"
 _USER_GET = "/api.User/Get"
 
 
@@ -38,7 +39,7 @@ def _integer(value, description: str, *, maximum: int = (1 << 63) - 1) -> int:
 
 
 class Quest:
-    """Serve an explicit main-live catalog and persisted progress only."""
+    """Serve the main-live catalog, progress and ListAsset resource references."""
 
     def __init__(self, schema, state, profile: str, master_dir: Path | None = None):
         self.schema, self.state, self.profile = schema, state, profile
@@ -166,13 +167,16 @@ class Quest:
             info.isPlayable = False
 
     def handle(self, path: str, request_bytes: bytes) -> bytes | None:
-        if path not in (_TOP, _LIST_MAIN):
+        if path not in (_TOP, _LIST_MAIN, _LIST_ASSET):
             return None
         try:
-            self.schema.request_type(path).FromString(request_bytes)
+            request = self.schema.request_type(path).FromString(request_bytes)
         except DecodeError:
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Malformed quest catalog protobuf request") from None
         snapshot = self._snapshot()
+        if path == _LIST_ASSET:
+            from .live_assets import project_live_assets
+            return project_live_assets(self.schema, snapshot, request, self.catalog).SerializeToString()
         areas, quests, groups = self._main_catalog(tutorial_pending=self._tutorial_pending(snapshot))
         area_progress = self._progress(snapshot.areas, "areaId", "area progress")
         quest_progress = self._progress(snapshot.quests, "questId", "quest progress")
