@@ -68,3 +68,15 @@ def test_wrong_foreground_surface_and_mismatched_aspect_prevent_input(snapshot):
     snapshot["screen"]["height"] = 2000
     with pytest.raises(ValueError, match="aspect ratios"):
         mapped_point(snapshot, node, XML, PACKAGE, [1080, 2280])
+
+
+def test_actual_api30_immersive_render_scale_uses_matching_display_metrics(snapshot):
+    # Actual runtime42752337928: Unity renders at0.6x1080x2280, while Android
+    # still reports its accessibility view with a132px navigation inset.
+    snapshot["screen"].update(width=648, height=1368)
+    node = snapshot["nodes"][0]
+    node["bounds"] = [0, 0, 648, 1368]
+    xml = XML.replace("[0,48][1080,2208]", "[0,0][1080,2148]")
+    assert mapped_point(snapshot, node, xml, PACKAGE, [1080, 2280]) == [540, 1140]
+    node["bounds"] = [307.8, 1287.6, 451.8, 1354.8]
+    assert mapped_point(snapshot, node, xml, PACKAGE, [1080, 2280]) == [633, 2202]

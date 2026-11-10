@@ -97,7 +97,17 @@ def mapped_point(snapshot, node, xml, package, image_size):
     if not (0 <= x0 < x1 <= image_size[0] and 0 <= y0 < y1 <= image_size[1]):
         raise ValueError("Android game surface is outside the current display")
     if abs(((x1 - x0) / (y1 - y0)) / (width / height) - 1) > 0.04:
-        raise ValueError("Unity and Android screen aspect ratios disagree")
+        # API30 Unity can render at 0.6x the full immersive display while its
+        # accessibility SurfaceView still excludes the navigation inset.
+        # Accept that specific, measured geometry; never stretch arbitrary
+        # mismatched viewports. Positions still come only from the Unity tree.
+        display_width, display_height = image_size
+        if (x0 == y0 == 0 and x1 == display_width
+                and 0 <= display_height - y1 <= display_height * 0.12
+                and abs((display_width / display_height) / (width / height) - 1) <= 0.01):
+            x1, y1 = display_width, display_height
+        else:
+            raise ValueError("Unity and Android screen aspect ratios disagree")
     return [round(x0 + (left + right) / 2 * (x1 - x0) / width),
             round(y0 + (top + bottom) / 2 * (y1 - y0) / height)]
 
@@ -113,6 +123,12 @@ class UiExplorer:
         self.last_action = -1000.0
         self.wait_frames, self.session_titles, self.stopped = 0, 0, False
         self.snapshot_successes, self.snapshot_errors = 0, {}
+        self.input_errors = {}
+
+    def _input_error(self, code):
+        self.input_errors[code] = self.input_errors.get(code, 0) + 1
+        print("Unity UI input skipped: " + code, flush=True)
+        return False
 
     def _snapshot(self):
         token = self.qa.adb("exec-out", "run-as", _PACKAGE, "cat", "files/idoly-qa-ui-token", check=False).strip()
@@ -142,22 +158,26 @@ class UiExplorer:
         current = next((item for item in buttons(fresh) if item.get("instance_id") == node.get("instance_id")
                         and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
         if fresh.get("ok") is not True or current is None:
-            return False
+            return self._input_error("selected_node_no_longer_present")
         raw = self.qa.adb("exec-out", "screencap", "-p", binary=True)
         if raw[:8] != b"\x89PNG\r\n\x1a\n":
-            return False
+            return self._input_error("display_capture_unavailable")
         size = struct.unpack_from(">II", raw, 16)
+        metrics = self.qa.adb("shell", "wm", "size")
+        measured = re.findall(r"(?:Physical|Override) size:\s*(\d+)x(\d+)", metrics)
+        if not measured or tuple(map(int, measured[-1])) != size:
+            return self._input_error("display_metrics_disagree")
         xml = self.qa.adb("exec-out", "uiautomator", "dump", "/dev/tty")
         begin, end = xml.find("<hierarchy"), xml.rfind("</hierarchy>")
         if begin < 0 or end < 0:
-            return False
+            return self._input_error("android_ui_tree_unavailable")
         xml = xml[begin:end + len("</hierarchy>")]
         try:
             point = mapped_point(fresh, current, xml, _PACKAGE, size)
-        except ValueError:
-            return False
+        except ValueError as error:
+            return self._input_error(str(error))
         if time.monotonic() - began > 10:
-            return False
+            return self._input_error("ui_observation_became_stale")
         prefix = self.qa.artifacts / f"ui-action-{len(self.actions) + 1:02d}"
         prefix.with_suffix(".png").write_bytes(raw)
         prefix.with_suffix(".xml").write_text(xml, encoding="utf-8")
@@ -243,4 +263,5 @@ class UiExplorer:
         return {"qa_only": True, "actions": self.actions, "outcomes": self.outcomes,
                 "goals": [goal[0] for goal in _GOALS], "native_click_used": False,
                 "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
+                "input_errors": self.input_errors,
                 "gameplay_rpc_injected_during_exploration": False, "menu_success_requires_evidence_review": True}
