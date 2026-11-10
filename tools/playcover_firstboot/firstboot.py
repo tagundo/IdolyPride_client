@@ -47,8 +47,16 @@ def main():
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError('bounded_firstboot_deadline')
-        return subprocess.run([str(value) for value in argv], capture_output=True, text=True,
-                              timeout=min(timeout, remaining), check=check)
+        result = subprocess.run([str(value) for value in argv], capture_output=True, text=True,
+                                timeout=min(timeout, remaining), check=False)
+        if check and result.returncode:
+            # Installer and LaunchServices errors are needed to distinguish an
+            # application launch refusal from a crash inside a launched app.
+            (args.output / 'failed-command.json').write_text(json.dumps({
+                'argv': [str(value) for value in argv], 'exit_code': result.returncode,
+                'stdout': result.stdout[:8192], 'stderr': result.stderr[:8192]}, indent=2) + '\n')
+            result.check_returncode()
+        return result
 
     def observe(stage, bundle=PLAYCOVER, action=None, label=None, allow_starting=False):
         destination = (args.output / stage).with_suffix('.json')

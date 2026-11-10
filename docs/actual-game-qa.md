@@ -96,3 +96,11 @@ PlayCover `4.0.0-prerelease`와 로컬 IPA 6.1.1, Mac 서버 후보의 정확한
 설치와 실행은 성공했고 게임 PID2013의 Unity `2022.3.57f1` 초기화도 기록됐습니다. 이후 macOS가 `UIKit applications must check-in via UISApplicationSupportService before creating scenes`로 첫 장면 생성을 거부했고, `_mainSceneIdentifier should have been set by now!` 예외로 게임이 종료됐습니다. 서버는 실행 중이었으나 게임 RPC는 0건이었습니다. 게임 화면·로그인·홈·라이브 성공으로 판정하지 않습니다. 이 자료만으로 모든 가상 Mac이나 사용자의 PlayCover 환경에서도 같은 문제가 난다고 단정할 수 없습니다.
 
 결과 자료는 아티팩트 `13773638481`이며 ZIP SHA-256은 `aa9dccfc737dc76f65d4fcaa099fbfd25bc07927f45634135533fa956ef189f5`입니다. `host.json`, `inputs.json`, `evidence/result.json`, 입력 전후 AX·PNG, 필터링한 게임 오류와 서버 기록을 포함합니다. 새 로컬 프로필로 검사했으며 사용자 계정이나 Mac 접속은 사용하지 않았습니다. v0.3.0 릴리스는 계속 초안 상태입니다.
+
+### UIKit 대조 검사와 실행 경로 비교
+
+[표준 UIKit 대조 검사42841006099](https://github.com/tagundo/IdolyPride_client/actions/runs/42841006099), 소스 `7800465`는 같은 종류의 `macos-15` 실행기에 공개 UIKit API만 사용하는 작은 Mac Catalyst 앱을 Xcode로 빌드·ad-hoc 서명해 일반 LaunchServices 경로로 열었습니다. 실제 창과 `UIKit Host Control Ready` 라벨, 연속 3회 같은 PID1918을 확인했고 `UIKIT_CONTROL_SCENE_READY`도 기록됐습니다. 게임에서 발생한 check-in 오류는 없었습니다. 아티팩트 `13775517368`의 SHA-256은 `1ad5501e8800b782b6831e7290a934b729539b93faac018c8a10090c977fd406`입니다. 일반 UIKit 창 생성은 작동하지만, PlayCover로 변환한 게임의 실행 성공까지 증명하는 검사는 아닙니다.
+
+게임의 설치 메타데이터도 실제로 수집했습니다. Main·Unity 바이너리는 둘 다 Mac Catalyst 플랫폼6이며 App Sandbox가 활성화돼 PlayCover 소스의 예상값과 일치했습니다. 설치본의 서명 검사는 통과했고, Info.plist 복사본과 나머지 항목의 심볼릭 링크로 구성된 PlayCover 별칭은 엄격한 서명 검사에 실패했습니다. 별칭의 이 구조만으로 게임 종료 원인이라고 판정하지 않습니다.
+
+[실행 경로 비교42842193479](https://github.com/tagundo/IdolyPride_client/actions/runs/42842193479), 소스 `3acba8d`에서 공식 PlayCover 준비와 GUI 실행 후 같은 UIKit 오류·PID4529 종료를 확인했습니다. 그 뒤 실제 설치본 `.app`를 일반 `open`으로 여는 명령이 종료 코드1로 거절됐습니다. 두 번째 게임 프로세스를 관측하지 못했으므로 "실제 설치 경로에서도 같은 UIKit 크래시가 재현됐다"고 해석하지 않습니다. 이 실행에서 명령의 세부 stderr가 보존되지 않은 점을 확인하고 후속 드라이버에 실패 명령 기록을 추가했습니다. 서버 게임 RPC는 여전히 0건이며, 아직 검증된 게임 시작 수정안은 없습니다.
