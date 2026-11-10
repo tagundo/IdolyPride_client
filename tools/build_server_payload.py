@@ -16,12 +16,39 @@ from idoly_local.schema import Schema
 from idoly_local.catalog import FixtureStore
 
 
-TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill", "Music", "MusicChartPattern", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget", "Stage", "ManagerLevel", "CardLevel", "Consumption", "Message", "MessageGroup", "EventStory", "ExtraStoryPart", "ExtraStory", "Story", "QuestPressure", "QuestAudienceAdvantage", "ComboAdvantage", "QuestStaminaConsumption")
+TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill", "Music", "MusicChartPattern", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget", "Stage", "ManagerLevel", "CardLevel", "Consumption", "Message", "MessageGroup", "EventStory", "ExtraStoryPart", "ExtraStory", "Story", "QuestPressure", "QuestAudienceAdvantage", "ComboAdvantage", "QuestStaminaConsumption", "Mission")
+MISSION_MASTER_VERSION = "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60"
+MISSION_PACK_SHA256 = "9c9cbec8de1ef1d7c9fb89b6b4319bf75ea5875fc9d7b13de877bcb43eaa1647"
+MISSION_ROW_COUNT = 7087
+CARD_LEVEL_MISSION_ID = "ms-normal-card_level_achievement"
+CARD_LEVEL_THRESHOLDS = (5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160)
 
 
 def digest(path):
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def validate_mission_master(version, pack_sha256, values):
+    """Pin public master data only; this does not enable other mission eligibility."""
+    if (version != MISSION_MASTER_VERSION or pack_sha256 != MISSION_PACK_SHA256
+            or not isinstance(values, list) or len(values) != MISSION_ROW_COUNT):
+        raise ValueError("Mission master version, original pack or row count differs from the audited data")
+    identities = [row.get("id") if isinstance(row, dict) else None for row in values]
+    if any(not isinstance(identity, str) or not identity for identity in identities) or len(set(identities)) != len(identities):
+        raise ValueError("Mission master IDs must be nonempty and unique")
+    matches = [row for row in values if row["id"] == CARD_LEVEL_MISSION_ID]
+    if len(matches) != 1:
+        raise ValueError("The audited card-level mission is missing")
+    expected = {"id": CARD_LEVEL_MISSION_ID, "categoryType": 3, "missionType": 13,
+        "name": "アイドルLv{threshold}到達", "shortDescription": "アイドルLv{threshold}到達",
+        "longDescription": "アイドルLvを{threshold}まであげましょう。", "order": 1, "linkType": 11,
+        "targetIds": [], "viewConditionId": "", "linkDetail": "", "eventMissionId": "",
+        "companyEnjoyCharacterId": "", "companyEnjoyCharacterMissionCategoryType": 0, "companyTrustMissionCategoryType": 0,
+        "progresses": [{"threshold": str(level), "rewardSetId": f"rd_auto;stone;;{50 if level <= 40 else 70 if level <= 90 else 100 if level <= 140 else 200}"}
+                       for level in CARD_LEVEL_THRESHOLDS]}
+    if matches[0] != expected:
+        raise ValueError("The audited card-level mission row or its progress tiers differ")
 
 
 def build_payload(data_dir: Path, output: Path) -> dict:
@@ -86,6 +113,8 @@ def build_payload(data_dir: Path, output: Path) -> dict:
                           for row in rows]
             finally:
                 connection.close()
+            if table == "Mission":
+                validate_mission_master(response.masterTag.version, digest(root / pack.fileName), values)
             path = catalog / (table + ".json")
             path.write_text(json.dumps(values, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             files.append((path, "data/master-json/" + path.name))

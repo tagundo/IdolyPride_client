@@ -329,9 +329,9 @@ jobs:
               tables = manifest.get('tables')
               if (not isinstance(tables, dict) or not tables
                       or any(not re.fullmatch(r'[A-Za-z][A-Za-z0-9]*', name) for name in tables)
-                      or len(tables) != 39
+                      or len(tables) != 40
                       or not {'CardLevel', 'ManagerLevel', 'Consumption', 'Message', 'MessageGroup', 'EventStory', 'ExtraStoryPart', 'ExtraStory', 'Story',
-                              'QuestPressure', 'QuestAudienceAdvantage', 'ComboAdvantage', 'QuestStaminaConsumption'}.issubset(tables)):
+                              'QuestPressure', 'QuestAudienceAdvantage', 'ComboAdvantage', 'QuestStaminaConsumption', 'Mission'}.issubset(tables)):
                   raise SystemExit('Android QA payload has no complete progression master catalog')
               required = ('protocol/idolypride-6.1.1.pb', 'master-json/!version.txt', *(f'master-json/{name}.json' for name in tables),
                           'public-tutorial/manifest.json', 'public-tutorial/tutorial-short.pb', 'public-tutorial/tutorial-full.pb',
@@ -977,7 +977,7 @@ jobs:
               'experimental_main_live': {
                   'included': True, 'default_enabled': False, 'opt_in_verified': True,
                   'supported_method': 'Quest.Start', 'quest_id': 'qt-main-1-001-01',
-                  'ruleset': 'live-v5', 'native_c_abi': 1, 'master_table_count': 39,
+                  'ruleset': 'live-v5', 'native_c_abi': 1, 'master_table_count': 40,
                   'official_score_equivalence': False,
                   'execution_verified': ['Linux_x86_64_source', 'Android_x86_64_Chaquopy', 'macOS_arm64_frozen'],
                   'android_physical_arm64_tested': False,
