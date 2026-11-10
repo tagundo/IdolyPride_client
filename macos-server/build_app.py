@@ -148,13 +148,15 @@ def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float =
 
 
 def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
-          live_engine_library: Path | None = None):
+          live_engine_library: Path | None = None, *, build_number: str = "20"):
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise ValueError("Build on an Apple Silicon macOS runner (macos-15, uname -m = arm64)")
     if output.suffix != ".app" or output.exists() or archive.exists():
         raise ValueError("Choose new .app and .app.zip output paths")
     if not version or any(char not in "0123456789." for char in version):
         raise ValueError("Version must contain only digits and periods")
+    if not build_number or any(char not in "0123456789" for char in build_number) or int(build_number) <= 0:
+        raise ValueError("Build number must be a positive decimal integer")
     live_engine = {"included": False}
     if live_engine_library is not None:
         live_engine_library = live_engine_library.expanduser().resolve(strict=True)
@@ -211,7 +213,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                 "CFBundleDisplayName": "아이프라 로컬 서버",
                 "CFBundlePackageType": "APPL",
                 "CFBundleShortVersionString": version,
-                "CFBundleVersion": "1",
+                "CFBundleVersion": build_number,
                 "LSMinimumSystemVersion": "13.0",
                 "LSApplicationCategoryType": "public.app-category.games",
                 "NSHighResolutionCapable": True,
@@ -221,7 +223,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
              "-target", "arm64-apple-macos13.0", "-framework", "SwiftUI", "-framework", "AppKit",
              HERE / "App.swift", "-o", executable], env=environment)
         source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-        provenance = {"version": version, "architecture": "arm64", "minimum_macos": "13.0",
+        provenance = {"version": version, "build_number": build_number, "architecture": "arm64", "minimum_macos": "13.0",
             "source_commit": source_commit, "server_data_sha256": digest(server_data),
             "source_sha256": {name: digest(HERE / name) for name in ("App.swift", "engine.py", "payload.py")},
             "python": platform.python_version(),
@@ -309,7 +311,8 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="New IdolyPrideLocalServer.app path")
     parser.add_argument("--archive", required=True, type=Path, help="New deliverable .app.zip path")
     parser.add_argument("--evidence", required=True, type=Path)
-    parser.add_argument("--version", default="0.3.0")
+    parser.add_argument("--version", default="0.3.1")
+    parser.add_argument("--build-number", default="20")
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     parser.add_argument("--live-engine-library", type=Path,
                         help="Optional ARM64 macOS 13 libidoly_live.dylib; experimental engine remains off by default")
@@ -317,7 +320,7 @@ def main(argv=None):
     try:
         build(args.server_data.resolve(), args.output.resolve(), args.archive.resolve(),
               args.evidence.resolve(), args.version, not args.skip_smoke,
-              live_engine_library=args.live_engine_library)
+              live_engine_library=args.live_engine_library, build_number=args.build_number)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         parser.exit(1, f"macOS app build failed: {error}\n")
     print(args.archive)

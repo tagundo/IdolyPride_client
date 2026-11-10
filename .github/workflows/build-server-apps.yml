@@ -7,18 +7,25 @@ on:
         description: Build Actions-only candidates for separate Android native runtime QA; leave the release draft untouched
         type: boolean
         default: false
+      fixed_payload_patch:
+        description: Build v0.3.1 Actions-only candidates with the exact previously verified v0.3.0 data payload
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: native-server-apps-v0.3.0
+  group: native-server-apps-${{ inputs.fixed_payload_patch && 'v0.3.1' || 'v0.3.0' }}
   cancel-in-progress: true
 
 env:
   GH_REPO: ${{ github.repository }}
-  IDOLY_SERVER_TAG: local-server-v0.3.0
-  IDOLY_PAYLOAD_NAME: IdolyPride-ServerData-v0.3.0.zip
+  IDOLY_SERVER_TAG: ${{ inputs.fixed_payload_patch && 'local-server-v0.3.1' || 'local-server-v0.3.0' }}
+  IDOLY_APP_VERSION: ${{ inputs.fixed_payload_patch && '0.3.1' || '0.3.0' }}
+  IDOLY_APP_VERSION_CODE: ${{ inputs.fixed_payload_patch && '20' || '19' }}
+  IDOLY_PAYLOAD_NAME: ${{ inputs.fixed_payload_patch && 'IdolyPride-ServerData-v0.3.1.zip' || 'IdolyPride-ServerData-v0.3.0.zip' }}
+  IDOLY_PATCH_CANDIDATE: ${{ inputs.fixed_payload_patch }}
 
 jobs:
   prepare:
@@ -36,6 +43,14 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Keep the fixed-data patch path Actions-only
+        env:
+          IDOLY_ARTIFACT_ONLY: ${{ inputs.artifact_only }}
+        run: |
+          if [ "$IDOLY_PATCH_CANDIDATE" = true ] && [ "$IDOLY_ARTIFACT_ONLY" != true ]; then
+            echo 'The fixed-data patch path cannot create or upload to a release.' >&2
+            exit 1
+          fi
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.13.5"
@@ -59,6 +74,7 @@ jobs:
           echo "IDOLY_LIVE_LIBRARY=$GITHUB_WORKSPACE/data/native-live/linux/libidoly_live.so" >> "$GITHUB_ENV"
           echo "IDOLY_LIVE_MASTER_DIR=$GITHUB_WORKSPACE/data/master-json" >> "$GITHUB_ENV"
       - name: Download the pinned existing public server-data asset
+        if: ${{ !inputs.fixed_payload_patch }}
         shell: bash
         run: |
           set -euo pipefail
@@ -83,17 +99,20 @@ jobs:
               archive.extractall(Path.cwd())
           PY
       - name: Archive anonymous title-screen rules and help
+        if: ${{ !inputs.fixed_payload_patch }}
         run: >-
           uv run --locked python tools/archive_public_text.py
           --descriptor-set data/protocol/idolypride-6.1.1.pb
           --output data/public-fixtures
       - name: Archive the pinned public official tutorial replay records
+        if: ${{ !inputs.fixed_payload_patch }}
         run: >-
           uv run --locked python tools/archive_tutorial_replays.py
           --descriptor-set data/protocol/idolypride-6.1.1.pb
           --master-tag data/original-master/master-tag.json
           --output data/public-tutorial
       - name: Archive the pinned public story eligibility catalogs
+        if: ${{ !inputs.fixed_payload_patch }}
         run: >-
           uv run --locked python tools/archive_story_catalog.py
           --descriptor-set data/protocol/idolypride-6.1.1.pb
@@ -104,9 +123,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          uv run --locked --all-extras python tools/build_server_payload.py \
-            --output "data/dist/$IDOLY_PAYLOAD_NAME" \
-            | tee data/dist/server-data-build.json
+          mkdir -p data/ci-input data/dist data/preparation-evidence
+          if [[ "$IDOLY_PATCH_CANDIDATE" == true ]]; then
+            gh api "repos/$GH_REPO/releases/assets/732944285" \
+              --header 'Accept: application/octet-stream' \
+              > data/ci-input/ServerData-fixed.zip
+            uv run --locked python tools/prepare_fixed_patch_payload.py \
+              --source data/ci-input/ServerData-fixed.zip \
+              --output "data/dist/$IDOLY_PAYLOAD_NAME" --workspace . \
+              --report data/dist/server-data-build.json
+          else
+            uv run --locked --all-extras python tools/build_server_payload.py \
+              --output "data/dist/$IDOLY_PAYLOAD_NAME" \
+              | tee data/dist/server-data-build.json
+          fi
           uv run --locked python - <<'PY'
           import hashlib
           import os
@@ -219,9 +249,9 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: server-data-v0.3.0
+          name: server-data-v${{ env.IDOLY_APP_VERSION }}
           path: |
-            data/dist/IdolyPride-ServerData-v0.3.0.zip
+            data/dist/${{ env.IDOLY_PAYLOAD_NAME }}
             data/dist/server-data-build.json
             data/protocol/idolypride-6.1.1.pb
           if-no-files-found: error
@@ -229,7 +259,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: server-preparation-evidence-v0.3.0
+          name: server-preparation-evidence-v${{ env.IDOLY_APP_VERSION }}
           path: data/preparation-evidence
           if-no-files-found: warn
 
@@ -311,7 +341,7 @@ jobs:
           fi
       - uses: actions/download-artifact@v4
         with:
-          name: server-data-v0.3.0
+          name: server-data-v${{ env.IDOLY_APP_VERSION }}
           path: data
       - name: Prepare verified host catalog references before Android build
         shell: bash
@@ -399,13 +429,13 @@ jobs:
           IDOLY_PAYLOAD="$GITHUB_WORKSPACE/data/dist/$IDOLY_PAYLOAD_NAME"
           ./android-server/gradlew -p android-server :app:assembleDebug \
             --no-daemon --console=plain --stacktrace \
-            -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=arm64-v8a \
+            -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=arm64-v8a -PserverVersionName="$IDOLY_APP_VERSION" -PserverVersionCode="$IDOLY_APP_VERSION_CODE" \
             | tee data/android-server-qa/build-arm64.log
           cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android.apk
           if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
             ./android-server/gradlew -p android-server :app:clean :app:assembleDebug \
               --no-daemon --console=plain --stacktrace \
-              -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=x86_64 \
+              -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=x86_64 -PserverVersionName="$IDOLY_APP_VERSION" -PserverVersionCode="$IDOLY_APP_VERSION_CODE" \
               | tee data/android-server-qa/build-x86_64.log
             cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
           fi
@@ -474,6 +504,9 @@ jobs:
           report = {'schema': 1, 'source_commit': os.environ['GITHUB_SHA'],
               'workflow_run_id': os.environ['GITHUB_RUN_ID'],
               'artifact_only': os.environ['IDOLY_ARTIFACT_ONLY'] == 'true',
+              'app_version': os.environ['IDOLY_APP_VERSION'],
+              'app_version_code': int(os.environ['IDOLY_APP_VERSION_CODE']),
+              'fixed_payload_patch': os.environ['IDOLY_PATCH_CANDIDATE'] == 'true',
               'android_abi': 'arm64-v8a', 'master_table_count': 40,
               'apk': {'file': apk.name, 'bytes': apk.stat().st_size, 'sha256': digest(apk)},
               'payload': {'file': payload.name, 'bytes': payload.stat().st_size, 'sha256': payload_sha},
@@ -705,7 +738,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-server-build-and-available-evidence-v0.3.0
+          name: android-server-build-and-available-evidence-v${{ env.IDOLY_APP_VERSION }}
           path: |
             data/android-server-qa
             data/android-diagnostics-qa
@@ -742,7 +775,7 @@ jobs:
           version: "0.13.5"
       - uses: actions/download-artifact@v4
         with:
-          name: server-data-v0.3.0
+          name: server-data-v${{ env.IDOLY_APP_VERSION }}
           path: data
       - uses: actions/setup-go@v5
         with:
@@ -777,7 +810,7 @@ jobs:
             --server-data "data/dist/$IDOLY_PAYLOAD_NAME" \
             --output data/macos/IdolyPrideLocalServer.app \
             --archive data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip \
-            --evidence data/macos-evidence --version 0.3.0 \
+            --evidence data/macos-evidence --version "$IDOLY_APP_VERSION" --build-number "$IDOLY_APP_VERSION_CODE" \
             --live-engine-library data/native-live/macos/libidoly_live.dylib \
             | tee data/macos-evidence/build.log
       - name: Verify the Mac app and upload only in release mode
@@ -929,7 +962,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-server-candidate-and-native-evidence-v0.3.0
+          name: macos-server-candidate-and-native-evidence-v${{ env.IDOLY_APP_VERSION }}
           path: |
             data/macos-evidence
             data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip
@@ -1079,6 +1112,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
-          name: native-server-release-verification-v0.3.0
+          name: native-server-release-verification-v${{ env.IDOLY_APP_VERSION }}
           path: data/release-verification
           if-no-files-found: error
