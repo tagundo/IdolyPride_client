@@ -128,6 +128,7 @@ jobs:
               assert build['ad_hoc_codesign_verified'] is True
               assert build['architecture'] == 'arm64'
               assert build['macos_deployment_target'] == '13.0'
+              assert build['install_name'] == '@rpath/libidoly_live.dylib'
           report = {'source_commit': os.environ['GITHUB_SHA'], 'target': os.environ['LIVE_TARGET'],
                     'host_system': platform.system(), 'host_machine': platform.machine(),
                     'library_sha256': sha(library), 'public_header_sha256': sha(output / 'idoly_live.h'),

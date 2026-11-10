@@ -115,6 +115,8 @@ def main(argv=None):
     linker_flags = "-s -w"
     if args.target == "android":
         linker_flags += " -extldflags=-Wl,-z,max-page-size=16384"
+    elif args.target == "macos":
+        linker_flags += " -extldflags=-Wl,-install_name,@rpath/libidoly_live.dylib"
     run([go, "build", "-mod=readonly", "-buildvcs=false", "-trimpath", "-buildmode=c-shared",
          "-ldflags=" + linker_flags, "-o", library, "./cmd/livebridge"], env)
     dependencies = run([go, "list", "-mod=readonly", "-deps", "./cmd/livebridge"], env).splitlines()
@@ -124,6 +126,9 @@ def main(argv=None):
         raise ValueError("Unexpected server/DB dependency: " + ", ".join(forbidden))
     if args.target == "macos":
         check_macos_library(library.read_bytes())
+        install_names = run(["otool", "-D", library], env).splitlines()
+        if "@rpath/libidoly_live.dylib" not in [line.strip() for line in install_names]:
+            raise ValueError("macos dynamic library must use a relocatable @rpath install name")
         run(["codesign", "--force", "--sign", "-", "--timestamp=none", library], env)
         run(["codesign", "--verify", "--strict", "--verbose=2", library], env)
     raw = library.read_bytes()
@@ -138,6 +143,7 @@ def main(argv=None):
                       linker_max_page_size=16384, device_execution_tested=False)
     if args.target == "macos":
         report.update(architecture="arm64", macos_deployment_target="13.0",
+                      install_name="@rpath/libidoly_live.dylib",
                       ad_hoc_codesign_verified=True, library_execution_tested=False,
                       full_simulation_tested=False)
     (output / "build-report.json").write_text(json.dumps(report, indent=2) + "\n")
