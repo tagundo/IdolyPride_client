@@ -1,7 +1,12 @@
-name: Build native server apps into draft release
+name: Build native server candidates or draft assets
 
 on:
   workflow_dispatch:
+    inputs:
+      artifact_only:
+        description: Build Actions-only candidates for separate Android native runtime QA; leave the release draft untouched
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -154,6 +159,7 @@ jobs:
           runpy.run_path('macos-server/engine.py', run_name='__main__')
           PY
       - name: Create or require the dedicated draft release
+        if: ${{ !inputs.artifact_only }}
         id: draft
         shell: bash
         run: |
@@ -184,6 +190,7 @@ jobs:
             --jq '.draft and .tag_name == "local-server-v0.3.0"' | grep -qx true
           echo "release_id=$IDOLY_RELEASE_ID" >> "$GITHUB_OUTPUT"
       - name: Upload the tested payload to the draft only
+        if: ${{ !inputs.artifact_only }}
         shell: bash
         env:
           IDOLY_RELEASE_ID: ${{ steps.draft.outputs.release_id }}
@@ -227,9 +234,10 @@ jobs:
           if-no-files-found: warn
 
   android:
-    # Paused: replace the ARM-on-x86 translation test with a native ARM
-    # runtime target before enabling this release gate again.
-    if: ${{ vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true' }}
+    # Release uploads stay paused until native ARM runtime QA replaces the
+    # translated gate. artifact_only builds bytes for that separate QA and
+    # never uploads Android APKs to the release or claims runtime success.
+    if: ${{ inputs.artifact_only || vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true' }}
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -241,6 +249,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       IDOLY_RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
       IDOLY_PAYLOAD_SHA: ${{ needs.prepare.outputs.payload_sha256 }}
+      IDOLY_ARTIFACT_ONLY: ${{ inputs.artifact_only }}
       DISPLAY: ':99'
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
@@ -267,7 +276,7 @@ jobs:
         with:
           go-version: '1.27.3'
           cache: false
-      - name: Prepare the disposable runner for translated ARM64 execution
+      - name: Prepare runner disk and optional translated QA graphics
         shell: bash
         run: |
           set -euo pipefail
@@ -288,16 +297,18 @@ jobs:
                       shutil.rmtree(child)
           PY
           df -h . > data/android-server-qa/environment/disk-after.txt
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb xauth mesa-utils \
-            libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers libpulse0
-          Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp -ac \
-            > data/android-server-qa/environment/xvfb.log 2>&1 &
-          for attempt in $(seq 1 20); do
-            if glxinfo -B > data/android-server-qa/environment/host-glxinfo.txt 2>&1; then break; fi
-            sleep 1
-          done
-          grep -E 'OpenGL renderer string:.*llvmpipe' data/android-server-qa/environment/host-glxinfo.txt
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends xvfb xauth mesa-utils \
+              libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers libpulse0
+            Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp -ac \
+              > data/android-server-qa/environment/xvfb.log 2>&1 &
+            for attempt in $(seq 1 20); do
+              if glxinfo -B > data/android-server-qa/environment/host-glxinfo.txt 2>&1; then break; fi
+              sleep 1
+            done
+            grep -E 'OpenGL renderer string:.*llvmpipe' data/android-server-qa/environment/host-glxinfo.txt
+          fi
       - uses: actions/download-artifact@v4
         with:
           name: server-data-v0.3.0
@@ -353,31 +364,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264' 'emulator'
+          sdkmanager 'platform-tools' 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then sdkmanager 'emulator'; fi
           uv sync --locked --python 3.12
           mkdir -p data/android-server-qa data/dist
           chmod +x android-server/gradlew
           python -c 'import sys; assert sys.version_info[:2] == (3, 13)'
           echo "IDOLY_BUILD_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
-      - name: Build both attributed Android local-rules libraries and the synthetic ARM preflight
+      - name: Build stock-toolchain Android local-rules libraries and optional translated QA preflight
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p data/native-live/jni/arm64-v8a data/native-live/jni/x86_64 data/android-server-qa/native-live-engine
           for target in android android-x86_64; do
+            if [[ "$IDOLY_ARTIFACT_ONLY" == true && "$target" == android-x86_64 ]]; then continue; fi
             python native-live-engine/scripts/build.py --target "$target" --go "$(command -v go)" \
               --ndk "$ANDROID_HOME/ndk/26.3.11579264" --output "data/native-live/$target" \
               --cache data/native-live-cache
             cp "data/native-live/$target/build-report.json" "data/android-server-qa/native-live-engine/$target-build.json"
           done
           cp data/native-live/android/libidoly_live.so data/native-live/jni/arm64-v8a/
-          cp data/native-live/android-x86_64/libidoly_live.so data/native-live/jni/x86_64/
-          python tools/emulator_environment_probe/build.py --sdk "$ANDROID_HOME" \
-            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" \
-            --output data/android-server-qa/environment/EnvironmentProbe.apk \
-            > data/android-server-qa/environment/build-report.json
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
+            cp data/native-live/android-x86_64/libidoly_live.so data/native-live/jni/x86_64/
+            python tools/emulator_environment_probe/build.py --sdk "$ANDROID_HOME" \
+              --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" \
+              --output data/android-server-qa/environment/EnvironmentProbe.apk \
+              > data/android-server-qa/environment/build-report.json
+          fi
           git diff --exit-code -- native-live-engine/go.mod native-live-engine/go.sum
-      - name: Build the arm64 deliverable and x86_64 QA APK separately
+      - name: Build the arm64 candidate and optional separate x86_64 QA APK
         shell: bash
         run: |
           set -euo pipefail
@@ -387,18 +402,23 @@ jobs:
             -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=arm64-v8a \
             | tee data/android-server-qa/build-arm64.log
           cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android.apk
-          ./android-server/gradlew -p android-server :app:clean :app:assembleDebug \
-            --no-daemon --console=plain --stacktrace \
-            -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=x86_64 \
-            | tee data/android-server-qa/build-x86_64.log
-          cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
+            ./android-server/gradlew -p android-server :app:clean :app:assembleDebug \
+              --no-daemon --console=plain --stacktrace \
+              -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverData="$IDOLY_PAYLOAD" -PliveEngineDir="$GITHUB_WORKSPACE/data/native-live/jni" -PserverAbi=x86_64 \
+              | tee data/android-server-qa/build-x86_64.log
+            cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
+          fi
           "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
             data/dist/IdolyPride-Local-Server-Android.apk > data/android-server-qa/arm64-signature.txt
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
-            data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk > data/android-server-qa/x86_64-signature.txt
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
+            "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
+              data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk > data/android-server-qa/x86_64-signature.txt
+          fi
           python - <<'PY'
           import hashlib
           import json
+          import os
           from pathlib import Path
           from zipfile import ZipFile
 
@@ -406,7 +426,10 @@ jobs:
           notices = ('LICENSE', 'NOTICE', 'third-party-licenses/Go-LICENSE',
               'third-party-licenses/Protobuf-LICENSE', 'third-party-licenses/YAML-LICENSE',
               'third-party-licenses/YAML-NOTICE')
-          for suffix, target, abi in (('', 'android', 'arm64-v8a'), ('-x86_64-QA', 'android-x86_64', 'x86_64')):
+          targets = [('', 'android', 'arm64-v8a')]
+          if os.environ['IDOLY_ARTIFACT_ONLY'] != 'true':
+              targets.append(('-x86_64-QA', 'android-x86_64', 'x86_64'))
+          for suffix, target, abi in targets:
               apk = Path('data/dist/IdolyPride-Local-Server-Android' + suffix + '.apk')
               build = json.loads(Path('data/native-live', target, 'build-report.json').read_text())
               assert build['abi_version'] == 1 and build['ruleset'] == 'live-v5'
@@ -424,20 +447,58 @@ jobs:
                   'license_files_verified': len(notices), 'exact_unstripped_library': True})
           Path('data/android-server-qa/native-live-engine/apk-audit.json').write_text(json.dumps(reports, indent=2) + '\n')
           PY
-      - name: Build the own-process diagnostic collector probe
+      - name: Record candidate bytes and source without claiming Android execution
         shell: bash
         run: |
           set -euo pipefail
-          python android-diagnostics/ci/build_probe.py \
-            --output data/dist/IdolyPride-Diagnostics-Probe.apk \
-            --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
-            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar"
+          python - <<'PYCODE'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          apk = Path('data/dist/IdolyPride-Local-Server-Android.apk')
+          payload = Path('data/dist') / os.environ['IDOLY_PAYLOAD_NAME']
+          def digest(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream, 'sha256').hexdigest()
+          payload_sha = digest(payload)
+          assert payload_sha == os.environ['IDOLY_PAYLOAD_SHA']
+          with ZipFile(payload) as archive:
+              manifest = json.loads(archive.read('data/payload-manifest.json'))
+              assert len(manifest['tables']) == 40 and 'Mission' in manifest['tables']
+          with ZipFile(apk) as archive:
+              assert archive.read('assets/ServerData.zip') == payload.read_bytes()
+              assert archive.testzip() is None
+          report = {'schema': 1, 'source_commit': os.environ['GITHUB_SHA'],
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'],
+              'artifact_only': os.environ['IDOLY_ARTIFACT_ONLY'] == 'true',
+              'android_abi': 'arm64-v8a', 'master_table_count': 40,
+              'apk': {'file': apk.name, 'bytes': apk.stat().st_size, 'sha256': digest(apk)},
+              'payload': {'file': payload.name, 'bytes': payload.stat().st_size, 'sha256': payload_sha},
+              'signature_verification': 'apksigner verify passed',
+              'native_runtime_tested': False, 'game_client_gameplay_tested': False,
+              'android_apk_uploaded_to_release': False}
+          Path('data/android-server-qa/candidate-provenance.json').write_text(json.dumps(report, indent=2) + '\n')
+          PYCODE
+      - name: Build the optional own-process diagnostic collector probe and reclaim build space
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
+            python android-diagnostics/ci/build_probe.py \
+              --output data/dist/IdolyPride-Diagnostics-Probe.apk \
+              --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+              --android-jar "$ANDROID_HOME/platforms/android-34/android.jar"
+          fi
           # No compiler is used after this step. Recover space for the API35
           # image/userdata while retaining exact libraries and build reports.
           chmod -R u+w data/native-live-cache
           rm -rf data/native-live-cache "$ANDROID_HOME/ndk/26.3.11579264" android-server/app/build
           df -h . > data/android-server-qa/environment/disk-before-emulator.txt
       - name: Configure Android emulator acceleration
+        if: ${{ !inputs.artifact_only }}
         id: acceleration
         shell: bash
         run: |
@@ -455,6 +516,7 @@ jobs:
             echo 'disable_linux_hw_accel=true' >> "$GITHUB_OUTPUT"
           fi
       - name: Exercise the actual native server UI and encrypted RPCs
+        if: ${{ !inputs.artifact_only }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -480,6 +542,7 @@ jobs:
             adb -s emulator-5554 shell dumpsys package game.qualiarts.idolypride.localserver > data/android-server-qa/production-arm64/package.txt
             grep -F 'primaryCpuAbi=arm64-v8a' data/android-server-qa/production-arm64/package.txt
       - name: Upload the arm64 APK only after emulator QA passes
+        if: ${{ !inputs.artifact_only }}
         id: publish
         shell: bash
         run: |
@@ -642,10 +705,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: android-server-emulator-qa-v0.3.0
+          name: android-server-build-and-available-evidence-v0.3.0
           path: |
             data/android-server-qa
             data/android-diagnostics-qa
+            data/dist/IdolyPride-Local-Server-Android.apk
             data/dist/IdolyPride-Local-Server-Android-x86_64-QA.apk
           if-no-files-found: warn
           compression-level: 0
@@ -661,6 +725,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       IDOLY_RELEASE_ID: ${{ needs.prepare.outputs.release_id }}
+      IDOLY_ARTIFACT_ONLY: ${{ inputs.artifact_only }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -715,7 +780,7 @@ jobs:
             --evidence data/macos-evidence --version 0.3.0 \
             --live-engine-library data/native-live/macos/libidoly_live.dylib \
             | tee data/macos-evidence/build.log
-      - name: Upload the Mac app only after frozen runtime and native GUI checks pass
+      - name: Verify the Mac app and upload only in release mode
         id: publish
         shell: bash
         run: |
@@ -835,6 +900,7 @@ jobs:
                'tutorial_replay_short_score', 'tutorial_replay_full_score')) == (8, 9, 158, 156, 8813, 10717)
           PY
           .venv/bin/python -m zipfile -c data/dist/IdolyPride-Local-Server-macOS-QA.zip data/macos-evidence
+          if [[ "$IDOLY_ARTIFACT_ONLY" != true ]]; then
           gh api "repos/$GH_REPO/releases/$IDOLY_RELEASE_ID" \
             --jq '.draft and .tag_name == "local-server-v0.3.0"' | grep -qx true
           gh release upload "$IDOLY_SERVER_TAG" --repo "$GH_REPO" --clobber \
@@ -859,14 +925,19 @@ jobs:
                   with Path(os.environ['GITHUB_OUTPUT']).open('a') as output:
                       output.write('app_sha256=' + digest + '\n')
           PY
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos-server-native-evidence-v0.3.0
-          path: data/macos-evidence
+          name: macos-server-candidate-and-native-evidence-v0.3.0
+          path: |
+            data/macos-evidence
+            data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip
+            data/dist/IdolyPride-Local-Server-macOS-QA.zip
           if-no-files-found: warn
 
   verify:
+    if: ${{ !inputs.artifact_only }}
     needs: [prepare, android, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
