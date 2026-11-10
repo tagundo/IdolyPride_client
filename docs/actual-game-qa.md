@@ -1,6 +1,8 @@
-# 실제 Android 게임 자동 점검
+# 실제 게임 자동 점검
 
 개발용 [Debug actual Android game boot](https://github.com/tagundo/IdolyPride_client/actions/workflows/debug-game-android.yml)는 일회용 에뮬레이터에서 현재 서버 앱과 실제 6.1.1 게임을 함께 실행합니다. 화면·UI 트리·일반 터치 입력·서버 요청을 남겨 다음 미구현 기능을 찾는 작업입니다.
+
+Android의 ARM 변환·소프트웨어 그래픽 환경에서 추가 게임 검사는 중단했습니다. 아래 Android 기록은 이전 관측입니다. Mac에서는 별도 [PlayCover 첫 실행 검사](https://github.com/tagundo/IdolyPride_client/actions/workflows/playcover-local-firstboot.yml)로 실제 IPA 설치·실행을 검사하며, 현재 결과는 문서 끝에 기록합니다.
 
 ## 실행과 입력
 
@@ -78,3 +80,19 @@ Android 서버 APK·Mac 앱의 별도 빌드 검사는 암호화 RPC와 재시�
 이 관측 구간의 게임 PID4518은 유지됐고, 크래시 버퍼와 관리 예외·`SIGILL`·GLSL 링크 오류는 없었습니다. 초기 준비용 RPC 31회는 실제 게임 요청에서 제외했으며, 이 실행에서 새 `UNIMPLEMENTED`는 관측하지 못했습니다. 아직 누르지 않은 메뉴의 구현 여부를 이 결과로 판단하지 않습니다.
 
 현재 메뉴 탐색기는 메뉴 입력 뒤 트리 변화를 기록하는 범위이며, 일반 퀘스트 선택·시작·재생·결과 화면까지 진행하지 않습니다. [첫 메인 라이브 실험 기능](first-live-support.md)의 엔진·API 검사는 이 실제 게임 기록과 별개이며, 일반 라이브의 실제 화면 재생을 증명하지 않습니다.
+
+## 마지막 Android 관측과 추가 실행 중단
+
+[실행42820195722](https://github.com/tagundo/IdolyPride_client/actions/runs/42820195722), 소스 `42158ba`에서 홈 3D 캐릭터를 확인하고 일반 입력으로 매니저 레벨업 안내와 레슨 보상 창을 닫았습니다. 실제 `Activity.ReceiveLessonReward`, `Home.Enter`, `Quest.Top` 요청과 라이브 상단 메뉴 화면을 확인했습니다. 준비용 요청을 제외한 게임 요청 53개는 모두 성공했지만, 일반 `Quest.ListMain/ListAsset/Start`는 관측하지 못했습니다. 아이돌 버튼 뒤의 단순 트리 변화는 홈 화면의 텍스트 변화였으므로 아이돌 메뉴 성공으로 판정하지 않습니다.
+
+이 실행도 GPU 없는 x86 호스트의 ARM 변환·소프트웨어 그래픽 환경입니다. 낮은 실제 프레임 속도와 별도 ARM 네이티브 라이브러리의 변환기 호환성 문제 때문에 이 환경의 추가 게임 검사는 중단했습니다. 기본 Go SDK를 유지하며 ARM 변환기에 맞추는 런타임 패치는 제거했습니다. 네이티브 ARM Android 게임·라이브의 검증은 남아 있습니다.
+
+## Mac PlayCover 첫 실행
+
+[실행42837601574](https://github.com/tagundo/IdolyPride_client/actions/runs/42837601574), 소스 `6fadd3b`는 사용자 Mac과 별개의 GitHub `macos-15` ARM64 가상 Mac에서 실행했습니다. 실제 macOS는 15.8.2, 장치는 `VirtualMac2,1`, GPU는 `Apple Paravirtual device`였습니다. 같은 실행기에서 Metal 렌더링과 화면 캡처·접근성 권한 검사를 통과했습니다. 합성 그래픽 성능은 게임 프레임 속도 측정이 아닙니다.
+
+PlayCover `4.0.0-prerelease`와 로컬 IPA 6.1.1, Mac 서버 후보의 정확한 배포 파일 해시를 확인했습니다. 서버 후보의 실제 소스는 `42158ba`이며 검사 드라이버의 소스와 구분합니다. PlayCover를 먼저 빈 상태로 열어 앱 목록 창·설치 폴더·PlayTools 준비를 확인한 뒤 공식 파일 열기 경로로 IPA를 설치·재서명했습니다. 새 AX 트리에서 **아이프라 로컬**의 위치를 확인하고 일반 더블클릭으로 실행했습니다. 초기 파일 열기 이벤트가 설치 폴더 생성보다 먼저 처리될 수 있어 이 순서가 필요했습니다.
+
+설치와 실행은 성공했고 게임 PID2013의 Unity `2022.3.57f1` 초기화도 기록됐습니다. 이후 macOS가 `UIKit applications must check-in via UISApplicationSupportService before creating scenes`로 첫 장면 생성을 거부했고, `_mainSceneIdentifier should have been set by now!` 예외로 게임이 종료됐습니다. 서버는 실행 중이었으나 게임 RPC는 0건이었습니다. 게임 화면·로그인·홈·라이브 성공으로 판정하지 않습니다. 이 자료만으로 모든 가상 Mac이나 사용자의 PlayCover 환경에서도 같은 문제가 난다고 단정할 수 없습니다.
+
+결과 자료는 아티팩트 `13773638481`이며 ZIP SHA-256은 `aa9dccfc737dc76f65d4fcaa099fbfd25bc07927f45634135533fa956ef189f5`입니다. `host.json`, `inputs.json`, `evidence/result.json`, 입력 전후 AX·PNG, 필터링한 게임 오류와 서버 기록을 포함합니다. 새 로컬 프로필로 검사했으며 사용자 계정이나 Mac 접속은 사용하지 않았습니다. v0.3.0 릴리스는 계속 초안 상태입니다.
