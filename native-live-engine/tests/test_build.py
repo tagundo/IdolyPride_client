@@ -14,7 +14,8 @@ SPEC.loader.exec_module(build)
 class BuildTargetTests(unittest.TestCase):
     def test_android_targets_use_pinned_ndk_api26_and_distinct_architectures(self):
         with tempfile.TemporaryDirectory() as temporary:
-            ndk = Path(temporary)
+            # macOS exposes temporary directories through the /var symlink.
+            ndk = Path(temporary).resolve()
             (ndk / "source.properties").write_text("Pkg.Revision = 26.3.11579264\n")
             for target, arch, triple in (("android", "arm64", "aarch64"),
                                          ("android-x86_64", "amd64", "x86_64")):
