@@ -15,7 +15,7 @@ Android IL2CPP 바이너리에서 protobuf descriptor 359개 파일·68개 서�
 
 descriptor 파일은 `data/protocol/idolypride-6.1.1.pb` 위치를 기본값으로 사용하며 SHA-256은 `c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad`입니다. `tools/extract_client_schema.py`로 원본 XAPK에서 다시 추출할 수 있습니다. 현재 서버는 427개 unary RPC를 등록합니다. server-streaming `/api.Health/Watch`는 등록하지 않으며 호출 시 `UNIMPLEMENTED`를 반환합니다.
 
-소스 `dc8524c`의 기본 명시 처리 경로는 51개이며 제한된 자체 처리 49개와 공개 fixture 전용 2개를 포함합니다. 나머지 unary 376개는 가져온 사용자 fixture가 없으면 기본 자체 처리가 없고, `Quest.Start`의 첫 메인 퀘스트 실험도 기본 OFF입니다. 등록된 경로 수를 전체 기능 구현 수로 계산하지 않습니다. 경로별 타입과 제한은 [RPC 분류 CSV](rpc-coverage-6.1.1.csv)를 따릅니다.
+소스 `b18f711`의 기본 명시 처리 경로는 52개이며 제한된 자체 처리 50개와 공개 fixture 전용 2개를 포함합니다. 나머지 unary 375개는 가져온 사용자 fixture가 없으면 기본 자체 처리가 없고, `Quest.Start`의 첫 메인 퀘스트 실험도 기본 OFF입니다. 등록된 경로 수를 전체 기능 구현 수로 계산하지 않습니다. 경로별 타입과 제한은 [RPC 분류 CSV](rpc-coverage-6.1.1.csv)를 따릅니다.
 
 `inspect`의 `schema_sha256`은 파일 순서와 로딩 경로를 정규화한 스키마 지문이며 원본 파일 해시와 구분합니다. 현재 6.1.1의 정규화된 지문은 `0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3`입니다. 동일한 스키마를 Solis 모듈이나 내보낸 descriptor set으로 읽어도 같은 지문을 사용합니다.
 
@@ -62,6 +62,7 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 | `Home.*`, `Tutorial.Init/Progress/Skip/StartQuest`, `Deck.Save/Delete`, `Quest.Top/ListMain/ListAsset` | fixture 우선, 없으면 구현한 로컬 상태·목록 처리 |
 | `Profile.Top` | fixture 우선; 없으면 저장된 계층 포인트와 홈의 마스터 규칙으로 계급 조회, 순위 0·빈 로컬 친구 목록, 상태 변경 없음 |
 | `Profile.UpdateName` | fixture 우선; 없으면 이름만 원자적으로 저장하고 `commonResponse.updatedData.user` 반환; UTF-16 1–10단위·로컬 한 줄 입력 정책, 공식 금칙어·미션 진행 제외 |
+| `Profile.UpdateMessage` | fixture 우선; 없으면 기존 `profile.message`만 원자적으로 저장하고 `commonResponse.updatedData.profile` 반환; UTF-16 1–60단위·공백만인 입력과 탭 거부, 공식 금칙어·미션·보상 제외 |
 | 그 밖의 알려진 RPC | fixture 또는 구현이 없으면 `UNIMPLEMENTED` |
 | 알 수 없는 RPC 경로 | `UNIMPLEMENTED` |
 | 보호된 RPC의 세션 누락·불일치·만료 | `UNAUTHENTICATED` |
@@ -70,7 +71,7 @@ AES 키는 공개 구현의 고정 seed에 대한 MD5, IV는 `seed + key materia
 
 fixture 저장은 protobuf 문법 검증을 거치지만 게임 규칙·아이디 참조의 의미적 일관성까지 검증하지 않습니다. 정적 응답 재생은 라이브 점수 계산, 보상 지급, 스토리 진행 같은 상태 변경을 구현하지 않습니다. fixture에는 개인 유저 데이터가 포함될 수 있으며 `Auth.*` fixture는 금지합니다.
 
-`Profile.Top`의 순위 0은 전역 순위를 계산했다는 뜻이 아니며 빈 친구 목록은 현재 로컬 친구 관계의 범위입니다. `Profile.UpdateName`은 비어 있지 않은 이름의 공백·Unicode 정규화를 그대로 보존합니다. 원본 UI가 제출 전에 제거하는 줄바꿈·탭은 서버의 로컬 정책으로 거부하며 공식 서버의 직접 요청 처리 규칙으로 단정하지 않습니다. 두 경로는 원본 응답 소비 코드와 6.1.1 스키마를 대조하고 자동 검증했지만 실제 프로필 UI 검증은 아직 없습니다. `Auth.Create`는 계속 미지원이며 로컬 `Auth.Login`을 원본 신규 계정 생성 구현으로 취급하지 않습니다.
+`Profile.Top`의 순위 0은 전역 순위를 계산했다는 뜻이 아니며 빈 친구 목록은 현재 로컬 친구 관계의 범위입니다. `Profile.UpdateName`은 비어 있지 않은 이름의 공백·Unicode 정규화를 그대로 보존합니다. 원본 UI가 제출 전에 제거하는 줄바꿈·탭은 서버의 로컬 정책으로 거부하며 공식 서버의 직접 요청 처리 규칙으로 단정하지 않습니다. `Profile.UpdateMessage`도 수락한 공백·Unicode 정규화와 CR/LF를 보존합니다. 원본 소개문 입력 필드의 줄바꿈 모드는 아직 확정하지 않았으며 탭·공백만인 입력 거부는 로컬 정책입니다. 세 경로는 원본 응답 소비 코드와 6.1.1 스키마를 대조하고 자동 검증했지만 실제 프로필 UI 검증은 아직 없습니다. `Auth.Create`는 계속 미지원이며 로컬 `Auth.Login`을 원본 신규 계정 생성 구현으로 취급하지 않습니다.
 
 ## 기존 공식 세션 수집
 
@@ -112,4 +113,6 @@ Android manifest는 기본 system trust와 debug user trust 구성을 갖지만 
 
 이 문서의 전송 형식 검증은 codec 호환성, localhost gRPC 통합, SQLite 재로딩, fixture·파일 전송·마스터 round trip과 공식 익명 조회입니다. 별도 Android 로컬 연결판의 홈·튜토리얼 진행 결과는 [실제 게임 점검](actual-game-qa.md)을 따릅니다. 이를 원본 APK의 공식 인증 통신이나 계정 수집 성공으로 확대 해석하지 않습니다.
 
-원본 APK 기준 [실행 `42858431492`](https://github.com/tagundo/IdolyPride_client/actions/runs/42858431492), 소스 `465c14b`에서는 원본 서명을 보존해 Google Play API 35 x86_64 이미지에 설치했습니다. GitHub 호스트의 KVM과 SwiftShader·Google ARM 번역을 사용했으며, 약 160초에 `libndk_translation.so`·Unity가 포함된 네이티브 `SIGSEGV`를 기록했습니다. 수집 화면은 Android 전체 화면 안내에 가려져 타이틀·홈 진입을 관측하지 못했습니다. 에뮬레이터 전체의 암호화 패킷 메타데이터는 RPC 내용이나 공식 로그인 검증 자료가 아닙니다. 일반 안내 닫기만 추가한 후속 소스 `09e8f9a`의 실행 결과는 아직 대기 중입니다.
+원본 APK 기준 [실행 `42858431492`](https://github.com/tagundo/IdolyPride_client/actions/runs/42858431492), 소스 `465c14b`에서는 원본 서명을 보존해 Google Play API 35 x86_64 이미지에 설치했습니다. GitHub 호스트의 KVM과 SwiftShader·Google ARM 번역을 사용했으며, 약 160초에 `libndk_translation.so`·Unity가 포함된 네이티브 `SIGSEGV`를 기록했습니다. 수집 화면은 Android 전체 화면 안내에 가려져 타이틀·홈 진입을 관측하지 못했습니다. 에뮬레이터 전체의 암호화 패킷 메타데이터는 RPC 내용이나 공식 로그인 검증 자료가 아닙니다.
+
+후속 [실행 `42861039882`](https://github.com/tagundo/IdolyPride_client/actions/runs/42861039882), 소스 `09e8f9a`에서는 일반 Android 안내만 닫고 사라진 것을 검증했습니다. 게임 PID는 180초까지 살아 있었지만, 30–180초 화면은 회색 게임 화면 위의 Pixel Launcher ANR 대화상자였고 Unity 초기화·타이틀·홈 진입을 관측하지 못했습니다. 정상 실행이나 크래시 해결을 입증한 결과가 아닙니다. 공식 API 36 비교 [실행 `42862969552`](https://github.com/tagundo/IdolyPride_client/actions/runs/42862969552), 소스 `34ca8d5`는 아직 결과 대기 중이며 원본의 공식 인증 RPC 캡처도 아직 없습니다.
