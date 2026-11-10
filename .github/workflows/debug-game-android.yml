@@ -229,6 +229,33 @@ jobs:
             --qa-ui-explore
             --max-title-taps 5
             --prepare-completed-opening
+      - name: Summarize observed input and menu evidence
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path('data/android-game-debug/ui-exploration.json')
+          if path.is_file():
+              report = json.loads(path.read_text())
+              outcomes = report.get('outcomes', [])
+              lines = [
+                  'Actual game UI capture',
+                  f"Successful UI snapshots: {report.get('successful_ui_snapshots', 0)}",
+                  f"Normal Android touch actions: {len(report.get('actions', []))}",
+                  f"Recorded menu outcomes requiring review: {len(outcomes)}",
+                  'Screenshots, UI trees and RPCs must be reviewed before claiming a menu works.',
+              ]
+              for outcome in outcomes:
+                  lines.append(f"- {outcome['goal']}: {outcome['status']}")
+          else:
+              lines = ['Actual game UI capture did not produce an exploration report.']
+          with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+              summary.write('\n\n'.join(lines) + '\n')
+          PY
       - name: Preserve game screenshots and diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
