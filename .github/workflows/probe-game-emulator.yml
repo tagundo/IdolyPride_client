@@ -51,7 +51,7 @@ jobs:
           test -r /dev/kvm && test -w /dev/kvm
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            xvfb xauth mesa-utils libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers vulkan-tools
+            xvfb xauth mesa-utils libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers vulkan-tools libpulse0
           Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp -ac > "$RESULTS/xvfb.log" 2>&1 &
           for attempt in $(seq 1 20); do
             if glxinfo -B > "$RESULTS/host-glxinfo.txt" 2>&1; then break; fi
@@ -60,8 +60,11 @@ jobs:
           grep -E 'OpenGL renderer string:.*llvmpipe' "$RESULTS/host-glxinfo.txt"
           vulkaninfo --summary > "$RESULTS/host-vulkan.txt" 2>&1 || true
           sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264' 'emulator'
-          "$ANDROID_HOME/emulator/emulator" -version > "$RESULTS/emulator-version.txt" 2>&1
-          "$ANDROID_HOME/emulator/emulator" -help-gpu > "$RESULTS/emulator-gpu-options.txt" 2>&1
+          ldd "$ANDROID_HOME/emulator/qemu/linux-x86_64/qemu-system-x86_64" \
+            | tee "$RESULTS/emulator-host-libraries.txt"
+          ! grep -F 'not found' "$RESULTS/emulator-host-libraries.txt"
+          "$ANDROID_HOME/emulator/emulator" -version 2>&1 | tee "$RESULTS/emulator-version.txt"
+          "$ANDROID_HOME/emulator/emulator" -help-gpu 2>&1 | tee "$RESULTS/emulator-gpu-options.txt"
           if [ '${{ matrix.gpu }}' = lavapipe ]; then
             grep -w lavapipe "$RESULTS/emulator-gpu-options.txt"
           fi

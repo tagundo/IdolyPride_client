@@ -1,5 +1,5 @@
 import unittest
-from run_probe import validate_report
+from run_probe import PACKAGE, scoped_crash_log, validate_report
 
 
 def successful():
@@ -40,6 +40,25 @@ class GateTests(unittest.TestCase):
                        {**successful(), "graphics": []},
                        {**successful(), "conversion": {"ok": False}}):
             self.assertFalse(validate_report(report))
+
+    def test_crash_capture_excludes_other_apps(self):
+        log = ("11-10 01:02:03.001 123 124 F libc : Fatal signal 4\n"
+               "11-10 01:02:03.002 900 900 F DEBUG : *** *** ***\n"
+               "11-10 01:02:03.003 900 900 F DEBUG : pid: 123, tid: 124 >>> " + PACKAGE + " <<<\n"
+               "11-10 01:02:03.004 900 900 F DEBUG : #00 pc 000000\n"
+               "11-10 01:02:04.001 901 901 F DEBUG : *** *** ***\n"
+               "11-10 01:02:04.002 901 901 F DEBUG : pid: 999 >>> other.app <<<\n"
+               "11-10 01:02:04.003 901 901 F DEBUG : unrelated private text\n")
+        result = scoped_crash_log(log, "123")
+        self.assertIn("Fatal signal 4", result)
+        self.assertIn("#00 pc", result)
+        self.assertNotIn("other.app", result)
+        self.assertNotIn("unrelated private text", result)
+
+    def test_prior_probe_pid_cannot_supply_current_crash(self):
+        log = ("11-10 01:02:03.002 900 900 F DEBUG : *** *** ***\n"
+               "11-10 01:02:03.003 900 900 F DEBUG : pid: 122, tid: 124 >>> " + PACKAGE + " <<<\n")
+        self.assertEqual("", scoped_crash_log(log, "123"))
 
 
 if __name__ == "__main__":

@@ -6,11 +6,40 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import subprocess
 import time
 
 PACKAGE = "org.idolypride.environmentprobe"
 ACTIVITY = PACKAGE + "/.ProbeActivity"
+
+
+def scoped_crash_log(text, pid):
+    """Keep only the synthetic process and its explicitly identified tombstone."""
+    line_pattern = re.compile(r"^\S+\s+\S+\s+(\d+)\s+\d+\s+[A-Z]\s+(\S+)\s*:\s?(.*)$")
+    blocks, current, dumper = [], [], None
+    own = []
+    for line in text.splitlines():
+        match = line_pattern.match(line)
+        if not match:
+            continue
+        line_pid, tag, message = match.groups()
+        if pid and line_pid == pid.split()[0]:
+            own.append(line)
+        if tag == "DEBUG" and message.startswith("*** ***"):
+            if current:
+                blocks.append(current)
+            current, dumper = [line], line_pid
+        elif current and tag == "DEBUG" and line_pid == dumper:
+            current.append(line)
+    if current:
+        blocks.append(current)
+    for block in blocks:
+        joined = "\n".join(block)
+        if ">>> " + PACKAGE + " <<<" in joined and (not pid or
+                re.search(r"\bpid:\s*" + re.escape(pid.split()[0]) + r"\b", joined)):
+            own.extend(block)
+    return "\n".join(own) + ("\n" if own else "")
 
 
 def validate_report(report):
@@ -52,7 +81,8 @@ def run(adb, serial, apk, output, timeout=60, record_root=False):
     # Dedicated synthetic APK only; no account data, network permission, or game code.
     call("install", "-r", str(apk), limit=120)
     call("shell", "am", "force-stop", PACKAGE)
-    call("shell", "run-as", PACKAGE, "rm", "-f", "files/report.json", check=False)
+    # A failed removal must abort: a previous successful report cannot qualify this run.
+    call("shell", "run-as", PACKAGE, "rm", "-f", "files/report.json")
     properties = {}
     for key in ("ro.build.version.sdk", "ro.product.cpu.abilist", "ro.dalvik.vm.native.bridge",
                 "ro.hardware.egl", "ro.boot.qemu.avd_name", "ro.build.version.incremental"):
@@ -88,12 +118,13 @@ def run(adb, serial, apk, output, timeout=60, record_root=False):
         time.sleep(0.5)
     if report is not None:
         (output / "probe-report.json").write_text(json.dumps(report, indent=2) + "\n")
-    # Only this synthetic app's fixed tag, plus the isolated emulator crash buffer.
+    # Scope logs to this synthetic process, including its identified tombstone.
     if first_pid:
         own = call("logcat", "-d", "--pid=" + first_pid.split()[0],
-                   "IdolyEnvironmentProbe:I", "*:S", check=False)
+                   "IdolyEnvironmentProbe:I", "ndk_translation:E", "libc:F", "AndroidRuntime:E", "*:S", check=False)
         (output / "probe-own-logcat.txt").write_text(own)
-    (output / "probe-crash-logcat.txt").write_text(call("logcat", "-d", "-b", "crash", check=False))
+    crash = call("logcat", "-d", "-b", "crash", check=False)
+    (output / "probe-crash-logcat.txt").write_text(scoped_crash_log(crash, first_pid))
     screenshot = subprocess.run(base + ["exec-out", "screencap", "-p"],
                                 capture_output=True, timeout=20, check=False)
     if screenshot.returncode == 0:
