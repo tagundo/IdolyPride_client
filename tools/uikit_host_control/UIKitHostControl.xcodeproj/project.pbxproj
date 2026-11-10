@@ -1,0 +1,57 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {};
+    objectVersion = 56;
+    objects = {
+        A00000000000000000000001 = {isa = PBXBuildFile; fileRef = A00000000000000000000002; };
+        A00000000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+        A00000000000000000000003 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+        A00000000000000000000004 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = UIKitHostControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
+        A00000000000000000000005 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000003, A00000000000000000000006); sourceTree = "<group>"; };
+        A00000000000000000000006 = {isa = PBXGroup; children = (A00000000000000000000004); name = Products; sourceTree = "<group>"; };
+        A00000000000000000000007 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000001); runOnlyForDeploymentPostprocessing = 0; };
+        A00000000000000000000008 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+        A00000000000000000000009 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+        A00000000000000000000010 = {
+            isa = PBXNativeTarget;
+            buildConfigurationList = A00000000000000000000011;
+            buildPhases = (A00000000000000000000007, A00000000000000000000008, A00000000000000000000009);
+            buildRules = (); dependencies = (); name = UIKitHostControl;
+            productName = UIKitHostControl; productReference = A00000000000000000000004;
+            productType = "com.apple.product-type.application";
+        };
+        A00000000000000000000012 = {
+            isa = PBXProject;
+            attributes = {LastUpgradeCheck = 1600; TargetAttributes = {A00000000000000000000010 = {CreatedOnToolsVersion = 16.0; }; }; };
+            buildConfigurationList = A00000000000000000000013;
+            compatibilityVersion = "Xcode 14.0"; developmentRegion = en;
+            hasScannedForEncodings = 0; knownRegions = (en, Base);
+            mainGroup = A00000000000000000000005; productRefGroup = A00000000000000000000006;
+            projectDirPath = ""; projectRoot = ""; targets = (A00000000000000000000010);
+        };
+        A00000000000000000000011 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000014); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+        A00000000000000000000013 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000015); defaultConfigurationIsVisible = 0; defaultConfigurationName = Debug; };
+        A00000000000000000000014 = {
+            isa = XCBuildConfiguration; name = Debug;
+            buildSettings = {
+                PRODUCT_NAME = UIKitHostControl;
+                PRODUCT_BUNDLE_IDENTIFIER = local.idolypride.UIKitHostControl;
+                GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Info.plist;
+                SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+                IPHONEOS_DEPLOYMENT_TARGET = 17.0; MACOSX_DEPLOYMENT_TARGET = 14.0;
+                SUPPORTS_MACCATALYST = YES; DERIVE_MACCATALYST_PRODUCT_BUNDLE_IDENTIFIER = NO;
+                TARGETED_DEVICE_FAMILY = "1,2"; SWIFT_VERSION = 5.0;
+                SWIFT_OPTIMIZATION_LEVEL = "-Onone"; ONLY_ACTIVE_ARCH = YES;
+                ENABLE_APP_SANDBOX = YES; CODE_SIGN_ENTITLEMENTS = Control.entitlements;
+                CODE_SIGNING_ALLOWED = NO; CODE_SIGN_IDENTITY = "-";
+                LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
+            };
+        };
+        A00000000000000000000015 = {
+            isa = XCBuildConfiguration; name = Debug;
+            buildSettings = {CLANG_ENABLE_MODULES = YES; SWIFT_VERSION = 5.0; };
+        };
+    };
+    rootObject = A00000000000000000000012;
+}

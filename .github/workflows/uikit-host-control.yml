@@ -1,0 +1,134 @@
+name: Control standard UIKit scenes on native Mac Catalyst
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uikit-host-control
+  cancel-in-progress: false
+
+jobs:
+  control:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - name: Recheck the actual graphics and existing UI permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/uikit-host-control
+          swiftc tools/probe_playcover_host.swift -o "$RUNNER_TEMP/uikit-control-host"
+          swiftc tools/playcover_firstboot/ax_driver.swift -o "$RUNNER_TEMP/uikit-control-ax"
+          "$RUNNER_TEMP/uikit-control-host" > data/uikit-host-control/host.json
+          python3 -c 'import json; from pathlib import Path; assert json.loads(Path("data/uikit-host-control/host.json").read_text())["candidate_eligible"] is True'
+      - name: Build through the standard Xcode Mac Catalyst destination
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version > data/uikit-host-control/xcode-version.txt
+          xcodebuild -project tools/uikit_host_control/UIKitHostControl.xcodeproj \
+            -scheme UIKitHostControl -configuration Debug \
+            -destination 'platform=macOS,variant=Mac Catalyst' \
+            -derivedDataPath "$RUNNER_TEMP/uikit-control-build" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build \
+            > data/uikit-host-control/build.txt 2>&1
+          IDOLY_CONTROL_APP="$RUNNER_TEMP/uikit-control-build/Build/Products/Debug-maccatalyst/UIKitHostControl.app"
+          test -d "$IDOLY_CONTROL_APP"
+          codesign --force --sign - --entitlements tools/uikit_host_control/Control.entitlements "$IDOLY_CONTROL_APP"
+          codesign --verify --deep --strict "$IDOLY_CONTROL_APP"
+          xcrun vtool -show-build "$IDOLY_CONTROL_APP/Contents/MacOS/UIKitHostControl" \
+            > data/uikit-host-control/macho-build.txt
+          grep -q 'MACCATALYST' data/uikit-host-control/macho-build.txt
+          xcrun lipo -archs "$IDOLY_CONTROL_APP/Contents/MacOS/UIKitHostControl" \
+            > data/uikit-host-control/architecture.txt
+          grep -qx 'arm64' data/uikit-host-control/architecture.txt
+          cp "$IDOLY_CONTROL_APP/Contents/Info.plist" data/uikit-host-control/built-Info.plist
+          python3 -c 'import plistlib; from pathlib import Path; p=plistlib.loads(Path("data/uikit-host-control/built-Info.plist").read_bytes()); assert p["CFBundleIdentifier"]=="local.idolypride.UIKitHostControl" and p["CFBundleExecutable"]=="UIKitHostControl"'
+          codesign -d --entitlements :- "$IDOLY_CONTROL_APP" \
+            > data/uikit-host-control/built-entitlements.plist 2> data/uikit-host-control/codesign.txt
+          echo "IDOLY_CONTROL_APP=$IDOLY_CONTROL_APP" >> "$GITHUB_ENV"
+      - name: Open normally and observe the public UIKit scene label
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import time
+
+          output = Path('data/uikit-host-control')
+          bundle = 'local.idolypride.UIKitHostControl'
+          report = {'schema': 1, 'source_commit': os.environ['GITHUB_SHA'],
+              'workflow_run_id': os.environ['GITHUB_RUN_ID'], 'control': 'standard_public_UIKit_MacCatalyst',
+              'PlayCover_used': False, 'game_used': False, 'security_settings_changed': False,
+              'visible_label_verified': False, 'stable_pid_verified': False, 'samples': []}
+          def contains(node):
+              if isinstance(node, dict):
+                  if node.get('visible') is True and 'UIKit Host Control Ready' in [node.get(k) for k in ('title','description','static_text')]:
+                      return True
+                  return any(contains(v) for v in node.values())
+              return isinstance(node, list) and any(contains(v) for v in node)
+          try:
+              subprocess.run(['/usr/bin/open', os.environ['IDOLY_CONTROL_APP']], check=True, timeout=15)
+              deadline = time.monotonic() + 60
+              while time.monotonic() < deadline:
+                  destination = output / ('observation-' + str(len(report['samples'])) + '.json')
+                  result = subprocess.run([str(Path(os.environ['RUNNER_TEMP']) / 'uikit-control-ax'),
+                      '--inspect', bundle, '--output', str(destination)], capture_output=True, text=True, timeout=20)
+                  destination.with_suffix('.driver.json').write_text(json.dumps({'returncode': result.returncode,
+                      'stdout': result.stdout[:4096], 'stderr': result.stderr[:4096]}, indent=2) + '\n')
+                  state = json.loads(destination.read_text()) if destination.is_file() else {}
+                  sample = {'running': state.get('running'), 'pid': state.get('pid'),
+                      'label_visible': contains(state.get('tree', [])), 'dialog': state.get('visible_dialog_present')}
+                  report['samples'].append(sample)
+                  if sample['label_visible']:
+                      report['visible_label_verified'] = True
+                  if sample['dialog']:
+                      raise RuntimeError('unknown_control_dialog')
+                  if len(report['samples']) >= 3:
+                      last = report['samples'][-3:]
+                      if all(s['running'] and s['label_visible'] for s in last) and len({s['pid'] for s in last}) == 1:
+                          report['stable_pid_verified'] = True
+                          break
+                  time.sleep(5)
+          except Exception as error:
+              report['error_type'] = type(error).__name__
+          finally:
+              log_text = ''
+              try:
+                  logs = subprocess.run(['/usr/bin/log', 'show', '--last', '2m', '--info', '--style', 'compact',
+                      '--predicate', 'process == "UIKitHostControl"'], capture_output=True, text=True, timeout=15)
+                  log_text = logs.stdout
+              except Exception as error:
+                  report['log_capture_error_type'] = type(error).__name__
+              lines = [line[:600] for line in log_text.splitlines() if re.search(
+                  r'UIKIT_CONTROL|UISApplicationSupportService|FuseBoard|FBSWorkspace|mainSceneIdentifier|exception|error', line, re.I)]
+              (output / 'control-log.txt').write_text('\n'.join(lines[-200:]) + '\n')
+              report['scene_ready_log_observed'] = 'UIKIT_CONTROL_SCENE_READY' in log_text
+              report['same_checkin_error_observed'] = 'UIKit applications must check-in via UISApplicationSupportService before creating scenes' in log_text
+              report['ok'] = report['visible_label_verified'] and report['stable_pid_verified']
+              (output / 'result.json').write_text(json.dumps(report, indent=2) + '\n')
+          print(json.dumps({k: report.get(k) for k in ('ok','visible_label_verified','stable_pid_verified','scene_ready_log_observed','same_checkin_error_observed','error_type')}))
+          raise SystemExit(0 if report['ok'] else 1)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: uikit-host-control-${{ github.run_id }}
+          path: data/uikit-host-control
+          if-no-files-found: error
+          retention-days: 14

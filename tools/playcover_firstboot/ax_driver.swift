@@ -206,8 +206,16 @@ private func doubleClick(_ bounds: CGRect) throws {
     }
 }
 
+private func processIdentity(_ app: NSRunningApplication?) -> [String: Any] {
+    // Public process metadata only. Keep the requested bundle separate from the
+    // identity and paths LaunchServices assigned to the running application.
+    ["running_bundle_identifier": app?.bundleIdentifier.map { $0 as Any } ?? NSNull(),
+     "running_bundle_url": app?.bundleURL.map { $0.absoluteString as Any } ?? NSNull(),
+     "running_executable_url": app?.executableURL.map { $0.absoluteString as Any } ?? NSNull()]
+}
+
 private func observationReport(bundle: String, mode: String, snapshot: Snapshot?, action: [String: Any]) -> [String: Any] {
-    ["schema": 1, "bundle": bundle, "running": snapshot != nil,
+    var report: [String: Any] = ["schema": 1, "bundle": bundle, "running": snapshot != nil,
      "pid": snapshot.map { $0.app.processIdentifier as Any } ?? NSNull(),
      "frontmost_bundle": NSWorkspace.shared.frontmostApplication?.bundleIdentifier.map { $0 as Any } ?? NSNull(),
      "mode": mode, "tree": snapshot?.tree ?? [], "element_count": snapshot?.scan.count ?? 0,
@@ -217,6 +225,8 @@ private func observationReport(bundle: String, mode: String, snapshot: Snapshot?
      "textfield_values_read": false, "credential_input": false,
      "tcc_prompt_requested": false, "security_settings_changed": false,
      "accessibility_trusted": AXIsProcessTrusted(), "screen_capture_preflight": CGPreflightScreenCaptureAccess()]
+    report.merge(processIdentity(snapshot?.app)) { _, observed in observed }
+    return report
 }
 
 @available(macOS 14.0, *)
@@ -253,6 +263,7 @@ private func saveInitialFailure(_ error: Error) {
         report["running"] = !applications.isEmpty
         if applications.count == 1, let application = applications.first {
             report["pid"] = application.processIdentifier
+            report.merge(processIdentity(application)) { _, observed in observed }
         }
     }
     try? saveReport(report, output: output)
