@@ -2,6 +2,12 @@ name: Observe untouched original Android client on official Google Play image
 
 on:
   workflow_dispatch:
+    inputs:
+      api_level:
+        description: Official Google Play system image API
+        type: choice
+        default: '35'
+        options: ['35', '36']
 
 permissions:
   contents: read
@@ -59,7 +65,7 @@ jobs:
       - name: Install original signed base and split, then observe without account input
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ inputs.api_level || '35' }}
           target: google_apis_playstore
           arch: x86_64
           profile: pixel_4
@@ -70,7 +76,7 @@ jobs:
           disable-animations: true
           emulator-boot-timeout: 600
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu software -tcpdump /tmp/idoly-original-baseline.pcap
-          script: python3 tools/run_original_android_baseline.py --output "$RESULTS" --observe-seconds 180 --pcap /tmp/idoly-original-baseline.pcap
+          script: python3 tools/run_original_android_baseline.py --output "$RESULTS" --observe-seconds 180 --api-level "${{ inputs.api_level || '35' }}" --pcap /tmp/idoly-original-baseline.pcap
       - uses: actions/upload-artifact@v4
         if: always()
         with:

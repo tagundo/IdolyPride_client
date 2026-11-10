@@ -214,7 +214,7 @@ def packet_metadata(path: Path) -> dict:
                                              for key, value in sorted(flows.items())]}
 
 
-def observe(output: Path, duration: int, pcap: Path | None) -> None:
+def observe(output: Path, duration: int, pcap: Path | None, api_level: int = 35) -> None:
     report = {'workflow_sha': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
               'original_apks_unmodified': True, 'UI_input_performed': False, 'gameplay_verified': False,
               'system_UI_input_performed': False, 'system_UI_actions': [],
@@ -225,10 +225,12 @@ def observe(output: Path, duration: int, pcap: Path | None) -> None:
         properties = ['ro.build.version.sdk', 'ro.build.fingerprint', 'ro.product.cpu.abi',
                       'ro.product.cpu.abilist', 'ro.dalvik.vm.native.bridge', 'ro.hardware.egl', 'ro.boot.qemu.avd_name']
         report['image_properties'] = {key: decoded(adb('shell', 'getprop', key)).strip() for key in properties}
-        image = Path(os.environ['ANDROID_HOME']) / 'system-images/android-35/google_apis_playstore/x86_64'
+        assert report['image_properties']['ro.build.version.sdk'] == str(api_level), 'Unexpected guest API level'
+        image = Path(os.environ['ANDROID_HOME']) / f'system-images/android-{api_level}/google_apis_playstore/x86_64'
         source_properties = (image / 'source.properties').read_text()
         (output / 'image-source.properties').write_text(source_properties)
-        assert re.search(r'^Pkg.Revision\s*=\s*9\s*$', source_properties, re.M), 'Unexpected official image revision'
+        revision = {35: 9, 36: 7}[api_level]
+        assert re.search(r'^Pkg.Revision\s*=\s*' + str(revision) + r'\s*$', source_properties, re.M), 'Unexpected official image revision'
         (output / 'surfaceflinger-before.txt').write_text(decoded(adb('shell', 'dumpsys', 'SurfaceFlinger'))[:131072])
         (output / 'native-bridge-files.txt').write_text(decoded(adb('shell', 'ls', '-l',
             '/system/lib64/libndk_translation.so', '/system/lib64/libhoudini.so', check=False)))
@@ -291,6 +293,7 @@ def main() -> None:
     parser.add_argument('--xapk', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--observe-seconds', type=int, default=180, choices=[180])
+    parser.add_argument('--api-level', type=int, default=35, choices=[35, 36])
     parser.add_argument('--pcap', type=Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
@@ -298,7 +301,7 @@ def main() -> None:
         assert args.xapk is not None, '--xapk is required to prepare originals'
         prepare(args.xapk, args.output)
     else:
-        observe(args.output, args.observe_seconds, args.pcap)
+        observe(args.output, args.observe_seconds, args.pcap, args.api_level)
 
 
 if __name__ == '__main__':
