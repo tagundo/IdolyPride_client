@@ -30,7 +30,9 @@ class Application:
         from .tutorial_progression import TutorialProgression
         from .tutorial_messages import TutorialMessages
         from .lessons import OrdinaryLessons
+        from .social import SocialInbox
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
+        self.social = SocialInbox(schema)
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
@@ -102,6 +104,8 @@ class Application:
             response = self.gameplay.handle(path, plain)
             if response is None:
                 response = self.lessons.handle(path, plain)
+            if response is None:
+                response = self.social.handle(path, plain)
             if response is None:
                 response = self.tutorial_progression.handle(path, plain)
             if response is None:

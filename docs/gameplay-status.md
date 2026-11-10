@@ -12,6 +12,8 @@
 
 직접 게임을 점검하기 위한 별도 수동 Actions 작업은 API30 ARM 변환 에뮬레이터에서 서버와 실제 6.1.1 진단 게임을 함께 실행합니다. 검증 전용 APK에는 소프트웨어 AES·스토어 없는 초기화·GLES3 설정을 사용하며 공개 게임 APK는 바꾸지 않습니다. 초기 튜토리얼 완료 프로필은 알려진 로컬 RPC로만 준비하고, 이 준비 과정과 실제 게임에서 발생한 요청을 구분해 기록합니다. UI 트리·화면·예외·서버 요청을 자료로 남기며 실행 성공을 홈이나 메뉴 성공으로 취급하지 않습니다.
 
+튜토리얼 완료 도중 일부 손가락 안내가 뒤로가기 이외의 위치를 가리킨 것 같다는 사용자 보고도 있습니다. 진행 중단은 없었으며 표시 위치 문제의 정확한 재현은 남아 있습니다.
+
 ## 제목 화면의 환불 기간 조회
 
 `Refund.GetTerm`은 `System.Check` 다음, `Auth.Login` 전에 호출되는 익명 조회입니다. v0.2.1은 로그인 없이 `startDatetime=endDatetime=4102444800000`(2100-01-01 UTC), `shopInvalidStartDatetime=0`을 반환합니다. 공식 환불 신청·잔액 조회는 실행하지 않습니다.
@@ -25,11 +27,14 @@
 | RPC | 로컬 동작 | 저장되는 내용 |
 | --- | --- | --- |
 | `Home.Login` | 설정 수신·로그인 시각 갱신 | `SettingInfo`, `user.lastLoginTime`, JST 날짜별 `totalCount.loginCount` |
-| `Home.Enter` | 마스터 기반 현재 메인 지역·현재 하이어라키 등급·홈 컨테이너 반환 | 읽기 전용; 보상·이벤트는 생성하지 않음 |
+| `Home.Enter` | 마스터 기반 현재 메인 지역·현재 하이어라키 등급·홈 컨테이너 반환 | 완료 계정의 일반 레슨 시간 최초 생성; 조회로 자원을 지급하지 않음 |
+| `Activity.ReceiveLessonReward` | 초기 메인 지역의 기본 레슨 보상 수령 | 프로필별 누적 시간·골드·매니저 경험치/레벨·레슨 피스·누적 골드 |
 | `Home.SetReview` | 리뷰 확인 상태 기록 | `user.isReviewed=true` |
 | `Home.SetCharacterPosition` | 소유 캐릭터·배치 유형을 검증하고 갱신 | `homePositions` |
 | `Dokan.List` | 비어 있는 로컬 팝업 목록 | 없음 |
 | `Notice.List` | 비어 있는 로컬 공지 목록 | 없음 |
+| `Gift.List/ListHistory` | 비어 있는 로컬 선물함·수령 이력과 페이지 종료 상태 | 없음 |
+| `Friend.List/ListApplying/ListApplied/Search` | 외부 플레이어와 연결되지 않은 로컬 친구·신청·검색 목록 | 없음 |
 | `Master.GetVersion` | 묶음의 `!version.txt` 반환 | 없음 |
 | `Tutorial.Init` | 이름과 최초 GameStart 체크포인트 설정 | `user.name`, GameStart step 최소 10 |
 | `Tutorial.Progress` | 알려진 유형·마스터 체크포인트의 진행을 단조 증가 | `tutorials`, GameStart 완료 시각 |
@@ -90,7 +95,7 @@ v0.2.10 사용자 기기에서 `Quest.ListAsset → Deck.Save`는 정상 통과�
 
 패키징 전에 캡처의 사용자 ID·이름·상세 로그 ID를 제거하고 빈 `CommonResponse`로 새 응답을 만듭니다. 실행할 때 단일 시연 사용자의 ID를 로컬 `UserPublic.publicUserId`로, 표시 이름을 현재 매니저 이름으로 연결합니다. 원본 `CreateUserDeck`(`0x489bbb4`)은 서버 ID가 아닌 public ID를 비교합니다. 상세 로그는 연결하지 않으며 `isDisplayDetailAvailable=false`로 미구현 분석 버튼을 비활성화합니다.
 
-`Tutorial.StartQuest`와 리소스 목록 요청은 계정·카드·덱·재화·세션·설정·튜토리얼·라이브 기록을 변경하지 않습니다. 재생 뒤 클라이언트가 별도로 요청하는 `Tutorial.Progress`는 기존 진행 핸들러에서 처리합니다. 활동 보상·일반 라이브 결과·일반 전투 엔진은 아직 구현하지 않았습니다. 출처와 고정 해시·개인정보 제거 범위는 [튜토리얼 재생 데이터](tutorial-replay-data.md)에 기록합니다.
+`Tutorial.StartQuest`와 리소스 목록 요청은 계정·카드·덱·재화·세션·설정·튜토리얼·라이브 기록을 변경하지 않습니다. 재생 뒤 클라이언트가 별도로 요청하는 `Tutorial.Progress`는 기존 진행 핸들러에서 처리합니다. 일반 라이브 결과·일반 전투 엔진은 아직 구현하지 않았습니다. 출처와 고정 해시·개인정보 제거 범위는 [튜토리얼 재생 데이터](tutorial-replay-data.md)에 기록합니다.
 
 ## 신규 프로필의 시작 데이터
 
@@ -123,7 +128,7 @@ v0.2.9의 `repair_starter_inventory`는 버전 3으로 표시된 로컬 기본 �
 - `TimeManager.GetDeviceNowUnixTime`의 `0x1d29230`은 UTC epoch 차이에 `TimeSpan.TotalMilliseconds`를 적용합니다. 따라서 저장 시각은 Unix 밀리초입니다.
 - 독립 최소 스키마와 실제 6.1.1 스키마 양쪽에서 상태 보존·설정·JST 날짜 경계·병렬 변경·오류 롤백·알 수 없는 필드 유지·실제 마스터 참조를 테스트했습니다. 외부 스키마·마스터가 없는 fresh clone에서도 최소 스키마 테스트는 실행됩니다.
 
-일반 전투·활동 보상, 초기 형태 범위 밖의 카드 육성, 가챠·구매 등은 아직 처리하지 않습니다. 준비된 fixture도 없으면 `UNIMPLEMENTED`를 반환합니다. 현재 튜토리얼 완료 표시는 일반 전투·보상 계산의 구현을 뜻하지 않습니다.
+일반 전투, 초기 메인 지역 레슨 이외의 활동 보상, 초기 형태 범위 밖의 카드 육성, 가챠·구매 등은 아직 처리하지 않습니다. 선물 수령·친구 변경도 목록 조회와 별도 미구현입니다. 준비된 fixture도 없으면 `UNIMPLEMENTED`를 반환합니다. 현재 튜토리얼 완료 표시는 일반 전투·보상 계산의 구현을 뜻하지 않습니다.
 
 ## 다음 구현 근거
 
