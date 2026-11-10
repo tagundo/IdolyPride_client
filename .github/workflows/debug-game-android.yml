@@ -69,11 +69,11 @@ jobs:
           set -euo pipefail
           gh api "repos/$GH_REPO/releases/assets/728205797" \
             --header 'Accept: application/octet-stream' > data/ci-input/Game-local-diagnostics.apk
-          gh api "repos/$GH_REPO/releases/assets/730409943" \
-            --header 'Accept: application/octet-stream' > data/ci-input/ServerData-published-v0.2.14.zip
+          gh api "repos/$GH_REPO/releases/assets/730632271" \
+            --header 'Accept: application/octet-stream' > data/ci-input/ServerData-published-v0.2.15.zip
           printf '%s  %s\n' \
             'f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df' 'data/ci-input/Game-local-diagnostics.apk' \
-            'b1ea024a411e9a5e077700c788bb1f6cdbb19fba0100f899344893e797568e1d' 'data/ci-input/ServerData-published-v0.2.14.zip' \
+            'b02854fe3f748618737c6d258a4ed329c2328e4b54c4056e57ed529b326aa97e' 'data/ci-input/ServerData-published-v0.2.15.zip' \
             | sha256sum --check --strict | tee data/android-game-debug/input-checksums.txt
           uv run --locked python - <<'PY'
           import hashlib
@@ -82,7 +82,7 @@ jobs:
           import stat
           from zipfile import ZipFile
 
-          payload = Path('data/ci-input/ServerData-published-v0.2.14.zip')
+          payload = Path('data/ci-input/ServerData-published-v0.2.15.zip')
           with ZipFile(payload) as archive:
               if archive.testzip() is not None:
                   raise SystemExit('Published payload failed ZIP CRC validation')
@@ -200,7 +200,7 @@ jobs:
           ./android-server/gradlew -p android-server :app:assembleDebug \
             --no-daemon --console=plain --stacktrace \
             -PbuildPython="$IDOLY_BUILD_PYTHON" -PserverAbi=x86_64 \
-            -PserverData="$GITHUB_WORKSPACE/data/ci-input/ServerData-published-v0.2.14.zip" \
+            -PserverData="$GITHUB_WORKSPACE/data/ci-input/ServerData-published-v0.2.15.zip" \
             | tee data/android-game-debug/server-build.txt
           cp android-server/app/build/outputs/apk/debug/app-debug.apk data/dist/Server-game-debug.apk
           "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging data/dist/Game-QA-UI.apk \
