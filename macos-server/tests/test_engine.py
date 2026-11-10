@@ -411,6 +411,28 @@ def test_whole_database_guard_detects_unrelated_marker_and_currency_writes(tmp_p
     assert engine._whole_database_state(tmp_path) != before
 
 
+@pytest.mark.parametrize("table,column,replacement", (
+    ("profiles", "server_id", "changed-server"),
+    ("sessions", "expires_at", 4102444800),
+    ("profile_settings", "response", b"changed-settings"),
+    ("starter_profiles", "version", 3),
+))
+def test_continuation_guard_allows_gameplay_snapshot_but_detects_preserved_row_changes(
+        tmp_path, table, column, replacement):
+    from idoly_local.state import State
+
+    state = State(tmp_path / "state.db")
+    state.save_snapshot("sandbox", b"initial", "schema", starter_version=4)
+    state.login("sandbox")
+    state.mutate_snapshot("sandbox", "schema", lambda payload: payload, setting_info=b"original-settings")
+    preserved = engine._preserved_database_state(tmp_path)
+    state.mutate_snapshot("sandbox", "schema", lambda _payload: b"progressed")
+    assert engine._preserved_database_state(tmp_path) == preserved
+    with sqlite3.connect(state.path) as connection:
+        connection.execute("UPDATE " + table + " SET " + column + "=?", (replacement,))
+    assert engine._preserved_database_state(tmp_path) != preserved
+
+
 @pytest.fixture
 def quest_catalog(tmp_path):
     schema = _client_schema()

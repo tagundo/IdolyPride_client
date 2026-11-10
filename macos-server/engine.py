@@ -479,6 +479,14 @@ def _whole_database_state(data_dir):
         return tuple(connection.iterdump())
 
 
+def _preserved_database_state(data_dir):
+    """Keep identity/session/settings/upgrade rows in memory during progression."""
+    path = (Path(data_dir) / "state.db").resolve()
+    with sqlite3.connect(path.as_uri() + "?mode=ro", uri=True) as connection:
+        return {name: connection.execute("SELECT * FROM " + name + " ORDER BY 1").fetchall()
+                for name in ("profiles", "sessions", "profile_settings", "starter_profiles")}
+
+
 def _quest_catalog_reference(top, main, data_dir, user):
     """Check encrypted responses against the bundled public table references."""
     if ([group.SerializeToString() for group in top.mainAreaGroups]
@@ -586,6 +594,8 @@ def smoke(data_dir, server_data, report_path):
               "tutorial_replay_readonly": False, "tutorial_replay_assets_covered": False,
               "initial_inventory_master_backed": False, "default_unit_complete": False,
               "initial_inventory_readonly": False, "starter_inventory_persisted": False,
+              "tutorial_continuation_persisted": False, "tutorial_continuation_identity_preserved": False,
+              "tutorial_continuation_sessions_preserved": False, "tutorial_continuation_settings_preserved": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
     try:
@@ -718,6 +728,16 @@ def smoke(data_dir, server_data, report_path):
         changed = _rpc(address, schema, "/api.User/Get", token=token)
         if changed.user.name != before.user.name or not changed.user.isReviewed or changed.user.lastLoginTime <= 0:
             raise RuntimeError("Home calls did not preserve and update the local user")
+        # All canonical replay and whole-database read-only assertions above
+        # have completed before the following intentional gameplay mutations.
+        from idoly_local.tutorial_qa import (assert_tutorial_continuation_snapshot,
+                                           run_tutorial_continuation)
+        preserved = _preserved_database_state(data_dir)
+        continuation = run_tutorial_continuation(schema,
+            lambda path, request: _rpc(address, schema, path, request, token),
+            Path(data_dir) / "master-json", label="macOS frozen")
+        report["tutorial_continuation"] = continuation
+        changed = _rpc(address, schema, "/api.User/Get", token=token)
         saved_user = changed.SerializeToString()
         tag = json.loads((Path(data_dir) / "original-master/master-tag.json").read_text())
         filename = tag["masterTagPacks"][0]["fileName"]
@@ -735,6 +755,11 @@ def smoke(data_dir, server_data, report_path):
         # session to prove mutations survived a fresh runtime instance.
         runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
         restored = _rpc(runtime.status()["grpc_address"], schema, "/api.User/Get", token=token)
+        assert_tutorial_continuation_snapshot(schema, restored, continuation)
+        if _preserved_database_state(data_dir) != preserved:
+            raise RuntimeError("Tutorial continuation changed identity, sessions, settings or the starter marker")
+        report.update(tutorial_continuation_persisted=True, tutorial_continuation_identity_preserved=True,
+                      tutorial_continuation_sessions_preserved=True, tutorial_continuation_settings_preserved=True)
         report["profile_persisted"] = restored.SerializeToString() == saved_user
         report["starter_inventory_persisted"] = report["profile_persisted"]
         settings = State(Path(data_dir) / "state.db").settings("sandbox")
@@ -753,6 +778,8 @@ def smoke(data_dir, server_data, report_path):
                 "tutorial_replay_short", "tutorial_replay_full", "tutorial_replay_canonical",
                 "tutorial_replay_master_references", "tutorial_replay_readonly", "tutorial_replay_assets_covered",
                 "initial_inventory_master_backed", "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted",
+                "tutorial_continuation_persisted", "tutorial_continuation_identity_preserved",
+                "tutorial_continuation_sessions_preserved", "tutorial_continuation_settings_preserved",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")

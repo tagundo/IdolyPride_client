@@ -181,7 +181,7 @@ def master_dir(tmp_path):
     directory.mkdir()
     rows = {
         "Setting": [{"id": 1, "tutorialPhotoShootingCharacterIds": ["char-" + key for key in "abcde"],
-                     "cardDefaultMental": 100, "cardDefaultTechnique": 100}],
+                     "cardDefaultMental": 100, "cardDefaultTechnique": 100, "deckCountMax": 30}],
         "Character": [{"id": "char-" + key, "type": 1, "defaultCostumeId": "costume-" + key,
                        "defaultLiveCostumeId": "costume-" + key} for key in "abcde"],
         "Costume": [{"id": "costume-" + key, "characterId": "char-" + key, "defaultHairId": "hair-" + key}
@@ -282,15 +282,70 @@ def test_deck_invalid_reference_rolls_back_entire_snapshot(game, position):
     assert game.state.snapshot(game.profile) == before
 
 
-def test_deck_unsupported_modes_buddies_and_creation_preserve_state(game):
+def test_deck_unsupported_modes_and_buddies_preserve_state(game):
     prepare_deck_inventory(game)
     before = game.state.snapshot(game.profile)
-    for values in ({"number": 1, "deckEditType": 2}, {"number": 3, "deckEditType": 1},
+    for values in ({"number": 1, "deckEditType": 3}, {"number": 1, "deckEditType": 4},
                    {"number": 1, "deckEditType": 1, "userDeckPositions": [{"position": 1, "buddyUserId": "other"}]}):
         with pytest.raises(RpcFailure) as error:
             call(game, "/api.Deck/Save", **values)
         assert error.value.code == RpcCode.UNIMPLEMENTED
         assert game.state.snapshot(game.profile) == before
+
+
+def test_deck_unknown_positive_number_is_not_a_creation_request(game):
+    before = game.state.snapshot(game.profile)
+    with pytest.raises(RpcFailure) as error:
+        call(game, "/api.Deck/Save", number=2, deckEditType=1)
+    assert error.value.code == RpcCode.INVALID_ARGUMENT
+    assert game.state.snapshot(game.profile) == before
+
+
+def test_deck_zero_allocates_client_selected_unit_and_preserves_first(game):
+    before = snapshot(game)
+    token, _ = game.state.login(game.profile)
+    positions = [{"position": index, "cardId": row.cardId} for index, row in enumerate(before.cards[:5], 1)]
+    response = call(game, "/api.Deck/Save", number=0, name="Tutorial unit", deckEditType=2,
+                    userDeckPositions=positions)
+    after = snapshot(game)
+    assert after.user.deckSequence == 2
+    assert [row.number for row in after.decks] == [1, 2]
+    assert after.decks[0] == before.decks[0]
+    assert [row for row in after.deckPositions if row.number == 1] == list(before.deckPositions)
+    assert [(row.position, row.cardId, row.costumeId, row.hairId) for row in after.deckPositions if row.number == 2] == [
+        (row["position"], row["cardId"], "", "") for row in positions]
+    assert response.commonResponse.updatedData.user.deckSequence == 2
+    assert game.state.authenticated(token, game.profile)
+    assert State(game.state.path).snapshot(game.profile) == game.state.snapshot(game.profile)
+    # Saving the allocated identity edits it; a new Number=0 request has no
+    # idempotency key and deliberately allocates a separate unit.
+    call(game, "/api.Deck/Save", number=2, name="edited", deckEditType=2, userDeckPositions=positions)
+    assert snapshot(game).user.deckSequence == 2
+    call(game, "/api.Deck/Save", number=0, name="same selection", deckEditType=2, userDeckPositions=positions)
+    assert snapshot(game).user.deckSequence == 3
+
+
+def test_deck_creation_invalid_reference_does_not_allocate(game):
+    before = game.state.snapshot(game.profile)
+    with pytest.raises(RpcFailure) as error:
+        call(game, "/api.Deck/Save", number=0, deckEditType=2,
+             userDeckPositions=[{"position": 1, "cardId": "not-owned"}])
+    assert error.value.code == RpcCode.INVALID_ARGUMENT
+    assert game.state.snapshot(game.profile) == before
+
+
+def test_concurrent_deck_creations_allocate_unique_bounded_sequences(game, master_dir):
+    settings = json.loads((master_dir / "Setting.json").read_text())
+    settings[0]["deckCountMax"] = 3
+    (master_dir / "Setting.json").write_text(json.dumps(settings))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: call(game, "/api.Deck/Save", number=0, deckEditType=1), range(2)))
+    assert sorted(row.commonResponse.updatedData.user.deckSequence for row in results) == [2, 3]
+    before = game.state.snapshot(game.profile)
+    with pytest.raises(RpcFailure) as error:
+        call(game, "/api.Deck/Save", number=0, deckEditType=1)
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert game.state.snapshot(game.profile) == before
 
 
 @pytest.mark.parametrize("positions", [

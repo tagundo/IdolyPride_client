@@ -199,17 +199,34 @@ class Gameplay:
         return current
 
     def _save_deck(self, snapshot, request, result):
-        # Auto composition and borrowed buddies need additional live/rental
-        # contracts; transaction.UserDeckPosition cannot represent buddyUserId.
-        if request.deckEditType != 1 or any(row.buddyUserId for row in request.userDeckPositions):
-            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Only manual local-card deck editing is supported")
+        # Auto (2) sends the client's already selected positions. It does not
+        # ask this endpoint to calculate a formation. Borrowed buddies need a
+        # rental contract that transaction.UserDeckPosition cannot represent.
+        if request.deckEditType not in (1, 2) or any(row.buddyUserId for row in request.userDeckPositions):
+            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Only manual or client-selected local-card deck editing is supported")
         if request.number < 0:
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "A nonnegative deck number is required")
-        if request.number == 0:
-            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Creating a deck needs the client deck-number allocation contract")
         deck = next((row for row in snapshot.decks if row.number == request.number), None)
-        if deck is None:
-            raise RpcFailure(RpcCode.UNIMPLEMENTED, "Creating a deck needs the client deck-number allocation contract")
+        creating = request.number == 0
+        number = request.number
+        if creating:
+            # Android 6.1.1 CreateDeck (0x51f7504) uses a Number=0
+            # placeholder; CreateDeckSaveRequest (0x51fa93c) copies that value.
+            settings = self.catalog.rows("Setting", required=True)
+            limit = settings[0].get("deckCountMax") if len(settings) == 1 else None
+            if type(limit) is not int or limit <= 0:
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Missing local deck count limit")
+            numbers = [row.number for row in snapshot.decks]
+            if (any(value <= 0 for value in numbers) or len(set(numbers)) != len(numbers)
+                    or snapshot.user.deckSequence < 0):
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local deck identities are invalid")
+            if len(numbers) >= limit:
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local deck count limit reached")
+            number = max([snapshot.user.deckSequence, *numbers]) + 1
+            if number > 2147483647:
+                raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local deck sequence exhausted")
+        elif deck is None:
+            raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Unknown local deck number")
         requested = list(request.userDeckPositions)
         if (any(not 1 <= row.position <= 5 for row in requested)
                 or len({row.position for row in requested}) != len(requested)):
@@ -252,8 +269,11 @@ class Gameplay:
                     raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Deck accessory belongs to a different character")
                 if accessory_master[key].get("characterGroupId"):
                     raise RpcFailure(RpcCode.UNIMPLEMENTED, "Character-group accessory restrictions require their master catalog")
-        old = [row for row in snapshot.deckPositions if row.number == request.number]
-        kept = [row for row in snapshot.deckPositions if row.number != request.number]
+        if creating:
+            deck = snapshot.decks.add(number=number)
+            snapshot.user.deckSequence = number
+        old = [row for row in snapshot.deckPositions if row.number == number]
+        kept = [row for row in snapshot.deckPositions if row.number != number]
         for row in old:
             if row.position not in {entry.position for entry in requested}:
                 result.commonResponse.deletedData.deckPositions.add().CopyFrom(row)
@@ -264,13 +284,13 @@ class Gameplay:
             target = snapshot.deckPositions.add()
             if row.position in old_by_position:
                 target.CopyFrom(old_by_position[row.position])  # Preserve unknown fields.
-            target.number, target.position = request.number, row.position
+            target.number, target.position = number, row.position
             for name in ("cardId", "part1AccessoryId", "part2AccessoryId", "costumeId", "hairId"):
                 setattr(target, name, getattr(row, name))
             del target.photoIds[:]
             target.photoIds.extend(row.photoIds)
         deck.name = request.name
-        return ("decks", "deckPositions")
+        return ("user", "decks", "deckPositions") if creating else ("decks", "deckPositions")
 
     @staticmethod
     def _delete_deck(snapshot, request, result):

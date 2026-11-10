@@ -670,6 +670,47 @@ def verify_upgrade_database(qa, preserved):
             db.close()
 
 
+def exercise_tutorial_continuation(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
+    """Continue only after the canonical replay's stopped whole-DB check.
+
+    The caller has finished every read-only replay assertion before this
+    function starts any progression. Reuse the original local session across
+    the later native process restart; issuing another login would hide a lost
+    session or change the identity-preservation evidence.
+    """
+    from idoly_local.tutorial_qa import (assert_tutorial_continuation_snapshot,
+                                       run_tutorial_continuation)
+
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "17-continuation-start")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    print("Continuing the tutorial through encrypted native-server RPCs", flush=True)
+    receipt = run_tutorial_continuation(schema,
+        lambda path, request: rpc(schema, grpc_port, path, token, request),
+        master_dir, label="Android native")
+    qa.capture("18-continuation-complete")
+    qa.tap("서버 중지", "19-continuation-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "20-continuation-persistence-restart")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    restored = rpc(schema, grpc_port, "/api.User/Get", token)
+    assert_tutorial_continuation_snapshot(schema, restored, receipt)
+    if QA_UNKNOWN_PB not in restored.SerializeToString():
+        raise RuntimeError("Tutorial continuation lost the imported unknown protobuf field")
+    qa.capture("21-continuation-persisted")
+    qa.tap("서버 중지", "22-continuation-final-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    return {"tutorial_continuation": receipt, "tutorial_continuation_persisted": True,
+            "tutorial_continuation_identity_preserved": True, "tutorial_continuation_sessions_preserved": True,
+            "tutorial_continuation_settings_preserved": True, "tutorial_continuation_unknown_fields_preserved": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -896,6 +937,8 @@ def main():
             raise RuntimeError("Tutorial demonstration changed synthetic identity, session, settings, marker or snapshot database rows")
         result["tutorial_replay_readonly"] = True
         result.update(upgrade_identity_preserved=True, upgrade_sessions_preserved=True, upgrade_settings_preserved=True)
+        result.update(exercise_tutorial_continuation(qa, schema, grpc_port, login.gameAuthToken,
+                                                    args.master_dir, args.startup_timeout, preserved))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:
@@ -904,7 +947,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("17-final")
+            qa.capture("23-final")
         except Exception:
             pass
         qa.close()
