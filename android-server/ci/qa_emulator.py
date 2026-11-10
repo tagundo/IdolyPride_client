@@ -55,14 +55,28 @@ class QA:
         return result.stdout
 
     def capture(self, stage):
-        raw = self.adb("exec-out", "uiautomator", "dump", "/dev/tty")
-        begin, end = raw.find("<hierarchy"), raw.rfind("</hierarchy>")
-        if begin < 0 or end < 0:
-            raise RuntimeError("uiautomator did not return a UI hierarchy")
-        xml = raw[begin:end + len("</hierarchy>")]
-        (self.artifacts / (stage + ".xml")).write_text(xml, encoding="utf-8")
-        (self.artifacts / (stage + ".png")).write_bytes(self.adb("exec-out", "screencap", "-p", binary=True))
-        return ET.fromstring(xml)
+        # A cold Activity can be displayed before UiAutomation reaches idle.
+        # Retry observations only; no input is sent without a parsed hierarchy.
+        for attempt in range(5):
+            raw = self.adb("exec-out", "uiautomator", "dump", "/dev/tty", check=False)
+            screenshot = self.adb("exec-out", "screencap", "-p", binary=True)
+            (self.artifacts / (stage + ".png")).write_bytes(screenshot)
+            begin, end = raw.find("<hierarchy"), raw.rfind("</hierarchy>")
+            if begin >= 0 and end >= begin:
+                xml = raw[begin:end + len("</hierarchy>")]
+                try:
+                    hierarchy = ET.fromstring(xml)
+                except ET.ParseError:
+                    pass
+                else:
+                    (self.artifacts / (stage + ".xml")).write_text(xml, encoding="utf-8")
+                    return hierarchy
+            failure = self.artifacts / (stage + "-hierarchy-attempt-" + str(attempt))
+            failure.with_suffix(".txt").write_text(raw, encoding="utf-8")
+            failure.with_suffix(".png").write_bytes(screenshot)
+            if attempt < 4:
+                time.sleep(0.5)
+        raise RuntimeError("uiautomator did not return a valid UI hierarchy after five observations")
 
     def tap(self, label, stage):
         for attempt in range(5):

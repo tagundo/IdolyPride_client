@@ -471,6 +471,7 @@ jobs:
           script: |
             python tools/emulator_environment_probe/run_probe.py --apk data/android-server-qa/environment/EnvironmentProbe.apk --output data/android-server-qa/environment/runtime --timeout 60 --record-root
             python -c 'import json; from pathlib import Path; assert json.loads(Path("data/android-server-qa/environment/runtime/root-capability.json").read_text())["reported_root"] is True'
+            adb -s emulator-5554 shell am force-stop org.idolypride.environmentprobe
             bash android-server/ci/run_native_qa.sh
             test "$(adb -s emulator-5554 shell getprop ro.kernel.qemu | tr -d '\r')" = 1
             adb -s emulator-5554 shell am force-stop game.qualiarts.idolypride.localserver
