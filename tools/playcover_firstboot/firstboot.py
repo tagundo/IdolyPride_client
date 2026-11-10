@@ -24,6 +24,10 @@ CLIENTS = {
     'local': ('game.qualiarts.idolypride.local', '아이프라 로컬'),
     'original': ('game.qualiarts.idolypride', 'アイプラ'),
 }
+PLAYCOVER_SOURCES = {
+    '3.1.0': 'a103786e03b7f6257b6b489dfc49ca6712423a2e',
+    '4.0.0-prerelease': 'a7b1693d4fa4310367990cd35d4ebafb20e5c965',
+}
 BACKEND_SOURCE = '42158bade5fce76af03524d2adebafb9334bb44f'
 
 
@@ -34,6 +38,7 @@ def main():
     parser.add_argument('--ax-driver', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=480)
     parser.add_argument('--ipa-variant', choices=tuple(CLIENTS), default='local')
+    parser.add_argument('--playcover-version', choices=tuple(PLAYCOVER_SOURCES), default='3.1.0')
     parser.add_argument('--compare-canonical-launch', action='store_true',
         help='After the known UIKit check-in failure, compare normal LaunchServices opening of the prepared installed bundle')
     args = parser.parse_args()
@@ -45,7 +50,8 @@ def main():
               'source_commit': os.environ.get('GITHUB_SHA'), 'workflow_run_id': os.environ.get('GITHUB_RUN_ID'), 'game_bundle': game,
               'client_variant': args.ipa_variant, 'local_client_patch_present': args.ipa_variant == 'local',
               'backend_applies_to_client': args.ipa_variant == 'local',
-              'playcover_source': 'a7b1693d4fa4310367990cd35d4ebafb20e5c965',
+              'playcover_source': PLAYCOVER_SOURCES[args.playcover_version],
+              'playcover_version_requested': args.playcover_version,
               'game_launched': False, 'gameplay_verified': False, 'credentials_supplied': False,
               'security_settings_changed': False, 'unknown_dialog_stopped': False}
     backend = None; mounted = None
@@ -176,6 +182,14 @@ def main():
             raise RuntimeError('fresh_host_PlayCover_already_present')
         command(['/usr/bin/ditto', source_app, target])
         command(['/usr/bin/codesign', '--verify', '--deep', '--strict', target])
+        playcover_info = plistlib.loads((target / 'Contents/Info.plist').read_bytes())
+        report['playcover_installed_version'] = playcover_info.get('CFBundleShortVersionString')
+        report['playcover_installed_build'] = playcover_info.get('CFBundleVersion')
+        if (playcover_info.get('CFBundleIdentifier') != PLAYCOVER
+                or (args.playcover_version == '3.1.0'
+                    and (report['playcover_installed_version'] != '3.1.0'
+                         or str(report['playcover_installed_build']) != '1633'))):
+            raise RuntimeError('PlayCover_installed_version_or_identity_mismatch')
         report['playcover_installed'] = True
         command(['/usr/bin/hdiutil', 'detach', mounted]); mounted = None
         # Pinned PlayCover initializes AppsVM.shared from its main library

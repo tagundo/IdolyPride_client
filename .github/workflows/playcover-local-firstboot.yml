@@ -3,6 +3,14 @@ name: Observe Idoly Pride IPA first boot in PlayCover on qualified Mac
 on:
   workflow_dispatch:
     inputs:
+      playcover_version:
+        description: Pinned PlayCover release; 3.1.0 build 1633 matches the working user setup
+        type: choice
+        required: true
+        default: '3.1.0'
+        options:
+          - '3.1.0'
+          - '4.0.0-prerelease'
       ipa_variant:
         description: Pinned unmodified QualiArts IPA or local connection client
         type: choice
@@ -21,7 +29,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: playcover-local-firstboot
+  group: playcover-firstboot-${{ inputs.playcover_version || '3.1.0' }}-${{ inputs.ipa_variant || 'local' }}
   cancel-in-progress: false
 
 jobs:
@@ -35,6 +43,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       IDOLY_IPA_VARIANT: ${{ inputs.ipa_variant || 'local' }}
+      IDOLY_PLAYCOVER_VERSION: ${{ inputs.playcover_version || '3.1.0' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,10 +93,13 @@ jobs:
 
           folder = Path('data/playcover-firstboot/input'); folder.mkdir()
           assets = [
-              ('PlayCover/PlayCover', 617729765, 'PlayCover.dmg', 7031217,
-               '54e01381205ed7de05f8316ca229eab39ab8f6202b0dda4de07e98396e64d79e'),
               ('tagundo/IdolyPride_client', 731458081, 'IdolyPride-Server-macOS.app.zip', 94633315,
                'f1cbabf133015587ed2cd72e9f2d80fdf8eded7f92d70a4314d277e72030cb99')]
+          playcovers = {
+              '3.1.0': (189832208, 5563083, '5c3a291827f4802f665daf5c33a6bfe6ef0df2c6dff3f9e554db6514176196e7'),
+              '4.0.0-prerelease': (617729765, 7031217, '54e01381205ed7de05f8316ca229eab39ab8f6202b0dda4de07e98396e64d79e')}
+          identity, size, digest = playcovers[os.environ['IDOLY_PLAYCOVER_VERSION']]
+          assets.insert(0, ('PlayCover/PlayCover', identity, 'PlayCover.dmg', size, digest))
           clients = {
               'local': (726978003, 146399786, 'f02993302c186ac353d2b96f5aefbe93d3794d5309e142184be08547f9f8cfb3'),
               'original': (725761399, 146438450, '33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848')}
@@ -120,7 +132,7 @@ jobs:
           python3 tools/playcover_firstboot/firstboot.py \
             --input data/playcover-firstboot/input --output data/playcover-firstboot/evidence \
             --ax-driver "$RUNNER_TEMP/playcover-ax-driver" --timeout 480 \
-            --ipa-variant "$IDOLY_IPA_VARIANT" "$@"
+            --ipa-variant "$IDOLY_IPA_VARIANT" --playcover-version "$IDOLY_PLAYCOVER_VERSION" "$@"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
