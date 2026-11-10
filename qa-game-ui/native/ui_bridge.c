@@ -23,6 +23,7 @@
 typedef void Obj;
 typedef void Klass;
 typedef void Method;
+typedef void Field;
 typedef struct { float x, y; } Vec2;
 typedef struct { float x, y, z; } Vec3;
 struct bounds { float left, top, right, bottom; Vec2 center; };
@@ -35,6 +36,11 @@ static struct {
     Klass *(*class_from_name)(const void *, const char *, const char *);
     const Method *(*class_get_method_from_name)(Klass *, const char *, int);
     const Method *(*class_get_methods)(Klass *, void **);
+    const Field *(*class_get_field_from_name)(Klass *, const char *);
+    const void *(*field_get_type)(const Field *);
+    uint32_t (*field_get_flags)(const Field *);
+    void (*field_get_value)(Obj *, const Field *, void *);
+    void (*field_static_get_value)(const Field *, void *);
     const void *(*class_get_type)(Klass *);
     Klass *(*object_get_class)(Obj *);
     bool (*class_is_assignable_from)(Klass *, Klass *);
@@ -63,6 +69,15 @@ static struct methods {
     const Method *qua_enabled, *parent_component, *corners, *root_canvas, *render_mode, *camera;
     const Method *screen_point, *screen_width, *screen_height;
 } methods;
+
+static struct {
+    Klass *title_presenter, *title_view, *solis_button, *event_system, *input_module;
+    const Field *callback, *title_initialized, *view, *title_button, *interceptor;
+    const Field *current_input_module, *is_releasing;
+    const Method *initialization_succeeded, *content_blocking;
+} observations;
+struct observed_bool { bool available, value; };
+static bool callback_observation_missing;
 
 struct retained { int32_t id; uint32_t handle; bool qua; };
 static struct retained buttons[NODE_LIMIT];
@@ -126,6 +141,7 @@ static bool load_api(void) {
     LOAD(domain_get); LOAD(domain_get_assemblies); LOAD(assembly_get_image); LOAD(image_get_name);
     LOAD(class_from_name); LOAD(class_get_method_from_name); LOAD(class_get_type); LOAD(type_get_object);
     LOAD(class_get_methods); LOAD(method_get_name); LOAD(method_get_param_count); LOAD(method_get_param); LOAD(type_get_type);
+    LOAD(class_get_field_from_name); LOAD(field_get_type); LOAD(field_get_flags); LOAD(field_get_value); LOAD(field_static_get_value);
     LOAD(object_get_class); LOAD(class_is_assignable_from); LOAD(array_new);
     LOAD(runtime_invoke); LOAD(object_get_virtual_method); LOAD(object_unbox);
     LOAD(gchandle_new); LOAD(gchandle_get_target); LOAD(gchandle_free); LOAD(array_length);
@@ -223,6 +239,26 @@ static bool initialize(void) {
         methods.parent, methods.text_value, methods.tmp_value, methods.qua_enabled};
     if (!methods.button || !methods.text || !methods.tmp || !methods.qua_button) return false;
     for (size_t j = 0; j < sizeof(required)/sizeof(required[0]); ++j) if (!required[j]) return false;
+    observations.title_presenter = klass("Assembly-CSharp.dll", "Solis.Title", "TitlePresenter");
+    observations.title_view = klass("Assembly-CSharp.dll", "Solis.Title", "TitleView");
+    observations.solis_button = klass("solis-submodule.Runtime.dll", "Solis.Common", "SolisButtonBase");
+    observations.event_system = klass("UnityEngine.UI.dll", "UnityEngine.EventSystems", "EventSystem");
+    observations.input_module = klass("Assembly-CSharp.dll", "Solis.Common", "SolisInputModule");
+    observations.callback = api.class_get_field_from_name(methods.qua_button, "onClickedCallback");
+    if (observations.title_presenter) {
+        observations.title_initialized = api.class_get_field_from_name(observations.title_presenter, "_isInitialized");
+        observations.view = api.class_get_field_from_name(observations.title_presenter, "_view");
+    }
+    if (observations.title_view)
+        observations.title_button = api.class_get_field_from_name(observations.title_view, "_titleButton");
+    if (observations.solis_button)
+        observations.interceptor = api.class_get_field_from_name(observations.solis_button, "clickInterceptor");
+    if (observations.event_system)
+        observations.current_input_module = api.class_get_field_from_name(observations.event_system, "m_CurrentInputModule");
+    if (observations.input_module)
+        observations.is_releasing = api.class_get_field_from_name(observations.input_module, "<IsReleasing>k__BackingField");
+    observations.initialization_succeeded = method(klass("Assembly-CSharp.dll", "Solis.Common", "SolisInitializer"), "get_IsSuccess", 0);
+    observations.content_blocking = method(klass("Assembly-CSharp.dll", "Solis.Common", "SolisBlockingManager"), "IsActive", 1);
     initialized = true; return true;
 }
 static bool unity_thread(JNIEnv *e) {
@@ -269,6 +305,149 @@ static bool usable(Obj *o, bool *ok) {
     Obj *game = invoke(methods.game_object, o, NULL, false, ok);
     return game && value_bool(invoke(methods.active, game, NULL, false, ok), ok)
         && value_bool(invoke(methods.enabled, o, NULL, false, ok), ok);
+}
+static bool field_valid(Klass *owner, Obj *o, const Field *field, bool is_static, bool reference) {
+    if (!owner || !field || (((api.field_get_flags(field) & 0x10u) != 0) != is_static)) return false;
+    if (!is_static && (!o || !api.class_is_assignable_from(owner, api.object_get_class(o)))) return false;
+    const void *type = api.field_get_type(field);
+    if (!type) return false;
+    int kind = api.type_get_type(type);
+    /* Only references or the one-byte IL2CPP Boolean may be copied into our buffers. */
+    return reference ? (kind == 0x12 || kind == 0x15 || kind == 0x1c) : kind == 0x02;
+}
+static bool field_reference(Klass *owner, Obj *o, const Field *field, bool is_static, Obj **value) {
+    *value = NULL;
+    if (!field_valid(owner, o, field, is_static, true)) return false;
+    if (is_static) api.field_static_get_value(field, value);
+    else api.field_get_value(o, field, value);
+    return true;
+}
+static struct observed_bool field_boolean(Klass *owner, Obj *o, const Field *field) {
+    if (!field_valid(owner, o, field, false, false)) return (struct observed_bool){false, false};
+    unsigned char value = 0;
+    api.field_get_value(o, field, &value);
+    if (value > 1) return (struct observed_bool){false, false};
+    return (struct observed_bool){true, value != 0};
+}
+static struct observed_bool query_boolean(const Method *m, void **args) {
+    bool ok = true;
+    Obj *value = invoke(m, NULL, args, false, &ok);
+    bool state = ok && value_bool(value, &ok);
+    return (struct observed_bool){ok, state};
+}
+static void boolean_json(struct ui_json *j, struct observed_bool value) {
+    ui_raw(j, !value.available ? "null" : value.value ? "true" : "false");
+}
+static struct observed_bool callback_registered(Obj *button) {
+    Obj *callback = NULL;
+    bool ok = field_reference(methods.qua_button, button, observations.callback, false, &callback);
+    return (struct observed_bool){ok, callback != NULL};
+}
+static struct observed_bool input_releasing(void) {
+    struct observed_bool result = {false, false};
+    if (!observations.event_system || !observations.input_module || !observations.current_input_module
+            || !observations.is_releasing) return result;
+    bool ok = true;
+    Obj *type = api.type_get_object(api.class_get_type(observations.event_system)); void *args[] = {type};
+    Obj *array = invoke(methods.find_all, NULL, args, false, &ok);
+    uint32_t root = array ? api.gchandle_new(array, false) : 0;
+    if (!ok || !root) { if (root) api.gchandle_free(root); return result; }
+    uintptr_t count = api.array_length(array); unsigned active = 0;
+    if (count > 64) { api.gchandle_free(root); return result; }
+    for (uintptr_t ix = 0; ix < count; ++ix) {
+        int32_t index = (int32_t)ix; void *at[] = {&index};
+        Obj *event = invoke(methods.array_get, array, at, false, &ok);
+        if (!ok) break;
+        if (!usable(event, &ok)) { if (!ok) break; continue; }
+        if (++active > 1) { ok = false; break; }
+        Obj *module = NULL;
+        if (!field_reference(observations.event_system, event, observations.current_input_module, false, &module)) { ok = false; break; }
+        /* No EventSystem.current or static SolisInputModule method is invoked:
+         * the latter would run its reflection-writing managed .cctor. */
+        if (!module) { result = (struct observed_bool){true, false}; continue; }
+        void *alive[] = {module};
+        bool live = value_bool(invoke(methods.alive, NULL, alive, false, &ok), &ok);
+        if (!ok) break;
+        if (!live || !api.class_is_assignable_from(observations.input_module, api.object_get_class(module))) {
+            result = (struct observed_bool){true, false}; continue;
+        }
+        result = field_boolean(observations.input_module, module, observations.is_releasing);
+    }
+    api.gchandle_free(root);
+    if (!ok || active != 1) result.available = false;
+    return result;
+}
+static void unavailable_key(struct ui_json *out, const char *key, bool missing, size_t *count) {
+    if (!missing) return;
+    if ((*count)++) ui_raw(out, ",");
+    ui_raw(out, "\""); ui_raw(out, key); ui_raw(out, "\"");
+}
+static void startup_json(struct ui_json *out) {
+    struct observed_bool success = query_boolean(observations.initialization_succeeded, NULL);
+    struct observed_bool releasing = input_releasing();
+    int32_t content_order = 155; void *content_args[] = {&content_order};
+    struct observed_bool blocking = query_boolean(observations.content_blocking, content_args);
+    Obj *interceptor = NULL;
+    bool interceptor_ok = field_reference(observations.solis_button, NULL, observations.interceptor, true, &interceptor);
+    bool titles_ok = observations.title_presenter != NULL, initialized_missing = false, button_missing = false;
+    ui_raw(out, ",\"startup_observation\":{\"title_presenters\":");
+    Obj *array = NULL; uint32_t array_root = 0;
+    uintptr_t count = 0;
+    if (titles_ok) {
+        Obj *type = api.type_get_object(api.class_get_type(observations.title_presenter)); void *args[] = {type};
+        array = invoke(methods.find_all, NULL, args, false, &titles_ok);
+        array_root = array ? api.gchandle_new(array, false) : 0;
+        titles_ok = titles_ok && array_root != 0;
+        if (titles_ok) { count = api.array_length(array); if (count > 8) titles_ok = false; }
+    }
+    if (!titles_ok) ui_raw(out, "null");
+    else {
+        size_t list_start = out->length;
+        ui_raw(out, "["); size_t emitted = 0;
+        for (uintptr_t ix = 0; ix < count; ++ix) {
+            int32_t index = (int32_t)ix; void *args[] = {&index}; bool ok = true;
+            Obj *presenter = invoke(methods.array_get, array, args, false, &ok);
+            if (!ok) { titles_ok = false; break; }
+            if (!usable(presenter, &ok)) { if (!ok) { titles_ok = false; break; } continue; }
+            int32_t id = object_id(presenter, &ok);
+            if (!ok || !id) { titles_ok = false; break; }
+            struct observed_bool initialized_value = field_boolean(observations.title_presenter, presenter, observations.title_initialized);
+            Obj *view = NULL, *button = NULL;
+            bool button_ok = field_reference(observations.title_presenter, presenter, observations.view, false, &view)
+                && view && field_reference(observations.title_view, view, observations.title_button, false, &button) && button;
+            if (button_ok) { void *alive[] = {button}; button_ok = value_bool(invoke(methods.alive, NULL, alive, false, &ok), &ok); }
+            int32_t button_id = button_ok ? object_id(button, &ok) : 0;
+            button_ok = button_ok && ok && button_id != 0;
+            if (emitted++) ui_raw(out, ",");
+            ui_raw(out, "{\"instance_id\":"); ui_number(out, id);
+            ui_raw(out, ",\"is_initialized\":"); boolean_json(out, initialized_value);
+            ui_raw(out, ",\"title_button_id\":");
+            if (button_ok) ui_number(out, button_id); else ui_raw(out, "null");
+            ui_raw(out, "}");
+            initialized_missing |= !initialized_value.available; button_missing |= !button_ok;
+        }
+        if (titles_ok) ui_raw(out, "]");
+        else {
+            out->length = list_start; out->data[list_start] = 0;
+            initialized_missing = button_missing = false;
+            ui_raw(out, "null");
+        }
+    }
+    if (array_root) api.gchandle_free(array_root);
+    ui_raw(out, ",\"solis_initialization_succeeded\":"); boolean_json(out, success);
+    ui_raw(out, ",\"click_interceptor_present\":"); boolean_json(out, (struct observed_bool){interceptor_ok, interceptor != NULL});
+    ui_raw(out, ",\"input_releasing\":"); boolean_json(out, releasing);
+    ui_raw(out, ",\"content_blocking\":"); boolean_json(out, blocking);
+    ui_raw(out, ",\"unavailable\":["); size_t missing = 0;
+    unavailable_key(out, "callback_registered", callback_observation_missing, &missing);
+    unavailable_key(out, "title_presenters", !titles_ok, &missing);
+    unavailable_key(out, "title_presenters.is_initialized", initialized_missing, &missing);
+    unavailable_key(out, "title_presenters.title_button_id", button_missing, &missing);
+    unavailable_key(out, "solis_initialization_succeeded", !success.available, &missing);
+    unavailable_key(out, "click_interceptor_present", !interceptor_ok, &missing);
+    unavailable_key(out, "input_releasing", !releasing.available, &missing);
+    unavailable_key(out, "content_blocking", !blocking.available, &missing);
+    ui_raw(out, "]}");
 }
 static bool button_bounds(Obj *button, struct bounds *out) {
     bool ok = true;
@@ -376,8 +555,13 @@ static bool add_kind(struct ui_json *out, Klass *k, const char *kind, const Meth
             char numbers[128]; snprintf(numbers, sizeof(numbers), "[%.2f,%.2f,%.2f,%.2f]", rect.left, rect.top, rect.right, rect.bottom); ui_raw(out, numbers);
         } else ui_raw(out, "null");
         if (button) { ui_raw(out, ",\"button_type\":\""); ui_raw(out, qua ? "qua" : "unity"); ui_raw(out, "\""); }
+        if (button && qua) {
+            struct observed_bool callback = callback_registered(o);
+            ui_raw(out, ",\"callback_registered\":"); boolean_json(out, callback);
+            callback_observation_missing |= !callback.available;
+        }
         ui_raw(out, "}");
-        if (!ok || out->failed || out->length > JSON_LIMIT - 128) {
+        if (!ok || out->failed || out->length > JSON_LIMIT - 4096) {
             out->length = before; out->data[before] = 0; out->failed = false;
             *truncated = true; break;
         }
@@ -402,7 +586,7 @@ Java_game_qualiarts_idolypride_qa_ui_NativeUiBridge_nativeSnapshot(JNIEnv *e, jc
     if (pthread_mutex_trylock(&mutex)) return error(e, "busy");
     if (!initialize()) { pthread_mutex_unlock(&mutex); return error(e, "runtime_not_ready"); }
     if (!api.thread_current()) { pthread_mutex_unlock(&mutex); return error(e, "wrong_runtime_thread"); }
-    clear_buttons(); advance(); snapshot_time = now_ms();
+    clear_buttons(); advance(); snapshot_time = now_ms(); callback_observation_missing = false;
     char *buffer = calloc(1, JSON_LIMIT); if (!buffer) { pthread_mutex_unlock(&mutex); return error(e, "allocation_failed"); }
     struct ui_json out = {buffer, JSON_LIMIT, 0, false};
     ui_raw(&out, "{\"ok\":true,\"generation\":"); ui_number(&out, (int64_t)generation);
@@ -417,7 +601,8 @@ Java_game_qualiarts_idolypride_qa_ui_NativeUiBridge_nativeSnapshot(JNIEnv *e, jc
         && add_kind(&out, methods.button, "button", NULL, false, &nodes, &truncated)
         && add_kind(&out, methods.text, "text", methods.text_value, false, &nodes, &truncated)
         && add_kind(&out, methods.tmp, "tmp_text", methods.tmp_value, false, &nodes, &truncated);
-    ui_raw(&out, "],\"truncated\":"); ui_raw(&out, truncated ? "true}" : "false}");
+    ui_raw(&out, "]"); startup_json(&out);
+    ui_raw(&out, ",\"truncated\":"); ui_raw(&out, truncated ? "true}" : "false}");
     jstring result = NULL;
     if (ok && !out.failed) result = (*e)->NewStringUTF(e, buffer);
     else { clear_buttons(); advance(); result = error(e, "snapshot_failed"); }

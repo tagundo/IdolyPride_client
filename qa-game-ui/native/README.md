@@ -48,6 +48,41 @@ still displayed 6.1.1. Parsed text omits formatting markup and reflects the
 last parsed render text; it can be empty before the first text layout. Standard
 `UnityEngine.UI.Text` continues to use its text getter.
 
+Each Qua button additionally reports `callback_registered: true|false|null`.
+It reads only whether the existing `onClickedCallback` delegate reference is
+non-null. It does not invoke or identify delegate targets, and `true` alone
+does not prove which listener is registered or whether Android input reached it.
+
+Snapshots include this bounded, nonsecret startup state:
+
+```json
+{"startup_observation":{"title_presenters":[{"instance_id":42,"is_initialized":false,"title_button_id":-123}],"solis_initialization_succeeded":false,"click_interceptor_present":true,"input_releasing":false,"content_blocking":false,"unavailable":[]}}
+```
+
+Title presenter fields use typed metadata field APIs, including a checked
+one-byte Boolean and checked reference fields, with no hardcoded object offsets.
+The active presenter list is capped at eight. Unavailable values are `null` and
+their fixed field keys appear in `unavailable`; an enumeration failure produces
+`title_presenters:null`, rather than an empty list implying absence.
+
+`is_initialized` means that presenter's initialization await succeeded; it is
+separate from click listener registration. `solis_initialization_succeeded`
+reads the existing public `SolisInitializer.IsSuccess` getter. The installed
+Solis click interceptor is normally present even when input is allowed, so its
+presence must not be interpreted as blocking. `input_releasing` reads the
+existing active EventSystem's `m_CurrentInputModule` and, when it is a
+SolisInputModule, its Boolean `IsReleasing` backing field. Zero or multiple
+active EventSystems produce unavailable, not an assumed value. No delegate,
+`EventSystem.current`, or static `SolisInputModule` method is invoked: the
+latter's managed static constructor performs reflection and writes a static
+field, which an observer must not trigger. `content_blocking` uses the verified pure
+`SolisBlockingManager.IsActive(BlockingOrder.ContentBlocking)` query (enum155),
+which checks the existing counter without creating a manager or blocker.
+These observations do not create purchase managers, call initialization,
+invoke click callbacks, release blockers, or write game fields. A driver can
+defer input on an absent callback or a known active input/content gate; an
+unsuccessful initializer alone is not a reason to suppress the first title tap.
+
 Bounds come from the actual RectTransform, root Canvas camera and
 WorldToScreenPoint. They use Unity Screen pixels with a top-left origin, clipped
 to the reported Screen dimensions. They are null if geometry cannot be resolved.

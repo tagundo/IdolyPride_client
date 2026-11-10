@@ -135,6 +135,31 @@
       "name": "il2cpp_array_new",
       "rva": "0x419da70",
       "expected16": "af0cff17b50cff17010cff1742000012"
+    },
+    {
+      "name": "il2cpp_class_get_field_from_name",
+      "rva": "0x419dae0",
+      "expected16": "4487fe17a487fe17d787fe171f88fe17"
+    },
+    {
+      "name": "il2cpp_field_get_type",
+      "rva": "0x419e18c",
+      "expected16": "a5cf0014b2f1001424f2001481f30014"
+    },
+    {
+      "name": "il2cpp_field_get_flags",
+      "rva": "0x419e180",
+      "expected16": "b1f100147986fe17b2f10014a5cf0014"
+    },
+    {
+      "name": "il2cpp_field_get_value",
+      "rva": "0x419e190",
+      "expected16": "b2f1001424f2001481f3001481f30014"
+    },
+    {
+      "name": "il2cpp_field_static_get_value",
+      "rva": "0x419e1a4",
+      "expected16": "85f30014b1f30014080440f908214039"
     }
   ],
   "runtime_validation": "ELF build ID + exact export addresses and 16-byte windows; build provenance pins source APK/native separately; no code is modified"

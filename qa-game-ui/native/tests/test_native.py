@@ -19,7 +19,7 @@ def test_profile_covers_every_loaded_export(tmp_path):
     profile = json.loads((HERE / "runtime-profile.json").read_text())
     loaded = {"il2cpp_" + name for name in re.findall(r"LOAD\((\w+)\);", (HERE / "ui_bridge.c").read_text())}
     assert loaded == {row["name"] for row in profile["exports"]}
-    assert len(loaded) == 26
+    assert len(loaded) == 31
     build.header(profile, tmp_path / "ui_profile.h")
     assert "UI_EXPORT_COUNT" in (tmp_path / "ui_profile.h").read_text()
     for field, value in [("schema", 2), ("architecture", "x86_64"), ("client_version", "6.1.0")]:
@@ -46,6 +46,13 @@ static int free_count, invoke_count;
 static const Method *seen_method;
 static bool throw_managed;
 static int parsed_m, array_m, find_m, name_m, transform_m, parent_m, default_m, old_text_m;
+static int bool_field, callback_field, view_field, title_button_field, static_field, wrong_field, current_input_field, releasing_field;
+static int success_m, releasing_m, blocking_m, field_reads;
+static unsigned char observed_initialized;
+static Obj *observed_callback = (Obj*)0x1111;
+static bool releasing_value, blocking_value;
+static uintptr_t array_size = 1;
+static bool static_input_invoked;
 static bool requested_old_tmp_getter, text_dirty = true;
 static unsigned parsed_calls, old_text_calls;
 struct fake_string { int32_t length; uint16_t chars[32]; };
@@ -72,10 +79,23 @@ static const Method *next_method(Klass *k,void **iter) { (void)k;if(*iter)return
 static const char *method_name(const Method *m) { assert(m==&array_m);return "GetValue"; }
 static uint32_t param_count(const Method *m) { (void)m;return 1; }
 static const void *param(const Method *m,uint32_t n) { (void)m;assert(n==0);return (void*)1; }
-static int type_kind(const void *t) { (void)t;return 8; }
+static int type_kind(const void *t) { return t==(void*)2?2:t==(void*)0x12?0x12:t==(void*)0x15?0x15:8; }
+static const Field *find_field(Klass *k,const char *n) { (void)k;(void)n;return NULL; }
+static uint32_t field_flags(const Field *f) { return f==&static_field?0x16:0; }
+static const void *field_type(const Field *f) { return (f==&bool_field||f==&releasing_field)?(void*)2:f==&wrong_field?(void*)8:f==&static_field?(void*)0x15:(void*)0x12; }
+static Klass *object_class(Obj *o) { assert(o);return (Klass*)0x103; }
+static bool assignable(Klass *expected,Klass *actual) { return expected&&actual; }
+static void read_field(Obj *o,const Field *f,void *value) {
+ assert(o);++field_reads;
+ if(f==&bool_field){memcpy(value,&observed_initialized,1);return;}
+ if(f==&releasing_field){unsigned char b=releasing_value?1:0;memcpy(value,&b,1);return;}
+ Obj *reference=f==&callback_field?observed_callback:f==&view_field?(Obj*)2:(Obj*)3;
+ memcpy(value,&reference,sizeof(reference));
+}
+static void read_static(const Field *f,void *value) { assert(f==&static_field);++field_reads;memcpy(value,&observed_callback,sizeof(observed_callback)); }
 static const void *class_type(Klass *k) { return k; }
 static Obj *type_object(const void *t) { return (Obj*)t; }
-static uintptr_t array_length(Obj *a) { (void)a;return 1; }
+static uintptr_t array_length(Obj *a) { (void)a;return array_size; }
 static uint32_t retain(Obj *o,bool pinned_value) { assert(o&&!pinned_value);return 2; }
 static int32_t string_length(Obj *s) { return ((struct fake_string*)s)->length; }
 static const uint16_t *string_chars(Obj *s) { return ((struct fake_string*)s)->chars; }
@@ -115,6 +135,9 @@ static Obj *call(const Method *m,Obj *o,void **p,Obj **exception) {
  if(m==&name_m)return &label;
  if(m==&transform_m)return (Obj*)2;
  if(m==&parent_m)return NULL;
+ if(m==&success_m)return &truth;
+ if(m==&releasing_m){static_input_invoked=true;return &releasing_value;}
+ if(m==&blocking_m){assert(p&&*(int32_t*)p[0]==155);return &blocking_value;}
  return NULL;
 }
 static void expect(JNIEnv *e,int id,long version,const char *message) {
@@ -155,6 +178,9 @@ int main(void) {
  api.image_get_name=image_name;api.class_from_name=find_class;api.class_get_method_from_name=find_method;
  api.class_get_methods=next_method;api.method_get_name=method_name;api.method_get_param_count=param_count;
  api.method_get_param=param;api.type_get_type=type_kind;
+ api.class_get_field_from_name=find_field;api.field_get_type=field_type;api.field_get_flags=field_flags;
+ api.field_get_value=read_field;api.field_static_get_value=read_static;
+ api.object_get_class=object_class;api.class_is_assignable_from=assignable;
  assert(initialize()&&methods.tmp_value==&parsed_m&&!requested_old_tmp_getter);
  methods.find_all=&find_m;methods.array_get=&array_m;methods.id=&id_m;methods.name=&name_m;
  methods.alive=&alive_m;methods.game_object=&game_m;methods.transform=&transform_m;
@@ -169,6 +195,40 @@ int main(void) {
   assert(strstr(output,"\"text\":\"version.6.1.1\"")&&!strstr(output,"version.0.2.0"));
  }
  assert(parsed_calls==2&&old_text_calls==0&&text_dirty);
+ /* Field sizes/static flags are checked before copying; unknown is not false. */
+ int reads_before=field_reads;Obj *reference=(Obj*)0x999;
+ assert(!field_reference(methods.qua_button,(Obj*)1,&wrong_field,false,&reference)&&reference==NULL);
+ assert(!field_reference(methods.qua_button,(Obj*)1,&static_field,false,&reference));
+ assert(field_reads==reads_before);
+ observations.callback=&callback_field;
+ struct observed_bool callback=callback_registered((Obj*)1);assert(callback.available&&callback.value);
+ observed_callback=NULL;callback=callback_registered((Obj*)1);assert(callback.available&&!callback.value);
+ observations.callback=NULL;callback=callback_registered((Obj*)1);assert(!callback.available);
+ observations.title_presenter=(Klass*)0x103;observations.title_view=(Klass*)0x103;observations.solis_button=(Klass*)0x103;
+ observations.title_initialized=&bool_field;observations.view=&view_field;observations.title_button=&title_button_field;
+ observations.interceptor=&static_field;observations.initialization_succeeded=&success_m;
+ observations.event_system=(Klass*)0x103;observations.input_module=(Klass*)0x103;
+ observations.current_input_module=&current_input_field;observations.is_releasing=&releasing_field;
+ observations.content_blocking=&blocking_m;
+ observed_callback=(Obj*)0x1111;observed_initialized=0;callback_observation_missing=false;
+ char startup[4096]={0};struct ui_json startup_out={startup,sizeof(startup),0,false};startup_json(&startup_out);
+ assert(!startup_out.failed&&strstr(startup,"\"is_initialized\":false")&&strstr(startup,"\"title_button_id\":123"));
+ assert(strstr(startup,"\"solis_initialization_succeeded\":true"));
+ assert(strstr(startup,"\"click_interceptor_present\":true")&&strstr(startup,"\"input_releasing\":false"));
+ assert(strstr(startup,"\"content_blocking\":false")&&strstr(startup,"\"unavailable\":[]"));
+ struct observed_bool releasing=input_releasing();assert(releasing.available&&!releasing.value);
+ releasing_value=true;releasing=input_releasing();assert(releasing.available&&releasing.value);releasing_value=false;
+ array_size=0;releasing=input_releasing();assert(!releasing.available);
+ array_size=2;releasing=input_releasing();assert(!releasing.available);array_size=1;
+ assert(!static_input_invoked);
+ observations.event_system=NULL;observations.interceptor=&wrong_field;observed_initialized=2;callback_observation_missing=true;
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};startup_json(&startup_out);
+ assert(!startup_out.failed&&strstr(startup,"\"is_initialized\":null")&&strstr(startup,"\"input_releasing\":null"));
+ assert(strstr(startup,"\"click_interceptor_present\":null"));
+ assert(strstr(startup,"\"unavailable\":[\"callback_registered\",\"title_presenters.is_initialized\",\"click_interceptor_present\",\"input_releasing\"]"));
+ throw_managed=true;memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};startup_json(&startup_out);throw_managed=false;
+ assert(!startup_out.failed&&strstr(startup,"\"title_presenters\":null")&&!strstr(startup,"\"title_presenters\":[]"));
+ assert(strstr(startup,"\"solis_initialization_succeeded\":null")&&strstr(startup,"\"content_blocking\":null"));
  puts("host safety checks passed");return 0;
 }
 '''
