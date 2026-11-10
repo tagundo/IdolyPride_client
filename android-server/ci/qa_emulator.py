@@ -711,6 +711,60 @@ def exercise_tutorial_continuation(qa, schema, grpc_port, token, master_dir, sta
             "tutorial_continuation_settings_preserved": True, "tutorial_continuation_unknown_fields_preserved": True}
 
 
+def verify_ordinary_lesson_database(qa, schema, receipt):
+    """Compare claimed resources and the raw clock without exporting DB rows."""
+    from idoly_local.lesson_qa import assert_ordinary_lesson_progress, assert_ordinary_lesson_snapshot
+
+    with tempfile.TemporaryDirectory(prefix="idoly-native-lesson-verify-") as directory:
+        path = _copy_private_database(qa, directory)
+        with sqlite3.connect(path) as db:
+            clock = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile=?",
+                               ("sandbox",)).fetchone()
+            snapshot = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                                  ("sandbox",)).fetchone()
+            if (clock is None or snapshot is None or clock[1] != schema.fingerprint
+                    or snapshot[1] != schema.fingerprint):
+                raise RuntimeError("Native ordinary lesson snapshot/clock schema was not persisted")
+            assert_ordinary_lesson_progress(schema, clock[0], receipt)
+            assert_ordinary_lesson_snapshot(schema, snapshot[0], receipt)
+
+
+def exercise_ordinary_lesson_claim(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
+    """Claim after the opening's own restart/hash test, then restart once more."""
+    from idoly_local.lesson_qa import (assert_ordinary_lesson_home, assert_ordinary_lesson_snapshot,
+                                     run_ordinary_lesson_claim)
+
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "23-ordinary-lesson-start")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    receipt = run_ordinary_lesson_claim(schema,
+        lambda path, request: rpc(schema, grpc_port, path, token, request),
+        master_dir, label="Android native")
+    qa.capture("24-ordinary-lesson-claimed")
+    qa.tap("서버 중지", "25-ordinary-lesson-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_ordinary_lesson_database(qa, schema, receipt)
+
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "26-ordinary-lesson-persistence-restart")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    assert_ordinary_lesson_snapshot(schema, rpc(schema, grpc_port, "/api.User/Get", token), receipt)
+    assert_ordinary_lesson_home(schema, rpc(schema, grpc_port, "/api.Home/Enter", token), receipt)
+    assert_ordinary_lesson_snapshot(schema, rpc(schema, grpc_port, "/api.User/Get", token), receipt)
+    qa.capture("27-ordinary-lesson-persisted")
+    qa.tap("서버 중지", "28-ordinary-lesson-final-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_ordinary_lesson_database(qa, schema, receipt)
+    return {"ordinary_lesson": receipt, "ordinary_lesson_persisted": True,
+            "ordinary_lesson_clock_persisted": True, "ordinary_lesson_resources_persisted": True,
+            "ordinary_lesson_identity_preserved": True, "ordinary_lesson_sessions_preserved": True,
+            "ordinary_lesson_settings_preserved": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -939,6 +993,8 @@ def main():
         result.update(upgrade_identity_preserved=True, upgrade_sessions_preserved=True, upgrade_settings_preserved=True)
         result.update(exercise_tutorial_continuation(qa, schema, grpc_port, login.gameAuthToken,
                                                     args.master_dir, args.startup_timeout, preserved))
+        result.update(exercise_ordinary_lesson_claim(qa, schema, grpc_port, login.gameAuthToken,
+                                                    args.master_dir, args.startup_timeout, preserved))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:
@@ -947,7 +1003,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("23-final")
+            qa.capture("29-final")
         except Exception:
             pass
         qa.close()

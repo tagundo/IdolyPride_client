@@ -596,8 +596,12 @@ def smoke(data_dir, server_data, report_path):
               "initial_inventory_readonly": False, "starter_inventory_persisted": False,
               "tutorial_continuation_persisted": False, "tutorial_continuation_identity_preserved": False,
               "tutorial_continuation_sessions_preserved": False, "tutorial_continuation_settings_preserved": False,
+              "ordinary_lesson_persisted": False, "ordinary_lesson_clock_persisted": False,
+              "ordinary_lesson_resources_persisted": False, "ordinary_lesson_identity_preserved": False,
+              "ordinary_lesson_sessions_preserved": False, "ordinary_lesson_settings_preserved": False,
               "settings_persisted": False, "profile_persisted": False,
               "asset_range": False, "server_stopped": False, "game_client_tested": False}
+    engine_label = "macOS frozen" if report["frozen_runtime"] else "source engine"
     try:
         status = runtime.status()
         report["server_started"] = bool(status["running"])
@@ -735,7 +739,7 @@ def smoke(data_dir, server_data, report_path):
         preserved = _preserved_database_state(data_dir)
         continuation = run_tutorial_continuation(schema,
             lambda path, request: _rpc(address, schema, path, request, token),
-            Path(data_dir) / "master-json", label="macOS frozen")
+            Path(data_dir) / "master-json", label=engine_label)
         report["tutorial_continuation"] = continuation
         changed = _rpc(address, schema, "/api.User/Get", token=token)
         saved_user = changed.SerializeToString()
@@ -764,6 +768,31 @@ def smoke(data_dir, server_data, report_path):
         report["starter_inventory_persisted"] = report["profile_persisted"]
         settings = State(Path(data_dir) / "state.db").settings("sandbox")
         report["settings_persisted"] = settings == (expected_settings, schema.fingerprint)
+        # The tutorial receipt above is checked before this separate mutation;
+        # its snapshot hash must never be reused after claiming ordinary XP.
+        from idoly_local.lesson_qa import (assert_ordinary_lesson_home, assert_ordinary_lesson_progress,
+                                         assert_ordinary_lesson_snapshot, run_ordinary_lesson_claim)
+        ordinary = run_ordinary_lesson_claim(schema,
+            lambda path, request: _rpc(runtime.status()["grpc_address"], schema, path, request, token),
+            Path(data_dir) / "master-json", label=engine_label)
+        report["ordinary_lesson"] = ordinary
+        runtime.stop()
+        runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
+        address = runtime.status()["grpc_address"]
+        assert_ordinary_lesson_snapshot(schema, _rpc(address, schema, "/api.User/Get", token=token), ordinary)
+        lesson = State(Path(data_dir) / "state.db").lesson_progress("sandbox")
+        if lesson is None or lesson[1] != schema.fingerprint:
+            raise RuntimeError("Ordinary lesson clock/schema did not survive a fresh runtime")
+        assert_ordinary_lesson_progress(schema, lesson[0], ordinary)
+        assert_ordinary_lesson_home(schema, _rpc(address, schema, "/api.Home/Enter", token=token), ordinary)
+        assert_ordinary_lesson_snapshot(schema, _rpc(address, schema, "/api.User/Get", token=token), ordinary)
+        if State(Path(data_dir) / "state.db").lesson_progress("sandbox") != lesson:
+            raise RuntimeError("Post-restart Home.Enter changed the stored ordinary lesson clock")
+        if _preserved_database_state(data_dir) != preserved:
+            raise RuntimeError("Ordinary lesson claim changed identity, sessions, settings or the starter marker")
+        report.update(ordinary_lesson_persisted=True, ordinary_lesson_clock_persisted=True,
+                      ordinary_lesson_resources_persisted=True, ordinary_lesson_identity_preserved=True,
+                      ordinary_lesson_sessions_preserved=True, ordinary_lesson_settings_preserved=True)
     finally:
         runtime.stop()
         report["server_stopped"] = runtime.status()["running"] is False
@@ -780,6 +809,8 @@ def smoke(data_dir, server_data, report_path):
                 "initial_inventory_master_backed", "default_unit_complete", "initial_inventory_readonly", "starter_inventory_persisted",
                 "tutorial_continuation_persisted", "tutorial_continuation_identity_preserved",
                 "tutorial_continuation_sessions_preserved", "tutorial_continuation_settings_preserved",
+                "ordinary_lesson_persisted", "ordinary_lesson_clock_persisted", "ordinary_lesson_resources_persisted",
+                "ordinary_lesson_identity_preserved", "ordinary_lesson_sessions_preserved", "ordinary_lesson_settings_preserved",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
