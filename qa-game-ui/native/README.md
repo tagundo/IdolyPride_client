@@ -22,6 +22,52 @@ The original and bootstrap file hashes are provenance; the runtime guard does
 not claim to hash the entire loaded image. The QA APK packager separately pins
 the source APK and records all permitted QA adaptations.
 
+## Separate packaging inputs
+
+`tools/package_qa_ui_client.py` keeps the existing `diagnostic-aes` profile as
+its default. That profile still requires the audited software-AES/no-store
+intermediate and its matching `--qa-aes-report`; it is not an original-client
+baseline. It retains `game.qualiarts.idolypride.local.diagnostics`.
+
+The explicitly selected `normal-local` profile instead requires the published
+normal local APK (release asset `726978000`, SHA-256
+`28ecc6a617867d0842a5e88eac3d5736199809a49d4d433ce47816d6a40ba77b`).
+It rejects diagnostic reports and prior QA markers, verifies the published
+certificate and exact original FastAES/Unity bytes, normal IL2CPP/metadata and
+four existing top-level DEX files. This input already has the local endpoint
+and six authentication bootstrap patches; it is not the untouched game. The
+UI packager adds no further bootstrap, AES, store, graphics or game-code changes.
+
+For example, after building this library and providing SDK/JDK/APKEditor:
+
+```sh
+uv run --locked python tools/package_qa_ui_client.py data/clients/Game-r2-pinned.apk \
+  --input-profile normal-local \
+  --expected-source-sha256 28ecc6a617867d0842a5e88eac3d5736199809a49d4d433ce47816d6a40ba77b \
+  --native-library scratch/ui-native/lib/arm64-v8a/libidoly_qa_ui_bridge.so \
+  --apkeditor /path/to/APKEditor.jar --build-tools "$ANDROID_HOME/build-tools/34.0.0" \
+  --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+  --emulator-only --output scratch/normal-local-ui-qa.apk
+```
+
+The new QA copy keeps `game.qualiarts.idolypride.local`, uses the fixed
+nonexported authority `game.qualiarts.idolypride.local.qa.ui`, becomes debuggable,
+and receives an ephemeral QA signature. All input ZIP members other than the
+manifest/signatures are checked unchanged. The source APK is never overwritten.
+The appended marker/report identify the selected input profile and preserved
+member hashes. Runtime activation requires the matching package/profile marker,
+the pinned normal input hash, and both existing emulator guards; the original
+production package is never allowed. This preparation is not device validation.
+
+A later emulator run can use the current host Python server with a fresh
+synthetic `sandbox` profile and the prepared payload directory, then reverse
+both services with `adb reverse tcp:50051 tcp:50051` and
+`adb reverse tcp:8080 tcp:8080`. This avoids depending on Android server-app
+packaging for testing the current backend. The UI listener remains loopback-only
+on port 50052 with its existing temporary private token and expiry. Read that
+token only in memory through the disposable app's `run-as`; do not put it into
+logs, build reports or artifacts. No workflow is enabled by this packaging step.
+
 `NativeUiBridge.nativeSnapshot()` returns ASCII JSON. Success contains:
 
 ```json

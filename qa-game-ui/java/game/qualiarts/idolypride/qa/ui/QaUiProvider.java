@@ -20,7 +20,9 @@ import org.json.JSONObject;
 
 /** Nonexported, temporary QA bootstrap. Physical devices never start a bridge. */
 public final class QaUiProvider extends ContentProvider {
-    private static final String PACKAGE = "game.qualiarts.idolypride.local.diagnostics";
+    private static final String DIAGNOSTIC_PACKAGE = "game.qualiarts.idolypride.local.diagnostics";
+    private static final String NORMAL_PACKAGE = "game.qualiarts.idolypride.local";
+    private static final String NORMAL_INPUT_SHA256 = "28ecc6a617867d0842a5e88eac3d5736199809a49d4d433ce47816d6a40ba77b";
     private static final String TOKEN_FILE = "idoly-qa-ui-token";
     private static final String TAG = "IdolyQaUi";
     private static final long SESSION_MILLIS = 1800000L;
@@ -28,8 +30,9 @@ public final class QaUiProvider extends ContentProvider {
 
     @Override public boolean onCreate() {
         Context context = getContext();
-        if (context == null || !PACKAGE.equals(context.getPackageName())
-                || !PACKAGE.equals(Application.getProcessName()) || !emulatorHardware()
+        if (context == null || !(DIAGNOSTIC_PACKAGE.equals(context.getPackageName())
+                || NORMAL_PACKAGE.equals(context.getPackageName()))
+                || !context.getPackageName().equals(Application.getProcessName()) || !emulatorHardware()
                 || !validMarker(context) || !STARTED.compareAndSet(false, true)) return true;
         Thread worker = new Thread(new Bootstrap(context.getApplicationContext()), "IdolyQaUiBootstrap");
         worker.setDaemon(true);
@@ -52,8 +55,18 @@ public final class QaUiProvider extends ContentProvider {
                 buffer.write(chunk, 0, count);
             }
             JSONObject marker = new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8));
-            return marker.optInt("schema", 0) == 1 && marker.optBoolean("qa_only", false)
-                && marker.optBoolean("emulator_only", false) && PACKAGE.equals(marker.optString("package", ""));
+            String packageName = context.getPackageName();
+            String profile = marker.optString("input_profile", "diagnostic-aes");
+            boolean supportedProfile = DIAGNOSTIC_PACKAGE.equals(packageName) && "diagnostic-aes".equals(profile);
+            if (NORMAL_PACKAGE.equals(packageName)) {
+                supportedProfile = "normal-local".equals(profile)
+                    && NORMAL_INPUT_SHA256.equals(marker.optString("input_apk_sha256", ""))
+                    && (NORMAL_PACKAGE + ".qa.ui").equals(marker.optString("authority", ""))
+                    && !marker.optBoolean("exported", true) && marker.optBoolean("debuggable", false)
+                    && marker.optBoolean("loopback_only", false);
+            }
+            return supportedProfile && marker.optInt("schema", 0) == 1 && marker.optBoolean("qa_only", false)
+                && marker.optBoolean("emulator_only", false) && packageName.equals(marker.optString("package", ""));
         } catch (Exception ignored) { return false; }
     }
 

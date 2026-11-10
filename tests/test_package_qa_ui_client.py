@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
 
@@ -163,3 +164,109 @@ def test_compiled_provider_requires_nonexported_and_debuggable_contract():
     qa.verify_provider_xml(real_format)
     with pytest.raises(qa.AndroidPackagingError):
         qa.verify_provider_xml(real_format.replace("debuggable(0x0101000f)=true", "debuggable(0x0101000f)=false"))
+
+
+@pytest.fixture
+def normal_local(tmp_path, monkeypatch):
+    payload = {qa.IL2CPP: b"normal bootstrap, original store", qa.FAST_AES: b"original AES",
+        qa.METADATA_NAME: b"normal local endpoint metadata", "lib/arm64-v8a/libunity.so": b"original Unity GLES"}
+    for name in qa.PINNED_NORMAL_DEX:
+        payload[name] = name.encode()
+    for key, name in (("PINNED_NATIVE_BEFORE", qa.IL2CPP), ("PINNED_AES_BEFORE", qa.FAST_AES),
+                      ("PINNED_METADATA", qa.METADATA_NAME), ("PINNED_UNITY", "lib/arm64-v8a/libunity.so")):
+        monkeypatch.setattr(qa, key, hashlib.sha256(payload[name]).hexdigest())
+    monkeypatch.setattr(qa, "PINNED_NORMAL_DEX", {name: hashlib.sha256(payload[name]).hexdigest()
+                                               for name in qa.PINNED_NORMAL_DEX})
+    marker = {"package": qa.NORMAL_PACKAGE, "original_package": "game.qualiarts.idolypride",
+        "input_sha256": qa.PINNED_XAPK, "endpoint": "http://127.0.0.1:50051", "native_override": False,
+        "native_output_sha256": qa.PINNED_NATIVE_BEFORE, "native_original_sha256": qa.PINNED_NATIVE_ORIGINAL,
+        "metadata_patch": {"input_sha256": qa.PINNED_METADATA_ORIGINAL, "output_sha256": qa.PINNED_METADATA},
+        "native_bootstrap": {"input_sha256": qa.PINNED_NATIVE_ORIGINAL, "output_sha256": qa.PINNED_NATIVE_BEFORE,
+            "patches": [{"method": method} for method in sorted(qa.BOOTSTRAP_METHODS)]}}
+    return tmp_path / "normal.apk", payload, marker
+
+
+def write_normal_fixture(normal_local, monkeypatch):
+    source, payload, marker = normal_local
+    with ZipFile(source, "w") as archive:
+        for name, raw in payload.items():
+            archive.writestr(name, raw)
+        archive.writestr("assets/idoly-local.json", json.dumps(marker))
+    monkeypatch.setattr(qa, "PINNED_NORMAL", qa.digest(source))
+    monkeypatch.setattr(qa, "PINNED_NORMAL_BYTES", source.stat().st_size)
+    return source
+
+
+def test_normal_local_requires_explicit_separate_profile_and_never_uses_diagnostic_report(normal_local, monkeypatch):
+    source = write_normal_fixture(normal_local, monkeypatch)
+    members, provenance = qa.validate_input(source, None, qa.PINNED_NORMAL, qa.NORMAL_PROFILE)
+    assert members[qa.FAST_AES] == qa.PINNED_AES_BEFORE
+    assert provenance["normal_local_apk_sha256"] == qa.PINNED_NORMAL
+    assert provenance["original_source_sha256"] == qa.PINNED_XAPK
+    assert "software_aes_sha256" not in provenance and "native_no_store_sha256" not in provenance
+    with pytest.raises(qa.AndroidPackagingError, match="requires.*QA AES report"):
+        qa.validate_input(source, None, qa.PINNED_NORMAL)
+    with pytest.raises(qa.AndroidPackagingError, match="must not receive"):
+        qa.validate_input(source, Path("missing-report.json"), qa.PINNED_NORMAL, qa.NORMAL_PROFILE)
+
+
+@pytest.mark.parametrize("change", ("wrong-hash", "wrong-size", "aes", "native", "unity", "dex",
+    "extra-dex", "qa-marker", "ui-library", "package", "override", "original-native", "missing-bootstrap"))
+def test_normal_local_rejects_adaptations_and_wrong_provenance(normal_local, monkeypatch, change):
+    _, payload, marker = normal_local
+    names = {"aes": qa.FAST_AES, "native": qa.IL2CPP, "unity": "lib/arm64-v8a/libunity.so", "dex": "classes2.dex"}
+    if change in names:
+        payload[names[change]] = b"changed adaptation"
+    elif change == "extra-dex":
+        payload["classes5.dex"] = b"preexisting observer"
+    elif change == "qa-marker":
+        payload[qa.AES_MARKER] = b"{}"
+    elif change == "ui-library":
+        payload[qa.NATIVE] = b"prior UI observer"
+    elif change == "package":
+        marker["package"] = qa.PACKAGE
+    elif change == "override":
+        marker["native_override"] = True
+    elif change == "original-native":
+        marker["native_original_sha256"] = "0" * 64
+    elif change == "missing-bootstrap":
+        marker["native_bootstrap"]["patches"].pop()
+    source = write_normal_fixture(normal_local, monkeypatch)
+    expected = qa.PINNED_NORMAL
+    if change == "wrong-hash":
+        expected = "0" * 64
+    elif change == "wrong-size":
+        monkeypatch.setattr(qa, "PINNED_NORMAL_BYTES", source.stat().st_size + 1)
+    with pytest.raises(qa.AndroidPackagingError):
+        qa.validate_input(source, None, expected, qa.NORMAL_PROFILE)
+
+
+def test_normal_profile_manifest_keeps_identity_fixed_authority_and_original_dex(tmp_path):
+    root = decoded(tmp_path, qa.NORMAL_PACKAGE)
+    before = {p.name: p.read_bytes() for p in (root / "dex").iterdir()}
+    assert qa.add_provider(root, qa.NORMAL_PROFILE) == "classes11.dex"
+    tree = ET.parse(root / "AndroidManifest.xml").getroot()
+    assert tree.get("package") == qa.NORMAL_PACKAGE
+    provider = tree.find("application").findall("provider")[-1]
+    assert provider.get(qa.ANDROID + "authorities") == qa.NORMAL_PACKAGE + ".qa.ui"
+    assert provider.get(qa.ANDROID + "exported") == "false"
+    assert before == {p.name: p.read_bytes() for p in (root / "dex").iterdir()}
+    with pytest.raises(qa.AndroidPackagingError):
+        qa.add_provider(root)
+
+
+@pytest.mark.parametrize("signers", ([], ["0" * 64], [qa.PINNED_NORMAL_CERT, qa.PINNED_NORMAL_CERT]))
+def test_normal_signature_rejects_missing_wrong_or_multiple_signers(monkeypatch, signers):
+    monkeypatch.setattr(qa, "_run", lambda *args: SimpleNamespace(stdout="\n".join(
+        f"Signer #{i} certificate SHA-256 digest: {value}" for i, value in enumerate(signers, 1))))
+    with pytest.raises(qa.AndroidPackagingError, match="signer"):
+        qa.verify_normal_signature(Path("normal.apk"), Path("build-tools"))
+
+
+def test_normal_signature_requires_published_cert_and_java_guard_pins_same_input(monkeypatch):
+    monkeypatch.setattr(qa, "_run", lambda *args: SimpleNamespace(
+        stdout=f"Signer #1 certificate SHA-256 digest: {qa.PINNED_NORMAL_CERT}\n"))
+    qa.verify_normal_signature(Path("normal.apk"), Path("build-tools"))
+    provider = (qa.JAVA_ROOT / "game/qualiarts/idolypride/qa/ui/QaUiProvider.java").read_text()
+    assert f'NORMAL_INPUT_SHA256 = "{qa.PINNED_NORMAL}"' in provider
+    assert f'NORMAL_PACKAGE = "{qa.NORMAL_PACKAGE}"' in provider
