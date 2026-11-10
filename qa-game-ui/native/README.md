@@ -37,6 +37,17 @@ buttons using a `/` boundary. `interactable` means the Qua button's `IsEnabled`
 or standard Selectable's `IsInteractable`; it does not imply absence of an
 overlaid modal.
 
+TMP node text uses virtual `TMP_Text.GetParsedText()`, which copies the current
+`m_textInfo.characterInfo` render characters into a new string without writing
+TMP instance fields. The client's `TMP_Text.text` getter is unsuitable for a
+repeated observer: its first read consumes the backing-string dirty flag but
+leaves `m_text` at the serialized value, so later reads can return stale text.
+For example, the first actual snapshot read `version.6.1.1` and later reads of
+the same component returned its serialized `version.0.2.0` while the screen
+still displayed 6.1.1. Parsed text omits formatting markup and reflects the
+last parsed render text; it can be empty before the first text layout. Standard
+`UnityEngine.UI.Text` continues to use its text getter.
+
 Bounds come from the actual RectTransform, root Canvas camera and
 WorldToScreenPoint. They use Unity Screen pixels with a top-left origin, clipped
 to the reported Screen dimensions. They are null if geometry cannot be resolved.

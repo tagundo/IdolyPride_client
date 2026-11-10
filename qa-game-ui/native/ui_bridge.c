@@ -206,7 +206,9 @@ static bool initialize(void) {
     methods.interactable = method(selectable, "IsInteractable", 0);
     methods.parent = method(transform, "get_parent", 0);
     methods.text_value = method(methods.text, "get_text", 0);
-    methods.tmp_value = method(methods.tmp, "get_text", 0);
+    /* TMP's text getter consumes a dirty flag without updating its cached
+     * m_text in this client. Read the parsed render characters instead. */
+    methods.tmp_value = method(methods.tmp, "GetParsedText", 0);
     methods.qua_enabled = method(methods.qua_button, "get_IsEnabled", 0);
     methods.parent_component = method(component, "GetComponentInParent", 1);
     methods.corners = method(methods.rect, "GetWorldCorners", 1);
