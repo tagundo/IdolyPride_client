@@ -1,17 +1,17 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했습니다. v0.3.0 베타는 기존 일반 레슨·스토리·외형 저장에 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행 저장을 추가했습니다. 새 APK의 ARM64 실행, 기존 데이터 보완·업데이트·재시작 보존과 Mac 앱 실행을 검사했습니다.
+아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했습니다. **v0.3.1 베타는 자동 편성 후 `Deck.Save`가 `UNIMPLEMENTED`로 실패하던 문제를 수정했습니다.** 실제 ARM64 환경의 이전 서버 APK에서 오류를 재현하고, 데이터를 지우지 않은 업데이트·덱 저장·재시작 보존과 Mac 앱 실행을 검사했습니다. 실제 게임의 자동 편성 버튼 동작 검증은 남아 있습니다.
 
-v0.3.0 베타에는 **첫 메인 라이브 실험 기능**도 포함합니다. 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 검증한 v0.3.0 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
+v0.3.0 베타에서 추가한 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행, **첫 메인 라이브 실험 기능**도 유지합니다. 라이브 실험 기능의 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 검증한 v0.3.1 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [서버 앱 v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [서버 앱 v0.3.1 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.1)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.0/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
-| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.0/IdolyPride-Local-Server-macOS-arm64.app.zip) | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
+| Android ARM64, Android 9 이상 | [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.1/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
+| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.1/IdolyPride-Local-Server-macOS-arm64.app.zip) | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
 2. **아이프라 서버 / 아이프라 로컬 서버**에서 **서버 시작**을 누릅니다.
@@ -32,7 +32,7 @@ Android에서 문제가 발생하면 [별도 진단 게임 v0.2.1](https://githu
 | `Refund.GetTerm` | 제목 화면에서 로그인 없이 조회; 로컬 환불 기간 비활성·유료 상점 닫힘 |
 | `User.Get` | 계정별 fixture 우선, 다음 SQLite snapshot 제공 |
 | 홈·설정·튜토리얼 10개 RPC | `Home.Login/Enter/SetReview/SetCharacterPosition`, `Dokan.List`, `Notice.List`, `Master.GetVersion`, `Tutorial.Init/Progress/Skip` 구현 |
-| `Deck.Save/Delete` | 새 번호 할당, 기존 덱 편집·삭제, 클라이언트가 자동 선택한 편성 저장과 보유 참조 검증 |
+| `Deck.Save/Delete` — v0.3.1 | 새 번호 할당, 기존 덱 편집·삭제, 편집 모드 1~4의 클라이언트 선택 배치 저장과 보유 참조 검증 |
 | `Quest.Top/ListMain/ListAsset` | 메인·튜토리얼 목록과 저장된 5인 덱의 캐릭터·의상·헤어 리소스 참조 조회; 잠긴 하이스코어 정보 제공, 전투·보상 생성 없음 |
 | `Tutorial.StartQuest` | 검증된 공식 short/full 기록의 고정 시연 편성 재생; 로컬 사용자 표시·필요 리소스 연결, 계정 상태 변경 없음 |
 | 첫 일반 라이브 — v0.3.0 베타 | 기본값 꺼짐인 실험 기능; 첫 메인 퀘스트만 현재 덱·능력치·스킬로 로컬 계산, 첫 성공 보상·경험치 1회와 결과 저장, 동일 요청 재시도 시 원래 응답 반환 |
@@ -50,6 +50,8 @@ Android에서 문제가 발생하면 [별도 진단 게임 v0.2.1](https://githu
 | 기존 계정 보존 | `User.Get` snapshot 가져오기와 제한된 공식 세션 읽기 수집 구현; 실제 계정 수집은 미검증 |
 | 나머지 일반 라이브·확장 육성·가챠·구매·전체 게임 진행 | 첫 메인 퀘스트 실험 범위 밖의 기능은 미구현 |
 | 실제 게임 앱의 홈 진입·플레이 | 사용자 Android 기기의 홈·모델·편성·초기 튜토리얼 완료 확인; 현재 공식 ARM64 Cuttlefish·QEMU TCG에서 원본 주의 화면과 일반 연결판 타이틀·초기 RPC 확인, 이 환경의 로그인·홈은 미검증 |
+
+`Deck.Save`는 `Manual(1)`, `Auto(2)`, `ManualAuto(3)`, `QuestAuto(4)`로 전달된 배치를 검사해 저장합니다. 서버 자체의 최적 편성 계산과 버디 대여는 미지원이며, `Unknown(0)`·알 수 없는 모드·대여 버디 요청은 상태를 변경하지 않고 거절합니다. 자세한 수정·검증 범위는 [자동 편성 저장 안내](docs/gameplay-status.md#자동-편성-저장-수정-v031)에 있습니다.
 
 홈·튜토리얼 변경은 SQLite 트랜잭션으로 저장하며 활성 로컬 세션과 알 수 없는 protobuf 필드를 유지합니다. 신규 시작 데이터는 원본 `initial_user_reward`의 카드·아이템을 준비합니다. 튜토리얼 레슨 보상은 마스터의 수량만 한 번 더하며, 완료는 클라이언트의 명시적 진행 요청으로 기록합니다. 튜토리얼 시연은 원본 기록의 편성·스킬·차트·점수를 재생합니다. v0.3.0의 첫 메인 라이브 실험 기능은 첫 성공 보상과 경험치만 한 번 지급하며, 팬·음악 숙련도·미션 보상·전체 해금을 만들지 않습니다. 구현된 RPC의 세부 동작과 근거는 [게임 상태 구현 범위](docs/gameplay-status.md)에 정리했습니다. 구현이나 fixture가 없는 RPC는 `UNIMPLEMENTED`입니다.
 

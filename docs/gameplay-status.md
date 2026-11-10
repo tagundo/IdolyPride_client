@@ -1,6 +1,8 @@
 # 로컬 게임 상태 구현 범위
 
-v0.3.0 베타에는 프로필 조회·이름 변경·소개문과 선호 캐릭터 저장, 카드 레벨 도달 미션 한 개의 진행·조회도 추가했습니다. 자동 검사와 실제 ARM64 Android 서버 APK의 암호화 API·업데이트·재시작 검사, Mac 앱 실행 검사로 검증했습니다. 새 기능의 실제 게임 화면은 아직 확인하지 않았습니다. 설치 파일과 범위별 검사 기록은 [v0.3.0 릴리스](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0)에 있습니다. 저장소 접근 권한과 GitHub 로그인이 필요합니다. 원본 APK와 일반 연결판의 실행 결과 및 전체 미구현 목록은 [원본 기준 분석](original-client-baseline.md)을 따릅니다.
+v0.3.1 베타는 자동 편성 뒤 `Deck.Save`의 `ManualAuto(3)`·`QuestAuto(4)` 저장이 `UNIMPLEMENTED`로 실패하던 문제를 수정했습니다. 실제 ARM64 Android 서버 APK에서 이전 오류·업데이트·저장·재시작을 검사했으며 실제 게임의 자동 편성 버튼 동작은 아직 확인하지 않았습니다. 설치 파일과 범위별 검사 기록은 [v0.3.1 릴리스](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.1)에 있습니다. 저장소 접근 권한과 GitHub 로그인이 필요합니다. 원본 APK와 일반 연결판의 실행 결과 및 전체 미구현 목록은 [원본 기준 분석](original-client-baseline.md)을 따릅니다.
+
+v0.3.0 베타에서 추가한 프로필 조회·이름 변경·소개문과 선호 캐릭터 저장, 카드 레벨 도달 미션 한 개의 진행·조회는 유지합니다. 이 기능들의 자동 검사와 실제 ARM64 Android 서버 APK의 암호화 API·기존 데이터 보완·업데이트·재시작 검사, Mac 앱 실행 검사 기록은 v0.3.0 범위이며 새 기능의 실제 게임 화면은 아직 확인하지 않았습니다.
 
 상태 핸들러는 6.1.1 스키마와 같은 버전의 마스터를 사용합니다. Android 사용자 기기에서 홈·캐릭터·편성과 초기 튜토리얼 전체 진행을 확인했습니다. v0.2.12의 레슨 보상·초기 카드 강화·새 유닛 생성·메시지 확인 이후 타이틀을 거쳐 홈으로 재접속한 기록도 확인했습니다. 일반 라이브의 실제 게임 재생·결과 화면 검증은 남아 있습니다. 기본값이 꺼진 v0.3.0 베타의 제한된 계산·정산은 [첫 메인 라이브 실험 기능](first-live-support.md)에서 별도로 설명합니다.
 
@@ -55,7 +57,7 @@ Android 설치 앱과 Mac 묶음 엔진 모두 실제 10초 경과 후 기본 �
 | `Tutorial.Init` | 이름과 최초 GameStart 체크포인트 설정 | `user.name`, GameStart step 최소 10 |
 | `Tutorial.Progress` | 알려진 유형·마스터 체크포인트의 진행을 단조 증가 | `tutorials`, GameStart 완료 시각 |
 | `Tutorial.Skip` | GameStart 튜토리얼만 완료 처리 | GameStart step 최소 150·완료 시각 |
-| `Deck.Save` | 새 번호 할당·기존 덱 편집, 클라이언트 자동 선택 편성 저장·보유 참조 검증 | `decks`, `deckPositions`, 생성 시 `user.deckSequence`, 제거된 슬롯의 `deletedData` |
+| `Deck.Save` | 새 번호 할당·기존 덱 편집, 모드 1~4의 클라이언트 선택 배치 저장·보유 참조 검증 | `decks`, `deckPositions`, 생성 시 `user.deckSequence`, 제거된 슬롯의 `deletedData` |
 | `Deck.Delete` | 지정한 기존 덱 삭제 | 덱·배치 제거 및 `deletedData` |
 | `Quest.Top` | 메인 라이브 그룹·지역·퀘스트와 저장된 진행도 조회 | 읽기 전용 |
 | `Quest.ListMain` | 같은 메인 목록·진행도 조회 | 읽기 전용 |
@@ -67,7 +69,13 @@ Android 설치 앱과 Mac 묶음 엔진 모두 실제 10초 경과 후 기본 �
 
 선호 캐릭터 설정은 원본 6.1.1 `ProfileTopScreenPresenter.UpdateFavoriteCharaAsync` 상태 머신의 네트워크 호출(`0x433b1ec`)과 `Profile.UpdateFavoriteCharactersAsync` 요청 생성(`0x474c014`, 반복 ID 복사 `0x474c09c`–`0x474c0bc`)을 대조했습니다. 중복 금지·현재 보유 검증은 로컬 정책입니다. 근거 없는 고정 인원 제한은 적용하지 않으며 선택은 현재 보유한 마스터 유효 캐릭터 수로 한정됩니다. 기존 로컬 starter가 저장하는 5명도 그대로 저장·재정렬할 수 있습니다. 목록 순서는 보존하고 빈 목록은 기존 선택을 해제합니다. 기존 user/profile이 없는 snapshot은 생성하지 않으며, 비어 있지 않은 선택은 `Character` 마스터와 해당 프로필의 보유 목록이 있어야 합니다. 이름·소개문·의상·재화·미션·설정·세션은 바꾸지 않습니다. 정확한 같은 요청의 재시도는 원래 snapshot 바이트를 유지합니다. 자동 검증은 실제 프로필 UI 확인과 구분합니다.
 
-`Deck.Save`는 배치 1~5와 중복 참조·장비 수량·슬롯·캐릭터 제한을 검증합니다. Android의 새 덱은 번호 0을 보내며, 서버는 `deckSequence`와 기존 번호보다 큰 번호를 트랜잭션 안에서 할당하고 `Setting.deckCountMax`를 지킵니다. 번호 0 재요청에는 멱등 키가 없으므로 별도 덱을 생성합니다. `deckEditType=2`는 클라이언트가 이미 자동 선택한 배치를 저장합니다. 버디 대여·캐릭터 그룹 제한 장비·서버의 자동 편성 계산은 아직 미구현입니다.
+`Deck.Save`는 배치 1~5와 중복 참조·장비 수량·슬롯·캐릭터 제한을 검증합니다. Android의 새 덱은 번호 0을 보내며, 서버는 `deckSequence`와 기존 번호보다 큰 번호를 트랜잭션 안에서 할당하고 `Setting.deckCountMax`를 지킵니다. 번호 0 재요청에는 멱등 키가 없으므로 별도 덱을 생성합니다. `deckEditType`은 `Manual(1)`, `Auto(2)`, `ManualAuto(3)`, `QuestAuto(4)`를 지원하며 클라이언트가 선택해 보낸 배치를 저장합니다. `Unknown(0)`·알 수 없는 모드와 대여 버디 요청은 상태를 바꾸지 않고 `UNIMPLEMENTED`로 거절합니다. 버디 대여·캐릭터 그룹 제한 장비·서버의 자동 편성 계산은 아직 미구현입니다.
+
+## 자동 편성 저장 수정: v0.3.1
+
+이전 서버는 편집 모드 1·2만 받아 자동 편성 결과를 담은 3·4 요청도 `UNIMPLEMENTED`로 거절했습니다. v0.3.1은 같은 소유권·슬롯·장비 검사와 트랜잭션을 네 모드에 적용합니다. 카드 순서·일부 슬롯 비우기·새 덱 생성·기존 덱 변경을 저장하며 서버가 최적 편성을 새로 계산하지는 않습니다. 원본 6.1.1 Android의 `QuestAuto(4)` 요청 생성 경로를 대조했으며 `ManualAuto(3)`의 정확한 UI 호출 위치는 아직 확인하지 않았습니다.
+
+실제 ARM64 Cuttlefish에서 v0.3.0 서버 APK의 모드 3·4 오류를 재현한 뒤, 앱 데이터를 지우지 않고 v0.3.1로 업데이트했습니다. 암호화 RPC로 네 모드의 저장과 모드 3·4의 새 번호 할당, 슬롯 제거를 검사했습니다. 잘못된 참조·버디 요청 거절과 기존 세션·덱 외 상태 보존, 서버 재시작 후 저장값도 확인했습니다. 소스의 전체 검사와 Mac 묶음 엔진·창 표시·서버 시작·종료도 통과했습니다. [v0.3.1의 Android QA 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.1/IdolyPride-Local-Server-Android-QA.zip)에 범위와 결과를 담았습니다. 실제 게임의 자동 편성 버튼·저장 후 화면 검증은 남아 있습니다. 데이터 ZIP·40개 테이블·202개 원본 팩·보상 규칙은 v0.3.0과 같습니다.
 
 ## 카드 레벨 도달 미션: v0.3.0 베타
 
