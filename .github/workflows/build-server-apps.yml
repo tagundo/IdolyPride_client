@@ -434,6 +434,7 @@ jobs:
             --android-jar "$ANDROID_HOME/platforms/android-34/android.jar"
           # No compiler is used after this step. Recover space for the API35
           # image/userdata while retaining exact libraries and build reports.
+          chmod -R u+w data/native-live-cache
           rm -rf data/native-live-cache "$ANDROID_HOME/ndk/26.3.11579264" android-server/app/build
           df -h . > data/android-server-qa/environment/disk-before-emulator.txt
       - name: Configure Android emulator acceleration
