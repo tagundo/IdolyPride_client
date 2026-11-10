@@ -37,6 +37,7 @@ class Application:
         from .story_catalog import StoryCatalog
         from .story_reads import StoryReads
         from .appearance import Appearance
+        from .profile_names import ProfileNames
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
@@ -44,6 +45,7 @@ class Application:
                                       fixtures=self.fixtures, extra_fixture=self._story_extra_fixture,
                                       event_fixture=self._story_event_fixture)
         self.appearance = Appearance(schema, state, profile, master_dir)
+        self.profile_names = ProfileNames(schema, state, profile)
         self.main_lives = None
         if experimental_main_live:
             from .main_live import MainLives
@@ -142,6 +144,8 @@ class Application:
                 response = self.story_reads.handle(path, plain)
             if response is None:
                 response = self.appearance.handle(path, plain)
+            if response is None:
+                response = self.profile_names.handle(path, plain)
             if response is None and self.main_lives is not None:
                 request_ids = [value for key, value in context.invocation_metadata() if key == "x-app-request-id"]
                 if path == "/api.Quest/Start" and len(request_ids) != 1:
