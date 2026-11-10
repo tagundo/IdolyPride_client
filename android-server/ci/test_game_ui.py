@@ -572,3 +572,160 @@ def test_other_input_guard_failure_resets_the_repeated_surface_failure_window():
     explorer._input_error("ui_observation_became_stale")
     explorer._input_error("A unique current Unity accessibility surface is required")
     assert explorer.surface_input_failures == 1 and not explorer.stopped
+
+
+NOTICE_ROOT = "Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/"
+NOTICE_BASE = NOTICE_ROOT + "TabDialogBase/DialogCanvas/Dialog/"
+
+
+@pytest.fixture
+def notice_snapshot(home_snapshot):
+    # Minimal public dialog nodes from run42793871383 unity-ui-043.json.
+    result = deepcopy(home_snapshot)
+    result["nodes"].append({"kind": "tmp_text", "active": True, "text": "INFORMATION",
+                            "path": NOTICE_BASE + "Header/Title", "instance_id": -15698})
+    for number, label, bounds in ((1, "お知らせ", [67.2, 1140, 230.4, 1212]),
+                                  (2, "不具合", [242.4, 1140, 405.6, 1212]),
+                                  (3, "PR", [417.6, 1140, 580.8, 1212])):
+        path = NOTICE_BASE + f"Footer/TabButtons/Button{number}"
+        result["nodes"].extend([
+            {"kind": "button", "active": True, "interactable": True, "callback_registered": True,
+             "instance_id": -16000 - number, "name": f"Button{number}", "path": path,
+             "text": "", "bounds": bounds},
+            {"kind": "tmp_text", "active": True, "text": label, "path": path + "/Text"}])
+    result["nodes"].append({"kind": "button", "active": True, "interactable": True,
+                            "callback_registered": True, "instance_id": -16020, "name": "CloseButton",
+                            "path": NOTICE_BASE + "Footer/CloseButton", "text": "",
+                            "bounds": [288, 1236, 360, 1308]})
+    return result
+
+
+def test_observed_notice_textless_x_is_selected_without_using_background_labels(notice_snapshot):
+    node = ui.notice_close_target(notice_snapshot)
+    assert node["instance_id"] == -16020 and node["label"] == ""
+    assert node["path"] == NOTICE_BASE + "Footer/CloseButton"
+    assert ui.visible_global_dialogs(notice_snapshot) == {NOTICE_ROOT}
+
+
+@pytest.mark.parametrize("change", ["header", "tab", "missing_close", "ambiguous_close",
+                                   "callback", "inactive", "geometry", "name"])
+def test_notice_context_or_close_ambiguity_prevents_selection(notice_snapshot, change):
+    close = next(n for n in notice_snapshot["nodes"] if n.get("name") == "CloseButton")
+    if change == "header":
+        next(n for n in notice_snapshot["nodes"] if n.get("path") == NOTICE_BASE + "Header/Title")["text"] = "Purchase"
+    elif change == "tab":
+        next(n for n in notice_snapshot["nodes"] if n.get("path", "").endswith("Button2/Text"))["text"] = "Other"
+    elif change == "missing_close":
+        notice_snapshot["nodes"].remove(close)
+    elif change == "ambiguous_close":
+        notice_snapshot["nodes"].append(dict(close, instance_id=-42))
+    elif change == "callback":
+        close["callback_registered"] = False
+    elif change == "inactive":
+        close["active"] = False
+    elif change == "geometry":
+        close["bounds"] = [288, 1236, 360, 2000]
+    else:
+        close["name"] = "OtherButton"
+    assert ui.notice_close_target(notice_snapshot) is None
+
+
+def competing_modal(snapshot):
+    snapshot["nodes"].append({"kind": "button", "active": True, "interactable": True,
+                              "instance_id": -999, "name": "Buy", "text": "購入",
+                              "path": "Singleton/GlobalDialog/DialogManager/PurchaseDialog(Clone)/Buy",
+                              "bounds": [1, 1, 100, 100]})
+
+
+def test_competing_purchase_modal_still_blocks_although_its_button_is_forbidden(notice_snapshot):
+    competing_modal(notice_snapshot)
+    assert len(ui.visible_global_dialogs(notice_snapshot)) == 2
+    assert ui.notice_close_target(notice_snapshot) is None
+    assert not any(n["name"] == "Buy" for n in ui.buttons(notice_snapshot))
+
+
+@pytest.mark.parametrize("change", ["header", "callback", "competing"])
+def test_notice_context_is_revalidated_before_any_android_input(notice_snapshot, tmp_path, monkeypatch, change):
+    selected = ui.notice_close_target(notice_snapshot)
+    fresh = deepcopy(notice_snapshot)
+    if change == "header":
+        next(n for n in fresh["nodes"] if n.get("path") == NOTICE_BASE + "Header/Title")["text"] = "Other"
+    elif change == "callback":
+        next(n for n in fresh["nodes"] if n.get("name") == "CloseButton")["callback_registered"] = False
+    else:
+        competing_modal(fresh)
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port,
+                         adb=lambda *args, **kwargs: pytest.fail("Stale notice must never call adb"))
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: fresh)
+    assert not explorer._tap(notice_snapshot, selected, "observed_notice_close", 43)
+    assert explorer.actions == [] and explorer.input_errors == {"notice_dialog_changed": 1}
+
+
+def test_fresh_valid_notice_uses_normal_android_tap_at_its_tree_bounds(notice_snapshot, tmp_path, monkeypatch):
+    inputs = []
+    responses = {("exec-out", "screencap", "-p"): b"\x89PNG\r\n\x1a\n" + b"\0" * 8 + struct.pack(">II", 1080, 2280),
+                 ("shell", "wm", "size"): "Physical size: 1080x2280\n",
+                 ("exec-out", "uiautomator", "dump", "/dev/tty"): XML.replace("[0,48][1080,2208]", "[0,0][1080,2148]")}
+
+    def adb(*args, **kwargs):
+        if args[:3] == ("shell", "input", "tap"):
+            inputs.append(args)
+            return ""
+        return responses[args]
+
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port,
+                         touch_hold_ms=0, adb=adb)
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: notice_snapshot)
+    assert explorer._tap(notice_snapshot, ui.notice_close_target(notice_snapshot), "observed_notice_close", 43)
+    assert inputs == [("shell", "input", "tap", "540", "2120")]
+    assert explorer.actions[0]["reason"] == "observed_notice_close"
+
+
+@pytest.mark.parametrize("reason", ["menu_live", "route_stories", "observed_title", "observed_dialog"])
+def test_modal_appearing_during_refresh_blocks_every_background_input(home_snapshot, notice_snapshot, tmp_path, monkeypatch, reason):
+    target = ui.goal_button(home_snapshot, "live")
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port,
+                         adb=lambda *args, **kwargs: pytest.fail("Background input must not reach adb"))
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: notice_snapshot)
+    assert not explorer._tap(home_snapshot, target, reason, 43)
+    assert explorer.input_errors == {"visible_global_dialog_blocks_input": 1}
+    assert explorer.actions == []
+
+
+@pytest.mark.parametrize("goal", ["lesson", "live", "idols", "work"])
+def test_notice_prevents_the_four_observed_background_menu_outcomes(notice_snapshot, tmp_path, monkeypatch, goal):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port)
+    explorer = ui.UiExplorer(qa)
+    explorer.goal_index = next(i for i, row in enumerate(ui._GOALS) if row[0] == goal)
+    explorer.pending = (goal, 1, explorer._signature(notice_snapshot))
+    before = explorer.pending
+    taps, restarts = [], []
+    monkeypatch.setattr(explorer, "_snapshot", lambda: notice_snapshot)
+    monkeypatch.setattr(explorer, "_tap", lambda snap, node, reason, frame: taps.append(reason) or True)
+    monkeypatch.setattr(explorer, "_restart", lambda: restarts.append(True))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for frame in (43, 44, 45):
+        explorer.step(frame)
+    assert taps == ["observed_notice_close", "observed_notice_close"]
+    assert explorer.pending == before and explorer.outcomes == [] and restarts == []
+    assert explorer.stopped and explorer.stop_reason == "global_dialog_not_dismissed"
+
+
+def test_unknown_global_dialog_stops_after_three_observations_without_generic_close(notice_snapshot, tmp_path, monkeypatch):
+    competing_modal(notice_snapshot)
+    notice_snapshot["nodes"].append({"kind": "button", "active": True, "interactable": True,
+                                    "instance_id": 999, "path": "Window/Dialog/Close", "name": "Close",
+                                    "text": "OK", "bounds": [1, 1, 100, 100]})
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, forward=lambda port: port)
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: notice_snapshot)
+    monkeypatch.setattr(explorer, "_tap", lambda *args: pytest.fail("Unknown modal must not authorize generic close"))
+    monkeypatch.setattr(explorer, "_restart", lambda: pytest.fail("No restart behind a modal"))
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: 100))
+    for frame in (43, 44, 45):
+        explorer.step(frame)
+    assert explorer.stopped and explorer.stop_reason == "unrecognized_global_dialog"
+    assert explorer.actions == explorer.outcomes == []

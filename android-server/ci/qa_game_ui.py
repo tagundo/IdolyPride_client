@@ -29,6 +29,8 @@ _GOALS = (
     ("gifts", r"プレゼント", r"gift|present"),
 )
 _HOME_ROOT = "WindowSystem/WindowRoot/HomeWindow(Clone)/HomeTopScreen(Clone)/ScreenCanvas/ScreenRoot/"
+_GLOBAL_DIALOG_ROOT = "Singleton/GlobalDialog/DialogManager/"
+_NOTICE_ROOT = _GLOBAL_DIALOG_ROOT + "NoticeDialog(Clone)/"
 _HOME_ROLES = {
     "lesson": ("HomePage/SlideRoot/ActivityLesson/ActivityLessonButton", "ActivityLessonButton"),
     "live": ("HomePage/SlideRoot/Live", "Live"),
@@ -167,6 +169,51 @@ def visible_action_sheet(snapshot):
                for row in snapshot.get("nodes", []))
 
 
+def visible_global_dialogs(snapshot):
+    """Modal detection must include forbidden purchase/delete controls too."""
+    roots = set()
+    for node in snapshot.get("nodes", []):
+        if (not isinstance(node, dict) or node.get("kind") != "button"
+                or node.get("active") is not True or node.get("interactable") is not True
+                or not usable_bounds(snapshot, node)):
+            continue
+        path = node.get("path", "")
+        if not isinstance(path, str) or not path.startswith(_GLOBAL_DIALOG_ROOT):
+            continue
+        clone, separator, _ = path[len(_GLOBAL_DIALOG_ROOT):].partition("/")
+        if separator and clone.endswith("(Clone)"):
+            roots.add(_GLOBAL_DIALOG_ROOT + clone + "/")
+    return roots
+
+
+def notice_close_target(snapshot):
+    """Select the observed textless Notice X, only with its full known context."""
+    if visible_global_dialogs(snapshot) != {_NOTICE_ROOT}:
+        return None
+    base = _NOTICE_ROOT + "TabDialogBase/DialogCanvas/Dialog/"
+    nodes = snapshot.get("nodes", [])
+
+    def label_at(path, expected):
+        matches = [node for node in nodes if isinstance(node, dict)
+                   and node.get("path") == path and node.get("kind") in ("text", "tmp_text")
+                   and node.get("active") is True]
+        return len(matches) == 1 and text(matches[0].get("text", "")) == expected
+
+    if not label_at(base + "Header/Title", "INFORMATION"):
+        return None
+    candidates = buttons(snapshot)
+    for number, label in ((1, "お知らせ"), (2, "不具合"), (3, "PR")):
+        path = base + f"Footer/TabButtons/Button{number}"
+        tabs = [node for node in candidates if node.get("path") == path
+                and node.get("name") == f"Button{number}"
+                and node.get("callback_registered") is True]
+        if len(tabs) != 1 or not label_at(path + "/Text", label):
+            return None
+    close = [node for node in candidates if node.get("path") == base + "Footer/CloseButton"
+             and node.get("name") == "CloseButton" and node.get("callback_registered") is True]
+    return close[0] if len(close) == 1 else None
+
+
 def navigation_block_reason(snapshot):
     startup = snapshot.get("startup_observation")
     if not isinstance(startup, dict) or type(startup.get("content_blocking")) is not bool:
@@ -236,6 +283,7 @@ class UiExplorer:
         self.route_pending = None
         self.pending_dialog_frame = None
         self.restart_pending = False
+        self.global_dialog_observations = 0
 
     def _input_error(self, code):
         self.input_errors[code] = self.input_errors.get(code, 0) + 1
@@ -280,6 +328,13 @@ class UiExplorer:
                         and item.get("path") == node.get("path") and item.get("name") == node.get("name")), None)
         if fresh.get("ok") is not True or current is None:
             return self._input_error("selected_node_no_longer_present")
+        if reason == "observed_notice_close":
+            close = notice_close_target(fresh)
+            if (close is None or close.get("instance_id") != current.get("instance_id")
+                    or close.get("path") != current.get("path")):
+                return self._input_error("notice_dialog_changed")
+        elif visible_global_dialogs(fresh):
+            return self._input_error("visible_global_dialog_blocks_input")
         if reason == "observed_title" and (blocked := title_block_reason(fresh, current)):
             return self._input_error(blocked)
         if reason == "observed_title" and visible_action_sheet(fresh):
@@ -370,6 +425,29 @@ class UiExplorer:
             self.stopped, self.stop_reason = True, "action_limit_reached"
         if self.stopped or snapshot.get("ok") is not True or time.monotonic() - self.last_action < 12:
             return
+        dialogs = visible_global_dialogs(snapshot)
+        if not dialogs:
+            self.global_dialog_observations = 0
+        download = download_confirmation(snapshot)
+        if download is not None and not dialogs:
+            if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
+                self.pending_dialog_frame = frame
+            self._tap(snapshot, download, "observed_resource_download_confirmation", frame)
+            return
+        if dialogs:
+            self.global_dialog_observations += 1
+            close = notice_close_target(snapshot)
+            if self.global_dialog_observations >= 3:
+                self.stopped = True
+                self.stop_reason = ("global_dialog_not_dismissed" if close is not None
+                                    else "unrecognized_global_dialog")
+                return
+            if close is not None:
+                self._tap(snapshot, close, "observed_notice_close", frame)
+            else:
+                key = "unrecognized_global_dialog"
+                self.navigation_deferrals[key] = self.navigation_deferrals.get(key, 0) + 1
+            return
         visible = " ".join(text(row.get("text", "")) for row in snapshot.get("nodes", []) if isinstance(row, dict))
         if _ERROR.search(visible) and not self.restart_pending:
             self.outcomes.append({"goal": self.pending[0] if self.pending else "startup", "status": "game_error_observed", "frame": frame})
@@ -384,12 +462,6 @@ class UiExplorer:
             if navigation_block_reason(snapshot) is None:
                 self.restart_pending = False
                 self._restart()
-            return
-        download = download_confirmation(snapshot)
-        if download is not None:
-            if self.pending and self._signature(snapshot) != self.pending[2] and self.pending_dialog_frame is None:
-                self.pending_dialog_frame = frame
-            self._tap(snapshot, download, "observed_resource_download_confirmation", frame)
             return
         close = choose_button(snapshot, r"OK|閉じる|確認|次へ|あとで")
         if close is not None and re.search(r"dialog|modal|popup|sheet", str(close.get("path", "")), re.I):
@@ -460,6 +532,7 @@ class UiExplorer:
                 "successful_ui_snapshots": self.snapshot_successes, "snapshot_errors": self.snapshot_errors,
                 "input_errors": self.input_errors,
                 "repeated_android_surface_failures": self.surface_input_failures,
+                "repeated_visible_global_dialogs": self.global_dialog_observations,
                 "title_deferrals": self.title_deferrals,
                 "stop_reason": self.stop_reason,
                 "navigation_deferrals": self.navigation_deferrals,
