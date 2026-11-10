@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Observe the signed original game, without repacking, hooks, or UI/account input."""
+"""Observe the signed original game; only acknowledge its exact Android fullscreen hint."""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ import re
 import struct
 import subprocess
 import time
+import xml.etree.ElementTree as ET
 import zipfile
 
 PACKAGE = 'game.qualiarts.idolypride'
@@ -43,6 +44,78 @@ def optional_adb(*args: str, timeout: int = 20) -> subprocess.CompletedProcess:
 
 def write_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + '\n')
+
+
+def fullscreen_hint(xml: bytes) -> tuple[int, int, int, int] | None:
+    """Recognize the exact OS-owned hint observed in the untouched first run."""
+    expected = {'android:id/immersive_cling_title': 'Viewing full screen',
+                'android:id/immersive_cling_description': 'To exit, swipe down from the top of your screen',
+                'android:id/ok': 'Got it'}
+    try:
+        nodes = list(ET.fromstring(xml).iter('node'))
+    except ET.ParseError:
+        return None
+    if {node.get('text') for node in nodes if node.get('text')} != set(expected.values()):
+        return None
+    for identity, text in expected.items():
+        matches = [node for node in nodes if node.get('resource-id') == identity]
+        if len(matches) != 1 or matches[0].get('text') != text or matches[0].get('package') != 'android':
+            return None
+        if matches[0].get('enabled') != 'true' or matches[0].get('visible-to-user', 'true') != 'true':
+            return None
+    button = next(node for node in nodes if node.get('resource-id') == 'android:id/ok')
+    if button.get('class') != 'android.widget.Button' or button.get('clickable') != 'true':
+        return None
+    bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', button.get('bounds', ''))
+    if bounds is None:
+        return None
+    left, top, right, bottom = map(int, bounds.groups())
+    return (left, top, right, bottom) if left < right and top < bottom else None
+
+
+def dump_ui(output: Path, name: str) -> bytes | None:
+    result = optional_adb('shell', 'uiautomator', 'dump', '--compressed', '/sdcard/idoly-baseline-window.xml')
+    if result.returncode != 0:
+        return None
+    result = optional_adb('exec-out', 'cat', '/sdcard/idoly-baseline-window.xml')
+    if result.returncode != 0 or len(result.stdout) > 262144:
+        return None
+    (output / name).write_bytes(result.stdout)
+    return result.stdout
+
+
+def dismiss_fullscreen_hint(output: Path, report: dict) -> None:
+    action = {'kind': 'Android fullscreen onboarding acknowledgement', 'tap_performed': False}
+    report['system_UI_actions'].append(action)
+    first = dump_ui(output, 'systemui-hint-before-1.xml')
+    second = dump_ui(output, 'systemui-hint-before-2.xml')
+    bounds = fullscreen_hint(first or b'')
+    if bounds is None or bounds != fullscreen_hint(second or b''):
+        action['outcome'] = 'fresh exact hint mismatch; no input'
+        return
+    screenshot = optional_adb('exec-out', 'screencap', '-p', timeout=30)
+    if screenshot.returncode != 0 or not screenshot.stdout.startswith(b'\x89PNG') or len(screenshot.stdout) < 24:
+        action['outcome'] = 'fresh screenshot unavailable; no input'
+        return
+    (output / 'systemui-hint-before.png').write_bytes(screenshot.stdout)
+    width, height = struct.unpack('!II', screenshot.stdout[16:24])
+    left, top, right, bottom = bounds
+    if right > width or bottom > height:
+        action['outcome'] = 'hint outside fresh screen; no input'
+        return
+    action['bounds'] = list(bounds)
+    action['center'] = [(left + right) // 2, (top + bottom) // 2]
+    tap = optional_adb('shell', 'input', 'tap', *(str(value) for value in action['center']))
+    action['tap_returncode'] = tap.returncode
+    action['tap_performed'] = True
+    report['UI_input_performed'] = True
+    report['system_UI_input_performed'] = True
+    after = dump_ui(output, 'systemui-hint-after.xml')
+    post_image = optional_adb('exec-out', 'screencap', '-p', timeout=30)
+    if post_image.returncode == 0 and post_image.stdout.startswith(b'\x89PNG'):
+        (output / 'systemui-hint-after.png').write_bytes(post_image.stdout)
+    action['hint_absent_after'] = after is not None and b'android:id/immersive_cling_title' not in after
+    action['outcome'] = 'hint dismissed' if tap.returncode == 0 and action['hint_absent_after'] else 'dismissal not verified; no further input'
 
 
 def prepare(xapk: Path, output: Path) -> None:
@@ -144,6 +217,8 @@ def packet_metadata(path: Path) -> dict:
 def observe(output: Path, duration: int, pcap: Path | None) -> None:
     report = {'workflow_sha': os.environ.get('GITHUB_SHA'), 'run_id': os.environ.get('GITHUB_RUN_ID'),
               'original_apks_unmodified': True, 'UI_input_performed': False, 'gameplay_verified': False,
+              'system_UI_input_performed': False, 'system_UI_actions': [],
+              'gameplay_UI_input_performed': False, 'account_UI_input_performed': False,
               'account_credentials_supplied': False, 'observation_seconds_requested': duration, 'samples': []}
     pids: set[str] = set()
     try:
@@ -190,6 +265,8 @@ def observe(output: Path, duration: int, pcap: Path | None) -> None:
                 xml = optional_adb('exec-out', 'cat', '/sdcard/idoly-baseline-window.xml')
                 if xml.returncode == 0:
                     (output / f'ui-{target:03d}.xml').write_bytes(xml.stdout[:262144])
+                    if not report['system_UI_actions'] and fullscreen_hint(xml.stdout) is not None:
+                        dismiss_fullscreen_hint(output, report)
             report['samples'].append(sample)
             write_json(output / 'result.json', report)
         report['observed_game_pids'] = sorted(pids)
