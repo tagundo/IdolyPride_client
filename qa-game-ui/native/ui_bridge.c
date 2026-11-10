@@ -20,6 +20,7 @@
 #define NODE_LIMIT 512
 #define JSON_LIMIT 65536
 #define ARRAY_LIMIT 8192
+#define TITLE_BUTTON_PATH "Canvas/TitleButton"
 #define NOTICE_CLOSE_PATH "Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/TabDialogBase/DialogCanvas/Dialog/Footer/CloseButton"
 typedef void Obj;
 typedef void Klass;
@@ -561,7 +562,7 @@ groups:
     result.blocks = (struct observed_bool){valid, blocks};
     return result;
 }
-static void notice_input_json(struct ui_json *out, Obj *button) {
+static void button_input_json(struct ui_json *out, Obj *button) {
     Obj *gesture = NULL;
     bool found = field_reference(observations.solis_button, button, input_observations.gesture_reference,
                                 false, &gesture) && gesture && input_observations.gesture
@@ -780,6 +781,13 @@ static void path_json(struct ui_json *j, Obj *transform, bool *ok) {
     }
     ui_utf16(j, path, used, 512);
 }
+/* Deliberately bounded observation scope; other buttons do not expose gesture
+ * state. The encoded path is the exact, freshly emitted JSON string. */
+static bool observes_button_input(const char *encoded_path) {
+    return encoded_path && (!strcmp(encoded_path, "\"" NOTICE_CLOSE_PATH "\"")
+                            || !strcmp(encoded_path, "\"" TITLE_BUTTON_PATH "\""));
+}
+
 static bool add_kind(struct ui_json *out, Klass *k, const char *kind, const Method *text_method, bool qua,
                      size_t *node_count, bool *truncated) {
     bool ok = true;
@@ -814,7 +822,7 @@ static bool add_kind(struct ui_json *out, Klass *k, const char *kind, const Meth
         ui_raw(out, ",\"kind\":\""); ui_raw(out, kind); ui_raw(out, "\",\"name\":");
         Obj *name = invoke(methods.name, o, NULL, false, &ok); string_json(out, name, 128);
         ui_raw(out, ",\"path\":"); size_t path_begin = out->length; path_json(out, transform, &ok);
-        bool notice_close = ok && !out->failed && !strcmp(out->data + path_begin, "\"" NOTICE_CLOSE_PATH "\"");
+        bool observe_input = ok && !out->failed && observes_button_input(out->data + path_begin);
         ui_raw(out, ",\"text\":");
         Obj *text = text_method ? invoke(text_method, o, NULL, true, &ok) : NULL;
         string_json(out, text, 512);
@@ -830,7 +838,7 @@ static bool add_kind(struct ui_json *out, Klass *k, const char *kind, const Meth
             ui_raw(out, ",\"callback_registered\":"); boolean_json(out, callback);
             callback_observation_missing |= !callback.available;
         }
-        if (button && qua && notice_close) notice_input_json(out, o);
+        if (button && qua && observe_input) button_input_json(out, o);
         ui_raw(out, "}");
         if (!ok || out->failed || out->length > JSON_LIMIT - 4096) {
             out->length = before; out->data[before] = 0; out->failed = false;

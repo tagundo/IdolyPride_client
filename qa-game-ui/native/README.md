@@ -183,7 +183,7 @@ account storage. The host tests check JSON escaping/overflow, exported API
 coverage, virtual dispatch and fail-closed exception, thread, generation and
 enabled-state paths. Actual Unity execution is a separate emulator CI check.
 
-## Notice input and frame observations
+## Title, notice input and frame observations
 
 `frame_observation` reports `sample_monotonic_ms`, nullable `frame_count`,
 `unscaled_delta_time` and `time_scale`, with missing field names in
@@ -192,9 +192,9 @@ on UnityMain. Delta time describes Unity's most recent frame; it is not a
 direct FPS measurement. Frame-count differences divided by monotonic sample
 time can help compare successive observations. Sampling itself also takes time.
 
-Only the exact observed
+Only the exact observed `Canvas/TitleButton` and
 `Singleton/GlobalDialog/DialogManager/NoticeDialog(Clone)/TabDialogBase/DialogCanvas/Dialog/Footer/CloseButton`
-node receives `input_observation`. It contains nullable
+nodes receive `input_observation`. Child and similarly named paths are excluded. It contains nullable
 `long_tap_time_seconds`, `suppress_long_tap_click`, `is_pressed`, `is_dragged`,
 `canvas_effective_alpha`, `canvas_interactable`, `canvas_blocks_raycasts`,
 `canvas_group_count`, and `unavailable` keys. The gesture is read from the

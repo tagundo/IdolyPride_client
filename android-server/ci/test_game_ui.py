@@ -114,6 +114,47 @@ def test_normal_input_rechecks_selected_package_in_fresh_android_tree(snapshot, 
     assert explorer.report()["native_click_used"] is False
 
 
+@pytest.mark.parametrize("source,hold,expected", (
+    ("mouse", 0, ("shell", "input", "mouse", "tap", "110", "1928")),
+    ("mouse", 150, ("shell", "input", "mouse", "swipe", "110", "1928", "110", "1928", "150")),
+    ("touchscreen", 0, ("shell", "input", "tap", "110", "1928")),
+    ("touchscreen", 150, ("shell", "input", "touchscreen", "swipe", "110", "1928", "110", "1928", "150")),
+))
+def test_guarded_input_source_and_command_latency(snapshot, tmp_path, monkeypatch, source, hold, expected):
+    snapshot["startup_observation"] = {"content_blocking": False, "input_releasing": False}
+    clock, inputs = [0.0], []
+    monkeypatch.setattr(ui, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    responses = {("exec-out", "screencap", "-p"): b"\x89PNG\r\n\x1a\n" + bytes(8) + struct.pack(">II", 1080, 2280),
+                 ("shell", "wm", "size"): "Physical size: 1080x2280\n",
+                 ("exec-out", "uiautomator", "dump", "/dev/tty"): XML}
+
+    def adb(*args, **kwargs):
+        if args[:2] == ("shell", "input"):
+            inputs.append(args)
+            clock[0] += .35
+            return ""
+        return responses[args]
+
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, input_source=source,
+                         touch_hold_ms=hold, forward=lambda port: port, adb=adb)
+    explorer = ui.UiExplorer(qa)
+    monkeypatch.setattr(explorer, "_snapshot", lambda: snapshot)
+    assert explorer._tap(snapshot, choose_button(snapshot, "ライブ"), "menu_live", 1)
+    assert inputs == [expected]
+    assert explorer.actions[0]["input_source"] == source
+    assert explorer.actions[0]["input_command_milliseconds"] == 350
+
+
+@pytest.mark.parametrize("source", ("keyboard", "touchpad", "", None))
+def test_unknown_input_source_fails_without_adb(snapshot, tmp_path, source):
+    qa = SimpleNamespace(game_package=PACKAGE, artifacts=tmp_path, input_source=source,
+                         forward=lambda port: port,
+                         adb=lambda *args, **kwargs: pytest.fail("Invalid source must not access device"))
+    explorer = ui.UiExplorer(qa)
+    assert not explorer._tap(snapshot, choose_button(snapshot, "ライブ"), "menu_live", 1)
+    assert explorer.input_errors == {"unsupported_input_source": 1}
+
+
 @pytest.mark.parametrize("package", (PACKAGE, NORMAL_PACKAGE))
 def test_restart_uses_same_qa_identity_and_normal_profile_has_no_graphics_override(package):
     commands = []

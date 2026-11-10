@@ -273,13 +273,19 @@ int main(void) {
  assert(!startup_out.failed&&strstr(startup,"\"title_presenters\":null")&&!strstr(startup,"\"title_presenters\":[]"));
  assert(strstr(startup,"\"solis_initialization_succeeded\":null")&&strstr(startup,"\"content_blocking\":null"));
  assert(strstr(startup,"\"home_scene_loading\":null")&&strstr(startup,"\"home_enter_called\":null"));
- /* Notice readiness is typed, nullable and never invokes gesture handlers. */
+ /* Only exact observed Title/Notice paths receive typed, nullable telemetry. */
+ assert(observes_button_input("\"Canvas/TitleButton\""));
+ assert(observes_button_input("\"" NOTICE_CLOSE_PATH "\""));
+ assert(!observes_button_input(NULL));
+ assert(!observes_button_input("\"Canvas/TitleButton/Child\""));
+ assert(!observes_button_input("\"Other/TitleButton\""));
+ assert(!observes_button_input("Canvas/TitleButton"));
  observations.solis_button=(Klass*)0x103;
  input_observations.gesture=(Klass*)0x103;input_observations.gesture_reference=&callback_field;
  input_observations.long_tap_time=&float_field;input_observations.suppress=&bool_field;
  input_observations.pressed=&home_enter_field;input_observations.dragged=&home_scene_field;
  observed_callback=(Obj*)0x1111;observed_initialized=1;home_enter_value=false;
- memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};notice_input_json(&startup_out,(Obj*)1);
+ memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
  assert(strstr(startup,"\"long_tap_time_seconds\":0.5")&&strstr(startup,"\"suppress_long_tap_click\":true"));
  assert(strstr(startup,"\"is_pressed\":false")&&strstr(startup,"\"is_dragged\":false"));
  assert(strstr(startup,"\"canvas_effective_alpha\":null"));
@@ -294,7 +300,7 @@ int main(void) {
  array_size=0;cv=canvas_observation((Obj*)1);assert(cv.interactable.available&&cv.interactable.value&&cv.blocks.value&&cv.groups==0);array_size=1;
  float_value=NAN;assert(!field_single(input_observations.gesture,(Obj*)1,&float_field).available);float_value=.5f;
  int read_guard=field_reads;assert(!field_single(input_observations.gesture,(Obj*)1,&wrong_field).available&&read_guard==field_reads);
- observed_callback=NULL;memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};notice_input_json(&startup_out,(Obj*)1);
+ observed_callback=NULL;memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};button_input_json(&startup_out,(Obj*)1);
  assert(strstr(startup,"\"long_tap_time_seconds\":null")&&strstr(startup,"\"is_pressed\":null"));
  input_observations.frame_count=&frames_m;input_observations.unscaled_delta=&delta_m;input_observations.time_scale=&scale_m;
  memset(startup,0,sizeof(startup));startup_out=(struct ui_json){startup,sizeof(startup),0,false};frame_json(&startup_out);

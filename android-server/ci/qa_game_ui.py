@@ -436,6 +436,11 @@ class UiExplorer:
         return current
 
     def _tap(self, snapshot, node, reason, frame):
+        # Source choice is a normal Android input differential, never a native
+        # gameplay callback. Unsupported sources cannot fall back to touching.
+        source = getattr(self.qa, "input_source", "touchscreen")
+        if source not in ("touchscreen", "mouse"):
+            return self._input_error("unsupported_input_source")
         # Reject an obsolete selection before the relatively slow Android dump.
         query_began = time.monotonic()
         fresh = self._snapshot()
@@ -488,15 +493,21 @@ class UiExplorer:
         action["android_geometry_to_input_milliseconds"] = round((time.monotonic() - geometry_observed_at) * 1000)
         hold = getattr(self.qa, "touch_hold_ms", 0)
         action["touch_hold_milliseconds"] = hold
+        action["input_source"] = source
+        input_began = time.monotonic()
         if hold == 150:
             # Normal Android DOWN/MOVE/UP at the same point. The original
             # title's long-tap threshold is 500ms and its drag threshold is30.
-            self.qa.adb("shell", "input", "touchscreen", "swipe", str(point[0]), str(point[1]),
+            self.qa.adb("shell", "input", source, "swipe", str(point[0]), str(point[1]),
                         str(point[0]), str(point[1]), "150")
         elif hold == 0:
-            self.qa.adb("shell", "input", "tap", str(point[0]), str(point[1]))
+            prefix_args = ("shell", "input") if source == "touchscreen" else ("shell", "input", source)
+            self.qa.adb(*prefix_args, "tap", str(point[0]), str(point[1]))
         else:
             return self._input_error("unsupported_touch_duration")
+        # This includes adb/process/injection latency, not a claim about the
+        # event's actual DOWN/UP interval or final Android/Unity delivery.
+        action["input_command_milliseconds"] = round((time.monotonic() - input_began) * 1000)
         action["performed"] = True
         self.actions.append(action)
         self.surface_input_failures = 0

@@ -87,7 +87,7 @@ def build_native(output, *, ndk=None):
         "elf_build_id": profile["elf_build_id"], "runtime_profile_sha256": digest(profile_path),
         "limits": {"nodes": 512, "json_bytes": 65535, "array_scan": 8192},
         "read_only_input_telemetry": {
-            "scope": "frame_observation and the exact NoticeDialog CloseButton only",
+            "scope": "frame_observation and exact Canvas/TitleButton or NoticeDialog CloseButton only",
             "gesture": "existing SolisButtonBase._longTapGesture metadata fields; no lazy getter",
             "canvas_alpha": "existing target CanvasRenderer.GetInheritedAlpha; unavailable if absent",
             "canvas_flags": "target and ancestors until ignoreParentGroups; max32 ancestors; multiple groups per transform unavailable",
