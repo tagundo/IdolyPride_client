@@ -31,6 +31,7 @@ jobs:
       DISPLAY: ":99"
       LIBGL_ALWAYS_SOFTWARE: "1"
       GALLIUM_DRIVER: llvmpipe
+      IDOLY_QA_DISPLAY_SIZE: ${{ inputs.display_size || '1080x2280' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -245,11 +246,7 @@ jobs:
           script: |
             python tools/emulator_environment_probe/run_probe.py --apk data/dist/EnvironmentProbe.apk --output data/android-game-debug/environment-preflight --timeout 60 --record-root
             adb -s emulator-5554 shell am force-stop org.idolypride.environmentprobe
-            case '${{ inputs.display_size || '1080x2280' }}' in
-              1080x2280) adb -s emulator-5554 shell wm size 1080x2280; adb -s emulator-5554 shell wm density 440 ;;
-              540x1140) adb -s emulator-5554 shell wm size 540x1140; adb -s emulator-5554 shell wm density 220 ;;
-              *) exit 1 ;;
-            esac
+            case "$IDOLY_QA_DISPLAY_SIZE" in 1080x2280) adb -s emulator-5554 shell wm size 1080x2280 && adb -s emulator-5554 shell wm density 440 ;; 540x1140) adb -s emulator-5554 shell wm size 540x1140 && adb -s emulator-5554 shell wm density 220 ;; *) exit 1 ;; esac
             adb -s emulator-5554 shell wm size > data/android-game-debug/display-size.txt
             adb -s emulator-5554 shell wm density > data/android-game-debug/display-density.txt
             uv run --locked python android-server/ci/qa_game_boot.py --server-apk data/dist/Server-game-debug.apk --game-apk data/dist/Game-QA-UI.apk --game-package game.qualiarts.idolypride.local.diagnostics --descriptor-set data/protocol/idolypride-6.1.1.pb --artifacts data/android-game-debug --duration 1800 --interval 20 --startup-timeout 600 --force-gles30 --tap-observed-title --tree-title-input --qa-ui-explore --touch-hold-ms ${{ inputs.touch_hold_ms || '0' }} --max-title-taps 5 --prepare-completed-opening
