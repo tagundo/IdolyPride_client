@@ -46,7 +46,7 @@ def test_native_rpc_carries_the_exact_request_id_only_when_supplied(monkeypatch,
 
             def call(payload, *, metadata, timeout):
                 assert codec.decode(payload) == request.SerializeToString()
-                assert (30 <= timeout <= 120) if path == START else timeout == 2
+                assert 30 <= timeout <= 120
                 observed.extend(metadata)
                 return codec.encode(response.SerializeToString())
 

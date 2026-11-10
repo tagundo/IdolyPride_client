@@ -112,7 +112,10 @@ def rpc(schema, port, method, token=None, request=None, request_id=None):
     if request_id is not None:
         metadata += (("x-app-request-id", str(request_id)),)
     with grpc.insecure_channel("127.0.0.1:" + str(port)) as channel:
-        raw = channel.unary_unary(method)(codec.encode(request.SerializeToString()), metadata=metadata, timeout=60 if method == "/api.Quest/Start" else 2)
+        # This is a functional check on cold, optionally translated software
+        # emulators. Allow slow catalog initialization without retrying a
+        # request that may already have changed the account.
+        raw = channel.unary_unary(method)(codec.encode(request.SerializeToString()), metadata=metadata, timeout=60)
     return schema.response_type(method).FromString(codec.decode(raw))
 
 
