@@ -52,16 +52,18 @@ class Controller:
         self.emit("status", status=status)
         return status
 
-    def start(self):
+    def start(self, experimental_main_live=False):
+        if type(experimental_main_live) is not bool:
+            raise ValueError("Experimental live must be an explicit boolean")
         with self.lock:
             if self.closed or self.runtime or (self.worker and self.worker.is_alive()):
                 return self.status()
             self.cancelled = False
-            self.worker = threading.Thread(target=self._start, name="local-server-start", daemon=False)
+            self.worker = threading.Thread(target=self._start, args=(experimental_main_live,), name="local-server-start", daemon=False)
             self.worker.start()
         self.status()
 
-    def _start(self):
+    def _start(self, experimental_main_live=False):
         runtime = None
         try:
             self.log("서버 데이터를 준비하고 있습니다.")
@@ -70,7 +72,8 @@ class Controller:
             with self.lock:
                 if self.cancelled or self.closed:
                     return
-            runtime = app_runtime.start(self.data_dir, profile=self.profile, log_callback=self.log)
+            live_options = {"experimental_main_live": True} if experimental_main_live else {}
+            runtime = app_runtime.start(self.data_dir, profile=self.profile, log_callback=self.log, **live_options)
             with self.lock:
                 self.runtime = runtime
                 cancelled = self.cancelled or self.closed
@@ -118,7 +121,7 @@ class Controller:
         self.stop()
 
 
-def _rpc(address, schema, method, request=None, token=None, *, expected_status="0"):
+def _rpc(address, schema, method, request=None, token=None, *, expected_status="0", request_id=None, timeout=5):
     """Exercise the frozen pure-Python HTTP/2 stack without importing grpcio."""
     from h2.config import H2Configuration
     from h2.connection import H2Connection
@@ -135,10 +138,12 @@ def _rpc(address, schema, method, request=None, token=None, *, expected_status="
         (":path", method), ("content-type", "application/grpc+proto"), ("te", "trailers")]
     if token is not None:
         headers.append(("x-auth-token", token))
+    if request_id is not None:
+        headers.append(("x-app-request-id", str(request_id)))
     client.send_headers(1, headers)
     client.send_data(1, b"\0" + len(payload).to_bytes(4, "big") + payload, end_stream=True)
     body, status, ended = bytearray(), None, False
-    with socket.create_connection((host, int(port)), timeout=5) as stream:
+    with socket.create_connection((host, int(port)), timeout=timeout) as stream:
         stream.sendall(client.data_to_send())
         while not ended:
             data = stream.recv(65535)
@@ -570,7 +575,26 @@ def _quest_catalog_reference(top, main, data_dir, user):
     return first_quest.questId
 
 
-def smoke(data_dir, server_data, report_path):
+
+def _main_live_database(data_dir, schema, receipt, expected_clock, expected_attempts=None):
+    from idoly_local.main_live_qa import assert_main_live_attempt_rows, assert_main_live_snapshot
+    with sqlite3.connect(Path(data_dir) / "state.db") as db:
+        db.row_factory = sqlite3.Row
+        snapshot = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile='sandbox'").fetchone()
+        clock = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile='sandbox'").fetchone()
+        rows = db.execute("SELECT * FROM main_live_attempts WHERE profile='sandbox' ORDER BY request_id").fetchall()
+        if (snapshot is None or snapshot[1] != schema.fingerprint or clock is None
+                or tuple(clock) != expected_clock):
+            raise RuntimeError("Main-live snapshot/schema or raw lesson clock was not preserved")
+        assert_main_live_snapshot(schema, snapshot[0], receipt)
+        assert_main_live_attempt_rows(schema, rows, receipt)
+        attempts = tuple(tuple(row) for row in rows)
+        if expected_attempts is not None and attempts != expected_attempts:
+            raise RuntimeError("Cached main-live seeds, timestamps or exact responses changed")
+        return attempts
+
+
+def smoke(data_dir, server_data, report_path, live_engine_library=None):
     from http.client import HTTPConnection
     from urllib.parse import quote, urlsplit
     from idoly_local import app_runtime
@@ -579,6 +603,10 @@ def smoke(data_dir, server_data, report_path):
 
     install_payload(server_data, data_dir)
     runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
+    if live_engine_library is None and getattr(sys, "frozen", False):
+        candidate = Path(sys._MEIPASS) / "libidoly_live.dylib"
+        if candidate.is_file():
+            live_engine_library = candidate
     report = {"frozen_runtime": bool(getattr(sys, "frozen", False)), "server_started": False,
               "encrypted_system_check": False, "anonymous_refund_term": False, "anonymous_public_text": False,
               "local_auth": False, "home_login": False, "home_enter": False,
@@ -856,6 +884,38 @@ def smoke(data_dir, server_data, report_path):
                       appearance_resources_preserved=True, appearance_identity_preserved=True,
                       appearance_sessions_preserved=True, appearance_settings_preserved=True,
                       appearance_restart_no_change=True)
+        report["main_live_included"] = live_engine_library is not None
+        if live_engine_library is not None:
+            from idoly_local.main_live_qa import assert_main_live_retries, run_main_live_checks
+            disabled_before = _rpc(address, schema, "/api.User/Get", token=token).SerializeToString(deterministic=True)
+            request = schema.request_type("/api.Quest/Start")(questId="qt-main-1-001-01", deckNumber=1, playCount=1)
+            _rpc(address, schema, "/api.Quest/Start", request, token,
+                 expected_status="12", request_id="9000000000000000300", timeout=60)
+            if _rpc(address, schema, "/api.User/Get", token=token).SerializeToString(deterministic=True) != disabled_before:
+                raise RuntimeError("Disabled experimental main live changed the snapshot")
+            runtime.stop()
+            runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0,
+                experimental_main_live=True, live_engine_library=live_engine_library)
+            address = runtime.status()["grpc_address"]
+            if runtime.status().get("experimental_main_live") is not True:
+                raise RuntimeError("Native main live did not enable the explicit opt-in setting")
+            invoke = lambda path, request, identity: _rpc(address, schema, path, request, token,
+                                                         request_id=identity, timeout=60)
+            main_live = run_main_live_checks(schema, invoke, Path(data_dir) / "master-json", label=engine_label)
+            report["main_live"] = main_live
+            runtime.stop()
+            attempts = _main_live_database(data_dir, schema, main_live, lesson)
+            runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0,
+                experimental_main_live=True, live_engine_library=live_engine_library)
+            address = runtime.status()["grpc_address"]
+            assert_main_live_retries(schema, invoke, Path(data_dir) / "master-json", main_live)
+            _main_live_database(data_dir, schema, main_live, lesson, attempts)
+            if _preserved_database_state(data_dir) != preserved:
+                raise RuntimeError("Main live changed identity, sessions, settings or the starter marker")
+            report.update(main_live_first_quest=True, main_live_mode_default_off=True, main_live_opt_in=True,
+                          main_live_persisted=True, main_live_attempts_persisted=True, main_live_clock_preserved=True,
+                          main_live_identity_preserved=True, main_live_sessions_preserved=True,
+                          main_live_settings_preserved=True, main_live_cached_no_grant=True)
     finally:
         runtime.stop()
         report["server_stopped"] = runtime.status()["running"] is False
@@ -882,6 +942,11 @@ def smoke(data_dir, server_data, report_path):
                 "appearance_identity_preserved", "appearance_sessions_preserved", "appearance_settings_preserved",
                 "appearance_restart_no_change",
                 "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+    if report.get("main_live_included"):
+        required += ("main_live_first_quest", "main_live_mode_default_off", "main_live_opt_in",
+                     "main_live_persisted", "main_live_attempts_persisted", "main_live_clock_preserved",
+                     "main_live_identity_preserved", "main_live_sessions_preserved", "main_live_settings_preserved",
+                     "main_live_cached_no_grant")
     if not all(report[key] for key in required):
         raise RuntimeError("Bundled engine smoke check failed")
 
@@ -892,12 +957,13 @@ def main(argv=None):
     parser.add_argument("--server-data", required=True, type=Path)
     parser.add_argument("--json-control", action="store_true")
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--live-engine-library", type=Path)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args(argv)
     if args.smoke:
         if args.report is None:
             parser.error("--smoke requires --report")
-        smoke(args.data_dir, args.server_data, args.report)
+        smoke(args.data_dir, args.server_data, args.report, args.live_engine_library)
         return 0
     controller = Controller(args.data_dir, args.server_data)
 
@@ -917,7 +983,14 @@ def main(argv=None):
                 continue
             action = command.get("action") if isinstance(command, dict) else None
             if action == "start":
-                controller.start()
+                experimental_live = command.get("experimental_main_live", False)
+                if type(experimental_live) is not bool:
+                    emit("error", message="실험 라이브 설정을 읽지 못했습니다.")
+                    continue
+                if experimental_live:
+                    controller.start(True)
+                else:
+                    controller.start()
             elif action == "stop":
                 controller.stop()
             elif action == "status":

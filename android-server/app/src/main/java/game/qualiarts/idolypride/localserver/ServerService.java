@@ -165,6 +165,8 @@ public final class ServerService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        final boolean experimentalMainLive = getSharedPreferences(MainActivity.SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(MainActivity.EXPERIMENTAL_MAIN_LIVE, false);
         foreground();
         if (!startQueued.compareAndSet(false, true)) return START_NOT_STICKY;
         runtimeDetails = "{}";
@@ -177,7 +179,8 @@ public final class ServerService extends Service {
                     if (!Python.isStarted()) Python.start(new AndroidPlatform(getApplicationContext()));
                 }
                 runtime = Python.getInstance().getModule("android_server_runtime");
-                runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback());
+                runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback(),
+                        getApplicationInfo().nativeLibraryDir, experimentalMainLive);
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
                 runtimeDetails = details.toString();
                 if (!details.optBoolean("running", false)) {

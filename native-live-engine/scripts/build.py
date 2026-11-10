@@ -45,15 +45,16 @@ def target_settings(target, ndk=None, *, system=None, machine=None):
             raise ValueError("macos requires a native Apple Silicon Darwin/arm64 host")
         return {"GOOS": "darwin", "GOARCH": "arm64", "CC": "clang", "CXX": "clang++",
                 "MACOSX_DEPLOYMENT_TARGET": "13.0"}, "libidoly_live.dylib"
-    if target == "android":
+    if target in ("android", "android-x86_64"):
         if ndk is None:
             raise ValueError("--ndk is required for Android")
         ndk = Path(ndk).resolve()
         if "Pkg.Revision = 26.3.11579264" not in (ndk / "source.properties").read_text():
             raise ValueError("This proof is pinned to NDK 26.3.11579264")
         compiler = ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin"
-        return {"GOOS": "android", "GOARCH": "arm64", "CC": str(compiler / "aarch64-linux-android26-clang"),
-                "CXX": str(compiler / "aarch64-linux-android26-clang++")}, "libidoly_live.so"
+        arch, triple = (("arm64", "aarch64") if target == "android" else ("amd64", "x86_64"))
+        return {"GOOS": "android", "GOARCH": arch, "CC": str(compiler / (triple + "-linux-android26-clang")),
+                "CXX": str(compiler / (triple + "-linux-android26-clang++"))}, "libidoly_live.so"
     if target == "linux":
         return {"GOOS": "linux", "GOARCH": "amd64", "CC": "cc", "CXX": "c++"}, "libidoly_live.so"
     raise ValueError("Unsupported build target")
@@ -67,12 +68,37 @@ def check_macos_library(raw):
         raise ValueError("macos output must be a thin ARM64 Mach-O dynamic library")
 
 
+def check_android_library(raw, target):
+    """Check the actual output architecture and every 16-KiB load segment."""
+    machine = {"android": 183, "android-x86_64": 62}.get(target)
+    if (machine is None or len(raw) < 64 or raw[:6] != b"\x7fELF\x02\x01"
+            or struct.unpack_from("<HH", raw, 16) != (3, machine)):
+        raise ValueError("Android output must be the selected 64-bit ELF dynamic library")
+    offset = struct.unpack_from("<Q", raw, 32)[0]
+    size, count = struct.unpack_from("<HH", raw, 54)
+    if size < 56 or not count or offset + size * count > len(raw):
+        raise ValueError("Android ELF program headers are incomplete")
+    alignments = []
+    for index in range(count):
+        kind, _flags, file_offset, address, _physical, file_size, _memory, alignment = struct.unpack_from(
+            "<IIQQQQQQ", raw, offset + index * size)
+        if kind != 1:  # PT_LOAD
+            continue
+        if (alignment < 16384 or alignment & (alignment - 1)
+                or (address - file_offset) % alignment or file_offset + file_size > len(raw)):
+            raise ValueError("Android ELF load segments must support 16-KiB pages")
+        alignments.append(alignment)
+    if not alignments:
+        raise ValueError("Android ELF has no load segments")
+    return alignments
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--verify-only", action="store_true")
     parser.add_argument("--go", default=os.environ.get("IDOLY_GO_BINARY", "go"),
                         help="Go compiler path or name; beware unrelated /usr/bin/go programs")
-    parser.add_argument("--target", choices=("linux", "android", "macos"), default="linux")
+    parser.add_argument("--target", choices=("linux", "android", "android-x86_64", "macos"), default="linux")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--cache", type=Path)
     parser.add_argument("--ndk", type=Path)
@@ -113,7 +139,7 @@ def main(argv=None):
     output.mkdir(parents=True, exist_ok=True)
     library = output / library_name
     linker_flags = "-s -w"
-    if args.target == "android":
+    if args.target in ("android", "android-x86_64"):
         linker_flags += " -extldflags=-Wl,-z,max-page-size=16384"
     elif args.target == "macos":
         linker_flags += " -extldflags=-Wl,-install_name,@rpath/libidoly_live.dylib"
@@ -138,9 +164,13 @@ def main(argv=None):
               "library_bytes": len(raw), "library_sha256": hashlib.sha256(raw).hexdigest(),
               "no_db_or_server_dependencies": True, "dependencies": dependencies,
               "official_score_equivalence": False}
-    if args.target == "android":
+    if args.target in ("android", "android-x86_64"):
+        alignments = check_android_library(raw, args.target)
         report.update(ndk_revision="26.3.11579264", android_min_api=26,
-                      linker_max_page_size=16384, device_execution_tested=False)
+                      linker_max_page_size=16384, device_execution_tested=False,
+                      android_abi="arm64-v8a" if args.target == "android" else "x86_64",
+                      architecture="arm64" if args.target == "android" else "x86_64",
+                      elf_load_segment_alignment=alignments, elf_16k_load_alignment_verified=True)
     if args.target == "macos":
         report.update(architecture="arm64", macos_deployment_target="13.0",
                       install_name="@rpath/libidoly_live.dylib",

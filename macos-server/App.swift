@@ -8,6 +8,10 @@ final class ServerModel: ObservableObject {
     @Published var running = false
     @Published var busy = true
     @Published var canStop = false
+    @Published var experimentalMainLive = UserDefaults.standard.bool(forKey: "experimentalMainLive") {
+        didSet { UserDefaults.standard.set(experimentalMainLive, forKey: "experimentalMainLive") }
+    }
+    private var experimentalLiveObserved = false
     @Published var status = "앱을 준비하고 있습니다."
     @Published var logs = ""
     @Published var alertMessage: String?
@@ -35,6 +39,7 @@ final class ServerModel: ObservableObject {
         }
         smoke = arguments.contains("--app-smoke")
         smokeReport = value("--smoke-report").map { URL(fileURLWithPath: $0) }
+        if arguments.contains("--experimental-main-live") { experimentalMainLive = true }
         if let custom = value("--data-dir") {
             dataDirectory = URL(fileURLWithPath: custom, isDirectory: true)
         } else {
@@ -144,6 +149,7 @@ final class ServerModel: ObservableObject {
             case "status":
                 guard let state = event["status"] as? [String: Any] else { continue }
                 running = state["running"] as? Bool ?? false
+                if running && (state["experimental_main_live"] as? Bool == true) { experimentalLiveObserved = true }
                 busy = state["starting"] as? Bool ?? false
                 canStop = state["can_stop"] as? Bool ?? (running || busy)
                 status = running ? "로컬 서버가 실행 중입니다." : (busy ? "서버를 시작하고 있습니다." : "서버가 중지되어 있습니다.")
@@ -175,13 +181,15 @@ final class ServerModel: ObservableObject {
         }
     }
 
-    private func send(_ action: String) {
+    private func send(_ action: String, experimental: Bool? = nil) {
         guard let writer = input?.fileHandleForWriting, child?.isRunning == true else {
             fail("서버 엔진에 연결하지 못했습니다. 앱을 다시 열어 주세요.")
             return
         }
         do {
-            var data = try JSONSerialization.data(withJSONObject: ["action": action])
+            var command: [String: Any] = ["action": action]
+            if let enabled = experimental { command["experimental_main_live"] = enabled }
+            var data = try JSONSerialization.data(withJSONObject: command)
             data.append(10)
             try writer.write(contentsOf: data)
         } catch { fail("서버 엔진에 요청을 전달하지 못했습니다.") }
@@ -189,7 +197,7 @@ final class ServerModel: ObservableObject {
 
     func start() {
         guard !running && !busy && !canStop else { return }
-        busy = true; status = "서버를 시작하고 있습니다."; send("start")
+        busy = true; status = "서버를 시작하고 있습니다."; send("start", experimental: experimentalMainLive)
     }
     func stop() {
         busy = true; status = "서버를 중지하고 있습니다."; send("stop")
@@ -226,7 +234,9 @@ final class ServerModel: ObservableObject {
         if let destination = smokeReport {
             let report: [String: Any] = ["gui_started": visibleWindowObserved,
                 "window_visible": NSApp.windows.contains { $0.isVisible }, "server_started": smokeStarted,
-                "server_stopped": success && !running && !canStop, "game_client_tested": false]
+                "server_stopped": success && !running && !canStop, "game_client_tested": false,
+                "experimental_main_live_requested": experimentalMainLive,
+                "experimental_main_live_observed": experimentalLiveObserved]
             do {
                 try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let data = try JSONSerialization.data(withJSONObject: report, options: .prettyPrinted)
@@ -331,7 +341,11 @@ VStack(alignment: .leading, spacing: 18) {
                     Button("데이터 폴더") { model.revealData() }
                 }
                 Text("서버 127.0.0.1:50051 · 리소스 127.0.0.1:8080").font(.caption).foregroundStyle(.secondary)
-                Text("튜토리얼 라이브는 원본 기록을 재생합니다. 일반 라이브 계산은 개발 중입니다.")
+                Toggle("첫 메인 라이브 실험 기능 사용", isOn: $model.experimentalMainLive)
+                    .disabled(model.running || model.busy || model.canStop)
+                Text("첫 퀘스트만 지원하며 점수는 로컬 계산 규칙을 사용합니다. 공식 서버와 다를 수 있습니다. 기본값은 꺼짐입니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("튜토리얼 라이브는 원본 기록을 재생합니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 Divider()
                 Text("실행 기록").font(.subheadline.bold())

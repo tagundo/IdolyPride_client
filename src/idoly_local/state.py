@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 import sqlite3
 import time
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
+
+
+class AttemptConflict(ValueError):
+    """A request identity was already used for different live input."""
 
 
 class State:
@@ -46,6 +51,19 @@ class State:
                     profile TEXT PRIMARY KEY REFERENCES profiles(name),
                     response BLOB NOT NULL,
                     schema_sha256 TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS main_live_attempts (
+                    profile TEXT NOT NULL REFERENCES profiles(name),
+                    request_id TEXT NOT NULL,
+                    request_sha256 TEXT NOT NULL,
+                    path TEXT NOT NULL,
+                    schema_sha256 TEXT NOT NULL,
+                    master_version TEXT NOT NULL,
+                    ruleset TEXT NOT NULL,
+                    seed TEXT NOT NULL,
+                    started_time INTEGER NOT NULL,
+                    response BLOB NOT NULL,
+                    PRIMARY KEY(profile, request_id)
                 );
             """)
         path.chmod(0o600)
@@ -123,6 +141,8 @@ class State:
             # A replacement/import starts a new local earning timeline. Never
             # carry time accumulated by the previous snapshot/account into it.
             db.execute("DELETE FROM profile_lesson_progress WHERE profile=?", (profile,))
+            # Request identities belong to this snapshot/account, not its name.
+            db.execute("DELETE FROM main_live_attempts WHERE profile=?", (profile,))
 
     def snapshot(self, profile: str) -> tuple[bytes, str] | None:
         with self.connect() as db:
@@ -140,6 +160,72 @@ class State:
             row = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile=?",
                              (profile,)).fetchone()
             return (bytes(row["response"]), row["schema_sha256"]) if row is not None else None
+
+    @staticmethod
+    def live_request_id(value: str) -> str:
+        """Validate the canonical positive uint64 x-app-request-id spelling."""
+        if (not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", value)
+                or int(value) > (1 << 64) - 1):
+            raise ValueError("A canonical positive uint64 live request identity is required")
+        return value
+
+    def main_live_attempt(self, profile: str, request_id: str) -> dict | None:
+        """Return an opaque local attempt receipt, without re-running a live."""
+        self.live_request_id(request_id)
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM main_live_attempts WHERE profile=? AND request_id=?",
+                             (profile, request_id)).fetchone()
+            return dict(row) if row is not None else None
+
+    def mutate_main_live_snapshot(self, profile: str, schema_sha256: str, request_id: str,
+                                  request_sha256: str, path: str, master_version: str,
+                                  ruleset: str, callback) -> bytes:
+        """Settle a live and its complete retry response in one write transaction.
+
+        The callback runs only on a cache miss and returns
+        ``(snapshot_bytes, response_bytes, uint64_seed, unix_milliseconds)``.
+        It owns all protobuf, engine and reward validation. A cache hit returns
+        the original response even if later actions changed the snapshot. An
+        explicit snapshot import clears receipts; ordinary mutations never do.
+        """
+        self.live_request_id(request_id)
+        if (not isinstance(request_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", request_sha256) is None):
+            raise ValueError("Live request SHA256 is required")
+        if any(not isinstance(value, str) or not value
+               for value in (schema_sha256, path, master_version, ruleset)) or not callable(callback):
+            raise ValueError("Live attempt context and callback are required")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                             (profile,)).fetchone()
+            if row is None or row["schema_sha256"] != schema_sha256:
+                raise ValueError("Local profile has no snapshot for this schema")
+            old = db.execute("SELECT * FROM main_live_attempts WHERE profile=? AND request_id=?",
+                             (profile, request_id)).fetchone()
+            if old is not None:
+                if old["request_sha256"] != request_sha256 or old["path"] != path:
+                    raise AttemptConflict("Live request identity was reused for different input")
+                if any(old[key] != value for key, value in (
+                        ("schema_sha256", schema_sha256), ("master_version", master_version),
+                        ("ruleset", ruleset))):
+                    raise ValueError("Cached live attempt uses a different ruleset or master")
+                return bytes(old["response"])
+            original = bytes(row["response"])
+            result = callback(original)
+            if not isinstance(result, tuple) or len(result) != 4:
+                raise ValueError("Live mutation must return snapshot, response, seed and time")
+            payload, response, seed, started_time = result
+            if (not isinstance(payload, bytes) or not isinstance(response, bytes)
+                    or type(seed) is not int or not 0 <= seed <= (1 << 64) - 1
+                    or type(started_time) is not int or not 0 < started_time <= (1 << 63) - 1):
+                raise ValueError("Invalid live mutation receipt")
+            if payload != original:
+                db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            db.execute("INSERT INTO main_live_attempts VALUES (?,?,?,?,?,?,?,?,?,?)", (
+                profile, request_id, request_sha256, path, schema_sha256,
+                master_version, ruleset, str(seed), started_time, response))
+        return response
 
     def mutate_lesson_snapshot(self, profile: str, schema_sha256: str, callback) -> tuple[bytes, bytes]:
         """Update a snapshot and its local lesson clock in one transaction.

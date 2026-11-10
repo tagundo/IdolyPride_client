@@ -26,6 +26,7 @@ class Runtime:
         self._running = False
         self._stopped = False
         self._last_error = None
+        self._experimental_main_live = False
         self._grpc_address = None
         self._asset_url = None
         from .diagnostics import ClientDiagnostics
@@ -56,6 +57,9 @@ class Runtime:
             result = {"running": self._running, "profile": self.profile,
                       "grpc_address": self._grpc_address, "asset_url": self._asset_url,
                       "last_error": self._last_error}
+            if self._experimental_main_live:
+                result["experimental_main_live"] = True
+                result["live_ruleset"] = "live-v5"
         with self._log_lock:
             result["logs"] = list(self._logs)
         diagnostics = self._diagnostics.status()
@@ -131,7 +135,8 @@ class Runtime:
 
 def start(data_dir, profile="sandbox", log_callback=None, *,
           grpc_host="127.0.0.1", grpc_port=50051,
-          asset_host="127.0.0.1", asset_port=8080, aes_cbc=None) -> Runtime:
+          asset_host="127.0.0.1", asset_port=8080, aes_cbc=None,
+          experimental_main_live=False, live_engine_library=None) -> Runtime:
     """Start the local game engine and asset server without blocking the UI.
 
     ``data_dir`` contains ``protocol/idolypride-6.1.1.pb`` and
@@ -144,6 +149,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     the engine is imported. An already configured backend is preserved when it
     is omitted. The macOS launcher uses the normal Python AES backend.
     """
+    if type(experimental_main_live) is not bool:
+        raise ValueError("Experimental main live must be an explicit boolean")
     if not isinstance(profile, str) or not profile.strip():
         raise ValueError("A nonempty local profile is required")
     if log_callback is not None and not callable(log_callback):
@@ -195,7 +202,20 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         master_response = prepare_master_tag(schema, archive / "master-tag.json",
                                              archive / "assets" / "master", runtime._asset_url)
         fixtures = FixtureStore(root / "fixtures", schema)
-        application = Application(schema, state, fixtures, profile=profile, master_response=master_response, master_dir=master_dir)
+        live_options = {}
+        if experimental_main_live:
+            import sys
+            from .live_engine import NativeLiveEngine
+            if live_engine_library is None:
+                library_name = "libidoly_live.dylib" if sys.platform == "darwin" else "libidoly_live.so"
+                live_engine_library = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / library_name
+            live_options = {"experimental_main_live": True,
+                            "live_engine": NativeLiveEngine(Path(live_engine_library))}
+        application = Application(schema, state, fixtures, profile=profile, master_response=master_response,
+                                  master_dir=master_dir, **live_options)
+        runtime._experimental_main_live = experimental_main_live
+        if experimental_main_live:
+            runtime._log("일반 라이브 실험 기능 사용: 첫 메인 퀘스트 · 로컬 계산 규칙")
         runtime._grpc = create_server(application, host=grpc_host, port=grpc_port, log_callback=runtime._log)
         runtime._grpc_address = f"{runtime._grpc.address[0]}:{runtime._grpc.address[1]}"
         runtime._asset_thread = threading.Thread(target=runtime._asset.serve_forever,

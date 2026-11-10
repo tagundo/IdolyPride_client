@@ -1,4 +1,6 @@
 import java.security.MessageDigest
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 plugins {
     id("com.android.application")
@@ -8,7 +10,7 @@ plugins {
 val serverAbi = providers.gradleProperty("serverAbi").orElse("arm64-v8a").get()
 require(serverAbi in listOf("arm64-v8a", "x86_64")) { "serverAbi must be arm64-v8a or x86_64" }
 val serverData = providers.gradleProperty("serverData").map { rootProject.file(it) }
-    .orElse(rootProject.file("../data/clients/IdolyPride-ServerData-v0.2.16.zip"))
+    .orElse(rootProject.file("../data/clients/IdolyPride-ServerData-v0.3.0.zip"))
 val payloadFile = serverData.get()
 val payloadHash = if (payloadFile.isFile) payloadFile.inputStream().use { input ->
     val digest = MessageDigest.getInstance("SHA-256")
@@ -30,6 +32,56 @@ val prepareServerDataAssets = tasks.register<Copy>("prepareServerDataAssets") {
     }
 }
 
+// Optional prebuilt libraries only. Go sources never enter Chaquopy's Python
+// package, and omitting this property removes any previously staged library.
+val liveEngineDir = providers.gradleProperty("liveEngineDir").map { rootProject.file(it) }
+val liveEngineLibrary = liveEngineDir.map { it.resolve("$serverAbi/libidoly_live.so") }
+val liveEngineNotices = rootProject.file("../native-live-engine")
+val liveEngineNoticePaths = listOf("LICENSE", "NOTICE", "third-party-licenses/Go-LICENSE",
+    "third-party-licenses/Protobuf-LICENSE", "third-party-licenses/YAML-LICENSE",
+    "third-party-licenses/YAML-NOTICE")
+val generatedLiveEngine = layout.buildDirectory.dir("generated/optionalLiveEngine")
+val prepareLiveEngine = tasks.register("prepareLiveEngine") {
+    inputs.property("liveEngineDir", liveEngineDir.map { it.absolutePath }.orElse(""))
+    inputs.property("serverAbi", serverAbi)
+    if (liveEngineLibrary.isPresent) {
+        inputs.file(liveEngineLibrary)
+        inputs.files(liveEngineNoticePaths.map { liveEngineNotices.resolve(it) })
+    }
+    outputs.dir(generatedLiveEngine)
+    doLast {
+        val library = liveEngineLibrary.orNull
+        if (library != null) {
+            require(library.isFile) { "liveEngineDir must contain $serverAbi/libidoly_live.so" }
+            val raw = library.readBytes()
+            require(raw.size >= 64 && raw.copyOfRange(0, 6).contentEquals(byteArrayOf(0x7f, 0x45, 0x4c, 0x46, 2, 1))) {
+                "libidoly_live.so must be a 64-bit little-endian ELF library"
+            }
+            val elf = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
+            val expectedMachine = if (serverAbi == "arm64-v8a") 183 else 62
+            require(elf.getShort(16).toInt() == 3 && elf.getShort(18).toInt() == expectedMachine) {
+                "libidoly_live.so does not match the selected serverAbi=$serverAbi"
+            }
+            require(liveEngineNoticePaths.all { liveEngineNotices.resolve(it).isFile }) {
+                "Native live engine LICENSE, NOTICE and third-party notices must be present"
+            }
+        }
+        val destination = generatedLiveEngine.get().asFile
+        project.delete(destination)
+        destination.mkdirs()
+        if (library != null) {
+            val outputLibrary = destination.resolve("jniLibs/$serverAbi/libidoly_live.so")
+            outputLibrary.parentFile.mkdirs()
+            library.copyTo(outputLibrary)
+            for (relative in liveEngineNoticePaths) {
+                val outputNotice = destination.resolve("assets/native-live-engine/$relative")
+                outputNotice.parentFile.mkdirs()
+                liveEngineNotices.resolve(relative).copyTo(outputNotice)
+            }
+        }
+    }
+}
+
 android {
     namespace = "game.qualiarts.idolypride.localserver"
     compileSdk = 34
@@ -37,8 +89,8 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("18").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.2.16").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("19").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.0").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
     }
@@ -74,6 +126,16 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     sourceSets.getByName("main").assets.srcDir(generatedAssets)
+    sourceSets.getByName("main").assets.srcDir(generatedLiveEngine.map { it.dir("assets") })
+    sourceSets.getByName("main").jniLibs.srcDir(generatedLiveEngine.map { it.dir("jniLibs") })
+    if (liveEngineDir.isPresent) {
+        packaging.jniLibs {
+            // ctypes uses applicationInfo.nativeLibraryDir. Extract this
+            // optional library rather than depending on an APK zip pathname.
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libidoly_live.so"
+        }
+    }
     androidResources { noCompress += "zip" }
 }
 
@@ -93,8 +155,9 @@ chaquopy {
         getByName("main") {
             srcDir("src/main/python")
             srcDir("../../src")
+            exclude("**/*.go", "**/go.mod", "**/go.sum", "**/native-live-engine/**")
         }
     }
 }
 
-tasks.named("preBuild").configure { dependsOn(prepareServerDataAssets) }
+tasks.named("preBuild").configure { dependsOn(prepareServerDataAssets, prepareLiveEngine) }

@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import struct
+import tempfile
 import unittest
 
 
@@ -11,6 +12,45 @@ SPEC.loader.exec_module(build)
 
 
 class BuildTargetTests(unittest.TestCase):
+    def test_android_targets_use_pinned_ndk_api26_and_distinct_architectures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ndk = Path(temporary)
+            (ndk / "source.properties").write_text("Pkg.Revision = 26.3.11579264\n")
+            for target, arch, triple in (("android", "arm64", "aarch64"),
+                                         ("android-x86_64", "amd64", "x86_64")):
+                with self.subTest(target=target):
+                    environment, filename = build.target_settings(target, ndk)
+                    self.assertEqual(filename, "libidoly_live.so")
+                    self.assertEqual(environment["GOOS"], "android")
+                    self.assertEqual(environment["GOARCH"], arch)
+                    prefix = ndk / "toolchains/llvm/prebuilt/linux-x86_64/bin"
+                    self.assertEqual(environment["CC"], str(prefix / (triple + "-linux-android26-clang")))
+                    self.assertEqual(environment["CXX"], str(prefix / (triple + "-linux-android26-clang++")))
+            (ndk / "source.properties").write_text("Pkg.Revision = 27.0.0\n")
+            with self.assertRaisesRegex(ValueError, "pinned"):
+                build.target_settings("android-x86_64", ndk)
+        with self.assertRaisesRegex(ValueError, "--ndk"):
+            build.target_settings("android-x86_64")
+
+    def test_android_output_must_match_architecture_and_all_16k_load_segments(self):
+        def elf(machine, alignment=16384):
+            raw = bytearray(120)
+            raw[:6] = b"\x7fELF\x02\x01"
+            struct.pack_into("<HH", raw, 16, 3, machine)
+            struct.pack_into("<Q", raw, 32, 64)
+            struct.pack_into("<HH", raw, 54, 56, 1)
+            struct.pack_into("<IIQQQQQQ", raw, 64, 1, 5, 0, 0, 0, 120, 120, alignment)
+            return bytes(raw)
+        for target, machine in (("android", 183), ("android-x86_64", 62)):
+            with self.subTest(target=target):
+                self.assertEqual(build.check_android_library(elf(machine), target), [16384])
+                with self.assertRaisesRegex(ValueError, "selected"):
+                    build.check_android_library(elf(62 if machine == 183 else 183), target)
+                with self.assertRaisesRegex(ValueError, "16-KiB"):
+                    build.check_android_library(elf(machine, 4096), target)
+                with self.assertRaisesRegex(ValueError, "incomplete"):
+                    build.check_android_library(elf(machine)[:80], target)
+
     def test_macos_requires_native_apple_silicon_host(self):
         for system, machine in (("Linux", "arm64"), ("Linux", "x86_64"), ("Darwin", "x86_64")):
             with self.subTest(system=system, machine=machine), self.assertRaisesRegex(ValueError, "Apple Silicon"):

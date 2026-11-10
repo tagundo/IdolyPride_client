@@ -114,7 +114,7 @@ def _copy_asset(assets, destination: Path, expected_sha256: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def start(files_dir, assets, callback):
+def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False):
     """Start the embedded loopback runtime; called on the service worker."""
     global _RUNTIME, _LAST_STATUS
     # Select the universal wheel's implementation before importing the engine.
@@ -144,7 +144,13 @@ def start(files_dir, assets, callback):
             data = install_bundle(bundle, files, expected)
             from idoly_local.app_runtime import start as start_runtime
 
-            _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc)
+            live_options = {}
+            if experimental_main_live:
+                if native_library_dir is None:
+                    raise ValueError("Experimental live library directory is unavailable")
+                live_options = {"experimental_main_live": True,
+                                "live_engine_library": Path(str(native_library_dir)) / "libidoly_live.so"}
+            _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc, **live_options)
             _LAST_STATUS = _RUNTIME.status()
             return json.dumps(_LAST_STATUS, ensure_ascii=False)
         except BaseException as error:

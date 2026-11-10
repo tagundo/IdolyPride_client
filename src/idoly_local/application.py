@@ -18,7 +18,10 @@ LOCAL_REFUND_DATETIME_MS = 4102444800000
 
 
 class Application:
-    def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None, master_dir=None):
+    def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None,
+                 master_dir=None, *, experimental_main_live=False, live_engine=None):
+        if type(experimental_main_live) is not bool:
+            raise ValueError("Experimental main live must be an explicit boolean")
         self.schema = schema
         self.state = state
         self.fixtures = fixtures
@@ -41,6 +44,10 @@ class Application:
                                       fixtures=self.fixtures, extra_fixture=self._story_extra_fixture,
                                       event_fixture=self._story_event_fixture)
         self.appearance = Appearance(schema, state, profile, master_dir)
+        self.main_lives = None
+        if experimental_main_live:
+            from .main_live import MainLives
+            self.main_lives = MainLives(schema, state, profile, master_dir, engine=live_engine, enabled=True)
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
@@ -135,6 +142,12 @@ class Application:
                 response = self.story_reads.handle(path, plain)
             if response is None:
                 response = self.appearance.handle(path, plain)
+            if response is None and self.main_lives is not None:
+                request_ids = [value for key, value in context.invocation_metadata() if key == "x-app-request-id"]
+                if path == "/api.Quest/Start" and len(request_ids) != 1:
+                    raise RpcFailure(RpcCode.INVALID_ARGUMENT, "One x-app-request-id is required for a local live")
+                response = self.main_lives.handle(path, plain,
+                    request_id=request_ids[0] if len(request_ids) == 1 else None)
             if response is None:
                 response = self.tutorial_progression.handle(path, plain)
             if response is None:

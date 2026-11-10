@@ -13,6 +13,7 @@ import android.net.Uri;
 import android.text.TextUtils;
 import android.view.View;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -25,6 +26,9 @@ import org.json.JSONObject;
 
 /** Native controls for a server contained entirely in this installed app. */
 public final class MainActivity extends Activity implements ServerService.Observer {
+    static final String SERVER_PREFS = "local_server";
+    static final String EXPERIMENTAL_MAIN_LIVE = "experimental_main_live";
+    private CheckBox experimentalMainLive;
     private TextView status;
     private TextView logs;
     private TextView gameStatus;
@@ -98,6 +102,18 @@ public final class MainActivity extends Activity implements ServerService.Observ
         // Keep lifecycle controls visible while diagnostics and logs scroll.
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
+        experimentalMainLive = new CheckBox(this);
+        experimentalMainLive.setText(R.string.experimental_main_live);
+        experimentalMainLive.setTextColor(Color.WHITE);
+        experimentalMainLive.setTextSize(13);
+        experimentalMainLive.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(EXPERIMENTAL_MAIN_LIVE, false));
+        experimentalMainLive.setOnCheckedChangeListener((button, enabled) ->
+                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
+                        .putBoolean(EXPERIMENTAL_MAIN_LIVE, enabled).apply());
+        body.addView(experimentalMainLive);
+        TextView liveNotice = text(R.string.experimental_main_live_notice, 12, Color.rgb(180, 199, 211));
+        body.addView(liveNotice);
         TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
         replayNotice.setPadding(0, dp(6), 0, dp(8));
         body.addView(replayNotice);
@@ -215,6 +231,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         status.setText(value);
         status.setTextColor(running ? Color.rgb(117, 226, 177) : Color.WHITE);
         start.setEnabled(!running && !busy);
+        experimentalMainLive.setEnabled(!running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);

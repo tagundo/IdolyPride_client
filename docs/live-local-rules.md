@@ -1,0 +1,52 @@
+# 일반 라이브 로컬 계산 기반
+
+일반 라이브 계산은 **`live-v5` 로컬 규칙**입니다. 공개 마스터의 실제 차트와 현재 소유 카드의 수치·스킬을 사용하며 고정 승리나 공식 계정 응답을 복사하지 않습니다. 공식 점수·확률·팬 증가와 동일하다는 검증은 없습니다. 크리티컬 확률, 난수 순서와 비트 점수 정규화에는 원본 참고 서버의 추정 규칙이 포함됩니다.
+
+이 문서의 두 모듈은 입력 준비와 네이티브 호출 계층입니다. v0.3.0 소스의 `main_live.py`가 게임 기능 활성화·인증 이후의 `Quest.Start` 응답 조립·첫 성공 보상과 진행 저장을 연결합니다. 앱의 실험 기능은 기본값이 꺼져 있습니다. 입력 준비·네이티브 호출 계층 자체는 재화·퀘스트·세션·설정을 변경하지 않습니다. 사용 조건과 정산 범위는 [첫 일반 라이브 안내](first-live-support.md)를 참고합니다.
+
+## API
+
+```python
+prepared = prepare_main_live(schema, master_dir, snapshot,
+                             quest_id, deck_number, seed)
+result_bytes = NativeLiveEngine(library_path).simulate(prepared)
+```
+
+[live_input.py](../src/idoly_local/live_input.py)의 `prepare_main_live`는 새 JSON-v1 dict를 반환합니다. snapshot은 해당 스키마의 `UserGetResponse`이며, 호출자가 트랜잭션 안에서 읽은 현재 값이어야 합니다. seed는 부호 없는 64비트 정수입니다. 이 함수는 시계를 읽거나 seed를 새로 추첨하지 않습니다.
+
+[live_engine.py](../src/idoly_local/live_engine.py)의 `NativeLiveEngine`은 명시적으로 지정한 호스트용 라이브러리만 로드합니다. 성공 결과는 압축·전송 봉투 없는 `api.LiveResult` protobuf 바이트입니다. 호출자가 자신의 스키마로 해석·검증한 뒤 정산해야 합니다.
+
+## 현재 입력 범위
+
+- 스키마 6.1.1의 정규화 SHA-256 `0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3`와 마스터 `961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`만 지원합니다.
+- `qt-main-1-001-01` / `area-main-001`, 음악 `music-hsm-006`, 차트 `chart-hsm-006-002`, 기준 점수 3,000만 지원합니다. 해금 조건·라이브 보너스·캐릭터 우대가 추가된 형태는 거부합니다.
+- 선택한 저장 덱에 1~5번 슬롯과 서로 다른 소유 카드 다섯 장이 있어야 합니다. 카드·캐릭터·외형의 마스터 연결과 소유권을 확인합니다. 외형은 기존 `project_live_assets`와 동일한 명시적 선택·기본 외형 fallback을 사용합니다.
+- 포토·액세서리를 장착한 덱은 명시적으로 미지원입니다. 버디 입력은 이 API에 없으며 상위 요청 처리 계층도 빌린 덱을 거부해야 합니다.
+- 초기 레어리티이며 서포트를 적용하지 않은 랭크 0·진화 0 카드만 허용합니다. 현재 경험치·레벨·기본/유효 파라미터·해금된 스킬과 사진 슬롯을 기존 카드 검증기로 확인하고, 다음 해금 또는 스킬 강화 경계 이전으로 제한합니다. 레벨 숫자를 임의로 고정하지 않습니다.
+- 현재 스냅샷의 능력치와 스킬 ID/레벨을 그대로 투영합니다. 역사적 스타터의 `rarityTotalExp=0` 표현은 초기 레어리티 검증에서만 허용하며, 입력 준비 과정에서 경험치나 스냅샷을 고치지 않습니다. 상위 정산 계층은 검증한 성장 상태와 마스터 상한에 맞춰 첫 성공 경험치를 반영합니다.
+- 사용자 ID는 `userPublic.publicUserId`, 이름·덱 이름은 현재 프로필 값을 사용합니다. 숫자 사용자 인덱스는 1, 카드 인덱스는 저장 슬롯 1~5입니다. 팬 수는 현재 소유 캐릭터의 세 팬 구분 값을 사용합니다.
+
+학습한 스킬의 efficacy·trigger·target 참조를 확인합니다. 잘못된 마스터·누락·중복 breakpoint·알 수 없는 protobuf enum은 실패 처리합니다. 엔진이 지원하지 않는 효과는 빈 성공 대신 `UNIMPLEMENTED`로 전달합니다. 출력에서는 제공하지 않는 상세 분석 로그 ID와 분석 버튼 플래그를 비웁니다.
+
+## 마스터와 네이티브 경계
+
+전체 필수 테이블은 `live_input.REQUIRED_MASTER_TABLES`에 있습니다. 기존 35개 서버 테이블 기준 추가 계산 테이블은 다음 네 개입니다.
+
+| 테이블 | 용도 |
+| --- | --- |
+| `QuestPressure` | 스킬 성공 관련 압박 계수 |
+| `QuestAudienceAdvantage` | 관객 수에 따른 점수 계수 |
+| `ComboAdvantage` | 콤보에 따른 점수 계수 |
+| `QuestStaminaConsumption` | 남은 스태미나에 따른 계수 |
+
+기존 `Skill`, `SkillEfficacy`, `SkillTrigger`, `SkillTarget`와 카드 파라미터·레벨·레어리티·해금 표도 필요합니다. 런타임에서 SQLCipher나 공식 서버를 조회하지 않으며 로컬 JSON만 읽습니다. 입력 JSON의 proto 배열은 이 스키마로 직렬화한 protobuf의 base64입니다.
+
+네이티브 구현과 라이선스는 [native-live-engine](../native-live-engine/README.md)에 있습니다. ABI 1만 허용하고, 정규화한 라이브러리 경로별 로드를 프로세스 전체에서 공유합니다. 성공·실패 버퍼는 길이를 확인해 복사한 뒤 항상 네이티브 free 함수로 해제하며 `dlclose`하지 않습니다. JSON·결과·오류의 한도는 각각 16MiB입니다. ABI 오류나 손상된 포인터/길이 조합을 유효한 결과로 취급하지 않습니다.
+
+네이티브 상태 1/2/3/4는 각각 `INVALID_ARGUMENT` / `UNIMPLEMENTED` / `DEADLINE_EXCEEDED` / `INTERNAL`로 매핑합니다. 라이브러리 누락·ABI 불일치는 `FAILED_PRECONDITION`입니다. 이 경계는 gRPC를 직접 import하지 않습니다.
+
+## 검증과 서버 정산
+
+독립적인 작은 descriptor 테스트는 원본 게임 파일 없이 실행됩니다. 선택적인 실제 6.1.1 마스터·Linux 라이브러리 테스트에서는 새 로컬 스타터 입력으로 4,781점·성공, 준비된 입력의 세 능력치를 0으로 만든 대조군으로 0점·실패를 확인했습니다. 동일 seed의 결과·현재 파라미터 투영·스냅샷 불변·잘못된 참조 거부도 검사합니다. 이 대조군은 엔진 검증용이며 잘못된 저장 카드 수치를 게임 입력으로 허용하는 경로가 아닙니다.
+
+첫 일반 퀘스트도 `Quest.Start`가 전체 결과와 정산을 반환하며 `Quest.Finish`는 없습니다. `main_live.py`와 `State.mutate_main_live_snapshot`은 `x-app-request-id`·요청 본문·스키마/마스터/규칙을 확인하고, seed·시각·완성 응답과 snapshot 변경을 같은 트랜잭션에 저장합니다. 동일 요청은 재시작 뒤에도 원래 응답을 반환합니다. 첫 성공 보상·경험치만 한 번 지급하고, 팬·숙련도·미션은 변경하지 않습니다. 입력 준비와 네이티브 호출 모듈은 이 상태 변경을 직접 수행하지 않습니다. Android 기기에서의 Go 라이브러리 로딩과 macOS 앱 빌드 검증은 해당 플랫폼의 별도 검증 범위입니다.

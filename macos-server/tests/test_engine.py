@@ -1,4 +1,6 @@
 from pathlib import Path
+import hashlib
+import io
 import json
 import sqlite3
 import sys
@@ -675,3 +677,158 @@ def test_stop_failure_retains_owned_runtime_for_retry(tmp_path):
     assert controller.stop()["can_stop"] is False
     assert controller.runtime is None
     assert runtime.stops == 2
+
+
+@pytest.mark.parametrize("mode", (None, False, True))
+def test_native_controller_only_enables_main_live_for_explicit_true(tmp_path, monkeypatch, mode):
+    calls = []
+    monkeypatch.setattr(engine, "install_payload", lambda *args: None)
+
+    def start(*args, **kwargs):
+        calls.append(kwargs)
+        return Runtime()
+
+    import idoly_local
+    runtime_module = SimpleNamespace(start=start)
+    monkeypatch.setitem(sys.modules, "idoly_local.app_runtime", runtime_module)
+    monkeypatch.setattr(idoly_local, "app_runtime", runtime_module, raising=False)
+    controller = engine.Controller(tmp_path, tmp_path / "ServerData.zip", emit_event=lambda *args, **kwargs: None)
+    try:
+        controller.start() if mode is None else controller.start(mode)
+        wait_until(lambda: controller.runtime is not None)
+        assert len(calls) == 1
+        assert calls[0].get("experimental_main_live", False) is (mode is True)
+        if mode is not True:
+            assert "experimental_main_live" not in calls[0]
+    finally:
+        controller.close()
+
+
+@pytest.mark.parametrize("mode", (None, 0, 1, "true", "false", [], {}))
+def test_native_controller_rejects_truthy_or_falsey_non_boolean_mode_before_start(tmp_path, monkeypatch, mode):
+    def forbidden(*args):
+        raise AssertionError("Invalid opt-in must not prepare payloads")
+
+    monkeypatch.setattr(engine, "install_payload", forbidden)
+    controller = engine.Controller(tmp_path, tmp_path / "ServerData.zip", emit_event=lambda *args, **kwargs: None)
+    with pytest.raises(ValueError, match="explicit boolean"):
+        controller.start(mode)
+    assert controller.worker is None and controller.runtime is None
+
+
+def test_native_json_control_keeps_default_off_and_rejects_non_boolean_opt_in(tmp_path, monkeypatch):
+    starts, errors, closed = [], [], []
+
+    class Control:
+        def __init__(self, *args):
+            pass
+
+        def start(self, *args):
+            starts.append(args)
+
+        def status(self):
+            pass
+
+        def close(self):
+            closed.append(True)
+
+    commands = [{"action": "start"}, {"action": "start", "experimental_main_live": False},
+                {"action": "start", "experimental_main_live": True}]
+    commands.extend({"action": "start", "experimental_main_live": value}
+                    for value in (None, 0, 1, "true", [], {}))
+    commands.append({"action": "quit"})
+    monkeypatch.setattr(engine, "Controller", Control)
+    monkeypatch.setattr(engine.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(engine, "emit", lambda event, **data: errors.append((event, data)))
+    monkeypatch.setattr(sys, "stdin", io.StringIO("\n".join(map(json.dumps, commands))))
+    assert engine.main(["--data-dir", str(tmp_path), "--server-data", str(tmp_path / "ServerData.zip")]) == 0
+    assert starts == [(), (), (True,)]
+    assert len(errors) == 6 and all(event == "error" for event, _ in errors)
+    assert closed == [True]
+
+
+@pytest.fixture
+def main_live_database(tmp_path):
+    """A settled native DB with two distinct opaque replay receipts."""
+    schema = _client_schema()
+    snapshot = schema.response_type("/api.User/Get")()
+    snapshot.user.name = "Original native manager"
+    snapshot.MergeFromString(b"\x80\x4b\x7b")
+    bodies = [schema.response_type("/api.Quest/Start")(questId="qt-main-1-001-01", highestScore=score)
+              .SerializeToString(deterministic=True) for score in (4000, 5000)]
+    digest = lambda payload: hashlib.sha256(payload).hexdigest()
+    identities = ["9000000000000000301", "9000000000000000302"]
+    started = [1794234000000, 1794234000001]
+    receipt = {"request_ids": identities, "started_times": started, "request_sha256": "a" * 64,
+               "schema_sha256": schema.fingerprint, "master_version": "original-master", "ruleset": "live-v5",
+               "snapshot_sha256": digest(snapshot.SerializeToString(deterministic=True)),
+               "first_response_sha256": digest(bodies[0]), "replay_response_sha256": digest(bodies[1])}
+    clock = (b"unchanged raw clock\x00", schema.fingerprint)
+    path = tmp_path / "state.db"
+    with sqlite3.connect(path) as db:
+        db.execute("CREATE TABLE snapshots(profile TEXT,response BLOB,schema_sha256 TEXT)")
+        db.execute("CREATE TABLE profile_lesson_progress(profile TEXT,response BLOB,schema_sha256 TEXT)")
+        db.execute("CREATE TABLE main_live_attempts(profile TEXT,request_id TEXT,request_sha256 TEXT,path TEXT,"
+                   "schema_sha256 TEXT,master_version TEXT,ruleset TEXT,seed TEXT,started_time INTEGER,response BLOB)")
+        db.execute("INSERT INTO snapshots VALUES(?,?,?)", ("sandbox", snapshot.SerializeToString(), schema.fingerprint))
+        db.execute("INSERT INTO profile_lesson_progress VALUES(?,?,?)", ("sandbox", *clock))
+        for index, (identity, stamp, body) in enumerate(zip(identities, started, bodies)):
+            seed = "0" if not index else str((1 << 64) - 1)
+            db.execute("INSERT INTO main_live_attempts VALUES(?,?,?,?,?,?,?,?,?,?)",
+                       ("sandbox", identity, receipt["request_sha256"], "/api.Quest/Start", schema.fingerprint,
+                        receipt["master_version"], "live-v5", seed, stamp, body))
+        # A different profile's incompatible data must never become the QA receipt.
+        db.execute("INSERT INTO main_live_attempts(profile,request_id) VALUES('other-profile','unrelated')")
+    return tmp_path, schema, receipt, clock
+
+
+def test_native_main_live_database_keeps_exact_both_cached_responses_and_uint64_text(main_live_database):
+    directory, schema, receipt, clock = main_live_database
+    rows = engine._main_live_database(directory, schema, receipt, clock)
+    assert len(rows) == 2
+    assert [row[7] for row in rows] == ["0", str((1 << 64) - 1)]
+    assert engine._main_live_database(directory, schema, receipt, clock, rows) == rows
+
+
+@pytest.mark.parametrize("damage", ("snapshot", "snapshot-schema", "clock", "clock-schema", "missing-snapshot",
+                                    "missing-clock", "missing-attempt", "seed", "time", "response", "context", "extra-column"))
+def test_native_main_live_database_cannot_emit_success_for_lost_or_changed_state(main_live_database, damage):
+    directory, schema, receipt, clock = main_live_database
+    with sqlite3.connect(directory / "state.db") as db:
+        if damage == "snapshot":
+            db.execute("UPDATE snapshots SET response=x'0a00' WHERE profile='sandbox'")
+        elif damage == "snapshot-schema":
+            db.execute("UPDATE snapshots SET schema_sha256='changed' WHERE profile='sandbox'")
+        elif damage == "clock":
+            db.execute("UPDATE profile_lesson_progress SET response=x'00' WHERE profile='sandbox'")
+        elif damage == "clock-schema":
+            db.execute("UPDATE profile_lesson_progress SET schema_sha256='changed' WHERE profile='sandbox'")
+        elif damage == "missing-snapshot":
+            db.execute("DELETE FROM snapshots WHERE profile='sandbox'")
+        elif damage == "missing-clock":
+            db.execute("DELETE FROM profile_lesson_progress WHERE profile='sandbox'")
+        elif damage == "missing-attempt":
+            db.execute("DELETE FROM main_live_attempts WHERE request_id=?", (receipt["request_ids"][0],))
+        elif damage == "seed":
+            db.execute("UPDATE main_live_attempts SET seed='01' WHERE profile='sandbox'")
+        elif damage == "time":
+            db.execute("UPDATE main_live_attempts SET started_time=started_time+1 WHERE profile='sandbox'")
+        elif damage == "response":
+            db.execute("UPDATE main_live_attempts SET response=x'0a00' WHERE profile='sandbox'")
+        elif damage == "context":
+            db.execute("UPDATE main_live_attempts SET ruleset='unknown' WHERE profile='sandbox'")
+        else:
+            db.execute("ALTER TABLE main_live_attempts ADD COLUMN unexpected TEXT")
+    with pytest.raises(RuntimeError):
+        engine._main_live_database(directory, schema, receipt, clock)
+
+
+def test_native_main_live_restart_rejects_a_rerolled_but_still_canonical_seed(main_live_database):
+    directory, schema, receipt, clock = main_live_database
+    rows = engine._main_live_database(directory, schema, receipt, clock)
+    with sqlite3.connect(directory / "state.db") as db:
+        db.execute("UPDATE main_live_attempts SET seed='1' WHERE request_id=?", (receipt["request_ids"][0],))
+    # The receipt accepts any valid uint64 seed; the restart boundary must preserve the original too.
+    assert engine._main_live_database(directory, schema, receipt, clock) != rows
+    with pytest.raises(RuntimeError, match="seeds, timestamps or exact responses changed"):
+        engine._main_live_database(directory, schema, receipt, clock, rows)

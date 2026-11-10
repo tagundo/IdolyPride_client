@@ -91,12 +91,14 @@ class QA:
             self.adb("forward", "--remove", "tcp:" + str(port), check=False)
 
 
-def rpc(schema, port, method, token=None, request=None):
+def rpc(schema, port, method, token=None, request=None, request_id=None):
     if request is None:
         request = schema.request_type(method)()
     metadata = (("x-auth-token", token),) if token else ()
+    if request_id is not None:
+        metadata += (("x-app-request-id", str(request_id)),)
     with grpc.insecure_channel("127.0.0.1:" + str(port)) as channel:
-        raw = channel.unary_unary(method)(codec.encode(request.SerializeToString()), metadata=metadata, timeout=2)
+        raw = channel.unary_unary(method)(codec.encode(request.SerializeToString()), metadata=metadata, timeout=60 if method == "/api.Quest/Start" else 2)
     return schema.response_type(method).FromString(codec.decode(raw))
 
 
@@ -870,6 +872,83 @@ def exercise_appearance_checks(qa, schema, grpc_port, token, master_dir, startup
             "appearance_restart_no_change": True}
 
 
+
+def verify_main_live_database(qa, schema, receipt=None, *, expected_clock=None, expected_attempts=None):
+    from idoly_local.main_live_qa import assert_main_live_attempt_rows, assert_main_live_snapshot
+    with tempfile.TemporaryDirectory(prefix="idoly-native-main-live-verify-") as directory:
+        path = _copy_private_database(qa, directory)
+        with sqlite3.connect(path) as db:
+            db.row_factory = sqlite3.Row
+            clock_row = db.execute("SELECT response,schema_sha256 FROM profile_lesson_progress WHERE profile=?",
+                                   ("sandbox",)).fetchone()
+            snapshot = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                                  ("sandbox",)).fetchone()
+            rows = db.execute("SELECT * FROM main_live_attempts WHERE profile=? ORDER BY request_id",
+                              ("sandbox",)).fetchall()
+            clock = tuple(clock_row) if clock_row is not None else None
+            if (clock is None or snapshot is None or clock[1] != schema.fingerprint
+                    or snapshot[1] != schema.fingerprint):
+                raise RuntimeError("Native main-live snapshot/clock schema was not persisted")
+            attempts = tuple(tuple(row) for row in rows)
+            if expected_clock is not None and clock != expected_clock:
+                raise RuntimeError("Native main live changed the raw persistent lesson clock")
+            if expected_attempts is not None and attempts != expected_attempts:
+                raise RuntimeError("Native main-live cache changed its seed, time or exact response")
+            if receipt is not None:
+                assert_main_live_snapshot(schema, snapshot[0], receipt)
+                assert_main_live_attempt_rows(schema, rows, receipt)
+            return clock, attempts
+
+
+def exercise_main_live_checks(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
+    from idoly_local.main_live_qa import assert_main_live_retries, run_main_live_checks
+    original_clock, existing_attempts = verify_main_live_database(qa, schema)
+    if existing_attempts:
+        raise RuntimeError("Disposable QA profile already has main-live attempts")
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "46-main-live-default-start")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    before = rpc(schema, grpc_port, "/api.User/Get", token).SerializeToString(deterministic=True)
+    request = schema.request_type("/api.Quest/Start")(questId="qt-main-1-001-01", deckNumber=1, playCount=1)
+    try:
+        rpc(schema, grpc_port, "/api.Quest/Start", token, request, request_id="9000000000000000300")
+    except grpc.RpcError as error:
+        if error.code() != grpc.StatusCode.UNIMPLEMENTED:
+            raise
+    else:
+        raise RuntimeError("Experimental main live was enabled by default")
+    if rpc(schema, grpc_port, "/api.User/Get", token).SerializeToString(deterministic=True) != before:
+        raise RuntimeError("Disabled main live changed the snapshot")
+    qa.tap("서버 중지", "47-main-live-default-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.tap("첫 메인 라이브 실험 기능 사용", "48-main-live-opt-in")
+    qa.tap("서버 시작", "49-main-live-enabled-start")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    invoke = lambda path, request, identity: rpc(schema, grpc_port, path, token, request, request_id=identity)
+    receipt = run_main_live_checks(schema, invoke, master_dir, label="Android native")
+    qa.capture("50-main-live-computed")
+    qa.tap("서버 중지", "51-main-live-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    clock, attempts = verify_main_live_database(qa, schema, receipt, expected_clock=original_clock)
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    qa.tap("서버 시작", "52-main-live-cache-restart")
+    wait_server(schema, grpc_port, timeout=startup_timeout)
+    assert_main_live_retries(schema, invoke, master_dir, receipt)
+    qa.capture("53-main-live-cached")
+    qa.tap("서버 중지", "54-main-live-final-stop")
+    wait_server(schema, grpc_port, expected=False, timeout=30)
+    qa.adb("shell", "am", "force-stop", PACKAGE)
+    verify_upgrade_database(qa, preserved)
+    verify_main_live_database(qa, schema, receipt, expected_clock=clock, expected_attempts=attempts)
+    return {"main_live": receipt, "main_live_first_quest": True, "main_live_mode_default_off": True,
+            "main_live_opt_in": True, "main_live_persisted": True, "main_live_attempts_persisted": True,
+            "main_live_clock_preserved": True, "main_live_identity_preserved": True,
+            "main_live_sessions_preserved": True, "main_live_settings_preserved": True,
+            "main_live_cached_no_grant": True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apk", type=Path, required=True)
@@ -1107,6 +1186,8 @@ def main():
                                                  args.master_dir, args.startup_timeout, preserved))
         result.update(exercise_appearance_checks(qa, schema, grpc_port, login.gameAuthToken,
                                                  args.master_dir, args.startup_timeout, preserved))
+        result.update(exercise_main_live_checks(qa, schema, grpc_port, login.gameAuthToken,
+                                                args.master_dir, args.startup_timeout, preserved))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:
@@ -1115,7 +1196,7 @@ def main():
         raise
     finally:
         try:
-            qa.capture("45-final")
+            qa.capture("55-final")
         except Exception:
             pass
         qa.close()
