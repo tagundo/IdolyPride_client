@@ -4,7 +4,7 @@
 
 ## 실행과 입력
 
-API30 ARM64 변환 환경에서 고정 해시를 확인한 공개 진단 게임의 별도 복사본을 실행합니다. 변환 환경용 소프트웨어 AES·스토어 없는 초기화·GLES3와 QA UI 브리지를 사용하며 일반 배포 게임은 바꾸지 않습니다. 결제 초기화 등에서 실제 기기와 동작 차이가 남을 수 있습니다.
+API35 `google_apis;x86_64`의 ARM64 변환 환경에서 고정 해시를 확인한 공개 진단 게임의 별도 복사본을 실행합니다. Lavapipe·소프트웨어 AES·스토어 없는 초기화·GLES3와 QA UI 브리지를 사용하며 일반 배포 게임은 바꾸지 않습니다. 결제 초기화 등에서 실제 기기와 동작 차이가 남을 수 있습니다.
 
 튜토리얼 완료 프로필은 알려진 로컬 RPC로 준비하고 `profile-fixture.json`에 별도 기록합니다. 이 준비 과정은 게임으로 튜토리얼을 플레이한 증거에 포함하지 않습니다.
 
@@ -43,3 +43,12 @@ Android 서버 APK·Mac 앱의 별도 빌드 검사는 암호화 RPC와 재시�
 게임 PID5060의 로그에는 07:23:05~07:27:47 UTC에 `Environment/Default` GLSL 링크 오류가 550회 기록됐습니다. SwiftShader의 vertex uniform 한도256 초과251회, fragment uniform 한도261 초과299회입니다. 이어 07:27:48에 ARM 변환기가 원본 `lib_burst_generated.so+0x2fff0`의 `FCVTZS S1,S1`을 지원하지 못해 UnityMain이 `SIGILL`로 종료됐습니다. 원본 라이브러리의 해당 명령 바이트와 크래시 로그를 대조했습니다. 셰이더 오류와 명령 변환 실패는 별도 환경 제약으로 기록하며, 셰이더 오류가 종료를 일으켰다고 단정하지 않습니다.
 
 프레임59부터 게임 PID와 UI 브리지 리스너가 함께 사라지고 서버 앱이 전면에 나타났습니다. 이후의 `bridge_snapshot_unavailable`는 정상 30분 세션 만료가 아니며, 이 실행은 홈·메뉴 검증 미완료로 남깁니다. 종료 지점에 미구현 RPC나 OOM 증거는 없고, `purchase_initialized=false`만으로 원인을 판단하지 않습니다. 드라이버는 수집 오류 없이 **3회 연속 게임 PID가 없으면** `game_process_exited`를 기록하고 관측을 중단하도록 보강했습니다. 이 조사로 일반 배포 게임이나 서버 동작을 우회하는 패치는 추가하지 않았습니다.
+
+
+## 루트 지원과 개선한 검사 환경
+
+루트 권한은 내부 저장 데이터·시스템 로그·통신 분석에 유용하지만, ARM 변환기와 그래픽 한도의 오류를 없애 주지는 않습니다. MuMu의 [Mac 개발자 문서](https://www.mumuplayer.com/help/mac/developer-support-function.html)는 루트 설정 `vmRootEnable`을, [Windows MuMu12 개발자 문서](https://mumu.163.com/help/20240807/40912_1170006.html)는 `root_permission`을 안내합니다. 현재 Windows6.x/Android15의 내장 루트는 이 조사에서 직접 확인하지 않았습니다. 공식 Android15의 Magisk 미지원 안내를 내장 루트 미지원으로 해석하지 않습니다.
+
+현재 Linux 실행기에 MuMu를 설치해 실행했다는 주장은 하지 않습니다. [별도 환경 검사](https://github.com/tagundo/IdolyPride_client/actions/runs/42785150482)의 API35·Lavapipe 구성은 실제 `adb root`와 `whoami=root`, 원본 실패 명령 `FCVTZS S1,S1`의 양·음수 절삭, vertex/fragment 각300개 vec4 uniform의 실제 컴파일·링크·활성 배열 크기 검사를 통과했습니다. 게임·계정 정보가 없는 ARM64 전용 합성 APK로 확인했습니다. 기본 `-gpu host` 구성의 결과와 구분합니다.
+
+성공 구성은 emulator37.2.13(build16740729), Android35 image12960925, native bridge SHA256 `9b5808354a85d722a290ae879400b909aa961955e80ea1a7e807aea9416d92f9`, `-gpu lavapipe`입니다. 렌더러는 ANGLE의 Mesa Vulkan llvmpipe, GLES3.1이며 두 uniform 한도는 각각4096입니다. Xvfb와 Mesa·`libpulse0`, `LIBGL_ALWAYS_SOFTWARE=1`, `GALLIUM_DRIVER=llvmpipe`를 사용합니다. 게임 검사도 시작 전에 같은 합성 검사를 다시 통과해야 진행하며, 성공한 합성 검사 자체를 홈·메뉴 플레이 검증으로 취급하지 않습니다.
