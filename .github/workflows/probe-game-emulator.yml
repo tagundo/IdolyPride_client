@@ -1,0 +1,102 @@
+# No game/server downloads, account data, purchase SDK, or production patches.
+name: Probe API35 ARM translation and Mesa graphics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qa-emulator-environment
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        gpu: [host, lavapipe]
+    env:
+      DISPLAY: ":99"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
+      PROBE_DIR: tools/emulator_environment_probe
+      RESULTS: data/emulator-environment-${{ matrix.gpu }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare KVM and Mesa without overriding reported GL limits
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RESULTS"
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            xvfb xauth mesa-utils libgl1-mesa-dri libegl-mesa0 mesa-vulkan-drivers vulkan-tools
+          Xvfb "$DISPLAY" -screen 0 1280x720x24 -nolisten tcp -ac > "$RESULTS/xvfb.log" 2>&1 &
+          for attempt in $(seq 1 20); do
+            if glxinfo -B > "$RESULTS/host-glxinfo.txt" 2>&1; then break; fi
+            sleep 1
+          done
+          grep -E 'OpenGL renderer string:.*llvmpipe' "$RESULTS/host-glxinfo.txt"
+          vulkaninfo --summary > "$RESULTS/host-vulkan.txt" 2>&1 || true
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264' 'emulator'
+          "$ANDROID_HOME/emulator/emulator" -version > "$RESULTS/emulator-version.txt" 2>&1
+          "$ANDROID_HOME/emulator/emulator" -help-gpu > "$RESULTS/emulator-gpu-options.txt" 2>&1
+          if [ '${{ matrix.gpu }}' = lavapipe ]; then
+            grep -w lavapipe "$RESULTS/emulator-gpu-options.txt"
+          fi
+      - name: Build the synthetic ARM64-only APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s "$PROBE_DIR" -p test_driver.py -v
+          python "$PROBE_DIR/build.py" --sdk "$ANDROID_HOME" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" \
+            --output "$RESULTS/EnvironmentProbe.apk" > "$RESULTS/build-report.json"
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose --print-certs \
+            "$RESULTS/EnvironmentProbe.apk" > "$RESULTS/signature.txt"
+          "$ANDROID_HOME/build-tools/34.0.0/aapt2" dump badging \
+            "$RESULTS/EnvironmentProbe.apk" > "$RESULTS/package.txt"
+          ! grep -q 'uses-permission:' "$RESULTS/package.txt"
+      - name: Execute original FCVTZS and actual GLES3 uniform shaders
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          cores: 4
+          ram-size: 4096M
+          disk-size: 4G
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu ${{ matrix.gpu }} -accel on
+          script: python "$PROBE_DIR/run_probe.py" --apk "$RESULTS/EnvironmentProbe.apk" --output "$RESULTS/runtime" --timeout 60 --record-root
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: environment-api35-${{ matrix.gpu }}-${{ github.run_id }}
+          path: data/emulator-environment-${{ matrix.gpu }}/
+          if-no-files-found: error
+          retention-days: 14
