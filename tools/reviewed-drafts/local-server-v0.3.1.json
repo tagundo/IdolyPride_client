@@ -1,0 +1,60 @@
+{
+  "approved": true,
+  "repo": "tagundo/IdolyPride_client",
+  "release_id": 441044576,
+  "tag": "local-server-v0.3.1",
+  "source": "6e06100a8fd4ab767f97011f48760e1e7b70a8e4",
+  "run_id": 42921195880,
+  "assets": {
+    "IdolyPride-Local-Server-Android-QA.zip": {
+      "bytes": 21914,
+      "sha256": "dfd908b0074fa698723a4180a86a5acc1fdfddc507439512d07dbd81173d7c67"
+    },
+    "IdolyPride-Local-Server-Android.apk": {
+      "bytes": 96574542,
+      "sha256": "653612e95375f3289985a2d273d5d7cd9c1b7bb8ebf3da71d9da33ee5bd6c40b"
+    },
+    "IdolyPride-Local-Server-macOS-QA.zip": {
+      "bytes": 7263,
+      "sha256": "bf92ed21b3b0615fef92a6c36c23afcfa1686806526464a38b6798dc0e6cce9b"
+    },
+    "IdolyPride-Local-Server-macOS-arm64.app.zip": {
+      "bytes": 94831733,
+      "sha256": "696bb2c62eb86f44dd527c000b7465ce23020f2d9ba94eb0db6843f3de6b65a6"
+    },
+    "IdolyPride-ServerData-v0.3.1.zip": {
+      "bytes": 80929314,
+      "sha256": "3139ea69af1305a231ca09a3caab88a4496f1663c7a3af30892c588ed2cbc436"
+    },
+    "RELEASE-VERIFICATION.json": {
+      "bytes": 7404,
+      "sha256": "bdafa2b6ce82dc5d1c77a2a0943edbca2a9a08556023e8688d503be0c57a55d8"
+    },
+    "SHA256SUMS": {
+      "bytes": 519,
+      "sha256": "fd0935edff84b9014b2b50332c5e2e5818f502a228c14311ef5d6eb09f8b6a32"
+    }
+  },
+  "artifacts": {
+    "android": {
+      "id": 13812427337,
+      "name": "android-server-build-and-available-evidence-v0.3.1",
+      "bytes": 96587045,
+      "sha256": "b3a64ce8097a0be183e6fdefd47c425f421f99c1b53882df3ec049357a46a2b7"
+    },
+    "macos": {
+      "id": 13812810889,
+      "name": "macos-server-candidate-and-native-evidence-v0.3.1",
+      "bytes": 94734062,
+      "sha256": "5e38de89f4cda83e9981721e8b6b8920563d2b436fee4f198f2826c135fc5191"
+    }
+  },
+  "body": {
+    "bytes": 2744,
+    "sha256": "8a8df4b5df285fc81937625bb1ab5380efd8227a2307d7e1d0af03b8cb78ab80"
+  },
+  "proof": {
+    "bytes": 26663,
+    "sha256": "7b8479f0184693ac78816f3c7b75149e34cd2a410fd035a07ae2da799ad3889b"
+  }
+}
