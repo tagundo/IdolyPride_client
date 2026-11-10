@@ -296,4 +296,13 @@ def test_actual_611_schema_and_master_define_seventeen_ungated_normal_characters
     user = schema.response_type("/api.User/Get").FromString(payload)
     assert_roster(user, master, initial_inventory=True)
     assert len(user.cards) == 17
-    assert state.starter_version("actual") == 4
+    # New payloads add the evidenced normal card-level achievement; older
+    # decoded payloads without Mission retain their previous origin marker.
+    if (master / "Mission.json").is_file():
+        assert state.starter_version("actual") == 5
+        assert len(user.missions) == 1
+        mission = user.missions[0]
+        assert (mission.missionId, mission.currentThreshold, mission.progress, mission.statusType) == (
+            "ms-normal-card_level_achievement", 5, 1, 1)
+    else:
+        assert state.starter_version("actual") == 4

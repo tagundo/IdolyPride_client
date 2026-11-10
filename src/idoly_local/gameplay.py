@@ -777,9 +777,48 @@ def seed_starter_profile(state, schema, profile: str, master_dir: Path, *, manag
     snapshot.areas.add(areaId=areas[0]["id"])
     snapshot.tutorials.add(tutorialType=_GAME_START, step=0)
     snapshot.profile.favoriteCharacterIds.extend(photo_ids)
+    from .card_level_missions import initialize_mission
+    has_mission = initialize_mission(snapshot, catalog, now)
     identity = state.ensure_profile(profile)
     snapshot.userPublic.serverUserId = identity["server_id"]
     snapshot.userPublic.publicUserId = identity["public_id"]
     payload = snapshot.SerializeToString()
-    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=4)
+    state.save_snapshot(profile, payload, schema.fingerprint, starter_version=5 if has_mission else 4)
     return payload
+
+
+def repair_starter_card_level_mission(state, schema, profile: str, master_dir: Path) -> bool:
+    """Add the evidenced achievement only to an explicitly version-4 starter.
+
+    Imports, unmarked/older origins and existing mission rows are not reset.
+    Missing Mission data in old payloads preserves their previous behavior.
+    """
+    current = state.snapshot(profile)
+    if current is None or state.starter_version(profile) != 4 or current[1] != schema.fingerprint:
+        return False
+    from .card_level_missions import initialize_mission, mission_master, saved_mission
+    catalog = _Catalog(master_dir)
+    thresholds = mission_master(catalog, optional=True)
+    if thresholds is None:
+        return False
+
+    def repair(payload, origin):
+        if origin != 4:
+            return None
+        try:
+            snapshot = schema.response_type(_USER_GET).FromString(payload)
+        except (DecodeError, UnicodeError):
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local starter snapshot is malformed") from None
+        if not snapshot.HasField("user"):
+            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local starter has no user state")
+        if "missions" not in snapshot.DESCRIPTOR.fields_by_name:
+            return None
+        # Existing rows can carry imported thresholds/receipts or unknown
+        # fields. Validate, preserve byte-for-byte, and only advance the marker.
+        if saved_mission(snapshot, thresholds) is not None:
+            return payload, 5
+        if not initialize_mission(snapshot, catalog, _now_ms()):
+            return None
+        return snapshot.SerializeToString(), 5
+
+    return state.mutate_starter_snapshot(profile, schema.fingerprint, repair) is not None

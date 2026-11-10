@@ -155,9 +155,64 @@
   "unproven": [
     "Removal, synchronization and imported account reconciliation semantics.",
     "Full Mission.List active catalog, initialization and eligibility.",
-    "Inline rd_auto reward decoding and claim receipts."
+    "Claim eligibility, receipt persistence, reward accounting and retry/concurrency behavior."
   ],
   "excluded_data": [
     "User identifiers, authentication, names and raw account snapshots."
-  ]
+  ],
+  "native_consumer": {
+    "source": {
+      "client": "original Android 6.1.1 ARM64",
+      "libil2cpp_sha256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+      "analysis": "static disassembly, metadata and recovered descriptor; no authenticated runtime or claim execution"
+    },
+    "list_consumer": {
+      "entry": "0x58f48cc",
+      "collection": "MissionListResponse.userMissions at +0x18",
+      "only_returns_rows": true,
+      "empty_collection_exits": "0x58f4a5c -> 0x58f4bdc",
+      "master_required": "0x58f4acc calls UserMission.get_Mission; null at 0x58f4ad0 throws at 0x58f4c58",
+      "category_getter": "0x4e76354 = ldr w0,[x0,#0x20]; categories 1/2/3 route daily/weekly/normal"
+    },
+    "statuses": {
+      "Unknown": 0,
+      "Progress": 1,
+      "Clear": 2,
+      "NotReceived": 3,
+      "Received": 4,
+      "is_unreceived": "0x47addf4: (status & ~1) == 2, so statuses 2 or 3"
+    },
+    "threshold_contract": {
+      "current_progress": "0x47adc3c selects master progress entry; predicate 0x47ae0b4 requires entry.threshold == user.currentThreshold exactly",
+      "field_getters": {
+        "UserMission.currentThreshold": "0x47ad58c -> +0x20",
+        "MissionProgress.threshold": "0x4e77e4c -> +0x18"
+      },
+      "reward_resources": "0x47add90 requires nonnull CurrentProgress, RewardSet, then resources +0x20; throws on missing references",
+      "implication": "Return only real master mission IDs and a currentThreshold present in that mission progress list, including already-received rows."
+    },
+    "inline_reward": {
+      "find_by_key": "0x4fe1618",
+      "parse": "0x4fe16a4",
+      "prefix": "rd_auto",
+      "separator": ";",
+      "exact_part_count": 4,
+      "resource_type": "enum name -> CamelToLowerSnakeCase -> ToLower dictionary; Stone=15",
+      "resource_id": "parts[2].Trim()",
+      "amount": "Int32.TryParse parts[3].Trim() at 0x4fe17a0",
+      "construction": "0x4fe1f54 -> RewardResource type/id/amount -> resources.Add",
+      "example": {
+        "expression": "rd_auto;stone;;50",
+        "resourceType": 15,
+        "resourceId": "",
+        "amount": 50
+      },
+      "requires_reward_table_row": false
+    },
+    "limits": [
+      "Does not establish profile/card enhancement mission trigger rules; use captured deltas and persisted-state design for that.",
+      "Does not establish claim eligibility, progression transition, reward accounting or atomic idempotency.",
+      "Clear and NotReceived are both unreceived by native getter; their distinct server transition semantics need captures, not enum-name inference."
+    ]
+  }
 }

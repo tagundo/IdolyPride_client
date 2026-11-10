@@ -32,7 +32,8 @@ def runtime_bundle(tmp_path, monkeypatch):
         seed_starter_profile=lambda *a: pytest.fail('existing profile was seeded again'),
         repair_starter_roster=lambda *a: False,
         repair_starter_home_positions=lambda *a: False,
-        repair_starter_inventory=lambda *a: False))
+        repair_starter_inventory=lambda *a: False,
+        repair_starter_card_level_mission=lambda *a: False))
     return SimpleNamespace(root=tmp_path, schema=schema, state=state, created=created, token=token)
 
 

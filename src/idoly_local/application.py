@@ -40,6 +40,7 @@ class Application:
         from .profile_names import ProfileNames
         from .profile_messages import ProfileMessages
         from .profile_top import ProfileTop
+        from .card_level_missions import CardLevelMissions
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
@@ -56,6 +57,7 @@ class Application:
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture)
         self.profile_top = ProfileTop(schema, state, profile, self.gameplay.catalog)
+        self.card_level_missions = CardLevelMissions(schema, state, profile, master_dir)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
         self.tutorial_replays = TutorialReplays(schema, state, profile, master_dir)
@@ -154,6 +156,8 @@ class Application:
                 response = self.profile_messages.handle(path, plain)
             if response is None:
                 response = self.profile_top.handle(path, plain)
+            if response is None:
+                response = self.card_level_missions.handle(path, plain)
             if response is None and self.main_lives is not None:
                 request_ids = [value for key, value in context.invocation_metadata() if key == "x-app-request-id"]
                 if path == "/api.Quest/Start" and len(request_ids) != 1:

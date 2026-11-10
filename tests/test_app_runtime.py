@@ -15,7 +15,8 @@ import grpc
 from google.protobuf import descriptor_pb2
 
 from idoly_local import app_runtime, codec
-from idoly_local.gameplay import repair_starter_home_positions, repair_starter_inventory, repair_starter_roster
+from idoly_local.gameplay import (repair_starter_home_positions, repair_starter_inventory,
+                                 repair_starter_roster, repair_starter_card_level_mission)
 from idoly_local.profiles import new_profile
 from idoly_local.schema import Schema
 from idoly_local.state import State
@@ -102,7 +103,8 @@ class EmbeddedRuntimeTests(unittest.TestCase):
             "idoly_local.gameplay": SimpleNamespace(seed_starter_profile=seed,
                                                     repair_starter_roster=repair_starter_roster,
                                                     repair_starter_home_positions=repair_starter_home_positions,
-                                                    repair_starter_inventory=repair_starter_inventory),
+                                                    repair_starter_inventory=repair_starter_inventory,
+                                                    repair_starter_card_level_mission=repair_starter_card_level_mission),
         })
         self.module_patcher.start()
         self.addCleanup(self.module_patcher.stop)
@@ -156,7 +158,7 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(state.snapshot("sandbox"), before)
         self.assertFalse(self.seed_calls)
 
-    def test_startup_repairs_roster_then_home_then_initial_inventory(self):
+    def test_startup_repairs_roster_home_inventory_then_card_level_mission(self):
         state = State(self.root / "state.db")
         new_profile(state, self.schema, "sandbox", "Preserved Manager")
         before = state.snapshot("sandbox")
@@ -165,9 +167,10 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         gameplay = sys.modules["idoly_local.gameplay"]
         with mock.patch.object(gameplay, "repair_starter_roster", side_effect=lambda *args: order.append("roster") or False), \
                 mock.patch.object(gameplay, "repair_starter_home_positions", side_effect=lambda *args: order.append("home") or False), \
-                mock.patch.object(gameplay, "repair_starter_inventory", side_effect=lambda *args: order.append("inventory") or False):
+                mock.patch.object(gameplay, "repair_starter_inventory", side_effect=lambda *args: order.append("inventory") or False), \
+                mock.patch.object(gameplay, "repair_starter_card_level_mission", side_effect=lambda *args: order.append("mission") or False):
             self.start()
-        self.assertEqual(order, ["roster", "home", "inventory"])
+        self.assertEqual(order, ["roster", "home", "inventory", "mission"])
         self.assertEqual(state.snapshot("sandbox"), before)
         self.assertTrue(state.authenticated(token, "sandbox"))
         self.assertFalse(self.seed_calls)

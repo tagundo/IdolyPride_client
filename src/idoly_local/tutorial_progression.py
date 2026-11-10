@@ -173,11 +173,17 @@ class TutorialProgression:
         available = item.amount if item is not None else 0
         if available < plan.required_pieces:
             _invalid("Not enough enhancement items")
+        old_level = card.level
         if plan.changed:
             plan.card.lastEnhanceTime = max(card.lastEnhanceTime, time.time_ns() // 1000000)
             card.CopyFrom(plan.card)
             if plan.required_pieces:
                 item.amount -= plan.required_pieces
+        if card.level > old_level:
+            from .card_level_missions import advance_mission
+            mission = advance_mission(snapshot, self.catalog, card.lastEnhanceTime)
+            if mission is not None:
+                result.commonResponse.updatedData.missions.add().CopyFrom(mission)
         result.commonResponse.SetInParent()
         result.commonResponse.updatedData.cards.add().CopyFrom(card)
         if item is not None:
