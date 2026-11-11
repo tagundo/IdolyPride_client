@@ -16,6 +16,7 @@ from google.protobuf.json_format import ParseDict, ParseError
 
 from .card_progression import prepare_enhancement
 from .gameplay import _Catalog
+from .live_accessories import prepare_starter_accessories
 from .live_assets import project_live_assets
 from .rpc import RpcCode, RpcFailure
 
@@ -163,7 +164,8 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
     verified unranked, unsupported-by-assistance initial form below the next
     release/skill-upgrade boundary. An initial rarity XP of zero is accepted as
     the historical starter representation, without changing it or granting XP.
-    No photo/accessory/buddy preparation or result/reward calculation occurs.
+    Only the two pinned plain first-area accessory additions are prepared;
+    photos, other accessories, buddies and result/reward calculation are absent.
     """
     definition = main_quest_definition(quest_id)
     if definition is None:
@@ -185,8 +187,7 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
     for field in ("difficultyLevel", "maxCapacity", "mentalThreshold"):
         _number(quest.get(field), field, positive=True)
     positions = sorted((row for row in snapshot.deckPositions if row.number == deck_number), key=lambda row: row.position)
-    if any(row.photoIds or row.part1AccessoryId or row.part2AccessoryId for row in positions):
-        _fail("live photo and accessory bonuses are not supported", RpcCode.UNIMPLEMENTED)
+    accessory_bonuses = prepare_starter_accessories(snapshot, positions, catalog)
     query = schema.request_type("/api.Quest/ListAsset")(questId=quest_id, deckNumber=deck_number)
     appearances = project_live_assets(schema, snapshot, query, catalog).characterAssets
     decks = [row for row in snapshot.decks if row.number == deck_number]
@@ -235,6 +236,12 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
             rarity=card.rarity, evolutionLevel=card.evolutionLevel, vocal=card.vocal, dance=card.dance,
             visual=card.visual, stamina=card.stamina, mental=card.mental, technique=card.technique,
             displayCharacterId=owner, displayCostumeId=appearance.costumeId, displayHairId=appearance.hairId)
+        attribute = accessory_bonuses.get(position.position)
+        if attribute is not None:
+            value = _number(getattr(live, attribute), "accessory base parameter")
+            if value > (1 << 63) - 1 - 64:
+                _fail("live accessory parameter overflows")
+            setattr(live, attribute, value + 64)
         for slot in range(1, 5):
             identity = getattr(card, "skillId" + str(slot))
             if identity:
