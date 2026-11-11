@@ -1,19 +1,19 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했습니다. **v0.3.1 베타는 자동 편성 후 `Deck.Save`가 `UNIMPLEMENTED`로 실패하던 문제를 수정했습니다.** 실제 ARM64 환경의 이전 서버 APK에서 오류를 재현하고, 데이터를 지우지 않은 업데이트·덱 저장·재시작 보존과 Mac 앱 실행을 검사했습니다. 실제 게임의 자동 편성 버튼 동작 검증은 남아 있습니다.
+아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** 실제 Android 게임에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했습니다. **v0.3.2 베타는 첫 메인 퀘스트의 LIVE SKIP이 `Quest.Start → UNIMPLEMENTED`로 거절되던 문제를 수정했습니다.** 실제 ARM64 Android 서버 APK에서 기존 클리어 계정의 업데이트·반복 SKIP 계산·재시작 보존을 검사했습니다. 실제 게임의 일반 라이브 화면 완료 검증은 남아 있습니다.
 
-v0.3.0 베타에서 추가한 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행, **첫 메인 라이브 실험 기능**도 유지합니다. 라이브 실험 기능의 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 검증한 v0.3.1 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
+v0.3.0 베타에서 추가한 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행, **첫 메인 라이브 실험 기능**도 유지합니다. 라이브 실험 기능의 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 검증한 v0.3.2 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
 
-v0.3.2 개발 소스에는 **첫 메인 퀘스트의 SKIP·하이라이트 시작 지원**과 안전한 거절 사유 기록을 추가했습니다. SKIP도 실제 라이브 전체 계산과 기존 정산·재시도 보존 경로를 사용합니다. 자동 반복·티켓·버디·포토·액세서리는 미지원이며 기본 OFF는 유지합니다. **아직 앱 빌드·배포 전이므로 아래 v0.3.1 다운로드에는 이 변경이 없습니다.** SKIP가 라이브 장면·리소스 로딩을 완전히 생략한다는 뜻은 아닙니다.
+v0.3.2에는 **첫 메인 퀘스트의 SKIP·하이라이트 시작 지원**과 안전한 거절 사유 기록을 추가했습니다. SKIP도 실제 라이브 전체 계산과 기존 정산·재시도 보존 경로를 사용합니다. 자동 반복·티켓·버디·포토·액세서리는 미지원이며 기본 OFF는 유지합니다. Android의 기존 클리어 반복 검사, Linux의 새 계정 첫 클리어·실패 검사, Mac의 일반 모드 엔진·앱 실행 검사는 구분해 기록했습니다. SKIP가 라이브 장면·리소스 로딩을 완전히 생략한다는 뜻은 아닙니다.
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [서버 앱 v0.3.1 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.1)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [서버 앱 v0.3.2 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.2)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.1/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
-| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.1/IdolyPride-Local-Server-macOS-arm64.app.zip) | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
+| Android ARM64, Android 9 이상 | [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
+| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-arm64.app.zip) | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
 2. **아이프라 서버 / 아이프라 로컬 서버**에서 **서버 시작**을 누릅니다.
@@ -38,6 +38,7 @@ Android에서 문제가 발생하면 [별도 진단 게임 v0.2.1](https://githu
 | `Quest.Top/ListMain/ListAsset` | 메인·튜토리얼 목록과 저장된 5인 덱의 캐릭터·의상·헤어 리소스 참조 조회; 잠긴 하이스코어 정보 제공, 전투·보상 생성 없음 |
 | `Tutorial.StartQuest` | 검증된 공식 short/full 기록의 고정 시연 편성 재생; 로컬 사용자 표시·필요 리소스 연결, 계정 상태 변경 없음 |
 | 첫 일반 라이브 — v0.3.0 베타 | 기본값 꺼짐인 실험 기능; 첫 메인 퀘스트만 현재 덱·능력치·스킬로 로컬 계산, 첫 성공 보상·경험치 1회와 결과 저장, 동일 요청 재시도 시 원래 응답 반환 |
+| 첫 메인 라이브 SKIP — v0.3.2 | 같은 실제 계산·정산으로 하이라이트 시작 지원; Android 기존 클리어 계정 반복·업데이트·재시작 검사, 새 계정 첫 클리어·실패는 Linux 네이티브 검사 |
 | 프로필 — v0.3.0 베타 | 저장된 계층 정보 조회, 이름·소개문·즐겨찾기 순서 저장·해제; 공식 금칙어·미션 보상 제외 |
 | 카드 레벨 미션 — v0.3.0 베타 | 검증된 `ms-normal-card_level_achievement` 목록과 보유 카드의 최고 레벨 진행 저장; 다른 미션·보상 수령 제외 |
 | 튜토리얼 후반 | 레슨 보상 1회 지급·초기 카드 강화·사쿠라 메시지 조회/선택 저장/완료; 명시적 `Progress150`으로 완료 |
