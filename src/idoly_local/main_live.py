@@ -1,7 +1,7 @@
-"""Opt-in settlement of one ordinary main live, using computed live-v5 results.
+"""Opt-in first-area main lives, using computed live-v5 results.
 
 This deliberately implements no fan, music-mastery or mission rewards. It is
-an experimental first-quest slice, not a replacement for all live modes.
+an experimental first-area slice, not a replacement for all live modes.
 """
 from __future__ import annotations
 
@@ -14,7 +14,8 @@ from google.protobuf.message import DecodeError
 
 from .card_progression import prepare_enhancement
 from .gameplay import _Catalog
-from .live_input import MAIN_QUEST_ID, RULESET, prepare_main_live
+from .live_input import (MAIN_QUEST_ID, MAIN_QUEST_IDS, RULESET, main_quest_definition,
+                         prepare_main_live, validated_main_quest)
 from .rpc import RpcCode, RpcFailure
 from .state import AttemptConflict, State
 from .tutorial_progression import TutorialProgression, _number
@@ -25,9 +26,6 @@ _AREA = 'area-main-001'
 _I32 = (1 << 31) - 1
 _DAY = 86400000
 _JST = 9 * 3600000
-# This exact fixed reward is pinned to the supported 6.1.1 first quest.
-_CLEAR_REWARDS = ((1, 'item-card_enhance', 290), (8, '', 500),
-                  (15, '', 50), (3, 'ac-1-visual-02', 1))
 
 
 def _fail(detail, code=RpcCode.FAILED_PRECONDITION):
@@ -46,7 +44,7 @@ def _same_day(a, b):
 
 
 class MainLives:
-    """Compute and atomically settle the explicitly enabled first main quest."""
+    """Compute and atomically settle the explicitly enabled first main area."""
 
     def __init__(self, schema, state, profile, master_dir, engine=None, enabled=False):
         self.schema, self.state, self.profile = schema, state, profile
@@ -54,20 +52,15 @@ class MainLives:
         self.catalog = _Catalog(self.master_dir)
         self.engine, self.enabled = engine, enabled
 
-    def _definition(self):
-        quest = self.catalog.ids('Quest', required=True).get(MAIN_QUEST_ID)
-        area = self.catalog.ids('Area', required=True).get(_AREA)
-        if (quest is None or area is None or quest.get('areaId') != _AREA or area.get('type') != 1
-                or MAIN_QUEST_ID not in area.get('questIds', [])
-                or len(set(area['questIds'])) != len(area['questIds'])):
-            _fail('first-quest area references are invalid')
-        if (_number(quest.get('clearScore'), 'clear score') != 3000
-                or _number(quest.get('rewardManagerExp'), 'live manager experience') != 50
-                or _number(quest.get('rewardCardExp'), 'live card experience') != 40
-                or any(quest.get(key) for key in ('rankAdditionalRewardId', 'rankSRewardId',
+    def _definition(self, quest_id=MAIN_QUEST_ID):
+        definition = main_quest_definition(quest_id)
+        if definition is None:
+            _fail('this main quest is not supported', RpcCode.UNIMPLEMENTED)
+        quest, area = validated_main_quest(self.catalog, definition)
+        if any(quest.get(key) for key in ('rankAdditionalRewardId', 'rankSRewardId',
                     'rankARewardId', 'rankBRewardId', 'rankCRewardId', 'rankDRewardId',
-                    'achievedRankRewards'))):
-            _fail('the first-quest reward or score definition differs from its pin')
+                    'achievedRankRewards')):
+            _fail('the first-area reward definition differs from its pin')
         reward = self.catalog.ids('Reward', required=True).get(quest.get('clearRewardId'))
         resources = reward.get('resources') if reward else None
         if not isinstance(resources, list):
@@ -76,19 +69,23 @@ class MainLives:
         for row in resources:
             if not isinstance(row, dict):
                 _fail('invalid first-clear reward')
-            actual.append((_number(row.get('resourceType'), 'resource type'), row.get('resourceId', ''),
+            kind = _number(row.get('resourceType'), 'resource type')
+            if kind not in (1, 3, 8, 15):
+                _fail('first-clear resource type is not supported', RpcCode.UNIMPLEMENTED)
+            actual.append((kind, row.get('resourceId', ''),
                            _number(row.get('amount'), 'reward amount', positive=True)))
-        if tuple(actual) != _CLEAR_REWARDS:
+        if tuple(actual) != definition.rewards:
             _fail('the first-clear reward differs from its pin')
-        if ('item-card_enhance' not in self.catalog.ids('Item', required=True)
-                or 'ac-1-visual-02' not in self.catalog.ids('Accessory', required=True)):
-            _fail('first-clear resource master references are missing')
+        for kind, identity, _amount in definition.rewards:
+            table = {1: 'Item', 3: 'Accessory'}.get(kind)
+            if table is not None and identity not in self.catalog.ids(table, required=True):
+                _fail('first-clear resource master references are missing')
         settings = self.catalog.rows('Setting', required=True)
         if len(settings) != 1:
             _fail('one Setting master row is required')
-        return quest, area, settings[0]
+        return quest, area, settings[0], definition
 
-    def _result(self, raw, snapshot, positions):
+    def _result(self, raw, snapshot, positions, goal):
         if not isinstance(raw, bytes) or not raw:
             _fail('engine returned no protobuf result', RpcCode.INTERNAL)
         result = self.schema.response_type(_PATH)().result
@@ -109,7 +106,7 @@ class MainLives:
         if (len(card_results) != 5 or {row.cardId for row in card_results} != {row.cardId for row in positions}
                 or any(row.totalScore < 0 for row in card_results)
                 or sum(row.totalScore for row in card_results) != score
-                or result.cleared != (score >= 3000)):
+                or result.cleared != (score >= goal)):
             _fail('engine clear status or card scores are inconsistent', RpcCode.INTERNAL)
         # No detail-log/replay service is implemented for these local attempts.
         result.detailLogId = ''
@@ -154,9 +151,9 @@ class MainLives:
             plans.append((card, plan.card, total - old_exp, total - old_exp < amount))
         return plans
 
-    def _reward(self, snapshot, response, setting):
+    def _reward(self, snapshot, response, setting, rewards):
         updated = response.commonResponse.updatedData
-        for kind, identity, amount in _CLEAR_REWARDS:
+        for kind, identity, amount in rewards:
             if kind == 1:
                 matches = [row for row in snapshot.items if row.itemId == identity and row.expiredTime == 0]
                 if len(matches) > 1:
@@ -189,7 +186,7 @@ class MainLives:
                     _fail('first-clear stone exceeds the resource limit')
                 snapshot.balance.freeBalance = after
                 updated.balance.CopyFrom(snapshot.balance)
-            else:
+            elif kind == 3:
                 old = _single(snapshot.accessories, 'accessoryId', identity)
                 before = _number(old.amount if old is not None else 0, 'accessory amount')
                 after = _number(before + amount, 'accessory amount')
@@ -198,12 +195,14 @@ class MainLives:
                 row = old if old is not None else snapshot.accessories.add(accessoryId=identity)
                 row.amount = after
                 updated.accessories.add().CopyFrom(row)
+            else:
+                _fail('first-clear resource type is not supported', RpcCode.UNIMPLEMENTED)
             response.reward.clearRewards.add(resourceType=kind, resourceId=identity,
                 amountI64=amount, beforeAmount=before, afterAmount=after, isNew=before == 0)
 
-    def _settle(self, snapshot, request, response, score, now):
-        _quest, area_master, setting = self._definition()
-        old_quest = _single(snapshot.quests, 'questId', MAIN_QUEST_ID)
+    def _settle(self, snapshot, request, response, score, now, contract):
+        _quest, area_master, setting, definition = contract
+        old_quest = _single(snapshot.quests, 'questId', request.questId)
         old_area = _single(snapshot.areas, 'areaId', _AREA)
         high = _number(old_quest.highestScore if old_quest else 0, 'highest score')
         response.highestScore = high
@@ -236,11 +235,11 @@ class MainLives:
             experience = _number(snapshot.user.managerExp, 'manager experience')
             if snapshot.user.managerLevel != progression._manager_level(experience):
                 _fail('manager level and experience disagree')
-            new_exp = _number(experience + 50, 'manager experience')
+            new_exp = _number(experience + definition.manager_exp, 'manager experience')
             new_level = progression._manager_level(new_exp)
             positions = sorted((row for row in snapshot.deckPositions if row.number == request.deckNumber), key=lambda row: row.position)
-            plans = self._card_xp(snapshot, positions, new_level, 40)
-            self._reward(snapshot, response, setting)
+            plans = self._card_xp(snapshot, positions, new_level, definition.card_exp)
+            self._reward(snapshot, response, setting, definition.rewards)
         updated = response.commonResponse.updatedData
         if first:
             snapshot.user.managerExp, snapshot.user.managerLevel = new_exp, new_level
@@ -256,7 +255,7 @@ class MainLives:
                 card.CopyFrom(projected)
                 updated.cards.add().CopyFrom(card)
                 response.reward.rewardCards.add(cardId=card.cardId, exp=gain, isExpTruncated=truncated)
-        quest = old_quest if old_quest is not None else snapshot.quests.add(questId=MAIN_QUEST_ID)
+        quest = old_quest if old_quest is not None else snapshot.quests.add(questId=request.questId)
         area = old_area if old_area is not None else snapshot.areas.add(areaId=_AREA)
         for row in (quest, area):
             count_today = row.dailyClearCount if _same_day(row.lastClearedTime, now) else 0
@@ -284,9 +283,9 @@ class MainLives:
             _fail('malformed quest-start request', RpcCode.INVALID_ARGUMENT)
         if not request.questId or request.deckNumber <= 0 or request.playCount <= 0:
             _fail('quest, saved deck and positive play count are required', RpcCode.INVALID_ARGUMENT)
-        if (request.questId != MAIN_QUEST_ID or request.playCount != 1 or request.useDailyTicket
+        if (request.questId not in MAIN_QUEST_IDS or request.playCount != 1 or request.useDailyTicket
                 or request.isAuto or request.userBuddyDeckPositions):
-            _fail('only the first main quest with one ordinary saved-deck play is supported', RpcCode.UNIMPLEMENTED)
+            _fail('only the first main area with one ordinary saved-deck play is supported', RpcCode.UNIMPLEMENTED)
         version = self.catalog.version()
         if not version:
             _fail('a pinned master version is required')
@@ -307,7 +306,28 @@ class MainLives:
                 _fail('borrowed deck names are not supported', RpcCode.UNIMPLEMENTED)
             positions = sorted((row for row in snapshot.deckPositions if row.number == request.deckNumber), key=lambda row: row.position)
             seed, now = secrets.randbits(64), time.time_ns() // 1000000
-            quest, _area, _setting = self._definition()
+            contract = self._definition(request.questId)
+            quest, _area, _setting, definition = contract
+            # A catalog's isPlayable is presentation, not authorization. Later
+            # first-area stages need real prior clears, validated on the same
+            # snapshot/transaction that will receive this attempt's settlement.
+            # The original 01 entry and pre-existing cached receipts stay valid.
+            if request.questId != MAIN_QUEST_ID:
+                known = {}
+                for row in snapshot.quests:
+                    if row.questId in MAIN_QUEST_IDS:
+                        if row.questId in known:
+                            _fail('main-area quest progress is ambiguous')
+                        cleared_time = _number(row.lastClearedTime, 'quest clear time')
+                        if cleared_time > now:
+                            _fail('quest clear clock is ahead of the local clock')
+                        known[row.questId] = cleared_time > 0
+                area = _single(snapshot.areas, 'areaId', _AREA)
+                if area is None or _number(area.clearQuestCount, 'main-area clear count') != sum(known.values()):
+                    _fail('main-area clear count disagrees with its saved quest progress')
+                index = MAIN_QUEST_IDS.index(request.questId)
+                if not all(known.get(identity, False) for identity in MAIN_QUEST_IDS[:index]):
+                    _fail('previous first-area quests must be cleared')
             # The original first quest is liveSkipType Always (2), not the
             # full-skip type (4). isSkip selects the client's playback mode;
             # its result still comes from the same actual simulation and
@@ -316,15 +336,18 @@ class MainLives:
                                    or quest['liveSkipType'] != 2):
                 _fail('the first-quest skip definition differs from its pin')
             prepared = prepare_main_live(self.schema, self.master_dir, snapshot, request.questId, request.deckNumber, seed)
-            live, score = self._result(self.engine.simulate(prepared), snapshot, positions)
+            live, score = self._result(self.engine.simulate(prepared), snapshot, positions, definition.clear_score)
             response = self.schema.response_type(path)(questId=request.questId)
             response.result.CopyFrom(live)
             response.reward.SetInParent()
             response.commonResponse.updatedData.SetInParent()
             response.commonResponse.deletedData.SetInParent()
-            for rank, threshold in ((3, 3600), (2, 3000), (1, 0)):
+            # Local presentation policy retained from the first-quest slice;
+            # these thresholds do not assert official score equivalence.
+            for rank, threshold in ((3, definition.clear_score * 12 // 10),
+                                    (2, definition.clear_score), (1, 0)):
                 response.rankPatterns.add(rankType=rank, thresholdScore=threshold)
-            self._settle(snapshot, request, response, score, now)
+            self._settle(snapshot, request, response, score, now, contract)
             return (snapshot.SerializeToString() if live.cleared else raw), response.SerializeToString(), seed, now
 
         try:

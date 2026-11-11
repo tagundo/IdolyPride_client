@@ -13,12 +13,13 @@ from .rpc import RpcCode
 
 
 _PATH = "/api.Quest/Start"
-_FIRST_QUEST = "qt-main-1-001-01"
+_FIRST_AREA_QUESTS = frozenset(("qt-main-1-001-01", "qt-main-1-001-02", "qt-main-1-001-03"))
 _MAX_REQUEST = 16 * 1024 * 1024
 _REQUEST_MODE = "request_mode_unsupported"
 _REASONS = {
     "No local handler or response fixture for /api.Quest/Start": "no_handler_or_disabled",
     "Experimental main live: only the first main quest with one ordinary saved-deck play is supported": _REQUEST_MODE,
+    "Experimental main live: only the first main area with one ordinary saved-deck play is supported": _REQUEST_MODE,
     "Experimental main live: borrowed deck names are not supported": "deck_name_unsupported",
     "Local live input: this main quest is not supported": "quest_unsupported",
     "Local live input: quest conditions or live bonuses are not supported": "quest_bonus_unsupported",
@@ -35,7 +36,7 @@ _REASONS = {
 }
 _LABELS = {
     "no_handler_or_disabled": "실험 라이브 처리기 없음 또는 꺼짐",
-    _REQUEST_MODE: "첫 퀘스트·일반 1회·모드 조건 미지원",
+    _REQUEST_MODE: "첫 메인 영역·일반 1회·모드 조건 미지원",
     "deck_name_unsupported": "저장 덱 이름과 요청 이름 불일치",
     "quest_unsupported": "지원 범위 밖의 퀘스트",
     "quest_bonus_unsupported": "퀘스트 조건·라이브 보너스 미지원",
@@ -56,7 +57,7 @@ _LABELS = {
 
 @dataclass(frozen=True)
 class QuestStartFacts:
-    first_quest: bool
+    first_area: bool
     play_once: bool
     is_auto: bool
     is_skip: bool
@@ -81,7 +82,7 @@ def quest_start_facts(path, code, details, schema, raw):
         if type(raw) is not bytes or len(raw) > _MAX_REQUEST:
             return None
         request = schema.request_type(_PATH).FromString(codec.decode(raw))
-        return QuestStartFacts(request.questId == _FIRST_QUEST, request.playCount == 1,
+        return QuestStartFacts(request.questId in _FIRST_AREA_QUESTS, request.playCount == 1,
             bool(request.isAuto), bool(request.isSkip), bool(request.useDailyTicket),
             bool(request.userBuddyDeckPositions))
     except Exception:
@@ -100,11 +101,11 @@ def format_quest_start_rejection(path, code, details, facts=None):
             return result
         if type(facts) is not QuestStartFacts:
             return result + " facts=unavailable"
-        values = (facts.first_quest, facts.play_once, facts.is_auto, facts.is_skip,
+        values = (facts.first_area, facts.play_once, facts.is_auto, facts.is_skip,
                   facts.daily_ticket, facts.buddy_positions)
         if any(type(value) is not bool for value in values):
             return result + " facts=unavailable"
-        return (result + " quest=" + (_FIRST_QUEST if facts.first_quest else "other")
+        return (result + " quest=" + ("first_area" if facts.first_area else "other")
             + " play=" + ("one" if facts.play_once else "other")
             + " auto=" + str(int(facts.is_auto)) + " skip=" + str(int(facts.is_skip))
             + " daily_ticket=" + str(int(facts.daily_ticket))

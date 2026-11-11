@@ -39,7 +39,7 @@ class Calculator:
     def simulate(self, prepared):
         self.calls.append(prepared)
         result = self.schema.response_type(START)().result
-        result.cleared = self.score >= 3000
+        result.cleared = self.score >= prepared['clear_score']
         result.preChart.SetInParent()
         result.charts.add(number=1)
         player = result.userInfos.add(index=1, userId=prepared['public_id'], name=prepared['name'])
@@ -59,14 +59,38 @@ def game(schema, tmp_path, monkeypatch):
                              freeStoneLimit='9999999', accessoryLimit='99999999')
     rows.update({
         'Quest': [{'id': QUEST, 'areaId': 'area-main-001', 'clearScore': '3000', 'liveSkipType': 2,
-                   'rewardManagerExp': 50, 'rewardCardExp': 40, 'clearRewardId': 'first-clear'}],
-        'Area': [{'id': 'area-main-001', 'type': 1, 'questIds': [QUEST, 'quest-2', 'quest-3']}],
-        'Reward': [{'id': 'first-clear', 'resources': [
+                   'rewardManagerExp': 50, 'rewardCardExp': 40, 'clearRewardId': 'rd-main-quest-001-01',
+                   'musicId': 'music-hsm-006', 'musicChartPatternId': 'chart-hsm-006-002',
+                   'stageId': 'stage-live-house-00-00'},
+                  {'id': 'qt-main-1-001-02', 'areaId': 'area-main-001', 'clearScore': '5400', 'liveSkipType': 2,
+                   'rewardManagerExp': 65, 'rewardCardExp': 57, 'clearRewardId': 'rd-main-quest-001-02',
+                   'musicId': 'music-sun-001', 'musicChartPatternId': 'chart-sun-001-002',
+                   'stageId': 'stage-live-house-00-00'},
+                  {'id': 'qt-main-1-001-03', 'areaId': 'area-main-001', 'clearScore': '10000', 'liveSkipType': 2,
+                   'rewardManagerExp': 85, 'rewardCardExp': 74, 'clearRewardId': 'rd-main-quest-001-03',
+                   'musicId': 'music-moon-004', 'musicChartPatternId': 'chart-moon-004-002',
+                   'stageId': 'stage-live-house-00-00'}],
+        'Area': [{'id': 'area-main-001', 'type': 1,
+                  'questIds': [QUEST, 'qt-main-1-001-02', 'qt-main-1-001-03']}],
+        'Stage': [{'id': 'stage-live-house-00-00'}],
+        'Music': [{'id': identity} for identity in ('music-hsm-006', 'music-sun-001', 'music-moon-004')],
+        'Reward': [{'id': 'rd-main-quest-001-01', 'resources': [
             {'resourceType': 1, 'resourceId': 'item-card_enhance', 'amount': 290},
             {'resourceType': 8, 'amount': 500}, {'resourceType': 15, 'amount': 50},
-            {'resourceType': 3, 'resourceId': 'ac-1-visual-02', 'amount': 1}]}],
-        'Accessory': [{'id': 'ac-1-visual-02'}],
+            {'resourceType': 3, 'resourceId': 'ac-1-visual-02', 'amount': 1}]},
+            {'id': 'rd-main-quest-001-02', 'resources': [
+                {'resourceType': 1, 'resourceId': 'item-card_enhance', 'amount': 590},
+                {'resourceType': 8, 'amount': 500}, {'resourceType': 15, 'amount': 50},
+                {'resourceType': 3, 'resourceId': 'ac-1-vocal-02', 'amount': 1}]},
+            {'id': 'rd-main-quest-001-03', 'resources': [
+                {'resourceType': 1, 'resourceId': 'item-card_enhance', 'amount': 890},
+                {'resourceType': 8, 'amount': 500}, {'resourceType': 15, 'amount': 50},
+                {'resourceType': 1, 'resourceId': 'item-photo_shooting-01', 'amount': 1}]}],
+        'Accessory': [{'id': 'ac-1-visual-02'}, {'id': 'ac-1-vocal-02'}],
     })
+    rows['Item'].append({'id': 'item-photo_shooting-01'})
+    rows['ManagerLevel'][2]['maxCardLevel'] = 12
+    rows['ManagerLevel'].append({'level': 4, 'requiredExp': '200', 'maxCardLevel': 12})
     base = dict(rows['Card'][0])
     rows['Card'] = [{**base, 'id': f'card-{i}', 'characterId': f'char-{i}'} for i in range(1, 6)]
     for table, values in rows.items():
@@ -100,14 +124,15 @@ def game(schema, tmp_path, monkeypatch):
     state.mutate_lesson_snapshot('player', schema.fingerprint, lambda raw, _: (raw, b'opaque-clock'))
     token, _ = state.login('player')
     calculator = Calculator(schema)
-    def prepare(_schema, _master, current, _quest, number, seed):
+    def prepare(_schema, _master, current, quest_id, number, seed):
         positions = sorted((p for p in current.deckPositions if p.number == number), key=lambda p: p.position)
         if [p.position for p in positions] != list(range(1, 6)):
             raise RpcFailure(RpcCode.FAILED_PRECONDITION, 'incomplete unit')
         if any(p.photoIds or p.part1AccessoryId or p.part2AccessoryId for p in positions):
             raise RpcFailure(RpcCode.UNIMPLEMENTED, 'bonuses not supported')
         return {'public_id': current.userPublic.publicUserId, 'name': current.user.name,
-                'cards': [p.cardId for p in positions], 'seed': seed}
+                'cards': [p.cardId for p in positions], 'seed': seed,
+                'clear_score': int(next(row for row in rows['Quest'] if row['id'] == quest_id)['clearScore'])}
     monkeypatch.setattr(module, 'prepare_main_live', prepare)
     monkeypatch.setattr(module.time, 'time_ns', lambda: NOW * 1000000)
     provider = module.MainLives(schema, state, 'player', master, calculator, enabled=True)
@@ -219,8 +244,8 @@ def test_failure_preserves_even_noncanonical_unknown_field_wire_order(game):
 def test_completing_imported_area_updates_only_real_clear_character_references(game):
     def previously_cleared(snapshot):
         snapshot.areas[0].clearQuestCount = 2
-        snapshot.quests.add(questId='quest-2', lastClearedTime=NOW - 1000)
-        snapshot.quests.add(questId='quest-3', lastClearedTime=NOW - 1000)
+        snapshot.quests.add(questId='qt-main-1-001-02', lastClearedTime=NOW - 1000)
+        snapshot.quests.add(questId='qt-main-1-001-03', lastClearedTime=NOW - 1000)
     change(game, previously_cleared)
     response = call(game)
     assert current(game).areas[0].clearQuestCount == 3

@@ -54,9 +54,10 @@ def small_schema(path):
     enum = master.enum_type.add(name="ChartType")
     for n in range(4):
         enum.value.add(name="ChartType" + str(n), number=n)
-    message(master, "Quest", fields(9, "id areaId stageId musicId musicChartPatternId questPressureId "
+    message(master, "Quest", fields(9, "id areaId stageId musicId musicChartPatternId questPressureId clearRewardId "
         "QuestAudienceAdvantageId QuestCharacterAdvantageId liveBonusGroupId viewConditionId unlockConditionId")
-        + fields(5, "difficultyLevel maxCapacity mentalThreshold ticketAmount") + fields(3, "clearScore"))
+        + fields(5, "difficultyLevel maxCapacity mentalThreshold ticketAmount liveSkipType rewardManagerExp rewardCardExp")
+        + fields(3, "clearScore"))
     message(master, "Setting", fields(3, "cardDefaultMental cardDefaultTechnique")
             + fields(5, "liveMinimumGuaranteedAudienceAmount"))
     message(master, "MusicChartPattern", fields(9, "id") + fields(5, "number position") + [("type", "ChartType", False)])
@@ -95,14 +96,20 @@ def game(schema, tmp_path, monkeypatch):
                        "defaultCostumeId": "cos-" + key} for key in "abcde"],
         "Costume": [{"id": "cos-" + key, "characterId": "char-" + key, "defaultHairId": "hair-" + key} for key in "abcde"],
         "Hair": [{"id": "hair-" + key, "characterId": "char-" + key} for key in "abcde"],
-        "Area": [{"id": module.MAIN_AREA_ID, "type": 1, "questIds": [module.MAIN_QUEST_ID]}],
+        "Area": [{"id": module.MAIN_AREA_ID, "type": 1,
+                  "questIds": [module.MAIN_QUEST_ID, "qt-main-1-001-02", "qt-main-1-001-03"]}],
+        "Stage": [{"id": "stage-live-house-00-00"}],
         "Quest": [{"id": module.MAIN_QUEST_ID, "areaId": module.MAIN_AREA_ID, "musicId": "music-hsm-006",
                    "musicChartPatternId": "chart-hsm-006-002", "difficultyLevel": 1, "maxCapacity": 100,
                    "mentalThreshold": 47, "questPressureId": "pressure", "QuestAudienceAdvantageId": "audience",
-                   "clearScore": "3000", "ticketAmount": 0}],
-        "Music": [{"id": "music-hsm-006", "comboAdvantageId": "combo"}],
+                   "stageId": "stage-live-house-00-00", "clearScore": "3000", "ticketAmount": 0,
+                   "liveSkipType": 2, "rewardManagerExp": 50, "rewardCardExp": 40,
+                   "clearRewardId": "rd-main-quest-001-01"}],
+        "Music": [{"id": identity, "comboAdvantageId": "combo"}
+                  for identity in ("music-hsm-006", "music-sun-001", "music-moon-004")],
         "MusicChartPattern": [{"id": identity, "number": n, "type": 1, "position": 0}
-            for identity in ("chart-hsm-006-001", "chart-hsm-006-002") for n in range(1, 4)],
+            for identity in ("chart-hsm-006-001", "chart-hsm-006-002", "chart-sun-001-001",
+                             "chart-sun-001-002", "chart-moon-004-001", "chart-moon-004-002") for n in range(1, 4)],
         "QuestPressure": [{"id": "pressure", "weightPermil": 1}],
         "QuestAudienceAdvantage": [{"id": "audience", "audienceAmount": 0, "advantagePermil": 1000}],
         "ComboAdvantage": [{"id": "combo", "comboCount": 0, "advantagePermil": 1000}],
@@ -111,6 +118,12 @@ def game(schema, tmp_path, monkeypatch):
         "SkillTrigger": [{"id": "tg-beat", "type": 1}],
         "SkillTarget": [{"id": "target-self", "type": 1}],
     })
+    for suffix, song, goal, manager_exp, card_exp in (
+            ("02", "sun-001", "5400", 65, 57), ("03", "moon-004", "10000", 85, 74)):
+        rows["Quest"].append({**rows["Quest"][0], "id": "qt-main-1-001-" + suffix,
+            "musicId": "music-" + song, "musicChartPatternId": "chart-" + song + "-002",
+            "clearScore": goal, "rewardManagerExp": manager_exp, "rewardCardExp": card_exp,
+            "clearRewardId": "rd-main-quest-001-" + suffix})
     rows["Setting"][0]["liveMinimumGuaranteedAudienceAmount"] = 10
     for skill in rows["Skill"]:
         skill["categoryType"] = 2
@@ -164,6 +177,35 @@ def test_projects_current_owned_slot_order_public_identity_stats_skills_fans_and
         assert result["cards"][index - 1]["light_fans"] == index
     assert game[3].SerializeToString() == before
     assert prepare(game) == result
+
+
+@pytest.mark.parametrize('quest_id,music_id,chart_id,reference_id,goal', [
+    ('qt-main-1-001-01', 'music-hsm-006', 'chart-hsm-006-002', 'chart-hsm-006-001', 3000),
+    ('qt-main-1-001-02', 'music-sun-001', 'chart-sun-001-002', 'chart-sun-001-001', 5400),
+    ('qt-main-1-001-03', 'music-moon-004', 'chart-moon-004-002', 'chart-moon-004-001', 10000),
+])
+def test_each_first_area_song_uses_its_own_explicit_reference_chart(game, quest_id, music_id, chart_id, reference_id, goal):
+    before = game[3].SerializeToString()
+    prepared = prepare(game, quest_id=quest_id)
+    cls = message_factory.GetMessageClass(game[0].pool.FindMessageTypeByName('master.MusicChartPattern'))
+    for table, expected in (('Chart', chart_id), ('ReferenceChart', reference_id)):
+        assert {cls.FromString(base64.b64decode(raw)).id for raw in prepared['proto'][table]} == {expected}
+    quest_cls = message_factory.GetMessageClass(game[0].pool.FindMessageTypeByName('master.Quest'))
+    quest = quest_cls.FromString(base64.b64decode(prepared['proto']['Quest'][0]))
+    assert (prepared['music_id'], quest.id, quest.clearScore) == (music_id, quest_id, goal)
+    assert game[3].SerializeToString() == before
+
+
+@pytest.mark.parametrize('quest_id,reference_id', [
+    ('qt-main-1-001-02', 'chart-sun-001-001'), ('qt-main-1-001-03', 'chart-moon-004-001'),
+])
+def test_missing_song_reference_never_falls_back_to_the_first_song(game, quest_id, reference_id):
+    game[2]['MusicChartPattern'] = [row for row in game[2]['MusicChartPattern'] if row['id'] != reference_id]
+    rewrite(game, 'MusicChartPattern')
+    before = game[3].SerializeToString()
+    with pytest.raises(RpcFailure):
+        prepare(game, quest_id=quest_id)
+    assert game[3].SerializeToString() == before
 
 
 def test_current_enhanced_level_is_used_and_legacy_initial_rarity_xp_is_not_written(game):

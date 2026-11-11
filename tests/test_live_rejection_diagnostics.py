@@ -19,7 +19,7 @@ from test_main_live import QUEST, START, USER, current, dump, game, schema
 
 
 CANARY = "PRIVATE-token-user-card-name-seed-987654321\nunsafe=1"
-MODE = "Experimental main live: only the first main quest with one ordinary saved-deck play is supported"
+MODE = "Experimental main live: only the first main area with one ordinary saved-deck play is supported"
 
 
 @pytest.fixture
@@ -42,6 +42,8 @@ def request_schema():
 @pytest.mark.parametrize('detail,reason,label', [
     ("No local handler or response fixture for /api.Quest/Start", "no_handler_or_disabled", "처리기 없음 또는 꺼짐"),
     (MODE, "request_mode_unsupported", "모드 조건 미지원"),
+    ("Experimental main live: only the first main quest with one ordinary saved-deck play is supported",
+     "request_mode_unsupported", "첫 메인 영역"),
     ("Experimental main live: borrowed deck names are not supported", "deck_name_unsupported", "이름 불일치"),
     ("Local live input: this main quest is not supported", "quest_unsupported", "범위 밖의 퀘스트"),
     ("Local live input: quest conditions or live bonuses are not supported", "quest_bonus_unsupported", "보너스 미지원"),
@@ -90,11 +92,26 @@ def test_only_public_literal_categories_and_boolean_request_facts_are_retained(r
     assert facts == QuestStartFacts(first, once, True, True, True, True)
     assert request.SerializeToString() == before
     result = format_quest_start_rejection(START, RpcCode.UNIMPLEMENTED, MODE, facts)
-    assert "quest=" + (QUEST if first else "other") in result
+    assert "quest=" + ("first_area" if first else "other") in result
     assert "play=" + ("one" if once else "other") in result
     assert "auto=1 skip=1 daily_ticket=1 buddy_positions=1" in result
     assert CANARY not in result and "987654321" not in result and "\n" not in result
     assert len(result) < 300
+
+
+@pytest.mark.parametrize('quest_id,first_area', [
+    ('qt-main-1-001-01', True), ('qt-main-1-001-02', True), ('qt-main-1-001-03', True),
+    ('qt-main-1-002-01', False), ('qt-main-1-001-04', False), (CANARY, False),
+])
+def test_first_area_message_keeps_finite_safe_request_facts(request_schema, quest_id, first_area):
+    detail = 'Experimental main live: only the first main area with one ordinary saved-deck play is supported'
+    request = request_schema.request_type(START)(questId=quest_id, playCount=1, isAuto=True, buddyDeckName=CANARY)
+    facts = quest_start_facts(START, RpcCode.UNIMPLEMENTED, detail, request_schema, codec.encode(request.SerializeToString()))
+    assert facts == QuestStartFacts(first_area, True, True, False, False, False)
+    text = format_quest_start_rejection(START, RpcCode.UNIMPLEMENTED, detail, facts)
+    assert 'live_rejection=request_mode_unsupported' in text and 'auto=1' in text and CANARY not in text
+    assert ('quest=first_area' if first_area else 'quest=other') in text
+    assert quest_id not in text
 
 
 def test_facts_are_not_parsed_for_native_unclassified_or_other_rejections():
@@ -119,7 +136,7 @@ def test_empty_protobuf_is_a_valid_default_request_not_a_parse_error(request_sch
         QuestStartFacts(False, False, False, False, False, False))
 
 
-@pytest.mark.parametrize('facts', [CANARY, {'first_quest': CANARY},
+@pytest.mark.parametrize('facts', [CANARY, {'first_area': CANARY},
     QuestStartFacts(CANARY, True, False, False, False, False),
     QuestStartFacts(True, True, 1, False, False, False)])
 def test_invalid_context_facts_cannot_inject_text(facts):
@@ -150,6 +167,8 @@ def connected(game, directory, *, enabled=True, callback=None):
 @pytest.mark.parametrize('enabled,values,detail,reason', [
     (False, {}, "No local handler or response fixture for /api.Quest/Start", "no_handler_or_disabled"),
     (True, {'isAuto': True, 'isSkip': True}, MODE, "request_mode_unsupported"),
+    (True, {'questId': 'qt-main-1-001-02', 'isAuto': True}, MODE, "request_mode_unsupported"),
+    (True, {'questId': 'qt-main-1-001-03', 'useDailyTicket': True}, MODE, "request_mode_unsupported"),
     (True, {'questId': CANARY}, MODE, "request_mode_unsupported"),
     (True, {'buddyDeckName': CANARY}, "Experimental main live: borrowed deck names are not supported", "deck_name_unsupported"),
 ])
@@ -167,8 +186,13 @@ def test_actual_application_h2_preserves_wire_error_and_complete_state(game, tmp
     assert 'live_rejection=' + reason in line and len(line) < 400
     assert not any(value in line for value in private_values)
     if values.get('isAuto'):
-        assert 'auto=1 skip=1 daily_ticket=0 buddy_positions=0' in line
-    if 'questId' in values:
+        assert ('auto=1 skip=' + str(int(bool(values.get('isSkip'))))
+                + ' daily_ticket=0 buddy_positions=0') in line
+    if values.get('useDailyTicket'):
+        assert 'daily_ticket=1' in line
+    if values.get('questId') in ('qt-main-1-001-02', 'qt-main-1-001-03'):
+        assert 'quest=first_area' in line and values['questId'] not in line
+    elif 'questId' in values:
         assert 'quest=other' in line
 
 

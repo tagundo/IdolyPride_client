@@ -1,4 +1,4 @@
-"""Read-only prepared input for the pinned first main live, local rules v5.
+"""Read-only prepared input for the pinned first main area, local rules v5.
 
 The native engine receives current owned card parameters and learned skills,
 not a captured account or a predetermined result. Appearance projection uses
@@ -8,6 +8,7 @@ responsibility and must use the same transactional snapshot as this input.
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 from pathlib import Path
 
 from google.protobuf import message_factory
@@ -22,10 +23,40 @@ from .rpc import RpcCode, RpcFailure
 RULESET = "live-v5"
 MAIN_QUEST_ID = "qt-main-1-001-01"
 MAIN_AREA_ID = "area-main-001"
+
+
+@dataclass(frozen=True)
+class MainQuestDefinition:
+    quest_id: str
+    music_id: str
+    chart_id: str
+    reference_chart_id: str
+    clear_score: int
+    manager_exp: int
+    card_exp: int
+    reward_id: str
+    rewards: tuple[tuple[int, str, int], ...]
+
+
+# Audited 6.1.1 first-area definitions, not a rule for arbitrary main quests.
+# Keep the reference chart explicit: using the first song's chart for another
+# song would silently change the local-v5 beat normalization.
+MAIN_QUEST_DEFINITIONS = (
+    MainQuestDefinition(MAIN_QUEST_ID, "music-hsm-006", "chart-hsm-006-002", "chart-hsm-006-001",
+        3000, 50, 40, "rd-main-quest-001-01", ((1, "item-card_enhance", 290),
+        (8, "", 500), (15, "", 50), (3, "ac-1-visual-02", 1))),
+    MainQuestDefinition("qt-main-1-001-02", "music-sun-001", "chart-sun-001-002", "chart-sun-001-001",
+        5400, 65, 57, "rd-main-quest-001-02", ((1, "item-card_enhance", 590),
+        (8, "", 500), (15, "", 50), (3, "ac-1-vocal-02", 1))),
+    MainQuestDefinition("qt-main-1-001-03", "music-moon-004", "chart-moon-004-002", "chart-moon-004-001",
+        10000, 85, 74, "rd-main-quest-001-03", ((1, "item-card_enhance", 890),
+        (8, "", 500), (15, "", 50), (1, "item-photo_shooting-01", 1))),
+)
+MAIN_QUEST_IDS = tuple(row.quest_id for row in MAIN_QUEST_DEFINITIONS)
 SCHEMA_SHA256 = "0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3"
 MASTER_VERSION = "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60"
 REQUIRED_MASTER_TABLES = (
-    "Area", "Quest", "Setting", "Music", "MusicChartPattern", "Card", "Character", "Costume", "Hair",
+    "Area", "Quest", "Stage", "Setting", "Music", "MusicChartPattern", "Card", "Character", "Costume", "Hair",
     "Skill", "SkillEfficacy", "SkillTrigger", "SkillTarget", "CardParameter", "CardRarity",
     "CardLevelRelease", "CardLevel", "ManagerLevel", "Item", "Consumption", "QuestPressure",
     "QuestAudienceAdvantage", "ComboAdvantage", "QuestStaminaConsumption",
@@ -53,6 +84,38 @@ def _identity(value, label, *, optional=False):
     if not isinstance(value, str) or not optional and not value:
         _fail("invalid " + label)
     return value
+
+
+def main_quest_definition(quest_id):
+    return next((row for row in MAIN_QUEST_DEFINITIONS if row.quest_id == quest_id), None)
+
+
+def validated_main_quest(catalog, definition):
+    """Validate the bounded stage contract without reading or changing progress."""
+    quest = catalog.ids("Quest", required=True).get(definition.quest_id)
+    area = catalog.ids("Area", required=True).get(MAIN_AREA_ID)
+    if (quest is None or area is None or quest.get("areaId") != MAIN_AREA_ID
+            or area.get("type") != 1 or area.get("questIds") != list(MAIN_QUEST_IDS)):
+        _fail("the supported quest has an invalid main-area link")
+    if (quest.get("viewConditionId") or quest.get("unlockConditionId")
+            or area.get("viewConditionId") or area.get("unlockConditionId")
+            or quest.get("liveBonusGroupId") or quest.get("QuestCharacterAdvantageId")):
+        _fail("quest conditions or live bonuses are not supported", RpcCode.UNIMPLEMENTED)
+    if (quest.get("musicId") != definition.music_id
+            or quest.get("musicChartPatternId") != definition.chart_id
+            or quest.get("stageId") != "stage-live-house-00-00"
+            or _number(quest.get("clearScore"), "clear score", positive=True) != definition.clear_score
+            or _number(quest.get("rewardManagerExp"), "manager experience") != definition.manager_exp
+            or _number(quest.get("rewardCardExp"), "card experience") != definition.card_exp
+            or quest.get("clearRewardId") != definition.reward_id
+            or _number(quest.get("ticketAmount", 0), "ticket cost") != 0
+            or _number(quest.get("dailyLimitCount", 0), "daily limit") != 0
+            or type(quest.get("liveSkipType")) is not int or quest["liveSkipType"] != 2):
+        _fail("the supported first-area definition differs from its pin")
+    if (definition.music_id not in catalog.ids("Music", required=True)
+            or quest["stageId"] not in catalog.ids("Stage", required=True)):
+        _fail("quest music or stage reference is missing")
+    return quest, area
 
 
 def _known(message):
@@ -96,13 +159,14 @@ def _chart(catalog, identity):
 def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed):
     """Prepare JSON-v1 without mutating the supplied snapshot or any storage.
 
-    Only the first ordinary main quest is supported. Cards must remain in the
+    Only the three first-area main quests are supported. Cards must remain in the
     verified unranked, unsupported-by-assistance initial form below the next
     release/skill-upgrade boundary. An initial rarity XP of zero is accepted as
     the historical starter representation, without changing it or granting XP.
     No photo/accessory/buddy preparation or result/reward calculation occurs.
     """
-    if quest_id != MAIN_QUEST_ID:
+    definition = main_quest_definition(quest_id)
+    if definition is None:
         _fail("this main quest is not supported", RpcCode.UNIMPLEMENTED)
     if type(deck_number) is not int or deck_number <= 0:
         _fail("a positive saved deck number is required", RpcCode.INVALID_ARGUMENT)
@@ -117,23 +181,7 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
         _fail("a local user and public identity are required")
     for table in REQUIRED_MASTER_TABLES:
         catalog.rows(table, required=True)
-    quest = catalog.ids("Quest", required=True).get(quest_id)
-    if quest is None:
-        _fail("the supported quest is missing from master data")
-    areas = catalog.ids("Area", required=True)
-    area = areas.get(MAIN_AREA_ID)
-    if (quest.get("areaId") != MAIN_AREA_ID or area is None or area.get("type") != 1
-            or quest_id not in area.get("questIds", [])):
-        _fail("the supported quest has an invalid main-area link")
-    if (quest.get("viewConditionId") or quest.get("unlockConditionId")
-            or area.get("viewConditionId") or area.get("unlockConditionId")
-            or quest.get("liveBonusGroupId") or quest.get("QuestCharacterAdvantageId")):
-        _fail("quest conditions or live bonuses are not supported", RpcCode.UNIMPLEMENTED)
-    if (_number(quest.get("clearScore"), "clear score", positive=True) != 3000
-            or quest.get("musicId") != "music-hsm-006"
-            or quest.get("musicChartPatternId") != "chart-hsm-006-002"
-            or _number(quest.get("ticketAmount", 0), "ticket cost") != 0):
-        _fail("the supported first-quest definition differs from its pin")
+    quest, _area = validated_main_quest(catalog, definition)
     for field in ("difficultyLevel", "maxCapacity", "mentalThreshold"):
         _number(quest.get(field), field, positive=True)
     positions = sorted((row for row in snapshot.deckPositions if row.number == deck_number), key=lambda row: row.position)
@@ -156,7 +204,7 @@ def prepare_main_live(schema, master_dir, snapshot, quest_id, deck_number, seed)
     if _number(pressure.get("weightPermil"), "pressure weight", positive=True) == 0:
         _fail("invalid pressure weight")
     chart = _chart(catalog, quest["musicChartPatternId"])
-    reference = _chart(catalog, "chart-hsm-006-001")
+    reference = _chart(catalog, definition.reference_chart_id)
     audience_id = _identity(quest.get("QuestAudienceAdvantageId"), "quest audience reference")
     combo_id = _identity(music.get("comboAdvantageId"), "music combo reference")
     audience = [row for row in catalog.rows("QuestAudienceAdvantage") if row.get("id") == audience_id]

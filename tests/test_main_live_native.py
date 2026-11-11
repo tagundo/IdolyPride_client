@@ -14,6 +14,7 @@ import pytest
 
 from idoly_local.gameplay import seed_starter_profile
 from idoly_local.live_engine import NativeLiveEngine
+from idoly_local.live_input import prepare_main_live
 from idoly_local.main_live import MainLives
 from idoly_local.schema import Schema
 from idoly_local.state import State
@@ -72,3 +73,35 @@ def test_actual_native_first_live_and_transactional_retry(tmp_path, is_skip):
     assert not failed.result.cleared and failed.result.userInfos[0].userResult.score == 0
     assert not failed.reward.clearRewards and not failed.reward.rewardCards
     assert state2.snapshot('failure') == before
+
+
+@pytest.mark.parametrize('quest_id,goal', [
+    ('qt-main-1-001-01', 3000), ('qt-main-1-001-02', 5400), ('qt-main-1-001-03', 10000),
+])
+def test_actual_native_first_area_preparation_is_computed_without_profile_writes(tmp_path, quest_id, goal):
+    """Exercise the real producer/ABI, not battle authorization or forced wins.
+
+    A fresh starter may fail a later stage. That is a valid computed result;
+    sequential settlement/authorization is independently tested with a fixture.
+    """
+    library, master = os.environ.get('IDOLY_LIVE_LIBRARY'), os.environ.get('IDOLY_LIVE_MASTER_DIR')
+    if not library or not master:
+        pytest.skip('Optional native live library and audited master bundle are not configured')
+    schema = Schema.from_descriptor_set(Path(__file__).resolve().parents[1] / 'data/protocol/idolypride-6.1.1.pb')
+    state = State(tmp_path / 'state.db')
+    raw = seed_starter_profile(state, schema, 'player', Path(master))
+    snapshot = schema.response_type('/api.User/Get').FromString(raw)
+    prepared = prepare_main_live(schema, Path(master), snapshot, quest_id, 1, 123456)
+    engine = NativeLiveEngine(Path(library))
+    output = engine.simulate(prepared)
+    result = schema.response_type('/api.Quest/Start')().result.FromString(output)
+    assert len(result.userInfos) == 1 and result.charts and result.HasField('preChart')
+    player = result.userInfos[0]
+    assert player.userId == snapshot.userPublic.publicUserId
+    assert len(player.userDeck.cards) == len(player.userResult.cardResults) == 5
+    assert sum(row.totalScore for row in player.userResult.cardResults) == player.userResult.score
+    assert result.cleared == (player.userResult.score >= goal)
+    assert engine.simulate(prepared) == output
+    assert snapshot.SerializeToString() == raw and state.snapshot('player')[0] == raw
+    with state.connect() as db:
+        assert db.execute('SELECT COUNT(*) FROM main_live_attempts').fetchone()[0] == 0
