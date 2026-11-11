@@ -1,6 +1,6 @@
 # 감상용 전체 해금
 
-Android v0.3.6 후보는 [APK 직접 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.6/IdolyPride-Local-Server-Android.apk) 또는 [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.6/IdolyPride-Local-Server-Android.apk)에서 받습니다. 저장소 접근 권한이 있는 계정으로 GitHub에 로그인해야 합니다. 새 Mac 바이너리는 포함하지 않습니다.
+Android v0.3.7 후보는 [APK 직접 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.7/IdolyPride-Local-Server-Android.apk) 또는 [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.7/IdolyPride-Local-Server-Android.apk)에서 받습니다. 저장소 접근 권한이 있는 계정으로 GitHub에 로그인해야 합니다. 새 Mac 바이너리는 포함하지 않습니다.
 
 서버 앱의 **감상용 전체 해금**을 선택하고 서버를 시작합니다. 모드를 바꾸려면 서버를 중지한 뒤 선택을 바꾸고, 게임은 타이틀로 돌아가 다시 로그인합니다. Android와 Mac의 기본값은 꺼짐이며 선택을 저장합니다.
 
