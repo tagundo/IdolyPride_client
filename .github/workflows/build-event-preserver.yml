@@ -1,0 +1,87 @@
+name: Build Mac event preserver candidate (offline QA only)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mac-event-preserver-candidate
+  cancel-in-progress: false
+
+jobs:
+  mac-preserver:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked dependencies and pinned freezer from binary wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          uv sync --locked --python 3.12 --no-build-package grpcio --no-build-package protobuf \
+            --no-build-package pycryptodome --no-build-package googleapis-common-protos
+          uv pip install --python .venv/bin/python --only-binary :all: -r macos-preserver/requirements-build.txt
+      - name: Download exactly the pinned existing public payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p data/event-preserver-input
+          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 \
+            --header 'Accept: application/octet-stream' \
+            > data/event-preserver-input/pinned-public-payload.zip
+          .venv/bin/python macos-preserver/extract_descriptor.py \
+            --payload data/event-preserver-input/pinned-public-payload.zip \
+            --output data/protocol/idolypride-6.1.1.pb
+          rm data/event-preserver-input/pinned-public-payload.zip
+      - name: Run synthetic bridge, archive and capture tests (no official login)
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pytest -q macos-preserver/tests tests/test_firebase_archive.py \
+            tests/test_official_session.py tests/test_event_capture.py \
+            --junitxml=data/event-preserver-input/synthetic-tests.xml
+          .venv/bin/python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          suites = ET.parse('data/event-preserver-input/synthetic-tests.xml').getroot().iter('testsuite')
+          totals = {key: 0 for key in ('tests', 'failures', 'errors', 'skipped')}
+          for suite in suites:
+              for key in totals:
+                  totals[key] += int(suite.get(key, '0'))
+          if totals['tests'] < 100 or any(totals[k] for k in ('failures', 'errors', 'skipped')):
+              raise SystemExit('Required synthetic suites did not all run successfully')
+          PY
+          .venv/bin/python macos-preserver/worker.py --help > /dev/null
+      - name: Build signed app and run frozen offline and visible GUI smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python macos-preserver/build_app.py \
+            --descriptor-set data/protocol/idolypride-6.1.1.pb \
+            --test-report data/event-preserver-input/synthetic-tests.xml \
+            --output data/event-preserver-dist/IdolyPrideEventPreserver.app \
+            --archive data/event-preserver-dist/IdolyPride-Event-Preserver-Mac-arm64.zip \
+            --evidence data/event-preserver-qa
+      - name: Upload candidate app and credential-free QA only
+        uses: actions/upload-artifact@v4
+        with:
+          name: IdolyPride-Event-Preserver-Mac-arm64-candidate
+          path: |
+            data/event-preserver-dist/IdolyPride-Event-Preserver-Mac-arm64.zip
+            data/event-preserver-dist/IdolyPride-Event-Preserver-Mac-arm64-QA.zip
+          if-no-files-found: error
+          retention-days: 7
