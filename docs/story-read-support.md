@@ -26,3 +26,13 @@
 고정 마스터의 `Condition` 30,786행과 `Message` 1,853행·`Telephone` 549행의 해금 조건을 재귀적으로 조사했습니다. `ReadStory` 조건이 참조하는 307개 Story 중 위 425개는 없었으며, 조건 참조 누락·순환도 없었습니다. 따라서 이 범위에서 메시지·전화의 읽기 연동 스케줄을 임의로 생성하지 않습니다. 이 결과는 모든 종류의 향후 스토리 부작용을 구현했다는 뜻이 아닙니다. 카드·포토 스토리, 일반 스토리 해금, 다른 보상과 내러티브 예약은 계속 별도 구현 범위입니다.
 
 [solis-server](https://github.com/vertesan/solis-server)의 원자적 읽음·보상 처리 구조도 참고했습니다. 해당 서버는 AGPL-3.0이며, 여기의 코드는 해당 구현을 복사하지 않고 복구한 스키마·원본 클라이언트·고정 공개 마스터와 응답을 근거로 작성했습니다. 데이터 원출처와 고정 커밋은 위 링크에 유지합니다.
+
+## 별도 전체 해금 감상 프로필
+
+개발 소스의 `MediaStories`는 별도로 선택한 로컬 감상 프로필을 위한 처리기입니다. 기본 프로필의 위 425개 규칙과 계정별 잠금 판단은 유지합니다. 감상 프로필 초기화용 `unlock_media_stories(snapshot, master_dir)`는 같은 버전의 실제 `Story` 마스터에 있는 행을 `Unread(1)`로 준비합니다. 이미 읽은 `Read(2)`, 사진 관련 플래그와 알 수 없는 protobuf 필드는 보존합니다. 원래 계정의 클리어·재화·소지품을 복사하거나 수정하지 않습니다.
+
+감상 모드의 `ListEvent`·`ListExtra`와 홈의 `extraStoryPartInfos`는 마스터의 실제 부모·에피소드 연결을 검증해 동일한 전체 해금 목록을 제공합니다. 현재 고정 마스터에는 Story 3,277개, EventStory 59개·291개 에피소드, ExtraStoryPart 17개와 ExtraStory 69개·590개 에피소드가 있습니다. 이벤트·특별 목록이 참조하는 857개는 전체 Story 개수와 다릅니다. 일반 메인·카드·캐릭터·유닛 스토리는 별도 목록 RPC 대신 마스터와 `UserStory`를 사용하는 구조입니다. `StoryPart` JSON은 메인 `ReleaseEpisode`의 장·루트·에피소드 참조 확인에 추가로 필요합니다.
+
+감상 모드의 `Read`·`ReadEvent`·`ReadExtra`는 재생 완료와 건너뛰기 모두 해당 스토리를 읽음으로 저장하며 **보상과 잔액 변경은 없습니다**. `ReleaseEpisode`는 실제 장·루트·에피소드만 무료로 읽기 가능한 상태로 만들고, 이미 읽은 행을 미독으로 되돌리지 않습니다. 같은 요청의 반복은 추가 상태 변경 없이 현재 행을 반환합니다. 읽음 저장과 프로필 snapshot 변경은 기존 `State.mutate_snapshot` 트랜잭션을 사용합니다.
+
+이 확장은 일반 획득 조건을 복원한 것이 아니라 사용자가 선택한 감상 모드의 명시적인 해금입니다. 원본 6.1.1 enum의 `StoryStatusType_Unread=1`, `Read=2`와 실제 Story RPC 필드를 사용하며, 재생에는 원본 `Story.advPlayTypes`·`advAssetIds`·`branchChoices`와 기존 SDK 리소스 경로를 그대로 사용합니다. ADV 스크립트·보이스·영상 파일을 생성하지 않습니다. 별도 기념일·회사 교류 흐름의 `ReadAnniversaryStory`와 `ReadCharacterCompanyEnjoyStory`는 이 최소 처리기에 포함하지 않습니다. 실제 게임에서의 전체 목록 선택·재생 완료 검증은 별도입니다.

@@ -53,6 +53,26 @@ def test_first_launch_install_and_update_preserve_profiles_and_existing_files(tm
     assert not list(data.rglob(".server-data-*"))
 
 
+def test_public_octo_and_media_tables_preserve_both_account_databases(tmp_path):
+    contents = dict(PUBLIC)
+    contents.update({"data/public-octo/settings.json": b"public SDK configuration",
+                     "data/public-octo/manifest.pb": b"public resource manifest",
+                     "data/master-json/PhotoQuestMusic.json": b"[]",
+                     "data/master-json/StoryPart.json": b"[]"})
+    source = archive(tmp_path / "media.zip", contents)
+    data = tmp_path / "data"
+    data.mkdir()
+    ordinary, media = data / "state.db", data / "media-state.db"
+    ordinary.write_bytes(b"normal account")
+    media.write_bytes(b"media account")
+    install_payload(source, data)
+    assert ordinary.read_bytes() == b"normal account"
+    assert media.read_bytes() == b"media account"
+    assert (data / "public-octo/manifest.pb").read_bytes() == contents["data/public-octo/manifest.pb"]
+    with pytest.raises(ValueError):
+        member_path("data/public-octo/private-session.json")
+
+
 @pytest.mark.parametrize("name", ["data/../state.db", "/data/protocol/idolypride-6.1.1.pb", "data/state.db",
                                   "data/sandbox/fixtures/private.pb", "data/private/firebase.archive",
                                   "data/master-json/../../state.db", "data/original-master/assets/master/../state.db",

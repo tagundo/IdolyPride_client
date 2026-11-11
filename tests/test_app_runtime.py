@@ -68,9 +68,10 @@ def _write_bundle(root: Path):
 class _Application:
     created = []
 
-    def __init__(self, schema, state, fixtures, profile, master_response, master_dir):
+    def __init__(self, schema, state, fixtures, profile, master_response, master_dir, **options):
         self.schema, self.state, self.profile = schema, state, profile
         self.master_response, self.master_dir = master_response, master_dir
+        self.fixtures, self.options = fixtures, options
         self.created.append(self)
 
     def handle(self, path, raw, context):
@@ -135,6 +136,33 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(_Application.created[-1].master_dir, self.root / "master-json")
         self.assertEqual(len(self.seed_calls), 1)
         self.assertEqual(json.loads(json.dumps(status))["running"], True)
+
+    def test_media_mode_uses_an_independent_database_and_live_response_store(self):
+        ordinary = State(self.root / "state.db")
+        new_profile(ordinary, self.schema, "sandbox", "Normal Manager")
+        before = (self.root / "state.db").read_bytes()
+        scenes = object()
+
+        def media_seed(state, schema, profile, master_dir):
+            self.assertEqual(state.path, self.root / "media-state.db")
+            new_profile(state, schema, profile, "Media Manager")
+            return scenes
+
+        with mock.patch("idoly_local.media_runtime.prepare_media_profile", side_effect=media_seed):
+            runtime = self.start(media_mode=True)
+        self.assertTrue(runtime.status()["media_mode"])
+        self.assertEqual(self.rpc(runtime, "/api.User/Get").user.name, "Media Manager")
+        self.assertEqual((self.root / "state.db").read_bytes(), before)
+        app = _Application.created[-1]
+        self.assertEqual(app.fixtures.directory, self.root / "media-fixtures")
+        self.assertTrue(app.options["media_mode"])
+        self.assertIs(app.options["photo_scene_access"], scenes)
+
+    def test_media_mode_requires_an_explicit_boolean(self):
+        for value in (None, 0, 1, "true"):
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "Media mode"):
+                self.start(media_mode=value)
+        self.assertFalse((self.root / "media-state.db").exists())
 
     def test_loopback_runtime_endpoint_exports_existing_snapshot_and_safe_rpc_log_only(self):
         runtime = self.start()

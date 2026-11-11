@@ -28,9 +28,10 @@ def missions():
     return master, values
 
 
-def test_payload_adds_only_mission_to_existing_canonical_table_contract():
-    assert len(payload.TABLES) == len(set(payload.TABLES)) == 40
-    assert payload.TABLES[-1] == "Mission"
+def test_payload_includes_canonical_tables_and_media_scene_definitions():
+    assert len(payload.TABLES) == len(set(payload.TABLES)) == 45
+    assert payload.TABLES[39] == "Mission"
+    assert payload.TABLES[40:] == ("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression")
     assert "Condition" not in payload.TABLES
 
 

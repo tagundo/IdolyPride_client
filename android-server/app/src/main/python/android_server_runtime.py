@@ -202,11 +202,13 @@ def _fetch_resource(url, *, timeout):
 
 
 def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False,
-          download_missing_resources=True):
+          download_missing_resources=True, media_mode=False):
     """Start the embedded loopback runtime; called on the service worker."""
     global _RUNTIME, _LAST_STATUS
     if type(download_missing_resources) is not bool:
         raise ValueError("Resource downloads must be an explicit boolean")
+    if type(media_mode) is not bool:
+        raise ValueError("Media mode must be an explicit boolean")
     # Select the universal wheel's implementation before importing the engine.
     # Merely importing the asset installer must not change a host test process.
     os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -242,6 +244,7 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
                                 "live_engine_library": Path(str(native_library_dir)) / "libidoly_live.so"}
             _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc,
                                      download_missing_resources=download_missing_resources,
+                                     media_mode=media_mode,
                                      resource_fetcher=_fetch_resource, **live_options)
             _LAST_STATUS = _RUNTIME.status()
             return json.dumps(_LAST_STATUS, ensure_ascii=False)

@@ -21,14 +21,24 @@ class Application:
     def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None,
                  master_dir=None, *, experimental_main_live=False, live_engine=None,
                  dream_catalog_path=None, pvp_catalog_path=None,
-                 photo_scene_access=None, photo_image_urls=None):
+                 photo_scene_access=None, photo_image_urls=None, media_mode=False):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental main live must be an explicit boolean")
+        if type(media_mode) is not bool:
+            raise ValueError("Media mode must be an explicit boolean")
         self.schema = schema
         self.state = state
         self.fixtures = fixtures
         self.profile = profile
         self.master_response = master_response
+        self.media_mode = media_mode
+        self.media_stories = None
+        if media_mode:
+            from .media_stories import MediaStories
+            self.media_stories = MediaStories(schema, state, profile, master_dir)
+            if photo_scene_access is None:
+                from .media_scenes import prepare_media_scenes
+                photo_scene_access = prepare_media_scenes(master_dir)
         from .gameplay import Gameplay
         from .quest import Quest
         from .tutorial_replay import TutorialReplays
@@ -138,7 +148,19 @@ class Application:
             context.abort(RpcCode.UNAUTHENTICATED, "Local Auth.Login is required")
         if path == "/api.Master/Get" and self.master_response is not None:
             return self.master_response
-        response = self.fixtures.get(path, plain)
+        if self.media_stories is not None:
+            from .rpc import RpcFailure
+            try:
+                media_response = self.media_stories.handle(path, plain)
+            except RpcFailure as failure:
+                context.abort(failure.code, failure.details)
+            except ValueError:
+                context.abort(RpcCode.FAILED_PRECONDITION, "Media story catalog is not ready")
+            if media_response is not None:
+                return media_response
+        # Media ownership is the dedicated database's live state. Captured
+        # account responses must not shadow it or undo a media selection.
+        response = None if self.media_mode else self.fixtures.get(path, plain)
         if response is not None:
             return response
         if path == "/api.User/Get":
@@ -156,6 +178,10 @@ class Application:
                 if captured is not None:
                     return captured
             response = self.gameplay.handle(path, plain)
+            if response is not None and self.media_stories is not None and path == "/api.Home/Enter":
+                home = response_type.FromString(response)
+                self.media_stories.fill_home(home)
+                response = home.SerializeToString()
             if response is None:
                 response = self.dream.handle(path, plain)
             if response is None:

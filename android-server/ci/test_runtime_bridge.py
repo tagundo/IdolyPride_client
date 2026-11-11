@@ -244,9 +244,20 @@ class InstallationTests(unittest.TestCase):
                 self.assertFalse((files / ".server-data-sha256").exists())
 
 
-@pytest.mark.parametrize("options,expected", [({}, True), ({"download_missing_resources": True}, True),
-                                             ({"download_missing_resources": False}, False)])
-def test_start_forwards_explicit_or_default_resource_download_policy(monkeypatch, tmp_path, options, expected):
+@pytest.mark.parametrize("options,expected_download,expected_media,expected_live", [
+    ({}, True, False, False),
+    ({"download_missing_resources": True}, True, False, False),
+    ({"download_missing_resources": False}, False, False, False),
+    ({"media_mode": False}, True, False, False),
+    ({"media_mode": True}, True, True, False),
+    ({"download_missing_resources": False, "media_mode": True}, False, True, False),
+    ({"experimental_main_live": True}, True, False, True),
+    ({"experimental_main_live": True, "download_missing_resources": False, "media_mode": True},
+     False, True, True),
+])
+@pytest.mark.parametrize("positional", [False, True])
+def test_start_forwards_download_and_media_policies_without_reordering_existing_options(
+        monkeypatch, tmp_path, options, expected_download, expected_media, expected_live, positional):
     java = ModuleType("java")
     classes = []
     def jclass(name):
@@ -271,12 +282,23 @@ def test_start_forwards_explicit_or_default_resource_download_policy(monkeypatch
     runtime.start = start_runtime
     monkeypatch.setitem(sys.modules, "idoly_local.app_runtime", runtime)
     logs = []
-    result = bridge.start(str(tmp_path), object(), SimpleNamespace(log=logs.append), **options)
+    if positional:
+        result = bridge.start(str(tmp_path), object(), SimpleNamespace(log=logs.append),
+                              str(tmp_path / "native"), expected_live, expected_download, expected_media)
+    else:
+        result = bridge.start(str(tmp_path), object(), SimpleNamespace(log=logs.append),
+                              native_library_dir=str(tmp_path / "native"), **options)
     assert json.loads(result)["running"] is True
     assert len(starts) == 1
     data, kwargs = starts[0]
     assert data == tmp_path / "data" and kwargs["profile"] == "sandbox"
-    assert kwargs["download_missing_resources"] is expected
+    assert kwargs["download_missing_resources"] is expected_download
+    assert kwargs["media_mode"] is expected_media
+    assert kwargs.get("experimental_main_live", False) is expected_live
+    if expected_live:
+        assert kwargs["live_engine_library"] == tmp_path / "native/libidoly_live.so"
+    else:
+        assert "live_engine_library" not in kwargs
     assert kwargs["resource_fetcher"] is bridge._fetch_resource
     assert kwargs["aes_cbc"](True, b"key", b"iv", b"\x00\x80\xff") == b"\x00\x80\xff"
     assert classes == ["game.qualiarts.idolypride.localserver.BuildConfig",
@@ -290,6 +312,18 @@ def test_start_rejects_non_boolean_resource_policy_before_platform_or_storage_wo
     with pytest.raises(ValueError, match="explicit boolean"):
         bridge.start(str(tmp_path), object(), SimpleNamespace(log=lambda _: None),
                      download_missing_resources=value)
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "false", [], {}])
+def test_start_rejects_non_boolean_media_mode_before_platform_or_storage_work(monkeypatch, tmp_path, value):
+    java = ModuleType("java")
+    java.jclass = lambda _name: pytest.fail("must not initialize the platform")
+    monkeypatch.setitem(sys.modules, "java", java)
+    monkeypatch.setattr(bridge, "_RUNTIME", None)
+    monkeypatch.setattr(bridge, "_copy_asset", lambda *_args: pytest.fail("must not touch assets"))
+    with pytest.raises(ValueError, match="Media mode must be an explicit boolean"):
+        bridge.start(str(tmp_path), object(), SimpleNamespace(log=lambda _: None), media_mode=value)
     assert not list(tmp_path.iterdir())
 
 

@@ -11,6 +11,9 @@ final class ServerModel: ObservableObject {
     @Published var experimentalMainLive = UserDefaults.standard.bool(forKey: "experimentalMainLive") {
         didSet { UserDefaults.standard.set(experimentalMainLive, forKey: "experimentalMainLive") }
     }
+    @Published var mediaMode = UserDefaults.standard.bool(forKey: "mediaMode") {
+        didSet { UserDefaults.standard.set(mediaMode, forKey: "mediaMode") }
+    }
     private var experimentalLiveObserved = false
     @Published var status = "앱을 준비하고 있습니다."
     @Published var logs = ""
@@ -181,7 +184,7 @@ final class ServerModel: ObservableObject {
         }
     }
 
-    private func send(_ action: String, experimental: Bool? = nil) {
+    private func send(_ action: String, experimental: Bool? = nil, mediaMode: Bool? = nil) {
         guard let writer = input?.fileHandleForWriting, child?.isRunning == true else {
             fail("서버 엔진에 연결하지 못했습니다. 앱을 다시 열어 주세요.")
             return
@@ -189,6 +192,7 @@ final class ServerModel: ObservableObject {
         do {
             var command: [String: Any] = ["action": action]
             if let enabled = experimental { command["experimental_main_live"] = enabled }
+            if let enabled = mediaMode { command["media_mode"] = enabled }
             var data = try JSONSerialization.data(withJSONObject: command)
             data.append(10)
             try writer.write(contentsOf: data)
@@ -197,7 +201,8 @@ final class ServerModel: ObservableObject {
 
     func start() {
         guard !running && !busy && !canStop else { return }
-        busy = true; status = "서버를 시작하고 있습니다."; send("start", experimental: experimentalMainLive)
+        busy = true; status = "서버를 시작하고 있습니다."
+        send("start", experimental: experimentalMainLive, mediaMode: mediaMode)
     }
     func stop() {
         busy = true; status = "서버를 중지하고 있습니다."; send("stop")
@@ -341,6 +346,10 @@ VStack(alignment: .leading, spacing: 18) {
                     Button("데이터 폴더") { model.revealData() }
                 }
                 Text("서버 127.0.0.1:50051 · 리소스 127.0.0.1:8080").font(.caption).foregroundStyle(.secondary)
+                Toggle("감상용 전체 해금", isOn: $model.mediaMode)
+                    .disabled(model.running || model.busy || model.canStop)
+                Text("감상용 저장은 일반 진행과 별도로 보관합니다. 모드를 바꾼 뒤에는 서버를 다시 시작하고 게임 타이틀에서 다시 로그인해 주세요. 기본값은 꺼짐입니다.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Toggle("첫 메인 라이브 실험 기능 사용", isOn: $model.experimentalMainLive)
                     .disabled(model.running || model.busy || model.canStop)
                 Text("첫 퀘스트만 지원하며 점수는 로컬 계산 규칙을 사용합니다. 공식 서버와 다를 수 있습니다. 기본값은 꺼짐입니다.")

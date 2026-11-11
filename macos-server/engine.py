@@ -52,18 +52,20 @@ class Controller:
         self.emit("status", status=status)
         return status
 
-    def start(self, experimental_main_live=False):
+    def start(self, experimental_main_live=False, media_mode=False):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental live must be an explicit boolean")
+        if type(media_mode) is not bool:
+            raise ValueError("Media mode must be an explicit boolean")
         with self.lock:
             if self.closed or self.runtime or (self.worker and self.worker.is_alive()):
                 return self.status()
             self.cancelled = False
-            self.worker = threading.Thread(target=self._start, args=(experimental_main_live,), name="local-server-start", daemon=False)
+            self.worker = threading.Thread(target=self._start, args=(experimental_main_live, media_mode), name="local-server-start", daemon=False)
             self.worker.start()
         self.status()
 
-    def _start(self, experimental_main_live=False):
+    def _start(self, experimental_main_live=False, media_mode=False):
         runtime = None
         try:
             self.log("서버 데이터를 준비하고 있습니다.")
@@ -73,7 +75,8 @@ class Controller:
                 if self.cancelled or self.closed:
                     return
             live_options = {"experimental_main_live": True} if experimental_main_live else {}
-            runtime = app_runtime.start(self.data_dir, profile=self.profile, log_callback=self.log, **live_options)
+            runtime = app_runtime.start(self.data_dir, profile=self.profile, log_callback=self.log,
+                                       media_mode=media_mode, **live_options)
             with self.lock:
                 self.runtime = runtime
                 cancelled = self.cancelled or self.closed
@@ -987,10 +990,11 @@ def main(argv=None):
                 if type(experimental_live) is not bool:
                     emit("error", message="실험 라이브 설정을 읽지 못했습니다.")
                     continue
-                if experimental_live:
-                    controller.start(True)
-                else:
-                    controller.start()
+                media_mode = command.get("media_mode", False)
+                if type(media_mode) is not bool:
+                    emit("error", message="감상용 설정을 읽지 못했습니다.")
+                    continue
+                controller.start(experimental_live, media_mode)
             elif action == "stop":
                 controller.stop()
             elif action == "status":

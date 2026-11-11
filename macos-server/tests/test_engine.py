@@ -680,7 +680,9 @@ def test_stop_failure_retains_owned_runtime_for_retry(tmp_path):
 
 
 @pytest.mark.parametrize("mode", (None, False, True))
-def test_native_controller_only_enables_main_live_for_explicit_true(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize("media_mode", (None, False, True))
+def test_native_controller_keeps_live_and_media_modes_independent_and_default_off(
+        tmp_path, monkeypatch, mode, media_mode):
     calls = []
     monkeypatch.setattr(engine, "install_payload", lambda *args: None)
 
@@ -694,10 +696,12 @@ def test_native_controller_only_enables_main_live_for_explicit_true(tmp_path, mo
     monkeypatch.setattr(idoly_local, "app_runtime", runtime_module, raising=False)
     controller = engine.Controller(tmp_path, tmp_path / "ServerData.zip", emit_event=lambda *args, **kwargs: None)
     try:
-        controller.start() if mode is None else controller.start(mode)
+        options = {} if media_mode is None else {"media_mode": media_mode}
+        controller.start(**options) if mode is None else controller.start(mode, **options)
         wait_until(lambda: controller.runtime is not None)
         assert len(calls) == 1
         assert calls[0].get("experimental_main_live", False) is (mode is True)
+        assert calls[0]["media_mode"] is (media_mode is True)
         if mode is not True:
             assert "experimental_main_live" not in calls[0]
     finally:
@@ -705,14 +709,15 @@ def test_native_controller_only_enables_main_live_for_explicit_true(tmp_path, mo
 
 
 @pytest.mark.parametrize("mode", (None, 0, 1, "true", "false", [], {}))
-def test_native_controller_rejects_truthy_or_falsey_non_boolean_mode_before_start(tmp_path, monkeypatch, mode):
+@pytest.mark.parametrize("option", ("experimental_main_live", "media_mode"))
+def test_native_controller_rejects_non_boolean_modes_before_start(tmp_path, monkeypatch, mode, option):
     def forbidden(*args):
         raise AssertionError("Invalid opt-in must not prepare payloads")
 
     monkeypatch.setattr(engine, "install_payload", forbidden)
     controller = engine.Controller(tmp_path, tmp_path / "ServerData.zip", emit_event=lambda *args, **kwargs: None)
     with pytest.raises(ValueError, match="explicit boolean"):
-        controller.start(mode)
+        controller.start(**{option: mode})
     assert controller.worker is None and controller.runtime is None
 
 
@@ -733,8 +738,12 @@ def test_native_json_control_keeps_default_off_and_rejects_non_boolean_opt_in(tm
             closed.append(True)
 
     commands = [{"action": "start"}, {"action": "start", "experimental_main_live": False},
-                {"action": "start", "experimental_main_live": True}]
+                {"action": "start", "experimental_main_live": True},
+                {"action": "start", "media_mode": False}, {"action": "start", "media_mode": True},
+                {"action": "start", "experimental_main_live": True, "media_mode": True}]
     commands.extend({"action": "start", "experimental_main_live": value}
+                    for value in (None, 0, 1, "true", [], {}))
+    commands.extend({"action": "start", "media_mode": value}
                     for value in (None, 0, 1, "true", [], {}))
     commands.append({"action": "quit"})
     monkeypatch.setattr(engine, "Controller", Control)
@@ -742,8 +751,9 @@ def test_native_json_control_keeps_default_off_and_rejects_non_boolean_opt_in(tm
     monkeypatch.setattr(engine, "emit", lambda event, **data: errors.append((event, data)))
     monkeypatch.setattr(sys, "stdin", io.StringIO("\n".join(map(json.dumps, commands))))
     assert engine.main(["--data-dir", str(tmp_path), "--server-data", str(tmp_path / "ServerData.zip")]) == 0
-    assert starts == [(), (), (True,)]
-    assert len(errors) == 6 and all(event == "error" for event, _ in errors)
+    assert starts == [(False, False), (False, False), (True, False),
+                      (False, False), (False, True), (True, True)]
+    assert len(errors) == 12 and all(event == "error" for event, _ in errors)
     assert closed == [True]
 
 

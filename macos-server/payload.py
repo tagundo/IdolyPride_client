@@ -19,6 +19,8 @@ FIXED_FILES = {
     "public-story/story-list-extra.pb",
     "protocol/idolypride-6.1.1.pb",
     "protocol/idolypride-6.1.1.evidence.json",
+    "public-octo/settings.json",
+    "public-octo/manifest.pb",
     "original-master/response.pb",
     "original-master/master-tag.json",
     "original-master/archive-report.json",

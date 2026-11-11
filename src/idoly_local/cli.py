@@ -85,12 +85,22 @@ def serve(args, schema):
     master_response = None
     if args.master_tag:
         master_response = prepare_master_tag(schema, args.master_tag, args.asset_root / "master", args.asset_base_url)
-    fixtures = FixtureStore(args.fixtures, schema)
-    state = State(args.state)
+    media_mode = getattr(args, "media_mode", False)
+    state_path = args.state.with_name("media-" + args.state.name) if media_mode else args.state
+    fixture_path = args.fixtures.with_name("media-" + args.fixtures.name) if media_mode else args.fixtures
+    fixtures = FixtureStore(fixture_path, schema)
+    state = State(state_path)
+    media_scenes = None
+    if media_mode:
+        if args.master_dir is None:
+            raise ValueError("--media-mode requires --master-dir")
+        from .media_runtime import prepare_media_profile
+        media_scenes = prepare_media_profile(state, schema, args.profile, args.master_dir)
     app = Application(schema, state, fixtures, args.profile, master_response,
                       master_dir=args.master_dir, dream_catalog_path=args.dream_catalog,
-                      pvp_catalog_path=args.pvp_catalog)
-    config = ServerConfig(args.bind, args.state, args.profile, args.tls_cert, args.tls_key)
+                      pvp_catalog_path=args.pvp_catalog, media_mode=media_mode,
+                      photo_scene_access=media_scenes)
+    config = ServerConfig(args.bind, state_path, args.profile, args.tls_cert, args.tls_key)
     server, port = create_server(schema, app, config)
     try:
         if args.asset_root:
@@ -145,6 +155,8 @@ def parser():
     run.add_argument("--bind", default="127.0.0.1:50051")
     run.add_argument("--state", type=Path, default=Path("data/state.db"))
     run.add_argument("--profile", default="local", help="Single local profile to serve; Firebase tokens are ignored")
+    run.add_argument("--media-mode", action="store_true",
+        help="Unlock local media in a separate media- state DB; ordinary saves are preserved")
     run.add_argument("--fixtures", type=Path, default=Path("data/fixtures"))
     run.add_argument("--master-dir", type=Path, help="Matching decoded local master JSON directory")
     run.add_argument("--dream-catalog", type=Path, help="Private Dream catalog belonging to this profile")

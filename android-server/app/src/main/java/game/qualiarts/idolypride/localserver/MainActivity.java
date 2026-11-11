@@ -29,8 +29,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
     static final String SERVER_PREFS = "local_server";
     static final String EXPERIMENTAL_MAIN_LIVE = "experimental_main_live";
     static final String DOWNLOAD_MISSING_RESOURCES = "download_missing_resources";
+    static final String MEDIA_MODE = "media_mode";
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
+    private CheckBox mediaMode;
     private TextView status;
     private TextView logs;
     private TextView gameStatus;
@@ -107,6 +109,19 @@ public final class MainActivity extends Activity implements ServerService.Observ
         // Keep lifecycle controls visible while diagnostics and logs scroll.
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
+        mediaMode = new CheckBox(this);
+        mediaMode.setText(R.string.media_mode);
+        mediaMode.setTextColor(Color.WHITE);
+        mediaMode.setTextSize(13);
+        mediaMode.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(MEDIA_MODE, false));
+        mediaMode.setOnCheckedChangeListener((button, enabled) ->
+                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
+                        .putBoolean(MEDIA_MODE, enabled).apply());
+        body.addView(mediaMode);
+        TextView mediaNotice = text(R.string.media_mode_notice, 12, Color.rgb(180, 199, 211));
+        mediaNotice.setPadding(0, 0, 0, dp(6));
+        body.addView(mediaNotice);
         experimentalMainLive = new CheckBox(this);
         experimentalMainLive.setText(R.string.experimental_main_live);
         experimentalMainLive.setTextColor(Color.WHITE);
@@ -271,6 +286,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         start.setEnabled(!running && !busy);
         experimentalMainLive.setEnabled(!running && !busy);
         downloadMissingResources.setEnabled(!running && !busy);
+        mediaMode.setEnabled(!running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);

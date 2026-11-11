@@ -1,8 +1,9 @@
 """Photo scene checks and image reservations without fabricated photographs.
 
 The 6.1.1 protocol separates scene unlocks, reserved upload IDs and UserPhoto
-records.  A master scene is not proof of ownership and an upload ID is not an
-image.  Callers must provide preserved scene access and finalized image URLs.
+records.  A master scene is not proof of normal-profile ownership and an upload
+ID is not an image. Callers provide scene access from preserved ownership or
+an explicit separate media-mode policy, and finalized image URLs.
 Creation remains blocked until the local upload/generation flow is available;
 this module never consumes film or creates a placeholder PhotoImageType.User.
 """
@@ -29,6 +30,7 @@ _URL = "/api.Photo/GetImageURL"
 _ROUTES = frozenset((_LIST, _CHECK, _CREATE, _URL))
 _SAFE_IMAGE_ID = re.compile(r"[A-Za-z0-9_.~-]{1,251}\Z")
 RESERVED_IMAGE_COUNT = 20
+_MV_SCENE = object()
 
 
 def _fail(message, code=RpcCode.FAILED_PRECONDITION):
@@ -71,11 +73,12 @@ def reserve_photo_image_ids(user, *, id_factory=lambda: str(uuid4())):
 
 @dataclass(frozen=True)
 class PhotoSceneAccess:
-    """Explicit per-profile preserved scene ownership, including locked rows.
+    """Explicit per-profile scene access, including locked rows.
 
     IDs use the native API names: activities and expressions use their photo
-    IDs, musics use musicId, and stages use stageId.  No entries are inferred
-    from master presence, date, or another account's snapshot.
+    IDs, musics use musicId, and stages use stageId. This value object infers
+    nothing. Normal profiles use preserved access; a separately enabled media
+    profile may supply an explicit all-unlocked public-master policy.
     """
     activities: Mapping[str, bool] = field(default_factory=dict)
     musics: Mapping[str, bool] = field(default_factory=dict)
@@ -157,19 +160,36 @@ class PhotoShootings:
                 _fail("The photo activity is not owned and unlocked")
             return activity
         if request.actionType == 3:
-            if not request.photoMusicId or not request.photoStageId:
-                _fail("Photo music and stage IDs are required", RpcCode.INVALID_ARGUMENT)
-            for table, key, owned in (("PhotoQuestMusic", request.photoMusicId, access.musics),
-                                      ("PhotoQuestStage", request.photoStageId, access.stages)):
-                if key not in self.catalog.ids(table, required=True):
-                    _fail("Unknown local photo music or stage", RpcCode.INVALID_ARGUMENT)
-                if owned.get(key) is not True:
-                    _fail("The photo music or stage is not owned and unlocked")
+            if not request.photoMusicId:
+                _fail("A photo music ID is required", RpcCode.INVALID_ARGUMENT)
+            if request.photoMusicId not in self.catalog.ids("PhotoQuestMusic", required=True):
+                _fail("Unknown local photo music or stage", RpcCode.INVALID_ARGUMENT)
+            if access.musics.get(request.photoMusicId) is not True:
+                _fail("The photo music or stage is not owned and unlocked")
+            if not request.photoStageId:
+                # Original LivePhotography.OnExecuteConfirmSheetAsync chooses
+                # an empty stage for MV songs before Photo.CheckShootingAsync
+                # (0x59b8660..0x59b902c). Music.IsMvMusic (0x4e7af24) uses
+                # the real master mvAssetId, not a music-ID prefix.
+                music = self.catalog.ids("Music", required=True).get(request.photoMusicId)
+                if music is not None and isinstance(music.get("mvAssetId"), str) and music["mvAssetId"]:
+                    return _MV_SCENE
+                _fail("A photo stage ID is required for a 3D live", RpcCode.INVALID_ARGUMENT)
+            if request.photoStageId not in self.catalog.ids("PhotoQuestStage", required=True):
+                _fail("Unknown local photo music or stage", RpcCode.INVALID_ARGUMENT)
+            if access.stages.get(request.photoStageId) is not True:
+                _fail("The photo music or stage is not owned and unlocked")
             return None
         _fail("Unsupported photo shooting action type", RpcCode.INVALID_ARGUMENT)
 
     def _styles(self, request, snapshot, activity):
         characters, costumes, hairs = list(request.characterIds), list(request.costumeIds), list(request.hairIds)
+        # A movie creates no 3D actors. The native caller constructs these
+        # arrays from its current selection before branching to the empty MV
+        # stage. Accept an entirely empty selection without inventing actors;
+        # any supplied cast still passes every ordinary ownership/style check.
+        if activity is _MV_SCENE and not characters and not costumes and not hairs:
+            return
         if (not characters or len(costumes) != len(characters)
                 or len(hairs) != len(characters)
                 or any(not value for value in [*characters, *costumes, *hairs])):
@@ -190,7 +210,7 @@ class PhotoShootings:
                 _fail("Photo character and outfit do not match", RpcCode.INVALID_ARGUMENT)
             if not _wearable(hair_definition, costume):
                 _fail("The photo hair cannot be worn with this costume", RpcCode.INVALID_ARGUMENT)
-            if activity is not None:
+            if activity is not None and activity is not _MV_SCENE:
                 denied = activity.get("impossibleShootingCharacterIds", [])
                 allowed = activity.get("costumeTypeIds", [])
                 if not isinstance(denied, list) or not isinstance(allowed, list):
