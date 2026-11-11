@@ -17,6 +17,8 @@ from google.protobuf.json_format import ParseDict, ParseError
 
 _LOG = logging.getLogger(__name__)
 _RANGE = re.compile(r"bytes=(\d*)-(\d*)\Z")
+_RUNTIME_DIAGNOSTICS_PATH = "/diagnostics/runtime"
+_MAX_RUNTIME_DIAGNOSTICS_BYTES = 1024 * 1024
 
 
 def prepare_master_tag(schema, tag_path: Path, pack_dir: Path, base_url: str) -> bytes:
@@ -76,7 +78,8 @@ def _range(value: str, size: int) -> tuple[int, int]:
 
 
 def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
-                        transfer_callback=None, octo=None) -> ThreadingHTTPServer:
+                        transfer_callback=None, octo=None,
+                        runtime_status_callback=None) -> ThreadingHTTPServer:
     """Create a bound server; caller owns serve_forever/shutdown/server_close.
 
     Files live under the explicit root. Directory listings and paths resolving
@@ -85,7 +88,12 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
     its downloads never enter the master-file transfer callback. A caller may
     bind port zero, set ``server.octo_gateway`` using the bound port, and then
     start serving. Replacing the gateway after serving starts is not supported.
+    ``runtime_status_callback`` optionally exposes a safe snapshot over the
+    loopback-only GET endpoint ``/diagnostics/runtime``. It receives no input;
+    its JSON response is limited to 1 MiB and never cached.
     """
+    if runtime_status_callback is not None and not callable(runtime_status_callback):
+        raise ValueError("Runtime status callback must be callable")
     directory = Path(root).resolve()
     if not directory.is_dir():
         raise ValueError("Asset root must be an existing directory")
@@ -97,6 +105,15 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
             _LOG.info("%s %r", self.command, urlsplit(self.path).path)
 
         def do_GET(self):
+            if unquote(urlsplit(self.path).path) == _RUNTIME_DIAGNOSTICS_PATH:
+                if self.path != _RUNTIME_DIAGNOSTICS_PATH or runtime_status_callback is None:
+                    self._json(404, {"error": "not_found"})
+                    return
+                if not self._loopback():
+                    self._json(403, {"error": "loopback_required"})
+                    return
+                self._runtime_status()
+                return
             if self.path == "/diagnostics/status" and diagnostics is not None:
                 if not self._loopback():
                     self._json(403, {"error": "loopback_required"})
@@ -110,6 +127,9 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
             self._serve(True)
 
         def do_HEAD(self):
+            if unquote(urlsplit(self.path).path) == _RUNTIME_DIAGNOSTICS_PATH:
+                self._json(404, {"error": "not_found"})
+                return
             gateway = self.server.octo_gateway
             if gateway is not None and gateway.handles(self.path):
                 gateway.serve(self, send_body=False)
@@ -124,12 +144,37 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
 
         def _json(self, status, value):
             body = json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            self._json_body(status, body)
+
+        def _json_body(self, status, body):
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
-            self.wfile.write(body)
+            if self.command != "HEAD":
+                self.wfile.write(body)
+
+        def _runtime_status(self):
+            # Only a trusted, zero-argument observer is called. Encode before
+            # sending headers so failures cannot leak exception text or produce
+            # a successful but truncated response. No request fields select
+            # profiles, files, authentication metadata or executable actions.
+            try:
+                value = runtime_status_callback()
+                if not isinstance(value, dict):
+                    raise ValueError("Runtime snapshot must be an object")
+                body = bytearray()
+                encoder = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+                for chunk in encoder.iterencode(value):
+                    encoded = chunk.encode("utf-8")
+                    if len(body) + len(encoded) > _MAX_RUNTIME_DIAGNOSTICS_BYTES:
+                        raise ValueError("Runtime snapshot exceeds response limit")
+                    body.extend(encoded)
+            except Exception:
+                self._json(503, {"error": "runtime_diagnostics_unavailable"})
+                return
+            self._json_body(200, body)
 
         def _transfer(self, path, phase, sent, total, status):
             if transfer_callback is not None:

@@ -205,7 +205,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         archive = root / "original-master"
         runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets",
                                              diagnostics=runtime._diagnostics,
-                                             transfer_callback=runtime._observe_transfer)
+                                             transfer_callback=runtime._observe_transfer,
+                                             runtime_status_callback=runtime.diagnostics_snapshot)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.

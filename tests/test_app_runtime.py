@@ -136,6 +136,32 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(len(self.seed_calls), 1)
         self.assertEqual(json.loads(json.dumps(status))["running"], True)
 
+    def test_loopback_runtime_endpoint_exports_existing_snapshot_and_safe_rpc_log_only(self):
+        runtime = self.start()
+        self.assertEqual(self.rpc(runtime, "/api.System/Check").keepAliveTimeMilliseconds, 60000)
+        runtime._log("RPC /api.Deck/Save -> UNIMPLEMENTED")
+        state = State(self.root / "state.db")
+        before = state.snapshot("sandbox")
+        session_token, _ = state.login("sandbox")
+        # The HTTP observer reads existing runtime metadata, without selecting
+        # or loading any account profile or session from local storage.
+        with mock.patch.object(State, "snapshot", side_effect=AssertionError("account read")):
+            with urlopen(runtime.status()["asset_url"] + "/diagnostics/runtime", timeout=3) as response:
+                self.assertEqual(response.status, 200)
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+                body = response.read()
+                self.assertEqual(int(response.headers["Content-Length"]), len(body))
+        observed = json.loads(body)
+        self.assertEqual(observed, runtime.diagnostics_snapshot())
+        self.assertTrue(observed["runtime"]["running"])
+        self.assertIn("RPC /api.Deck/Save -> UNIMPLEMENTED", observed["runtime"]["logs"])
+        self.assertTrue(any("/api.System/Check -> OK" in line for line in observed["runtime"]["logs"]))
+        self.assertNotIn("Starter Manager", body.decode())
+        self.assertNotIn(session_token, body.decode())
+        self.assertNotIn("state.db", body.decode())
+        self.assertEqual(state.snapshot("sandbox"), before)
+        self.assertTrue(state.authenticated(session_token, "sandbox"))
+
     def test_stop_releases_both_ports_and_restart_preserves_snapshot(self):
         first = self.start()
         original = self.rpc(first, "/api.User/Get").SerializeToString()
