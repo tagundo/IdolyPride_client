@@ -69,7 +69,7 @@ def case(tmp_path, monkeypatch):
     payload = b"synthetic public server data"
     baseline = tmp_path / "baseline.apk"
 
-    def write_baseline(app=original_app, build=None):
+    def write_baseline(app=original_app, build=None, zero_attr_compression=None):
         build = build if build is not None else json.dumps({
             "assets": {"app.imy": hashlib.sha1(app).hexdigest(), "bootstrap.imy": "f" * 40},
             "extract_packages": [], "python_version": "3.13"}).encode()
@@ -82,7 +82,11 @@ def case(tmp_path, monkeypatch):
                 info.compress_type = ZIP_STORED if name in (tool.APP, tool.PAYLOAD, "resources.arsc") else ZIP_DEFLATED
                 info.external_attr = 0o100644 << 16
                 info.comment = b"retain member comment"
+                if name == "classes.dex" and zero_attr_compression is not None:
+                    info.compress_type = zero_attr_compression
                 archive.writestr(info, raw)
+                if name == "classes.dex" and zero_attr_compression is not None:
+                    info.external_attr = 0
         monkeypatch.setattr(tool, "BASELINE_SHA256", tool.digest(baseline))
         monkeypatch.setattr(tool, "PAYLOAD_SHA256", hashlib.sha256(payload).hexdigest())
     write_baseline()
@@ -140,6 +144,17 @@ def test_zip_reads_are_bounded_and_do_not_use_whole_member_read(case, monkeypatc
     monkeypatch.setattr(zipfile.ZipExtFile, "read", bounded)
     monkeypatch.setattr(ZipFile, "read", lambda *a, **k: pytest.fail("unbounded ZipFile.read"))
     run(case)
+
+
+@pytest.mark.parametrize("compression", [ZIP_STORED, ZIP_DEFLATED])
+def test_zero_external_attrs_survive_both_compression_methods(case, compression):
+    case[4](zero_attr_compression=compression)
+    with ZipFile(case[2]) as archive:
+        assert archive.getinfo("classes.dex").external_attr == 0
+    run(case)
+    with ZipFile(case[3]) as archive:
+        assert archive.getinfo("classes.dex").external_attr == 0
+        assert archive.getinfo("classes.dex").compress_type == compression
 
 
 def test_wrong_compiler_and_baseline_fail_before_output(case, monkeypatch):

@@ -317,12 +317,17 @@ def repack(baseline, source_root, source_commit, output, *, epoch, report_path=N
             with ZipFile(stage, "x") as outgoing:
                 outgoing.comment = incoming.comment
                 for name, info in before_infos.items():
+                    copied_info = copy.copy(info)
                     if name in replacements:
-                        outgoing.writestr(copy.copy(info), replacements[name])
+                        outgoing.writestr(copied_info, replacements[name])
                     else:
-                        with incoming.open(info) as src, outgoing.open(copy.copy(info), "w") as dst:
+                        with incoming.open(info) as src, outgoing.open(copied_info, "w") as dst:
                             while block := src.read(CHUNK):
                                 dst.write(block)
+                    # zipfile supplies mode0600 when the original attribute is
+                    # zero. Restore the exact value before central-directory
+                    # emission; AAPT resources legitimately use zero here.
+                    copied_info.external_attr = info.external_attr
             with ZipFile(stage) as check:
                 after_infos = _members(check, MAX_EXPANDED)
                 after_hashes = _hash_members(check, after_infos)
