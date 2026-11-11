@@ -47,6 +47,8 @@ class Application:
         from .dream import Dream
         from .pvp import Pvp
         from .photo_shooting import PhotoShootings
+        from .photo_names import PhotoNames
+        from .profile_layout import ProfileLayout
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
@@ -61,6 +63,8 @@ class Application:
         self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
         self.photo_shootings = PhotoShootings(schema, state, profile, master_dir,
             scene_access=photo_scene_access, image_urls=photo_image_urls)
+        self.photo_names = PhotoNames(schema, state, profile)
+        self.profile_layout = ProfileLayout(schema, state, profile)
         self.main_lives = None
         if experimental_main_live:
             from .main_live import MainLives
@@ -158,6 +162,10 @@ class Application:
                 response = self.pvp.handle(path, plain)
             if response is None:
                 response = self.photo_shootings.handle(path, plain)
+            if response is None:
+                response = self.photo_names.handle(path, plain)
+            if response is None:
+                response = self.profile_layout.handle(path, plain)
             if response is None:
                 response = self.lessons.handle(path, plain)
             if response is None:
