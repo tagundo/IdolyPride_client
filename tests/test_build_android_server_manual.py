@@ -341,6 +341,92 @@ def test_staging_reserves_root_space_before_first_apk_allocation(monkeypatch, sa
         tool.staging_budget(Location("root"), Location("destination"))
 
 
+@pytest.fixture
+def memory_guard_case(tmp_path, monkeypatch):
+    cgroup, processes = tmp_path / "cgroup", tmp_path / "empty-proc"
+    cgroup.mkdir()
+    processes.mkdir()
+    (cgroup / "memory.events").write_text("oom_kill 2\n")
+    monkeypatch.setattr(tool, "CGROUP", cgroup)
+    monkeypatch.setattr(tool, "Path", lambda value: processes if value == "/proc" else Path(value))
+    monkeypatch.setattr(tool.shutil, "disk_usage", lambda _: SimpleNamespace(free=tool.MIN_ROOT_FREE))
+    def configure(direct_mib=960, raw=None, **values):
+        maximum = 16 * 1024 * tool.MIB
+        (cgroup / "memory.max").write_text(str(maximum))
+        (cgroup / "memory.current").write_text(str(maximum - direct_mib * tool.MIB))
+        defaults = {"file": 512, "shmem": 256, "file_dirty": 0, "file_writeback": 0,
+                    "inactive_file": 256, "slab_reclaimable": 1024}
+        defaults.update(values)
+        path = cgroup / "memory.stat"
+        if raw is None:
+            raw = "".join(f"{name} {amount * tool.MIB}\n" for name, amount in defaults.items())
+        path.write_text(raw)
+        return cgroup
+    return configure
+
+
+def test_resource_guard_credits_only_capped_clean_inactive_file_pages(memory_guard_case, tmp_path):
+    memory_guard_case(direct_mib=896)
+    report = tool._resource_guard(tmp_path)
+    assert report["memory_direct_headroom"] == 896 * tool.MIB
+    assert report["memory_clean_inactive_credit"] == 128 * tool.MIB
+    assert report["memory_effective_headroom"] == tool.MIN_HEADROOM
+    assert report["oom_kill"] == "2"
+    assert tool.MIN_HEADROOM == 1024 * tool.MIB
+
+
+def test_resource_guard_subtracts_shmem_dirty_and_writeback_before_credit(memory_guard_case, tmp_path):
+    memory_guard_case(direct_mib=980, file=512, shmem=300, file_dirty=96, file_writeback=64,
+                      inactive_file=70)
+    report = tool._resource_guard(tmp_path)
+    assert report["memory_clean_inactive_credit"] == 52 * tool.MIB
+    assert report["memory_effective_headroom"] == 1032 * tool.MIB
+
+
+@pytest.mark.parametrize("direct_mib,values", [
+    (895, {}),  # Even abundant clean cache cannot replace the 896 MiB direct floor.
+    (896, {"inactive_file": 127}),
+    (960, {"inactive_file": 63}),
+    (960, {"inactive_file": 0}),
+    (960, {"file": 512, "shmem": 512}),
+    (960, {"file_dirty": 256}),
+    (960, {"file_writeback": 256}),
+    (960, {"file": 128, "shmem": 256}),
+    (960, {"file": 0, "shmem": 0, "slab_reclaimable": 16384}),
+])
+def test_resource_guard_rejects_real_shortage_or_nonclean_cache(memory_guard_case, tmp_path, direct_mib, values):
+    memory_guard_case(direct_mib=direct_mib, **values)
+    with pytest.raises(ValueError, match="1 GiB"):
+        tool._resource_guard(tmp_path)
+
+
+@pytest.mark.parametrize("raw", ["", "file 999999999\n", "file -1\n", "file nan\n",
+                                  "file 1\nfile 2\n", "file 1 extra\n", "x" * 65537])
+def test_resource_guard_malformed_stats_add_zero_credit(memory_guard_case, tmp_path, raw):
+    memory_guard_case(direct_mib=960, raw=raw)
+    assert tool._memory_budget()["memory_clean_inactive_credit"] == 0
+    with pytest.raises(ValueError, match="1 GiB"):
+        tool._resource_guard(tmp_path)
+    memory_guard_case(direct_mib=1024, raw=raw)
+    assert tool._resource_guard(tmp_path)["memory_effective_headroom"] == tool.MIN_HEADROOM
+
+
+def test_resource_guard_missing_stats_add_zero_credit(memory_guard_case, tmp_path):
+    cgroup = memory_guard_case(direct_mib=960)
+    (cgroup / "memory.stat").unlink()
+    assert tool._memory_budget()["memory_clean_inactive_credit"] == 0
+    with pytest.raises(ValueError, match="1 GiB"):
+        tool._resource_guard(tmp_path)
+
+
+def test_resource_guard_rereads_clean_cache_before_each_tool(memory_guard_case, tmp_path):
+    memory_guard_case(direct_mib=960)
+    assert tool._resource_guard(tmp_path)["memory_clean_inactive_credit"] == 128 * tool.MIB
+    memory_guard_case(direct_mib=960, file_dirty=256)
+    with pytest.raises(ValueError, match="1 GiB"):
+        tool._resource_guard(tmp_path)
+
+
 def test_offline_subprocess_timeout_bounds_silent_pipe_and_reaps_child(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "_resource_guard", lambda _: {})
     started = time.monotonic()

@@ -66,6 +66,7 @@ MAX_APK = 100 * MIB
 MAX_APK_STAGING = 200 * MIB
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
+MAX_CLEAN_INACTIVE_CREDIT = 128 * MIB
 JAVA_FLAGS = ("-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
 CGROUP = Path("/sys/fs/cgroup")
@@ -202,12 +203,40 @@ def read_password(path):
     return raw.decode("utf-8").rstrip("\r\n")
 
 
-def _resource_guard(root):
+def _memory_budget():
     maximum = (CGROUP / "memory.max").read_text().strip()
-    if not maximum.isdecimal():
+    current = (CGROUP / "memory.current").read_text().strip()
+    if (not re.fullmatch(r"[0-9]+", maximum) or int(maximum) == 0
+            or not re.fullmatch(r"[0-9]+", current)):
         raise ValueError("A finite cgroup memory limit is required")
-    current = int((CGROUP / "memory.current").read_text())
-    if int(maximum) - current < MIN_HEADROOM:
+    credit = 0
+    try:
+        raw = (CGROUP / "memory.stat").read_text()
+        if len(raw) > 64 * 1024:
+            raise ValueError("Unexpected cgroup memory statistics")
+        values = {}
+        for line in raw.splitlines():
+            fields = line.split()
+            if (len(fields) != 2 or fields[0] in values
+                    or not re.fullmatch(r"[0-9]+", fields[1])):
+                raise ValueError("Unexpected cgroup memory statistics")
+            values[fields[0]] = int(fields[1])
+        clean_file = max(0, values["file"] - values["shmem"]
+                         - values["file_dirty"] - values["file_writeback"])
+        credit = min(MAX_CLEAN_INACTIVE_CREDIT, values["inactive_file"], clean_file)
+    except (OSError, UnicodeError, KeyError, ValueError):
+        # Missing or malformed statistics never add to direct headroom.
+        pass
+    direct = int(maximum) - int(current)
+    return {"memory_current": int(current), "memory_max": int(maximum),
+            "memory_direct_headroom": direct, "memory_clean_inactive_credit": credit,
+            "memory_effective_headroom": direct + credit}
+
+
+def _resource_guard(root):
+    budget = _memory_budget()
+    if (budget["memory_direct_headroom"] < MIN_HEADROOM - MAX_CLEAN_INACTIVE_CREDIT
+            or budget["memory_effective_headroom"] < MIN_HEADROOM):
         raise ValueError("Defer build until at least 1 GiB cgroup headroom is available")
     for entry in Path("/proc").iterdir():
         if not entry.name.isdecimal():
@@ -222,7 +251,7 @@ def _resource_guard(root):
     if shutil.disk_usage(root).free < MIN_ROOT_FREE:
         raise ValueError("Preserve at least 150 MiB root disk reserve")
     events = dict(line.split() for line in (CGROUP / "memory.events").read_text().splitlines())
-    return {"memory_current": current, "memory_max": int(maximum), "oom_kill": events.get("oom_kill")}
+    return {**budget, "oom_kill": events.get("oom_kill")}
 
 
 def _run(command, *, root, env, timeout=180, cache=None):
