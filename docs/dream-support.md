@@ -8,6 +8,8 @@
 
 `User.Get`의 포토는 `isDreamBase`와 재료 포토 메타데이터만 가지고 있습니다. 생성된 퀘스트·성장 계획·진행 정보는 별도 `Dream.Top`·`Dream.ListQuest` 응답이 필요합니다. 이미 `isDreamBase`인 포토에 해당 정보가 없으면 빈 에리어나 새 진행도로 바꾸지 않고 오류를 반환합니다. `GenerateArea`·`StartQuest`·`SkipQuest`·`ResetArea`와 포토 강화는 구현 범위 밖입니다.
 
+새 포토를 직접 찍는 경로도 별도로 복원해야 합니다. 원본 촬영창은 `Photo.ListShooting`으로 장소·곡·표정의 계정별 잠금을 받고, 촬영 확인 뒤 원본·썸네일 이미지를 Firebase에 올린 다음 `Photo.CreateShootings`를 호출합니다. 현재 production runtime에는 보존한 촬영 잠금과 이미지 공급자를 연결하는 경로가 없습니다. 또한 원본의 직접 촬영 사진(`PhotoImageType.User=2`)과 생성 사진(`Generated=3`)의 이미지 취득 경로가 다르므로, 현재 `GetImageURL`의 로컬 정책 검사만으로 원본 갤러리나 촬영 복구를 검증했다고 표현하지 않습니다. 포토 예약 ID나 공개 장소 마스터만으로 실제 이미지·보유 포토를 만들지 않습니다.
+
 본인 계정에서 수집한 자료가 있으면 `master-json` 상위의 `dream-private-catalog.json`을 우선 사용합니다. `Dream(..., capture_catalog_path=...)`로 경로를 지정할 수도 있습니다. `dream_capture.build_dream_catalog(schema, capture_directory, output_path=None)`는 보존 도구의 아카이브를 검사해 이 비공개 카탈로그를 만듭니다. 출력 경로를 주면 0600 권한으로 원자적으로 저장합니다. 공식 서버 호출이나 로컬 계정 변경은 하지 않습니다. 이 파일에는 개인 계정·포토 데이터가 있으므로 저장소·배포 payload에 포함하면 안 됩니다.
 
 비공개 읽기 경로는 실제 `Master.Get`, 최초·최종 `User.Get`, `Home.Enter(skipUpdate=true)`, `Dream.Top`과 생성된 포토별 `Dream.ListQuest`를 검증합니다. 실제로 수집된 포토별 `Dream.ListMaterialPhoto`도 조회할 수 있습니다. 최종 스냅샷이 명시된 아카이브만 받고 최초·최종 계정 식별자, 스키마·마스터 버전, 원본 파일 크기·SHA-256, 요청의 `basePhotoId`, 보유 포토 참조·진행도·마스터 참조를 대조합니다. 파일 경로 조작·심볼릭 링크·중복 요청을 거절합니다. 다른 이벤트의 자료가 빠져 아카이브가 부분 완료여도 Dream의 필수 자료가 모두 있으면 변환할 수 있습니다.
