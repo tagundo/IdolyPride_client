@@ -4,13 +4,13 @@
 
 최초 실행은 포함된 `ServerData.zip`의 공개 데이터만 앱 전용 저장소에 설치합니다. 프로필과 진행 상태 DB는 앱 업데이트 후에도 유지됩니다. 앱 삭제나 Android 설정의 데이터 지우기는 해당 데이터를 제거합니다.
 
-[Android 서버 APK v0.3.3](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.3/IdolyPride-Local-Server-Android.apk)은 포토 이름·프로필 레이아웃 저장과 이미지 트레이닝·VENUS 자료의 읽기 모듈을 포함합니다. APK의 기존 40개 디코딩 JSON 마스터 묶음에는 이벤트 읽기에 필요한 추가 테이블이 없으며 개인 자료 가져오기 UI도 없습니다. 실제 이벤트 읽기는 별도 도구로 복원한 개인 자료와 일치하는 추가 마스터를 준비한 소스 실행 환경이 필요합니다. 포토 촬영·지역 생성·이벤트 라이브·VENUS 대전·보상 정산은 제공하지 않습니다. Mac 서버 앱은 v0.3.2로, 이 추가 코드는 Mac 배포 앱에 포함되지 않았습니다.
+[GitHub에 배포된 Android 서버 APK는 v0.3.2](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android.apk)입니다. 현재 소스와 로컬 빌드한 미게시 v0.3.3 후보는 포토 이름·프로필 레이아웃 저장과 이미지 트레이닝·VENUS 자료의 읽기 모듈을 포함합니다. 후보 APK의 기존 40개 디코딩 JSON 마스터 묶음에는 이벤트 읽기에 필요한 추가 테이블이 없으며 개인 자료 가져오기 UI도 없습니다. 실제 이벤트 읽기는 별도 도구로 복원한 개인 자료와 일치하는 추가 마스터를 준비한 소스 실행 환경이 필요합니다. 포토 촬영·지역 생성·이벤트 라이브·VENUS 대전·보상 정산은 제공하지 않습니다. Android·Mac 배포 앱은 v0.3.2로, 이 추가 코드가 포함되지 않았습니다.
 
-v0.3.3은 같은 개발 서명의 업데이트에서 기존 DB 보존, 서버 앱의 시작 버튼, 네이티브 암호화 통신의 로그인·사용자 조회와 잘못된 포토 요청 거부 후 조회 데이터 보존을 검사했습니다. 검사 계정은 보유 포토가 없고 기존 레이아웃 값 일부가 정의되지 않아 실제 이름·레이아웃 변경은 검사하지 않았습니다. 소스 검사 3,410개 통과·9개 생략과 Android의 제한된 실행 검사를 구분하며, 이 결과로 게임의 홈·일반 라이브나 해당 설정 화면 동작이 검증됐다고 표현하지 않습니다.
+미게시 v0.3.3 후보는 같은 개발 서명의 업데이트에서 기존 DB 보존, 서버 앱의 시작 버튼, 네이티브 암호화 통신의 로그인·사용자 조회와 잘못된 포토 요청 거부 후 조회 데이터 보존을 검사했습니다. 검사 계정은 보유 포토가 없고 기존 레이아웃 값 일부가 정의되지 않아 실제 이름·레이아웃 변경은 검사하지 않았습니다. 소스 검사 3,410개 통과·9개 생략과 Android의 제한된 실행 검사를 구분하며, 이 결과로 게임의 홈·일반 라이브나 해당 설정 화면 동작이 검증됐다고 표현하지 않습니다. GitHub 자산 업로드의 `401 Bad credentials` 오류로 v0.3.3은 릴리스에 게시하지 않았습니다.
 
 Java 17 이상, Android SDK 34, Python 3.13을 준비한 뒤 저장소 루트에서 빌드합니다.
 
-아래는 v0.3.3 베타 소스의 빌드 예시입니다. 현재 배포 링크와 설치 방법은 [저장소 README](../README.md#앱으로-실행하기)를 따릅니다. v0.3.3은 검증한 v0.3.2의 공개 데이터 묶음과 라이브 엔진을 유지합니다. 서버 데이터에는 기존 35개 JSON 테이블, 첫 일반 라이브 계산용 네 개와 `Mission`을 합쳐 40개 테이블이 필요합니다.
+아래는 미게시 v0.3.3 후보 소스의 빌드 예시입니다. 현재 배포 링크와 설치 방법은 [저장소 README](../README.md#앱으로-실행하기)를 따릅니다. v0.3.3 후보는 검증한 v0.3.2의 공개 데이터 묶음과 라이브 엔진을 유지합니다. 서버 데이터에는 기존 35개 JSON 테이블, 첫 일반 라이브 계산용 네 개와 `Mission`을 합쳐 40개 테이블이 필요합니다.
 
 ```sh
 cd android-server
@@ -19,7 +19,7 @@ cd android-server
   -PserverData=/path/to/IdolyPride-ServerData-v0.3.2.zip
 ```
 
-기본 ABI는 `arm64-v8a`입니다. CI 에뮬레이터용 빌드는 `-PserverAbi=x86_64`를 추가합니다. 결과는 `app/build/outputs/apk/debug/app-debug.apk`입니다. v0.3.3의 Android 버전 코드는 22이며 같은 개발 서명을 사용하므로 설치된 서버 앱 위에 업데이트합니다. Chaquopy 17과 Python 3.13을 사용하며 protobuf·HTTP/2는 순수 Python, AES는 Android의 `javax.crypto`를 사용합니다.
+기본 ABI는 `arm64-v8a`입니다. CI 에뮬레이터용 빌드는 `-PserverAbi=x86_64`를 추가합니다. 결과는 `app/build/outputs/apk/debug/app-debug.apk`입니다. v0.3.3 후보의 Android 버전 코드는 22이며 같은 개발 서명을 사용하므로 설치된 서버 앱 위에 업데이트합니다. Chaquopy 17과 Python 3.13을 사용하며 protobuf·HTTP/2는 순수 Python, AES는 Android의 `javax.crypto`를 사용합니다.
 
 ## 첫 메인 라이브 실험 기능
 

@@ -1,25 +1,27 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** **Android v0.3.3 베타는 포토 이름·프로필 레이아웃 저장과 보존한 이미지 트레이닝·VENUS 자료의 읽기 코드를 추가합니다. Mac 서버 앱은 v0.3.2입니다.** 사용자 Android 기기에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했으며, 현재 클라우드 실행 환경의 홈·일반 라이브 완료 검증은 남아 있습니다.
+아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** **GitHub에 배포된 Android·Mac 서버 앱은 v0.3.2입니다. Android v0.3.3 후보는 로컬 빌드와 ARM64 검사를 마쳤지만 미게시 상태입니다.** 사용자 Android 기기에서 로컬 로그인·홈·캐릭터 표시·편성과 초기 튜토리얼 전체 진행을 확인했으며, 현재 클라우드 실행 환경의 홈·일반 라이브 완료 검증은 남아 있습니다.
 
-v0.3.0 베타에서 추가한 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행, **첫 메인 라이브 실험 기능**도 유지합니다. 라이브 실험 기능의 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 Android v0.3.3과 Mac v0.3.2 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
+v0.3.0 베타에서 추가한 프로필 이름·소개문·즐겨찾기 저장과 카드 레벨 미션 조회·진행, **첫 메인 라이브 실험 기능**도 유지합니다. 라이브 실험 기능의 기본값은 꺼짐이며, 현재 소유 카드 다섯 장과 저장된 편성으로 첫 퀘스트 `qt-main-1-001-01`의 결과를 계산합니다. 공식 서버와 같은 점수라고 검증된 기능은 아닙니다. 지원 조건·첫 성공 보상·재시도 보존 범위는 [첫 일반 라이브 안내](docs/first-live-support.md)를 참고합니다. 아래 설치 링크는 Android·Mac v0.3.2 베타입니다. 미션 보상 수령은 아직 지원하지 않습니다.
 
 v0.3.2에는 **첫 메인 퀘스트의 SKIP·하이라이트 시작 지원**과 안전한 거절 사유 기록을 추가했습니다. SKIP도 실제 라이브 전체 계산과 기존 정산·재시도 보존 경로를 사용합니다. 자동 반복·티켓·버디·포토·액세서리는 미지원이며 기본 OFF는 유지합니다. Android의 기존 클리어 반복 검사, Linux의 새 계정 첫 클리어·실패 검사, Mac의 일반 모드 엔진·앱 실행 검사는 구분해 기록했습니다. SKIP가 라이브 장면·리소스 로딩을 완전히 생략한다는 뜻은 아닙니다.
 
 이미지 트레이닝·VENUS의 현재 계정 데이터를 먼저 보관하려면 [Mac 이벤트 보존 앱 v0.1.0](https://github.com/tagundo/IdolyPride_client/releases/download/event-preserver-v0.1.0/IdolyPride-Event-Preserver-Mac-arm64.zip)을 사용합니다. Apple Silicon macOS 13 이상에서 Python 설치 없이 실행합니다. 기존 PlayCover 일본판의 로그인 자료를 오프라인으로 점검한 뒤, 보존 위치를 선택하고 **기존 계정 로그인·메뉴 조회**를 체크해 보존을 시작합니다. 실제 Mac 빌드·GUI 실행·이동 후 실행·TLS 확인과 모의 검사 150개를 통과했으며, 사용자 계정의 실제 로그인 성공 검증은 남아 있습니다. 자료는 Mac에 보관하며 채팅에 보내지 않습니다. 설치·보존 범위는 [개인 데이터 보존 안내](docs/event-preservation.md)를 참고합니다.
 
-Android v0.3.3에는 [포토 이름과 프로필 레이아웃 저장](docs/preference-support.md) 및 이미지 트레이닝·VENUS 자료의 읽기 모듈이 포함됩니다. APK의 기존 40개 디코딩 JSON 마스터 묶음에는 이벤트 읽기에 필요한 추가 테이블이 없으며 개인 자료 가져오기 UI도 없습니다. 실제 이벤트 읽기는 본인이 보존한 응답을 별도 소스 도구로 새 개인 프로필에 복원하고, 일치하는 추가 마스터를 준비한 소스 실행 환경에서 제공합니다. Mac v0.3.2에는 이 추가 코드가 없으며 현재 저장소 소스에서만 사용할 수 있습니다. 포토 촬영·지역 생성·이벤트 라이브·VENUS 대전과 보상 정산은 아직 미완성입니다.
+현재 소스와 미게시 Android v0.3.3 후보에는 [포토 이름과 프로필 레이아웃 저장](docs/preference-support.md) 및 이미지 트레이닝·VENUS 자료의 읽기 모듈이 포함됩니다. 후보 APK의 기존 40개 디코딩 JSON 마스터 묶음에는 이벤트 읽기에 필요한 추가 테이블이 없으며 개인 자료 가져오기 UI도 없습니다. 실제 이벤트 읽기는 본인이 보존한 응답을 별도 소스 도구로 새 개인 프로필에 복원하고, 일치하는 추가 마스터를 준비한 소스 실행 환경에서 제공합니다. 배포된 Android·Mac v0.3.2 앱에는 이 추가 코드가 없습니다. 포토 촬영·지역 생성·이벤트 라이브·VENUS 대전과 보상 정산은 아직 미완성입니다.
 
-현재 소스 검사는 3,410개 통과·9개 생략입니다. Android v0.3.3은 기존 DB를 보존한 업데이트와 서버 시작, 네이티브 암호화 통신의 로그인·사용자 조회·잘못된 포토 요청 거부 및 조회 데이터 보존을 확인했습니다. 검사 프로필에는 포토가 없고 기존 레이아웃에 정의되지 않은 값이 있어, 실제 이름 변경과 레이아웃 변경·원복 검사는 수행하지 않았습니다. 이 검사는 실제 게임 화면의 해당 설정 조작을 확인한 결과가 아닙니다.
+현재 소스 검사는 3,410개 통과·9개 생략입니다. 미게시 Android v0.3.3 후보에서 기존 DB를 보존한 업데이트와 서버 시작, 네이티브 암호화 통신의 로그인·사용자 조회·잘못된 포토 요청 거부 및 조회 데이터 보존을 확인했습니다. 검사 프로필에는 포토가 없고 기존 레이아웃에 정의되지 않은 값이 있어, 실제 이름 변경과 레이아웃 변경·원복 검사는 수행하지 않았습니다. 이 검사는 실제 게임 화면의 해당 설정 조작을 확인한 결과가 아닙니다. GitHub 자산 업로드가 `401 Bad credentials`로 실패해 v0.3.3을 릴리스에 게시하지 않았으며, 아래 링크는 기존 v0.3.2 파일만 가리킵니다.
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [Android 서버 앱 v0.3.3 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.3)와 [Mac 서버 앱 v0.3.2 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.2)는 같은 공개 데이터 묶음을 사용합니다. 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [배포된 서버 앱 v0.3.2 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.2)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.3](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.3/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
+| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.2](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
 | Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-arm64.app.zip) | PlayCover에 설치하는 `IdolyPride-6.1.1-Local-PlayCover.ipa` |
+
+v0.3.2의 [파일 해시](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/SHA256SUMS), [Android 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android-QA.zip), [Mac 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-QA.zip)도 같은 릴리스에서 받습니다.
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
 2. **아이프라 서버 / 아이프라 로컬 서버**에서 **서버 시작**을 누릅니다.
@@ -46,8 +48,8 @@ Android에서 문제가 발생하면 [별도 진단 게임 v0.2.1](https://githu
 | 첫 일반 라이브 — v0.3.0 베타 | 기본값 꺼짐인 실험 기능; 첫 메인 퀘스트만 현재 덱·능력치·스킬로 로컬 계산, 첫 성공 보상·경험치 1회와 결과 저장, 동일 요청 재시도 시 원래 응답 반환 |
 | 첫 메인 라이브 SKIP — v0.3.2 | 같은 실제 계산·정산으로 하이라이트 시작 지원; Android 기존 클리어 계정 반복·업데이트·재시작 검사, 새 계정 첫 클리어·실패는 Linux 네이티브 검사 |
 | 프로필 — v0.3.0 베타 | 저장된 계층 정보 조회, 이름·소개문·즐겨찾기 순서 저장·해제; 공식 금칙어·미션 보상 제외 |
-| 포토 이름·프로필 레이아웃 — Android v0.3.3 | 보유 포토 이름과 기존 프로필의 레이아웃·정보·색상 선택 저장; Mac 앱에는 미포함 |
-| 이미지 트레이닝·VENUS 읽기 모듈 — Android v0.3.3 | 모듈 포함; 실제 읽기는 개인 카탈로그와 추가 마스터를 준비한 별도 소스 환경 필요. APK의 기존 데이터만으로 이벤트 메뉴를 복원하지 않으며 가져오기 UI·생성·대전·정산은 미지원, Mac 앱에는 미포함 |
+| 포토 이름·프로필 레이아웃 — 소스·Android v0.3.3 미게시 후보 | 보유 포토 이름과 기존 프로필의 레이아웃·정보·색상 선택 저장; 배포된 v0.3.2 앱에는 미포함 |
+| 이미지 트레이닝·VENUS 읽기 모듈 — 소스·Android v0.3.3 미게시 후보 | 모듈 포함; 실제 읽기는 개인 카탈로그와 추가 마스터를 준비한 별도 소스 환경 필요. 후보 APK의 기존 데이터만으로 이벤트 메뉴를 복원하지 않으며 가져오기 UI·생성·대전·정산은 미지원, 배포된 v0.3.2 앱에는 미포함 |
 | 카드 레벨 미션 — v0.3.0 베타 | 검증된 `ms-normal-card_level_achievement` 목록과 보유 카드의 최고 레벨 진행 저장; 다른 미션·보상 수령 제외 |
 | 튜토리얼 후반 | 레슨 보상 1회 지급·초기 카드 강화·사쿠라 메시지 조회/선택 저장/완료; 명시적 `Progress150`으로 완료 |
 | `Activity.ReceiveLessonReward` | 초기 메인 지역의 기본 레슨 보상을 10초 단위로 최대 12시간 누적·수령; 재시도·재시작 후 시간과 재화 보존 |
