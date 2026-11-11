@@ -1,12 +1,60 @@
 {
-  "approved": false,
+  "approved": true,
   "repo": "tagundo/IdolyPride_client",
   "release_id": 441084603,
   "tag": "local-server-v0.3.2",
   "source": "276b5552e77f4264b80ea40e00e95cc6576cdab9",
   "run_id": 42930420770,
-  "assets": {},
-  "artifacts": {},
-  "body": null,
-  "proof": null
+  "assets": {
+    "IdolyPride-Local-Server-Android-QA.zip": {
+      "bytes": 23228,
+      "sha256": "e64a2cfcc666ba16dee501a2a8bd24940a6de43c78ffd9ba5da8593b6a8330e8"
+    },
+    "IdolyPride-Local-Server-Android.apk": {
+      "bytes": 96580626,
+      "sha256": "727b02941c1f3e0f9d7a04032df0c89e647b1a4963d8a7abebbc4f109582d504"
+    },
+    "IdolyPride-Local-Server-macOS-QA.zip": {
+      "bytes": 7254,
+      "sha256": "c8ab1e85658657591677a1f8a419cac3c1834647403614bc95326f6296458bf3"
+    },
+    "IdolyPride-Local-Server-macOS-arm64.app.zip": {
+      "bytes": 94837814,
+      "sha256": "3ec82c7c46a7a6c8b909234ca67a289e6a529ff16974b383ebaca856974fd570"
+    },
+    "IdolyPride-ServerData-v0.3.2.zip": {
+      "bytes": 80929314,
+      "sha256": "3139ea69af1305a231ca09a3caab88a4496f1663c7a3af30892c588ed2cbc436"
+    },
+    "RELEASE-VERIFICATION.json": {
+      "bytes": 6071,
+      "sha256": "c401f842a098018bf7db013cdcbb8d0704e4f8b190d2d56cb31f638be0157aa9"
+    },
+    "SHA256SUMS": {
+      "bytes": 519,
+      "sha256": "17e645a84f22cf80ab1e53c5ebd3e7168f01729247e9833d3cc9ab87028f9ee9"
+    }
+  },
+  "artifacts": {
+    "android": {
+      "id": 13815554278,
+      "name": "android-server-build-and-available-evidence-v0.3.2",
+      "bytes": 96593129,
+      "sha256": "25f50df7f64bfff0cd34148faa127be780216d187468049171679574aa3a4e4b"
+    },
+    "macos": {
+      "id": 13815819018,
+      "name": "macos-server-candidate-and-native-evidence-v0.3.2",
+      "bytes": 94740313,
+      "sha256": "71d7d3957d25c999b6097525131c9fd5685e38c1bee2a71082000fac0c9990c1"
+    }
+  },
+  "body": {
+    "bytes": 3192,
+    "sha256": "c46bf248e747f1e63d8d9727ebaf343a96b419e569dcc24b366d58c44fc4acaa"
+  },
+  "proof": {
+    "bytes": 27440,
+    "sha256": "66b9d6c87b30321fd4eaa3a55d8da7d65a92deadc126b0b10ff66d33c91a464f"
+  }
 }
