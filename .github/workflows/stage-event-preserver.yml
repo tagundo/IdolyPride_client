@@ -1,0 +1,42 @@
+name: Stage verified Mac event preserver draft
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-event-preserver-v010
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: IdolyPride-Event-Preserver-Mac-arm64-candidate
+          repository: tagundo/IdolyPride_client
+          run-id: 42941660798
+          github-token: ${{ github.token }}
+          path: data/event-preserver-reviewed
+      - name: Verify pinned source, app and QA; stage a new draft only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/stage_event_preserver.py --candidate data/event-preserver-reviewed --evidence data/event-preserver-staging.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: event-preserver-draft-staging-receipt
+          path: data/event-preserver-staging.json
+          if-no-files-found: error

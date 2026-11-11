@@ -52,6 +52,7 @@ def test_inspection_redacts_unknown_fields():
 @pytest.mark.parametrize("change", [
     {"matched_rows": True}, {"valid_archives": -1}, {"account_groups": 2},
     {"groups": [{"group_number": 1, "candidate_count": 1, "current_candidate_count": 2}]},
+    {"groups": [{"group_number": True, "candidate_count": 1, "current_candidate_count": 0}]},
 ])
 def test_malformed_inventory_is_fixed_error(change):
     with pytest.raises(bridge.BridgeError) as caught:
@@ -86,6 +87,26 @@ def test_ambiguous_group_never_picks_newest(tmp_path):
     with pytest.raises(bridge.BridgeError) as caught:
         worker.handle(capture(tmp_path / "new"))
     assert caught.value.code == "account_selection_required_or_invalid"
+
+
+@pytest.mark.parametrize("binding", [None, "", "private-uid", "A" * 64, "b" * 63])
+def test_inspection_requires_private_nonce_binding_but_never_renders_it(binding):
+    value = inventory()
+    value["groups"][0]["binding"] = binding
+    sink = io.StringIO()
+    bridge.serve(bridge.Bridge(cli(value, [])), io.StringIO('{"action":"inspect"}\n'), sink)
+    result = json.loads(sink.getvalue().splitlines()[1])
+    assert result == {"schema": 1, "event": "failure", "code": "worker_reply_invalid"}
+
+
+def test_each_inspection_replaces_nonce_and_cached_binding():
+    calls = []
+    worker = bridge.Bridge(cli(inventory(), calls))
+    worker.handle({"action": "inspect"})
+    first = worker.nonce
+    worker.handle({"action": "inspect"})
+    assert worker.nonce != first and len(worker.nonce) == 64
+    assert calls[0][2] == first and calls[1][2] == worker.nonce
 
 
 def test_capture_explicit_flags_and_only_bound_output(monkeypatch, tmp_path):
