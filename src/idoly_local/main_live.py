@@ -285,7 +285,7 @@ class MainLives:
         if not request.questId or request.deckNumber <= 0 or request.playCount <= 0:
             _fail('quest, saved deck and positive play count are required', RpcCode.INVALID_ARGUMENT)
         if (request.questId != MAIN_QUEST_ID or request.playCount != 1 or request.useDailyTicket
-                or request.isSkip or request.isAuto or request.userBuddyDeckPositions):
+                or request.isAuto or request.userBuddyDeckPositions):
             _fail('only the first main quest with one ordinary saved-deck play is supported', RpcCode.UNIMPLEMENTED)
         version = self.catalog.version()
         if not version:
@@ -307,7 +307,14 @@ class MainLives:
                 _fail('borrowed deck names are not supported', RpcCode.UNIMPLEMENTED)
             positions = sorted((row for row in snapshot.deckPositions if row.number == request.deckNumber), key=lambda row: row.position)
             seed, now = secrets.randbits(64), time.time_ns() // 1000000
-            self._definition()
+            quest, _area, _setting = self._definition()
+            # The original first quest is liveSkipType Always (2), not the
+            # full-skip type (4). isSkip selects the client's playback mode;
+            # its result still comes from the same actual simulation and
+            # atomic settlement. It never requests a canned successful result.
+            if request.isSkip and (type(quest.get('liveSkipType')) is not int
+                                   or quest['liveSkipType'] != 2):
+                _fail('the first-quest skip definition differs from its pin')
             prepared = prepare_main_live(self.schema, self.master_dir, snapshot, request.questId, request.deckNumber, seed)
             live, score = self._result(self.engine.simulate(prepared), snapshot, positions)
             response = self.schema.response_type(path)(questId=request.questId)

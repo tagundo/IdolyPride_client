@@ -115,7 +115,7 @@ def test_malformed_body_conflicting_retry_and_unsupported_mode_leave_atomic_rece
         with pytest.raises(grpc.RpcError) as conflict:
             invoke(raw=changed)
         assert conflict.value.code() == grpc.StatusCode.INVALID_ARGUMENT and dump(game) == after
-        unsupported = game.schema.request_type(START)(questId=QUEST, deckNumber=1, playCount=1, isSkip=True).SerializeToString()
+        unsupported = game.schema.request_type(START)(questId=QUEST, deckNumber=1, playCount=1, isAuto=True).SerializeToString()
         with pytest.raises(grpc.RpcError) as not_implemented:
             invoke(raw=unsupported, headers=(('x-app-request-id', '2'),))
         assert not_implemented.value.code() == grpc.StatusCode.UNIMPLEMENTED

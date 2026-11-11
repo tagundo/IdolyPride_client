@@ -58,7 +58,7 @@ def game(schema, tmp_path, monkeypatch):
     rows['Setting'][0].update(goldLimit='99999999999', itemLimit='99999999999',
                              freeStoneLimit='9999999', accessoryLimit='99999999')
     rows.update({
-        'Quest': [{'id': QUEST, 'areaId': 'area-main-001', 'clearScore': '3000',
+        'Quest': [{'id': QUEST, 'areaId': 'area-main-001', 'clearScore': '3000', 'liveSkipType': 2,
                    'rewardManagerExp': 50, 'rewardCardExp': 40, 'clearRewardId': 'first-clear'}],
         'Area': [{'id': 'area-main-001', 'type': 1, 'questIds': [QUEST, 'quest-2', 'quest-3']}],
         'Reward': [{'id': 'first-clear', 'resources': [
@@ -258,15 +258,16 @@ def test_card_experience_cap_uses_post_reward_manager_level(game):
 @pytest.mark.parametrize('kwargs,code', [
     ({'questId': ''}, RpcCode.INVALID_ARGUMENT), ({'deckNumber': 0}, RpcCode.INVALID_ARGUMENT),
     ({'playCount': 0}, RpcCode.INVALID_ARGUMENT), ({'questId': 'other'}, RpcCode.UNIMPLEMENTED),
-    ({'playCount': 2}, RpcCode.UNIMPLEMENTED), ({'isSkip': True}, RpcCode.UNIMPLEMENTED),
+    ({'playCount': 2}, RpcCode.UNIMPLEMENTED),
     ({'isAuto': True}, RpcCode.UNIMPLEMENTED), ({'useDailyTicket': True}, RpcCode.UNIMPLEMENTED),
     ({'userBuddyDeckPositions': [{'cardId': 'borrowed'}]}, RpcCode.UNIMPLEMENTED),
     ({'buddyDeckName': 'Borrowed'}, RpcCode.UNIMPLEMENTED),
 ])
-def test_unsupported_requests_never_calculate_or_write(game, kwargs, code):
+@pytest.mark.parametrize('is_skip', [False, True])
+def test_unsupported_requests_never_calculate_or_write(game, kwargs, code, is_skip):
     before = dump(game)
     with pytest.raises(RpcFailure) as error:
-        call(game, **kwargs)
+        call(game, isSkip=is_skip, **kwargs)
     assert error.value.code == code and dump(game) == before and not game.engine.calls
 
 

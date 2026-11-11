@@ -7,6 +7,7 @@ import pytest
 
 from idoly_local import main_live_qa as qa
 from idoly_local.card_progression import prepare_enhancement
+from idoly_local.rpc import RpcCode, RpcFailure
 from idoly_local.schema import Schema
 from test_card_progression import synthetic_fixture
 
@@ -156,18 +157,25 @@ def game(schema, tmp_path):
         calculations = 0
         fault = None
         calls = []
+        is_skip = False
+        cache_requests = {}
         def invoke(self, path, request, request_id):
             self.calls.append((path, request_id))
             if path == USER:
                 assert request_id is None
                 return clone(self.current)
             assert path == START and request.questId == QUEST and request.deckNumber == request.playCount == 1
-            assert request.buddyDeckName == before.decks[0].name and not request.isSkip and not request.isAuto
+            assert request.buddyDeckName == before.decks[0].name and not request.isAuto
             if request_id in self.cache:
+                if request.SerializeToString() != self.cache_requests[request_id]:
+                    if self.fault != "cross-mode-accepted":
+                        code = RpcCode.UNIMPLEMENTED if self.fault == "wrong-cross-mode-status" else RpcCode.INVALID_ARGUMENT
+                        raise RpcFailure(code, "request identity conflict")
                 result = schema.response_type(START).FromString(self.cache[request_id])
                 if self.fault == "rerolled-cache":
                     result.result.charts[0].beats[0].score += 1
                 return result
+            assert request.isSkip == self.is_skip
             self.calculations += 1
             first = request_id == qa._IDS[0]
             self.current = clone(first_after if first else second_after)
@@ -195,13 +203,20 @@ def game(schema, tmp_path):
             if self.fault == "chart": del result.result.charts[-1]
             if self.fault == "clear-count": self.current.areas[0].clearQuestCount += 1
             self.cache[request_id] = result.SerializeToString()
+            self.cache_requests[request_id] = request.SerializeToString()
             return result
     return schema, master, tables, before, first_after, second_after, Transport()
 
 
-def test_main_live_oracle_settles_once_new_id_recomputes_and_restart_replays_exact_old_responses(game):
+@pytest.mark.parametrize("is_skip", (False, True))
+def test_main_live_oracle_settles_once_new_id_recomputes_and_restart_replays_exact_old_responses(game, is_skip):
     schema, master, _tables, before, _first, final, transport = game
-    receipt = qa.run_main_live_checks(schema, transport.invoke, master, label="unit")
+    transport.is_skip = is_skip
+    receipt = qa.run_main_live_checks(schema, transport.invoke, master, label="unit", is_skip=is_skip)
+    assert receipt["is_skip"] is is_skip
+    expected_request = schema.request_type(START)(questId=QUEST, deckNumber=1, playCount=1,
+        buddyDeckName=before.decks[0].name, isSkip=is_skip)
+    assert receipt["request_sha256"] == qa._digest(expected_request)
     assert receipt["card_exp_deltas"] == [40] * 5
     assert (receipt["chart_count"], receipt["beat_count"], receipt["first_score"], receipt["replay_score"]) == (183, 855, 5000, 6000)
     assert receipt["started_times"] == [NOW, NOW + 1] and transport.calculations == 2
@@ -210,8 +225,64 @@ def test_main_live_oracle_settles_once_new_id_recomputes_and_restart_replays_exa
     assert UNKNOWN in final.SerializeToString() and final.cards[0].lastEnhanceTime == before.cards[0].lastEnhanceTime
     qa.assert_main_live_snapshot(schema, memoryview(final.SerializeToString()), receipt)
     qa.assert_main_live_retries(schema, transport.invoke, master, receipt)
+    qa.assert_main_live_mode_conflicts(schema, transport.invoke, master, receipt)
     assert transport.calculations == 2 and transport.current == final
     assert "qa-public" not in json.dumps(receipt) and "Saved original unit" not in json.dumps(receipt)
+
+
+@pytest.mark.parametrize("is_skip", (None, 0, 1, "true"))
+def test_skip_mode_requires_an_explicit_boolean_before_any_rpc(game, is_skip):
+    schema, master, _tables, _before, _first, _final, transport = game
+    with pytest.raises(RuntimeError, match="explicit boolean"):
+        qa.run_main_live_checks(schema, transport.invoke, master, is_skip=is_skip)
+    assert not transport.calls
+
+
+def test_normal_mode_receipts_remain_backward_compatible(game):
+    schema, master, _tables, _before, _first, _final, transport = game
+    receipt = qa.run_main_live_checks(schema, transport.invoke, master)
+    assert receipt.pop("is_skip") is False
+    qa.assert_main_live_retries(schema, transport.invoke, master, receipt)
+
+
+@pytest.mark.parametrize("fault", ("cross-mode-accepted", "wrong-cross-mode-status"))
+def test_cross_mode_request_id_reuse_requires_rejection_without_mutation(game, fault):
+    schema, master, _tables, _before, _first, _final, transport = game
+    receipt = qa.run_main_live_checks(schema, transport.invoke, master)
+    transport.fault = fault
+    with pytest.raises(RuntimeError, match="opposite-mode"):
+        qa.assert_main_live_mode_conflicts(schema, transport.invoke, master, receipt)
+
+
+def test_skip_receipt_binds_the_exact_wire_request_and_rejects_mode_tampering(game):
+    schema, master, _tables, _before, _first, _final, transport = game
+    transport.is_skip = True
+    receipt = qa.run_main_live_checks(schema, transport.invoke, master, is_skip=True)
+    qa.assert_main_live_attempt_rows(schema, attempt_rows(transport, receipt), receipt)
+    receipt["is_skip"] = False
+    with pytest.raises(RuntimeError, match="request changed"):
+        qa.assert_main_live_retries(schema, transport.invoke, master, receipt)
+
+
+def test_request_can_bind_a_complete_alternate_saved_deck_without_changing_it(game):
+    schema, master, _tables, before, _first, _final, _transport = game
+    alternate = clone(before)
+    alternate.decks.add(number=7, name="Existing complete alternate")
+    for row in list(alternate.deckPositions):
+        copy = alternate.deckPositions.add(); copy.CopyFrom(row); copy.number = 7
+    del alternate.deckPositions[0]
+    original = alternate.SerializeToString()
+    request, positions = qa._request(schema, alternate, qa._oracle(master), is_skip=True, deck_number=7)
+    assert request.deckNumber == 7 and request.buddyDeckName == "Existing complete alternate" and request.isSkip
+    assert [row.position for row in positions] == [1, 2, 3, 4, 5]
+    assert alternate.SerializeToString() == original
+
+
+@pytest.mark.parametrize("number", (False, 0, -1, "1"))
+def test_request_rejects_invalid_saved_deck_numbers(game, number):
+    schema, master, _tables, before, _first, _final, _transport = game
+    with pytest.raises(RuntimeError, match="positive integer"):
+        qa._request(schema, before, qa._oracle(master), deck_number=number)
 
 
 @pytest.mark.parametrize("fault", ("paid", "story", "fan", "deck", "enhance-time", "unknown", "repeat-xp",

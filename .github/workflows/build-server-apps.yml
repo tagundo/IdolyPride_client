@@ -8,7 +8,7 @@ on:
         type: boolean
         default: false
       fixed_payload_patch:
-        description: Build v0.3.1 Actions-only candidates with the exact previously verified v0.3.0 data payload
+        description: Build v0.3.2 Actions-only candidates with the exact previously verified v0.3.0 data payload
         type: boolean
         default: false
 
@@ -16,15 +16,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-server-apps-${{ inputs.fixed_payload_patch && 'v0.3.1' || 'v0.3.0' }}
+  group: native-server-apps-${{ inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0' }}
   cancel-in-progress: true
 
 env:
   GH_REPO: ${{ github.repository }}
-  IDOLY_SERVER_TAG: ${{ inputs.fixed_payload_patch && 'local-server-v0.3.1' || 'local-server-v0.3.0' }}
-  IDOLY_APP_VERSION: ${{ inputs.fixed_payload_patch && '0.3.1' || '0.3.0' }}
-  IDOLY_APP_VERSION_CODE: ${{ inputs.fixed_payload_patch && '20' || '19' }}
-  IDOLY_PAYLOAD_NAME: ${{ inputs.fixed_payload_patch && 'IdolyPride-ServerData-v0.3.1.zip' || 'IdolyPride-ServerData-v0.3.0.zip' }}
+  IDOLY_SERVER_TAG: ${{ inputs.fixed_payload_patch && 'local-server-v0.3.2' || 'local-server-v0.3.0' }}
+  IDOLY_APP_VERSION: ${{ inputs.fixed_payload_patch && '0.3.2' || '0.3.0' }}
+  IDOLY_APP_VERSION_CODE: ${{ inputs.fixed_payload_patch && '21' || '19' }}
+  IDOLY_PAYLOAD_NAME: ${{ inputs.fixed_payload_patch && 'IdolyPride-ServerData-v0.3.2.zip' || 'IdolyPride-ServerData-v0.3.0.zip' }}
   IDOLY_PATCH_CANDIDATE: ${{ inputs.fixed_payload_patch }}
 
 jobs:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reuse the exact released public data for the v0.3.1 code-only patch.
+"""Reuse the exact released public data for code-only patch candidates.
 
 No archive generation or user-state copying is performed. The CLI pins the
 existing asset's bytes, verifies every declared public member, then uses the

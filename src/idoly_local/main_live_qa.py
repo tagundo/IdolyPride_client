@@ -84,13 +84,14 @@ def _oracle(master_dir):
     return tables
 
 
-def _deck(snapshot, tables):
+def _deck(snapshot, tables, deck_number=1):
+    _require(type(deck_number) is int and deck_number > 0, "saved deck number must be a positive integer")
     _require(snapshot.HasField("user") and snapshot.HasField("userPublic")
              and bool(snapshot.userPublic.publicUserId), "local user identity is absent")
-    deck = _one(snapshot.decks, "number", 1)
-    positions = sorted((row for row in snapshot.deckPositions if row.number == 1), key=lambda row: row.position)
+    deck = _one(snapshot.decks, "number", deck_number)
+    positions = sorted((row for row in snapshot.deckPositions if row.number == deck_number), key=lambda row: row.position)
     _require([row.position for row in positions] == [1, 2, 3, 4, 5]
-             and len({row.cardId for row in positions}) == 5, "requires the original saved five-card unit1")
+             and len({row.cardId for row in positions}) == 5, "requires a complete saved five-card unit")
     owners = []
     for row in positions:
         _require(not row.photoIds and not row.part1AccessoryId and not row.part2AccessoryId,
@@ -105,9 +106,11 @@ def _deck(snapshot, tables):
     return deck, positions
 
 
-def _request(schema, snapshot, tables):
-    deck, positions = _deck(snapshot, tables)
-    return schema.request_type(_START)(questId=_QUEST, deckNumber=1, playCount=1, buddyDeckName=deck.name), positions
+def _request(schema, snapshot, tables, *, is_skip=False, deck_number=1):
+    _require(type(is_skip) is bool, "skip mode must be an explicit boolean")
+    deck, positions = _deck(snapshot, tables, deck_number)
+    return schema.request_type(_START)(questId=_QUEST, deckNumber=deck_number, playCount=1,
+        buddyDeckName=deck.name, isSkip=is_skip), positions
 
 
 def _result(response, before, positions, tables):
@@ -320,17 +323,43 @@ def _cached(schema, invoke, request, expected, ids, hashes):
 def assert_main_live_retries(schema, invoke, master_dir, receipt):
     expected = _user(schema, invoke)
     assert_main_live_snapshot(schema, expected, receipt)
-    request, _positions = _request(schema, expected, _oracle(master_dir))
+    request, _positions = _request(schema, expected, _oracle(master_dir),
+        is_skip=receipt.get("is_skip", False), deck_number=receipt.get("deck_number", 1))
     _require(_digest(request) == receipt["request_sha256"], "saved main-live request changed after restart")
     _cached(schema, invoke, request, expected, receipt["request_ids"],
             (receipt["first_response_sha256"], receipt["replay_response_sha256"]))
     assert_main_live_snapshot(schema, _user(schema, invoke), receipt)
 
 
-def run_main_live_checks(schema, invoke, master_dir, label="native"):
+def assert_main_live_mode_conflicts(schema, invoke, master_dir, receipt):
+    """A v0.3.2 transport must not reuse a cached ID for the opposite mode."""
+    is_skip = receipt.get("is_skip", False)
+    _require(type(is_skip) is bool, "skip mode must be an explicit boolean")
+    expected = _user(schema, invoke)
+    assert_main_live_snapshot(schema, expected, receipt)
+    request, _positions = _request(schema, expected, _oracle(master_dir), is_skip=is_skip,
+                                  deck_number=receipt.get("deck_number", 1))
+    _require(_digest(request) == receipt["request_sha256"], "saved main-live request changed after restart")
+    request.isSkip = not is_skip
+    _require(_digest(request) != receipt["request_sha256"], "opposite mode did not change the request bytes")
+    for identity in receipt["request_ids"]:
+        try:
+            invoke(_START, request, identity)
+        except Exception as error:
+            code = getattr(error, "code", None)
+            code = code() if callable(code) else code
+            _require(getattr(code, "name", None) == "INVALID_ARGUMENT",
+                     "opposite-mode cached request returned an unexpected status")
+        else:
+            _require(False, "opposite-mode cached request was accepted")
+        assert_main_live_snapshot(schema, _user(schema, invoke), receipt)
+
+
+def run_main_live_checks(schema, invoke, master_dir, label="native", *, is_skip=False):
+    _require(type(is_skip) is bool, "skip mode must be an explicit boolean")
     tables = _oracle(master_dir)
     before = _user(schema, invoke)
-    request, positions = _request(schema, before, tables)
+    request, positions = _request(schema, before, tables, is_skip=is_skip)
     _require(not any(row.lastClearedTime for row in before.quests if row.questId in tables["area"]["questIds"])
              and all(not row.clearQuestCount for row in before.areas if row.areaId == _AREA),
              "requires the dedicated QA profile before any ordinary main clear")
@@ -344,7 +373,7 @@ def run_main_live_checks(schema, invoke, master_dir, label="native"):
              "new request ID paid rewards/EXP again or changed unrelated progress")
     hashes = (_digest(first), _digest(replay))
     _cached(schema, invoke, request, final, _IDS, hashes)
-    return {"platform": label, "quest_id": _QUEST, "deck_number": 1, "request_ids": list(_IDS),
+    return {"platform": label, "quest_id": _QUEST, "deck_number": 1, "is_skip": is_skip, "request_ids": list(_IDS),
             "request_sha256": _digest(request), "first_response_sha256": hashes[0], "replay_response_sha256": hashes[1],
             "started_times": [first_time, replay_time], "master_version": (Path(master_dir) / "!version.txt").read_text().strip(),
             "schema_sha256": schema.fingerprint, "ruleset": "live-v5", "snapshot_sha256": _digest(final),

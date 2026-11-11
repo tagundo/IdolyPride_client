@@ -29,6 +29,7 @@ from h2.exceptions import H2Error, StreamClosedError
 from h2.settings import SettingCodes
 
 from . import codec
+from .live_rejection_diagnostics import format_quest_start_rejection, quest_start_facts
 from .rpc import RpcCode, RpcFailure
 
 
@@ -164,7 +165,18 @@ class _Connection:
     def _invoke(self, path, payload, context):
         if not context.is_active():
             raise RpcFailure(RpcCode.DEADLINE_EXCEEDED, "RPC deadline exceeded")
-        plain = self.server.application.handle(path, payload, context)
+        try:
+            plain = self.server.application.handle(path, payload, context)
+        except RpcFailure as failure:
+            # Per-request finite observations only. Do not retain request bytes,
+            # account state, metadata, exception text, or native engine details.
+            if path == "/api.Quest/Start" and failure.code == RpcCode.UNIMPLEMENTED:
+                try:
+                    context._quest_start_facts = quest_start_facts(path, failure.code, failure.details,
+                        getattr(self.server.application, "schema", None), payload)
+                except Exception:
+                    context._quest_start_facts = None
+            raise
         if not isinstance(plain, bytes):
             raise RpcFailure(RpcCode.INTERNAL, "Local RPC handler returned invalid response bytes")
         if len(plain) > MAX_MESSAGE:
@@ -192,7 +204,17 @@ class _Connection:
                 ("grpc-message", quote(failure.details[:2048], safe=""))], end_stream=True)
         except (StreamClosedError, H2Error):
             pass
-        self.server._log(f"RPC {self.streams[sid].path[:180]} -> {failure.code.name}")
+        stream = self.streams[sid]
+        message = f"RPC {stream.path[:180]} -> {failure.code.name}"
+        try:
+            diagnostic = format_quest_start_rejection(stream.path, failure.code, failure.details,
+                getattr(stream.context, "_quest_start_facts", None))
+            if diagnostic is not None:
+                message += " [" + diagnostic + "]"
+        except Exception:
+            # Logging is advisory and cannot change the wire failure or cleanup.
+            pass
+        self.server._log(message)
         self.streams.pop(sid, None)
         self.replies.pop(sid, None)
 

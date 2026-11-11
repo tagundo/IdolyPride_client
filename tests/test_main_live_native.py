@@ -19,16 +19,17 @@ from idoly_local.schema import Schema
 from idoly_local.state import State
 
 
-def test_actual_native_first_live_and_transactional_retry(tmp_path):
+@pytest.mark.parametrize('is_skip', [False, True])
+def test_actual_native_first_live_and_transactional_retry(tmp_path, is_skip):
     library, master = os.environ.get('IDOLY_LIVE_LIBRARY'), os.environ.get('IDOLY_LIVE_MASTER_DIR')
     if not library or not master:
-        pytest.skip('Optional native live library and audited 39-table master are not configured')
+        pytest.skip('Optional native live library and audited master bundle are not configured')
     schema = Schema.from_descriptor_set(Path(__file__).resolve().parents[1] / 'data/protocol/idolypride-6.1.1.pb')
     state = State(tmp_path / 'state.db')
     seed_starter_profile(state, schema, 'player', Path(master))
     provider = MainLives(schema, state, 'player', Path(master), NativeLiveEngine(Path(library)), True)
     request = schema.request_type('/api.Quest/Start')(questId='qt-main-1-001-01', deckNumber=1,
-        playCount=1, buddyDeckName='Local deck').SerializeToString()
+        playCount=1, buddyDeckName='Local deck', isSkip=is_skip).SerializeToString()
     with patch('idoly_local.main_live.secrets.randbits', return_value=123456):
         first = provider.handle('/api.Quest/Start', request, '1')
     response = schema.response_type('/api.Quest/Start').FromString(first)
