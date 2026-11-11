@@ -1,4 +1,4 @@
-"""Serve archived game files locally without fetching missing content."""
+"""Serve archived game files and an optional verified Octo resource gateway."""
 from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -76,11 +76,15 @@ def _range(value: str, size: int) -> tuple[int, int]:
 
 
 def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
-                        transfer_callback=None) -> ThreadingHTTPServer:
+                        transfer_callback=None, octo=None) -> ThreadingHTTPServer:
     """Create a bound server; caller owns serve_forever/shutdown/server_close.
 
     Files live under the explicit root. Directory listings and paths resolving
-    outside that root, including symlink escapes, are unavailable.
+    outside that root, including symlink escapes, are unavailable. An explicit
+    ``octo`` gateway owns its reserved API/resource routes and transfer observer;
+    its downloads never enter the master-file transfer callback. A caller may
+    bind port zero, set ``server.octo_gateway`` using the bound port, and then
+    start serving. Replacing the gateway after serving starts is not supported.
     """
     directory = Path(root).resolve()
     if not directory.is_dir():
@@ -99,9 +103,17 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                     return
                 self._json(200, diagnostics.status())
                 return
+            gateway = self.server.octo_gateway
+            if gateway is not None and gateway.handles(self.path):
+                gateway.serve(self, send_body=True)
+                return
             self._serve(True)
 
         def do_HEAD(self):
+            gateway = self.server.octo_gateway
+            if gateway is not None and gateway.handles(self.path):
+                gateway.serve(self, send_body=False)
+                return
             self._serve(False)
 
         def _loopback(self):
@@ -224,4 +236,6 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                         return
                     self._transfer(path, "completed", sent, length, status)
 
-    return ThreadingHTTPServer((host, port), Handler)
+    server = ThreadingHTTPServer((host, port), Handler)
+    server.octo_gateway = octo
+    return server

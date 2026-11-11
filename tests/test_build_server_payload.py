@@ -1,10 +1,17 @@
 """Public Mission master inclusion preserves its audited data, not eligibility."""
 from copy import deepcopy
+import builtins
+import hashlib
 import importlib.util
+import io
 import json
+import os
 from pathlib import Path
+from zipfile import ZipFile
 
 import pytest
+
+from test_octo_runtime import write_archive
 
 
 spec = importlib.util.spec_from_file_location("payload_builder", Path(__file__).resolve().parents[1] / "tools/build_server_payload.py")
@@ -68,3 +75,66 @@ def test_mission_payload_rejects_wrong_data_or_card_level_contract(missions, cha
         row["progresses"].reverse()
     with pytest.raises(ValueError):
         payload.validate_mission_master(version, pack, rows)
+
+
+def test_octo_payload_selects_exact_public_pair_without_reading_private_neighbors(tmp_path, monkeypatch):
+    public = tmp_path / 'catalog'
+    write_archive(public)
+    private = [public/'firebase-user.archive', public/'state.db', public/'private/user.pb']
+    for path in private:
+        path.parent.mkdir(exist_ok=True)
+        path.write_bytes(b'private-synthetic-account-data-never-read')
+    allowed = {public/'settings.json', public/'manifest.pb'}
+    seen = set()
+    def guard(original):
+        def checked(path, *args, **kwargs):
+            if isinstance(path, (str, bytes, os.PathLike)):
+                candidate = Path(os.fsdecode(path)).absolute()
+                if candidate.is_relative_to(public):
+                    assert candidate in allowed, 'Payload builder tried to read a private neighboring file'
+                    seen.add(candidate)
+            return original(path, *args, **kwargs)
+        return checked
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins, 'open', guard(builtins.open))
+        patch.setattr(io, 'open', guard(io.open))
+        patch.setattr(os, 'open', guard(os.open))
+        files, summary = payload.octo_public_files(public)
+    assert {source for source, _ in files} == allowed
+    assert {target for _, target in files} == {'data/public-octo/settings.json', 'data/public-octo/manifest.pb'}
+    assert seen == allowed
+    assert summary['revision'] == 1087 and summary['objects'] == 2
+    archive = tmp_path/'public-only.zip'
+    with ZipFile(archive, 'w') as output:
+        for source, target in files:
+            output.write(source, target)
+    with ZipFile(archive) as output:
+        assert set(output.namelist()) == {'data/public-octo/settings.json', 'data/public-octo/manifest.pb'}
+        assert all(b'private-synthetic-account' not in output.read(name) for name in output.namelist())
+
+
+@pytest.mark.parametrize('changed', ['missing', 'partial', 'settings-version', 'digest', 'protobuf', 'revision'])
+def test_octo_payload_rejects_invalid_explicit_catalog_without_outputs_or_input_changes(tmp_path, changed):
+    public = tmp_path/'catalog'
+    settings, _ = write_archive(public)
+    if changed == 'missing':
+        for file in public.iterdir(): file.unlink()
+    elif changed == 'partial':
+        (public/'manifest.pb').unlink()
+    elif changed == 'settings-version':
+        settings['application_version'] += 1
+        (public/'settings.json').write_text(json.dumps(settings))
+    elif changed == 'digest':
+        (public/'manifest.pb').write_bytes(b'different original bytes')
+    elif changed == 'protobuf':
+        malformed = b'\xff'
+        (public/'manifest.pb').write_bytes(malformed)
+        settings['manifest_sha256'] = hashlib.sha256(malformed).hexdigest()
+        (public/'settings.json').write_text(json.dumps(settings))
+    else:
+        write_archive(public, revision=1088)
+    before = {p.name: p.read_bytes() for p in public.iterdir()}
+    with pytest.raises(ValueError):
+        payload.octo_public_files(public)
+    assert {p.name: p.read_bytes() for p in public.iterdir()} == before
+    assert set(tmp_path.iterdir()) == {public}

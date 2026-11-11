@@ -19,6 +19,7 @@ _TUTORIAL_FILES = {"data/public-tutorial/manifest.json", "data/public-tutorial/t
                    "data/public-tutorial/tutorial-full.pb"}
 _STORY_FILES = {"data/public-story/manifest.json", "data/public-story/story-list-event.pb",
                 "data/public-story/story-list-extra.pb"}
+_OCTO_FILES = {"data/public-octo/settings.json", "data/public-octo/manifest.pb"}
 
 
 def _digest(path: Path) -> str:
@@ -39,6 +40,11 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
     marker = files / ".server-data-sha256"
     if marker.is_file() and marker.read_text(encoding="ascii").strip() == expected_sha256:
         required = [data / "protocol/idolypride-6.1.1.pb", data / "original-master/master-tag.json"]
+        with ZipFile(bundle) as archive:
+            octo_files = _OCTO_FILES.intersection(archive.namelist())
+        if octo_files and octo_files != _OCTO_FILES:
+            raise ValueError("Bundled game resource catalog is incomplete")
+        required.extend(files / name for name in octo_files)
         if all(path.is_file() for path in required):
             return data
     with ZipFile(bundle) as archive:
@@ -53,6 +59,7 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
             public = public or info.filename == "data/public-fixtures/manifest.json"
             public = public or info.filename in _TUTORIAL_FILES
             public = public or info.filename in _STORY_FILES
+            public = public or info.filename in _OCTO_FILES
             public = public or (len(path.parts) == 4 and path.parts[:3] == ("data", "public-fixtures", "responses")
                                 and path.suffix == ".pb")
             if (path.is_absolute() or ".." in path.parts or "\\" in info.filename
@@ -65,6 +72,8 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
             entries.append((info, destination))
         if not {"data/protocol/idolypride-6.1.1.pb", "data/original-master/master-tag.json"}.issubset(names):
             raise ValueError("Bundled data is missing the schema or master archive")
+        if names.intersection(_OCTO_FILES) and not _OCTO_FILES.issubset(names):
+            raise ValueError("Bundled game resource catalog is incomplete")
         for info, destination in entries:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".server-data-", delete=False) as stream:
@@ -114,9 +123,90 @@ def _copy_asset(assets, destination: Path, expected_sha256: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False):
+class _AndroidResourceResponse:
+    """Normal platform HTTPS trust and streaming, with no redirect or TLS bypass."""
+
+    def __init__(self, url, timeout):
+        from java import jarray, jbyte, jclass
+
+        self._connection = jclass("java.net.URL")(url).openConnection()
+        self._connection.setInstanceFollowRedirects(False)
+        milliseconds = max(1, min(30000, int(timeout * 1000)))
+        self._connection.setConnectTimeout(milliseconds)
+        self._connection.setReadTimeout(milliseconds)
+        self._connection.setRequestProperty("Accept-Encoding", "identity")
+        self._connection.setRequestProperty("User-Agent", "IdolyPride-Local-Resource-Cache")
+        self._buffer = jarray(jbyte)(64 * 1024)
+        self._stream = None
+        self._closed = False
+
+    @property
+    def status(self):
+        if self._closed:
+            raise OSError("Resource connection is closed")
+        result = int(self._connection.getResponseCode())
+        if self._closed:
+            self._connection.disconnect()
+            raise OSError("Resource connection is closed")
+        return result
+
+    @property
+    def headers(self):
+        if self._closed:
+            raise OSError("Resource connection is closed")
+        result = {}
+        for name in ("Content-Length", "Content-Encoding"):
+            value = self._connection.getHeaderField(name)
+            if value is not None:
+                result[name] = str(value)
+        return result
+
+    def geturl(self):
+        if self._closed:
+            raise OSError("Resource connection is closed")
+        return str(self._connection.getURL().toString())
+
+    def read(self, size):
+        if self._closed:
+            raise OSError("Resource connection is closed")
+        if self._stream is None:
+            self._stream = self._connection.getInputStream()
+            if self._closed:
+                try:
+                    self._stream.close()
+                finally:
+                    self._connection.disconnect()
+                raise OSError("Resource connection is closed")
+        count = int(self._stream.read(self._buffer, 0, min(size, len(self._buffer))))
+        return b"" if count < 0 else memoryview(self._buffer).cast("B")[:count].tobytes()
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            if self._stream is not None:
+                self._stream.close()
+        finally:
+            self._connection.disconnect()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        self.close()
+
+
+def _fetch_resource(url, *, timeout):
+    return _AndroidResourceResponse(url, timeout)
+
+
+def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False,
+          download_missing_resources=True):
     """Start the embedded loopback runtime; called on the service worker."""
     global _RUNTIME, _LAST_STATUS
+    if type(download_missing_resources) is not bool:
+        raise ValueError("Resource downloads must be an explicit boolean")
     # Select the universal wheel's implementation before importing the engine.
     # Merely importing the asset installer must not change a host test process.
     os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -150,7 +240,9 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
                     raise ValueError("Experimental live library directory is unavailable")
                 live_options = {"experimental_main_live": True,
                                 "live_engine_library": Path(str(native_library_dir)) / "libidoly_live.so"}
-            _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc, **live_options)
+            _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc,
+                                     download_missing_resources=download_missing_resources,
+                                     resource_fetcher=_fetch_resource, **live_options)
             _LAST_STATUS = _RUNTIME.status()
             return json.dumps(_LAST_STATUS, ensure_ascii=False)
         except BaseException as error:

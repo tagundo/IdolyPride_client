@@ -23,6 +23,7 @@ class Runtime:
         self._asset = None
         self._asset_thread = None
         self._asset_started = False
+        self._resources = None
         self._running = False
         self._stopped = False
         self._last_error = None
@@ -66,6 +67,8 @@ class Runtime:
         result["client_diagnostics"] = {key: value for key, value in diagnostics.items() if key != "events"}
         with self._transfer_lock:
             result["asset_transfer"] = dict(self._transfer_status)
+        if self._resources is not None:
+            result["resource_transfer"] = self._resources.status()
         return result
 
     def diagnostics_snapshot(self) -> dict:
@@ -106,6 +109,9 @@ class Runtime:
                     failures.append(error)
             if self._asset is not None:
                 try:
+                    gateway = getattr(self._asset, "octo_gateway", None)
+                    if gateway is not None:
+                        gateway.close()
                     if self._asset_started:
                         self._asset.shutdown()
                     self._asset.server_close()
@@ -136,7 +142,8 @@ class Runtime:
 def start(data_dir, profile="sandbox", log_callback=None, *,
           grpc_host="127.0.0.1", grpc_port=50051,
           asset_host="127.0.0.1", asset_port=8080, aes_cbc=None,
-          experimental_main_live=False, live_engine_library=None) -> Runtime:
+          experimental_main_live=False, live_engine_library=None,
+          download_missing_resources=True, resource_fetcher=None) -> Runtime:
     """Start the local game engine and asset server without blocking the UI.
 
     ``data_dir`` contains ``protocol/idolypride-6.1.1.pb`` and
@@ -151,6 +158,10 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     """
     if type(experimental_main_live) is not bool:
         raise ValueError("Experimental main live must be an explicit boolean")
+    if type(download_missing_resources) is not bool:
+        raise ValueError("Resource downloads must be an explicit boolean")
+    if resource_fetcher is not None and not callable(resource_fetcher):
+        raise ValueError("Resource fetcher must be callable")
     if not isinstance(profile, str) or not profile.strip():
         raise ValueError("A nonempty local profile is required")
     if log_callback is not None and not callable(log_callback):
@@ -202,6 +213,13 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         if ":" in asset_url_host:
             asset_url_host = "[" + asset_url_host + "]"
         runtime._asset_url = f"http://{asset_url_host}:{bound_asset_port}"
+        from .octo_runtime import create_octo_gateway
+        gateway, runtime._resources = create_octo_gateway(
+            root, runtime._asset_url, aes_cbc=aes_cbc, fetcher=resource_fetcher,
+            allow_downloads=download_missing_resources, log_callback=runtime._log)
+        # Install the gateway only after binding has selected the actual port,
+        # and before any HTTP serving thread is started.
+        runtime._asset.octo_gateway = gateway
         master_response = prepare_master_tag(schema, archive / "master-tag.json",
                                              archive / "assets" / "master", runtime._asset_url)
         fixtures = FixtureStore(root / "fixtures", schema)

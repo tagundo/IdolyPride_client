@@ -28,13 +28,18 @@ import org.json.JSONObject;
 public final class MainActivity extends Activity implements ServerService.Observer {
     static final String SERVER_PREFS = "local_server";
     static final String EXPERIMENTAL_MAIN_LIVE = "experimental_main_live";
+    static final String DOWNLOAD_MISSING_RESOURCES = "download_missing_resources";
     private CheckBox experimentalMainLive;
+    private CheckBox downloadMissingResources;
     private TextView status;
     private TextView logs;
     private TextView gameStatus;
     private TextView transferStatus;
     private TextView lastException;
     private TextView networkStatus;
+    private TextView resourceStatus;
+    private TextView resourceReceived;
+    private TextView resourceServed;
     private ProgressBar transferProgress;
     private Button export;
     private static final int EXPORT_DIAGNOSTICS = 50052;
@@ -114,6 +119,19 @@ public final class MainActivity extends Activity implements ServerService.Observ
         body.addView(experimentalMainLive);
         TextView liveNotice = text(R.string.experimental_main_live_notice, 12, Color.rgb(180, 199, 211));
         body.addView(liveNotice);
+        downloadMissingResources = new CheckBox(this);
+        downloadMissingResources.setText(R.string.download_missing_resources);
+        downloadMissingResources.setTextColor(Color.WHITE);
+        downloadMissingResources.setTextSize(13);
+        downloadMissingResources.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(DOWNLOAD_MISSING_RESOURCES, true));
+        downloadMissingResources.setOnCheckedChangeListener((button, enabled) ->
+                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
+                        .putBoolean(DOWNLOAD_MISSING_RESOURCES, enabled).apply());
+        body.addView(downloadMissingResources);
+        TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, Color.rgb(180, 199, 211));
+        resourceNotice.setPadding(0, 0, 0, dp(6));
+        body.addView(resourceNotice);
         TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
         replayNotice.setPadding(0, dp(6), 0, dp(8));
         body.addView(replayNotice);
@@ -153,6 +171,20 @@ public final class MainActivity extends Activity implements ServerService.Observ
         transferProgress.setMax(1000);
         transferProgress.setVisibility(View.GONE);
         body.addView(transferProgress, new LinearLayout.LayoutParams(-1, dp(12)));
+        TextView resourceHeading = text(R.string.resource_transfer_title, 15, Color.WHITE);
+        resourceHeading.setPadding(0, dp(10), 0, dp(4));
+        body.addView(resourceHeading);
+        resourceStatus = text(R.string.resource_transfer_waiting, 12, Color.rgb(192, 212, 222));
+        resourceStatus.setTextIsSelectable(true);
+        body.addView(resourceStatus);
+        resourceReceived = text(R.string.resource_transfer_waiting, 12, Color.rgb(160, 181, 194));
+        resourceReceived.setTextIsSelectable(true);
+        resourceReceived.setVisibility(View.GONE);
+        body.addView(resourceReceived);
+        resourceServed = text(R.string.resource_transfer_waiting, 12, Color.rgb(160, 181, 194));
+        resourceServed.setTextIsSelectable(true);
+        resourceServed.setVisibility(View.GONE);
+        body.addView(resourceServed);
         TextView note = text(R.string.first_launch_note, 13, Color.rgb(160, 181, 194));
         note.setPadding(0, dp(8), 0, dp(14));
         body.addView(note);
@@ -179,8 +211,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
             }
         });
         stop.setOnClickListener(view -> startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP)));
-        launch.setOnClickListener(view -> launchClient("game.qualiarts.idolypride.local", R.string.client_missing));
-        diagnosticLaunch.setOnClickListener(view -> launchClient("game.qualiarts.idolypride.local.diagnostics", R.string.diagnostic_client_missing));
+        launch.setOnClickListener(view -> launchClient(R.string.client_missing,
+                "game.qualiarts.idolypride.local.resources", "game.qualiarts.idolypride.local"));
+        diagnosticLaunch.setOnClickListener(view -> launchClient(R.string.diagnostic_client_missing,
+                "game.qualiarts.idolypride.local.diagnostics"));
         export.setOnClickListener(view -> {
             Intent destination = new Intent(Intent.ACTION_CREATE_DOCUMENT)
                     .addCategory(Intent.CATEGORY_OPENABLE)
@@ -197,8 +231,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
     }
 
-    private void launchClient(String packageName, int missingMessage) {
-        Intent client = getPackageManager().getLaunchIntentForPackage(packageName);
+    private void launchClient(int missingMessage, String... packageNames) {
+        Intent client = null;
+        for (String packageName : packageNames) {
+            client = getPackageManager().getLaunchIntentForPackage(packageName);
+            if (client != null) break;
+        }
         if (client == null) {
             Toast.makeText(this, missingMessage, Toast.LENGTH_LONG).show();
             return;
@@ -232,6 +270,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         status.setTextColor(running ? Color.rgb(117, 226, 177) : Color.WHITE);
         start.setEnabled(!running && !busy);
         experimentalMainLive.setEnabled(!running && !busy);
+        downloadMissingResources.setEnabled(!running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);
@@ -303,6 +342,49 @@ public final class MainActivity extends Activity implements ServerService.Observ
             transferProgress.setIndeterminate(false);
             transferProgress.setProgress((int) Math.max(0, Math.min(1000, ((double) sent / total) * 1000)));
         }
+        updateResources(details);
+    }
+
+    private void updateResources(JSONObject details) {
+        JSONObject resources = details.optJSONObject("resource_transfer");
+        boolean available = resources != null && resources.optBoolean("available", false);
+        if (!available) {
+            boolean missing = resources != null || details.optBoolean("running", false);
+            setTextIfChanged(resourceStatus, getString(missing
+                    ? R.string.resource_transfer_unavailable : R.string.resource_transfer_waiting));
+            resourceStatus.setTextColor(Color.rgb(192, 212, 222));
+            resourceReceived.setVisibility(View.GONE);
+            resourceServed.setVisibility(View.GONE);
+            return;
+        }
+        String resourceState = resources.optString("status", "idle");
+        int active = Math.max(0, resources.optInt("active_requests", 0));
+        boolean allowDownloads = resources.optBoolean("allow_downloads", false);
+        String summary;
+        if ("failed".equals(resourceState)) {
+            summary = getString(R.string.resource_transfer_failed);
+        } else if ("downloading".equals(resourceState)) {
+            summary = active > 0 ? getString(R.string.resource_transfer_active, active)
+                    : getString(R.string.resource_transfer_downloading);
+        } else if ("ready".equals(resourceState)) {
+            summary = getString(R.string.resource_transfer_ready);
+        } else {
+            summary = getString(allowDownloads
+                    ? R.string.resource_transfer_idle : R.string.resource_transfer_cache_only);
+        }
+        setTextIfChanged(resourceStatus, summary);
+        resourceStatus.setTextColor("failed".equals(resourceState)
+                ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+        long received = Math.max(0, resources.optLong("session_received_bytes", 0));
+        long verified = Math.max(0, resources.optLong("session_verified_files", 0));
+        long served = Math.max(0, resources.optLong("session_served_bytes", 0));
+        // These are measured session totals for different links, not a combined
+        // percentage or proof that all of the game's resources are downloaded.
+        setTextIfChanged(resourceReceived, getString(R.string.resource_transfer_received,
+                formatBytes(received), verified));
+        setTextIfChanged(resourceServed, getString(R.string.resource_transfer_served, formatBytes(served)));
+        resourceReceived.setVisibility(View.VISIBLE);
+        resourceServed.setVisibility(View.VISIBLE);
     }
 
     private static void setTextIfChanged(TextView view, String value) {

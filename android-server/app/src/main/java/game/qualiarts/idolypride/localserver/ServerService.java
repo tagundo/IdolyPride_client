@@ -167,6 +167,8 @@ public final class ServerService extends Service {
         }
         final boolean experimentalMainLive = getSharedPreferences(MainActivity.SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(MainActivity.EXPERIMENTAL_MAIN_LIVE, false);
+        final boolean downloadMissingResources = getSharedPreferences(MainActivity.SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(MainActivity.DOWNLOAD_MISSING_RESOURCES, true);
         foreground();
         if (!startQueued.compareAndSet(false, true)) return START_NOT_STICKY;
         runtimeDetails = "{}";
@@ -180,7 +182,7 @@ public final class ServerService extends Service {
                 }
                 runtime = Python.getInstance().getModule("android_server_runtime");
                 runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback(),
-                        getApplicationInfo().nativeLibraryDir, experimentalMainLive);
+                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources);
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
                 runtimeDetails = details.toString();
                 if (!details.optBoolean("running", false)) {

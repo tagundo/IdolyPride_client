@@ -51,7 +51,37 @@ def validate_mission_master(version, pack_sha256, values):
         raise ValueError("The audited card-level mission row or its progress tiers differ")
 
 
-def build_payload(data_dir: Path, output: Path) -> dict:
+def octo_public_files(directory: Path):
+    """Validate an explicit public SDK catalog, never an account archive."""
+    from Crypto.Cipher import AES
+    from idoly_local.octo_manifest import OctoManifest
+    from idoly_local.octo_runtime import load_octo_archive
+
+    directory = Path(directory).resolve()
+    loaded = load_octo_archive(directory)
+    if loaded is None:
+        raise ValueError("An explicit Octo catalog directory must contain both public files")
+    settings, raw = loaded
+
+    def aes_cbc(encrypt, key, iv, data):
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        return cipher.encrypt(data) if encrypt else cipher.decrypt(data)
+
+    manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]),
+                            client_key=settings["client_key"], base_url="http://127.0.0.1:8080",
+                            aes_cbc=aes_cbc)
+    if manifest.revision != settings["revision"]:
+        raise ValueError("Public Octo catalog revision differs from its settings")
+    files = [(directory / name, "data/public-octo/" + name)
+             for name in ("settings.json", "manifest.pb")]
+    summary = {"application_id": settings["application_id"],
+               "application_version": settings["application_version"],
+               "revision": manifest.revision, "objects": len(manifest.objects),
+               "manifest_sha256": settings["manifest_sha256"]}
+    return files, summary
+
+
+def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None) -> dict:
     from google.protobuf import message_factory
     from google.protobuf.json_format import MessageToDict, ParseDict
     from sqlcipher3 import dbapi2 as sqlcipher
@@ -71,6 +101,10 @@ def build_payload(data_dir: Path, output: Path) -> dict:
     if not set(TABLES).issubset(packs):
         raise ValueError("Required starter master tables are missing")
     files = [(descriptor, "data/protocol/idolypride-6.1.1.pb")]
+    octo_summary = None
+    if octo_data is not None:
+        octo_files, octo_summary = octo_public_files(octo_data)
+        files.extend(octo_files)
     public = data_dir / "public-fixtures"
     if (public / "manifest.json").is_file():
         store = FixtureStore(public, schema)
@@ -142,6 +176,8 @@ def build_payload(data_dir: Path, output: Path) -> dict:
                    "schema_sha256": schema.fingerprint, "tables": counts, "tutorial_replays": replay_report,
                    "story_catalog": story_report,
                    "files": [{"path": name, "bytes": path.stat().st_size, "sha256": digest(path)} for path, name in files]}
+        if octo_summary is not None:
+            summary["octo_resources"] = octo_summary
         payload = stage / "ServerData.zip"
         with ZipFile(payload, "x", compression=ZIP_DEFLATED, compresslevel=6) as zipped:
             for path, name in files:
@@ -158,8 +194,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=Path("data"))
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--octo-data", type=Path,
+                        help="Explicit public settings.json and manifest.pb directory; no account files")
     args = parser.parse_args()
-    print(json.dumps(build_payload(args.data_dir, args.output), ensure_ascii=False, indent=2))
+    print(json.dumps(build_payload(args.data_dir, args.output, octo_data=args.octo_data),
+                     ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
