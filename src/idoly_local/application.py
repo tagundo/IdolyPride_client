@@ -79,7 +79,11 @@ class Application:
         if experimental_main_live:
             from .main_live import MainLives
             self.main_lives = MainLives(schema, state, profile, master_dir, engine=live_engine, enabled=True)
-        self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
+        # Media-only entry markers may put Home beyond the first main area.
+        # Its gallery has no passive reward accrual; ordinary lesson clocks
+        # support the first area and must remain exclusive to normal play.
+        self.gameplay = Gameplay(schema, state, profile, master_dir,
+                                 lessons=None if media_mode else self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture, dream=self.dream)
         self.profile_top = ProfileTop(schema, state, profile, self.gameplay.catalog)
         self.card_level_missions = CardLevelMissions(schema, state, profile, master_dir)

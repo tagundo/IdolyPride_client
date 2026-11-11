@@ -74,6 +74,8 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
 
     Every card starts at its actual initial rarity and level one, using the
     same two integer floors and initial skill-release checks as the starter.
+    Original 6.1.1 Card.get_IllustrationStage selects stage one when initial
+    rarity exceeds four; its explicit display enum is AfterLimitBreak (2).
     No extra master tables beyond the normal payload are required.
     """
     catalog = _Catalog(master_dir)
@@ -168,7 +170,8 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
         if parameter is None:
             _fail("missing initial card parameter")
         values = dict(cardId=identity, level=1, baseLevel=1, rarity=rarity,
-                      rarityTotalExp=rarity_exp, mental=mental, technique=technique, displayType=1)
+                      rarityTotalExp=rarity_exp, mental=mental, technique=technique,
+                      displayType=2 if rarity > 4 else 1)
         for name in ("vocal", "dance", "visual", "stamina"):
             base = _number(parameter.get("staminaValue" if name == "stamina" else "value"),
                            "initial card parameter")
@@ -192,11 +195,16 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
 
 
 def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: int) -> bool:
-    """Append missing media ownership, leaving every existing row unchanged.
+    """Append ownership and repair the original media seed's invalid display.
 
     Call only for an explicitly chosen media profile. This pure function cannot
     select, import, overwrite or authenticate another profile. A False return
     means the caller should keep its original snapshot bytes verbatim.
+
+    The old media seed assigned display 1 even to initial five-star cards,
+    whose pinned 6.1.1 CardImage rows have only displays 2 (and sometimes 3).
+    Repair only that invalid choice. Existing growth, valid display choices,
+    unknown fields and all unrelated rows remain byte-for-byte unchanged.
     """
     if not isinstance(plan, MediaInventoryPlan) or not isinstance(snapshot, plan._snapshot_type):
         _fail("snapshot and prepared schema do not match")
@@ -211,6 +219,7 @@ def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: 
     owned_cards = _owned(snapshot.cards, "cardId")
     result = plan._snapshot_type()
     result.CopyFrom(snapshot)
+    result_cards = {row.cardId: row for row in result.cards}
     changed = False
     for owner, default, hair, live, live_hair in plan._appearances:
         if owner not in owned_characters:
@@ -232,6 +241,11 @@ def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: 
             row.ParseFromString(payload)
             row.obtainedTime = obtained_time
             changed = True
+        elif owned_cards[identity].displayType == 1:
+            initial = type(owned_cards[identity]).FromString(payload)
+            if initial.displayType == 2:
+                result_cards[identity].displayType = 2
+                changed = True
     if changed:
         snapshot.CopyFrom(result)
     return changed

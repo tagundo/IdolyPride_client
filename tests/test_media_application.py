@@ -60,6 +60,40 @@ def test_media_home_uses_live_handler_and_same_story_parts_as_media_list(game, t
     assert game.state.snapshot("media") == before
 
 
+def test_media_home_after_photography_entry_marker_does_not_accrue_unsupported_area_lessons(game, tmp_path):
+    for table, rows in {
+        "Area": [
+            {"id": "area-main-001", "type": 1, "order": 1, "questIds": ["quest-1"]},
+            {"id": "area-main-002", "type": 1, "order": 2, "questIds": ["quest-2"]},
+            {"id": "area-main-003", "type": 1, "order": 3, "questIds": ["quest-3"]},
+        ],
+        "Setting": [{"secondsPerActivityLessonStep": 10}],
+        "HierarchyGrade": [{"id": "home-grade"}],
+        "HierarchyDetailGrade": [{"id": "home-detail", "hierarchyGradeId": "home-grade",
+                                   "requiredHierarchyPoint": 0, "requiredHierarchyRank": 0}],
+    }.items():
+        (game.master / (table + ".json")).write_text(json.dumps(rows))
+    raw, fingerprint = game.state.snapshot("media")
+    snapshot = game.schema.response_type("/api.User/Get").FromString(raw)
+    snapshot.areas.add(areaId="area-main-002", clearQuestCount=1)
+    game.state.mutate_snapshot("media", fingerprint, lambda _: snapshot.SerializeToString())
+    application = app(game, tmp_path, True)
+    ordinary = app(game, tmp_path, False)
+    assert ordinary.gameplay.lessons is ordinary.lessons
+    # The media account's real new frontier previously invoked the normal
+    # first-area policy and failed before the home response was returned.
+    assert application.gameplay.lessons is None
+    before = game.state.snapshot("media")
+    with game.state.connect() as db:
+        old_clock = db.execute("SELECT response FROM profile_lesson_progress WHERE profile='media'").fetchone()
+    home = invoke(game, application, "/api.Home/Enter")
+    assert home.currentMainAreaId == home.lessonProgress.currentAreaId == "area-main-003"
+    assert home.lessonProgress.maxRewardTime == home.lessonProgress.lastReceiveTime
+    assert game.state.snapshot("media") == before
+    with game.state.connect() as db:
+        assert db.execute("SELECT response FROM profile_lesson_progress WHERE profile='media'").fetchone() == old_clock
+
+
 @pytest.mark.parametrize("source_path", ("/api.Story/ListExtra", "/api.Home/Enter"))
 def test_media_home_ignores_conflicting_captured_story_permissions_while_normal_keeps_them(game, tmp_path, source_path):
     # Exercise the real Gameplay.Home.Enter callback, rather than replacing its

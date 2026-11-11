@@ -155,8 +155,49 @@ def test_new_cards_have_real_initial_rarity_xp_two_floors_and_only_released_skil
     assert not card.skillId2 and not card.baseSkillId2 and card.skillLevel2 == 0
     assert not card.liveAbilityId and not card.activityAbilityId
     assert card.photoEquipableCount == card.basePhotoEquipableCount == 2
+    assert card.displayType == 2
     assert card.obtainedTime == NOW
     assert not snapshot.balance.freeBalance and snapshot.quests[0].lastClearedTime == 123
+
+
+def test_new_cards_use_original_initial_rarity_display_stage(schema, master):
+    snapshot = schema.response_type("/api.User/Get")()
+    snapshot.user.name = "New media manager"
+    plan = prepare_media_inventory(schema, master[0])
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    assert {row.cardId: row.displayType for row in snapshot.cards} == {
+        "card-a": 1, "card-a-other": 2, "card-collab": 2, "card-mana": 2}
+
+
+@pytest.mark.parametrize("low_rarity_choice", [1, 2])
+@pytest.mark.parametrize("high_rarity_choice", [2, 3])
+def test_existing_media_repairs_only_unavailable_initial_five_star_display_and_preserves_state(
+        schema, master, snapshot, low_rarity_choice, high_rarity_choice):
+    plan = prepare_media_inventory(schema, master[0])
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    cards = {row.cardId: row for row in snapshot.cards}
+    # A low-initial-rarity card can grow to five stars and still keep display 1.
+    cards["card-a"].rarity = 5
+    cards["card-a"].displayType = low_rarity_choice
+    cards["card-mana"].displayType = high_rarity_choice
+    cards["card-collab"].displayType = 3
+    invalid = cards["card-a-other"]
+    invalid.displayType = 1
+    invalid.level = 41
+    invalid.totalExp = 9876
+    invalid.rarity = 8
+    invalid.evolutionLevel = 1
+    invalid.obtainedTime = 123
+    invalid.MergeFromString(UNKNOWN)
+    snapshot.MergeFromString(UNKNOWN)
+    expected = type(snapshot)()
+    expected.CopyFrom(snapshot)
+    next(row for row in expected.cards if row.cardId == "card-a-other").displayType = 2
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW + 1000)
+    assert snapshot.SerializeToString() == expected.SerializeToString()
+    before = snapshot.SerializeToString()
+    assert not apply_media_inventory(snapshot, plan, obtained_time=NOW + 2000)
+    assert snapshot.SerializeToString() == before
 
 
 def test_repeat_is_byte_identical_and_does_not_restore_user_preferences(schema, master, snapshot):
