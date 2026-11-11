@@ -22,7 +22,7 @@ final class LoopbackUiServer implements Runnable {
     static final int PORT = 50052;
     static final int MAX_RESPONSE = 65536;
     static final long DEFAULT_SESSION_MILLIS = 1800000L;
-    static final long MAX_SESSION_MILLIS = 7200000L;
+    static final long MAX_SESSION_MILLIS = 21600000L;
     private static final int MAX_HEADERS = 8192;
     private static final int MAX_BODY = 4096;
     private static final long INPUT_NANOS = 3000000000L;

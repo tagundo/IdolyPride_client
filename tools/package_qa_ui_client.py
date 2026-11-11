@@ -62,7 +62,7 @@ BOOTSTRAP_METHODS = {"SeedWrapper.IsInitialized", "SeedWrapper.SeedId", "SeedWra
                      "SeedWrapper.RefreshSeedIdAsync", "AccountManager.IsCreatedUser", "AccountManager.GetFirebaseIdTokenAsync"}
 DEX_NAME = re.compile(r"classes(?P<index>[2-9][0-9]*|1[0-9]+)?\.dex")
 DEFAULT_SESSION_MILLIS = 1800000
-MAX_SESSION_MILLIS = 7200000
+MAX_SESSION_MILLIS = 21600000
 PINNED_SESSION_INPUT = "a4bd9100ca32ba454a5756095e4ba89687c88ab1d0a10b2c17e7342798edac98"
 PINNED_SESSION_BYTES = 159585812
 PINNED_QA_CERT = "d94173bdb64bfb6fc75deca8cfa66bb8284a71f47cd800e1bb347abe6ee93259"
@@ -70,7 +70,7 @@ PINNED_QA_CERT = "d94173bdb64bfb6fc75deca8cfa66bb8284a71f47cd800e1bb347abe6ee932
 
 def validate_session_millis(value):
     if type(value) is not int or not 1 <= value <= MAX_SESSION_MILLIS:
-        raise AndroidPackagingError("QA session_millis must be an integer from1 to7200000")
+        raise AndroidPackagingError("QA session_millis must be an integer from1 to21600000")
     return value
 
 
@@ -519,7 +519,7 @@ def main(argv=None):
     parser.add_argument("--refresh-existing-session", action="store_true",
                         help="Update only observer DEX/marker of the exact pinned a4 QA APK")
     parser.add_argument("--session-millis", type=int, default=DEFAULT_SESSION_MILLIS,
-                        help="Public emulator-only observer lifetime; default30min, maximum120min")
+                        help="Public emulator-only observer lifetime; default30min, maximum6h (21600000ms)")
     parser.add_argument("--emulator-only", action="store_true", required=True)
     parser.add_argument("--apkeditor", type=Path)
     parser.add_argument("--build-tools", type=Path)

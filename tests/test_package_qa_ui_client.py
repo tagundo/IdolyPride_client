@@ -15,15 +15,25 @@ qa = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(qa)
 
 
-@pytest.mark.parametrize("value", [1, 1800000, 7200000])
+@pytest.mark.parametrize("value", [1, 1800000, 7200000, 21600000])
 def test_public_observer_session_integer_range(value):
     assert qa.validate_session_millis(value) == value
 
 
-@pytest.mark.parametrize("value", [True, False, None, 0, -1, 7200001, 1800000.0, "7200000"])
+@pytest.mark.parametrize("value", [True, False, None, 0, -1, 21600001, 1800000.0, "21600000"])
 def test_public_observer_session_rejects_bool_noninteger_and_unbounded(value):
     with pytest.raises(qa.AndroidPackagingError):
         qa.validate_session_millis(value)
+
+
+def test_observer_default_remains_thirty_minutes_and_cli_documents_six_hour_cap(capsys):
+    assert qa.DEFAULT_SESSION_MILLIS == 1800000
+    assert qa.MAX_SESSION_MILLIS == 21600000
+    with pytest.raises(SystemExit) as result:
+        qa.main(["--help"])
+    assert result.value.code == 0
+    help_text = capsys.readouterr().out
+    assert "default30min" in help_text and "maximum6h" in help_text
 
 
 def test_session_refresh_unknown_source_precedes_signing_or_output_access(tmp_path):

@@ -78,6 +78,15 @@ on port 50052 with its existing temporary private token and expiry. Read that
 token only in memory through the disposable app's `run-as`; do not put it into
 logs, build reports or artifacts. No workflow is enabled by this packaging step.
 
+The observer defaults to **30 minutes**. An explicit `--session-millis` accepts
+an integer from1 through **21600000 (6 hours)**; missing marker configuration
+still uses30 minutes. `--refresh-existing-session` can prepare a new QA copy of
+the exact pinned A4 input by replacing only `classes5.dex` and its public QA
+marker, with the retained same-certificate QA key. This source limit does not
+extend an already running observer or game session. Game clocks, SDK deadlines,
+the8-second UI request timeout, native code, graphics, metadata and Unity GUID
+remain unchanged. Building and installing that copy are separate operations.
+
 `NativeUiBridge.nativeSnapshot()` returns ASCII JSON. Success contains:
 
 ```json

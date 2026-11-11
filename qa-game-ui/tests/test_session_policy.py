@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 
-def test_strict_integer_default_and_two_hour_cap(tmp_path):
+def test_strict_integer_default_and_six_hour_cap(tmp_path):
     root = Path(__file__).resolve().parents[1]
     jdk = Path(os.environ.get("JAVA_HOME", "/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64")) / "bin"
     if not (jdk / "javac").is_file() or not (jdk / "java").is_file():
@@ -25,10 +25,12 @@ public final class SessionHarness {
         equal(1800000L, LoopbackUiServer.markerSessionMillis(Integer.valueOf(1800000), true));
         equal(7200000L, LoopbackUiServer.markerSessionMillis(Integer.valueOf(7200000), true));
         equal(7200000L, LoopbackUiServer.markerSessionMillis(Long.valueOf(7200000L), true));
-        for (Object bad : new Object[]{null, Boolean.TRUE, Boolean.FALSE, "7200000", Double.valueOf(7200000.0),
-                Float.valueOf(1800000), Integer.valueOf(0), Integer.valueOf(-1), Integer.valueOf(7200001),
-                Long.valueOf(Long.MAX_VALUE), Long.valueOf(Long.MIN_VALUE), new java.math.BigInteger("7200000")}) reject(bad);
-        for (long bad : new long[]{0,-1,7200001L,Long.MAX_VALUE}) {
+        equal(21600000L, LoopbackUiServer.markerSessionMillis(Integer.valueOf(21600000), true));
+        equal(21600000L, LoopbackUiServer.markerSessionMillis(Long.valueOf(21600000L), true));
+        for (Object bad : new Object[]{null, Boolean.TRUE, Boolean.FALSE, "21600000", Double.valueOf(21600000.0),
+                Float.valueOf(1800000), Integer.valueOf(0), Integer.valueOf(-1), Integer.valueOf(21600001),
+                Long.valueOf(Long.MAX_VALUE), Long.valueOf(Long.MIN_VALUE), new java.math.BigInteger("21600000")}) reject(bad);
+        for (long bad : new long[]{0,-1,21600001L,Long.MAX_VALUE}) {
             try { LoopbackUiServer.checkedSessionMillis(bad); throw new AssertionError(); }
             catch (IllegalArgumentException expected) { }
         }
