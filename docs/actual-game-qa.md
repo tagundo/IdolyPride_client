@@ -2,7 +2,17 @@
 
 개발용 [Debug actual Android game boot](https://github.com/tagundo/IdolyPride_client/actions/workflows/debug-game-android.yml)는 일회용 에뮬레이터에서 현재 서버 앱과 실제 6.1.1 게임을 함께 실행합니다. 화면·UI 트리·일반 터치 입력·서버 요청을 남겨 다음 미구현 기능을 찾는 작업입니다.
 
-Android의 ARM 변환·소프트웨어 그래픽 환경에서 추가 게임 검사는 중단했습니다. 아래 Android 기록은 이전 관측입니다. Mac에서는 별도 [PlayCover 첫 실행 검사](https://github.com/tagundo/IdolyPride_client/actions/workflows/playcover-local-firstboot.yml)로 실제 IPA 설치·실행을 검사하며, 현재 결과는 문서 끝에 기록합니다.
+기존 Android ARM 변환 환경의 추가 검사는 중단했습니다. 현재는 공식 Cuttlefish ARM64 이미지와 QEMU TCG에서 원본 SDK를 보존한 로컬 연결판의 실제 입력·통신을 검사합니다. 최신 결과는 아래의 **현재 ARM64 실제 실행**에 기록하고, 이전 GitHub Android·Mac 실행 기록과 구분합니다.
+
+## 현재 ARM64 실제 실행
+
+2026-11-11에는 공식 Android 17 ARM64 이미지(build 16644040), QEMU TCG와 guest SwiftShader에서 일본판 6.1.1을 실행했습니다. GPU·KVM·ARM 앱 번역은 사용하지 않습니다. 물리 화면은 200×200, Android density는 78입니다. 낮은 해상도와 프레임 속도는 이 검사 환경의 조건이며 일반 기기의 화면·성능을 대표하지 않습니다.
+
+같은 개발 서명의 서버 v0.3.4 APK를 업데이트하고 기존 UID·DB·설정 보존을 확인했습니다. 실제 서버 UI의 시작 버튼으로 실행한 뒤, 새 Unity·Android UI 트리에서 확인한 타이틀 버튼에 일반 Android 입력을 전달했습니다. 게임의 `LOADING` 표시와 서버 앱의 `Auth.Login → Master.Get → User.Get → OK`를 확인했습니다. 게임 콜백·SDK 초기화 플래그·시간 배율을 바꾸거나 준비용 RPC를 게임 입력으로 계산하지 않았습니다.
+
+이후 게임의 원본 리소스 취득 오류 `E203`을 관측했습니다. 원본 코드에서 `E203`은 `octo.network.communication`에 대응합니다. 같은 시점의 로컬 Octo 서버에는 게임 SDK의 HTTP 요청이 없었습니다. 별도의 운영자 점검 요청은 서버에 도착했으므로 이 요청을 SDK 다운로드 증거로 계산하지 않습니다.
+
+정적 대조에서는 원본과 새 연결판의 `PlayerSettings.insecureHttpOption`이 모두 `NotAllowed(0)`인 것을 확인했습니다. Android의 루프백 허용 설정과 별개로 UnityWebRequest의 HTTP 정책도 로컬 연결에 맞춰야 합니다. 원본 객체의 바이트 단위 재직렬화와 공식 Unity 2022.3 열거형을 독립 대조했으며, 수정판의 실제 재실행 검증은 진행 중입니다. 아직 이 실행에서 다운로드 확인창·홈·일반 라이브·이미지 트레이닝·VENUS 진입을 확인한 것은 아닙니다.
 
 ## 실행과 입력
 

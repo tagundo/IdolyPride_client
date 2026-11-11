@@ -55,7 +55,8 @@ def test_small_resource_stage_renames_identity_and_preserves_sdk_component_names
 def test_stream_uses_only_approved_normal_native_not_qa_observer(tmp_path):
     source, normal, output = (tmp_path / x for x in ("original.apk", "normal-source.apk", "out.apk"))
     original = {"classes.dex": b"original SDK", tool.NATIVE: b"original native",
-                "AndroidManifest.xml": b"old manifest", tool.octo.METADATA: b"old metadata", "META-INF/OLD.SF": b"sig"}
+                "AndroidManifest.xml": b"old manifest", tool.octo.METADATA: b"old metadata",
+                tool.UNITY_SETTINGS: b"old PlayerSettings", "META-INF/OLD.SF": b"sig"}
     with ZipFile(source, "w") as z:
         for k, v in original.items():
             z.writestr(k, v)
@@ -63,13 +64,15 @@ def test_stream_uses_only_approved_normal_native_not_qa_observer(tmp_path):
         z.writestr(tool.NATIVE, b"approved normal native")
         z.writestr("classes5.dex", b"QA must not be copied")
         z.writestr("lib/arm64-v8a/libidoly_qa_ui_bridge.so", b"QA must not be copied")
-    replacements = {"AndroidManifest.xml": b"new manifest", tool.octo.METADATA: b"new metadata", tool.MARKER: b"new provenance"}
+    replacements = {"AndroidManifest.xml": b"new manifest", tool.octo.METADATA: b"new metadata",
+                    tool.UNITY_SETTINGS: b"one audited PlayerSettings field changed", tool.MARKER: b"new provenance"}
     tool.stream_apk(source, normal, output, replacements)
     with ZipFile(output) as z:
         assert z.read("classes.dex") == b"original SDK"
         assert z.read(tool.NATIVE) == b"approved normal native"
         assert z.read(tool.MARKER) == b"new provenance"
         assert z.read(tool.octo.METADATA) == b"new metadata"
+        assert z.read(tool.UNITY_SETTINGS) == b"one audited PlayerSettings field changed"
         assert not tool.FORBIDDEN & set(z.namelist())
         assert "META-INF/OLD.SF" not in z.namelist()
 

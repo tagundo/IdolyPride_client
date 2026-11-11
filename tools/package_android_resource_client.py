@@ -5,6 +5,8 @@ The existing game stays installed. This package has its own cache and settings,
 and connects to the same local server profile. Existing local-login bootstrap
 bytes are reused from the verified normal-client baseline; no QA observer,
 software AES, store bypass, SDK flags or additional native hooks are introduced.
+Unity's one PlayerSettings HTTP transport policy is enabled; Android NSC still
+limits cleartext connections to127.0.0.1 and TLS validation is unchanged.
 """
 from __future__ import annotations
 
@@ -22,6 +24,7 @@ from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 from idoly_local.android_package import configure_android
 from idoly_local.client_patch import patch_metadata
+from idoly_local.unity_http import MEMBER as UNITY_SETTINGS, patch_player_http
 
 if __package__:
     from . import patch_android_octo_origin as octo
@@ -164,6 +167,7 @@ def package(source: Path, normal_native_source: Path, output: Path, *,
         if FORBIDDEN & before.keys() or MARKER in before:
             raise ValueError("Original source contains local or QA additions")
         metadata = incoming.read(octo.METADATA)
+        settings = incoming.read(UNITY_SETTINGS)
     if hashlib.sha256(metadata).hexdigest() != ORIGINAL_METADATA:
         raise ValueError("Original metadata differs")
     api_metadata, api_proof = patch_metadata(metadata, API_ORIGIN)
@@ -172,6 +176,7 @@ def package(source: Path, normal_native_source: Path, output: Path, *,
         raise ValueError("Local API patch differs from published normal metadata")
     metadata, octo_proof = octo.patch_octo_metadata(api_metadata)
     del api_metadata
+    settings, unity_proof = patch_player_http(settings)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".resource-client-", dir=output.parent) as temporary:
         work = Path(temporary)
@@ -201,9 +206,11 @@ def package(source: Path, normal_native_source: Path, output: Path, *,
                   "input_original_merged_sha256": SOURCE_SHA256,
                   "native_sha256_matches_published_normal": NORMAL_NATIVE,
                   "normal_baseline_reuses_six_existing_local_login_bootstrap_patches": True,
+                  "unity_http_connection_policy": unity_proof,
                   "qa_observer_or_new_sdk_native_patches_added": False}
-        replacements.update({octo.METADATA: metadata, MARKER: (json.dumps(marker, ensure_ascii=False, indent=2) + "\n").encode()})
-        del metadata
+        replacements.update({octo.METADATA: metadata, UNITY_SETTINGS: settings,
+                             MARKER: (json.dumps(marker, ensure_ascii=False, indent=2) + "\n").encode()})
+        del metadata, settings
         unsigned, aligned = work / "unsigned.apk", work / "aligned.apk"
         stream_apk(source, normal_native_source, unsigned, replacements)
         replacement_hashes = {k: hashlib.sha256(v).hexdigest() for k, v in replacements.items()}

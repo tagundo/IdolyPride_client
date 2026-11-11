@@ -2,7 +2,7 @@
 
 현재 v0.3.4 후보 소스는 **일본 Android 6.1.1**의 리소스 목록과 파일 요청을 로컬 서버로 연결합니다. GitHub에 배포된 서버 앱은 [Android·Mac v0.3.2](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.2)이며, 새 후보는 아직 게시하지 않았습니다. iOS·한국판의 별도 리소스 목록과 Mac v0.3.2 앱은 이번 변경에 포함되지 않습니다.
 
-기존 경로로 실제 게임을 실행했을 때 `Auth.Login → Master.Get → User.Get` 성공 뒤 `E209`를 관측했습니다. 원본에서 이 코드는 Octo 네트워크 시간 초과에 대응합니다. 새 로컬 목록 경로의 HTTP 검사는 통과했으며, 원본 SDK에 적용한 뒤의 오류 해결·다운로드 UI·홈·일반 라이브 검증은 진행 중입니다.
+기존 경로로 실제 게임을 실행했을 때 `Auth.Login → Master.Get → User.Get` 성공 뒤 `E209`를 관측했습니다. 원본에서 이 코드는 Octo 네트워크 시간 초과에 대응합니다. 새 서버 v0.3.4의 실제 Android 실행에서도 세 RPC는 성공했지만, HTTP 정책을 바꾸기 전의 연결판은 원본 `E203` 통신 오류와 함께 SDK의 로컬 목록 요청 전에 멈췄습니다. 원본 Unity의 HTTP 금지 설정을 확인해 [연결판의 통신 설정](resource-client.md)을 수정했으며, 재실행·다운로드 UI·홈·일반 라이브 검증은 진행 중입니다.
 
 ## 후보 앱 사용 방식
 
