@@ -33,9 +33,12 @@ class Application:
         self.master_response = master_response
         self.media_mode = media_mode
         self.media_stories = None
+        self.media_panorama = None
         if media_mode:
             from .media_stories import MediaStories
+            from .media_panorama import MediaPanorama
             self.media_stories = MediaStories(schema, state, profile, master_dir)
+            self.media_panorama = MediaPanorama(schema, state, profile, master_dir)
             if photo_scene_access is None:
                 from .media_scenes import prepare_media_scenes
                 photo_scene_access = prepare_media_scenes(master_dir)
@@ -196,6 +199,8 @@ class Application:
                 response = self.pvp.handle(path, plain)
             if response is None:
                 response = self.photo_shootings.handle(path, plain)
+            if response is None and self.media_panorama is not None:
+                response = self.media_panorama.handle(path, plain)
             if response is None:
                 response = self.photo_names.handle(path, plain)
             if response is None:

@@ -1,9 +1,11 @@
-"""The one aggregate prerequisite for Photography in a separate media account.
+"""The shared aggregate for Photography and 360 LIVE in a media account.
 
 6.1.1 FunctionLock type 16 uses cd-clear-area-main-002. Its ClearArea
 condition compares UserArea.clearQuestCount with Master.Area.questIds.Count
 (0x502ed20, 0x4db7c98); it reads neither a timestamp nor UserQuest results.
 This opt-in helper creates no rewards, scores, individual clears or sessions.
+360 LIVE uses FunctionLock 49 and cd-photo_panorama_music-start. Its first
+OR setting requires the same area and a date after 2025-06-23 15:00 UTC.
 """
 from __future__ import annotations
 

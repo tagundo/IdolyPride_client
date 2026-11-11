@@ -46,6 +46,24 @@ def test_media_user_get_uses_live_state_while_normal_fixture_precedence_is_uncha
     assert denied.value.code == RpcCode.UNAUTHENTICATED
 
 
+def test_media_360_catalog_route_keeps_auth_and_ignores_old_account_capture(game, tmp_path):
+    path = "/api.PhotoPanorama/List"
+    old = game.schema.response_type(path)()
+    old.musics.add(musicId="captured-locked-music", isUnlocked=False)
+    captured(game, tmp_path, path, old)
+    assert invoke(game, app(game, tmp_path, False), path) == old
+    application = app(game, tmp_path, True)
+    current = game.schema.response_type(path)()
+    current.musics.add(musicId="current-media-music", isUnlocked=True)
+    application.media_panorama.handle = lambda route, plain: current.SerializeToString() if route == path else None
+    before = game.state.snapshot("media")
+    assert invoke(game, application, path) == current
+    with pytest.raises(RpcFailure) as denied:
+        invoke(game, application, path, authenticated=False)
+    assert denied.value.code == RpcCode.UNAUTHENTICATED
+    assert game.state.snapshot("media") == before
+
+
 def test_media_home_uses_live_handler_and_same_story_parts_as_media_list(game, tmp_path):
     response = game.schema.response_type("/api.Home/Enter")(currentMainAreaId="old-capture")
     captured(game, tmp_path, "/api.Home/Enter", response)

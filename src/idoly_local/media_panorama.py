@@ -1,0 +1,153 @@
+"""Read/check the original 360 LIVE menu in an explicitly separate media mode.
+
+Original Panorama uses PhotoPanorama.List/CheckShooting, not Photo.ListShooting
+or the PhotoQuestMusic catalog. The caller must enable this provider only in
+media mode. Conditions are intentionally bypassed there; no photo creation,
+film use, account delta, live result or resource bytes are generated.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from types import MappingProxyType
+
+from google.protobuf.message import DecodeError
+
+from .appearance import _owned
+from .gameplay import _Catalog
+from .live_assets import _wearable
+from .panorama_rules import MASTER_VERSION, PANORAMA_RULES, UNLOCK_CONDITION
+from .rpc import RpcCode, RpcFailure
+
+
+_USER = "/api.User/Get"
+_LIST = "/api.PhotoPanorama/List"
+_CHECK = "/api.PhotoPanorama/CheckShooting"
+_ROUTES = frozenset((_LIST, _CHECK))
+
+
+def _fail(message, code=RpcCode.FAILED_PRECONDITION):
+    raise RpcFailure(code, message)
+
+
+def _text(value):
+    return isinstance(value, str) and bool(value)
+
+
+@dataclass(frozen=True)
+class MediaPanoramaScene:
+    music_id: str
+    stage_id: str
+    asset_id: str
+    order: int
+    view_condition_id: str
+    cast_count: int
+
+
+def _prepare(catalog):
+    if catalog.version() != MASTER_VERSION:
+        _fail("The media 360 LIVE catalog needs its pinned original masters")
+    musics, stages = catalog.ids("Music", required=True), catalog.ids("Stage", required=True)
+    result, orders = {}, set()
+    for rule in PANORAMA_RULES:
+        music, stage = musics.get(rule.music_id), stages.get(rule.stage_id)
+        if (rule.music_id in result or type(rule.order) is not int or rule.order <= 0
+                or rule.order in orders or not _text(rule.view_condition_id)
+                or music is None or type(music.get("is360LiveExist")) is not bool
+                or not music["is360LiveExist"] or not _text(music.get("assetId"))
+                or stage is None or not _text(stage.get("assetId"))):
+            _fail("The media 360 LIVE catalog has an invalid public scene reference")
+        cast_count, cameras = music.get("displayCharacterAmount"), stage.get("cameraPositions")
+        if (type(cast_count) is not int or not 0 < cast_count <= 32
+                or not isinstance(cameras, list) or not cameras
+                or any(not isinstance(row, dict) or not _text(row.get("name"))
+                       or type(row.get("index")) is not int or row["index"] < 0 for row in cameras)
+                or len({row["index"] for row in cameras}) != len(cameras)):
+            _fail("The media 360 LIVE scene lacks a valid cast or panorama camera")
+        result[rule.music_id] = MediaPanoramaScene(rule.music_id, rule.stage_id, music["assetId"],
+            rule.order, rule.view_condition_id, cast_count)
+        orders.add(rule.order)
+    return MappingProxyType(result)
+
+
+def prepare_media_panorama(master_dir):
+    """Purely validate the fourteen factual scenes before opening a media DB.
+
+    Existing Music/Stage tables suffice; no PhotoQuestMusic or new master table
+    is needed. This does not infer a stage for other is360LiveExist music rows.
+    """
+    return _prepare(_Catalog(master_dir))
+
+
+class MediaPanorama:
+    """Lazy media-only list/check provider; creation is deliberately unhandled."""
+
+    def __init__(self, schema, state, profile, master_dir=None):
+        self.schema, self.state, self.profile = schema, state, profile
+        self.catalog = _Catalog(master_dir)
+        self._scenes = None
+
+    def _snapshot(self):
+        stored = self.state.snapshot(self.profile)
+        if stored is None or stored[1] != self.schema.fingerprint:
+            _fail("The media 360 LIVE profile has no snapshot for this schema")
+        try:
+            snapshot = self.schema.response_type(_USER).FromString(stored[0])
+        except DecodeError:
+            _fail("The media 360 LIVE snapshot is malformed")
+        if not snapshot.HasField("user"):
+            _fail("The media 360 LIVE profile has no user state")
+        return snapshot
+
+    def _check(self, request, snapshot, scenes):
+        scene = scenes.get(request.photoMusicId)
+        if scene is None:
+            music = self.catalog.ids("Music", required=True).get(request.photoMusicId)
+            if music is not None and music.get("is360LiveExist") is True:
+                _fail("This 360 LIVE music has no verified local panorama scene")
+            _fail("Unknown 360 LIVE music", RpcCode.INVALID_ARGUMENT)
+        characters = list(request.characterIds)
+        costumes, hairs = list(request.costumeIds), list(request.hairIds)
+        # Original SetMusicAndCameraData (0x591b550) reads Music's cast amount;
+        # OnExecuteConfirmSheetAsync (0x5925618) sends the API row's musicId.
+        if (len(characters) != scene.cast_count or len(costumes) != len(characters)
+                or len(hairs) != len(characters) or len(set(characters)) != len(characters)
+                or any(not identity for identity in (*characters, *costumes, *hairs))):
+            _fail("Matching unique 360 LIVE characters and outfits are required", RpcCode.INVALID_ARGUMENT)
+        character_master = self.catalog.ids("Character", required=True)
+        costume_master = self.catalog.ids("Costume", required=True)
+        hair_master = self.catalog.ids("Hair", required=True)
+        owned_characters = _owned(snapshot.characters, "characterId")
+        owned_costumes = _owned(snapshot.costumes, "costumeId")
+        owned_hairs = _owned(snapshot.hairs, "hairId")
+        for character, costume, hair in zip(characters, costumes, hairs):
+            costume_row, hair_row = costume_master.get(costume), hair_master.get(hair)
+            if character not in character_master or costume_row is None or hair_row is None:
+                _fail("Unknown 360 LIVE character or outfit", RpcCode.INVALID_ARGUMENT)
+            if character not in owned_characters or costume not in owned_costumes or hair not in owned_hairs:
+                _fail("The 360 LIVE character or outfit is not owned", RpcCode.PERMISSION_DENIED)
+            if costume_row.get("characterId") != character or hair_row.get("characterId") != character:
+                _fail("360 LIVE character and outfit do not match", RpcCode.INVALID_ARGUMENT)
+            if not _wearable(hair_row, costume):
+                _fail("The 360 LIVE hair cannot be worn with this costume", RpcCode.INVALID_ARGUMENT)
+
+    def handle(self, path, plain):
+        if path not in _ROUTES or path not in self.schema.methods or self.catalog.directory is None:
+            return None
+        try:
+            request = self.schema.request_type(path).FromString(plain)
+        except DecodeError:
+            _fail("Malformed 360 LIVE request", RpcCode.INVALID_ARGUMENT)
+        if self._scenes is None:
+            self._scenes = _prepare(self.catalog)
+        snapshot = self._snapshot()
+        result = self.schema.response_type(path)()
+        if path == _LIST:
+            for scene in sorted(self._scenes.values(), key=lambda value: value.order):
+                result.musics.add(musicId=scene.music_id, stageId=scene.stage_id, assetId=scene.asset_id,
+                    order=scene.order, isUnlocked=True, unlockConditionId=UNLOCK_CONDITION,
+                    viewConditionId=scene.view_condition_id)
+        else:
+            self._check(request, snapshot, self._scenes)
+        result.commonResponse.updatedData.SetInParent()
+        result.commonResponse.deletedData.SetInParent()
+        return result.SerializeToString()
