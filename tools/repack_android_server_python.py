@@ -8,6 +8,7 @@ same-certificate signing and actual Android runtime checks are separate steps.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import copy
 import hashlib
 import importlib.util
@@ -173,6 +174,22 @@ def committed_sources(root, commit):
     return sources
 
 
+def _constant_key(value):
+    """Compare values and numeric bits, not marshal's reference/intern flags."""
+    kind = type(value)
+    if kind in (type(None), type(Ellipsis), bool, int, str, bytes):
+        return kind, value
+    if kind is float:
+        return kind, struct.pack(">d", value)
+    if kind is complex:
+        return kind, struct.pack(">dd", value.real, value.imag)
+    if kind is tuple:
+        return kind, tuple(_constant_key(item) for item in value)
+    if kind is frozenset:
+        return kind, frozenset(Counter(_constant_key(item) for item in value).items())
+    raise ValueError("Unsupported Python code constant type")
+
+
 def _code_matches(actual, expected):
     if not isinstance(actual, types.CodeType) or not isinstance(expected, types.CodeType):
         return False
@@ -183,7 +200,7 @@ def _code_matches(actual, expected):
     return (all(getattr(actual, f) == getattr(expected, f) for f in fields)
             and len(actual.co_consts) == len(expected.co_consts)
             and all(_code_matches(a, b) if isinstance(a, types.CodeType) or isinstance(b, types.CodeType)
-                    else type(a) is type(b) and marshal.dumps(a) == marshal.dumps(b)
+                    else _constant_key(a) == _constant_key(b)
                     for a, b in zip(actual.co_consts, expected.co_consts)))
 
 

@@ -184,6 +184,30 @@ def test_source_audit_detects_signed_zero_constant_and_nested_filename_changes()
     assert not tool._code_matches(changed, expected)
 
 
+def test_source_audit_accepts_equal_strings_with_different_intern_state():
+    expected = compile("VALUE = 'constant with spaces and intern state'\n", "module.py", "exec")
+    interned = sys.intern(expected.co_consts[0].encode().decode())
+    changed = expected.replace(co_consts=(interned, None))
+    assert tool._code_matches(changed, expected)
+    assert tool._constant_key(frozenset(("a", 1))) == tool._constant_key(frozenset((1, "a")))
+    assert tool._constant_key((True, 0)) != tool._constant_key((1, False))
+    assert tool._constant_key(0j) != tool._constant_key(complex(-0.0, 0.0))
+
+
+def test_source_audit_unknown_constant_types_fail_closed():
+    with pytest.raises(ValueError, match="Unsupported"):
+        tool._constant_key([])
+
+
+def test_frozenset_constant_keys_preserve_repeated_nan_bit_pattern_counts():
+    def nan(payload):
+        return struct.unpack(">d", (0x7FF8000000000000 | payload).to_bytes(8, "big"))[0]
+    left = frozenset((nan(1), nan(1), nan(2)))
+    right = frozenset((nan(1), nan(2), nan(2)))
+    assert len(left) == len(right) == 3
+    assert tool._constant_key(left) != tool._constant_key(right)
+
+
 @pytest.mark.parametrize("mutation", ["digest", "extract", "duplicate-json", "payload"])
 def test_stale_digest_policy_duplicate_json_and_changed_payload_fail(case, mutation, monkeypatch):
     _, _, baseline, output, write = case
