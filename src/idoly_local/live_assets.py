@@ -52,10 +52,22 @@ def project_live_assets(schema, snapshot, request, catalog):
         raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Unknown local quest")
     if not isinstance(quest.get("areaId"), str) or quest["areaId"] not in areas:
         _bad("quest has an unknown master area")
+    return project_saved_deck_assets(schema, snapshot, request.deckNumber, catalog)
+
+
+def project_saved_deck_assets(schema, snapshot, deck_number, catalog):
+    """Resolve a saved owned unit without inventing a master quest identity.
+
+    Dynamic battle definitions such as Pvp.Top do not live in Master.Quest.
+    Their callers validate that battle separately, then share the same owned
+    slot/equipment/appearance checks as Quest.ListAsset.
+    """
+    if type(deck_number) is not int or deck_number <= 0:
+        raise RpcFailure(RpcCode.INVALID_ARGUMENT, "A positive saved deck number is required")
     decks = _index(snapshot.decks, "number")
-    if request.deckNumber not in decks:
+    if deck_number not in decks:
         raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Unknown local saved deck")
-    positions = sorted((row for row in snapshot.deckPositions if row.number == request.deckNumber),
+    positions = sorted((row for row in snapshot.deckPositions if row.number == deck_number),
                        key=lambda row: row.position)
     if [row.position for row in positions] != [1, 2, 3, 4, 5]:
         _bad("five distinct saved slots are required")

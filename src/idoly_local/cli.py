@@ -87,7 +87,9 @@ def serve(args, schema):
         master_response = prepare_master_tag(schema, args.master_tag, args.asset_root / "master", args.asset_base_url)
     fixtures = FixtureStore(args.fixtures, schema)
     state = State(args.state)
-    app = Application(schema, state, fixtures, args.profile, master_response)
+    app = Application(schema, state, fixtures, args.profile, master_response,
+                      master_dir=args.master_dir, dream_catalog_path=args.dream_catalog,
+                      pvp_catalog_path=args.pvp_catalog)
     config = ServerConfig(args.bind, args.state, args.profile, args.tls_cert, args.tls_key)
     server, port = create_server(schema, app, config)
     try:
@@ -144,6 +146,9 @@ def parser():
     run.add_argument("--state", type=Path, default=Path("data/state.db"))
     run.add_argument("--profile", default="local", help="Single local profile to serve; Firebase tokens are ignored")
     run.add_argument("--fixtures", type=Path, default=Path("data/fixtures"))
+    run.add_argument("--master-dir", type=Path, help="Matching decoded local master JSON directory")
+    run.add_argument("--dream-catalog", type=Path, help="Private Dream catalog belonging to this profile")
+    run.add_argument("--pvp-catalog", type=Path, help="Private VENUS catalog belonging to this profile")
     run.add_argument("--tls-cert", type=Path)
     run.add_argument("--tls-key", type=Path)
     run.add_argument("--master-tag", type=Path, help="Original MasterTag JSON, with matching local raw packs")

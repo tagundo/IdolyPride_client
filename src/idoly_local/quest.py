@@ -41,10 +41,12 @@ def _integer(value, description: str, *, maximum: int = (1 << 63) - 1) -> int:
 class Quest:
     """Serve the main-live catalog, progress and ListAsset resource references."""
 
-    def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, tutorial_replays=None):
+    def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, tutorial_replays=None,
+                 pvp=None):
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
         self.tutorial_replays = tutorial_replays
+        self.pvp = pvp
 
     def _snapshot(self):
         saved = self.state.snapshot(self.profile)
@@ -192,6 +194,10 @@ class Quest:
             # LiveTop.RequestLiveProgress unconditionally reads these objects
             # (0x57550b0 and 0x5755360). latestPvpSeason has a null fallback.
             result.pvpInfo.SetInParent()
+            if self.pvp is not None:
+                info = self.pvp.quest_top_info(snapshot)
+                if info is not None:
+                    result.pvpInfo.CopyFrom(info)
             result.hierarchyNotiInfo.currentDetailGradeId = self.catalog.hierarchy_grade(
                 snapshot.hierarchy.currentFixedPoint + snapshot.hierarchy.currentVariablePoint,
                 snapshot.hierarchy.bestDetailGradeId)

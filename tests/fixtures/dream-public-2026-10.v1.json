@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "catalog_id": "public-dream-2026-10",
+  "schema_sha256": "0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3",
+  "master_version": "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60",
+  "source": {
+    "repository": "Project-Hoshimi/sumire-sr-data",
+    "commit": "c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02",
+    "path": "captures/2026-10-25_fresh_official/raw/00033.resp-plain.Home%3AEnter.bin",
+    "sha256": "d956979f9d04a6a69ffc640ba6c2650f5bc7f34ece0236b466b37bdfcee5a193",
+    "field": "eventInfo.dreamInfo"
+  },
+  "home": {
+    "startTime": 1792033200000,
+    "endTime": 1794711599000,
+    "assetId": "event-dream-defalut",
+    "bannerAssetId": "img_banner_l_event-dream-defalut",
+    "order": 60,
+    "unlockConditionId": "cd-dream-25-0320-play",
+    "generateAreaItemId": "item-dream-generate-dream-25-0320",
+    "eventMissionId": "event-dream-26-10"
+  }
+}

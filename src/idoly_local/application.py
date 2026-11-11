@@ -19,7 +19,9 @@ LOCAL_REFUND_DATETIME_MS = 4102444800000
 
 class Application:
     def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None,
-                 master_dir=None, *, experimental_main_live=False, live_engine=None):
+                 master_dir=None, *, experimental_main_live=False, live_engine=None,
+                 dream_catalog_path=None, pvp_catalog_path=None,
+                 photo_scene_access=None, photo_image_urls=None):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental main live must be an explicit boolean")
         self.schema = schema
@@ -42,6 +44,9 @@ class Application:
         from .profile_favorites import ProfileFavorites
         from .profile_top import ProfileTop
         from .card_level_missions import CardLevelMissions
+        from .dream import Dream
+        from .pvp import Pvp
+        from .photo_shooting import PhotoShootings
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
         self.stories = StoryCatalog(schema, master_dir)
@@ -52,18 +57,23 @@ class Application:
         self.profile_names = ProfileNames(schema, state, profile)
         self.profile_messages = ProfileMessages(schema, state, profile)
         self.profile_favorites = ProfileFavorites(schema, state, profile, master_dir)
+        self.dream = Dream(schema, state, profile, master_dir, catalog_path=dream_catalog_path)
+        self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
+        self.photo_shootings = PhotoShootings(schema, state, profile, master_dir,
+            scene_access=photo_scene_access, image_urls=photo_image_urls)
         self.main_lives = None
         if experimental_main_live:
             from .main_live import MainLives
             self.main_lives = MainLives(schema, state, profile, master_dir, engine=live_engine, enabled=True)
         self.gameplay = Gameplay(schema, state, profile, master_dir, lessons=self.lessons, stories=self.stories,
-                                 story_extra_fixture=self._story_extra_fixture)
+                                 story_extra_fixture=self._story_extra_fixture, dream=self.dream)
         self.profile_top = ProfileTop(schema, state, profile, self.gameplay.catalog)
         self.card_level_missions = CardLevelMissions(schema, state, profile, master_dir)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
         self.tutorial_replays = TutorialReplays(schema, state, profile, master_dir)
-        self.quest = Quest(schema, state, profile, master_dir, tutorial_replays=self.tutorial_replays)
+        self.quest = Quest(schema, state, profile, master_dir, tutorial_replays=self.tutorial_replays,
+                           pvp=self.pvp)
         self.public_fixtures = FixtureStore(Path(master_dir).parent / "public-fixtures", schema) if master_dir is not None else None
 
     def _story_extra_fixture(self):
@@ -142,6 +152,12 @@ class Application:
                 if captured is not None:
                     return captured
             response = self.gameplay.handle(path, plain)
+            if response is None:
+                response = self.dream.handle(path, plain)
+            if response is None:
+                response = self.pvp.handle(path, plain)
+            if response is None:
+                response = self.photo_shootings.handle(path, plain)
             if response is None:
                 response = self.lessons.handle(path, plain)
             if response is None:

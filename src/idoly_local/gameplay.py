@@ -116,12 +116,13 @@ class Gameplay:
     """Handle an explicit local feature allowlist; other methods return None."""
 
     def __init__(self, schema, state, profile: str, master_dir: Path | None = None, *, lessons=None, stories=None,
-                 story_extra_fixture=None):
+                 story_extra_fixture=None, dream=None):
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
         self.lessons = lessons
         self.stories = stories
         self.story_extra_fixture = story_extra_fixture
+        self.dream = dream
 
     def _parse_user(self, payload: bytes):
         try:
@@ -376,6 +377,10 @@ class Gameplay:
                           "notiShowcaseShopItem", "leagueInfo", "loveInfo", "companyInfo"):
                 if field in result.DESCRIPTOR.fields_by_name:
                     getattr(result, field).SetInParent()
+            if self.dream is not None and "eventInfo" in result.DESCRIPTOR.fields_by_name:
+                info = self.dream.home_info(snapshot)
+                if info is not None:
+                    result.eventInfo.dreamInfo.CopyFrom(info)
             if self.stories is not None:
                 extra = (self.story_extra_fixture() if self.story_extra_fixture is not None
                          and "/api.Story/ListExtra" in self.schema.methods else None)
