@@ -57,7 +57,7 @@ def test_prior_release_or_tag_prevents_every_mutation(stager, monkeypatch, tmp_p
     calls = []
     monkeypatch.setattr(stager, "build_opener", lambda _: fake_api(stager, releases=releases,
                         tag_exists=case == "existing-tag", calls=calls))
-    with pytest.raises(ValueError, match="release_(already_exists|tag_already_exists)"):
+    with pytest.raises(ValueError, match="release_(already_exists|tag_differs)"):
         stager.stage(tmp_path, tmp_path / "receipt.json")
     assert calls and all(method == "GET" for method, _ in calls)
     assert not (tmp_path / "receipt.json").exists()

@@ -16,6 +16,7 @@ REPO = "tagundo/IdolyPride_client"
 SOURCE = "11759580f423b616f368c38ac3d02c5022bd3b10"
 RUN = 42941660798
 ARTIFACT = 13820254198
+DRAFT = 441149600
 TAG = "event-preserver-v0.1.0"
 APP = "IdolyPride-Event-Preserver-Mac-arm64.zip"
 QA = "IdolyPride-Event-Preserver-Mac-arm64-QA.zip"
@@ -108,26 +109,33 @@ def stage(directory, evidence):
     for page in range(1, 11):
         releases = request("GET", prefix + "/releases?per_page=100&page=" + str(page))
         need(isinstance(releases, list), "release_lookup_failed")
-        need(all(row.get("tag_name") != TAG for row in releases), "release_already_exists")
+        need(all(row.get("tag_name") != TAG or row.get("id") == DRAFT for row in releases),
+             "release_already_exists")
         if len(releases) < 100:
             break
     else:
         raise ValueError("release_lookup_limit")
     try:
-        request("GET", prefix + "/git/ref/tags/" + TAG)
+        ref = request("GET", prefix + "/git/ref/tags/" + TAG)
     except HTTPError as error:
         need(error.code == 404, "release_lookup_failed")
     else:
-        raise ValueError("release_tag_already_exists")
+        need(ref.get("object") == {"type": "commit", "sha": SOURCE,
+             "url": "https://api.github.com/repos/" + REPO + "/git/commits/" + SOURCE},
+             "release_tag_differs")
     body = """로그인된 PlayCover의 기존 계정으로 이미지 트레이닝·VENUS 메뉴 응답을 Mac에 보관하는 별도 앱입니다. Apple Silicon macOS 13 이상이며 Python 설치가 필요 없습니다.
 
 앱 실행 → 오프라인 점검 → 보존 위치 선택 → 기존 계정 로그인·메뉴 조회 체크 → 보존 시작 순서로 사용합니다. 자료와 인증값은 업로드하지 않으며 보존 폴더는 Mac에 보관해 주세요. 정상 로그인·메뉴 조회에 따른 세션·월간 상태 갱신은 발생할 수 있습니다.
 
 macOS 실제 빌드·서명·GUI 실행·이동 후 실행·TLS 인증서 확인과 모의 검사 150개를 통과했습니다. 사용자 계정의 실제 로그인 성공은 아직 검증하지 못했습니다. 이 앱은 서버 APK 업데이트가 아니며 포토 촬영·지역 생성·대전 시작은 자동 실행하지 않습니다. ad-hoc 서명이며 Apple 공증은 되어 있지 않습니다.
 """
-    release = request("POST", prefix + "/releases", {"tag_name": TAG, "target_commitish": SOURCE,
-        "name": "아이프라 이벤트 보존 도구 v0.1.0 (Mac)", "body": body, "draft": True, "prerelease": True})
-    need(release["draft"] is True and release["tag_name"] == TAG, "draft_creation_differs")
+    # The repository owner created this exact empty draft. Actions only uploads
+    # its approved files; it never creates a tag/release or publishes anything.
+    release = request("GET", prefix + "/releases/" + str(DRAFT))
+    need(release["id"] == DRAFT and release["draft"] is True and release["prerelease"] is True
+         and release["tag_name"] == TAG and release["target_commitish"] == SOURCE
+         and release["name"] == "아이프라 이벤트 보존 도구 v0.1.0 (Mac)"
+         and release["body"] == body and release["assets"] == [], "pinned_empty_draft_differs")
     rid = release["id"]
     sums = "".join(f"{PINS[name][1]}  {name}\n" for name in sorted(PINS)).encode()
     blobs["SHA256SUMS"] = sums
