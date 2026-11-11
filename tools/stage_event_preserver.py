@@ -84,7 +84,8 @@ def stage(directory, evidence):
     def request(method, path, body=None, *, upload=False, content_type="application/json"):
         host = "https://uploads.github.com" if upload else "https://api.github.com"
         headers = {"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json",
-                   "Content-Type": content_type, "X-GitHub-Api-Version": "2022-11-28"}
+                   "Content-Type": content_type, "X-GitHub-Api-Version": "2022-11-28",
+                   "User-Agent": "IdolyPride-verified-event-preserver-stager"}
         if isinstance(body, dict):
             body = json.dumps(body, ensure_ascii=False).encode()
         with opener.open(Request(host + path, data=body, headers=headers, method=method), timeout=120) as response:
@@ -151,5 +152,11 @@ if __name__ == "__main__":
     try:
         stage(args.candidate, args.evidence)
     except Exception as error:
-        print(json.dumps({"ok": False, "error_class": type(error).__name__}), file=sys.stderr)
+        # Fixed API paths contain only this repository's public build/release
+        # identity. Never print response bodies, headers or credentials.
+        details = {"ok": False, "error_class": type(error).__name__}
+        if isinstance(error, HTTPError):
+            details["http_status"] = error.code
+            details["api_path"] = error.url.split(".github.com", 1)[-1]
+        print(json.dumps(details), file=sys.stderr)
         raise SystemExit(1) from None
