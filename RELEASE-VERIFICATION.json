@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "version": "0.3.5",
+  "version_code": 24,
+  "source_commit": "bcd9f2833f6b54e877010d2c9d970834d243553e",
+  "apk_name": "IdolyPride-Local-Server-Android.apk",
+  "apk_bytes": 99184512,
+  "apk_sha256": "112d1b986090c74b465950f4dfa10d698e70f5877453bae0c3628b0621abe934",
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "android_update_install_verified": true,
+  "native_server_start_verified": true,
+  "media_mode_verified": true,
+  "ordinary_database_preserved": true,
+  "actual_media_inventory": {
+    "characters": 28,
+    "costumes": 900,
+    "hairs": 1092,
+    "cards": 503,
+    "stories": 3277
+  },
+  "media_playback_verified": false,
+  "mac_binary_included": false
+}
