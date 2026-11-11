@@ -68,7 +68,7 @@ MAX_APK = 100 * MIB
 MAX_APK_STAGING = 200 * MIB
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
-MAX_CLEAN_INACTIVE_CREDIT = 128 * MIB
+MAX_CLEAN_INACTIVE_CREDIT = 256 * MIB
 JAVA_FLAGS = ("-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
 CGROUP = Path("/sys/fs/cgroup")

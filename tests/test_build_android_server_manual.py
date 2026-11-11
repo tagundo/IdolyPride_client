@@ -381,10 +381,10 @@ def memory_guard_case(tmp_path, monkeypatch):
 
 
 def test_resource_guard_credits_only_capped_clean_inactive_file_pages(memory_guard_case, tmp_path):
-    memory_guard_case(direct_mib=896)
+    memory_guard_case(direct_mib=768)
     report = tool._resource_guard(tmp_path)
-    assert report["memory_direct_headroom"] == 896 * tool.MIB
-    assert report["memory_clean_inactive_credit"] == 128 * tool.MIB
+    assert report["memory_direct_headroom"] == 768 * tool.MIB
+    assert report["memory_clean_inactive_credit"] == 256 * tool.MIB
     assert report["memory_effective_headroom"] == tool.MIN_HEADROOM
     assert report["oom_kill"] == "2"
     assert tool.MIN_HEADROOM == 1024 * tool.MIB
@@ -399,8 +399,8 @@ def test_resource_guard_subtracts_shmem_dirty_and_writeback_before_credit(memory
 
 
 @pytest.mark.parametrize("direct_mib,values", [
-    (895, {}),  # Even abundant clean cache cannot replace the 896 MiB direct floor.
-    (896, {"inactive_file": 127}),
+    (767, {}),  # Even abundant clean cache cannot replace the 768 MiB direct floor.
+    (768, {"inactive_file": 255}),
     (960, {"inactive_file": 63}),
     (960, {"inactive_file": 0}),
     (960, {"file": 512, "shmem": 512}),
@@ -436,7 +436,7 @@ def test_resource_guard_missing_stats_add_zero_credit(memory_guard_case, tmp_pat
 
 def test_resource_guard_rereads_clean_cache_before_each_tool(memory_guard_case, tmp_path):
     memory_guard_case(direct_mib=960)
-    assert tool._resource_guard(tmp_path)["memory_clean_inactive_credit"] == 128 * tool.MIB
+    assert tool._resource_guard(tmp_path)["memory_clean_inactive_credit"] == 256 * tool.MIB
     memory_guard_case(direct_mib=960, file_dirty=256)
     with pytest.raises(ValueError, match="1 GiB"):
         tool._resource_guard(tmp_path)
