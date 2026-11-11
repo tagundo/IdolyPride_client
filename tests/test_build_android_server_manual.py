@@ -124,6 +124,23 @@ def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit
         tool.tool_sources(root, "a" * 40)
 
 
+def test_commit_epoch_accepts_the_actual_git_bytes_return_type():
+    assert tool.validate_epoch(b"1794415775", 1794415775) is None
+
+
+@pytest.mark.parametrize("raw", [b"", b"-1", b"1.5", b"1\n2", b" 1794415775", b"1794415775\n",
+                                  b"not-a-timestamp", "1794415775", None])
+def test_commit_epoch_rejects_malformed_git_bytes(raw):
+    with pytest.raises(ValueError, match="Epoch must match"):
+        tool.validate_epoch(raw, 1794415775)
+
+
+@pytest.mark.parametrize("expected", [1794415774, "1794415775", True])
+def test_commit_epoch_rejects_mismatched_or_non_integer_expected_value(expected):
+    with pytest.raises(ValueError, match="Epoch must match"):
+        tool.validate_epoch(b"1794415775", expected)
+
+
 def test_dex_reads_definitions_not_referenced_strings_and_rejects_duplicate_or_bad_checksum():
     names = ["Lcom/chaquo/python/Python;", "Lcom/chaquo/python/PyObject;"]
     assert tool.dex_classes(synthetic_dex(names)) == set(names)

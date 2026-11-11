@@ -301,6 +301,12 @@ def tool_sources(root, commit):
     return result
 
 
+def validate_epoch(raw, expected):
+    if (type(raw) is not bytes or type(expected) is not int
+            or re.fullmatch(rb"[0-9]+", raw) is None or int(raw) != expected):
+        raise ValueError("Epoch must match the frozen source commit time")
+
+
 def manifest_xml(raw):
     if b"<!" in raw:
         raise ValueError("Manifest declarations/entities are not accepted")
@@ -546,8 +552,7 @@ def build(args):
     native_sources = source_blobs(root, args.source_commit)
     builder_sources = tool_sources(root, args.source_commit)
     epoch = pybundle._git(root, "show", "-s", "--format=%ct", args.source_commit, limit=32).strip()
-    if not epoch.isdecimal() or int(epoch) != args.epoch:
-        raise ValueError("Epoch must match the frozen source commit time")
+    validate_epoch(epoch, args.epoch)
     jdk, sdk, android = Path(args.jdk_bin).resolve(strict=True), Path(args.build_tools).resolve(strict=True), _regular(args.android_jar)
     tools = [jdk / "java", jdk / "javac", sdk / "aapt2", sdk / "zipalign", sdk / "lib/d8.jar", sdk / "lib/apksigner.jar", android]
     for tool in tools:
