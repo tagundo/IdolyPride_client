@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "source": "Original archived 6.1.1 public SQLCipher master packs; no account records",
+  "master_version": "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60",
+  "tables": {
+    "Condition": {
+      "pack_sha256": "d4c6ea5b58c95fe7a4d48576f7c5c6df7980605dd532b31a6d37305058103141",
+      "rows": 30786,
+      "identity_field": "id",
+      "distinct_ids": 30786,
+      "duplicate_id_groups": 0
+    },
+    "EventMission": {
+      "pack_sha256": "49b5b944722f31327ce99c9211316bcf789fe589eef3a932fadaa1b11a8153f5",
+      "rows": 412,
+      "identity_field": "id",
+      "distinct_ids": 412,
+      "duplicate_id_groups": 0
+    },
+    "PhotoAbility": {
+      "pack_sha256": "8534ed8a88a6fe41b014b54181574394cfc91c74f0608fc8acd7a651639da08d",
+      "rows": 375,
+      "identity_field": "id",
+      "distinct_ids": 375,
+      "duplicate_id_groups": 0
+    },
+    "QuestCharacterAdvantage": {
+      "pack_sha256": "37ba73b53ea42a2bccf105ecadaf89a33506834e62d3e7de00b637835dcf7f12",
+      "rows": 89,
+      "identity_field": "id",
+      "distinct_ids": 89,
+      "duplicate_id_groups": 0
+    },
+    "LiveBonusGroup": {
+      "pack_sha256": "78e9b9287bd18cce0163f8fa3efc71e7b41512a40c9b4d09ddf2c779c06bb215",
+      "rows": 160,
+      "identity_field": "groupId",
+      "distinct_ids": 160,
+      "duplicate_id_groups": 0
+    }
+  },
+  "live_bonus_group_sample": {
+    "protobuf_b64": "ChRsaXZlLWJvbnVzLWdyb3VwLTA3ORIabGl2ZS1sYmEtcGFzc2l2ZV9za2lsbC0wNzk=",
+    "protobuf_sha256": "cb77f6aeaac2f9561c68af87322659c8bdd8324ce68a2f39fe5aae0d42f41c1a"
+  }
+}

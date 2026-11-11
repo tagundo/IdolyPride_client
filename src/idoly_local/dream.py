@@ -91,7 +91,8 @@ class Dream:
         def present(table, identity):
             # Chart patterns/advantages/bonus groups intentionally have many
             # rows sharing one ID. _Catalog.ids is only for unique-ID tables.
-            return any(row.get("id") == identity for row in self.catalog.rows(table, required=True))
+            key = "groupId" if table == "LiveBonusGroup" else "id"
+            return any(row.get(key) == identity for row in self.catalog.rows(table, required=True))
 
         home, top = parsed[HOME][1].eventInfo.dreamInfo, parsed[_TOP][1]
         _need(home.unlockConditionId == "cd-dream-25-0320-play"

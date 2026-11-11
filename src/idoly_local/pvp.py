@@ -135,7 +135,8 @@ class Pvp:
                              ("LiveBonusGroup", "liveBonusGroupId")):
             identity = getattr(quest, field)
             if identity:
-                _need(any(row.get("id") == identity for row in self.catalog.rows(table, required=True)), "battle_master_missing")
+                key = "groupId" if table == "LiveBonusGroup" else "id"
+                _need(any(row.get(key) == identity for row in self.catalog.rows(table, required=True)), "battle_master_missing")
         _need(all(getattr(quest, field.name) >= 0 for field in quest.DESCRIPTOR.fields
                   if field.type in (field.TYPE_INT32, field.TYPE_INT64)), "battle_definition_invalid")
         _known_enums(quest)

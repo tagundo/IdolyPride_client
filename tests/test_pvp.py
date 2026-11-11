@@ -296,3 +296,31 @@ def test_malformed_or_oversized_catalog_is_fixed_failure_without_changes(game, c
     with pytest.raises(RpcFailure) as caught:
         invoke(game)
     assert caught.value.code == RpcCode.FAILED_PRECONDITION and dump(game) == before
+
+
+@pytest.mark.parametrize("kind", ["actual-field", "duplicate-group", "invented-id", "wrong-group-with-id"])
+def test_venus_quest_live_bonus_uses_original_master_group_id_read_only(game, kind):
+    from google.protobuf import message_factory
+    from google.protobuf.json_format import MessageToDict
+    evidence = json.loads((Path(__file__).parent / "fixtures/event-read-master-data.v1.json").read_text())
+    cls = message_factory.GetMessageClass(game.schema.pool.FindMessageTypeByName("master.LiveBonusGroup"))
+    original = cls.FromString(base64.b64decode(evidence["live_bonus_group_sample"]["protobuf_b64"]))
+    source_change(game, module._TOP, lambda request, top: setattr(top.topResult.pvpQuest, "liveBonusGroupId", original.groupId))
+    rows = [MessageToDict(original, preserving_proto_field_name=True)]
+    if kind == "duplicate-group":
+        rows.append({"groupId": original.groupId, "liveBonusIds": ["synthetic-second-effect"]})
+    elif kind == "invented-id":
+        rows = [{"id": original.groupId}]
+    elif kind == "wrong-group-with-id":
+        rows = [{"id": original.groupId, "groupId": "different-group"}]
+    (game.master / "LiveBonusGroup.json").write_text(json.dumps(rows))
+    before = dump(game)
+    if kind in ("invented-id", "wrong-group-with-id"):
+        with pytest.raises(RpcFailure) as failure:
+            invoke(game)
+        assert failure.value.code == RpcCode.FAILED_PRECONDITION
+    else:
+        actual = invoke(game)
+        assert actual.topResult.pvpQuest.liveBonusGroupId == original.groupId
+        assert not actual.commonResponse.ListFields()
+    assert dump(game) == before and game.state.authenticated(game.token, "player")

@@ -328,3 +328,55 @@ def test_malformed_json_field_types_use_fixed_errors(captured):
     captured.path.write_text(json.dumps(data))
     with pytest.raises(RpcFailure) as error: response(captured, TOP)
     assert error.value.code == RpcCode.FAILED_PRECONDITION
+
+
+@pytest.mark.parametrize("kind", ["actual-field", "duplicate-group", "invented-id", "wrong-group-with-id"])
+def test_captured_live_bonus_uses_original_master_group_id_without_state_change(captured, kind):
+    import base64
+    from google.protobuf import message_factory
+    from google.protobuf.json_format import MessageToDict
+    evidence = json.loads((Path(__file__).parent / "fixtures/event-read-master-data.v1.json").read_text())
+    cls = message_factory.GetMessageClass(captured.schema.pool.FindMessageTypeByName("master.LiveBonusGroup"))
+    original = cls.FromString(base64.b64decode(evidence["live_bonus_group_sample"]["protobuf_b64"]))
+    change_response(captured, QUEST, lambda value: setattr(value.questInfos[0], "liveBonusGroupId", original.groupId))
+    rows = [MessageToDict(original, preserving_proto_field_name=True)]
+    if kind == "duplicate-group":
+        rows.append({"groupId": original.groupId, "liveBonusIds": ["synthetic-second-effect"]})
+    elif kind == "invented-id":
+        rows = [{"id": original.groupId}]
+    elif kind == "wrong-group-with-id":
+        rows = [{"id": original.groupId, "groupId": "different-group"}]
+    (captured.master / "LiveBonusGroup.json").write_text(json.dumps(rows))
+    before = sql(captured)
+    if kind in ("invented-id", "wrong-group-with-id"):
+        with pytest.raises(RpcFailure) as failure:
+            response(captured, TOP)
+        assert failure.value.code == RpcCode.FAILED_PRECONDITION
+    else:
+        actual = response(captured, QUEST, basePhotoId="owned-base")
+        assert actual.questInfos[0].liveBonusGroupId == original.groupId
+        assert not actual.commonResponse.ListFields()
+    assert sql(captured) == before and captured.state.authenticated(captured.token, "local")
+
+
+def test_bad_private_bonus_reference_does_not_fall_back_to_available_public_home(captured):
+    public = captured.master.parent / "dream-catalog.json"
+    public.write_bytes((Path(__file__).parent / "fixtures/dream-public-2026-10.v1.json").read_bytes())
+    (captured.master / "Setting.json").write_text(json.dumps([{
+        "id": "setting", "dreamAreaName": "イメージトレーニング",
+        "dreamGenerateAreaBasePhotoRequiredRarity": 4}]))
+    (captured.master / "EventMission.json").write_text(json.dumps([{
+        "id": _HOME["eventMissionId"], "viewConditionId": "cd-time-dream-26-10",
+        "unlockConditionId": _HOME["unlockConditionId"], "assetId": _HOME["bannerAssetId"]}]))
+    area = json.loads((captured.master / "Area.json").read_text())
+    area[0]["type"] = 1
+    (captured.master / "Area.json").write_text(json.dumps(area))
+    public_only = Dream(captured.schema, captured.state, "local", captured.master,
+        capture_catalog_path=captured.master.parent / "missing-private.json", clock=lambda: NOW)
+    assert public_only.home_info().name == "イメージトレーニング"
+    change_response(captured, QUEST, lambda value: setattr(value.questInfos[0], "liveBonusGroupId", "private-group"))
+    (captured.master / "LiveBonusGroup.json").write_text(json.dumps([{"id": "private-group"}]))
+    before = sql(captured)
+    with pytest.raises(RpcFailure) as failure:
+        captured.provider.home_info()
+    assert failure.value.code == RpcCode.FAILED_PRECONDITION and sql(captured) == before

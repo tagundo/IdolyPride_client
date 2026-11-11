@@ -22,6 +22,14 @@ MISSION_PACK_SHA256 = "9c9cbec8de1ef1d7c9fb89b6b4319bf75ea5875fc9d7b13de877bcb43
 MISSION_ROW_COUNT = 7087
 CARD_LEVEL_MISSION_ID = "ms-normal-card_level_achievement"
 CARD_LEVEL_THRESHOLDS = (5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160)
+EVENT_READ_TABLES = ("Condition", "EventMission", "PhotoAbility", "QuestCharacterAdvantage", "LiveBonusGroup")
+EVENT_MASTER_PINS = {
+    "Condition": ("d4c6ea5b58c95fe7a4d48576f7c5c6df7980605dd532b31a6d37305058103141", 30786),
+    "EventMission": ("49b5b944722f31327ce99c9211316bcf789fe589eef3a932fadaa1b11a8153f5", 412),
+    "PhotoAbility": ("8534ed8a88a6fe41b014b54181574394cfc91c74f0608fc8acd7a651639da08d", 375),
+    "QuestCharacterAdvantage": ("37ba73b53ea42a2bccf105ecadaf89a33506834e62d3e7de00b637835dcf7f12", 89),
+    "LiveBonusGroup": ("78e9b9287bd18cce0163f8fa3efc71e7b41512a40c9b4d09ddf2c779c06bb215", 160),
+}
 
 
 def digest(path):
@@ -49,6 +57,52 @@ def validate_mission_master(version, pack_sha256, values):
                        for level in CARD_LEVEL_THRESHOLDS]}
     if matches[0] != expected:
         raise ValueError("The audited card-level mission row or its progress tiers differ")
+
+
+def payload_tables(event_read_masters=False):
+    """Keep existing bundles unchanged unless public event table export is explicit."""
+    if type(event_read_masters) is not bool:
+        raise TypeError("Event read master export must be an explicit boolean")
+    return TABLES + EVENT_READ_TABLES if event_read_masters else TABLES
+
+
+def validate_event_master(table, version, pack_sha256, values):
+    """Pin public read prerequisites; no private catalog or eligibility is created."""
+    pin = EVENT_MASTER_PINS.get(table)
+    if (pin is None or version != MISSION_MASTER_VERSION or pack_sha256 != pin[0]
+            or not isinstance(values, list) or len(values) != pin[1]):
+        raise ValueError("Event read master table, version, original pack or row count differs")
+    identity = "groupId" if table == "LiveBonusGroup" else "id"
+    identities = [row.get(identity) if isinstance(row, dict) else None for row in values]
+    if any(not isinstance(value, str) or not value for value in identities):
+        raise ValueError("Event read master identity is missing or malformed")
+    # These tables are looked up as groups by the captured quest readers. Rows
+    # may share a group identity; treating them as _Catalog.ids would lose data.
+    if table not in ("QuestCharacterAdvantage", "LiveBonusGroup") and len(set(identities)) != len(identities):
+        raise ValueError("Event read master identities are ambiguous")
+
+
+def decode_master_table(schema, sqlcipher, root, pack, table):
+    """Decode one explicit public table without reading neighboring account files."""
+    from google.protobuf import message_factory
+    from google.protobuf.json_format import MessageToDict
+
+    if table not in TABLES + EVENT_READ_TABLES or not re.fullmatch(r"[0-9a-fA-F]{64}", pack.cryptoKey):
+        raise ValueError("Unsupported master table or encryption key format")
+    root = Path(root).resolve()
+    source = (root / pack.fileName).resolve()
+    if not source.is_relative_to(root) or not source.is_file():
+        raise ValueError("Original master pack is outside its archive")
+    connection = sqlcipher.connect(source.as_uri() + "?mode=ro", uri=True)
+    try:
+        connection.execute(f'PRAGMA key="x\'{pack.cryptoKey}\'"')
+        connection.execute("PRAGMA query_only=ON")
+        message = message_factory.GetMessageClass(schema.pool.FindMessageTypeByName("master." + table))
+        return [MessageToDict(message.FromString(bytes(raw)), preserving_proto_field_name=True,
+                              use_integers_for_enums=True, always_print_fields_with_no_presence=True)
+                for (raw,) in connection.execute(f'SELECT data FROM "{table}" ORDER BY rowid')]
+    finally:
+        connection.close()
 
 
 def octo_public_files(directory: Path):
@@ -81,12 +135,13 @@ def octo_public_files(directory: Path):
     return files, summary
 
 
-def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None) -> dict:
-    from google.protobuf import message_factory
-    from google.protobuf.json_format import MessageToDict, ParseDict
+def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None,
+                  event_read_masters: bool = False) -> dict:
+    from google.protobuf.json_format import ParseDict
     from sqlcipher3 import dbapi2 as sqlcipher
 
     data_dir, output = Path(data_dir).resolve(), Path(output).resolve()
+    selected_tables = payload_tables(event_read_masters)
     if output.exists():
         raise ValueError("Payload output already exists")
     descriptor = data_dir / "protocol/idolypride-6.1.1.pb"
@@ -98,7 +153,7 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
     response = schema.response_type("/api.Master/Get")()
     ParseDict(json.loads((archive / "master-tag.json").read_text()), response.masterTag)
     packs = {pack.type: pack for pack in response.masterTag.masterTagPacks}
-    if not set(TABLES).issubset(packs):
+    if not set(selected_tables).issubset(packs):
         raise ValueError("Required starter master tables are missing")
     files = [(descriptor, "data/protocol/idolypride-6.1.1.pb")]
     octo_summary = None
@@ -133,22 +188,13 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
         stage = Path(temporary)
         catalog = stage / "master-json"
         catalog.mkdir()
-        for table in TABLES:
+        for table in selected_tables:
             pack = packs[table]
-            if not re.fullmatch(r"[0-9a-fA-F]{64}", pack.cryptoKey):
-                raise ValueError("Unsupported master encryption key format")
-            connection = sqlcipher.connect((root / pack.fileName).as_uri() + "?mode=ro", uri=True)
-            try:
-                connection.execute(f'PRAGMA key="x\'{pack.cryptoKey}\'"')
-                rows = connection.execute(f'SELECT data FROM "{table}" ORDER BY rowid').fetchall()
-                message = message_factory.GetMessageClass(schema.pool.FindMessageTypeByName("master." + table))
-                values = [MessageToDict(message.FromString(bytes(row[0])), preserving_proto_field_name=True,
-                                       use_integers_for_enums=True, always_print_fields_with_no_presence=True)
-                          for row in rows]
-            finally:
-                connection.close()
+            values = decode_master_table(schema, sqlcipher, root, pack, table)
             if table == "Mission":
                 validate_mission_master(response.masterTag.version, digest(root / pack.fileName), values)
+            if table in EVENT_READ_TABLES:
+                validate_event_master(table, response.masterTag.version, digest(root / pack.fileName), values)
             path = catalog / (table + ".json")
             path.write_text(json.dumps(values, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             files.append((path, "data/master-json/" + path.name))
@@ -178,6 +224,8 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
                    "files": [{"path": name, "bytes": path.stat().st_size, "sha256": digest(path)} for path, name in files]}
         if octo_summary is not None:
             summary["octo_resources"] = octo_summary
+        if event_read_masters:
+            summary["event_read_master_tables"] = list(EVENT_READ_TABLES)
         payload = stage / "ServerData.zip"
         with ZipFile(payload, "x", compression=ZIP_DEFLATED, compresslevel=6) as zipped:
             for path, name in files:
@@ -196,8 +244,11 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--octo-data", type=Path,
                         help="Explicit public settings.json and manifest.pb directory; no account files")
+    parser.add_argument("--event-read-masters", action="store_true",
+                        help="Export five pinned public Dream/VENUS read prerequisite tables; no private catalogs or unlocks")
     args = parser.parse_args()
-    print(json.dumps(build_payload(args.data_dir, args.output, octo_data=args.octo_data),
+    print(json.dumps(build_payload(args.data_dir, args.output, octo_data=args.octo_data,
+                                   event_read_masters=args.event_read_masters),
                      ensure_ascii=False, indent=2))
 
 
