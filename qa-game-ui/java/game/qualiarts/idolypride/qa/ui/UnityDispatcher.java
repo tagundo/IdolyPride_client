@@ -23,7 +23,7 @@ final class UnityDispatcher implements LoopbackUiServer.Actions {
 
     UnityDispatcher(Context context, long sessionMillis) {
         this.context = context.getApplicationContext();
-        sessionDeadline = SystemClock.elapsedRealtime() + sessionMillis;
+        sessionDeadline = SystemClock.elapsedRealtime() + LoopbackUiServer.checkedSessionMillis(sessionMillis);
     }
 
     void start() { main.post(new Poll(this)); }

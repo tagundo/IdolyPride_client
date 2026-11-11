@@ -15,6 +15,47 @@ qa = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(qa)
 
 
+@pytest.mark.parametrize("value", [1, 1800000, 7200000])
+def test_public_observer_session_integer_range(value):
+    assert qa.validate_session_millis(value) == value
+
+
+@pytest.mark.parametrize("value", [True, False, None, 0, -1, 7200001, 1800000.0, "7200000"])
+def test_public_observer_session_rejects_bool_noninteger_and_unbounded(value):
+    with pytest.raises(qa.AndroidPackagingError):
+        qa.validate_session_millis(value)
+
+
+def test_session_refresh_unknown_source_precedes_signing_or_output_access(tmp_path):
+    source = tmp_path / "unknown.apk"
+    source.write_bytes(b"not the pinned QA APK")
+    output = tmp_path / "not-created/new.apk"
+    with pytest.raises(qa.AndroidPackagingError, match="exact pinned"):
+        qa.refresh_session(source, output, expected_source_sha256="0" * 64,
+                           emulator_only=True, session_millis=7200000)
+    assert not output.parent.exists()
+
+
+def test_session_repack_changes_only_observer_dex_and_public_marker(tmp_path):
+    source, output = tmp_path / "input.apk", tmp_path / "output.apk"
+    members = {"classes.dex": b"game SDK", "classes5.dex": b"old QA observer",
+               qa.MARKER: b"old public QA marker", qa.NATIVE: b"unchanged native observer",
+               qa.METADATA_NAME: b"cached metadata must not change", "assets/bin/Data/globalgamemanagers": b"GMM",
+               "assets/bin/Data/unity_app_guid": b"c07eb3a7-ce76-523d-8bfa-19c3a9eb6b36",
+               "AndroidManifest.xml": b"manifest", "res/xml/network_security_config.xml": b"NSC"}
+    with ZipFile(source, "w") as archive:
+        for name, raw in members.items():
+            archive.writestr(name, raw)
+    changes = {"classes5.dex": b"new QA observer", qa.MARKER: b'{"session_millis":7200000}'}
+    qa.repack_session(source, output, changes)
+    with ZipFile(output) as archive:
+        assert set(archive.namelist()) == set(members)
+        for name, raw in members.items():
+            assert archive.read(name) == changes.get(name, raw)
+    with pytest.raises(qa.AndroidPackagingError, match="only observer"):
+        qa.repack_session(source, tmp_path / "forbidden.apk", {**changes, qa.NATIVE: b"not allowed"})
+
+
 @pytest.fixture
 def intermediate(tmp_path, monkeypatch):
     native, aes, metadata = b"audited no-store", b"audited software AES", b"unchanged managed metadata"

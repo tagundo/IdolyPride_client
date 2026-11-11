@@ -9,6 +9,7 @@ game. No cloning, new bootstrap patches, account data or publication occurs here
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -60,6 +61,17 @@ PINNED_NORMAL_DEX = {
 BOOTSTRAP_METHODS = {"SeedWrapper.IsInitialized", "SeedWrapper.SeedId", "SeedWrapper.InitializeAsync",
                      "SeedWrapper.RefreshSeedIdAsync", "AccountManager.IsCreatedUser", "AccountManager.GetFirebaseIdTokenAsync"}
 DEX_NAME = re.compile(r"classes(?P<index>[2-9][0-9]*|1[0-9]+)?\.dex")
+DEFAULT_SESSION_MILLIS = 1800000
+MAX_SESSION_MILLIS = 7200000
+PINNED_SESSION_INPUT = "a4bd9100ca32ba454a5756095e4ba89687c88ab1d0a10b2c17e7342798edac98"
+PINNED_SESSION_BYTES = 159585812
+PINNED_QA_CERT = "d94173bdb64bfb6fc75deca8cfa66bb8284a71f47cd800e1bb347abe6ee93259"
+
+
+def validate_session_millis(value):
+    if type(value) is not int or not 1 <= value <= MAX_SESSION_MILLIS:
+        raise AndroidPackagingError("QA session_millis must be an integer from1 to7200000")
+    return value
 
 
 def digest(path):
@@ -233,10 +245,11 @@ def compile_dex(work, java, build_tools, android_jar):
     classes, output = work / "ui-classes", work / "ui-dex"
     classes.mkdir()
     output.mkdir()
-    _run([javac, "--release", "8", "-encoding", "UTF-8", "-classpath", android_jar, "-d", classes, *sources], "QA UI Java compilation")
+    _run([javac, "-J-Xmx128m", "--release", "8", "-encoding", "UTF-8", "-classpath", android_jar, "-d", classes, *sources], "QA UI Java compilation")
     # Include every generated class (also nested/anonymous classes), not just
     # the four top-level classes, so D8 cannot silently omit a callback.
-    _run([build_tools / "d8", "--release", "--min-api", "28", "--lib", android_jar,
+    _run([java, "-Xmx128m", "-cp", build_tools / "lib/d8.jar", "com.android.tools.r8.D8",
+          "--release", "--min-api", "28", "--lib", android_jar,
           "--output", output, *sorted(classes.rglob("*.class"))], "QA UI DEX compilation")
     if sorted(p.name for p in output.iterdir()) != ["classes.dex"]:
         raise AndroidPackagingError("QA UI must compile into exactly one added DEX")
@@ -289,9 +302,10 @@ def qa_signing_material(keystore=None):
 
 def package(source, output, *, qa_aes_report=None, expected_source_sha256, native_library, emulator_only=False,
             input_profile=DIAGNOSTIC_PROFILE, apkeditor=None, build_tools=None, java=None, android_jar=None, report_path=None,
-            qa_keystore=None):
+            qa_keystore=None, session_millis=DEFAULT_SESSION_MILLIS):
     if emulator_only is not True:
         raise AndroidPackagingError("Explicit --emulator-only is required for this QA APK")
+    session_millis = validate_session_millis(session_millis)
     source, output = Path(source).resolve(strict=True), Path(output).resolve()
     report_path = Path(report_path).resolve() if report_path else output.with_suffix(output.suffix + ".evidence.json")
     if output.suffix != ".apk" or output.exists() or report_path.exists() or output == source or output == report_path:
@@ -328,7 +342,8 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
             "provider": PROVIDER, "exported": False, "debuggable": True, "loopback_only": True,
             "original_source_sha256": provenance["original_source_sha256"],
             "input_apk_sha256": expected_source_sha256, "provenance": provenance,
-            "source_sha256": java_hashes, "native_library_sha256": digest(native_library), "added_dex": added_dex}
+            "source_sha256": java_hashes, "native_library_sha256": digest(native_library), "added_dex": added_dex,
+            "session_millis": session_millis}
         additions = {added_dex: dex.read_bytes(), NATIVE: native,
                      MARKER: (json.dumps(marker, indent=2, sort_keys=True) + "\n").encode("utf-8")}
         if set(additions) & set(members):
@@ -395,6 +410,104 @@ def package(source, output, *, qa_aes_report=None, expected_source_sha256, nativ
     return report
 
 
+def validate_session_input(source, expected_source_sha256):
+    if (expected_source_sha256 != PINNED_SESSION_INPUT or digest(source) != PINNED_SESSION_INPUT
+            or Path(source).stat().st_size != PINNED_SESSION_BYTES):
+        raise AndroidPackagingError("Session refresh requires the exact pinned a4 QA APK")
+    with ZipFile(source) as archive:
+        members = inventory(archive)
+        marker = json.loads(archive.read(MARKER))
+    if (not isinstance(marker, dict) or marker.get("schema") != 1
+            or marker.get("package") != NORMAL_PACKAGE or marker.get("input_profile") != NORMAL_PROFILE
+            or marker.get("input_apk_sha256") != PINNED_NORMAL or marker.get("added_dex") != "classes5.dex"
+            or any(marker.get(flag) is not True for flag in ("qa_only", "emulator_only", "debuggable", "loopback_only"))
+            or marker.get("exported") is not False or marker.get("authority") != NORMAL_PACKAGE + ".qa.ui"
+            or marker.get("provider") != PROVIDER or members.get(NATIVE) != marker.get("native_library_sha256")):
+        raise AndroidPackagingError("Pinned session marker or native observer contract differs")
+    validate_session_millis(marker.get("session_millis", DEFAULT_SESSION_MILLIS))
+    return members, marker
+
+
+def repack_session(source, target, replacements):
+    if set(replacements) != {"classes5.dex", MARKER}:
+        raise AndroidPackagingError("Session refresh may replace only observer DEX and its public marker")
+    with ZipFile(source) as incoming, ZipFile(target, "x") as outgoing:
+        for item in incoming.infolist():
+            if signature_member(item.filename):
+                continue
+            if item.filename in replacements:
+                outgoing.writestr(copy.copy(item), replacements[item.filename])
+            else:
+                with incoming.open(item) as src, outgoing.open(copy.copy(item), "w") as dst:
+                    shutil.copyfileobj(src, dst, 1024 * 1024)
+
+
+def refresh_session(source, output, *, expected_source_sha256, emulator_only=False,
+                    session_millis=DEFAULT_SESSION_MILLIS, qa_keystore=None,
+                    build_tools=None, java=None, android_jar=None, report_path=None):
+    if emulator_only is not True:
+        raise AndroidPackagingError("Explicit --emulator-only is required for session refresh")
+    session_millis = validate_session_millis(session_millis)
+    source, output = Path(source).resolve(strict=True), Path(output).resolve()
+    report_path = Path(report_path).resolve() if report_path else output.with_suffix(output.suffix + ".evidence.json")
+    if output.suffix != ".apk" or output.exists() or report_path.exists() or report_path in (source, output) or output == source:
+        raise AndroidPackagingError("Choose new session APK and report paths")
+    members, marker = validate_session_input(source, expected_source_sha256)
+    if qa_keystore is None:
+        raise AndroidPackagingError("Session refresh requires the retained private QA signing key")
+    key, environment = qa_signing_material(qa_keystore)
+    _, sdk, executable = _tools(None, build_tools, java)
+    executable = Path(shutil.which(str(executable)) or executable).resolve()
+    platform = Path(android_jar).resolve() if android_jar else sdk.parent.parent / "platforms/android-34/android.jar"
+    signer = [executable, "-Xmx128m", "-jar", sdk / "lib/apksigner.jar"]
+    def verify(path):
+        result = _run([*signer, "verify", "--verbose", "--print-certs", path], "QA session signature verification", environment)
+        found = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})$", result.stdout, re.MULTILINE)
+        if found != [PINNED_QA_CERT]:
+            raise AndroidPackagingError("Session refresh signing certificate differs from installed QA")
+    verify(source)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".idoly-qa-session-", dir=output.parent) as temporary:
+        work = Path(temporary)
+        dex, java_hashes = compile_dex(work, executable, sdk, platform)
+        marker = {**marker, "session_millis": session_millis, "source_sha256": java_hashes}
+        replacements = {"classes5.dex": dex.read_bytes(), MARKER: (json.dumps(marker, indent=2, sort_keys=True) + "\n").encode()}
+        unsigned, aligned = work / "unsigned.apk", work / "aligned.apk"
+        repack_session(source, unsigned, replacements)
+        _run([sdk / "zipalign", "-f", "16384", unsigned, aligned], "QA session APK alignment", environment)
+        unsigned.unlink()
+        _run([*signer, "sign", "--ks", key, "--ks-key-alias", "qa-ui-only",
+              "--ks-pass", "env:IDOLY_QA_UI_KEY_PASSWORD", "--key-pass", "env:IDOLY_QA_UI_KEY_PASSWORD",
+              "--v4-signing-enabled", "false", aligned], "QA session APK signing", environment)
+        verify(aligned)
+        _run([sdk / "zipalign", "-c", "16384", aligned], "QA session alignment verification", environment)
+        with ZipFile(aligned) as archive:
+            after = inventory(archive)
+        expected = {**members, **{k: hashlib.sha256(v).hexdigest() for k, v in replacements.items()}}
+        if after != expected or digest(source) != PINNED_SESSION_INPUT:
+            raise AndroidPackagingError("Session refresh changed another APK member or its input")
+        report = {"schema": 1, "qa_only": True, "emulator_only": True, "package": NORMAL_PACKAGE,
+                  "session_millis": session_millis, "default_session_millis": DEFAULT_SESSION_MILLIS,
+                  "maximum_session_millis": MAX_SESSION_MILLIS, "observer_lifetime_only": True,
+                  "source_apk_sha256": PINNED_SESSION_INPUT, "output_apk_sha256": digest(aligned),
+                  "output_bytes": aligned.stat().st_size, "signer_sha256": PINNED_QA_CERT,
+                  "qa_ui": marker, "changed_apk_members": ["classes5.dex", MARKER],
+                  "all_other_members_preserved": True, "native_observer_sha256": members[NATIVE],
+                  "sdk_native_metadata_gmm_guid_manifest_nsc_unchanged": True,
+                  "game_clocks_sdk_flags_or_running_fields_changed": False,
+                  "vm_install_performed": False, "published": False}
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        os.link(aligned, output)
+        try:
+            with report_path.open("x", encoding="utf8") as stream:
+                json.dump(report, stream, indent=2)
+                stream.write("\n")
+        except BaseException:
+            output.unlink()
+            raise
+    return report
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path)
@@ -402,7 +515,11 @@ def main(argv=None):
     parser.add_argument("--input-profile", choices=tuple(INPUT_PROFILES), default=DIAGNOSTIC_PROFILE)
     parser.add_argument("--qa-aes-report", type=Path)
     parser.add_argument("--expected-source-sha256", required=True)
-    parser.add_argument("--native-library", type=Path, required=True)
+    parser.add_argument("--native-library", type=Path)
+    parser.add_argument("--refresh-existing-session", action="store_true",
+                        help="Update only observer DEX/marker of the exact pinned a4 QA APK")
+    parser.add_argument("--session-millis", type=int, default=DEFAULT_SESSION_MILLIS,
+                        help="Public emulator-only observer lifetime; default30min, maximum120min")
     parser.add_argument("--emulator-only", action="store_true", required=True)
     parser.add_argument("--apkeditor", type=Path)
     parser.add_argument("--build-tools", type=Path)
@@ -413,10 +530,20 @@ def main(argv=None):
                         help="Reuse a privately retained QA key (alias qa-ui-only); password from IDOLY_QA_UI_KEY_PASSWORD")
     args = parser.parse_args(argv)
     try:
-        report = package(args.source, args.output, qa_aes_report=args.qa_aes_report,
-            expected_source_sha256=args.expected_source_sha256, native_library=args.native_library,
-            emulator_only=args.emulator_only, input_profile=args.input_profile, apkeditor=args.apkeditor, build_tools=args.build_tools,
-            java=args.java, android_jar=args.android_jar, report_path=args.report, qa_keystore=args.qa_keystore)
+        if args.refresh_existing_session:
+            if args.native_library is not None or args.qa_aes_report is not None or args.apkeditor is not None:
+                raise AndroidPackagingError("Session refresh does not accept native, AES or manifest overrides")
+            report = refresh_session(args.source, args.output, expected_source_sha256=args.expected_source_sha256,
+                emulator_only=args.emulator_only, session_millis=args.session_millis, qa_keystore=args.qa_keystore,
+                build_tools=args.build_tools, java=args.java, android_jar=args.android_jar, report_path=args.report)
+        else:
+            if args.native_library is None:
+                raise AndroidPackagingError("Adding a new QA provider requires --native-library")
+            report = package(args.source, args.output, qa_aes_report=args.qa_aes_report,
+                expected_source_sha256=args.expected_source_sha256, native_library=args.native_library,
+                emulator_only=args.emulator_only, input_profile=args.input_profile, apkeditor=args.apkeditor, build_tools=args.build_tools,
+                java=args.java, android_jar=args.android_jar, report_path=args.report, qa_keystore=args.qa_keystore,
+                session_millis=args.session_millis)
     except (AndroidPackagingError, OSError, ValueError, KeyError) as error:
         parser.exit(1, f"QA UI packaging failed: {error}\n")
     print(json.dumps(report, indent=2))

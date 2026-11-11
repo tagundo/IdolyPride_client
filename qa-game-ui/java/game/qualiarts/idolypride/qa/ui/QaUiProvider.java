@@ -25,16 +25,16 @@ public final class QaUiProvider extends ContentProvider {
     private static final String NORMAL_INPUT_SHA256 = "28ecc6a617867d0842a5e88eac3d5736199809a49d4d433ce47816d6a40ba77b";
     private static final String TOKEN_FILE = "idoly-qa-ui-token";
     private static final String TAG = "IdolyQaUi";
-    private static final long SESSION_MILLIS = 1800000L;
     private static final AtomicBoolean STARTED = new AtomicBoolean();
 
     @Override public boolean onCreate() {
         Context context = getContext();
         if (context == null || !(DIAGNOSTIC_PACKAGE.equals(context.getPackageName())
                 || NORMAL_PACKAGE.equals(context.getPackageName()))
-                || !context.getPackageName().equals(Application.getProcessName()) || !emulatorHardware()
-                || !validMarker(context) || !STARTED.compareAndSet(false, true)) return true;
-        Thread worker = new Thread(new Bootstrap(context.getApplicationContext()), "IdolyQaUiBootstrap");
+                || !context.getPackageName().equals(Application.getProcessName()) || !emulatorHardware()) return true;
+        long sessionMillis = markerSessionMillis(context);
+        if (sessionMillis <= 0 || !STARTED.compareAndSet(false, true)) return true;
+        Thread worker = new Thread(new Bootstrap(context.getApplicationContext(), sessionMillis), "IdolyQaUiBootstrap");
         worker.setDaemon(true);
         worker.start();
         return true;
@@ -45,13 +45,13 @@ public final class QaUiProvider extends ContentProvider {
             || "cutf_cvm".equals(Build.HARDWARE);
     }
 
-    private static boolean validMarker(Context context) {
+    private static long markerSessionMillis(Context context) {
         try (InputStream stream = context.getAssets().open("idoly-qa-ui.json")) {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             byte[] chunk = new byte[1024];
             int count;
             while ((count = stream.read(chunk)) >= 0) {
-                if (buffer.size() + count > 16384) return false;
+                if (buffer.size() + count > 16384) return 0;
                 buffer.write(chunk, 0, count);
             }
             JSONObject marker = new JSONObject(new String(buffer.toByteArray(), StandardCharsets.UTF_8));
@@ -65,9 +65,10 @@ public final class QaUiProvider extends ContentProvider {
                     && !marker.optBoolean("exported", true) && marker.optBoolean("debuggable", false)
                     && marker.optBoolean("loopback_only", false);
             }
-            return supportedProfile && marker.optInt("schema", 0) == 1 && marker.optBoolean("qa_only", false)
-                && marker.optBoolean("emulator_only", false) && packageName.equals(marker.optString("package", ""));
-        } catch (Exception ignored) { return false; }
+            if (!(supportedProfile && marker.optInt("schema", 0) == 1 && marker.optBoolean("qa_only", false)
+                && marker.optBoolean("emulator_only", false) && packageName.equals(marker.optString("package", "")))) return 0;
+            return LoopbackUiServer.markerSessionMillis(marker.opt("session_millis"), marker.has("session_millis"));
+        } catch (Exception ignored) { return 0; }
     }
 
     static final class EmulatorIndicators {
@@ -104,7 +105,11 @@ public final class QaUiProvider extends ContentProvider {
 
     private static final class Bootstrap implements Runnable {
         private final Context context;
-        Bootstrap(Context context) { this.context = context; }
+        private final long sessionMillis;
+        Bootstrap(Context context, long sessionMillis) {
+            this.context = context;
+            this.sessionMillis = LoopbackUiServer.checkedSessionMillis(sessionMillis);
+        }
         @Override public void run() {
             if (!emulatorProperty()) { Log.i(TAG, "emulator_guard_blocked"); return; }
             UnityDispatcher dispatcher = null;
@@ -120,9 +125,9 @@ public final class QaUiProvider extends ContentProvider {
                 StringBuilder encoded = new StringBuilder(64);
                 for (byte value : random) encoded.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
                 String token = encoded.toString();
-                dispatcher = new UnityDispatcher(context, SESSION_MILLIS);
+                dispatcher = new UnityDispatcher(context, sessionMillis);
                 phase = "listener_start";
-                server = new LoopbackUiServer(token, dispatcher, SESSION_MILLIS);
+                server = new LoopbackUiServer(token, dispatcher, sessionMillis);
                 phase = "private_token_write";
                 try (FileOutputStream stream = context.openFileOutput(temporary.getName(), Context.MODE_PRIVATE)) {
                     stream.write((token + "\n").getBytes(StandardCharsets.US_ASCII));

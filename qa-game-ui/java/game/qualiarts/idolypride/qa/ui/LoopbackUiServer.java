@@ -21,6 +21,8 @@ import java.util.regex.Pattern;
 final class LoopbackUiServer implements Runnable {
     static final int PORT = 50052;
     static final int MAX_RESPONSE = 65536;
+    static final long DEFAULT_SESSION_MILLIS = 1800000L;
+    static final long MAX_SESSION_MILLIS = 7200000L;
     private static final int MAX_HEADERS = 8192;
     private static final int MAX_BODY = 4096;
     private static final long INPUT_NANOS = 3000000000L;
@@ -44,9 +46,22 @@ final class LoopbackUiServer implements Runnable {
     private final long deadline;
     private volatile boolean stopped;
 
+    static long checkedSessionMillis(long value) {
+        if (value <= 0 || value > MAX_SESSION_MILLIS) throw new IllegalArgumentException("QA session duration");
+        return value;
+    }
+
+    static long markerSessionMillis(Object value, boolean present) {
+        if (!present) return DEFAULT_SESSION_MILLIS;
+        if (!(value instanceof Integer) && !(value instanceof Long))
+            throw new IllegalArgumentException("QA session duration must be an integer");
+        return checkedSessionMillis(((Number)value).longValue());
+    }
+
     LoopbackUiServer(String token, Actions actions, long sessionMillis) throws IOException {
-        if (token == null || !token.matches("[0-9a-f]{64}") || actions == null
-                || sessionMillis <= 0 || sessionMillis > 1800000L) throw new IllegalArgumentException("QA bridge configuration");
+        if (token == null || !token.matches("[0-9a-f]{64}") || actions == null)
+            throw new IllegalArgumentException("QA bridge configuration");
+        checkedSessionMillis(sessionMillis);
         this.authorization = ("Bearer " + token).getBytes(StandardCharsets.US_ASCII);
         this.actions = actions;
         this.deadline = System.nanoTime() + sessionMillis * 1000000L;
