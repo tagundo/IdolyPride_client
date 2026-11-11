@@ -2,7 +2,7 @@
 """Build the native server with cached Android tools, without Gradle or Go.
 
 Use CPython 3.13, an exact committed source snapshot and a separately validated
-45-table public payload. Existing APKs and account files are never overwritten.
+49-table public payload. Existing APKs and account files are never overwritten.
 All Java processes are sequential, bounded and run with a single CPU/worker.
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.6", 25
+VERSION, VERSION_CODE = "0.3.7", 26
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -53,7 +53,9 @@ GRADLE = "android-server/app/build.gradle.kts"
 JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")
 SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
-EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression"))
+EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
+                          "CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
+                          "CompanyEnjoyCharacterLevelSetting"))
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
 NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
     "libchaquopy_java.so", "libcrypto_chaquopy.so", "libcrypto_python.so", "libidoly_live.so",
@@ -438,7 +440,7 @@ def dependency_classes(jar, baseline_dex):
 
 
 def validate_payload(payload, expected_sha256, baseline_archive):
-    """Only extend the pinned public payload by its five named JSON tables."""
+    """Only extend the pinned public payload by its nine named JSON tables."""
     if (not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
             or payload.stat().st_size > MAX_APK or pybundle.digest(payload) != expected_sha256):
         raise ValueError("Validated public payload hash differs")
@@ -447,7 +449,7 @@ def validate_payload(payload, expected_sha256, baseline_archive):
         infos = pybundle._members(new, pybundle.MAX_EXPANDED)
         added = {"data/master-json/" + name + ".json" for name in EXTRA_TABLES}
         if set(infos) != set(old_infos) | added or added & set(old_infos):
-            raise ValueError("Payload may add only the five named public JSON tables")
+            raise ValueError("Payload may add only the nine named public JSON tables")
         old_hashes = pybundle._hash_members(old, old_infos)
         hashes = pybundle._hash_members(new, infos)
         if any(hashes[name] != digest for name, digest in old_hashes.items() if name != PAYLOAD_MANIFEST):
@@ -459,8 +461,8 @@ def validate_payload(payload, expected_sha256, baseline_archive):
             raise ValueError("Payload provenance changed outside tables/files")
         tables = {name[len("data/master-json/"):-5] for name in infos
                   if name.startswith("data/master-json/") and name.endswith(".json")}
-        if len(tables) != 45 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
-            raise ValueError("Payload must contain exactly 45 public JSON tables")
+        if len(tables) != 49 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
+            raise ValueError("Payload must contain exactly 49 public JSON tables")
         for table in tables:
             rows = json.loads(pybundle._read(new, infos["data/master-json/" + table + ".json"], MAX_JSON),
                               object_pairs_hook=pybundle._json_object)

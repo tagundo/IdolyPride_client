@@ -64,6 +64,24 @@ def test_media_360_catalog_route_keeps_auth_and_ignores_old_account_capture(game
     assert game.state.snapshot("media") == before
 
 
+def test_media_company_route_keeps_auth_and_live_catalog_precedence(game, tmp_path):
+    path = "/api.Company/Top"
+    old = game.schema.response_type(path)()
+    old.companyGradeInfos.add(id="captured-grade")
+    captured(game, tmp_path, path, old)
+    assert invoke(game, app(game, tmp_path, False), path) == old
+    application = app(game, tmp_path, True)
+    current = game.schema.response_type(path)()
+    current.companyGradeInfos.add(id="current-media-grade")
+    application.company_reads.handle = lambda route, plain: current.SerializeToString() if route == path else None
+    before = game.state.snapshot("media")
+    assert invoke(game, application, path) == current
+    with pytest.raises(RpcFailure) as denied:
+        invoke(game, application, path, authenticated=False)
+    assert denied.value.code == RpcCode.UNAUTHENTICATED
+    assert game.state.snapshot("media") == before
+
+
 def test_media_home_uses_live_handler_and_same_story_parts_as_media_list(game, tmp_path):
     response = game.schema.response_type("/api.Home/Enter")(currentMainAreaId="old-capture")
     captured(game, tmp_path, "/api.Home/Enter", response)

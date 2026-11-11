@@ -59,8 +59,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "25",
-                           tool.ANDROID + "versionName": "0.3.6"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "26",
+                           tool.ANDROID + "versionName": "0.3.7"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -87,7 +87,7 @@ def test_manifest_entity_and_backup_policy_rejected():
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 25;' in raw and 'VERSION_NAME = "0.3.6";' in raw
+    assert 'VERSION_CODE = 26;' in raw and 'VERSION_NAME = "0.3.7";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
         tool.build_config('"; injected')
@@ -95,7 +95,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("25")\ngradleProperty("serverVersionName").orElse("0.3.6")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("26")\ngradleProperty("serverVersionName").orElse("0.3.7")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -195,12 +195,12 @@ def payload_case(tmp_path):
     return baseline, payload, new, write
 
 
-def test_payload_extends_only_five_public_tables_and_verifies_actual_file_provenance(payload_case):
+def test_payload_extends_only_nine_public_tables_and_verifies_actual_file_provenance(payload_case):
     baseline, payload, _files, write = payload_case
     digest = write()
     with ZipFile(baseline) as archive:
         report = tool.validate_payload(payload, digest, archive)
-    assert len(report["tables"]) == 45 and report["sha256"] == digest
+    assert len(report["tables"]) == 49 and report["sha256"] == digest
 
 
 @pytest.mark.parametrize("change", ["private", "old-bytes", "missing", "empty-new"])
@@ -218,6 +218,21 @@ def test_payload_rejects_private_extra_mutated_old_or_incomplete_tables(payload_
     digest = write(files)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
         tool.validate_payload(payload, digest, archive)
+
+
+@pytest.mark.parametrize("table", ["CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
+                                   "CompanyEnjoyCharacterLevelSetting"])
+def test_company_menu_public_tables_must_all_exist_and_be_nonempty(payload_case, table):
+    baseline, payload, original, write = payload_case
+    for empty in (False, True):
+        files = dict(original)
+        if empty:
+            files["data/master-json/" + table + ".json"] = b"[]"
+        else:
+            files.pop("data/master-json/" + table + ".json")
+        digest = write(files)
+        with ZipFile(baseline) as archive, pytest.raises(ValueError):
+            tool.validate_payload(payload, digest, archive)
 
 
 @pytest.mark.parametrize("change", ["file-hash", "row-count-bool", "duplicate-path", "wrong-hash", "duplicate-member"])

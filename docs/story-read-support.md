@@ -35,4 +35,4 @@
 
 감상 모드의 `Read`·`ReadEvent`·`ReadExtra`는 재생 완료와 건너뛰기 모두 해당 스토리를 읽음으로 저장하며 **보상과 잔액 변경은 없습니다**. `ReleaseEpisode`는 실제 장·루트·에피소드만 무료로 읽기 가능한 상태로 만들고, 이미 읽은 행을 미독으로 되돌리지 않습니다. 같은 요청의 반복은 추가 상태 변경 없이 현재 행을 반환합니다. 읽음 저장과 프로필 snapshot 변경은 기존 `State.mutate_snapshot` 트랜잭션을 사용합니다.
 
-이 확장은 일반 획득 조건을 복원한 것이 아니라 사용자가 선택한 감상 모드의 명시적인 해금입니다. 원본 6.1.1 enum의 `StoryStatusType_Unread=1`, `Read=2`와 실제 Story RPC 필드를 사용하며, 재생에는 원본 `Story.advPlayTypes`·`advAssetIds`·`branchChoices`와 기존 SDK 리소스 경로를 그대로 사용합니다. ADV 스크립트·보이스·영상 파일을 생성하지 않습니다. 별도 기념일·회사 교류 흐름의 `ReadAnniversaryStory`와 `ReadCharacterCompanyEnjoyStory`는 이 최소 처리기에 포함하지 않습니다. 실제 게임에서의 전체 목록 선택·재생 완료 검증은 별도입니다.
+이 확장은 일반 획득 조건을 복원한 것이 아니라 사용자가 선택한 감상 모드의 명시적인 해금입니다. 원본 6.1.1 enum의 `StoryStatusType_Unread=1`, `Read=2`와 실제 Story RPC 필드를 사용하며, 재생에는 원본 `Story.advPlayTypes`·`advAssetIds`·`branchChoices`와 기존 SDK 리소스 경로를 그대로 사용합니다. ADV 스크립트·보이스·영상 파일을 생성하지 않습니다. v0.3.7은 `ReadCharacterCompanyEnjoyStory`의 실제 캐릭터·번호 연결을 확인해 보상 없이 읽음 처리합니다. 기념일 `ReadAnniversaryStory`는 계속 미지원입니다. 실제 게임에서의 전체 목록 선택·재생 완료 검증은 별도입니다.

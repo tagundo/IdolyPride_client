@@ -73,6 +73,54 @@ def snapshot(game):
     return game.schema.response_type(module._USER).FromString(game.state.snapshot("media")[0])
 
 
+@pytest.fixture
+def company_game(game):
+    rows = [{"id": "company-owned", "companyEnjoyStories": [
+        {"number": 1, "storyId": "media-main"}, {"number": 2, "storyId": "media-extra"}]},
+        {"id": "company-unowned", "companyEnjoyStories": [{"number": 1, "storyId": "media-event"}]}]
+    (game.master / "Character.json").write_text(json.dumps(rows))
+    value = snapshot(game)
+    value.characters.add(characterId="company-owned", companyEnjoyPoint=123)
+    game.state.mutate_snapshot("media", game.schema.fingerprint, lambda _: value.SerializeToString())
+    return game
+
+
+@pytest.mark.parametrize("is_last", (False, True))
+def test_media_company_story_uses_actual_character_number_and_preserves_points_without_rewards(company_game, is_last):
+    game = company_game
+    before = snapshot(game)
+    result = invoke(game, module._COMPANY, characterId="company-owned", number=1, isLast=is_last)
+    after = snapshot(game)
+    expected = type(before)()
+    expected.CopyFrom(before)
+    expected.stories.add(storyId="media-main", statusType=2)
+    assert after.SerializeToString() == expected.SerializeToString()
+    assert not result.rewards
+    assert result.commonResponse.updatedData.stories[0].storyId == "media-main"
+    saved = game.state.snapshot("media")
+    invoke(game, module._COMPANY, characterId="company-owned", number=1, isLast=not is_last)
+    assert game.state.snapshot("media") == saved
+
+
+@pytest.mark.parametrize("character,number,code", (("company-owned", 9, RpcCode.INVALID_ARGUMENT),
+    ("unknown", 1, RpcCode.INVALID_ARGUMENT), ("company-unowned", 1, RpcCode.PERMISSION_DENIED)))
+def test_media_company_story_rejects_invalid_target_or_unowned_character_without_changes(company_game, character, number, code):
+    before = dump(company_game)
+    with pytest.raises(RpcFailure) as error:
+        invoke(company_game, module._COMPANY, characterId=character, number=number, isLast=True)
+    assert error.value.code == code and dump(company_game) == before
+
+
+def test_media_company_story_malformed_reference_cannot_partly_mark_a_story_read(company_game):
+    game = company_game
+    (game.master / "Character.json").write_text(json.dumps([{"id": "company-owned",
+        "companyEnjoyStories": [{"number": 1, "storyId": {"invalid": "reference"}}]}]))
+    before = dump(game)
+    with pytest.raises(RpcFailure) as error:
+        invoke(game, module._COMPANY, characterId="company-owned", number=1, isLast=True)
+    assert error.value.code == RpcCode.FAILED_PRECONDITION and dump(game) == before
+
+
 def test_seed_unlocks_only_defined_stories_and_preserves_read_photo_and_unknown_fields(game):
     value = snapshot(game)
     value.stories.add(storyId="media-main", statusType=2, isInvalid=True, isPhotoShot=True).MergeFromString(UNKNOWN)

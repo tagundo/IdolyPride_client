@@ -19,10 +19,12 @@ def prepare_media_profile(state, schema, profile, master_dir):
     from .media_stories import unlock_media_stories
     from .media_access import prepare_media_access, apply_media_access
     from .media_panorama import prepare_media_panorama
+    from .company import prepare_company_reads
 
     plan = prepare_media_inventory(schema, master_dir)
     access = prepare_media_access(master_dir)
     prepare_media_panorama(master_dir)
+    prepare_company_reads(master_dir)
     # Validate all scene definitions before creating or changing an account.
     scenes = prepare_media_scenes(master_dir)
     unlock_media_stories(schema.response_type("/api.User/Get")(), master_dir)

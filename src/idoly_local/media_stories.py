@@ -18,10 +18,11 @@ _USER = "/api.User/Get"
 _READ = "/api.Story/Read"
 _EVENT = "/api.Story/ReadEvent"
 _EXTRA = "/api.Story/ReadExtra"
+_COMPANY = "/api.Story/ReadCharacterCompanyEnjoyStory"
 _RELEASE = "/api.Story/ReleaseEpisode"
 _LIST_EVENT = "/api.Story/ListEvent"
 _LIST_EXTRA = "/api.Story/ListExtra"
-_ROUTES = frozenset((_READ, _EVENT, _EXTRA, _RELEASE, _LIST_EVENT, _LIST_EXTRA))
+_ROUTES = frozenset((_READ, _EVENT, _EXTRA, _COMPANY, _RELEASE, _LIST_EVENT, _LIST_EXTRA))
 
 
 def _fail(detail, code=RpcCode.FAILED_PRECONDITION):
@@ -154,6 +155,21 @@ class MediaStories:
 
     def _resolve(self, path, request):
         stories = self._definitions()
+        if path == _COMPANY:
+            character = self.catalog.ids("Character", required=True).get(request.characterId)
+            if character is None or request.number <= 0:
+                _fail("Unknown media company story", RpcCode.INVALID_ARGUMENT)
+            entries = character.get("companyEnjoyStories", [])
+            if (not isinstance(entries, list)
+                    or any(not isinstance(row, dict) or type(row.get("number")) is not int
+                           or row["number"] <= 0 or not _identity(row.get("storyId"))
+                           or row["storyId"] not in stories for row in entries)
+                    or len({row["number"] for row in entries}) != len(entries)):
+                _fail("Media company story references are malformed")
+            selected = [row for row in entries if row["number"] == request.number]
+            if len(selected) != 1:
+                _fail("Unknown media company story", RpcCode.INVALID_ARGUMENT)
+            return selected[0]["storyId"]
         if path == _READ:
             if request.storyId not in stories:
                 _fail("Unknown media Story identity", RpcCode.INVALID_ARGUMENT)
@@ -206,6 +222,8 @@ class MediaStories:
                 _fail("Media profile snapshot is malformed")
             if not snapshot.HasField("user"):
                 _fail("Media profile has no user state")
+            if path == _COMPANY and request.characterId not in {row.characterId for row in snapshot.characters}:
+                _fail("The media company character is not owned", RpcCode.PERMISSION_DENIED)
             matches = [row for row in snapshot.stories if row.storyId == identity]
             if len(matches) > 1:
                 _fail("Media story state has ambiguous identities")

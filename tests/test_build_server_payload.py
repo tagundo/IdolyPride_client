@@ -29,9 +29,11 @@ def missions():
 
 
 def test_payload_includes_canonical_tables_and_media_scene_definitions():
-    assert len(payload.TABLES) == len(set(payload.TABLES)) == 45
+    assert len(payload.TABLES) == len(set(payload.TABLES)) == 49
     assert payload.TABLES[39] == "Mission"
-    assert payload.TABLES[40:] == ("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression")
+    assert payload.TABLES[40:45] == ("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression")
+    assert payload.TABLES[45:] == ("CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
+                                  "CompanyEnjoyCharacterLevelSetting")
     assert "Condition" not in payload.TABLES
 
 
