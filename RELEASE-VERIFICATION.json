@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "version": "0.3.6",
+  "version_code": 25,
+  "source_commit": "c97c649a786305b74218154dc6458e748055c379",
+  "apk_name": "IdolyPride-Local-Server-Android.apk",
+  "apk_bytes": 99204992,
+  "apk_sha256": "ae2c03e3374a11605612c19b837e0c3e988ebe37b38f4244b0e415b69b5f77dd",
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "compiled_python_modules": 75,
+  "source_and_immutable_runtime_audit": true,
+  "backend_actual_masters_verified": true,
+  "photography_and_360_entry_condition_verified_from_original": true,
+  "supported_360_music_count": 14,
+  "panorama_all14_valid_cast_checks_no_mutation": true,
+  "media_v035_card_display_migration_verified": true,
+  "ordinary_db_and_media_selections_preserved_host_test": true,
+  "actual_360_playback_verified": false,
+  "clothes_back_freeze_resolution_verified": false,
+  "mac_binary_included": false
+}
