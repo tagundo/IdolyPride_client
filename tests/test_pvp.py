@@ -166,6 +166,136 @@ def test_top_opponents_and_dynamic_assets_are_private_owned_read_only_projection
     assert dump(game) == before and game.state.authenticated(game.token, "player")
 
 
+def test_top_only_capture_reads_menu_and_list_but_missing_selected_appearance_is_fixed_failure(game):
+    game.data["responses"] = [row for row in game.data["responses"] if row["method"] != module._ASSET]
+    write(game)
+    assert len(game.data["responses"]) == 4
+    before = dump(game)
+    snapshot_before = game.state.snapshot("player")
+    top = invoke(game)
+    assert top.topResult == game.top.topResult and top.opponentInfos == game.top.opponentInfos
+    assert UNKNOWN in top.SerializeToString() and not top.commonResponse.ListFields()
+    opponents = invoke(game, module._OPPONENTS, pvpSeasonId="synthetic-season")
+    assert opponents.opponentInfos == game.top.opponentInfos and not opponents.commonResponse.ListFields()
+    snapshot = game.schema.response_type(module._USER).FromString(game.state.snapshot("player")[0])
+    assert game.provider.quest_top_info(snapshot) == game.header.pvpInfo
+    restarted = module.Pvp(game.schema, State(game.state.path), "player", game.master)
+    assert restarted.handle(module._TOP, b"") == top.SerializeToString()
+    with pytest.raises(RpcFailure) as missing:
+        invoke(game, module._ASSET, pvpSeasonId="synthetic-season",
+               opponentId="synthetic-opponent", deckNumber=1)
+    assert missing.value.code == RpcCode.FAILED_PRECONDITION
+    assert missing.value.details == "VENUS capture unavailable: opponent_appearance_missing"
+    assert "synthetic-opponent" not in missing.value.details and str(game.path) not in missing.value.details
+    with pytest.raises(RpcFailure) as unknown:
+        invoke(game, module._ASSET, pvpSeasonId="synthetic-season",
+               opponentId="unknown-private-opponent", deckNumber=1)
+    assert unknown.value.code == RpcCode.INVALID_ARGUMENT
+    assert "unknown-private-opponent" not in unknown.value.details
+    assert game.state.snapshot("player") == snapshot_before
+    assert dump(game) == before and game.state.authenticated(game.token, "player")
+
+
+def test_partial_appearance_never_copies_another_opponents_model(game):
+    def add_opponent(_request, response):
+        added = response.opponentInfos.add()
+        added.CopyFrom(response.opponentInfos[0])
+        added.opponentId, added.name = "synthetic-second-opponent", "Second private rival"
+    source_change(game, module._TOP, add_opponent)
+    before = dump(game)
+    assert len(invoke(game).opponentInfos) == 2
+    assert len(invoke(game, module._OPPONENTS, pvpSeasonId="synthetic-season").opponentInfos) == 2
+    first = invoke(game, module._ASSET, pvpSeasonId="synthetic-season",
+                   opponentId="synthetic-opponent", deckNumber=1)
+    assert first.opponentCharacterAssets == game.assets.opponentCharacterAssets
+    with pytest.raises(RpcFailure) as missing:
+        invoke(game, module._ASSET, pvpSeasonId="synthetic-season",
+               opponentId="synthetic-second-opponent", deckNumber=1)
+    assert missing.value.code == RpcCode.FAILED_PRECONDITION
+    assert missing.value.details == "VENUS capture unavailable: opponent_appearance_missing"
+    assert dump(game) == before
+
+
+def test_optional_captured_opponent_list_is_available_without_any_appearance(game):
+    game.data["responses"] = [row for row in game.data["responses"] if row["method"] != module._ASSET]
+    captured = game.schema.response_type(module._OPPONENTS)()
+    captured.opponentInfos.extend(game.top.opponentInfos)
+    captured.opponentInfos[0].opponentId = "synthetic-list-only-opponent"
+    captured.MergeFromString(UNKNOWN)
+    captured.commonResponse.updatedData.balance.freeBalance = 999999
+    request = game.schema.request_type(module._OPPONENTS)(pvpSeasonId="synthetic-season")
+    game.data["responses"].append(record(module._OPPONENTS, request, captured))
+    write(game)
+    before = dump(game)
+    actual = invoke(game, module._OPPONENTS, pvpSeasonId="synthetic-season")
+    assert actual.opponentInfos == captured.opponentInfos and UNKNOWN in actual.SerializeToString()
+    assert invoke(game).opponentInfos == game.top.opponentInfos
+    with pytest.raises(RpcFailure) as missing:
+        invoke(game, module._ASSET, pvpSeasonId="synthetic-season",
+               opponentId="synthetic-list-only-opponent", deckNumber=1)
+    assert missing.value.code == RpcCode.FAILED_PRECONDITION
+    assert missing.value.details == "VENUS capture unavailable: opponent_appearance_missing"
+    assert not actual.commonResponse.ListFields() and dump(game) == before
+
+
+@pytest.mark.parametrize("gate", ["owner", "master", "expired", "main11"])
+def test_top_only_capture_keeps_account_master_time_and_unlock_gates(game, monkeypatch, gate):
+    game.data["responses"] = [row for row in game.data["responses"] if row["method"] != module._ASSET]
+    if gate == "owner":
+        game.data["owner"]["public_user_id"] = "foreign-private-owner"
+    elif gate == "master":
+        game.data["master_version"] = "different-master"
+    elif gate == "expired":
+        monkeypatch.setattr(module, "_now_ms", lambda: NOW + 10001)
+    else:
+        mutate(game, lambda snapshot: snapshot.quests.clear())
+    write(game)
+    before = dump(game)
+    for path, values in ((module._TOP, {}), (module._OPPONENTS, {"pvpSeasonId": "synthetic-season"})):
+        with pytest.raises(RpcFailure) as denied:
+            invoke(game, path, **values)
+        assert denied.value.code == RpcCode.FAILED_PRECONDITION
+        assert "foreign-private-owner" not in denied.value.details
+    snapshot = game.schema.response_type(module._USER).FromString(game.state.snapshot("player")[0])
+    assert game.provider.quest_top_info(snapshot) is None and dump(game) == before
+
+
+@pytest.mark.parametrize("kind", ["short", "unknown-opponent", "wrong-season", "bad-deck", "bad-pin"])
+def test_any_malformed_captured_appearance_blocks_all_reads_even_for_another_selection(game, kind):
+    def add_opponent(_request, response):
+        for identity in ("synthetic-second-opponent", "synthetic-missing-appearance"):
+            added = response.opponentInfos.add()
+            added.CopyFrom(response.opponentInfos[0])
+            added.opponentId = identity
+    source_change(game, module._TOP, add_opponent)
+    request = game.schema.request_type(module._ASSET)(pvpSeasonId="synthetic-season",
+        opponentId="synthetic-second-opponent", deckNumber=1)
+    response = game.schema.response_type(module._ASSET)()
+    response.CopyFrom(game.assets)
+    if kind == "short":
+        response.opponentCharacterAssets.pop()
+    elif kind == "unknown-opponent":
+        request.opponentId = "uncaptured-private-opponent"
+    elif kind == "wrong-season":
+        request.pvpSeasonId = "different-season"
+    elif kind == "bad-deck":
+        request.deckNumber = 0
+    captured = record(module._ASSET, request, response)
+    if kind == "bad-pin":
+        captured["response_sha256"] = "0" * 64
+    game.data["responses"].append(captured)
+    write(game)
+    before = dump(game)
+    for path, values in ((module._TOP, {}),
+                         (module._OPPONENTS, {"pvpSeasonId": "synthetic-season"}),
+                         (module._ASSET, {"pvpSeasonId": "synthetic-season",
+                                         "opponentId": "synthetic-opponent", "deckNumber": 1})):
+        with pytest.raises(RpcFailure) as denied:
+            invoke(game, path, **values)
+        assert denied.value.code == RpcCode.FAILED_PRECONDITION
+    assert dump(game) == before
+
+
 def test_selected_owned_deck_changes_projection_without_changing_private_opponent(game):
     mutate(game, lambda s: setattr(s.deckPositions[0], "costumeId", "cos-e-live"))
     # Slot5 is e because the shared synthetic input is deliberately unsorted.
@@ -185,7 +315,7 @@ def test_selected_owned_deck_changes_projection_without_changing_private_opponen
     lambda g: g.data["responses"][0].update(response_sha256="0" * 64),
     lambda g: g.data["responses"][0].update(request_b64="secret-invalid-base64"),
     lambda g: g.data["responses"].append(deepcopy(g.data["responses"][0])),
-    lambda g: g.data["responses"].pop(),
+    lambda g: g.data["responses"].pop(1),
 ])
 def test_missing_future_mismatched_partial_or_unpinned_catalog_fails_without_state_or_identifier_logs(game, change):
     before = dump(game)

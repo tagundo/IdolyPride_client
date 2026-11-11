@@ -1,5 +1,6 @@
 """Preserved VENUS reads cross the actual encrypted HTTP/2 application route."""
 from contextlib import contextmanager
+import json
 
 import grpc
 import pytest
@@ -82,6 +83,28 @@ def test_missing_private_catalog_returns_precondition_after_authentication(game,
             invoke("/api.Pvp/Top")
         assert missing.value.code() == grpc.StatusCode.FAILED_PRECONDITION
     assert dump(game) == before
+
+
+def test_top_only_venus_reads_cross_authenticated_transport_without_fabricating_appearance(game, tmp_path):
+    game.data["responses"] = [row for row in game.data["responses"] if row["method"] != "/api.Pvp/ListAsset"]
+    game.path.write_text(json.dumps(game.data))
+    snapshot = game.state.snapshot("player")[0]
+    before = dump(game)
+    with connected(game, tmp_path / "fixtures") as (_, invoke):
+        top = game.schema.response_type("/api.Pvp/Top").FromString(invoke("/api.Pvp/Top"))
+        assert not top.commonResponse.ListFields()
+        request = game.schema.request_type("/api.Pvp/ListOpponent")(pvpSeasonId=top.topResult.pvpSeason.id)
+        opponents = game.schema.response_type("/api.Pvp/ListOpponent").FromString(
+            invoke("/api.Pvp/ListOpponent", request.SerializeToString()))
+        assert opponents.opponentInfos == top.opponentInfos and not opponents.commonResponse.ListFields()
+        query = game.schema.request_type("/api.Pvp/ListAsset")(pvpSeasonId=top.topResult.pvpSeason.id,
+            opponentId=top.opponentInfos[0].opponentId, deckNumber=1)
+        with pytest.raises(grpc.RpcError) as missing:
+            invoke("/api.Pvp/ListAsset", query.SerializeToString())
+        assert missing.value.code() == grpc.StatusCode.FAILED_PRECONDITION
+        assert missing.value.details() == "VENUS capture unavailable: opponent_appearance_missing"
+        assert invoke("/api.User/Get") == snapshot
+    assert game.state.snapshot("player")[0] == snapshot and dump(game) == before
 
 
 def test_photo_creation_without_preserved_scene_cannot_consume_film_or_mutate_account(game, tmp_path):

@@ -1,7 +1,8 @@
 """Private, captured VENUS season reads; no matchmaking or battle settlement.
 
 VENUS season/quest/opponent definitions are dynamic API data, not Master.Quest.
-Only a complete, pinned capture belonging to this same local account is used.
+Only pinned captures belonging to this same local account are used. Top/list
+reads require their complete definitions; appearance is required when selected.
 The catalog is private user data and must never be included in app payloads.
 """
 from __future__ import annotations
@@ -161,7 +162,7 @@ class Pvp:
             now = _now_ms()
             _need(type(captured) is int and 0 < captured <= now, "capture_time_invalid")
             records = data.get("responses")
-            _need(isinstance(records, list) and 5 <= len(records) <= 256)
+            _need(isinstance(records, list) and 4 <= len(records) <= 256)
             parsed, seen = {}, set()
             for record in records:
                 _need(isinstance(record, dict) and record.get("method") in _RECORDS)
@@ -233,7 +234,11 @@ class Pvp:
                 by_id[opponent.opponentId] = opponent
             appearances = {}
             for identity in by_id:
-                _need((_ASSET, identity) in parsed, "opponent_appearance_missing")
+                # The original player-selection screen reads Top before deck
+                # selection requests ListAsset. Missing appearance must not
+                # block Top, but every appearance actually captured is checked.
+                if (_ASSET, identity) not in parsed:
+                    continue
                 request, response = parsed[(_ASSET, identity)]
                 _need(request.pvpSeasonId == season.id and request.deckNumber > 0, "season_mismatch")
                 self._assets_valid(response.opponentCharacterAssets, by_id[identity])
@@ -276,8 +281,13 @@ class Pvp:
                 else:
                     result.opponentInfos.extend(top.opponentInfos)
             else:
-                if request.opponentId not in assets:
+                known = {row.opponentId for row in top.opponentInfos}
+                if captured_opponents is not None:
+                    known.update(row.opponentId for row in captured_opponents.opponentInfos)
+                if request.opponentId not in known:
                     raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Unknown captured VENUS opponent")
+                if request.opponentId not in assets:
+                    _fail("opponent_appearance_missing")
                 own = project_saved_deck_assets(self.schema, snapshot, request.deckNumber, self.catalog)
                 result.CopyFrom(assets[request.opponentId])
                 del result.characterAssets[:]

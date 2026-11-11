@@ -12,7 +12,7 @@ from idoly_local import event_capture
 from idoly_local.dream_capture import read_capture_directory
 from idoly_local.state import State
 from test_dream_capture import captured as dream_capture, schema, CAPTURED
-from test_pvp import game as venus_game, asset_game
+from test_pvp import game as venus_game, asset_game, source_change
 from test_pvp_capture import archive as venus_archive
 
 
@@ -85,6 +85,40 @@ def test_venus_restores_its_private_catalog_and_stable_owner(tool, venus_game, t
     assert catalog["owner"] == {"server_user_id": identity["server_id"], "public_user_id": identity["public_id"]}
     assert catalog["owner"] == value.data["owner"] and contents(directory) == before
     assert not (output / "dream-private-catalog.json").exists()
+    no_staging(tmp_path)
+
+
+def test_venus_top_only_restores_exact_snapshot_without_creating_appearance_records(tool, venus_game, tmp_path, monkeypatch):
+    value = venus_game
+    directory = venus_archive(value, tmp_path / "capture", monkeypatch, omit="/api.Pvp/ListAsset")
+    before = contents(directory)
+    source = read_capture_directory(value.schema, directory)
+    output = tmp_path / "restored"
+    result = tool.restore_capture(value.schema, directory, output, event="venus", profile="my-account")
+    assert result["pvp_catalog"] and not result["credentials_imported"]
+    catalog = json.loads((output / "pvp-catalog.json").read_text())
+    assert len(catalog["responses"]) == 4
+    assert {row["method"] for row in catalog["responses"]} == {
+        "/api.User/Get", "/api.Master/Get", "/api.Quest/Top", "/api.Pvp/Top"}
+    state = State(output / "state.db")
+    assert state.snapshot("my-account") == (source.records[-1].response_raw, value.schema.fingerprint)
+    assert (output / "user-get.pb").read_bytes() == source.records[-1].response_raw
+    with state.connect() as db:
+        assert db.execute("SELECT count(*) FROM sessions").fetchone()[0] == 0
+    assert catalog["owner"] == value.data["owner"] and contents(directory) == before
+    private_modes(output)
+    no_staging(tmp_path)
+
+
+def test_venus_importer_does_not_drop_a_present_malformed_appearance(tool, venus_game, tmp_path, monkeypatch):
+    value = venus_game
+    source_change(value, "/api.Pvp/ListAsset", lambda request, response: response.opponentCharacterAssets.pop())
+    directory = venus_archive(value, tmp_path / "capture", monkeypatch)
+    before = contents(directory)
+    output = tmp_path / "restored"
+    with pytest.raises(tool.RestoreError, match="venus_catalog_unavailable"):
+        tool.restore_capture(value.schema, directory, output, event="venus")
+    assert contents(directory) == before and not output.exists()
     no_staging(tmp_path)
 
 

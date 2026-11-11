@@ -21,9 +21,12 @@ def _need(value, code):
 def build_pvp_catalog(schema, capture_directory, output_path=None):
     """Keep the final snapshot and exact captured season/opponent requests.
 
-    The runtime additionally validates every battle master and opponent style
-    against the installed master. Conversion does not import a local profile,
-    run a battle, reconcile a season or grant any captured response delta.
+    Top/list reads do not require an appearance capture for every opponent.
+    Every supplied appearance still needs its original matching request and
+    response; nothing is synthesized for missing ones. The runtime additionally
+    validates every battle master and supplied opponent style against the
+    installed master. Conversion does not import a local profile, run a battle,
+    reconcile a season or grant any captured response delta.
     """
     source = read_capture_directory(schema, capture_directory)
     selected = [row for row in source.records if row.method in _RECORDS
@@ -67,15 +70,12 @@ def build_pvp_catalog(schema, capture_directory, output_path=None):
                   "pvp_opponent_source_mismatch")
             opponents[opponent.opponentId] = raw
     _need(bool(top.opponentInfos), "pvp_opponent_missing")
-    asset_ids = set()
     for row in selected:
         if row.method in (ASSET, OPPONENTS):
             _need(row.request.pvpSeasonId == season.id, "pvp_season_mismatch")
         if row.method == ASSET:
             _need(row.request.opponentId in opponents and len(row.response.opponentCharacterAssets) == 5,
                   "pvp_opponent_appearance_missing")
-            asset_ids.add(row.request.opponentId)
-    _need(asset_ids == opponents.keys(), "pvp_opponent_appearance_missing")
     result = {"schema": 1, "schema_sha256": schema.fingerprint, "master_version": source.master_version,
               "captured_at_ms": source.captured_at_ms,
               "source_manifest_sha256": source.source_manifest_sha256,
