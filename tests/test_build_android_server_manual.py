@@ -1,7 +1,9 @@
 """Small synthetic boundaries; no Android tool, signing key or emulator needed."""
 import hashlib
+import errno
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import sys
@@ -342,3 +344,114 @@ def test_subprocess_failure_withholds_output_and_never_runs_if_resource_guard_fa
     monkeypatch.setattr(tool.subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn"))
     with pytest.raises(ValueError, match="resource guard"):
         tool._run(["must-not-run"], root=tmp_path, env={})
+
+
+def public_cache_case(tmp_path, monkeypatch):
+    path = tmp_path / "synthetic-public-input.apk"
+    path.write_bytes(b"public synthetic bytes" * 3000)
+    path.chmod(0o640)
+    expected = tool.pybundle.digest(path)
+    monkeypatch.setitem(tool.PUBLIC_INPUT_HASHES, "baseline", expected)
+    return path, expected, tool.PublicCacheAdvice()
+
+
+def test_cache_hint_preserves_public_bytes_mode_mtime_and_uses_readonly_fd(tmp_path, monkeypatch):
+    if not hasattr(os, "posix_fadvise"):
+        pytest.skip("POSIX cache advice is unavailable")
+    path, expected, cache = public_cache_case(tmp_path, monkeypatch)
+    before = tool._file_identity(path.stat())
+    opened, original_open = [], os.open
+    def checked_open(name, flags, *args, **kwargs):
+        opened.append(flags)
+        assert flags & os.O_ACCMODE == os.O_RDONLY
+        assert flags & os.O_NOFOLLOW
+        return original_open(name, flags, *args, **kwargs)
+    monkeypatch.setattr(tool.os, "open", checked_open)
+    cache.public("baseline", path, expected)
+    cache.advise()
+    assert tool._file_identity(path.stat()) == before
+    assert tool.pybundle.digest(path) == expected
+    assert opened and {event["role"] for event in cache.events} == {"baseline"}
+
+
+@pytest.mark.parametrize("role", ["keystore", "password", "state.db", "VM-overlay", "other-file"])
+def test_private_or_arbitrary_cache_roles_reject_before_open(tmp_path, monkeypatch, role):
+    monkeypatch.setattr(tool.os, "open", lambda *a, **k: pytest.fail("must not open private inputs"))
+    with pytest.raises(ValueError, match="explicitly pinned public"):
+        tool.PublicCacheAdvice().public(role, tmp_path / "private", "a" * 64)
+
+
+def test_cache_hint_requires_verified_hash_before_advice_and_rejects_symlinks(tmp_path, monkeypatch):
+    path, expected, cache = public_cache_case(tmp_path, monkeypatch)
+    monkeypatch.setattr(tool.os, "posix_fadvise", lambda *a: pytest.fail("unverified input must not be advised"), raising=False)
+    path.write_bytes(b"different public bytes")
+    with pytest.raises(ValueError, match="hash differs"):
+        cache.public("baseline", path, expected)
+    link = tmp_path / "linked-input.apk"
+    link.symlink_to(path)
+    with pytest.raises(ValueError, match="stable regular"):
+        cache.public("baseline", link, expected)
+    assert not cache.events
+
+
+def test_cache_advice_detects_path_replacement_between_lstat_and_open(tmp_path, monkeypatch):
+    path, expected, cache = public_cache_case(tmp_path, monkeypatch)
+    replacement = tmp_path / "other-public-file.apk"
+    replacement.write_bytes(path.read_bytes())
+    original_open = os.open
+    def replaced(name, flags, *args, **kwargs):
+        replacement.replace(path)
+        return original_open(name, flags, *args, **kwargs)
+    monkeypatch.setattr(tool.os, "open", replaced)
+    with pytest.raises(ValueError, match="changed while opening"):
+        cache.public("baseline", path, expected)
+    assert not cache.events
+
+
+def test_cache_advice_detects_changed_registered_file_without_hinting_new_bytes(tmp_path, monkeypatch):
+    path, expected, cache = public_cache_case(tmp_path, monkeypatch)
+    monkeypatch.setattr(tool.os, "posix_fadvise", lambda *a: None, raising=False)
+    cache.public("baseline", path, expected)
+    path.write_bytes(b"changed after verification")
+    monkeypatch.setattr(tool.os, "posix_fadvise", lambda *a: pytest.fail("changed file must not be advised"), raising=False)
+    with pytest.raises(ValueError, match="stable regular"):
+        cache.advise()
+
+
+def test_only_completed_owned_apk_names_can_be_advised_and_removed_own_file_is_skipped(tmp_path, monkeypatch):
+    work = tmp_path / "own-build"
+    work.mkdir()
+    (work / "unsigned.apk").write_bytes(b"synthetic own completed APK")
+    monkeypatch.setattr(tool.os, "posix_fadvise", lambda *a: None, raising=False)
+    cache = tool.PublicCacheAdvice()
+    cache.own_directory(work)
+    cache.completed_apk("unsigned.apk")
+    for name in ("../state.db", "password", "unrelated.apk"):
+        with pytest.raises(ValueError, match="completed APK"):
+            cache.completed_apk(name)
+    (work / "unsigned.apk").unlink()
+    cache.advise()
+    assert {event["role"] for event in cache.events} == {"own-unsigned.apk"}
+
+
+def test_unsupported_cache_hint_still_runs_the_unchanged_memory_guard_before_spawn(tmp_path, monkeypatch):
+    path, expected, cache = public_cache_case(tmp_path, monkeypatch)
+    def unsupported(*args): raise OSError(errno.EOPNOTSUPP, "synthetic unsupported hint")
+    monkeypatch.setattr(tool.os, "posix_fadvise", unsupported, raising=False)
+    cache.public("baseline", path, expected)
+    assert cache.events[-1]["result"] == "unsupported"
+    order = []
+    original_advise = cache.advise
+    def advice():
+        order.append("advice")
+        original_advise()
+    cache.advise = advice
+    def guard(_root):
+        order.append("strict-guard")
+        raise ValueError("Defer build until at least 1 GiB cgroup headroom is available")
+    monkeypatch.setattr(tool, "_resource_guard", guard)
+    monkeypatch.setattr(tool.subprocess, "Popen", lambda *a, **k: pytest.fail("must not spawn below strict threshold"))
+    with pytest.raises(ValueError, match="1 GiB"):
+        tool._run(["must-not-run"], root=tmp_path, env={}, cache=cache)
+    assert order == ["advice", "strict-guard"]
+    assert tool.MIN_HEADROOM == 1024 * 1024 * 1024

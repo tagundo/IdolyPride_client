@@ -37,6 +37,13 @@ PACKAGE = "game.qualiarts.idolypride.localserver"
 VERSION, VERSION_CODE = "0.3.5", 24
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
+PUBLIC_INPUT_HASHES = {
+    "baseline": pybundle.BASELINE_SHA256,
+    "chaquopy-jar": CHAQUOPY_SHA256,
+    "android-jar": "6cea1df3efb77103ac3e2beb9bf4718964b0e0869ab16d39d29d5cbae1c147ad",
+    "d8-jar": "d43c8a94c9b1f1da1a7cc49c32b81e8cee1708b37ee8b530a81a0688222b42c0",
+    "signer-jar": "eefdd6aed9db9fb849e4c98a50d8741e19d1b674ba6547220bcb9c3ed152123a",
+}
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 JAVA_SOURCE_ROOT = "android-server/app/src/main/java/"
 JAVA_ROOT = JAVA_SOURCE_ROOT + PACKAGE.replace(".", "/") + "/"
@@ -62,6 +69,110 @@ MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
 JAVA_FLAGS = ("-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
 CGROUP = Path("/sys/fs/cgroup")
+
+
+def _file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+class PublicCacheAdvice:
+    """Drop only verified public inputs or this build's three closed APKs.
+
+    This is a best-effort clean-page hint, never a substitute for the memory
+    guard. Key/password paths and arbitrary discovered files are not inputs.
+    """
+    def __init__(self):
+        self._entries, self._work = {}, None
+        self.events = []
+
+    def own_directory(self, directory):
+        directory = Path(directory)
+        info = directory.lstat()
+        if self._work is not None or not stat.S_ISDIR(info.st_mode) or directory.is_symlink():
+            raise ValueError("Expected one new owned build directory")
+        self._work = (directory, info.st_dev, info.st_ino)
+
+    def _open(self, path, expected=None):
+        before = path.lstat()
+        if not stat.S_ISREG(before.st_mode) or (expected is not None and _file_identity(before) != expected):
+            raise ValueError("Cache-advice file is not a stable regular file")
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+        fd = os.open(path, flags)
+        try:
+            if _file_identity(os.fstat(fd)) != _file_identity(before):
+                raise ValueError("Cache-advice file changed while opening")
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd, _file_identity(before)
+
+    def _stable(self, path, fd, expected):
+        if (_file_identity(os.fstat(fd)) != expected or _file_identity(path.lstat()) != expected):
+            raise ValueError("Cache-advice file changed during the operation")
+
+    def _register(self, role, path, expected_sha256):
+        path = Path(path).absolute()
+        fd, identity = self._open(path)
+        try:
+            limit = MAX_APK if role in ("baseline", "validated-payload") or role.startswith("own-") else 64 * MIB
+            if not 0 < identity[3] <= limit or role.startswith("own-") and os.fstat(fd).st_nlink != 1:
+                raise ValueError("Cache-advice input size or owned-file identity differs")
+            digest = hashlib.sha256()
+            while block := os.read(fd, pybundle.CHUNK):
+                digest.update(block)
+            self._stable(path, fd, identity)
+            if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+                raise ValueError("Public cache-advice input hash differs")
+            self._entries[path] = (role, identity, digest.hexdigest())
+        finally:
+            os.close(fd)
+        self._advise(path)
+
+    def public(self, role, path, expected_sha256):
+        if (role not in PUBLIC_INPUT_HASHES and role != "validated-payload"
+                or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+                or role in PUBLIC_INPUT_HASHES and PUBLIC_INPUT_HASHES[role] != expected_sha256):
+            raise ValueError("Only explicitly pinned public inputs may receive cache advice")
+        self._register(role, path, expected_sha256)
+
+    def completed_apk(self, name):
+        if self._work is None or name not in ("unsigned.apk", "aligned.apk", "signed.apk"):
+            raise ValueError("Cache advice is restricted to this build's completed APKs")
+        directory, device, inode = self._work
+        current = directory.lstat()
+        if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (device, inode):
+            raise ValueError("Owned build directory changed")
+        self._register("own-" + name, directory / name, None)
+
+    def _advise(self, path):
+        role, expected, _digest = self._entries[path]
+        try:
+            fd, identity = self._open(path, expected)
+        except FileNotFoundError:
+            if role.startswith("own-"):
+                return
+            raise ValueError("A pinned public input disappeared") from None
+        result = "unsupported"
+        try:
+            try:
+                hint = getattr(os, "posix_fadvise", None)
+                dontneed = getattr(os, "POSIX_FADV_DONTNEED", None)
+                if hint is not None and dontneed is not None:
+                    os.fsync(fd)
+                    hint(fd, 0, 0, dontneed)
+                    result = "advised"
+            except OSError:
+                # Unsupported hints and filesystem limitations do not relax the
+                # subsequent strict resource check or change the file content.
+                pass
+            self._stable(path, fd, identity)
+        finally:
+            os.close(fd)
+        self.events.append({"role": role, "path": str(path), "bytes": identity[3], "result": result})
+
+    def advise(self):
+        for path in tuple(self._entries):
+            self._advise(path)
 
 
 def _regular(path, *, private=False):
@@ -114,8 +225,10 @@ def _resource_guard(root):
     return {"memory_current": current, "memory_max": int(maximum), "oom_kill": events.get("oom_kill")}
 
 
-def _run(command, *, root, env, timeout=180):
+def _run(command, *, root, env, timeout=180, cache=None):
     """Bound both pipe reads and process lifetime; never print command/output."""
+    if cache is not None:
+        cache.advise()
     _resource_guard(root)
     process = subprocess.Popen(["/usr/bin/nice", "-n", "19", *map(str, command)],
                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -422,9 +535,12 @@ def build(args):
     if (output.name != "IdolyPride-Local-Server-Android.apk" or not output.parent.is_dir()
             or any(os.path.lexists(path) for path in (output, report_path))):
         raise ValueError("Choose unused standard APK/provenance paths in an existing directory")
-    if (baseline.stat().st_size > MAX_APK or pybundle.digest(baseline) != pybundle.BASELINE_SHA256):
+    if baseline.stat().st_size > MAX_APK:
         raise ValueError("Expected the exact pinned original v0.3.4 server APK")
+    cache = PublicCacheAdvice()
+    cache.public("baseline", baseline, pybundle.BASELINE_SHA256)
     staging_budget(root, output.parent)
+    cache.advise()
     preflight = _resource_guard(root)
     sources = pybundle.committed_sources(root, args.source_commit)
     native_sources = source_blobs(root, args.source_commit)
@@ -436,23 +552,33 @@ def build(args):
     tools = [jdk / "java", jdk / "javac", sdk / "aapt2", sdk / "zipalign", sdk / "lib/d8.jar", sdk / "lib/apksigner.jar", android]
     for tool in tools:
         _regular(tool)
+    for role, path in (("android-jar", android), ("d8-jar", sdk / "lib/d8.jar"),
+                       ("signer-jar", sdk / "lib/apksigner.jar")):
+        cache.public(role, path, PUBLIC_INPUT_HASHES[role])
+    tool_hashes = {str(path): PUBLIC_INPUT_HASHES[role] for role, path in (
+        ("android-jar", android), ("d8-jar", sdk / "lib/d8.jar"), ("signer-jar", sdk / "lib/apksigner.jar"))}
+    tool_hashes.update({str(path): pybundle.digest(path) for path in tools if str(path) not in tool_hashes})
     env = dict(os.environ)
     for name in ("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS"):
         env.pop(name, None)
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix=".manual-server-", dir=output.parent) as temporary, ZipFile(baseline) as incoming:
         work = Path(temporary)
+        cache.own_directory(work)
         infos = pybundle._members(incoming, pybundle.MAX_EXPANDED)
         before = pybundle._hash_members(incoming, infos)
         if (before.get(pybundle.PAYLOAD) != pybundle.PAYLOAD_SHA256 or not (MUTABLE_NAMES | REMOVED_NAMES) <= infos.keys()
                 or {name for name in infos if name.startswith("lib/")} != NATIVE_NAMES):
             raise ValueError("Pinned baseline structure differs")
         dependencies = dependency_classes(jar, pybundle._read(incoming, infos["classes.dex"], MAX_DEX))
+        cache.public("chaquopy-jar", jar, CHAQUOPY_SHA256)
         stable_jar = work / "chaquopy_java-17.0.0.jar"
         shutil.copyfile(jar, stable_jar)
         if pybundle.digest(stable_jar) != CHAQUOPY_SHA256:
             raise ValueError("Runtime JAR changed while snapshotting")
+        cache.public("chaquopy-jar", stable_jar, CHAQUOPY_SHA256)
         payload_report = validate_payload(payload, args.payload_sha256, incoming)
+        cache.public("validated-payload", payload, args.payload_sha256)
         for name, raw in native_sources.items():
             path = work / "source" / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -465,7 +591,7 @@ def build(args):
         config = generated / "BuildConfig.java"
         config.write_bytes(build_config(args.payload_sha256))
         def run(command):
-            return _run(command, root=root, env=env)
+            return _run(command, root=root, env=env, cache=cache)
         compiled_res, resources = work / "compiled-res.zip", work / "resources.apk"
         run([sdk / "aapt2", "compile", "--dir", work / "source" / RES_ROOT, "-o", compiled_res])
         run([sdk / "aapt2", "link", "-I", android, "--manifest", manifest, "--java", generated,
@@ -517,7 +643,9 @@ def build(args):
         if unsigned.stat().st_size * 2 + MIB > MAX_APK_STAGING:
             raise ValueError("Two APK files would exceed the 200 MiB staging bound")
         audit_apk(unsigned, before, infos, replacement_hashes, dependencies, compiled_names)
+        cache.completed_apk("unsigned.apk")
         run([sdk / "zipalign", "-f", "4", unsigned, aligned])
+        cache.completed_apk("aligned.apk")
         run([sdk / "zipalign", "-c", "4", aligned])
         unsigned.unlink()
         if aligned.stat().st_size * 2 + MIB > MAX_APK_STAGING:
@@ -531,6 +659,7 @@ def build(args):
                  "--v3-signing-enabled", "false", "--v4-signing-enabled", "false", "--out", signed, aligned])
         finally:
             env.pop("IDOLY_MANUAL_SERVER_PASSWORD", None)
+        cache.completed_apk("signed.apk")
         signature = run([*signer, "verify", "--verbose", "--print-certs", signed]).decode("utf-8")
         if ("Signer #1 certificate SHA-256 digest: " + CERTIFICATE not in signature
                 or "Number of signers: 1" not in signature
@@ -546,6 +675,8 @@ def build(args):
         if (pybundle.digest(baseline) != pybundle.BASELINE_SHA256 or pybundle.digest(payload) != args.payload_sha256
                 or pybundle.digest(stable_jar) != CHAQUOPY_SHA256):
             raise ValueError("A frozen build input changed during packaging")
+        signed_sha256 = pybundle.digest(signed)
+        cache.advise()
         postflight = _resource_guard(root)
         if postflight["oom_kill"] != preflight["oom_kill"]:
             raise ValueError("An OOM occurred during the build; candidate not published")
@@ -553,14 +684,14 @@ def build(args):
         report = {"schema": 1, "build_method": "cached manual aapt2/javac/D8; no Gradle, Go or downloads",
                   "source_commit": args.source_commit, "epoch": args.epoch, "version_name": VERSION,
                   "version_code": VERSION_CODE, "baseline_sha256": pybundle.BASELINE_SHA256,
-                  "apk_sha256": pybundle.digest(signed), "apk_bytes": signed.stat().st_size,
+                  "apk_sha256": signed_sha256, "apk_bytes": signed.stat().st_size,
                   "signer_sha256": CERTIFICATE, "signature_v2_only": True, "aligned": True,
                   "payload": payload_report, "chaquopy_jar_sha256": CHAQUOPY_SHA256,
                   "generated_r_sha256": pybundle.digest(r_sources[0]), "build_config_sha256": pybundle.digest(config),
                   "public_source_sha256": {name: hashlib.sha256(raw).hexdigest() for name, raw in native_sources.items()},
                   "builder_source_sha256": builder_sources,
                   "modules": modules, "app_imy_sha1": hashlib.sha1(app).hexdigest(), "audit": audit,
-                  "tool_sha256": {str(path): pybundle.digest(path) for path in tools},
+                  "tool_sha256": tool_hashes, "public_cache_advice": cache.events,
                   "java_flags": JAVA_FLAGS, "preflight": preflight, "postflight": postflight,
                   "seconds": time.monotonic() - started,
                   "child_peak_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
