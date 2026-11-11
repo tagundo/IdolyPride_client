@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "version": "0.3.7",
+  "version_code": 26,
+  "source_commit": "1f07ac5e7b39e4e5c233743fb4d06dbf98bc3b85",
+  "apk_bytes": 99229568,
+  "apk_sha256": "c4ab2e73e060b8797a630166248a6498c04d9824f8389a2b8a3df4336dfa520b",
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "json_tables": 49,
+  "payload_sha256": "065a17d66d548b5e43de7084ea61808c18035c4883cd17b210803e2b62e5ee58",
+  "source_runtime_signature_audit_passed": true,
+  "actual_master_api_tests_passed": true,
+  "company_grades": 55,
+  "company_trust_levels": 50,
+  "company_supported_characters": 20,
+  "company_levels_each": 60,
+  "company_story_entries": 160,
+  "read_operations_preserve_snapshot_and_points": true,
+  "actual_company_game_ui_verified": false,
+  "rewards_rankings_item_use_supported": false
+}
