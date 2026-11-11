@@ -1,0 +1,63 @@
+name: Stage reviewed v0.3.2 assets into its empty draft only
+
+on:
+  workflow_dispatch:
+    inputs:
+      review_bundle_b64:
+        description: Base64 of the exact independently reviewed public proof envelope
+        type: string
+        required: true
+      review_bundle_sha256:
+        description: SHA-256 of that exact approved envelope
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stage-reviewed-server-v0.3.2-draft-only
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDOLY_REVIEW_BUNDLE_B64: ${{ inputs.review_bundle_b64 }}
+      IDOLY_REVIEW_BUNDLE_SHA256: ${{ inputs.review_bundle_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Refuse incomplete or unapproved fixed pins before any candidate API request
+        run: python -c "import sys; sys.path.insert(0,'tools'); from stage_reviewed_server_v032_draft import configured_engine; configured_engine().load_pins()"
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-server-build-and-available-evidence-v0.3.2
+          repository: tagundo/IdolyPride_client
+          run-id: 42930420770
+          github-token: ${{ github.token }}
+          path: data/android
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos-server-candidate-and-native-evidence-v0.3.2
+          repository: tagundo/IdolyPride_client
+          run-id: 42930420770
+          github-token: ${{ github.token }}
+          path: data/macos
+      - name: Check exact proof bytes and stage only the empty reviewed draft
+        run: python tools/stage_reviewed_server_v032_draft.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reviewed-server-v0.3.2-draft-staging-evidence
+          path: data/patch-draft-staging-evidence
+          if-no-files-found: warn
