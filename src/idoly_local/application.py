@@ -92,10 +92,14 @@ class Application:
 
     def _story_extra_fixture(self):
         """Use the same account eligibility for Home, lists and read actions."""
+        if self.media_mode:
+            return None
         from .story_reads import _private_story_permissions
         return _private_story_permissions(self.schema, self.fixtures, "/api.Story/ListExtra")
 
     def _story_event_fixture(self):
+        if self.media_mode:
+            return None
         from .story_reads import _private_story_permissions
         return _private_story_permissions(self.schema, self.fixtures, "/api.Story/ListEvent")
 

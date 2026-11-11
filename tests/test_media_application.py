@@ -1,4 +1,5 @@
 """Media routes cannot be shadowed by captured ordinary account responses."""
+import json
 from pathlib import Path
 
 import pytest
@@ -56,4 +57,49 @@ def test_media_home_uses_live_handler_and_same_story_parts_as_media_list(game, t
     expected = invoke(game, application, "/api.Story/ListExtra")
     assert actual.currentMainAreaId == "current-media-area"
     assert actual.extraStoryPartInfos == expected.infos
+    assert game.state.snapshot("media") == before
+
+
+@pytest.mark.parametrize("source_path", ("/api.Story/ListExtra", "/api.Home/Enter"))
+def test_media_home_ignores_conflicting_captured_story_permissions_while_normal_keeps_them(game, tmp_path, source_path):
+    # Exercise the real Gameplay.Home.Enter callback, rather than replacing its
+    # handler. These are the only extra masters its empty home needs.
+    for table, rows in {
+        "Area": [{"id": "home-main", "type": 1, "order": 1, "questIds": []}],
+        "HierarchyGrade": [{"id": "home-grade"}],
+        "HierarchyDetailGrade": [{"id": "home-detail", "hierarchyGradeId": "home-grade",
+                                   "requiredHierarchyPoint": 0, "requiredHierarchyRank": 0}],
+    }.items():
+        (game.master / (table + ".json")).write_text(json.dumps(rows))
+    for index, unlocked in enumerate((True, False)):
+        response = game.schema.response_type(source_path)()
+        target = response.infos if source_path == "/api.Story/ListExtra" else response.extraStoryPartInfos
+        part = target.add(id="extra-part", unlocked=unlocked)
+        story = part.stories.add(id="extra", unlocked=unlocked)
+        story.episodes.add(episode=1, unlocked=unlocked)
+        source = tmp_path / ("conflicting-" + str(index) + ".pb")
+        source.write_bytes(response.SerializeToString())
+        # A fallback capture and an exact-request capture are both valid
+        # FixtureStore entries, but their eligibility intentionally disagrees.
+        request = None
+        if index:
+            request = tmp_path / "captured-request.pb"
+            request.write_bytes(game.schema.request_type(source_path)().SerializeToString())
+        import_response(source, tmp_path / "fixtures", game.schema, source_path, request=request)
+    media = app(game, tmp_path, True)
+    ordinary = app(game, tmp_path, False)
+    assert len(media.fixtures.variants(source_path)) == 2
+    before = game.state.snapshot("media")
+    home = invoke(game, media, "/api.Home/Enter")
+    expected = invoke(game, media, "/api.Story/ListExtra")
+    assert home.currentMainAreaId == "home-main"
+    assert home.extraStoryPartInfos == expected.infos
+    assert game.state.snapshot("media") == before
+    with pytest.raises(RpcFailure, match="variants disagree") as denied:
+        ordinary._story_extra_fixture()
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION
+    if source_path == "/api.Story/ListExtra":
+        with pytest.raises(RpcFailure, match="variants disagree") as denied:
+            invoke(game, ordinary, "/api.Home/Enter")
+        assert denied.value.code == RpcCode.FAILED_PRECONDITION
     assert game.state.snapshot("media") == before
