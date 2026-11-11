@@ -86,6 +86,7 @@ def test_stream_repack_preserves_native_dex_manifest_sdk_marker_and_licenses(tmp
     before = fixture()
     members = {tool.METADATA: before, "AndroidManifest.xml": b"manifest bytes",
         tool.UNITY_SETTINGS: b"original PlayerSettings bytes",
+        tool.UNITY_GUID: b"a711296b-d0fa-4aa6-a376-90142093f41a",
         "classes.dex": b"real SDK code retained", "lib/arm64-v8a/libil2cpp.so": b"native code retained",
         "assets/idoly-qa-ui.json": b"existing observer provenance",
         "META-INF/library.kotlin_module": b"license metadata", "META-INF/OLD.SF": b"signature"}
@@ -94,13 +95,15 @@ def test_stream_repack_preserves_native_dex_manifest_sdk_marker_and_licenses(tmp
             z.writestr(name, raw)
     after, _ = tool.patch_octo_metadata(before)
     settings = b"one audited PlayerSettings field changed"
-    tool.repack(source, output, after, settings)
+    guid = b"00000000-0000-5000-8000-000000000001"
+    tool.repack(source, output, after, settings, guid)
     with ZipFile(output) as z:
         assert z.read(tool.METADATA) == after
         assert z.read(tool.UNITY_SETTINGS) == settings
+        assert z.read(tool.UNITY_GUID) == guid
         assert "META-INF/OLD.SF" not in z.namelist()
         for name, raw in members.items():
-            if name not in (tool.METADATA, tool.UNITY_SETTINGS) and not tool.signature_member(name):
+            if name not in (tool.METADATA, tool.UNITY_SETTINGS, tool.UNITY_GUID) and not tool.signature_member(name):
                 assert z.read(name) == raw
     with ZipFile(source) as z:
         assert z.read(tool.METADATA) == before

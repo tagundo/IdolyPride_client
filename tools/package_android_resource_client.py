@@ -7,6 +7,8 @@ bytes are reused from the verified normal-client baseline; no QA observer,
 software AES, store bypass, SDK flags or additional native hooks are introduced.
 Unity's one PlayerSettings HTTP transport policy is enabled; Android NSC still
 limits cleartext connections to127.0.0.1 and TLS validation is unchanged.
+The Unity extraction-cache build GUID is derived from the changed code/config
+hashes so ordinary engine startup refreshes IL2CPP resources after an update.
 """
 from __future__ import annotations
 
@@ -25,6 +27,7 @@ from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 from idoly_local.android_package import configure_android
 from idoly_local.client_patch import patch_metadata
 from idoly_local.unity_http import MEMBER as UNITY_SETTINGS, patch_player_http
+from idoly_local.unity_cache import MEMBER as UNITY_GUID, derive_cache_guid
 
 if __package__:
     from . import patch_android_octo_origin as octo
@@ -168,6 +171,7 @@ def package(source: Path, normal_native_source: Path, output: Path, *,
             raise ValueError("Original source contains local or QA additions")
         metadata = incoming.read(octo.METADATA)
         settings = incoming.read(UNITY_SETTINGS)
+        original_guid = incoming.read(UNITY_GUID)
     if hashlib.sha256(metadata).hexdigest() != ORIGINAL_METADATA:
         raise ValueError("Original metadata differs")
     api_metadata, api_proof = patch_metadata(metadata, API_ORIGIN)
@@ -177,6 +181,7 @@ def package(source: Path, normal_native_source: Path, output: Path, *,
     metadata, octo_proof = octo.patch_octo_metadata(api_metadata)
     del api_metadata
     settings, unity_proof = patch_player_http(settings)
+    guid, guid_proof = derive_cache_guid(original_guid, octo_proof["output_sha256"], unity_proof["output_sha256"])
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".resource-client-", dir=output.parent) as temporary:
         work = Path(temporary)
@@ -207,8 +212,9 @@ def package(source: Path, normal_native_source: Path, output: Path, *,
                   "native_sha256_matches_published_normal": NORMAL_NATIVE,
                   "normal_baseline_reuses_six_existing_local_login_bootstrap_patches": True,
                   "unity_http_connection_policy": unity_proof,
+                  "unity_cache_build_guid": guid_proof,
                   "qa_observer_or_new_sdk_native_patches_added": False}
-        replacements.update({octo.METADATA: metadata, UNITY_SETTINGS: settings,
+        replacements.update({octo.METADATA: metadata, UNITY_SETTINGS: settings, UNITY_GUID: guid,
                              MARKER: (json.dumps(marker, ensure_ascii=False, indent=2) + "\n").encode()})
         del metadata, settings
         unsigned, aligned = work / "unsigned.apk", work / "aligned.apk"

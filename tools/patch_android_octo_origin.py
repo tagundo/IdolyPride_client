@@ -2,8 +2,9 @@
 """Redirect the pinned client's Octo origin and permit loopback HTTP in Unity.
 
 No SDK, native instructions, Android resources, package identity or saved data
-are changed. The only game-asset change is PlayerSettings.insecureHttpOption
-NotAllowed→AlwaysAllowed; Android NSC still restricts HTTP to127.0.0.1. The
+are changed. The only game-asset changes are PlayerSettings.insecureHttpOption
+NotAllowed→AlwaysAllowed and a deterministic Unity extraction-cache build GUID;
+Android NSC still restricts HTTP to127.0.0.1. The
 normal release and disposable emulator QA inputs have distinct signing
 identities; an output must retain the input's verified certificate.
 """
@@ -25,6 +26,7 @@ from zipfile import ZipFile
 
 from idoly_local.client_patch import literal_rows
 from idoly_local.unity_http import MEMBER as UNITY_SETTINGS, patch_player_http
+from idoly_local.unity_cache import MEMBER as UNITY_GUID, derive_cache_guid
 
 
 METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
@@ -121,7 +123,8 @@ def member_hashes(archive: ZipFile) -> dict:
     return result
 
 
-def repack(source: Path, target: Path, metadata: bytes, unity_settings: bytes | None = None) -> None:
+def repack(source: Path, target: Path, metadata: bytes, unity_settings: bytes | None = None,
+           unity_guid: bytes | None = None) -> None:
     with ZipFile(source) as incoming, ZipFile(target, "x", allowZip64=True) as outgoing:
         for info in incoming.infolist():
             if signature_member(info.filename):
@@ -130,6 +133,8 @@ def repack(source: Path, target: Path, metadata: bytes, unity_settings: bytes | 
                 outgoing.writestr(copy.copy(info), metadata)
             elif info.filename == UNITY_SETTINGS and unity_settings is not None:
                 outgoing.writestr(copy.copy(info), unity_settings)
+            elif info.filename == UNITY_GUID and unity_guid is not None:
+                outgoing.writestr(copy.copy(info), unity_guid)
             else:
                 with incoming.open(info) as src, outgoing.open(copy.copy(info), "w") as dst:
                     shutil.copyfileobj(src, dst, 1024 * 1024)
@@ -184,17 +189,20 @@ def package(source: Path, output: Path, *, origin=DEFAULT_ORIGIN, keystore: Path
         before = member_hashes(archive)
         metadata = archive.read(METADATA)
         settings = archive.read(UNITY_SETTINGS)
+        original_guid = archive.read(UNITY_GUID)
     if hashlib.sha256(metadata).hexdigest() != METADATA_SHA256:
         raise ValueError("Pinned input metadata differs")
     patched, metadata_report = patch_octo_metadata(metadata, origin)
     del metadata
     patched_settings, unity_report = patch_player_http(settings)
     del settings
+    patched_guid, guid_report = derive_cache_guid(original_guid, metadata_report["output_sha256"],
+                                                 unity_report["output_sha256"])
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".idoly-octo-", dir=output.parent) as temporary:
         work = Path(temporary)
         unsigned, aligned = work / "unsigned.apk", work / "aligned.apk"
-        repack(source, unsigned, patched, patched_settings)
+        repack(source, unsigned, patched, patched_settings, patched_guid)
         del patched, patched_settings
         _run([sdk / "zipalign", "-f", "16384", unsigned, aligned], "APK alignment", environment)
         unsigned.unlink()  # Keep at most two APK-sized scratch files, including signer's temp file.
@@ -206,15 +214,16 @@ def package(source: Path, output: Path, *, origin=DEFAULT_ORIGIN, keystore: Path
         with ZipFile(aligned) as archive:
             after = member_hashes(archive)
         expected = {**before, METADATA: metadata_report["output_sha256"],
-                    UNITY_SETTINGS: unity_report["output_sha256"]}
+                    UNITY_SETTINGS: unity_report["output_sha256"], UNITY_GUID: guid_report["output_sha256"]}
         if after != expected or file_hash(source) != original_hash:
-            raise ValueError("APK changed beyond Octo origin/Unity HTTP policy/signatures or source changed during build")
+            raise ValueError("APK changed beyond Octo origin/Unity HTTP policy/cache build GUID/signatures or source changed during build")
         report = {"schema": 1, "input_profile": profile["name"], "qa_only": profile["qa_only"],
                   "input_apk_sha256": original_hash, "output_apk_sha256": file_hash(aligned),
                   "output_bytes": aligned.stat().st_size, "package": "game.qualiarts.idolypride.local",
                   "signer_sha256": profile["signer"], "same_input_signer_verified": True,
                   "metadata": metadata_report, "unity_http_connection_policy": unity_report,
-                  "changed_non_signature_members": [METADATA, UNITY_SETTINGS],
+                  "unity_cache_build_guid": guid_report,
+                  "changed_non_signature_members": [METADATA, UNITY_SETTINGS, UNITY_GUID],
                   "all_other_member_bytes_preserved": True,
                   "preserved_native_and_dex_sha256": {k: v for k, v in before.items()
                                                      if k.startswith("lib/") or re.fullmatch(r"classes\d*\.dex", k)},
