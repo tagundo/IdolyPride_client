@@ -452,10 +452,21 @@ def dex_classes(raw, *, versions=(b"dex\n038\0",)):
             raise ValueError("DEX class name length is malformed")
         end = raw.find(b"\0", offset, min(len(raw), offset + 512))
         name = raw[offset:end].decode("ascii") if end >= 0 else ""
-        if (len(name) != length or not re.fullmatch(r"L[A-Za-z0-9_$/]+;", name) or name in result):
+        if (len(name) != length or not re.fullmatch(r"L[A-Za-z0-9_$/-]+;", name) or name in result):
             raise ValueError("DEX class names are malformed or duplicated")
         result.add(name)
     return result
+
+
+def own_synthetic(name, compiled_names):
+    """Only known D8 forms derived from a real own javac class may be added."""
+    if not name.startswith("L" + PACKAGE.replace(".", "/") + "/"):
+        return False
+    if name.endswith("-IA;"):
+        # D8's init-class helper, observed for the private nested Attempt class.
+        return name[:-4] + ";" in compiled_names
+    match = re.fullmatch(r"(.+)\$\$ExternalSynthetic(?:Lambda|ApiModelOutline)[0-9]+;", name)
+    return match is not None and match.group(1) + ";" in compiled_names
 
 
 def dependency_classes(jar, baseline_dex):
@@ -596,10 +607,8 @@ def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, 
         if dex_classes(pybundle._read(archive, infos["classes.dex"], MAX_DEX)) != dependency_names:
             raise ValueError("Preserved dependency class inventory differs")
         own = dex_classes(pybundle._read(archive, infos["classes2.dex"], MAX_DEX))
-        prefix = "L" + PACKAGE.replace(".", "/") + "/"
         if (not compiled_names <= own or own & dependency_names
-                or any(not re.fullmatch(re.escape(prefix) + r"(?:MainActivity|ServerService|PresentationSettings|PresentationAddonInstaller|PresentationInstallActivity)\$\$ExternalSynthetic(?:Lambda|ApiModelOutline)[0-9]+;", name)
-                       for name in own - compiled_names)):
+                or any(not own_synthetic(name, compiled_names) for name in own - compiled_names)):
             raise ValueError("Own DEX classes differ from compiler inputs/synthetics")
         if {name for name in infos if name.startswith("lib/")} != NATIVE_NAMES:
             raise ValueError("Native library inventory differs")

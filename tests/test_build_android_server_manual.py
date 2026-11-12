@@ -368,6 +368,30 @@ def test_elf_load_alignment_is_checked_on_preserved_bytes():
         tool.elf_alignment(synthetic_elf(4096))
 
 
+def test_real_d8_init_class_descriptor_hyphen_is_valid_without_accepting_bad_names():
+    name = "L" + tool.PACKAGE.replace(".", "/") + "/PresentationAddonInstaller$Attempt-IA;"
+    assert tool.dex_classes(synthetic_dex([name])) == {name}
+    for invalid in (name.replace("-IA", " bad"), name.replace("-IA", "*"), name.replace("-IA", ".bad")):
+        with pytest.raises(ValueError, match="class names"):
+            tool.dex_classes(synthetic_dex([invalid]))
+
+
+@pytest.mark.parametrize("suffix", ["-IA;", "$$ExternalSyntheticLambda0;", "$$ExternalSyntheticApiModelOutline12;"])
+def test_d8_synthetic_requires_exact_compiled_own_origin(suffix):
+    origin = "L" + tool.PACKAGE.replace(".", "/") + "/PresentationAddonInstaller$Attempt"
+    assert tool.own_synthetic(origin + suffix, {origin + ";"})
+    assert not tool.own_synthetic(origin + suffix, set())
+    foreign = origin.replace("/localserver/", "/foreign/")
+    assert not tool.own_synthetic(foreign + suffix, {foreign + ";"})
+
+
+@pytest.mark.parametrize("suffix", ["-CC;", "-IAextra;", "$$ExternalSyntheticBackport0;",
+                                     "$$ExternalSyntheticLambda;", "$$ExternalSyntheticLambda0;extra"])
+def test_unknown_d8_synthetic_kinds_or_malformed_suffixes_remain_rejected(suffix):
+    origin = "L" + tool.PACKAGE.replace(".", "/") + "/PresentationAddonInstaller$Attempt"
+    assert not tool.own_synthetic(origin + suffix, {origin + ";"})
+
+
 def feature_case(directory, monkeypatch):
     directory.mkdir()
     native = synthetic_elf()
