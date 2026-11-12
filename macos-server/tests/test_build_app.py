@@ -86,7 +86,9 @@ def test_default_app_build_does_not_include_or_require_live_engine(app_build):
     report = build_app.build(payload, output, archive, evidence, "0.2.16", smoke=False)
     assert report["live_engine"] == {"included": False}
     assert "--add-binary" not in next(command for command in commands if "PyInstaller" in command)
-    assert not (output / "Contents/Resources/licenses").exists()
+    assert not (output / "Contents/Resources/licenses/native-live-engine").exists()
+    assert (output / "Contents/Resources/licenses/tls/LICENSE-certifi").is_file()
+    assert (output / "Contents/Resources/runtime/_internal/cacert.pem").is_file()
     assert not (output / "Contents/Resources/runtime/_internal/libidoly_live.dylib").exists()
 
 

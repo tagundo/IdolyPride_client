@@ -6,8 +6,12 @@ import hashlib
 import io
 import os
 from pathlib import Path
+import socket
+import ssl
+import sys
 import threading
 import time
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 import pytest
@@ -15,6 +19,7 @@ import pytest
 from idoly_local.octo_cache import (OctoCache, OctoCacheError, OctoCacheMiss,
                                     _CDNRedirects)
 from idoly_local.octo_manifest import OctoObject
+from idoly_local import octo_cache
 
 
 BODY = b"original encrypted CDN object\x00\xff"
@@ -174,6 +179,89 @@ def test_exception_and_progress_codes_cannot_echo_adapter_details(tmp_path):
     assert caught.value.code == "cache_io"
     assert events[-1]["error_code"] == "cache_io"
     assert "sensitive" not in str(caught.value) + repr(events)
+
+
+@pytest.mark.parametrize("reason,code", [
+    (URLError(TimeoutError("sensitive timeout URL")), "upstream_timeout"),
+    (URLError(socket.gaierror(-2, "sensitive DNS hostname")), "upstream_dns"),
+    (URLError(ConnectionRefusedError("sensitive connection hostname")), "upstream_connect"),
+    (URLError("sensitive transport description"), "upstream_connect"),
+    (ConnectionResetError("sensitive response details"), "upstream_connect"),
+    (URLError(ssl.SSLError("sensitive TLS transcript")), "upstream_tls"),
+])
+def test_transport_causes_have_distinct_fixed_codes_without_exception_details(tmp_path, reason, code):
+    events = []
+    def fetch(*args, **kwargs):
+        raise reason
+    cache = OctoCache(tmp_path, fetcher=fetch, on_event=events.append)
+    with pytest.raises(OctoCacheError) as caught:
+        read(cache, record())
+    assert caught.value.code == code and events[-1]["error_code"] == code
+    assert "sensitive" not in str(caught.value) + repr(events)
+    assert not destination(cache, record()).exists() and not list(tmp_path.rglob("*.part"))
+
+
+def test_certificate_verification_exports_only_its_bounded_numeric_code(tmp_path):
+    reason = ssl.SSLCertVerificationError(1, "sensitive certificate names and URL")
+    reason.verify_code = 20
+    events = []
+    def fetch(*args, **kwargs):
+        raise URLError(reason)
+    cache = OctoCache(tmp_path, fetcher=fetch, on_event=events.append)
+    with pytest.raises(OctoCacheError) as caught:
+        read(cache, record())
+    assert caught.value.code == "upstream_tls" and caught.value.verify_code == 20
+    assert events[-1]["verify_code"] == 20 and "http_status" not in events[-1]
+    assert "sensitive" not in str(caught.value) + repr(events)
+
+
+def test_actual_http_error_retains_status_closes_body_and_does_not_export_url(tmp_path):
+    response = io.BytesIO(b"sensitive upstream error body")
+    reason = HTTPError("https://private.invalid/?token=sensitive", 403,
+                       "sensitive upstream message", {"Secret": "sensitive"}, response)
+    events = []
+    def fetch(*args, **kwargs):
+        raise reason
+    cache = OctoCache(tmp_path, fetcher=fetch, on_event=events.append)
+    with pytest.raises(OctoCacheError) as caught:
+        read(cache, record())
+    assert caught.value.code == "upstream_http" and caught.value.http_status == 403
+    assert events[-1]["http_status"] == 403 and response.closed
+    assert "sensitive" not in str(caught.value) + repr(events)
+    assert "private.invalid" not in str(caught.value) + repr(events)
+
+
+@pytest.mark.parametrize("value", [True, "403", -1, 600, None])
+def test_diagnostic_numeric_fields_do_not_accept_unbounded_or_wrong_type_data(value):
+    assert OctoCacheError("upstream_http", http_status=value).http_status is None
+    assert OctoCacheError("upstream_tls", verify_code="sensitive").verify_code is None
+    assert OctoCacheError("cache_io", http_status=403, verify_code=20).http_status is None
+
+
+def test_source_upstream_preserves_default_transport_without_a_frozen_certificate_file(monkeypatch):
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    def forbidden():
+        raise AssertionError("Source transport must retain its normal CA context")
+    monkeypatch.setattr(octo_cache, "_frozen_tls_context", forbidden)
+    calls = []
+    class Opener:
+        def open(self, request, *, timeout):
+            calls.append((request.full_url, request.get_header("Accept-encoding"), timeout))
+            return Response()
+    monkeypatch.setattr(octo_cache, "build_opener", lambda *handlers: Opener())
+    with octo_cache.open_upstream(record().upstream_url, timeout=5) as response:
+        assert response.read() == BODY
+    assert calls == [(record().upstream_url, "identity", 5)]
+
+
+def test_platform_resource_adapter_does_not_open_python_tls_or_a_frozen_ca(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Custom platform adapter owns HTTPS trust")
+    monkeypatch.setattr(octo_cache, "_frozen_tls_context", forbidden)
+    monkeypatch.setattr(octo_cache, "open_upstream", forbidden)
+    cache = OctoCache(tmp_path, fetcher=lambda *args, **kwargs: Response())
+    assert read(cache, record()) == BODY
 
 
 def test_concurrent_requests_share_one_complete_fetch_and_independent_streams(tmp_path):

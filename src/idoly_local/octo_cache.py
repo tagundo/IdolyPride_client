@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 import secrets
 import stat
+import sys
 import threading
 import time
 from urllib.error import HTTPError, URLError
@@ -31,14 +32,19 @@ _MD5 = re.compile(r"[0-9a-f]{32}\Z")
 _CHUNK = 64 * 1024
 _ERROR_CODES = frozenset(("cache_io", "cache_closed", "download_disabled", "budget_exceeded",
                           "upstream_redirect", "upstream_http", "upstream_timeout", "upstream_size",
-                          "upstream_encoding", "upstream_data", "upstream_digest", "conflicting_metadata"))
+                          "upstream_encoding", "upstream_data", "upstream_digest", "conflicting_metadata",
+                          "upstream_tls", "upstream_dns", "upstream_connect"))
 
 
 class OctoCacheError(OSError):
     """A fixed error code without upstream headers, URLs, or account data."""
 
-    def __init__(self, code="cache_io"):
+    def __init__(self, code="cache_io", *, http_status=None, verify_code=None):
         self.code = code if isinstance(code, str) and code in _ERROR_CODES else "cache_io"
+        self.http_status = (http_status if self.code == "upstream_http" and type(http_status) is int
+                            and 100 <= http_status <= 599 else None)
+        self.verify_code = (verify_code if self.code == "upstream_tls" and type(verify_code) is int
+                            and 0 <= verify_code <= 2**31 - 1 else None)
         super().__init__("Octo object unavailable: " + self.code)
 
 
@@ -64,12 +70,72 @@ class _CDNRedirects(HTTPRedirectHandler):
         return super().redirect_request(request, fp, code, message, headers, newurl)
 
 
+def _frozen_tls_context():
+    """Append shipped public roots to the user's normal verifying context.
+
+    Relocated Python/OpenSSL binaries retain their build-machine certificate
+    path. The app therefore ships a public CA bundle in its frozen runtime.
+    Loading it supplements system/environment roots; hostname and certificate
+    verification remain enabled. Source runs and Android's Java adapter do not
+    use this helper.
+    """
+    try:
+        import ssl
+        directory = getattr(sys, "_MEIPASS", None)
+        if not isinstance(directory, (str, bytes, os.PathLike)):
+            raise ValueError()
+        bundle = Path(os.fsdecode(directory)) / "cacert.pem"
+        info = bundle.stat()
+        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= 1024 * 1024:
+            raise ValueError()
+        context = ssl.create_default_context()
+        context.load_verify_locations(cafile=str(bundle))
+        return context
+    except (ImportError, OSError, ValueError):
+        raise OctoCacheError("upstream_tls") from None
+
+
 def open_upstream(url, *, timeout):
     """Use inherited proxy/CA trust and retain normal HTTPS verification."""
     if not _cdn_origin(url):
         raise OctoCacheError("upstream_redirect")
     request = Request(url, headers={"Accept-Encoding": "identity", "User-Agent": "IdolyLocalAssets/0.1"})
-    return build_opener(_CDNRedirects()).open(request, timeout=timeout)
+    handlers = [_CDNRedirects()]
+    if getattr(sys, "frozen", False):
+        context = _frozen_tls_context()
+        try:
+            from urllib.request import HTTPSHandler
+        except ImportError:
+            raise OctoCacheError("upstream_tls") from None
+        handlers.append(HTTPSHandler(context=context))
+    return build_opener(*handlers).open(request, timeout=timeout)
+
+
+def _transport_failure(error):
+    """Classify transport failures without exporting exception messages."""
+    if isinstance(error, HTTPError):
+        failure = OctoCacheError("upstream_http", http_status=error.code)
+        try:
+            error.close()
+        except Exception:
+            pass
+        return failure
+    reason = error.reason if isinstance(error, URLError) else error
+    if isinstance(reason, TimeoutError):
+        return OctoCacheError("upstream_timeout")
+    # Lazy imports keep the Android Java transport independent of Python TLS.
+    try:
+        import ssl
+        if isinstance(reason, ssl.SSLError):
+            return OctoCacheError("upstream_tls", verify_code=getattr(reason, "verify_code", None))
+    except ImportError:
+        pass
+    import socket
+    if isinstance(reason, socket.gaierror):
+        return OctoCacheError("upstream_dns")
+    if isinstance(error, (URLError, ConnectionError)):
+        return OctoCacheError("upstream_connect")
+    return OctoCacheError("cache_io")
 
 
 @dataclass
@@ -170,13 +236,19 @@ class OctoCache:
         return OctoObject(record.kind, record.upload_version, record.object_name,
                           record.generation, record.size, record.md5, record.name)
 
-    def _notify(self, record, phase, received=0, code=None):
+    def _notify(self, record, phase, received=0, code=None, *, http_status=None, verify_code=None):
         if self.on_event is None:
             return
         event = {"phase": phase, "cache_key": record.cache_key,
                  "received_bytes": received, "total_bytes": record.size}
         if code is not None:
             event["error_code"] = code
+        if phase == "failed":
+            safe = OctoCacheError(code, http_status=http_status, verify_code=verify_code)
+            if safe.http_status is not None:
+                event["http_status"] = safe.http_status
+            if safe.verify_code is not None:
+                event["verify_code"] = safe.verify_code
         try:
             self.on_event(event)
         except Exception:
@@ -271,7 +343,7 @@ class OctoCache:
     @staticmethod
     def _response(response, expected, url):
         if getattr(response, "status", None) != 200:
-            raise OctoCacheError("upstream_http")
+            raise OctoCacheError("upstream_http", http_status=getattr(response, "status", None))
         final_url = response.geturl() if callable(getattr(response, "geturl", None)) else url
         if not _cdn_origin(final_url):
             raise OctoCacheError("upstream_redirect")
@@ -386,15 +458,11 @@ class OctoCache:
                 failure = OctoCacheError("cache_closed")
             elif isinstance(error, OctoCacheError):
                 failure = error
-            elif isinstance(error, TimeoutError) or (isinstance(error, URLError)
-                    and isinstance(error.reason, TimeoutError)):
-                failure = OctoCacheError("upstream_timeout")
-            elif isinstance(error, (HTTPError, URLError)):
-                failure = OctoCacheError("upstream_http")
             else:
-                failure = OctoCacheError("cache_io")
+                failure = _transport_failure(error)
             if started:
-                self._notify(record, "failed", received, failure.code)
+                self._notify(record, "failed", received, failure.code,
+                             http_status=failure.http_status, verify_code=failure.verify_code)
             if not isinstance(error, Exception):
                 raise
             raise failure from None

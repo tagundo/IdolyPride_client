@@ -187,7 +187,7 @@ def test_observer_exceptions_secret_fields_and_returned_status_do_not_affect_tra
     upstream(tracker,"failed",received=4,error_code="untrusted secret",headers={"Authorization":"secret"})
     snapshot=tracker.status();snapshot["session_received_bytes"]=-100
     assert tracker.status()["session_received_bytes"]==4
-    assert logs==["게임 리소스 내려받기 중단 · download_failed"]
+    assert logs==["게임 리소스 내려받기 중단 · download_failed · 파일 " + "a" * 12]
     assert "secret" not in repr(tracker.status())
 
 
@@ -348,6 +348,20 @@ def test_ios_catalog_requires_its_own_archive_version_and_keeps_android_cache_se
     finally:
         gateway.close()
     assert load_octo_archive(tmp_path / "public-octo")[0] == android
+
+
+def test_upstream_failure_logs_distinguish_tls_and_http_without_adapter_details():
+    logs = []
+    tracker = OctoResourceTracker(available=True, log_callback=logs.append)
+    for code, extra in (("upstream_tls", {"verify_code": 20}),
+                        ("upstream_http", {"http_status": 403}),
+                        ("upstream_http", {"http_status": 404})):
+        upstream(tracker, "started")
+        upstream(tracker, "failed", error_code=code, reason="sensitive URL/token", **extra)
+    assert logs == ["게임 리소스 내려받기 중단 · upstream_tls · 인증서 코드 20 · 파일 " + "a" * 12,
+                    "게임 리소스 내려받기 중단 · upstream_http · HTTP 403 · 파일 " + "a" * 12,
+                    "게임 리소스 내려받기 중단 · upstream_http · HTTP 404 · 파일 " + "a" * 12]
+    assert "sensitive" not in repr(logs)
 
 
 @pytest.mark.parametrize("platform", [None, 0, True, [], "macos", "../public-octo"])

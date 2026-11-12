@@ -19,6 +19,7 @@ import tempfile
 from zipfile import ZipFile
 
 from payload import member_path
+from certificate_bundle import install_certificate_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
@@ -198,6 +199,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         resources.mkdir()
         shutil.copytree(temporary / "dist/IdolyServerEngine", resources / "runtime", symlinks=True)
         shutil.copy2(server_data, resources / "ServerData.zip")
+        public_tls_trust = install_certificate_bundle(resources / "runtime/_internal", resources / "licenses/tls")
         embedded_live_engine = resources / "runtime/_internal" / LIVE_ENGINE_NAME
         if live_engine_library is not None:
             if not embedded_live_engine.is_file() or embedded_live_engine.is_symlink():
@@ -230,7 +232,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             "pyinstaller": importlib.metadata.version("PyInstaller"),
             "signature": "ad-hoc", "notarized": False,
             "user_python_required": False, "user_terminal_required": False,
-            "game_client_tested": False, "live_engine": live_engine}
+            "game_client_tested": False, "live_engine": live_engine, "public_tls_trust": public_tls_trust}
         write_json(resources / "bundle-provenance.json", provenance)
         run(["/usr/bin/codesign", "--force", "--deep", "--sign", "-", output])
         if live_engine_library is not None:

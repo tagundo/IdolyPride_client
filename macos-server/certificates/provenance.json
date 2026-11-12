@@ -1,0 +1,14 @@
+{
+  "package": "certifi",
+  "version": "2026.10.23",
+  "source": "official PyPI wheel",
+  "wheel_filename": "certifi-2026.10.23-py3-none-any.whl",
+  "wheel_url": "https://files.pythonhosted.org/packages/32/d1/a3652fe2c19134d0d15922177821d863cbd7e842d53a21bbe7e8e3a1b5ac/certifi-2026.10.23-py3-none-any.whl",
+  "wheel_bytes": 135082,
+  "wheel_sha256": "e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1",
+  "cacert_bytes": 235863,
+  "cacert_sha256": "2ef52ad56b4803e264045c915e55c236cbfa045b84b81efefc218a19eb44bd2b",
+  "license_sha256": "e93716da6b9c0d5a4a1df60fe695b370f0695603d21f6f83f053e42cfc10caf7",
+  "certificates": 118,
+  "cloud_or_user_ca_added": false
+}

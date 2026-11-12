@@ -25,9 +25,11 @@ from adhoc_verify import verify_adhoc
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+sys.path.insert(0, str(HERE.parent))
+from certificate_bundle import install_certificate_bundle
 APP = "IdolyPrideLocalServer"
-VERSION = "0.3.12"
-BUILD_NUMBER = "31"
+VERSION = "0.3.13"
+BUILD_NUMBER = "32"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
 PAYLOAD_SHA = "1b310088f2f8573c1b62bd071de3e064e4f6c59ba8058a7f4f5c3665a82aa9f5"
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
@@ -107,7 +109,8 @@ def build(args):
     # Only tracked production sources are read, with exact bytes checked against
     # the supplied local Git commit before they enter the app.
     source_paths = [*sorted((ROOT/"src/idoly_local").glob("*.py")),
-                    ROOT/"macos-server/engine.py", ROOT/"macos-server/payload.py",
+                    ROOT/"macos-server/engine.py", ROOT/"macos-server/payload.py", ROOT/"macos-server/certificate_bundle.py",
+                    *sorted((ROOT/"macos-server/certificates").iterdir()),
                     *sorted(HERE.glob("*.c")), *sorted(HERE.glob("*.h")), HERE/"libSystem.tbd", *sorted(HERE.glob("*.py"))]
     sources = {}
     for path in source_paths:
@@ -132,6 +135,7 @@ def build(args):
               "user_python_required": False, "user_terminal_required": False,
               "input_runtime_archive_sha256": RUNTIME_SHA, "server_data_sha256": PAYLOAD_SHA}
     report["runtime"] = export_runtime(args.runtime, resources/"runtime")
+    report["public_tls_trust"] = install_certificate_bundle(resources/"runtime/_internal", resources/"licenses/tls")
     for path in source_paths:
         if path.suffix != ".py" or path.parent == HERE:
             continue

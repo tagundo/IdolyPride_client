@@ -40,7 +40,8 @@ _SETTINGS = frozenset(("schema", "application_id", "application_version", "revis
                        "manifest_sha256", "aes_key_hex", "client_key"))
 _FAILURE_CODES = frozenset(("cache_io", "upstream_redirect", "upstream_http",
     "upstream_size", "upstream_encoding", "upstream_timeout", "upstream_data",
-    "upstream_digest", "budget_exceeded", "download_disabled", "conflicting_metadata"))
+    "upstream_digest", "budget_exceeded", "download_disabled", "conflicting_metadata",
+    "upstream_tls", "upstream_dns", "upstream_connect"))
 
 
 def _integer(value):
@@ -225,7 +226,14 @@ class OctoResourceTracker:
                 else:
                     code = event.get("error_code")
                     code = code if isinstance(code, str) and code in _FAILURE_CODES else "download_failed"
-                    message = ("failed:" + key + ":" + code, "게임 리소스 내려받기 중단 · " + code)
+                    status, verify = event.get("http_status"), event.get("verify_code")
+                    status = status if code == "upstream_http" and type(status) is int and 100 <= status <= 599 else None
+                    verify = verify if code == "upstream_tls" and type(verify) is int and 0 <= verify <= 2**31 - 1 else None
+                    detail = (f" · HTTP {status}" if status is not None else "")
+                    detail += (f" · 인증서 코드 {verify}" if verify is not None else "")
+                    detail += " · 파일 " + key[:12]
+                    message = (f"failed:{key}:{code}:{status}:{verify}",
+                               "게임 리소스 내려받기 중단 · " + code + detail)
         if message is not None:
             self._log(*message)
 
