@@ -16,3 +16,6 @@ private/
 *.pem
 *.key
 .env*
+
+# Pinned public Mozilla roots; private certificate files stay ignored.
+!macos-server/certificates/cacert.pem
