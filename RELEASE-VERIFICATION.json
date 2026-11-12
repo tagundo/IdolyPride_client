@@ -1,0 +1,10 @@
+{
+  "version": "0.3.8",
+  "version_code": 27,
+  "source_commit": "c1435d4595396e387a4ac984af672efb48369298",
+  "apk_sha256": "6958f7173685876dcf7c28fe86284b9939f07e6cdfdc69e89305ac4345f9d0a4",
+  "apk_bytes": 99835776,
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "host_runtime_http_sqlcipher_verified": true,
+  "actual_game_ui_verified": false
+}
