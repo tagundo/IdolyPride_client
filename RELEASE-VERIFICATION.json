@@ -1,0 +1,25 @@
+{
+  "version": "macos-v0.3.11",
+  "source_commit": "0705a1e074289a97f2fb5d56058c259c63d91bee",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 101660617,
+      "sha256": "503ac9b3ee3183ee14ca7a599ba4f1fdd4039712261597483d6f34582758c3d4",
+      "platform": "macOS13+ Apple Silicon",
+      "ad_hoc_pages_and_resources_verified": true,
+      "actual_mac_execution": false
+    },
+    {
+      "name": "IdolyPride-6.1.1-Local-PlayCover.ipa",
+      "bytes": 146427054,
+      "sha256": "09c4a15585dba9d4d4a6cdd8271b00aa06c614741bbf0d252f45c20dade7a809",
+      "platform": "PlayCover Apple Silicon",
+      "bundle": "game.qualiarts.idolypride.local",
+      "bundle_build": "156.9002",
+      "original_function_count": 63,
+      "static_hook_count": 19,
+      "actual_gameplay_verified": false
+    }
+  ]
+}
