@@ -17,7 +17,7 @@ from .media_outfit_policy import (COSTUME_IDS, ADMIN_COSTUME_IDS, ADMIN_HAIR_IDS
 
 
 POLICY = "media-outfits-v1"
-TABLES = ("PhotoActivity", "PhotoExpression", "Costume", "Hair", "PhotoQuestMusic")
+TABLES = ("PhotoActivity", "PhotoExpression", "Costume", "Hair", "PhotoQuestMusic", "PhotoQuestStage")
 TAG_NAME = "media-master-tag.json"
 TAG_MEMBER = "data/original-master/" + TAG_NAME
 PACK_NAMES = {table: POLICY + "-" + table + ".db" for table in TABLES}
@@ -100,10 +100,10 @@ def expanded_rows(table, rows):
             continue
         if any(not isinstance(row.get(name), str) for name in ("viewConditionId", "unlockConditionId")):
             raise ValueError("Original photo visibility conditions are malformed")
-        if table == "PhotoQuestMusic":
+        if table in ("PhotoQuestMusic", "PhotoQuestStage"):
             changed = copy.deepcopy(row)
             changed.update(viewConditionId="", unlockConditionId="")
-            if row["id"] in COVER_LABEL_IDS:
+            if table == "PhotoQuestMusic" and row["id"] in COVER_LABEL_IDS:
                 description = row.get("description")
                 if not isinstance(description, str) or not description.rstrip():
                     raise ValueError("An audited cover song must have its original description")
@@ -183,7 +183,7 @@ def _identities(schema_sha256, original_tag, rows):
 
 
 def validate_media_master_tag(original_tag, media_tag, schema_sha256, rows, packs):
-    """Check the five replacements against original data and actual byte hashes.
+    """Check the six replacements against original data and actual byte hashes.
 
     ``packs`` maps each new plain filename to its measured bytes/SHA256. The
     producer separately performs strict protobuf and SQLCipher row roundtrips.
@@ -211,7 +211,7 @@ def validate_media_master_tag(original_tag, media_tag, schema_sha256, rows, pack
         if after != expected or name in {row["fileName"] for row in original.values()}:
             raise ValueError("Media pack metadata does not match its explicit replacement")
     return {"policy": POLICY, "version": version, "tables": list(TABLES), "costume_types": len(TYPE_IDS),
-            "original_pack_count": len(original), "replaced_pack_count": 5}
+            "original_pack_count": len(original), "replaced_pack_count": 6}
 
 
 def _pack_path(root, pack):
@@ -255,7 +255,7 @@ def _decode(schema, driver, root, pack):
 
 
 def build_media_master_overlay(schema, original_tag, original_pack_root, original_json_root, output):
-    """Build only five offline packs; never alter the original tag/JSON/archive."""
+    """Build only six offline packs; never alter the original tag/JSON/archive."""
     from google.protobuf import message_factory
     from google.protobuf.json_format import ParseDict
     from .master_build import build_master_packs, _sqlcipher_driver
@@ -288,6 +288,7 @@ def build_media_master_overlay(schema, original_tag, original_pack_root, origina
             fields = (("isUserUnavailable", "isDisableAdmin") if table == "Costume" else
                       ("isDisableAdmin",) if table == "Hair" else
                       ("viewConditionId", "unlockConditionId", "name") if table == "PhotoQuestMusic" else
+                      ("viewConditionId", "unlockConditionId") if table == "PhotoQuestStage" else
                       ("costumeTypeIds", "viewConditionId", "unlockConditionId"))
             for field in fields:
                 left.ClearField(field)

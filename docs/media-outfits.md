@@ -12,6 +12,6 @@ v0.3.8의 **감상용 전체 해금**에서 일반 촬영 업무와 장면 촬�
 
 기존 보유 목록에 포함됐지만 원본 `isDisableAdmin` 설정으로 숨겨지던 의상 18개·헤어 19개도 감상 모드에서 표시합니다. 해당 항목 모두 실제 3D body/hair 자산이 있으며, 이 감사된 항목의 숨김 플래그만 해제합니다. 원본 `CostumeMaster`·`HairMaster.FindByKey`가 숨김 항목을 기본 외형으로 바꾸고 `UserCostumeCollection`·`UserHairCollection.Add`에서 제외하는 경로를 확인했습니다.
 
-감상 모드에는 별도의 버전과 다섯 개의 SQLCipher 마스터(`PhotoActivity`, `PhotoExpression`, `Costume`, `Hair`, `PhotoQuestMusic`)를 제공합니다. 마지막 표는 [숨겨진 곡의 표시 조건](media-music-catalog.md)을 해제합니다. 나머지 원본 마스터와 서버의 원본 JSON·버전은 보존하며 일반 모드는 기존 마스터를 제공합니다. `Master.GetVersion`과 실제 `Master.Get` 버전을 일치시켜 이전 선택창 캐시를 갱신합니다. 기존 계정·의상 선택·성장·읽음 기록·잔액은 보존합니다.
+감상 모드에는 별도의 버전과 여섯 개의 SQLCipher 마스터(`PhotoActivity`, `PhotoExpression`, `Costume`, `Hair`, `PhotoQuestMusic`, `PhotoQuestStage`)를 제공합니다. 마지막 두 표는 [숨겨진 곡과 스테이지의 표시·기간 조건](media-music-catalog.md)을 해제합니다. 나머지 원본 마스터와 서버의 원본 JSON·버전은 보존하며 일반 모드는 기존 마스터를 제공합니다. `Master.GetVersion`과 실제 `Master.Get` 버전을 일치시켜 이전 선택창 캐시를 갱신합니다. 기존 계정·의상 선택·성장·읽음 기록·잔액은 보존합니다.
 
 새 포토 생성·이미지 업로드·필름 사용은 기존 미지원 범위를 유지합니다. 의상을 선택하고 촬영 장면에 진입하는 기능과 사진을 계정 아이템으로 생성하는 기능은 별개입니다.

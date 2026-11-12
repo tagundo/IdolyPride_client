@@ -49,11 +49,13 @@ def original_rows():
             "PhotoQuestMusic": [{"id": identity, "assetId": "asset-" + identity, "name": "shared original name",
                 "description": "  original cover " + identity + " \t", "singer": "original three singers", "order": index,
                 "viewConditionId": "original-possession", "unlockConditionId": "original-possession"}
-                for index, identity in enumerate([*sorted(overlay.COVER_LABEL_IDS), "non-cover-original"])]}
+                for index, identity in enumerate([*sorted(overlay.COVER_LABEL_IDS), "non-cover-original"])],
+            "PhotoQuestStage": [{"id": "stage-original", "stageId": "asset-original", "name": "original stage",
+                "order": 4, "viewConditionId": "original-area-gate", "unlockConditionId": "original-period"}]}
 
 
 def original_tag():
-    names = [*overlay.TABLES, "CostumeType", *["Other%03d" % n for n in range(196)]]
+    names = [*overlay.TABLES, "CostumeType", *["Other%03d" % n for n in range(195)]]
     return {"version": "synthetic-original", "masterTagPacks": [
         {"type": name, "fileName": "original-" + name + ".db", "fileSize": 4096,
          "cryptoKey": "a" * 64, "downloadUrl": "https://public.invalid/" + name} for name in names]}
@@ -90,9 +92,9 @@ def test_only_approved_photo_conditions_types_and_appearance_flags_change_withou
                     expected["isDisableAdmin"] = False
             else:
                 expected.update(viewConditionId="", unlockConditionId="")
-                if table != "PhotoQuestMusic":
+                if table not in ("PhotoQuestMusic", "PhotoQuestStage"):
                     expected["costumeTypeIds"] = list(overlay.TYPE_IDS)
-                elif before["id"] in overlay.COVER_LABEL_IDS:
+                elif table == "PhotoQuestMusic" and before["id"] in overlay.COVER_LABEL_IDS:
                     expected["name"] = before["description"].rstrip()
             assert after == expected
     assert rows == snapshot
@@ -127,7 +129,7 @@ def test_reordered_source_keys_keep_version_source_bytes_and_local_keys_identica
     assert overlay._identities("a" * 64, tag, rows) == overlay._identities("a" * 64, tag, reordered)
 
 
-@pytest.mark.parametrize("table", ["PhotoActivity", "PhotoExpression", "PhotoQuestMusic"])
+@pytest.mark.parametrize("table", ["PhotoActivity", "PhotoExpression", "PhotoQuestMusic", "PhotoQuestStage"])
 def test_visibility_conditions_must_be_real_strings_before_clearing_them(table):
     rows = original_rows()[table]
     rows[0]["viewConditionId"] = True
@@ -207,6 +209,8 @@ def _schema():
                  ("canUseCostumeIds", 9, True)],
         "PhotoQuestMusic": [("id", 9, False), ("assetId", 9, False), ("name", 9, False),
                             ("description", 9, False), ("singer", 9, False), ("order", 5, False),
+                            ("viewConditionId", 9, False), ("unlockConditionId", 9, False)],
+        "PhotoQuestStage": [("id", 9, False), ("stageId", 9, False), ("name", 9, False), ("order", 5, False),
                             ("viewConditionId", 9, False), ("unlockConditionId", 9, False)]}
     for name, fields in definitions.items():
         message = tables.message_type.add(name=name)
@@ -257,7 +261,7 @@ def built_original(tmp_path, monkeypatch):
     return schema, catalog, original, tag
 
 
-def test_five_encrypted_packs_roundtrip_and_leave_original_files_and_197_entries_unchanged(built_original, tmp_path):
+def test_six_encrypted_packs_roundtrip_and_leave_original_files_and_196_entries_unchanged(built_original, tmp_path):
     schema, catalog, original, tag = built_original
     source_hashes = {str(path.relative_to(original)): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in original.rglob("*") if path.is_file()}
@@ -266,7 +270,7 @@ def test_five_encrypted_packs_roundtrip_and_leave_original_files_and_197_entries
         original / "assets/master", catalog, destination)
     media = overlay.read_json(destination / overlay.TAG_NAME)
     assert report["protobuf_row_roundtrip_verified"] is True and report["device_ingestion_verified"] is False
-    assert len(report["packs"]) == 5 and report["replaced_pack_count"] == 5
+    assert len(report["packs"]) == 6 and report["replaced_pack_count"] == 6
     assert {path.name for path in (destination / "assets/master").iterdir()} == set(overlay.PACK_NAMES.values())
     for before, after in zip(tag["masterTagPacks"], media["masterTagPacks"], strict=True):
         if before["type"] not in overlay.TABLES: assert before == after
