@@ -1,0 +1,16 @@
+{
+  "version": "macos-v0.3.12",
+  "source_commit": "401a042ce89c10e395664fbb333db71109be15b3",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 101661293,
+      "sha256": "4e2b90a3a67d9c1e7bc35f15bb8fe897729ea1831a5423c5ef6f5b6701f0cccd",
+      "platform": "macOS13+ Apple Silicon",
+      "fix": "CArchive Python bootstrap module export including struct",
+      "isolated_runtime_import_test": true,
+      "linux_c_embedding_engine_checks": 65,
+      "actual_mac_execution": false
+    }
+  ]
+}
