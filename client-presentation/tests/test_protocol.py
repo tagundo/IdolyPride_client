@@ -27,6 +27,20 @@ def test_java_protocol_and_transport_boundaries(tmp_path):
     assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 45
 
 
+def test_java_playback_protocol_transport_and_native_default_retention(tmp_path):
+    sources = [HERE / "java/game/qualiarts/idolypride/presentation/PresentationClient.java",
+               HERE / "tests/PlaybackHarness.java"]
+    flags = ["-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
+             "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1"]
+    env = dict(os.environ, MALLOC_ARENA_MAX="2")
+    subprocess.run([str(JDK / "javac"), *["-J" + flag for flag in flags], *ADDON.JAVAC_ARGUMENTS,
+                    "-d", str(tmp_path), *map(str, sources)], check=True, capture_output=True, timeout=30, env=env)
+    result = subprocess.run([str(JDK / "java"), *flags, "-cp", str(tmp_path),
+        "game.qualiarts.idolypride.presentation.PlaybackHarness"], check=True,
+        capture_output=True, text=True, timeout=30, env=env)
+    assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 90
+
+
 def test_jdk21_captured_parameter_metadata_compiles_through_cached_d8(tmp_path):
     """Exercise real production classes at the former D8 null-name boundary."""
     android = Path("/workspace/.setup/android-sdk/platforms/android-34/android.jar")

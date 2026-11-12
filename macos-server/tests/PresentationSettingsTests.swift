@@ -149,11 +149,70 @@ struct PresentationSettingsTests {
         try expect(!polling.fresh(at: 21) && polling.beginRequest(), "reset removes stale observation")
     }
 
+    static func playback() throws {
+        let defaults = ClientPlaybackSettings.defaults
+        let encoded = try defaults.encoded()
+        try expect(try ClientPlaybackSettings.decode(encoded) == defaults, "playback defaults round trip")
+        try expect(defaults.waitForOrientation && defaults.revision == 0, "playback defaults on")
+        let object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
+        try expect(Set(object.keys) == ["schema", "revision", "wait_for_orientation"], "separate exact playback schema")
+        for (key, value) in [("schema", true as Any), ("schema", 2 as Any), ("revision", true as Any),
+                ("revision", -1 as Any), ("wait_for_orientation", 1 as Any), ("wait_for_orientation", "false" as Any),
+                ("expand_photography", true as Any)] {
+            var changed = object; changed[key] = value
+            try rejected("invalid playback " + key) {
+                _ = try ClientPlaybackSettings.decode(JSONSerialization.data(withJSONObject: changed))
+            }
+        }
+        for source in [#"{"schema":1,"revision":0.0,"wait_for_orientation":false}"#,
+                #"{"schema":1,"revision":0,"wait_for_orientation":true,"wait_for_orientation":false}"#,
+                #"{"schema":1,"revision":0,"wait_for_orientation":false,"\u0073chema":1}"#,
+                #"{"schema":1,"revision":9223372036854775808,"wait_for_orientation":false}"#] {
+            try rejected("playback duplicate/fraction/overflow") { _ = try ClientPlaybackSettings.decode(Data(source.utf8)) }
+        }
+        try rejected("playback cannot alter graphics schema") { _ = try ClientPresentationSettings.decode(encoded) }
+        try rejected("graphics cannot alter playback schema") {
+            _ = try ClientPlaybackSettings.decode(ClientPresentationSettings.defaults.encoded())
+        }
+        try rejected("playback size limit") { _ = try ClientPlaybackSettings.decode(Data(repeating: 32, count: 8193)) }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("playback-tests-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = directory.appendingPathComponent(ClientPlaybackSettings.filename)
+        let graphics = directory.appendingPathComponent(ClientPresentationSettings.filename)
+        let database = directory.appendingPathComponent("state.db")
+        let sentinel = Data("preserved unrelated data".utf8)
+        try sentinel.write(to: graphics); try sentinel.write(to: database)
+        try expect(!ClientPlaybackSettings.load(from: file).invalid, "missing playback defaults without write")
+        try expect(!FileManager.default.fileExists(atPath: file.path), "missing playback load is read-only")
+        let broken = Data("broken playback settings".utf8); try broken.write(to: file)
+        let damaged = ClientPlaybackSettings.load(from: file)
+        try expect(damaged.invalid && damaged.settings == defaults, "bad playback displays safe defaults")
+        try expect(try Data(contentsOf: file) == broken, "bad playback file preserved until edit")
+        var enabled = defaults; enabled.waitForOrientation = false
+        enabled = try enabled.saving(to: file, nowMilliseconds: 100)
+        try expect(enabled.revision == 100 && ClientPlaybackSettings.load(from: file).settings == enabled
+                   && !ClientPlaybackSettings.load(from: file).settings.waitForOrientation, "explicit disabled playback survives atomic reopen")
+        enabled = try enabled.saving(to: file, nowMilliseconds: 10)
+        try expect(enabled.revision == 101, "backward playback clock increments")
+        let previous = try Data(contentsOf: file)
+        enabled.revision = Int64.max
+        try rejected("playback revision exhausted") { _ = try enabled.saving(to: file, nowMilliseconds: 200) }
+        try expect(try Data(contentsOf: file) == previous, "playback overflow preserves file")
+        try expect(try Data(contentsOf: graphics) == sentinel, "playback preserves graphics file")
+        try expect(try Data(contentsOf: database) == sentinel, "playback preserves database")
+        try FileManager.default.removeItem(at: file)
+        try FileManager.default.createSymbolicLink(at: file, withDestinationURL: database)
+        try expect(ClientPlaybackSettings.load(from: file).invalid, "playback symlink rejected")
+        try expect(try Data(contentsOf: database) == sentinel, "playback symlink target preserved")
+    }
+
     static func main() throws {
         try codec()
         try files()
         try feedback()
         try polling()
+        try playback()
         print("PASS: \(checks) presentation codec, preservation, ACK and polling checks")
     }
 }

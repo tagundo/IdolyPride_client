@@ -1695,7 +1695,7 @@
     "all_original_prefixes_restreamed_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
   },
   "orientation_adapter": {
-    "scope": "Only verified iOS-on-Mac desktop; physical iOS and Android retain originals",
+    "scope": "Playback option on iOS: default wait=true on Mac and physical iOS; explicit saved preferences retained; original waits retained when enabled",
     "original_MV_entry": "FixedPortrait phone pre-step -> physical rotation view -> FixedLandscape; exit restores saved original OrientationType",
     "UniTask_bytes": 16,
     "UniTask_source_offset": 0,
@@ -1708,8 +1708,10 @@
     "actual_viewport_required": "width>0 and height>0",
     "caller_precancel": "Original overload fallback",
     "active_task": "Real PUBLIC SetOrientationAsync(FixedLandscape) with original CTS and Before/After pipeline",
-    "midtransition_caller_token": "Not externally linked, matching original public orientation substep; physical rotation view is removed on desktop only",
-    "global_Screen_or_Input_spoof": false
+    "midtransition_caller_token": "Not externally linked, matching original public orientation substep; physical rotation view is removed only when waiting is explicitly disabled",
+    "global_Screen_or_Input_spoof": false,
+    "transition_mode": "Latch preference at wrapper entry and original InternalMoveNext initial -1; no mode changes during an active transition",
+    "configuration_endpoint": "GET /client/playback, independent schema1 with revision and wait_for_orientation"
   },
   "preview_default_off": {
     "scope": "PhotographyPreviewContentPresenter only; activity/expression/live viewing sessions",

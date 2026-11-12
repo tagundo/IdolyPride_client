@@ -21,6 +21,12 @@ public final class PresentationProvider extends ContentProvider {
     private static void poll() {
         boolean loaded = false;
         PresentationClient client = new PresentationClient();
+        PresentationClient.PlaybackNative playback = new PresentationClient.PlaybackNative() {
+            @Override public boolean configure(int schema, long revision, boolean wait) {
+                return NativePresentation.configurePlayback(schema, revision, wait);
+            }
+            @Override public String status() { return NativePresentation.playbackStatus(); }
+        };
         while (!Thread.currentThread().isInterrupted()) {
             long nextPoll = System.nanoTime() + 2000000000L;
             try {
@@ -36,6 +42,11 @@ public final class PresentationProvider extends ContentProvider {
                   loaded = false;
                   client.reportStartupFailure();
               }
+            if (loaded) {
+                try { client.pollPlayback(playback); }
+                catch (Exception ignored) { /* Keep native defaults or the last valid playback option. */ }
+                catch (LinkageError ignored) { /* An older graphics bridge may not expose this optional API. */ }
+            }
             long delay = nextPoll - System.nanoTime();
             try { if (delay > 0) Thread.sleep(delay / 1000000L, (int) (delay % 1000000L)); }
             catch (InterruptedException stopped) { Thread.currentThread().interrupt(); return; }

@@ -120,6 +120,69 @@ struct ClientPresentationSettings: Equatable {
     }
 }
 
+/// Independent playback preference; never part of the graphics wire schema.
+struct ClientPlaybackSettings: Equatable {
+    static let filename = "client-playback.json"
+    static let maximumBytes = 8192
+    static let defaults = ClientPlaybackSettings()
+    var revision: Int64 = 0
+    var waitForOrientation = true
+
+    enum Invalid: Error { case settings, revisionExhausted }
+    struct Loaded { let settings: ClientPlaybackSettings; let invalid: Bool }
+
+    static func decode(_ data: Data) throws -> ClientPlaybackSettings {
+        guard !data.isEmpty, data.count <= maximumBytes,
+              let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(object.keys) == ["schema", "revision", "wait_for_orientation"],
+              ClientPresentationSettings.integer(object["schema"]) == 1,
+              let revision = ClientPresentationSettings.integer(object["revision"]), revision >= 0,
+              let wait = object["wait_for_orientation"] as? NSNumber,
+              CFGetTypeID(wait) == CFBooleanGetTypeID(),
+              let source = String(data: data, encoding: .utf8) else { throw Invalid.settings }
+        let members = try NSRegularExpression(pattern: #"(?:^|[,{])\s*"(?:\\.|[^"\\])*"\s*:"#)
+        guard members.numberOfMatches(in: source, range: NSRange(source.startIndex..., in: source)) == 3 else {
+            throw Invalid.settings
+        }
+        return ClientPlaybackSettings(revision: revision, waitForOrientation: wait.boolValue)
+    }
+
+    func encoded() throws -> Data {
+        guard revision >= 0 else { throw Invalid.settings }
+        return try JSONSerialization.data(withJSONObject: ["schema": 1, "revision": revision,
+            "wait_for_orientation": waitForOrientation], options: .sortedKeys)
+    }
+
+    static func load(from file: URL) -> Loaded {
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular else { throw Invalid.settings }
+            let input = try FileHandle(forReadingFrom: file)
+            defer { try? input.close() }
+            return Loaded(settings: try decode(input.read(upToCount: maximumBytes + 1) ?? Data()), invalid: false)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return Loaded(settings: .defaults, invalid: false)
+        } catch { return Loaded(settings: .defaults, invalid: true) }
+    }
+
+    func saving(to file: URL, nowMilliseconds: Int64? = nil) throws -> ClientPlaybackSettings {
+        guard revision >= 0, revision < Int64.max else { throw Invalid.revisionExhausted }
+        let now: Int64
+        if let supplied = nowMilliseconds { now = max(0, supplied) }
+        else {
+            let milliseconds = Date().timeIntervalSince1970 * 1000
+            guard milliseconds.isFinite, milliseconds < Double(Int64.max) else { throw Invalid.revisionExhausted }
+            now = Int64(max(0, milliseconds))
+        }
+        var next = self
+        next.revision = max(revision + 1, now)
+        let data = try next.encoded()
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: file, options: .atomic)
+        return next
+    }
+}
+
 enum ClientPresentationFeedback: Equatable {
     case waiting, savedWaiting, applied, disabled, unsupported, waitingForScene, initializationFailed
     case invalidFile, saveFailed

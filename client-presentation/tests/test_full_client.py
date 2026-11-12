@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import tempfile
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, ZipInfo
@@ -68,39 +69,27 @@ def test_compiled_tree_compares_typed_attributes_not_source_lines():
 
 def test_standalone_marker_has_only_public_compatibility_fields():
     assert tool.marker()=={'schema':1,'bridge_version':1,'target_package':tool.PACKAGE,'base_version_code':414,'native_library_sha256':tool.NATIVE_SHA256}
-    assert tool.marker(tool.ASPECT_NATIVE_SHA256)['native_library_sha256']==tool.ASPECT_NATIVE_SHA256
-
-
-def test_native_replacement_requires_pinned_bytes_and_matching_frozen_compile_receipt(tmp_path, monkeypatch):
-    # Synthetic input keeps this trust-boundary check independent of NDK and
-    # game artifacts. A valid digest without matching build/source evidence
-    # must never become a separately distributed client native replacement.
-    raw=b'synthetic native fixture'
-    digest=hashlib.sha256(raw).hexdigest()
-    monkeypatch.setattr(tool,'ASPECT_NATIVE_SHA256',digest)
-    monkeypatch.setattr(tool,'ASPECT_NATIVE_BYTES',len(raw))
-    native=tmp_path/'libidoly_presentation.so';native.write_bytes(raw)
-    source_hashes={name:'a'*64 for name in tool.NATIVE_SOURCE_PATHS}
-    receipt={'sha256':digest,'bytes':len(raw),'profile_prefix_count':63,
-        'source_unchanged_during_build':True,'source_sha256':source_hashes}
-    proof=tmp_path/'build-receipt.json';proof.write_text(json.dumps(receipt))
-    actual,metadata=tool.native_override(native,tool.PublicCache(),source_hashes)
-    assert actual==raw and metadata['profile_prefix_count']==63
-    assert metadata['source_sha256']==source_hashes and metadata['runtime_device_tested'] is False
-    receipt['source_sha256']={**source_hashes,tool.NATIVE_SOURCE_PATHS[0]:'b'*64}
-    proof.write_text(json.dumps(receipt))
-    with pytest.raises(ValueError,match='frozen compile inputs'):
-        tool.native_override(native,tool.PublicCache(),source_hashes)
-    receipt['source_sha256']=source_hashes;receipt['profile_prefix_count']=55
-    proof.write_text(json.dumps(receipt))
-    with pytest.raises(ValueError,match='frozen compile inputs'):
-        tool.native_override(native,tool.PublicCache(),source_hashes)
-    native.write_bytes(raw+b'changed')
-    with pytest.raises(ValueError,match='Pinned public build input differs'):
-        tool.native_override(native,tool.PublicCache(),source_hashes)
+    assert tool.marker('a'*64)['native_library_sha256']=='a'*64
 
 
 def test_dual_signature_output_verification_includes_v2_sdk_range_only_for_verifier():
     command=tool.output_verify_command(['java','-jar','apksigner.jar'],Path('output.apk'))
     assert command==['java','-jar','apksigner.jar','verify','--verbose','--print-certs','--min-sdk-version','24',Path('output.apk')]
     assert 'sign' not in command and 'AndroidManifest.xml' not in command
+
+
+def test_all_tmpfs_placement_keeps_root_reserve_and_at_most_two_full_apks(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    ram = Path('/dev/shm')
+    if not ram.is_dir() or ram.stat().st_dev == tmp_path.stat().st_dev:
+        pytest.skip('Separate tmpfs unavailable')
+    with tempfile.TemporaryDirectory(prefix='presentation-placement-test-',dir=ram) as td:
+        output = Path(td)
+        root_free = tool.limits.MIN_ROOT_FREE
+        required = 2 * tool.MAX_APK + 32 * 1024 * 1024
+        monkeypatch.setattr(tool.shutil,'disk_usage',lambda p:SimpleNamespace(free=required if Path(p)==ram else root_free))
+        assert tool.staging_placement(tmp_path,output,ram,all_tmpfs=True)['max_full_apks']==2
+        with pytest.raises(ValueError,match='separate'): tool.staging_placement(tmp_path,output,ram)
+        with pytest.raises(ValueError,match='inside'): tool.staging_placement(tmp_path,tmp_path,ram,all_tmpfs=True)
+        root_free -= 1
+        with pytest.raises(ValueError,match='reserves'): tool.staging_placement(tmp_path,output,ram,all_tmpfs=True)

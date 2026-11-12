@@ -16,6 +16,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -37,6 +39,9 @@ public final class PresentationClient {
     private static final Set<String> METRICS = keys("screen_width", "screen_height", "render_width", "render_height",
             "camera_aspect", "base_vertical_fov", "vertical_fov");
     private static final Set<String> STATUSES = keys("waiting", "applied", "disabled", "unsupported", "waiting_for_scene", "init_failed");
+    private static final Set<String> PLAYBACK_KEYS = keys("schema", "revision", "wait_for_orientation");
+    private static final Set<String> PLAYBACK_STATUS_KEYS = keys("schema", "bridge_version", "revision",
+            "wait_for_orientation", "supported", "applied");
     // No native code ran, so no preference revision or capability was applied.
     static String startupFailureStatus() {
         return "{\"schema\":1,\"bridge_version\":1,\"revision\":0,\"status\":\"init_failed\","
@@ -68,6 +73,22 @@ public final class PresentationClient {
         }
     }
 
+    public static final class PlaybackConfig {
+        public final long revision;
+        public final boolean waitForOrientation;
+        PlaybackConfig(Map<String, Object> row) throws IOException {
+            if (!row.keySet().equals(PLAYBACK_KEYS) || integer(row.get("schema")) != 1) throw invalid();
+            revision = integer(row.get("revision"));
+            waitForOrientation = bool(row.get("wait_for_orientation"));
+            if (revision < 0) throw invalid();
+        }
+    }
+
+    public interface PlaybackNative {
+        boolean configure(int schema, long revision, boolean waitForOrientation);
+        String status();
+    }
+
     private static Set<String> keys(String... values) { return new HashSet<String>(Arrays.asList(values)); }
     private static IOException invalid() { return new IOException("Invalid presentation protocol"); }
     private static boolean bool(Object value) throws IOException { if (!(value instanceof Boolean)) throw invalid(); return (Boolean) value; }
@@ -88,6 +109,15 @@ public final class PresentationClient {
     }
 
     public static Config parseConfig(String json) throws IOException { return new Config(new Json(json).parse()); }
+    public static PlaybackConfig parsePlayback(String json) throws IOException { return new PlaybackConfig(new Json(json).parse()); }
+    public static void validatePlaybackStatus(String json) throws IOException {
+        Map<String, Object> row = new Json(json).parse();
+        if (!row.keySet().equals(PLAYBACK_STATUS_KEYS) || integer(row.get("schema")) != 1
+                || integer(row.get("bridge_version")) != 1 || integer(row.get("revision")) < 0) throw invalid();
+        bool(row.get("wait_for_orientation"));
+        boolean supported = bool(row.get("supported")), applied = bool(row.get("applied"));
+        if (applied && !supported) throw invalid();
+    }
     @SuppressWarnings("unchecked")
     public static void validateStatus(String json) throws IOException {
         Map<String, Object> row = new Json(json).parse();
@@ -111,16 +141,19 @@ public final class PresentationClient {
 
     interface Connections { HttpURLConnection open(URL url) throws IOException; }
     private final Connections connections;
-    private static ThreadPoolExecutor daemon(final String name) {
-        return new ThreadPoolExecutor(0, 1, 5, TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
+    private static ThreadPoolExecutor daemon(final String name, boolean allowPending) {
+        BlockingQueue<Runnable> queue = allowPending ? new ArrayBlockingQueue<Runnable>(1) : new SynchronousQueue<Runnable>();
+        return new ThreadPoolExecutor(0, 1, 5, TimeUnit.SECONDS, queue,
             new ThreadFactory() { public Thread newThread(Runnable task) {
                 Thread thread = new Thread(task, name); thread.setDaemon(true); return thread;
             }});
     }
-    // At most one network operation and one asynchronous cleanup may exist.
-    // A platform call that ignores cancellation cannot create an unbounded queue.
-    private final ThreadPoolExecutor requests = daemon("IdolyPresentationHttp");
-    private final ThreadPoolExecutor cleanup = daemon("IdolyPresentationClose");
+    // One active request, one bounded pending request, and one cleanup at most.
+    // The pending slot covers Future completion before its worker becomes idle;
+    // cancelled queued calls are removed and can never accumulate behind a
+    // platform operation that ignores interruption.
+    private final ThreadPoolExecutor requests = daemon("IdolyPresentationHttp", true);
+    private final ThreadPoolExecutor cleanup = daemon("IdolyPresentationClose", false);
     public PresentationClient() {
         this(new Connections() { public HttpURLConnection open(URL url) throws IOException {
             return (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
@@ -128,6 +161,18 @@ public final class PresentationClient {
     }
     PresentationClient(Connections connections) { this.connections = connections; }
     public Config fetch() throws IOException { return parseConfig(request("/client/presentation", null)); }
+    public PlaybackConfig fetchPlayback() throws IOException { return parsePlayback(request("/client/playback", null)); }
+    public void postPlaybackStatus(String status) throws IOException {
+        validatePlaybackStatus(status);
+        request("/client/playback/status", status.getBytes(StandardCharsets.UTF_8));
+    }
+    /** Only native acknowledgement is posted; a stored preference is not playback completion. */
+    public boolean pollPlayback(PlaybackNative receiver) throws IOException {
+        PlaybackConfig config = fetchPlayback();
+        if (!receiver.configure(1, config.revision, config.waitForOrientation)) return false;
+        postPlaybackStatus(receiver.status());
+        return true;
+    }
     public void postStatus(String status) throws IOException {
         validateStatus(status);
         request("/client/presentation/status", status.getBytes(StandardCharsets.UTF_8));
@@ -161,6 +206,7 @@ public final class PresentationClient {
     }
     private void cancel(Future<String> future, final AtomicReference<HttpURLConnection> active) {
         future.cancel(true);
+        requests.purge();
         try { cleanup.execute(new Runnable() { public void run() {
             HttpURLConnection connection = active.get(); if (connection != null) connection.disconnect();
         }}); } catch (RejectedExecutionException alreadyClosing) { /* Bounded daemon cleanup. */ }

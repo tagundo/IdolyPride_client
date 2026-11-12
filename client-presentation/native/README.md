@@ -14,6 +14,8 @@ boolean configure(int schema, long revision, boolean customGraphics,
     int quality, int fps, float scale, int maxBufferPixel,
     int aaMode, int shadow, boolean expandPhotography);
 String status();
+boolean configurePlayback(int schema, long revision, boolean waitForOrientation);
+String playbackStatus();
 ```
 
 `configure` validates schema 1 and publishes one mutex-protected immutable
@@ -95,6 +97,20 @@ The source references HoshimiLocalify's documented option contracts and the
 original metadata/native interfaces. Its GPLv3 implementation was not copied.
 Profile provenance and ABI details are in `profile.json`. This repository's
 existing ShadowHook license/third-party notices apply to that dependency.
+
+The separate `/client/playback` schema controls entry/exit orientation waits.
+Its default is enabled on Android, physical iOS and Mac/PlayCover. Explicitly
+saved preferences are retained.
+Enabling the wait uses the original overloads and completion predicates.
+Disabling it uses the original public landscape task and its cancellation and
+Before/After pipeline, then requires two original Unity frames and a valid
+viewport. An already cancelled caller takes the original path. Each transition
+latches its mode, so a preference arriving midway applies to the next one.
+Neither Screen/Input getters nor Unity time are replaced. The Android profile
+pins 76 original functions with 29 hooks; iOS has its separate original profile.
+Playback status reports accepted configuration and hook support, rather than
+proof that an MV or rotation completed. No Unity call occurs while accepting
+or reporting this configuration.
 
 Run the CPU and bounded-profile checks with:
 

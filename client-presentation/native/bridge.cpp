@@ -22,10 +22,11 @@
 #endif
 #include "presentation_math.hpp"
 #include "presentation_scope.hpp"
+#include "orientation.hpp"
+#include "playback_config.hpp"
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
 #include "../ios/live_ui.hpp"
-#include "../ios/orientation.hpp"
 #include "../ios/photography_ui.hpp"
 #include "panorama_ui_edges.hpp"
 #else
@@ -45,10 +46,34 @@ bool configured = false;
 std::atomic<bool> started{false}, ready{false};
 uintptr_t image_base;
 void *held_library;
-// Set before hooks are published. Physical iOS and Android keep their device
-// rotation and camera-lens behavior; PlayCover is identified by loaded AppKit.
+// Set before hooks are published. PlayCover is identified by loaded AppKit;
+// orientation waiting defaults to enabled on both desktop and phones.
 bool desktop_host = false;
 std::atomic<uintptr_t> game_thread_id{0};
+pthread_mutex_t playback_mutex = PTHREAD_MUTEX_INITIALIZER;
+PlaybackSettings playback_settings;
+bool accept_playback_configuration(int schema,int64_t revision,bool wait) {
+    pthread_mutex_lock(&playback_mutex);
+    const bool accepted=playback_settings.accept(schema,revision,wait);
+    pthread_mutex_unlock(&playback_mutex);return accepted;
+}
+bool playback_wait_for_orientation() {
+    pthread_mutex_lock(&playback_mutex);
+    const bool wait=playback_settings.wait();
+    pthread_mutex_unlock(&playback_mutex);return wait;
+}
+bool orientation_available() { return ready.load(std::memory_order_acquire); }
+void playback_status_json(char *output,size_t size) {
+    const bool supported=ready.load(std::memory_order_acquire);
+    pthread_mutex_lock(&playback_mutex);
+    const bool applied=supported && playback_settings.known();
+    const bool wait=playback_settings.wait();
+    const int64_t revision=playback_settings.revision();
+    pthread_mutex_unlock(&playback_mutex);
+    std::snprintf(output,size,"{\"schema\":1,\"bridge_version\":1,\"revision\":%lld,"
+        "\"wait_for_orientation\":%s,\"supported\":%s,\"applied\":%s}",
+        static_cast<long long>(revision),wait?"true":"false",supported?"true":"false",applied?"true":"false");
+}
 
 struct Status {
     int64_t revision = 0;
@@ -178,9 +203,9 @@ Rect (*uv_get)(void *, Method *);
 void (*aa_original)(void *, void *, bool, void *, Method *);
 bool (*shadow_original)(void *, void *, void **, int, Method *);
 
-#ifdef IDOLY_DARWIN_BRIDGE
-namespace rotation = idoly::presentation::ios_orientation;
+namespace rotation = idoly::presentation::orientation;
 rotation::Calls orientation_calls;
+#ifdef IDOLY_DARWIN_BRIDGE
 PanoramaEdgeApi panorama_api;
 PanoramaEdgeLayout panorama_ui;
 bool class_matches(void *object, const char *space, const char *name) {
@@ -1026,6 +1051,13 @@ void load_calls() {
     CALL(orthographic, orthographic); CALL(uv_get, uv_get);
     CALL(projection_get, projection_get); CALL(physical_get, physical_get); CALL(gate_get, gate_get);
     CALL(sensor_get, sensor_get); CALL(lens_get, lens_get); CALL(projection_mode_get, projection_mode_get);
+    CALL(orientation_calls.frame_count, orientation_frame_count);
+    CALL(orientation_calls.token_cancelled, orientation_token_cancelled);
+    CALL(orientation_calls.set_orientation_async, orientation_set_async);
+    orientation_calls.available=orientation_available; orientation_calls.wait_for_orientation=playback_wait_for_orientation;
+    orientation_calls.game_thread=game_call;
+    orientation_calls.screen_width=screen_width; orientation_calls.screen_height=screen_height;
+    rotation::configure(orientation_calls);
 #ifdef IDOLY_DARWIN_BRIDGE
     CALL(camera_aspect_set_original, aspect_set); CALL(camera_aspect_reset, aspect_reset);
     CALL(mv_ui_hide, mv_ui_hide);
@@ -1033,12 +1065,6 @@ void load_calls() {
     preview_ui_calls.matches=class_matches;
     CALL(preview_ui_calls.ui_get, preview_ui_get); CALL(preview_ui_calls.ui_set, preview_ui_set);
     preview_ui.configure(preview_ui_calls);
-    CALL(orientation_calls.frame_count, orientation_frame_count);
-    CALL(orientation_calls.token_cancelled, orientation_token_cancelled);
-    CALL(orientation_calls.set_orientation_async, orientation_set_async);
-    orientation_calls.desktop_enabled=desktop_enabled; orientation_calls.game_thread=game_call;
-    orientation_calls.screen_width=screen_width; orientation_calls.screen_height=screen_height;
-    rotation::configure(orientation_calls);
     panorama_api.weak_new=weak_new; panorama_api.weak_get=weak_get; panorama_api.weak_free=weak_free;
     panorama_api.alive=object_alive; panorama_api.matches=class_matches;
     panorama_api.parent=parent_get; panorama_api.position_get=local_position; panorama_api.position_set=local_position_set;
@@ -1122,6 +1148,16 @@ void *install(void *) {
         HOOK(fov_get, fov_get_hook, fov_get_original), HOOK(fov_set, fov_set_hook, fov_set_original),
         HOOK(focal_get, focal_get_hook, focal_get_original), HOOK(focal_set, focal_set_hook, focal_set_original),
         HOOK(aa_init, aa_hook, aa_original), HOOK(shadow_update, shadow_hook, shadow_original),
+        HOOK(rotation_wait,rotation::wait_hook,rotation::original_wait),
+        HOOK(rotation_wait_label,rotation::wait_label_hook,rotation::original_wait_label),
+        HOOK(rotation_wait_simple,rotation::wait_simple_hook,rotation::original_wait_simple),
+        HOOK(rotation_wait_preview,rotation::wait_preview_hook,rotation::original_wait_preview),
+        HOOK(orientation_internal_move,rotation::internal_move_hook,rotation::original_internal_move),
+        HOOK(orientation_starts_portrait_ready,rotation::starts_portrait_hook,rotation::original_starts_portrait),
+        HOOK(orientation_starts_landscape_ready,rotation::starts_landscape_hook,rotation::original_starts_landscape),
+        HOOK(orientation_fixed_portrait_ready,rotation::fixed_portrait_hook,rotation::original_fixed_portrait),
+        HOOK(orientation_fixed_landscape_ready,rotation::fixed_landscape_hook,rotation::original_fixed_landscape),
+        HOOK(orientation_after_ready,rotation::after_hook,rotation::original_after),
     };
 #undef HOOK
     for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; ++i) {
@@ -1130,6 +1166,10 @@ void *install(void *) {
             for (size_t j = i; j > 0; --j) shadowhook_unhook(hooks[j - 1].stub);
             set_state("init_failed"); return nullptr;
         }
+    }
+    if (!rotation::ready_for_publish()) {
+        for (size_t i=sizeof hooks/sizeof hooks[0];i>0;--i) shadowhook_unhook(hooks[i-1].stub);
+        set_state("init_failed");return nullptr;
     }
     pthread_mutex_lock(&status_mutex);
     state.fps = state.quality = state.resolution = state.aa = state.shadow = state.expanded = true;
@@ -1159,6 +1199,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentatio
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_status(JNIEnv *env, jclass) {
     char json[1024]; status_json(json, sizeof json);
     return env->NewStringUTF(json);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_configurePlayback(
+        JNIEnv *,jclass,jint schema,jlong revision,jboolean wait) {
+    return accept_playback_configuration(schema,revision,wait!=0)?JNI_TRUE:JNI_FALSE;
+}
+extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_playbackStatus(JNIEnv *env,jclass) {
+    char json[256];playback_status_json(json,sizeof json);return env->NewStringUTF(json);
 }
 
 #else

@@ -1,26 +1,33 @@
 #include "darwin_objc.h"
 #include "presentation_contract.h"
 #include "playcover_launch.h"
+#include "shutdown_policy.h"
+#include "playback_contract.h"
+
+extern int fcntl(int, int, ...);
 
 /* The launcher owns Python embedding; this file owns only the Cocoa window and
    its existing local JSON-control child. No client download/install code. */
 
 enum { C_CUSTOM = 1, C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW, C_EXPAND,
-       C_MEDIA = 100, C_LIVE, C_DOWNLOAD, C_START = 200, C_STOP, C_OPEN, C_FOLDER };
+       C_MEDIA = 100, C_LIVE, C_DOWNLOAD, C_WAIT_ROTATION, C_START = 200, C_STOP, C_OPEN, C_FOLDER };
 
 static struct {
-    IDObj app, delegate, window, timer, task, writer, defaults, dataURL, prefsURL, smokeURL;
+    IDObj app, delegate, window, timer, task, writer, defaults, dataURL, prefsURL, playbackURL, smokeURL;
     IDObj serverLabel, launchLabel, visualLabel, metricLabel, logView, start, stop, openGame;
-    IDObj media, live, download, custom, expand, menus[6];
+    IDObj media, live, download, waitOrientation, playbackLabel, custom, expand, menus[6];
     IDPrefs prefs;
+    IDPlaybackPrefs playback;
     int invalidPrefs, saveFailed, running, busy, canStop, mediaMode, liveMode, downloadMode;
-    int outFD, errorFD, inputFD, inputClosed, engineEnded, quitting, terminated, termSent;
+    int invalidPlayback, playbackSaveFailed;
+    int outFD, errorFD, inputFD, inputClosed, engineEnded, quitting;
     int ackBridge, ackPresent, ackState, experimentalObserved;
     long long ackRevision;
     double screenW, screenH, renderW, renderH, baseFOV, fov, cameraAspect;
-    double startedAt, quitAt, lastRequestAt;
+    double startedAt, lastRequestAt;
     double scales[16]; int scaleCount, maxima[16], maximumCount;
     IDPolling polling;
+    IDShutdown shutdown;
     int smoke, smokeStarted, smokeStopping, smokeFinished;
     char output[131073], errors[32769], logs[60001];
     IDSize outputCount, errorCount, logCount;
@@ -110,6 +117,46 @@ static int save_preferences(IDPrefs changed) {
     return 1;
 }
 
+static int write_playback_preferences(const IDPlaybackPrefs *value) {
+    char bytes[256]; int length = id_playback_encode(value, bytes, sizeof bytes);
+    return length > 0 && create_data_directory() && atomic_bytes(G.playbackURL, bytes, (IDSize)length);
+}
+
+static void load_playback_preferences(void) {
+    G.playback = id_playback_defaults();
+    IDObj manager = id_get(id_class("NSFileManager"), "defaultManager");
+    IDObj path = id_get(G.playbackURL, "path");
+    if (!id_bool_arg(manager, "fileExistsAtPath:", path)) {
+        G.playbackSaveFailed = !write_playback_preferences(&G.playback);
+        return;
+    }
+    IDObj attributes = ((IDObj (*)(IDObj, IDSel, IDObj, IDObj *))IDRuntime.message)(manager,
+        id_sel("attributesOfItemAtPath:error:"), path, 0);
+    if (strcmp(id_utf8(id_item(attributes, "NSFileType")), "NSFileTypeRegular") != 0) { G.invalidPlayback = 1; return; }
+    int fd = open(id_utf8(path), 0);
+    if (fd < 0) { G.invalidPlayback = 1; return; }
+    char bytes[8193]; IDSize length = 0;
+    while (length < sizeof bytes) {
+        long count = read(fd, bytes + length, sizeof bytes - length);
+        if (count < 0) { G.invalidPlayback = 1; break; }
+        if (!count) break;
+        length += (IDSize)count;
+    }
+    close(fd);
+    if (!G.invalidPlayback && !id_playback_decode(bytes, length, &G.playback)) G.invalidPlayback = 1;
+}
+
+static int save_playback_preferences(int waitForOrientation) {
+    double milliseconds = id_number(id_get(id_class("NSDate"), "date"), "timeIntervalSince1970") * 1000.0;
+    if (!__builtin_isfinite(milliseconds) || milliseconds >= 9223372036854775807.0) return 0;
+    IDPlaybackPrefs changed = G.playback, next;
+    changed.waitForOrientation = waitForOrientation;
+    if (!id_playback_next(&changed, milliseconds > 0 ? (long long)milliseconds : 0, &next)
+        || !write_playback_preferences(&next)) return 0;
+    G.playback = next; G.invalidPlayback = G.playbackSaveFailed = 0;
+    return 1;
+}
+
 static long selected_int(const int *values, int count, int desired) {
     for (int i = 0; i < count; ++i) if (values[i] == desired) return i;
     return 0;
@@ -135,6 +182,13 @@ static void update_controls(void) {
     id_set_bool(G.media, "setEnabled:", (IDBool)modes);
     id_set_bool(G.live, "setEnabled:", (IDBool)modes);
     id_set_bool(G.download, "setEnabled:", (IDBool)modes);
+    id_set_bool(G.waitOrientation, "setEnabled:", !G.quitting);
+    id_set_long(G.waitOrientation, "setState:", G.playback.waitForOrientation);
+    text(G.playbackLabel, G.playbackSaveFailed ? "회전 대기 설정을 저장하지 못했습니다. 이전 값을 유지합니다."
+        : G.invalidPlayback ? "회전 대기 설정을 읽지 못해 기본값 켜짐을 표시합니다. 바꾸면 새로 저장합니다."
+        : G.playback.revision > 0 ? "MV 회전 대기 설정이 저장되었습니다."
+        : "기본값 켜짐 · 그래픽 설정과 별도로 저장됩니다.");
+    id_set(G.playbackLabel, "setTextColor:", color(G.invalidPlayback || G.playbackSaveFailed ? "systemOrangeColor" : "secondaryLabelColor"));
     int state = id_ack_feedback(G.running && !G.quitting, id_poll_fresh(&G.polling, uptime()), G.prefs.revision,
         G.ackBridge, G.ackRevision, G.ackPresent ? ackNames[G.ackState] : 0);
     const char *message;
@@ -160,6 +214,13 @@ static void update_controls(void) {
     } else text(G.metricLabel, "게임의 3D 화면·시야각 측정값 수신 대기");
 }
 
+static void close_input(void) {
+    if (!G.inputClosed && G.writer) {
+        G.inputClosed = 1;
+        id_void(G.writer, "closeFile");
+    }
+}
+
 static int send_control(const char *action) {
     if (!G.task || !id_bool(G.task, "isRunning") || G.inputClosed) return 0;
     char command[320];
@@ -168,7 +229,10 @@ static int send_control(const char *action) {
         "{\"action\":\"start\",\"experimental_main_live\":%s,\"media_mode\":%s,\"download_missing_resources\":%s}\n",
         G.liveMode ? "true" : "false", G.mediaMode ? "true" : "false", G.downloadMode ? "true" : "false");
     else size = snprintf(command, sizeof command, "{\"action\":\"%s\"}\n", action);
-    return size > 0 && (IDSize)size < sizeof command && write(G.inputFD, command, (IDSize)size) == size;
+    if (size <= 0 || (IDSize)size >= sizeof command) return 0;
+    int sent = id_control_send(G.inputFD, command, (IDSize)size, write);
+    if (sent < 0) close_input(); /* Never append a second JSON command to a partial line. */
+    return sent == 1;
 }
 
 static void begin_start(void) {
@@ -276,6 +340,9 @@ static void control_action(IDObj self, IDSel command, IDObj sender) {
     else if (tag == C_FOLDER) {
         create_data_directory();
         id_bool_arg(id_get(id_class("NSWorkspace"), "sharedWorkspace"), "openURL:", G.dataURL);
+    } else if (tag == C_WAIT_ROTATION) {
+        if (!G.quitting && !save_playback_preferences(id_long(sender, "state") == 1)) G.playbackSaveFailed = 1;
+        update_controls();
     } else if (tag >= C_MEDIA && tag <= C_DOWNLOAD) {
         int value = id_long(sender, "state") == 1;
         const char *key;
@@ -389,7 +456,7 @@ static void make_window(void) {
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
-    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1060));
+    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1188));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
     add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
@@ -402,12 +469,15 @@ static void make_window(void) {
     G.download = add_button(document, "없는 게임 리소스 내려받기", 8, 180, 470, C_DOWNLOAD, 1);
     id_set_long(G.download, "setState:", G.downloadMode);
     add_label(document, "게임이 요청한 리소스만 보관합니다. 끄면 이미 보관한 파일만 제공합니다. IPA 설치 파일은 내려받지 않습니다.", 212, 36, 11, 1);
-    add_label(document, "그래픽·촬영 화면", 256, 30, 17, 0);
-    add_label(document, "그래픽 지원 IPA가 필요합니다. 서버 실행 중에도 바꿀 수 있으며 저장 후 실제 게임의 적용 확인을 기다립니다.", 290, 38, 11, 1);
-    G.custom = add_button(document, "사용자 그래픽 설정 사용", 8, 332, 450, C_CUSTOM, 1);
+    G.waitOrientation = add_button(document, "MV 진입·종료 시 화면 회전 대기", 8, 256, 620, C_WAIT_ROTATION, 1);
+    add_label(document, "켜면 화면 회전이 끝날 때까지 MV 진입·종료를 기다립니다. 끄면 회전을 기다리지 않습니다.", 288, 36, 11, 1);
+    G.playbackLabel = add_label(document, "회전 대기 설정을 준비하고 있습니다.", 328, 36, 11, 1);
+    add_label(document, "그래픽·촬영 화면", 384, 30, 17, 0);
+    add_label(document, "그래픽 지원 IPA가 필요합니다. 서버 실행 중에도 바꿀 수 있으며 저장 후 실제 게임의 적용 확인을 기다립니다.", 418, 38, 11, 1);
+    G.custom = add_button(document, "사용자 그래픽 설정 사용", 8, 460, 450, C_CUSTOM, 1);
     const char *labels[] = {"그래픽 품질", "목표 프레임 수", "3D 렌더 배율", "렌더 버퍼 최대 크기", "가장자리 다듬기", "캐릭터 그림자 해상도"};
     long tags[] = {C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW};
-    for (int i = 0; i < 6; ++i) G.menus[i] = add_menu(document, labels[i], 368 + i * 34, tags[i]);
+    for (int i = 0; i < 6; ++i) G.menus[i] = add_menu(document, labels[i], 496 + i * 34, tags[i]);
     add_int_items(G.menus[0], qualities, 6, 0); add_int_items(G.menus[1], rates, 5, 1);
     double initialScales[] = {0.25, 0.5, 0.75, 1, 1.25, 1.5, 2};
     G.scaleCount = 7; for (int i = 0; i < 7; ++i) G.scales[i] = initialScales[i];
@@ -420,19 +490,19 @@ static void make_window(void) {
     if (!found) G.maxima[G.maximumCount++] = G.prefs.maximum;
     add_int_items(G.menus[3], G.maxima, G.maximumCount, 2);
     add_int_items(G.menus[4], antiAlias, 4, 3); add_int_items(G.menus[5], shadows, 5, 4);
-    G.expand = add_button(document, "촬영·360 화면의 3D 표시 영역 확장", 8, 578, 600, C_EXPAND, 1);
-    add_label(document, "기본 16:9 바깥에도 3D 장면을 렌더링합니다. 확대·잘라내기·늘이기 방식이 아닙니다.", 610, 32, 11, 1);
-    G.visualLabel = add_label(document, "게임의 응답 대기", 648, 42, 12, 1);
-    G.metricLabel = add_label(document, "게임의 3D 화면·시야각 측정값 수신 대기", 692, 42, 11, 1);
-    add_label(document, "실행 기록", 746, 26, 14, 0);
-    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 776, 676, 200));
+    G.expand = add_button(document, "촬영·360 화면의 3D 표시 영역 확장", 8, 706, 600, C_EXPAND, 1);
+    add_label(document, "기본 16:9 바깥에도 3D 장면을 렌더링합니다. 확대·잘라내기·늘이기 방식이 아닙니다.", 738, 32, 11, 1);
+    G.visualLabel = add_label(document, "게임의 응답 대기", 776, 42, 12, 1);
+    G.metricLabel = add_label(document, "게임의 3D 화면·시야각 측정값 수신 대기", 820, 42, 11, 1);
+    add_label(document, "실행 기록", 874, 26, 14, 0);
+    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 904, 676, 200));
     id_set_bool(logScroll, "setHasVerticalScroller:", 1); id_set_bool(logScroll, "setHasHorizontalScroller:", 0);
     G.logView = id_init_frame(id_get(id_class("NSTextView"), "alloc"), id_rect(0, 0, 650, 200));
     id_set_bool(G.logView, "setEditable:", 0); id_set_bool(G.logView, "setSelectable:", 1);
     id_set_bool(G.logView, "setVerticallyResizable:", 1); id_set_bool(G.logView, "setHorizontallyResizable:", 0);
     id_set(G.logView, "setFont:", id_double(id_class("NSFont"), "userFixedPitchFontOfSize:", 11));
     id_set(logScroll, "setDocumentView:", G.logView); id_set(document, "addSubview:", logScroll);
-    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 988, 42, 11, 1);
+    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1116, 42, 11, 1);
     sync_graphics_controls(); update_controls();
     id_void(G.window, "center"); id_set(G.window, "makeKeyAndOrderFront:", 0);
     id_set_bool(G.app, "activateIgnoringOtherApps:", 1);
@@ -518,15 +588,26 @@ static void tick(IDObj self, IDSel command, IDObj timer) {
         update_controls();
     }
     if (G.quitting) {
-        if (!alive) { G.terminated = 1; id_set_bool(G.app, "replyToApplicationShouldTerminate:", 1); }
-        else if (now - G.quitAt > 10) kill(id_int(G.task, "processIdentifier"), 9);
-        else if (now - G.quitAt > 8 && !G.termSent) { G.termSent = 1; id_void(G.task, "terminate"); }
+        enum IDShutdownAction action = id_shutdown_step(&G.shutdown, now, alive,
+            G.task ? id_int(G.task, "processIdentifier") : 0);
+        if (action == ID_SHUTDOWN_TERM) kill(G.shutdown.ownedPID, 15);
+        else if (action == ID_SHUTDOWN_KILL) kill(G.shutdown.ownedPID, 9);
+        else if (action == ID_SHUTDOWN_FINISH) {
+            /* NSTask owns reaping. Read the result only after it reports exit;
+               waitUntilExit on the main thread would block the window again. */
+            if (G.shutdown.observedExit && G.task) (void)id_int(G.task, "terminationStatus");
+            if (G.shutdown.timedOut) log_line("서버 엔진에 강제 종료를 요청한 뒤 앱을 종료합니다.");
+            if (G.shutdown.ownershipLost) log_line("서버 엔진의 소유 정보를 확인할 수 없어 추가 신호 없이 앱을 종료합니다.");
+            id_void(G.timer, "invalidate");
+            id_set(G.app, "terminate:", G.delegate);
+        }
     } else if (alive) {
         if (G.polling.received && !id_poll_fresh(&G.polling, now)) {
             G.ackPresent = 0; status("서버 응답을 기다리고 있습니다."); update_controls();
         }
         if (now - G.lastRequestAt >= 1 && id_poll_begin(&G.polling)) {
-            G.lastRequestAt = now; send_control("status");
+            G.lastRequestAt = now;
+            if (!send_control("status")) G.polling.outstanding = 0;
         }
     }
     if (G.smoke && !G.smokeFinished && !G.quitting) {
@@ -557,10 +638,15 @@ static void start_engine(void) {
     IDObj input = id_get(id_class("NSPipe"), "pipe"), output = id_get(id_class("NSPipe"), "pipe"), errors = id_get(id_class("NSPipe"), "pipe");
     id_set(G.task, "setStandardInput:", input); id_set(G.task, "setStandardOutput:", output); id_set(G.task, "setStandardError:", errors);
     G.writer = id_keep(id_get(input, "fileHandleForWriting")); G.inputFD = id_int(G.writer, "fileDescriptor");
+    /* Darwin F_GETFL=3, F_SETFL=4, O_NONBLOCK=4. Never let a full engine pipe
+       block a button, the timer, or applicationShouldTerminate on the main thread. */
+    int writable = id_control_nonblocking(G.inputFD, 3, 4, 4, fcntl);
+    if (!writable) close_input();
     G.outFD = id_int(id_get(output, "fileHandleForReading"), "fileDescriptor");
     G.errorFD = id_int(id_get(errors, "fileHandleForReading"), "fileDescriptor");
     IDBool launched = ((IDBool (*)(IDObj, IDSel, IDObj *))IDRuntime.message)(G.task, id_sel("launchAndReturnError:"), 0);
     if (!launched) { G.engineEnded = 1; G.busy = 0; status("서버 엔진을 실행하지 못했습니다. 앱 파일을 확인해 주세요."); }
+    else if (!writable) { G.busy = 0; status("서버 엔진 제어 통로를 준비하지 못했습니다. 앱을 다시 열어 주세요."); }
     update_controls();
 }
 
@@ -569,20 +655,29 @@ static void did_launch(IDObj self, IDSel command, IDObj notification) {
     if (G.window) return;
     make_window(); start_engine(); G.startedAt = uptime();
     G.timer = id_keep(((IDObj (*)(IDObj, IDSel, double, IDObj, IDSel, IDObj, IDBool))IDRuntime.message)(
-        id_class("NSTimer"), id_sel("scheduledTimerWithTimeInterval:target:selector:userInfo:repeats:"),
+        id_class("NSTimer"), id_sel("timerWithTimeInterval:target:selector:userInfo:repeats:"),
         0.2, G.delegate, id_sel("timerTick:"), 0, 1));
+    /* Common modes include ordinary events and menu tracking. Quit itself is
+       cancelled during cleanup, so no termination-modal run loop is entered. */
+    ((void (*)(IDObj, IDSel, IDObj, IDObj))IDRuntime.message)(id_get(id_class("NSRunLoop"), "mainRunLoop"),
+        id_sel("addTimer:forMode:"), G.timer, id_string("kCFRunLoopCommonModes"));
 }
 
 static unsigned long should_terminate(IDObj self, IDSel command, IDObj app) {
     (void)self; (void)command; (void)app;
-    if (G.terminated || !G.task || !id_bool(G.task, "isRunning")) return 1;
+    int alive = G.task && id_bool(G.task, "isRunning");
+    enum IDTerminateReply reply = id_shutdown_request(&G.shutdown, uptime(),
+        G.task ? id_int(G.task, "processIdentifier") : 0, alive);
+    if (reply == ID_TERMINATE_NOW) return ID_TERMINATE_NOW;
     if (!G.quitting) {
-        G.quitting = 1; G.quitAt = uptime(); G.ackPresent = 0;
+        G.quitting = 1; G.ackPresent = 0;
         status("서버 엔진을 종료하고 있습니다."); update_controls();
         send_control("quit");
-        if (!G.inputClosed) { G.inputClosed = 1; id_void(G.writer, "closeFile"); }
+        close_input(); /* EOF also requests cleanup if the quit command could not fit. */
     }
-    return 2;
+    /* Keep the normal run loop/timer alive. tick reissues terminate only when
+       the owned child has exited, or bounded escalation has finished. */
+    return ID_TERMINATE_CANCEL;
 }
 
 static IDBool close_quits(IDObj self, IDSel command, IDObj app) { (void)self; (void)command; (void)app; return 1; }
@@ -612,6 +707,7 @@ int idoly_app_main(int argc, char **argv) {
         }
     }
     G.prefsURL = id_keep(childURL(G.dataURL, "client-presentation.json")); load_preferences();
+    G.playbackURL = id_keep(childURL(G.dataURL, "client-playback.json")); load_playback_preferences();
     G.app = id_get(id_class("NSApplication"), "sharedApplication"); id_set_long(G.app, "setActivationPolicy:", 0);
     IDObj delegateClass = IDRuntime.allocateClass(id_class("NSObject"), "IdolyServerDelegate", 0);
     IDRuntime.addMethod(delegateClass, id_sel("applicationDidFinishLaunching:"), (void *)did_launch, "v@:@");

@@ -8,4 +8,6 @@ public final class NativePresentation {
             int fps, float scale, int maxBufferPixel, int aaMode, int shadow,
             boolean expandPhotography);
     public static native String status();
+    public static native boolean configurePlayback(int schema, long revision, boolean waitForOrientation);
+    public static native String playbackStatus();
 }

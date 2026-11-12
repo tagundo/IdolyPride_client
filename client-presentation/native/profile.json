@@ -31,6 +31,10 @@
       {
         "file": "photography-layout-injected-api-proof.json",
         "sha256": "50e35f3d978bcacfe2d107526573da62259c7a03c6943b94e0abff7484d9abc5"
+      },
+      {
+        "file": "android-orientation-profile-extension-13.json",
+        "sha256": "e9ee02d055478cd499e18064476d9ccc5aef4dff7c9d8551d807b8e34303452d"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -864,6 +868,575 @@
       "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
       "rva": "0x8f3da64",
       "prefix16": "fe57bea9f44f01a9d58900d0a25a40f9"
+    },
+    "orientation_frame_count": {
+      "name": "UnityEngine.Time.get_frameCount",
+      "type_definition_index": 24055,
+      "metadata_method_index": 165251,
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 3759,
+      "rva": "0x8f89464",
+      "file_offset": "0x8f85464",
+      "prefix16": "fe4fbfa99387009060aa43f9a00000b5",
+      "return_type": "System.Int32",
+      "parameters": [],
+      "method_flags": "0x896",
+      "static": true,
+      "mode": "CALL",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98dd868",
+        "method_count": 5479,
+        "method_table_rva": "0xa018b88",
+        "slot_rva": "0xa0200f8",
+        "slot_file_offset": "0xa0140f8",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x8f89464",
+        "relocation": {
+          "entry_file_offset": "0x1bcfc68",
+          "r_offset": "0xa0200f8",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x8f89464"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "UnityEngine.Time.get_frameCount"
+      }
+    },
+    "orientation_token_cancelled": {
+      "name": "System.Threading.CancellationToken.get_IsCancellationRequested",
+      "type_definition_index": 19123,
+      "metadata_method_index": 130364,
+      "module": "mscorlib.dll",
+      "token_row": 4501,
+      "rva": "0x869fed0",
+      "file_offset": "0x869bed0",
+      "prefix16": "fe4fbfa9080040f9c80000b4132140b9",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "method_flags": "0x886",
+      "static": false,
+      "mode": "CALL",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98a74e8",
+        "method_count": 12906,
+        "method_table_rva": "0x9f950b0",
+        "slot_rva": "0x9f9dd50",
+        "slot_file_offset": "0x9f91d50",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x869fed0",
+        "relocation": {
+          "entry_file_offset": "0x1a8c970",
+          "r_offset": "0x9f9dd50",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x869fed0"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "System.Threading.CancellationToken.get_IsCancellationRequested"
+      }
+    },
+    "orientation_set_async": {
+      "name": "Solis.Common.ScreenOrientationManager.SetOrientationAsync",
+      "type_definition_index": 23327,
+      "metadata_method_index": 159811,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2213,
+      "rva": "0x88531c4",
+      "file_offset": "0x884f1c4",
+      "prefix16": "fe57bea9f44f01a9f4c000d0f58b00f0",
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "orientationType",
+          "metadata_type_index": 66700,
+          "type_name": "Solis.Common.OrientationType",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        }
+      ],
+      "method_flags": "0x96",
+      "static": true,
+      "mode": "CALL",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6430",
+        "slot_file_offset": "0x9fba430",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x88531c4",
+        "relocation": {
+          "entry_file_offset": "0x1aeb6e0",
+          "r_offset": "0x9fc6430",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x88531c4"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.ScreenOrientationManager.SetOrientationAsync"
+      }
+    },
+    "orientation_internal_move": {
+      "name": "Solis.Common.ScreenOrientationControllerBase+<InternalSetOrientationAsync>d__24.MoveNext",
+      "type_definition_index": 23317,
+      "metadata_method_index": 159787,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2189,
+      "rva": "0x8850250",
+      "file_offset": "0x884c250",
+      "prefix16": "ff4301d1fe5f02a9f65703a9f44f04a9",
+      "return_type": "System.Void",
+      "parameters": [],
+      "method_flags": "0x1e1",
+      "static": false,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6370",
+        "slot_file_offset": "0x9fba370",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x8850250",
+        "relocation": {
+          "entry_file_offset": "0x1aeb4a0",
+          "r_offset": "0x9fc6370",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x8850250"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.ScreenOrientationControllerBase+<InternalSetOrientationAsync>d__24.MoveNext"
+      }
+    },
+    "rotation_wait": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync",
+      "type_definition_index": 12079,
+      "metadata_method_index": 57837,
+      "module": "Assembly-CSharp.dll",
+      "token_row": 57838,
+      "rva": "0x45adfd4",
+      "file_offset": "0x45a9fd4",
+      "prefix16": "fe0f1df8f65701a9f44f02a935d502b0",
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54522,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50865,
+          "type_name": "System.Threading.CancellationToken",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        }
+      ],
+      "method_flags": "0x96",
+      "static": true,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x9368ab0",
+        "method_count": 125864,
+        "method_table_rva": "0x9aaa998",
+        "slot_rva": "0x9b1b900",
+        "slot_file_offset": "0x9b0f900",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x45adfd4",
+        "relocation": {
+          "entry_file_offset": "0x1540568",
+          "r_offset": "0x9b1b900",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x45adfd4"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync"
+      }
+    },
+    "rotation_wait_label": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync",
+      "type_definition_index": 12079,
+      "metadata_method_index": 57840,
+      "module": "Assembly-CSharp.dll",
+      "token_row": 57841,
+      "rva": "0x45ae02c",
+      "file_offset": "0x45aa02c",
+      "prefix16": "ff0302d1fe5f05a9f65706a9f44f07a9",
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54522,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "labelKey",
+          "metadata_type_index": 74263,
+          "type_name": "System.String",
+          "kind": "0xe",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50865,
+          "type_name": "System.Threading.CancellationToken",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        }
+      ],
+      "method_flags": "0x96",
+      "static": true,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x9368ab0",
+        "method_count": 125864,
+        "method_table_rva": "0x9aaa998",
+        "slot_rva": "0x9b1b918",
+        "slot_file_offset": "0x9b0f918",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x45ae02c",
+        "relocation": {
+          "entry_file_offset": "0x15405b0",
+          "r_offset": "0x9b1b918",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x45ae02c"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync"
+      }
+    },
+    "rotation_wait_simple": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync",
+      "type_definition_index": 12079,
+      "metadata_method_index": 57838,
+      "module": "Assembly-CSharp.dll",
+      "token_row": 57839,
+      "rva": "0x45ae0d0",
+      "file_offset": "0x45aa0d0",
+      "prefix16": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54522,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "isSimple",
+          "metadata_type_index": 50428,
+          "type_name": "System.Boolean",
+          "kind": "0x2",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50865,
+          "type_name": "System.Threading.CancellationToken",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        }
+      ],
+      "method_flags": "0x96",
+      "static": true,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x9368ab0",
+        "method_count": 125864,
+        "method_table_rva": "0x9aaa998",
+        "slot_rva": "0x9b1b908",
+        "slot_file_offset": "0x9b0f908",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x45ae0d0",
+        "relocation": {
+          "entry_file_offset": "0x1540580",
+          "r_offset": "0x9b1b908",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x45ae0d0"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync"
+      }
+    },
+    "rotation_wait_preview": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalPreviewAsync",
+      "type_definition_index": 12079,
+      "metadata_method_index": 57839,
+      "module": "Assembly-CSharp.dll",
+      "token_row": 57840,
+      "rva": "0x45ae150",
+      "file_offset": "0x45aa150",
+      "prefix16": "fe0f1cf8f85f01a9f65702a9f44f03a9",
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54522,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "isPreview",
+          "metadata_type_index": 50428,
+          "type_name": "System.Boolean",
+          "kind": "0x2",
+          "byref": false,
+          "attrs": 0
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50865,
+          "type_name": "System.Threading.CancellationToken",
+          "kind": "0x11",
+          "byref": false,
+          "attrs": 0
+        }
+      ],
+      "method_flags": "0x96",
+      "static": true,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x9368ab0",
+        "method_count": 125864,
+        "method_table_rva": "0x9aaa998",
+        "slot_rva": "0x9b1b910",
+        "slot_file_offset": "0x9b0f910",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x45ae150",
+        "relocation": {
+          "entry_file_offset": "0x1540598",
+          "r_offset": "0x9b1b910",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x45ae150"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.DeviceRotationManager.WaitHorizontalPreviewAsync"
+      }
+    },
+    "orientation_starts_portrait_ready": {
+      "name": "Solis.Common.AndroidScreenOrientationController+<>c.<SetStartsWithPortraitAsync>b__0_0",
+      "type_definition_index": 23300,
+      "metadata_method_index": 159723,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2125,
+      "rva": "0x884be1c",
+      "file_offset": "0x8847e1c",
+      "prefix16": "fe4fbfa9e0031faa37f91b94f303002a",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "method_flags": "0x83",
+      "static": false,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6170",
+        "slot_file_offset": "0x9fba170",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x884be1c",
+        "relocation": {
+          "entry_file_offset": "0x1aeaf00",
+          "r_offset": "0x9fc6170",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x884be1c"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.IOSScreenOrientationController+<>c.<SetStartsWithPortraitAsync>b__0_0"
+      }
+    },
+    "orientation_starts_landscape_ready": {
+      "name": "Solis.Common.AndroidScreenOrientationController+<>c.<SetStartsWithLandscapeAsync>b__1_0",
+      "type_definition_index": 23300,
+      "metadata_method_index": 159724,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2126,
+      "rva": "0x884be44",
+      "file_offset": "0x8847e44",
+      "prefix16": "fe4fbfa9e0031faa2df91b94f303002a",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "method_flags": "0x83",
+      "static": false,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6178",
+        "slot_file_offset": "0x9fba178",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x884be44",
+        "relocation": {
+          "entry_file_offset": "0x1aeaf18",
+          "r_offset": "0x9fc6178",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x884be44"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.IOSScreenOrientationController+<>c.<SetStartsWithLandscapeAsync>b__1_0"
+      }
+    },
+    "orientation_fixed_portrait_ready": {
+      "name": "Solis.Common.AndroidScreenOrientationController+<>c.<SetFixedPortraitAsync>b__2_0",
+      "type_definition_index": 23300,
+      "metadata_method_index": 159725,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2127,
+      "rva": "0x884be6c",
+      "file_offset": "0x8847e6c",
+      "prefix16": "fe4fbfa9e0031faa23f91b94f303002a",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "method_flags": "0x83",
+      "static": false,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6180",
+        "slot_file_offset": "0x9fba180",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x884be6c",
+        "relocation": {
+          "entry_file_offset": "0x1aeaf30",
+          "r_offset": "0x9fc6180",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x884be6c"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.IOSScreenOrientationController+<>c.<SetFixedPortraitAsync>b__2_0"
+      }
+    },
+    "orientation_fixed_landscape_ready": {
+      "name": "Solis.Common.AndroidScreenOrientationController+<>c.<SetFixedLandscapeAsync>b__3_0",
+      "type_definition_index": 23300,
+      "metadata_method_index": 159726,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2128,
+      "rva": "0x884be94",
+      "file_offset": "0x8847e94",
+      "prefix16": "fe4fbfa9e0031faa19f91b94f303002a",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "method_flags": "0x83",
+      "static": false,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6188",
+        "slot_file_offset": "0x9fba188",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x884be94",
+        "relocation": {
+          "entry_file_offset": "0x1aeaf48",
+          "r_offset": "0x9fc6188",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x884be94"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.IOSScreenOrientationController+<>c.<SetFixedLandscapeAsync>b__3_0"
+      }
+    },
+    "orientation_after_ready": {
+      "name": "Solis.Common.ScreenOrientationManager+<>c__DisplayClass17_0.<AfterChangeOrientationAsync>b__0",
+      "type_definition_index": 23324,
+      "metadata_method_index": 159816,
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 2218,
+      "rva": "0x88532bc",
+      "file_offset": "0x884f2bc",
+      "prefix16": "fe0f1ef8f44f01a9141040b9e0031faa",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "method_flags": "0x83",
+      "static": false,
+      "mode": "HOOK",
+      "codegen_pointer_source": {
+        "module_record_rva": "0x98b7b80",
+        "method_count": 3894,
+        "method_table_rva": "0x9fc1f10",
+        "slot_rva": "0x9fc6458",
+        "slot_file_offset": "0x9fba458",
+        "raw_slot_value": "0x0",
+        "resolved_rva": "0x88532bc",
+        "relocation": {
+          "entry_file_offset": "0x1aeb758",
+          "r_offset": "0x9fc6458",
+          "r_info": "0x403",
+          "type": 1027,
+          "addend": "0x88532bc"
+        }
+      },
+      "ios_signature_comparison": {
+        "same_return_type": true,
+        "same_explicit_parameter_types": true,
+        "ios_name_for_reference_only": "Solis.Common.ScreenOrientationManager+<>c__DisplayClass17_0.<AfterChangeOrientationAsync>b__0"
+      }
     }
   },
   "graphics_fields": [
@@ -1122,5 +1695,15 @@
     "Photography360_Update_at": "0x5179654..0x5179658",
     "meaning": "All use the same generic singleton accessor with the exact same method-info global slot. GetCurrentTarget Target=0 obtains this singleton targetTexture+0x98 then op_Implicit; Captured=1 obtains its capturedTexture+0xa0. No arbitrary per-image controller field."
   },
-  "texture_dimension_dispatch": "Original UpdateTexture uses virtual texture.width/height. Prefer verified RenderTexture.get_width/get_height for an object validated as RenderTexture, or use virtual dispatch; base Texture API alone is not proof of concrete dispatch."
+  "texture_dimension_dispatch": "Original UpdateTexture uses virtual texture.width/height. Prefer verified RenderTexture.get_width/get_height for an object validated as RenderTexture, or use virtual dispatch; base Texture API alone is not proof of concrete dispatch.",
+  "playback_orientation_option": {
+    "schema": 1,
+    "platform_default_wait": true,
+    "helper": "shared native/orientation.hpp",
+    "supported_option_off": "RealpublicFixedLandscapeTask; originalCTS/BeforeAfter; precanceloriginalfallback",
+    "transition_latch": "InitialInternalMoveNextstate-1 and wrapperentrysnapshot, unchangeduntilnexttransition",
+    "new_hook_count": 10,
+    "new_call_count": 3,
+    "original_phone_mode_preserved_when_wait_true": true
+  }
 }

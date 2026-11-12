@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.util.Log;
 
 import com.chaquo.python.PyObject;
@@ -50,6 +51,7 @@ public final class ServerService extends Service {
     private static volatile boolean running = false;
     private static volatile boolean busy = false;
     private static volatile String runtimeDetails = "{}";
+    private static volatile long runtimeDetailsReceivedAt;
     private static volatile String lastDiagnostics = "{}";
     private static volatile ServerService activeService;
     private static final AtomicBoolean EXPORT_BUSY = new AtomicBoolean(false);
@@ -70,6 +72,9 @@ public final class ServerService extends Service {
     public interface Observer {
         void onServerChanged(String state, boolean isRunning, boolean isBusy, List<String> logs, String detailsJson);
     }
+
+    /** Advances only for a validated Python status response, never a log replay. */
+    static long runtimeDetailsReceivedAt() { return runtimeDetailsReceivedAt; }
 
     public static void observe(Observer observer) {
         OBSERVERS.addIfAbsent(observer);
@@ -190,6 +195,7 @@ public final class ServerService extends Service {
                 if (!details.optBoolean("running", false)) {
                     throw new IllegalStateException("Runtime did not start");
                 }
+                runtimeDetailsReceivedAt = SystemClock.elapsedRealtime();
                 if (!stopQueued.get()) {
                     state(getString(R.string.status_running), true, false);
                     appendLog("게임 연결 127.0.0.1:50051 · 파일 전송 127.0.0.1:8080");
@@ -255,6 +261,11 @@ public final class ServerService extends Service {
                 try {
                     if (runtime != null && !stopQueued.get()) {
                         String value = runtime.callAttr("status_json").toString();
+                        JSONObject details = new JSONObject(value);
+                        if (!(details.opt("running") instanceof Boolean)) {
+                            throw new IllegalArgumentException("Invalid runtime status");
+                        }
+                        runtimeDetailsReceivedAt = SystemClock.elapsedRealtime();
                         if (!value.equals(runtimeDetails)) {
                             runtimeDetails = value;
                             dispatch();

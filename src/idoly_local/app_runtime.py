@@ -30,6 +30,7 @@ class Runtime:
         self._experimental_main_live = False
         self._media_mode = False
         self._presentation = None
+        self._playback = None
         self._grpc_address = None
         self._asset_url = None
         from .diagnostics import ClientDiagnostics
@@ -74,6 +75,8 @@ class Runtime:
             result["resource_transfer"] = self._resources.status()
         if self._presentation is not None:
             result["presentation"] = self._presentation.status()
+        if self._playback is not None:
+            result["playback"] = self._playback.status()
         return result
 
     def diagnostics_snapshot(self) -> dict:
@@ -181,6 +184,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     runtime._media_mode = media_mode
     from .presentation import PresentationState
     runtime._presentation = PresentationState(root / "client-presentation.json")
+    from .playback import PlaybackState
+    runtime._playback = PlaybackState(root / "client-playback.json")
     try:
         # Imports stay inside startup so launchers can extract bundled data and
         # configure their platform's codec before loading the application engine.
@@ -230,7 +235,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                                              diagnostics=runtime._diagnostics,
                                              transfer_callback=runtime._observe_transfer,
                                              runtime_status_callback=runtime.diagnostics_snapshot,
-                                             presentation=runtime._presentation)
+                                             presentation=runtime._presentation, playback=runtime._playback)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.

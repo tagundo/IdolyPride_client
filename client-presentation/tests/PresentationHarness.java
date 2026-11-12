@@ -22,6 +22,7 @@ public final class PresentationHarness {
         byte[] bytes = CONFIG.getBytes(StandardCharsets.UTF_8);
         volatile boolean disconnected, closed;
         boolean failConnect, failRead, slowHeader;
+        long headerDelayNanos = 1500000000L;
         int code = 200; long length = -1; String encoding;
         ByteArrayOutputStream posted = new ByteArrayOutputStream();
         Fake() throws Exception { super(new URL("http://127.0.0.1:8080")); }
@@ -30,7 +31,7 @@ public final class PresentationHarness {
         @Override public boolean usingProxy() { return false; }
         @Override public int getResponseCode() {
             if (slowHeader) {
-                long end = System.nanoTime() + 1500000000L;
+                long end = System.nanoTime() + headerDelayNanos;
                 while (System.nanoTime() < end) try { Thread.sleep(10); } catch (InterruptedException ignored) {}
             }
             return code;
@@ -113,14 +114,17 @@ public final class PresentationHarness {
         Fake readFailed = new Fake(); readFailed.failRead = true;
         try { client(readFailed, "/client/presentation").fetch(); throw new AssertionError(); }
         catch (IllegalStateException expected) { check(readFailed.closed && readFailed.disconnected); }
-        Fake slow = new Fake(); slow.slowHeader = true;
+        Fake slow = new Fake(); slow.slowHeader = true; slow.headerDelayNanos = 3500000000L;
         PresentationClient bounded = client(slow, "/client/presentation");
         long start = System.nanoTime();
         try { bounded.fetch(); throw new AssertionError("unbounded header call"); }
         catch (IOException expected) { check((System.nanoTime() - start) / 1000000 < 1400); }
         for (int i=0; i<20 && !slow.disconnected; i++) Thread.sleep(5);
         check(slow.disconnected);
-        try { bounded.fetch(); throw new AssertionError("queued a second blocked operation"); }
+        // The one pending slot must time out and be cancelled while the first
+        // platform call is still ignoring interruption; it cannot start a new
+        // network operation or grow an unbounded queue.
+        try { bounded.fetch(); throw new AssertionError("ran a second blocked operation"); }
         catch (IOException expected) { checks++; }
         System.out.println("PASS " + checks);
     }

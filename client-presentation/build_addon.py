@@ -17,8 +17,10 @@ import resource
 import selectors
 import signal
 import shutil
+import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 from zipfile import ZipFile, ZipInfo, ZIP_STORED, ZIP_DEFLATED
@@ -26,6 +28,8 @@ from zipfile import ZipFile, ZipInfo, ZIP_STORED, ZIP_DEFLATED
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
+sys.path[:0] = [str(ROOT / "tools"), str(ROOT / "src")]
+import repack_android_server_python as pybundle
 SPLIT = "idoly_presentation"
 VERSION_CODE = 414
 SUPPORTED_INSTALLATION_MODES = ("MODE_FULL_INSTALL", "MODE_INHERIT_EXISTING")
@@ -59,6 +63,191 @@ LICENSE_HASHES = {
     "SHADOWHOOK-LICENSE": "63204388d1ac7b371e03223fb4910a04fdb41cd67d4f0e0a030d5249d811d7eb",
     "THIRD-PARTY-NOTICES.txt": "114b489514680bf58611ac6ce36877fea7fc9927ed0c51f630928a6c07a02b95",
 }
+
+
+def file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def read_regular_public(path, maximum):
+    path = Path(path)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= maximum:
+        raise ValueError("Expected a bounded regular public file")
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        if file_identity(os.fstat(stream.fileno())) != file_identity(info):
+            raise ValueError("Public input changed while opening")
+        raw = stream.read(maximum + 1)
+        if (len(raw) != info.st_size or file_identity(os.fstat(stream.fileno())) != file_identity(info)
+                or file_identity(path.lstat()) != file_identity(info)):
+            raise ValueError("Public input changed while reading")
+    return raw
+
+
+def read_public_json(path):
+    """Bounded regular-file metadata, with ambiguous object keys rejected."""
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result: raise ValueError("Duplicate public receipt key")
+            result[key] = value
+        return result
+    raw = read_regular_public(path, 256 * 1024)
+    value = json.loads(raw, object_pairs_hook=pairs)
+    if not isinstance(value, dict): raise ValueError("Expected public receipt object")
+    return value
+
+
+def native_source_paths(root=ROOT):
+    directory = Path(root) / "client-presentation/native"
+    return tuple(sorted(path.relative_to(root).as_posix() for path in directory.iterdir()
+        if path.suffix in (".cpp", ".hpp") or path.name == "profile.json"))
+
+
+def frozen_sources(commit, *, root=ROOT, extra=()):
+    """Verify local compile inputs against an exact local Git commit, no fetch."""
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("An exact frozen source commit is required")
+    root = Path(root)
+    java = tuple(sorted((root / "client-presentation/java").rglob("*.java")))
+    if {p.name for p in java} != {"PresentationProvider.java", "PresentationClient.java", "NativePresentation.java"} or len(java) != 3:
+        raise ValueError("Presentation Java source inventory differs")
+    names = {"client-presentation/build_addon.py", "client-presentation/AndroidManifest.template",
+             *native_source_paths(root), *extra, *(p.relative_to(root).as_posix() for p in java)}
+    names.update(("client-presentation/licenses/" + RUNTIME_NOTICE,
+                  "android-diagnostics/native/SHADOWHOOK-LICENSE", "android-diagnostics/native/THIRD-PARTY-NOTICES.txt"))
+    result = {}
+    for name in sorted(names):
+        if not isinstance(name, str) or name.startswith("/") or ".." in Path(name).parts:
+            raise ValueError("Invalid frozen source path")
+        path = root / name
+        raw = read_regular_public(path, 2 * 1024 * 1024)
+        if raw != pybundle._git(root, "show", commit + ":" + name, limit=2 * 1024 * 1024):
+            raise ValueError("A public build source differs from the frozen commit")
+        result[name] = hashlib.sha256(raw).hexdigest()
+    return result
+
+
+def native_profile_counts(root=ROOT):
+    directory = Path(root) / "client-presentation/native"
+    profile = read_public_json(directory / "profile.json")
+    aliases = profile.get("aliases")
+    if not isinstance(aliases, dict) or not 1 <= len(aliases) <= 256:
+        raise ValueError("Invalid frozen native profile")
+    hooks = re.findall(r"\bHOOK\(\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*,", read_regular_public(directory / "bridge.cpp", 2 * 1024 * 1024).decode("utf-8"))
+    hooks = [name for name in hooks if name != "entry"]  # Macro declaration.
+    if not hooks or len(set(hooks)) != len(hooks) or not set(hooks) <= aliases.keys():
+        raise ValueError("Native hook inventory differs from the profile")
+    return len(aliases), len(hooks)
+
+
+def verified_native(path, commit, source_hashes, *, root=ROOT):
+    """Accept a newly compiled artifact only with exact frozen-source evidence."""
+    path = Path(path)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or not 64 <= info.st_size <= MAX_ADDON:
+        raise ValueError("Expected a bounded regular native artifact")
+    receipt_path = path.with_name("build-receipt.json")
+    receipt = read_public_json(receipt_path)
+    expected = {name: source_hashes[name] for name in native_source_paths(root)}
+    prefixes, hooks = native_profile_counts(root)
+    sha = digest(path)
+    if (receipt.get("source_commit") != commit or receipt.get("sha256") != sha
+            or receipt.get("bytes") != info.st_size or receipt.get("profile_prefix_count") != prefixes
+            or receipt.get("profile_hook_count") != hooks or receipt.get("source_unchanged_during_build") is not True
+            or not isinstance(receipt.get("source_sha256"), dict)
+            or any(receipt["source_sha256"].get(name) != value for name, value in expected.items())):
+        raise ValueError("Native receipt differs from the frozen compile inputs")
+    check_elf(path)
+    check_jni(path, root=root)
+    if file_identity(path.lstat()) != file_identity(info): raise ValueError("Native artifact changed while verifying")
+    return {"sha256": sha, "bytes": info.st_size, "profile_prefix_count": prefixes,
+            "profile_hook_count": hooks, "source_commit": commit, "source_sha256": expected,
+            "build_receipt_sha256": digest(receipt_path), "runtime_device_tested": False}
+
+
+def native_jni_exports(path):
+    """Exact defined dynamic-symbol names; configurePlayback cannot match configure."""
+    raw = read_regular_public(path, MAX_ADDON)
+    if len(raw) < 64 or raw[:6] != b"\x7fELF\x02\x01":
+        raise ValueError("Expected ELF64 dynamic symbols")
+    offset = struct.unpack_from("<Q", raw, 40)[0]
+    width, count = struct.unpack_from("<HH", raw, 58)
+    if width != 64 or not 1 <= count <= 512 or offset + count * width > len(raw):
+        raise ValueError("Invalid native ELF section table")
+    sections = [struct.unpack_from("<II4QII2Q", raw, offset + at * width) for at in range(count)]
+    result = set()
+    for section in sections:
+        if section[1] != 11: continue  # SHT_DYNSYM
+        start, size, link, entry = section[4], section[5], section[6], section[9]
+        if entry != 24 or size % entry or start + size > len(raw) or link >= count or sections[link][1] != 3:
+            raise ValueError("Invalid native dynamic-symbol table")
+        string_start, string_size = sections[link][4:6]
+        if string_start + string_size > len(raw): raise ValueError("Invalid native dynamic-string table")
+        for at in range(start, start + size, entry):
+            name, kind, _visibility, index = struct.unpack_from("<IBBH", raw, at)
+            if index == 0 or kind >> 4 not in (1, 2): continue
+            if name >= string_size: raise ValueError("Invalid native symbol name")
+            end = raw.find(b"\0", string_start + name, string_start + string_size)
+            if end < 0: raise ValueError("Unterminated native symbol name")
+            symbol = raw[string_start + name:end].decode("ascii")
+            if symbol == "JNI_OnLoad" or symbol.startswith("Java_game_qualiarts_idolypride_presentation_NativePresentation_"):
+                if kind & 15 != 2 or _visibility & 3 not in (0, 3):
+                    raise ValueError("JNI export is not an externally visible function")
+                if symbol in result: raise ValueError("Duplicate native JNI export")
+                result.add(symbol)
+    return result
+
+
+def check_jni(path, *, root=ROOT):
+    source = Path(root) / "client-presentation/java/game/qualiarts/idolypride/presentation/NativePresentation.java"
+    methods = re.findall(r"public static native \w+ (\w+)\(", read_regular_public(source, 65536).decode("utf-8"))
+    expected = {"JNI_OnLoad", *("Java_game_qualiarts_idolypride_presentation_NativePresentation_" + name for name in methods)}
+    if not methods or len(set(methods)) != len(methods) or native_jni_exports(path) != expected:
+        raise ValueError("Native JNI exports do not exactly match the frozen Java methods")
+    return sorted(expected)
+
+
+def verified_feature(path, commit, source_hashes, *, root=ROOT):
+    path = Path(path)
+    info = path.lstat()
+    if not stat.S_ISREG(info.st_mode) or not 1 <= info.st_size <= MAX_ADDON:
+        raise ValueError("Expected one bounded regular feature APK")
+    proof_path = path.with_suffix(".provenance.json")
+    proof = read_public_json(proof_path)
+    required_sources = frozen_sources(commit, root=root)
+    expected_native = {name: source_hashes[name] for name in native_source_paths(root)}
+    prefixes, hooks = native_profile_counts(root)
+    native = proof.get("native_input", {})
+    if (proof.get("source_commit") != commit or proof.get("source_sha256") != required_sources
+            or proof.get("addon_apk_sha256") != digest(path) or proof.get("addon_bytes") != info.st_size
+            or proof.get("signature_and_alignment_verified") is not True or proof.get("base_unchanged") is not True
+            or proof.get("profile") != "diagnostics" or proof.get("certificate_sha256") != PROFILES["diagnostics"]["certificate"]
+            or not isinstance(native, dict) or native.get("source_commit") != commit
+            or native.get("source_sha256") != expected_native or native.get("profile_prefix_count") != prefixes
+            or native.get("profile_hook_count") != hooks):
+        raise ValueError("Feature receipt differs from the frozen compile inputs")
+    with ZipFile(path) as archive:
+        names = archive.namelist()
+        expected_names = {"classes.dex", "AndroidManifest.xml", LIBRARY, MARKER, *license_hashes("diagnostics")}
+        if len(names) != len(set(names)) or set(names) != expected_names:
+            raise ValueError("Feature member inventory differs")
+        bounds = {"classes.dex": 256 * 1024, "AndroidManifest.xml": 65536, LIBRARY: MAX_ADDON, MARKER: 8192}
+        if (sum(info.file_size for info in archive.infolist()) > 2 * MAX_ADDON
+                or any(not 0 < info.file_size <= bounds.get(info.filename, 65536) for info in archive.infolist())
+                or archive.getinfo(LIBRARY).file_size != native.get("bytes")):
+            raise ValueError("Feature expanded member bounds differ")
+        actual = {name: member_hash(archive, name) for name in names}
+        if (actual != proof.get("member_sha256") or actual[LIBRARY] != native.get("sha256")
+                or any(actual[name] != value for name, value in license_hashes("diagnostics").items())):
+            raise ValueError("Feature members differ from their source-bound receipt")
+        marker = json.loads(archive.read(MARKER))
+        expected_marker = feature_marker("diagnostics", native.get("sha256"))
+        if marker != expected_marker or any(proof.get(name) != value for name, value in expected_marker.items()):
+            raise ValueError("Feature marker differs from its receipt")
+    if file_identity(path.lstat()) != file_identity(info): raise ValueError("Feature changed while verifying")
+    return proof
 
 
 def license_hashes(profile):
@@ -151,8 +340,8 @@ def _run(command, env, *, timeout=45):
         process.stdout.close()
 
 
-def signature(signer, path, certificate, env, *, existing_base=False):
-    output, _ = _run([*signer, "verify", "--verbose", "--print-certs", path], env)
+def signature(signer, path, certificate, env, *, existing_base=False, runner=None):
+    output, _ = (runner or _run)([*signer, "verify", "--verbose", "--print-certs", path], env)
     found = re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([a-f0-9]{64})$", output, re.M)
     v2 = "Verified using v2 scheme (APK Signature Scheme v2): true" in output
     v3 = "Verified using v3 scheme (APK Signature Scheme v3): true" in output
@@ -164,6 +353,16 @@ def signature(signer, path, certificate, env, *, existing_base=False):
 def required_base_members(profile):
     if profile not in PROFILES: raise ValueError("Unsupported feature profile")
     return {BOOTSTRAP: BOOTSTRAP_SHA256, **(SHADOW_HASHES if profile == "diagnostics" else {})}
+
+
+def feature_marker(profile, native_hash):
+    known = PROFILES[profile]
+    return {"schema": 1, "bridge_version": 1, "profile": profile,
+            "target_package": known["package"], "split_id": SPLIT,
+            "base_version_code": VERSION_CODE, "certificate_sha256": known["certificate"],
+            "required_base_members": required_base_members(profile), "native_library_sha256": native_hash,
+            "configuration_origin": "http://127.0.0.1:8080",
+            "supported_installation_modes": list(SUPPORTED_INSTALLATION_MODES)}
 
 
 def validate_bundle_manifest(value):
@@ -235,6 +434,7 @@ def check_base_members(archive, profile):
 
 def build(args):
     os.umask(0o077)
+    source_hashes = frozen_sources(args.source_commit)
     profile = PROFILES[args.profile]
     base, library, output = Path(args.base_apk), Path(args.native_library), Path(args.output)
     receipt = output.with_suffix(".provenance.json")
@@ -244,14 +444,24 @@ def build(args):
         raise ValueError("Expected stable regular public build inputs")
     source_hash = digest(base)
     native_hash = digest(library)
+    native_proof = verified_native(library, args.source_commit, source_hashes)
     alignment = check_elf(library)
     jdk, sdk, android = Path(args.jdk_bin), Path(args.build_tools), Path(args.android_jar)
     signer = [jdk / "java", *JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
     env = dict(os.environ, MALLOC_ARENA_MAX="2")
     for name in ("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS"):
         env.pop(name, None)
-    signature(signer, base, profile["certificate"], env, existing_base=True)
-    badging, _ = _run([sdk / "aapt2", "dump", "badging", base], env)
+    import build_android_server_manual as limits
+    preflight = limits._resource_guard(ROOT)
+    def run(command, environment=env, **kwargs):
+        before = limits._resource_guard(ROOT)
+        result = _run(command, environment, **kwargs)
+        after = limits._resource_guard(ROOT)
+        if before["oom_kill"] != preflight["oom_kill"] or after["oom_kill"] != preflight["oom_kill"]:
+            raise ValueError("OOM counter changed during feature packaging")
+        return result
+    signature(signer, base, profile["certificate"], env, existing_base=True, runner=run)
+    badging, _ = run([sdk / "aapt2", "dump", "badging", base], env)
     if ("package: name='" + profile["package"] + "'" not in badging or "versionCode='414'" not in badging
             or "versionName='6.1.1'" not in badging or "native-code: 'arm64-v8a'" not in badging):
         raise ValueError("Existing game identity/version/ABI is unsupported")
@@ -261,14 +471,11 @@ def build(args):
     required = required_base_members(args.profile)
     with ZipFile(base) as archive:
         check_base_members(archive, args.profile)
-    dynamic, _ = _run([Path(args.readelf), "-d", library], env)
+    dynamic, _ = run([Path(args.readelf), "-d", library], env)
     needed = re.findall(r"Shared library: \[([^\]]+)\]", dynamic)
     if "libshadowhook.so" not in needed or set(needed) - {"libshadowhook.so", "libc.so", "libdl.so", "libm.so", "liblog.so"}:
         raise ValueError("Presentation native dependencies differ from the bounded bridge contract")
-    symbols, _ = _run([Path(args.readelf), "--dyn-syms", "--wide", library], env)
-    if any("Java_game_qualiarts_idolypride_presentation_NativePresentation_" + name not in symbols
-           for name in ("start", "configure", "status")):
-        raise ValueError("Presentation JNI exports do not match Java")
+    check_jni(library)
     output.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix=".presentation-addon-", dir=output.parent) as temporary:
@@ -279,20 +486,15 @@ def build(args):
             raise ValueError("Presentation Java source inventory differs")
         (work / "AndroidManifest.xml").write_text(manifest(args.profile), encoding="utf-8")
         (work / "classes").mkdir(); (work / "dex").mkdir()
-        _run([sdk / "aapt2", "link", "--manifest", work / "AndroidManifest.xml", "-I", android,
+        run([sdk / "aapt2", "link", "--manifest", work / "AndroidManifest.xml", "-I", android,
               "-o", work / "manifest.apk"], env)
-        _run([jdk / "javac", *["-J" + flag for flag in JAVA_FLAGS], *JAVAC_ARGUMENTS, "-classpath", android,
+        run([jdk / "javac", *["-J" + flag for flag in JAVA_FLAGS], *JAVAC_ARGUMENTS, "-classpath", android,
               "-d", work / "classes", *java_sources], env)
-        _run([jdk / "java", *JAVA_FLAGS, "-cp", sdk / "lib/d8.jar", "com.android.tools.r8.D8", "--release",
+        run([jdk / "java", *JAVA_FLAGS, "-cp", sdk / "lib/d8.jar", "com.android.tools.r8.D8", "--release",
               "--min-api", "28", "--lib", android, "--output", work / "dex", *sorted((work / "classes").rglob("*.class"))], env)
         if sorted(path.name for path in (work / "dex").iterdir()) != ["classes.dex"]:
             raise ValueError("Feature must contain exactly one new own DEX")
-        marker = {"schema": 1, "bridge_version": 1, "profile": args.profile,
-                  "target_package": profile["package"], "split_id": SPLIT,
-                  "base_version_code": VERSION_CODE, "certificate_sha256": profile["certificate"],
-                  "required_base_members": required, "native_library_sha256": native_hash,
-                  "configuration_origin": "http://127.0.0.1:8080",
-                  "supported_installation_modes": list(SUPPORTED_INSTALLATION_MODES)}
+        marker = feature_marker(args.profile, native_hash)
         members = {"classes.dex": (work / "dex/classes.dex").read_bytes(), LIBRARY: library.read_bytes(),
                    MARKER: (json.dumps(marker, sort_keys=True, indent=2) + "\n").encode()}
         members.update(license_members(args.profile))
@@ -306,20 +508,20 @@ def build(args):
                 info = ZipInfo(name); info.compress_type = ZIP_STORED if name.endswith(".so") else ZIP_DEFLATED
                 info.external_attr = 0o100644 << 16
                 archive.writestr(info, raw)
-        _run([sdk / "zipalign", "-f", "16384", unsigned, signed], env)
+        run([sdk / "zipalign", "-f", "16384", unsigned, signed], env)
         unsigned.unlink()
         key = Path(args.keystore)
         if not key.is_file() or key.is_symlink(): raise ValueError("Existing matching signing key is required")
         password = Path(args.password_file)
         if not password.is_file() or password.is_symlink() or password.stat().st_mode & 0o077:
             raise ValueError("Existing private password file is required; no signing key is generated")
-        _run([*signer, "sign", "--ks", key, "--ks-key-alias", profile["alias"], "--ks-pass", "file:" + str(password),
+        run([*signer, "sign", "--ks", key, "--ks-key-alias", profile["alias"], "--ks-pass", "file:" + str(password),
               "--min-sdk-version", "28", "--v1-signing-enabled", "false", "--v2-signing-enabled", "true",
               "--v3-signing-enabled", "false", "--v4-signing-enabled", "false", signed], env)
-        signature(signer, signed, profile["certificate"], env)
-        _run([sdk / "zipalign", "-c", "16384", signed], env)
-        feature_badging, _ = _run([sdk / "aapt2", "dump", "badging", signed], env)
-        tree, _ = _run([sdk / "aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml", signed], env)
+        signature(signer, signed, profile["certificate"], env, runner=run)
+        run([sdk / "zipalign", "-c", "16384", signed], env)
+        feature_badging, _ = run([sdk / "aapt2", "dump", "badging", signed], env)
+        tree, _ = run([sdk / "aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml", signed], env)
         if ("split='" + SPLIT + "'" not in feature_badging or "versionCode='414'" not in feature_badging
                 or "name='" + profile["package"] + "'" not in feature_badging
                 or "sdkVersion:'28'" not in feature_badging or "targetSdkVersion:'34'" not in feature_badging
@@ -334,12 +536,15 @@ def build(args):
             raise ValueError("Feature APK members changed or exceed the 1 MiB bound")
         if digest(base) != source_hash or digest(library) != native_hash:
             raise ValueError("An existing build input changed")
+        if frozen_sources(args.source_commit) != source_hashes or verified_native(library, args.source_commit, source_hashes) != native_proof:
+            raise ValueError("Frozen compile inputs changed during feature packaging")
         report = {**marker, "base_apk_sha256": source_hash, "addon_apk_sha256": digest(signed), "addon_bytes": signed.stat().st_size,
                   "member_sha256": actual, "native_load_alignments": alignment,
-                  "source_sha256": {str(path.relative_to(HERE)): digest(path) for path in [*java_sources, HERE / "AndroidManifest.template", Path(__file__)]},
+                  "source_commit": args.source_commit, "source_sha256": source_hashes, "native_input": native_proof,
                   "base_unchanged": True, "signature_and_alignment_verified": True, "installed": False,
                   "seconds": round(time.monotonic() - started, 3),
-                  "child_peak_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss}
+                  "child_peak_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
+                  "preflight": preflight, "postflight": limits._resource_guard(ROOT)}
         staged = work / "provenance.json"; staged.write_text(json.dumps(report, indent=2) + "\n")
         os.link(staged, receipt)
         try: os.link(signed, output)
@@ -350,6 +555,7 @@ def build(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", choices=PROFILES, required=True)
+    parser.add_argument("--source-commit", required=True)
     for name in ("base-apk", "native-library", "output", "jdk-bin", "build-tools", "android-jar",
                  "shadowhook-aar", "readelf", "keystore", "password-file"):
         parser.add_argument("--" + name, type=Path, required=True)

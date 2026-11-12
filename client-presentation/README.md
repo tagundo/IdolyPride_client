@@ -46,6 +46,7 @@ which name paths only, is:
 ```sh
 MALLOC_ARENA_MAX=2 python client-presentation/build_addon.py \
   --profile diagnostics --base-apk "$DIAGNOSTIC_BASE_APK" \
+  --source-commit "$FROZEN_SOURCE_COMMIT" \
   --native-library "$PRESENTATION_SO" --output "$ADDON_OUTPUT/diagnostics.apk" \
   --jdk-bin "$JDK_BIN" --build-tools "$ANDROID_BUILD_TOOLS" \
   --android-jar "$ANDROID_JAR" --shadowhook-aar "$SHADOWHOOK_AAR" \
@@ -54,6 +55,12 @@ MALLOC_ARENA_MAX=2 python client-presentation/build_addon.py \
 ```
 
 Repeat with `--profile resources`, its matching base/key, and `resources.apk`.
+The exact frozen Git commit must contain every Java source, native CPP/HPP,
+profile, manifest and dependency notice used by the build. The native input's
+adjacent `build-receipt.json` must identify that same commit, its SHA-256/size,
+unchanged-source check, all native source hashes, and prefix/hook counts derived
+from the frozen profile and hook declarations. All five JNI methods and
+`JNI_OnLoad` must be exact defined, externally visible native functions.
 Java runs use heap/metaspace 128 MiB, code cache 32 MiB, Serial GC and one
 processor; tools run at nice 19 with bounded output and time limits. The
 Java compilation uses `--release 8 -parameters`: named synthetic constructor
@@ -131,12 +138,17 @@ mixed staging route: unsigned on the output filesystem, aligned in RAM, then
 signed on the output filesystem. At most one full APK occupies each location;
 the normal memory and disk-reserve guards still apply. Only small original
 manifest/resource members are decoded, and no whole game/native/DEX is rebuilt.
+Alternatively, `--all-tmpfs --ram-directory /dev/shm` requires an output beneath
+`/dev/shm` and keeps at most two full APKs there, including the final artifact.
+This changes placement only: the Root reserve remains 150 MiB and every tool
+still requires 1 GiB effective/768 MiB direct memory headroom. A small external
+symlink can point to the final artifact for subsequent verified delivery.
 
-The optional `--native-library` accepts the separately audited 4:3 aspect-fix
-library while reusing the same feature DEX unchanged. Its exact SHA-256 and
-length are pinned, and the adjacent `build-receipt.json` must bind all five
-native compile/profile inputs to the frozen `--source-commit`, with 63 checked
-original function prefixes. The standalone marker and output provenance record
-that replacement's actual hash and source evidence. Omitting this option
-retains the original audited feature's native library. Distribute this complete
-client APK separately from the server APK.
+The feature APK must have its adjacent `.provenance.json` with the same frozen
+source commit, complete source/member hashes, verified signature/alignment and
+native receipt. The full builder independently verifies its AA4e signature and
+copies only the own DEX, native library and notices. The diagnostic base remains
+fixed by its original SHA-256 and length. Optional `--native-library` requires
+the same native receipt contract while retaining the feature's own DEX; the
+standalone marker records its actual hash. Distribute this complete client APK
+separately from the server APK.

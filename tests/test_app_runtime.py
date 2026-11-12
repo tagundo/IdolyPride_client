@@ -247,6 +247,22 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(self.rpc(restarted, "/api.User/Get").SerializeToString(), original)
         self.assertEqual(len(self.seed_calls), 1)
 
+    def test_playback_default_is_on_for_both_platforms_and_is_exposed_independently(self):
+        for platform in ("android", "ios"):
+            with self.subTest(platform=platform):
+                runtime = self.start(resource_platform=platform)
+                address = runtime.status()["asset_url"]
+                with urlopen(address + "/client/playback", timeout=3) as response:
+                    setting = json.load(response)
+                self.assertEqual(setting, {"schema": 1, "revision": 0, "wait_for_orientation": True})
+                self.assertEqual(runtime.status()["playback"]["settings"], setting)
+                self.assertFalse(runtime.status()["playback"]["client"]["applied"])
+                with urlopen(address + "/client/presentation", timeout=3) as response:
+                    graphics = json.load(response)
+                self.assertEqual(len(graphics), 10)
+                self.assertNotIn("wait_for_orientation", graphics)
+                runtime.stop()
+
     def test_existing_imported_snapshot_is_not_seeded_again(self):
         state = State(self.root / "state.db")
         new_profile(state, self.schema, "sandbox", "Preserved Manager")

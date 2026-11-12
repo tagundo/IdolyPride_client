@@ -1,5 +1,6 @@
 // Optional, account-free loopback transport. Unity calls stay on its own thread.
 #include "settings_json.hpp"
+#include "playback_json.hpp"
 namespace {
 double monotonic_seconds() {
     timespec tick{};
@@ -58,6 +59,16 @@ void *presentation_poll(void *) {
             if (decode_settings(settings,&next) && accept_configuration(1,next)) {
                 char report[1024], accepted[256]; status_json(report,sizeof report);
                 exchange_http("POST","/client/presentation/status",report,accepted,sizeof accepted);
+            }
+        }
+        // A missing/failed graphics endpoint must not suppress playback
+        // preferences. Failed or rejected reads never publish a fallback value.
+        if (exchange_http("GET","/client/playback",nullptr,settings,sizeof settings)) {
+            PlaybackConfigMessage next;
+            if (decode_playback_settings(settings,&next)
+                    && accept_playback_configuration(1,next.revision,next.wait_for_orientation)) {
+                char report[512], accepted[256]; playback_status_json(report,sizeof report);
+                exchange_http("POST","/client/playback/status",report,accepted,sizeof accepted);
             }
         }
         pause_ms(2000);

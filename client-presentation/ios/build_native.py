@@ -27,7 +27,8 @@ def main():
     obj=output.with_suffix('.o')
     sources=[here.parent/'native/bridge.cpp',here.parent/'native/presentation_math.hpp',
         here.parent/'native/presentation_scope.hpp',here.parent/'native/panorama_ui_math.hpp',
-        here.parent/'native/panorama_ui_edges.hpp',*sorted(here.glob('*.hpp')),
+        here.parent/'native/panorama_ui_edges.hpp',here.parent/'native/orientation.hpp',
+        here.parent/'native/playback_config.hpp',*sorted(here.glob('*.hpp')),
         here/'libSystem.tbd',here/'libcxx.tbd',Path(__file__).resolve()]
     hashes={str(path.relative_to(here.parent.parent)):hashlib.sha256(path.read_bytes()).hexdigest() for path in sources}
     header_hash=hashlib.sha256(header.read_bytes()).hexdigest()

@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "6a928cdb8e54efaffc29413140f5f6ff63d5abdd4999127774bd80365cea0d68",
+  "profile_sha256": "6f3cb333d04422556174084b8166467b89444c3b9848c80e09aa2474b174562f",
   "hook_names": [
     "q_set",
     "q_apply",

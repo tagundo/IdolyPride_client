@@ -6,7 +6,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
-def test_original_task_forwarding_and_desktop_frame_readiness(tmp_path):
+def test_original_task_forwarding_and_latched_frame_readiness(tmp_path):
     compiler = shutil.which("c++")
     if compiler is None:
         pytest.skip("A host C++ compiler is unavailable")

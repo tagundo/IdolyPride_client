@@ -61,8 +61,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "30",
-                           tool.ANDROID + "versionName": "0.3.11"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "34",
+                           tool.ANDROID + "versionName": "0.3.15"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -102,7 +102,7 @@ def test_installer_requires_explicit_permission_and_nonexported_callback(change)
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 30;' in raw and 'VERSION_NAME = "0.3.11";' in raw
+    assert 'VERSION_CODE = 34;' in raw and 'VERSION_NAME = "0.3.15";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
         tool.build_config('"; injected')
@@ -110,7 +110,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("30")\ngradleProperty("serverVersionName").orElse("0.3.11")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("34")\ngradleProperty("serverVersionName").orElse("0.3.15")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -443,9 +443,11 @@ def test_presentation_snapshots_only_three_public_assets_and_validates_own_code(
                                     for name in ("NativePresentation", "PresentationClient", "PresentationProvider")]
 
 
-def test_public_storage_summary_is_part_of_the_exact_seven_java_source_inventory():
-    assert len(tool.JAVA_FILES) == 7
+def test_storage_and_playback_are_part_of_the_exact_nine_java_source_inventory():
+    assert len(tool.JAVA_FILES) == 9
     assert tool.JAVA_ROOT + "PresentationStorage.java" in tool.SOURCE_FILES
+    assert tool.JAVA_ROOT + "PlaybackSettings.java" in tool.SOURCE_FILES
+    assert tool.JAVA_ROOT + "PlaybackStorage.java" in tool.SOURCE_FILES
 
 
 @pytest.mark.parametrize("modes", [None, "MODE_FULL_INSTALL", ["MODE_FULL_INSTALL"],

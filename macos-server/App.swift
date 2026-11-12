@@ -18,6 +18,8 @@ final class ServerModel: ObservableObject {
         didSet { UserDefaults.standard.set(downloadMissingResources, forKey: "downloadMissingResources") }
     }
     @Published private(set) var presentation = ClientPresentationSettings.defaults
+    @Published private(set) var playback = ClientPlaybackSettings.defaults
+    @Published private(set) var playbackMessage = "Mac의 기본값은 꺼짐입니다. 켜면 원본 회전 대기 동작을 사용합니다."
     @Published private(set) var presentationFeedback = ClientPresentationFeedback.waiting
     private var experimentalLiveObserved = false
     @Published var status = "앱을 준비하고 있습니다."
@@ -35,6 +37,8 @@ final class ServerModel: ObservableObject {
     private var pending = Data()
     private var launched = false
     private var shutdownRequested = false
+    private var shutdownFinished = false
+    private var shutdownCompletions: [() -> Void] = []
     private var smokeStarted = false
     private var smokeStopping = false
     private var smokeFinished = false
@@ -64,12 +68,36 @@ final class ServerModel: ObservableObject {
         let loaded = ClientPresentationSettings.load(from: presentationFile)
         presentation = loaded.settings
         presentationInvalid = loaded.invalid
+        let loadedPlayback = ClientPlaybackSettings.load(from: playbackFile)
+        playback = loadedPlayback.settings
+        if loadedPlayback.invalid {
+            playbackMessage = "회전 대기 설정을 읽지 못해 기본값을 표시합니다. 옵션을 바꾸면 새로 저장합니다."
+        }
         updatePresentationFeedback()
         checkpoint("model_initialized")
     }
 
     private var presentationFile: URL {
         dataDirectory.appendingPathComponent(ClientPresentationSettings.filename)
+    }
+
+    private var playbackFile: URL {
+        dataDirectory.appendingPathComponent(ClientPlaybackSettings.filename)
+    }
+
+    var orientationWaitBinding: Binding<Bool> {
+        Binding(get: { self.playback.waitForOrientation }, set: { enabled in
+            guard !self.shutdownRequested, self.playback.waitForOrientation != enabled else { return }
+            var changed = self.playback
+            changed.waitForOrientation = enabled
+            do {
+                self.playback = try changed.saving(to: self.playbackFile)
+                self.playbackMessage = "MV 회전 대기 설정이 저장되었습니다."
+            } catch {
+                self.playbackMessage = "회전 대기 설정을 저장하지 못했습니다. 이전 설정을 유지합니다."
+                self.alertMessage = self.playbackMessage
+            }
+        })
     }
 
     func presentationBinding<Value: Equatable>(_ key: WritableKeyPath<ClientPresentationSettings, Value>) -> Binding<Value> {
@@ -139,6 +167,15 @@ final class ServerModel: ObservableObject {
         let serverData = resources.appendingPathComponent("ServerData.zip")
         let process = Process()
         let writer = Pipe(), reader = Pipe(), errorReader = Pipe()
+        // Fixed JSON commands fit in Darwin's minimum PIPE_BUF (512 bytes).
+        // A full engine pipe must never stall the main AppKit thread.
+        let inputFD = writer.fileHandleForWriting.fileDescriptor
+        let inputFlags = fcntl(inputFD, F_GETFL)
+        guard inputFlags >= 0, fcntl(inputFD, F_SETFL, inputFlags | O_NONBLOCK) == 0 else {
+            fail("서버 엔진 연결을 준비하지 못했습니다.")
+            return
+        }
+        signal(SIGPIPE, SIG_IGN)
         process.executableURL = engine
         process.arguments = ["--json-control", "--data-dir", dataDirectory.path,
                              "--server-data", serverData.path]
@@ -203,6 +240,7 @@ final class ServerModel: ObservableObject {
     }
 
     private func consume(_ data: Data) {
+        guard !shutdownRequested else { return }
         pending.append(data)
         while let end = pending.firstIndex(of: 10) {
             let line = pending.prefix(upTo: end)
@@ -254,6 +292,7 @@ final class ServerModel: ObservableObject {
 
     private func send(_ action: String, experimental: Bool? = nil, mediaMode: Bool? = nil,
                       downloadMissingResources: Bool? = nil, reportFailure: Bool = true) {
+        guard !shutdownRequested else { return }
         guard let writer = input?.fileHandleForWriting, child?.isRunning == true else {
             if reportFailure { fail("서버 엔진에 연결하지 못했습니다. 앱을 다시 열어 주세요.") }
             return
@@ -265,9 +304,28 @@ final class ServerModel: ObservableObject {
             if let enabled = downloadMissingResources { command["download_missing_resources"] = enabled }
             var data = try JSONSerialization.data(withJSONObject: command)
             data.append(10)
-            try writer.write(contentsOf: data)
+            guard Self.nonblockingWrite(data, fileDescriptor: writer.fileDescriptor) else {
+                if reportFailure { fail("서버 엔진에 요청을 전달하지 못했습니다.") }
+                return
+            }
         } catch {
             if reportFailure { fail("서버 엔진에 요청을 전달하지 못했습니다.") }
+        }
+    }
+
+    private static func nonblockingWrite(_ data: Data, fileDescriptor: Int32) -> Bool {
+        guard !data.isEmpty, data.count <= 512 else { return false }
+        let flags = fcntl(fileDescriptor, F_GETFL)
+        guard flags >= 0, flags & O_NONBLOCK != 0 else { return false }
+        return data.withUnsafeBytes { bytes in
+            // <= PIPE_BUF is atomic: EAGAIN writes nothing. Retry only a
+            // bounded number of signal interruptions, never wait for capacity.
+            for _ in 0..<3 {
+                let count = write(fileDescriptor, bytes.baseAddress, bytes.count)
+                if count == bytes.count { return true }
+                if count >= 0 || errno != EINTR { return false }
+            }
+            return false
         }
     }
 
@@ -374,39 +432,59 @@ final class ServerModel: ObservableObject {
         NSApp.terminate(nil)
     }
     func shutdown(_ completion: @escaping () -> Void) {
-        guard !shutdownRequested else { completion(); return }
+        if shutdownFinished { completion(); return }
+        shutdownCompletions.append(completion)
+        guard !shutdownRequested else { return }
         shutdownRequested = true
+        busy = true
+        canStop = false
+        status = "서버를 종료하고 있습니다."
         statusTimer?.invalidate()
         statusTimer = nil
         presentationClient = nil
         updatePresentationFeedback()
         checkpoint("shutdown_requested")
         let process = child
-        if process?.isRunning == true { send("quit") }
         let writer = input?.fileHandleForWriting
         let reader = output?.fileHandleForReading
         let errorReader = errors?.fileHandleForReading
+        let quit = Data("{\"action\":\"quit\"}\n".utf8)
+        // A full stdin pipe must not block AppKit or prevent escalation from
+        // starting. The write/close operation has its own worker.
         DispatchQueue.global(qos: .userInitiated).async {
+            if process?.isRunning == true { try? writer?.write(contentsOf: quit) }
             try? writer?.close()
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
             if let process = process {
-                let deadline = Date().addingTimeInterval(8)
-                while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
+                let deadline = ProcessInfo.processInfo.systemUptime + 8
+                while process.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
                 if process.isRunning {
                     process.terminate()
-                    let finalDeadline = Date().addingTimeInterval(2)
-                    while process.isRunning && Date() < finalDeadline { Thread.sleep(forTimeInterval: 0.05) }
+                    let finalDeadline = ProcessInfo.processInfo.systemUptime + 2
+                    while process.isRunning && ProcessInfo.processInfo.systemUptime < finalDeadline {
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
                     if process.isRunning { kill(process.processIdentifier, SIGKILL) }
                 }
             }
-            // Keep draining both pipes until the owned child exits. Removing a
-            // readability handler while its read is pending can block cleanup.
+            // Request application exit before optional FileHandle cleanup:
+            // removing a handler can wait for an in-flight Foundation read.
+            DispatchQueue.main.async { self.finishShutdown() }
             reader?.readabilityHandler = nil
             errorReader?.readabilityHandler = nil
-            DispatchQueue.main.async {
-                self.checkpoint("shutdown_cleanup_complete")
-                completion()
-            }
         }
+    }
+
+    private func finishShutdown() {
+        guard !shutdownFinished else { return }
+        shutdownFinished = true
+        checkpoint("shutdown_cleanup_complete")
+        let completions = shutdownCompletions
+        shutdownCompletions.removeAll()
+        for completion in completions { completion() }
     }
 }
 
@@ -559,6 +637,8 @@ struct ServerView: View {
                     Text("게임에서 요청한 리소스 파일만 내려받아 이 기기에 보관합니다. 끄면 이미 보관한 파일만 제공합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("튜토리얼 라이브는 원본 기록을 재생합니다.").font(.caption).foregroundStyle(.secondary)
+                    Toggle("MV 진입·종료 시 화면 회전 대기", isOn: model.orientationWaitBinding)
+                    Text(model.playbackMessage).font(.caption).foregroundStyle(.secondary)
                     Divider()
                     PresentationControls(model: model)
                     Divider()

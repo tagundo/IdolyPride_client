@@ -12,6 +12,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.net.Uri;
 import android.text.TextUtils;
@@ -82,6 +83,17 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private boolean presentationFeatureOnlyLoading;
     private Button copyPresentationInstallDetails;
     private PresentationAddonInstaller.Snapshot presentationInstallation;
+    private PlaybackSettings playbackSettings;
+    private CheckBox waitForOrientation;
+    private TextView playbackStatus;
+    private boolean playbackLoading, playbackInvalid, playbackSaveFailed, playbackRuntimeRunning;
+    private JSONObject playbackRuntime;
+    private final Runnable playbackRefresh = new Runnable() {
+        @Override public void run() {
+            updatePlaybackStatus();
+            if (presentationObserved && playbackStatus != null) playbackStatus.postDelayed(this, 1000);
+        }
+    };
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
@@ -181,6 +193,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, Color.rgb(180, 199, 211));
         resourceNotice.setPadding(0, 0, 0, dp(6));
         body.addView(resourceNotice);
+        addPlaybackControls(body);
         addPresentationControls(body);
         TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
         replayNotice.setPadding(0, dp(6), 0, dp(8));
@@ -279,6 +292,86 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 50051);
         }
+    }
+
+    private void addPlaybackControls(LinearLayout body) {
+        PlaybackStorage.Loaded loaded = PlaybackStorage.load(getFilesDir());
+        playbackSettings = loaded.settings;
+        playbackInvalid = loaded.invalid;
+        waitForOrientation = new CheckBox(this);
+        waitForOrientation.setText(R.string.playback_wait_for_orientation);
+        waitForOrientation.setTextColor(Color.WHITE);
+        waitForOrientation.setTextSize(14);
+        waitForOrientation.setChecked(playbackSettings.waitForOrientation);
+        body.addView(waitForOrientation);
+        TextView notice = text(R.string.playback_wait_notice, 12, Color.rgb(180, 199, 211));
+        notice.setPadding(0, 0, 0, dp(4));
+        body.addView(notice);
+        playbackStatus = text(R.string.playback_waiting, 12, Color.rgb(192, 212, 222));
+        playbackStatus.setTextIsSelectable(true);
+        playbackStatus.setPadding(0, 0, 0, dp(8));
+        body.addView(playbackStatus);
+        waitForOrientation.setOnCheckedChangeListener((button, checked) -> savePlaybackControl(checked));
+        updatePlaybackStatus();
+    }
+
+    private void savePlaybackControl(boolean wait) {
+        if (playbackLoading || playbackSettings.waitForOrientation == wait) return;
+        try {
+            PlaybackSettings requested = playbackSettings.changed(wait);
+            PlaybackStorage.save(getFilesDir(), requested);
+            playbackSettings = requested;
+            playbackSaveFailed = playbackInvalid = false;
+        } catch (IOException | IllegalStateException error) {
+            playbackSaveFailed = true;
+            playbackLoading = true;
+            waitForOrientation.setChecked(playbackSettings.waitForOrientation);
+            playbackLoading = false;
+            Toast.makeText(this, R.string.playback_save_failed, Toast.LENGTH_LONG).show();
+        }
+        updatePlaybackStatus();
+    }
+
+    private static int playbackInteger(JSONObject object, String name) {
+        Object value = object == null ? null : object.opt(name);
+        if (!(value instanceof Integer || value instanceof Long)) return -1;
+        long number = ((Number) value).longValue();
+        return number >= 0 && number <= Integer.MAX_VALUE ? (int) number : -1;
+    }
+
+    private static Boolean playbackBoolean(JSONObject object, String name) {
+        Object value = object == null ? null : object.opt(name);
+        return value instanceof Boolean ? (Boolean) value : null;
+    }
+
+    private void updatePlaybackStatus() {
+        if (playbackStatus == null) return;
+        if (playbackSaveFailed || playbackInvalid || (playbackRuntime != null
+                && playbackRuntime.optBoolean("invalid_settings_file", false))) {
+            setTextIfChanged(playbackStatus, getString(playbackSaveFailed
+                    ? R.string.playback_save_failed : R.string.playback_invalid));
+            playbackStatus.setTextColor(Color.rgb(255, 192, 154));
+            return;
+        }
+        JSONObject client = playbackRuntime == null ? null : playbackRuntime.optJSONObject("client");
+        if (client != null && client.length() != 6) client = null;
+        Object revision = client == null ? null : client.opt("revision");
+        long ackRevision = revision instanceof Integer || revision instanceof Long
+                ? ((Number) revision).longValue() : -1;
+        int feedback = PlaybackSettings.feedback(presentationObserved, presentationServerRunning && playbackRuntimeRunning,
+                PlaybackSettings.fresh(SystemClock.elapsedRealtime(), ServerService.runtimeDetailsReceivedAt()),
+                playbackSettings, playbackInteger(client, "schema"), playbackInteger(client, "bridge_version"),
+                ackRevision, playbackBoolean(client, "wait_for_orientation"),
+                playbackBoolean(client, "supported"), playbackBoolean(client, "applied"));
+        int message = feedback == PlaybackSettings.APPLIED ? R.string.playback_received
+                : feedback == PlaybackSettings.UNSUPPORTED ? R.string.playback_unsupported
+                : feedback == PlaybackSettings.WAIT_CLIENT ? R.string.playback_client_waiting
+                : feedback == PlaybackSettings.PENDING ? R.string.playback_saved_waiting
+                : R.string.playback_waiting;
+        setTextIfChanged(playbackStatus, getString(message));
+        playbackStatus.setTextColor(feedback == PlaybackSettings.APPLIED ? Color.rgb(117, 226, 177)
+                : feedback == PlaybackSettings.UNSUPPORTED ? Color.rgb(255, 192, 154)
+                : Color.rgb(192, 212, 222));
     }
 
     private void addPresentationControls(LinearLayout body) {
@@ -675,6 +768,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         super.onStart();
         presentationObserved = true;
         ServerService.observe(this);
+        playbackStatus.removeCallbacks(playbackRefresh);
+        playbackStatus.post(playbackRefresh);
     }
 
     @Override protected void onResume() {
@@ -685,6 +780,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
     @Override protected void onStop() {
         presentationObserved = false;
         presentationRuntime = null;
+        playbackRuntime = null;
+        playbackRuntimeRunning = false;
+        playbackStatus.removeCallbacks(playbackRefresh);
+        updatePlaybackStatus();
         updatePresentationStatus();
         ServerService.removeObserver(this);
         super.onStop();
@@ -713,6 +812,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         try { details = new JSONObject(serialized); }
         catch (Exception ignored) { details = new JSONObject(); }
         presentationRuntime = details.optJSONObject("presentation");
+        playbackRuntime = details.optJSONObject("playback");
+        playbackRuntimeRunning = Boolean.TRUE.equals(details.opt("running"));
+        updatePlaybackStatus();
         updatePresentationStatus();
         JSONObject client = details.optJSONObject("client_diagnostics");
         String summary = client == null ? "" : client.optString("summary", "");

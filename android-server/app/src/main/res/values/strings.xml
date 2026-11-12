@@ -56,6 +56,15 @@
     <string name="resource_transfer_received">이번 실행 · 내려받은 양 %1$s · 새로 보관한 파일 %2$d개</string>
     <string name="resource_transfer_served">이번 실행 · 게임으로 보낸 양 %1$s</string>
     <string name="presentation_title">그래픽·촬영 화면 ▾</string>
+    <string name="playback_wait_for_orientation">MV 진입·종료 시 화면 회전 대기</string>
+    <string name="playback_wait_notice">켜면 MV를 시작하거나 나갈 때 화면이 돌아갈 때까지 기다립니다. 기본값은 켜짐이며, 다음 MV 진입·종료부터 적용됩니다.</string>
+    <string name="playback_waiting">회전 설정 · 서버와 게임 응답 대기</string>
+    <string name="playback_saved_waiting">회전 설정 저장됨 · 클라이언트 수신 확인 대기</string>
+    <string name="playback_client_waiting">회전 설정 지원 클라이언트 응답 대기 · 지원 클라이언트 업데이트가 필요합니다.</string>
+    <string name="playback_unsupported">회전 설정 수신 확인 대기 · 응답이 없으면 지원 클라이언트로 업데이트해 주세요.</string>
+    <string name="playback_received">클라이언트에서 설정 수신 확인 · 다음 MV 진입·종료부터 적용</string>
+    <string name="playback_save_failed">회전 설정을 저장하지 못했습니다. 이전 설정을 유지합니다.</string>
+    <string name="playback_invalid">저장된 회전 설정을 읽지 못해 기본값을 표시합니다. 설정을 바꾸면 새로 저장합니다.</string>
     <string name="presentation_title_expanded">그래픽·촬영 화면 ▴</string>
     <string name="presentation_notice">그래픽 설정을 지원하는 게임이 필요합니다. 서버 실행 중에도 바꿀 수 있습니다. 변경 사항은 저장한 뒤 게임의 적용 확인을 기다립니다.</string>
     <string name="presentation_custom_graphics">사용자 그래픽 설정 사용</string>
