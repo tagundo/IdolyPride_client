@@ -93,7 +93,14 @@ def _path(descriptor, text, *, rule=False):
 
 
 def _rule_key(parts):
-    return tuple(field.name for field, _index in parts)
+    return tuple((field.name, index) for field, index in parts)
+
+
+def _matches_rule(parts, rules):
+    actual = _rule_key(parts)
+    return any(len(actual) == len(rule) and all(
+        name == allowed and (index is None or index == position)
+        for (name, position), (allowed, index) in zip(actual, rule, strict=True)) for rule in rules)
 
 
 def _row_key(row, fields):
@@ -186,7 +193,7 @@ def translate_rows(schema, table, rows, document, *, media_mode=False):
         if len(pieces) != len(keys)+1:
             raise ValueError("Translation entry has an ambiguous primary key")
         parts = _path(descriptor, pieces[-1])
-        if _rule_key(parts) not in rules:
+        if not _matches_rule(parts, rules):
             raise ValueError("Translation entry has no matching declared text rule")
         identity = "|".join(pieces[:-1])
         row = indexed.get(identity)
@@ -223,8 +230,14 @@ def read_master_rows(schema, driver, pack_root, pack):
             or not isinstance(pack.get("cryptoKey"), str) or not _HASH.fullmatch(pack["cryptoKey"])
             or type(pack.get("fileSize")) is not int or not 0 < pack["fileSize"] <= 64*1024*1024):
         raise ValueError("Invalid public master pack metadata")
-    root = Path(pack_root).resolve(strict=True)
-    path = root / filename
+    roots = list(pack_root) if isinstance(pack_root, (list, tuple)) else [pack_root]
+    if not 1 <= len(roots) <= 4:
+        raise ValueError("Public master roots must be explicit and bounded")
+    paths = [Path(root).resolve(strict=True) / filename for root in roots]
+    candidates = [path for path in paths if path.exists() or path.is_symlink()]
+    if len(candidates) != 1:
+        raise ValueError("Public master pack is missing or ambiguous across roots")
+    path = candidates[0]
     if path.is_symlink() or not path.is_file() or path.stat().st_size != pack["fileSize"]:
         raise ValueError("Public master pack is missing or differs in size")
     message = message_factory.GetMessageClass(schema.pool.FindMessageTypeByName("master." + table))

@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import stat
 import threading
 
 LANGUAGES = ("ja", "ko", "en")
@@ -37,8 +39,14 @@ class LanguageSettingsState:
 
     def settings(self):
         try:
-            with self.path.open("rb") as stream:
-                raw = stream.read(MAX_BYTES+1)
+            descriptor = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            try:
+                info = os.fstat(descriptor)
+                if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_BYTES:
+                    raise ValueError("Language preferences must be a bounded regular file")
+                raw = os.read(descriptor, MAX_BYTES+1)
+            finally:
+                os.close(descriptor)
             if not 0 < len(raw) <= MAX_BYTES:
                 raise ValueError("Language file size")
             value = validate_settings(json.loads(raw.decode("utf-8"), object_pairs_hook=_object))

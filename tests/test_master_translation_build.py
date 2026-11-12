@@ -87,6 +87,17 @@ def test_composite_primary_key_mismatch_and_duplicate_original_ids_are_rejected(
             translation.translate_rows(schema,"Story",rows,document)
 
 
+def test_explicit_rule_indices_are_constraints_and_unindexed_rules_are_wildcards(schema):
+    rows=[{'id':'a','branchChoices':[{'text':'一'},{'text':'二'}]}]
+    with pytest.raises(ValueError,match='matching declared'):
+        translation.translate_rows(schema,'Story',rows,{'rule':['id|branchChoices[0].text'],
+            'data':{'a|branchChoices[1].text':'wrong index'}})
+    out,_=translation.translate_rows(schema,'Story',rows,
+        {'rule':['id|branchChoices[0].text','id|branchChoices[1].text'],
+         'data':{'a|branchChoices[0].text':'one','a|branchChoices[1].text':'two'}})
+    assert out[0]['branchChoices']==[{'text':'one'},{'text':'two'}]
+
+
 def test_media_cover_label_uses_actual_translated_description_and_preserves_missing_fallback(schema):
     identity="music-thrx-001-unit"
     rows=[{"id":identity,"name":"日本語カバー","description":"日本語カバー","isUserUnavailable":False}]
@@ -143,6 +154,9 @@ def test_real_sqlcipher_overlay_roundtrip_preserves_other_packs_and_original_byt
     driver,_=_sqlcipher_driver()
     result=translation.read_master_rows(schema,driver,output/"assets/master",by_type['Story'])
     assert result[0]["name"]=="번역" and result[0]["assetId"]=="same" and result[0]["order"]==3
+    assert translation.read_master_rows(schema,driver,[original/'assets/master',output/'assets/master'],by_type['Story'])==result
+    with pytest.raises(ValueError,match='ambiguous'):
+        translation.read_master_rows(schema,driver,[output/'assets/master',output/'assets/master'],by_type['Story'])
     assert before=={p.relative_to(original):p.read_bytes() for p in original.rglob('*') if p.is_file()}
     reused=tmp_path/'media-reused'
     report2=translation.build_translation_master_overlay(schema,tag,original/'assets/master',translations,reused,

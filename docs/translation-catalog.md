@@ -13,7 +13,8 @@ not imply every screen has been translated.
 {"schema":1,"language":"ja"}
 ```
 
-Japanese is the default. Invalid files retain the last valid setting in that
+Japanese is the default. Only bounded regular preference files are opened;
+FIFOs, devices and symlinks are rejected without waiting. Invalid files retain the last valid setting in that
 server process. Settings are saved atomically by the launcher. A change requires
 a server restart and returning the game to the title screen. The selector uses
 `original-master/languages/<locale>/master-tag.json` or the corresponding
@@ -55,6 +56,8 @@ matches exactly. The producer does not relabel a fork as current upstream.
 
 The supplied descriptor owns primary keys, scalar types, nested messages and
 repeated-field indices. Only the explicit human-text leaf allowlist can change.
+An unindexed repeated-field rule is a wildcard; an explicit index remains an
+exact constraint and cannot authorize another entry.
 IDs, quantities, order, asset references, dates, visibility and unlock conditions
 are not translation targets. Invalid/unsupported rule sets retain that table's
 original pack and are reported as unsupported; malformed files and provenance
@@ -86,7 +89,10 @@ python tools/build_master_translations.py \
   --language ko --output generated/ko-normal
 ```
 
-Run media against the prepared media tag/pack root with `--media-mode`, using
+Run media against the prepared media tag with `--media-mode`, supplying its
+separate generated pack directory with `--extra-pack-root` rather than copying
+the 202 original input packs. Duplicate filenames across roots are rejected.
+Use
 `--reuse-overlay generated/ko-normal`. Generated files merge into the common
 `original-master/assets/master` directory; the mode-specific tags live beside
 the selected language catalogs. `coverage.json` records actual changed fields,

@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -60,3 +61,16 @@ def test_unknown_tag_and_settings_are_rejected(tmp_path):
         select_language_tag(tmp_path / "state.db", "ko")
     with pytest.raises(ValueError):
         validate_settings({"schema": 1, "language": ["en"]})
+
+
+def test_nonregular_preferences_never_block_or_follow_other_files(tmp_path):
+    path = tmp_path / 'client-language.json'
+    state = LanguageSettingsState(path)
+    path.write_text('{"schema":1,"language":"en"}')
+    assert state.settings()['language'] == 'en'
+    path.unlink();os.mkfifo(path)
+    assert state.status() == {'settings':{'schema':1,'language':'en'},'invalid_settings_file':True}
+    path.unlink();target=tmp_path/'other.json';target.write_text('{"schema":1,"language":"ko"}')
+    path.symlink_to(target)
+    assert state.settings()['language'] == 'en'
+    assert state.status()['invalid_settings_file']
