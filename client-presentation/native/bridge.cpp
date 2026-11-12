@@ -25,11 +25,11 @@
 #include "presentation_scope.hpp"
 #include "orientation.hpp"
 #include "playback_config.hpp"
+#include "panorama_ui_edges.hpp"
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
 #include "../ios/live_ui.hpp"
 #include "../ios/photography_ui.hpp"
-#include "panorama_ui_edges.hpp"
 #else
 #include "profile.hpp"
 #endif
@@ -338,7 +338,6 @@ bool (*shadow_original)(void *, void *, void **, int, Method *);
 
 namespace rotation = idoly::presentation::orientation;
 rotation::Calls orientation_calls;
-#ifdef IDOLY_DARWIN_BRIDGE
 PanoramaEdgeApi panorama_api;
 PanoramaEdgeLayout panorama_ui;
 bool class_matches(void *object, const char *space, const char *name) {
@@ -350,7 +349,6 @@ bool class_matches(void *object, const char *space, const char *name) {
     }
     return false;
 }
-#endif
 
 Weak quality_manager, main_controller;
 Weak controller_candidates[4];
@@ -448,6 +446,7 @@ void update_camera_metrics(void *camera) {
     state.base_fov = photo.base_known ? frustum_vertical_fov(photo.original_frustum) : state.fov;
     pthread_mutex_unlock(&status_mutex);
 }
+// BEGIN_VERIFIED_PROJECTION_REFRESH
 bool projection_model_unchanged(void *camera) {
     if (physical_get(camera, nullptr) != photo.physical || projection_mode_get(camera, nullptr) != photo.projection_mode)
         return false;
@@ -513,7 +512,7 @@ bool set_expanded_camera(void *camera) {
     if (!photo.base_known || !dimensions_valid(rendered)) return false;
     const float expected_aspect = static_cast<float>(rendered.width) / rendered.height;
     if (!projection_model_unchanged(camera)
-            && (!desktop_host || !refresh_original_projection(camera, expected_aspect))) return false;
+            && !refresh_original_projection(camera, expected_aspect)) return false;
     // TargetTexture must drive the original automatic camera aspect. Setting
     // Camera.aspect ourselves would switch it to manual mode and could leak
     // the photo ratio into a later scene. Manual/custom viewports fail closed.
@@ -540,6 +539,7 @@ bool set_expanded_camera(void *camera) {
     update_camera_metrics(camera);
     return true;
 }
+// END_VERIFIED_PROJECTION_REFRESH
 void restore_camera() {
     void *camera = photo.camera.get(true);
     if (photo.expanded && camera && photo.base_known) {
@@ -649,9 +649,7 @@ bool fill_image_parent(void *rect, Rect available) {
     return true;
 }
 void restore_photography(bool rebuild_target) {
-#ifdef IDOLY_DARWIN_BRIDGE
     panorama_ui.restore_layout();
-#endif
     restore_image_layouts();
     void *controller = photo.controller.get(true);
     if (controller) {
@@ -664,19 +662,47 @@ void restore_photography(bool rebuild_target) {
     photo.target_expanded = false; photo.geometry_confirmed = false; photo.layout_ticks = 0;
     photo.original_image_frame_known = false;
 }
+// BEGIN_PROJECTION_REJECTION_RETRY
+void clear_projection_rejection() {
+    photo.rejected_revision = -1; photo.rejected_viewport = {};
+}
 void clear_photography() {
     restore_photography(false);
-#ifdef IDOLY_DARWIN_BRIDGE
     panorama_ui.restore();
-#endif
     photo.owner.clear(); photo.controller.clear(); photo.camera.clear(); photo.image.clear();
     photo.viewport_parent.clear();
     photo.active = false; photo.base_known = false; photo.geometry_known = false;
     photo.viewport = {}; photo.built_viewport = {};
-    photo.rejected_revision = -1; photo.rejected_viewport = {};
+    clear_projection_rejection();
+}
+bool synchronize_photo_camera(void *controller, void *camera) {
+    if (!controller) return false;
+    void *next = rt_camera(controller, nullptr);
+    if (!next || !object_alive(next, nullptr)) {
+        // During teardown the managed wrapper may outlive its Unity camera.
+        // Never turn that transient dead wrapper into a per-frame RT reset.
+        if (photo.expanded || photo.target_expanded) restore_photography(false);
+        // Even the same live camera may later be reattached to this controller.
+        // Its first valid attachment then needs one original-target baseline.
+        photo.camera.clear(); photo.built_viewport = {};
+        return true;
+    }
+    if (next == camera) return false;
+    // A genuinely new camera needs an original-ratio target for its first
+    // baseline. Do this once before replacing the saved weak camera; otherwise
+    // a still-wide RT can be mistaken for the new original lens forever.
+    restore_photography(true);
+    next = rt_camera(controller, nullptr);
+    photo.camera.set(next && object_alive(next, nullptr) ? next : nullptr);
+    photo.built_viewport = {};
+    clear_projection_rejection();
+    return true;
+}
+bool projection_rejected_for(const Config &config) {
+    return photo.rejected_revision == config.revision && photo.rejected_viewport.width == photo.viewport.width
+        && photo.rejected_viewport.height == photo.viewport.height;
 }
 void reject_current_projection() {
-    if (!desktop_host) { restore_photography(true); return; }
     const Config config = configuration();
     const Dimensions rejected = photo.viewport;
     restore_photography(true);
@@ -687,6 +713,7 @@ void reject_current_projection() {
     photo.rejected_viewport = rejected;
     pthread_mutex_lock(&status_mutex); state.state = "unsupported"; state.expanded = false; pthread_mutex_unlock(&status_mutex);
 }
+// END_PROJECTION_REJECTION_RETRY
 
 bool image_fills_parent(void *rect, Rect available) {
     Rect drawn{}; transform_rect_get(rect, &drawn, nullptr);
@@ -722,9 +749,12 @@ void observe_image(void *self, void *texture) {
     capture_original_image_frame(rect, parent);
 }
 
-#ifdef IDOLY_DARWIN_BRIDGE
 void update_panorama_ui() {
+#ifdef IDOLY_DARWIN_BRIDGE
     if (!desktop_enabled() || !game_call()) return;
+#else
+    if (!ready.load(std::memory_order_acquire) || !game_call()) return;
+#endif
     void *owner = photo.active ? photo.owner.get(true) : nullptr;
     if (!owner || !class_matches(owner, "Solis.Photography", "Photography360LiveContentPresenter")) {
         panorama_ui.restore(); return;
@@ -734,7 +764,6 @@ void update_panorama_ui() {
             || !photo.original_image_frame_known) { panorama_ui.restore_layout(); return; }
     panorama_ui.update(owner, photo.viewport_parent.get(true), photo.viewport_rect, photo.original_image_frame);
 }
-#endif
 
 uint64_t limited_hook(int width, int height, Vec2 ratio, int max_pixel, float scale, bool first, Method *method) {
     if (!ready.load(std::memory_order_acquire) || !resolution_scope || !first || !game_call())
@@ -760,7 +789,11 @@ void rt_hook(void *self, int width, int height, bool alpha, Method *method) {
     if (!primary) { rt_original(self, width, height, alpha, method); return; }
     main_controller.set(self);
     if (scene_enter && !scene_exit) {
-        if (photo.controller.get(true) && photo.controller.get(true) != self) restore_photography(false);
+        void *previous_controller = photo.controller.get(true), *previous_camera = photo.camera.get(true);
+        const bool changed = previous_controller != self || previous_camera != camera;
+        if ((previous_controller && previous_controller != self) || (previous_camera && previous_camera != camera))
+            restore_photography(false);
+        if (changed) clear_projection_rejection();
         photo.controller.set(self); photo.camera.set(camera); photo.ratio = read<Vec2>(self, 0x28);
         photo.base_known = false;
     }
@@ -802,16 +835,14 @@ void target_late_hook(void *self, Method *method) {
                 pthread_mutex_lock(&status_mutex); state.state = "unsupported"; state.expanded = false; pthread_mutex_unlock(&status_mutex);
             }
         }
-#ifdef IDOLY_DARWIN_BRIDGE
         update_panorama_ui();
-#endif
     }
 }
 
 void photo_update(void *self, Method *method, VoidMethod original) {
     if (!ready.load(std::memory_order_acquire) || !game_call(true)) { original(self, method); return; }
     if (photo.owner.get() != self) clear_photography();
-    else restore_photography(false);
+    else restore_photography(false); // Same target keeps a failed-projection cache across ordinary render updates.
     photo.owner.set(self); photo.active = true;
     ScopedValue<bool> enter(scene_enter, true); original(self, method);
 }
@@ -823,9 +854,7 @@ void photo_reset(void *self, Method *method, VoidMethod original) {
 void main_update_hook(void *self, Method *method) { photo_update(self, method, scene_main_update_original); }
 void pano_update_hook(void *self, Method *method) {
     photo_update(self, method, scene_pano_update_original);
-#ifdef IDOLY_DARWIN_BRIDGE
     if (ready.load(std::memory_order_acquire) && game_call()) update_panorama_ui();
-#endif
 }
 void main_reset_hook(void *self, Method *method) { photo_reset(self, method, scene_main_reset_original); }
 void pano_reset_hook(void *self, Method *method) { photo_reset(self, method, scene_pano_reset_original); }
@@ -881,28 +910,19 @@ bool apply_photography(Config config) {
     }
     if (!config.expand_photography) {
         if (photo.expanded || photo.target_expanded) restore_photography(true);
-        photo.rejected_revision = -1;
+        clear_projection_rejection();
         return true;
     }
     void *image = photo.image.get(true);
     if (image) observe_image(image, target_current(image, nullptr));
     else photo.geometry_known = false;
     void *controller = photo.controller.get(true), *camera = photo.camera.get(true);
-    if (controller && rt_camera(controller, nullptr) != camera) {
-        restore_camera(); photo.camera.set(rt_camera(controller, nullptr));
-        photo.base_known = false; photo.built_viewport = {};
-        photo.rejected_revision = -1; return false;
-    }
+    if (synchronize_photo_camera(controller, camera)) return false;
     if (!controller || !camera || !photo.geometry_known || orthographic(camera, nullptr)) {
         if (photo.expanded || photo.target_expanded) restore_photography(true);
         return false;
     }
-    if (photo.rejected_revision == config.revision && photo.rejected_viewport.width == photo.viewport.width
-            && photo.rejected_viewport.height == photo.viewport.height) { geometry_unsupported = true; return false; }
-    if (!desktop_host && photo.base_known && !projection_model_unchanged(camera)) {
-        restore_photography(true);
-        return false;
-    }
+    if (projection_rejected_for(config)) { geometry_unsupported = true; return false; }
     if (!photo.base_known) {
         ProjectionMatrix matrix{};
         projection_get(camera, &matrix, nullptr);
@@ -1074,9 +1094,7 @@ void quality_update_hook(void *self, Method *method) {
     const bool rt_restore_pending = controller && !config.custom_graphics
         && rendered_configuration_known && rendered_configuration.custom_graphics;
     const bool geometry = apply_photography(config);
-#ifdef IDOLY_DARWIN_BRIDGE
     update_panorama_ui();
-#endif
     const bool aa_pending = config.custom_graphics && config.aa_mode >= 0 && aa_revision != config.revision;
     const bool shadow_pending = config.custom_graphics && config.shadow_resolution && shadow_revision != config.revision;
     const bool unavailable = geometry_unsupported || quality_unavailable
@@ -1201,6 +1219,7 @@ void load_calls() {
     CALL(orthographic, orthographic); CALL(uv_get, uv_get);
     CALL(projection_get, projection_get); CALL(physical_get, physical_get); CALL(gate_get, gate_get);
     CALL(sensor_get, sensor_get); CALL(lens_get, lens_get); CALL(projection_mode_get, projection_mode_get);
+    CALL(camera_aspect_set_original, aspect_set); CALL(camera_aspect_reset, aspect_reset);
     CALL(orientation_calls.frame_count, orientation_frame_count);
     CALL(orientation_calls.token_cancelled, orientation_token_cancelled);
     CALL(orientation_calls.set_orientation_async, orientation_set_async);
@@ -1209,12 +1228,12 @@ void load_calls() {
     orientation_calls.screen_width=screen_width; orientation_calls.screen_height=screen_height;
     rotation::configure(orientation_calls);
 #ifdef IDOLY_DARWIN_BRIDGE
-    CALL(camera_aspect_set_original, aspect_set); CALL(camera_aspect_reset, aspect_reset);
     CALL(mv_ui_hide, mv_ui_hide);
     preview_ui_calls.weak_new=weak_new; preview_ui_calls.weak_get=weak_get; preview_ui_calls.weak_free=weak_free;
     preview_ui_calls.matches=class_matches;
     CALL(preview_ui_calls.ui_get, preview_ui_get); CALL(preview_ui_calls.ui_set, preview_ui_set);
     preview_ui.configure(preview_ui_calls);
+#endif
     panorama_api.weak_new=weak_new; panorama_api.weak_get=weak_get; panorama_api.weak_free=weak_free;
     panorama_api.alive=object_alive; panorama_api.matches=class_matches;
     panorama_api.parent=parent_get; panorama_api.position_get=local_position; panorama_api.position_set=local_position_set;
@@ -1224,7 +1243,6 @@ void load_calls() {
     CALL(panorama_api.inverse_transform_point, ui_inverse_transform_point);
     CALL(panorama_api.ui_active_get, pano_ui_get); CALL(panorama_api.ui_active_set, pano_ui_set);
     panorama_ui.configure(panorama_api);
-#endif
 #undef CALL
 }
 bool accept_configuration(int schema, const Config &value) {

@@ -39,6 +39,10 @@
       {
         "file": "render-probe-original-call-pins.json",
         "sha256": "4d24d2d7a2db878c7512f011e1261c66b39a791893482d35623a16eaf090fbf8"
+      },
+      {
+        "file": "android-original-ui-fields-and-call-pins.json",
+        "sha256": "7a6b8c2466c41e6466a2255e795887bcde2671e1ebec0c3f3acb51273cc00d91"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -1471,6 +1475,163 @@
       "mode": "CALL",
       "native_ABI": "int32_t(const MethodInfo*)",
       "source": "render-probe-original-call-pins.json"
+    },
+    "pano_ui_get": {
+      "name": "Solis.Photography.Photography360LiveContentModel.get_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 200,
+      "metadata_method_index": 1770,
+      "token_row": 1771,
+      "rva": "0x5179320",
+      "prefix16": "fe0f1ef8f44f01a9147702d088d27639",
+      "method_flags": "0x886",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0x9aae0e8",
+      "native_ABI": "bool(void*,const MethodInfo*)",
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "pano_ui_set": {
+      "name": "Solis.Photography.Photography360LiveContentModel.set_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 200,
+      "metadata_method_index": 1771,
+      "token_row": 1772,
+      "rva": "0x5179368",
+      "prefix16": "fe57bea9f44f01a9157702d0a8d67639",
+      "method_flags": "0x886",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0x9aae0f0",
+      "native_ABI": "void(void*,bool,const MethodInfo*)",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Boolean",
+          "typeindex": 50428,
+          "byref": false,
+          "attributes": 0
+        }
+      ],
+      "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "aspect_reset": {
+      "name": "UnityEngine.Camera.ResetAspect",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23776,
+      "metadata_method_index": 161952,
+      "token_row": 460,
+      "rva": "0x8f3bd44",
+      "prefix16": "fe0f1ef8f44f01a9d48900f0815e46f9",
+      "method_flags": "0x86",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0xa0199e0",
+      "native_ABI": "void(void*,const MethodInfo*)",
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "ui_component_transform": {
+      "name": "UnityEngine.Component.get_transform",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23986,
+      "metadata_method_index": 164654,
+      "token_row": 3162,
+      "rva": "0x8f7c58c",
+      "prefix16": "fe0f1ef8f44f01a9f487009081e247f9",
+      "method_flags": "0x886",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0xa01ee50",
+      "native_ABI": "void*(void*,const MethodInfo*)",
+      "return_type": "UnityEngine.Transform",
+      "parameters": [],
+      "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "ui_gameobject_transform": {
+      "name": "UnityEngine.GameObject.get_transform",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23999,
+      "metadata_method_index": 164779,
+      "token_row": 3287,
+      "rva": "0x8f7fc1c",
+      "prefix16": "fe0f1ef8f44f01a9d48700d0815640f9",
+      "method_flags": "0x886",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0xa01f238",
+      "native_ABI": "void*(void*,const MethodInfo*)",
+      "return_type": "UnityEngine.Transform",
+      "parameters": [],
+      "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "ui_transform_point": {
+      "name": "UnityEngine.Transform.TransformPoint_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24069,
+      "metadata_method_index": 165481,
+      "token_row": 3989,
+      "rva": "0x8f8e344",
+      "prefix16": "fe0f1df8f65701a9f44f02a9568700f0",
+      "method_flags": "0x81",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0xa020828",
+      "native_ABI": "void(void*,const Vec3*,Vec3*,const MethodInfo*)",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "position",
+          "type": "UnityEngine.Vector3",
+          "typeindex": 44944,
+          "byref": true,
+          "attributes": 0
+        },
+        {
+          "name": "ret",
+          "type": "UnityEngine.Vector3",
+          "typeindex": 44946,
+          "byref": true,
+          "attributes": 2
+        }
+      ],
+      "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "ui_inverse_transform_point": {
+      "name": "UnityEngine.Transform.InverseTransformPoint_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24069,
+      "metadata_method_index": 165482,
+      "token_row": 3990,
+      "rva": "0x8f8e630",
+      "prefix16": "fe0f1df8f65701a9f44f02a9568700f0",
+      "method_flags": "0x81",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0xa020830",
+      "native_ABI": "void(void*,const Vec3*,Vec3*,const MethodInfo*)",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "position",
+          "type": "UnityEngine.Vector3",
+          "typeindex": 44944,
+          "byref": true,
+          "attributes": 0
+        },
+        {
+          "name": "ret",
+          "type": "UnityEngine.Vector3",
+          "typeindex": 44946,
+          "byref": true,
+          "attributes": 2
+        }
+      ],
+      "source": "android-original-ui-fields-and-call-pins.json"
     }
   },
   "graphics_fields": [
@@ -1641,6 +1802,21 @@
       "_uiAreaList": {
         "offset": 48,
         "type": "managed pointer"
+      },
+      "_livePresenter": {
+        "offset": 56,
+        "type": "Solis.Photography.Photography360LiveControlPresenter",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "_contentView": {
+        "offset": 80,
+        "type": "Solis.Photography.Photography360LiveContentView",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "_model": {
+        "offset": 88,
+        "type": "Solis.Photography.Photography360LiveContentModel",
+        "source": "android-original-ui-fields-and-call-pins.json"
       }
     },
     "VLSRPTargetImage": {
@@ -1677,6 +1853,59 @@
       "capturedTexture": {
         "offset": 160,
         "type": "VL.VLRenderTexture*"
+      }
+    },
+    "Photography360LiveContentView": {
+      "_uiButton": {
+        "offset": 40,
+        "type": "Solis.Common.SolisButton",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "_endButton": {
+        "offset": 48,
+        "type": "Solis.Common.SolisButton",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      }
+    },
+    "Photography360LiveControlPresenter": {
+      "_view": {
+        "offset": 32,
+        "type": "Solis.Photography.Photography360LiveView",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "_isInitialized": {
+        "offset": 168,
+        "type": "System.Boolean",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      }
+    },
+    "Photography360LiveView": {
+      "_balloon": {
+        "offset": 168,
+        "type": "UnityEngine.GameObject",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "_menuOpenButton": {
+        "offset": 176,
+        "type": "Solis.Common.SolisButton",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "_buttonsAreaGroup": {
+        "offset": 296,
+        "type": "UnityEngine.CanvasGroup",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      }
+    },
+    "Photography360LiveContentModel": {
+      "_isUIActiveProperty": {
+        "offset": 16,
+        "type": "managed generic pointer",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      "<IsEnd>k__BackingField": {
+        "offset": 24,
+        "type": "System.Boolean",
+        "source": "android-original-ui-fields-and-call-pins.json"
       }
     }
   },
@@ -1757,5 +1986,119 @@
     "frame_timings": "null until exact original layout and shared-clock freshness are validated",
     "new_CALL_count": 2,
     "new_HOOK_count": 0
+  },
+  "panorama_ui_edges": {
+    "platform": "Android6.1.1 arm64 (iOS layout separately verified; no iOS RVA reused)",
+    "fields": [
+      {
+        "class": "Solis.Photography.Photography360LiveContentPresenter",
+        "type_definition_index": 214,
+        "field": "_livePresenter",
+        "offset": 56,
+        "type": "Solis.Photography.Photography360LiveControlPresenter",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveContentPresenter",
+        "type_definition_index": 214,
+        "field": "_contentView",
+        "offset": 80,
+        "type": "Solis.Photography.Photography360LiveContentView",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveContentPresenter",
+        "type_definition_index": 214,
+        "field": "_model",
+        "offset": 88,
+        "type": "Solis.Photography.Photography360LiveContentModel",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveContentView",
+        "type_definition_index": 219,
+        "field": "_uiButton",
+        "offset": 40,
+        "type": "Solis.Common.SolisButton",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveContentView",
+        "type_definition_index": 219,
+        "field": "_endButton",
+        "offset": 48,
+        "type": "Solis.Common.SolisButton",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveControlPresenter",
+        "type_definition_index": 231,
+        "field": "_view",
+        "offset": 32,
+        "type": "Solis.Photography.Photography360LiveView",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveControlPresenter",
+        "type_definition_index": 231,
+        "field": "_isInitialized",
+        "offset": 168,
+        "type": "System.Boolean",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveView",
+        "type_definition_index": 246,
+        "field": "_balloon",
+        "offset": 168,
+        "type": "UnityEngine.GameObject",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveView",
+        "type_definition_index": 246,
+        "field": "_menuOpenButton",
+        "offset": 176,
+        "type": "Solis.Common.SolisButton",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveView",
+        "type_definition_index": 246,
+        "field": "_buttonsAreaGroup",
+        "offset": 296,
+        "type": "UnityEngine.CanvasGroup",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveContentModel",
+        "type_definition_index": 200,
+        "field": "_isUIActiveProperty",
+        "offset": 16,
+        "type": "managed generic pointer",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      },
+      {
+        "class": "Solis.Photography.Photography360LiveContentModel",
+        "type_definition_index": 200,
+        "field": "<IsEnd>k__BackingField",
+        "offset": 24,
+        "type": "System.Boolean",
+        "source": "android-original-ui-fields-and-call-pins.json"
+      }
+    ],
+    "targets": [
+      "UI toggle top-left",
+      "end bottom-left",
+      "camera settings button bottom-right",
+      "camera balloon same world delta",
+      "whole outer CanvasGroup with its own popup mask same world delta"
+    ],
+    "new_UI_CALL_count": 6,
+    "new_aspect_reset_CALL_count": 1,
+    "new_HOOK_count": 0,
+    "initial_UI_off": "Original reactive model setter once per weak model after initialized control; later user UI-ON untouched",
+    "lifetime": "Weak owner/rect/parent/model identity; frame-local geometry memo only; restore on disable/exit without overwriting later original writes",
+    "no_direct_drag_or_new_settings": true
   }
 }

@@ -8,7 +8,7 @@
 namespace idoly::presentation {
 
 // Unity calls and registered field reads run only on the established game
-// thread. These callbacks are populated from the locked original iOS profile.
+// thread. Each platform's callbacks come from its locked original profile.
 struct PanoramaEdgeApi {
     using Method = const void;
     uint32_t (*weak_new)(void *, bool) = nullptr;
@@ -87,7 +87,8 @@ class PanoramaEdgeLayout {
         entry.saved = entry.changed = entry.writing = false;
     }
     bool resolve_rects(void *owner, void **targets) const {
-        // Registered iOS6.1.1 fields, independently matched to original level5
+        // Android and iOS6.1.1 registered offsets independently agree; each
+        // platform's fields are matched to its own original level5
         // PPtrs. The camera popup has its OWN mask and a different parent from
         // the button/balloon; move all three by the same world-space delta.
         void *content = field<void *>(owner, 0x50);
@@ -152,14 +153,24 @@ public:
     bool update(void *owner, void *viewport, Rect full_viewport, Rect old_frame) {
         if (!track_owner(owner) || !api_.component_transform || !api_.gameobject_transform || !api_.parent
                 || !api_.position_get || !api_.position_set || !api_.transform_point || !api_.inverse_transform_point
-                || !rect(viewport) || !ui_rect_valid(old_frame)
+                || !rect(viewport) || !ui_rect_valid(old_frame) || !ui_rect_valid(full_viewport)
                 || std::fabs(old_frame.width / old_frame.height - 16.f / 9.f) > .01f) {
             restore_layout(); return false;
+        }
+        if (old_frame.x == full_viewport.x && old_frame.y == full_viewport.y
+                && old_frame.width == full_viewport.width && old_frame.height == full_viewport.height) {
+            restore_layout(); return true;
         }
         void *targets[5]{};
         if (!resolve_rects(owner, targets)) { restore_layout(); return false; }
         Vec3 desired[5]{}, world_origin{}, world_edges[3]{};
         bool have_world_origin = false, have_world_edge[3]{};
+        struct ParentPoints {
+            void *parent = nullptr;
+            Vec3 origin{}, moved[3]{};
+            bool have_origin = false, have_moved[3]{};
+        } parent_points[5];
+        unsigned parent_count = 0;
         for (unsigned i = 0; i < 5; ++i) {
             if (targets[i] == viewport) { restore_layout(); return false; }
             void *parent = api_.parent(targets[i], nullptr);
@@ -173,6 +184,7 @@ public:
                 if (may_restore_position) {
                     have_world_origin = false;
                     for (bool &ready : have_world_edge) ready = false;
+                    parent_count = 0;
                 }
             }
             Vec3 current{}; api_.position_get(targets[i], &current, nullptr);
@@ -199,12 +211,25 @@ public:
                 if (!ui_position_valid(world_edges[edge_index])) { restore_layout(); return false; }
                 have_world_edge[edge_index] = true;
             }
-            // Only the viewport points are shared within this call. Each
-            // target keeps its own current parent-space conversion below.
-            Vec3 local_origin{}, local_moved{};
-            api_.inverse_transform_point(parent, &world_origin, &local_origin, nullptr);
-            api_.inverse_transform_point(parent, &world_edges[edge_index], &local_moved, nullptr);
-            if (!panorama_ui_local_position(entry.original, local_origin, local_moved, &desired[i])) {
+            // Borrowed parent identities and converted points live only for
+            // this update. A distinct popup parent must never share a point.
+            unsigned parent_index = 0;
+            while (parent_index < parent_count && parent_points[parent_index].parent != parent) ++parent_index;
+            ParentPoints &points = parent_points[parent_index];
+            if (parent_index == parent_count) {
+                points = {}; points.parent = parent; ++parent_count;
+            }
+            if (!points.have_origin) {
+                api_.inverse_transform_point(parent, &world_origin, &points.origin, nullptr);
+                if (!ui_position_valid(points.origin)) { restore_layout(); return false; }
+                points.have_origin = true;
+            }
+            if (!points.have_moved[edge_index]) {
+                api_.inverse_transform_point(parent, &world_edges[edge_index], &points.moved[edge_index], nullptr);
+                if (!ui_position_valid(points.moved[edge_index])) { restore_layout(); return false; }
+                points.have_moved[edge_index] = true;
+            }
+            if (!panorama_ui_local_position(entry.original, points.origin, points.moved[edge_index], &desired[i])) {
                 restore_layout(); return false;
             }
         }

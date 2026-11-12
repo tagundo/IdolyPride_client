@@ -86,15 +86,20 @@ def test_probe_is_post_original_only_and_jni_does_not_call_unity():
     assert "_get(" not in formatter and "game_call" not in formatter
 
 
-def test_probe_only_extends_android_call_pins_and_keeps_hook_count():
+def test_android_probe_and_panorama_call_pins_keep_hook_count():
     profile = json.loads((HERE.parent / "profile.json").read_text())
     aliases = profile["aliases"]
-    assert len(aliases) == 78
+    assert len(aliases) == 85
     assert aliases["rendering_mode"]["rva"] == "0x8f8826c"
     assert aliases["graphics_api"]["rva"] == "0x8f8812c"
     for name in ("rendering_mode", "graphics_api"):
         assert aliases[name]["is_static"] and aliases[name]["parameters"] == []
         assert aliases[name]["mode"] == "CALL"
+    # Android360 projection/UI support adds CALLs, without changing the probe
+    # ABI or adding hooks to any of these getter/transform/model functions.
+    for name in ("aspect_reset", "ui_component_transform", "ui_gameobject_transform",
+                 "ui_transform_point", "ui_inverse_transform_point", "pano_ui_get", "pano_ui_set"):
+        assert name in aliases
     text = BRIDGE.read_text()
     hooks = re.findall(r"HOOK\((\w+),", text)
     assert len(hooks) - 1 == 29  # Exclude the HOOK macro's own entry parameter.
