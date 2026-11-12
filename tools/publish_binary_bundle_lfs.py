@@ -88,7 +88,8 @@ def main():
             if 'upload' in actions:
                 with Path(item['path']).open('rb') as stream:
                     with opener.open(request(actions['upload'],method='PUT',data=stream,headers={
-                            'Content-Length':str(item['bytes']),'Content-Type':'application/octet-stream'}),timeout=120) as response:
+                            'Content-Length':str(item['bytes']),'Content-Type':'application/octet-stream',
+                            'Content-Disposition':'attachment; filename="'+item['name']+'"'}),timeout=120) as response:
                         if response.status not in (200,201,202,204): raise ValueError('LFS upload refused')
                         response.read(65536)
             if 'verify' in actions:
