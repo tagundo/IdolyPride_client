@@ -105,14 +105,14 @@ def decode_master_table(schema, sqlcipher, root, pack, table):
         connection.close()
 
 
-def octo_public_files(directory: Path):
+def octo_public_files(directory: Path, *, platform="android"):
     """Validate an explicit public SDK catalog, never an account archive."""
     from Crypto.Cipher import AES
     from idoly_local.octo_manifest import OctoManifest
     from idoly_local.octo_runtime import load_octo_archive
 
     directory = Path(directory).resolve()
-    loaded = load_octo_archive(directory)
+    loaded = load_octo_archive(directory, platform=platform)
     if loaded is None:
         raise ValueError("An explicit Octo catalog directory must contain both public files")
     settings, raw = loaded
@@ -123,10 +123,11 @@ def octo_public_files(directory: Path):
 
     manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]),
                             client_key=settings["client_key"], base_url="http://127.0.0.1:8080",
-                            aes_cbc=aes_cbc)
+                            aes_cbc=aes_cbc, application_version=settings["application_version"])
     if manifest.revision != settings["revision"]:
         raise ValueError("Public Octo catalog revision differs from its settings")
-    files = [(directory / name, "data/public-octo/" + name)
+    archive_name = "public-octo-ios" if platform == "ios" else "public-octo"
+    files = [(directory / name, "data/" + archive_name + "/" + name)
              for name in ("settings.json", "manifest.pb")]
     summary = {"application_id": settings["application_id"],
                "application_version": settings["application_version"],
@@ -136,7 +137,7 @@ def octo_public_files(directory: Path):
 
 
 def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None,
-                  event_read_masters: bool = False) -> dict:
+                  event_read_masters: bool = False, ios_octo_data: Path | None = None) -> dict:
     from google.protobuf.json_format import ParseDict
     from sqlcipher3 import dbapi2 as sqlcipher
 
@@ -160,6 +161,10 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
     if octo_data is not None:
         octo_files, octo_summary = octo_public_files(octo_data)
         files.extend(octo_files)
+    ios_octo_summary = None
+    if ios_octo_data is not None:
+        ios_octo_files, ios_octo_summary = octo_public_files(ios_octo_data, platform="ios")
+        files.extend(ios_octo_files)
     public = data_dir / "public-fixtures"
     if (public / "manifest.json").is_file():
         store = FixtureStore(public, schema)
@@ -230,6 +235,8 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
                    "files": [{"path": name, "bytes": path.stat().st_size, "sha256": digest(path)} for path, name in files]}
         if octo_summary is not None:
             summary["octo_resources"] = octo_summary
+        if ios_octo_summary is not None:
+            summary["ios_octo_resources"] = ios_octo_summary
         if event_read_masters:
             summary["event_read_master_tables"] = list(EVENT_READ_TABLES)
         payload = stage / "ServerData.zip"
@@ -251,11 +258,13 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--octo-data", type=Path,
                         help="Explicit public settings.json and manifest.pb directory; no account files")
+    parser.add_argument("--ios-octo-data", type=Path,
+                        help="Original iOS public settings/manifest; kept separate from Android bundles")
     parser.add_argument("--event-read-masters", action="store_true",
                         help="Export five pinned public Dream/VENUS read prerequisite tables; no private catalogs or unlocks")
     args = parser.parse_args()
     print(json.dumps(build_payload(args.data_dir, args.output, octo_data=args.octo_data,
-                                   event_read_masters=args.event_read_masters),
+                                   event_read_masters=args.event_read_masters, ios_octo_data=args.ios_octo_data),
                      ensure_ascii=False, indent=2))
 
 

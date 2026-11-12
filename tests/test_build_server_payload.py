@@ -141,3 +141,13 @@ def test_octo_payload_rejects_invalid_explicit_catalog_without_outputs_or_input_
         payload.octo_public_files(public)
     assert {p.name: p.read_bytes() for p in public.iterdir()} == before
     assert set(tmp_path.iterdir()) == {public}
+
+
+def test_ios_public_catalog_is_packaged_under_separate_directory(tmp_path):
+    directory = tmp_path / "ios-public"
+    write_archive(directory, revision=1159, platform="ios")
+    files, summary = payload.octo_public_files(directory, platform="ios")
+    assert {target for _, target in files} == {"data/public-octo-ios/settings.json", "data/public-octo-ios/manifest.pb"}
+    assert summary["application_version"] == 105051 and summary["revision"] == 1159
+    with pytest.raises(ValueError, match="version"):
+        payload.octo_public_files(directory)

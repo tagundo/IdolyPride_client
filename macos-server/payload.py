@@ -21,8 +21,11 @@ FIXED_FILES = {
     "protocol/idolypride-6.1.1.evidence.json",
     "public-octo/settings.json",
     "public-octo/manifest.pb",
+    "public-octo-ios/settings.json",
+    "public-octo-ios/manifest.pb",
     "original-master/response.pb",
     "original-master/master-tag.json",
+    "original-master/media-master-tag.json",
     "original-master/archive-report.json",
 }
 PACK_PREFIX = "original-master/assets/master/"

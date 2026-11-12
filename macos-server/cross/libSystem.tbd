@@ -1,0 +1,14 @@
+--- !tapi-tbd-v3
+archs: [ arm64 ]
+platform: macosx
+install-name: /usr/lib/libSystem.B.dylib
+current-version: 1
+compatibility-version: 1
+exports:
+  - archs: [ arm64 ]
+    symbols: [ _dlopen, _dlsym, _realpath, _strlen, _strchr, _strrchr, _strstr,
+      _strcmp, _strncmp, _memcpy, _memmove, _memset, _bzero, _malloc, _calloc, _free,
+      _snprintf, __NSGetExecutablePath, _read, _write, _close, _fcntl, ___error,
+      _getpid, _kill, _usleep, _open, _signal, _poll, _strtod, _strtol, _strtoll, _setlocale,
+      ___chkstk_darwin, dyld_stub_binder ]
+...

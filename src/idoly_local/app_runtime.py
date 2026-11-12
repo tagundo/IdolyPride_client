@@ -148,7 +148,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
           grpc_host="127.0.0.1", grpc_port=50051,
           asset_host="127.0.0.1", asset_port=8080, aes_cbc=None,
           experimental_main_live=False, live_engine_library=None,
-          download_missing_resources=True, resource_fetcher=None, media_mode=False) -> Runtime:
+          download_missing_resources=True, resource_fetcher=None, media_mode=False,
+          resource_platform="android") -> Runtime:
     """Start the local game engine and asset server without blocking the UI.
 
     ``data_dir`` contains ``protocol/idolypride-6.1.1.pb`` and
@@ -167,6 +168,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         raise ValueError("Resource downloads must be an explicit boolean")
     if type(media_mode) is not bool:
         raise ValueError("Media mode must be an explicit boolean")
+    from .octo_runtime import _platform_archive
+    _platform_archive(resource_platform)
     if resource_fetcher is not None and not callable(resource_fetcher):
         raise ValueError("Resource fetcher must be callable")
     if not isinstance(profile, str) or not profile.strip():
@@ -238,7 +241,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         from .octo_runtime import create_octo_gateway
         gateway, runtime._resources = create_octo_gateway(
             root, runtime._asset_url, aes_cbc=aes_cbc, fetcher=resource_fetcher,
-            allow_downloads=download_missing_resources, log_callback=runtime._log)
+            allow_downloads=download_missing_resources, log_callback=runtime._log,
+            platform=resource_platform)
         # Install the gateway only after binding has selected the actual port,
         # and before any HTTP serving thread is started.
         runtime._asset.octo_gateway = gateway

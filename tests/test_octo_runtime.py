@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import sys
 import threading
+import time
 
 from Crypto.Cipher import AES
 import pytest
@@ -33,16 +34,16 @@ def aes(encrypt, key, iv, data):
     return cipher.encrypt(data) if encrypt else cipher.decrypt(data)
 
 
-def write_archive(directory, *, revision=1087):
+def write_archive(directory, *, revision=1087, platform="android"):
     directory.mkdir(parents=True, exist_ok=True)
     database = Database(revision=revision, urlFormat=ORIGINAL_URL)
     for kind, target in (("assetbundle", database.assetBundleList), ("resources", database.resourceList)):
         target.add(id=1, name="synthetic-"+kind, size=len(PAYLOAD), state=1,
             md5=hashlib.md5(PAYLOAD).hexdigest(), objectName="object_"+kind,
-            generation=12345, uploadVersionId=202050)
+            generation=12345, uploadVersionId=101050 if platform == "ios" else 202050)
     raw = database.SerializeToString()
-    settings = {"schema":1, "application_id":212, "application_version":205051,
-        "revision":1087, "manifest_sha256":hashlib.sha256(raw).hexdigest(),
+    settings = {"schema":1, "application_id":212, "application_version":105051 if platform == "ios" else 205051,
+        "revision":1159 if platform == "ios" else 1087, "manifest_sha256":hashlib.sha256(raw).hexdigest(),
         "aes_key_hex":KEY.hex(), "client_key":CLIENT_KEY}
     (directory/"settings.json").write_text(json.dumps(settings))
     (directory/"manifest.pb").write_bytes(raw)
@@ -304,7 +305,11 @@ def test_factory_real_http_ranges_head_and_cached_restart_keep_counters_honest(t
         assert status==206 and body==PAYLOAD[2:9]
         assert request("HEAD",object_path)==(200,b"")
         assert request("GET",object_path)==(200,PAYLOAD)
-        snapshot=tracker.status()
+        # The HTTP body can reach the reader before the serving thread emits
+        # its final transfer callback. Wait for that observation, not a new GET.
+        deadline = time.monotonic() + 2
+        while (snapshot := tracker.status())["session_served_bytes"] != 7 + len(PAYLOAD) and time.monotonic() < deadline:
+            threading.Event().wait(0.005)
         assert len(calls)==1
         assert snapshot["session_received_bytes"]==len(PAYLOAD)
         assert snapshot["session_verified_files"]==1
@@ -319,3 +324,34 @@ def test_factory_real_http_ranges_head_and_cached_restart_keep_counters_honest(t
     assert new_tracker.status()["session_received_bytes"]==0
     assert new_tracker.status()["session_verified_files"]==0
     assert new_tracker.status()["status"]=="ready"
+
+
+def test_ios_catalog_requires_its_own_archive_version_and_keeps_android_cache_separate(tmp_path):
+    android, _ = write_archive(tmp_path / "public-octo")
+    ios, original = write_archive(tmp_path / "public-octo-ios", revision=1159, platform="ios")
+    assert load_octo_archive(tmp_path / "public-octo-ios", platform="ios") == (ios, original)
+    with pytest.raises(ValueError, match="version"):
+        load_octo_archive(tmp_path / "public-octo-ios")
+    with pytest.raises(ValueError, match="version"):
+        load_octo_archive(tmp_path / "public-octo", platform="ios")
+    gateway, tracker = create_octo_gateway(tmp_path, "http://127.0.0.1:8080",
+                                           platform="ios", aes_cbc=aes)
+    try:
+        response = gateway.manifest.manifest_response("/v2/pub/a/212/v/105051/list/0", HEADERS)
+        assert Database.FromString(decrypt_manifest(response, aes_key=KEY, aes_cbc=aes)).revision == 1159
+        assert all(row.upload_version == 101050 for row in gateway.manifest.objects.values())
+        from idoly_local.octo_manifest import OctoRequestError
+        with pytest.raises(OctoRequestError) as error:
+            gateway.manifest.manifest_response("/v2/pub/a/212/v/205051/list/0", HEADERS)
+        assert error.value.status == 404
+        assert not (tmp_path / "octo-cache").exists()
+    finally:
+        gateway.close()
+    assert load_octo_archive(tmp_path / "public-octo")[0] == android
+
+
+@pytest.mark.parametrize("platform", [None, 0, True, [], "macos", "../public-octo"])
+def test_unrecognized_resource_platform_rejected_even_without_an_archive(tmp_path, platform):
+    with pytest.raises(ValueError, match="platform"):
+        create_octo_gateway(tmp_path, "http://127.0.0.1:8080", platform=platform)
+    assert not list(tmp_path.iterdir())

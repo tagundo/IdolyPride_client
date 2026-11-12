@@ -57,6 +57,9 @@ def test_public_octo_and_media_tables_preserve_both_account_databases(tmp_path):
     contents = dict(PUBLIC)
     contents.update({"data/public-octo/settings.json": b"public SDK configuration",
                      "data/public-octo/manifest.pb": b"public resource manifest",
+                     "data/public-octo-ios/settings.json": b"public iOS SDK configuration",
+                     "data/public-octo-ios/manifest.pb": b"public iOS resource manifest",
+                     "data/original-master/media-master-tag.json": b"public media master tag",
                      "data/master-json/PhotoQuestMusic.json": b"[]",
                      "data/master-json/StoryPart.json": b"[]"})
     source = archive(tmp_path / "media.zip", contents)
@@ -71,6 +74,8 @@ def test_public_octo_and_media_tables_preserve_both_account_databases(tmp_path):
     assert (data / "public-octo/manifest.pb").read_bytes() == contents["data/public-octo/manifest.pb"]
     with pytest.raises(ValueError):
         member_path("data/public-octo/private-session.json")
+    with pytest.raises(ValueError):
+        member_path("data/public-octo-ios/private-session.json")
 
 
 @pytest.mark.parametrize("name", ["data/../state.db", "/data/protocol/idolypride-6.1.1.pb", "data/state.db",

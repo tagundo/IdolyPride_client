@@ -208,3 +208,22 @@ def test_stop_cancels_active_upstream_and_never_publishes_partial_object(runtime
     assert not list((root / 'octo-cache').rglob('*.part'))
     status = runtime.status()['resource_transfer']
     assert status['session_verified_files'] == 0 and status['session_served_bytes'] == 0
+
+
+def test_ios_runtime_uses_ios_manifest_when_both_platforms_are_installed(runtime_data):
+    root, start = runtime_data
+    write_archive(root / "public-octo")
+    _, ios_raw = write_archive(root / "public-octo-ios", revision=1159, platform="ios")
+    before = (root / "state.db").read_bytes()
+    runtime = start(resource_platform="ios", download_missing_resources=False)
+    origin = runtime.status()["asset_url"]
+    code, _, encrypted = request(origin, "/v2/pub/a/212/v/105051/list/0", HEADERS)
+    assert code == 200
+    decoded = Database.FromString(unpad(AES.new(KEY, AES.MODE_CBC, encrypted[:16]).decrypt(encrypted[16:]), 16))
+    original = Database.FromString(ios_raw)
+    original.urlFormat = origin + "/octo/{v}/{type}/{o}/{g}"
+    assert decoded == original and decoded.revision == 1159
+    assert request(origin, "/v2/pub/a/212/v/205051/list/0", HEADERS)[0] == 404
+    assert runtime.status()["resource_transfer"]["allow_downloads"] is False
+    assert (root / "state.db").read_bytes() == before
+    assert not (root / "octo-cache").exists()

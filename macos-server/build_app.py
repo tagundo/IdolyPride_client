@@ -221,11 +221,11 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             }, stream)
         run(["/usr/bin/xcrun", "swiftc", "-swift-version", "5", "-parse-as-library", "-O",
              "-target", "arm64-apple-macos13.0", "-framework", "SwiftUI", "-framework", "AppKit",
-             HERE / "App.swift", "-o", executable], env=environment)
+             HERE / "App.swift", HERE / "PresentationSettings.swift", "-o", executable], env=environment)
         source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         provenance = {"version": version, "build_number": build_number, "architecture": "arm64", "minimum_macos": "13.0",
             "source_commit": source_commit, "server_data_sha256": digest(server_data),
-            "source_sha256": {name: digest(HERE / name) for name in ("App.swift", "engine.py", "payload.py")},
+            "source_sha256": {name: digest(HERE / name) for name in ("App.swift", "PresentationSettings.swift", "engine.py", "payload.py")},
             "python": platform.python_version(),
             "pyinstaller": importlib.metadata.version("PyInstaller"),
             "signature": "ad-hoc", "notarized": False,

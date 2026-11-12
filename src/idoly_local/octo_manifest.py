@@ -1,6 +1,7 @@
-"""Pinned Android Octo manifest protocol and immutable object whitelist.
+"""Pinned Android/iOS Octo manifest protocol and immutable object whitelist.
 
-The original 6.1.1 client requests application212/version205051. The Octo API
+The original 6.1.1 clients request application212/version205051 (Android) or
+version105051 (iOS). The Octo API
 uses a separate envelope from the game RPC codec: a random16byte IV followed
 by AES256CBC/PKCS7 protobuf. Callers supply SHA256(UTF8(settings.A)) and the
 same generic AES callback used by the embedded Java bridge. This module does
@@ -21,7 +22,7 @@ from google.protobuf.message import DecodeError
 
 
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
-_LIST = re.compile(r"/v2/pub/a/212/v/205051/list/(0|[1-9][0-9]{0,9})\Z")
+_VERSIONS = frozenset((205051, 105051))
 _OBJECT = re.compile(r"/octo/([1-9][0-9]{0,9})/(assetbundle|resources)/"
                      r"([A-Za-z0-9_-]{1,128})/([1-9][0-9]{0,19})\Z")
 _ORIGIN = re.compile(r"http://127\.0\.0\.1(?::([1-9][0-9]{0,4}))?/?\Z")
@@ -208,8 +209,13 @@ class OctoObject:
 
 class OctoManifest:
     def __init__(self, plain_protobuf: bytes, *, aes_key: bytes, client_key: str,
-                 base_url: str, aes_cbc: AESCallback):
+                 base_url: str, aes_cbc: AESCallback, application_version: int = 205051):
         _key_and_backend(aes_key, aes_cbc)
+        if type(application_version) is not int or application_version not in _VERSIONS:
+            raise OctoManifestError("Unsupported Octo client platform version")
+        self.application_version = application_version
+        self._list = re.compile(r"/v2/pub/a/212/v/" + str(application_version)
+                                + r"/list/(0|[1-9][0-9]{0,9})\Z")
         if (not isinstance(client_key, str) or not client_key
                 or len(client_key) > 4096 or not client_key.isascii()
                 or any(ord(c) < 33 or ord(c) > 126 for c in client_key)):
@@ -266,7 +272,7 @@ class OctoManifest:
         Older nonzero deltas are unavailable; a409 avoids inventing historical
         manifest changes or rolling back a newer cached revision.
         """
-        match = _LIST.fullmatch(path) if isinstance(path, str) else None
+        match = self._list.fullmatch(path) if isinstance(path, str) else None
         if not match:
             raise OctoRequestError(404, "Unsupported Octo manifest route")
         try:

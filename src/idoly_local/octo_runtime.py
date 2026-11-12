@@ -24,6 +24,18 @@ _MAX_COUNTER = 2**63 - 1
 _MAX_ACTIVE = 1024
 _MAX_VERIFIED = 100000
 _MAX_LOG_RECEIPTS = 200
+PLATFORM_ARCHIVES = {
+    "android": ("public-octo", "octo-cache", 205051, 1087),
+    "ios": ("public-octo-ios", "octo-cache-ios", 105051, 1159),
+}
+
+
+def _platform_archive(platform):
+    if not isinstance(platform, str) or platform not in PLATFORM_ARCHIVES:
+        raise ValueError("Unsupported game resource platform")
+    return PLATFORM_ARCHIVES[platform]
+
+
 _SETTINGS = frozenset(("schema", "application_id", "application_version", "revision",
                        "manifest_sha256", "aes_key_hex", "client_key"))
 _FAILURE_CODES = frozenset(("cache_io", "upstream_redirect", "upstream_http",
@@ -71,13 +83,14 @@ def _read_archive_file(path, limit):
             os.close(descriptor)
 
 
-def load_octo_archive(directory):
+def load_octo_archive(directory, *, platform="android"):
     """Return validated ``(settings, protobuf)`` or None for an absent archive.
 
     ``directory`` is the public-octo directory itself. This helper creates no
     files, imports no AES backend, and opens no network connection. Complete
     protobuf/object validation belongs to OctoManifest in the gateway factory.
     """
+    _, _, version, revision = _platform_archive(platform)
     directory = Path(directory)
     if directory.is_symlink() or (directory.exists() and not directory.is_dir()):
         raise ValueError("Game resource archive directory is invalid")
@@ -95,7 +108,7 @@ def load_octo_archive(directory):
     if not isinstance(settings, dict) or set(settings) != _SETTINGS:
         raise ValueError("Game resource settings fields differ")
     for key, expected in (("schema", 1), ("application_id", 212),
-                          ("application_version", 205051), ("revision", 1087)):
+                          ("application_version", version), ("revision", revision)):
         if type(settings[key]) is not int or settings[key] != expected:
             raise ValueError("Game resource settings version differs")
     if any(not isinstance(settings[key], str) or not _HEX64.fullmatch(settings[key])
@@ -282,7 +295,7 @@ def _desktop_aes_backend():
 
 
 def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
-                        allow_downloads=True, log_callback=None):
+                        allow_downloads=True, log_callback=None, platform="android"):
     """Create an optional gateway without changing legacy server bundles."""
     if type(allow_downloads) is not bool:
         raise TypeError("Resource download choice must be a boolean")
@@ -290,9 +303,10 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
         raise ValueError("Resource AES backend must be callable")
     if fetcher is not None and not callable(fetcher):
         raise ValueError("Resource fetcher must be callable")
+    archive_name, cache_name, _, _ = _platform_archive(platform)
     tracker = OctoResourceTracker(allow_downloads=allow_downloads, log_callback=log_callback)
     root = Path(data_dir)
-    archive = load_octo_archive(root / "public-octo")
+    archive = load_octo_archive(root / archive_name, platform=platform)
     if archive is None:
         return None, tracker
     settings, raw = archive
@@ -301,10 +315,11 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
     from .octo_http import OctoGateway
     manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]),
         client_key=settings["client_key"], base_url=base_url,
-        aes_cbc=aes_cbc if aes_cbc is not None else _desktop_aes_backend())
+        aes_cbc=aes_cbc if aes_cbc is not None else _desktop_aes_backend(),
+        application_version=settings["application_version"])
     if manifest.revision != settings["revision"]:
         raise ValueError("Game resource manifest revision differs")
     tracker = OctoResourceTracker(available=True, allow_downloads=allow_downloads, log_callback=log_callback)
-    cache = OctoCache(root / "octo-cache", fetcher=fetcher,
+    cache = OctoCache(root / cache_name, fetcher=fetcher,
         on_event=tracker.on_cache_event, allow_download=allow_downloads)
     return OctoGateway(manifest, cache, transfer_callback=tracker.on_http_transfer), tracker
