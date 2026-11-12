@@ -1,0 +1,20 @@
+{
+  "version": "0.3.14",
+  "source_commit": "5dd4d3d44fc42803e13c260a6a65344f71d26082",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 101797635,
+      "sha256": "dbfafd2b69af42e7da8504cfa6fd14e4dcc22c6a307a97b23113c0f33f354e9c",
+      "platform": "macOS arm64",
+      "device_verified": false
+    },
+    {
+      "name": "IdolyPride-6.1.1-Local-PlayCover.ipa",
+      "bytes": 146435938,
+      "sha256": "05ac71a6713a7727e2d413721c8b5881a290f4525b579a1f0c26bdeaa97625bc",
+      "platform": "PlayCover/iOS arm64",
+      "device_verified": false
+    }
+  ]
+}
