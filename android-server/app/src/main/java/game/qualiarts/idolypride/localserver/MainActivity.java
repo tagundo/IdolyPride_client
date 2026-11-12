@@ -4,6 +4,8 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -74,6 +76,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private Button installPresentation;
     private Button launchPresentation;
     private TextView presentationInstallStatus;
+    private TextView presentationInstallDetails;
+    private Button copyPresentationInstallDetails;
     private PresentationAddonInstaller.Snapshot presentationInstallation;
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
@@ -307,6 +311,22 @@ public final class MainActivity extends Activity implements ServerService.Observ
         presentationInstallStatus = text(R.string.presentation_install_checking, 12, Color.rgb(192, 212, 222));
         presentationInstallStatus.setPadding(0, dp(4), 0, dp(8));
         settings.addView(presentationInstallStatus);
+        presentationInstallDetails = text(R.string.presentation_install_checking, 12, Color.rgb(255, 192, 154));
+        presentationInstallDetails.setTextIsSelectable(true);
+        presentationInstallDetails.setPadding(0, 0, 0, dp(8));
+        presentationInstallDetails.setVisibility(View.GONE);
+        settings.addView(presentationInstallDetails);
+        copyPresentationInstallDetails = button(R.string.presentation_install_copy);
+        copyPresentationInstallDetails.setEnabled(false);
+        copyPresentationInstallDetails.setOnClickListener(view -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+            if (clipboard != null) {
+                clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.presentation_install_copy),
+                        presentationInstallDetails.getText()));
+                Toast.makeText(this, R.string.presentation_install_copied, Toast.LENGTH_SHORT).show();
+            }
+        });
+        settings.addView(copyPresentationInstallDetails, new LinearLayout.LayoutParams(-1, -2));
         customGraphics = new CheckBox(this);
         customGraphics.setText(R.string.presentation_custom_graphics);
         customGraphics.setTextColor(Color.WHITE);
@@ -364,7 +384,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         else if (!snapshot.bundleAvailable) message = R.string.presentation_install_bundle_unavailable;
         else if (snapshot.busy) message = "confirmation".equals(snapshot.state)
                 ? R.string.presentation_install_confirming : R.string.presentation_install_in_progress;
-        else if ("failed".equals(snapshot.state) || "interrupted".equals(snapshot.state)) {
+        else if ("interrupted".equals(snapshot.state)) message = R.string.presentation_install_interrupted;
+        else if ("failed".equals(snapshot.state)) {
             message = R.string.presentation_install_failed;
         } else if (!snapshot.installed.isEmpty()) message = R.string.presentation_install_available;
         else if (snapshot.compatible.isEmpty()) message = R.string.presentation_install_incompatible;
@@ -372,6 +393,22 @@ public final class MainActivity extends Activity implements ServerService.Observ
         setTextIfChanged(presentationInstallStatus, getString(message));
         presentationInstallStatus.setTextColor("failed".equals(snapshot.state) || "interrupted".equals(snapshot.state)
                 ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+        PresentationAddonInstaller.Failure failure = snapshot.failure;
+        presentationInstallDetails.setVisibility(failure == null ? View.GONE : View.VISIBLE);
+        copyPresentationInstallDetails.setEnabled(failure != null);
+        if (failure != null) {
+            String details = getString(R.string.presentation_install_failure_details, failure.stage, failure.reason,
+                    failure.exceptionClass, Build.VERSION.SDK_INT, snapshot.profile);
+            if (failure.status != PresentationAddonInstaller.FailurePolicy.NO_STATUS)
+                details += getString(R.string.presentation_install_failure_status, failure.status);
+            if (failure.legacyStatus != PresentationAddonInstaller.FailurePolicy.NO_STATUS)
+                details += getString(R.string.presentation_install_failure_legacy, failure.legacyStatus);
+            if (!failure.installToken.isEmpty()) details += "\n" + failure.installToken;
+            if (!failure.member.isEmpty()) details += "\n" + failure.member;
+            if (!failure.expectedSha.isEmpty()) details += getString(R.string.presentation_install_failure_hash,
+                    failure.expectedSha, failure.actualSha);
+            setTextIfChanged(presentationInstallDetails, details);
+        }
     }
 
     private interface PresentationProfileAction {
@@ -401,7 +438,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
                         Uri.parse("package:" + getPackageName())));
                 Toast.makeText(this, R.string.presentation_install_permission, Toast.LENGTH_LONG).show();
             } catch (RuntimeException error) {
+                PresentationAddonInstaller.permissionScreenFailed(this, error);
                 Toast.makeText(this, R.string.presentation_install_permission_failed, Toast.LENGTH_LONG).show();
+                refreshPresentationInstallation();
             }
             return;
         }
@@ -409,6 +448,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 profile -> {
                     installPresentation.setEnabled(false);
                     launchPresentation.setEnabled(false);
+                    presentationInstallDetails.setVisibility(View.GONE);
+                    copyPresentationInstallDetails.setEnabled(false);
                     setTextIfChanged(presentationInstallStatus, getString(R.string.presentation_install_in_progress));
                     PresentationAddonInstaller.install(this, profile, this::showPresentationInstallation);
                 });

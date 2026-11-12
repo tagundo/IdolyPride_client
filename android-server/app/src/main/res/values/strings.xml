@@ -78,7 +78,7 @@
     <string name="presentation_init_failed">게임의 화면 설정 초기화에 실패했습니다.</string>
     <string name="presentation_install_button">게임에 그래픽 기능 추가/업데이트</string>
     <string name="presentation_launch_button">그래픽 지원 게임 실행</string>
-    <string name="presentation_install_notice">게임을 종료한 뒤 그래픽 기능을 추가하고, 아래의 그래픽 지원 게임 실행을 눌러 주세요. Android 설치 확인 화면이 표시됩니다. 기능 추가만으로 화면 설정의 적용을 뜻하지는 않습니다.</string>
+    <string name="presentation_install_notice">게임을 종료한 뒤 그래픽 기능을 추가하고, 아래의 그래픽 지원 게임 실행을 눌러 주세요. 설치된 APK 파일을 이 기기 안에서 복사하며 추가 다운로드는 하지 않습니다. Android 설치 확인 화면이 표시됩니다. 기능 추가만으로 화면 설정의 적용을 뜻하지는 않습니다.</string>
     <string name="presentation_game_resources">아이프라 로컬 리소스 게임</string>
     <string name="presentation_game_diagnostics">아이프라 진단 게임</string>
     <string name="presentation_install_choose">그래픽 기능을 추가할 게임</string>
@@ -94,7 +94,14 @@
     <string name="presentation_install_permission">이 서버 앱의 설치 허용을 켠 뒤 돌아와 기능 추가 버튼을 다시 눌러 주세요.</string>
     <string name="presentation_install_permission_failed">이 서버 앱의 설치 허용 화면을 열지 못했습니다.</string>
     <string name="presentation_install_success">게임의 그래픽 기능 설치를 확인했습니다. 그래픽 지원 게임 실행을 눌러 주세요.</string>
-    <string name="presentation_install_failed">그래픽 기능을 추가하지 못했습니다. 호환 게임과 Android 설치 확인을 확인한 뒤 다시 시도해 주세요.</string>
+    <string name="presentation_install_failed">그래픽 기능을 추가하지 못했습니다. 아래 실패 정보를 복사하거나 진단 기록을 내보낼 수 있습니다.</string>
+    <string name="presentation_install_interrupted">이전 설치 세션이 종료되거나 중단되었습니다. 다시 시도할 수 있습니다.</string>
+    <string name="presentation_install_copy">설치 실패 정보 복사</string>
+    <string name="presentation_install_copied">설치 실패 정보를 복사했습니다.</string>
+    <string name="presentation_install_failure_details">설치 단계: %1$s\n실패 사유: %2$s · 예외: %3$s\nAndroid SDK: %4$d · 대상: %5$s</string>
+    <string name="presentation_install_failure_status">\nAndroid 설치 상태: %1$d</string>
+    <string name="presentation_install_failure_legacy"> · 이전 설치 코드: %1$d</string>
+    <string name="presentation_install_failure_hash">\nSHA-256 앞 12자리 · 예상 %1$s · 실제 %2$s</string>
     <string name="presentation_install_launch_missing">그래픽 기능이 설치된 호환 게임을 찾지 못했습니다.</string>
     <string-array name="presentation_quality_options">
         <item>원본 유지 (0)</item>

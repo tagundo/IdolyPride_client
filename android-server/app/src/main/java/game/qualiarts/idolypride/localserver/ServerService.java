@@ -319,6 +319,7 @@ public final class ServerService extends Service {
                 document.put("runtime", new JSONObject(details));
                 document.put("diagnostics", new JSONObject(snapshot));
                 document.put("server_logs", new JSONArray(lines));
+                PresentationAddonInstaller.appendDiagnostics(context, document);
                 byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);
                 try (OutputStream stream = context.getContentResolver().openOutputStream(destination, "wt")) {
                     if (stream == null) throw new java.io.IOException("Document is unavailable");
