@@ -6,7 +6,7 @@
 
 아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** **릴리즈 탭의 Android·Mac 서버 앱은 v0.3.2이며, Android 그래픽 기능 후보 v0.3.9와 설치 확인판 v0.3.10은 별도 다운로드 브랜치로 제공합니다.** 게임 리소스·설정 저장·전체 해금 감상 모드에 더해 그래픽·촬영 화면 설정을 추가했습니다. 사용자 Android 기기에서 홈·캐릭터·편성과 초기 튜토리얼 전체 진행을 확인했습니다. 클라우드의 공식 ARM64 Android 환경에서도 원본 SDK를 유지한 연결판으로 홈·캐릭터 모델 표시와 공지 닫기를 확인했으며, 일반 라이브 완료 검증은 남아 있습니다.
 
-후보의 **감상용 전체 해금**은 기본 계정과 분리한 계정에 캐릭터 28명·의상 921개·헤어 1,113개·카드 503개와 스토리 3,277개를 준비합니다. 촬영 목록은 실제 3D 68곡·MV 26곡을 사용합니다. 의상 선택과 읽음 기록은 저장하며, 일반 계정의 재화·진행은 바꾸지 않습니다. Android APK 빌드·서명·원본 런타임 보존 검사와 실제 마스터를 사용한 API 검사는 통과했으며, 감상 모드의 실제 메뉴·재생 검증은 별도입니다. Mac 서버 앱 v0.3.12와 PlayCover 그래픽 IPA도 별도 파일로 제공합니다. iOS 리소스 경로와 격리 런타임 검사를 반영했으며 실제 Mac 실행·장면 재생 검증은 남아 있습니다. 사용법과 지원 범위는 [감상 모드 안내](docs/media-mode.md)를 참고합니다. 일반 획득 조건 확장은 이후 작업입니다.
+후보의 **감상용 전체 해금**은 기본 계정과 분리한 계정에 캐릭터 28명·의상 921개·헤어 1,113개·카드 503개와 스토리 3,277개를 준비합니다. 촬영 목록은 실제 3D 68곡·MV 26곡을 사용합니다. 의상 선택과 읽음 기록은 저장하며, 일반 계정의 재화·진행은 바꾸지 않습니다. Android APK 빌드·서명·원본 런타임 보존 검사와 실제 마스터를 사용한 API 검사는 통과했으며, 감상 모드의 실제 메뉴·재생 검증은 별도입니다. Mac 서버 앱 v0.3.13와 PlayCover 그래픽 IPA도 별도 파일로 제공합니다. iOS 리소스 경로와 격리 런타임 검사를 반영했으며 실제 Mac 실행·장면 재생 검증은 남아 있습니다. 사용법과 지원 범위는 [감상 모드 안내](docs/media-mode.md)를 참고합니다. 일반 획득 조건 확장은 이후 작업입니다.
 
 **Android v0.3.9 후보 다운로드:** [APK 직접 받기](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk) · [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk) · [SHA256SUMS](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.9/SHA256SUMS). 접근 권한이 있는 GitHub 계정으로 로그인한 뒤 받습니다. 아래 릴리즈 표의 Android·Mac v0.3.2와 구분합니다.
 
@@ -39,9 +39,9 @@ v0.3.4 후보 소스의 [게임 리소스 경로](docs/resource-support.md)는 �
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
 | Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.2](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android.apk) | `IdolyPride-6.1.1-Local-Android.apk` |
-| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.12](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/macos-v0.3.12/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/macos-v0.3.11/IdolyPride-6.1.1-Local-PlayCover.ipa) |
+| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.13](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/macos-v0.3.13/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/macos-v0.3.11/IdolyPride-6.1.1-Local-PlayCover.ipa) |
 
-Mac v0.3.12는 엔진 시작 시 `No module named struct`로 종료되던 모듈 누락을 수정했습니다. 기존 서버 앱을 종료하고 새 앱으로 교체하며, IPA와 저장 데이터는 유지합니다. [Mac 수정판 파일·해시](https://github.com/tagundo/IdolyPride_client/tree/downloads/macos-v0.3.12)에서 확인합니다.
+Mac v0.3.13은 외부 리소스 HTTPS 검증용 공개 인증서 묶음을 포함하며, v0.3.12의 `struct` 모듈 누락 수정도 유지합니다. 기존 서버 앱을 종료하고 새 앱으로 교체하며, IPA와 저장 데이터는 유지합니다. [Mac 수정판 파일·해시](https://github.com/tagundo/IdolyPride_client/tree/downloads/macos-v0.3.13)에서 확인합니다.
 
 v0.3.2의 [파일 해시](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/SHA256SUMS), [Android 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android-QA.zip), [Mac 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-QA.zip)도 같은 릴리스에서 받습니다.
 
