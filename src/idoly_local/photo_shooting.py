@@ -96,7 +96,7 @@ class PhotoShootings:
     """
 
     def __init__(self, schema, state, profile, master_dir=None, *, scene_access=None, image_urls=None,
-                 media_mode=False):
+                 media_mode=False, media_settings=None):
         if type(media_mode) is not bool:
             raise ValueError("Media mode must be an explicit boolean")
         self.schema, self.state, self.profile = schema, state, profile
@@ -104,6 +104,7 @@ class PhotoShootings:
         self.scene_access = scene_access
         self.image_urls = image_urls
         self.media_mode = media_mode
+        self.media_settings = media_settings
 
     def _snapshot(self):
         stored = self.state.snapshot(self.profile)
@@ -135,6 +136,25 @@ class PhotoShootings:
         result.commonResponse.deletedData.SetInParent()
 
     def _list(self, result, access):
+        hidden = set()
+        if self.media_settings is not None:
+            from .media_settings import validate_settings
+            try:
+                settings = self.media_settings() if callable(self.media_settings) else self.media_settings
+                settings = validate_settings(settings)
+            except (OSError, ValueError):
+                _fail("Local media menu settings are unavailable or malformed")
+            if settings["hide_video_mv"]:
+                musics = self.catalog.ids("Music", required=True)
+                for identity in access.musics:
+                    music = musics.get(identity)
+                    if music is None:
+                        _fail("The photo music has no original music definition")
+                    is_3d, asset = music.get("is3dAvailable", False), music.get("mvAssetId", "")
+                    if type(is_3d) is not bool or not isinstance(asset, str):
+                        _fail("The original music playback type is malformed")
+                    if asset and not is_3d:
+                        hidden.add(identity)
         for table, source, target, identity in (
             ("PhotoActivity", access.activities, result.activities, "photoActivityId"),
             ("PhotoQuestMusic", access.musics, result.musics, "musicId"),
@@ -147,6 +167,8 @@ class PhotoShootings:
             if any(key not in masters for key in source):
                 _fail("Preserved photo scene has an unknown master reference")
             for key in sorted(source):
+                if table == "PhotoQuestMusic" and key in hidden:
+                    continue
                 row = target.add(isUnlocked=source[key])
                 setattr(row, identity, key)
         result.DokanInfo.SetInParent()

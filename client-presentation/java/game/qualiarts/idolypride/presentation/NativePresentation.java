@@ -11,4 +11,6 @@ public final class NativePresentation {
     public static native boolean configurePlayback(int schema, long revision, boolean waitForOrientation);
     public static native String playbackStatus();
     public static native String renderProbeStatus();
+    public static native boolean configureMedia(int schema, long revision, boolean useMasterCostumeOrder);
+    public static native String wardrobeStatus();
 }

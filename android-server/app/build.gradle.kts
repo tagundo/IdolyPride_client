@@ -10,7 +10,7 @@ plugins {
 val serverAbi = providers.gradleProperty("serverAbi").orElse("arm64-v8a").get()
 require(serverAbi in listOf("arm64-v8a", "x86_64")) { "serverAbi must be arm64-v8a or x86_64" }
 val serverData = providers.gradleProperty("serverData").map { rootProject.file(it) }
-    .orElse(rootProject.file("../data/clients/IdolyPride-ServerData-v0.3.8.zip"))
+    .orElse(rootProject.file("../data/clients/IdolyPride-ServerData-v0.3.19.zip"))
 val payloadFile = serverData.get()
 val payloadHash = if (payloadFile.isFile) payloadFile.inputStream().use { input ->
     val digest = MessageDigest.getInstance("SHA-256")
@@ -89,8 +89,8 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("36").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.17").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("38").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.19").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
     }
@@ -167,7 +167,8 @@ chaquopy {
                 "idoly_local/event_capture.py", "idoly_local/firebase_archive.py", "idoly_local/official_session.py",
                 "idoly_local/profiles.py", "idoly_local/server.py", "idoly_local/appearance_qa.py",
                 "idoly_local/lesson_qa.py", "idoly_local/main_live_qa.py", "idoly_local/story_qa.py",
-                "idoly_local/story_read_qa.py", "idoly_local/tutorial_qa.py", "idoly_local/pvp_capture.py")
+                "idoly_local/story_read_qa.py", "idoly_local/tutorial_qa.py", "idoly_local/pvp_capture.py",
+                "idoly_local/master_translation_build.py", "idoly_local/master_sort_build.py")
         }
     }
 }

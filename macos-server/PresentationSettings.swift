@@ -1,6 +1,94 @@
 import Foundation
 import CoreFoundation
 
+/// Prepared catalogs are selected at server startup, outside the game frame loop.
+struct ClientLibrarySettings: Equatable {
+    static let mediaFilename = "client-media.json"
+    static let languageFilename = "client-language.json"
+    static let mvSorts = ["recent", "old", "title", "id"]
+    static let outfitSorts = ["original", "recent", "old", "title", "id"]
+    static let languages = ["ja", "ko", "en"]
+    var revision: Int64 = 0
+    var hideVideoMV = false
+    var mvSort = "recent"
+    var outfitSort = "original"
+    var language = "ja"
+    enum Invalid: Error { case settings }
+
+    private static func object(_ data: Data, keys: Set<String>) throws -> [String: Any] {
+        guard !data.isEmpty, data.count <= 8192,
+              let row = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              Set(row.keys) == keys, ClientPresentationSettings.integer(row["schema"]) == 1,
+              let text = String(data: data, encoding: .utf8) else { throw Invalid.settings }
+        let pattern = try NSRegularExpression(pattern: #"(?:^|[,{])\s*"(?:\\.|[^"\\])*"\s*:"#)
+        guard pattern.numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text)) == keys.count
+        else { throw Invalid.settings }
+        return row
+    }
+
+    static func decodeMedia(_ data: Data) throws -> ClientLibrarySettings {
+        let row = try object(data, keys: ["schema", "revision", "hide_video_mv", "mv_sort", "outfit_sort"])
+        guard let revision = ClientPresentationSettings.integer(row["revision"]), revision >= 0,
+              let hidden = row["hide_video_mv"] as? NSNumber, CFGetTypeID(hidden) == CFBooleanGetTypeID(),
+              let mv = row["mv_sort"] as? String, mvSorts.contains(mv),
+              let outfit = row["outfit_sort"] as? String, outfitSorts.contains(outfit) else { throw Invalid.settings }
+        return ClientLibrarySettings(revision: revision, hideVideoMV: hidden.boolValue,
+                                     mvSort: mv, outfitSort: outfit)
+    }
+
+    static func decodeLanguage(_ data: Data) throws -> String {
+        let row = try object(data, keys: ["schema", "language"])
+        guard let language = row["language"] as? String, languages.contains(language) else { throw Invalid.settings }
+        return language
+    }
+
+    private static func read(_ file: URL) throws -> Data {
+        let values = try file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true,
+              let size = values.fileSize, size > 0, size <= 8192 else { throw Invalid.settings }
+        let handle = try FileHandle(forReadingFrom: file)
+        defer { try? handle.close() }
+        return try handle.read(upToCount: 8193) ?? Data()
+    }
+
+    static func load(from directory: URL) -> (settings: ClientLibrarySettings, invalid: Bool) {
+        var result = ClientLibrarySettings(), invalid = false
+        let media = directory.appendingPathComponent(mediaFilename)
+        let language = directory.appendingPathComponent(languageFilename)
+        if FileManager.default.fileExists(atPath: media.path) {
+            do { result = try decodeMedia(read(media)) } catch { invalid = true }
+        }
+        if FileManager.default.fileExists(atPath: language.path) {
+            do { result.language = try decodeLanguage(read(language)) } catch { invalid = true }
+        }
+        return (result, invalid)
+    }
+
+    private static func write(_ row: [String: Any], to file: URL) throws {
+        if FileManager.default.fileExists(atPath: file.path),
+           try file.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink == true { throw Invalid.settings }
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: row, options: .sortedKeys).write(to: file, options: .atomic)
+    }
+
+    func savingMedia(to file: URL) throws -> ClientLibrarySettings {
+        guard revision >= 0, revision < Int64.max, Self.mvSorts.contains(mvSort),
+              Self.outfitSorts.contains(outfitSort) else { throw Invalid.settings }
+        let now = Date().timeIntervalSince1970 * 1000
+        guard now.isFinite, now >= 0, now < Double(Int64.max) else { throw Invalid.settings }
+        var next = self
+        next.revision = max(revision + 1, Int64(now))
+        try Self.write(["schema": 1, "revision": next.revision, "hide_video_mv": hideVideoMV,
+                        "mv_sort": mvSort, "outfit_sort": outfitSort], to: file)
+        return next
+    }
+
+    func savingLanguage(to file: URL) throws {
+        guard Self.languages.contains(language) else { throw Invalid.settings }
+        try Self.write(["schema": 1, "language": language], to: file)
+    }
+}
+
 /// Public graphics preferences only; stored beside the existing server data.
 struct ClientPresentationSettings: Equatable {
     static let filename = "client-presentation.json"

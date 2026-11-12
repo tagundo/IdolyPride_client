@@ -17,8 +17,17 @@ final class ServerModel: ObservableObject {
     @Published var downloadMissingResources = (UserDefaults.standard.object(forKey: "downloadMissingResources") as? Bool) ?? true {
         didSet { UserDefaults.standard.set(downloadMissingResources, forKey: "downloadMissingResources") }
     }
+    @Published var resourcesInDownloads = (UserDefaults.standard.object(forKey: "resourcesInDownloads") as? Bool) ?? true {
+        didSet { UserDefaults.standard.set(resourcesInDownloads, forKey: "resourcesInDownloads") }
+    }
     @Published private(set) var presentation = ClientPresentationSettings.defaults
     @Published private(set) var playback = ClientPlaybackSettings.defaults
+    @Published private(set) var library = ClientLibrarySettings()
+    @Published private(set) var libraryMessage = "목록·언어 변경은 서버 재시작 후 게임 타이틀에서 다시 로그인하면 적용됩니다."
+    @Published var resourcePlatform = "ios"
+    @Published private(set) var resourceMessage = "서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다."
+    @Published private(set) var resourceJobID: String?
+    @Published private(set) var resourceJobActive = false
     @Published private(set) var playbackMessage = "Mac의 기본값은 꺼짐입니다. 켜면 원본 회전 대기 동작을 사용합니다."
     @Published private(set) var presentationFeedback = ClientPresentationFeedback.waiting
     private var experimentalLiveObserved = false
@@ -70,6 +79,9 @@ final class ServerModel: ObservableObject {
         presentationInvalid = loaded.invalid
         let loadedPlayback = ClientPlaybackSettings.load(from: playbackFile)
         playback = loadedPlayback.settings
+        let loadedLibrary = ClientLibrarySettings.load(from: dataDirectory)
+        library = loadedLibrary.settings
+        if loadedLibrary.invalid { libraryMessage = "목록·언어 설정을 읽지 못했습니다. 선택을 바꾸면 새로 저장합니다." }
         if loadedPlayback.invalid {
             playbackMessage = "회전 대기 설정을 읽지 못해 기본값을 표시합니다. 옵션을 바꾸면 새로 저장합니다."
         }
@@ -98,6 +110,121 @@ final class ServerModel: ObservableObject {
                 self.alertMessage = self.playbackMessage
             }
         })
+    }
+
+    func libraryBinding<Value: Equatable>(_ key: WritableKeyPath<ClientLibrarySettings, Value>) -> Binding<Value> {
+        Binding(get: { self.library[keyPath: key] }, set: { value in
+            guard !self.shutdownRequested, self.library[keyPath: key] != value else { return }
+            var changed = self.library
+            changed[keyPath: key] = value
+            do {
+                self.library = try changed.savingMedia(to: self.dataDirectory.appendingPathComponent(ClientLibrarySettings.mediaFilename))
+                self.libraryMessage = "저장되었습니다. 서버를 재시작하고 게임 타이틀에서 다시 로그인해 주세요."
+            } catch { self.alertMessage = "목록 설정을 저장하지 못했습니다. 이전 설정을 유지합니다." }
+        })
+    }
+
+    var languageBinding: Binding<String> {
+        Binding(get: { self.library.language }, set: { value in
+            guard !self.shutdownRequested, self.library.language != value else { return }
+            var changed = self.library
+            changed.language = value
+            do {
+                try changed.savingLanguage(to: self.dataDirectory.appendingPathComponent(ClientLibrarySettings.languageFilename))
+                self.library = changed
+                self.libraryMessage = "언어가 저장되었습니다. 서버를 재시작하고 게임 타이틀에서 다시 로그인해 주세요."
+            } catch { self.alertMessage = "언어 설정을 저장하지 못했습니다. 이전 설정을 유지합니다." }
+        })
+    }
+
+    private func updateResourceStatus(_ state: [String: Any]) {
+        guard let resources = state["resource_library"] as? [String: Any] else { return }
+        let job = resources["job"] as? [String: Any]
+        let phase = job?["state"] as? String ?? "idle"
+        resourceJobID = job?["job_id"] as? String
+        resourceJobActive = ["preparing", "running", "export_ready", "cancelling"].contains(phase)
+        if let job = job {
+            let files = (job["verified_files"] as? NSNumber)?.intValue ?? 0
+            let total = (job["total_files"] as? NSNumber)?.intValue ?? 0
+            let bytes = (job["received_bytes"] as? NSNumber)?.int64Value ?? 0
+            let missing = (job["missing_files"] as? NSNumber)?.intValue ?? 0
+            let imported = (job["imported_files"] as? NSNumber)?.intValue ?? 0
+            let failed = (job["failed_files"] as? NSNumber)?.intValue ?? 0
+            resourceMessage = "상태 \(phase) · 확인 \(files)/\(total)개 · 수신 \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) · 가져옴 \(imported)개 · 실패 \(failed)개 · 미보관 \(missing)개"
+        } else if let catalogs = resources["catalogs"] as? [String: Any], let catalog = catalogs[resourcePlatform] as? [String: Any] {
+            if let files = catalog["object_count"] as? NSNumber, let bytes = catalog["total_bytes"] as? NSNumber {
+                resourceMessage = "포함 목록 \(files.intValue)개 · \(ByteCountFormatter.string(fromByteCount: bytes.int64Value, countStyle: .file)). 받은 파일은 크기와 MD5를 검사해 보관합니다."
+            } else { resourceMessage = "선택한 플랫폼의 목록 확인을 누르면 예상 용량을 표시합니다." }
+        }
+    }
+
+    func resources(_ action: String) {
+        guard running, !shutdownRequested else { alertMessage = "먼저 서버를 시작해 주세요."; return }
+        sendResource(action, extra: ["platform": resourcePlatform])
+    }
+
+    func cancelResources() {
+        guard let identifier = resourceJobID else { return }
+        sendResource("resources_cancel", extra: ["job_id": identifier])
+    }
+
+    func exportResources() {
+        guard running, !resourceJobActive else { return }
+        let panel = NSSavePanel()
+        panel.allowedFileTypes = ["zip"]
+        guard let exports = resourceExportsDirectory() else { return }
+        panel.directoryURL = exports
+        panel.nameFieldStringValue = "IdolyPride-resources-\(resourcePlatform).zip"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        sendResource("resources_export", extra: ["platform": resourcePlatform, "path": url.path])
+    }
+
+    private func downloadsResourceDirectory() -> URL? {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("IdolyPride", isDirectory: true)
+    }
+
+    private func resourceExportsDirectory() -> URL? {
+        guard let root = downloadsResourceDirectory() else {
+            alertMessage = "Downloads 보관 폴더를 찾지 못했습니다."; return nil
+        }
+        let exports = root.appendingPathComponent("exports", isDirectory: true)
+        do { try FileManager.default.createDirectory(at: exports, withIntermediateDirectories: true) }
+        catch { alertMessage = "Downloads 보관 폴더에 접근하지 못했습니다. 폴더 접근 권한을 확인해 주세요."; return nil }
+        return exports
+    }
+
+    func revealResources() {
+        guard let folder = resourcesInDownloads ? downloadsResourceDirectory() : dataDirectory else { return }
+        do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+        catch { alertMessage = "리소스 보관 폴더에 접근하지 못했습니다."; return }
+        NSWorkspace.shared.open(folder)
+    }
+
+    func importResources() {
+        guard running, !resourceJobActive else { return }
+        let panel = NSOpenPanel()
+        panel.allowedFileTypes = ["zip"]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        sendResource("resources_import", extra: ["platform": resourcePlatform, "path": url.path])
+    }
+
+    private func sendResource(_ action: String, extra: [String: Any]) {
+        guard running, !shutdownRequested, let writer = input?.fileHandleForWriting else { return }
+        var command = extra
+        command["action"] = action
+        do {
+            var data = try JSONSerialization.data(withJSONObject: command)
+            data.append(10)
+            guard Self.nonblockingWrite(data, fileDescriptor: writer.fileDescriptor) else {
+                alertMessage = "리소스 요청을 전달하지 못했습니다. 경로가 길면 Downloads 아래의 짧은 이름을 선택해 주세요."
+                return
+            }
+            resourceMessage = "리소스 작업을 준비하고 있습니다."
+        } catch { alertMessage = "리소스 요청을 만들지 못했습니다." }
     }
 
     func presentationBinding<Value: Equatable>(_ key: WritableKeyPath<ClientPresentationSettings, Value>) -> Binding<Value> {
@@ -252,6 +379,8 @@ final class ServerModel: ObservableObject {
             switch kind {
             case "log": appendLog(event["message"] as? String ?? "")
             case "error": fail(event["message"] as? String ?? "서버 작업에 실패했습니다.")
+            case "resource_error": alertMessage = event["message"] as? String ?? "리소스 작업을 완료하지 못했습니다."
+            case "resource_result": resourceMessage = event["message"] as? String ?? "리소스 작업 상태가 갱신되었습니다."
             case "status":
                 guard let state = event["status"] as? [String: Any] else { continue }
                 statusPolling.received(at: ProcessInfo.processInfo.systemUptime)
@@ -261,6 +390,7 @@ final class ServerModel: ObservableObject {
                 canStop = state["can_stop"] as? Bool ?? (running || busy)
                 status = running ? "로컬 서버가 실행 중입니다." : (busy ? "서버를 시작하고 있습니다." : "서버가 중지되어 있습니다.")
                 presentationClient = (state["presentation"] as? [String: Any])?["client"] as? [String: Any]
+                updateResourceStatus(state)
                 updatePresentationFeedback()
                 checkpoint(running ? "server_running" : (busy ? "server_starting" : "server_stopped"))
                 if smoke { advanceSmoke() }
@@ -291,7 +421,8 @@ final class ServerModel: ObservableObject {
     }
 
     private func send(_ action: String, experimental: Bool? = nil, mediaMode: Bool? = nil,
-                      downloadMissingResources: Bool? = nil, reportFailure: Bool = true) {
+                      downloadMissingResources: Bool? = nil, resourceCacheDirectory: String? = nil,
+                      reportFailure: Bool = true) {
         guard !shutdownRequested else { return }
         guard let writer = input?.fileHandleForWriting, child?.isRunning == true else {
             if reportFailure { fail("서버 엔진에 연결하지 못했습니다. 앱을 다시 열어 주세요.") }
@@ -302,6 +433,7 @@ final class ServerModel: ObservableObject {
             if let enabled = experimental { command["experimental_main_live"] = enabled }
             if let enabled = mediaMode { command["media_mode"] = enabled }
             if let enabled = downloadMissingResources { command["download_missing_resources"] = enabled }
+            if let directory = resourceCacheDirectory { command["resource_cache_dir"] = directory }
             var data = try JSONSerialization.data(withJSONObject: command)
             data.append(10)
             guard Self.nonblockingWrite(data, fileDescriptor: writer.fileDescriptor) else {
@@ -331,9 +463,16 @@ final class ServerModel: ObservableObject {
 
     func start() {
         guard !running && !busy && !canStop else { return }
+        var cache: String?
+        if resourcesInDownloads {
+            guard let folder = downloadsResourceDirectory() else { alertMessage = "Downloads 폴더를 찾지 못했습니다."; return }
+            do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
+            catch { alertMessage = "Downloads 폴더에 접근하지 못했습니다. 접근 권한을 확인하거나 앱 전용 보관을 선택해 주세요."; return }
+            cache = folder.path
+        }
         busy = true; status = "서버를 시작하고 있습니다."
         send("start", experimental: experimentalMainLive, mediaMode: mediaMode,
-             downloadMissingResources: downloadMissingResources)
+             downloadMissingResources: downloadMissingResources, resourceCacheDirectory: cache)
     }
     func stop() {
         busy = true; status = "서버를 중지하고 있습니다."; send("stop")
@@ -637,6 +776,59 @@ struct ServerView: View {
                     Text("게임에서 요청한 리소스 파일만 내려받아 이 기기에 보관합니다. 끄면 이미 보관한 파일만 제공합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("튜토리얼 라이브는 원본 기록을 재생합니다.").font(.caption).foregroundStyle(.secondary)
+                    DisclosureGroup("촬영 목록·의상·언어") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("라이브 촬영에서 영상 MV 숨기기", isOn: model.libraryBinding(\.hideVideoMV))
+                            Text("3D 공연 목록을 유지하고 영상으로 재생하는 MV만 숨깁니다.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Picker("MV 정렬", selection: model.libraryBinding(\.mvSort)) {
+                                Text("최근 공개순").tag("recent")
+                                Text("오래된 공개순").tag("old")
+                                Text("제목순").tag("title")
+                                Text("ID순").tag("id")
+                            }
+                            Picker("의상 정렬", selection: model.libraryBinding(\.outfitSort)) {
+                                Text("원본 획득순").tag("original")
+                                Text("최근 공개순").tag("recent")
+                                Text("오래된 공개순").tag("old")
+                                Text("이름순").tag("title")
+                                Text("ID순").tag("id")
+                            }
+                            Picker("게임 데이터 언어", selection: model.languageBinding) {
+                                Text("日本語").tag("ja")
+                                Text("한국어").tag("ko")
+                                Text("English").tag("en")
+                            }
+                            Text("준비된 번역 데이터를 제공합니다. 번역이 없는 문구는 일본어로 표시됩니다.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text(model.libraryMessage).font(.caption).foregroundStyle(.secondary)
+                        }.padding(.top, 6)
+                    }
+                    DisclosureGroup("게임 리소스 보관·Downloads 내보내기") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Downloads/IdolyPride에 리소스 직접 보관", isOn: $model.resourcesInDownloads)
+                                .disabled(model.running || model.busy || model.canStop)
+                            Text("켜면 CDN 원본 파일을 이 폴더 아래의 플랫폼별 캐시에 받아 게임에 바로 제공합니다. 계정·설정 데이터는 기존 앱 폴더에 유지합니다.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Button("리소스 보관 폴더 열기") { model.revealResources() }
+                            Picker("보관할 리소스", selection: $model.resourcePlatform) {
+                                Text("Mac·iOS").tag("ios")
+                                Text("Android").tag("android")
+                            }.disabled(model.resourceJobActive)
+                            HStack {
+                                Button("목록·예상 용량 확인") { model.resources("resources_preview") }
+                                Button("전체 리소스 받기") { model.resources("resources_download") }
+                                Button("작업 취소") { model.cancelResources() }.disabled(!model.resourceJobActive)
+                            }.disabled(!model.running)
+                            HStack {
+                                Button("Downloads에 내보내기") { model.exportResources() }
+                                Button("보관 ZIP 가져오기") { model.importResources() }
+                            }.disabled(!model.running || model.resourceJobActive)
+                            Text(model.resourceMessage).font(.caption).textSelection(.enabled)
+                            Text("포함된 목록의 원본 파일을 서버에 보관합니다. 전체 자료는 수십 GB가 될 수 있습니다. 다시 받으면 검증된 완료 파일부터 재사용하며, 전송 중인 파일의 바이트 단위 재개는 지원하지 않습니다. 내보낸 ZIP은 다른 서버로 가져올 수 있습니다.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.padding(.top, 6)
+                    }
                     Toggle("MV 진입·종료 시 화면 회전 대기", isOn: model.orientationWaitBinding)
                     Text(model.playbackMessage).font(.caption).foregroundStyle(.secondary)
                     Divider()

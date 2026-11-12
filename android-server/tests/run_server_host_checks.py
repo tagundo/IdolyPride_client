@@ -27,7 +27,7 @@ def main():
     args = parser.parse_args()
     sources = sorted((ROOT / "android-server/app/src/main/java" / PACKAGE).glob("*.java"))
     tests = [ROOT / "android-server/tests/java" / PACKAGE / (name + ".java") for name in
-             ("PlaybackSettingsHostTest", "RenderingExperimentHostTest")]
+             ("PlaybackSettingsHostTest", "RenderingExperimentHostTest", "LibrarySettingsHostTest", "ResourceTransfersHostTest")]
     for path in (args.jdk_bin / "javac", args.jdk_bin / "java", args.android_jar, args.chaquopy_jar, *tests):
         if not path.is_file():
             parser.error(f"Required cached tool or source is missing: {path}")
@@ -61,9 +61,10 @@ def main():
         ], check=True)
         # Deliberately omit android.jar here: these tested policies use only Java.
         for test in tests:
+            classpath = str(classes) + (":" + str(args.android_jar) if test.stem in ("LibrarySettingsHostTest", "ResourceTransfersHostTest") else "")
             subprocess.run([
                 str(args.jdk_bin / "java"), "-Xmx64m", "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1",
-                "-cp", str(classes), "game.qualiarts.idolypride.localserver." + test.stem,
+                "-cp", classpath, "game.qualiarts.idolypride.localserver." + test.stem,
             ], check=True)
         print(f"Compiled {len(sources)} actual standalone server Java sources; no APK build or Android runtime.")
 

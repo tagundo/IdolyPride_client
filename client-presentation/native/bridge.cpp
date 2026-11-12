@@ -26,10 +26,14 @@
 #include "orientation.hpp"
 #include "playback_config.hpp"
 #include "panorama_ui_edges.hpp"
+#include "photography_ui.hpp"
+#include "media_policy.hpp"
+#ifndef IDOLY_DARWIN_BRIDGE
+#include "wardrobe_lifecycle.hpp"
+#endif
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
 #include "../ios/live_ui.hpp"
-#include "../ios/photography_ui.hpp"
 #else
 #include "profile.hpp"
 #endif
@@ -55,6 +59,17 @@ bool desktop_host = false;
 std::atomic<uintptr_t> game_thread_id{0};
 pthread_mutex_t playback_mutex = PTHREAD_MUTEX_INITIALIZER;
 PlaybackSettings playback_settings;
+pthread_mutex_t media_mutex = PTHREAD_MUTEX_INITIALIZER;
+MediaPolicySettings media_settings;
+bool accept_media_configuration(int schema,int64_t revision,bool use_master_order) {
+    pthread_mutex_lock(&media_mutex);
+    const bool accepted=media_settings.accept(schema,revision,use_master_order);
+    pthread_mutex_unlock(&media_mutex); return accepted;
+}
+bool master_costume_order_enabled() {
+    pthread_mutex_lock(&media_mutex); const bool enabled=media_settings.use_master_costume_order();
+    pthread_mutex_unlock(&media_mutex); return enabled;
+}
 bool accept_playback_configuration(int schema,int64_t revision,bool wait) {
     pthread_mutex_lock(&playback_mutex);
     const bool accepted=playback_settings.accept(schema,revision,wait);
@@ -151,6 +166,7 @@ pthread_mutex_t render_probe_mutex = PTHREAD_MUTEX_INITIALIZER;
 RenderProbeTracker render_probe;
 int (*rendering_mode_get)(Method *), (*graphics_api_get)(Method *);
 bool game_call(bool establish);
+void cleanup_wardrobe();
 int64_t render_probe_monotonic_ms() {
     timespec now{};
     if (clock_gettime(CLOCK_MONOTONIC, &now) || now.tv_sec < 0 || now.tv_nsec < 0
@@ -167,6 +183,7 @@ void sample_render_probe() {
     pthread_mutex_lock(&render_probe_mutex); const bool due = render_probe.begin_sample(now);
     pthread_mutex_unlock(&render_probe_mutex);
     if (!due) return;
+    cleanup_wardrobe();
     int mode = -1, api = -1;
     try { mode = rendering_mode_get(nullptr); api = graphics_api_get(nullptr); }
     catch (...) { mode = -1; api = -1; }
@@ -291,12 +308,64 @@ void mv_ui_initialize_hook(void *self, Method *method) {
     idoly_live_ui::initialize_default_off(self, method, mv_ui_initialize_original, mv_ui_hide,
         ready.load(std::memory_order_acquire) && desktop_host && game_call(true));
 }
+#endif
 VoidMethod preview_ui_bind_original;
-idoly::presentation::ios_photography_ui::Calls preview_ui_calls;
-idoly::presentation::ios_photography_ui::DefaultHidden preview_ui;
+idoly::presentation::photography_ui::Calls preview_ui_calls;
+idoly::presentation::photography_ui::DefaultHidden preview_ui;
 void preview_ui_bind_hook(void *self, Method *method) {
+#ifdef IDOLY_DARWIN_BRIDGE
     preview_ui.bind(self, method, preview_ui_bind_original,
         ready.load(std::memory_order_acquire) && desktop_host && game_call(true));
+#else
+    preview_ui.bind(self, method, preview_ui_bind_original,
+        ready.load(std::memory_order_acquire) && game_call(true));
+#endif
+}
+
+// BEGIN_ORIGINAL_COSTUME_SORT_DISPATCH
+using CostumeListMethod = void *(*)(void *, void *, Method *);
+CostumeListMethod costume_sorted_original, costume_order_sorted;
+void *costume_sorted_hook(void *self, void *character_id, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call(false) && self && character_id
+            && master_costume_order_enabled())
+        return costume_order_sorted(self, character_id, nullptr);
+    return costume_sorted_original(self, character_id, method);
+}
+// END_ORIGINAL_COSTUME_SORT_DISPATCH
+
+#ifndef IDOLY_DARWIN_BRIDGE
+namespace wardrobe = idoly::presentation::wardrobe;
+wardrobe::Calls wardrobe_calls;
+wardrobe::Lifecycle wardrobe_lifecycle;
+wardrobe::Show wardrobe_show_original;
+wardrobe::Move wardrobe_move_original;
+wardrobe::Fail wardrobe_fail_original;
+wardrobe::Wait wardrobe_wait_original;
+pthread_mutex_t wardrobe_mutex = PTHREAD_MUTEX_INITIALIZER;
+wardrobe::Tracker wardrobe_tracker;
+void wardrobe_event(const char *phase) {
+    const int64_t now=render_probe_monotonic_ms();
+    pthread_mutex_lock(&wardrobe_mutex); wardrobe_tracker.event(phase,now);
+    pthread_mutex_unlock(&wardrobe_mutex);
+}
+void wardrobe_status_json(char *output,size_t capacity) {
+    pthread_mutex_lock(&wardrobe_mutex); const wardrobe::Snapshot copy=wardrobe_tracker.snapshot();
+    pthread_mutex_unlock(&wardrobe_mutex);
+    wardrobe::Tracker::json(copy,render_probe_monotonic_ms(),output,capacity);
+}
+bool wardrobe_enabled() { return ready.load(std::memory_order_acquire) && game_call(false); }
+void cleanup_wardrobe() { if (wardrobe_enabled()) wardrobe_lifecycle.cleanup(); }
+wardrobe::Task wardrobe_show_hook(void *self,wardrobe::Token token,Method *method) {
+    return wardrobe_lifecycle.show(self,token,method,wardrobe_show_original,wardrobe_enabled());
+}
+void wardrobe_move_hook(void *self,Method *method) {
+    wardrobe_lifecycle.move(self,method,wardrobe_move_original,wardrobe_enabled());
+}
+void wardrobe_fail_hook(void *self,void *exception,Method *method) {
+    wardrobe_lifecycle.fail(self,exception,method,wardrobe_fail_original,wardrobe_enabled());
+}
+wardrobe::Task wardrobe_wait_hook(void *predicate,int timing,wardrobe::Token token,Method *method) {
+    return wardrobe_lifecycle.wait(predicate,timing,token,method,wardrobe_wait_original,wardrobe_enabled());
 }
 #endif
 
@@ -1222,6 +1291,7 @@ void load_calls() {
     CALL(projection_get, projection_get); CALL(physical_get, physical_get); CALL(gate_get, gate_get);
     CALL(sensor_get, sensor_get); CALL(lens_get, lens_get); CALL(projection_mode_get, projection_mode_get);
     CALL(camera_aspect_set_original, aspect_set); CALL(camera_aspect_reset, aspect_reset);
+    CALL(costume_order_sorted, costume_order_sorted);
     CALL(orientation_calls.frame_count, orientation_frame_count);
     CALL(orientation_calls.token_cancelled, orientation_token_cancelled);
     CALL(orientation_calls.set_orientation_async, orientation_set_async);
@@ -1231,10 +1301,17 @@ void load_calls() {
     rotation::configure(orientation_calls);
 #ifdef IDOLY_DARWIN_BRIDGE
     CALL(mv_ui_hide, mv_ui_hide);
+#endif
     preview_ui_calls.weak_new=weak_new; preview_ui_calls.weak_get=weak_get; preview_ui_calls.weak_free=weak_free;
     preview_ui_calls.matches=class_matches;
     CALL(preview_ui_calls.ui_get, preview_ui_get); CALL(preview_ui_calls.ui_set, preview_ui_set);
     preview_ui.configure(preview_ui_calls);
+#ifndef IDOLY_DARWIN_BRIDGE
+    wardrobe_calls.weak_new=weak_new; wardrobe_calls.weak_get=weak_get; wardrobe_calls.weak_free=weak_free;
+    wardrobe_calls.alive=object_alive; wardrobe_calls.active=active_enabled; wardrobe_calls.matches=class_matches;
+    CALL(wardrobe_calls.yield, wardrobe_yield);
+    wardrobe_calls.hide_predicate=reinterpret_cast<void *>(image_base+pin::wardrobe_hide_predicate.rva);
+    wardrobe_calls.event=wardrobe_event; wardrobe_lifecycle.configure(wardrobe_calls);
 #endif
     panorama_api.weak_new=weak_new; panorama_api.weak_get=weak_get; panorama_api.weak_free=weak_free;
     panorama_api.alive=object_alive; panorama_api.matches=class_matches;
@@ -1328,6 +1405,12 @@ void *install(void *) {
         HOOK(orientation_fixed_portrait_ready,rotation::fixed_portrait_hook,rotation::original_fixed_portrait),
         HOOK(orientation_fixed_landscape_ready,rotation::fixed_landscape_hook,rotation::original_fixed_landscape),
         HOOK(orientation_after_ready,rotation::after_hook,rotation::original_after),
+        HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original),
+        HOOK(costume_sorted,costume_sorted_hook,costume_sorted_original),
+        HOOK(wardrobe_show,wardrobe_show_hook,wardrobe_show_original),
+        HOOK(wardrobe_move,wardrobe_move_hook,wardrobe_move_original),
+        HOOK(wardrobe_fail,wardrobe_fail_hook,wardrobe_fail_original),
+        HOOK(wardrobe_wait,wardrobe_wait_hook,wardrobe_wait_original),
     };
 #undef HOOK
     for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; ++i) {
@@ -1337,7 +1420,7 @@ void *install(void *) {
             set_state("init_failed"); return nullptr;
         }
     }
-    if (!rotation::ready_for_publish()) {
+    if (!rotation::ready_for_publish() || !preview_ui.ready() || !wardrobe_lifecycle.ready()) {
         for (size_t i=sizeof hooks/sizeof hooks[0];i>0;--i) shadowhook_unhook(hooks[i-1].stub);
         set_state("init_failed");return nullptr;
     }
@@ -1380,6 +1463,13 @@ extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation
 }
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_renderProbeStatus(JNIEnv *env,jclass) {
     char json[512];render_probe_status_json(json,sizeof json);return env->NewStringUTF(json);
+}
+extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_configureMedia(
+        JNIEnv *,jclass,jint schema,jlong revision,jboolean use_master_order) {
+    return accept_media_configuration(schema,revision,use_master_order!=0)?JNI_TRUE:JNI_FALSE;
+}
+extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_wardrobeStatus(JNIEnv *env,jclass) {
+    char json[256];wardrobe_status_json(json,sizeof json);return env->NewStringUTF(json);
 }
 
 #else

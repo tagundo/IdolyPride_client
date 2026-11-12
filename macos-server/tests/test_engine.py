@@ -753,15 +753,20 @@ def test_native_json_control_keeps_default_off_and_rejects_non_boolean_opt_in(tm
                     for value in (None, 0, 1, "true", [], {}))
     commands.extend({"action": "start", "download_missing_resources": value}
                     for value in (None, 0, 1, "true", [], {}))
+    public_cache = str(tmp_path / "Downloads" / "IdolyPride")
+    commands.append({"action": "start", "resource_cache_dir": public_cache})
+    commands.extend({"action": "start", "resource_cache_dir": value}
+                    for value in (False, 1, "relative", "", [], {}, "bad\0path"))
     commands.append({"action": "quit"})
     monkeypatch.setattr(engine, "Controller", Control)
     monkeypatch.setattr(engine.signal, "signal", lambda *args: None)
     monkeypatch.setattr(engine, "emit", lambda event, **data: errors.append((event, data)))
     monkeypatch.setattr(sys, "stdin", io.StringIO("\n".join(map(json.dumps, commands))))
     assert engine.main(["--data-dir", str(tmp_path), "--server-data", str(tmp_path / "ServerData.zip")]) == 0
-    assert starts == [(False, False, True), (False, False, True), (True, False, True),
-                      (False, False, True), (False, True, True), (True, True, True), (False, False, False)]
-    assert len(errors) == 18 and all(event == "error" for event, _ in errors)
+    assert starts == [(False, False, True, None), (False, False, True, None), (True, False, True, None),
+                      (False, False, True, None), (False, True, True, None), (True, True, True, None),
+                      (False, False, False, None), (False, False, True, public_cache)]
+    assert len(errors) == 25 and all(event == "error" for event, _ in errors)
     assert closed == [True]
 
 

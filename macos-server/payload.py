@@ -29,6 +29,13 @@ FIXED_FILES = {
     "original-master/archive-report.json",
 }
 PACK_PREFIX = "original-master/assets/master/"
+FIXED_FILES.update({"original-master/master-sort.json", "original-master/media-master-sort.json"})
+FIXED_FILES.update(
+    f"original-master/languages/{language}/{filename}"
+    for language in ("ko", "en")
+    for filename in ("master-tag.json", "media-master-tag.json", "master-sort.json",
+                     "media-master-sort.json", "coverage.json", "media-coverage.json")
+)
 
 
 def member_path(name: str) -> str:

@@ -51,7 +51,8 @@ GIT_TIMEOUT = 20
 # these explicit modules. Any new retained import of one fails the build.
 ANDROID_EXCLUDED_MODULES = frozenset("idoly_local." + name for name in (
     "__main__", "cli", "android_package", "client_patch", "native_bootstrap", "ios_patch",
-    "ios_presentation", "master_build", "media_master_build", "unity_http", "unity_cache",
+    "ios_presentation", "master_build", "media_master_build", "master_translation_build", "master_sort_build",
+    "unity_http", "unity_cache",
     "collect", "event_capture", "firebase_archive", "official_session", "profiles", "server",
     "appearance_qa", "lesson_qa", "main_live_qa", "story_qa", "story_read_qa", "tutorial_qa", "pvp_capture"))
 ANDROID_EXCLUDED_MEMBERS = frozenset(name.replace(".", "/") + ".pyc" for name in ANDROID_EXCLUDED_MODULES)
@@ -159,9 +160,10 @@ def _compiler():
         raise ValueError("Use unoptimized CPython 3.13 with the pinned PYC magic")
 
 
-def _members(archive, expanded_limit):
+def _members(archive, expanded_limit, *, member_limit=MAX_MEMBERS):
     infos = archive.infolist()
-    if len(infos) > MAX_MEMBERS or sum(i.file_size for i in infos) > expanded_limit:
+    if (type(member_limit) is not int or not 0 < member_limit <= 1024
+            or len(infos) > member_limit or sum(i.file_size for i in infos) > expanded_limit):
         raise ValueError("Archive metadata or expanded size exceeds the bound")
     seen = set()
     for info in infos:

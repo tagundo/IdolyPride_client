@@ -21,7 +21,7 @@ class Application:
     def __init__(self, schema, state: State, fixtures, profile="local", master_response: bytes | None = None,
                  master_dir=None, *, experimental_main_live=False, live_engine=None,
                  dream_catalog_path=None, pvp_catalog_path=None,
-                 photo_scene_access=None, photo_image_urls=None, media_mode=False):
+                 photo_scene_access=None, photo_image_urls=None, media_mode=False, media_settings=None):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental main live must be an explicit boolean")
         if type(media_mode) is not bool:
@@ -33,14 +33,14 @@ class Application:
         self.master_response = master_response
         self.media_mode = media_mode
         self.media_master_version = None
-        if media_mode and master_response is not None:
+        if master_response is not None:
             try:
                 self.media_master_version = schema.response_type("/api.Master/Get").FromString(
                     master_response).masterTag.version
             except DecodeError:
-                raise ValueError("Media client master response is malformed") from None
+                raise ValueError(("Media" if media_mode else "Client") + " client master response is malformed") from None
             if not self.media_master_version:
-                raise ValueError("Media client master response has no version")
+                raise ValueError(("Media" if media_mode else "Client") + " client master response has no version")
         self.media_stories = None
         self.media_panorama = None
         self.company_reads = None
@@ -87,7 +87,8 @@ class Application:
         self.dream = Dream(schema, state, profile, master_dir, catalog_path=dream_catalog_path)
         self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
         self.photo_shootings = PhotoShootings(schema, state, profile, master_dir,
-            scene_access=photo_scene_access, image_urls=photo_image_urls, media_mode=media_mode)
+            scene_access=photo_scene_access, image_urls=photo_image_urls, media_mode=media_mode,
+            media_settings=media_settings)
         self.photo_names = PhotoNames(schema, state, profile)
         self.profile_layout = ProfileLayout(schema, state, profile)
         self.main_lives = None

@@ -3,6 +3,7 @@
 #include "playcover_launch.h"
 #include "shutdown_policy.h"
 #include "playback_contract.h"
+#include "library_contract.h"
 
 extern int fcntl(int, int, ...);
 
@@ -10,16 +11,34 @@ extern int fcntl(int, int, ...);
    its existing local JSON-control child. No client download/install code. */
 
 enum { C_CUSTOM = 1, C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW, C_EXPAND,
-       C_MEDIA = 100, C_LIVE, C_DOWNLOAD, C_WAIT_ROTATION, C_START = 200, C_STOP, C_OPEN, C_FOLDER };
+       C_MEDIA = 100, C_LIVE, C_DOWNLOAD, C_WAIT_ROTATION,
+       C_HIDE_VIDEO = 110, C_MV_SORT, C_OUTFIT_SORT, C_LANGUAGE,
+       C_START = 200, C_STOP, C_OPEN, C_FOLDER,
+       C_RESOURCE_PLATFORM = 300, C_RESOURCE_PREVIEW, C_RESOURCE_DOWNLOAD,
+       C_RESOURCE_CANCEL, C_RESOURCE_EXPORT, C_RESOURCE_IMPORT,
+       C_RESOURCE_LOCATION, C_RESOURCE_REVEAL };
+
+/* Official Foundation SearchPathDirectory values (swift-foundation6.0.3):
+   cachesDirectory13, applicationSupportDirectory14, downloadsDirectory15. */
+enum { ID_SEARCH_DOWNLOADS = 15, ID_USER_DOMAIN = 1 };
 
 static struct {
     IDObj app, delegate, window, timer, task, writer, defaults, dataURL, prefsURL, playbackURL, smokeURL;
+    IDObj mediaURL, languageURL, libraryLabel, hideVideo, mvSort, outfitSort, language;
+    IDObj resourcePlatform, resourceLabel, resourcePreview, resourceDownload, resourceCancel, resourceExport, resourceImport;
+    IDObj resourceSnapshot;
+    IDObj downloadsResourcesURL, resourcesInDownloads, resourceLocationLabel, revealResources;
     IDObj serverLabel, launchLabel, visualLabel, metricLabel, logView, start, stop, openGame;
     IDObj media, live, download, waitOrientation, playbackLabel, custom, expand, menus[6];
     IDPrefs prefs;
     IDPlaybackPrefs playback;
+    IDLibraryPrefs library;
     int invalidPrefs, saveFailed, running, busy, canStop, mediaMode, liveMode, downloadMode;
     int invalidPlayback, playbackSaveFailed;
+    int invalidLibrary, librarySaveFailed, libraryChanged;
+    int resourcePlatformIndex, resourceJobActive, resourcePending;
+    int resourcesDownloads;
+    char resourceJobID[65];
     int outFD, errorFD, inputFD, inputClosed, engineEnded, quitting;
     int ackBridge, ackPresent, ackState, experimentalObserved;
     long long ackRevision;
@@ -77,6 +96,14 @@ static int create_data_directory(void) {
     return ((IDBool (*)(IDObj, IDSel, IDObj, IDBool, IDObj, IDObj *))IDRuntime.message)(
         id_get(id_class("NSFileManager"), "defaultManager"), id_sel("createDirectoryAtURL:withIntermediateDirectories:attributes:error:"),
         G.dataURL, 1, 0, 0);
+}
+
+static IDObj selected_resource_root(void) { return G.resourcesDownloads ? G.downloadsResourcesURL : G.dataURL; }
+
+static int create_resource_directory(IDObj url) {
+    return url && ((IDBool (*)(IDObj,IDSel,IDObj,IDBool,IDObj,IDObj *))IDRuntime.message)(
+        id_get(id_class("NSFileManager"),"defaultManager"),id_sel("createDirectoryAtURL:withIntermediateDirectories:attributes:error:"),
+        url,1,0,0);
 }
 
 static int atomic_bytes(IDObj destination, const char *bytes, IDSize count) {
@@ -157,6 +184,58 @@ static int save_playback_preferences(int waitForOrientation) {
     return 1;
 }
 
+/* Read only these two public preference files. No directory scan or account
+   database access is performed by the UI. */
+static void load_library_file(IDObj url, int languageOnly) {
+    IDObj manager = id_get(id_class("NSFileManager"), "defaultManager");
+    IDObj path = id_get(url, "path");
+    IDObj attributes = ((IDObj (*)(IDObj, IDSel, IDObj, IDObj *))IDRuntime.message)(manager,
+        id_sel("attributesOfItemAtPath:error:"), path, 0);
+    if (!attributes) return;
+    int invalid = languageOnly ? 2 : 1;
+    if (strcmp(id_utf8(id_item(attributes,"NSFileType")),"NSFileTypeRegular")) { G.invalidLibrary |= invalid; return; }
+    int fd = open(id_utf8(path), 0x104); /* Darwin O_NOFOLLOW | O_NONBLOCK. */
+    if (fd < 0) { G.invalidLibrary |= invalid; return; }
+    char bytes[8193]; IDSize length=0; int failed=0;
+    while (length < sizeof bytes) {
+        long count=read(fd,bytes+length,sizeof bytes-length);
+        if (count < 0) { failed=1; break; }
+        if (!count) break;
+        length+=(IDSize)count;
+    }
+    close(fd);
+    IDLibraryPrefs decoded;
+    if (failed || !id_library_decode(bytes,length,&decoded,languageOnly)) { G.invalidLibrary |= invalid; return; }
+    if (languageOnly) G.library.language=decoded.language;
+    else { int language=G.library.language; G.library=decoded; G.library.language=language; }
+}
+
+static int save_library_preferences(IDLibraryPrefs changed, int languageOnly) {
+    IDLibraryPrefs next=changed;
+    if (!languageOnly) {
+        double now=id_number(id_get(id_class("NSDate"),"date"),"timeIntervalSince1970")*1000.0;
+        if (!__builtin_isfinite(now) || now < 0 || now >= 9223372036854775807.0
+            || !id_library_next(&changed,(long long)now,&next)) return 0;
+    }
+    IDObj url=languageOnly ? G.languageURL : G.mediaURL;
+    IDObj attributes=((IDObj (*)(IDObj,IDSel,IDObj,IDObj *))IDRuntime.message)(
+        id_get(id_class("NSFileManager"),"defaultManager"),id_sel("attributesOfItemAtPath:error:"),id_get(url,"path"),0);
+    if (!strcmp(id_utf8(id_item(attributes,"NSFileType")),"NSFileTypeSymbolicLink")) return 0;
+    char bytes[512]; int length=id_library_encode(&next,bytes,sizeof bytes,languageOnly);
+    if (!length || !create_data_directory() || !atomic_bytes(url,bytes,(IDSize)length)) return 0;
+    G.library=next; G.invalidLibrary &= ~(languageOnly ? 2 : 1);
+    G.librarySaveFailed=0; G.libraryChanged=1; return 1;
+}
+
+static void sync_library_controls(void) {
+    id_set_long(G.hideVideo,"setState:",G.library.hideVideo);
+    id_set_long(G.mvSort,"selectItemAtIndex:",G.library.mvSort);
+    id_set_long(G.outfitSort,"selectItemAtIndex:",G.library.outfitSort);
+    id_set_long(G.language,"selectItemAtIndex:",G.library.language);
+}
+
+static void resource_status(IDObj resources);
+
 static long selected_int(const int *values, int count, int desired) {
     for (int i = 0; i < count; ++i) if (values[i] == desired) return i;
     return 0;
@@ -182,6 +261,13 @@ static void update_controls(void) {
     id_set_bool(G.media, "setEnabled:", (IDBool)modes);
     id_set_bool(G.live, "setEnabled:", (IDBool)modes);
     id_set_bool(G.download, "setEnabled:", (IDBool)modes);
+    id_set_bool(G.resourcesInDownloads,"setEnabled:",(IDBool)modes);
+    id_set_long(G.resourcesInDownloads,"setState:",G.resourcesDownloads);
+    id_set_bool(G.revealResources,"setEnabled:",!G.quitting);
+    IDObj resourceRoot=selected_resource_root();
+    if (resourceRoot) id_set(G.resourceLocationLabel,"setStringValue:",id_arg(
+        id_string(G.resourcesDownloads ? "직접 보관 (체크 해제 시 앱 전용): " : "앱 전용 보관 위치: "),"stringByAppendingString:",id_get(resourceRoot,"path")));
+    else text(G.resourceLocationLabel,"다운로드 폴더를 찾지 못했습니다. 앱 전용 보관을 직접 선택하거나 폴더 접근을 확인해 주세요.");
     id_set_bool(G.waitOrientation, "setEnabled:", !G.quitting);
     id_set_long(G.waitOrientation, "setState:", G.playback.waitForOrientation);
     text(G.playbackLabel, G.playbackSaveFailed ? "회전 대기 설정을 저장하지 못했습니다. 이전 값을 유지합니다."
@@ -189,6 +275,22 @@ static void update_controls(void) {
         : G.playback.revision > 0 ? "MV 회전 대기 설정이 저장되었습니다."
         : "기본값 켜짐 · 그래픽 설정과 별도로 저장됩니다.");
     id_set(G.playbackLabel, "setTextColor:", color(G.invalidPlayback || G.playbackSaveFailed ? "systemOrangeColor" : "secondaryLabelColor"));
+    id_set_bool(G.hideVideo,"setEnabled:",!G.quitting);
+    id_set_bool(G.mvSort,"setEnabled:",!G.quitting);
+    id_set_bool(G.outfitSort,"setEnabled:",!G.quitting);
+    id_set_bool(G.language,"setEnabled:",!G.quitting);
+    text(G.libraryLabel,G.librarySaveFailed ? "목록·언어 설정을 저장하지 못했습니다. 이전 값을 유지합니다."
+        : G.invalidLibrary ? "목록·언어 설정 일부를 읽지 못해 기본값을 표시합니다. 변경하면 해당 파일을 새로 저장합니다."
+        : G.libraryChanged ? "저장되었습니다. 서버를 재시작하고 게임 타이틀에서 다시 로그인해 주세요."
+        : "서버 시작 시 적용합니다. 변경 후 서버를 재시작하고 게임 타이틀에서 다시 로그인해 주세요.");
+    id_set(G.libraryLabel,"setTextColor:",color(G.librarySaveFailed || G.invalidLibrary ? "systemOrangeColor" : "secondaryLabelColor"));
+    int resources=G.running && !G.quitting && !G.engineEnded && !G.inputClosed && !G.resourcePending;
+    id_set_bool(G.resourcePlatform,"setEnabled:",!G.quitting && !G.resourceJobActive && !G.resourcePending);
+    id_set_bool(G.resourcePreview,"setEnabled:",resources && !G.resourceJobActive);
+    id_set_bool(G.resourceDownload,"setEnabled:",resources && !G.resourceJobActive);
+    id_set_bool(G.resourceExport,"setEnabled:",resources && !G.resourceJobActive);
+    id_set_bool(G.resourceImport,"setEnabled:",resources && !G.resourceJobActive);
+    id_set_bool(G.resourceCancel,"setEnabled:",resources && G.resourceJobActive && id_resource_job_valid(G.resourceJobID));
     int state = id_ack_feedback(G.running && !G.quitting, id_poll_fresh(&G.polling, uptime()), G.prefs.revision,
         G.ackBridge, G.ackRevision, G.ackPresent ? ackNames[G.ackState] : 0);
     const char *message;
@@ -223,11 +325,13 @@ static void close_input(void) {
 
 static int send_control(const char *action) {
     if (!G.task || !id_bool(G.task, "isRunning") || G.inputClosed) return 0;
-    char command[320];
+    char command[513];
     int size;
-    if (strcmp(action, "start") == 0) size = snprintf(command, sizeof command,
-        "{\"action\":\"start\",\"experimental_main_live\":%s,\"media_mode\":%s,\"download_missing_resources\":%s}\n",
-        G.liveMode ? "true" : "false", G.mediaMode ? "true" : "false", G.downloadMode ? "true" : "false");
+    if (strcmp(action, "start") == 0) {
+        if (G.resourcesDownloads && !G.downloadsResourcesURL) return 0;
+        size=id_server_start_command(G.liveMode,G.mediaMode,G.downloadMode,
+            G.resourcesDownloads ? id_utf8(id_get(G.downloadsResourcesURL,"path")) : 0,command,sizeof command);
+    }
     else size = snprintf(command, sizeof command, "{\"action\":\"%s\"}\n", action);
     if (size <= 0 || (IDSize)size >= sizeof command) return 0;
     int sent = id_control_send(G.inputFD, command, (IDSize)size, write);
@@ -237,8 +341,11 @@ static int send_control(const char *action) {
 
 static void begin_start(void) {
     if (G.running || G.busy || G.canStop || G.quitting) return;
+    if (G.resourcesDownloads && !G.downloadsResourcesURL) {
+        status("다운로드 폴더를 찾지 못해 서버를 시작하지 않았습니다. 보관 위치를 확인해 주세요."); return;
+    }
     G.busy = 1; status("서버를 시작하고 있습니다."); update_controls();
-    if (!send_control("start")) { G.busy = 0; status("서버 엔진에 요청을 전달하지 못했습니다. 앱을 다시 열어 주세요."); update_controls(); }
+    if (!send_control("start")) { G.busy = 0; status("서버 시작 요청을 전달하지 못했습니다. 보관 위치와 앱 상태를 확인해 주세요."); update_controls(); }
 }
 
 static void begin_stop(void) {
@@ -330,6 +437,52 @@ static void open_game(void) {
     launch_message(message, 1);
 }
 
+static void resource_message(const char *message, int failed) {
+    text(G.resourceLabel,message);
+    id_set(G.resourceLabel,"setTextColor:",color(failed ? "systemOrangeColor" : "secondaryLabelColor"));
+}
+
+static void resource_request(const char *action, const char *argument) {
+    if (!G.running || G.quitting || G.engineEnded || G.inputClosed || G.resourcePending
+        || !G.task || !id_bool(G.task,"isRunning")) return;
+    char bytes[513]; int count=id_resource_command(action,G.resourcePlatformIndex ? "android" : "ios",argument,bytes,sizeof bytes);
+    if (!count) { resource_message("요청 경로가 너무 길거나 ZIP 형식이 아닙니다. Downloads 아래의 짧은 이름을 선택해 주세요.",1); return; }
+    int sent=id_control_send(G.inputFD,bytes,(IDSize)count,write);
+    if (sent < 0) close_input();
+    if (sent != 1) { resource_message("리소스 요청을 전달하지 못했습니다. 잠시 뒤 다시 시도해 주세요.",1); return; }
+    G.resourcePending=1; resource_message("리소스 작업을 준비하고 있습니다.",0); update_controls();
+}
+
+static void resource_archive_panel(int importing) {
+    if (!G.running || G.resourceJobActive || G.resourcePending || G.quitting) return;
+    IDObj panel=id_get(id_class(importing ? "NSOpenPanel" : "NSSavePanel"),importing ? "openPanel" : "savePanel");
+    IDObj zip=id_string("zip"); id_set(panel,"setAllowedFileTypes:",id_array(&zip,1));
+    id_set_bool(panel,"setAllowsOtherFileTypes:",0);
+    if (importing) {
+        IDObj directories=((IDObj (*)(IDObj,IDSel,unsigned long,unsigned long))IDRuntime.message)(
+            id_get(id_class("NSFileManager"),"defaultManager"),id_sel("URLsForDirectory:inDomains:"),ID_SEARCH_DOWNLOADS,ID_USER_DOMAIN);
+        if (id_long(directories,"count") > 0) id_set(panel,"setDirectoryURL:",id_index(directories,"objectAtIndex:",0));
+    } else {
+        IDObj exports=G.downloadsResourcesURL ? childURL(G.downloadsResourcesURL,"exports") : 0;
+        if (!create_resource_directory(exports)) {
+            resource_message("Downloads/IdolyPride/exports 폴더를 준비하지 못했습니다. macOS의 폴더 접근 권한을 확인해 주세요.",1); return;
+        }
+        id_set(panel,"setDirectoryURL:",exports);
+    }
+    if (importing) {
+        id_set_bool(panel,"setAllowsMultipleSelection:",0); id_set_bool(panel,"setCanChooseDirectories:",0);
+        id_set_bool(panel,"setCanChooseFiles:",1);
+    } else {
+        id_set_bool(panel,"setCanCreateDirectories:",1);
+        id_set(panel,"setNameFieldStringValue:",id_string(G.resourcePlatformIndex
+            ? "IdolyPride-resources-android.zip" : "IdolyPride-resources-ios.zip"));
+    }
+    if (id_long(panel,"runModal") != 1) return; /* NSModalResponseOK. */
+    IDObj selected=id_get(panel,"URL");
+    if (!selected || !id_bool(selected,"isFileURL")) return;
+    resource_request(importing ? "resources_import" : "resources_export",id_utf8(id_get(selected,"path")));
+}
+
 static void control_action(IDObj self, IDSel command, IDObj sender) {
     (void)self; (void)command;
     void *pool = IDRuntime.poolPush();
@@ -337,12 +490,46 @@ static void control_action(IDObj self, IDSel command, IDObj sender) {
     if (tag == C_START) begin_start();
     else if (tag == C_STOP) begin_stop();
     else if (tag == C_OPEN) open_game();
+    else if (tag == C_RESOURCE_LOCATION) {
+        if (!G.running && !G.busy && !G.canStop && !G.quitting) {
+            G.resourcesDownloads=id_long(sender,"state") == 1;
+            ((void (*)(IDObj,IDSel,IDBool,IDObj))IDRuntime.message)(G.defaults,id_sel("setBool:forKey:"),
+                (IDBool)G.resourcesDownloads,id_string("resourcesInDownloads"));
+        }
+        update_controls();
+    } else if (tag == C_RESOURCE_REVEAL) {
+        IDObj root=selected_resource_root();
+        if (!create_resource_directory(root)) resource_message("리소스 폴더를 열지 못했습니다. macOS의 폴더 접근 권한을 확인해 주세요.",1);
+        else if (!id_bool_arg(id_get(id_class("NSWorkspace"),"sharedWorkspace"),"openURL:",root))
+            resource_message("Finder에서 리소스 폴더를 열지 못했습니다.",1);
+    }
+    else if (tag >= C_RESOURCE_PLATFORM && tag <= C_RESOURCE_IMPORT) {
+        if (tag == C_RESOURCE_PLATFORM) {
+            long index=id_long(sender,"indexOfSelectedItem");
+            if (!G.resourceJobActive && !G.resourcePending && index >= 0 && index < 2) G.resourcePlatformIndex=(int)index;
+            resource_status(G.resourceSnapshot); update_controls();
+        } else if (tag == C_RESOURCE_CANCEL) resource_request("resources_cancel",G.resourceJobID);
+        else if (!G.resourceJobActive && tag == C_RESOURCE_PREVIEW) resource_request("resources_preview",0);
+        else if (!G.resourceJobActive && tag == C_RESOURCE_DOWNLOAD) resource_request("resources_download",0);
+        else if (tag == C_RESOURCE_EXPORT || tag == C_RESOURCE_IMPORT) resource_archive_panel(tag == C_RESOURCE_IMPORT);
+    }
     else if (tag == C_FOLDER) {
         create_data_directory();
         id_bool_arg(id_get(id_class("NSWorkspace"), "sharedWorkspace"), "openURL:", G.dataURL);
     } else if (tag == C_WAIT_ROTATION) {
         if (!G.quitting && !save_playback_preferences(id_long(sender, "state") == 1)) G.playbackSaveFailed = 1;
         update_controls();
+    } else if (tag >= C_HIDE_VIDEO && tag <= C_LANGUAGE) {
+        if (!G.quitting) {
+            IDLibraryPrefs changed=G.library;
+            long index=tag == C_HIDE_VIDEO ? -1 : id_long(sender,"indexOfSelectedItem");
+            if (tag == C_HIDE_VIDEO) changed.hideVideo=id_long(sender,"state") == 1;
+            if (tag == C_MV_SORT && index >= 0 && index < 4) changed.mvSort=(int)index;
+            if (tag == C_OUTFIT_SORT && index >= 0 && index < 5) changed.outfitSort=(int)index;
+            if (tag == C_LANGUAGE && index >= 0 && index < 3) changed.language=(int)index;
+            if (!save_library_preferences(changed,tag == C_LANGUAGE)) G.librarySaveFailed=1;
+        }
+        sync_library_controls(); update_controls();
     } else if (tag >= C_MEDIA && tag <= C_DOWNLOAD) {
         int value = id_long(sender, "state") == 1;
         const char *key;
@@ -456,7 +643,7 @@ static void make_window(void) {
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
-    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1188));
+    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1876));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
     add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
@@ -472,12 +659,25 @@ static void make_window(void) {
     G.waitOrientation = add_button(document, "MV 진입·종료 시 화면 회전 대기", 8, 256, 620, C_WAIT_ROTATION, 1);
     add_label(document, "켜면 화면 회전이 끝날 때까지 MV 진입·종료를 기다립니다. 끄면 회전을 기다리지 않습니다.", 288, 36, 11, 1);
     G.playbackLabel = add_label(document, "회전 대기 설정을 준비하고 있습니다.", 328, 36, 11, 1);
-    add_label(document, "그래픽·촬영 화면", 384, 30, 17, 0);
-    add_label(document, "그래픽 지원 IPA가 필요합니다. 서버 실행 중에도 바꿀 수 있으며 저장 후 실제 게임의 적용 확인을 기다립니다.", 418, 38, 11, 1);
-    G.custom = add_button(document, "사용자 그래픽 설정 사용", 8, 460, 450, C_CUSTOM, 1);
+    add_label(document, "MV·의상 목록·게임 데이터 언어", 384, 30, 17, 0);
+    G.hideVideo=add_button(document,"3D 촬영이 없는 영상 MV 숨기기",8,420,620,C_HIDE_VIDEO,1);
+    G.mvSort=add_menu(document,"라이브 촬영 MV 정렬",458,C_MV_SORT);
+    const char *mvNames[]={"최신순 (기본)","오래된 순","이름순","ID순"};
+    for (int i=0;i<4;++i) menu_item(G.mvSort,mvNames[i]);
+    G.outfitSort=add_menu(document,"의상 정렬",492,C_OUTFIT_SORT);
+    const char *outfitNames[]={"원본 획득순 (기본)","출시 최신순","출시 오래된 순","이름순","ID순"};
+    for (int i=0;i<5;++i) menu_item(G.outfitSort,outfitNames[i]);
+    G.language=add_menu(document,"게임 데이터 언어",526,C_LANGUAGE);
+    const char *languageNames[]={"日本語 (원본)","한국어","English"};
+    for (int i=0;i<3;++i) menu_item(G.language,languageNames[i]);
+    add_label(document,"언어는 준비된 게임 데이터의 곡·의상·캐릭터·스토리 제목에 적용됩니다. 음성·자막·전체 UI 번역은 포함하지 않습니다.",562,38,11,1);
+    G.libraryLabel=add_label(document,"목록·언어 설정을 준비하고 있습니다.",606,50,11,1);
+    add_label(document, "그래픽·촬영 화면", 684, 30, 17, 0);
+    add_label(document, "그래픽 지원 IPA가 필요합니다. 서버 실행 중에도 바꿀 수 있으며 저장 후 실제 게임의 적용 확인을 기다립니다.", 718, 38, 11, 1);
+    G.custom = add_button(document, "사용자 그래픽 설정 사용", 8, 760, 450, C_CUSTOM, 1);
     const char *labels[] = {"그래픽 품질", "목표 프레임 수", "3D 렌더 배율", "렌더 버퍼 최대 크기", "가장자리 다듬기", "캐릭터 그림자 해상도"};
     long tags[] = {C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW};
-    for (int i = 0; i < 6; ++i) G.menus[i] = add_menu(document, labels[i], 496 + i * 34, tags[i]);
+    for (int i = 0; i < 6; ++i) G.menus[i] = add_menu(document, labels[i], 796 + i * 34, tags[i]);
     add_int_items(G.menus[0], qualities, 6, 0); add_int_items(G.menus[1], rates, 5, 1);
     double initialScales[] = {0.25, 0.5, 0.75, 1, 1.25, 1.5, 2};
     G.scaleCount = 7; for (int i = 0; i < 7; ++i) G.scales[i] = initialScales[i];
@@ -490,20 +690,33 @@ static void make_window(void) {
     if (!found) G.maxima[G.maximumCount++] = G.prefs.maximum;
     add_int_items(G.menus[3], G.maxima, G.maximumCount, 2);
     add_int_items(G.menus[4], antiAlias, 4, 3); add_int_items(G.menus[5], shadows, 5, 4);
-    G.expand = add_button(document, "촬영·360 화면의 3D 표시 영역 확장", 8, 706, 600, C_EXPAND, 1);
-    add_label(document, "기본 16:9 바깥에도 3D 장면을 렌더링합니다. 확대·잘라내기·늘이기 방식이 아닙니다.", 738, 32, 11, 1);
-    G.visualLabel = add_label(document, "게임의 응답 대기", 776, 42, 12, 1);
-    G.metricLabel = add_label(document, "게임의 3D 화면·시야각 측정값 수신 대기", 820, 42, 11, 1);
-    add_label(document, "실행 기록", 874, 26, 14, 0);
-    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 904, 676, 200));
+    G.expand = add_button(document, "촬영·360 화면의 3D 표시 영역 확장", 8, 1006, 600, C_EXPAND, 1);
+    add_label(document, "기본 16:9 바깥에도 3D 장면을 렌더링합니다. 확대·잘라내기·늘이기 방식이 아닙니다.", 1038, 32, 11, 1);
+    G.visualLabel = add_label(document, "게임의 응답 대기", 1076, 42, 12, 1);
+    G.metricLabel = add_label(document, "게임의 3D 화면·시야각 측정값 수신 대기", 1120, 42, 11, 1);
+    add_label(document,"게임 리소스 보관",1174,28,17,0);
+    G.resourcesInDownloads=add_button(document,"Downloads/IdolyPride에 직접 보관 (기본)",8,1208,500,C_RESOURCE_LOCATION,1);
+    G.revealResources=add_button(document,"리소스 폴더 열기",516,1208,170,C_RESOURCE_REVEAL,0);
+    G.resourceLocationLabel=add_label(document,"보관 위치를 확인하고 있습니다.",1240,44,11,1);
+    G.resourcePlatform=add_menu(document,"보관할 리소스",1296,C_RESOURCE_PLATFORM);
+    menu_item(G.resourcePlatform,"iOS · Mac PlayCover (기본)"); menu_item(G.resourcePlatform,"Android");
+    G.resourcePreview=add_button(document,"목록·예상 용량 확인",12,1334,180,C_RESOURCE_PREVIEW,0);
+    G.resourceDownload=add_button(document,"전체 리소스 받기",202,1334,180,C_RESOURCE_DOWNLOAD,0);
+    G.resourceCancel=add_button(document,"작업 취소",392,1334,120,C_RESOURCE_CANCEL,0);
+    G.resourceExport=add_button(document,"보관 ZIP 내보내기",12,1372,180,C_RESOURCE_EXPORT,0);
+    G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1372,180,C_RESOURCE_IMPORT,0);
+    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1412,64,11,1);
+    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1480,54,11,1);
+    add_label(document, "실행 기록", 1562, 26, 14, 0);
+    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1592, 676, 200));
     id_set_bool(logScroll, "setHasVerticalScroller:", 1); id_set_bool(logScroll, "setHasHorizontalScroller:", 0);
     G.logView = id_init_frame(id_get(id_class("NSTextView"), "alloc"), id_rect(0, 0, 650, 200));
     id_set_bool(G.logView, "setEditable:", 0); id_set_bool(G.logView, "setSelectable:", 1);
     id_set_bool(G.logView, "setVerticallyResizable:", 1); id_set_bool(G.logView, "setHorizontallyResizable:", 0);
     id_set(G.logView, "setFont:", id_double(id_class("NSFont"), "userFixedPitchFontOfSize:", 11));
     id_set(logScroll, "setDocumentView:", G.logView); id_set(document, "addSubview:", logScroll);
-    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1116, 42, 11, 1);
-    sync_graphics_controls(); update_controls();
+    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1804, 42, 11, 1);
+    sync_graphics_controls(); sync_library_controls(); update_controls();
     id_void(G.window, "center"); id_set(G.window, "makeKeyAndOrderFront:", 0);
     id_set_bool(G.app, "activateIgnoringOtherApps:", 1);
 }
@@ -515,11 +728,61 @@ static double metric(IDObj values, const char *key) {
     return __builtin_isfinite(value) && value >= 0 && value <= 32768 ? value : 0;
 }
 
+/* Status is a cached, bounded dictionary from the owned engine. Reading it
+   never scans the resource cache or calculates object digests on the UI thread. */
+static void resource_status(IDObj resources) {
+    if (!id_is(resources,"NSDictionary")) {
+        if (!G.running) {
+            G.resourceJobActive=0; G.resourceJobID[0]=0;
+            resource_message("서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",0);
+        }
+        return;
+    }
+    IDObj job=id_item(resources,"job");
+    const char *phase=id_utf8(id_item(job,"state"));
+    const char *identifier=id_utf8(id_item(job,"job_id"));
+    G.resourceJobActive=id_resource_active(phase); G.resourceJobID[0]=0;
+    if (id_resource_job_valid(identifier)) {
+        IDSize length=strlen(identifier); memcpy(G.resourceJobID,identifier,length+1);
+    }
+    const char *platform=G.resourcePlatformIndex ? "android" : "ios";
+    char message[512];
+    if (id_is(job,"NSDictionary") && (G.resourceJobActive || !strcmp(platform,id_utf8(id_item(job,"platform"))))) {
+        long long files=id_json_integer(id_item(job,"verified_files"),-1);
+        long long total=id_json_integer(id_item(job,"total_files"),-1);
+        long long bytes=id_json_integer(id_item(job,"received_bytes"),-1);
+        long long missing=id_json_integer(id_item(job,"missing_files"),-1);
+        if (files < 0 || total < 0 || bytes < 0 || missing < 0) { resource_message("리소스 작업 상태를 확인하고 있습니다.",0); return; }
+        const char *phases[]={"preparing","running","export_ready","cancelling","completed","partial","failed","cancelled"};
+        const char *names[]={"준비","진행","내보내기 준비","취소 중","완료","일부 완료","실패","취소됨"};
+        const char *name="상태 확인 중";
+        for (int i=0;i<8;++i) if (!strcmp(phase,phases[i])) name=names[i];
+        snprintf(message,sizeof message,"%s · %s · 확인 %lld/%lld개 · 수신 %.1f MiB · 미보관 %lld개",
+            !strcmp(id_utf8(id_item(job,"platform")),"android") ? "Android" : "iOS",name,files,total,(double)bytes/1048576.0,missing);
+        resource_message(message,!strcmp(phase,"failed") || !strcmp(phase,"partial"));
+    } else {
+        IDObj catalog=id_item(id_item(resources,"catalogs"),platform);
+        long long files=id_json_integer(id_item(catalog,"object_count"),-1);
+        long long bytes=id_json_integer(id_item(catalog,"total_bytes"),-1);
+        if (files >= 0 && bytes >= 0) {
+            snprintf(message,sizeof message,"%s 목록 %lld개 · %.1f GiB · 받은 파일은 크기·MD5를 확인해 보관합니다.",
+                G.resourcePlatformIndex ? "Android" : "iOS",files,(double)bytes/1073741824.0);
+            resource_message(message,0);
+        } else resource_message(G.running ? "목록·예상 용량 확인을 누르면 선택한 플랫폼의 보관 용량을 표시합니다."
+            : "서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",0);
+    }
+}
+
 static void received_event(const char *bytes, IDSize length) {
     IDObj event = id_json(id_data(bytes, length));
     if (!id_is(event, "NSDictionary")) return;
     const char *kind = id_utf8(id_item(event, "event"));
     if (strcmp(kind, "log") == 0) { log_line(id_utf8(id_item(event, "message"))); return; }
+    if (!strcmp(kind,"resource_error") || !strcmp(kind,"resource_result")) {
+        const char *message=id_utf8(id_item(event,"message"));
+        G.resourcePending=0; resource_message(*message ? message : "리소스 작업 상태가 갱신되었습니다.",!strcmp(kind,"resource_error"));
+        log_line(message); update_controls(); return;
+    }
     if (strcmp(kind, "error") == 0) {
         G.busy = 0; status(id_utf8(id_item(event, "message"))); log_line(id_utf8(id_item(event, "message"))); update_controls(); return;
     }
@@ -529,6 +792,11 @@ static void received_event(const char *bytes, IDSize length) {
     id_poll_received(&G.polling, uptime());
     G.running = truth(id_item(state, "running")); G.busy = truth(id_item(state, "starting"));
     G.canStop = truth(id_item(state, "can_stop"));
+    G.resourcePending=0;
+    IDObj resources=id_item(state,"resource_library");
+    IDObj previous=G.resourceSnapshot; G.resourceSnapshot=id_keep(resources);
+    if (previous) id_void(previous,"release");
+    resource_status(resources);
     if (G.running && truth(id_item(state, "experimental_main_live"))) G.experimentalObserved = 1;
     if (!G.quitting) status(G.running ? "로컬 서버가 실행 중입니다." : G.busy ? "서버를 시작하고 있습니다." : "서버가 중지되어 있습니다.");
     IDObj client = id_item(id_item(state, "presentation"), "client");
@@ -693,6 +961,13 @@ int idoly_app_main(int argc, char **argv) {
     G.liveMode = truth(id_arg(G.defaults, "objectForKey:", id_string("experimentalMainLive")));
     IDObj downloads = id_arg(G.defaults, "objectForKey:", id_string("downloadMissingResources"));
     G.downloadMode = downloads ? truth(downloads) : 1;
+    IDObj resourcesChoice=id_arg(G.defaults,"objectForKey:",id_string("resourcesInDownloads"));
+    G.resourcesDownloads=id_resources_in_downloads(id_is(resourcesChoice,"NSNumber")
+        && IDRuntime.typeID(resourcesChoice)==IDRuntime.booleanTypeID(),truth(resourcesChoice));
+    IDObj downloadDirectories=((IDObj (*)(IDObj,IDSel,unsigned long,unsigned long))IDRuntime.message)(
+        id_get(id_class("NSFileManager"),"defaultManager"),id_sel("URLsForDirectory:inDomains:"),ID_SEARCH_DOWNLOADS,ID_USER_DOMAIN);
+    if (id_long(downloadDirectories,"count") > 0)
+        G.downloadsResourcesURL=id_keep(childURL(id_index(downloadDirectories,"objectAtIndex:",0),"IdolyPride"));
     IDObj directories = ((IDObj (*)(IDObj, IDSel, unsigned long, unsigned long))IDRuntime.message)(
         id_get(id_class("NSFileManager"), "defaultManager"), id_sel("URLsForDirectory:inDomains:"), 14, 1);
     if (id_long(directories, "count") < 1) { IDRuntime.poolPop(pool); return 1; }
@@ -708,6 +983,9 @@ int idoly_app_main(int argc, char **argv) {
     }
     G.prefsURL = id_keep(childURL(G.dataURL, "client-presentation.json")); load_preferences();
     G.playbackURL = id_keep(childURL(G.dataURL, "client-playback.json")); load_playback_preferences();
+    G.library=id_library_defaults();
+    G.mediaURL=id_keep(childURL(G.dataURL,"client-media.json")); load_library_file(G.mediaURL,0);
+    G.languageURL=id_keep(childURL(G.dataURL,"client-language.json")); load_library_file(G.languageURL,1);
     G.app = id_get(id_class("NSApplication"), "sharedApplication"); id_set_long(G.app, "setActivationPolicy:", 0);
     IDObj delegateClass = IDRuntime.allocateClass(id_class("NSObject"), "IdolyServerDelegate", 0);
     IDRuntime.addMethod(delegateClass, id_sel("applicationDidFinishLaunching:"), (void *)did_launch, "v@:@");

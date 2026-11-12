@@ -28,7 +28,9 @@ def java_jni_contract():
             "public static native String status();\n"
             "public static native boolean configurePlayback(int schema, long revision, boolean waitForOrientation);\n"
             "public static native String playbackStatus();\n"
-            "public static native String renderProbeStatus();\n")
+            "public static native String renderProbeStatus();\n"
+            "public static native boolean configureMedia(int schema, long revision, boolean useMasterCostumeOrder);\n"
+            "public static native String wardrobeStatus();\n")
 
 
 @pytest.fixture
@@ -120,14 +122,14 @@ def test_new_feature_accepts_only_exact_source_bound_members(frozen_fixture, tmp
              "native_input": {"source_commit": commit, "sha256": sha, "bytes": len(native),
                  "source_sha256": {name: sources[name] for name in tool.native_source_paths(root)},
                  "profile_prefix_count": 1, "profile_hook_count": 1,
-                 "jni_exports": tool.expected_jni_exports(root=root), "jni_method_count": 6}}
+                 "jni_exports": tool.expected_jni_exports(root=root), "jni_method_count": 8}}
     receipt = path.with_suffix(".provenance.json")
     receipt.write_text(json.dumps(proof))
     assert tool.verified_feature(path, commit, sources, root=root) == proof
     for key, value in (("source_commit", "b" * 40), ("source_sha256", {}),
                        ("signature_and_alignment_verified", False), ("member_sha256", {}),
                        ("native_input", {**proof["native_input"], "jni_exports": proof["native_input"]["jni_exports"][:-1]}),
-                       ("native_input", {**proof["native_input"], "jni_method_count": 5})):
+                       ("native_input", {**proof["native_input"], "jni_method_count": 6})):
         receipt.write_text(json.dumps({**proof, key: value}))
         with pytest.raises(ValueError): tool.verified_feature(path, commit, sources, root=root)
     receipt.write_text(json.dumps(proof))
@@ -149,24 +151,26 @@ def synthetic_jni_elf(names):
     return bytes(raw)
 
 
-def test_exact_six_jni_methods_include_render_probe_without_prefix_or_type_confusion(tmp_path):
+def test_exact_eight_jni_methods_include_render_probe_media_and_wardrobe_without_type_confusion(tmp_path):
     prefix = 'Java_game_qualiarts_idolypride_presentation_NativePresentation_'
     java=tmp_path/'client-presentation/java/game/qualiarts/idolypride/presentation/NativePresentation.java'
     java.parent.mkdir(parents=True);java.write_text(java_jni_contract())
     names = {'JNI_OnLoad', *(prefix + name for name in ('start', 'configure', 'status',
-              'configurePlayback', 'playbackStatus', 'renderProbeStatus'))}
+              'configurePlayback', 'playbackStatus', 'renderProbeStatus', 'configureMedia', 'wardrobeStatus'))}
     library=tmp_path/'native.so';library.write_bytes(synthetic_jni_elf(sorted(names)))
     assert tool.native_jni_exports(library)==names
     assert tool.check_jni(library,root=tmp_path)==sorted(names)
     # A playback export cannot stand in for configure; a status-prefixed name
     # cannot stand in for the new renderProbeStatus native method.
     for replacement in [names - {prefix+'configure'}, names - {prefix+'renderProbeStatus'},
+                        names - {prefix+'wardrobeStatus'},
                         names | {prefix+'renderProbeStatusExtra'}]:
         library.write_bytes(synthetic_jni_elf(sorted(replacement)))
         with pytest.raises(ValueError,match='exactly'):tool.check_jni(library,root=tmp_path)
     library.write_bytes(synthetic_jni_elf(sorted(names)))
     for changed in [java_jni_contract().replace('String renderProbeStatus()', 'boolean renderProbeStatus()'),
                     java_jni_contract().replace('renderProbeStatus()', 'renderProbeStatus(int unexpected)'),
+                    java_jni_contract().replace('String wardrobeStatus()', 'boolean wardrobeStatus()'),
                     java_jni_contract()+'public static native String renderProbeStatus();',
                     java_jni_contract().replace('public static native String renderProbeStatus();', '')]:
         java.write_text(changed)
@@ -174,7 +178,7 @@ def test_exact_six_jni_methods_include_render_probe_without_prefix_or_type_confu
 
 
 @pytest.mark.parametrize("drift", ["missing-probe", "extra-prefix-method"])
-def test_feature_rejects_native_export_drift_even_when_receipt_lists_six_methods(frozen_fixture, tmp_path, monkeypatch, drift):
+def test_feature_rejects_native_export_drift_even_when_receipt_lists_eight_methods(frozen_fixture, tmp_path, monkeypatch, drift):
     root, commit = frozen_fixture
     sources = tool.frozen_sources(commit, root=root)
     expected = tool.expected_jni_exports(root=root)
@@ -199,7 +203,7 @@ def test_feature_rejects_native_export_drift_even_when_receipt_lists_six_methods
              "native_input": {"source_commit": commit, "sha256": sha, "bytes": len(native),
                  "source_sha256": {name: sources[name] for name in tool.native_source_paths(root)},
                  "profile_prefix_count": 1, "profile_hook_count": 1,
-                 "jni_exports": expected, "jni_method_count": 6}}
+                 "jni_exports": expected, "jni_method_count": 8}}
     path.with_suffix(".provenance.json").write_text(json.dumps(proof))
     # All source/member identities agree. The raw ELF still cannot omit or add
     # a method merely because its public receipt claims the expected inventory.

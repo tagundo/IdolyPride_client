@@ -36,6 +36,41 @@ def _platform_archive(platform):
     return PLATFORM_ARCHIVES[platform]
 
 
+def resource_cache_root(data_dir, resource_cache_dir=None):
+    """Choose resource storage only; catalogs, profiles and state stay private."""
+    try:
+        private = Path(data_dir).resolve(strict=True)
+        if not private.is_dir():
+            raise ValueError("Game resource data directory is unavailable")
+        if resource_cache_dir is None:
+            return private
+        public = Path(resource_cache_dir)
+        if not public.is_absolute() or public.is_symlink():
+            raise ValueError("Game resource storage must be an absolute directory")
+        public.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if public.is_symlink() or not public.is_dir():
+            raise ValueError("Game resource storage directory is invalid")
+        return public.resolve(strict=True)
+    except OSError:
+        raise ValueError("Game resource storage directory is unavailable") from None
+
+
+def resource_cache_paths(data_dir, cache_root, platform):
+    """Return the primary platform cache and optional read-only legacy seed."""
+    _archive, name, _version, _revision = _platform_archive(platform)
+    try:
+        private, selected = Path(data_dir).resolve(strict=True), Path(cache_root).resolve(strict=True)
+        primary, legacy = selected / name, private / name
+        if primary.is_symlink():
+            raise ValueError("Game resource cache directory is invalid")
+        seeds = ()
+        if selected != private and legacy.is_dir() and not legacy.is_symlink():
+            seeds = (legacy,)
+        return primary, seeds
+    except OSError:
+        raise ValueError("Game resource cache directory is unavailable") from None
+
+
 _SETTINGS = frozenset(("schema", "application_id", "application_version", "revision",
                        "manifest_sha256", "aes_key_hex", "client_key"))
 _FAILURE_CODES = frozenset(("cache_io", "upstream_redirect", "upstream_http",
@@ -303,7 +338,8 @@ def _desktop_aes_backend():
 
 
 def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
-                        allow_downloads=True, log_callback=None, platform="android"):
+                        allow_downloads=True, log_callback=None, platform="android",
+                        resource_cache_dir=None):
     """Create an optional gateway without changing legacy server bundles."""
     if type(allow_downloads) is not bool:
         raise TypeError("Resource download choice must be a boolean")
@@ -314,6 +350,7 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
     archive_name, cache_name, _, _ = _platform_archive(platform)
     tracker = OctoResourceTracker(allow_downloads=allow_downloads, log_callback=log_callback)
     root = Path(data_dir)
+    selected_cache_root = resource_cache_root(root, resource_cache_dir)
     archive = load_octo_archive(root / archive_name, platform=platform)
     if archive is None:
         return None, tracker
@@ -328,6 +365,7 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
     if manifest.revision != settings["revision"]:
         raise ValueError("Game resource manifest revision differs")
     tracker = OctoResourceTracker(available=True, allow_downloads=allow_downloads, log_callback=log_callback)
-    cache = OctoCache(root / cache_name, fetcher=fetcher,
+    cache_path, seed_dirs = resource_cache_paths(root, selected_cache_root, platform)
+    cache = OctoCache(cache_path, fetcher=fetcher, seed_dirs=seed_dirs,
         on_event=tracker.on_cache_event, allow_download=allow_downloads)
     return OctoGateway(manifest, cache, transfer_callback=tracker.on_http_transfer), tracker

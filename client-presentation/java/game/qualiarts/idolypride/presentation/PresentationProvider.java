@@ -27,6 +27,11 @@ public final class PresentationProvider extends ContentProvider {
             }
             @Override public String status() { return NativePresentation.playbackStatus(); }
         };
+        PresentationClient.MediaNative media = new PresentationClient.MediaNative() {
+            @Override public boolean configure(int schema, long revision, boolean useMasterCostumeOrder) {
+                return NativePresentation.configureMedia(schema, revision, useMasterCostumeOrder);
+            }
+        };
         while (!Thread.currentThread().isInterrupted()) {
             long nextPoll = System.nanoTime() + 2000000000L;
             try {
@@ -46,9 +51,15 @@ public final class PresentationProvider extends ContentProvider {
                 try { client.pollPlayback(playback); }
                 catch (Exception ignored) { /* Keep native defaults or the last valid playback option. */ }
                 catch (LinkageError ignored) { /* An older graphics bridge may not expose this optional API. */ }
+                try { client.pollMedia(media); }
+                catch (Exception ignored) { /* Retain native original ordering or the last valid startup policy. */ }
+                catch (LinkageError ignored) { /* Optional API on an older installed bridge. */ }
                 try { client.postRenderProbe(NativePresentation.renderProbeStatus()); }
                 catch (Exception ignored) { /* Old servers and invalid/unavailable snapshots are optional. */ }
                 catch (LinkageError ignored) { /* Do not reload or disturb an older working graphics bridge. */ }
+                try { client.postWardrobe(NativePresentation.wardrobeStatus()); }
+                catch (Exception ignored) { /* Optional lifecycle trace on older/unavailable local servers. */ }
+                catch (LinkageError ignored) { /* Preserve all other channels on an older native bridge. */ }
             }
             long delay = nextPoll - System.nanoTime();
             try { if (delay > 0) Thread.sleep(delay / 1000000L, (int) (delay % 1000000L)); }

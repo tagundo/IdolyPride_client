@@ -72,6 +72,8 @@ ANDROID_JNI_METHODS = {
     "configurePlayback": ("boolean", ("int", "long", "boolean")),
     "playbackStatus": ("String", ()),
     "renderProbeStatus": ("String", ()),
+    "configureMedia": ("boolean", ("int", "long", "boolean")),
+    "wardrobeStatus": ("String", ()),
 }
 JNI_PREFIX = "Java_game_qualiarts_idolypride_presentation_NativePresentation_"
 
@@ -234,7 +236,7 @@ def expected_jni_exports(*, root=ROOT):
             raise ValueError("Frozen Android Java JNI method is duplicated")
         methods[name] = (result, tuple(params))
     if methods != ANDROID_JNI_METHODS:
-        raise ValueError("Frozen Android Java JNI signatures do not exactly match the six-method contract")
+        raise ValueError("Frozen Android Java JNI signatures do not exactly match the typed method contract")
     return sorted({"JNI_OnLoad", *(JNI_PREFIX + name for name in methods)})
 
 

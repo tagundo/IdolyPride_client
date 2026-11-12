@@ -28,8 +28,8 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
 from certificate_bundle import install_certificate_bundle
 APP = "IdolyPrideLocalServer"
-VERSION = "0.3.16"
-BUILD_NUMBER = "35"
+VERSION = "0.3.19"
+BUILD_NUMBER = "38"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
 PAYLOAD_SHA = "1b310088f2f8573c1b62bd071de3e064e4f6c59ba8058a7f4f5c3665a82aa9f5"
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
@@ -169,7 +169,8 @@ def build(args):
                       "CFBundleName": "IdolyPride Local Server", "CFBundleDisplayName": "아이프라 로컬 서버",
                       "CFBundlePackageType": "APPL", "CFBundleShortVersionString": VERSION, "CFBundleVersion": BUILD_NUMBER,
                       "LSMinimumSystemVersion": "13.0", "LSApplicationCategoryType": "public.app-category.games",
-                      "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication"}, stream)
+                      "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication",
+                      "NSDownloadsFolderUsageDescription": "게임 리소스를 Downloads/IdolyPride에 보관하고 게임에 제공합니다."}, stream)
     commands=[]
     objects=[]
     for name in ("main", "python_host", "appkit_ui"):

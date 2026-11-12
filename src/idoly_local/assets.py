@@ -103,7 +103,8 @@ def _range(value: str, size: int) -> tuple[int, int]:
 def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                         transfer_callback=None, octo=None,
                         runtime_status_callback=None, presentation=None, playback=None,
-                        render_probe=None) -> ThreadingHTTPServer:
+                        render_probe=None, media_settings=None, resource_library=None,
+                        wardrobe_probe=None) -> ThreadingHTTPServer:
     """Create a bound server; caller owns serve_forever/shutdown/server_close.
 
     Files live under the explicit root. Directory listings and paths resolving
@@ -129,6 +130,25 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
             _LOG.info("%s %r", self.command, urlsplit(self.path).path)
 
         def do_GET(self):
+            if unquote(urlsplit(self.path).path).startswith("/client/wardrobe"):
+                if self.path != "/client/wardrobe" or wardrobe_probe is None:
+                    self._json(404, {"error": "not_found"})
+                elif not self._loopback():
+                    self._json(403, {"error": "loopback_required"})
+                else:
+                    self._json(200, wardrobe_probe.status())
+                return
+            from . import resource_routes
+            if resource_routes.get(self, self.server.resource_library):
+                return
+            if unquote(urlsplit(self.path).path).startswith("/client/media"):
+                if self.path != "/client/media" or media_settings is None:
+                    self._json(404, {"error": "not_found"})
+                elif not self._loopback():
+                    self._json(403, {"error": "loopback_required"})
+                else:
+                    self._json(200, media_settings.settings())
+                return
             if _render_probe_route(self.path):
                 if self.path != "/client/render-probe" or render_probe is None:
                     self._json(404, {"error": "not_found"})
@@ -175,6 +195,10 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
             self._serve(True)
 
         def do_HEAD(self):
+            from . import resource_routes
+            if resource_routes.handles(self.path) or unquote(urlsplit(self.path).path).startswith(("/client/media", "/client/wardrobe")):
+                self._json(404, {"error": "not_found"})
+                return
             if _render_probe_route(self.path):
                 self._json(404, {"error": "not_found"})
                 return
@@ -243,10 +267,14 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                     pass  # A status observer cannot interrupt file serving.
 
         def do_POST(self):
+            from . import resource_routes
+            if resource_routes.post(self, self.server.resource_library):
+                return
             visual = self.path == "/client/presentation/status" and presentation is not None
             playback_report = self.path == "/client/playback/status" and playback is not None
             probe_report = self.path == "/client/render-probe" and render_probe is not None
-            if not visual and not playback_report and not probe_report and (self.path != "/diagnostics/client" or diagnostics is None):
+            wardrobe_report = self.path == "/client/wardrobe" and wardrobe_probe is not None
+            if not visual and not playback_report and not probe_report and not wardrobe_report and (self.path != "/diagnostics/client" or diagnostics is None):
                 self._json(404, {"error": "not_found"})
                 return
             if not self._loopback():
@@ -260,7 +288,7 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                 self._json(411, {"error": "content_length_required"})
                 return
             size = int(size)
-            if not 0 < size <= (8191 if probe_report else 8192 if visual or playback_report else 32768):
+            if not 0 < size <= (2048 if wardrobe_report else 8191 if probe_report else 8192 if visual or playback_report else 32768):
                 self._json(413, {"error": "diagnostics_size_limit"})
                 return
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
@@ -272,10 +300,10 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                 raw = self.rfile.read(size)
                 if len(raw) != size:
                     raise ValueError("Incomplete request")
-                receiver = render_probe if probe_report else playback if playback_report else presentation if visual else diagnostics
+                receiver = wardrobe_probe if wardrobe_report else render_probe if probe_report else playback if playback_report else presentation if visual else diagnostics
                 result = receiver.receive(raw)
             except (ValueError, TimeoutError, OSError):
-                self._json(400, {"error": "invalid_render_probe" if probe_report else
+                self._json(400, {"error": "invalid_wardrobe_status" if wardrobe_report else "invalid_render_probe" if probe_report else
                                        "invalid_playback_status" if playback_report else
                                        "invalid_presentation_status" if visual else "invalid_client_diagnostics"})
                 return
@@ -346,4 +374,5 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
 
     server = ThreadingHTTPServer((host, port), Handler)
     server.octo_gateway = octo
+    server.resource_library = resource_library
     return server

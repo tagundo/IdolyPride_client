@@ -1558,6 +1558,50 @@
       "return_type": "System.Void",
       "registration_pointer_slot_rva": 169983312,
       "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "costume_sorted": {
+      "name": "Solis.Common.User.UserCostumeCollection.GetSortedCharacterCostumes",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12828,
+      "metadata_method_index": 61470,
+      "token_row": 61471,
+      "rva": 31313528,
+      "return_type_index": 25377,
+      "parameters": [
+        {
+          "name": "characterId",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 134,
+      "return_type": "managed collection reference",
+      "registration_pointer_slot_rva": 170449472,
+      "prefix16": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "native_ABI": "void*(void*,Il2CppString*,const MethodInfo*)"
+    },
+    "costume_order_sorted": {
+      "name": "Solis.Common.User.UserCostumeCollection.GetOrderSortedCharacterCostumes",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12828,
+      "metadata_method_index": 61471,
+      "token_row": 61472,
+      "rva": 31313816,
+      "return_type_index": 25377,
+      "parameters": [
+        {
+          "name": "characterId",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 134,
+      "return_type": "managed collection reference",
+      "registration_pointer_slot_rva": 170449480,
+      "prefix16": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "native_ABI": "void*(void*,Il2CppString*,const MethodInfo*)"
     }
   },
   "hook_names": [
@@ -1591,7 +1635,8 @@
     "orientation_fixed_landscape_ready",
     "orientation_after_ready",
     "mv_ui_initialize",
-    "preview_ui_bind"
+    "preview_ui_bind",
+    "costume_sorted"
   ],
   "segments": {
     "__TEXT": {
@@ -1633,12 +1678,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 992,
+    "bytes": 1024,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 248,
+    "bytes": 256,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -1689,7 +1734,7 @@
       "max_texture",
       "rt_destroy"
     ],
-    "managed_semantic_method_count": 81,
+    "managed_semantic_method_count": 83,
     "export_symbol_count": 7,
     "original_iOS_orientation_rows": 13,
     "all_original_prefixes_restreamed_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
@@ -1721,5 +1766,16 @@
     "model_end_offset": 24,
     "UI_On_and_Off_original_handlers_retained": true,
     "paid_capture_and_selection_menus_changed": false
+  },
+  "media_costume_sort": {
+    "scope": "Presentation-only: accepted startup outfit_sort other than original",
+    "default_path": "Original acquisition-time descending sorter",
+    "custom_path": "Original master-order ascending sorter",
+    "same_character_predicate": true,
+    "account_data_or_acquisition_timestamps_changed": false,
+    "configuration_endpoint": "GET /client/media schema1 startup snapshot",
+    "dispatch_runtime_guard": "ready plus established Unity game thread",
+    "original_source_proof": "Original iOS metadata + SHA-verified method table/prefix + comparator/character predicate code",
+    "runtime_device_validation": false
   }
 }

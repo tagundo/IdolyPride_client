@@ -5,7 +5,7 @@ import pytest
 
 from idoly_local.photo_shooting import PhotoSceneAccess
 from idoly_local.rpc import RpcCode, RpcFailure
-from test_photo_shooting import game as photo_game, schema, call, dump, CHECK, CREATE
+from test_photo_shooting import game as photo_game, schema, call, dump, CHECK, CREATE, LIST
 
 
 @pytest.fixture
@@ -38,6 +38,31 @@ def test_real_movie_can_check_with_empty_stage_and_no_invented_cast(movie):
     assert not result.commonResponse.deletedData.ListFields()
     assert call(movie, CHECK, **values()) == result
     assert dump(movie[1]) == before
+
+
+def test_hide_video_only_filters_menu_rows_without_relocking_or_mutating_accounts(movie):
+    from idoly_local.media_settings import DEFAULTS
+
+    provider, state, master, access = movie
+    definitions = json.loads((master / "Music.json").read_text())
+    definitions.append({"id": "dual-music", "is3dAvailable": True, "mvAssetId": "original-movie"})
+    (master / "Music.json").write_text(json.dumps(definitions))
+    rows = json.loads((master / "PhotoQuestMusic.json").read_text())
+    rows.append({"id": "dual-music"})
+    (master / "PhotoQuestMusic.json").write_text(json.dumps(rows))
+    provider.scene_access = PhotoSceneAccess(activities=access.activities,
+        musics=dict(provider.scene_access.musics) | {"dual-music": True}, stages=access.stages,
+        expressions=access.expressions)
+    preferences = DEFAULTS | {"hide_video_mv": True}
+    provider.media_settings = lambda: preferences
+    before = dump(state)
+    assert {row.musicId for row in call(movie, LIST).musics} == {"music-a", "dual-music"}
+    assert provider.scene_access.musics["movie-a"] is True
+    # Hiding an item is not a revocation of playback/check access.
+    call(movie, CHECK, **values())
+    preferences["hide_video_mv"] = False
+    assert {row.musicId for row in call(movie, LIST).musics} == {"movie-a", "music-a", "dual-music"}
+    assert dump(state) == before
 
 
 def test_supplied_movie_cast_still_requires_owned_matching_compatible_styles(movie):

@@ -1,6 +1,7 @@
 // Optional, account-free loopback transport. Unity calls stay on its own thread.
 #include "settings_json.hpp"
 #include "playback_json.hpp"
+#include "media_json.hpp"
 namespace {
 double monotonic_seconds() {
     timespec tick{};
@@ -52,6 +53,7 @@ bool exchange_http(const char *method, const char *path, const char *body, char 
     std::memcpy(output,payload,bytes); output[bytes]=0; return true;
 }
 void *presentation_poll(void *) {
+    MediaConfigMessage accepted_media; bool have_media = false;
     for (;;) {
         char settings[8193];
         if (exchange_http("GET","/client/presentation",nullptr,settings,sizeof settings)) {
@@ -69,6 +71,15 @@ void *presentation_poll(void *) {
                     && accept_playback_configuration(1,next.revision,next.wait_for_orientation)) {
                 char report[512], accepted[256]; playback_status_json(report,sizeof report);
                 exchange_http("POST","/client/playback/status",report,accepted,sizeof accepted);
+            }
+        }
+        if (exchange_http("GET","/client/media",nullptr,settings,sizeof settings)) {
+            MediaConfigMessage next;
+            if (decode_media_settings(settings,&next)
+                    && (!have_media || next.revision > accepted_media.revision
+                        || (next.revision == accepted_media.revision && next.same_values(accepted_media)))
+                    && accept_media_configuration(1,next.revision,next.outfit_sort != 0)) {
+                accepted_media = next; have_media = true;
             }
         }
         pause_ms(2000);

@@ -19,6 +19,7 @@ def test_server_keeps_runtime_permissions_and_only_known_client_visibility():
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
         "android.permission.POST_NOTIFICATIONS",
+        "android.permission.MANAGE_EXTERNAL_STORAGE",
     }
     assert {node.get(ANDROID + "name") for node in manifest.findall("queries/package")} == {
         "game.qualiarts.idolypride.local",
@@ -28,6 +29,25 @@ def test_server_keeps_runtime_permissions_and_only_known_client_visibility():
     application = manifest.find("application")
     assert {node.get(ANDROID + "name") for node in application.findall("activity")} == {".MainActivity"}
     assert application.find("service").get(ANDROID + "exported") == "false"
+
+
+def test_downloads_storage_is_explicit_permission_gated_and_keeps_old_android_fallback():
+    activity = (JAVA / "MainActivity.java").read_text()
+    service = (JAVA / "ServerService.java").read_text()
+    transfers = (JAVA / "ResourceTransfers.java").read_text()
+    assert "Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION" in activity
+    assert 'Uri.parse("package:" + getPackageName())' in activity
+    assert "retryStartAfterStoragePermission" in activity and "protected void onResume()" in activity
+    assert "Environment.isExternalStorageManager()" in activity and "Environment.isExternalStorageManager()" in service
+    assert "choosePrivateStorageAndStart()" in activity
+    assert "resourceCacheDirectory" in service and "mediaMode, resourceCacheDirectory" in service
+    assert 'Environment.DIRECTORY_DOWNLOADS + "/IdolyPride/exports"' in transfers
+    assert "DocumentsContract.EXTRA_INITIAL_URI" in activity and "primary:Download/IdolyPride/exports" in activity
+    manifest = ET.parse(MAIN / "AndroidManifest.xml").getroot()
+    permissions = {node.get(ANDROID + "name") for node in manifest.findall("uses-permission")}
+    assert "android.permission.REQUEST_INSTALL_PACKAGES" not in permissions
+    assert "android.permission.READ_EXTERNAL_STORAGE" not in permissions
+    assert "android.permission.WRITE_EXTERNAL_STORAGE" not in permissions
 
 
 def test_graphics_and_playback_controls_remain_without_any_apk_installation_path():

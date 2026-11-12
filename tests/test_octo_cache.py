@@ -631,3 +631,388 @@ def test_close_cancels_an_object_waiting_for_download_capacity(tmp_path):
             assert caught.value.code == "cache_closed"
     assert len(calls) == 1
     assert not list(tmp_path.rglob("*.part"))
+
+
+def seed_file(root, item, body=BODY):
+    path = root / item.cache_key[:2] / (item.cache_key + ".bin")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(body)
+    return path
+
+
+def no_upstream(*args, **kwargs):
+    pytest.fail("A valid legacy cache object must not contact the CDN")
+
+
+def test_seed_copy_works_offline_preserves_legacy_and_reports_zero_upstream_bytes(tmp_path):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item)
+    before = octo_cache._stamp(source.stat())
+    events = []
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream, on_event=events.append)
+    assert read(cache, item) == BODY
+    assert read(cache, item) == BODY
+    assert source.read_bytes() == BODY and octo_cache._stamp(source.stat()) == before
+    assert source.stat().st_ino != destination(cache, item).stat().st_ino
+    assert destination(cache, item).stat().st_mode & 0o777 == 0o400
+    assert [event["phase"] for event in events] == ["cache_hit", "cache_hit"]
+    assert all(event["received_bytes"] == 0 for event in events)
+    assert cache._allowance_spent == 0 and not list(cache.root.rglob("*.part"))
+
+
+@pytest.mark.parametrize("body", [BODY[:-1], b"x" * len(BODY)])
+def test_invalid_seed_size_or_digest_is_preserved_and_remains_an_offline_miss(tmp_path, body):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item, body)
+    before = octo_cache._stamp(source.stat())
+    events = []
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream, on_event=events.append)
+    with pytest.raises(OctoCacheMiss):
+        read(cache, item)
+    assert source.read_bytes() == body and octo_cache._stamp(source.stat()) == before
+    assert not destination(cache, item).exists() and not list(cache.root.rglob("*.part"))
+    assert events == []
+
+
+def test_first_bad_seed_can_fall_back_to_second_verified_seed_without_deleting_either(tmp_path):
+    item = record()
+    first, second = tmp_path / "first", tmp_path / "second"
+    bad = seed_file(first, item, b"x" * len(BODY))
+    good = seed_file(second, item)
+    cache = OctoCache(tmp_path / "public", seed_dirs=[first, second], allow_download=False,
+                      fetcher=no_upstream)
+    assert read(cache, item) == BODY
+    assert bad.read_bytes() == b"x" * len(BODY) and good.read_bytes() == BODY
+
+
+@pytest.mark.parametrize("kind", ["file-symlink", "shard-symlink", "hardlink", "fifo"])
+def test_seed_special_files_and_directory_symlinks_are_never_followed_or_modified(tmp_path, kind):
+    item = record()
+    legacy, outside = tmp_path / "legacy", tmp_path / "outside"
+    legacy.mkdir()
+    outside.mkdir()
+    external = outside / (item.cache_key + ".bin")
+    external.write_bytes(BODY)
+    before = octo_cache._stamp(external.stat())
+    shard = legacy / item.cache_key[:2]
+    if kind == "shard-symlink":
+        shard.symlink_to(outside, target_is_directory=True)
+    else:
+        shard.mkdir()
+        source = shard / external.name
+        if kind == "file-symlink":
+            source.symlink_to(external)
+        elif kind == "hardlink":
+            os.link(external, source)
+            before = octo_cache._stamp(external.stat())
+        else:
+            os.mkfifo(source)
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream)
+    with pytest.raises(OctoCacheMiss):
+        read(cache, item)
+    assert external.read_bytes() == BODY and octo_cache._stamp(external.stat()) == before
+    assert shard.is_symlink() if kind == "shard-symlink" else os.path.lexists(source)
+    assert not destination(cache, item).exists() and not list(cache.root.rglob("*.part"))
+
+
+@pytest.mark.parametrize("kind", ["missing", "file", "symlink", "duplicate", "too-many", "string", "generator"])
+def test_seed_roots_are_explicit_existing_distinct_nonsymlink_directories(tmp_path, kind):
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    invalid = tmp_path / "invalid"
+    if kind == "file":
+        invalid.write_bytes(b"x")
+    elif kind == "symlink":
+        invalid.symlink_to(legacy, target_is_directory=True)
+    roots = ((invalid,) if kind in ("missing", "file", "symlink") else
+             (legacy, legacy) if kind == "duplicate" else
+             (legacy, legacy, legacy) if kind == "too-many" else
+             str(legacy) if kind == "string" else (path for path in (legacy,)))
+    with pytest.raises(ValueError, match="seed"):
+        OctoCache(tmp_path / "public", seed_dirs=roots)
+    assert not invalid.exists() if kind == "missing" else legacy.is_dir()
+
+
+def test_changed_seed_root_identity_cannot_redirect_reads(tmp_path):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item)
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream)
+    legacy.rename(tmp_path / "retained")
+    substituted = seed_file(legacy, item)
+    with pytest.raises(OctoCacheMiss):
+        read(cache, item)
+    assert substituted.read_bytes() == BODY
+    assert (tmp_path / "retained" / source.relative_to(legacy)).read_bytes() == BODY
+
+
+def test_seed_copy_never_spends_the_upstream_lifetime_allowance(tmp_path):
+    item = record()
+    legacy = tmp_path / "legacy"
+    seed_file(legacy, item)
+    calls = []
+
+    def fetch(url, *, timeout):
+        calls.append(url)
+        return Response(url=url)
+
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), max_download_bytes=len(BODY), fetcher=fetch)
+    assert read(cache, item) == BODY and cache._allowance_spent == 0
+    other = record(name="uncached_object")
+    assert read(cache, other) == BODY
+    assert calls == [other.upstream_url] and cache._allowance_spent == len(BODY)
+
+
+def test_two_cache_instances_publish_independent_verified_seed_copies_atomically(tmp_path, monkeypatch):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item)
+    caches = [OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                        fetcher=no_upstream) for _ in range(2)]
+    barrier, original_replace = threading.Barrier(2), octo_cache.os.replace
+
+    def simultaneous_replace(src, dst, **kwargs):
+        barrier.wait(timeout=2)
+        return original_replace(src, dst, **kwargs)
+
+    monkeypatch.setattr(octo_cache.os, "replace", simultaneous_replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(read, cache, item) for cache in caches]
+        assert [future.result(timeout=3) for future in futures] == [BODY, BODY]
+    assert source.read_bytes() == BODY and destination(caches[0], item).read_bytes() == BODY
+    assert not list(caches[0].root.rglob("*.part"))
+
+
+def test_existing_verification_never_chmods_or_changes_a_valid_public_file(tmp_path, monkeypatch):
+    item = record()
+    cache = OctoCache(tmp_path / "public", allow_download=False, fetcher=no_upstream)
+    path = seed_file(cache.root, item)
+    path.chmod(0o600)
+    before = octo_cache._stamp(path.stat())
+    monkeypatch.setattr(octo_cache.os, "fchmod", lambda *args: pytest.fail("A verifier must not mutate an existing inode"))
+    assert read(cache, item) == BODY
+    assert octo_cache._stamp(path.stat()) == before
+
+
+def test_bad_opened_inode_cannot_delete_another_caches_valid_replacement(tmp_path, monkeypatch):
+    item = record()
+    cache = OctoCache(tmp_path / "public", allow_download=False, fetcher=no_upstream)
+    path = seed_file(cache.root, item, b"x" * len(BODY))
+    old_inode = path.stat().st_ino
+    replacement = path.with_name("other-verified-writer")
+    replacement.write_bytes(BODY)
+    replacement.chmod(0o400)
+    new_inode = replacement.stat().st_ino
+    original_fdopen = octo_cache.os.fdopen
+
+    class ReplacedRead:
+        def __init__(self, stream):
+            self.stream, self.replaced = stream, False
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+        def read(self, count):
+            block = self.stream.read(count)
+            if not block and not self.replaced:
+                replacement.replace(path)
+                self.replaced = True
+            return block
+
+    def replaced_fdopen(descriptor, mode, *args, **kwargs):
+        stream = original_fdopen(descriptor, mode, *args, **kwargs)
+        if mode == "rb" and os.fstat(stream.fileno()).st_ino == old_inode:
+            return ReplacedRead(stream)
+        return stream
+
+    monkeypatch.setattr(octo_cache.os, "fdopen", replaced_fdopen)
+    assert read(cache, item) == BODY
+    assert path.stat().st_ino == new_inode and path.read_bytes() == BODY
+    assert not list(cache.root.rglob("*.part"))
+
+
+def test_two_cache_instances_publish_independent_verified_cdn_copies_atomically(tmp_path, monkeypatch):
+    item, calls = record(), []
+
+    def fetch(url, *, timeout):
+        calls.append(url)
+        return Response(url=url)
+
+    caches = [OctoCache(tmp_path / "public", fetcher=fetch) for _ in range(2)]
+    barrier, original_replace = threading.Barrier(2), octo_cache.os.replace
+
+    def simultaneous_replace(src, dst, **kwargs):
+        barrier.wait(timeout=2)
+        return original_replace(src, dst, **kwargs)
+
+    monkeypatch.setattr(octo_cache.os, "replace", simultaneous_replace)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(read, cache, item) for cache in caches]
+        assert [future.result(timeout=3) for future in futures] == [BODY, BODY]
+    assert calls == [item.upstream_url, item.upstream_url]
+    assert destination(caches[0], item).read_bytes() == BODY
+    assert [read(cache, item) for cache in caches] == [BODY, BODY]
+    assert len(calls) == 2 and not list(caches[0].root.rglob("*.part"))
+
+
+def test_seed_copy_close_before_publication_cleans_primary_and_preserves_legacy(tmp_path, monkeypatch):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item)
+    flushing, release = threading.Event(), threading.Event()
+    events, original_fsync = [], octo_cache.os.fsync
+
+    def held_fsync(descriptor):
+        flushing.set()
+        assert release.wait(2)
+        return original_fsync(descriptor)
+
+    monkeypatch.setattr(octo_cache.os, "fsync", held_fsync)
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream, on_event=events.append)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(read, cache, item)
+        assert flushing.wait(2)
+        cache.close()
+        release.set()
+        with pytest.raises(OctoCacheError) as caught:
+            future.result(timeout=2)
+        assert caught.value.code == "cache_closed"
+    assert source.read_bytes() == BODY and not destination(cache, item).exists()
+    assert events == [] and not list(cache.root.rglob("*.part"))
+
+
+def test_seed_copy_deadline_is_checked_after_each_bounded_read(tmp_path, monkeypatch):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item)
+    clock = [0.0]
+    monkeypatch.setattr(octo_cache.time, "monotonic", lambda: clock[0])
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream, total_timeout=1)
+    original_open = cache._seed_file
+
+    class SlowRead:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, count):
+            assert 0 < count <= octo_cache._CHUNK
+            result = self.stream.read(count)
+            clock[0] += 2
+            return result
+
+    def slow_open(*args):
+        stream, info = original_open(*args)
+        return SlowRead(stream), info
+
+    monkeypatch.setattr(cache, "_seed_file", slow_open)
+    with pytest.raises(OctoCacheError) as caught:
+        read(cache, item)
+    assert caught.value.code == "upstream_timeout"
+    assert source.read_bytes() == BODY and not destination(cache, item).exists()
+    assert not list(cache.root.rglob("*.part"))
+
+
+def test_seed_modified_during_bounded_copy_is_not_published_or_deleted(tmp_path, monkeypatch):
+    body = b"original" * 20_000
+    item = record(body)
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item, body)
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream)
+    original_open = cache._seed_file
+
+    class MutatedRead:
+        def __init__(self, stream):
+            self.stream, self.changed = stream, False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.stream.close()
+
+        def fileno(self):
+            return self.stream.fileno()
+
+        def read(self, count):
+            assert 0 < count <= 64 * 1024
+            block = self.stream.read(count)
+            if not block and not self.changed:
+                # Mutation happens after matching original bytes were copied;
+                # checking the original file's stable stamp is still required.
+                source.write_bytes(b"x" * len(body))
+                self.changed = True
+            return block
+
+    def mutated_open(*args):
+        stream, info = original_open(*args)
+        return MutatedRead(stream), info
+
+    monkeypatch.setattr(cache, "_seed_file", mutated_open)
+    with pytest.raises(OctoCacheMiss):
+        read(cache, item)
+    assert source.read_bytes() == b"x" * len(body)
+    assert not destination(cache, item).exists() and not list(cache.root.rglob("*.part"))
+
+
+def test_seed_copies_obey_parallel_limit_and_close_cancels_waiting_copy(tmp_path, monkeypatch):
+    first_item, next_item = record(), record(name="second_seed")
+    legacy = tmp_path / "legacy"
+    sources = [seed_file(legacy, item) for item in (first_item, next_item)]
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream, max_parallel=1)
+    flushing, release = threading.Event(), threading.Event()
+    opened, original_open, original_fsync = [], cache._seed_file, octo_cache.os.fsync
+
+    def counted_open(*args):
+        opened.append(args[-1].cache_key)
+        return original_open(*args)
+
+    def held_fsync(descriptor):
+        flushing.set()
+        assert release.wait(2)
+        return original_fsync(descriptor)
+
+    monkeypatch.setattr(cache, "_seed_file", counted_open)
+    monkeypatch.setattr(octo_cache.os, "fsync", held_fsync)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(read, cache, first_item)
+        assert flushing.wait(2)
+        waiting = pool.submit(read, cache, next_item)
+        cache.close()
+        release.set()
+        for future in (first, waiting):
+            with pytest.raises(OctoCacheError) as caught:
+                future.result(timeout=2)
+            assert caught.value.code == "cache_closed"
+    assert opened == [first_item.cache_key]
+    assert all(path.read_bytes() == BODY for path in sources)
+    assert not list(cache.root.rglob("*.bin")) and not list(cache.root.rglob("*.part"))
+
+
+def test_seed_lookup_cannot_bypass_manifest_object_size_limit(tmp_path):
+    item = record()
+    legacy = tmp_path / "legacy"
+    source = seed_file(legacy, item)
+    cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
+                      fetcher=no_upstream, max_object_bytes=len(BODY) - 1)
+    with pytest.raises(ValueError, match="metadata"):
+        read(cache, item)
+    assert source.read_bytes() == BODY and not list(cache.root.iterdir())

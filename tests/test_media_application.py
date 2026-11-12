@@ -33,7 +33,7 @@ def invoke(game, application, path, *, authenticated=True):
     return game.schema.response_type(path).FromString(raw)
 
 
-def test_media_master_version_matches_served_packs_and_preserves_original_catalog(game, tmp_path):
+def test_normal_and_media_versions_match_explicit_served_packs_and_preserve_original_catalog(game, tmp_path):
     version_path = "/api.Master/GetVersion"
     old = game.schema.response_type(version_path)(version="captured-original-version")
     captured(game, tmp_path, version_path, old)
@@ -43,7 +43,8 @@ def test_media_master_version_matches_served_packs_and_preserves_original_catalo
     source_version = (game.master / "!version.txt").read_bytes()
     before = game.state.snapshot("media")
     normal = app(game, tmp_path, False, master_response=tag.SerializeToString())
-    assert invoke(game, normal, version_path) == old
+    assert invoke(game, normal, version_path).version == tag.masterTag.version
+    assert invoke(game, app(game, tmp_path, False), version_path) == old
     media = app(game, tmp_path, True, master_response=tag.SerializeToString())
     assert invoke(game, media, version_path).version == invoke(game, media, "/api.Master/Get").masterTag.version
     with pytest.raises(RpcFailure) as denied:

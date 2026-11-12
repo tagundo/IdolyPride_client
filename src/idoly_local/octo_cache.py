@@ -163,6 +163,10 @@ class OctoCache:
     It is not a claim about bytes already transferred. Events report actual
     upstream bytes, and cache hits report zero newly received bytes.
 
+    ``seed_dirs`` optionally names at most two existing legacy cache roots.
+    Matching immutable objects are verified and copied on demand into this
+    cache, including offline reads. Seeds are read only and never removed.
+
     ``close()`` rejects new work and prevents subsequent writes/publication. It
     closes available response handles outside the cache lock. Opening DNS or
     response headers has no handle to close yet and remains bounded by the
@@ -172,7 +176,7 @@ class OctoCache:
     def __init__(self, root, *, fetcher=None, on_event=None,
                  max_object_bytes=512 * 1024 * 1024, max_parallel=2,
                  timeout=30, total_timeout=300, allow_download=True,
-                 max_download_bytes=None):
+                 max_download_bytes=None, seed_dirs=()):
         if (type(max_object_bytes) is not int or not 1 <= max_object_bytes <= 2**31-1
                 or type(max_parallel) is not int or not 1 <= max_parallel <= 16
                 or type(allow_download) is not bool
@@ -190,6 +194,7 @@ class OctoCache:
             raise ValueError("Octo cache root is not a directory")
         root_info = self.root.stat()
         self._root_identity = root_info.st_dev, root_info.st_ino
+        self._seed_roots = self._validate_seeds(seed_dirs)
         self.fetcher, self.on_event = fetcher or open_upstream, on_event
         self.max_object_bytes, self.timeout, self.total_timeout = max_object_bytes, timeout, total_timeout
         self.allow_download, self.max_download_bytes = allow_download, max_download_bytes
@@ -200,6 +205,29 @@ class OctoCache:
         self._closed = threading.Event()
         self._responses = {}
         self._flights, self._verified = {}, {}
+
+    @staticmethod
+    def _validate_seeds(seed_dirs):
+        if not isinstance(seed_dirs, (tuple, list)) or len(seed_dirs) > 2:
+            raise ValueError("Octo seed roots must be an explicit bounded sequence")
+        result, seen = [], set()
+        for value in seed_dirs:
+            descriptor = None
+            try:
+                root = Path(value).absolute()
+                descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                info = os.fstat(descriptor)
+                identity = info.st_dev, info.st_ino
+                if not stat.S_ISDIR(info.st_mode) or identity in seen:
+                    raise ValueError()
+                seen.add(identity)
+                result.append((root, identity))
+            except (OSError, TypeError, ValueError):
+                raise ValueError("Octo seed root must be an existing distinct directory") from None
+            finally:
+                if descriptor is not None:
+                    os.close(descriptor)
+        return tuple(result)
 
     def _require_open(self):
         if self._closed.is_set():
@@ -278,67 +306,191 @@ class OctoCache:
             if root_fd is not None:
                 os.close(root_fd)
 
-    def _existing(self, record, directory):
+    def _existing(self, record, directory, deadline=None):
         name = record.cache_key + ".bin"
+        # Independent game/bulk cache instances may atomically replace this
+        # name during verification. Retry a changed inode, but never unlink
+        # the name: a stat-then-unlink check cannot protect another publisher.
+        for _attempt in range(3):
+            self._check_deadline(deadline)
+            descriptor = stream = info = None
+            try:
+                descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+                stream = os.fdopen(descriptor, "rb")
+                descriptor = None
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != record.size:
+                    raise ValueError()
+                signature = record.size, record.md5
+                with self._lock:
+                    trusted = self._verified.get(record.cache_key) == (signature, _stamp(info))
+                if not trusted:
+                    digest = hashlib.md5(usedforsecurity=False)
+                    count = 0
+                    while True:
+                        self._check_deadline(deadline)
+                        block = stream.read(min(_CHUNK, record.size - count + 1))
+                        if not block:
+                            break
+                        count += len(block)
+                        if count > record.size:
+                            raise ValueError()
+                        digest.update(block)
+                    after = os.fstat(stream.fileno())
+                    if (count != record.size or digest.hexdigest() != record.md5
+                            or _stamp(info) != _stamp(after)):
+                        raise ValueError()
+                    # Reads never mutate an existing inode. Our verified
+                    # writers publish 0400 files; chmod here could change
+                    # another verifier's ctime or memoize a post-hash edit.
+                    with self._lock:
+                        self._verified[record.cache_key] = signature, _stamp(after)
+                stream.seek(0)
+                return stream
+            except (OSError, ValueError) as error:
+                if stream is not None:
+                    stream.close()
+                elif descriptor is not None:
+                    os.close(descriptor)
+                if isinstance(error, OctoCacheError) and error.code in ("cache_closed", "upstream_timeout"):
+                    raise
+                self._discard(record, directory)
+                if info is None:
+                    return None
+                try:
+                    current = os.stat(name, dir_fd=directory, follow_symlinks=False)
+                except OSError:
+                    return None
+                if _stamp(current) == _stamp(info):
+                    return None
+        return None
+
+    def _check_deadline(self, deadline):
+        self._require_open()
+        if deadline is not None and time.monotonic() >= deadline:
+            raise OctoCacheError("upstream_timeout")
+
+    @staticmethod
+    def _seed_file(root, identity, record):
+        """Open a pinned seed read only; invalid seeds remain untouched."""
+        root_fd = shard_fd = descriptor = None
         stream = None
         try:
-            descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
-        except FileNotFoundError:
-            return None
-        except OSError:
-            # In particular, never follow a file symlink out of this cache.
-            self._discard(record, directory)
-            return None
-        try:
-            stream = os.fdopen(descriptor, "rb")
-            descriptor = None
-            info = os.fstat(stream.fileno())
+            root_fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            info = os.fstat(root_fd)
+            if (info.st_dev, info.st_ino) != identity:
+                return None
+            shard_fd = os.open(record.cache_key[:2], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                               dir_fd=root_fd)
+            descriptor = os.open(record.cache_key + ".bin", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                 dir_fd=shard_fd)
+            info = os.fstat(descriptor)
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size != record.size:
-                raise ValueError()
-            signature = record.size, record.md5
-            with self._lock:
-                trusted = self._verified.get(record.cache_key) == (signature, _stamp(info))
-            if not trusted:
-                digest = hashlib.md5(usedforsecurity=False)
-                count = 0
-                while True:
-                    self._require_open()
-                    block = stream.read(min(_CHUNK, record.size - count + 1))
-                    if not block:
-                        break
-                    count += len(block)
-                    if count > record.size:
-                        raise ValueError()
-                    digest.update(block)
-                after = os.fstat(stream.fileno())
-                if (count != record.size or digest.hexdigest() != record.md5
-                        or _stamp(info) != _stamp(after)):
-                    raise ValueError()
-                # Cache contents are replaced, never edited in place. This
-                # makes a verified inode/stat stamp safe to reuse on ranges.
-                os.fchmod(stream.fileno(), 0o400)
-                info = os.fstat(stream.fileno())
-                with self._lock:
-                    self._verified[record.cache_key] = signature, _stamp(info)
-            stream.seek(0)
-            return stream
-        except (OSError, ValueError) as error:
+                return None
+            stream = os.fdopen(descriptor, "rb", buffering=0)
+            descriptor = None
+            return stream, info
+        except OSError:
             if stream is not None:
                 stream.close()
-            elif descriptor is not None:
-                os.close(descriptor)
-            if isinstance(error, OctoCacheError) and error.code == "cache_closed":
-                raise
-            self._discard(record, directory)
             return None
+        finally:
+            for opened in (descriptor, shard_fd, root_fd):
+                if opened is not None:
+                    os.close(opened)
+
+    def _seed(self, record, directory, deadline):
+        if not self._seed_roots:
+            return None
+        while True:
+            self._check_deadline(deadline)
+            if self._parallel.acquire(timeout=min(deadline - time.monotonic(), 0.1)):
+                break
+        try:
+            for root, identity in self._seed_roots:
+                self._check_deadline(deadline)
+                source = self._seed_file(root, identity, record)
+                if source is None:
+                    continue
+                temporary = reader = None
+                try:
+                    with source[0] as incoming:
+                        temporary = ".octo-" + secrets.token_hex(12) + ".part"
+                        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                             0o600, dir_fd=directory)
+                        with os.fdopen(descriptor, "wb", buffering=0) as output:
+                            digest, received = hashlib.md5(usedforsecurity=False), 0
+                            while True:
+                                self._check_deadline(deadline)
+                                try:
+                                    block = incoming.read(min(_CHUNK, record.size - received + 1))
+                                except OSError:
+                                    raise ValueError() from None
+                                self._check_deadline(deadline)
+                                if not block:
+                                    break
+                                received += len(block)
+                                if received > record.size:
+                                    raise ValueError()
+                                with self._commit_lock:
+                                    self._require_open()
+                                    view = memoryview(block)
+                                    while view:
+                                        written = output.write(view)
+                                        if not written:
+                                            raise OctoCacheError("cache_io")
+                                        view = view[written:]
+                                digest.update(block)
+                            if (received != record.size or digest.hexdigest() != record.md5
+                                    or _stamp(source[1]) != _stamp(os.fstat(incoming.fileno()))):
+                                raise ValueError()
+                            self._check_deadline(deadline)
+                            os.fchmod(output.fileno(), 0o400)
+                            os.fsync(output.fileno())
+                            with self._commit_lock:
+                                self._check_deadline(deadline)
+                                descriptor = os.open(temporary, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                                     dir_fd=directory)
+                                reader = os.fdopen(descriptor, "rb", buffering=0)
+                                info = os.fstat(reader.fileno())
+                                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                                        or _stamp(info) != _stamp(os.fstat(output.fileno()))):
+                                    raise OctoCacheError("cache_io")
+                                os.replace(temporary, record.cache_key + ".bin",
+                                           src_dir_fd=directory, dst_dir_fd=directory)
+                                temporary = None
+                                info = os.fstat(reader.fileno())
+                                with self._lock:
+                                    self._verified[record.cache_key] = (record.size, record.md5), _stamp(info)
+                    # This read-only inode was verified before publication.
+                    # Another cache replacing its name cannot invalidate it.
+                    self._check_deadline(deadline)
+                    result, reader = reader, None
+                    return result
+                except ValueError:
+                    continue
+                except OSError as error:
+                    if isinstance(error, OctoCacheError):
+                        raise
+                    raise OctoCacheError("cache_io") from None
+                finally:
+                    if reader is not None:
+                        reader.close()
+                    if temporary is not None:
+                        try:
+                            os.unlink(temporary, dir_fd=directory)
+                        except FileNotFoundError:
+                            pass
+            return None
+        finally:
+            self._parallel.release()
 
     def _discard(self, record, directory):
         with self._lock:
             self._verified.pop(record.cache_key, None)
-        try:
-            os.unlink(record.cache_key + ".bin", dir_fd=directory)
-        except FileNotFoundError:
-            pass
+        # A failed read proves this descriptor is ineligible, not that the
+        # current pathname is still the same bad inode. Verified writers
+        # replace stale entries atomically; readers never remove the name.
 
     @staticmethod
     def _response(response, expected, url):
@@ -440,10 +592,9 @@ class OctoCache:
                 self._require_open()
                 os.replace(temporary, final_name, src_dir_fd=directory, dst_dir_fd=directory)
                 temporary = None
-            info = os.stat(final_name, dir_fd=directory, follow_symlinks=False)
-            with self._lock:
-                self._verified[record.cache_key] = (record.size, record.md5), _stamp(info)
-            stream = self._existing(record, directory)
+            # A different cache can replace final_name immediately after our
+            # publication. Its stat alone cannot prove our downloaded digest.
+            stream = self._existing(record, directory, deadline)
             if stream is None:
                 raise OctoCacheError("cache_io")
             try:
@@ -504,6 +655,8 @@ class OctoCache:
         try:
             with self._directory(key) as directory:
                 stream = self._existing(record, directory)
+                if stream is None:
+                    stream = self._seed(record, directory, deadline)
                 if stream is None:
                     return self._download(record, directory, deadline)
             self._notify(record, "cache_hit")

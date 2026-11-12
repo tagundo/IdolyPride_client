@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import tempfile
@@ -19,7 +20,9 @@ _TUTORIAL_FILES = {"data/public-tutorial/manifest.json", "data/public-tutorial/t
                    "data/public-tutorial/tutorial-full.pb"}
 _STORY_FILES = {"data/public-story/manifest.json", "data/public-story/story-list-event.pb",
                 "data/public-story/story-list-extra.pb"}
-_OCTO_FILES = {"data/public-octo/settings.json", "data/public-octo/manifest.pb"}
+_OCTO_ARCHIVES = ({"data/public-octo/settings.json", "data/public-octo/manifest.pb"},
+                  {"data/public-octo-ios/settings.json", "data/public-octo-ios/manifest.pb"})
+_OCTO_FILES = set().union(*_OCTO_ARCHIVES)
 
 
 def _digest(path: Path) -> str:
@@ -42,8 +45,9 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
         required = [data / "protocol/idolypride-6.1.1.pb", data / "original-master/master-tag.json"]
         with ZipFile(bundle) as archive:
             octo_files = _OCTO_FILES.intersection(archive.namelist())
-        if octo_files and octo_files != _OCTO_FILES:
-            raise ValueError("Bundled game resource catalog is incomplete")
+        for group in _OCTO_ARCHIVES:
+            if octo_files.intersection(group) and not group.issubset(octo_files):
+                raise ValueError("Bundled game resource catalog is incomplete")
         required.extend(files / name for name in octo_files)
         if all(path.is_file() for path in required):
             return data
@@ -72,8 +76,9 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
             entries.append((info, destination))
         if not {"data/protocol/idolypride-6.1.1.pb", "data/original-master/master-tag.json"}.issubset(names):
             raise ValueError("Bundled data is missing the schema or master archive")
-        if names.intersection(_OCTO_FILES) and not _OCTO_FILES.issubset(names):
-            raise ValueError("Bundled game resource catalog is incomplete")
+        for group in _OCTO_ARCHIVES:
+            if names.intersection(group) and not group.issubset(names):
+                raise ValueError("Bundled game resource catalog is incomplete")
         for info, destination in entries:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".server-data-", delete=False) as stream:
@@ -202,13 +207,16 @@ def _fetch_resource(url, *, timeout):
 
 
 def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False,
-          download_missing_resources=True, media_mode=False):
+          download_missing_resources=True, media_mode=False, resource_cache_dir=None):
     """Start the embedded loopback runtime; called on the service worker."""
     global _RUNTIME, _LAST_STATUS
     if type(download_missing_resources) is not bool:
         raise ValueError("Resource downloads must be an explicit boolean")
     if type(media_mode) is not bool:
         raise ValueError("Media mode must be an explicit boolean")
+    if resource_cache_dir is not None and (not isinstance(resource_cache_dir, str)
+            or not resource_cache_dir or "\0" in resource_cache_dir or not Path(resource_cache_dir).is_absolute()):
+        raise ValueError("Resource storage must be an explicit absolute directory or private None")
     # Select the universal wheel's implementation before importing the engine.
     # Merely importing the asset installer must not change a host test process.
     os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
@@ -245,6 +253,7 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
             _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc,
                                      download_missing_resources=download_missing_resources,
                                      media_mode=media_mode,
+                                     resource_cache_dir=resource_cache_dir,
                                      resource_fetcher=_fetch_resource, **live_options)
             _LAST_STATUS = _RUNTIME.status()
             return json.dumps(_LAST_STATUS, ensure_ascii=False)
@@ -277,3 +286,37 @@ def diagnostics_json():
     with _LOCK:
         value = _RUNTIME.diagnostics_snapshot() if _RUNTIME is not None else _LAST_DIAGNOSTICS
         return json.dumps(value, ensure_ascii=False)
+
+
+def _resource_library_reference():
+    # Hold the lifecycle lock only to acquire the current object. Long archive
+    # I/O must not prevent status, cancellation or stop from reaching the runtime.
+    with _LOCK:
+        library = getattr(_RUNTIME, "_library", None) if _RUNTIME is not None else None
+        if library is None:
+            raise ValueError("Resource server is not running")
+        return library
+
+
+def import_resources_fd(descriptor, platform):
+    """Import one user-selected seekable PFD, retaining no Android activity/URI."""
+    if type(descriptor) is not int or descriptor < 0 or platform not in ("android", "ios"):
+        raise ValueError("Invalid resource import selection")
+    library = _resource_library_reference()
+    copied = os.dup(descriptor)
+    try:
+        os.lseek(copied, 0, os.SEEK_CUR)
+        with os.fdopen(copied, "rb") as source:
+            copied = -1
+            source.seek(0)
+            result = library.import_from(source, platform, kind="all")
+        return json.dumps(result, ensure_ascii=False)
+    finally:
+        if copied >= 0:
+            os.close(copied)
+
+
+def cancel_resource_job(identifier):
+    if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", identifier):
+        raise ValueError("Invalid resource cancellation")
+    return json.dumps(_resource_library_reference().cancel(identifier), ensure_ascii=False)

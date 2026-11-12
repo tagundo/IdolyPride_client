@@ -15,6 +15,8 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.os.Environment;
+import java.io.File;
 import android.util.Log;
 
 import com.chaquo.python.PyObject;
@@ -25,6 +27,7 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 
 import java.io.OutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 
 import java.util.ArrayDeque;
@@ -67,6 +70,7 @@ public final class ServerService extends Service {
     private PyObject runtime;
     private volatile boolean destroyed = false;
     private final AtomicBoolean pollQueued = new AtomicBoolean(false);
+    private final AtomicBoolean resourceCancelQueued = new AtomicBoolean(false);
     private final Runnable pollState = () -> queuePoll();
 
     public interface Observer {
@@ -75,6 +79,32 @@ public final class ServerService extends Service {
 
     /** Advances only for a validated Python status response, never a log replay. */
     static long runtimeDetailsReceivedAt() { return runtimeDetailsReceivedAt; }
+
+    static boolean resourceServerRunning() {
+        ServerService service = activeService;
+        return running && !busy && service != null && !service.destroyed && !service.stopQueued.get();
+    }
+    static void resourceTransferChanged() { dispatch(); }
+    /** Called only by the app-context resource I/O worker, not the lifecycle worker. */
+    static String importResourceFd(int fd, String platform) throws IOException {
+        ServerService service = activeService;
+        if (!resourceServerRunning() || service == null || service.runtime == null || fd < 0 || !ResourceTransfers.platform(platform))
+            throw new IOException("Resource server unavailable");
+        return service.runtime.callAttr("import_resources_fd", fd, platform).toString();
+    }
+    static void cancelResourceJob(String identifier) {
+        ResourceTransfers.cancelLocal();
+        ServerService service = activeService;
+        if (identifier == null || !identifier.matches("[A-Za-z0-9_-]{1,64}") || service == null
+                || service.destroyed || !service.resourceCancelQueued.compareAndSet(false, true)) return;
+        try {
+            service.worker.execute(() -> {
+                try { if (service.runtime != null) service.runtime.callAttr("cancel_resource_job", identifier); }
+                catch (Exception error) { Log.w("IdolyLocalServer", "Resource cancellation unavailable: " + error.getClass().getSimpleName()); }
+                finally { service.resourceCancelQueued.set(false); dispatch(); }
+            });
+        } catch (RejectedExecutionException stopped) { service.resourceCancelQueued.set(false); }
+    }
 
     public static void observe(Observer observer) {
         OBSERVERS.addIfAbsent(observer);
@@ -176,6 +206,8 @@ public final class ServerService extends Service {
                 .getBoolean(MainActivity.DOWNLOAD_MISSING_RESOURCES, true);
         final boolean mediaMode = getSharedPreferences(MainActivity.SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(MainActivity.MEDIA_MODE, false);
+        final boolean publicDownloads = getSharedPreferences(MainActivity.SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(MainActivity.RESOURCE_PUBLIC_DOWNLOADS, true);
         foreground();
         if (!startQueued.compareAndSet(false, true)) return START_NOT_STICKY;
         runtimeDetails = "{}";
@@ -184,12 +216,20 @@ public final class ServerService extends Service {
         worker.execute(() -> {
             if (stopQueued.get()) return;
             try {
+                String resourceCacheDirectory = null;
+                if (publicDownloads) {
+                    boolean permission = Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();
+                    if (ResourceTransfers.storageAccess(Build.VERSION.SDK_INT, true, permission) != ResourceTransfers.STORAGE_DOWNLOADS)
+                        throw new SecurityException("Downloads storage permission is required");
+                    resourceCacheDirectory = ResourceTransfers.publicCachePath(
+                            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS));
+                }
                 synchronized (PYTHON_LOCK) {
                     if (!Python.isStarted()) Python.start(new AndroidPlatform(getApplicationContext()));
                 }
                 runtime = Python.getInstance().getModule("android_server_runtime");
                 runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback(),
-                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources, mediaMode);
+                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources, mediaMode, resourceCacheDirectory);
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
                 runtimeDetails = details.toString();
                 if (!details.optBoolean("running", false)) {
@@ -215,6 +255,7 @@ public final class ServerService extends Service {
 
     private void queueStop(boolean finishService, boolean keepFailure) {
         if (!stopQueued.compareAndSet(false, true)) return;
+        ResourceTransfers.cancelLocal();
         MAIN.removeCallbacks(pollState);
         if (!keepFailure) state(getString(R.string.status_stopping), running, true);
         try {

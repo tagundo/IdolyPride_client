@@ -10,6 +10,14 @@ from pathlib import Path
 import threading
 
 
+class _StartupSettings:
+    def __init__(self, value):
+        self._value = dict(value)
+
+    def settings(self):
+        return dict(self._value)
+
+
 class Runtime:
     """Own listeners, threads and a bounded log for one embedded server instance."""
 
@@ -32,6 +40,12 @@ class Runtime:
         self._presentation = None
         self._playback = None
         self._render_probe = None
+        self._wardrobe_probe = None
+        self._media_settings = None
+        self._language_settings = None
+        self._library = None
+        self._active_media = None
+        self._effective_language = None
         self._grpc_address = None
         self._asset_url = None
         from .diagnostics import ClientDiagnostics
@@ -66,6 +80,7 @@ class Runtime:
             if self._experimental_main_live:
                 result["experimental_main_live"] = True
                 result["live_ruleset"] = "live-v5"
+            library = self._library
         with self._log_lock:
             result["logs"] = list(self._logs)
         diagnostics = self._diagnostics.status()
@@ -80,6 +95,17 @@ class Runtime:
             result["playback"] = self._playback.status()
         if self._render_probe is not None:
             result["render_probe"] = self._render_probe.status()
+        if self._wardrobe_probe is not None:
+            result["wardrobe_probe"] = self._wardrobe_probe.status()
+        if self._media_settings is not None:
+            result["media_options"] = self._media_settings.status()
+            if self._active_media is not None:
+                result["media_options"]["effective_settings"] = self._active_media.settings()
+        if self._language_settings is not None:
+            result["language"] = self._language_settings.status()
+            result["language"]["effective_language"] = self._effective_language
+        if library is not None:
+            result["resource_library"] = library.status()
         return result
 
     def diagnostics_snapshot(self) -> dict:
@@ -112,6 +138,12 @@ class Runtime:
                 return
             self._running = False
             failures = []
+            if self._library is not None:
+                try:
+                    self._library.close()
+                    self._library = None
+                except Exception as error:
+                    failures.append(error)
             if self._grpc is not None:
                 try:
                     self._grpc.stop()
@@ -155,7 +187,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
           asset_host="127.0.0.1", asset_port=8080, aes_cbc=None,
           experimental_main_live=False, live_engine_library=None,
           download_missing_resources=True, resource_fetcher=None, media_mode=False,
-          resource_platform="android") -> Runtime:
+          resource_platform="android", resource_cache_dir=None) -> Runtime:
     """Start the local game engine and asset server without blocking the UI.
 
     ``data_dir`` contains ``protocol/idolypride-6.1.1.pb`` and
@@ -178,6 +210,10 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     _platform_archive(resource_platform)
     if resource_fetcher is not None and not callable(resource_fetcher):
         raise ValueError("Resource fetcher must be callable")
+    if resource_cache_dir is not None:
+        resource_cache_dir = Path(resource_cache_dir)
+        if not resource_cache_dir.is_absolute() or resource_cache_dir.is_symlink():
+            raise ValueError("Resource cache directory must be an absolute regular directory")
     if not isinstance(profile, str) or not profile.strip():
         raise ValueError("A nonempty local profile is required")
     if log_callback is not None and not callable(log_callback):
@@ -191,6 +227,14 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     runtime._playback = PlaybackState(root / "client-playback.json")
     from .render_probe import RenderProbeState
     runtime._render_probe = RenderProbeState()
+    from .wardrobe_diagnostics import WardrobeDiagnostics
+    runtime._wardrobe_probe = WardrobeDiagnostics(runtime._log)
+    from .media_settings import MediaSettingsState
+    runtime._media_settings = MediaSettingsState(root / "client-media.json")
+    from .language_settings import LanguageSettingsState
+    runtime._language_settings = LanguageSettingsState(root / "client-language.json")
+    runtime._active_media = _StartupSettings(runtime._media_settings.settings())
+    runtime._effective_language = runtime._language_settings.settings()["language"]
     try:
         # Imports stay inside startup so launchers can extract bundled data and
         # configure their platform's codec before loading the application engine.
@@ -213,6 +257,10 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         schema = Schema.from_descriptor_set(root / "protocol" / "idolypride-6.1.1.pb")
         archive = root / "original-master"
         master_tag = select_master_tag(archive / "master-tag.json", media_mode=media_mode)
+        from .language_settings import select_language_tag
+        master_tag = select_language_tag(master_tag, runtime._effective_language)
+        from .master_sort import select_sorted_master_tag
+        master_tag = select_sorted_master_tag(master_tag, runtime._active_media.settings())
         if media_mode:
             # Detect incomplete/invalid media data before inventory seeding.
             # The final response is rebased to the bound HTTP port below.
@@ -241,7 +289,9 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                                              transfer_callback=runtime._observe_transfer,
                                              runtime_status_callback=runtime.diagnostics_snapshot,
                                              presentation=runtime._presentation, playback=runtime._playback,
-                                             render_probe=runtime._render_probe)
+                                             render_probe=runtime._render_probe,
+                                             media_settings=runtime._active_media,
+                                             wardrobe_probe=runtime._wardrobe_probe)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.
@@ -253,10 +303,19 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         gateway, runtime._resources = create_octo_gateway(
             root, runtime._asset_url, aes_cbc=aes_cbc, fetcher=resource_fetcher,
             allow_downloads=download_missing_resources, log_callback=runtime._log,
-            platform=resource_platform)
+            platform=resource_platform, resource_cache_dir=resource_cache_dir)
         # Install the gateway only after binding has selected the actual port,
         # and before any HTTP serving thread is started.
         runtime._asset.octo_gateway = gateway
+        from .resource_library import ResourceLibrary
+        runtime._library = ResourceLibrary.from_data_dir(root, base_url=runtime._asset_url,
+            aes_cbc=aes_cbc, fetcher=resource_fetcher, active_gateway=gateway,
+            resource_cache_dir=resource_cache_dir)
+        if resource_cache_dir is not None:
+            runtime._log("게임 리소스를 선택한 Downloads 보관 폴더에서 직접 제공합니다.")
+        # Installed before any serving thread starts, just like the gateway.
+        # The handler reads this bound attribute for export/status commands.
+        runtime._asset.resource_library = runtime._library
         master_response = prepare_master_tag(schema, master_tag,
                                              archive / "assets" / "master", runtime._asset_url)
         if media_mode:
@@ -271,7 +330,9 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                 live_engine_library = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / library_name
             live_options = {"experimental_main_live": True,
                             "live_engine": NativeLiveEngine(Path(live_engine_library))}
-        media_options = {"media_mode": True, "photo_scene_access": media_scenes} if media_mode else {}
+        media_options = {"media_settings": runtime._active_media.settings}
+        if media_mode:
+            media_options.update(media_mode=True, photo_scene_access=media_scenes)
         application = Application(schema, state, fixtures, profile=profile, master_response=master_response,
                                   master_dir=master_dir, **media_options, **live_options)
         runtime._experimental_main_live = experimental_main_live

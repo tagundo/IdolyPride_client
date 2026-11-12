@@ -35,7 +35,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.17", 36
+VERSION, VERSION_CODE = "0.3.19", 38
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -52,7 +52,8 @@ RES_ROOT = "android-server/app/src/main/res/"
 MANIFEST = "android-server/app/src/main/AndroidManifest.xml"
 GRADLE = "android-server/app/build.gradle.kts"
 JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge",
-    "PresentationSettings", "PlaybackSettings", "PlaybackStorage", "RenderingExperiment"))
+    "PresentationSettings", "PlaybackSettings", "PlaybackStorage", "RenderingExperiment",
+    "LibrarySettings", "ResourceTransfers"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")
 SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
@@ -75,10 +76,14 @@ from idoly_local import media_master_build as media_master
 LEGACY_PRESENTATION_ASSETS = frozenset("assets/presentation/" + name for name in
                                       ("manifest.json", "diagnostics.apk", "resources.apk"))
 SERVER_PERMISSIONS = frozenset("android.permission." + name for name in
-    ("INTERNET", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC", "POST_NOTIFICATIONS"))
+    ("INTERNET", "FOREGROUND_SERVICE", "FOREGROUND_SERVICE_DATA_SYNC", "POST_NOTIFICATIONS",
+     "MANAGE_EXTERNAL_STORAGE"))
 FORBIDDEN_INSTALLER_DEX_TOKENS = (b"PresentationAddonInstaller", b"PresentationInstallActivity",
     b"PresentationStorage", b"Landroid/content/pm/PackageInstaller", b"REQUEST_INSTALL_PACKAGES")
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
+PAYLOAD_INVENTORY = "tools/server_payload_v0319.json"
+BASE_PUBLIC_PAYLOAD = {"bytes": 84637208,
+    "sha256": "27522b394b021a4df002a4e34f20e89b5407be7b145aeecce45f5023b5227522"}
 NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
     "libchaquopy_java.so", "libcrypto_chaquopy.so", "libcrypto_python.so", "libidoly_live.so",
     "libpython3.13.so", "libsqlite3_chaquopy.so", "libsqlite3_python.so", "libssl_chaquopy.so", "libssl_python.so"))
@@ -88,6 +93,10 @@ REMOVED_NAMES = frozenset(("classes3.dex",))
 MIB = 1024 * 1024
 MAX_APK = 100 * MIB
 MAX_APK_STAGING = 200 * MIB
+MAX_PAYLOAD = 256 * MIB
+MAX_PAYLOAD_MEMBERS = 1024
+MAX_SERVER_APK = 320 * MIB
+MAX_SERVER_EXPANDED = 320 * MIB
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
 MAX_CLEAN_INACTIVE_CREDIT = 256 * MIB
@@ -139,7 +148,8 @@ class PublicCacheAdvice:
         path = Path(path).absolute()
         fd, identity = self._open(path)
         try:
-            limit = MAX_APK if role in ("baseline", "validated-payload") or role.startswith("own-") else 64 * MIB
+            limit = (MAX_APK if role == "baseline" else MAX_PAYLOAD if role == "validated-payload"
+                     else MAX_SERVER_APK if role.startswith("own-") else 64 * MIB)
             if not 0 < identity[3] <= limit or role.startswith("own-") and os.fstat(fd).st_nlink != 1:
                 raise ValueError("Cache-advice input size or owned-file identity differs")
             digest = hashlib.sha256()
@@ -208,12 +218,94 @@ def _regular(path, *, private=False):
     return path.resolve(strict=True)
 
 
-def staging_budget(root, destination):
-    required = MAX_APK_STAGING + 8 * MIB
+def staging_budget(root, destination, required=None):
+    required = MAX_APK_STAGING + 8 * MIB if required is None else required
+    if type(required) is not int or not 0 < required <= 2 * MAX_SERVER_APK + 8 * MIB:
+        raise ValueError("Invalid versioned server staging budget")
     if Path(root).stat().st_dev == Path(destination).stat().st_dev:
         required += MIN_ROOT_FREE
     if shutil.disk_usage(destination).free < required:
         raise ValueError("Insufficient staging space while preserving the root disk reserve")
+
+
+def capacity_plan(infos, payload_bytes, replacement_sizes=None):
+    """Bound this payload's two-APK peak before allocating its first output.
+
+    The baseline remains independently pinned and size-limited. ZIP sizes use
+    each retained entry's original compression method, a conservative DEFLATE
+    bound, explicit ZIP metadata and 1 MiB for alignment/signature growth.
+    """
+    if type(payload_bytes) is not int or not 0 < payload_bytes <= MAX_PAYLOAD:
+        raise ValueError("Public payload exceeds the versioned size bound")
+    sizes = {pybundle.PAYLOAD: payload_bytes, pybundle.APP: pybundle.MAX_APP,
+             pybundle.BUILD: META_LIMIT, "classes2.dex": MAX_DEX,
+             **{name: MIB for name in RESOURCE_NAMES}}
+    if replacement_sizes is not None:
+        if set(replacement_sizes) != set(sizes):
+            raise ValueError("Replacement capacity inventory differs")
+        if any(type(size) is not int or size < 0 or size > sizes[name]
+               for name, size in replacement_sizes.items()):
+            raise ValueError("Replacement exceeds its bounded build input")
+        if replacement_sizes[pybundle.PAYLOAD] != payload_bytes:
+            raise ValueError("Payload capacity differs from its validated size")
+        sizes = replacement_sizes
+    if not set(sizes) <= infos.keys() or infos[pybundle.PAYLOAD].compress_type != 0:
+        raise ValueError("Pinned server payload capacity structure differs")
+    total, expanded = MIB, 0
+    for name, info in infos.items():
+        if name in excluded_members(infos):
+            continue
+        size = sizes.get(name, info.file_size)
+        if type(size) is not int or size < 0 or info.compress_type not in (0, 8):
+            raise ValueError("Unsupported server ZIP capacity entry")
+        expanded += size
+        compressed = size if info.compress_type == 0 else size + (size >> 12) + (size >> 14) + (size >> 25) + 64
+        # Two names/extras (local and central), comment, descriptor and ZIP64
+        # allowance. The archive itself stays far below the ZIP32 size limit.
+        total += compressed + 30 + 46 + 24 + 64 + 2 * (len(name.encode("utf-8")) + len(info.extra)) + len(info.comment)
+    total += 22 + 65535
+    maximum = ((total + MIB - 1) // MIB) * MIB
+    if maximum > MAX_SERVER_APK or expanded > MAX_SERVER_EXPANDED:
+        raise ValueError("Server APK exceeds the versioned capacity bound")
+    return {"schema": 1, "policy": "server-library-v1", "payload_bytes": payload_bytes,
+            "apk_bytes": maximum, "expanded_bytes": expanded,
+            "staging_bytes": 2 * maximum + 8 * MIB}
+
+
+def _tmpfs(destination):
+    """Identify the destination's actual Linux mount, including nested mounts."""
+    target = Path(destination).resolve(strict=True)
+    with Path("/proc/self/mountinfo").open("rb") as stream:
+        raw = stream.read(MIB + 1)
+    if len(raw) > MIB:
+        raise ValueError("Mount inventory exceeds its bounded read size")
+    selected = None
+    for line in raw.decode("utf-8", errors="strict").splitlines():
+        before, separator, after = line.partition(" - ")
+        fields, tail = before.split(), after.split()
+        if not separator or len(fields) < 6 or len(tail) < 3:
+            raise ValueError("Invalid mount inventory")
+        value = re.sub(r"\\(040|011|012|134)", lambda match: chr(int(match[1], 8)), fields[4])
+        mount = Path(value)
+        if target == mount or target.is_relative_to(mount):
+            if selected is None or len(value) > selected[0]:
+                selected = (len(value), tail[0])
+    if selected is None:
+        raise ValueError("Cannot identify the server staging filesystem")
+    return selected[1] == "tmpfs"
+
+
+def _allocation_guard(root, destination, future_bytes):
+    """Reserve future tmpfs growth above the unchanged runtime headroom floor."""
+    if type(future_bytes) is not int or not 0 < future_bytes <= 2 * MAX_SERVER_APK + 8 * MIB:
+        raise ValueError("Invalid future staging capacity")
+    staging_budget(root, destination, future_bytes)
+    budget = _resource_guard(root)
+    growth = future_bytes if _tmpfs(destination) else 0
+    if (budget["memory_direct_headroom"] < MIN_HEADROOM - MAX_CLEAN_INACTIVE_CREDIT + growth
+            or budget["memory_effective_headroom"] < MIN_HEADROOM + growth):
+        raise ValueError("Defer build until projected staging preserves the unchanged memory reserve")
+    return {**budget, "future_staging_bytes": future_bytes, "future_tmpfs_bytes": growth}
 
 
 def read_password(path):
@@ -344,6 +436,7 @@ def tool_sources(root, commit):
     result = {}
     for name, loaded in (("tools/build_android_server_manual.py", Path(__file__)),
                          ("tools/repack_android_server_python.py", Path(pybundle.__file__)),
+                         (PAYLOAD_INVENTORY, Path(__file__).with_name("server_payload_v0319.json")),
                          ("src/idoly_local/media_master_build.py", Path(media_master.__file__)),
                          ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py"))):
         if loaded.resolve() != (root / name).resolve():
@@ -483,19 +576,135 @@ def dependency_classes(jar, baseline_dex):
     return names
 
 
-def validate_payload(payload, expected_sha256, baseline_archive):
-    """Keep all original data and allow exactly nine JSONs plus the media overlay."""
+def payload_directory_bounds(path):
+    """Reject oversized ZIP directory allocations before constructing ZipFile."""
+    with path.open("rb") as stream:
+        size = os.fstat(stream.fileno()).st_size
+        if not 22 <= size <= MAX_PAYLOAD:
+            raise ValueError("Public payload exceeds the versioned size bound")
+        length = min(size, 22 + 65535)
+        stream.seek(size - length)
+        tail = stream.read(length)
+        position = tail.rfind(b"PK\x05\x06")
+        if position < 0 or position + 22 > len(tail):
+            raise ValueError("Public payload has no complete ZIP directory")
+        (_sig, disk, directory_disk, disk_count, count, directory_bytes,
+         offset, comment) = struct.unpack_from("<4s4H2LH", tail, position)
+        end = size - length + position
+        if position + 22 + comment != len(tail) or disk or directory_disk or disk_count != count:
+            raise ValueError("Public payload ZIP directory is invalid")
+        if count == 65535 or directory_bytes == 0xffffffff or offset == 0xffffffff:
+            if end < 20:
+                raise ValueError("Public payload ZIP64 locator is invalid")
+            stream.seek(end - 20)
+            raw = stream.read(20)
+            signature, locator_disk, record_offset, disks = struct.unpack("<4sLQL", raw)
+            if signature != b"PK\x06\x07" or locator_disk or disks != 1 or record_offset + 56 > end - 20:
+                raise ValueError("Public payload ZIP64 locator is invalid")
+            stream.seek(record_offset)
+            raw = stream.read(56)
+            signature, width, _made, _needed, disk, directory_disk, disk_count, count, directory_bytes, offset = struct.unpack("<4sQ2H2L4Q", raw)
+            if (signature != b"PK\x06\x06" or width < 44 or record_offset + 12 + width != end - 20
+                    or disk or directory_disk or disk_count != count):
+                raise ValueError("Public payload ZIP64 directory is invalid")
+            end = record_offset
+        if (not 0 < count <= MAX_PAYLOAD_MEMBERS or not count * 46 <= directory_bytes <= 2 * MIB
+                or offset < 0 or offset + directory_bytes != end):
+            raise ValueError("Public payload ZIP directory exceeds its allocation bound")
+        stream.seek(offset)
+        seen = 0
+        while stream.tell() < end:
+            fixed = stream.read(46)
+            if len(fixed) != 46 or fixed[:4] != b"PK\x01\x02":
+                raise ValueError("Public payload ZIP directory member is invalid")
+            name_bytes, extra_bytes, comment_bytes, disk = struct.unpack_from("<4H", fixed, 28)
+            seen += 1
+            if (seen > count or disk or not 0 < name_bytes <= 240
+                    or stream.tell() + name_bytes + extra_bytes + comment_bytes > end):
+                raise ValueError("Public payload ZIP directory exceeds its allocation bound")
+            stream.seek(name_bytes + extra_bytes + comment_bytes, os.SEEK_CUR)
+        if seen != count or stream.tell() != end:
+            raise ValueError("Public payload ZIP directory member count differs")
+        return {"members": count, "central_directory_bytes": directory_bytes}
+
+
+def load_payload_inventory(path=None):
+    """Read the explicit, source-frozen v0.3.19 catalog additions, never a glob."""
+    path = _regular(Path(__file__).with_name("server_payload_v0319.json") if path is None else path)
+    if not 0 < path.stat().st_size <= META_LIMIT:
+        raise ValueError("Versioned public catalog inventory exceeds its size bound")
+    with path.open("rb") as stream:
+        raw = stream.read(META_LIMIT + 1)
+    if len(raw) > META_LIMIT:
+        raise ValueError("Versioned public catalog inventory exceeds its size bound")
+    value = json.loads(raw.decode("utf-8"), object_pairs_hook=pybundle._json_object)
+    keys = {"schema", "policy", "base_payload", "component_commit", "component_sources",
+            "additions", "ios_public_files", "prebuilt_catalogs"}
+    if (not isinstance(value, dict) or value.keys() != keys or type(value["schema"]) is not int
+            or value["schema"] != 1 or value["policy"] != "precomputed-language-sort-v1"
+            or value["base_payload"] != BASE_PUBLIC_PAYLOAD
+            or not isinstance(value["component_commit"], str) or not re.fullmatch(r"[0-9a-f]{40}", value["component_commit"])
+            or not isinstance(value["component_sources"], dict) or not value["component_sources"]
+            or any(not isinstance(name, str) or not re.fullmatch(r"src/idoly_local/[a-z_]+\.py", name)
+                   or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                   for name, digest in value["component_sources"].items())):
+        raise ValueError("Versioned public catalog inventory identity differs")
+    additions, ios = value["additions"], value["ios_public_files"]
+    if not isinstance(additions, list) or len(additions) != 258 or not isinstance(ios, list) or len(ios) != 2:
+        raise ValueError("Versioned public catalog inventory count differs")
+    metadata = {"data/original-master/" + name for name in ("master-sort.json", "media-master-sort.json")}
+    metadata.update("data/original-master/languages/" + locale + "/" + name
+        for locale in ("ko", "en") for name in ("master-tag.json", "media-master-tag.json", "coverage.json",
+            "media-coverage.json", "master-sort.json", "media-master-sort.json"))
+    rows = {}
+    for row in additions + ios:
+        if (not isinstance(row, dict) or row.keys() != {"path", "bytes", "sha256"}
+                or not isinstance(row["path"], str) or row["path"] in rows
+                or type(row["bytes"]) is not int or not 0 < row["bytes"] <= MAX_JSON
+                or not isinstance(row["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])):
+            raise ValueError("Versioned public catalog file inventory differs")
+        rows[row["path"]] = row
+    if ({row["path"] for row in ios} != {"data/public-octo-ios/settings.json", "data/public-octo-ios/manifest.pb"}
+            or {row["path"] for row in additions if row["path"].endswith(".json")} != metadata
+            or any(row["path"] not in metadata and not re.fullmatch(
+                r"data/original-master/assets/master/[A-Za-z0-9_-]+\.db", row["path"]) for row in additions)):
+        raise ValueError("Versioned public catalog contains an unapproved path")
+    proof = value["prebuilt_catalogs"]
+    proof_keys = {"schema", "policy", "base_payload", "component_commit", "component_sources", "catalog_inventory_sha256",
+                  "added_members", "sources", "coverage", "sorts", "ios_catalog_identity", "device_verified", "scope"}
+    canonical = json.dumps(additions, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    if (not isinstance(proof, dict) or proof.keys() != proof_keys or type(proof["schema"]) is not int or proof["schema"] != 1
+            or proof["policy"] != value["policy"] or proof["base_payload"] != value["base_payload"]
+            or proof["component_commit"] != value["component_commit"] or proof["component_sources"] != value["component_sources"]
+            or type(proof["added_members"]) is not int or proof["added_members"] != len(additions)
+            or proof["catalog_inventory_sha256"] != hashlib.sha256(canonical).hexdigest()
+            or proof["device_verified"] is not False):
+        raise ValueError("Versioned public catalog provenance differs")
+    return value
+
+
+def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inventory=None):
+    """Preserve original public data and optionally add the frozen library catalog."""
     if (not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
-            or payload.stat().st_size > MAX_APK or pybundle.digest(payload) != expected_sha256):
+            or payload.stat().st_size > MAX_PAYLOAD or pybundle.digest(payload) != expected_sha256):
         raise ValueError("Validated public payload hash differs")
+    directory = payload_directory_bounds(payload)
     with baseline_archive.open(pybundle.PAYLOAD) as stream, ZipFile(stream) as old, ZipFile(payload) as new:
         old_infos = pybundle._members(old, pybundle.MAX_EXPANDED)
-        infos = pybundle._members(new, pybundle.MAX_EXPANDED)
+        infos = pybundle._members(new, pybundle.MAX_EXPANDED, member_limit=MAX_PAYLOAD_MEMBERS)
         added = {"data/master-json/" + name + ".json" for name in EXTRA_TABLES} | media_master.PAYLOAD_MEMBERS
+        catalog_files = {} if catalog_inventory is None else {
+            row["path"]: row for row in catalog_inventory["additions"] + catalog_inventory["ios_public_files"]}
+        if set(catalog_files) & (set(old_infos) | added):
+            raise ValueError("Versioned public catalogs overlap original payload members")
+        added |= catalog_files.keys()
         if set(infos) != set(old_infos) | added or added & set(old_infos):
             raise ValueError("Payload may add only the nine named JSON tables and explicit media master files")
         old_hashes = pybundle._hash_members(old, old_infos)
         hashes = pybundle._hash_members(new, infos)
+        if any(infos[name].file_size != row["bytes"] or hashes[name] != row["sha256"]
+               for name, row in catalog_files.items()):
+            raise ValueError("Versioned public catalog bytes differ from the source-frozen inventory")
         if any(hashes[name] != digest for name, digest in old_hashes.items() if name != PAYLOAD_MANIFEST):
             raise ValueError("Payload changed an existing public input")
         if any(hashes["data/master-json/" + table + ".json"] != digest
@@ -503,9 +712,12 @@ def validate_payload(payload, expected_sha256, baseline_archive):
             raise ValueError("An existing public media/company JSON table changed")
         report = json.loads(pybundle._read(new, infos[PAYLOAD_MANIFEST], META_LIMIT), object_pairs_hook=pybundle._json_object)
         old_report = json.loads(pybundle._read(old, old_infos[PAYLOAD_MANIFEST], META_LIMIT), object_pairs_hook=pybundle._json_object)
-        if (not isinstance(report, dict) or {k: v for k, v in report.items() if k not in ("tables", "files")}
+        if (not isinstance(report, dict) or {k: v for k, v in report.items() if k not in ("tables", "files", "prebuilt_catalogs")}
                 != {k: v for k, v in old_report.items() if k not in ("tables", "files")}):
             raise ValueError("Payload provenance changed outside tables/files")
+        if ((catalog_inventory is None and "prebuilt_catalogs" in report)
+                or (catalog_inventory is not None and report.get("prebuilt_catalogs") != catalog_inventory["prebuilt_catalogs"])):
+            raise ValueError("Payload versioned public catalog provenance differs")
         tables = {name[len("data/master-json/"):-5] for name in infos
                   if name.startswith("data/master-json/") and name.endswith(".json")}
         if len(tables) != 49 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
@@ -542,7 +754,8 @@ def validate_payload(payload, expected_sha256, baseline_archive):
         overlay = media_master.validate_media_master_tag(original_tag, media_tag, report["schema_sha256"], rows,
                                                          overlay_packs)
         return {"sha256": expected_sha256, "bytes": payload.stat().st_size,
-                "tables": report["tables"], "members": len(infos), "media_master_overlay": overlay}
+                "tables": report["tables"], "members": len(infos), "media_master_overlay": overlay,
+                "directory": directory, "prebuilt_catalogs": report.get("prebuilt_catalogs")}
 
 
 def elf_alignment(raw):
@@ -597,7 +810,7 @@ def stream_apk(incoming, infos, target, replacements):
 
 def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, compiled_names):
     with ZipFile(path) as archive:
-        infos = pybundle._members(archive, pybundle.MAX_EXPANDED)
+        infos = pybundle._members(archive, MAX_SERVER_EXPANDED)
         _server_archive_members(infos)
         removed = excluded_members(before_infos)
         if set(replacement_hashes) - set(before) or set(infos) != set(before) - removed:
@@ -661,7 +874,6 @@ def build(args):
         raise ValueError("Expected the exact pinned original v0.3.4 server APK")
     cache = PublicCacheAdvice()
     cache.public("baseline", baseline, pybundle.BASELINE_SHA256)
-    staging_budget(root, output.parent)
     cache.advise()
     preflight = _resource_guard(root)
     sources = pybundle.committed_sources(root, args.source_commit)
@@ -687,6 +899,8 @@ def build(args):
         work = Path(temporary)
         cache.own_directory(work)
         infos = pybundle._members(incoming, pybundle.MAX_EXPANDED)
+        planned_capacity = capacity_plan(infos, payload.stat().st_size)
+        capacity_preflight = _allocation_guard(root, output.parent, planned_capacity["staging_bytes"])
         before = pybundle._hash_members(incoming, infos)
         if (before.get(pybundle.PAYLOAD) != pybundle.PAYLOAD_SHA256 or not (MUTABLE_NAMES | REMOVED_NAMES) <= infos.keys()
                 or {name for name in infos if name.startswith("lib/")} != NATIVE_NAMES):
@@ -698,7 +912,8 @@ def build(args):
         if pybundle.digest(stable_jar) != CHAQUOPY_SHA256:
             raise ValueError("Runtime JAR changed while snapshotting")
         cache.public("chaquopy-jar", stable_jar, CHAQUOPY_SHA256)
-        payload_report = validate_payload(payload, args.payload_sha256, incoming)
+        payload_report = validate_payload(payload, args.payload_sha256, incoming,
+                                          catalog_inventory=load_payload_inventory())
         cache.public("validated-payload", payload, args.payload_sha256)
         for name, raw in native_sources.items():
             path = work / "source" / name
@@ -760,17 +975,27 @@ def build(args):
         # remains the authority if the payload file changes concurrently.
         replacement_hashes[pybundle.PAYLOAD] = args.payload_sha256
         unsigned, aligned, signed = work / "unsigned.apk", work / "aligned.apk", work / "signed.apk"
+        actual_capacity = capacity_plan(infos, payload_report["bytes"], {
+            name: value.stat().st_size if isinstance(value, Path) else len(value)
+            for name, value in replacements.items()})
+        maximum = actual_capacity["apk_bytes"]
+        cache.advise()
+        _allocation_guard(root, output.parent, 2 * maximum + MIB)
         stream_apk(incoming, infos, unsigned, replacements)
-        if unsigned.stat().st_size * 2 + MIB > MAX_APK_STAGING:
-            raise ValueError("Two APK files would exceed the 200 MiB staging bound")
+        if not 0 < unsigned.stat().st_size <= maximum:
+            raise ValueError("Unsigned server APK exceeded its calculated capacity")
         audit_apk(unsigned, before, infos, replacement_hashes, dependencies, compiled_names)
         cache.completed_apk("unsigned.apk")
+        cache.advise()
+        _allocation_guard(root, output.parent, maximum + MIB)
         run([sdk / "zipalign", "-f", "4", unsigned, aligned])
+        if not 0 < aligned.stat().st_size <= maximum:
+            raise ValueError("Aligned server APK exceeded its calculated capacity")
         cache.completed_apk("aligned.apk")
         run([sdk / "zipalign", "-c", "4", aligned])
         unsigned.unlink()
-        if aligned.stat().st_size * 2 + MIB > MAX_APK_STAGING:
-            raise ValueError("Signing would exceed the two-APK staging bound")
+        cache.advise()
+        _allocation_guard(root, output.parent, maximum + MIB)
         env["IDOLY_MANUAL_SERVER_PASSWORD"] = read_password(password_file)
         try:
             signer = [jdk / "java", *JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
@@ -780,6 +1005,8 @@ def build(args):
                  "--v3-signing-enabled", "false", "--v4-signing-enabled", "false", "--out", signed, aligned])
         finally:
             env.pop("IDOLY_MANUAL_SERVER_PASSWORD", None)
+        if not 0 < signed.stat().st_size <= maximum:
+            raise ValueError("Signed server APK exceeded its calculated capacity")
         cache.completed_apk("signed.apk")
         signature = run([*signer, "verify", "--verbose", "--print-certs", signed]).decode("utf-8")
         if ("Signer #1 certificate SHA-256 digest: " + CERTIFICATE not in signature
@@ -815,6 +1042,8 @@ def build(args):
                   "modules": modules, "app_imy_sha1": hashlib.sha1(app).hexdigest(), "audit": audit,
                   "tool_sha256": tool_hashes, "public_cache_advice": cache.events,
                   "java_flags": JAVA_FLAGS, "preflight": preflight, "postflight": postflight,
+                  "capacity": {"planned": planned_capacity, "actual": actual_capacity,
+                               "preflight": capacity_preflight},
                   "seconds": time.monotonic() - started,
                   "child_peak_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
                   "self_peak_rss_kib": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,

@@ -5,11 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import signal
 import socket
 import sqlite3
 import sys
+import stat
+import tempfile
 import threading
 import time
 
@@ -35,6 +38,7 @@ class Controller:
         self.runtime = self.worker = None
         self.cancelled = False
         self.closed = False
+        self.resource_worker = None
 
     def log(self, message):
         self.emit("log", message=str(message))
@@ -52,22 +56,121 @@ class Controller:
         self.emit("status", status=status)
         return status
 
-    def start(self, experimental_main_live=False, media_mode=False, download_missing_resources=True):
+    def start(self, experimental_main_live=False, media_mode=False, download_missing_resources=True,
+              resource_cache_dir=None):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental live must be an explicit boolean")
         if type(media_mode) is not bool:
             raise ValueError("Media mode must be an explicit boolean")
         if type(download_missing_resources) is not bool:
             raise ValueError("Resource downloads must be an explicit boolean")
+        if resource_cache_dir is not None and (not isinstance(resource_cache_dir, str)
+                or not 0 < len(resource_cache_dir) <= 4096 or "\0" in resource_cache_dir
+                or not Path(resource_cache_dir).is_absolute()):
+            raise ValueError("Resource cache directory must be an absolute folder")
         with self.lock:
             if self.closed or self.runtime or (self.worker and self.worker.is_alive()):
                 return self.status()
             self.cancelled = False
-            self.worker = threading.Thread(target=self._start, args=(experimental_main_live, media_mode, download_missing_resources), name="local-server-start", daemon=False)
+            self.worker = threading.Thread(target=self._start, args=(experimental_main_live, media_mode,
+                download_missing_resources, resource_cache_dir), name="local-server-start", daemon=False)
             self.worker.start()
         self.status()
 
-    def _start(self, experimental_main_live=False, media_mode=False, download_missing_resources=True):
+    def resources(self, action, command):
+        """Reserve work quickly; archive I/O must never occupy the IPC reader."""
+        with self.lock:
+            runtime = self.runtime
+            library = getattr(runtime, "_library", None) if runtime is not None else None
+            if self.closed or library is None or not runtime.status().get("running"):
+                self.emit("resource_error", message="먼저 서버를 시작해 주세요.")
+                return
+        try:
+            if action == "resources_cancel":
+                identifier = command.get("job_id")
+                if not isinstance(identifier, str) or not 1 <= len(identifier) <= 64:
+                    raise ValueError("Invalid job identifier")
+                library.cancel(identifier)
+                self.status()
+                return
+            platform = command.get("platform")
+            if platform not in ("android", "ios"):
+                raise ValueError("Invalid resource platform")
+            if action == "resources_preview":
+                library.catalog_summary(platform)
+                self.status()
+                return
+            if action == "resources_download":
+                library.start_download(platform)
+                self.status()
+                return
+            value = command.get("path")
+            if not isinstance(value, str) or not 1 <= len(value) <= 4096 or "\0" in value:
+                raise ValueError("Invalid archive path")
+            path = Path(value)
+            if not path.is_absolute() or path.suffix.lower() != ".zip" or path.is_symlink():
+                raise ValueError("Invalid archive path")
+            with self.lock:
+                if self.resource_worker is not None and self.resource_worker.is_alive():
+                    self.emit("resource_error", message="진행 중인 보관 작업을 먼저 마치거나 취소해 주세요.")
+                    return
+                self.resource_worker = threading.Thread(
+                    target=self._resource_archive, args=(library, action, platform, path),
+                    name="local-resource-archive", daemon=True)
+                self.resource_worker.start()
+        except (OSError, ValueError, RuntimeError):
+            self.emit("resource_error", message="리소스 요청을 처리하지 못했습니다. 진행 중인 작업과 플랫폼을 확인해 주세요.")
+
+    def _resource_archive(self, library, action, platform, path):
+        temporary = None
+        job = None
+        try:
+            if action == "resources_export":
+                job = library.prepare_export(platform)
+                fd, temporary = tempfile.mkstemp(prefix=".idoly-resource-", suffix=".part", dir=path.parent)
+                with os.fdopen(fd, "wb") as output:
+                    result = library.write_export(job["job_id"], output)
+                    output.flush()
+                    os.fsync(output.fileno())
+                if (result.get("state") not in ("completed", "partial")
+                        or result.get("archive_complete") is not True or result.get("failed_files") != 0):
+                    raise ValueError("Archive export did not complete")
+                if path.is_symlink():
+                    raise ValueError("Archive destination changed")
+                os.replace(temporary, path)
+                temporary = None
+                missing = result.get("missing_files", 0)
+                message = f"보관 ZIP을 저장했습니다. 미보관 파일 {missing}개는 포함되지 않았습니다."
+            elif action == "resources_import":
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd, "rb") as source:
+                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                        raise ValueError("A regular archive is required")
+                    result = library.import_from(source, platform)
+                if result.get("state") not in ("completed", "partial"):
+                    raise ValueError("Archive import did not complete")
+                imported, failed = result.get("imported_files", 0), result.get("failed_files", 0)
+                if failed or result.get("error_code") is not None:
+                    self.emit("resource_error", message=f"일부 파일을 가져오지 못했습니다. 확인 완료 {imported}개 · 실패 {failed}개. 확인된 캐시는 유지됩니다.")
+                    return
+                message = f"원본 크기·MD5를 확인한 파일 {imported}개를 서버 캐시에 가져왔습니다."
+            else:
+                raise ValueError("Unsupported archive action")
+            self.emit("resource_result", message=message)
+        except (OSError, ValueError, RuntimeError):
+            if job is not None:
+                library.cancel(job["job_id"])
+            self.emit("resource_error", message="보관 ZIP 작업이 중단되었습니다. 완료 파일과 기존 캐시는 유지됩니다.")
+        finally:
+            if temporary is not None:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+            self.status()
+
+    def _start(self, experimental_main_live=False, media_mode=False, download_missing_resources=True,
+               resource_cache_dir=None):
         runtime = None
         try:
             self.log("서버 데이터를 준비하고 있습니다.")
@@ -79,7 +182,7 @@ class Controller:
             live_options = {"experimental_main_live": True} if experimental_main_live else {}
             runtime = app_runtime.start(self.data_dir, profile=self.profile, log_callback=self.log,
                                        media_mode=media_mode, download_missing_resources=download_missing_resources,
-                                       resource_platform="ios", **live_options)
+                                       resource_platform="ios", resource_cache_dir=resource_cache_dir, **live_options)
             with self.lock:
                 self.runtime = runtime
                 cancelled = self.cancelled or self.closed
@@ -1001,11 +1104,20 @@ def main(argv=None):
                 if type(download_missing) is not bool:
                     emit("error", message="게임 리소스 내려받기 설정을 읽지 못했습니다.")
                     continue
-                controller.start(experimental_live, media_mode, download_missing)
+                resource_cache_dir = command.get("resource_cache_dir")
+                if resource_cache_dir is not None and (not isinstance(resource_cache_dir, str)
+                        or not 0 < len(resource_cache_dir) <= 4096 or "\0" in resource_cache_dir
+                        or not Path(resource_cache_dir).is_absolute()):
+                    emit("error", message="리소스 보관 폴더를 읽지 못했습니다.")
+                    continue
+                controller.start(experimental_live, media_mode, download_missing, resource_cache_dir)
             elif action == "stop":
                 controller.stop()
             elif action == "status":
                 controller.status()
+            elif action in ("resources_preview", "resources_download", "resources_cancel",
+                            "resources_export", "resources_import"):
+                controller.resources(action, command)
             elif action == "quit":
                 break
             else:

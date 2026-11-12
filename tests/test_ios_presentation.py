@@ -1,6 +1,7 @@
 import copy
 import hashlib
 from pathlib import Path
+import re
 import struct
 
 import pytest
@@ -48,9 +49,9 @@ def test_gateway_rejects_pc_relative_control_flow_and_x16_input(word):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "914d2f85fddb9046300321df817687e3f9fe3046671293a6debe73777c9953d9"
+    assert hashlib.sha256(header).hexdigest() == "1bd0f3e8cbb392cedcc5f750cf90fe237e20a415cb5a17935f9f021a4830fd71"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 88 and len(plan["entries"]) == 31
+    assert len(profile["aliases"]) == 90 and len(plan["entries"]) == 32
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -94,6 +95,32 @@ def test_shared_preview_UI_default_is_scoped_to_original_bind_and_reactive_model
     assert "preview_ui_get" not in plan["entries"] and "preview_ui_set" not in plan["entries"]
     assert profile["preview_default_off"]["UI_On_and_Off_original_handlers_retained"] is True
     assert profile["preview_default_off"]["paid_capture_and_selection_menus_changed"] is False
+
+
+def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway():
+    profile, plan = p.load_profile(), p.make_plan()
+    aliases = profile["aliases"]
+    for name, rva, row in (("costume_sorted", 0x1DDCE78, 61471),
+                           ("costume_order_sorted", 0x1DDCF98, 61472)):
+        method = aliases[name]
+        assert method["rva"] == rva and method["token_row"] == row
+        assert method["type_definition_index"] == 12828
+        assert method["parameter_count"] == 1 and method["method_flags"] & 0x10 == 0
+        assert method["parameters"] == [{"name": "characterId", "metadata_type_index": 74127,
+                                           "type_name": "System.String"}]
+        assert method["return_type_index"] == 25377
+        assert method["prefix16"] == "f85fbca9f65701a9f44f02a9fd7b03a9"
+    assert "costume_sorted" in plan["entries"] and "costume_order_sorted" not in plan["entries"]
+    hook = plan["entries"]["costume_sorted"]
+    assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
+    assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
+    assert profile["gateway_region"]["bytes"] == 1024
+    assert profile["slot_region"]["bytes"] == 256
+    assert profile["media_costume_sort"]["same_character_predicate"] is True
+    assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
+    installer = (p.PROFILE.parent / "static_install.hpp").read_text()
+    installed = re.findall(r"HOOK\((\w+),", installer)
+    assert set(installed) - {"entry"} == set(plan["entries"])
 
 
 def test_plan_mutation_and_unrecognized_native_are_rejected_before_patch():

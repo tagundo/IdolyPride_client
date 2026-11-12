@@ -21,7 +21,7 @@ def test_pinned_profile_matches_original_function_bytes():
         entry_size, count = struct.unpack_from("<HH", data, 54)
         segments = [struct.unpack_from("<II6Q", data, offset + i * entry_size) for i in range(count)]
         aliases = profile["aliases"]
-        assert len(aliases) == 85
+        assert len(aliases) == 96
         for alias, entry in aliases.items():
             rva = int(entry["rva"], 16)
             expected = bytes.fromhex(entry["prefix16"])

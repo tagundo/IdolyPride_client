@@ -105,6 +105,7 @@ void *install(void *) {
         HOOK(orientation_after_ready,rotation::after_hook,rotation::original_after),
         HOOK(mv_ui_initialize,mv_ui_initialize_hook,mv_ui_initialize_original),
         HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original),
+        HOOK(costume_sorted,costume_sorted_hook,costume_sorted_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {

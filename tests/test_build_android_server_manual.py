@@ -1,4 +1,5 @@
 """Small synthetic boundaries; no Android tool, signing key or emulator needed."""
+import copy
 import hashlib
 import errno
 import io
@@ -62,8 +63,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "36",
-                           tool.ANDROID + "versionName": "0.3.17"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "38",
+                           tool.ANDROID + "versionName": "0.3.19"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -119,7 +120,7 @@ def test_release_component_export_policy_is_fixed(name, old, new):
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 36;' in raw and 'VERSION_NAME = "0.3.17";' in raw
+    assert 'VERSION_CODE = 38;' in raw and 'VERSION_NAME = "0.3.19";' in raw
     assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
@@ -128,7 +129,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("36")\ngradleProperty("serverVersionName").orElse("0.3.17")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("38")\ngradleProperty("serverVersionName").orElse("0.3.19")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -146,6 +147,7 @@ def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, m
 def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit(monkeypatch):
     root = Path(tool.__file__).resolve().parents[1]
     names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py",
+             tool.PAYLOAD_INVENTORY,
              "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py")
     frozen = {name: (root / name).read_bytes() for name in names}
     def git(_root, *args, limit):
@@ -156,6 +158,31 @@ def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit
     frozen[names[0]] = b"different builder source at declared commit"
     with pytest.raises(ValueError, match="differs from the frozen source"):
         tool.tool_sources(root, "a" * 40)
+
+
+def test_versioned_catalog_inventory_keeps_exact_source_and_platform_boundaries():
+    value = tool.load_payload_inventory()
+    assert len(value["additions"]) == 258 and len(value["ios_public_files"]) == 2
+    assert value["base_payload"] == tool.BASE_PUBLIC_PAYLOAD
+    assert value["prebuilt_catalogs"]["device_verified"] is False
+    assert len({row["path"] for row in value["additions"] + value["ios_public_files"]}) == 260
+
+
+@pytest.mark.parametrize("change", ["base", "duplicate", "private", "size", "digest", "ios", "extra", "device"])
+def test_versioned_catalog_inventory_rejects_unapproved_or_inconsistent_rows(tmp_path, change):
+    value = tool.load_payload_inventory()
+    if change == "base": value["base_payload"]["sha256"] = "0" * 64
+    elif change == "duplicate": value["additions"][1] = value["additions"][0]
+    elif change == "private": value["additions"][0]["path"] = "data/state.db"
+    elif change == "size": value["additions"][0]["bytes"] = tool.MAX_JSON + 1
+    elif change == "digest": value["additions"][0]["sha256"] = "0" * 64
+    elif change == "ios": value["ios_public_files"][0]["path"] = "data/public-octo/settings.json"
+    elif change == "extra": value["unexpected"] = True
+    else: value["prebuilt_catalogs"]["device_verified"] = True
+    path = tmp_path / "catalogs.json"
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="catalog"):
+        tool.load_payload_inventory(path)
 
 
 def test_commit_epoch_accepts_the_actual_git_bytes_return_type():
@@ -253,6 +280,33 @@ def test_payload_extends_only_nine_public_tables_and_verifies_actual_file_proven
     with ZipFile(baseline) as archive:
         report = tool.validate_payload(payload, digest, archive)
     assert len(report["tables"]) == 49 and report["sha256"] == digest
+
+
+@pytest.mark.parametrize("change", [None, "changed-catalog", "changed-proof", "extra-provenance"])
+def test_versioned_payload_catalog_is_bound_to_external_frozen_inventory(payload_case, change):
+    baseline, payload, files, _write = payload_case
+    inventory = tool.load_payload_inventory()
+    for row in inventory["additions"] + inventory["ios_public_files"]:
+        raw = ("synthetic original public catalog " + row["path"]).encode()
+        files[row["path"]] = raw
+        row["bytes"], row["sha256"] = len(raw), hashlib.sha256(raw).hexdigest()
+    if change == "changed-catalog":
+        files[inventory["additions"][0]["path"]] += b" changed after source freeze"
+    members = public_payload(files)
+    proof = json.loads(members[tool.PAYLOAD_MANIFEST])
+    proof["prebuilt_catalogs"] = copy.deepcopy(inventory["prebuilt_catalogs"])
+    if change == "changed-proof": proof["prebuilt_catalogs"]["scope"] = ["unapproved claim"]
+    if change == "extra-provenance": proof["private_state"] = "must never be allowed"
+    members[tool.PAYLOAD_MANIFEST] = json.dumps(proof).encode()
+    payload.write_bytes(zip_bytes(members))
+    with ZipFile(baseline) as archive:
+        if change:
+            with pytest.raises(ValueError, match="catalog|provenance"):
+                tool.validate_payload(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
+        else:
+            report = tool.validate_payload(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
+            assert report["prebuilt_catalogs"] == inventory["prebuilt_catalogs"]
+            assert report["members"] == len(files) + 1
 
 
 @pytest.mark.parametrize("change", ["private", "old-bytes", "missing", "empty-new"])
@@ -409,11 +463,11 @@ def test_unknown_d8_synthetic_kinds_or_malformed_suffixes_remain_rejected(suffix
     assert not tool.own_synthetic(origin + suffix, {origin + ";"})
 
 
-def test_only_seven_server_sources_are_frozen_without_installer_or_client_builder():
-    assert len(tool.JAVA_FILES) == 7
+def test_only_nine_server_sources_are_frozen_without_installer_or_client_builder():
+    assert len(tool.JAVA_FILES) == 9
     assert {Path(name).stem for name in tool.JAVA_FILES} == {
         "MainActivity", "ServerService", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage",
-        "RenderingExperiment"}
+        "RenderingExperiment", "LibrarySettings", "ResourceTransfers"}
     assert not any("Installer" in name or "PresentationStorage" in name for name in tool.SOURCE_FILES)
     assert not hasattr(tool, "presentation")
     assert not hasattr(tool, "presentation_assets")
@@ -423,7 +477,7 @@ def test_gradle_python_exclusions_match_the_manual_server_dependency_boundary():
     gradle = (Path(tool.__file__).resolve().parents[1] / tool.GRADLE).read_text()
     excluded_paths = re.findall(r'"(idoly_local/[^"\n]+\.py)"', gradle)
     expected = {name.replace(".", "/") + ".py" for name in tool.pybundle.ANDROID_EXCLUDED_MODULES}
-    assert len(excluded_paths) == len(expected) == 24
+    assert len(excluded_paths) == len(expected) == 26
     assert set(excluded_paths) == expected
 
 
@@ -455,7 +509,7 @@ def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(t
 
 
 def linked_identity():
-    badging = (f"package: name='{tool.PACKAGE}' versionCode='36' versionName='0.3.17'\n"
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='38' versionName='0.3.19'\n"
                "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
                + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
     manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"

@@ -226,6 +226,7 @@ class OctoManifest:
         if (not isinstance(plain_protobuf, bytes)
                 or not 1 <= len(plain_protobuf) <= MAX_MANIFEST_BYTES):
             raise OctoManifestError("Invalid Octo manifest size")
+        self.archive_sha256 = hashlib.sha256(plain_protobuf).hexdigest()
         local_url_format = base_url.rstrip("/") + "/octo/{v}/{type}/{o}/{g}"
         rewritten_wire = _rewrite_url_field(plain_protobuf, local_url_format)
         try:

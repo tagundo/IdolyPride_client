@@ -43,6 +43,18 @@
       {
         "file": "android-original-ui-fields-and-call-pins.json",
         "sha256": "7a6b8c2466c41e6466a2255e795887bcde2671e1ebec0c3f3acb51273cc00d91"
+      },
+      {
+        "file": "android-original-preview-ui-fields-and-pins.json",
+        "sha256": "2ff3a6cc821373a9bf98f8f9fe5f30ca8357a55ddfcf50ca8cd35f0ffab20c3a"
+      },
+      {
+        "file": "original-costume-sort-hook-packet.json",
+        "sha256": "0ea63c50b75decb3787430c4a45a5e475e6e8737ef4c0ac0c5aa982ad8cc97de"
+      },
+      {
+        "file": "android-wardrobe-lean-original-pins.json",
+        "sha256": "d205ee0e8b23687e1ce6f9b0a12d629c8d6ab6ead53864c76d1b3520e87c8832"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -1632,6 +1644,375 @@
         }
       ],
       "source": "android-original-ui-fields-and-call-pins.json"
+    },
+    "preview_ui_get": {
+      "name": "Solis.Photography.PhotographyPreviewContentModel.get_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 484,
+      "metadata_method_index": 3193,
+      "token_row": 3194,
+      "rva": "0x5657a7c",
+      "prefix16": "fe0f1ef8f44f01a9345002f088364039",
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "parameters": [],
+      "method_flags": "0x886",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0x9ab0d60",
+      "native_ABI": "bool(void*,const MethodInfo*)"
+    },
+    "preview_ui_set": {
+      "name": "Solis.Photography.PhotographyPreviewContentModel.set_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 484,
+      "metadata_method_index": 3194,
+      "token_row": 3195,
+      "rva": "0x5657ac4",
+      "prefix16": "fe57bea9f44f01a9355002f0a83a4039",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 50428,
+            "kind": 2,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80020000",
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "method_flags": "0x886",
+      "is_static": false,
+      "mode": "CALL",
+      "registration_pointer_slot_rva": "0x9ab0d68",
+      "native_ABI": "void(void*,bool,const MethodInfo*)"
+    },
+    "preview_ui_bind": {
+      "name": "Solis.Photography.PhotographyPreviewContentPresenter.Bind",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 487,
+      "metadata_method_index": 3198,
+      "token_row": 3199,
+      "rva": "0x5657df0",
+      "prefix16": "fe5fbda9f65701a9f44f02a9345002f0",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "method_flags": "0x81",
+      "is_static": false,
+      "mode": "HOOK",
+      "registration_pointer_slot_rva": "0x9ab0d88",
+      "native_ABI": "void(void*,const MethodInfo*)"
+    },
+    "costume_sorted": {
+      "name": "Solis.Common.User.UserCostumeCollection.GetSortedCharacterCostumes",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12830,
+      "metadata_method_index": 61473,
+      "token_row": 61474,
+      "rva": "0x4670510",
+      "prefix16": "fe5fbda9f65701a9f44f02a915cf02d0",
+      "return_type": {
+        "metadata_type_index": 25472,
+        "kind": 21,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x150000",
+        "class": null
+      },
+      "parameters": [
+        {
+          "name": "characterId",
+          "type": {
+            "metadata_type_index": 74263,
+            "kind": 14,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0xe0000",
+            "class": null
+          }
+        }
+      ],
+      "method_flags": "0x86",
+      "is_static": false,
+      "mode": "HOOK",
+      "native_ABI": "void*(void* self,Il2CppString* characterId,const MethodInfo*)",
+      "registration_pointer_slot_rva": "0x9b22aa0"
+    },
+    "costume_order_sorted": {
+      "name": "Solis.Common.User.UserCostumeCollection.GetOrderSortedCharacterCostumes",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12830,
+      "metadata_method_index": 61474,
+      "token_row": 61475,
+      "rva": "0x4670624",
+      "prefix16": "fe5fbda9f65701a9f44f02a915cf02d0",
+      "return_type": {
+        "metadata_type_index": 25472,
+        "kind": 21,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x150000",
+        "class": null
+      },
+      "parameters": [
+        {
+          "name": "characterId",
+          "type": {
+            "metadata_type_index": 74263,
+            "kind": 14,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0xe0000",
+            "class": null
+          }
+        }
+      ],
+      "method_flags": "0x86",
+      "is_static": false,
+      "mode": "CALL",
+      "native_ABI": "void*(void* self,Il2CppString* characterId,const MethodInfo*)",
+      "registration_pointer_slot_rva": "0x9b22aa8"
+    },
+    "wardrobe_show": {
+      "name": "Solis.OutGame.CharacterCostumeScreenView.ShowAnimationAsync",
+      "token_row": 23074,
+      "rva": "0x53779a4",
+      "prefix16": "ffc301d1fe2300f9f65705a9f44f06a9",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": {
+            "metadata_type_index": 50865,
+            "kind": 17,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80110000",
+            "class": "System.Threading.CancellationToken"
+          }
+        }
+      ],
+      "flags": "0x86",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 4245,
+      "mode": "HOOK",
+      "native_ABI": "UniTask16(void*,CancellationToken8,const MethodInfo*)",
+      "return_type": {
+        "metadata_type_index": 76686,
+        "kind": 17,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80110000",
+        "class": "Cysharp.Threading.Tasks.UniTask"
+      },
+      "metadata_method_index": 23073,
+      "is_static": false
+    },
+    "wardrobe_move": {
+      "name": "Solis.OutGame.LoadingCharacter3DView.<ShowAsync>d__7.MoveNext",
+      "rva": "0x497094c",
+      "parameter_count": 0,
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 1239,
+      "token_row": 8013,
+      "parameters": [],
+      "mode": "HOOK",
+      "native_ABI": "void(unboxed_ShowState*,const MethodInfo*)",
+      "prefix16": "ff4301d1fe0b00f9f85f02a9f65703a9",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "metadata_method_index": 8012,
+      "is_static": false
+    },
+    "wardrobe_fail": {
+      "name": "Cysharp.Threading.Tasks.CompilerServices.AsyncUniTask<LoadingCharacter3DView.ShowState>.SetException",
+      "module": "UniTask.dll",
+      "type_definition_index": 29661,
+      "token_row": 1440,
+      "rva": "0x7d0e5f4",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "exception",
+          "type": {
+            "class": "System.Exception",
+            "kind": 18
+          }
+        }
+      ],
+      "is_static": false,
+      "mode": "HOOK",
+      "native_ABI": "void(void*runner,void*exception,const MethodInfo*)",
+      "method_spec_index": 57043,
+      "generic_method_pointer_slot": 54691,
+      "prefix16": "fe0f1df8f65701a9f44f02a9d61a01f0",
+      "metadata_method_index": 201101
+    },
+    "wardrobe_wait": {
+      "class": "Cysharp.Threading.Tasks.UniTask",
+      "TD": 29422,
+      "method": "WaitUntil",
+      "token_row": 162,
+      "rva": "0x8d6e1e8",
+      "prefix16": "ff0301d1fe5f01a9f65702a9f44f03a9",
+      "parameters": [
+        {
+          "name": "predicate",
+          "type": {
+            "metadata_type_index": 14936,
+            "kind": 21,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x150000",
+            "class": null
+          }
+        },
+        {
+          "name": "timing",
+          "type": {
+            "metadata_type_index": 68536,
+            "kind": 17,
+            "byref": false,
+            "attributes": 4112,
+            "native_type_bits": "0x80111010",
+            "class": "Cysharp.Threading.Tasks.PlayerLoopTiming"
+          }
+        },
+        {
+          "name": "cancellationToken",
+          "type": {
+            "metadata_type_index": 50872,
+            "kind": 17,
+            "byref": false,
+            "attributes": 4112,
+            "native_type_bits": "0x80111010",
+            "class": "System.Threading.CancellationToken"
+          }
+        }
+      ],
+      "flags": "0x96",
+      "module": "UniTask.dll",
+      "registration_slot": "0x9fff228",
+      "name": "Cysharp.Threading.Tasks.UniTask.WaitUntil",
+      "mode": "HOOK",
+      "native_ABI": "UniTask16(void*predicate,int32_t,CancellationToken8,const MethodInfo*)",
+      "return_type": {
+        "metadata_type_index": 76686,
+        "kind": 17,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80110000",
+        "class": "Cysharp.Threading.Tasks.UniTask"
+      },
+      "metadata_method_index": 199823,
+      "is_static": true
+    },
+    "wardrobe_yield": {
+      "class": "Cysharp.Threading.Tasks.UniTask",
+      "TD": 29422,
+      "method": "Yield",
+      "token_row": 149,
+      "rva": "0x8d6d274",
+      "prefix16": "fe0f1df8f65701a9f44f02a9369800d0",
+      "parameters": [
+        {
+          "name": "timing",
+          "type": {
+            "metadata_type_index": 68533,
+            "kind": 17,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80110000",
+            "class": "Cysharp.Threading.Tasks.PlayerLoopTiming"
+          }
+        },
+        {
+          "name": "cancellationToken",
+          "type": {
+            "metadata_type_index": 50865,
+            "kind": 17,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80110000",
+            "class": "System.Threading.CancellationToken"
+          }
+        }
+      ],
+      "flags": "0x96",
+      "module": "UniTask.dll",
+      "registration_slot": "0x9fff1c0",
+      "name": "Cysharp.Threading.Tasks.UniTask.Yield",
+      "mode": "CALL",
+      "native_ABI": "UniTask16(int32_t,CancellationToken8,const MethodInfo*)",
+      "return_type": {
+        "metadata_type_index": 76686,
+        "kind": 17,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80110000",
+        "class": "Cysharp.Threading.Tasks.UniTask"
+      },
+      "metadata_method_index": 199810,
+      "is_static": true
+    },
+    "wardrobe_hide_predicate": {
+      "name": "Solis.OutGame.LoadingCharacter3DView.<HideAsync>b__8_0",
+      "rva": "0x49702ec",
+      "parameter_count": 0,
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 1240,
+      "token_row": 8010,
+      "parameters": [],
+      "mode": "CALL",
+      "native_ABI": "IDENTITY ONLY bool(void*,const MethodInfo*)",
+      "function_size_bytes": 8,
+      "never_hook_short_body": true,
+      "prefix16": "00204139c0035fd6ff4301d1fe6701a9",
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "metadata_method_index": 8009,
+      "is_static": false
     }
   },
   "graphics_fields": [
@@ -2100,5 +2481,32 @@
     "initial_UI_off": "Original reactive model setter once per weak model after initialized control; later user UI-ON untouched",
     "lifetime": "Weak owner/rect/parent/model identity; frame-local geometry memo only; restore on disable/exit without overwriting later original writes",
     "no_direct_drag_or_new_settings": true
+  },
+  "preview_default_off": {
+    "scope": "OriginalPreviewContentPresenter activity/expression/liveviewingsessions;selectionandpaidcapturemenusunchanged",
+    "helper": "shared native/photography_ui.hpp",
+    "hook": "Original Bind first, then originalmodelIsUIActive(false)andreadbackoncepernewweakmodel",
+    "presenter_model_offset": 64,
+    "model_property_offset": 16,
+    "model_end_offset": 24,
+    "original_user_UI_ON_preserved": true,
+    "new_call_count": 2,
+    "new_hook_count": 1
+  },
+  "costume_sort_policy": {
+    "default": "original",
+    "nonoriginal": "Dispatch originalGetSortedCharacterCostumesto originalGetOrderSortedCharacterCostumes onestablishedgamethreadonly",
+    "owned_character_candidates_changed": false,
+    "original_method_used_when_unconfigured": true,
+    "JNI": "configureMedia(int,long,bool)",
+    "original_filter_proof": "original-costume-sort-hook-packet.json"
+  },
+  "wardrobe_recovery": {
+    "scope": "Android CharacterCostumeScreenView only",
+    "hook_count": 4,
+    "weak_scope_slots": 2,
+    "scheduler": "original Yield(timing,CT)",
+    "predicate_identity_only": true,
+    "physical_cause_verified": false
   }
 }

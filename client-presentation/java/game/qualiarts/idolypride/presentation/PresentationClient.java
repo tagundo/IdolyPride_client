@@ -32,6 +32,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public final class PresentationClient {
     public static final int MAX_BYTES = 8192;
     public static final int MAX_RENDER_PROBE_BYTES = 2048;
+    public static final int MAX_WARDROBE_BYTES = 2048;
     private static final String ORIGIN = "http://127.0.0.1:8080";
     private static final Set<String> CONFIG_KEYS = keys("schema", "revision", "custom_graphics", "quality",
             "target_fps", "render_scale", "max_buffer_pixel", "anti_aliasing", "shadow_resolution", "expand_photography");
@@ -43,9 +44,12 @@ public final class PresentationClient {
     private static final Set<String> PLAYBACK_KEYS = keys("schema", "revision", "wait_for_orientation");
     private static final Set<String> PLAYBACK_STATUS_KEYS = keys("schema", "bridge_version", "revision",
             "wait_for_orientation", "supported", "applied");
+    private static final Set<String> MEDIA_KEYS = keys("schema", "revision", "hide_video_mv", "mv_sort", "outfit_sort");
     private static final Set<String> RENDER_PROBE_KEYS = keys("schema", "state", "actual_mode", "graphics_api",
             "callback_tid", "observations", "sample_age_ms", "cpu_frame_ms", "gpu_frame_ms", "timing_age_ms");
     private static final Set<String> RENDER_PROBE_STATES = keys("waiting", "observed", "unsupported", "init_failed");
+    private static final Set<String> WARDROBE_KEYS = keys("schema", "phase", "show_failures", "released_waits", "sequence", "sample_age_ms");
+    private static final Set<String> WARDROBE_PHASES = keys("idle", "show_begin", "show_failed", "hide_wait_released", "owner_closed");
     // No native code ran, so no preference revision or capability was applied.
     static String startupFailureStatus() {
         return "{\"schema\":1,\"bridge_version\":1,\"revision\":0,\"status\":\"init_failed\","
@@ -93,6 +97,27 @@ public final class PresentationClient {
         String status();
     }
 
+    public static final class MediaConfig {
+        public final long revision;
+        public final boolean hideVideoMv;
+        public final String mvSort, outfitSort;
+        MediaConfig(Map<String, Object> row) throws IOException {
+            if (!row.keySet().equals(MEDIA_KEYS) || integer(row.get("schema")) != 1) throw invalid();
+            revision = integer(row.get("revision"));
+            hideVideoMv = bool(row.get("hide_video_mv"));
+            if (revision < 0 || !keys("recent", "old", "title", "id").contains(row.get("mv_sort"))
+                    || !keys("original", "recent", "old", "title", "id").contains(row.get("outfit_sort"))) throw invalid();
+            mvSort = (String) row.get("mv_sort"); outfitSort = (String) row.get("outfit_sort");
+        }
+        public boolean useMasterCostumeOrder() { return !outfitSort.equals("original"); }
+        boolean sameValues(MediaConfig other) {
+            return hideVideoMv == other.hideVideoMv && mvSort.equals(other.mvSort) && outfitSort.equals(other.outfitSort);
+        }
+    }
+    public interface MediaNative {
+        boolean configure(int schema, long revision, boolean useMasterCostumeOrder);
+    }
+
     private static Set<String> keys(String... values) { return new HashSet<String>(Arrays.asList(values)); }
     private static IOException invalid() { return new IOException("Invalid presentation protocol"); }
     private static boolean bool(Object value) throws IOException { if (!(value instanceof Boolean)) throw invalid(); return (Boolean) value; }
@@ -114,6 +139,7 @@ public final class PresentationClient {
 
     public static Config parseConfig(String json) throws IOException { return new Config(new Json(json).parse()); }
     public static PlaybackConfig parsePlayback(String json) throws IOException { return new PlaybackConfig(new Json(json).parse()); }
+    public static MediaConfig parseMedia(String json) throws IOException { return new MediaConfig(new Json(json).parse()); }
     public static void validatePlaybackStatus(String json) throws IOException {
         Map<String, Object> row = new Json(json).parse();
         if (!row.keySet().equals(PLAYBACK_STATUS_KEYS) || integer(row.get("schema")) != 1
@@ -161,6 +187,20 @@ public final class PresentationClient {
             } else if (mode != null) throw invalid();
         }
     }
+    /** Read-only lifecycle counters; never includes a game object or account identifier. */
+    public static void validateWardrobe(String json) throws IOException {
+        if (json == null || json.getBytes(StandardCharsets.UTF_8).length > MAX_WARDROBE_BYTES) throw invalid();
+        Map<String, Object> row = new Json(json).parse();
+        if (!row.keySet().equals(WARDROBE_KEYS) || integer(row.get("schema")) != 1
+                || !WARDROBE_PHASES.contains(row.get("phase"))) throw invalid();
+        long failures = integer(row.get("show_failures")), released = integer(row.get("released_waits"));
+        long sequence = integer(row.get("sequence"));
+        Long age = nullableInteger(row.get("sample_age_ms"), 0, Long.MAX_VALUE);
+        if (failures < 0 || released < 0 || sequence < 0) throw invalid();
+        if (row.get("phase").equals("idle")) {
+            if (sequence != 0 || failures != 0 || released != 0 || age != null) throw invalid();
+        } else if (sequence == 0 || age == null) throw invalid();
+    }
     @SuppressWarnings("unchecked")
     public static void validateStatus(String json) throws IOException {
         Map<String, Object> row = new Json(json).parse();
@@ -184,6 +224,7 @@ public final class PresentationClient {
 
     interface Connections { HttpURLConnection open(URL url) throws IOException; }
     private final Connections connections;
+    private MediaConfig acceptedMedia;
     private static ThreadPoolExecutor daemon(final String name, boolean allowPending) {
         BlockingQueue<Runnable> queue = allowPending ? new ArrayBlockingQueue<Runnable>(1) : new SynchronousQueue<Runnable>();
         return new ThreadPoolExecutor(0, 1, 5, TimeUnit.SECONDS, queue,
@@ -205,6 +246,15 @@ public final class PresentationClient {
     PresentationClient(Connections connections) { this.connections = connections; }
     public Config fetch() throws IOException { return parseConfig(request("/client/presentation", null)); }
     public PlaybackConfig fetchPlayback() throws IOException { return parsePlayback(request("/client/playback", null)); }
+    public MediaConfig fetchMedia() throws IOException { return parseMedia(request("/client/media", null)); }
+    public boolean pollMedia(MediaNative receiver) throws IOException {
+        MediaConfig config = fetchMedia();
+        if (acceptedMedia != null && (config.revision < acceptedMedia.revision
+                || config.revision == acceptedMedia.revision && !config.sameValues(acceptedMedia))) return false;
+        if (!receiver.configure(1, config.revision, config.useMasterCostumeOrder())) return false;
+        acceptedMedia = config;
+        return true;
+    }
     public void postPlaybackStatus(String status) throws IOException {
         validatePlaybackStatus(status);
         request("/client/playback/status", status.getBytes(StandardCharsets.UTF_8));
@@ -212,6 +262,10 @@ public final class PresentationClient {
     public void postRenderProbe(String status) throws IOException {
         validateRenderProbe(status);
         request("/client/render-probe", status.getBytes(StandardCharsets.UTF_8));
+    }
+    public void postWardrobe(String status) throws IOException {
+        validateWardrobe(status);
+        request("/client/wardrobe", status.getBytes(StandardCharsets.UTF_8));
     }
     /** Only native acknowledgement is posted; a stored preference is not playback completion. */
     public boolean pollPlayback(PlaybackNative receiver) throws IOException {

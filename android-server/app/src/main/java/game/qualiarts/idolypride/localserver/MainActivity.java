@@ -2,6 +2,7 @@ package game.qualiarts.idolypride.localserver;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -9,8 +10,11 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.SystemClock;
 import android.net.Uri;
+import android.provider.DocumentsContract;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
@@ -28,6 +32,7 @@ import android.widget.Toast;
 import java.util.List;
 import java.util.Locale;
 import java.io.IOException;
+import java.io.File;
 import org.json.JSONObject;
 
 /** Native controls for a server contained entirely in this installed app. */
@@ -36,6 +41,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     static final String EXPERIMENTAL_MAIN_LIVE = "experimental_main_live";
     static final String DOWNLOAD_MISSING_RESOURCES = "download_missing_resources";
     static final String MEDIA_MODE = "media_mode";
+    static final String RESOURCE_PUBLIC_DOWNLOADS = "resource_public_downloads";
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
     private CheckBox mediaMode;
@@ -51,6 +57,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private ProgressBar transferProgress;
     private Button export;
     private static final int EXPORT_DIAGNOSTICS = 50052;
+    private static final int EXPORT_RESOURCES = 50053, IMPORT_RESOURCES = 50054;
     private Button start;
     private Button stop;
     private ScrollView logScroll;
@@ -79,6 +86,18 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private TextView renderingStatus;
     private JSONObject renderProbeRuntime;
     private boolean renderProbeRuntimeRunning;
+    private LibrarySettings librarySettings;
+    private boolean libraryLoading, libraryInvalid, librarySaveFailed;
+    private boolean libraryInvalidLanguage, libraryInvalidMedia;
+    private Spinner libraryLanguage, libraryMvSort, libraryOutfitSort, resourcePlatform;
+    private CheckBox hideVideoMv;
+    private TextView libraryStatus, libraryTransferStatus;
+    private Button downloadLibrary, importLibrary, exportLibrary, cancelLibrary;
+    private ProgressBar libraryProgress;
+    private String currentLibraryJob, pendingResourcePlatform;
+    private Spinner resourceStorage;
+    private TextView resourceStorageNotice;
+    private boolean retryStartAfterStoragePermission;
     private final Runnable playbackRefresh = new Runnable() {
         @Override public void run() {
             updatePlaybackStatus();
@@ -107,6 +126,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) {
+            pendingResourcePlatform = savedInstanceState.getString("resource_platform");
+            retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
+        }
         getWindow().setStatusBarColor(Color.rgb(19, 29, 36));
         getWindow().setNavigationBarColor(Color.rgb(19, 29, 36));
         LinearLayout content = new LinearLayout(this);
@@ -160,6 +183,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView mediaNotice = text(R.string.media_mode_notice, 12, Color.rgb(180, 199, 211));
         mediaNotice.setPadding(0, 0, 0, dp(6));
         body.addView(mediaNotice);
+        addResourceStorageControls(body);
+        addLibraryControls(body);
         experimentalMainLive = new CheckBox(this);
         experimentalMainLive.setText(R.string.experimental_main_live);
         experimentalMainLive.setTextColor(Color.WHITE);
@@ -241,6 +266,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         resourceServed.setTextIsSelectable(true);
         resourceServed.setVisibility(View.GONE);
         body.addView(resourceServed);
+        addResourceLibraryControls(body);
         TextView note = text(R.string.first_launch_note, 13, Color.rgb(160, 181, 194));
         note.setPadding(0, dp(8), 0, dp(14));
         body.addView(note);
@@ -259,13 +285,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         content.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
         setContentView(content);
 
-        start.setOnClickListener(view -> {
-            try {
-                startForegroundService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_START));
-            } catch (RuntimeException error) {
-                Toast.makeText(this, R.string.server_start_failed, Toast.LENGTH_LONG).show();
-            }
-        });
+        start.setOnClickListener(view -> requestServerStart());
         stop.setOnClickListener(view -> startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP)));
         launch.setOnClickListener(view -> launchClient(R.string.client_missing,
                 "game.qualiarts.idolypride.local.resources", "game.qualiarts.idolypride.local"));
@@ -285,6 +305,246 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 50051);
         }
+    }
+
+    private static int optionIndex(String[] values, String selected) {
+        for (int index = 0; index < values.length; index++) if (values[index].equals(selected)) return index;
+        return 0;
+    }
+    private boolean downloadsSelected() {
+        return getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getBoolean(RESOURCE_PUBLIC_DOWNLOADS, true);
+    }
+    private void addResourceStorageControls(LinearLayout body) {
+        resourceStorage = presentationSpinner(body, R.string.resource_storage, R.array.resource_storage_options);
+        resourceStorage.setSelection(downloadsSelected() ? 0 : 1);
+        resourceStorageNotice = text(R.string.resource_storage_public_notice, 12, Color.rgb(180, 199, 211));
+        resourceStorageNotice.setPadding(0, 0, 0, dp(8)); body.addView(resourceStorageNotice);
+        resourceStorage.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                boolean selected = position == 0;
+                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putBoolean(RESOURCE_PUBLIC_DOWNLOADS, selected).apply();
+                resourceStorageNotice.setText(selected ? R.string.resource_storage_public_notice : R.string.resource_storage_private_notice);
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        resourceStorageNotice.setText(downloadsSelected() ? R.string.resource_storage_public_notice : R.string.resource_storage_private_notice);
+    }
+    private void startServerWithSelectedStorage() {
+        try { startForegroundService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_START)); }
+        catch (RuntimeException failed) { Toast.makeText(this, R.string.server_start_failed, Toast.LENGTH_LONG).show(); }
+    }
+    private void choosePrivateStorageAndStart() {
+        getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putBoolean(RESOURCE_PUBLIC_DOWNLOADS, false).apply();
+        resourceStorage.setSelection(1); retryStartAfterStoragePermission = false;
+        startServerWithSelectedStorage();
+    }
+    private void requestServerStart() {
+        boolean granted = Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();
+        int decision = ResourceTransfers.storageAccess(Build.VERSION.SDK_INT, downloadsSelected(), granted);
+        if (decision == ResourceTransfers.STORAGE_PRIVATE || decision == ResourceTransfers.STORAGE_DOWNLOADS) {
+            startServerWithSelectedStorage(); return;
+        }
+        AlertDialog.Builder dialog = new AlertDialog.Builder(this).setTitle(R.string.resource_storage_permission_title)
+                .setMessage(decision == ResourceTransfers.STORAGE_UNSUPPORTED ? R.string.resource_storage_older_android : R.string.resource_storage_permission_notice)
+                .setNegativeButton(R.string.resource_storage_use_private, (view, which) -> choosePrivateStorageAndStart())
+                .setNeutralButton(R.string.resource_storage_later, null);
+        if (decision == ResourceTransfers.STORAGE_PERMISSION) dialog.setPositiveButton(R.string.resource_storage_open_settings, (view, which) -> {
+            retryStartAfterStoragePermission = true;
+            Intent settings = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            try { startActivity(settings); }
+            catch (RuntimeException unavailable) {
+                retryStartAfterStoragePermission = false;
+                Toast.makeText(this, R.string.resource_storage_settings_unavailable, Toast.LENGTH_LONG).show();
+            }
+        });
+        dialog.show();
+    }
+    @Override protected void onResume() {
+        super.onResume();
+        if (retryStartAfterStoragePermission) {
+            retryStartAfterStoragePermission = false;
+            if (downloadsSelected() && Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager()) startServerWithSelectedStorage();
+            else Toast.makeText(this, R.string.resource_storage_permission_denied, Toast.LENGTH_LONG).show();
+        }
+    }
+    private void resourcePickerLocation(Intent picker) {
+        try {
+            File exports = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "IdolyPride/exports");
+            if (exports.isDirectory()) picker.putExtra(DocumentsContract.EXTRA_INITIAL_URI,
+                    DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:Download/IdolyPride/exports"));
+        } catch (SecurityException unavailable) { /* The system picker remains the explicit fallback. */ }
+    }
+    private void addLibraryControls(LinearLayout body) {
+        LibrarySettings.Loaded loaded = LibrarySettings.load(getFilesDir());
+        librarySettings = loaded.settings;
+        libraryInvalidLanguage = loaded.invalidLanguage; libraryInvalidMedia = loaded.invalidMedia;
+        libraryInvalid = libraryInvalidLanguage || libraryInvalidMedia;
+        body.addView(text(R.string.library_settings_title, 15, Color.WHITE));
+        libraryLanguage = presentationSpinner(body, R.string.library_language, R.array.library_language_options);
+        hideVideoMv = new CheckBox(this); hideVideoMv.setText(R.string.library_hide_video_mv);
+        hideVideoMv.setTextSize(13); hideVideoMv.setTextColor(Color.WHITE); body.addView(hideVideoMv);
+        libraryMvSort = presentationSpinner(body, R.string.library_mv_sort, R.array.library_mv_sort_options);
+        libraryOutfitSort = presentationSpinner(body, R.string.library_outfit_sort, R.array.library_outfit_sort_options);
+        libraryStatus = text(R.string.library_settings_notice, 12, Color.rgb(180, 199, 211));
+        libraryStatus.setTextIsSelectable(true); libraryStatus.setPadding(0, dp(4), 0, dp(8)); body.addView(libraryStatus);
+        restoreLibraryControls();
+        AdapterView.OnItemSelectedListener changed = new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { saveLibraryControls(); }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        };
+        libraryLanguage.setOnItemSelectedListener(changed); libraryMvSort.setOnItemSelectedListener(changed);
+        libraryOutfitSort.setOnItemSelectedListener(changed);
+        hideVideoMv.setOnCheckedChangeListener((button, enabled) -> saveLibraryControls());
+        updateLibraryStatus();
+    }
+    private void restoreLibraryControls() {
+        libraryLoading = true;
+        libraryLanguage.setSelection(optionIndex(LibrarySettings.LANGUAGES, librarySettings.language));
+        libraryMvSort.setSelection(optionIndex(LibrarySettings.MV_SORTS, librarySettings.mvSort));
+        libraryOutfitSort.setSelection(optionIndex(LibrarySettings.OUTFIT_SORTS, librarySettings.outfitSort));
+        hideVideoMv.setChecked(librarySettings.hideVideoMv); libraryLoading = false;
+    }
+    private void saveLibraryControls() {
+        if (libraryLoading) return;
+        String language = LibrarySettings.LANGUAGES[libraryLanguage.getSelectedItemPosition()];
+        String mv = LibrarySettings.MV_SORTS[libraryMvSort.getSelectedItemPosition()];
+        String outfit = LibrarySettings.OUTFIT_SORTS[libraryOutfitSort.getSelectedItemPosition()];
+        boolean hide = hideVideoMv.isChecked();
+        boolean languageChanged = !language.equals(librarySettings.language);
+        boolean mediaChanged = hide != librarySettings.hideVideoMv || !mv.equals(librarySettings.mvSort) || !outfit.equals(librarySettings.outfitSort);
+        if (!languageChanged && !mediaChanged) return;
+        try {
+            if (languageChanged) {
+                LibrarySettings next = librarySettings.changedLanguage(language); next.saveLanguage(getFilesDir()); librarySettings = next;
+                libraryInvalidLanguage = false;
+            }
+            if (mediaChanged) {
+                LibrarySettings next = librarySettings.changedMedia(hide, mv, outfit, System.currentTimeMillis());
+                next.saveMedia(getFilesDir()); librarySettings = next;
+                libraryInvalidMedia = false;
+            }
+            librarySaveFailed = false; libraryInvalid = libraryInvalidLanguage || libraryInvalidMedia;
+        } catch (IOException | IllegalArgumentException | IllegalStateException error) {
+            librarySaveFailed = true; restoreLibraryControls();
+            Toast.makeText(this, R.string.library_settings_failed, Toast.LENGTH_LONG).show();
+        }
+        updateLibraryStatus();
+    }
+    private void updateLibraryStatus() {
+        if (libraryStatus == null) return;
+        setTextIfChanged(libraryStatus, getString(librarySaveFailed ? R.string.library_settings_failed
+                : libraryInvalid ? R.string.library_settings_invalid : R.string.library_settings_notice));
+        libraryStatus.setTextColor(librarySaveFailed || libraryInvalid ? Color.rgb(255, 192, 154) : Color.rgb(180, 199, 211));
+    }
+    private String selectedResourcePlatform() { return resourcePlatform.getSelectedItemPosition() == 1 ? "ios" : "android"; }
+    private void addResourceLibraryControls(LinearLayout body) {
+        TextView heading = text(R.string.library_resources_title, 15, Color.WHITE);
+        heading.setPadding(0, dp(12), 0, dp(4)); body.addView(heading);
+        resourcePlatform = presentationSpinner(body, R.string.library_resource_platform, R.array.library_resource_platform_options);
+        String selected = getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getString("resource_platform", "android");
+        resourcePlatform.setSelection("ios".equals(selected) ? 1 : 0);
+        resourcePlatform.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putString("resource_platform", selectedResourcePlatform()).apply();
+                updateResourceLibrary(new JSONObject());
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        body.addView(text(R.string.library_resources_notice, 12, Color.rgb(180, 199, 211)));
+        downloadLibrary = button(R.string.library_download_all); body.addView(downloadLibrary);
+        importLibrary = button(R.string.library_import); body.addView(importLibrary);
+        exportLibrary = button(R.string.library_export); body.addView(exportLibrary);
+        cancelLibrary = button(R.string.library_cancel); body.addView(cancelLibrary);
+        libraryTransferStatus = text(R.string.library_resources_waiting, 12, Color.rgb(192, 212, 222));
+        libraryTransferStatus.setTextIsSelectable(true); libraryTransferStatus.setPadding(0, dp(6), 0, dp(6)); body.addView(libraryTransferStatus);
+        libraryProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        libraryProgress.setMax(1000); libraryProgress.setVisibility(View.GONE); body.addView(libraryProgress, new LinearLayout.LayoutParams(-1, dp(12)));
+        downloadLibrary.setOnClickListener(view -> {
+            if (!ResourceTransfers.download(getApplicationContext(), selectedResourcePlatform())) resourceUnavailable();
+        });
+        exportLibrary.setOnClickListener(view -> exportResourceLibrary());
+        importLibrary.setOnClickListener(view -> {
+            pendingResourcePlatform = selectedResourcePlatform();
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
+            resourcePickerLocation(picker);
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            try { startActivityForResult(picker, IMPORT_RESOURCES); }
+            catch (RuntimeException unavailable) { Toast.makeText(this, R.string.library_picker_failed, Toast.LENGTH_LONG).show(); }
+        });
+        cancelLibrary.setOnClickListener(view -> ServerService.cancelResourceJob(currentLibraryJob));
+        updateResourceLibrary(new JSONObject());
+    }
+    private void resourceUnavailable() { Toast.makeText(this, R.string.library_resources_unavailable, Toast.LENGTH_LONG).show(); }
+    private void exportResourceLibrary() {
+        pendingResourcePlatform = selectedResourcePlatform();
+        if (Build.VERSION.SDK_INT >= 29) {
+            if (!ResourceTransfers.exportArchive(getApplicationContext(), pendingResourcePlatform, null)) resourceUnavailable();
+        } else {
+            Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
+            resourcePickerLocation(picker);
+            picker.putExtra(Intent.EXTRA_TITLE, "IdolyPride-Resources-" + pendingResourcePlatform + ".zip");
+            try { startActivityForResult(picker, EXPORT_RESOURCES); }
+            catch (RuntimeException unavailable) { Toast.makeText(this, R.string.library_picker_failed, Toast.LENGTH_LONG).show(); }
+        }
+    }
+    private static boolean terminalResourceJob(String state) {
+        return state.equals("completed") || state.equals("partial") || state.equals("failed") || state.equals("cancelled");
+    }
+    private void updateResourceLibrary(JSONObject details) {
+        if (libraryTransferStatus == null) return;
+        JSONObject library = details.optJSONObject("resource_library");
+        if (library == null) library = resourceLibraryRuntime;
+        else resourceLibraryRuntime = library;
+        JSONObject catalogs = library == null ? null : library.optJSONObject("catalogs");
+        JSONObject catalog = catalogs == null ? null : catalogs.optJSONObject(selectedResourcePlatform());
+        JSONObject job = library == null ? null : library.optJSONObject("job");
+        String jobState = job == null ? "" : job.optString("state", "");
+        boolean active = job != null && !terminalResourceJob(jobState);
+        currentLibraryJob = active ? job.optString("job_id", "") : null;
+        ResourceTransfers.Snapshot local = ResourceTransfers.snapshot();
+        boolean enabled = ServerService.resourceServerRunning() && !local.busy && !active && catalog != null && catalog.optBoolean("available", false);
+        downloadLibrary.setEnabled(enabled); importLibrary.setEnabled(enabled); exportLibrary.setEnabled(enabled);
+        resourcePlatform.setEnabled(!local.busy && !active);
+        cancelLibrary.setEnabled(local.busy && local.action.equals("export") || active && currentLibraryJob != null && !currentLibraryJob.isEmpty());
+        String message;
+        if (local.busy) message = getString(local.state.equals("cancelling") ? R.string.library_resources_cancelling
+                : local.state.equals("preparing") ? R.string.library_resources_preparing : R.string.library_resources_working,
+                local.action.equals("import") ? getString(R.string.library_import) : local.action.equals("export") ? getString(R.string.library_export) : getString(R.string.library_download_all),
+                formatBytes(local.bytes));
+        else if (!ServerService.resourceServerRunning()) message = getString(R.string.library_resources_waiting);
+        else if (local.state.equals("failed")) message = getString(local.error != null && local.error.equals("seekable_required")
+                ? R.string.library_import_seekable : R.string.library_resources_failed);
+        else if (local.state.equals("cancelled")) message = getString(R.string.library_resources_cancelled);
+        else if (catalog == null || !catalog.optBoolean("available", false)) message = getString(R.string.library_catalog_unavailable);
+        else message = getString(R.string.library_resources_ready);
+        if (job != null) {
+            long total = Math.max(0, job.optLong("total_files", 0)), verified = Math.max(0, job.optLong("verified_files", 0));
+            long missing = Math.max(0, job.optLong("missing_files", 0)), failed = Math.max(0, job.optLong("failed_files", 0));
+            String state = jobState.equals("completed") ? getString(R.string.library_job_completed) : jobState.equals("partial") ? getString(R.string.library_job_partial)
+                    : jobState.equals("failed") ? getString(R.string.library_job_failed) : jobState.equals("cancelled") ? getString(R.string.library_job_cancelled)
+                    : jobState.equals("cancelling") ? getString(R.string.library_job_cancelling) : getString(R.string.library_job_running);
+            message += "\n" + getString(R.string.library_job_summary, job.optString("platform", "—"), state, verified, total, missing, failed);
+            libraryProgress.setVisibility(active || local.busy ? View.VISIBLE : View.GONE);
+            libraryProgress.setIndeterminate(total == 0 || !active && local.busy);
+            if (active && total > 0) libraryProgress.setProgress((int) Math.min(1000, 1000.0 * Math.min(total, verified + missing + failed) / total));
+        } else libraryProgress.setVisibility(local.busy ? View.VISIBLE : View.GONE);
+        if (job == null) libraryProgress.setIndeterminate(local.busy);
+        if (!local.busy && local.action.equals("export") && (local.state.equals("completed") || local.state.equals("partial")))
+            message += "\n" + getString("downloads".equals(local.destination) ? R.string.library_export_downloads : R.string.library_export_document)
+                    + (local.state.equals("partial") ? "\n" + getString(R.string.library_job_partial) : "");
+        if (!local.busy && local.action.equals("import") && local.importedFiles >= 0) {
+            message += "\n" + getString(R.string.library_import_result, local.importedFiles, local.failedFiles);
+            if (local.error != null) message += "\n" + getString(R.string.library_import_partial);
+        }
+        setTextIfChanged(libraryTransferStatus, message);
+    }
+    private JSONObject resourceLibraryRuntime;
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        state.putString("resource_platform", pendingResourcePlatform);
+        state.putBoolean("storage_retry", retryStartAfterStoragePermission);
+        super.onSaveInstanceState(state);
     }
 
     private void addPlaybackControls(LinearLayout body) {
@@ -665,6 +925,15 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_RESOURCES || requestCode == IMPORT_RESOURCES) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+            String platform = ResourceTransfers.platform(pendingResourcePlatform) ? pendingResourcePlatform : selectedResourcePlatform();
+            boolean started = requestCode == EXPORT_RESOURCES
+                    ? ResourceTransfers.exportArchive(getApplicationContext(), platform, data.getData())
+                    : ResourceTransfers.importArchive(getApplicationContext(), data.getData(), platform);
+            if (!started) resourceUnavailable();
+            return;
+        }
         if (requestCode != EXPORT_DIAGNOSTICS || resultCode != RESULT_OK || data == null) return;
         Uri destination = data.getData();
         if (destination != null) ServerService.exportDiagnostics(getApplicationContext(), destination);
@@ -701,6 +970,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         experimentalMainLive.setEnabled(!running && !busy);
         downloadMissingResources.setEnabled(!running && !busy);
         mediaMode.setEnabled(!running && !busy);
+        resourceStorage.setEnabled(!running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);
@@ -715,6 +985,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         JSONObject details;
         try { details = new JSONObject(serialized); }
         catch (Exception ignored) { details = new JSONObject(); }
+        updateResourceLibrary(details);
         presentationRuntime = details.optJSONObject("presentation");
         playbackRuntime = details.optJSONObject("playback");
         playbackRuntimeRunning = Boolean.TRUE.equals(details.opt("running"));

@@ -55,7 +55,7 @@ def test_android_panorama_layout_and_session_visibility_are_wired():
     common, _platform_profile = text.split('#ifdef IDOLY_DARWIN_BRIDGE\n#include "ios_profile.hpp"', 1)
     assert '#include "panorama_ui_edges.hpp"' in common
     load = text.split("void load_calls() {", 1)[1].split("\n#undef CALL", 1)[0]
-    assert load.index("#endif", load.index("preview_ui.configure")) < load.index("panorama_api.weak_new")
+    assert load.index("#endif", load.index("CALL(mv_ui_hide")) < load.index("panorama_api.weak_new")
     for alias in ("ui_component_transform", "ui_gameobject_transform", "ui_transform_point",
                   "ui_inverse_transform_point", "pano_ui_get", "pano_ui_set"):
         assert alias in load
