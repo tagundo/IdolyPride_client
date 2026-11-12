@@ -21,6 +21,7 @@ import time
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 from runtime_export import export_runtime
+from adhoc_verify import verify_adhoc
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
@@ -172,14 +173,21 @@ def build(args):
                         args.evidence, "sign", seconds=90))
     if tree_hashes(resources/"runtime") != report["runtime_before_signing"] or digest(resources/"ServerData.zip") != PAYLOAD_SHA:
         raise ValueError("Outer signing changed an immutable runtime/payload input")
-    commands.append(run([args.rcodesign, "-C", "/dev/null", "verify", executable], args.evidence, "verify-main", seconds=30))
+    # rcodesign 0.29's verify tries to parse its own empty ad-hoc CMS wrapper as
+    # an X.509 signature. Verify the actual ad-hoc page/special-slot hashes.
+    report["signature_verification"] = verify_adhoc(executable, info=contents/"Info.plist",
+        resources=contents/"_CodeSignature/CodeResources", identifier="game.idolypride.localserver")
     report["commands"] = commands
     report["executable_sha256"] = digest(executable)
     report["executable_bytes"] = executable.stat().st_size
     seal = plistlib.loads((contents/"_CodeSignature/CodeResources").read_bytes())
     sealed = seal.get("files2", {})
     for path in resources.rglob("*"):
-        if path.is_file() and not path.is_symlink():
+        if path.is_symlink():
+            relative = str(path.relative_to(contents))
+            if sealed.get(relative) != {"symlink": os.readlink(path)}:
+                raise ValueError("Resource seal omits or changes a symlink: " + relative)
+        elif path.is_file():
             relative = str(path.relative_to(contents))
             entry = sealed.get(relative)
             if not isinstance(entry, dict) or entry.get("hash2") != bytes.fromhex(digest(path)):
