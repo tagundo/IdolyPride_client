@@ -1,0 +1,12 @@
+{
+  "format": "standalone-apk",
+  "version": "graphics-client-v0.1.0",
+  "source_commit": "b7e313185f07e4dcf0e070047a52025bd83acf73",
+  "apk_bytes": 159402002,
+  "apk_sha256": "20d1ad5337395c9022f85aedff6858380b302712f4593cbc73ad3538f96c2126",
+  "package": "game.qualiarts.idolypride.local.diagnostics",
+  "version_code": 414,
+  "signer_sha256": "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc",
+  "android_device_install_verified": false,
+  "graphics_render_verified": false
+}
