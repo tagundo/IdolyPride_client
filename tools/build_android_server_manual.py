@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 import copy
 import hashlib
+import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -25,7 +27,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZipFile, ZipInfo
 import zlib
 
 if __package__:
@@ -35,7 +37,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.8", 27
+VERSION, VERSION_CODE = "0.3.9", 28
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -51,7 +53,8 @@ JAVA_ROOT = JAVA_SOURCE_ROOT + PACKAGE.replace(".", "/") + "/"
 RES_ROOT = "android-server/app/src/main/res/"
 MANIFEST = "android-server/app/src/main/AndroidManifest.xml"
 GRADLE = "android-server/app/build.gradle.kts"
-JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge"))
+JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge",
+    "PresentationSettings", "PresentationAddonInstaller", "PresentationInstallActivity"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")
 SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
@@ -70,6 +73,11 @@ ADDED_JSON_SHA256 = {
 }
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from idoly_local import media_master_build as media_master
+_PRESENTATION_PATH = Path(__file__).resolve().parents[1] / "client-presentation/build_addon.py"
+_PRESENTATION_SPEC = importlib.util.spec_from_file_location("idoly_presentation_packager", _PRESENTATION_PATH)
+presentation = importlib.util.module_from_spec(_PRESENTATION_SPEC)
+_PRESENTATION_SPEC.loader.exec_module(presentation)
+PRESENTATION_ASSETS = frozenset("assets/presentation/" + name for name in ("manifest.json", "diagnostics.apk", "resources.apk"))
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
 NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
     "libchaquopy_java.so", "libcrypto_chaquopy.so", "libcrypto_python.so", "libidoly_live.so",
@@ -337,7 +345,8 @@ def tool_sources(root, commit):
     for name, loaded in (("tools/build_android_server_manual.py", Path(__file__)),
                          ("tools/repack_android_server_python.py", Path(pybundle.__file__)),
                          ("src/idoly_local/media_master_build.py", Path(media_master.__file__)),
-                         ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py"))):
+                         ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py")),
+                         ("client-presentation/build_addon.py", Path(presentation.__file__))):
         if loaded.resolve() != (root / name).resolve():
             raise ValueError("Run the builder and compiler helper from the frozen source repository")
         raw = pybundle._git(root, "cat-file", "blob", commit + ":" + name, limit=MIB)
@@ -380,8 +389,13 @@ def manifest_xml(raw):
     if app.get(ANDROID + "allowBackup") != "false":
         raise ValueError("Server data backup policy differs")
     components = {(child.tag, child.get(ANDROID + "name")) for child in app}
-    if len(app) != 2 or components != {("activity", ".MainActivity"), ("service", ".ServerService")}:
+    if len(app) != 3 or components != {("activity", ".MainActivity"),
+            ("activity", ".PresentationInstallActivity"), ("service", ".ServerService")}:
         raise ValueError("Server component inventory differs")
+    if (len([item for item in tree.findall("uses-permission")
+             if item.get(ANDROID + "name") == "android.permission.REQUEST_INSTALL_PACKAGES"]) != 1
+            or next(child for child in app if child.get(ANDROID + "name") == ".PresentationInstallActivity").get(ANDROID + "exported") != "false"):
+        raise ValueError("Presentation installer permission or private callback policy differs")
     for child in app:
         child.set(ANDROID + "name", PACKAGE + child.get(ANDROID + "name"))
     ET.register_namespace("android", ANDROID[1:-1])
@@ -401,9 +415,9 @@ def build_config(payload_sha256):
             "}\n").encode()
 
 
-def dex_classes(raw):
+def dex_classes(raw, *, versions=(b"dex\n038\0",)):
     """Read bounded class definitions, not arbitrary strings/references."""
-    if (len(raw) < 112 or len(raw) > MAX_DEX or raw[:8] != b"dex\n038\0"
+    if (len(raw) < 112 or len(raw) > MAX_DEX or raw[:8] not in versions
             or struct.unpack_from("<III", raw, 32) != (len(raw), 112, 0x12345678)
             or hashlib.sha1(raw[32:]).digest() != raw[12:32]
             or zlib.adler32(raw[12:]) & 0xffffffff != struct.unpack_from("<I", raw, 8)[0]):
@@ -552,19 +566,31 @@ def stream_apk(incoming, infos, target, replacements):
                     with src:
                         shutil.copyfileobj(src, dst, pybundle.CHUNK)
             copied.external_attr = info.external_attr
+        added = set(replacements) - set(infos)
+        if added - PRESENTATION_ASSETS:
+            raise ValueError("Only fixed presentation assets may be added")
+        for name in sorted(added):
+            raw = replacements[name]
+            if not isinstance(raw, bytes) or not 0 < len(raw) <= MIB:
+                raise ValueError("Presentation assets must be bounded snapshots")
+            info = ZipInfo(name)
+            info.compress_type = 0
+            info.external_attr = 0o100644 << 16
+            outgoing.writestr(info, raw)
 
 
 def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, compiled_names):
     with ZipFile(path) as archive:
         infos = pybundle._members(archive, pybundle.MAX_EXPANDED)
-        if set(infos) != set(before) - REMOVED_NAMES:
+        added = set(replacement_hashes) - set(before)
+        if added - PRESENTATION_ASSETS or set(infos) != (set(before) - REMOVED_NAMES) | added:
             raise ValueError("APK member inventory differs")
         hashes = pybundle._hash_members(archive, infos)
         for name in infos:
-            expected = replacement_hashes.get(name, before[name])
+            expected = replacement_hashes[name] if name in replacement_hashes else before[name]
             if hashes[name] != expected:
                 raise ValueError("APK member differs from its approved input")
-            if any(getattr(infos[name], key) != getattr(before_infos[name], key)
+            if name not in added and any(getattr(infos[name], key) != getattr(before_infos[name], key)
                    for key in ("date_time", "compress_type", "external_attr", "comment", "extra")):
                 raise ValueError("APK member metadata changed")
         if dex_classes(pybundle._read(archive, infos["classes.dex"], MAX_DEX)) != dependency_names:
@@ -572,13 +598,14 @@ def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, 
         own = dex_classes(pybundle._read(archive, infos["classes2.dex"], MAX_DEX))
         prefix = "L" + PACKAGE.replace(".", "/") + "/"
         if (not compiled_names <= own or own & dependency_names
-                or any(not re.fullmatch(re.escape(prefix) + r"(?:MainActivity|ServerService)\$\$ExternalSyntheticLambda[0-9]+;", name)
+                or any(not re.fullmatch(re.escape(prefix) + r"(?:MainActivity|ServerService|PresentationSettings|PresentationAddonInstaller|PresentationInstallActivity)\$\$ExternalSynthetic(?:Lambda|ApiModelOutline)[0-9]+;", name)
                        for name in own - compiled_names)):
             raise ValueError("Own DEX classes differ from compiler inputs/synthetics")
         if {name for name in infos if name.startswith("lib/")} != NATIVE_NAMES:
             raise ValueError("Native library inventory differs")
         elf = {name: elf_alignment(pybundle._read(archive, infos[name], 16 * MIB)) for name in NATIVE_NAMES}
-        return {"changed_apk_members": sorted(name for name in infos if hashes[name] != before[name]),
+        return {"changed_apk_members": sorted(name for name in infos if name in before and hashes[name] != before[name]),
+                "added_apk_members": sorted(added),
                 "removed_apk_members": sorted(REMOVED_NAMES), "own_dex_classes": sorted(own),
                 "dependency_dex_classes": sorted(dependency_names), "native_elf_load_alignments": elf,
                 "all_other_member_bytes_and_metadata_preserved": True}
@@ -592,6 +619,83 @@ def _identity(badging, manifest):
             or not re.search(r":debuggable\([^)]*\)=true\b", manifest)
             or not re.search(r":allowBackup\([^)]*\)=false\b", manifest)):
         raise ValueError("Linked APK identity, SDK or native extraction policy differs")
+
+
+def presentation_assets(directory):
+    """Read only the fixed three public assets; neighboring files are irrelevant."""
+    directory = Path(directory)
+    if directory.is_symlink() or not directory.is_dir():
+        raise ValueError("A public presentation addon directory is required")
+    result = {}
+    for name in ("manifest.json", "diagnostics.apk", "resources.apk"):
+        path = directory / name
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MIB:
+            raise ValueError("Presentation assets must be bounded regular files")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            if _file_identity(os.fstat(fd)) != _file_identity(info):
+                raise ValueError("Presentation asset changed while opening")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                raw = stream.read(MIB + 1)
+            if (len(raw) != info.st_size or _file_identity(os.fstat(fd)) != _file_identity(info)
+                    or _file_identity(path.lstat()) != _file_identity(info)):
+                raise ValueError("Presentation asset changed while reading")
+        finally:
+            os.close(fd)
+        result["assets/presentation/" + name] = raw
+    manifest = json.loads(result["assets/presentation/manifest.json"], object_pairs_hook=pybundle._json_object)
+    presentation.validate_bundle_manifest(manifest)
+    if {row["id"] for row in manifest["profiles"]} != {"diagnostics", "resources"}:
+        raise ValueError("Server release requires both compatible presentation profiles")
+    for row in manifest["profiles"]:
+        raw = result["assets/" + row["asset"]]
+        if len(raw) != row["apk_bytes"] or hashlib.sha256(raw).hexdigest() != row["apk_sha256"]:
+            raise ValueError("Presentation APK differs from its public manifest")
+    return result, manifest
+
+
+def validate_presentation_archive(raw, row):
+    """Inspect only bounded own split members; platform tools verify its signature."""
+    with ZipFile(io.BytesIO(raw)) as archive:
+        infos = pybundle._members(archive, 4 * MIB)
+        expected = {"AndroidManifest.xml", "classes.dex", presentation.LIBRARY, presentation.MARKER}
+        expected.update(presentation.license_hashes(row["id"]))
+        if row["id"] == "resources":
+            expected.update(presentation.SHADOW_HASHES)
+        if set(infos) != expected:
+            raise ValueError("Presentation split contains unexpected code or asset members")
+        hashes = pybundle._hash_members(archive, infos)
+        if any(hashes[name] != value for name, value in presentation.license_hashes(row["id"]).items()):
+            raise ValueError("Presentation dependency license notice differs")
+        marker = json.loads(pybundle._read(archive, infos[presentation.MARKER], META_LIMIT),
+                            object_pairs_hook=pybundle._json_object)
+        marker_keys = {"schema", "bridge_version", "profile", "target_package", "split_id", "base_version_code",
+                       "certificate_sha256", "required_base_members", "configuration_origin", "installation_mode",
+                       "native_library_sha256"}
+        if (not isinstance(marker, dict) or set(marker) != marker_keys or type(marker["schema"]) is not int
+                or type(marker["bridge_version"]) is not int or type(marker["base_version_code"]) is not int):
+            raise ValueError("Presentation public marker schema differs")
+        for key, value in (("schema", 1), ("bridge_version", 1), ("profile", row["id"]),
+                ("target_package", row["target_package"]), ("split_id", presentation.SPLIT),
+                ("base_version_code", 414), ("certificate_sha256", row["certificate_sha256"]),
+                ("required_base_members", row["required_base_members"]),
+                ("configuration_origin", "http://127.0.0.1:8080"), ("installation_mode", "MODE_INHERIT_EXISTING")):
+            if marker.get(key) != value:
+                raise ValueError("Presentation split public marker differs from the manifest")
+        if marker.get("native_library_sha256") != hashes[presentation.LIBRARY]:
+            raise ValueError("Presentation native library differs from its marker")
+        own = dex_classes(pybundle._read(archive, infos["classes.dex"], MIB), versions=(b"dex\n039\0",))
+        prefix = "Lgame/qualiarts/idolypride/presentation/"
+        primary = {prefix + name + ";" for name in ("PresentationProvider", "PresentationClient", "NativePresentation")}
+        if (not primary <= own or any(not re.fullmatch(re.escape(prefix)
+                + r"(?:PresentationProvider|PresentationClient|NativePresentation)(?:\$[^;/]+)?;", name) for name in own)):
+            raise ValueError("Presentation DEX contains classes outside its own namespace")
+        elf = {name: elf_alignment(pybundle._read(archive, info, MIB)) for name, info in infos.items() if name.endswith(".so")}
+        if row["id"] == "resources" and any(hashes[name] != value for name, value in presentation.SHADOW_HASHES.items()):
+            raise ValueError("Presentation ShadowHook dependency changed")
+        return {"profile": row["id"], "sha256": hashlib.sha256(raw).hexdigest(),
+                "bytes": len(raw), "member_sha256": hashes, "classes": sorted(own), "elf_load_alignments": elf}
 
 
 def build(args):
@@ -663,6 +767,27 @@ def build(args):
         config.write_bytes(build_config(args.payload_sha256))
         def run(command):
             return _run(command, root=root, env=env, cache=cache)
+        addon_assets, addon_manifest = presentation_assets(args.presentation_addons)
+        addon_reports = []
+        addon_directory = work / "presentation"
+        addon_directory.mkdir()
+        addon_signer = [jdk / "java", *JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
+        for row in addon_manifest["profiles"]:
+            raw = addon_assets["assets/" + row["asset"]]
+            report = validate_presentation_archive(raw, row)
+            staged = addon_directory / (row["id"] + ".apk")
+            staged.write_bytes(raw)
+            proof = run([*addon_signer, "verify", "--verbose", "--print-certs", staged]).decode("utf-8")
+            if (re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([a-f0-9]{64})$", proof, re.M) != [row["certificate_sha256"]]
+                    or "Verified using v2 scheme (APK Signature Scheme v2): true" not in proof):
+                raise ValueError("Presentation split signature differs from its compatible base certificate")
+            run([sdk / "zipalign", "-c", "16384", staged])
+            feature = run([sdk / "aapt2", "dump", "badging", staged]).decode("utf-8")
+            if ("package: name='" + row["target_package"] + "'" not in feature or "versionCode='414'" not in feature
+                    or "versionName='6.1.1'" not in feature or "split='idoly_presentation'" not in feature
+                    or "sdkVersion:'28'" not in feature or "targetSdkVersion:'34'" not in feature):
+                raise ValueError("Presentation split package/version differs")
+            addon_reports.append({**report, "signature_and_alignment_verified": True})
         compiled_res, resources = work / "compiled-res.zip", work / "resources.apk"
         run([sdk / "aapt2", "compile", "--dir", work / "source" / RES_ROOT, "-o", compiled_res])
         run([sdk / "aapt2", "link", "-I", android, "--manifest", manifest, "--java", generated,
@@ -671,7 +796,7 @@ def build(args):
         r_sources = sorted(generated.rglob("R.java"))
         if len(r_sources) != 1 or r_sources[0].relative_to(generated).as_posix() != PACKAGE.replace(".", "/") + "/R.java":
             raise ValueError("aapt2 generated unexpected R source")
-        run([jdk / "javac", *("-J" + flag for flag in JAVA_FLAGS), "--release", "17", "-encoding", "UTF-8",
+        run([jdk / "javac", *("-J" + flag for flag in JAVA_FLAGS), "--release", "17", "-parameters", "-encoding", "UTF-8",
              "-classpath", str(android) + os.pathsep + str(stable_jar), "-d", classes,
              *(work / "source" / name for name in JAVA_FILES), config, r_sources[0]])
         class_files = sorted(classes.rglob("*.class"))
@@ -704,6 +829,7 @@ def build(args):
             raise ValueError("D8 output exceeds its bounded read size")
         replacements.update({pybundle.APP: app, pybundle.BUILD: new_build, pybundle.PAYLOAD: payload,
                              "classes2.dex": own_dex_path.read_bytes()})
+        replacements.update(addon_assets)
         replacement_hashes = {name: pybundle.digest(value) if isinstance(value, Path) else hashlib.sha256(value).hexdigest()
                               for name, value in replacements.items()}
         # The supplied validated hash, rather than a second mutable-path read,
@@ -758,6 +884,7 @@ def build(args):
                   "apk_sha256": signed_sha256, "apk_bytes": signed.stat().st_size,
                   "signer_sha256": CERTIFICATE, "signature_v2_only": True, "aligned": True,
                   "payload": payload_report, "chaquopy_jar_sha256": CHAQUOPY_SHA256,
+                  "presentation_addons": {"manifest": addon_manifest, "verified": addon_reports},
                   "generated_r_sha256": pybundle.digest(r_sources[0]), "build_config_sha256": pybundle.digest(config),
                   "public_source_sha256": {name: hashlib.sha256(raw).hexdigest() for name, raw in native_sources.items()},
                   "builder_source_sha256": builder_sources,
@@ -784,7 +911,7 @@ def build(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("baseline", "source-root", "source-commit", "payload", "payload-sha256", "chaquopy-jar",
-                 "jdk-bin", "build-tools", "android-jar", "keystore", "password-file", "output"):
+                 "jdk-bin", "build-tools", "android-jar", "keystore", "password-file", "output", "presentation-addons"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--epoch", type=int, required=True)
     parser.add_argument("--key-alias", default="idoly-local-server")

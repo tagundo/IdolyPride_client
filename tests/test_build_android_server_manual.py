@@ -51,16 +51,18 @@ def zip_bytes(files):
 
 def manifest(raw=b""):
     return (b'<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+            b'<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>'
             b'<application android:allowBackup="false" android:usesCleartextTraffic="true">'
             b'<activity android:name=".MainActivity" android:exported="true"/>'
+            b'<activity android:name=".PresentationInstallActivity" android:exported="false"/>'
             b'<service android:name=".ServerService" android:exported="false"/>'
             + raw + b'</application></manifest>')
 
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "27",
-                           tool.ANDROID + "versionName": "0.3.8"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "28",
+                           tool.ANDROID + "versionName": "0.3.9"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -70,6 +72,7 @@ def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     assert app.get(tool.ANDROID + "debuggable") == "true"
     assert [(x.tag, x.get(tool.ANDROID + "name"), x.get(tool.ANDROID + "exported")) for x in app] == [
         ("activity", tool.PACKAGE + ".MainActivity", "true"),
+        ("activity", tool.PACKAGE + ".PresentationInstallActivity", "false"),
         ("service", tool.PACKAGE + ".ServerService", "false")]
 
 
@@ -85,9 +88,21 @@ def test_manifest_entity_and_backup_policy_rejected():
             tool.manifest_xml(raw)
 
 
+@pytest.mark.parametrize("change", ["missing-permission", "public-callback"])
+def test_installer_requires_explicit_permission_and_nonexported_callback(change):
+    raw = manifest()
+    if change == "missing-permission":
+        raw = raw.replace(b'<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>', b'')
+    else:
+        raw = raw.replace(b'name=".PresentationInstallActivity" android:exported="false"',
+                          b'name=".PresentationInstallActivity" android:exported="true"')
+    with pytest.raises(ValueError, match="permission or private callback"):
+        tool.manifest_xml(raw)
+
+
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 27;' in raw and 'VERSION_NAME = "0.3.8";' in raw
+    assert 'VERSION_CODE = 28;' in raw and 'VERSION_NAME = "0.3.9";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
         tool.build_config('"; injected')
@@ -95,7 +110,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("27")\ngradleProperty("serverVersionName").orElse("0.3.8")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("28")\ngradleProperty("serverVersionName").orElse("0.3.9")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -113,7 +128,8 @@ def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, m
 def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit(monkeypatch):
     root = Path(tool.__file__).resolve().parents[1]
     names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py",
-             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py")
+             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py",
+             "client-presentation/build_addon.py")
     frozen = {name: (root / name).read_bytes() for name in names}
     def git(_root, *args, limit):
         return frozen[args[2].split(":", 1)[1]]
@@ -350,6 +366,92 @@ def test_elf_load_alignment_is_checked_on_preserved_bytes():
     assert tool.elf_alignment(synthetic_elf()) == [16384]
     with pytest.raises(ValueError, match="16 KiB"):
         tool.elf_alignment(synthetic_elf(4096))
+
+
+def feature_case(directory, monkeypatch):
+    directory.mkdir()
+    native = synthetic_elf()
+    monkeypatch.setattr(tool.presentation, "SHADOW_HASHES", {
+        name: hashlib.sha256(native).hexdigest() for name in tool.presentation.SHADOW_HASHES})
+    reports, all_members = [], {}
+    primary = ["Lgame/qualiarts/idolypride/presentation/" + name + ";"
+               for name in ("NativePresentation", "PresentationClient", "PresentationProvider")]
+    dex = bytearray(synthetic_dex(primary))
+    dex[:8] = b"dex\n039\0"
+    dex[12:32] = hashlib.sha1(dex[32:]).digest()
+    struct.pack_into("<I", dex, 8, zlib.adler32(dex[12:]) & 0xffffffff)
+    for profile, spec in tool.presentation.PROFILES.items():
+        marker = {"schema": 1, "bridge_version": 1, "profile": profile, "target_package": spec["package"],
+            "split_id": tool.presentation.SPLIT, "base_version_code": 414, "certificate_sha256": spec["certificate"],
+            "required_base_members": tool.presentation.required_base_members(profile),
+            "native_library_sha256": hashlib.sha256(native).hexdigest(),
+            "configuration_origin": "http://127.0.0.1:8080", "installation_mode": "MODE_INHERIT_EXISTING"}
+        members = {"AndroidManifest.xml": b"synthetic feature manifest checked by SDK in a real build",
+            "classes.dex": bytes(dex), tool.presentation.LIBRARY: native,
+            tool.presentation.MARKER: json.dumps(marker).encode()}
+        members.update(tool.presentation.license_members(profile))
+        if profile == "resources":
+            members.update({name: native for name in tool.presentation.SHADOW_HASHES})
+        raw = zip_bytes(members)
+        (directory / (profile + ".apk")).write_bytes(raw)
+        reports.append({**marker, "addon_bytes": len(raw), "addon_apk_sha256": hashlib.sha256(raw).hexdigest(),
+                        "signature_and_alignment_verified": True})
+        all_members[profile] = members
+    value = tool.presentation.bundle_manifest(reports)
+    (directory / "manifest.json").write_text(json.dumps(value))
+    return value, all_members
+
+
+def test_presentation_snapshots_only_three_public_assets_and_validates_own_code(tmp_path, monkeypatch):
+    directory = tmp_path / "presentation"
+    value, _members = feature_case(directory, monkeypatch)
+    private = directory / "private-keystore.password"
+    private.write_bytes(b"private-neighbor-not-an-input")
+    before = private.read_bytes()
+    snapshots, actual = tool.presentation_assets(directory)
+    assert actual == value and set(snapshots) == tool.PRESENTATION_ASSETS
+    assert private.read_bytes() == before
+    for row in value["profiles"]:
+        report = tool.validate_presentation_archive(snapshots["assets/" + row["asset"]], row)
+        assert report["profile"] == row["id"]
+        assert report["classes"] == ["Lgame/qualiarts/idolypride/presentation/" + name + ";"
+                                    for name in ("NativePresentation", "PresentationClient", "PresentationProvider")]
+
+
+@pytest.mark.parametrize("change", ["asset-hash", "wrong-package", "private-path", "bad-requirement", "symlink"])
+def test_presentation_asset_manifest_rejects_wrong_identity_bytes_paths_or_links(tmp_path, monkeypatch, change):
+    directory = tmp_path / "presentation"
+    value, _members = feature_case(directory, monkeypatch)
+    if change == "asset-hash": value["profiles"][0]["apk_sha256"] = "f" * 64
+    elif change == "wrong-package": value["profiles"][0]["target_package"] = "game.qualiarts.idolypride"
+    elif change == "private-path": value["profiles"][0]["asset"] = "../private"
+    elif change == "bad-requirement": value["profiles"][0]["required_base_members"] = {}
+    else:
+        target = directory / "diagnostics.apk"
+        external = tmp_path / "external.apk"
+        target.rename(external); target.symlink_to(external)
+    (directory / "manifest.json").write_text(json.dumps(value))
+    with pytest.raises(ValueError): tool.presentation_assets(directory)
+
+
+@pytest.mark.parametrize("change", ["extra-code", "marker", "native-bytes", "missing-provider", "runtime-notice"])
+def test_nested_presentation_split_rejects_extra_or_mutated_code(tmp_path, monkeypatch, change):
+    value, members = feature_case(tmp_path / "presentation", monkeypatch)
+    row = value["profiles"][0]
+    files = dict(members[row["id"]])
+    if change == "extra-code": files["classes2.dex"] = b"unapproved"
+    elif change == "marker":
+        marker = json.loads(files[tool.presentation.MARKER]); marker["account"] = "never include"
+        files[tool.presentation.MARKER] = json.dumps(marker).encode()
+    elif change == "native-bytes": files[tool.presentation.LIBRARY] += b"changed"
+    elif change == "runtime-notice":
+        files[tool.presentation.LICENSE_PREFIX + tool.presentation.RUNTIME_NOTICE] += b"changed"
+    else:
+        dex = bytearray(synthetic_dex(["Lgame/qualiarts/idolypride/presentation/NativePresentation;"]))
+        dex[:8] = b"dex\n039\0"; dex[12:32] = hashlib.sha1(dex[32:]).digest()
+        struct.pack_into("<I", dex, 8, zlib.adler32(dex[12:]) & 0xffffffff)
+        files["classes.dex"] = bytes(dex)
+    with pytest.raises(ValueError): tool.validate_presentation_archive(zip_bytes(files), row)
 
 
 @pytest.mark.parametrize("tamper", [None, "classes.dex", "assets/chaquopy/bootstrap.imy"])

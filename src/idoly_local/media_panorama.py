@@ -15,7 +15,7 @@ from google.protobuf.message import DecodeError
 from .appearance import _owned
 from .gameplay import _Catalog
 from .live_assets import _wearable
-from .panorama_rules import MASTER_PANORAMA_RULES, MASTER_VERSION, PANORAMA_RULES
+from .panorama_rules import MASTER_PANORAMA_RULES, MASTER_VERSION, PANORAMA_RULES, UNLOCK_CONDITION
 from .rpc import RpcCode, RpcFailure
 
 
@@ -156,8 +156,13 @@ class MediaPanorama:
         result = self.schema.response_type(path)()
         if path == _LIST:
             for scene in sorted(self._scenes.values(), key=lambda value: value.order):
+                # Original PanoramaMusicListCellView.SetView resolves this
+                # ID in ConditionDescriptionMaster and dereferences the
+                # description even when isUnlocked is true. Keep the actual
+                # description reference; only the safe view term is empty.
                 result.musics.add(musicId=scene.music_id, stageId=scene.stage_id, assetId=scene.asset_id,
-                    order=scene.order, isUnlocked=True, unlockConditionId="", viewConditionId="")
+                    order=scene.order, isUnlocked=True, unlockConditionId=UNLOCK_CONDITION,
+                    viewConditionId="")
         else:
             self._check(request, snapshot, self._scenes)
         result.commonResponse.updatedData.SetInParent()

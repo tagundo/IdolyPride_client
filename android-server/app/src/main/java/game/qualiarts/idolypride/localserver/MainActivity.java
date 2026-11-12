@@ -2,6 +2,7 @@ package game.qualiarts.idolypride.localserver;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -9,19 +10,25 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.net.Uri;
 import android.text.TextUtils;
 import android.view.View;
+import android.view.ViewGroup;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.List;
 import java.util.Locale;
+import java.io.IOException;
 import org.json.JSONObject;
 
 /** Native controls for a server contained entirely in this installed app. */
@@ -48,6 +55,26 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private Button start;
     private Button stop;
     private ScrollView logScroll;
+    private PresentationSettings presentationSettings;
+    private CheckBox customGraphics;
+    private CheckBox expandPhotography;
+    private Spinner graphicsQuality;
+    private Spinner targetFps;
+    private Spinner renderScale;
+    private Spinner maxBufferPixel;
+    private Spinner antiAliasing;
+    private Spinner shadowResolution;
+    private TextView presentationStatus;
+    private boolean presentationLoading;
+    private boolean presentationSaveFailed;
+    private boolean presentationInvalid;
+    private JSONObject presentationRuntime;
+    private boolean presentationServerRunning;
+    private boolean presentationObserved;
+    private Button installPresentation;
+    private Button launchPresentation;
+    private TextView presentationInstallStatus;
+    private PresentationAddonInstaller.Snapshot presentationInstallation;
 
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
 
@@ -147,6 +174,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, Color.rgb(180, 199, 211));
         resourceNotice.setPadding(0, 0, 0, dp(6));
         body.addView(resourceNotice);
+        addPresentationControls(body);
         TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
         replayNotice.setPadding(0, dp(6), 0, dp(8));
         body.addView(replayNotice);
@@ -246,6 +274,270 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
     }
 
+    private void addPresentationControls(LinearLayout body) {
+        PresentationSettings.Loaded loaded = PresentationSettings.load(getFilesDir());
+        presentationSettings = loaded.settings;
+        presentationInvalid = loaded.invalid;
+        Button heading = button(R.string.presentation_title);
+        body.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout settings = new LinearLayout(this);
+        settings.setOrientation(LinearLayout.VERTICAL);
+        settings.setPadding(dp(8), 0, dp(8), dp(8));
+        settings.setVisibility(View.GONE);
+        body.addView(settings, new LinearLayout.LayoutParams(-1, -2));
+        heading.setOnClickListener(view -> {
+            boolean expanded = settings.getVisibility() != View.VISIBLE;
+            settings.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            heading.setText(expanded ? R.string.presentation_title_expanded : R.string.presentation_title);
+        });
+        TextView notice = text(R.string.presentation_notice, 12, Color.rgb(180, 199, 211));
+        notice.setPadding(0, dp(4), 0, dp(8));
+        settings.addView(notice);
+        TextView installNotice = text(R.string.presentation_install_notice, 12, Color.rgb(180, 199, 211));
+        installNotice.setPadding(0, 0, 0, dp(6));
+        settings.addView(installNotice);
+        installPresentation = button(R.string.presentation_install_button);
+        installPresentation.setEnabled(false);
+        installPresentation.setOnClickListener(view -> requestPresentationInstall());
+        settings.addView(installPresentation, new LinearLayout.LayoutParams(-1, -2));
+        launchPresentation = button(R.string.presentation_launch_button);
+        launchPresentation.setEnabled(false);
+        launchPresentation.setOnClickListener(view -> launchPresentationClient());
+        settings.addView(launchPresentation, new LinearLayout.LayoutParams(-1, -2));
+        presentationInstallStatus = text(R.string.presentation_install_checking, 12, Color.rgb(192, 212, 222));
+        presentationInstallStatus.setPadding(0, dp(4), 0, dp(8));
+        settings.addView(presentationInstallStatus);
+        customGraphics = new CheckBox(this);
+        customGraphics.setText(R.string.presentation_custom_graphics);
+        customGraphics.setTextColor(Color.WHITE);
+        customGraphics.setTextSize(14);
+        settings.addView(customGraphics);
+        graphicsQuality = presentationSpinner(settings, R.string.presentation_quality,
+                R.array.presentation_quality_options);
+        targetFps = presentationSpinner(settings, R.string.presentation_target_fps,
+                R.array.presentation_target_fps_options);
+        renderScale = presentationSpinner(settings, R.string.presentation_render_scale,
+                R.array.presentation_render_scale_options);
+        maxBufferPixel = presentationSpinner(settings, R.string.presentation_max_buffer_pixel,
+                R.array.presentation_max_buffer_pixel_options);
+        antiAliasing = presentationSpinner(settings, R.string.presentation_anti_aliasing,
+                R.array.presentation_anti_aliasing_options);
+        shadowResolution = presentationSpinner(settings, R.string.presentation_shadow_resolution,
+                R.array.presentation_shadow_resolution_options);
+        expandPhotography = new CheckBox(this);
+        expandPhotography.setText(R.string.presentation_expand_photography);
+        expandPhotography.setTextColor(Color.WHITE);
+        expandPhotography.setTextSize(14);
+        settings.addView(expandPhotography);
+        TextView photographyNotice = text(R.string.presentation_photography_notice, 12,
+                Color.rgb(180, 199, 211));
+        photographyNotice.setPadding(0, 0, 0, dp(8));
+        settings.addView(photographyNotice);
+        presentationStatus = text(R.string.presentation_waiting, 12, Color.rgb(192, 212, 222));
+        presentationStatus.setTextIsSelectable(true);
+        presentationStatus.setPadding(0, dp(4), 0, dp(8));
+        body.addView(presentationStatus);
+        restorePresentationControls();
+        customGraphics.setOnCheckedChangeListener((button, checked) -> savePresentationControls());
+        expandPhotography.setOnCheckedChangeListener((button, checked) -> savePresentationControls());
+        AdapterView.OnItemSelectedListener selected = new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                savePresentationControls();
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        };
+        for (Spinner spinner : presentationSpinners()) spinner.setOnItemSelectedListener(selected);
+        updatePresentationStatus();
+    }
+
+    private void refreshPresentationInstallation() {
+        PresentationAddonInstaller.refresh(this, this::showPresentationInstallation);
+    }
+
+    private void showPresentationInstallation(PresentationAddonInstaller.Snapshot snapshot) {
+        if (isFinishing() || isDestroyed()) return;
+        presentationInstallation = snapshot;
+        installPresentation.setEnabled(!snapshot.busy && !snapshot.compatible.isEmpty());
+        launchPresentation.setEnabled(!snapshot.busy && !snapshot.installed.isEmpty());
+        int message;
+        if (Build.VERSION.SDK_INT < 28) message = R.string.presentation_install_android_required;
+        else if (!snapshot.bundleAvailable) message = R.string.presentation_install_bundle_unavailable;
+        else if (snapshot.busy) message = "confirmation".equals(snapshot.state)
+                ? R.string.presentation_install_confirming : R.string.presentation_install_in_progress;
+        else if ("failed".equals(snapshot.state) || "interrupted".equals(snapshot.state)) {
+            message = R.string.presentation_install_failed;
+        } else if (!snapshot.installed.isEmpty()) message = R.string.presentation_install_available;
+        else if (snapshot.compatible.isEmpty()) message = R.string.presentation_install_incompatible;
+        else message = R.string.presentation_install_ready;
+        setTextIfChanged(presentationInstallStatus, getString(message));
+        presentationInstallStatus.setTextColor("failed".equals(snapshot.state) || "interrupted".equals(snapshot.state)
+                ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+    }
+
+    private interface PresentationProfileAction {
+        void run(PresentationAddonInstaller.Profile profile);
+    }
+
+    private void choosePresentationProfile(List<PresentationAddonInstaller.Profile> profiles,
+            int title, PresentationProfileAction action) {
+        if (profiles.size() == 1) {
+            action.run(profiles.get(0));
+            return;
+        }
+        String[] labels = new String[profiles.size()];
+        for (int index = 0; index < profiles.size(); index++) labels[index] = getString(profiles.get(index).label());
+        new AlertDialog.Builder(this).setTitle(title).setItems(labels,
+                (dialog, which) -> action.run(profiles.get(which)))
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    private void requestPresentationInstall() {
+        if (presentationInstallation == null || presentationInstallation.busy
+                || presentationInstallation.compatible.isEmpty()) return;
+        if (Build.VERSION.SDK_INT < 28) return;
+        if (!getPackageManager().canRequestPackageInstalls()) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName())));
+                Toast.makeText(this, R.string.presentation_install_permission, Toast.LENGTH_LONG).show();
+            } catch (RuntimeException error) {
+                Toast.makeText(this, R.string.presentation_install_permission_failed, Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        choosePresentationProfile(presentationInstallation.compatible, R.string.presentation_install_choose,
+                profile -> {
+                    installPresentation.setEnabled(false);
+                    launchPresentation.setEnabled(false);
+                    setTextIfChanged(presentationInstallStatus, getString(R.string.presentation_install_in_progress));
+                    PresentationAddonInstaller.install(this, profile, this::showPresentationInstallation);
+                });
+    }
+
+    private void launchPresentationClient() {
+        launchPresentation.setEnabled(false);
+        PresentationAddonInstaller.refresh(this, snapshot -> {
+            showPresentationInstallation(snapshot);
+            if (isFinishing() || isDestroyed()) return;
+            if (snapshot.installed.isEmpty() || snapshot.busy) {
+                Toast.makeText(this, R.string.presentation_install_launch_missing, Toast.LENGTH_LONG).show();
+                return;
+            }
+            choosePresentationProfile(snapshot.installed, R.string.presentation_launch_choose,
+                    profile -> launchClient(R.string.presentation_install_launch_missing, profile.targetPackage));
+        });
+    }
+
+    private Spinner presentationSpinner(LinearLayout parent, int labelResource, int optionsResource) {
+        TextView label = text(labelResource, 13, Color.rgb(192, 212, 222));
+        label.setPadding(0, dp(6), 0, 0);
+        parent.addView(label);
+        Spinner spinner = new Spinner(this);
+        spinner.setId(View.generateViewId());
+        label.setLabelFor(spinner.getId());
+        spinner.setMinimumHeight(dp(48));
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, getResources().getStringArray(optionsResource)) {
+            @Override public View getView(int position, View convertView, ViewGroup parentView) {
+                TextView value = (TextView) super.getView(position, convertView, parentView);
+                value.setTextColor(Color.WHITE);
+                value.setTextSize(14);
+                return value;
+            }
+        };
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        parent.addView(spinner, new LinearLayout.LayoutParams(-1, -2));
+        return spinner;
+    }
+
+    private Spinner[] presentationSpinners() {
+        return new Spinner[]{graphicsQuality, targetFps, renderScale, maxBufferPixel,
+                antiAliasing, shadowResolution};
+    }
+
+    private void restorePresentationControls() {
+        presentationLoading = true;
+        customGraphics.setChecked(presentationSettings.customGraphics);
+        expandPhotography.setChecked(presentationSettings.expandPhotography);
+        graphicsQuality.setSelection(presentationPosition(PresentationSettings.QUALITY, presentationSettings.quality));
+        targetFps.setSelection(presentationPosition(PresentationSettings.TARGET_FPS, presentationSettings.targetFps));
+        int scalePosition = 0;
+        while (Double.compare(PresentationSettings.RENDER_SCALE[scalePosition], presentationSettings.renderScale) != 0) {
+            scalePosition++;
+        }
+        renderScale.setSelection(scalePosition);
+        maxBufferPixel.setSelection(presentationPosition(PresentationSettings.MAX_BUFFER_PIXEL, presentationSettings.maxBufferPixel));
+        antiAliasing.setSelection(presentationPosition(PresentationSettings.ANTI_ALIASING, presentationSettings.antiAliasing));
+        shadowResolution.setSelection(presentationPosition(PresentationSettings.SHADOW_RESOLUTION, presentationSettings.shadowResolution));
+        for (Spinner spinner : presentationSpinners()) spinner.setEnabled(presentationSettings.customGraphics);
+        presentationLoading = false;
+    }
+
+    private static int presentationPosition(int[] choices, int value) {
+        for (int index = 0; index < choices.length; index++) if (choices[index] == value) return index;
+        return 0;
+    }
+
+    private void savePresentationControls() {
+        if (presentationLoading) return;
+        PresentationSettings requested = new PresentationSettings(presentationSettings.revision,
+                customGraphics.isChecked(), PresentationSettings.QUALITY[graphicsQuality.getSelectedItemPosition()],
+                PresentationSettings.TARGET_FPS[targetFps.getSelectedItemPosition()],
+                PresentationSettings.RENDER_SCALE[renderScale.getSelectedItemPosition()],
+                PresentationSettings.MAX_BUFFER_PIXEL[maxBufferPixel.getSelectedItemPosition()],
+                PresentationSettings.ANTI_ALIASING[antiAliasing.getSelectedItemPosition()],
+                PresentationSettings.SHADOW_RESOLUTION[shadowResolution.getSelectedItemPosition()],
+                expandPhotography.isChecked());
+        if (presentationSettings.sameValues(requested)) return;
+        try {
+            presentationSettings = requested.save(getFilesDir());
+            presentationSaveFailed = false;
+            presentationInvalid = false;
+            for (Spinner spinner : presentationSpinners()) spinner.setEnabled(presentationSettings.customGraphics);
+        } catch (IOException error) {
+            presentationSaveFailed = true;
+            restorePresentationControls();
+            Toast.makeText(this, R.string.presentation_save_failed, Toast.LENGTH_LONG).show();
+        }
+        updatePresentationStatus();
+    }
+
+    private void updatePresentationStatus() {
+        if (presentationSaveFailed) {
+            setTextIfChanged(presentationStatus, getString(R.string.presentation_save_failed));
+            presentationStatus.setTextColor(Color.rgb(255, 192, 154));
+            return;
+        }
+        if (presentationInvalid) {
+            setTextIfChanged(presentationStatus, getString(R.string.presentation_invalid));
+            presentationStatus.setTextColor(Color.rgb(255, 192, 154));
+            return;
+        }
+        JSONObject client = !presentationObserved || !presentationServerRunning || presentationRuntime == null
+                ? null : presentationRuntime.optJSONObject("client");
+        if (client != null) {
+            String state = client.optString("status", "waiting");
+            boolean currentRevision = client.optLong("revision", -1) == presentationSettings.revision;
+            int message = 0;
+            if (currentRevision && "applied".equals(state)) message = R.string.presentation_applied;
+            else if (currentRevision && "disabled".equals(state)) message = R.string.presentation_disabled;
+            else if ("unsupported".equals(state)) message = R.string.presentation_unsupported;
+            else if ("waiting_for_scene".equals(state)) message = R.string.presentation_waiting_for_scene;
+            else if ("init_failed".equals(state)) message = R.string.presentation_init_failed;
+            if (message != 0) {
+                setTextIfChanged(presentationStatus, getString(message));
+                presentationStatus.setTextColor("applied".equals(state) || "disabled".equals(state)
+                        ? Color.rgb(117, 226, 177) : "unsupported".equals(state) || "init_failed".equals(state)
+                        ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+                return;
+            }
+        }
+        setTextIfChanged(presentationStatus, getString(presentationSettings.revision > 0
+                ? R.string.presentation_saved_waiting : R.string.presentation_waiting));
+        presentationStatus.setTextColor(Color.rgb(192, 212, 222));
+    }
+
     private void launchClient(int missingMessage, String... packageNames) {
         Intent client = null;
         for (String packageName : packageNames) {
@@ -272,15 +564,25 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onStart() {
         super.onStart();
+        presentationObserved = true;
         ServerService.observe(this);
     }
 
+    @Override protected void onResume() {
+        super.onResume();
+        refreshPresentationInstallation();
+    }
+
     @Override protected void onStop() {
+        presentationObserved = false;
+        presentationRuntime = null;
+        updatePresentationStatus();
         ServerService.removeObserver(this);
         super.onStop();
     }
 
     @Override public void onServerChanged(String value, boolean running, boolean busy, List<String> lines, String detailsJson) {
+        presentationServerRunning = running;
         status.setText(value);
         status.setTextColor(running ? Color.rgb(117, 226, 177) : Color.WHITE);
         start.setEnabled(!running && !busy);
@@ -301,6 +603,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         JSONObject details;
         try { details = new JSONObject(serialized); }
         catch (Exception ignored) { details = new JSONObject(); }
+        presentationRuntime = details.optJSONObject("presentation");
+        updatePresentationStatus();
         JSONObject client = details.optJSONObject("client_diagnostics");
         String summary = client == null ? "" : client.optString("summary", "");
         JSONObject phase = client == null ? null : client.optJSONObject("phase");

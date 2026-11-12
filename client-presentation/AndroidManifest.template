@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="@PACKAGE@" split="idoly_presentation" android:versionCode="414"
+    android:versionName="6.1.1" android:isFeatureSplit="true">
+    <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="34" />
+    <application android:hasCode="true">
+        <provider android:name="game.qualiarts.idolypride.presentation.PresentationProvider"
+            android:authorities="@PACKAGE@.idoly.presentation" android:exported="false"
+            android:initOrder="1" />
+    </application>
+</manifest>

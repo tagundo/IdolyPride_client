@@ -29,6 +29,7 @@ class Runtime:
         self._last_error = None
         self._experimental_main_live = False
         self._media_mode = False
+        self._presentation = None
         self._grpc_address = None
         self._asset_url = None
         from .diagnostics import ClientDiagnostics
@@ -71,6 +72,8 @@ class Runtime:
             result["asset_transfer"] = dict(self._transfer_status)
         if self._resources is not None:
             result["resource_transfer"] = self._resources.status()
+        if self._presentation is not None:
+            result["presentation"] = self._presentation.status()
         return result
 
     def diagnostics_snapshot(self) -> dict:
@@ -173,6 +176,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     root = Path(data_dir).resolve()
     runtime = Runtime(profile, log_callback)
     runtime._media_mode = media_mode
+    from .presentation import PresentationState
+    runtime._presentation = PresentationState(root / "client-presentation.json")
     try:
         # Imports stay inside startup so launchers can extract bundled data and
         # configure their platform's codec before loading the application engine.
@@ -221,7 +226,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets",
                                              diagnostics=runtime._diagnostics,
                                              transfer_callback=runtime._observe_transfer,
-                                             runtime_status_callback=runtime.diagnostics_snapshot)
+                                             runtime_status_callback=runtime.diagnostics_snapshot,
+                                             presentation=runtime._presentation)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.

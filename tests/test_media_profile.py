@@ -101,7 +101,8 @@ def snapshot(schema):
     result.photos.add(photoId="keep-photo", locked=True)
     result.decks.add(number=4, name="Keep deck")
     result.characters.add(characterId="char-a", favoriteCostumeId="cos-a-alt",
-        favoriteHairId="hair-a-alt", liveCostumeId="cos-a", liveHairId="hair-a", activityLevel=7)
+        favoriteHairId="hair-a-alt", liveCostumeId="cos-a", liveHairId="hair-a", activityLevel=7,
+        audienceCandidateAmount=123)
     result.costumes.add(costumeId="cos-a-alt", obtainedTime=99, checked=False)
     result.hairs.add(hairId="hair-a-alt", checked=False)
     result.cards.add(cardId="card-a", level=9, totalExp=123, vocal=999).MergeFromString(UNKNOWN)
@@ -168,7 +169,8 @@ def test_audited_bath_outfit_and_its_hair_are_added_but_sd_and_npc_models_are_no
     # Upgrade an existing media inventory. Keep its chosen outfit, old row
     # payloads/unknown fields and every unrelated balance/progression field.
     snapshot.characters.add(characterId="char-ai", favoriteCostumeId="cos-ai",
-        favoriteHairId="hair-ai", liveCostumeId="cos-ai", liveHairId="hair-ai")
+        favoriteHairId="hair-ai", liveCostumeId="cos-ai", liveHairId="hair-ai",
+        audienceCandidateAmount=42)
     snapshot.costumes.add(costumeId="cos-ai", checked=False, obtainedTime=123).MergeFromString(UNKNOWN)
     snapshot.hairs.add(hairId="hair-ai", checked=False).MergeFromString(UNKNOWN)
     expected = type(snapshot)()
@@ -396,3 +398,32 @@ def test_invalid_timestamp_does_not_touch_snapshot(schema, master, snapshot, obt
     with pytest.raises(RpcFailure):
         apply_media_inventory(snapshot, plan, obtained_time=obtained_time)
     assert snapshot.SerializeToString() == before
+
+
+def test_zero_media_audience_is_repaired_without_fan_or_progress_changes(schema, master, snapshot):
+    plan = prepare_media_inventory(schema, master[0])
+    apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    actor = next(row for row in snapshot.characters if row.characterId == "char-a")
+    actor.audienceCandidateAmount = 0
+    actor.lightFanAmount, actor.middleFanAmount, actor.heavyFanAmount = 11, 22, 33
+    actor.MergeFromString(UNKNOWN)
+    snapshot.characters.add(characterId="unrelated-npc", audienceCandidateAmount=0)
+    positive = next(row for row in snapshot.characters if row.characterId == "char-mana")
+    positive.audienceCandidateAmount = 4321
+    expected = type(snapshot).FromString(snapshot.SerializeToString())
+    next(row for row in expected.characters if row.characterId == "char-a").audienceCandidateAmount = 1000
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW + 1)
+    assert snapshot.SerializeToString() == expected.SerializeToString()
+    before = snapshot.SerializeToString()
+    assert not apply_media_inventory(snapshot, plan, obtained_time=NOW + 2)
+    assert snapshot.SerializeToString() == before
+
+
+def test_new_media_characters_have_positive_visual_audience_and_zero_actual_fans(schema, master):
+    plan = prepare_media_inventory(schema, master[0])
+    snapshot = schema.response_type("/api.User/Get")()
+    snapshot.user.name = "Media"
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    assert all(row.audienceCandidateAmount == 1000 for row in snapshot.characters)
+    assert all((row.lightFanAmount, row.middleFanAmount, row.heavyFanAmount) == (0, 0, 0)
+               for row in snapshot.characters)

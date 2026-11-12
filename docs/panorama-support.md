@@ -4,7 +4,7 @@ v0.3.6의 별도 감상 계정에서 `PhotoPanorama.List`와 `PhotoPanorama.Chec
 
 메뉴 조건 `cd-photo_panorama_music-start`의 첫 설정은 두 번째 메인 지역 클리어와 2025-06-23 15:00 UTC 이후를 요구합니다. 설정 목록은 OR이고 각 설정 안은 AND입니다. 현재 시각에서는 감상 계정의 `area-main-002.clearQuestCount=3`으로 촬영·360 LIVE 메뉴 조건을 모두 만족하며 티켓을 추가하지 않습니다. 개별 라이브 결과·점수·보상·기본 계정 데이터는 생성하거나 변경하지 않습니다.
 
-목록은 실제 `Music`·`Stage`와 대조한 15곡을 순서대로 해금 상태로 제공합니다. 곡·자산·스테이지·카메라는 실제 마스터를 사용합니다. v0.3.8은 `music-hsm-017`의 단일 지정 스테이지 `stage-live-dome-03-00`, 공개 시각·5인 편성·카메라를 원본 마스터에서 직접 확인했습니다. 실제 SDK에도 `hsm-017-360` timeline·layout·5인 모션이 있습니다. 감상 목록의 표시·해금 조건 ID는 비웁니다. `Music.displayCharacterAmount`에 따른 3~6명 편성, 캐릭터·의상·헤어 보유와 착용 호환성을 확인합니다. 곡 ID는 원본 확인 요청의 `photoMusicId`에 전달합니다.
+목록은 실제 `Music`·`Stage`와 대조한 15곡을 순서대로 해금 상태로 제공합니다. 곡·자산·스테이지·카메라는 실제 마스터를 사용합니다. v0.3.8은 `music-hsm-017`의 단일 지정 스테이지 `stage-live-dome-03-00`, 공개 시각·5인 편성·카메라를 원본 마스터에서 직접 확인했습니다. 실제 SDK에도 `hsm-017-360` timeline·layout·5인 모션이 있습니다. 표시 조건은 비우고 해금 상태를 제공합니다. v0.3.9는 원본 목록 UI가 무조건 읽는 해금 조건 설명 ID를 유효하게 유지해 `PanoramaMusicListCellView.SetView` 예외를 수정합니다. `Music.displayCharacterAmount`에 따른 3~6명 편성, 캐릭터·의상·헤어 보유와 착용 호환성을 확인합니다. 곡 ID는 원본 확인 요청의 `photoMusicId`에 전달합니다.
 
 목록·확인은 DB·필름·포토·예약 ID·보상을 변경하지 않습니다. `PhotoPanorama.CreateShootings`, 이미지 업로드와 실제 포토 생성은 별도 미지원 범위입니다. 기존 45개 JSON 데이터 묶음으로 동작하며 일반 계정의 획득 조건을 해석하는 기능은 추가하지 않습니다.
 

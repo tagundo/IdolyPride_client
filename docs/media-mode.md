@@ -1,12 +1,14 @@
 # 감상용 전체 해금
 
-Android v0.3.8 후보는 [APK 직접 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.8/IdolyPride-Local-Server-Android.apk) 또는 [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.8/IdolyPride-Local-Server-Android.apk)에서 받습니다. 저장소 접근 권한이 있는 계정으로 GitHub에 로그인해야 합니다. 새 Mac 바이너리는 포함하지 않습니다.
+Android v0.3.9 후보는 [APK 직접 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk) 또는 [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk)에서 받습니다. 저장소 접근 권한이 있는 계정으로 GitHub에 로그인해야 합니다. 새 Mac 바이너리는 포함하지 않습니다.
 
 서버 앱의 **감상용 전체 해금**을 선택하고 서버를 시작합니다. 모드를 바꾸려면 서버를 중지한 뒤 선택을 바꾸고, 게임은 타이틀로 돌아가 다시 로그인합니다. Android와 Mac의 기본값은 꺼짐이며 선택을 저장합니다.
 
 감상 모드는 별도의 `media-state.db`와 감상 계정을 사용합니다. 기본 `state.db`의 계정·진행·선택·잔액을 바꾸지 않습니다. 감상 계정의 의상 선택과 스토리 읽음 기록은 다음 실행에도 유지합니다. CLI에서도 `serve --media-mode --master-dir ... --master-tag .../original-master/master-tag.json --asset-root .../original-master/assets --asset-base-url http://127.0.0.1:8080`으로 선택할 수 있으며 지정한 DB 이름 앞에 `media-`를 붙여 분리합니다. v0.3.8 감상 모드는 이 경로의 `media-master-tag.json`과 감상 마스터 여섯 개를 함께 준비해야 합니다.
 
 현재 6.1.1 마스터에서 캐릭터 28명·의상 921개·헤어 1,113개·카드 503개를 준비합니다. NPC와 3D 자산이 없는 SD 전용 의상, 착용 가능한 의상이 없는 헤어는 생성하지 않습니다. 카드 성장은 초기 상태이며 재화나 개별 라이브 결과·보상을 추가하지 않습니다. 감상 진입을 위한 튜토리얼은 이 계정에서만 실제 마스터의 마지막 체크포인트로 준비합니다.
+
+v0.3.9는 관객 후보 값이 0인 캐릭터만 보완해 라이브 촬영·360 LIVE에 관객을 준비합니다. 실제 팬 수와 기존 양수 후보 값은 유지합니다. 360 목록의 해금 조건 설명 참조 오류도 수정하며, 별도 [그래픽·촬영 화면 설정](presentation-settings.md)을 추가했습니다.
 
 v0.3.8 감상 모드에서는 카페·라디오 등 촬영 업무와 장면 촬영의 의상 종류 제한도 해제합니다. 온천·암반욕 수영복 21개를 추가해 의상 921개·헤어 1,113개를 제공하며, 일반 라이브 촬영·360 LIVE에서도 선택할 수 있도록 클라이언트용 마스터를 함께 바꿉니다. 원본의 의상 분류와 헤어 호환성은 유지합니다. 자세한 범위는 [촬영 의상 안내](media-outfits.md)를 따릅니다.
 

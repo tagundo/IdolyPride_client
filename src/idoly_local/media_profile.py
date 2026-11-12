@@ -20,6 +20,11 @@ from .media_outfit_policy import COSTUME_IDS, is_audited_work_costume
 from .rpc import RpcCode, RpcFailure
 
 
+# Original photo crowd builders use this field, independently of actual fans.
+# All-zero candidates also make the original 360 normalization produce zero.
+MEDIA_AUDIENCE_CANDIDATES = 1000
+
+
 _USER = "/api.User/Get"
 _MAX = (1 << 63) - 1
 
@@ -226,12 +231,17 @@ def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: 
     result = plan._snapshot_type()
     result.CopyFrom(snapshot)
     result_cards = {row.cardId: row for row in result.cards}
+    result_characters = {row.characterId: row for row in result.characters}
     changed = False
     for owner, default, hair, live, live_hair in plan._appearances:
         if owner not in owned_characters:
-            result.characters.add(characterId=owner, favoriteCostumeId=default,
+            result_characters[owner] = result.characters.add(characterId=owner, favoriteCostumeId=default,
                 favoriteHairId=hair, liveCostumeId=live, liveHairId=live_hair,
                 activityLevel=1, activityStamina=plan._stamina, staminaUpdatedTime=obtained_time)
+            changed = True
+        character = result_characters[owner]
+        if character.audienceCandidateAmount == 0:
+            character.audienceCandidateAmount = MEDIA_AUDIENCE_CANDIDATES
             changed = True
     for identity in plan.costume_ids:
         if identity not in owned_costumes:

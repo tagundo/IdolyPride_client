@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from idoly_local.media_panorama import MediaPanorama, prepare_media_panorama
-from idoly_local.panorama_rules import MASTER_PANORAMA_RULES, MASTER_VERSION, PANORAMA_RULES
+from idoly_local.panorama_rules import MASTER_PANORAMA_RULES, MASTER_VERSION, PANORAMA_RULES, UNLOCK_CONDITION
 from idoly_local.rpc import RpcCode, RpcFailure
 from idoly_local.schema import Schema
 from idoly_local.state import State
@@ -100,7 +100,7 @@ def rewrite(game, table, change):
     (game[2] / (table + ".json")).write_text(json.dumps(values))
 
 
-def test_list_returns_fifteen_real_panorama_scenes_without_client_unlock_conditions(game):
+def test_list_returns_fifteen_scenes_with_required_unlock_description_and_unrestricted_view_term(game):
     before = dump(game[1])
     result = call(game, LIST)
     assert not (game[2] / "PhotoQuestMusic.json").exists()
@@ -109,7 +109,8 @@ def test_list_returns_fifteen_real_panorama_scenes_without_client_unlock_conditi
         (rule.music_id, rule.stage_id, rule.order) for rule in (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)]
     for row, rule in zip(result.musics, (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)):
         assert row.isUnlocked and row.assetId == "asset-" + rule.music_id
-        assert not row.unlockConditionId and not row.viewConditionId
+        assert row.unlockConditionId == UNLOCK_CONDITION
+        assert not row.viewConditionId
     assert result.musics[-1].musicId == "music-hsm-017"
     assert "unmapped-panorama" not in {row.musicId for row in result.musics}
     assert not result.dokanInfos
@@ -211,6 +212,35 @@ def test_actual_melodies_stage_cast_and_camera_are_master_backed_without_added_p
     assert melodies.asset_id == "hsm-017" and melodies.cast_count == 5
     assert melodies.order == 15 and not melodies.view_condition_id
     assert len(PANORAMA_RULES) == 14
+
+
+def test_unlock_reference_has_an_actual_nonempty_condition_description_in_original_master(schema):
+    # SetView reads UnlockCondition.Description before checking isUnlocked.
+    # A blank (or invented) ID can fail despite the scene being unlocked.
+    sqlcipher = pytest.importorskip("sqlcipher3.dbapi2")
+    from google.protobuf import message_factory
+
+    archive = Path(__file__).resolve().parents[1] / "data/original-master"
+    if not (archive / "master-tag.json").is_file():
+        pytest.skip("Original public master archive is unavailable")
+    tag = json.loads((archive / "master-tag.json").read_text())
+    pack = next(row for row in tag["masterTagPacks"] if row["type"] == "ConditionDescription")
+    source = archive / "assets/master" / pack["fileName"]
+    if not source.is_file():
+        pytest.skip("Original ConditionDescription pack is unavailable")
+    connection = sqlcipher.connect(source.resolve().as_uri() + "?mode=ro", uri=True)
+    try:
+        connection.execute('PRAGMA key="x\'' + pack["cryptoKey"] + '\'"')
+        connection.execute("PRAGMA query_only=ON")
+        rows = connection.execute("SELECT data FROM ConditionDescription WHERE Id=?",
+                                  (UNLOCK_CONDITION,)).fetchall()
+    finally:
+        connection.close()
+    assert UNLOCK_CONDITION == "cd-tutorial-finish-photo-create-shooting"
+    assert len(rows) == 1
+    message = message_factory.GetMessageClass(schema.pool.FindMessageTypeByName("master.ConditionDescription"))
+    entry = message.FromString(bytes(rows[0][0]))
+    assert entry.id == UNLOCK_CONDITION and entry.description == "フォト撮影チュートリアル突破"
 
 
 def test_master_version_is_pinned_and_constructor_does_not_eagerly_read_it(game):
