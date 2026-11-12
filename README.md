@@ -43,6 +43,8 @@ v0.3.4 후보 소스의 [게임 리소스 경로](docs/resource-support.md)는 �
 
 v0.3.15는 Mac 서버 앱의 종료 정체를 수정하고 **MV 진입·종료 시 화면 회전 대기** 옵션을 추가합니다. Mac과 스마트폰 모두 기본값은 켜짐이며 각 서버 앱에서 바꿀 수 있습니다. 다음 MV 진입·종료부터 사용합니다. 서버와 연결용 클라이언트를 각각 업데이트합니다. [파일·해시와 설치 안내](https://github.com/tagundo/IdolyPride_client/tree/downloads/apps-v0.3.15)에서 확인합니다.
 
+[라이브 촬영·360 LIVE 성능 조사](docs/mv-performance-audit.md)는 원본 Android·iOS의 렌더링 정책 차이, 공통 최적화 후보와 실기기 측정 도구를 정리합니다. 현재 결과는 정적 분석이며 실기기 병목이나 성능 개선을 확정한 결과는 아닙니다.
+
 v0.3.2의 [파일 해시](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/SHA256SUMS), [Android 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android-QA.zip), [Mac 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-QA.zip)도 같은 릴리스에서 받습니다.
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.

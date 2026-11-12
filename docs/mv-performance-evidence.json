@@ -1,0 +1,599 @@
+{
+  "schema": 1,
+  "audit_date": "2026-11-12",
+  "scope": "Original Japanese 6.1.1 Android/iOS real-time live photography and 360 LIVE static audit. No physical-device performance diagnosis.",
+  "bridge_source_commit": "d67baadc491c386711650ac9cee2056b1ea6d3bc",
+  "original_sources": {
+    "android_apk_sha256_reverified": "3d54e05f897bfb54716a0ad645562955ceb0081cead696cb29595941ac08faa9",
+    "ios_ipa_sha256_pinned": "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848",
+    "Android_ELF_SHA256": "68d4706d14b33d07647b9752124632a44b6a5901c82723beb569d9123df676b3",
+    "Android_metadata_SHA256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+    "iOS_IPA_SHA256": "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848",
+    "iOS_UnityFramework_SHA256_stream_verified": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+    "iOS_metadata_SHA256_stream_verified": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda"
+  },
+  "confirmed_serialized_comparison": [
+    {
+      "section": "PlayerSettings",
+      "field": "m_MTRendering",
+      "android": true,
+      "ios": true,
+      "equal": true,
+      "qualification": "Serialized build value; actual MV runtime use was not measured."
+    },
+    {
+      "section": "PlayerSettings",
+      "field": "mobileMTRenderingBaked",
+      "android": false,
+      "ios": true,
+      "equal": false,
+      "qualification": "Serialized build value; actual MV runtime use was not measured."
+    },
+    {
+      "section": "PlayerSettings",
+      "field": "gpuSkinning",
+      "android": false,
+      "ios": false,
+      "equal": true,
+      "qualification": "Serialized build value; actual MV runtime use was not measured."
+    },
+    {
+      "section": "PlayerSettings",
+      "field": "enableFrameTimingStats",
+      "android": true,
+      "ios": true,
+      "equal": true,
+      "qualification": "Serialized build value; actual MV runtime use was not measured."
+    },
+    {
+      "section": "boot.config",
+      "field": "gfx-disable-mt-rendering",
+      "android": "1",
+      "ios": null,
+      "equal": false,
+      "qualification": "Actual original release member, not the emulator-modified APK. Missing key is represented by null. Precedence over m_MTRendering/mobileMTRenderingBaked and runtime thread state are not established by these files."
+    },
+    {
+      "section": "boot.config",
+      "field": "hdr-display-enabled",
+      "android": "0",
+      "ios": "0",
+      "equal": true,
+      "qualification": "Serialized build value; actual MV runtime use was not measured."
+    },
+    {
+      "section": "BuildSettings",
+      "field": "m_GraphicsAPIs",
+      "android": [
+        21,
+        11
+      ],
+      "ios": [
+        16
+      ],
+      "equal": false,
+      "qualification": "Build API list is not a measurement of the backend selected on the user device."
+    }
+  ],
+  "graphics_api_declarations": {
+    "Android": [
+      "Vulkan (21)",
+      "OpenGLES3 (11)"
+    ],
+    "iOS": [
+      "Metal (16)"
+    ],
+    "runtime_selected_api": "not_measured"
+  },
+  "serialized_equality_scope": {
+    "quality_levels": [
+      {
+        "name": "Low",
+        "all_non_pipeline_reference_fields_equal": true,
+        "field_count": 46,
+        "fixed_dpi_factor": 0.800000011920929,
+        "vSyncCount": 0,
+        "quality_antiAliasing": 0,
+        "shadowDistance": 20.0,
+        "shadowResolution": 0,
+        "shadows_raw": 1,
+        "streamingMipmapsActive": true,
+        "streamingMipmapsMemoryBudget": 256.0,
+        "globalTextureMipmapLimit": 0
+      },
+      {
+        "name": "Middle",
+        "all_non_pipeline_reference_fields_equal": true,
+        "field_count": 46,
+        "fixed_dpi_factor": 0.800000011920929,
+        "vSyncCount": 0,
+        "quality_antiAliasing": 0,
+        "shadowDistance": 20.0,
+        "shadowResolution": 0,
+        "shadows_raw": 1,
+        "streamingMipmapsActive": true,
+        "streamingMipmapsMemoryBudget": 256.0,
+        "globalTextureMipmapLimit": 0
+      },
+      {
+        "name": "High",
+        "all_non_pipeline_reference_fields_equal": true,
+        "field_count": 46,
+        "fixed_dpi_factor": 1.0,
+        "vSyncCount": 0,
+        "quality_antiAliasing": 0,
+        "shadowDistance": 20.0,
+        "shadowResolution": 0,
+        "shadows_raw": 1,
+        "streamingMipmapsActive": true,
+        "streamingMipmapsMemoryBudget": 512.0,
+        "globalTextureMipmapLimit": 0
+      },
+      {
+        "name": "VeryHigh",
+        "all_non_pipeline_reference_fields_equal": true,
+        "field_count": 46,
+        "fixed_dpi_factor": 1.5,
+        "vSyncCount": 0,
+        "quality_antiAliasing": 0,
+        "shadowDistance": 20.0,
+        "shadowResolution": 0,
+        "shadows_raw": 1,
+        "streamingMipmapsActive": true,
+        "streamingMipmapsMemoryBudget": 512.0,
+        "globalTextureMipmapLimit": 0
+      }
+    ],
+    "pipeline_assets": [
+      {
+        "name": "SolisRenderPipelineHighAsset",
+        "bytes": 328,
+        "non_reference_bytes_identical": true,
+        "all_seven_reference_target_names_match": true,
+        "reference_target_names": [
+          "UniversalRenderPipelineAsset",
+          "SolisSceneViewRenderer",
+          "SolisUIRenderer",
+          "Solis3DRenderer",
+          "ForwardRendererData",
+          "SolisMonitorRenderer",
+          "SolisVRRenderer"
+        ],
+        "reference_byte_spans": [
+          {
+            "start": 16,
+            "length": 12
+          },
+          {
+            "start": 88,
+            "length": 12
+          },
+          {
+            "start": 100,
+            "length": 12
+          },
+          {
+            "start": 112,
+            "length": 12
+          },
+          {
+            "start": 124,
+            "length": 12
+          },
+          {
+            "start": 136,
+            "length": 12
+          },
+          {
+            "start": 148,
+            "length": 12
+          }
+        ]
+      },
+      {
+        "name": "SolisRenderPipelineLowAsset",
+        "bytes": 328,
+        "non_reference_bytes_identical": true,
+        "all_seven_reference_target_names_match": true,
+        "reference_target_names": [
+          "UniversalRenderPipelineAsset",
+          "SolisSceneViewRenderer",
+          "SolisUIRenderer",
+          "Solis3DRenderer",
+          "ForwardRendererData",
+          "SolisMonitorRenderer",
+          "SolisVRRenderer"
+        ],
+        "reference_byte_spans": [
+          {
+            "start": 16,
+            "length": 12
+          },
+          {
+            "start": 88,
+            "length": 12
+          },
+          {
+            "start": 100,
+            "length": 12
+          },
+          {
+            "start": 112,
+            "length": 12
+          },
+          {
+            "start": 124,
+            "length": 12
+          },
+          {
+            "start": 136,
+            "length": 12
+          },
+          {
+            "start": 148,
+            "length": 12
+          }
+        ]
+      },
+      {
+        "name": "SolisRenderPipelineMiddleAsset",
+        "bytes": 332,
+        "non_reference_bytes_identical": true,
+        "all_seven_reference_target_names_match": true,
+        "reference_target_names": [
+          "UniversalRenderPipelineAsset",
+          "SolisSceneViewRenderer",
+          "SolisUIRenderer",
+          "Solis3DRenderer",
+          "ForwardRendererData",
+          "SolisMonitorRenderer",
+          "SolisVRRenderer"
+        ],
+        "reference_byte_spans": [
+          {
+            "start": 16,
+            "length": 12
+          },
+          {
+            "start": 92,
+            "length": 12
+          },
+          {
+            "start": 104,
+            "length": 12
+          },
+          {
+            "start": 116,
+            "length": 12
+          },
+          {
+            "start": 128,
+            "length": 12
+          },
+          {
+            "start": 140,
+            "length": 12
+          },
+          {
+            "start": 152,
+            "length": 12
+          }
+        ]
+      },
+      {
+        "name": "SolisRenderPipelineVeryHighAsset",
+        "bytes": 332,
+        "non_reference_bytes_identical": true,
+        "all_seven_reference_target_names_match": true,
+        "reference_target_names": [
+          "UniversalRenderPipelineAsset",
+          "SolisSceneViewRenderer",
+          "SolisUIRenderer",
+          "Solis3DRenderer",
+          "ForwardRendererData",
+          "SolisMonitorRenderer",
+          "SolisVRRenderer"
+        ],
+        "reference_byte_spans": [
+          {
+            "start": 16,
+            "length": 12
+          },
+          {
+            "start": 92,
+            "length": 12
+          },
+          {
+            "start": 104,
+            "length": 12
+          },
+          {
+            "start": 116,
+            "length": 12
+          },
+          {
+            "start": 128,
+            "length": 12
+          },
+          {
+            "start": 140,
+            "length": 12
+          },
+          {
+            "start": 152,
+            "length": 12
+          }
+        ]
+      }
+    ],
+    "cameras": [
+      {
+        "gameobject": "Game3DManager",
+        "whole_native_camera_object_byte_identical": true,
+        "byte_size": 184,
+        "raw_sha256": "3bd4e1fcf1560e87f4d6f2752e13ce1d0cb3f1a8130a25946ad0d0ad67cdccf6",
+        "all_typed_fields_identical": true
+      },
+      {
+        "gameobject": "UICamera",
+        "whole_native_camera_object_byte_identical": true,
+        "byte_size": 184,
+        "raw_sha256": "8a7007403e3d4dc608ee2a8b4e9f310c25424dc8a4533b6cad76ece9892e04a9",
+        "all_typed_fields_identical": true
+      }
+    ],
+    "custom_camera_components": [
+      {
+        "gameobject": "Game3DManager",
+        "script": {
+          "m_ClassName": "VLSRPCameraController",
+          "m_Namespace": "VL.Rendering",
+          "m_AssemblyName": "vl-unity.Runtime"
+        },
+        "bytes": 52,
+        "only_changed_bytes": [
+          20
+        ],
+        "same_script_class_namespace_assembly": true,
+        "all_other_bytes_identical": true,
+        "custom_numeric_fields_not_interpreted": true
+      },
+      {
+        "gameobject": "Game3DManager",
+        "script": {
+          "m_ClassName": "UniversalAdditionalCameraData",
+          "m_Namespace": "UnityEngine.Rendering.Universal",
+          "m_AssemblyName": "Unity.RenderPipelines.Universal.Runtime"
+        },
+        "bytes": 116,
+        "only_changed_bytes": [
+          20
+        ],
+        "same_script_class_namespace_assembly": true,
+        "all_other_bytes_identical": true,
+        "custom_numeric_fields_not_interpreted": true
+      },
+      {
+        "gameobject": "Game3DManager",
+        "script": {
+          "m_ClassName": "VLSRPAdditionalCameraData",
+          "m_Namespace": "VL.Rendering",
+          "m_AssemblyName": "Unity.RenderPipelines.Universal.Runtime"
+        },
+        "bytes": 36,
+        "only_changed_bytes": [
+          20
+        ],
+        "same_script_class_namespace_assembly": true,
+        "all_other_bytes_identical": true,
+        "custom_numeric_fields_not_interpreted": true
+      },
+      {
+        "gameobject": "UICamera",
+        "script": {
+          "m_ClassName": "UniversalAdditionalCameraData",
+          "m_Namespace": "UnityEngine.Rendering.Universal",
+          "m_AssemblyName": "Unity.RenderPipelines.Universal.Runtime"
+        },
+        "bytes": 116,
+        "only_changed_bytes": [
+          20
+        ],
+        "same_script_class_namespace_assembly": true,
+        "all_other_bytes_identical": true,
+        "custom_numeric_fields_not_interpreted": true
+      }
+    ],
+    "limits": [
+      "No actual device frame times, CPU/GPU load, selected API, active quality level, final render-target dimensions or render-thread state was measured.",
+      "No supported precedence conclusion between Android boot gfx-disable-mt-rendering=1, serialized m_MTRendering=true and mobileMTRenderingBaked=false.",
+      "URP object type trees are stripped. Byte-level equality after proven object-reference normalization does not separately identify RenderScale, MSAA, SRP-batcher, shadow or individual pass field values.",
+      "Six referenced RendererData object bodies, material/shader compiled variants and downloaded stage resources were not exhaustively compared.",
+      "Camera m_HDR/allowMSAA are permission/initial settings, not proof of display HDR or actual URP render-target MSAA.",
+      "PlayerSettings graphicsJobs/mode fields are absent from this serialized layout; absence is not a false value.",
+      "The special iOS DPI branch is investigated separately in original native code; serialized DPI equality does not eliminate runtime platform-specific branches."
+    ]
+  },
+  "original_native_common_policies": {
+    "initialization_FPS": {
+      "Android": "0x88548ec..0x88548f8",
+      "iOS": "0x6fad49c..0x6fad4b0,0x6fad564..0x6fad578",
+      "requested_target_FPS": 30,
+      "limit": "Initialization only; subsequently overwritten by saved FPS option"
+    },
+    "user_FPS_option": {
+      "field": "GameSetting._isTarget60FPS at+0x14",
+      "Android_ApplySetting": "0x45b10a8; setter call0x45b1130",
+      "iOS_ApplySetting": "0x1d08bc8; setter call0x1d08c58",
+      "false": 30,
+      "true": 60,
+      "manager_float_target_at_0xa0_updated_as_well": true,
+      "same_policy": true,
+      "not_measured": "Saved setting, physical refresh rate, achieved/presented FPS and frame pacing on either user device"
+    },
+    "quality_presets": [
+      {
+        "level": 10,
+        "name": "Low",
+        "maxBufferPixel": 1024,
+        "UnityQualityLevel": 0,
+        "mirrorMask": 7,
+        "starStreak": false,
+        "chromaticAberration": false
+      },
+      {
+        "level": 20,
+        "name": "Middle",
+        "maxBufferPixel": 1440,
+        "UnityQualityLevel": 1,
+        "mirrorMask": 7,
+        "starStreak": true,
+        "chromaticAberration": true
+      },
+      {
+        "level": 30,
+        "name": "High",
+        "maxBufferPixel": 2160,
+        "UnityQualityLevel": 2,
+        "mirrorMask": 7,
+        "starStreak": true,
+        "chromaticAberration": true
+      },
+      {
+        "level": 40,
+        "name": "VeryHigh",
+        "maxBufferPixel": 4096,
+        "UnityQualityLevel": 3,
+        "mirrorMask": -1,
+        "starStreak": true,
+        "chromaticAberration": true
+      },
+      {
+        "level": 100,
+        "name": "internal Recording",
+        "maxBufferPixel": 5000,
+        "UnityQualityLevel": 5,
+        "mirrorMask": -1,
+        "starStreak": true,
+        "chromaticAberration": true
+      }
+    ],
+    "quality_SetQuality_addresses": {
+      "Android": "0x88548fc",
+      "iOS": "0x6fad57c"
+    },
+    "quality_Apply_addresses": {
+      "Android": "0x88549a4",
+      "iOS": "0x6fad620"
+    },
+    "dynamic_resolution": {
+      "Android_Update": "0x8854de0..0x885513c",
+      "iOS_Update": "0x6fadb2c..0x6fadf50",
+      "source": "FrameTimingManager.CaptureFrameTimings/GetLatestTimings",
+      "sample_consumed": "First FrameTiming.cpuFrameTime Double, NOT gpuFrameTime",
+      "normalized_sample": "cpuFrameTime / OnDemandRendering.renderFrameInterval * Application.targetFrameRate /30",
+      "default_sample_count": 5,
+      "sample_threshold_ms": 36,
+      "FrameChangeScale": 0.01,
+      "decrease_when": "All recent normalized samples >=36",
+      "decrease_counter": 30,
+      "increase_when": "Counter expires and not all samples exceed threshold",
+      "default_min_scale": {
+        "iOS_constructor": 0.5,
+        "Android_constructor": "not re-read within this narrow constructor slice; algorithm reads MinBufferScale field"
+      },
+      "max_scale": 1.0,
+      "resize_API": "ScalableBufferManager.ResizeBuffers",
+      "default_auto_dynamic_resolution": {
+        "iOS_constructor": true,
+        "Android_runtime_or_serialized_value": "unmeasured"
+      },
+      "limits": [
+        "Actual FrameTiming availability and IsAutoDynamicResolution value are unmeasured.",
+        "Actual render-target useDynamicScale support and resulting effective scale require runtime readback.",
+        "CPU frame time can include waits/backpressure; consuming it does not prove a CPU compute bottleneck."
+      ]
+    },
+    "render_target": {
+      "GetLimitedResolution_Android": "0x9237df4",
+      "GetLimitedResolution_iOS": "0x7bc4d88",
+      "UpdateRenderTarget_Android": "0x923ce18",
+      "UpdateRenderTarget_iOS": "0x7bcab84",
+      "PhotographyMain_default_aspect": [
+        16,
+        9
+      ],
+      "Photography360_default_aspect": [
+        16,
+        9
+      ],
+      "iOS_cctors": [
+        "0x2c14ac0",
+        "0x2ac8450"
+      ],
+      "iOS_shared_Vector2_literal": "0x86afa40 = 0000804100001041",
+      "high_example": {
+        "preconditions": "Landscape Unity surface sufficiently large, aspect16:9,maxBuffer2160,bufferScale1,no explicit dimensions override",
+        "width": 2160,
+        "height": 1216,
+        "rounding": "Truncate toward0 then increment positive odd integer to even"
+      },
+      "fallback": "When computed width or height is0, overload uses128x128; this is a failure fallback, not evidence of normal MV resolution",
+      "stable_target_reuse": "Existing valid texture with matching width/height returns without rebuilding",
+      "limits": [
+        "Portrait surface/aspect orientation mismatch has recursive firstCall logic and can yield a smaller cap.",
+        "Actual Unity surface and RT dimensions on the compared Fold/iPhone were not read.",
+        "A larger physical screen alone does not prove a larger 3D RT at the same preset.",
+        "2560 is not a native preset constant found here; current override value is unverified."
+      ]
+    }
+  },
+  "original_native_platform_differences": {
+    "iOS_fixed_DPI_half": {
+      "call": "QualityManager.ApplySetting0x6fad7ec..0x6fad80c and SetDPIFactor0x6fad828",
+      "condition": "UnityEngine.iOS.Device.generation ==61 || ==78",
+      "setter": "QualitySettings.resolutionScalingFixedDPIFactor=0.5",
+      "original_enum_mapping": {
+        "40": "iPhoneXS",
+        "61": "iPadAir4Gen",
+        "74": "iPhone14Pro",
+        "78": "iPad10Gen"
+      },
+      "comparison_iPhone14Pro_matches": false,
+      "default_enum_codec": "v31 compressedUInt32 plus signed zigzag; original bytes8094 decode74",
+      "conclusion": "This half-DPI branch cannot explain the reported iPhone14Pro advantage."
+    },
+    "default_quality_selection": {
+      "Android": "GPU name lowercased; Contains adreno then parses final3characters. >649 High30,620..649 Middle20,<=619 Low10; other GPU names defaultMiddle20. Selected branch can be limited toMiddle when SystemInfo.systemMemorySize<2200 (Unity-reported MB).",
+      "iOS": "Same adreno-number path plus non-adreno DeviceGeneration >=40 selectsHigh30, otherwiseMiddle20; SystemInfo.systemMemorySize<2200 (Unity-reported MB) guard may selectMiddle20.",
+      "addresses": {
+        "Android": "0x885513c",
+        "iOS": "0x6fadf50"
+      },
+      "limit": "Defaults only; saved user quality overrides these choices. Actual device GPU-name text/settings unmeasured."
+    },
+    "timing_loop_codegen": "iOS has NEON reduction for arrays>=8; Android audited loop is scalar. Both default sample arrays have5 elements, so the iOS vector fast path is not used by the normal5-sample configuration. No measured cost or causal performance claim."
+  },
+  "frame_pacing_scope": {
+    "OnDemandRendering": "Both qManagers expose renderFrameInterval; quality Update reads it. No proof of actual value>1 or MV-specific low-rate mode from these direct calls.",
+    "vsync_direct_setter": "Unique audited direct call is in URP XRSystem.SetupFrame and depends on Application.platform; do not generalize this XR branch to ordinary MV.",
+    "direct_call_inventory_limit": "Direct A64 BL/B caller inventory excludes indirect/delegate/native-engine invocation and does not prove absence of all runtime callers.",
+    "native_engine_threading_and_skinning": "boot/serialized multi-thread-rendering and GPU-skinning settings are delegated to separate original-asset audit. IL2CPP quality code alone does not establish active render threads or actual mesh skinning path."
+  },
+  "measurement_status": {
+    "physical_adb_targets": 0,
+    "phone_frame_times_captured": false,
+    "phone_cpu_gpu_traces_captured": false,
+    "optimization_applied": false,
+    "emulator_fps_used_as_phone_evidence": false
+  },
+  "limitations": [
+    "This is static original binary analysis, not a measured Fold8Ultra vs iPhone14Pro benchmark.",
+    "No GPU/CPU hardware spec inference or definitive performance root cause.",
+    "No Android/iOS graphics mode, driver, clock, settings or client binary was changed."
+  ],
+  "supporting_analysis_sha256": {
+    "serialized-settings-comparison.json": "eccbe2c128d1c9a6b6bc7bd7bce8a57e3cc116727129c7d45455ec0a567962c1",
+    "final-original-android-3D-frame-policy-audit.json": "1c868f5637dbba7965ca2146eb9e67b2550aede8fefa4cb4c7c07aaf5963cc7f"
+  }
+}
