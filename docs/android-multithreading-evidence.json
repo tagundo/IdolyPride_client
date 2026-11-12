@@ -1,0 +1,218 @@
+{
+  "schema": 1,
+  "audit_date": "2026-11-12",
+  "scope": "Read-only original Android 6.1.1 Unity threading investigation; selector outcomes are static evidence, not a physical-device benchmark.",
+  "repository_source_at_start": "8d5c0375ac5d3cf54d1baaa7a683cda4e428f3ad",
+  "unity_version": "2022.3.57f1",
+  "official_CSharp_commit": "2343a015342bdb351e30a92c104ebc77ead0b94a",
+  "engine_source": {
+    "member": "lib/arm64-v8a/libunity.so",
+    "bytes": 21427000,
+    "compressed_bytes": 9199450,
+    "SHA256": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85",
+    "CRC32": "0xe70840ed"
+  },
+  "unchanged_v0_3_16_members": {
+    "assets/bin/Data/boot.config": "22d4d694b3362a3b544336c47f6f2f61568431797556dae7dd957d2d90e86ec3",
+    "assets/bin/Data/globalgamemanagers": "7fb7ed1fbcdeb0c6be8ad458e0df695e5f8ef29e8d31606efd150afadcf6c2b7",
+    "lib/arm64-v8a/libunity.so": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85"
+  },
+  "serialized_settings": {
+    "boot_gfx_disable_mt_rendering": "1",
+    "m_MTRendering": true,
+    "mobileMTRenderingBaked": false,
+    "fields_runtime_offsets": {
+      "m_MTRendering": "0x210",
+      "mobileMTRenderingBaked": "0x211"
+    },
+    "limitation": "Complete baked-field consumer linkage outside the explicit selector was not proved. False does not establish missing engine support."
+  },
+  "mode_values": {
+    "Direct": 0,
+    "SingleThreaded": 1,
+    "MultiThreaded": 2,
+    "LegacyJobified": 3,
+    "NativeGraphicsJobs": 4,
+    "NativeGraphicsJobsWithoutRenderThread": 5
+  },
+  "mode_reference_urls": [
+    "https://docs.unity3d.com/2022.3/Documentation/ScriptReference/Rendering.RenderingThreadingMode.html",
+    "https://docs.unity3d.com/2022.3/Documentation/ScriptReference/SystemInfo-renderingThreadingMode.html",
+    "https://docs.unity3d.com/2022.3/Documentation/ScriptReference/SystemInfo-graphicsMultiThreaded.html"
+  ],
+  "selector": {
+    "range": "0xc8cc90..0xc8cf5c",
+    "caller": "0xc8d094",
+    "result_storage": "0x1518538",
+    "scope": "Graphics Jobs disabled and no force-gfx-jobs string, unless explicitly stated",
+    "force_order": [
+      "force-gfx-direct returns0",
+      "force-gfx-st returns1",
+      "force-gfx-mt returns2",
+      "only then normal batch/test/boot/default handling"
+    ],
+    "normal_argv_gate": {
+      "function": "0x6d4640",
+      "writer": "0x6d4338",
+      "is_normal_execution": "OR(batchmode,automated,runTests_or_runEditorTests_or_runNativeTests)==0",
+      "is_GPU_capability_check": false
+    },
+    "normal_CPU_fallback": {
+      "implementation": "0x7d5cc8",
+      "SystemInfo_GetProcessorCount_binding": "0x4a0eec ->0x489190 ->0x7d5cc8",
+      "without_disable_or_jobs": "processorCount>1 ? MultiThreaded(2) : Direct(0)"
+    },
+    "requested_outcomes": [
+      {
+        "inputs": "disable1, noforceargs, noforce-gfx-jobs string",
+        "result": "gate true→0; gatefalse→1"
+      },
+      {
+        "inputs": "disable0, noforceargs, noforce-gfx-jobs string",
+        "result": "gatefalse→1; gatetrue→(fallbackcount>1 ?2:0)"
+      },
+      {
+        "inputs": "disable1 + truthyforce-gfx-mt",
+        "result": "2, before gate ordisablecheck"
+      },
+      {
+        "inputs": "truthyforce-gfx-direct + truthyforce-gfx-mt",
+        "result": "0; directwins"
+      },
+      {
+        "inputs": "truthyforce-gfx-st + truthyforce-gfx-mt",
+        "result": "1; STwins"
+      }
+    ],
+    "bool_parsing": {
+      "Has": "0x55b5bc",
+      "Get": "0x55b614",
+      "converter": "0x55bb08..0x55bbe8",
+      "null_or_empty": true,
+      "true_literals": [
+        "true",
+        "yes",
+        "1",
+        "on"
+      ],
+      "false_literals": [
+        "false",
+        "no",
+        "0",
+        "off"
+      ],
+      "zero_literal_vaddr": "0x119ab9",
+      "unknown_input": "Fallsbacktoregistered default byte; these boolregistrations initialize that byte0. No case-sensitivity claim about comparisonhelper0x6d913c.",
+      "absent_key": "Uses registered defaultfalse.",
+      "conclusion": "gfx-disable-mt-rendering=0 is false, not merely keypresence=true. A presentkey withnull/emptyvalue is true. Numeric0 and absence have the same falsecondition inthis registeredoption context."
+    }
+  },
+  "mode_observation": {
+    "engine_registry_function": "0x4a102c..0x4a1040",
+    "registry_key": "UnityEngine.SystemInfo::GetRenderingThreadingMode",
+    "registered_function": "0x4893ec",
+    "tail_to_real_getter": "0x68f82c..0x68f83c",
+    "exact_getter_instructions": [
+      "ADRP x8,0x1459000",
+      "LDR x8,[x8,0x340]",
+      "LDR w0,[x8]",
+      "RET"
+    ],
+    "GOT_pointer": "0x1459340",
+    "R_AARCH64_RELATIVE_addend_current_mode_BSS": "0x1518538",
+    "writes_in_getter": 0,
+    "public_original_IL2CPP_getter": "SystemInfo.get_renderingThreadingMode0x8f8826c",
+    "original_IL2CPP_binding": "SystemInfo.GetRenderingThreadingMode0x8f88294 resolves UnityEngine.SystemInfo::GetRenderingThreadingMode()",
+    "note": "Engine registry omits optional empty parentheses; exact registry function key/native pointer pairing is proven. Public wrapper source evidence separately records actual literal and resolver.",
+    "graphicsMultiThreaded": "No such original IL2CPP wrapper found in the targeted SystemInfo method inventory; absence may reflect stripping and is not evidence that MT is unavailable."
+  },
+  "device_factory": {
+    "entry": "0x81922c..0x819384",
+    "mode_source": "Same GOT0x1459340/current_mode_BSS0x1518538 as public getter",
+    "mode_0_or_5": "Direct backend creation path at0x819254; does not create this client-worker",
+    "mode_1": "Device client path, worker start skipped",
+    "mode_2_3_4": "Device client plus explicit worker start at0x819308→0xe913e8",
+    "startup_log_format": "GfxDevice: creating device client; threaded=%i; jobified=%i",
+    "log_threaded_value": "true for modes2,3,4",
+    "log_jobified_value": "true for modes3,4",
+    "log_limit": "Only client path emits this exact log; absence alone does not identify current mode."
+  },
+  "worker_creation_chain": [
+    {
+      "site": "0xe913e8..0xe914bc",
+      "proof": "Allocates Thread object, names it UnityGfxDeviceWorker, passes callback0xe914bc and renderer userdata toThread_start0x6f1768 at0xe91490."
+    },
+    {
+      "site": "0x6f1768..0x6f1790",
+      "proof": "Stores userdata/callback at Thread+0x38/+0x40; tail calls0x7c2018."
+    },
+    {
+      "site": "0x7c2018..0x7c2158",
+      "proof": "Loads pthread routine viaGOT0x145a000; calls actual pthread_create PLT0x140b1a0 at0x7c20b0, passing owning Thread asargument."
+    },
+    {
+      "site": "RELA GOT0x145a000",
+      "proof": "R_AARCH64_RELATIVE target0x6f1520."
+    },
+    {
+      "site": "0x6f1520..0x6f16e4",
+      "proof": "Original pthread trampoline loads saved userdata/callback fromThread+0x38/+0x40 and invokes callback withBLR at0x6f166c."
+    },
+    {
+      "site": "0xe914bc..0xe914d0",
+      "proof": "Worker callback enters0xe916b0, then returns."
+    },
+    {
+      "site": "0xe916b0..0xe91724",
+      "proof": "Runs backend operations through renderer+0x230 and vtable, then dispatches renderer work through virtual function. Retained complete FDE-bounded entry; downstream virtual implementation not exhaustively decoded."
+    }
+  ],
+  "original_Java_intent_argument_path": {
+    "dex_bytes": 8606340,
+    "dex_sha256": "b0a204747eca560b03d5805f0ec563c24e9f49863c4d3cbd276595ab043579ce",
+    "base_class": "com.unity3d.player.UnityPlayerActivity",
+    "onCreate_code_offset": "0x4a0c3c",
+    "extra": "unity",
+    "argument_update_method": "0x4a0bec; identity return",
+    "actual_entry_subclass": "com.google.firebase.MessagingUnityPlayerActivity",
+    "subclass_onCreate": "0x2c54e8; delegates to base",
+    "scope": "Static DEX instructions, no command or device execution"
+  },
+  "compatibility_findings": {
+    "one_direct_caller": "Unity.2D.Animation.Runtime.dll / UnityEngine.U2D.Animation.BufferManager.OnEnable at0x8d8d50c",
+    "action": "needDoubleBuffering=(mode!=0); not a mode-disable branch",
+    "direct_inventory_limit": "Immediate B/BL only; indirect/virtual/inlined/native paths not exhausted",
+    "current_bridge_scope": "First accepted pthread callback is recorded; this is not an official Unity main-thread-ID query. Readback/TID observation is required for MT compatibility."
+  },
+  "runtime_observation": {
+    "attached_adb_targets": 0,
+    "actual_mode": null,
+    "selected_backend": null,
+    "physical_device_stability_tested": false,
+    "FPS_gain_measured": false
+  },
+  "changes": {
+    "render_settings_changed": false,
+    "runtime_source_changed": false,
+    "new_APK_or_IPA_built": false,
+    "VM_started_or_modified": false
+  },
+  "limitations": [
+    "Actual selected mode/backend on the reported physical phone",
+    "Whether a requested mode activates and remains stable for that backend/device",
+    "Any frame pacing, correctness, energy or performance benefit from enabling it",
+    "Complete PlayerSettings baked/runtime-consumer linkage outside the explicit selector"
+  ],
+  "analysis_report_sha256": {
+    "final-original-Android-MT-rendering-audit.json": "4dec25c3ec4669e8193d235d2a3299648ec7035b6a1087f31f697de3dd597015",
+    "engine-implementation-and-observation-proof.json": "565cb3fc7c0c2fd05c8e72fe0403f97d8827e49a5422fc419c9dcf4f71fbd504",
+    "bootflag-selector-precedence-independent-review.json": "92d92c7b071d14f951e06dca3d513e5b1dcb11dafeceaa9ea9fde15a113cea38",
+    "official-unity-2022.3-reference-summary.json": "8ce514ad8dc4011bf4735782abc090d3dfb1b300556ee7ab670f59c0f2de7ed3",
+    "reference-rendering-threading-mode.json": "552f6e821891db1edf27b2a29b2a446d2e94d68aff3d668d53dd4df432825b89",
+    "systeminfo-threading-wrappers.json": "a94f2209f8c0edd78880e122035d7a7fd5b44adc1fdc525668801fb995384883",
+    "rendering-threading-enum.json": "e2a1bcb4862a0b6aa11ecc46da7a58f7f07c9129853a7a92268ea835833b6b00",
+    "systeminfo-threading-direct-caller.json": "8e50137b1ef59222be4af2e4d9968a8192e2f89a123d0be2764a2d40f84c6166",
+    "original-java-startup-arguments.json": "7915026b99d58075362e081fdb785098089e9db1a01e8bb20c59afb9ceabd8d4",
+    "completion.json": "cfc719c658c5f4971bd3abbc551698c2fd421f3086a1eec3f8bb0724435be4cc"
+  }
+}
