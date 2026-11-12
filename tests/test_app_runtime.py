@@ -9,7 +9,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest import mock
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import grpc
 from google.protobuf import descriptor_pb2
@@ -271,6 +271,36 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(self.rpc(runtime, "/api.User/Get").user.name, "Preserved Manager")
         self.assertEqual(state.snapshot("sandbox"), before)
         self.assertFalse(self.seed_calls)
+
+    def test_render_probe_is_transient_exported_readback_and_restart_preserves_account(self):
+        runtime = self.start()
+        state = State(self.root / "state.db")
+        before = state.snapshot("sandbox")
+        database = (self.root / "state.db").read_bytes()
+        empty = {"client": None, "age_seconds": None, "stale": True}
+        self.assertEqual(runtime.status()["render_probe"], empty)
+        value = {"schema": 1, "state": "observed", "actual_mode": 0, "graphics_api": 21,
+                 "callback_tid": 123, "observations": 1, "sample_age_ms": 10000,
+                 "cpu_frame_ms": None, "gpu_frame_ms": None, "timing_age_ms": None}
+        address = runtime.status()["asset_url"]
+        with mock.patch.object(State, "snapshot", side_effect=AssertionError("account read")):
+            with urlopen(Request(address + "/client/render-probe", data=json.dumps(value).encode(),
+                         headers={"Content-Type": "application/json"}), timeout=3) as response:
+                self.assertEqual(json.load(response), {"accepted": True})
+            for route in ("/client/render-probe", "/diagnostics/runtime"):
+                with urlopen(address + route, timeout=3) as response:
+                    observed = json.load(response)
+                probe = observed if route == "/client/render-probe" else observed["runtime"]["render_probe"]
+                self.assertEqual(probe["client"], value)
+                self.assertGreaterEqual(probe["age_seconds"], 0)
+                self.assertTrue(probe["stale"])
+        self.assertEqual(state.snapshot("sandbox"), before)
+        self.assertEqual((self.root / "state.db").read_bytes(), database)
+        self.assertFalse(list(self.root.glob("*render-probe*")))
+        runtime.stop()
+        restarted = self.start()
+        self.assertEqual(restarted.status()["render_probe"], empty)
+        self.assertEqual(state.snapshot("sandbox"), before)
 
     def test_startup_repairs_roster_home_inventory_then_card_level_mission(self):
         state = State(self.root / "state.db")

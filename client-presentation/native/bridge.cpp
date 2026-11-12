@@ -16,6 +16,7 @@
 #include <cstring>
 #include <ctime>
 #include <limits.h>
+#include <unistd.h>
 
 #include "shadowhook.h"
 
@@ -85,6 +86,99 @@ struct Status {
 pthread_mutex_t status_mutex = PTHREAD_MUTEX_INITIALIZER;
 Status state;
 
+#ifndef IDOLY_DARWIN_BRIDGE
+// BEGIN_READ_ONLY_RENDER_PROBE
+// The tracker has no Unity calls. Its writer is the established game callback;
+// JNI only formats a copied snapshot under render_probe_mutex.
+struct RenderProbeSnapshot {
+    const char *state = "waiting";
+    int mode = -1, api = -1;
+    int64_t tid = 0, observations = 0, sampled_ms = -1;
+};
+class RenderProbeTracker {
+    RenderProbeSnapshot snapshot_;
+    int64_t last_attempt_ms_ = -1;
+public:
+    static int64_t next_observation_count(int64_t count) {
+        return count < INT64_MAX ? count + 1 : INT64_MAX;
+    }
+    bool begin_sample(int64_t now_ms) {
+        if (now_ms < 0) return false;
+        if (last_attempt_ms_ >= 0 && (now_ms < last_attempt_ms_
+                || now_ms - last_attempt_ms_ < 2000)) return false;
+        last_attempt_ms_ = now_ms;
+        return true;
+    }
+    void initialization_failed() { snapshot_ = {}; snapshot_.state = "init_failed"; }
+    void complete_sample(int64_t now_ms, int mode, int api, int64_t tid) {
+        snapshot_.observations = next_observation_count(snapshot_.observations);
+        snapshot_.sampled_ms = now_ms;
+        snapshot_.api = api >= 0 && api <= 255 ? api : -1;
+        snapshot_.tid = tid > 0 && tid <= INT32_MAX ? tid : 0;
+        const bool valid = now_ms >= 0 && mode >= 0 && mode <= 5
+            && snapshot_.api >= 0 && snapshot_.tid > 0;
+        snapshot_.mode = valid ? mode : -1;
+        snapshot_.state = valid ? "observed" : "unsupported";
+    }
+    RenderProbeSnapshot snapshot() const { return snapshot_; }
+    static void write_json(const RenderProbeSnapshot &copy, int64_t now_ms,
+            char *output, size_t capacity) {
+        const bool sampled = copy.observations > 0;
+        const bool has_age = sampled && copy.sampled_ms >= 0 && now_ms >= copy.sampled_ms;
+        const bool observed = sampled && has_age && copy.mode >= 0 && copy.mode <= 5
+            && copy.api >= 0 && copy.api <= 255 && copy.tid > 0 && copy.tid <= INT32_MAX;
+        const char *status = sampled ? (observed ? "observed" : "unsupported") : copy.state;
+        char mode[32], api[32], tid[32], age[32];
+        auto number = [](char *buffer, int64_t value, bool present) -> const char * {
+            if (!present) return "null";
+            std::snprintf(buffer, 32, "%lld", static_cast<long long>(value)); return buffer;
+        };
+        std::snprintf(output, capacity,
+            "{\"schema\":1,\"state\":\"%s\",\"actual_mode\":%s,\"graphics_api\":%s,"
+            "\"callback_tid\":%s,\"observations\":%lld,\"sample_age_ms\":%s,"
+            "\"cpu_frame_ms\":null,\"gpu_frame_ms\":null,\"timing_age_ms\":null}",
+            status, number(mode, copy.mode, observed),
+            number(api, copy.api, sampled && copy.api >= 0 && copy.api <= 255),
+            number(tid, copy.tid, sampled && copy.tid > 0 && copy.tid <= INT32_MAX),
+            static_cast<long long>(copy.observations),
+            number(age, has_age ? now_ms - copy.sampled_ms : 0, has_age));
+    }
+};
+// END_READ_ONLY_RENDER_PROBE
+pthread_mutex_t render_probe_mutex = PTHREAD_MUTEX_INITIALIZER;
+RenderProbeTracker render_probe;
+int (*rendering_mode_get)(Method *), (*graphics_api_get)(Method *);
+bool game_call(bool establish);
+int64_t render_probe_monotonic_ms() {
+    timespec now{};
+    if (clock_gettime(CLOCK_MONOTONIC, &now) || now.tv_sec < 0 || now.tv_nsec < 0
+            || now.tv_nsec >= 1000000000 || now.tv_sec > (INT64_MAX - 999) / 1000) return -1;
+    return static_cast<int64_t>(now.tv_sec) * 1000 + now.tv_nsec / 1000000;
+}
+void render_probe_init_failed() {
+    pthread_mutex_lock(&render_probe_mutex); render_probe.initialization_failed();
+    pthread_mutex_unlock(&render_probe_mutex);
+}
+void sample_render_probe() {
+    if (!ready.load(std::memory_order_acquire) || !game_call(false) || !rendering_mode_get || !graphics_api_get) return;
+    const int64_t now = render_probe_monotonic_ms();
+    pthread_mutex_lock(&render_probe_mutex); const bool due = render_probe.begin_sample(now);
+    pthread_mutex_unlock(&render_probe_mutex);
+    if (!due) return;
+    int mode = -1, api = -1;
+    try { mode = rendering_mode_get(nullptr); api = graphics_api_get(nullptr); }
+    catch (...) { mode = -1; api = -1; }
+    pthread_mutex_lock(&render_probe_mutex);
+    render_probe.complete_sample(now, mode, api, static_cast<int64_t>(gettid()));
+    pthread_mutex_unlock(&render_probe_mutex);
+}
+void render_probe_status_json(char *output, size_t capacity) {
+    pthread_mutex_lock(&render_probe_mutex); const RenderProbeSnapshot copy = render_probe.snapshot();
+    pthread_mutex_unlock(&render_probe_mutex);
+    RenderProbeTracker::write_json(copy, render_probe_monotonic_ms(), output, capacity);
+}
+#endif
+
 Config configuration(bool *has = nullptr) {
     pthread_mutex_lock(&config_mutex);
     Config result = pending;
@@ -94,6 +188,9 @@ Config configuration(bool *has = nullptr) {
 }
 void set_state(const char *value) {
     pthread_mutex_lock(&status_mutex); state.state = value; pthread_mutex_unlock(&status_mutex);
+#ifndef IDOLY_DARWIN_BRIDGE
+    if (!std::strcmp(value, "unsupported") || !std::strcmp(value, "init_failed")) render_probe_init_failed();
+#endif
 }
 bool game_call(bool establish = false) {
 #ifdef IDOLY_DARWIN_BRIDGE
@@ -927,7 +1024,13 @@ void quality_init_hook(void *self, Method *method) {
 void quality_update_hook(void *self, Method *method) {
     if (!ready.load(std::memory_order_acquire) || !game_call(true)) { quality_update_original(self, method); return; }
     bool has = false; Config config = configuration(&has);
-    if (!has) { quality_update_original(self, method); return; }
+    if (!has) {
+        quality_update_original(self, method);
+#ifndef IDOLY_DARWIN_BRIDGE
+        sample_render_probe();
+#endif
+        return;
+    }
     quality_track(self);
     int actual = read<int>(self, 0x24);
     if (applied_quality && actual != applied_quality) base_quality = actual;
@@ -943,6 +1046,9 @@ void quality_update_hook(void *self, Method *method) {
     const int desired_fps = selected_fps(config, original_fps());
     if (app_fps_get(nullptr) != desired_fps) app_fps_set_original(desired_fps, nullptr);
     quality_update_original(self, method);
+#ifndef IDOLY_DARWIN_BRIDGE
+    sample_render_probe();
+#endif
     RectTypeMemoScope type_memo;
     const bool quality_readback = read<int>(self, 0x24)
         == (config.custom_graphics && config.quality && !quality_unavailable ? config.quality : base_quality);
@@ -1077,6 +1183,9 @@ bool matches(const Image &image) {
 void pause_ms(long ms) { timespec t{ms / 1000, (ms % 1000) * 1000000}; nanosleep(&t, nullptr); }
 void load_calls() {
 #define CALL(variable, entry) variable = function<decltype(variable)>(pin::entry)
+#ifndef IDOLY_DARWIN_BRIDGE
+    CALL(rendering_mode_get, rendering_mode); CALL(graphics_api_get, graphics_api);
+#endif
     CALL(weak_new, weak_new); CALL(weak_get, weak_get); CALL(weak_free, weak_free);
     CALL(object_class, object_class); CALL(class_name, class_name); CALL(class_namespace, class_namespace); CALL(class_parent, class_parent);
     CALL(object_alive, object_alive); CALL(app_fps_get, app_fps_get); CALL(quality_names, q_names);
@@ -1248,6 +1357,9 @@ extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentatio
 }
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_playbackStatus(JNIEnv *env,jclass) {
     char json[256];playback_status_json(json,sizeof json);return env->NewStringUTF(json);
+}
+extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_renderProbeStatus(JNIEnv *env,jclass) {
+    char json[512];render_probe_status_json(json,sizeof json);return env->NewStringUTF(json);
 }
 
 #else

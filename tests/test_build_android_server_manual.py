@@ -62,8 +62,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "35",
-                           tool.ANDROID + "versionName": "0.3.16"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "36",
+                           tool.ANDROID + "versionName": "0.3.17"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -119,7 +119,7 @@ def test_release_component_export_policy_is_fixed(name, old, new):
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 35;' in raw and 'VERSION_NAME = "0.3.16";' in raw
+    assert 'VERSION_CODE = 36;' in raw and 'VERSION_NAME = "0.3.17";' in raw
     assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
@@ -128,7 +128,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("35")\ngradleProperty("serverVersionName").orElse("0.3.16")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("36")\ngradleProperty("serverVersionName").orElse("0.3.17")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -409,10 +409,11 @@ def test_unknown_d8_synthetic_kinds_or_malformed_suffixes_remain_rejected(suffix
     assert not tool.own_synthetic(origin + suffix, {origin + ";"})
 
 
-def test_only_six_server_sources_are_frozen_without_installer_or_client_builder():
-    assert len(tool.JAVA_FILES) == 6
+def test_only_seven_server_sources_are_frozen_without_installer_or_client_builder():
+    assert len(tool.JAVA_FILES) == 7
     assert {Path(name).stem for name in tool.JAVA_FILES} == {
-        "MainActivity", "ServerService", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage"}
+        "MainActivity", "ServerService", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage",
+        "RenderingExperiment"}
     assert not any("Installer" in name or "PresentationStorage" in name for name in tool.SOURCE_FILES)
     assert not hasattr(tool, "presentation")
     assert not hasattr(tool, "presentation_assets")
@@ -454,7 +455,7 @@ def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(t
 
 
 def linked_identity():
-    badging = (f"package: name='{tool.PACKAGE}' versionCode='35' versionName='0.3.16'\n"
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='36' versionName='0.3.17'\n"
                "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
                + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
     manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"

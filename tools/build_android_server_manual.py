@@ -35,7 +35,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.16", 35
+VERSION, VERSION_CODE = "0.3.17", 36
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -52,7 +52,7 @@ RES_ROOT = "android-server/app/src/main/res/"
 MANIFEST = "android-server/app/src/main/AndroidManifest.xml"
 GRADLE = "android-server/app/build.gradle.kts"
 JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge",
-    "PresentationSettings", "PlaybackSettings", "PlaybackStorage"))
+    "PresentationSettings", "PlaybackSettings", "PlaybackStorage", "RenderingExperiment"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")
 SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",

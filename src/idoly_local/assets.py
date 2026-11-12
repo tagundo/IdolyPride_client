@@ -21,6 +21,13 @@ _RUNTIME_DIAGNOSTICS_PATH = "/diagnostics/runtime"
 _MAX_RUNTIME_DIAGNOSTICS_BYTES = 1024 * 1024
 
 
+def _render_probe_route(path):
+    # Static-file serving collapses empty path components. Reserve those aliases
+    # too, while the handler below still accepts only the literal canonical URL.
+    decoded = unquote(urlsplit(path).path)
+    return "/".join(filter(None, decoded.split("/"))).startswith("client/render-probe")
+
+
 def select_master_tag(tag_path: Path, *, media_mode=False) -> Path:
     """Select the separate client-facing outfit catalog before opening a profile.
 
@@ -95,7 +102,8 @@ def _range(value: str, size: int) -> tuple[int, int]:
 
 def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                         transfer_callback=None, octo=None,
-                        runtime_status_callback=None, presentation=None, playback=None) -> ThreadingHTTPServer:
+                        runtime_status_callback=None, presentation=None, playback=None,
+                        render_probe=None) -> ThreadingHTTPServer:
     """Create a bound server; caller owns serve_forever/shutdown/server_close.
 
     Files live under the explicit root. Directory listings and paths resolving
@@ -121,6 +129,14 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
             _LOG.info("%s %r", self.command, urlsplit(self.path).path)
 
         def do_GET(self):
+            if _render_probe_route(self.path):
+                if self.path != "/client/render-probe" or render_probe is None:
+                    self._json(404, {"error": "not_found"})
+                elif not self._loopback():
+                    self._json(403, {"error": "loopback_required"})
+                else:
+                    self._json(200, render_probe.status())
+                return
             if unquote(urlsplit(self.path).path).startswith("/client/playback"):
                 if self.path != "/client/playback" or playback is None:
                     self._json(404, {"error": "not_found"})
@@ -159,6 +175,9 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
             self._serve(True)
 
         def do_HEAD(self):
+            if _render_probe_route(self.path):
+                self._json(404, {"error": "not_found"})
+                return
             if unquote(urlsplit(self.path).path).startswith("/client/playback"):
                 self._json(404, {"error": "not_found"})
                 return
@@ -226,7 +245,8 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
         def do_POST(self):
             visual = self.path == "/client/presentation/status" and presentation is not None
             playback_report = self.path == "/client/playback/status" and playback is not None
-            if not visual and not playback_report and (self.path != "/diagnostics/client" or diagnostics is None):
+            probe_report = self.path == "/client/render-probe" and render_probe is not None
+            if not visual and not playback_report and not probe_report and (self.path != "/diagnostics/client" or diagnostics is None):
                 self._json(404, {"error": "not_found"})
                 return
             if not self._loopback():
@@ -240,7 +260,7 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                 self._json(411, {"error": "content_length_required"})
                 return
             size = int(size)
-            if not 0 < size <= (8192 if visual or playback_report else 32768):
+            if not 0 < size <= (8191 if probe_report else 8192 if visual or playback_report else 32768):
                 self._json(413, {"error": "diagnostics_size_limit"})
                 return
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
@@ -252,10 +272,11 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                 raw = self.rfile.read(size)
                 if len(raw) != size:
                     raise ValueError("Incomplete request")
-                receiver = playback if playback_report else presentation if visual else diagnostics
+                receiver = render_probe if probe_report else playback if playback_report else presentation if visual else diagnostics
                 result = receiver.receive(raw)
             except (ValueError, TimeoutError, OSError):
-                self._json(400, {"error": "invalid_playback_status" if playback_report else
+                self._json(400, {"error": "invalid_render_probe" if probe_report else
+                                       "invalid_playback_status" if playback_report else
                                        "invalid_presentation_status" if visual else "invalid_client_diagnostics"})
                 return
             finally:

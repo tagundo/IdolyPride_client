@@ -64,6 +64,17 @@ LICENSE_HASHES = {
     "THIRD-PARTY-NOTICES.txt": "114b489514680bf58611ac6ce36877fea7fc9927ed0c51f630928a6c07a02b95",
 }
 
+# Frozen Android-only JNI contract; iOS static bridge exports are separate.
+ANDROID_JNI_METHODS = {
+    "start": ("void", ()),
+    "configure": ("boolean", ("int", "long", "boolean", "int", "int", "float", "int", "int", "int", "boolean")),
+    "status": ("String", ()),
+    "configurePlayback": ("boolean", ("int", "long", "boolean")),
+    "playbackStatus": ("String", ()),
+    "renderProbeStatus": ("String", ()),
+}
+JNI_PREFIX = "Java_game_qualiarts_idolypride_presentation_NativePresentation_"
+
 
 def file_identity(info):
     return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
@@ -160,16 +171,23 @@ def verified_native(path, commit, source_hashes, *, root=ROOT):
             or any(receipt["source_sha256"].get(name) != value for name, value in expected.items())):
         raise ValueError("Native receipt differs from the frozen compile inputs")
     check_elf(path)
-    check_jni(path, root=root)
+    jni_exports = check_jni(path, root=root)
     if file_identity(path.lstat()) != file_identity(info): raise ValueError("Native artifact changed while verifying")
     return {"sha256": sha, "bytes": info.st_size, "profile_prefix_count": prefixes,
             "profile_hook_count": hooks, "source_commit": commit, "source_sha256": expected,
-            "build_receipt_sha256": digest(receipt_path), "runtime_device_tested": False}
+            "build_receipt_sha256": digest(receipt_path), "jni_exports": jni_exports,
+            "jni_method_count": len(ANDROID_JNI_METHODS), "runtime_device_tested": False}
 
 
 def native_jni_exports(path):
     """Exact defined dynamic-symbol names; configurePlayback cannot match configure."""
-    raw = read_regular_public(path, MAX_ADDON)
+    return native_jni_exports_bytes(read_regular_public(path, MAX_ADDON))
+
+
+def native_jni_exports_bytes(raw):
+    """Inspect one bounded own library, including APK members already size-checked."""
+    if not isinstance(raw, bytes) or not 64 <= len(raw) <= MAX_ADDON:
+        raise ValueError("Expected a bounded native ELF64 library")
     if len(raw) < 64 or raw[:6] != b"\x7fELF\x02\x01":
         raise ValueError("Expected ELF64 dynamic symbols")
     offset = struct.unpack_from("<Q", raw, 40)[0]
@@ -200,13 +218,31 @@ def native_jni_exports(path):
     return result
 
 
-def check_jni(path, *, root=ROOT):
+def expected_jni_exports(*, root=ROOT):
     source = Path(root) / "client-presentation/java/game/qualiarts/idolypride/presentation/NativePresentation.java"
-    methods = re.findall(r"public static native \w+ (\w+)\(", read_regular_public(source, 65536).decode("utf-8"))
-    expected = {"JNI_OnLoad", *("Java_game_qualiarts_idolypride_presentation_NativePresentation_" + name for name in methods)}
-    if not methods or len(set(methods)) != len(methods) or native_jni_exports(path) != expected:
+    declarations = re.findall(r"public\s+static\s+native\s+(\w+)\s+(\w+)\s*\(([^)]*)\)\s*;",
+                              read_regular_public(source, 65536).decode("utf-8"))
+    methods = {}
+    for result, name, arguments in declarations:
+        params = []
+        for argument in arguments.split(",") if arguments.strip() else ():
+            match = re.fullmatch(r"\s*(\w+)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*", argument)
+            if match is None:
+                raise ValueError("Frozen Android Java JNI signature differs")
+            params.append(match[1])
+        if name in methods:
+            raise ValueError("Frozen Android Java JNI method is duplicated")
+        methods[name] = (result, tuple(params))
+    if methods != ANDROID_JNI_METHODS:
+        raise ValueError("Frozen Android Java JNI signatures do not exactly match the six-method contract")
+    return sorted({"JNI_OnLoad", *(JNI_PREFIX + name for name in methods)})
+
+
+def check_jni(path, *, root=ROOT):
+    expected = expected_jni_exports(root=root)
+    if native_jni_exports(path) != set(expected):
         raise ValueError("Native JNI exports do not exactly match the frozen Java methods")
-    return sorted(expected)
+    return expected
 
 
 def verified_feature(path, commit, source_hashes, *, root=ROOT):
@@ -219,6 +255,7 @@ def verified_feature(path, commit, source_hashes, *, root=ROOT):
     required_sources = frozen_sources(commit, root=root)
     expected_native = {name: source_hashes[name] for name in native_source_paths(root)}
     prefixes, hooks = native_profile_counts(root)
+    jni_exports = expected_jni_exports(root=root)
     native = proof.get("native_input", {})
     if (proof.get("source_commit") != commit or proof.get("source_sha256") != required_sources
             or proof.get("addon_apk_sha256") != digest(path) or proof.get("addon_bytes") != info.st_size
@@ -226,7 +263,8 @@ def verified_feature(path, commit, source_hashes, *, root=ROOT):
             or proof.get("profile") != "diagnostics" or proof.get("certificate_sha256") != PROFILES["diagnostics"]["certificate"]
             or not isinstance(native, dict) or native.get("source_commit") != commit
             or native.get("source_sha256") != expected_native or native.get("profile_prefix_count") != prefixes
-            or native.get("profile_hook_count") != hooks):
+            or native.get("profile_hook_count") != hooks or native.get("jni_exports") != jni_exports
+            or native.get("jni_method_count") != len(ANDROID_JNI_METHODS)):
         raise ValueError("Feature receipt differs from the frozen compile inputs")
     with ZipFile(path) as archive:
         names = archive.namelist()
@@ -242,6 +280,8 @@ def verified_feature(path, commit, source_hashes, *, root=ROOT):
         if (actual != proof.get("member_sha256") or actual[LIBRARY] != native.get("sha256")
                 or any(actual[name] != value for name, value in license_hashes("diagnostics").items())):
             raise ValueError("Feature members differ from their source-bound receipt")
+        if native_jni_exports_bytes(archive.read(LIBRARY)) != set(jni_exports):
+            raise ValueError("Feature native JNI exports differ from the frozen Java contract")
         marker = json.loads(archive.read(MARKER))
         expected_marker = feature_marker("diagnostics", native.get("sha256"))
         if marker != expected_marker or any(proof.get(name) != value for name, value in expected_marker.items()):

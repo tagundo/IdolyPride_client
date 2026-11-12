@@ -75,9 +75,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private TextView playbackStatus;
     private boolean playbackLoading, playbackInvalid, playbackSaveFailed, playbackRuntimeRunning;
     private JSONObject playbackRuntime;
+    private CheckBox multithreadedRendering;
+    private TextView renderingStatus;
+    private JSONObject renderProbeRuntime;
+    private boolean renderProbeRuntimeRunning;
     private final Runnable playbackRefresh = new Runnable() {
         @Override public void run() {
             updatePlaybackStatus();
+            updateRenderingStatus();
             if (presentationObserved && playbackStatus != null) playbackStatus.postDelayed(this, 1000);
         }
     };
@@ -180,6 +185,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, Color.rgb(180, 199, 211));
         resourceNotice.setPadding(0, 0, 0, dp(6));
         body.addView(resourceNotice);
+        addRenderingExperiment(body);
         addPlaybackControls(body);
         addPresentationControls(body);
         TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
@@ -300,6 +306,89 @@ public final class MainActivity extends Activity implements ServerService.Observ
         body.addView(playbackStatus);
         waitForOrientation.setOnCheckedChangeListener((button, checked) -> savePlaybackControl(checked));
         updatePlaybackStatus();
+    }
+
+    private void addRenderingExperiment(LinearLayout body) {
+        multithreadedRendering = new CheckBox(this);
+        multithreadedRendering.setText(R.string.rendering_mt_experiment);
+        multithreadedRendering.setTextColor(Color.WHITE);
+        multithreadedRendering.setTextSize(14);
+        multithreadedRendering.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
+                .getBoolean(RenderingExperiment.PREFERENCE, RenderingExperiment.DEFAULT_ENABLED));
+        body.addView(multithreadedRendering);
+        TextView notice = text(R.string.rendering_mt_notice, 12, Color.rgb(180, 199, 211));
+        notice.setPadding(0, 0, 0, dp(4));
+        body.addView(notice);
+        renderingStatus = text(R.string.rendering_probe_waiting, 12, Color.rgb(192, 212, 222));
+        renderingStatus.setTextIsSelectable(true);
+        renderingStatus.setPadding(0, 0, 0, dp(8));
+        body.addView(renderingStatus);
+        multithreadedRendering.setOnCheckedChangeListener((button, enabled) -> {
+            getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
+                    .putBoolean(RenderingExperiment.PREFERENCE, enabled).apply();
+            updateRenderingStatus();
+        });
+        updateRenderingStatus();
+    }
+
+    private static Long renderProbeLong(JSONObject object, String name) {
+        Object value = object == null ? null : object.opt(name);
+        if (!(value instanceof Integer || value instanceof Long)) return null;
+        long number = ((Number) value).longValue();
+        return number >= 0 ? number : null;
+    }
+
+    private static Double renderProbeNumber(JSONObject object, String name) {
+        Object value = object == null ? null : object.opt(name);
+        if (!(value instanceof Number)) return null;
+        double number = ((Number) value).doubleValue();
+        return Double.isFinite(number) && number >= 0 ? number : null;
+    }
+
+    private void updateRenderingStatus() {
+        if (renderingStatus == null) return;
+        boolean requested = multithreadedRendering.isChecked();
+        String request = getString(requested ? R.string.rendering_request_mt : R.string.rendering_request_original);
+        JSONObject client = renderProbeRuntime == null ? null : renderProbeRuntime.optJSONObject("client");
+        int mode = playbackInteger(client, "actual_mode");
+        Long observations = renderProbeLong(client, "observations");
+        Long thread = renderProbeLong(client, "callback_tid");
+        int api = playbackInteger(client, "graphics_api");
+        Object rawState = client == null ? null : client.opt("state");
+        Double receiptAge = renderProbeNumber(renderProbeRuntime, "age_seconds");
+        long now = SystemClock.elapsedRealtime(), received = ServerService.runtimeDetailsReceivedAt();
+        int feedback = RenderingExperiment.feedback(presentationObserved,
+                presentationServerRunning && renderProbeRuntimeRunning, now, received,
+                playbackInteger(client, "schema"), rawState instanceof String ? (String) rawState : null,
+                playbackBoolean(renderProbeRuntime, "stale"), receiptAge,
+                renderProbeLong(client, "sample_age_ms"), mode, observations == null ? -1 : observations,
+                client != null && client.length() == 10 && api >= 0 && api <= 255
+                        && thread != null && thread > 0 && thread <= Integer.MAX_VALUE);
+        int message = feedback == RenderingExperiment.STALE ? R.string.rendering_probe_stale
+                : feedback == RenderingExperiment.UNSUPPORTED ? R.string.rendering_probe_unsupported
+                : feedback == RenderingExperiment.INIT_FAILED ? R.string.rendering_probe_init_failed
+                : feedback == RenderingExperiment.WAIT_CLIENT ? R.string.rendering_probe_client_waiting
+                : R.string.rendering_probe_waiting;
+        String actual = getString(message);
+        if (feedback == RenderingExperiment.OBSERVED) {
+            int[] modes = {R.string.rendering_mode_direct, R.string.rendering_mode_single,
+                    R.string.rendering_mode_multi, R.string.rendering_mode_legacy_jobs,
+                    R.string.rendering_mode_native_jobs, R.string.rendering_mode_native_jobs_without_render};
+            actual = getString(R.string.rendering_probe_observed, getString(modes[mode]), api);
+            if (requested && (mode == 0 || mode == 1)) actual += "\n" + getString(R.string.rendering_mt_not_observed);
+            Double cpu = renderProbeNumber(client, "cpu_frame_ms"), gpu = renderProbeNumber(client, "gpu_frame_ms");
+            boolean timingFresh = RenderingExperiment.timingFresh(renderProbeLong(client, "timing_age_ms"),
+                    receiptAge, now, received);
+            if (timingFresh && (cpu != null && cpu > 0 && cpu <= 60_000 || gpu != null && gpu > 0 && gpu <= 60_000)) {
+                String cpuText = cpu != null && cpu > 0 && cpu <= 60_000 ? String.format(Locale.ROOT, "%.2f", cpu) : "—";
+                String gpuText = gpu != null && gpu > 0 && gpu <= 60_000 ? String.format(Locale.ROOT, "%.2f", gpu) : "—";
+                actual += "\n" + getString(R.string.rendering_frame_times, cpuText, gpuText);
+            } else actual += "\n" + getString(R.string.rendering_frame_times_unavailable);
+        }
+        setTextIfChanged(renderingStatus, request + "\n" + actual);
+        renderingStatus.setTextColor(feedback == RenderingExperiment.OBSERVED ? Color.rgb(192, 212, 222)
+                : feedback == RenderingExperiment.UNSUPPORTED || feedback == RenderingExperiment.INIT_FAILED
+                ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
     }
 
     private void savePlaybackControl(boolean wait) {
@@ -542,15 +631,32 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void launchClient(int missingMessage, String... packageNames) {
         Intent client = null;
+        String selectedPackage = null;
         for (String packageName : packageNames) {
             client = getPackageManager().getLaunchIntentForPackage(packageName);
-            if (client != null) break;
+            if (client != null) { selectedPackage = packageName; break; }
         }
         if (client == null) {
             Toast.makeText(this, missingMessage, Toast.LENGTH_LONG).show();
             return;
         }
         try {
+            if (getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
+                    .getBoolean(RenderingExperiment.PREFERENCE, RenderingExperiment.DEFAULT_ENABLED)) {
+                String arguments;
+                try {
+                    if (!RenderingExperiment.knownClient(selectedPackage)) throw new IllegalArgumentException("Unknown client");
+                    Bundle extras = client.getExtras();
+                    Object previous = extras == null ? null : extras.get(RenderingExperiment.UNITY_ARGUMENTS);
+                    if (previous != null && !(previous instanceof String)) throw new IllegalArgumentException("Unity argument type");
+                    arguments = RenderingExperiment.launchArguments((String) previous, true);
+                }
+                catch (IllegalArgumentException error) {
+                    Toast.makeText(this, R.string.rendering_launch_conflict, Toast.LENGTH_LONG).show();
+                    return;
+                }
+                client.putExtra(RenderingExperiment.UNITY_ARGUMENTS, arguments);
+            }
             startActivity(client);
         } catch (RuntimeException error) {
             Toast.makeText(this, R.string.client_launch_failed, Toast.LENGTH_LONG).show();
@@ -577,8 +683,11 @@ public final class MainActivity extends Activity implements ServerService.Observ
         presentationRuntime = null;
         playbackRuntime = null;
         playbackRuntimeRunning = false;
+        renderProbeRuntime = null;
+        renderProbeRuntimeRunning = false;
         playbackStatus.removeCallbacks(playbackRefresh);
         updatePlaybackStatus();
+        updateRenderingStatus();
         updatePresentationStatus();
         ServerService.removeObserver(this);
         super.onStop();
@@ -609,7 +718,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         presentationRuntime = details.optJSONObject("presentation");
         playbackRuntime = details.optJSONObject("playback");
         playbackRuntimeRunning = Boolean.TRUE.equals(details.opt("running"));
+        renderProbeRuntime = details.optJSONObject("render_probe");
+        renderProbeRuntimeRunning = Boolean.TRUE.equals(details.opt("running"));
         updatePlaybackStatus();
+        updateRenderingStatus();
         updatePresentationStatus();
         JSONObject client = details.optJSONObject("client_diagnostics");
         String summary = client == null ? "" : client.optString("summary", "");

@@ -72,14 +72,15 @@ def test_android_compiler_removes_only_explicit_offline_modules(case):
         tool.compile_app(unknown,sources,123)
 
 
-def test_real_android_source_selection_retains_57_runtime_modules():
+def test_real_android_source_selection_retains_58_runtime_modules():
     root=Path(__file__).resolve().parents[1]
     sources={'idoly_local/'+p.stem+'.pyc':(str(p.relative_to(root)),p.read_bytes())
              for p in (root/'src/idoly_local').glob('*.py')}
     bridge=root/'android-server/app/src/main/python/android_server_runtime.py'
     sources['android_server_runtime.pyc']=(str(bridge.relative_to(root)),bridge.read_bytes())
     selected=tool.android_runtime_sources(sources)
-    assert len(selected)==57 and len(sources)-len(selected)==24
+    assert len(selected)==58 and len(sources)-len(selected)==24
+    assert 'idoly_local/render_probe.pyc' in selected
     assert 'idoly_local/dream_capture.pyc' in selected
     assert not selected.keys() & tool.ANDROID_EXCLUDED_MEMBERS
 

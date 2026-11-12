@@ -27,7 +27,7 @@ def main():
     args = parser.parse_args()
     sources = sorted((ROOT / "android-server/app/src/main/java" / PACKAGE).glob("*.java"))
     tests = [ROOT / "android-server/tests/java" / PACKAGE / (name + ".java") for name in
-             ("PlaybackSettingsHostTest",)]
+             ("PlaybackSettingsHostTest", "RenderingExperimentHostTest")]
     for path in (args.jdk_bin / "javac", args.jdk_bin / "java", args.android_jar, args.chaquopy_jar, *tests):
         if not path.is_file():
             parser.error(f"Required cached tool or source is missing: {path}")

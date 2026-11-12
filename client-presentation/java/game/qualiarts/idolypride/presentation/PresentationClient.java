@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** A bounded, account-free loopback protocol. No Android or JSON-library dependency. */
 public final class PresentationClient {
     public static final int MAX_BYTES = 8192;
+    public static final int MAX_RENDER_PROBE_BYTES = 2048;
     private static final String ORIGIN = "http://127.0.0.1:8080";
     private static final Set<String> CONFIG_KEYS = keys("schema", "revision", "custom_graphics", "quality",
             "target_fps", "render_scale", "max_buffer_pixel", "anti_aliasing", "shadow_resolution", "expand_photography");
@@ -42,6 +43,9 @@ public final class PresentationClient {
     private static final Set<String> PLAYBACK_KEYS = keys("schema", "revision", "wait_for_orientation");
     private static final Set<String> PLAYBACK_STATUS_KEYS = keys("schema", "bridge_version", "revision",
             "wait_for_orientation", "supported", "applied");
+    private static final Set<String> RENDER_PROBE_KEYS = keys("schema", "state", "actual_mode", "graphics_api",
+            "callback_tid", "observations", "sample_age_ms", "cpu_frame_ms", "gpu_frame_ms", "timing_age_ms");
+    private static final Set<String> RENDER_PROBE_STATES = keys("waiting", "observed", "unsupported", "init_failed");
     // No native code ran, so no preference revision or capability was applied.
     static String startupFailureStatus() {
         return "{\"schema\":1,\"bridge_version\":1,\"revision\":0,\"status\":\"init_failed\","
@@ -118,6 +122,45 @@ public final class PresentationClient {
         boolean supported = bool(row.get("supported")), applied = bool(row.get("applied"));
         if (applied && !supported) throw invalid();
     }
+    private static Long nullableInteger(Object value, long minimum, long maximum) throws IOException {
+        if (value == null) return null;
+        long result = integer(value);
+        if (result < minimum || result > maximum) throw invalid();
+        return result;
+    }
+    private static Double nullableFrameTime(Object value) throws IOException {
+        if (value == null) return null;
+        double result = number(value);
+        if (result <= 0 || result > 60000) throw invalid();
+        return result;
+    }
+    /** An observation, not a rendering command or proof of a CPU/GPU bottleneck. */
+    public static void validateRenderProbe(String json) throws IOException {
+        if (json == null || json.getBytes(StandardCharsets.UTF_8).length > MAX_RENDER_PROBE_BYTES) throw invalid();
+        Map<String, Object> row = new Json(json).parse();
+        if (!row.keySet().equals(RENDER_PROBE_KEYS) || integer(row.get("schema")) != 1
+                || !RENDER_PROBE_STATES.contains(row.get("state"))) throw invalid();
+        long observations = integer(row.get("observations"));
+        if (observations < 0) throw invalid();
+        Long mode = nullableInteger(row.get("actual_mode"), 0, 5);
+        Long api = nullableInteger(row.get("graphics_api"), 0, 255);
+        Long tid = nullableInteger(row.get("callback_tid"), 1, Integer.MAX_VALUE);
+        Long age = nullableInteger(row.get("sample_age_ms"), 0, Long.MAX_VALUE);
+        Double cpu = nullableFrameTime(row.get("cpu_frame_ms"));
+        Double gpu = nullableFrameTime(row.get("gpu_frame_ms"));
+        Long timingAge = nullableInteger(row.get("timing_age_ms"), 0, Long.MAX_VALUE);
+        if ((cpu != null || gpu != null) != (timingAge != null)) throw invalid();
+        String state = (String) row.get("state");
+        if (state.equals("waiting") || state.equals("init_failed")) {
+            if (observations != 0 || mode != null || api != null || tid != null || age != null
+                    || cpu != null || gpu != null || timingAge != null) throw invalid();
+        } else {
+            if (observations < 1) throw invalid();
+            if (state.equals("observed")) {
+                if (mode == null || api == null || tid == null || age == null) throw invalid();
+            } else if (mode != null) throw invalid();
+        }
+    }
     @SuppressWarnings("unchecked")
     public static void validateStatus(String json) throws IOException {
         Map<String, Object> row = new Json(json).parse();
@@ -165,6 +208,10 @@ public final class PresentationClient {
     public void postPlaybackStatus(String status) throws IOException {
         validatePlaybackStatus(status);
         request("/client/playback/status", status.getBytes(StandardCharsets.UTF_8));
+    }
+    public void postRenderProbe(String status) throws IOException {
+        validateRenderProbe(status);
+        request("/client/render-probe", status.getBytes(StandardCharsets.UTF_8));
     }
     /** Only native acknowledgement is posted; a stored preference is not playback completion. */
     public boolean pollPlayback(PlaybackNative receiver) throws IOException {
@@ -264,7 +311,7 @@ public final class PresentationClient {
         final String token; final BigDecimal value;
         Numeric(String token) { this.token = token; this.value = new BigDecimal(token); }
     }
-    /** Just objects and finite scalar values; arrays/null are outside this protocol. */
+    /** Just objects and scalar values; only the render-probe validator permits null. */
     private static final class Json {
         final String text; int at;
         Json(String text) throws IOException {
@@ -295,6 +342,7 @@ public final class PresentationClient {
             for (String literal : new String[]{"true", "false"}) if (text.startsWith(literal, at)) {
                 at += literal.length(); return literal.equals("true");
             }
+            if (text.startsWith("null", at)) { at += 4; return null; }
             int start = at;
             while (at < text.length() && "-+0123456789.eE".indexOf(text.charAt(at)) >= 0) at++;
             String token = text.substring(start, at);

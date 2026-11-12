@@ -31,6 +31,7 @@ class Runtime:
         self._media_mode = False
         self._presentation = None
         self._playback = None
+        self._render_probe = None
         self._grpc_address = None
         self._asset_url = None
         from .diagnostics import ClientDiagnostics
@@ -77,6 +78,8 @@ class Runtime:
             result["presentation"] = self._presentation.status()
         if self._playback is not None:
             result["playback"] = self._playback.status()
+        if self._render_probe is not None:
+            result["render_probe"] = self._render_probe.status()
         return result
 
     def diagnostics_snapshot(self) -> dict:
@@ -186,6 +189,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     runtime._presentation = PresentationState(root / "client-presentation.json")
     from .playback import PlaybackState
     runtime._playback = PlaybackState(root / "client-playback.json")
+    from .render_probe import RenderProbeState
+    runtime._render_probe = RenderProbeState()
     try:
         # Imports stay inside startup so launchers can extract bundled data and
         # configure their platform's codec before loading the application engine.
@@ -235,7 +240,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                                              diagnostics=runtime._diagnostics,
                                              transfer_callback=runtime._observe_transfer,
                                              runtime_status_callback=runtime.diagnostics_snapshot,
-                                             presentation=runtime._presentation, playback=runtime._playback)
+                                             presentation=runtime._presentation, playback=runtime._playback,
+                                             render_probe=runtime._render_probe)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.

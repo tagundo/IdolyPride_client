@@ -46,6 +46,9 @@ public final class PresentationProvider extends ContentProvider {
                 try { client.pollPlayback(playback); }
                 catch (Exception ignored) { /* Keep native defaults or the last valid playback option. */ }
                 catch (LinkageError ignored) { /* An older graphics bridge may not expose this optional API. */ }
+                try { client.postRenderProbe(NativePresentation.renderProbeStatus()); }
+                catch (Exception ignored) { /* Old servers and invalid/unavailable snapshots are optional. */ }
+                catch (LinkageError ignored) { /* Do not reload or disturb an older working graphics bridge. */ }
             }
             long delay = nextPoll - System.nanoTime();
             try { if (delay > 0) Thread.sleep(delay / 1000000L, (int) (delay % 1000000L)); }

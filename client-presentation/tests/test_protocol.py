@@ -41,6 +41,18 @@ def test_java_playback_protocol_transport_and_native_default_retention(tmp_path)
     assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 90
 
 
+def test_java_render_probe_nullable_contract_optional_endpoint_and_transport(tmp_path):
+    sources = [HERE / "java/game/qualiarts/idolypride/presentation/PresentationClient.java",
+               HERE / "tests/RenderProbeHarness.java"]
+    env = dict(os.environ, MALLOC_ARENA_MAX="2")
+    subprocess.run([str(JDK / "javac"), *["-J" + flag for flag in ADDON.JAVA_FLAGS], *ADDON.JAVAC_ARGUMENTS,
+                    "-d", str(tmp_path), *map(str, sources)], check=True, capture_output=True, timeout=30, env=env)
+    result = subprocess.run([str(JDK / "java"), *ADDON.JAVA_FLAGS, "-cp", str(tmp_path),
+        "game.qualiarts.idolypride.presentation.RenderProbeHarness"], check=True,
+        capture_output=True, text=True, timeout=30, env=env)
+    assert result.stdout.startswith("PASS ") and int(result.stdout.split()[1]) >= 250
+
+
 def test_jdk21_captured_parameter_metadata_compiles_through_cached_d8(tmp_path):
     """Exercise real production classes at the former D8 null-name boundary."""
     android = Path("/workspace/.setup/android-sdk/platforms/android-34/android.jar")

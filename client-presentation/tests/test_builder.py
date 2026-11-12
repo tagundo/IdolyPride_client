@@ -19,14 +19,26 @@ SPEC.loader.exec_module(tool)
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 
 
+def java_jni_contract():
+    # Keep the existing five declarations byte-compatible and add one String
+    # snapshot method. This fixture is also used by actual ELF export tests.
+    return ("public static native void start();\n"
+            "public static native boolean configure(int schema, long revision, boolean custom, int quality, "
+            "int fps, float scale, int maxBufferPixel, int aaMode, int shadow, boolean expandPhotography);\n"
+            "public static native String status();\n"
+            "public static native boolean configurePlayback(int schema, long revision, boolean waitForOrientation);\n"
+            "public static native String playbackStatus();\n"
+            "public static native String renderProbeStatus();\n")
+
+
 @pytest.fixture
 def frozen_fixture(tmp_path, monkeypatch):
     root = tmp_path / "source"
     native = root / "client-presentation/native"
-    java = root / "client-presentation/java"
+    java = root / "client-presentation/java/game/qualiarts/idolypride/presentation"
     java.mkdir(parents=True); native.mkdir()
     for name in ("PresentationProvider", "PresentationClient", "NativePresentation"):
-        (java / (name + ".java")).write_text("class " + name + " {}")
+        (java / (name + ".java")).write_text("class " + name + " {" + (java_jni_contract() if name == "NativePresentation" else "") + "}")
     (native / "bridge.cpp").write_text("#define HOOK(entry, x, y) x\nHOOK(one, a, b)\n")
     (native / "profile.json").write_text(json.dumps({"aliases": {"one": {}}}))
     (native / "profile.hpp").write_text("// pinned profile")
@@ -67,7 +79,7 @@ def test_native_receipt_requires_exact_commit_sources_artifact_and_profile(froze
     proof = path.with_name("build-receipt.json")
     proof.write_text(json.dumps(receipt))
     monkeypatch.setattr(tool, "check_elf", lambda path: [16384])
-    monkeypatch.setattr(tool, "check_jni", lambda path, **kwargs: [])
+    monkeypatch.setattr(tool, "check_jni", lambda path, **kwargs: tool.expected_jni_exports(root=root))
     assert tool.verified_native(path, commit, sources, root=root)["sha256"] == sha
     for key, value in (("source_commit", "b" * 40), ("profile_hook_count", 2),
                        ("profile_prefix_count", 2), ("source_unchanged_during_build", False),
@@ -92,7 +104,7 @@ def test_public_receipts_reject_duplicate_keys_links_and_oversize(tmp_path):
 def test_new_feature_accepts_only_exact_source_bound_members(frozen_fixture, tmp_path, monkeypatch):
     root, commit = frozen_fixture
     sources = tool.frozen_sources(commit, root=root)
-    native = b"new rotation-aware native"
+    native = synthetic_jni_elf(tool.expected_jni_exports(root=root))
     sha = hashlib.sha256(native).hexdigest()
     monkeypatch.setattr(tool, "license_hashes", lambda profile: {})
     marker = tool.feature_marker("diagnostics", sha)
@@ -107,12 +119,15 @@ def test_new_feature_accepts_only_exact_source_bound_members(frozen_fixture, tmp
              "member_sha256": {name: hashlib.sha256(raw).hexdigest() for name, raw in members.items()},
              "native_input": {"source_commit": commit, "sha256": sha, "bytes": len(native),
                  "source_sha256": {name: sources[name] for name in tool.native_source_paths(root)},
-                 "profile_prefix_count": 1, "profile_hook_count": 1}}
+                 "profile_prefix_count": 1, "profile_hook_count": 1,
+                 "jni_exports": tool.expected_jni_exports(root=root), "jni_method_count": 6}}
     receipt = path.with_suffix(".provenance.json")
     receipt.write_text(json.dumps(proof))
     assert tool.verified_feature(path, commit, sources, root=root) == proof
     for key, value in (("source_commit", "b" * 40), ("source_sha256", {}),
-                       ("signature_and_alignment_verified", False), ("member_sha256", {})):
+                       ("signature_and_alignment_verified", False), ("member_sha256", {}),
+                       ("native_input", {**proof["native_input"], "jni_exports": proof["native_input"]["jni_exports"][:-1]}),
+                       ("native_input", {**proof["native_input"], "jni_method_count": 5})):
         receipt.write_text(json.dumps({**proof, key: value}))
         with pytest.raises(ValueError): tool.verified_feature(path, commit, sources, root=root)
     receipt.write_text(json.dumps(proof))
@@ -120,9 +135,7 @@ def test_new_feature_accepts_only_exact_source_bound_members(frozen_fixture, tmp
     with pytest.raises(ValueError): tool.verified_feature(path, commit, sources, root=root)
 
 
-def test_exact_jni_symbols_do_not_confuse_configure_with_configure_playback(tmp_path):
-    prefix = 'Java_game_qualiarts_idolypride_presentation_NativePresentation_'
-    names = ['JNI_OnLoad', prefix+'configurePlayback']
+def synthetic_jni_elf(names):
     strings = bytearray(b'\0'); symbols = bytearray(24)
     for name in names:
         symbols.extend(struct.pack('<IBBHQQ',len(strings),0x12,0,1,0,0))
@@ -133,13 +146,70 @@ def test_exact_jni_symbols_do_not_confuse_configure_with_configure_playback(tmp_
     symbol_start=len(raw)+len(strings)
     struct.pack_into('<II4QII2Q',raw,192,0,11,0,0,symbol_start,len(symbols),1,0,8,24)
     raw.extend(strings);raw.extend(symbols)
-    library=tmp_path/'native.so';library.write_bytes(raw)
-    assert tool.native_jni_exports(library)==set(names)
+    return bytes(raw)
+
+
+def test_exact_six_jni_methods_include_render_probe_without_prefix_or_type_confusion(tmp_path):
+    prefix = 'Java_game_qualiarts_idolypride_presentation_NativePresentation_'
     java=tmp_path/'client-presentation/java/game/qualiarts/idolypride/presentation/NativePresentation.java'
-    java.parent.mkdir(parents=True);java.write_text('public static native boolean configure();\npublic static native boolean configurePlayback();')
-    with pytest.raises(ValueError,match='exactly'):tool.check_jni(library,root=tmp_path)
-    java.write_text('public static native boolean configurePlayback();')
+    java.parent.mkdir(parents=True);java.write_text(java_jni_contract())
+    names = {'JNI_OnLoad', *(prefix + name for name in ('start', 'configure', 'status',
+              'configurePlayback', 'playbackStatus', 'renderProbeStatus'))}
+    library=tmp_path/'native.so';library.write_bytes(synthetic_jni_elf(sorted(names)))
+    assert tool.native_jni_exports(library)==names
     assert tool.check_jni(library,root=tmp_path)==sorted(names)
+    # A playback export cannot stand in for configure; a status-prefixed name
+    # cannot stand in for the new renderProbeStatus native method.
+    for replacement in [names - {prefix+'configure'}, names - {prefix+'renderProbeStatus'},
+                        names | {prefix+'renderProbeStatusExtra'}]:
+        library.write_bytes(synthetic_jni_elf(sorted(replacement)))
+        with pytest.raises(ValueError,match='exactly'):tool.check_jni(library,root=tmp_path)
+    library.write_bytes(synthetic_jni_elf(sorted(names)))
+    for changed in [java_jni_contract().replace('String renderProbeStatus()', 'boolean renderProbeStatus()'),
+                    java_jni_contract().replace('renderProbeStatus()', 'renderProbeStatus(int unexpected)'),
+                    java_jni_contract()+'public static native String renderProbeStatus();',
+                    java_jni_contract().replace('public static native String renderProbeStatus();', '')]:
+        java.write_text(changed)
+        with pytest.raises(ValueError,match='JNI'):tool.check_jni(library,root=tmp_path)
+
+
+@pytest.mark.parametrize("drift", ["missing-probe", "extra-prefix-method"])
+def test_feature_rejects_native_export_drift_even_when_receipt_lists_six_methods(frozen_fixture, tmp_path, monkeypatch, drift):
+    root, commit = frozen_fixture
+    sources = tool.frozen_sources(commit, root=root)
+    expected = tool.expected_jni_exports(root=root)
+    actual = set(expected)
+    if drift == "missing-probe":
+        actual.remove(tool.JNI_PREFIX + "renderProbeStatus")
+    else:
+        actual.add(tool.JNI_PREFIX + "renderProbeStatusExtra")
+    native = synthetic_jni_elf(sorted(actual))
+    sha = hashlib.sha256(native).hexdigest()
+    monkeypatch.setattr(tool, "license_hashes", lambda profile: {})
+    marker = tool.feature_marker("diagnostics", sha)
+    path = tmp_path / "diagnostics.apk"
+    members = {"classes.dex": b"own Java DEX checked elsewhere", "AndroidManifest.xml": b"own feature manifest",
+               tool.LIBRARY: native, tool.MARKER: json.dumps(marker).encode()}
+    with ZipFile(path, "w") as archive:
+        for name, raw in members.items(): archive.writestr(name, raw)
+    proof = {**marker, "source_commit": commit, "source_sha256": sources,
+             "addon_apk_sha256": tool.digest(path), "addon_bytes": path.stat().st_size,
+             "signature_and_alignment_verified": True, "base_unchanged": True,
+             "member_sha256": {name: hashlib.sha256(raw).hexdigest() for name, raw in members.items()},
+             "native_input": {"source_commit": commit, "sha256": sha, "bytes": len(native),
+                 "source_sha256": {name: sources[name] for name in tool.native_source_paths(root)},
+                 "profile_prefix_count": 1, "profile_hook_count": 1,
+                 "jni_exports": expected, "jni_method_count": 6}}
+    path.with_suffix(".provenance.json").write_text(json.dumps(proof))
+    # All source/member identities agree. The raw ELF still cannot omit or add
+    # a method merely because its public receipt claims the expected inventory.
+    with pytest.raises(ValueError, match="Feature native JNI exports"):
+        tool.verified_feature(path, commit, sources, root=root)
+
+
+def test_raw_native_export_reader_preserves_the_small_library_bound():
+    with pytest.raises(ValueError, match="bounded"):
+        tool.native_jni_exports_bytes(b'x' * (tool.MAX_ADDON + 1))
 
 
 @pytest.mark.parametrize("profile", ["diagnostics", "resources"])

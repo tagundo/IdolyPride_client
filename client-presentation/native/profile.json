@@ -35,6 +35,10 @@
       {
         "file": "android-orientation-profile-extension-13.json",
         "sha256": "e9ee02d055478cd499e18064476d9ccc5aef4dff7c9d8551d807b8e34303452d"
+      },
+      {
+        "file": "render-probe-original-call-pins.json",
+        "sha256": "4d24d2d7a2db878c7512f011e1261c66b39a791893482d35623a16eaf090fbf8"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -1437,6 +1441,36 @@
         "same_explicit_parameter_types": true,
         "ios_name_for_reference_only": "Solis.Common.ScreenOrientationManager+<>c__DisplayClass17_0.<AfterChangeOrientationAsync>b__0"
       }
+    },
+    "rendering_mode": {
+      "name": "UnityEngine.SystemInfo.get_renderingThreadingMode",
+      "module": "UnityEngine.CoreModule.dll",
+      "metadata_method_index": 165132,
+      "token_row": 3640,
+      "rva": "0x8f8826c",
+      "prefix16": "fe4fbfa9938700b060ca42f9a00000b5",
+      "return_type": "UnityEngine.Rendering.RenderingThreadingMode",
+      "parameters": [],
+      "method_flags": "0x896",
+      "is_static": true,
+      "mode": "CALL",
+      "native_ABI": "int32_t(const MethodInfo*)",
+      "source": "render-probe-original-call-pins.json"
+    },
+    "graphics_api": {
+      "name": "UnityEngine.SystemInfo.get_graphicsDeviceType",
+      "module": "UnityEngine.CoreModule.dll",
+      "metadata_method_index": 165128,
+      "token_row": 3636,
+      "rva": "0x8f8812c",
+      "prefix16": "fe4fbfa9938700b060ba42f9a00000b5",
+      "return_type": "UnityEngine.Rendering.GraphicsDeviceType",
+      "parameters": [],
+      "method_flags": "0x896",
+      "is_static": true,
+      "mode": "CALL",
+      "native_ABI": "int32_t(const MethodInfo*)",
+      "source": "render-probe-original-call-pins.json"
     }
   },
   "graphics_fields": [
@@ -1705,5 +1739,23 @@
     "new_hook_count": 10,
     "new_call_count": 3,
     "original_phone_mode_preserved_when_wait_true": true
+  },
+  "render_probe": {
+    "platform": "Android only",
+    "channel": "separate read-only JNI snapshot",
+    "sample_callback": "SolisQualityManager.Update post-original on established game thread, including absent graphics configuration",
+    "sample_minimum_interval_ms": 2000,
+    "mode_range": [
+      0,
+      5
+    ],
+    "raw_graphics_api_range": [
+      0,
+      255
+    ],
+    "observation_claim": "Original getter return only; no request/setting/fake FPS substitution",
+    "frame_timings": "null until exact original layout and shared-clock freshness are validated",
+    "new_CALL_count": 2,
+    "new_HOOK_count": 0
   }
 }

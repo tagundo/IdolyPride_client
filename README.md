@@ -49,6 +49,8 @@ v0.3.16은 Android 서버의 게임 APK 수정·설치 기능과 설치 권한·
 
 [Android 멀티스레드 렌더링 조사](docs/android-multithreading.md)에는 원본 엔진의 worker 구현, 실제 시작 옵션의 우선순위와 `renderingThreadingMode` 관측 경로를 기록했습니다. 이번 조사는 배포 APK의 설정을 변경하지 않습니다.
 
+[Android MT 확인판 안내](docs/android-mt-verification.md)는 기본 꺼짐의 시작 옵션과 실제 모드 관측을 비교하는 방법을 설명합니다. 확인판의 CPU·GPU 시간은 미측정이며, 실기기 활성화·성능 향상을 확인한 결과는 아직 없습니다.
+
 v0.3.2의 [파일 해시](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/SHA256SUMS), [Android 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android-QA.zip), [Mac 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-QA.zip)도 같은 릴리스에서 받습니다.
 
 1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.

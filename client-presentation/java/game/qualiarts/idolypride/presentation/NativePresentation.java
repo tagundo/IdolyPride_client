@@ -10,4 +10,5 @@ public final class NativePresentation {
     public static native String status();
     public static native boolean configurePlayback(int schema, long revision, boolean waitForOrientation);
     public static native String playbackStatus();
+    public static native String renderProbeStatus();
 }
