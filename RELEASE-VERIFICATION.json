@@ -1,0 +1,14 @@
+{
+  "version": "0.3.9",
+  "version_code": 28,
+  "source_commit": "1cd8f8cd749c6b44e69ea7fa79a09a2d3409fc19",
+  "apk_sha256": "97c931316a98a1ccb9651ce94531e217641fb961a9ca9cd78aa88d8994112565",
+  "apk_bytes": 100544623,
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "host_runtime_http_sqlcipher_verified": true,
+  "actual_game_ui_verified": false,
+  "android_install_runtime_verified": false,
+  "regression_tests_passed": 260,
+  "subtests_passed": 41,
+  "presentation_native_sha256": "7a68c1be9a65b71cd3d56ce56c737fe3823438324746ec78feb436bc5ecbca6d"
+}
