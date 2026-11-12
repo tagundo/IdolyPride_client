@@ -3,6 +3,8 @@ import hashlib
 import importlib.util
 import json
 import tempfile
+import struct
+import zlib
 from pathlib import Path
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile, ZipInfo
@@ -76,6 +78,26 @@ def test_dual_signature_output_verification_includes_v2_sdk_range_only_for_verif
     command=tool.output_verify_command(['java','-jar','apksigner.jar'],Path('output.apk'))
     assert command==['java','-jar','apksigner.jar','verify','--verbose','--print-certs','--min-sdk-version','24',Path('output.apk')]
     assert 'sign' not in command and 'AndroidManifest.xml' not in command
+
+
+def test_feature_reader_accepts_exact_min_api28_dex039_and_rejects_foreign_classes():
+    def dex(names, version=b'039'):
+        count=len(names); strings=112; types=strings+count*4; classes=types+count*4
+        raw=bytearray(classes+count*32);raw[:8]=b'dex\n'+version+b'\0'
+        struct.pack_into('<II',raw,36,112,0x12345678)
+        for at,offset in ((56,strings),(64,types),(96,classes)):struct.pack_into('<II',raw,at,count,offset)
+        for index,name in enumerate(names):
+            encoded=name.encode();struct.pack_into('<I',raw,strings+index*4,len(raw))
+            struct.pack_into('<I',raw,types+index*4,index);struct.pack_into('<I',raw,classes+index*32,index)
+            raw.extend(bytes([len(encoded)])+encoded+b'\0')
+        struct.pack_into('<I',raw,32,len(raw));raw[12:32]=hashlib.sha1(raw[32:]).digest()
+        struct.pack_into('<I',raw,8,zlib.adler32(raw[12:])&0xffffffff)
+        return bytes(raw)
+    names=['Lgame/qualiarts/idolypride/presentation/'+n+';' for n in ('NativePresentation','PresentationClient','PresentationProvider')]
+    assert tool.feature_classes(dex(names))==set(names)
+    with pytest.raises(ValueError,match='DEX format'):tool.feature_classes(dex(names,b'038'))
+    with pytest.raises(ValueError,match='own bridge'):tool.feature_classes(dex(names+['Lanother/sdk/Class;']))
+    with pytest.raises(ValueError,match='own bridge'):tool.feature_classes(dex(names[:-1]))
 
 
 def test_all_tmpfs_placement_keeps_root_reserve_and_at_most_two_full_apks(tmp_path, monkeypatch):

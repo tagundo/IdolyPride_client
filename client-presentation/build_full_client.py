@@ -52,6 +52,16 @@ def output_verify_command(signer, apk):
     return [*signer,"verify","--verbose","--print-certs","--min-sdk-version","24",apk]
 
 
+def feature_classes(raw):
+    # Cached D8 with --min-api28 emits039; the preserved server DEX uses038.
+    own = limits.dex_classes(raw, versions=(b"dex\n039\0",))
+    prefix = "Lgame/qualiarts/idolypride/presentation/"
+    required = {prefix + name + ";" for name in ("NativePresentation", "PresentationClient", "PresentationProvider")}
+    if not required <= own or any(not name.startswith(prefix) for name in own):
+        raise ValueError("Feature DEX contains classes outside the own bridge inventory")
+    return own
+
+
 def xml_shape(element):
     return (element.tag, tuple(sorted(element.attrib.items())),
             (element.text or "").strip(), tuple(xml_shape(child) for child in element))
@@ -249,8 +259,7 @@ def build(args):
     with ZipFile(feature) as small:
         dex = small.read("classes.dex"); native = small.read(addon.LIBRARY)
         if hashlib.sha256(native).hexdigest() != feature_proof["native_input"]["sha256"]: raise ValueError("Source-bound presentation native differs")
-        if any(not name.startswith("Lgame/qualiarts/idolypride/presentation/") for name in limits.dex_classes(dex)):
-            raise ValueError("Feature DEX contains classes outside the own bridge namespace")
+        feature_classes(dex)
         if replacement is not None: native = replacement
         additions = {addon.LIBRARY: native, MARKER: (json.dumps(marker(native_input["sha256"]),sort_keys=True,indent=2)+"\n").encode(), **addon.license_members("diagnostics")}
     with ZipFile(source) as base:
