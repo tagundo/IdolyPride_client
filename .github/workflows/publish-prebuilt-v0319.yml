@@ -1,0 +1,45 @@
+name: Publish independently reviewed prebuilt v0.3.19 release assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the fixed draft after all five binaries and both verification files pass full download checks
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-prebuilt-local-server-v0.3.19
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'tagundo/IdolyPride_client'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IDOLY_PUBLISH: ${{ inputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          lfs: false
+      - name: Verify reviewed pins and promote existing LFS bytes without rebuilding
+        shell: bash
+        run: |
+          args=()
+          if [[ "$IDOLY_PUBLISH" == "true" ]]; then args+=(--publish); fi
+          python3 tools/publish_prebuilt_release.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prebuilt-v0.3.19-publication-verification
+          path: ${{ runner.temp }}/idoly-prebuilt-publication-report.json
+          if-no-files-found: warn
