@@ -1,0 +1,15 @@
+{
+  "version": "graphics-client-v0.1.1",
+  "source_commit": "d628f8bffd1e2ee463ab4cde5429f988b45d89e2",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159418386,
+      "sha256": "a7b23cce52a985e1025d03e010e4e91426402e34f90453fe2323d57d294ddc2a",
+      "native_sha256": "efc14402105da403c92eef1f096ef9a9752b99c95f11ef86423270103c5ba1df",
+      "platform": "Android arm64",
+      "device_install_verified": false,
+      "game_render_verified": false
+    }
+  ]
+}
