@@ -752,6 +752,118 @@
       "is_static": false,
       "c_signature": "void (*)(void* self, Vec3* value, const void* method)",
       "source": "photography-layout-injected-api-proof.json"
+    },
+    "projection_mode_get": {
+      "name": "UnityEngine.Camera.get_projectionMatrixMode",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 494,
+      "return_type": "UnityEngine.Camera.ProjectionMatrixMode",
+      "parameters": [],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3c7b4",
+      "prefix16": "fe0f1ef8f44f01a9d48900d081c646f9"
+    },
+    "physical_get": {
+      "name": "UnityEngine.Camera.get_usePhysicalProperties",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 495,
+      "return_type": "System.Boolean",
+      "parameters": [],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3c7f0",
+      "prefix16": "fe0f1ef8f44f01a9d48900d081ca46f9"
+    },
+    "focal_get": {
+      "name": "UnityEngine.Camera.get_focalLength",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 505,
+      "return_type": "System.Single",
+      "parameters": [],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3ca88",
+      "prefix16": "fe0f1ef8f44f01a9d48900d081f246f9"
+    },
+    "focal_set": {
+      "name": "UnityEngine.Camera.set_focalLength",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 506,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Single",
+          "typeindex": 72837
+        }
+      ],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3cac4",
+      "prefix16": "e80f1efcfe0700f9f44f01a9d48900d0"
+    },
+    "gate_get": {
+      "name": "UnityEngine.Camera.get_gateFit",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 519,
+      "return_type": "UnityEngine.Camera.GateFitMode",
+      "parameters": [],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3cff4",
+      "prefix16": "fe0f1ef8f44f01a9d48900d0811247f9"
+    },
+    "sensor_get": {
+      "name": "UnityEngine.Camera.get_sensorSize_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 651,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "ret",
+          "type": "UnityEngine.Vector2&",
+          "typeindex": 44941
+        }
+      ],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3ce08",
+      "prefix16": "fe57bea9f44f01a9d58900f0a21e40f9"
+    },
+    "lens_get": {
+      "name": "UnityEngine.Camera.get_lensShift_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 653,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "ret",
+          "type": "UnityEngine.Vector2&",
+          "typeindex": 44941
+        }
+      ],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3cf24",
+      "prefix16": "fe57bea9f44f01a9d58900f0a22640f9"
+    },
+    "projection_get": {
+      "name": "UnityEngine.Camera.get_projectionMatrix_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 666,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "ret",
+          "type": "UnityEngine.Matrix4x4&",
+          "typeindex": 44678
+        }
+      ],
+      "is_static": false,
+      "source": "Original6.1.1 Camera metadata plus bounded ELF relocation/prefix audit 2026-11-12",
+      "rva": "0x8f3da64",
+      "prefix16": "fe57bea9f44f01a9d58900d0a25a40f9"
     }
   },
   "graphics_fields": [
@@ -974,7 +1086,8 @@
     "Injected instance void methods pass self as x0, address of Vector2/Vector3 as x1 and optional IL2CPP MethodInfo as x2.",
     "Vector2 is two float32 values (8 bytes); Vector3 is three float32 values (12 bytes).",
     "get_sizeDelta_Injected writes its output (parameter attributes Out=2); setters receive byref input.",
-    "get_isActiveAndEnabled is an instance bool getter: self as x0, MethodInfo as x1."
+    "get_isActiveAndEnabled is an instance bool getter: self as x0, MethodInfo as x1.",
+    "The original Cinemachine physical branch calls Camera.set_focalLength after Update and bypasses set_fieldOfView; compare actual perspective matrix edge rays instead of raw fieldOfView alone."
   ],
   "scope_guards": [
     "Only expanded photo scene active, VLSRPTargetImage type Target=0, current texture matches main target",

@@ -58,16 +58,26 @@ rebuilds its target and its existing resize/LateUpdate path updates the image.
 Camera position, rectangle and automatic/manual aspect policy are unchanged.
 Only cameras whose aspect automatically follows the actual render target and
 whose rectangle is already full are supported. Wider viewports retain the original vertical
-FOV; narrower viewports increase vertical FOV to preserve the original
-horizontal FOV. The FOV getter exposes the original game lens value to prevent
-feedback, while the native camera uses the expanded projection. Exit/off
-restores the saved FOV/controller ratio. Incoming game FOV changes are retained
-as the new baseline. The bridge never changes Camera.aspect or Camera.rect.
+FOV; narrower viewports increase vertical coverage to preserve the original
+horizontal coverage. The bridge measures the original projection matrix's
+four edge rays and the new target's fitted projection, including physical
+camera film-gate behavior. It computes the minimum lens expansion that keeps
+all four original edges, then verifies those edges in the actual matrix.
+Checking only raw `Camera.fieldOfView` is insufficient for a physical lens.
+Cinemachine's original physical-camera path writes `Camera.focalLength`
+instead of fieldOfView in LateUpdate; both original lens setters are observed
+and expansion is reapplied immediately after either write. Both getters expose
+the original game lens values to prevent feedback. Exit/off restores the exact
+saved physical focal length or nonphysical FOV and controller ratio. Incoming
+original lens changes update the baseline. Gate, sensor, lens-shift or camera
+projection-model changes cause a fresh measurement at the original ratio.
+The bridge never changes Camera.aspect, Camera.rect or Camera.projectionMatrix.
 
 The bridge acknowledges expanded view only after checking actual texture
 dimensions, the complete displayed parent rectangle including position,
-identity local rotation/unit scale, full UVs, and current controller-camera
-identity. Unknown layouts remain `waiting_for_scene`; a fixed 16:9 parent on
+identity local rotation/unit scale, full UVs, current controller-camera
+identity, actual projection-edge containment and projection/target aspect.
+Unknown layouts remain `waiting_for_scene`; a fixed 16:9 parent on
 a differently shaped window is reported `unsupported`, with expansion
 capability false, until its true viewport can be established. It does not infer a
 larger viewport from screen orientation, alter HUD layout, move a camera,

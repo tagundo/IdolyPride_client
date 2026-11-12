@@ -8,7 +8,77 @@ using namespace idoly::presentation;
 
 static double tangent(float degrees) { return std::tan(degrees * 3.14159265358979323846 / 360.0); }
 
+static ProjectionMatrix lens_projection(float raw_fov, float aspect, bool horizontal_gate, float shift = 0) {
+    const float vertical = static_cast<float>(tangent(raw_fov)) * (horizontal_gate ? 1.5f / aspect : 1.f);
+    ProjectionMatrix matrix{};
+    matrix.values[0] = 1.f / (vertical * aspect);
+    matrix.values[5] = 1.f / vertical;
+    matrix.values[8] = shift;
+    matrix.values[9] = -shift / 2;
+    matrix.values[10] = -1.01f;
+    matrix.values[11] = -1;
+    matrix.values[14] = -.2f;
+    return matrix;
+}
+
 int main() {
+    // A physical lens can be driven by focalLength in Cinemachine LateUpdate,
+    // after the ordinary fieldOfView override. The raw FOV readback alone is
+    // insufficient: an unchanged Vertical-gate 4:3 projection clips both of
+    // the original 16:9 horizontal edge rays.
+    for (bool horizontal_gate : {false, true}) {
+        for (float shift : {0.f, .2f}) {
+            Frustum baseline{};
+            assert(perspective_frustum(lens_projection(50, 16.f / 9, horizontal_gate, shift), &baseline));
+            for (float aspect : {16.f / 9, 4.f / 3, 21.f / 9}) {
+                Frustum before{}, after{};
+                assert(perspective_frustum(lens_projection(50, aspect, horizontal_gate, shift), &before));
+                if (!horizontal_gate && aspect < 16.f / 9) assert(!frustum_contains(before, baseline));
+                float desired = 0;
+                assert(expanded_raw_fov(baseline, before, 50, &desired));
+                assert(perspective_frustum(lens_projection(desired, aspect, horizontal_gate, shift), &after));
+                assert(frustum_contains(after, baseline));
+                assert(std::fabs(frustum_aspect(after) - aspect) < .00001f);
+                if (aspect < 16.f / 9) {
+                    // Preserve the old left and right edges; only top and
+                    // bottom grow. A Horizontal gate already does that, so
+                    // applying the plain vertical-gate formula twice would
+                    // unnecessarily zoom out.
+                    assert(std::fabs(after.left - baseline.left) < .00001f);
+                    assert(std::fabs(after.right - baseline.right) < .00001f);
+                    assert(after.bottom > baseline.bottom && after.top > baseline.top);
+                    assert(horizontal_gate ? std::fabs(desired - 50) < .00001f : desired > 50);
+                }
+                if (aspect > 16.f / 9) {
+                    assert(std::fabs(after.bottom - baseline.bottom) < .00001f);
+                    assert(std::fabs(after.top - baseline.top) < .00001f);
+                    assert(after.left > baseline.left && after.right > baseline.right);
+                }
+                // A subsequent original focalLength change describes a new
+                // baseline lens, not the expanded value from the prior frame.
+                Frustum updated{}, expected{};
+                assert(rescale_frustum(baseline, 50, 65, &updated));
+                assert(perspective_frustum(lens_projection(65, 16.f / 9, horizontal_gate, shift), &expected));
+                assert(std::fabs(updated.left - expected.left) < .00001f);
+                assert(std::fabs(updated.bottom - expected.bottom) < .00001f);
+            }
+        }
+    }
+    ProjectionMatrix invalid_projection = lens_projection(50, 16.f / 9, false);
+    Frustum invalid_frustum{};
+    invalid_projection.values[11] = 0; // Orthographic/custom projection must not be guessed.
+    assert(!perspective_frustum(invalid_projection, &invalid_frustum));
+    invalid_projection = lens_projection(50, 16.f / 9, false);
+    invalid_projection.values[1] = .1f; // A sheared projection is unsupported.
+    assert(!perspective_frustum(invalid_projection, &invalid_frustum));
+    invalid_projection.values[1] = 0;
+    invalid_projection.values[12] = .1f; // Depth-dependent clip translation is unsupported.
+    assert(!perspective_frustum(invalid_projection, &invalid_frustum));
+    invalid_projection.values[12] = 0;
+    invalid_projection.values[5] = std::numeric_limits<float>::quiet_NaN();
+    assert(!perspective_frustum(invalid_projection, &invalid_frustum));
+    float invalid_fov = 0;
+    assert(!expanded_raw_fov({}, {}, 50, &invalid_fov));
     CameraState original{16.f / 9.f, 50.f, {.1f, .2f, .8f, .7f}};
     for (Dimensions viewport : {Dimensions{1920, 1080}, {2520, 1080}, {1440, 1080}}) {
         CameraState result = expanded_camera(original, viewport, true);

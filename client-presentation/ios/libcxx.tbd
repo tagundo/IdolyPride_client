@@ -1,0 +1,10 @@
+--- !tapi-tbd-v3
+archs: [ arm64 ]
+platform: ios
+install-name: /usr/lib/libc++.1.dylib
+current-version: 1
+compatibility-version: 1
+exports:
+  - archs: [ arm64 ]
+    symbols: [ ___gxx_personality_v0, ___cxa_begin_catch, __ZSt9terminatev ]
+...

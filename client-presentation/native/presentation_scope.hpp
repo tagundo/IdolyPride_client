@@ -1,7 +1,9 @@
 #pragma once
 
+#ifndef IDOLY_DARWIN_BRIDGE
 #include <cstddef>
 #include <cstring>
+#endif
 
 namespace idoly::presentation {
 

@@ -131,3 +131,12 @@ mixed staging route: unsigned on the output filesystem, aligned in RAM, then
 signed on the output filesystem. At most one full APK occupies each location;
 the normal memory and disk-reserve guards still apply. Only small original
 manifest/resource members are decoded, and no whole game/native/DEX is rebuilt.
+
+The optional `--native-library` accepts the separately audited 4:3 aspect-fix
+library while reusing the same feature DEX unchanged. Its exact SHA-256 and
+length are pinned, and the adjacent `build-receipt.json` must bind all five
+native compile/profile inputs to the frozen `--source-commit`, with 63 checked
+original function prefixes. The standalone marker and output provenance record
+that replacement's actual hash and source evidence. Omitting this option
+retains the original audited feature's native library. Distribute this complete
+client APK separately from the server APK.

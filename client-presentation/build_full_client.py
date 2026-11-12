@@ -32,6 +32,10 @@ BASE_SHA256 = "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df"
 BASE_BYTES = 159549324
 FEATURE_SHA256 = "e7213b358f331b75ace056ab73da58f33b2215452585dd59ef6a17159d7f1f5a"
 NATIVE_SHA256 = "7a68c1be9a65b71cd3d56ce56c737fe3823438324746ec78feb436bc5ecbca6d"
+ASPECT_NATIVE_SHA256 = "efc14402105da403c92eef1f096ef9a9752b99c95f11ef86423270103c5ba1df"
+ASPECT_NATIVE_BYTES = 246576
+NATIVE_SOURCE_PATHS = tuple("client-presentation/native/" + name for name in
+    ("bridge.cpp", "presentation_math.hpp", "presentation_scope.hpp", "profile.hpp", "profile.json"))
 EDITOR_SHA256 = "4a98ae6a755264357603f1906b92e62e757d59229014e33395f4e03ff019fda8"
 PACKAGE = addon.PROFILES["diagnostics"]["package"]
 CERTIFICATE = addon.PROFILES["diagnostics"]["certificate"]
@@ -42,9 +46,9 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 MAX_APK = 192 * 1024 * 1024
 
 
-def marker():
+def marker(native_sha256=NATIVE_SHA256):
     return {"schema": 1, "bridge_version": 1, "target_package": PACKAGE,
-            "base_version_code": 414, "native_library_sha256": NATIVE_SHA256}
+            "base_version_code": 414, "native_library_sha256": native_sha256}
 
 
 def output_verify_command(signer, apk):
@@ -181,6 +185,34 @@ class PublicCache:
         finally: os.close(fd)
 
 
+def native_override(path, cache, source_hashes):
+    """Bind the separate pinned native artifact to its frozen compile inputs."""
+    path = Path(path)
+    cache.register(path, ASPECT_NATIVE_SHA256)
+    if path.stat().st_size != ASPECT_NATIVE_BYTES:
+        raise ValueError("Pinned replacement native size differs")
+    receipt_path = path.with_name("build-receipt.json")
+    receipt_info = receipt_path.lstat()
+    if not stat.S_ISREG(receipt_info.st_mode) or not 0 < receipt_info.st_size <= 256 * 1024:
+        raise ValueError("A bounded regular native build receipt is required")
+    receipt_sha256 = cache.register(receipt_path, None)
+    receipt = json.loads(receipt_path.read_bytes())
+    expected = {name: source_hashes[name] for name in NATIVE_SOURCE_PATHS}
+    if (receipt.get("sha256") != ASPECT_NATIVE_SHA256 or receipt.get("bytes") != ASPECT_NATIVE_BYTES
+            or receipt.get("profile_prefix_count") != 63
+            or receipt.get("source_unchanged_during_build") is not True
+            or any(receipt.get("source_sha256", {}).get(name) != digest for name, digest in expected.items())):
+        raise ValueError("Replacement native receipt differs from the frozen compile inputs")
+    native = path.read_bytes()
+    if hashlib.sha256(native).hexdigest() != ASPECT_NATIVE_SHA256:
+        raise ValueError("Replacement native changed after verification")
+    cache.advise(path); cache.advise(receipt_path)
+    return native, {"kind": "pinned_native_artifact", "sha256": ASPECT_NATIVE_SHA256,
+        "bytes": ASPECT_NATIVE_BYTES, "profile_prefix_count": 63,
+        "build_receipt_sha256": receipt_sha256, "source_sha256": expected,
+        "runtime_device_tested": False}
+
+
 def build(args):
     os.umask(0o077); root = ROOT; source, feature, output = map(Path, (args.source, args.feature_apk, args.output))
     proof = output.with_suffix(".provenance.json")
@@ -191,6 +223,9 @@ def build(args):
     source_paths=[Path(__file__),HERE/"build_addon.py",ROOT/"tools/build_android_server_manual.py",
                   ROOT/"tools/repack_android_server_python.py",
                   ROOT/"tools/package_android_resource_client.py",*sorted((HERE/"java").rglob("*.java"))]
+    replacement_native = getattr(args, "native_library", None)
+    if replacement_native is not None:
+        source_paths.extend(ROOT / name for name in NATIVE_SOURCE_PATHS)
     source_hashes={}
     for path in source_paths:
         relative=path.relative_to(ROOT).as_posix();raw=path.read_bytes()
@@ -198,6 +233,11 @@ def build(args):
             raise ValueError("A public build source differs from the frozen commit")
         source_hashes[relative]=hashlib.sha256(raw).hexdigest()
     cache = PublicCache(); cache.register(source, BASE_SHA256); cache.register(feature, FEATURE_SHA256)
+    native_input = {"kind": "audited_feature_apk", "sha256": NATIVE_SHA256,
+        "profile_prefix_count": 55, "runtime_device_tested": False}
+    replacement = None
+    if replacement_native is not None:
+        replacement, native_input = native_override(replacement_native, cache, source_hashes)
     if source.stat().st_size != BASE_BYTES: raise ValueError("Diagnostic base size differs")
     sdk, jdk, editor = Path(args.build_tools), Path(args.jdk_bin), Path(args.apkeditor)
     cache.register(editor, EDITOR_SHA256)
@@ -221,7 +261,8 @@ def build(args):
     with ZipFile(feature) as small:
         dex = small.read("classes.dex"); native = small.read(addon.LIBRARY)
         if hashlib.sha256(native).hexdigest() != NATIVE_SHA256: raise ValueError("Audited presentation native differs")
-        additions = {addon.LIBRARY: native, MARKER: (json.dumps(marker(),sort_keys=True,indent=2)+"\n").encode(), **addon.license_members("diagnostics")}
+        if replacement is not None: native = replacement
+        additions = {addon.LIBRARY: native, MARKER: (json.dumps(marker(native_input["sha256"]),sort_keys=True,indent=2)+"\n").encode(), **addon.license_members("diagnostics")}
     with ZipFile(source) as base:
         infos = members(base); before = hashes(base, infos); addon.check_base_members(base, "diagnostics")
     added_dex = next_dex(infos); additions[added_dex] = dex
@@ -271,7 +312,8 @@ def build(args):
             "output_apk_sha256":addon.digest(signed),"output_bytes":signed.stat().st_size,"certificate_sha256":CERTIFICATE,
             "signature_v2_v3_verified":True,"manifest_original_values_preserved":True,"provider":PROVIDER,"added_dex":added_dex,
             "all_original_members_preserved_except_manifest_and_signatures":True,"original_member_sha256":before,
-            "added_member_sha256":{n:after[n] for n in additions},"native_library_sha256":NATIVE_SHA256,
+            "added_member_sha256":{n:after[n] for n in additions},"native_library_sha256":native_input["sha256"],
+            "native_input":native_input,
             "reused_audited_feature_sha256":FEATURE_SHA256,"source_sha256":source_hashes,
             "tool_sha256":{str(p):addon.digest(p) for p in (jdk/"java",sdk/"aapt2",sdk/"zipalign",sdk/"lib/apksigner.jar",editor)},
             "stages":stages,"preflight":preflight,"postflight":postflight,"public_cache_advice":cache.events,
@@ -287,6 +329,8 @@ def main():
     for name in ("source","feature-apk","output","ram-directory","apkeditor","jdk-bin","build-tools","keystore","password-file"):
         parser.add_argument("--"+name,required=True,type=Path)
     parser.add_argument("--source-commit",required=True)
+    parser.add_argument("--native-library",type=Path,
+        help="Use the pinned aspect-fix native library and adjacent build-receipt.json; otherwise retain the audited feature native")
     args=parser.parse_args();result=build(args)
     print(json.dumps({k:result[k] for k in ("output_apk_sha256","output_bytes","certificate_sha256")}))
 

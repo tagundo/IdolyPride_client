@@ -1,0 +1,223 @@
+{
+  "schema": 1,
+  "target": "ios-arm64-6.1.1-156",
+  "source_unity_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+  "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
+  "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+  "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
+  "profile_sha256": "afc8e1e6fe685e1653743e19d57a425d27ac2c2446fdae8a97811a39fc16debe",
+  "hook_names": [
+    "q_set",
+    "q_apply",
+    "q_init",
+    "q_update",
+    "app_fps_set",
+    "rt_update",
+    "limited_resolution",
+    "scene_main_update",
+    "scene_main_reset",
+    "scene_pano_update",
+    "scene_pano_reset",
+    "target_update",
+    "target_late",
+    "fov_get",
+    "fov_set",
+    "aa_init",
+    "shadow_update",
+    "focal_get",
+    "focal_set"
+  ],
+  "entries": {
+    "q_set": {
+      "rva": 117101948,
+      "original16": "082440b91f01016b41000054c0035fd6",
+      "gateway": 158892112,
+      "slot": 179886264,
+      "original_callable": 158892132,
+      "patched_entry": "b56a9f14",
+      "gateway_hex": "30a000b010e2229110fedfc8500000b400021fd6082440b946956017",
+      "registration_pointer_slot": 175310416
+    },
+    "q_apply": {
+      "rva": 117102112,
+      "original16": "ff0301d1f65701a9f44f02a9fd7b03a9",
+      "gateway": 158892144,
+      "slot": 179886272,
+      "original_callable": 158892164,
+      "patched_entry": "946a9f14",
+      "gateway_hex": "30a000b01002239110fedfc8500000b400021fd6ff0301d167956017",
+      "registration_pointer_slot": 175310400
+    },
+    "q_init": {
+      "rva": 117101576,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158892176,
+      "slot": 179886280,
+      "original_callable": 158892196,
+      "patched_entry": "226b9f14",
+      "gateway_hex": "30a000b01022239110fedfc8500000b400021fd6f657bda9d9946017",
+      "registration_pointer_slot": 175310392
+    },
+    "q_update": {
+      "rva": 117103404,
+      "original16": "eb2bbb6de923016df65702a9f44f03a9",
+      "gateway": 158892208,
+      "slot": 179886288,
+      "original_callable": 158892228,
+      "patched_entry": "61699f14",
+      "gateway_hex": "30a000b01042239110fedfc8500000b400021fd6eb2bbb6d9a966017",
+      "registration_pointer_slot": 175310472
+    },
+    "app_fps_set": {
+      "rva": 125753452,
+      "original16": "f44fbea9fd7b01a9fd430091738901b0",
+      "gateway": 158892240,
+      "slot": 179886296,
+      "original_callable": 158892260,
+      "patched_entry": "196a7e14",
+      "gateway_hex": "30a000b01062239110fedfc8500000b400021fd6f44fbea9e2958117",
+      "registration_pointer_slot": 175650232
+    },
+    "rt_update": {
+      "rva": 129805188,
+      "original16": "ff8303d1fc6f08a9fa6709a9f85f0aa9",
+      "gateway": 158892272,
+      "slot": 179886304,
+      "original_callable": 158892292,
+      "patched_entry": "5bf56e14",
+      "gateway_hex": "30a000b01082239110fedfc8500000b400021fd6ff8303d1a00a9117",
+      "registration_pointer_slot": 175853608
+    },
+    "limited_resolution": {
+      "rva": 129781128,
+      "original16": "ffc301d1eb2b016de923026df85f03a9",
+      "gateway": 158892304,
+      "slot": 179886312,
+      "original_callable": 158892324,
+      "patched_entry": "e20c6f14",
+      "gateway_hex": "30a000b010a2239110fedfc8500000b400021fd6ffc301d119f39017",
+      "registration_pointer_slot": 175852480
+    },
+    "scene_main_update": {
+      "rva": 46221500,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158892336,
+      "slot": 179886320,
+      "original_callable": 158892356,
+      "patched_entry": "1dcead15",
+      "gateway_hex": "30a000b010c2239110fedfc8500000b400021fd6f657bda9de315216",
+      "registration_pointer_slot": 169975728
+    },
+    "scene_main_reset": {
+      "rva": 46221844,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158892368,
+      "slot": 179886328,
+      "original_callable": 158892388,
+      "patched_entry": "cfcdad15",
+      "gateway_hex": "30a000b010e2239110fedfc8500000b400021fd6f657bda92c325216",
+      "registration_pointer_slot": 169975752
+    },
+    "scene_pano_update": {
+      "rva": 44857244,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158892400,
+      "slot": 179886336,
+      "original_callable": 158892420,
+      "patched_entry": "7502b315",
+      "gateway_hex": "30a000b01002249110fedfc8500000b400021fd6f657bda986fd4c16",
+      "registration_pointer_slot": 169972008
+    },
+    "scene_pano_reset": {
+      "rva": 44857588,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158892432,
+      "slot": 179886344,
+      "original_callable": 158892452,
+      "patched_entry": "2702b315",
+      "gateway_hex": "30a000b01022249110fedfc8500000b400021fd6f657bda9d4fd4c16",
+      "registration_pointer_slot": 169972032
+    },
+    "target_update": {
+      "rva": 129814724,
+      "original16": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "gateway": 158892464,
+      "slot": 179886352,
+      "original_callable": 158892484,
+      "patched_entry": "3bec6e14",
+      "gateway_hex": "30a000b01042249110fedfc8500000b400021fd6f85fbca9c0139117",
+      "registration_pointer_slot": 175854016
+    },
+    "target_late": {
+      "rva": 129816792,
+      "original16": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "gateway": 158892496,
+      "slot": 179886360,
+      "original_callable": 158892516,
+      "patched_entry": "3eea6e14",
+      "gateway_hex": "30a000b01062249110fedfc8500000b400021fd6f85fbca9bd159117",
+      "registration_pointer_slot": 175854000
+    },
+    "fov_get": {
+      "rva": 125767356,
+      "original16": "f44fbea9fd7b01a9fd430091538901d0",
+      "gateway": 158892528,
+      "slot": 179886368,
+      "original_callable": 158892548,
+      "patched_entry": "cd5c7e14",
+      "gateway_hex": "30a000b01082249110fedfc8500000b400021fd6f44fbea92ea38117",
+      "registration_pointer_slot": 175650864
+    },
+    "fov_set": {
+      "rva": 125767436,
+      "original16": "e923bd6df44f01a9fd7b02a9fd830091",
+      "gateway": 158892560,
+      "slot": 179886376,
+      "original_callable": 158892580,
+      "patched_entry": "c15c7e14",
+      "gateway_hex": "30a000b010a2249110fedfc8500000b400021fd6e923bd6d3aa38117",
+      "registration_pointer_slot": 175650872
+    },
+    "aa_init": {
+      "rva": 124439004,
+      "original16": "ffc303d1e923096dfa670aa9f85f0ba9",
+      "gateway": 158892592,
+      "slot": 179886384,
+      "original_callable": 158892612,
+      "patched_entry": "156e8314",
+      "gateway_hex": "30a000b010c2249110fedfc8500000b400021fd6ffc303d1e6917c17",
+      "registration_pointer_slot": 175594776
+    },
+    "shadow_update": {
+      "rva": 129625344,
+      "original16": "ef3bb66ded33016deb2b026de923036d",
+      "gateway": 158892624,
+      "slot": 179886392,
+      "original_callable": 158892644,
+      "patched_entry": "54a56f14",
+      "gateway_hex": "30a000b010e2249110fedfc8500000b400021fd6ef3bb66da75a9017",
+      "registration_pointer_slot": 175845768
+    },
+    "focal_get": {
+      "rva": 125774776,
+      "original16": "f44fbea9fd7b01a9fd43009153890190",
+      "gateway": 158892656,
+      "slot": 179886400,
+      "original_callable": 158892676,
+      "patched_entry": "ae557e14",
+      "gateway_hex": "30a000b01002259110fedfc8500000b400021fd6f44fbea94daa8117",
+      "registration_pointer_slot": 175651456
+    },
+    "focal_set": {
+      "rva": 125774856,
+      "original16": "e923bd6df44f01a9fd7b02a9fd830091",
+      "gateway": 158892688,
+      "slot": 179886408,
+      "original_callable": 158892708,
+      "patched_entry": "a2557e14",
+      "gateway_hex": "30a000b01022259110fedfc8500000b400021fd6e923bd6d59aa8117",
+      "registration_pointer_slot": 175651464
+    }
+  },
+  "profile_header_sha256": "cb7ed477777bd0c512d9717621e00ebc71615e572482b00e95de0fdbbd6cff2f"
+}

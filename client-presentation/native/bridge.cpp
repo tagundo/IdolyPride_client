@@ -1,6 +1,9 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#ifdef IDOLY_DARWIN_BRIDGE
+#include "../ios/darwin_compat.hpp"
+#else
 #include <jni.h>
 #include <dlfcn.h>
 #include <elf.h>
@@ -15,9 +18,15 @@
 #include <limits.h>
 
 #include "shadowhook.h"
+
+#endif
 #include "presentation_math.hpp"
 #include "presentation_scope.hpp"
+#ifdef IDOLY_DARWIN_BRIDGE
+#include "ios_profile.hpp"
+#else
 #include "profile.hpp"
+#endif
 
 namespace {
 using namespace idoly::presentation;
@@ -55,7 +64,11 @@ void set_state(const char *value) {
     pthread_mutex_lock(&status_mutex); state.state = value; pthread_mutex_unlock(&status_mutex);
 }
 bool game_call(bool establish = false) {
+#ifdef IDOLY_DARWIN_BRIDGE
+    const uintptr_t current = reinterpret_cast<uintptr_t>(pthread_self());
+#else
     const uintptr_t current = static_cast<uintptr_t>(pthread_self());
+#endif
     uintptr_t expected = 0;
     if (establish) game_thread_id.compare_exchange_strong(expected, current, std::memory_order_acq_rel);
     return game_thread_id.load(std::memory_order_acquire) == current;
@@ -116,6 +129,12 @@ VoidMethod rt_destroy;
 uint64_t (*limited_original)(int, int, Vec2, int, float, bool, Method *);
 float (*fov_get_original)(void *, Method *), (*aspect_get_original)(void *, Method *);
 void (*fov_set_original)(void *, float, Method *);
+float (*focal_get_original)(void *, Method *);
+void (*focal_set_original)(void *, float, Method *);
+void (*projection_get)(void *, ProjectionMatrix *, Method *);
+bool (*physical_get)(void *, Method *);
+int (*gate_get)(void *, Method *), (*projection_mode_get)(void *, Method *);
+void (*sensor_get)(void *, Vec2 *, Method *), (*lens_get)(void *, Vec2 *, Method *);
 void (*camera_rect_get)(void *, Rect *, Method *);
 void (*transform_rect_get)(void *, Rect *, Method *);
 void (*local_position)(void *, Vec3 *, Method *), (*local_scale)(void *, Vec3 *, Method *);
@@ -162,6 +181,11 @@ struct Photography {
     Dimensions viewport{}, built_viewport{};
     Rect viewport_rect{};
     CameraState original{};
+    Frustum original_frustum{};
+    float original_focal = 0;
+    bool physical = false;
+    int gate = 0, projection_mode = 0;
+    Vec2 sensor{}, lens{};
 } photo;
 struct ImageLayout {
     Weak rect;
@@ -210,32 +234,63 @@ void *graphics_camera() {
 }
 void update_camera_metrics(void *camera) {
     if (!camera) return;
-    const float aspect = aspect_get_original(camera, nullptr), fov = fov_get_original(camera, nullptr);
+    ProjectionMatrix matrix{}; Frustum frustum{};
+    projection_get(camera, &matrix, nullptr);
+    const float aspect = aspect_get_original(camera, nullptr);
+    const float fov = perspective_frustum(matrix, &frustum) ? frustum_vertical_fov(frustum) : 0;
     pthread_mutex_lock(&status_mutex);
     state.aspect = aspect;
     state.fov = fov;
-    state.base_fov = photo.base_known ? photo.original.vertical_fov : state.fov;
+    state.base_fov = photo.base_known ? frustum_vertical_fov(photo.original_frustum) : state.fov;
     pthread_mutex_unlock(&status_mutex);
+}
+bool projection_model_unchanged(void *camera) {
+    if (physical_get(camera, nullptr) != photo.physical || projection_mode_get(camera, nullptr) != photo.projection_mode)
+        return false;
+    if (!photo.physical) return true;
+    Vec2 sensor{}, lens{}; sensor_get(camera, &sensor, nullptr); lens_get(camera, &lens, nullptr);
+    return gate_get(camera, nullptr) == photo.gate && std::isfinite(sensor.x) && std::isfinite(sensor.y)
+        && std::isfinite(lens.x) && std::isfinite(lens.y)
+        && std::fabs(sensor.x - photo.sensor.x) < .0001f && std::fabs(sensor.y - photo.sensor.y) < .0001f
+        && std::fabs(lens.x - photo.lens.x) < .0001f && std::fabs(lens.y - photo.lens.y) < .0001f;
+}
+void restore_base_lens(void *camera) {
+    // Retain the exact focal length for physical lenses. Reconstructing it
+    // from an already expanded fieldOfView would feed the override back into
+    // Cinemachine's next frame.
+    if (photo.physical) focal_set_original(camera, photo.original_focal, nullptr);
+    else fov_set_original(camera, photo.original.vertical_fov, nullptr);
 }
 bool set_expanded_camera(void *camera) {
     void *controller = photo.controller.get(true);
     void *texture = controller ? target_to_texture(rt_target(controller, nullptr), nullptr) : nullptr;
     if (!runtime_type(texture, "RenderTexture")) return false;
     const Dimensions rendered{rt_width(texture, nullptr), rt_height(texture, nullptr)};
-    CameraState plan;
-    if (!photo.base_known || !expansion_plan(photo.original, rendered, &plan)) return false;
+    if (!photo.base_known || !dimensions_valid(rendered) || !projection_model_unchanged(camera)) return false;
+    const float expected_aspect = static_cast<float>(rendered.width) / rendered.height;
     // TargetTexture must drive the original automatic camera aspect. Setting
     // Camera.aspect ourselves would switch it to manual mode and could leak
     // the photo ratio into a later scene. Manual/custom viewports fail closed.
     Rect actual_rect{}; camera_rect_get(camera, &actual_rect, nullptr);
-    if (std::fabs(aspect_get_original(camera, nullptr) - plan.aspect) > .0001f || !full_rect(actual_rect)) return false;
+    if (std::fabs(aspect_get_original(camera, nullptr) - expected_aspect) > .0001f || !full_rect(actual_rect)) return false;
     ScopedValue<bool> internal(internal_camera, true);
     // Remember the first write even if the following readback fails, so the
     // caller's rollback can restore the saved lens instead of losing it.
     photo.expanded = true;
-    fov_set_original(camera, plan.vertical_fov, nullptr);
-    if (std::fabs(aspect_get_original(camera, nullptr) - plan.aspect) > .0001f
-            || std::fabs(fov_get_original(camera, nullptr) - plan.vertical_fov) > .001f) return false;
+    restore_base_lens(camera);
+    ProjectionMatrix matrix{}; Frustum fitted{};
+    projection_get(camera, &matrix, nullptr);
+    float desired = 0;
+    if (!perspective_frustum(matrix, &fitted)
+            || !expanded_raw_fov(photo.original_frustum, fitted, photo.original.vertical_fov, &desired)) return false;
+    fov_set_original(camera, desired, nullptr);
+    projection_get(camera, &matrix, nullptr);
+    // A raw lens getter can read back our value while a physical-camera
+    // focalLength or a custom projection still renders the old cropped view.
+    // Acknowledge only the actual four projection edges and matching aspect.
+    if (std::fabs(aspect_get_original(camera, nullptr) - expected_aspect) > .0001f
+            || !perspective_frustum(matrix, &fitted) || !frustum_contains(fitted, photo.original_frustum)
+            || std::fabs(frustum_aspect(fitted) - expected_aspect) > .005f) return false;
     update_camera_metrics(camera);
     return true;
 }
@@ -243,7 +298,7 @@ void restore_camera() {
     void *camera = photo.camera.get(true);
     if (photo.expanded && camera && photo.base_known) {
         ScopedValue<bool> internal(internal_camera, true);
-        fov_set_original(camera, photo.original.vertical_fov, nullptr);
+        restore_base_lens(camera);
         update_camera_metrics(camera);
     }
     photo.expanded = false;
@@ -460,6 +515,16 @@ void main_update_hook(void *self, Method *method) { photo_update(self, method, s
 void pano_update_hook(void *self, Method *method) { photo_update(self, method, scene_pano_update_original); }
 void main_reset_hook(void *self, Method *method) { photo_reset(self, method, scene_main_reset_original); }
 void pano_reset_hook(void *self, Method *method) { photo_reset(self, method, scene_pano_reset_original); }
+bool remember_original_lens(void *camera) {
+    const float raw_fov = fov_get_original(camera, nullptr), focal = focal_get_original(camera, nullptr);
+    Frustum updated{};
+    if (!rescale_frustum(photo.original_frustum, photo.original.vertical_fov, raw_fov, &updated)
+            || !std::isfinite(focal) || focal <= 0) return false;
+    photo.original.vertical_fov = raw_fov;
+    photo.original_focal = focal;
+    photo.original_frustum = updated;
+    return true;
+}
 float fov_get_hook(void *camera, Method *method) {
     if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
             && photo.camera.get(true) == camera && !internal_camera) return photo.original.vertical_fov;
@@ -468,11 +533,31 @@ float fov_get_hook(void *camera, Method *method) {
 void fov_set_hook(void *camera, float value, Method *method) {
     if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
             && photo.camera.get(true) == camera && !internal_camera && value > 0 && value < 179 && std::isfinite(value)) {
-        photo.original.vertical_fov = value;
-        if (!set_expanded_camera(camera)) restore_photography(true);
+        // Observe the original setter's actual clamping/physical conversion
+        // before deriving a fresh baseline; never scale a previous override.
+        ScopedValue<bool> internal(internal_camera, true);
+        fov_set_original(camera, value, method);
+        if (!remember_original_lens(camera) || !set_expanded_camera(camera)) restore_photography(true);
         return;
     }
     fov_set_original(camera, value, method);
+}
+float focal_get_hook(void *camera, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
+            && photo.camera.get(true) == camera && !internal_camera) return photo.original_focal;
+    return focal_get_original(camera, method);
+}
+void focal_set_hook(void *camera, float value, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
+            && photo.camera.get(true) == camera && !internal_camera && value > 0 && std::isfinite(value)) {
+        // Cinemachine's physical branch writes focalLength in LateUpdate and
+        // never calls Camera.set_fieldOfView. Reapply after that exact write.
+        ScopedValue<bool> internal(internal_camera, true);
+        focal_set_original(camera, value, method);
+        if (!remember_original_lens(camera) || !set_expanded_camera(camera)) restore_photography(true);
+        return;
+    }
+    focal_set_original(camera, value, method);
 }
 bool apply_photography(Config config) {
     geometry_unsupported = false;
@@ -500,11 +585,29 @@ bool apply_photography(Config config) {
     }
     if (photo.rejected_revision == config.revision && photo.rejected_viewport.width == photo.viewport.width
             && photo.rejected_viewport.height == photo.viewport.height) { geometry_unsupported = true; return false; }
+    if (photo.base_known && !projection_model_unchanged(camera)) {
+        // The original game may change the physical gate/sensor between live
+        // timeline and free-camera views. Re-measure the new model with the
+        // original target on the following frame instead of retaining stale
+        // projection assumptions or overwriting the game's new lens model.
+        restore_photography(true);
+        return false;
+    }
     if (!photo.base_known) {
-        photo.original.aspect = photo.ratio.x / photo.ratio.y;
+        ProjectionMatrix matrix{};
+        projection_get(camera, &matrix, nullptr);
+        if (!perspective_frustum(matrix, &photo.original_frustum)) { geometry_unsupported = true; return false; }
+        photo.original.aspect = frustum_aspect(photo.original_frustum);
         photo.original.vertical_fov = fov_get_original(camera, nullptr);
+        photo.original_focal = focal_get_original(camera, nullptr);
+        photo.physical = physical_get(camera, nullptr);
+        photo.projection_mode = projection_mode_get(camera, nullptr);
+        photo.gate = gate_get(camera, nullptr);
+        sensor_get(camera, &photo.sensor, nullptr); lens_get(camera, &photo.lens, nullptr);
         camera_rect_get(camera, &photo.original.rect, nullptr);
-        if (!camera_valid(photo.original) || !full_rect(photo.original.rect)) return false;
+        if (!camera_valid(photo.original) || !full_rect(photo.original.rect)
+                || !std::isfinite(photo.original_focal) || photo.original_focal <= 0
+                || std::fabs(photo.original.aspect - photo.ratio.x / photo.ratio.y) > .005f) return false;
         photo.base_known = true;
     }
     const float available_aspect = static_cast<float>(photo.viewport.width) / photo.viewport.height;
@@ -712,6 +815,7 @@ bool shadow_hook(void *self, void *data, void **settings, int resolution, Method
     return result;
 }
 
+#ifndef IDOLY_DARWIN_BRIDGE
 struct Image { uintptr_t base = 0; const ElfW(Phdr) *headers = nullptr; size_t count = 0; char name[PATH_MAX]{}; bool unity = false; };
 int find_image(dl_phdr_info *info, size_t, void *opaque) {
     auto *image = static_cast<Image *>(opaque);
@@ -755,6 +859,7 @@ bool matches(const Image &image) {
     }
     return true;
 }
+#endif
 void pause_ms(long ms) { timespec t{ms / 1000, (ms % 1000) * 1000000}; nanosleep(&t, nullptr); }
 void load_calls() {
 #define CALL(variable, entry) variable = function<decltype(variable)>(pin::entry)
@@ -771,8 +876,48 @@ void load_calls() {
     CALL(size_delta_get, size_delta_get); CALL(size_delta_set, size_delta_set);
     CALL(local_position_set, local_position_set); CALL(active_enabled, active_enabled);
     CALL(orthographic, orthographic); CALL(uv_get, uv_get);
+    CALL(projection_get, projection_get); CALL(physical_get, physical_get); CALL(gate_get, gate_get);
+    CALL(sensor_get, sensor_get); CALL(lens_get, lens_get); CALL(projection_mode_get, projection_mode_get);
 #undef CALL
 }
+bool accept_configuration(int schema, const Config &value) {
+    if (!config_valid(schema, value)) return false;
+    pthread_mutex_lock(&config_mutex);
+    if (configured && value.revision < pending.revision) { pthread_mutex_unlock(&config_mutex); return false; }
+    if (configured && value.revision == pending.revision
+            && (value.custom_graphics != pending.custom_graphics || value.quality != pending.quality
+                || value.target_fps != pending.target_fps || value.render_scale != pending.render_scale
+                || value.max_buffer_pixel != pending.max_buffer_pixel || value.aa_mode != pending.aa_mode
+                || value.shadow_resolution != pending.shadow_resolution
+                || value.expand_photography != pending.expand_photography)) {
+        pthread_mutex_unlock(&config_mutex); return false;
+    }
+    pending = value; configured = true;
+    pthread_mutex_unlock(&config_mutex);
+    return true;
+}
+void status_json(char *json, size_t capacity) {
+    pthread_mutex_lock(&status_mutex); Status copy = state; pthread_mutex_unlock(&status_mutex);
+    if (!std::isfinite(copy.aspect)) copy.aspect = 0;
+    if (!std::isfinite(copy.base_fov)) copy.base_fov = 0;
+    if (!std::isfinite(copy.fov)) copy.fov = 0;
+    const long long aspect = std::llround(std::clamp(copy.aspect, 0.f, 32.f) * 1000000.0);
+    const long long base_fov = std::llround(std::clamp(copy.base_fov, 0.f, 179.f) * 1000000.0);
+    const long long fov = std::llround(std::clamp(copy.fov, 0.f, 179.f) * 1000000.0);
+    std::snprintf(json, capacity,
+        "{\"schema\":1,\"bridge_version\":1,\"revision\":%lld,\"status\":\"%s\","
+        "\"capabilities\":{\"fps\":%s,\"quality\":%s,\"resolution\":%s,\"anti_aliasing\":%s,\"shadow\":%s,\"expanded_photography\":%s},"
+        "\"metrics\":{\"screen_width\":%d,\"screen_height\":%d,\"render_width\":%d,\"render_height\":%d,"
+        "\"camera_aspect\":%lld.%06lld,\"base_vertical_fov\":%lld.%06lld,\"vertical_fov\":%lld.%06lld}}",
+        static_cast<long long>(copy.revision), copy.state,
+        copy.fps ? "true" : "false", copy.quality ? "true" : "false", copy.resolution ? "true" : "false",
+        copy.aa ? "true" : "false", copy.shadow ? "true" : "false", copy.expanded ? "true" : "false",
+        copy.screen_w, copy.screen_h, copy.render_w, copy.render_h,
+        aspect / 1000000, aspect % 1000000, base_fov / 1000000, base_fov % 1000000, fov / 1000000, fov % 1000000);
+
+}
+
+#ifndef IDOLY_DARWIN_BRIDGE
 struct Hook { const pin::Entry *entry; void *replacement; void **original; void *stub = nullptr; };
 void *install(void *) {
     Image image;
@@ -804,6 +949,7 @@ void *install(void *) {
         HOOK(scene_pano_update, pano_update_hook, scene_pano_update_original), HOOK(scene_pano_reset, pano_reset_hook, scene_pano_reset_original),
         HOOK(target_update, target_update_hook, target_update_original), HOOK(target_late, target_late_hook, target_late_original),
         HOOK(fov_get, fov_get_hook, fov_get_original), HOOK(fov_set, fov_set_hook, fov_set_original),
+        HOOK(focal_get, focal_get_hook, focal_get_original), HOOK(focal_set, focal_set_hook, focal_set_original),
         HOOK(aa_init, aa_hook, aa_original), HOOK(shadow_update, shadow_hook, shadow_original),
     };
 #undef HOOK
@@ -819,8 +965,12 @@ void *install(void *) {
     pthread_mutex_unlock(&status_mutex);
     ready.store(true, std::memory_order_release); return nullptr;
 }
+#else
+#include "../ios/static_install.hpp"
+#endif
 }
 
+#ifndef IDOLY_DARWIN_BRIDGE
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) { return JNI_VERSION_1_6; }
 extern "C" JNIEXPORT void JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_start(JNIEnv *, jclass) {
     if (started.exchange(true)) return;
@@ -832,39 +982,14 @@ extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentatio
         JNIEnv *, jclass, jint schema, jlong revision, jboolean custom, jint quality, jint fps, jfloat scale,
         jint max_pixel, jint aa, jint shadow, jboolean expand) {
     Config value{revision, custom != 0, quality, fps, scale, max_pixel, aa, shadow, expand != 0};
-    if (!config_valid(schema, value)) return JNI_FALSE;
-    pthread_mutex_lock(&config_mutex);
-    if (configured && revision < pending.revision) { pthread_mutex_unlock(&config_mutex); return JNI_FALSE; }
-    if (configured && revision == pending.revision
-            && (value.custom_graphics != pending.custom_graphics || value.quality != pending.quality
-                || value.target_fps != pending.target_fps || value.render_scale != pending.render_scale
-                || value.max_buffer_pixel != pending.max_buffer_pixel || value.aa_mode != pending.aa_mode
-                || value.shadow_resolution != pending.shadow_resolution
-                || value.expand_photography != pending.expand_photography)) {
-        pthread_mutex_unlock(&config_mutex); return JNI_FALSE;
-    }
-    pending = value; configured = true;
-    pthread_mutex_unlock(&config_mutex);
-    return JNI_TRUE;
+    return accept_configuration(schema, value) ? JNI_TRUE : JNI_FALSE;
 }
+
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_status(JNIEnv *env, jclass) {
-    pthread_mutex_lock(&status_mutex); Status copy = state; pthread_mutex_unlock(&status_mutex);
-    if (!std::isfinite(copy.aspect)) copy.aspect = 0;
-    if (!std::isfinite(copy.base_fov)) copy.base_fov = 0;
-    if (!std::isfinite(copy.fov)) copy.fov = 0;
-    const long long aspect = std::llround(std::clamp(copy.aspect, 0.f, 32.f) * 1000000.0);
-    const long long base_fov = std::llround(std::clamp(copy.base_fov, 0.f, 179.f) * 1000000.0);
-    const long long fov = std::llround(std::clamp(copy.fov, 0.f, 179.f) * 1000000.0);
-    char json[1024];
-    std::snprintf(json, sizeof json,
-        "{\"schema\":1,\"bridge_version\":1,\"revision\":%lld,\"status\":\"%s\","
-        "\"capabilities\":{\"fps\":%s,\"quality\":%s,\"resolution\":%s,\"anti_aliasing\":%s,\"shadow\":%s,\"expanded_photography\":%s},"
-        "\"metrics\":{\"screen_width\":%d,\"screen_height\":%d,\"render_width\":%d,\"render_height\":%d,"
-        "\"camera_aspect\":%lld.%06lld,\"base_vertical_fov\":%lld.%06lld,\"vertical_fov\":%lld.%06lld}}",
-        static_cast<long long>(copy.revision), copy.state,
-        copy.fps ? "true" : "false", copy.quality ? "true" : "false", copy.resolution ? "true" : "false",
-        copy.aa ? "true" : "false", copy.shadow ? "true" : "false", copy.expanded ? "true" : "false",
-        copy.screen_w, copy.screen_h, copy.render_w, copy.render_h,
-        aspect / 1000000, aspect % 1000000, base_fov / 1000000, base_fov % 1000000, fov / 1000000, fov % 1000000);
+    char json[1024]; status_json(json, sizeof json);
     return env->NewStringUTF(json);
 }
+
+#else
+#include "../ios/transport.hpp"
+#endif

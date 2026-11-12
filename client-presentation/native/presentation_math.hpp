@@ -1,8 +1,10 @@
 #pragma once
 
+#ifndef IDOLY_DARWIN_BRIDGE
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#endif
 
 namespace idoly::presentation {
 
@@ -12,6 +14,66 @@ struct Rect { float x = 0, y = 0, width = 1, height = 1; };
 struct Vec3 { float x = 0, y = 0, z = 0; };
 struct Quaternion { float x = 0, y = 0, z = 0, w = 1; };
 struct CameraState { float aspect = 0, vertical_fov = 0; Rect rect{}; };
+struct ProjectionMatrix { float values[16]{}; };
+struct Frustum { float left = 0, right = 0, bottom = 0, top = 0; };
+
+inline bool frustum_valid(Frustum value) {
+    for (float edge : {value.left, value.right, value.bottom, value.top})
+        if (!std::isfinite(edge) || edge <= 0 || edge > 65536) return false;
+    return true;
+}
+
+// Unity Matrix4x4 is column-major. Read the four actual rays at z=-1;
+// fieldOfView alone does not describe a physical camera's fitted film gate.
+inline bool perspective_frustum(ProjectionMatrix matrix, Frustum *result) {
+    const float *m = matrix.values;
+    for (float value : matrix.values) if (!std::isfinite(value)) return false;
+    if (m[0] <= 0 || m[5] <= 0 || std::fabs(m[11] + 1) > .0001f || std::fabs(m[15]) > .0001f
+            || std::fabs(m[1]) > .0001f || std::fabs(m[4]) > .0001f
+            || std::fabs(m[3]) > .0001f || std::fabs(m[7]) > .0001f
+            || std::fabs(m[12]) > .0001f || std::fabs(m[13]) > .0001f) return false;
+    *result = {(1 - m[8]) / m[0], (1 + m[8]) / m[0],
+        (1 - m[9]) / m[5], (1 + m[9]) / m[5]};
+    return frustum_valid(*result);
+}
+
+inline float frustum_aspect(Frustum value) {
+    return frustum_valid(value) ? (value.left + value.right) / (value.bottom + value.top) : 0;
+}
+
+inline float frustum_vertical_fov(Frustum value) {
+    return frustum_valid(value) ? static_cast<float>((std::atan(value.bottom) + std::atan(value.top))
+        * 180.0 / 3.14159265358979323846) : 0;
+}
+
+inline bool rescale_frustum(Frustum original, float previous_raw_fov, float next_raw_fov, Frustum *result) {
+    if (!frustum_valid(original) || !std::isfinite(previous_raw_fov) || !std::isfinite(next_raw_fov)
+            || previous_raw_fov <= 0 || previous_raw_fov >= 179 || next_raw_fov <= 0 || next_raw_fov >= 179) return false;
+    const double radians = 3.14159265358979323846 / 360.0;
+    const float scale = static_cast<float>(std::tan(next_raw_fov * radians) / std::tan(previous_raw_fov * radians));
+    *result = {original.left * scale, original.right * scale, original.bottom * scale, original.top * scale};
+    return frustum_valid(*result);
+}
+
+inline bool expanded_raw_fov(Frustum original, Frustum current, float raw_fov, float *result) {
+    if (!frustum_valid(original) || !frustum_valid(current) || !std::isfinite(raw_fov)
+            || raw_fov <= 0 || raw_fov >= 179) return false;
+    // Never zoom in. A physical Horizontal gate may already add the required
+    // vertical coverage when the target narrows; a Vertical gate needs a
+    // larger lens angle. Measure both rather than assuming either policy.
+    const double factor = std::max({1.0, static_cast<double>(original.left / current.left),
+        static_cast<double>(original.right / current.right), static_cast<double>(original.bottom / current.bottom),
+        static_cast<double>(original.top / current.top)});
+    *result = static_cast<float>(2 * std::atan(std::tan(raw_fov * 3.14159265358979323846 / 360.0) * factor)
+        * 180.0 / 3.14159265358979323846);
+    return std::isfinite(*result) && *result > 0 && *result < 179;
+}
+
+inline bool frustum_contains(Frustum actual, Frustum original) {
+    return frustum_valid(actual) && frustum_valid(original)
+        && actual.left * 1.0005f >= original.left && actual.right * 1.0005f >= original.right
+        && actual.bottom * 1.0005f >= original.bottom && actual.top * 1.0005f >= original.top;
+}
 
 inline bool fill_size_delta(Rect parent, Rect child, Vec2 current, Vec2 *result) {
     const float values[] = {parent.width, parent.height, child.width, child.height, current.x, current.y};
