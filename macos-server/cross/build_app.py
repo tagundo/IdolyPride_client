@@ -26,6 +26,8 @@ from adhoc_verify import verify_adhoc
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 APP = "IdolyPrideLocalServer"
+VERSION = "0.3.12"
+BUILD_NUMBER = "31"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
 PAYLOAD_SHA = "1b310088f2f8573c1b62bd071de3e064e4f6c59ba8058a7f4f5c3665a82aa9f5"
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
@@ -123,7 +125,7 @@ def build(args):
     executable = contents/"MacOS"/APP
     executable.parent.mkdir(parents=True)
     resources.mkdir()
-    report = {"version": "0.3.11", "build_number": "30", "source_commit": commit,
+    report = {"version": VERSION, "build_number": BUILD_NUMBER, "source_commit": commit,
               "source_sha256": sources, "architecture": "arm64", "minimum_macos": "13.0",
               "ui": "native AppKit (SDK-free C)", "actual_mac_execution": False,
               "actual_gameplay_verified": False, "notarized": False, "signature": "ad-hoc",
@@ -151,7 +153,7 @@ def build(args):
     with (contents/"Info.plist").open("wb") as stream:
         plistlib.dump({"CFBundleExecutable": APP, "CFBundleIdentifier": "game.idolypride.localserver",
                       "CFBundleName": "IdolyPride Local Server", "CFBundleDisplayName": "아이프라 로컬 서버",
-                      "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.3.11", "CFBundleVersion": "30",
+                      "CFBundlePackageType": "APPL", "CFBundleShortVersionString": VERSION, "CFBundleVersion": BUILD_NUMBER,
                       "LSMinimumSystemVersion": "13.0", "LSApplicationCategoryType": "public.app-category.games",
                       "NSHighResolutionCapable": True, "NSPrincipalClass": "NSApplication"}, stream)
     commands=[]

@@ -7,11 +7,43 @@ from pathlib import Path, PurePosixPath
 import stat
 import struct
 import sys
+from types import CodeType
 from zipfile import ZipFile
 import zlib
 
 PREFIX="IdolyPrideLocalServer.app/Contents/Resources/runtime/"
 MAX_MEMBER=32*1024*1024
+
+
+def excluded_application(name):
+    return name in ("engine","payload","__main__") or name=="idoly_local" or name.startswith("idoly_local.")
+
+
+def module_path(name,package):
+    if not isinstance(name,str) or any(not part.isidentifier() for part in name.split(".")):
+        raise ValueError("Unsafe runtime module name")
+    return name.replace(".","/")+("/__init__.pyc" if package else ".pyc")
+
+
+def carchive_modules(entries):
+    """CArchive m/M records hold raw marshal code, separately from the PYZ.
+
+    PyInstaller places struct here because its own archive reader needs it.
+    Preserve ordinary modules, but never install the old boot/import machinery
+    into the new interpreter. Script records are deliberately not exported.
+    """
+    result={};skipped=[]
+    for name,(kind,raw) in entries.items():
+        if kind not in ("m","M"):continue
+        path=module_path(name,kind=="M")
+        if (excluded_application(name) or name=="PyInstaller" or name.startswith("PyInstaller.")
+                or name.startswith(("pyimod","pyiboot","pyi_rth_"))):
+            skipped.append(name);continue
+        if sys.version_info[:2]!=(3,12) or len(raw)>MAX_MEMBER or not isinstance(marshal.loads(raw),CodeType):
+            raise ValueError("Expected matching CPython3.12 bootstrap module code")
+        if path in result:raise ValueError("Bootstrap modules collide on their output path")
+        result[path]=importlib.util.MAGIC_NUMBER+b"\0"*12+raw
+    return result,skipped
 
 
 def bounded_zlib(raw,maximum):
@@ -56,7 +88,7 @@ def pyz_modules(raw):
         if not isinstance(name,str) or name in names or any(not part.isidentifier() for part in name.split(".")):
             raise ValueError("Unsafe/duplicate PYZ module name")
         names.add(name)
-        if name in ("engine","payload","__main__") or name=="idoly_local" or name.startswith("idoly_local."):
+        if excluded_application(name):
             skipped.append(name);continue
         kind,start,size=entry
         if kind==3:continue # Namespace packages are supplied by their children/data directories.
@@ -64,7 +96,8 @@ def pyz_modules(raw):
             raise ValueError("PYZ module bounds/type differ")
         code=bounded_zlib(raw[start:start+size],MAX_MEMBER)
         # Keep exact original marshal bytes; no code-object reserialization.
-        path=name.replace(".","/")+("/__init__.pyc" if kind==1 else ".pyc")
+        path=module_path(name,kind==1)
+        if path in result:raise ValueError("PYZ modules collide on their output path")
         result[path]=raw[4:8]+b"\0"*12+code
     return result,skipped
 
@@ -80,7 +113,10 @@ def export_runtime(source,destination):
         entries=carchive(archive.read(PREFIX+"IdolyServerEngine"))
         pyzs=[raw for kind,raw in entries.values() if kind=="z"]
         if len(pyzs)!=1:raise ValueError("Expected one frozen dependency archive")
-        modules,skipped=pyz_modules(pyzs[0]);destination.mkdir(parents=True)
+        modules,skipped=pyz_modules(pyzs[0])
+        bootstrap,bootstrap_skipped=carchive_modules(entries)
+        if modules.keys() & bootstrap.keys():raise ValueError("Bootstrap module collides with PYZ dependency")
+        modules.update(bootstrap);destination.mkdir(parents=True)
         hashes={};symlinks={}
         for info in selected:
             relative=PurePosixPath(info.filename[len(PREFIX):])
@@ -105,4 +141,6 @@ def export_runtime(source,destination):
         return {"python_version":"3.12","python_magic":importlib.util.MAGIC_NUMBER.hex(),
             "original_file_sha256":hashes,"symlinks":symlinks,"exported_module_sha256":{n:hashlib.sha256(b).hexdigest() for n,b in modules.items()},
             "old_application_modules_excluded":skipped,"old_bootloader_copied":False,
+            "carchive_module_sha256":{n:hashlib.sha256(b).hexdigest() for n,b in bootstrap.items()},
+            "carchive_modules_excluded":bootstrap_skipped,
             "python_library":"_internal/Python.framework/Versions/3.12/Python"}
