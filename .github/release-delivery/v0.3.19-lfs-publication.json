@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "release_id": 443423317,
+  "tag": "local-server-v0.3.19",
+  "url": "https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19",
+  "draft": false,
+  "prerelease": true,
+  "target_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+  "body_sha256": "1bc563971b57879fd98684d00b58bdf84732a3d1b127c288b63eea9ed5aa3d57",
+  "release_assets_uploaded": false,
+  "linked_LFS_binaries": 5,
+  "download_branch": "downloads/apps-v0.3.19",
+  "download_commit": "01b2f70bee06ebe84c97a6f081cba1438852c62b",
+  "download_tree": "3da4a5d5d670020e7be8e20a885f6a37248911a2",
+  "all_remote_pointer_metadata_readback_verified": true,
+  "all_five_full_LFS_downloads_verified": true,
+  "verification_mode": "LFS binaries linked from published release body; no release asset upload asserted",
+  "delivery_branch_files_sha256": {
+    ".gitattributes": "fa028a4ddc1d4ccce1b4d9b65123571106eef1bc79448c5be595171fdcdca4be",
+    "README.md": "60d9d6d4f9aede1f304b7cb6ea6856483e12f6cea7650efc24972931ef82cb66",
+    "RELEASE-VERIFICATION.json": "4ccaf609cd36b8583262e9fc4a60893f2ec7e2987cc253db2a2e8af1b05aa37f",
+    "SHA256SUMS": "fc1d0ecd9cf8713ad3a98deab09f0edf42173782160fc340afcf578de7352273",
+    "IdolyPride-Local-Server-Android.apk": "d5a20f189fe9e10a29dccf8da8a9a63ab27365ca8ff54ffb3bd7b7784def499b",
+    "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk": "c9076dc6a40acf173cf703b8c37477b9b5dcdfb47e42c8963e2bd1b428354fd3",
+    "IdolyPride-Local-Server-macOS-arm64.app.zip": "ee046d29e26cc81e69b648edcc8da04f661dc57b3b34fe108f412e3f8acd5d59",
+    "IdolyPride-6.1.1-Local-PlayCover.ipa": "56c76d92f3ba032176fbce3a948af4c353300fc2acb29ad46c54a487cfbeae4e",
+    "IdolyPride-ServerData-v0.3.19.zip": "d478dd3185dcef753b7300b0c315e4599db33dc21508f00acde2ec8791040259"
+  },
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 206172032,
+      "sha256": "80c2b2f6e835f25cfcf580f4720b517b7609ee797e44f006ceec526693225e75",
+      "source_commit": "c532c45f830a7231b256bb5d0c9ceef39e81dfcb",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "866d183f07fc0ad38f59f0e9cf751a94dcc4f9ad0b10657013f2ebde5e5f4461",
+      "LFS_branch": "downloads/android-server-v0.3.19",
+      "LFS_publication_commit": "bcc05a344e36c851e1e4a3de377ed9b1631697a8",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    },
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159455250,
+      "sha256": "e50a18012c889e151f26b015f0403b0326306c24e39793e11f59359e044e4fa9",
+      "source_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "d40f772cb3e5f86b9c71dfa3db3830dc44b57d1d9a5a0e92fdf6f7c2034463a9",
+      "LFS_branch": "downloads/android-client-v0.3.19",
+      "LFS_publication_commit": "e5aae8e2729006d0b156fded238087f82370472c",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    },
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 205084030,
+      "sha256": "0fa937d7c5c4084c61924828ce8a618da11e92f478225dfd328d707f534bbfd2",
+      "source_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "42f663c1ccc3583872fa49937f69b04e4b1600257b4b328a5cec9326bc9beb06",
+      "LFS_branch": "downloads/mac-server-v0.3.19",
+      "LFS_publication_commit": "a85256fb7df3c702022fb6b8950b80a557fb4db5",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    },
+    {
+      "name": "IdolyPride-6.1.1-Local-PlayCover.ipa",
+      "bytes": 146439731,
+      "sha256": "7519c86b44d8718d711e48647958513c260abdec505b6b9bf32e81ab53ba709d",
+      "source_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "be71e2000a04cf61af2f2be2da1597ff71adc2be1a542c6272a005df4b539960",
+      "LFS_branch": "downloads/playcover-client-v0.3.19",
+      "LFS_publication_commit": "2635d58b02824af7de3a21c23771bddc380f403d",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    },
+    {
+      "name": "IdolyPride-ServerData-v0.3.19.zip",
+      "bytes": 190983804,
+      "sha256": "195788f94c4bb693810a1175d847eba5fa82f9ee77602f4a1537a870e7a7cdb0",
+      "source_commit": "b1564719b678bb3276e6e0b2a6ef99f198ec1ac5",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "efc00dd68158cd5ddfb737939ebf58960ad6237024b6752d50b9eb0cc5d46062",
+      "LFS_branch": "downloads/data-v0.3.19",
+      "LFS_publication_commit": "fdec0f3ea5eebfef524b6cc1e288efd32a42c5e1",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    }
+  ],
+  "constraints": {
+    "release_upload_HTTP_status": 401,
+    "hosted_Actions_run": 43298133776,
+    "hosted_Actions_started": false,
+    "hosted_Actions_reason": "Account payment or spending limit prevented runner startup",
+    "self_hosted_runner_registration_HTTP_status": 403,
+    "financial_settings_changed": false
+  }
+}
