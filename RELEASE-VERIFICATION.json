@@ -1,0 +1,11 @@
+{
+  "version": "0.3.19",
+  "source_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159455250,
+      "sha256": "e50a18012c889e151f26b015f0403b0326306c24e39793e11f59359e044e4fa9"
+    }
+  ]
+}
