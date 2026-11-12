@@ -1,0 +1,14 @@
+{
+  "version": "0.3.10",
+  "version_code": 29,
+  "source_commit": "4e39efbf59014139e7d034e13ba798d4763839c0",
+  "apk_sha256": "1cc4461e4717c850ef3e0b955e36f1a94e7fd63845f7c1e63456ccd67e041e41",
+  "apk_bytes": 100556911,
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "host_runtime_http_sqlcipher_verified": true,
+  "actual_game_ui_verified": false,
+  "android_install_runtime_verified": false,
+  "installer_compatibility_path": "existing_public_base_and_splits_in_inherit_session",
+  "samsung_install_result_verified": false,
+  "presentation_native_sha256": "7a68c1be9a65b71cd3d56ce56c737fe3823438324746ec78feb436bc5ecbca6d"
+}
