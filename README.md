@@ -6,7 +6,7 @@
 
 아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** **릴리즈 탭의 Android·Mac 서버 앱은 v0.3.2이며, Android 그래픽 기능 후보 v0.3.9와 설치 확인판 v0.3.10은 별도 다운로드 브랜치로 제공합니다.** 게임 리소스·설정 저장·전체 해금 감상 모드에 더해 그래픽·촬영 화면 설정을 추가했습니다. 사용자 Android 기기에서 홈·캐릭터·편성과 초기 튜토리얼 전체 진행을 확인했습니다. 클라우드의 공식 ARM64 Android 환경에서도 원본 SDK를 유지한 연결판으로 홈·캐릭터 모델 표시와 공지 닫기를 확인했으며, 일반 라이브 완료 검증은 남아 있습니다.
 
-후보의 **감상용 전체 해금**은 기본 계정과 분리한 계정에 캐릭터 28명·의상 921개·헤어 1,113개·카드 503개와 스토리 3,277개를 준비합니다. 촬영 목록은 실제 3D 68곡·MV 26곡을 사용합니다. 의상 선택과 읽음 기록은 저장하며, 일반 계정의 재화·진행은 바꾸지 않습니다. Android APK 빌드·서명·원본 런타임 보존 검사와 실제 마스터를 사용한 API 검사는 통과했으며, 감상 모드의 실제 메뉴·재생 검증은 별도입니다. Mac 서버 앱 v0.3.15와 PlayCover 그래픽 IPA도 별도 파일로 제공합니다. iOS 리소스 경로와 격리 런타임 검사를 반영했으며 실제 Mac 실행·장면 재생 검증은 남아 있습니다. 사용법과 지원 범위는 [감상 모드 안내](docs/media-mode.md)를 참고합니다. 일반 획득 조건 확장은 이후 작업입니다.
+후보의 **감상용 전체 해금**은 기본 계정과 분리한 계정에 캐릭터 28명·의상 921개·헤어 1,113개·카드 503개와 스토리 3,277개를 준비합니다. 촬영 목록은 실제 3D 68곡·MV 26곡을 사용합니다. 의상 선택과 읽음 기록은 저장하며, 일반 계정의 재화·진행은 바꾸지 않습니다. Android APK 빌드·서명·원본 런타임 보존 검사와 실제 마스터를 사용한 API 검사는 통과했으며, 감상 모드의 실제 메뉴·재생 검증은 별도입니다. Mac 서버 앱 v0.3.16과 PlayCover 그래픽 IPA도 별도 파일로 제공합니다. iOS 리소스 경로와 격리 런타임 검사를 반영했으며 실제 Mac 실행·장면 재생 검증은 남아 있습니다. 사용법과 지원 범위는 [감상 모드 안내](docs/media-mode.md)를 참고합니다. 일반 획득 조건 확장은 이후 작업입니다.
 
 **Android v0.3.9 후보 다운로드:** [APK 직접 받기](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk) · [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk) · [SHA256SUMS](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.9/SHA256SUMS). 접근 권한이 있는 GitHub 계정으로 로그인한 뒤 받습니다. 아래 릴리즈 표의 Android·Mac v0.3.2와 구분합니다.
 
@@ -34,14 +34,16 @@ v0.3.4 후보 소스의 [게임 리소스 경로](docs/resource-support.md)는 �
 
 ## 앱으로 실행하기
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 받습니다. [배포된 서버 앱 v0.3.2 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.2)에는 6.1.1 스키마, 원본 마스터 202개, 서버용 마스터 JSON 40개, 공개 약관·도움말, 식별자를 제거한 튜토리얼 재생 기록 두 개와 공개 스토리 기본 목록이 포함됩니다. 계정 정보나 기존 사용자의 저장 데이터는 포함하지 않습니다. 저장소는 비공개이므로 접근 권한이 있는 GitHub 계정으로 로그인해야 릴리스 파일을 받을 수 있습니다.
+아래 표에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 각각 받습니다. v0.3.16의 네 파일은 [별도 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/apps-v0.3.16)에 게시했으며, 원격 다운로드 전체의 SHA-256을 대조했습니다. 저장소는 비공개이므로 GitHub 링크는 접근 권한이 있는 계정으로 로그인해야 열 수 있습니다. 계정 정보나 기존 사용자의 저장 데이터는 배포 파일에 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.15](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.15/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.15/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
-| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.15](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.15/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.15/IdolyPride-6.1.1-Local-PlayCover.ipa) |
+| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.16](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.16/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.16/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
+| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.16](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.16/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.16/IdolyPride-6.1.1-Local-PlayCover.ipa) |
 
-v0.3.15는 Mac 서버 앱의 종료 정체를 수정하고 **MV 진입·종료 시 화면 회전 대기** 옵션을 추가합니다. Mac과 스마트폰 모두 기본값은 켜짐이며 각 서버 앱에서 바꿀 수 있습니다. 다음 MV 진입·종료부터 사용합니다. 서버와 연결용 클라이언트를 각각 업데이트합니다. [파일·해시와 설치 안내](https://github.com/tagundo/IdolyPride_client/tree/downloads/apps-v0.3.15)에서 확인합니다.
+v0.3.16은 Android 서버의 게임 APK 수정·설치 기능과 설치 권한·내장 클라이언트 APK를 제거하고 디버그를 허용하지 않는 배포판입니다. 그래픽·회전 설정은 유지하며 Android·iOS 공통 타입 검사와 Mac 360 UI 배치의 중복 계산을 줄였습니다. **서버와 연결용 클라이언트는 각각 업데이트**하며, Android에서는 **진단 게임 실행** 또는 **그래픽 지원 게임 실행**으로 새 클라이언트를 엽니다. Play 프로텍트 경고 해제와 실제 FPS 개선량은 실기기에서 확인하지 못했습니다. [파일·해시와 설치 안내](https://github.com/tagundo/IdolyPride_client/tree/downloads/apps-v0.3.16) · [권한·배포 변경](docs/android-distribution.md).
+
+기존 Mac 서버 앱 종료 수정과 **MV 진입·종료 시 화면 회전 대기** 옵션도 유지합니다. Mac과 스마트폰 모두 기본값은 켜짐이며 각 서버 앱에서 바꿀 수 있습니다. 다음 MV 진입·종료부터 사용합니다.
 
 [라이브 촬영·360 LIVE 성능 조사](docs/mv-performance-audit.md)는 원본 Android·iOS의 렌더링 정책 차이, 공통 최적화 후보와 실기기 측정 도구를 정리합니다. 현재 결과는 정적 분석이며 실기기 병목이나 성능 개선을 확정한 결과는 아닙니다.
 
