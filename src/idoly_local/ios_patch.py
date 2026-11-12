@@ -346,7 +346,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         info["CFBundleIdentifier"] = bundle_id
         info["CFBundleDisplayName"] = "아이프라 로컬"
         info["CFBundleName"] = "IdolyPrideLocal"
-        info["CFBundleVersion"] = profile.game_build + ".9002"
+        info["CFBundleVersion"] = profile.game_build + ".9003"
         # The local login does not use the original federated-login callbacks.
         # Register one isolated scheme so both apps can coexist without stealing
         # the original game's deep links or Google/Twitter callback URLs.

@@ -21,7 +21,51 @@ static ProjectionMatrix lens_projection(float raw_fov, float aspect, bool horizo
     return matrix;
 }
 
+struct AspectProbe { float aspect, automatic; unsigned resets = 0; };
+static void reset_probe_aspect(void *context) {
+    auto &probe = *static_cast<AspectProbe *>(context);
+    probe.aspect = probe.automatic;
+    ++probe.resets;
+}
+static bool measure_old_projection(AspectProbe &probe, float raw_fov, bool horizontal_gate,
+        float shift, ProjectionMatrix *matrix, bool fail = false) {
+    ScopedCleanup automatic(reset_probe_aspect, &probe);
+    probe.aspect = 16.f / 9;
+    if (fail) return false;
+    *matrix = lens_projection(raw_fov, probe.aspect, horizontal_gate, shift);
+    return true;
+}
+
 int main() {
+    // Continuously changing physical-camera gates/shift can be re-measured
+    // at the original aspect without restoring a visible 16:9 render target.
+    // The temporary camera policy must always return to its automatic target
+    // aspect, including early-return and original-call unwind paths.
+    AspectProbe probe{4.f / 3, 4.f / 3};
+    for (unsigned frame = 0; frame < 120; ++frame) {
+        const float raw = 50.f + 5.f * static_cast<float>(std::sin(frame * .1));
+        const float shift = .2f * static_cast<float>(std::sin(frame * .07));
+        const bool horizontal = frame % 4 < 2;
+        ProjectionMatrix baseline_matrix{}; Frustum baseline{}, fitted{}, after{};
+        assert(measure_old_projection(probe, raw, horizontal, shift, &baseline_matrix));
+        assert(probe.aspect == probe.automatic && probe.resets == frame + 1);
+        assert(perspective_frustum(baseline_matrix, &baseline));
+        assert(perspective_frustum(lens_projection(raw, probe.aspect, horizontal, shift), &fitted));
+        float desired = 0;
+        assert(expanded_raw_fov(baseline, fitted, raw, &desired));
+        assert(perspective_frustum(lens_projection(desired, probe.aspect, horizontal, shift), &after));
+        assert(frustum_contains(after, baseline));
+        assert(std::fabs(frustum_aspect(after) - probe.automatic) < .00001f);
+    }
+    ProjectionMatrix discarded{};
+    assert(!measure_old_projection(probe, 50, true, 0, &discarded, true));
+    assert(probe.aspect == probe.automatic && probe.resets == 121);
+    try {
+        ScopedCleanup automatic(reset_probe_aspect, &probe);
+        probe.aspect = 16.f / 9;
+        throw 1;
+    } catch (int) { }
+    assert(probe.aspect == probe.automatic && probe.resets == 122);
     // A physical lens can be driven by focalLength in Cinemachine LateUpdate,
     // after the ordinary fieldOfView override. The raw FOV readback alone is
     // insufficient: an unchanged Vertical-gate 4:3 projection clips both of
@@ -131,11 +175,28 @@ int main() {
         assert(center_position(parent, resized_child, original_position, &centered));
         assert(centered.z == original_position.z);
         assert(fills_parent(parent, resized_child, centered, {1, 1, 1}, {}));
+        Rect baseline{};
+        assert(baseline_image_bounds(resized_child, resized, original_delta, original_position, &baseline));
+        assert(baseline.x == -960 && baseline.y == -540
+            && baseline.width == 1920 && baseline.height == 1080);
         // Restoring exact saved sizeDelta/localPosition reconstructs the
         // original horizontal rectangle rather than leaving the full frame.
         assert(original_delta.x == 1920 && original_delta.y == 1080 && original_position.y == -540);
     }
     Vec2 invalid_delta{}; Vec3 invalid_position{};
+    // Pivot and stretched-anchor cases must recover the same baseline after
+    // an override and a later parent resize, without treating our full frame
+    // as the original 16:9 control bounds.
+    for (float pivot : {0.f, .5f, 1.f}) {
+        Rect baseline{};
+        assert(baseline_image_bounds({-2400*pivot,-1800*pivot,2400,1800},
+            {2000,1400},{1520,680},{10,20,0}, &baseline));
+        assert(baseline.width==1920 && baseline.height==1080);
+        assert(baseline.x==10-1920*pivot && baseline.y==20-1080*pivot);
+    }
+    Rect invalid_bounds{};
+    assert(!baseline_image_bounds({0,0,0,1080},{},{},{},&invalid_bounds));
+    assert(!baseline_image_bounds({10,0,1920,1080},{},{},{},&invalid_bounds));
     assert(!fill_size_delta({0, 0, 0, 1080}, folded_parent, {}, &invalid_delta));
     assert(!fill_size_delta(folded_parent, {0, 0, std::numeric_limits<float>::quiet_NaN(), 1080}, {}, &invalid_delta));
     assert(!center_position(folded_parent, folded_parent, {0, 0, std::numeric_limits<float>::infinity()}, &invalid_position));

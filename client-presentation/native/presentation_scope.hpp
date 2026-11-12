@@ -31,4 +31,16 @@ public:
     ScopedMemory(const ScopedMemory &) = delete;
     ScopedMemory &operator=(const ScopedMemory &) = delete;
 };
+
+// Register native state restoration before applying a temporary setter. This
+// also restores the state when a later original IL2CPP call unwinds.
+class ScopedCleanup {
+    void (*callback)(void *);
+    void *context;
+public:
+    ScopedCleanup(void (*callback)(void *), void *context) : callback(callback), context(context) {}
+    ~ScopedCleanup() { callback(context); }
+    ScopedCleanup(const ScopedCleanup &) = delete;
+    ScopedCleanup &operator=(const ScopedCleanup &) = delete;
+};
 }

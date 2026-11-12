@@ -28,8 +28,8 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
 from certificate_bundle import install_certificate_bundle
 APP = "IdolyPrideLocalServer"
-VERSION = "0.3.13"
-BUILD_NUMBER = "32"
+VERSION = "0.3.14"
+BUILD_NUMBER = "33"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
 PAYLOAD_SHA = "1b310088f2f8573c1b62bd071de3e064e4f6c59ba8058a7f4f5c3665a82aa9f5"
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
@@ -39,6 +39,14 @@ CGROUP = Path("/sys/fs/cgroup")
 def digest(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def release_public_input_cache(path):
+    # Only closed build inputs/tools, never the running VM or user state.
+    # Keep the conservative direct-headroom gate useful after a large read.
+    if hasattr(os, "posix_fadvise"):
+        with Path(path).open("rb") as stream:
+            os.posix_fadvise(stream.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
 
 
 def budget():
@@ -64,6 +72,7 @@ def run(command, evidence, name, *, seconds=30):
         subprocess.run([str(item) for item in command], stdout=output,
                        stderr=subprocess.STDOUT, check=True, timeout=seconds,
                        env=dict(os.environ, MALLOC_ARENA_MAX="2"), preexec_fn=limit)
+    release_public_input_cache(command[0])
     after = budget()
     if after["oom_kill"] != before["oom_kill"]:
         raise ValueError("OOM counter changed during bounded Mac tool")
@@ -135,6 +144,7 @@ def build(args):
               "user_python_required": False, "user_terminal_required": False,
               "input_runtime_archive_sha256": RUNTIME_SHA, "server_data_sha256": PAYLOAD_SHA}
     report["runtime"] = export_runtime(args.runtime, resources/"runtime")
+    release_public_input_cache(args.runtime)
     report["public_tls_trust"] = install_certificate_bundle(resources/"runtime/_internal", resources/"licenses/tls")
     for path in source_paths:
         if path.suffix != ".py" or path.parent == HERE:

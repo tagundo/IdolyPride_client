@@ -24,6 +24,10 @@
 #include "presentation_scope.hpp"
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
+#include "../ios/live_ui.hpp"
+#include "../ios/orientation.hpp"
+#include "../ios/photography_ui.hpp"
+#include "panorama_ui_edges.hpp"
 #else
 #include "profile.hpp"
 #endif
@@ -41,6 +45,9 @@ bool configured = false;
 std::atomic<bool> started{false}, ready{false};
 uintptr_t image_base;
 void *held_library;
+// Set before hooks are published. Physical iOS and Android keep their device
+// rotation and camera-lens behavior; PlayCover is identified by loaded AppKit.
+bool desktop_host = false;
 std::atomic<uintptr_t> game_thread_id{0};
 
 struct Status {
@@ -73,6 +80,9 @@ bool game_call(bool establish = false) {
     if (establish) game_thread_id.compare_exchange_strong(expected, current, std::memory_order_acq_rel);
     return game_thread_id.load(std::memory_order_acquire) == current;
 }
+#ifdef IDOLY_DARWIN_BRIDGE
+bool desktop_enabled() { return ready.load(std::memory_order_acquire) && desktop_host; }
+#endif
 template<class T> T read(void *object, size_t offset) {
     T result{}; std::memcpy(&result, static_cast<char *>(object) + offset, sizeof result); return result;
 }
@@ -114,6 +124,22 @@ bool rect_transform(void *value) {
     return false;
 }
 
+#ifdef IDOLY_DARWIN_BRIDGE
+VoidMethod mv_ui_initialize_original;
+void (*mv_ui_hide)(void *, bool, bool, Method *);
+void mv_ui_initialize_hook(void *self, Method *method) {
+    idoly_live_ui::initialize_default_off(self, method, mv_ui_initialize_original, mv_ui_hide,
+        ready.load(std::memory_order_acquire) && desktop_host && game_call(true));
+}
+VoidMethod preview_ui_bind_original;
+idoly::presentation::ios_photography_ui::Calls preview_ui_calls;
+idoly::presentation::ios_photography_ui::DefaultHidden preview_ui;
+void preview_ui_bind_hook(void *self, Method *method) {
+    preview_ui.bind(self, method, preview_ui_bind_original,
+        ready.load(std::memory_order_acquire) && desktop_host && game_call(true));
+}
+#endif
+
 VoidMethod quality_update_original, quality_init_original, quality_apply_original;
 void (*quality_set_original)(void *, int, Method *);
 int (*app_fps_get)(Method *);
@@ -131,6 +157,8 @@ float (*fov_get_original)(void *, Method *), (*aspect_get_original)(void *, Meth
 void (*fov_set_original)(void *, float, Method *);
 float (*focal_get_original)(void *, Method *);
 void (*focal_set_original)(void *, float, Method *);
+void (*camera_aspect_set_original)(void *, float, Method *);
+VoidMethod camera_aspect_reset;
 void (*projection_get)(void *, ProjectionMatrix *, Method *);
 bool (*physical_get)(void *, Method *);
 int (*gate_get)(void *, Method *), (*projection_mode_get)(void *, Method *);
@@ -149,6 +177,22 @@ VoidMethod scene_pano_update_original, scene_pano_reset_original;
 Rect (*uv_get)(void *, Method *);
 void (*aa_original)(void *, void *, bool, void *, Method *);
 bool (*shadow_original)(void *, void *, void **, int, Method *);
+
+#ifdef IDOLY_DARWIN_BRIDGE
+namespace rotation = idoly::presentation::ios_orientation;
+rotation::Calls orientation_calls;
+PanoramaEdgeApi panorama_api;
+PanoramaEdgeLayout panorama_ui;
+bool class_matches(void *object, const char *space, const char *name) {
+    if (!object) return false;
+    void *type = object_class(object);
+    for (unsigned depth = 0; type && depth != 32; ++depth, type = class_parent(type)) {
+        const char *actual = class_name(type), *actual_space = class_namespace(type);
+        if (actual && actual_space && !std::strcmp(actual, name) && !std::strcmp(actual_space, space)) return true;
+    }
+    return false;
+}
+#endif
 
 Weak quality_manager, main_controller;
 Weak controller_candidates[4];
@@ -170,7 +214,7 @@ thread_local bool internal_camera = false;
 thread_local bool scene_enter = false, scene_exit = false;
 
 struct Photography {
-    Weak owner, controller, camera, image;
+    Weak owner, controller, camera, image, viewport_parent;
     bool active = false, geometry_known = false, base_known = false, expanded = false, target_expanded = false;
     bool geometry_confirmed = false;
     unsigned layout_ticks = 0;
@@ -180,6 +224,8 @@ struct Photography {
     Vec2 ratio{16, 9};
     Dimensions viewport{}, built_viewport{};
     Rect viewport_rect{};
+    Rect original_image_frame{};
+    bool original_image_frame_known = false;
     CameraState original{};
     Frustum original_frustum{};
     float original_focal = 0;
@@ -254,6 +300,46 @@ bool projection_model_unchanged(void *camera) {
         && std::fabs(sensor.x - photo.sensor.x) < .0001f && std::fabs(sensor.y - photo.sensor.y) < .0001f
         && std::fabs(lens.x - photo.lens.x) < .0001f && std::fabs(lens.y - photo.lens.y) < .0001f;
 }
+bool remember_projection_model(void *camera) {
+    photo.physical = physical_get(camera, nullptr);
+    photo.projection_mode = projection_mode_get(camera, nullptr);
+    photo.gate = gate_get(camera, nullptr);
+    sensor_get(camera, &photo.sensor, nullptr); lens_get(camera, &photo.lens, nullptr);
+    return !photo.physical || (std::isfinite(photo.sensor.x) && photo.sensor.x > 0
+        && std::isfinite(photo.sensor.y) && photo.sensor.y > 0
+        && std::isfinite(photo.lens.x) && std::isfinite(photo.lens.y));
+}
+void reset_automatic_aspect(void *camera) { camera_aspect_reset(camera, nullptr); }
+bool refresh_original_projection(void *camera, float target_aspect) {
+    const float original_aspect = photo.ratio.x / photo.ratio.y;
+    if (!camera_aspect_set_original || !camera_aspect_reset
+            || !std::isfinite(original_aspect) || original_aspect <= 0 || original_aspect > 32
+            || std::fabs(aspect_get_original(camera, nullptr) - target_aspect) > .0001f) return false;
+    ScopedValue<bool> internal(internal_camera, true);
+    // A new Cinemachine gate/sensor/shift must not cause a visible 16:9 RT
+    // rebuild. Borrow the old projection ratio only during this synchronous
+    // measurement, then restore the camera's proven automatic RT aspect.
+    if (physical_get(camera, nullptr)) focal_set_original(camera, photo.original_focal, nullptr);
+    else fov_set_original(camera, photo.original.vertical_fov, nullptr);
+    ProjectionMatrix matrix{};
+    {
+        ScopedCleanup automatic(reset_automatic_aspect, camera);
+        camera_aspect_set_original(camera, original_aspect, nullptr);
+        projection_get(camera, &matrix, nullptr);
+    }
+    Frustum measured{};
+    const float raw_fov = fov_get_original(camera, nullptr), focal = focal_get_original(camera, nullptr);
+    if (std::fabs(aspect_get_original(camera, nullptr) - target_aspect) > .0001f
+            || !perspective_frustum(matrix, &measured)
+            || std::fabs(frustum_aspect(measured) - original_aspect) > .005f
+            || !std::isfinite(raw_fov) || raw_fov <= 0 || raw_fov >= 179
+            || !std::isfinite(focal) || focal <= 0 || !remember_projection_model(camera)) return false;
+    photo.original_frustum = measured;
+    photo.original.aspect = original_aspect;
+    photo.original.vertical_fov = raw_fov;
+    photo.original_focal = focal;
+    return true;
+}
 void restore_base_lens(void *camera) {
     // Retain the exact focal length for physical lenses. Reconstructing it
     // from an already expanded fieldOfView would feed the override back into
@@ -266,8 +352,10 @@ bool set_expanded_camera(void *camera) {
     void *texture = controller ? target_to_texture(rt_target(controller, nullptr), nullptr) : nullptr;
     if (!runtime_type(texture, "RenderTexture")) return false;
     const Dimensions rendered{rt_width(texture, nullptr), rt_height(texture, nullptr)};
-    if (!photo.base_known || !dimensions_valid(rendered) || !projection_model_unchanged(camera)) return false;
+    if (!photo.base_known || !dimensions_valid(rendered)) return false;
     const float expected_aspect = static_cast<float>(rendered.width) / rendered.height;
+    if (!projection_model_unchanged(camera)
+            && (!desktop_host || !refresh_original_projection(camera, expected_aspect))) return false;
     // TargetTexture must drive the original automatic camera aspect. Setting
     // Camera.aspect ourselves would switch it to manual mode and could leak
     // the photo ratio into a later scene. Manual/custom viewports fail closed.
@@ -346,6 +434,27 @@ void restore_image_layouts() {
         layout.rect.clear(); layout.saved = layout.changed = false;
     }
 }
+void capture_original_image_frame(void *rect, void *parent) {
+    photo.original_image_frame_known = false;
+    if (!rect_transform(rect) || !rect_transform(parent)) return;
+    Vec2 delta{}; Vec3 position{}, scale{}; Quaternion rotation{}; Rect drawn{};
+    size_delta_get(rect, &delta, nullptr); local_position(rect, &position, nullptr);
+    local_scale(rect, &scale, nullptr); local_rotation(rect, &rotation, nullptr);
+    transform_rect_get(rect, &drawn, nullptr);
+    if (!plain_transform(position, scale, rotation)) return;
+    Vec2 baseline_delta = delta;
+    Vec3 baseline_position = position;
+    for (const auto &layout : image_layouts) {
+        if (layout.saved && layout.changed && layout.rect.get(true) == rect) {
+            if (same(delta, layout.written_delta)) baseline_delta = layout.original_delta;
+            if (same(position, layout.written_position)) baseline_position = layout.original_position;
+            break;
+        }
+    }
+    photo.original_image_frame_known = baseline_image_bounds(drawn, delta, baseline_delta,
+        baseline_position, &photo.original_image_frame);
+    if (photo.original_image_frame_known) photo.viewport_parent.set(parent);
+}
 bool fill_image_parent(void *rect, Rect available) {
     ImageLayout *selected = nullptr;
     for (auto &layout : image_layouts) {
@@ -382,6 +491,9 @@ bool fill_image_parent(void *rect, Rect available) {
     return true;
 }
 void restore_photography(bool rebuild_target) {
+#ifdef IDOLY_DARWIN_BRIDGE
+    panorama_ui.restore_layout();
+#endif
     restore_image_layouts();
     void *controller = photo.controller.get(true);
     if (controller) {
@@ -392,13 +504,30 @@ void restore_photography(bool rebuild_target) {
     photo.geometry_known = false;
     photo.base_known = false;
     photo.target_expanded = false; photo.geometry_confirmed = false; photo.layout_ticks = 0;
+    photo.original_image_frame_known = false;
 }
 void clear_photography() {
     restore_photography(false);
+#ifdef IDOLY_DARWIN_BRIDGE
+    panorama_ui.restore();
+#endif
     photo.owner.clear(); photo.controller.clear(); photo.camera.clear(); photo.image.clear();
+    photo.viewport_parent.clear();
     photo.active = false; photo.base_known = false; photo.geometry_known = false;
     photo.viewport = {}; photo.built_viewport = {};
     photo.rejected_revision = -1; photo.rejected_viewport = {};
+}
+void reject_current_projection() {
+    if (!desktop_host) { restore_photography(true); return; }
+    const Config config = configuration();
+    const Dimensions rejected = photo.viewport;
+    restore_photography(true);
+    // A projection that cannot be safely re-measured must not repeatedly
+    // allocate a 16:9 target then expand it on the next frame. Retry only for
+    // a new settings revision or a genuinely different viewport.
+    photo.rejected_revision = config.revision;
+    photo.rejected_viewport = rejected;
+    pthread_mutex_lock(&status_mutex); state.state = "unsupported"; state.expanded = false; pthread_mutex_unlock(&status_mutex);
 }
 
 bool image_fills_parent(void *rect, Rect available) {
@@ -432,7 +561,22 @@ void observe_image(void *self, void *texture) {
                 < static_cast<int64_t>(photo.viewport.width) * photo.viewport.height) return;
     photo.viewport = dimensions; photo.viewport_rect = available;
     photo.image.set(self); photo.geometry_known = dimensions_valid(photo.viewport);
+    capture_original_image_frame(rect, parent);
 }
+
+#ifdef IDOLY_DARWIN_BRIDGE
+void update_panorama_ui() {
+    if (!desktop_enabled() || !game_call()) return;
+    void *owner = photo.active ? photo.owner.get(true) : nullptr;
+    if (!owner || !class_matches(owner, "Solis.Photography", "Photography360LiveContentPresenter")) {
+        panorama_ui.restore(); return;
+    }
+    panorama_ui.begin_session(owner);
+    if (!configuration().expand_photography || !photo.expanded || !photo.geometry_confirmed
+            || !photo.original_image_frame_known) { panorama_ui.restore_layout(); return; }
+    panorama_ui.update(owner, photo.viewport_parent.get(true), photo.viewport_rect, photo.original_image_frame);
+}
+#endif
 
 uint64_t limited_hook(int width, int height, Vec2 ratio, int max_pixel, float scale, bool first, Method *method) {
     if (!ready.load(std::memory_order_acquire) || !resolution_scope || !first || !game_call())
@@ -496,6 +640,9 @@ void target_late_hook(void *self, Method *method) {
                 pthread_mutex_lock(&status_mutex); state.state = "unsupported"; state.expanded = false; pthread_mutex_unlock(&status_mutex);
             }
         }
+#ifdef IDOLY_DARWIN_BRIDGE
+        update_panorama_ui();
+#endif
     }
 }
 
@@ -512,7 +659,12 @@ void photo_reset(void *self, Method *method, VoidMethod original) {
     } else original(self, method);
 }
 void main_update_hook(void *self, Method *method) { photo_update(self, method, scene_main_update_original); }
-void pano_update_hook(void *self, Method *method) { photo_update(self, method, scene_pano_update_original); }
+void pano_update_hook(void *self, Method *method) {
+    photo_update(self, method, scene_pano_update_original);
+#ifdef IDOLY_DARWIN_BRIDGE
+    if (ready.load(std::memory_order_acquire) && game_call()) update_panorama_ui();
+#endif
+}
 void main_reset_hook(void *self, Method *method) { photo_reset(self, method, scene_main_reset_original); }
 void pano_reset_hook(void *self, Method *method) { photo_reset(self, method, scene_pano_reset_original); }
 bool remember_original_lens(void *camera) {
@@ -537,7 +689,7 @@ void fov_set_hook(void *camera, float value, Method *method) {
         // before deriving a fresh baseline; never scale a previous override.
         ScopedValue<bool> internal(internal_camera, true);
         fov_set_original(camera, value, method);
-        if (!remember_original_lens(camera) || !set_expanded_camera(camera)) restore_photography(true);
+        if (!remember_original_lens(camera) || !set_expanded_camera(camera)) reject_current_projection();
         return;
     }
     fov_set_original(camera, value, method);
@@ -554,7 +706,7 @@ void focal_set_hook(void *camera, float value, Method *method) {
         // never calls Camera.set_fieldOfView. Reapply after that exact write.
         ScopedValue<bool> internal(internal_camera, true);
         focal_set_original(camera, value, method);
-        if (!remember_original_lens(camera) || !set_expanded_camera(camera)) restore_photography(true);
+        if (!remember_original_lens(camera) || !set_expanded_camera(camera)) reject_current_projection();
         return;
     }
     focal_set_original(camera, value, method);
@@ -585,11 +737,7 @@ bool apply_photography(Config config) {
     }
     if (photo.rejected_revision == config.revision && photo.rejected_viewport.width == photo.viewport.width
             && photo.rejected_viewport.height == photo.viewport.height) { geometry_unsupported = true; return false; }
-    if (photo.base_known && !projection_model_unchanged(camera)) {
-        // The original game may change the physical gate/sensor between live
-        // timeline and free-camera views. Re-measure the new model with the
-        // original target on the following frame instead of retaining stale
-        // projection assumptions or overwriting the game's new lens model.
+    if (!desktop_host && photo.base_known && !projection_model_unchanged(camera)) {
         restore_photography(true);
         return false;
     }
@@ -600,10 +748,7 @@ bool apply_photography(Config config) {
         photo.original.aspect = frustum_aspect(photo.original_frustum);
         photo.original.vertical_fov = fov_get_original(camera, nullptr);
         photo.original_focal = focal_get_original(camera, nullptr);
-        photo.physical = physical_get(camera, nullptr);
-        photo.projection_mode = projection_mode_get(camera, nullptr);
-        photo.gate = gate_get(camera, nullptr);
-        sensor_get(camera, &photo.sensor, nullptr); lens_get(camera, &photo.lens, nullptr);
+        if (!remember_projection_model(camera)) return false;
         camera_rect_get(camera, &photo.original.rect, nullptr);
         if (!camera_valid(photo.original) || !full_rect(photo.original.rect)
                 || !std::isfinite(photo.original_focal) || photo.original_focal <= 0
@@ -757,6 +902,9 @@ void quality_update_hook(void *self, Method *method) {
     const bool rt_restore_pending = controller && !config.custom_graphics
         && rendered_configuration_known && rendered_configuration.custom_graphics;
     const bool geometry = apply_photography(config);
+#ifdef IDOLY_DARWIN_BRIDGE
+    update_panorama_ui();
+#endif
     const bool aa_pending = config.custom_graphics && config.aa_mode >= 0 && aa_revision != config.revision;
     const bool shadow_pending = config.custom_graphics && config.shadow_resolution && shadow_revision != config.revision;
     const bool unavailable = geometry_unsupported || quality_unavailable
@@ -878,6 +1026,29 @@ void load_calls() {
     CALL(orthographic, orthographic); CALL(uv_get, uv_get);
     CALL(projection_get, projection_get); CALL(physical_get, physical_get); CALL(gate_get, gate_get);
     CALL(sensor_get, sensor_get); CALL(lens_get, lens_get); CALL(projection_mode_get, projection_mode_get);
+#ifdef IDOLY_DARWIN_BRIDGE
+    CALL(camera_aspect_set_original, aspect_set); CALL(camera_aspect_reset, aspect_reset);
+    CALL(mv_ui_hide, mv_ui_hide);
+    preview_ui_calls.weak_new=weak_new; preview_ui_calls.weak_get=weak_get; preview_ui_calls.weak_free=weak_free;
+    preview_ui_calls.matches=class_matches;
+    CALL(preview_ui_calls.ui_get, preview_ui_get); CALL(preview_ui_calls.ui_set, preview_ui_set);
+    preview_ui.configure(preview_ui_calls);
+    CALL(orientation_calls.frame_count, orientation_frame_count);
+    CALL(orientation_calls.token_cancelled, orientation_token_cancelled);
+    CALL(orientation_calls.set_orientation_async, orientation_set_async);
+    orientation_calls.desktop_enabled=desktop_enabled; orientation_calls.game_thread=game_call;
+    orientation_calls.screen_width=screen_width; orientation_calls.screen_height=screen_height;
+    rotation::configure(orientation_calls);
+    panorama_api.weak_new=weak_new; panorama_api.weak_get=weak_get; panorama_api.weak_free=weak_free;
+    panorama_api.alive=object_alive; panorama_api.matches=class_matches;
+    panorama_api.parent=parent_get; panorama_api.position_get=local_position; panorama_api.position_set=local_position_set;
+    CALL(panorama_api.component_transform, ui_component_transform);
+    CALL(panorama_api.gameobject_transform, ui_gameobject_transform);
+    CALL(panorama_api.transform_point, ui_transform_point);
+    CALL(panorama_api.inverse_transform_point, ui_inverse_transform_point);
+    CALL(panorama_api.ui_active_get, pano_ui_get); CALL(panorama_api.ui_active_set, pano_ui_set);
+    panorama_ui.configure(panorama_api);
+#endif
 #undef CALL
 }
 bool accept_configuration(int schema, const Config &value) {

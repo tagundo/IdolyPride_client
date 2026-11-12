@@ -48,9 +48,9 @@ def test_gateway_rejects_pc_relative_control_flow_and_x16_input(word):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "cb7ed477777bd0c512d9717621e00ebc71615e572482b00e95de0fdbbd6cff2f"
+    assert hashlib.sha256(header).hexdigest() == "914d2f85fddb9046300321df817687e3f9fe3046671293a6debe73777c9953d9"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 63 and len(plan["entries"]) == 19
+    assert len(profile["aliases"]) == 88 and len(plan["entries"]) == 31
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -60,6 +60,40 @@ def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
         assert struct.pack("<I", words[5]).hex() == entry["original16"][:8]
         assert signed_branch_target(entry["rva"], int.from_bytes(bytes.fromhex(entry["patched_entry"]), "little")) == entry["gateway"]
         assert profile["aliases"][name]["rva"] == entry["rva"]
+
+
+def test_desktop_orientation_contract_preserves_original_task_and_input_getters():
+    profile, plan = p.load_profile(), p.make_plan()
+    aliases = profile["aliases"]
+    for name in ("rotation_wait", "rotation_wait_label", "rotation_wait_simple", "rotation_wait_preview"):
+        assert aliases[name]["return_type"] == "Cysharp.Threading.Tasks.UniTask"
+        assert aliases[name]["parameters"][-1]["type_name"] == "System.Threading.CancellationToken"
+        assert name in plan["entries"]
+    assert aliases["rotation_wait_label"]["parameters"][1]["type_name"] == "System.String"
+    assert aliases["rotation_wait_simple"]["parameters"][1]["type_name"] == "System.Boolean"
+    assert aliases["rotation_wait_preview"]["parameters"][1]["type_name"] == "System.Boolean"
+    assert aliases["orientation_token_cancelled"]["return_type"] == "System.Boolean"
+    assert aliases["orientation_internal_move"]["name"].endswith("<InternalSetOrientationAsync>d__24.MoveNext")
+    assert all(name not in plan["entries"] for name in ("screen_width", "screen_height", "orientation_set_async"))
+    assert not any("Input.get_deviceOrientation" in a["name"] for a in aliases.values())
+    assert profile["orientation_adapter"]["minimum_original_Unity_frames_before_ready"] == 2
+    assert aliases["aspect_reset"]["name"] == "UnityEngine.Camera.ResetAspect"
+    assert aliases["mv_ui_initialize"]["name"] == "Solis.OutGame.LivePlayerUIView.Initialize"
+    assert aliases["mv_ui_hide"]["parameter_count"] == 2
+
+
+def test_shared_preview_UI_default_is_scoped_to_original_bind_and_reactive_model():
+    profile, plan = p.load_profile(), p.make_plan()
+    aliases = profile["aliases"]
+    assert aliases["preview_ui_bind"]["name"] == "Solis.Photography.PhotographyPreviewContentPresenter.Bind"
+    assert aliases["preview_ui_bind"]["parameter_count"] == 0
+    assert "preview_ui_bind" in plan["entries"]
+    assert aliases["preview_ui_get"]["name"] == "Solis.Photography.PhotographyPreviewContentModel.get_IsUIActive"
+    assert aliases["preview_ui_set"]["name"] == "Solis.Photography.PhotographyPreviewContentModel.set_IsUIActive"
+    assert aliases["preview_ui_set"]["parameters"][0]["type_name"] == "System.Boolean"
+    assert "preview_ui_get" not in plan["entries"] and "preview_ui_set" not in plan["entries"]
+    assert profile["preview_default_off"]["UI_On_and_Off_original_handlers_retained"] is True
+    assert profile["preview_default_off"]["paid_capture_and_selection_menus_changed"] is False
 
 
 def test_plan_mutation_and_unrecognized_native_are_rejected_before_patch():

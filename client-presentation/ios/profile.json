@@ -1073,6 +1073,491 @@
       "source": "MachO_export_trie+externaldefinedsymtab",
       "module": null,
       "prefix16": "e4ce3d16503eb617528101144a820114"
+    },
+    "orientation_frame_count": {
+      "name": "UnityEngine.Time.get_frameCount",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24102,
+      "metadata_method_index": 165676,
+      "token_row": 3764,
+      "rva": 126203320,
+      "return_type_index": 61162,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2198,
+      "return_type": "System.Int32",
+      "registration_pointer_slot_rva": 175677472,
+      "prefix16": "f44fbea9fd7b01a9fd430091138601b0"
+    },
+    "orientation_token_cancelled": {
+      "name": "System.Threading.CancellationToken.get_IsCancellationRequested",
+      "module": "mscorlib.dll",
+      "type_definition_index": 19106,
+      "metadata_method_index": 130322,
+      "token_row": 4503,
+      "rva": 115006780,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175144632,
+      "prefix16": "080040f9680100b4f44fbea9fd7b01a9"
+    },
+    "orientation_set_async": {
+      "name": "Solis.Common.ScreenOrientationManager.SetOrientationAsync",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23373,
+      "metadata_method_index": 160230,
+      "token_row": 2213,
+      "rva": 117095584,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "orientationType",
+          "metadata_type_index": 66591,
+          "type_name": "Solis.Common.OrientationType"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 150,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 175310192,
+      "prefix16": "ff0302d1f85f04a9f65705a9f44f06a9"
+    },
+    "orientation_internal_move": {
+      "name": "Solis.Common.ScreenOrientationControllerBase+<InternalSetOrientationAsync>d__24.MoveNext",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23363,
+      "metadata_method_index": 160206,
+      "token_row": 2189,
+      "rva": 117083500,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 481,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175310000,
+      "prefix16": "ff4301d1f65702a9f44f03a9fd7b04a9"
+    },
+    "rotation_wait": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12077,
+      "metadata_method_index": 57834,
+      "token_row": 57835,
+      "rva": 30430240,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54369,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 150,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 170420384,
+      "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
+    },
+    "rotation_wait_label": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12077,
+      "metadata_method_index": 57837,
+      "token_row": 57838,
+      "rva": 30430452,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54369,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType"
+        },
+        {
+          "name": "labelKey",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 150,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 170420408,
+      "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
+    },
+    "rotation_wait_simple": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalAsync",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12077,
+      "metadata_method_index": 57835,
+      "token_row": 57836,
+      "rva": 30430624,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54369,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType"
+        },
+        {
+          "name": "isSimple",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 150,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 170420392,
+      "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
+    },
+    "rotation_wait_preview": {
+      "name": "Solis.Common.DeviceRotationManager.WaitHorizontalPreviewAsync",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 12077,
+      "metadata_method_index": 57836,
+      "token_row": 57837,
+      "rva": 30430868,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "descriptionType",
+          "metadata_type_index": 54369,
+          "type_name": "Solis.Common.DeviceRotationDescriptionType"
+        },
+        {
+          "name": "isPreview",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 150,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 170420400,
+      "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
+    },
+    "orientation_starts_portrait_ready": {
+      "name": "Solis.Common.IOSScreenOrientationController+<>c.<SetStartsWithPortraitAsync>b__0_0",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23353,
+      "metadata_method_index": 160166,
+      "token_row": 2149,
+      "rva": 117074252,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 131,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175309680,
+      "prefix16": "f44fbea9fd7b01a9fd430091000080d2"
+    },
+    "orientation_starts_landscape_ready": {
+      "name": "Solis.Common.IOSScreenOrientationController+<>c.<SetStartsWithLandscapeAsync>b__1_0",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23353,
+      "metadata_method_index": 160167,
+      "token_row": 2150,
+      "rva": 117074304,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 131,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175309688,
+      "prefix16": "f44fbea9fd7b01a9fd430091000080d2"
+    },
+    "orientation_fixed_portrait_ready": {
+      "name": "Solis.Common.IOSScreenOrientationController+<>c.<SetFixedPortraitAsync>b__2_0",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23353,
+      "metadata_method_index": 160168,
+      "token_row": 2151,
+      "rva": 117074356,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 131,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175309696,
+      "prefix16": "f44fbea9fd7b01a9fd430091000080d2"
+    },
+    "orientation_fixed_landscape_ready": {
+      "name": "Solis.Common.IOSScreenOrientationController+<>c.<SetFixedLandscapeAsync>b__3_0",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23353,
+      "metadata_method_index": 160169,
+      "token_row": 2152,
+      "rva": 117074408,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 131,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175309704,
+      "prefix16": "f44fbea9fd7b01a9fd430091000080d2"
+    },
+    "orientation_after_ready": {
+      "name": "Solis.Common.ScreenOrientationManager+<>c__DisplayClass17_0.<AfterChangeOrientationAsync>b__0",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23370,
+      "metadata_method_index": 160235,
+      "token_row": 2218,
+      "rva": 117095980,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 131,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175310232,
+      "prefix16": "f44fbea9fd7b01a9fd430091141040b9"
+    },
+    "aspect_reset": {
+      "name": "UnityEngine.Camera.ResetAspect",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 23824,
+      "metadata_method_index": 162379,
+      "token_row": 467,
+      "rva": 125770172,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175651096,
+      "prefix16": "f44fbea9fd7b01a9fd430091538901b0"
+    },
+    "ui_component_transform": {
+      "name": "UnityEngine.Component.get_transform",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24034,
+      "metadata_method_index": 165079,
+      "token_row": 3167,
+      "rva": 126130724,
+      "return_type_index": 75929,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "UnityEngine.Transform",
+      "registration_pointer_slot_rva": 175672696,
+      "prefix16": "f44fbea9fd7b01a9fd430091938601f0"
+    },
+    "ui_gameobject_transform": {
+      "name": "UnityEngine.GameObject.get_transform",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24047,
+      "metadata_method_index": 165204,
+      "token_row": 3292,
+      "rva": 126149504,
+      "return_type_index": 75929,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "UnityEngine.Transform",
+      "registration_pointer_slot_rva": 175673696,
+      "prefix16": "f44fbea9fd7b01a9fd430091738601d0"
+    },
+    "ui_transform_point": {
+      "name": "UnityEngine.Transform.TransformPoint_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24116,
+      "metadata_method_index": 165907,
+      "token_row": 3995,
+      "rva": 126235340,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "position",
+          "metadata_type_index": 44825,
+          "type_name": "UnityEngine.Vector3"
+        },
+        {
+          "name": "ret",
+          "metadata_type_index": 44827,
+          "type_name": "UnityEngine.Vector3"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175679320,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "ui_inverse_transform_point": {
+      "name": "UnityEngine.Transform.InverseTransformPoint_Injected",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24116,
+      "metadata_method_index": 165908,
+      "token_row": 3996,
+      "rva": 126236272,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "position",
+          "metadata_type_index": 44825,
+          "type_name": "UnityEngine.Vector3"
+        },
+        {
+          "name": "ret",
+          "metadata_type_index": 44827,
+          "type_name": "UnityEngine.Vector3"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175679328,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "pano_ui_get": {
+      "name": "Solis.Photography.Photography360LiveContentModel.get_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 202,
+      "metadata_method_index": 1776,
+      "token_row": 1777,
+      "rva": 44856468,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 169971920,
+      "prefix16": "f44fbea9fd7b01a9fd430091f30300aa"
+    },
+    "pano_ui_set": {
+      "name": "Solis.Photography.Photography360LiveContentModel.set_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 202,
+      "metadata_method_index": 1777,
+      "token_row": 1778,
+      "rva": 44856544,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "value",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 2182,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 169971928,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "mv_ui_initialize": {
+      "name": "Solis.OutGame.LivePlayerUIView.Initialize",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 7418,
+      "metadata_method_index": 37055,
+      "token_row": 37056,
+      "rva": 51326876,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 170254152,
+      "prefix16": "f85fbca9f65701a9f44f02a9fd7b03a9"
+    },
+    "mv_ui_hide": {
+      "name": "Solis.OutGame.LivePlayerUIView.Hide",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 7418,
+      "metadata_method_index": 37064,
+      "token_row": 37065,
+      "rva": 51338708,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "isAnimation",
+          "metadata_type_index": 50298,
+          "type_name": "System.Boolean"
+        },
+        {
+          "name": "isAuto",
+          "metadata_type_index": 50298,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 170254224,
+      "prefix16": "e923bc6df65701a9f44f02a9fd7b03a9"
+    },
+    "preview_ui_bind": {
+      "name": "Solis.Photography.PhotographyPreviewContentPresenter.Bind",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 489,
+      "metadata_method_index": 3204,
+      "token_row": 3205,
+      "rva": 50361900,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 169983344,
+      "prefix16": "f85fbca9f65701a9f44f02a9fd7b03a9"
+    },
+    "preview_ui_get": {
+      "name": "Solis.Photography.PhotographyPreviewContentModel.get_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 486,
+      "metadata_method_index": 3199,
+      "token_row": 3200,
+      "rva": 50360940,
+      "return_type_index": 50275,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 2182,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 169983304,
+      "prefix16": "f44fbea9fd7b01a9fd430091f30300aa"
+    },
+    "preview_ui_set": {
+      "name": "Solis.Photography.PhotographyPreviewContentModel.set_IsUIActive",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 486,
+      "metadata_method_index": 3200,
+      "token_row": 3201,
+      "rva": 50361016,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "value",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 2182,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 169983312,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
     }
   },
   "hook_names": [
@@ -1094,7 +1579,19 @@
     "aa_init",
     "shadow_update",
     "focal_get",
-    "focal_set"
+    "focal_set",
+    "rotation_wait",
+    "rotation_wait_label",
+    "rotation_wait_simple",
+    "rotation_wait_preview",
+    "orientation_internal_move",
+    "orientation_starts_portrait_ready",
+    "orientation_starts_landscape_ready",
+    "orientation_fixed_portrait_ready",
+    "orientation_fixed_landscape_ready",
+    "orientation_after_ready",
+    "mv_ui_initialize",
+    "preview_ui_bind"
   ],
   "segments": {
     "__TEXT": {
@@ -1136,12 +1633,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 608,
+    "bytes": 992,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 152,
+    "bytes": 248,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -1191,6 +1688,36 @@
       "q_names",
       "max_texture",
       "rt_destroy"
-    ]
+    ],
+    "managed_semantic_method_count": 81,
+    "export_symbol_count": 7,
+    "original_iOS_orientation_rows": 13,
+    "all_original_prefixes_restreamed_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
+  },
+  "orientation_adapter": {
+    "scope": "Only verified iOS-on-Mac desktop; physical iOS and Android retain originals",
+    "original_MV_entry": "FixedPortrait phone pre-step -> physical rotation view -> FixedLandscape; exit restores saved original OrientationType",
+    "UniTask_bytes": 16,
+    "UniTask_source_offset": 0,
+    "UniTask_token_offset": 8,
+    "CancellationToken_bytes": 8,
+    "CancellationToken_source_offset": 0,
+    "Internal_MoveNext_unboxed_state_offset": 0,
+    "begin_state": -1,
+    "minimum_original_Unity_frames_before_ready": 2,
+    "actual_viewport_required": "width>0 and height>0",
+    "caller_precancel": "Original overload fallback",
+    "active_task": "Real PUBLIC SetOrientationAsync(FixedLandscape) with original CTS and Before/After pipeline",
+    "midtransition_caller_token": "Not externally linked, matching original public orientation substep; physical rotation view is removed on desktop only",
+    "global_Screen_or_Input_spoof": false
+  },
+  "preview_default_off": {
+    "scope": "PhotographyPreviewContentPresenter only; activity/expression/live viewing sessions",
+    "hook": "Original Bind first, then typed model setter false and readback once per new weak model identity",
+    "presenter_model_offset": 64,
+    "model_property_offset": 16,
+    "model_end_offset": 24,
+    "UI_On_and_Off_original_handlers_retained": true,
+    "paid_capture_and_selection_menus_changed": false
   }
 }

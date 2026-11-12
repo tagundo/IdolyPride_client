@@ -11,7 +11,9 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "afc8e1e6fe685e1653743e19d57a425d27ac2c2446fdae8a97811a39fc16debe"
+PROFILE_SHA256 = "6a928cdb8e54efaffc29413140f5f6ff63d5abdd4999127774bd80365cea0d68"
+PROFILE_ENTRY_COUNT = 88
+PROFILE_HOOK_COUNT = 31
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
 BOOTSTRAP_SHA256 = "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce"
 IPA_SHA256 = "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
@@ -98,13 +100,14 @@ def make_plan():
     target = profile["target"]
     if (target["unity_sha256"] != SOURCE_SHA256
             or target["bootstrap_unity_sha256"] != BOOTSTRAP_SHA256
-            or len(profile["aliases"]) != 63 or len(profile["hook_names"]) != 19):
+            or len(profile["aliases"]) != PROFILE_ENTRY_COUNT
+            or len(profile["hook_names"]) != PROFILE_HOOK_COUNT):
         raise ValueError("Original iOS presentation target differs")
     text, data = profile["segments"]["__TEXT"], profile["segments"]["__DATA"]
     cave, slot = profile["gateway_region"]["rva"], profile["slot_region"]["rva"]
-    if (cave < text["section_end"] or cave + 32 * 19 > text["rva"] + text["filesize"]
+    if (cave < text["section_end"] or cave + 32 * PROFILE_HOOK_COUNT > text["rva"] + text["filesize"]
             or slot < data["section_end"] or slot < data["rva"] + data["filesize"]
-            or slot + 8 * 19 > data["rva"] + data["vmsize"]):
+            or slot + 8 * PROFILE_HOOK_COUNT > data["rva"] + data["vmsize"]):
         raise ValueError("Gateway would overlap original code or data sections")
     plan = {"schema": 1, "target": "ios-arm64-6.1.1-156", "source_unity_sha256": SOURCE_SHA256,
             "bootstrap_unity_sha256": BOOTSTRAP_SHA256, "metadata_sha256": METADATA_SHA256,
@@ -172,7 +175,7 @@ def patch_presentation(native, plan, *, bootstrap_report=None):
                     "output_sha256": hashlib.sha256(result).hexdigest(),
                     "profile_sha256": PROFILE_SHA256,
                     "profile_header_sha256": plan["profile_header_sha256"],
-                    "hook_count": 19, "call_entry_count": 63,
+                    "hook_count": PROFILE_HOOK_COUNT, "call_entry_count": PROFILE_ENTRY_COUNT,
                     "runtime_executable_memory_writes": False,
                     "existing_section_layout_or_bss_modified": False,
                     "runtime_verified": False}

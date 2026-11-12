@@ -23,6 +23,8 @@ final class ServerModel: ObservableObject {
     @Published var status = "앱을 준비하고 있습니다."
     @Published var logs = ""
     @Published var alertMessage: String?
+    @Published var clientLaunchMessage = "PlayCover에서 ‘아이프라 로컬’을 두 번 클릭해 실행해 주세요."
+    @Published var clientLaunchFailed = false
     let dataDirectory: URL
     private let smoke: Bool
     private let smokeReport: URL?
@@ -280,16 +282,66 @@ final class ServerModel: ObservableObject {
     }
     func openGame() {
         guard running else { alertMessage = "먼저 서버를 시작해 주세요."; return }
-        let configuration = NSWorkspace.OpenConfiguration()
-        guard let application = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "game.qualiarts.idolypride.local") else {
-            alertMessage = "연결용 아이프라 IPA를 PlayCover에 먼저 설치해 주세요."
+        clientLaunchFailed = false
+        // PlayCover 3.1.0 has no app-launch URL/CLI. Its own launch() prepares
+        // settings, entitlements, signing and aliases before opening the game.
+        if let game = NSRunningApplication.runningApplications(withBundleIdentifier: "game.qualiarts.idolypride.local")
+                .first(where: { !$0.isTerminated }) {
+            clientLaunchMessage = game.activate(options: .activateIgnoringOtherApps)
+                ? "실행 중인 아이프라로 전환했습니다."
+                : "아이프라가 이미 실행 중입니다. Dock에서 게임 창을 선택해 주세요."
             return
         }
-        NSWorkspace.shared.openApplication(at: application, configuration: configuration) { [weak self] _, error in
-            if error != nil {
-                DispatchQueue.main.async { self?.alertMessage = "PlayCover에서 연결용 아이프라를 열어 주세요." }
+        let runningPlayCover = NSRunningApplication.runningApplications(withBundleIdentifier: "io.playcover.PlayCover")
+            .first(where: { !$0.isTerminated })
+        if let playcover = runningPlayCover, playcover.activate(options: .activateIgnoringOtherApps) {
+            clientLaunchMessage = "PlayCover에서 ‘아이프라 로컬’을 두 번 클릭해 실행해 주세요."
+            return
+        }
+        let workspace = NSWorkspace.shared
+        let candidates: [URL?] = [runningPlayCover?.bundleURL, workspace.urlForApplication(withBundleIdentifier: "io.playcover.PlayCover"),
+            URL(fileURLWithPath: "/Applications/PlayCover.app", isDirectory: true),
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/PlayCover.app", isDirectory: true)]
+        var applications: [URL] = []
+        for candidate in candidates.compactMap({ validPlayCover($0) }) {
+            let normalized = candidate.standardizedFileURL.resolvingSymlinksInPath()
+            if !applications.contains(normalized) { applications.append(normalized) }
+        }
+        guard !applications.isEmpty else {
+            clientLaunchFailed = true
+            clientLaunchMessage = "PlayCover를 찾지 못했습니다. PlayCover를 설치한 위치에서 먼저 연 뒤 다시 눌러 주세요."
+            alertMessage = clientLaunchMessage
+            return
+        }
+        clientLaunchMessage = "PlayCover에서 ‘아이프라 로컬’을 두 번 클릭해 실행해 주세요."
+        openPlayCover(applications, index: 0)
+    }
+
+    private func openPlayCover(_ candidates: [URL], index: Int) {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.promptsUserIfNeeded = false
+        NSWorkspace.shared.openApplication(at: candidates[index], configuration: configuration) { [weak self] _, error in
+            guard let error = error as NSError? else { return }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if index + 1 < candidates.count {
+                    self.openPlayCover(candidates, index: index + 1)
+                    return
+                }
+                self.clientLaunchFailed = true
+                self.clientLaunchMessage = "PlayCover를 열지 못했습니다 (OS \(error.code)). PlayCover 아이콘으로 열어 게임을 실행해 주세요."
+                self.alertMessage = self.clientLaunchMessage
             }
         }
+    }
+
+    private func validPlayCover(_ candidate: URL?) -> URL? {
+        guard let candidate = candidate else { return nil }
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: candidate.path, isDirectory: &directory), directory.boolValue,
+              let bundle = Bundle(url: candidate), bundle.bundleIdentifier == "io.playcover.PlayCover",
+              let executable = bundle.executableURL, FileManager.default.fileExists(atPath: executable.path) else { return nil }
+        return candidate
     }
     func revealData() {
         try? FileManager.default.createDirectory(at: dataDirectory, withIntermediateDirectories: true)
@@ -483,14 +535,16 @@ struct ServerView: View {
             HStack {
                 Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop)
                 Button("중지") { model.stop() }.disabled(!model.canStop)
-                Button("아이프라 열기") { model.openGame() }.disabled(!model.running)
+                Button("PlayCover에서 열기") { model.openGame() }.disabled(!model.running)
                 Spacer()
                 Button("데이터 폴더") { model.revealData() }
             }
+            Text(model.clientLaunchMessage).font(.caption).textSelection(.enabled)
+                .foregroundColor(model.clientLaunchFailed ? .orange : .secondary)
             Text("서버 127.0.0.1:50051 · 리소스 127.0.0.1:8080").font(.caption).foregroundStyle(.secondary)
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("연결용 IPA는 별도 파일로 제공됩니다. PlayCover에 설치한 게임을 위 버튼으로 실행합니다.")
+                    Text("연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("감상용 전체 해금", isOn: $model.mediaMode)
                         .disabled(model.running || model.busy || model.canStop)

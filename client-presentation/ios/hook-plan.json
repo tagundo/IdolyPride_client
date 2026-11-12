@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "afc8e1e6fe685e1653743e19d57a425d27ac2c2446fdae8a97811a39fc16debe",
+  "profile_sha256": "6a928cdb8e54efaffc29413140f5f6ff63d5abdd4999127774bd80365cea0d68",
   "hook_names": [
     "q_set",
     "q_apply",
@@ -25,7 +25,19 @@
     "aa_init",
     "shadow_update",
     "focal_get",
-    "focal_set"
+    "focal_set",
+    "rotation_wait",
+    "rotation_wait_label",
+    "rotation_wait_simple",
+    "rotation_wait_preview",
+    "orientation_internal_move",
+    "orientation_starts_portrait_ready",
+    "orientation_starts_landscape_ready",
+    "orientation_fixed_portrait_ready",
+    "orientation_fixed_landscape_ready",
+    "orientation_after_ready",
+    "mv_ui_initialize",
+    "preview_ui_bind"
   ],
   "entries": {
     "q_set": {
@@ -217,7 +229,127 @@
       "patched_entry": "a2557e14",
       "gateway_hex": "30a000b01022259110fedfc8500000b400021fd6e923bd6d59aa8117",
       "registration_pointer_slot": 175651464
+    },
+    "rotation_wait": {
+      "rva": 30430240,
+      "original16": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "gateway": 158892720,
+      "slot": 179886416,
+      "original_callable": 158892740,
+      "patched_entry": "a40bea15",
+      "gateway_hex": "30a000b01042259110fedfc8500000b400021fd6ff4302d157f41516",
+      "registration_pointer_slot": 170420384
+    },
+    "rotation_wait_label": {
+      "rva": 30430452,
+      "original16": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "gateway": 158892752,
+      "slot": 179886424,
+      "original_callable": 158892772,
+      "patched_entry": "770bea15",
+      "gateway_hex": "30a000b01062259110fedfc8500000b400021fd6ff4302d184f41516",
+      "registration_pointer_slot": 170420408
+    },
+    "rotation_wait_simple": {
+      "rva": 30430624,
+      "original16": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "gateway": 158892784,
+      "slot": 179886432,
+      "original_callable": 158892804,
+      "patched_entry": "540bea15",
+      "gateway_hex": "30a000b01082259110fedfc8500000b400021fd6ff4302d1a7f41516",
+      "registration_pointer_slot": 170420392
+    },
+    "rotation_wait_preview": {
+      "rva": 30430868,
+      "original16": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "gateway": 158892816,
+      "slot": 179886440,
+      "original_callable": 158892836,
+      "patched_entry": "1f0bea15",
+      "gateway_hex": "30a000b010a2259110fedfc8500000b400021fd6ff4302d1dcf41516",
+      "registration_pointer_slot": 170420400
+    },
+    "orientation_internal_move": {
+      "rva": 117083500,
+      "original16": "ff4301d1f65702a9f44f03a9fd7b04a9",
+      "gateway": 158892848,
+      "slot": 179886448,
+      "original_callable": 158892868,
+      "patched_entry": "717d9f14",
+      "gateway_hex": "30a000b010c2259110fedfc8500000b400021fd6ff4301d18a826017",
+      "registration_pointer_slot": 175310000
+    },
+    "orientation_starts_portrait_ready": {
+      "rva": 117074252,
+      "original16": "f44fbea9fd7b01a9fd430091000080d2",
+      "gateway": 158892880,
+      "slot": 179886456,
+      "original_callable": 158892900,
+      "patched_entry": "81869f14",
+      "gateway_hex": "30a000b010e2259110fedfc8500000b400021fd6f44fbea97a796017",
+      "registration_pointer_slot": 175309680
+    },
+    "orientation_starts_landscape_ready": {
+      "rva": 117074304,
+      "original16": "f44fbea9fd7b01a9fd430091000080d2",
+      "gateway": 158892912,
+      "slot": 179886464,
+      "original_callable": 158892932,
+      "patched_entry": "7c869f14",
+      "gateway_hex": "30a000b01002269110fedfc8500000b400021fd6f44fbea97f796017",
+      "registration_pointer_slot": 175309688
+    },
+    "orientation_fixed_portrait_ready": {
+      "rva": 117074356,
+      "original16": "f44fbea9fd7b01a9fd430091000080d2",
+      "gateway": 158892944,
+      "slot": 179886472,
+      "original_callable": 158892964,
+      "patched_entry": "77869f14",
+      "gateway_hex": "30a000b01022269110fedfc8500000b400021fd6f44fbea984796017",
+      "registration_pointer_slot": 175309696
+    },
+    "orientation_fixed_landscape_ready": {
+      "rva": 117074408,
+      "original16": "f44fbea9fd7b01a9fd430091000080d2",
+      "gateway": 158892976,
+      "slot": 179886480,
+      "original_callable": 158892996,
+      "patched_entry": "72869f14",
+      "gateway_hex": "30a000b01042269110fedfc8500000b400021fd6f44fbea989796017",
+      "registration_pointer_slot": 175309704
+    },
+    "orientation_after_ready": {
+      "rva": 117095980,
+      "original16": "f44fbea9fd7b01a9fd430091141040b9",
+      "gateway": 158893008,
+      "slot": 179886488,
+      "original_callable": 158893028,
+      "patched_entry": "69719f14",
+      "gateway_hex": "30a000b01062269110fedfc8500000b400021fd6f44fbea9928e6017",
+      "registration_pointer_slot": 175310232
+    },
+    "mv_ui_initialize": {
+      "rva": 51326876,
+      "original16": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "gateway": 158893040,
+      "slot": 179886496,
+      "original_callable": 158893060,
+      "patched_entry": "15559a15",
+      "gateway_hex": "30a000b01082269110fedfc8500000b400021fd6f85fbca9e6aa6516",
+      "registration_pointer_slot": 170254152
+    },
+    "preview_ui_bind": {
+      "rva": 50361900,
+      "original16": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "gateway": 158893072,
+      "slot": 179886504,
+      "original_callable": 158893092,
+      "patched_entry": "79039e15",
+      "gateway_hex": "30a000b010a2269110fedfc8500000b400021fd6f85fbca982fc6116",
+      "registration_pointer_slot": 169983344
     }
   },
-  "profile_header_sha256": "cb7ed477777bd0c512d9717621e00ebc71615e572482b00e95de0fdbbd6cff2f"
+  "profile_header_sha256": "914d2f85fddb9046300321df817687e3f9fe3046671293a6debe73777c9953d9"
 }

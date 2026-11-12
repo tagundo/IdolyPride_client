@@ -111,7 +111,7 @@ class IOSPackagingTests(unittest.TestCase):
             info = plistlib.loads(archive.read(APP + "Info.plist"))
             self.assertEqual(info["CFBundleIdentifier"], DEFAULT_BUNDLE_ID)
             self.assertEqual(info["CFBundleDisplayName"], "아이프라 로컬")
-            self.assertEqual(info["CFBundleVersion"], "156.9002")
+            self.assertEqual(info["CFBundleVersion"], "156.9003")
             self.assertEqual([scheme for item in info["CFBundleURLTypes"] for scheme in item["CFBundleURLSchemes"]],
                              [DEFAULT_BUNDLE_ID])
             self.assertTrue(info["NSAppTransportSecurity"]["NSAllowsArbitraryLoads"])

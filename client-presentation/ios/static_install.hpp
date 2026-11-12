@@ -69,9 +69,10 @@ void *install(void *) {
         const unsigned count=_dyld_image_count();
         for (unsigned i=0;i<count;++i) {
             const char *name=_dyld_get_image_name(i); if (!name) continue;
+            if (::strstr(name,"/AppKit.framework/")) desktop_host=true;
             const size_t length=std::strlen(name);
             if (length>=sizeof suffix-1 && !std::strcmp(name+length-(sizeof suffix-1),suffix)) {
-                header=_dyld_get_image_header(i); break;
+                header=_dyld_get_image_header(i);
             }
         }
         if (!header) pause_ms(200);
@@ -92,12 +93,25 @@ void *install(void *) {
         HOOK(fov_get,fov_get_hook,fov_get_original), HOOK(fov_set,fov_set_hook,fov_set_original),
         HOOK(focal_get,focal_get_hook,focal_get_original), HOOK(focal_set,focal_set_hook,focal_set_original),
         HOOK(aa_init,aa_hook,aa_original), HOOK(shadow_update,shadow_hook,shadow_original),
+        HOOK(rotation_wait,rotation::wait_hook,rotation::original_wait),
+        HOOK(rotation_wait_label,rotation::wait_label_hook,rotation::original_wait_label),
+        HOOK(rotation_wait_simple,rotation::wait_simple_hook,rotation::original_wait_simple),
+        HOOK(rotation_wait_preview,rotation::wait_preview_hook,rotation::original_wait_preview),
+        HOOK(orientation_internal_move,rotation::internal_move_hook,rotation::original_internal_move),
+        HOOK(orientation_starts_portrait_ready,rotation::starts_portrait_hook,rotation::original_starts_portrait),
+        HOOK(orientation_starts_landscape_ready,rotation::starts_landscape_hook,rotation::original_starts_landscape),
+        HOOK(orientation_fixed_portrait_ready,rotation::fixed_portrait_hook,rotation::original_fixed_portrait),
+        HOOK(orientation_fixed_landscape_ready,rotation::fixed_landscape_hook,rotation::original_fixed_landscape),
+        HOOK(orientation_after_ready,rotation::after_hook,rotation::original_after),
+        HOOK(mv_ui_initialize,mv_ui_initialize_hook,mv_ui_initialize_original),
+        HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {
         if (!hook.entry->gateway || !hook.entry->slot) { set_state("init_failed"); return nullptr; }
         *hook.original=reinterpret_cast<void *>(image_base+hook.entry->gateway+20);
     }
+    if (!rotation::ready_for_publish() || !preview_ui.ready()) { set_state("init_failed"); return nullptr; }
     // All originals are valid before the first replacement is visible. Any
     // concurrent invocation during publication takes the original path.
     for (auto &hook:hooks) __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),

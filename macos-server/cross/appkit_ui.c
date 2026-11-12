@@ -1,5 +1,6 @@
 #include "darwin_objc.h"
 #include "presentation_contract.h"
+#include "playcover_launch.h"
 
 /* The launcher owns Python embedding; this file owns only the Cocoa window and
    its existing local JSON-control child. No client download/install code. */
@@ -9,7 +10,7 @@ enum { C_CUSTOM = 1, C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW, C_EXP
 
 static struct {
     IDObj app, delegate, window, timer, task, writer, defaults, dataURL, prefsURL, smokeURL;
-    IDObj serverLabel, visualLabel, metricLabel, logView, start, stop, openGame;
+    IDObj serverLabel, launchLabel, visualLabel, metricLabel, logView, start, stop, openGame;
     IDObj media, live, download, custom, expand, menus[6];
     IDPrefs prefs;
     int invalidPrefs, saveFailed, running, busy, canStop, mediaMode, liveMode, downloadMode;
@@ -182,13 +183,87 @@ static void begin_stop(void) {
     if (!send_control("stop")) { G.busy = 0; status("서버 엔진에 요청을 전달하지 못했습니다."); update_controls(); }
 }
 
+static void launch_message(const char *message, int failed) {
+    text(G.launchLabel, message);
+    id_set(G.launchLabel, "setTextColor:", color(failed ? "systemOrangeColor" : "secondaryLabelColor"));
+}
+
+static IDObj running_application(const char *bundle) {
+    IDObj applications = id_arg(id_class("NSRunningApplication"), "runningApplicationsWithBundleIdentifier:", id_string(bundle));
+    long count = id_long(applications, "count");
+    if (count > 32) count = 32;
+    for (long i = 0; i < count; ++i) {
+        IDObj application = id_index(applications, "objectAtIndex:", i);
+        if (!id_bool(application, "isTerminated")) return application;
+    }
+    return 0;
+}
+
+static IDBool activate_application(IDObj application) {
+    /* NSApplicationActivateIgnoringOtherApps, from NSRunningApplication.h. */
+    return application && ((IDBool (*)(IDObj, IDSel, unsigned long))IDRuntime.message)(
+        application, id_sel("activateWithOptions:"), 2);
+}
+
+static IDObj valid_playcover_url(IDObj candidate) {
+    if (!candidate) return 0;
+    IDObj manager = id_get(id_class("NSFileManager"), "defaultManager");
+    IDObj path = id_get(candidate, "path");
+    IDBool directory = 0;
+    int exists = ((IDBool (*)(IDObj, IDSel, IDObj, IDBool *))IDRuntime.message)(
+        manager, id_sel("fileExistsAtPath:isDirectory:"), path, &directory);
+    IDObj bundle = id_arg(id_class("NSBundle"), "bundleWithURL:", candidate);
+    IDObj executable = id_get(bundle, "executableURL");
+    int executableExists = executable && id_bool_arg(manager, "fileExistsAtPath:", id_get(executable, "path"));
+    return id_playcover_candidate_valid(exists, directory, executableExists,
+        id_utf8(id_get(bundle, "bundleIdentifier"))) ? candidate : 0;
+}
+
 static void open_game(void) {
-    if (!G.running) return;
+    IDObj game = running_application(IDOLY_GAME_BUNDLE);
+    IDObj playcover = running_application(IDOLY_PLAYCOVER_BUNDLE);
+    enum IDLaunchRoute route = id_launch_route(G.running, game != 0, playcover != 0);
+    if (route == ID_LAUNCH_SERVER_STOPPED) { launch_message("먼저 서버를 시작해 주세요.", 1); return; }
+    if (route == ID_LAUNCH_FOCUS_GAME) {
+        launch_message(activate_application(game) ? "실행 중인 아이프라로 전환했습니다."
+            : "아이프라가 이미 실행 중입니다. Dock에서 게임 창을 선택해 주세요.", 0);
+        return;
+    }
+    if (route == ID_LAUNCH_FOCUS_PLAYCOVER && activate_application(playcover)) {
+        launch_message(IDOLY_PLAYCOVER_INSTRUCTION, 0); return;
+    }
     IDObj workspace = id_get(id_class("NSWorkspace"), "sharedWorkspace");
-    IDObj application = id_arg(workspace, "URLForApplicationWithBundleIdentifier:", id_string("game.qualiarts.idolypride.local"));
-    if (!application) { status("연결용 IPA를 PlayCover에 별도로 설치한 뒤 다시 실행해 주세요."); return; }
-    IDBool opened = ((IDBool (*)(IDObj, IDSel, IDObj))IDRuntime.message)(workspace, id_sel("openURL:"), application);
-    if (!opened) status("PlayCover에서 연결용 아이프라를 열어 주세요.");
+    IDObj home = id_get(id_get(id_class("NSFileManager"), "defaultManager"), "homeDirectoryForCurrentUser");
+    IDObj candidates[] = {playcover ? id_get(playcover, "bundleURL") : 0,
+        id_arg(workspace, "URLForApplicationWithBundleIdentifier:", id_string(IDOLY_PLAYCOVER_BUNDLE)),
+        id_arg(id_class("NSURL"), "fileURLWithPath:", id_string("/Applications/PlayCover.app")),
+        childURL(home, "Applications/PlayCover.app")};
+    IDObj error = 0, tried[4]; int attempted = 0;
+    for (int i = 0; i < 4; ++i) {
+        IDObj application = valid_playcover_url(candidates[i]);
+        if (!application) continue;
+        int duplicate = 0;
+        for (int j = 0; j < attempted; ++j)
+            if (id_bool_arg(application, "isEqual:", tried[j])) duplicate = 1;
+        if (duplicate) continue;
+        tried[attempted++] = application;
+        error = 0;
+        /* NSWorkspaceLaunchDefault == NSWorkspaceLaunchAsync (0x10000).
+           Error presentation is not requested. Never launch the game alias. */
+        IDObj opened = ((IDObj (*)(IDObj, IDSel, IDObj, unsigned long, IDObj, IDObj *))IDRuntime.message)(workspace,
+            id_sel("launchApplicationAtURL:options:configuration:error:"), application, 0x10000,
+            id_get(id_class("NSDictionary"), "dictionary"), &error);
+        if (opened) { launch_message(IDOLY_PLAYCOVER_INSTRUCTION, 0); return; }
+    }
+    if (!attempted) {
+        launch_message("PlayCover를 찾지 못했습니다. 설치한 위치에서 먼저 연 뒤 다시 눌러 주세요.", 1);
+        return;
+    }
+    char message[320];
+    if (error) snprintf(message, sizeof message, "PlayCover를 열지 못했습니다 (OS %ld). PlayCover 아이콘으로 열어 게임을 실행해 주세요.",
+        id_long(error, "code"));
+    else snprintf(message, sizeof message, "%s", "PlayCover를 열지 못했습니다. PlayCover 아이콘으로 열어 게임을 실행해 주세요.");
+    launch_message(message, 1);
 }
 
 static void control_action(IDObj self, IDSel command, IDObj sender) {
@@ -305,18 +380,19 @@ static void make_window(void) {
     G.serverLabel = add_label(root, "앱을 준비하고 있습니다.", 50, 30, 14, 0);
     G.start = add_button(root, "서버 시작", 12, 88, 110, C_START, 0);
     G.stop = add_button(root, "중지", 128, 88, 85, C_STOP, 0);
-    G.openGame = add_button(root, "아이프라 열기", 220, 88, 145, C_OPEN, 0);
+    G.openGame = add_button(root, "PlayCover에서 열기", 220, 88, 165, C_OPEN, 0);
     add_button(root, "데이터 폴더", 576, 88, 140, C_FOLDER, 0);
-    add_label(root, "서버 127.0.0.1:50051 · 리소스 127.0.0.1:8080", 124, 22, 11, 1);
+    G.launchLabel = add_label(root, IDOLY_PLAYCOVER_INSTRUCTION, 124, 34, 11, 1);
+    add_label(root, "서버 127.0.0.1:50051 · 리소스 127.0.0.1:8080", 164, 22, 11, 1);
 
-    IDObj scroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 154, 724, 450));
+    IDObj scroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 192, 724, 412));
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
     IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1060));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
-    add_label(document, "연결용 IPA는 별도 파일입니다. PlayCover에 설치한 게임을 위 버튼으로 실행합니다.", 0, 36, 12, 1);
+    add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
     G.media = add_button(document, "감상용 전체 해금", 8, 40, 430, C_MEDIA, 1);
     id_set_long(G.media, "setState:", G.mediaMode);
     add_label(document, "감상용 저장은 일반 진행과 별도로 보관됩니다. 변경 후 서버를 다시 시작하고 게임 타이틀에서 다시 로그인해 주세요.", 72, 38, 11, 1);

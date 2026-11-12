@@ -146,6 +146,26 @@ inline bool fills_parent(Rect parent, Rect child, Vec3 position, Vec3 scale, Qua
         && std::fabs(child.y + position.y - parent.y) < 2.f;
 }
 
+// Recover the unexpanded RectTransform bounds after our sizeDelta override.
+// Anchors and pivot are unchanged: the width difference is exactly the
+// sizeDelta difference, and rect.x/width is the negative horizontal pivot.
+inline bool baseline_image_bounds(Rect drawn, Vec2 current_delta, Vec2 baseline_delta,
+                                  Vec3 baseline_position, Rect *bounds) {
+    if (!bounds || !std::isfinite(drawn.x) || !std::isfinite(drawn.y)
+            || !std::isfinite(drawn.width) || !std::isfinite(drawn.height)
+            || drawn.width <= 0 || drawn.height <= 0
+            || drawn.x > .01f || drawn.x < -drawn.width-.01f
+            || drawn.y > .01f || drawn.y < -drawn.height-.01f) return false;
+    const float width = drawn.width + baseline_delta.x - current_delta.x;
+    const float height = drawn.height + baseline_delta.y - current_delta.y;
+    const float x = baseline_position.x + drawn.x * width / drawn.width;
+    const float y = baseline_position.y + drawn.y * height / drawn.height;
+    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(width) || !std::isfinite(height)
+            || width < 1 || height < 1 || width > 32768 || height > 32768) return false;
+    *bounds = {x,y,width,height};
+    return true;
+}
+
 struct Config {
     std::int64_t revision = 0;
     bool custom_graphics = false;
