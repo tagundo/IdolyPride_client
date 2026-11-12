@@ -47,6 +47,12 @@ def marker():
             "base_version_code": 414, "native_library_sha256": NATIVE_SHA256}
 
 
+def output_verify_command(signer, apk):
+    # A min28 manifest selects v3 by default. Explicitly include API24..27
+    # when checking both signature blocks; the APK/signing minSdk stays28.
+    return [*signer,"verify","--verbose","--print-certs","--min-sdk-version","24",apk]
+
+
 def xml_shape(element):
     return (element.tag, tuple(sorted(element.attrib.items())),
             (element.text or "").strip(), tuple(xml_shape(child) for child in element))
@@ -248,7 +254,7 @@ def build(args):
         run([*signer,"sign","--ks",key,"--ks-key-alias","idoly-diagnostics-public","--ks-pass","file:"+str(password),
             "--min-sdk-version","28","--v1-signing-enabled","false","--v2-signing-enabled","true","--v3-signing-enabled","true","--v4-signing-enabled","false","--out",signed,aligned])
         cache.register(signed,None,own=True)
-        signature=run([*signer,"verify","--verbose","--print-certs",signed]).decode()
+        signature=run(output_verify_command(signer,signed)).decode()
         if (re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([a-f0-9]{64})$",signature,re.M)!=[CERTIFICATE]
                 or any("Verified using v"+str(n)+" scheme (APK Signature Scheme v"+str(n)+"): true" not in signature for n in (2,3))):
             raise ValueError("Standalone signature differs from the existing diagnostic certificate")

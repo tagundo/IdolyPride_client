@@ -68,3 +68,9 @@ def test_compiled_tree_compares_typed_attributes_not_source_lines():
 
 def test_standalone_marker_has_only_public_compatibility_fields():
     assert tool.marker()=={'schema':1,'bridge_version':1,'target_package':tool.PACKAGE,'base_version_code':414,'native_library_sha256':tool.NATIVE_SHA256}
+
+
+def test_dual_signature_output_verification_includes_v2_sdk_range_only_for_verifier():
+    command=tool.output_verify_command(['java','-jar','apksigner.jar'],Path('output.apk'))
+    assert command==['java','-jar','apksigner.jar','verify','--verbose','--print-certs','--min-sdk-version','24',Path('output.apk')]
+    assert 'sign' not in command and 'AndroidManifest.xml' not in command
