@@ -49,7 +49,9 @@ uintptr_t image_base;
 void *held_library;
 // Set before hooks are published. PlayCover is identified by loaded AppKit;
 // orientation waiting defaults to enabled on both desktop and phones.
+#ifdef IDOLY_DARWIN_BRIDGE
 bool desktop_host = false;
+#endif
 std::atomic<uintptr_t> game_thread_id{0};
 pthread_mutex_t playback_mutex = PTHREAD_MUTEX_INITIALIZER;
 PlaybackSettings playback_settings;
