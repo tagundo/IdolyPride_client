@@ -6,6 +6,7 @@ SwiftUI builder remains macos-server/build_app.py for a real Mac runner.
 """
 from __future__ import annotations
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -31,7 +32,8 @@ APP = "IdolyPrideLocalServer"
 VERSION = "0.3.19"
 BUILD_NUMBER = "38"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
-PAYLOAD_SHA = "1b310088f2f8573c1b62bd071de3e064e4f6c59ba8058a7f4f5c3665a82aa9f5"
+PAYLOAD_SHA = "195788f94c4bb693810a1175d847eba5fa82f9ee77602f4a1537a870e7a7cdb0"
+PAYLOAD_BYTES = 190983804
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
 CGROUP = Path("/sys/fs/cgroup")
 
@@ -47,6 +49,49 @@ def release_public_input_cache(path):
     if hasattr(os, "posix_fadvise"):
         with Path(path).open("rb") as stream:
             os.posix_fadvise(stream.fileno(), 0, 0, os.POSIX_FADV_DONTNEED)
+
+
+def install_payload(source, destination, *, expected_sha=PAYLOAD_SHA, expected_bytes=PAYLOAD_BYTES):
+    """Prefer one inode; cross-filesystem builds make one bounded app copy."""
+    source, destination = Path(source), Path(destination)
+    if source.is_symlink() or not source.is_file() or source.stat().st_size != expected_bytes:
+        raise ValueError("Pinned payload size or source type differs")
+    try:
+        os.link(source, destination)
+    except OSError as error:
+        if error.errno != errno.EXDEV:
+            raise
+        created = False
+        try:
+            with source.open("rb") as incoming, destination.open("xb") as outgoing:
+                created = True
+                copied = 0
+                while block := incoming.read(65536):
+                    copied += len(block)
+                    if copied > expected_bytes:
+                        raise ValueError("Payload changed beyond its byte bound")
+                    outgoing.write(block)
+                if copied != expected_bytes:
+                    raise ValueError("Payload size changed while copying")
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+            destination.chmod(stat.S_IMODE(source.stat().st_mode))
+            if destination.stat().st_size != expected_bytes or digest(destination) != expected_sha:
+                raise ValueError("Copied payload fingerprint differs")
+        except BaseException:
+            if created:
+                destination.unlink(missing_ok=True)
+            raise
+        finally:
+            release_public_input_cache(source)
+        return "streamed_copy"
+    # The caller validates the public source before installing it; verify the
+    # shared inode again so this helper also rejects an unexpected standalone input.
+    if digest(destination) != expected_sha:
+        destination.unlink()
+        raise ValueError("Linked payload fingerprint differs")
+    release_public_input_cache(source)
+    return "hardlink"
 
 
 def budget():
@@ -107,8 +152,9 @@ def archive_app(app, archive):
 def build(args):
     if sys.version_info[:2] != (3, 12):
         raise ValueError("Use CPython 3.12 for original PYZ inspection")
-    for path, expected in ((args.runtime, RUNTIME_SHA), (args.payload, PAYLOAD_SHA), (args.rcodesign, SIGNER_SHA)):
-        if path.is_symlink() or not path.is_file() or digest(path) != expected:
+    for path, expected, size in ((args.runtime, RUNTIME_SHA, None), (args.payload, PAYLOAD_SHA, PAYLOAD_BYTES),
+                                 (args.rcodesign, SIGNER_SHA, None)):
+        if path.is_symlink() or not path.is_file() or (size is not None and path.stat().st_size != size) or digest(path) != expected:
             raise ValueError("Pinned public input differs: " + path.name)
     if args.app.exists() or args.archive.exists():
         raise ValueError("Choose unused app/archive output")
@@ -152,8 +198,7 @@ def build(args):
         target = resources/"code"/path.relative_to(ROOT)
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
-    # Same tmpfs only: no duplicate 88 MB anonymous/shmem allocation.
-    os.link(args.payload, resources/"ServerData.zip")
+    report["payload_installation"] = install_payload(args.payload, resources/"ServerData.zip")
     for source in (ROOT/"LICENSE", ROOT/"NOTICE"):
         if source.is_file():
             target = resources/"licenses"/source.name
