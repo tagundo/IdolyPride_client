@@ -12,6 +12,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.widget.Toast;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -39,7 +40,7 @@ import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Stages the installed game's public APKs unchanged with one bundled feature split. */
+/** Updates from installed public APKs, or optionally inherits a feature-only update. */
 final class PresentationAddonInstaller {
     static final String ACTION_RESULT = "game.qualiarts.idolypride.localserver.PRESENTATION_INSTALL_RESULT";
     static final String EXTRA_REQUESTED_SESSION = "presentation_session_id";
@@ -47,6 +48,8 @@ final class PresentationAddonInstaller {
     private static final String PREFS = "presentation_addon_install";
     private static final String MANIFEST_ASSET = "presentation/manifest.json";
     private static final String SPLIT_ID = "idoly_presentation";
+    private static final String STANDALONE_MARKER = "assets/idoly-presentation-standalone.json";
+    private static final String PRESENTATION_NATIVE_SHA256 = "7a68c1be9a65b71cd3d56ce56c737fe3823438324746ec78feb436bc5ecbca6d";
     private static final int MAX_APK_BYTES = 1024 * 1024;
     private static final ExecutorService WORKER = Executors.newSingleThreadExecutor();
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
@@ -55,11 +58,19 @@ final class PresentationAddonInstaller {
     /** Closed, bounded public diagnostics. Never stores Throwable.getMessage() or raw OS text. */
     static final class Failure {
         final String stage, reason, exceptionClass, member, expectedSha, actualSha, installToken;
+        final String category, osMessage, errno;
         final int status, legacyStatus;
         final long timeMs;
 
         Failure(String stage, String reason, String exceptionClass, String member, String expectedSha,
                 String actualSha, String installToken, int status, int legacyStatus, long timeMs) {
+            this(stage, reason, exceptionClass, member, expectedSha, actualSha, installToken, status,
+                    legacyStatus, timeMs, "", "");
+        }
+
+        Failure(String stage, String reason, String exceptionClass, String member, String expectedSha,
+                String actualSha, String installToken, int status, int legacyStatus, long timeMs,
+                String osMessage, String errno) {
             this.stage = stage;
             this.reason = reason;
             this.exceptionClass = exceptionClass;
@@ -70,6 +81,10 @@ final class PresentationAddonInstaller {
             this.status = status;
             this.legacyStatus = legacyStatus;
             this.timeMs = Math.max(0, timeMs);
+            category = "storage_or_io_error".equals(reason) || "storage_insufficient".equals(reason)
+                    ? "storage_or_io_error" : FailurePolicy.category(status, legacyStatus, installToken);
+            this.osMessage = osMessage;
+            this.errno = errno;
         }
     }
 
@@ -107,6 +122,7 @@ final class PresentationAddonInstaller {
                 case "existing_apk_size_limit": case "existing_apk_count_limit": case "existing_apk_name_invalid":
                 case "existing_apk_duplicate": case "existing_apk_copy_mismatch": case "existing_apk_changed":
                 case "existing_apk_total_limit":
+                case "storage_or_io_error": case "inherit_failed": case "digest_store_failed": case "rename_failed":
                     return value;
                 default: return "unknown";
             }
@@ -147,21 +163,59 @@ final class PresentationAddonInstaller {
         }
 
         static String osReason(String message) {
-            if (message == null) return "os_rejected";
-            String text = message.substring(0, Math.min(4096, message.length())).toLowerCase(java.util.Locale.ROOT);
+            return osReason(NO_STATUS, NO_STATUS, message);
+        }
+
+        static String category(int status, int legacyStatus, String token) {
+            return status == 6 || legacyStatus == -4 || "INSTALL_FAILED_INSUFFICIENT_STORAGE".equals(token)
+                    ? "storage_or_io_error" : "installation_error";
+        }
+
+        static String osReason(int status, int legacyStatus, String message) {
+            String text = message == null ? "" : message.substring(0, Math.min(4096, message.length()))
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (text.contains("failed to inherit") || text.contains("failed to link")) return "inherit_failed";
+            if (text.contains("failed to store digest") || text.contains("failed to write digest")) return "digest_store_failed";
+            if (text.contains("failed to rename")) return "rename_failed";
             if (text.contains("failed to extract native libraries")) return "native_library_extract_failed";
             if (text.contains("no matching abi")) return "abi_mismatch";
-            if (text.contains("insufficient storage")) return "storage_insufficient";
+            if (text.contains("insufficient storage")) return "storage_or_io_error";
             if (text.contains("signatures do not match") || text.contains("inconsistent certificates")) return "signer_mismatch";
             if (text.contains("user rejected") || text.contains("user canceled") || text.contains("user cancelled")) return "user_rejected";
-            return "os_rejected";
+            return "storage_or_io_error".equals(category(status, legacyStatus, installToken(message)))
+                    ? "storage_or_io_error" : "os_rejected";
+        }
+
+        static String errno(String message) {
+            if (message == null) return "";
+            Matcher match = Pattern.compile("\\b(?:ENOSPC|EACCES|EPERM|EXDEV|EIO|ENOENT|EROFS|ENOMEM|EMFILE|ENFILE|EDQUOT|EEXIST|EINVAL|ENOTDIR|EISDIR|ENOTEMPTY|ETXTBSY)\\b")
+                    .matcher(message.substring(0, Math.min(4096, message.length())));
+            return match.find() ? match.group() : "";
+        }
+
+        static String redactMessage(String message) {
+            if (message == null) return "";
+            String text = message.substring(0, Math.min(4096, message.length()))
+                    .replaceAll("[\\p{Cc}\\p{Cf}]", " ");
+            text = text.replaceAll("(?i)\\b[a-z][a-z0-9+.-]{1,20}://[^\\s<>\"']+", "[URI]");
+            text = text.replaceAll("\"/[^\"]*\"|'/.+?'", "[path]");
+            text = text.replaceAll("(?<![A-Za-z0-9_])/(?:[^\\s,;:()\\[\\]{}<>\"']+)", "[path]");
+            text = text.replaceAll("(?i)\\b[A-Z]:\\\\[^\\s,;()\\[\\]{}<>\"']+", "[path]");
+            text = text.replaceAll("(?i)\\b(?:Bearer|Basic)\\s+[^\\s,;]+", "[credential]");
+            text = text.replaceAll("(?i)\\b(?:access[_-]?token|refresh[_-]?token|token|password|passwd|authorization|auth|secret|credential|api[_-]?key|session[_-]?id)\\b\\s*[:=]\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s,;]+)", "[credential]");
+            text = text.replaceAll("\\beyJ[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}\\.[A-Za-z0-9_-]{4,}\\b", "[token]");
+            text = text.replaceAll("(?<![A-Za-z0-9_+/=.-])(?!INSTALL_)[A-Za-z0-9_+/=-]{24,}(?![A-Za-z0-9_+/=.-])", "[token]");
+            text = text.replaceAll("\\b[^\\s@]+@[^\\s@]+\\.[^\\s@]+", "[account]");
+            text = text.replaceAll("\\s+", " ").trim();
+            return text.substring(0, Math.min(512, text.length()));
         }
 
         static Failure make(String stage, String reason, Throwable error, String member,
                 String expected, String actual, int status, int legacyStatus, String osMessage) {
             return new Failure(stage(stage), reason(reason), exceptionClass(error == null
                     ? "none" : error.getClass().getSimpleName()), publicMember(member), shortSha(expected),
-                    shortSha(actual), installToken(osMessage), status, legacyStatus, System.currentTimeMillis());
+                    shortSha(actual), installToken(osMessage), status, legacyStatus, System.currentTimeMillis(),
+                    redactMessage(osMessage), errno(osMessage));
         }
     }
 
@@ -193,12 +247,23 @@ final class PresentationAddonInstaller {
 
         static ExistingPlan plan(String basePath, String[] names, String[] paths, long featureBytes)
                 throws ExistingApkException {
+            return create(basePath, names, paths, featureBytes, true);
+        }
+
+        static ExistingPlan inventory(String basePath, String[] names, String[] paths, long featureBytes)
+                throws ExistingApkException {
+            return create(basePath, names, paths, featureBytes, false);
+        }
+
+        private static ExistingPlan create(String basePath, String[] names, String[] paths, long featureBytes,
+                boolean copyExisting) throws ExistingApkException {
             String[] splitNames = names == null ? new String[0] : names.clone();
             String[] splitPaths = paths == null ? new String[0] : paths.clone();
             if (splitNames.length != splitPaths.length) throw new ExistingApkException("split_layout_mismatch");
             if (splitNames.length > MAX_SPLITS) throw new ExistingApkException("existing_apk_count_limit");
             List<ExistingApk> files = new ArrayList<>();
-            files.add(new ExistingApk("base.apk", basePath));
+            if (basePath == null || basePath.isEmpty()) throw new ExistingApkException("existing_apk_missing");
+            if (copyExisting) files.add(new ExistingApk("base.apk", basePath));
             HashSet<String> uniqueNames = new HashSet<>();
             HashSet<String> uniquePaths = new HashSet<>();
             uniquePaths.add(basePath);
@@ -207,7 +272,7 @@ final class PresentationAddonInstaller {
                 if (name == null) throw new ExistingApkException("existing_apk_name_invalid");
                 if (splitPaths[index] == null || splitPaths[index].isEmpty()) throw new ExistingApkException("existing_apk_missing");
                 if (!uniqueNames.add(name) || !uniquePaths.add(splitPaths[index])) throw new ExistingApkException("existing_apk_duplicate");
-                if (!"idoly_presentation".equals(splitNames[index])) files.add(new ExistingApk(name, splitPaths[index]));
+                if (copyExisting && !"idoly_presentation".equals(splitNames[index])) files.add(new ExistingApk(name, splitPaths[index]));
             }
             if (featureBytes <= 0 || featureBytes > 1024 * 1024) throw new ExistingApkException("existing_apk_total_limit");
             long total = featureBytes;
@@ -274,11 +339,12 @@ final class PresentationAddonInstaller {
         final List<ExistingApk> files;
         final long sessionBytes;
 
-        ExistingSet(PackageInfo info, long featureBytes) throws InstallFailure {
+        ExistingSet(PackageInfo info, long featureBytes, boolean featureOnly) throws InstallFailure {
             lastUpdateTime = info.lastUpdateTime;
             try {
-                plan = ExistingApkPolicy.plan(info.applicationInfo.sourceDir, info.splitNames,
-                        info.applicationInfo.splitSourceDirs, featureBytes);
+                plan = featureOnly ? ExistingApkPolicy.inventory(info.applicationInfo.sourceDir, info.splitNames,
+                        info.applicationInfo.splitSourceDirs, featureBytes) : ExistingApkPolicy.plan(
+                        info.applicationInfo.sourceDir, info.splitNames, info.applicationInfo.splitSourceDirs, featureBytes);
             } catch (ExistingApkException error) {
                 throw failure("existing_apk_copy", error.reason);
             }
@@ -352,9 +418,11 @@ final class PresentationAddonInstaller {
         final boolean bundleAvailable;
         final Failure failure;
         final String profile;
+        final boolean featureOnly;
+        final List<PresentationStorage.Estimate> storage;
 
         Snapshot(List<Profile> compatible, List<Profile> installed, boolean busy, String state, boolean available,
-                Failure failure, String profile) {
+                Failure failure, String profile, boolean featureOnly, List<PresentationStorage.Estimate> storage) {
             this.compatible = Collections.unmodifiableList(compatible);
             this.installed = Collections.unmodifiableList(installed);
             this.busy = busy;
@@ -362,6 +430,8 @@ final class PresentationAddonInstaller {
             bundleAvailable = available;
             this.failure = failure;
             this.profile = profile;
+            this.featureOnly = featureOnly;
+            this.storage = Collections.unmodifiableList(new ArrayList<>(storage));
         }
     }
 
@@ -372,7 +442,15 @@ final class PresentationAddonInstaller {
         WORKER.execute(() -> deliver(callback, scan(app)));
     }
 
-    static void install(Context context, Profile requested, Callback callback) {
+    static boolean featureOnly(Context context) {
+        return preferences(context).getBoolean("feature_only", false);
+    }
+
+    static void setFeatureOnly(Context context, boolean enabled) {
+        preferences(context).edit().putBoolean("feature_only", enabled).apply();
+    }
+
+    static void install(Context context, Profile requested, boolean featureOnly, Callback callback) {
         Context app = context.getApplicationContext();
         if (!PREPARING.compareAndSet(false, true)) {
             refresh(app, callback);
@@ -383,11 +461,13 @@ final class PresentationAddonInstaller {
             try {
                 if (hasInstallerSession(app)) throw failure("preflight", "active_session");
                 clearFailure(preferences(app).edit()).putString("state", "checking").putString("profile", requested.id)
+                        .putBoolean("attempt_feature_only", featureOnly)
+                        .putString("attempt_mode", featureOnly ? "feature_only_inherit" : "full_update")
                         .putInt("session_id", -1).commit();
                 attempt.stage = "manifest";
                 Profile profile = findProfile(loadProfiles(app), requested.id);
                 if (profile == null) throw failure("manifest", "missing_profile");
-                installVerified(app, profile, attempt);
+                installVerified(app, profile, featureOnly, attempt);
             } catch (Exception error) {
                 storeFailure(app, error instanceof InstallFailure ? ((InstallFailure) error).failure
                         : FailurePolicy.make(attempt.stage, "operation_failed", error, null, null, null,
@@ -400,15 +480,21 @@ final class PresentationAddonInstaller {
         });
     }
 
-    private static void installVerified(Context app, Profile profile, Attempt attempt) throws Exception {
+    private static void installVerified(Context app, Profile profile, boolean featureOnly, Attempt attempt) throws Exception {
         if (Build.VERSION.SDK_INT < 28) throw failure("preflight", "android_unsupported");
         if (!app.getPackageManager().canRequestPackageInstalls()) throw failure("permission", "permission_unavailable");
         attempt.stage = "compatibility";
         PackageInfo installed = compatiblePackage(app, profile);
+        if (hasStandalonePresentation(installed)) {
+            clearFailure(preferences(app).edit()).putString("state", "installed").putInt("session_id", -1).commit();
+            MAIN.post(() -> Toast.makeText(app, R.string.presentation_install_already_included,
+                    Toast.LENGTH_LONG).show());
+            return;
+        }
         attempt.stage = "base_hash";
         verifyBaseLibraries(installed, profile);
         attempt.stage = "existing_apk_copy";
-        ExistingSet existing = new ExistingSet(installed, profile.apkBytes);
+        ExistingSet existing = new ExistingSet(installed, profile.apkBytes, featureOnly);
         attempt.stage = "asset_copy";
         File staged = File.createTempFile("presentation-addon-", ".apk", app.getCacheDir());
         PackageInstaller installer = app.getPackageManager().getPackageInstaller();
@@ -429,7 +515,8 @@ final class PresentationAddonInstaller {
             // package, version and signer against the inherited installed base.
             // A feature APK is not a standalone base for getPackageArchiveInfo.
             PackageInstaller.SessionParams params = new PackageInstaller.SessionParams(
-                    PackageInstaller.SessionParams.MODE_INHERIT_EXISTING);
+                    featureOnly ? PackageInstaller.SessionParams.MODE_INHERIT_EXISTING
+                            : PackageInstaller.SessionParams.MODE_FULL_INSTALL);
             params.setAppPackageName(profile.targetPackage);
             params.setSize(existing.sessionBytes);
             if (Build.VERSION.SDK_INT >= 31) {
@@ -445,8 +532,10 @@ final class PresentationAddonInstaller {
                         throw failure("session_write", "asset_size_mismatch");
                     session.fsync(output);
                 }
-                attempt.stage = "existing_apk_copy";
-                preferences(app).edit().putString("state", "copying_existing").commit();
+                if (!featureOnly) {
+                    attempt.stage = "existing_apk_copy";
+                    preferences(app).edit().putString("state", "copying_existing").commit();
+                }
                 for (ExistingApk apk : existing.files) {
                     if (!apk.unchanged()) throw failure("existing_apk_copy", "existing_apk_changed");
                     try (InputStream installedInput = new java.io.FileInputStream(apk.file);
@@ -537,10 +626,35 @@ final class PresentationAddonInstaller {
         return installed;
     }
 
-    private static boolean hasSplit(PackageInfo installed) {
+    private static boolean hasPresentation(PackageInfo installed) {
         if (installed.splitNames != null) {
             for (String name : installed.splitNames) if (SPLIT_ID.equals(name)) return true;
         }
+        return hasStandalonePresentation(installed);
+    }
+
+    private static boolean hasStandalonePresentation(PackageInfo installed) {
+        if (Build.VERSION.SDK_INT < 28 || installed.applicationInfo == null || installed.applicationInfo.sourceDir == null)
+            return false;
+        // Called only after compatiblePackage verifies the installed package's
+        // certificate/version. Read this public base marker and native member only.
+        try (ZipFile base = new ZipFile(installed.applicationInfo.sourceDir)) {
+            ZipEntry marker = base.getEntry(STANDALONE_MARKER);
+            ZipEntry library = base.getEntry("lib/arm64-v8a/libidoly_presentation.so");
+            if (marker == null || marker.isDirectory() || marker.getSize() <= 0 || marker.getSize() > 4096
+                    || library == null || library.isDirectory() || library.getSize() <= 0
+                    || library.getSize() > 8L * 1024 * 1024) return false;
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            try (InputStream input = base.getInputStream(marker)) { copy(input, bytes, null, 4096); }
+            JSONObject identity = new JSONObject(bytes.toString(StandardCharsets.UTF_8.name()));
+            if (identity.length() != 5 || identity.getInt("schema") != 1 || identity.getInt("bridge_version") != 1
+                    || !installed.packageName.equals(identity.getString("target_package"))
+                    || identity.getLong("base_version_code") != 414 || installed.getLongVersionCode() != 414
+                    || !PRESENTATION_NATIVE_SHA256.equals(identity.getString("native_library_sha256"))) return false;
+            MessageDigest hash = MessageDigest.getInstance("SHA-256");
+            try (InputStream input = base.getInputStream(library)) { copy(input, null, hash, 8L * 1024 * 1024); }
+            return PRESENTATION_NATIVE_SHA256.equals(hex(hash.digest()));
+        } catch (Exception ignored) { }
         return false;
     }
 
@@ -570,6 +684,8 @@ final class PresentationAddonInstaller {
     private static Snapshot scan(Context app) {
         List<Profile> compatible = new ArrayList<>();
         List<Profile> installed = new ArrayList<>();
+        List<PresentationStorage.Estimate> storage = new ArrayList<>();
+        boolean featureOnly = featureOnly(app);
         boolean available = false;
         if (Build.VERSION.SDK_INT >= 28) {
             try {
@@ -579,7 +695,8 @@ final class PresentationAddonInstaller {
                     try {
                         PackageInfo info = compatiblePackage(app, profile);
                         compatible.add(profile);
-                        if (hasSplit(info)) installed.add(profile);
+                        if (hasPresentation(info)) installed.add(profile);
+                        storage.add(PresentationStorage.inspect(app, profile, info, featureOnly));
                     } catch (Exception ignored) { }
                 }
             } catch (Exception error) {
@@ -600,7 +717,7 @@ final class PresentationAddonInstaller {
             }
         }
         return new Snapshot(compatible, installed, busy, state, available, readFailure(app),
-                safeProfile(preferences(app).getString("profile", "")));
+                safeProfile(preferences(app).getString("profile", "")), featureOnly, storage);
     }
 
     private static void deliver(Callback callback, Snapshot snapshot) {
@@ -657,7 +774,7 @@ final class PresentationAddonInstaller {
                 try {
                     Profile profile = findProfile(loadProfiles(app), preferences(app).getString("profile", ""));
                     if (profile == null) throw failure("post_install", "missing_profile");
-                    if (!hasSplit(compatiblePackage(app, profile))) throw failure("post_install", "split_missing");
+                    if (!hasPresentation(compatiblePackage(app, profile))) throw failure("post_install", "split_missing");
                     success = true;
                 } catch (Exception error) {
                     resultFailure = FailurePolicy.make("post_install", error instanceof InstallFailure
@@ -708,7 +825,7 @@ final class PresentationAddonInstaller {
 
     private static SharedPreferences.Editor clearFailure(SharedPreferences.Editor editor) {
         for (String key : new String[]{"stage", "reason", "exception", "member", "expected_sha", "actual_sha",
-                "install_token", "status", "legacy_status", "time_ms"}) editor.remove("failure_" + key);
+                "install_token", "status", "legacy_status", "time_ms", "message", "errno"}) editor.remove("failure_" + key);
         return editor.remove("cleanup_state").remove("cleanup_exception").remove("stale_callback_observed")
                 .remove("result_code");
     }
@@ -718,7 +835,8 @@ final class PresentationAddonInstaller {
                 .putString("failure_exception", value.exceptionClass).putString("failure_member", value.member)
                 .putString("failure_expected_sha", value.expectedSha).putString("failure_actual_sha", value.actualSha)
                 .putString("failure_install_token", value.installToken).putInt("failure_status", value.status)
-                .putInt("failure_legacy_status", value.legacyStatus).putLong("failure_time_ms", value.timeMs).commit();
+                .putInt("failure_legacy_status", value.legacyStatus).putLong("failure_time_ms", value.timeMs)
+                .putString("failure_message", value.osMessage).putString("failure_errno", value.errno).commit();
     }
 
     private static Failure readFailure(Context context) {
@@ -727,20 +845,30 @@ final class PresentationAddonInstaller {
             // 0.3.9 recorded only Android's high-level callback code. Preserve
             // that existing evidence on upgrade without inventing missing data.
             if ("failed".equals(values.getString("state", "")) && values.contains("result_code"))
-                return new Failure("android_result", "os_rejected", "none", "", "", "", "",
+                return new Failure("android_result", FailurePolicy.osReason(values.getInt("result_code",
+                        FailurePolicy.NO_STATUS), FailurePolicy.NO_STATUS, null), "none", "", "", "", "",
                         values.getInt("result_code", FailurePolicy.NO_STATUS), FailurePolicy.NO_STATUS, 0);
             return null;
         }
         String expected = values.getString("failure_expected_sha", "");
         String actual = values.getString("failure_actual_sha", "");
+        int status = values.getInt("failure_status", FailurePolicy.NO_STATUS);
+        int legacyStatus = values.getInt("failure_legacy_status", FailurePolicy.NO_STATUS);
+        String token = FailurePolicy.installToken(values.getString("failure_install_token", ""));
+        String message = FailurePolicy.redactMessage(values.getString("failure_message", ""));
+        String reason = FailurePolicy.reason(values.getString("failure_reason", ""));
+        if ("os_rejected".equals(reason) || "storage_insufficient".equals(reason) || "storage_or_io_error".equals(reason)) {
+            String normalized = FailurePolicy.osReason(status, legacyStatus, message + " " + token);
+            reason = "storage_insufficient".equals(reason) && "os_rejected".equals(normalized)
+                    ? "storage_or_io_error" : normalized;
+        }
         return new Failure(FailurePolicy.stage(values.getString("failure_stage", "")),
-                FailurePolicy.reason(values.getString("failure_reason", "")),
+                reason,
                 FailurePolicy.exceptionClass(values.getString("failure_exception", "")),
                 FailurePolicy.publicMember(values.getString("failure_member", "")),
                 expected.matches("[0-9a-f]{12}") ? expected : "", actual.matches("[0-9a-f]{12}") ? actual : "",
-                FailurePolicy.installToken(values.getString("failure_install_token", "")),
-                values.getInt("failure_status", FailurePolicy.NO_STATUS),
-                values.getInt("failure_legacy_status", FailurePolicy.NO_STATUS), values.getLong("failure_time_ms", 0));
+                token, status, legacyStatus, values.getLong("failure_time_ms", 0), message,
+                FailurePolicy.errno(values.getString("failure_errno", "")));
     }
 
     private static String safeProfile(String profile) {
@@ -760,6 +888,37 @@ final class PresentationAddonInstaller {
                 || "interrupted".equals(state) || "copying_existing".equals(state))) state = "unknown";
         details.put("state", state);
         details.put("session_id", Math.max(-1, values.getInt("session_id", -1)));
+        details.put("feature_only", featureOnly(context));
+        String attemptMode = values.getString("attempt_mode", "");
+        boolean knownAttemptMode = "full_update".equals(attemptMode) || "feature_only_inherit".equals(attemptMode);
+        if (knownAttemptMode)
+            details.put("attempt_mode", attemptMode);
+        boolean storageFeatureOnly = knownAttemptMode ? "feature_only_inherit".equals(attemptMode) : featureOnly(context);
+        details.put("storage_mode", storageFeatureOnly ? "feature_only_inherit" : "full_update");
+        details.put("storage_context", knownAttemptMode ? "current_for_last_attempt_mode" : "current_for_selected_mode");
+        details.put("storage_observed_at_ms", Math.max(0, System.currentTimeMillis()));
+        JSONArray storage = new JSONArray();
+        try {
+            String attemptedProfile = safeProfile(values.getString("profile", ""));
+            for (Profile profile : loadProfiles(context)) {
+                if (knownAttemptMode && !attemptedProfile.isEmpty() && !profile.id.equals(attemptedProfile)) continue;
+                PresentationStorage.Estimate estimate = null;
+                try { estimate = PresentationStorage.inspect(context, profile, compatiblePackage(context, profile), storageFeatureOnly); }
+                catch (Exception ignored) { }
+                JSONObject observed = new JSONObject();
+                observed.put("profile", profile.id);
+                observed.put("addon_bytes", profile.apkBytes);
+                observed.put("existing_copy_bytes", storageFeatureOnly ? 0 : estimate == null ? -1 : Math.max(-1, estimate.existingCopyBytes));
+                observed.put("native_extract_bytes", estimate == null ? -1 : Math.max(-1, estimate.nativeExtractBytes));
+                observed.put("total_bytes", estimate == null ? -1 : Math.max(-1, estimate.totalBytes));
+                observed.put("available_bytes", estimate == null ? -1 : Math.max(-1, estimate.availableBytes));
+                observed.put("free_bytes", estimate == null ? -1 : Math.max(-1, estimate.freeBytes));
+                String volume = estimate == null ? "unknown" : estimate.volume;
+                observed.put("volume", "internal".equals(volume) || "other".equals(volume) ? volume : "unknown");
+                storage.put(observed);
+            }
+        } catch (Exception ignored) { }
+        details.put("storage", storage);
         if (values.getBoolean("stale_callback_observed", false)) details.put("stale_callback_observed", true);
         String cleanup = values.getString("cleanup_state", "");
         if ("abandoned".equals(cleanup) || "retained".equals(cleanup)) {
@@ -771,6 +930,7 @@ final class PresentationAddonInstaller {
         if (failure != null) {
             JSONObject error = new JSONObject();
             error.put("stage", failure.stage);
+            error.put("category", failure.category);
             error.put("reason", failure.reason);
             error.put("exception", failure.exceptionClass);
             error.put("time_ms", failure.timeMs);
@@ -780,6 +940,8 @@ final class PresentationAddonInstaller {
             if (failure.status != FailurePolicy.NO_STATUS) error.put("status", failure.status);
             if (failure.legacyStatus != FailurePolicy.NO_STATUS) error.put("legacy_status", failure.legacyStatus);
             if (!failure.installToken.isEmpty()) error.put("install_token", failure.installToken);
+            if (!failure.osMessage.isEmpty()) error.put("message", failure.osMessage);
+            if (!failure.errno.isEmpty()) error.put("errno", failure.errno);
             details.put("failure", error);
         }
         document.put("presentation_install", details);

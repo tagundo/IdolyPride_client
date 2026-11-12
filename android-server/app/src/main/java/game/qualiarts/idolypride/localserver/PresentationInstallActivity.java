@@ -28,12 +28,12 @@ public final class PresentationInstallActivity extends Activity {
         }
         PresentationAddonInstaller.Failure failure = result.hasExtra(PackageInstaller.EXTRA_STATUS) ? null
                 : PresentationAddonInstaller.FailurePolicy.make("callback", "callback_status_missing", null,
-                null, null, null, PresentationAddonInstaller.FailurePolicy.NO_STATUS, legacy, installToken);
+                null, null, null, PresentationAddonInstaller.FailurePolicy.NO_STATUS, legacy, osMessage);
         if (failure == null && status != PackageInstaller.STATUS_SUCCESS
                 && status != PackageInstaller.STATUS_PENDING_USER_ACTION) {
             failure = PresentationAddonInstaller.FailurePolicy.make("callback",
-                    PresentationAddonInstaller.FailurePolicy.osReason(osMessage), null, null, null, null,
-                    status, legacy, installToken);
+                    PresentationAddonInstaller.FailurePolicy.osReason(status, legacy, osMessage), null, null, null, null,
+                    status, legacy, osMessage);
         }
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             Intent confirmation = null;
@@ -48,11 +48,11 @@ public final class PresentationInstallActivity extends Activity {
                     return;
                 } catch (RuntimeException error) {
                     failure = PresentationAddonInstaller.FailurePolicy.make("confirmation", "confirmation_start_failed",
-                            error, null, null, null, status, legacy, installToken);
+                            error, null, null, null, status, legacy, osMessage);
                 }
             } else {
                 failure = PresentationAddonInstaller.FailurePolicy.make("confirmation", "confirmation_missing", readFailure,
-                        null, null, null, status, legacy, installToken);
+                        null, null, null, status, legacy, osMessage);
             }
         }
         int sessionId = result.getIntExtra(PresentationAddonInstaller.EXTRA_REQUESTED_SESSION, -1);

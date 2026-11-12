@@ -1,5 +1,7 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
+**그래픽 기능 포함 Android 클라이언트:** [별도 진단 클라이언트 APK 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/graphics-client-v0.1.0/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk). 기존 **아이프라 진단**에 일반 APK 업데이트로 설치하며 서버 v0.3.10의 **진단 게임 실행**으로 엽니다. 그래픽 기능이 본체에 포함돼 있습니다. GitHub 로그인 후 **Download raw file**로 약160MB 파일을 받습니다. [사용 안내](docs/presentation-settings.md)를 참고합니다.
+
 **Android 설치 오류 확인판 v0.3.10:** [서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.10/IdolyPride-Local-Server-Android.apk). 그래픽 기능 설치 시 기존 공개 APK도 함께 전달하고, 실패 단계·Android 오류 코드의 표시·복사·내보내기를 추가합니다. [설치 안내](docs/presentation-settings.md)를 참고합니다. 실제 Samsung 설치 실패의 원인은 OS 결과로 추가 확인해야 합니다.
 
 아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. **Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행할 수 있으며, 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다.** **릴리즈 탭의 Android·Mac 서버 앱은 v0.3.2이며, Android 그래픽 기능 후보 v0.3.9와 설치 확인판 v0.3.10은 별도 다운로드 브랜치로 제공합니다.** 게임 리소스·설정 저장·전체 해금 감상 모드에 더해 그래픽·촬영 화면 설정을 추가했습니다. 사용자 Android 기기에서 홈·캐릭터·편성과 초기 튜토리얼 전체 진행을 확인했습니다. 클라우드의 공식 ARM64 Android 환경에서도 원본 SDK를 유지한 연결판으로 홈·캐릭터 모델 표시와 공지 닫기를 확인했으며, 일반 라이브 완료 검증은 남아 있습니다.

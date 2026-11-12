@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build a small same-certificate feature split, never rebuild the game APK.
 
-Installation requires PackageInstaller MODE_INHERIT_EXISTING. Opening this APK
-as a standalone app is not supported. Existing game files are read, never edited.
+Installation requires a matching existing base: a complete-code normal update
+or an inherit-existing session. This APK cannot be opened as a standalone app.
+Existing game files are read, never edited.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
 SPLIT = "idoly_presentation"
 VERSION_CODE = 414
+SUPPORTED_INSTALLATION_MODES = ("MODE_FULL_INSTALL", "MODE_INHERIT_EXISTING")
 LIBRARY = "lib/arm64-v8a/libidoly_presentation.so"
 MARKER = "assets/idoly-presentation.json"
 BOOTSTRAP = "lib/arm64-v8a/libil2cpp.so"
@@ -201,6 +203,7 @@ def bundle_manifest(reports):
         if (report.get("target_package") != expected["package"] or report.get("base_version_code") != VERSION_CODE
                 or report.get("certificate_sha256") != expected["certificate"] or report.get("split_id") != SPLIT
                 or report.get("signature_and_alignment_verified") is not True
+                or report.get("supported_installation_modes") != list(SUPPORTED_INSTALLATION_MODES)
                 or type(report.get("addon_bytes")) is not int or not 0 < report["addon_bytes"] <= MAX_ADDON
                 or not re.fullmatch(r"[0-9a-f]{64}", report.get("addon_apk_sha256", ""))):
             raise ValueError("Feature provenance differs from the fixed bundle contract")
@@ -288,7 +291,8 @@ def build(args):
                   "target_package": profile["package"], "split_id": SPLIT,
                   "base_version_code": VERSION_CODE, "certificate_sha256": profile["certificate"],
                   "required_base_members": required, "native_library_sha256": native_hash,
-                  "configuration_origin": "http://127.0.0.1:8080", "installation_mode": "MODE_INHERIT_EXISTING"}
+                  "configuration_origin": "http://127.0.0.1:8080",
+                  "supported_installation_modes": list(SUPPORTED_INSTALLATION_MODES)}
         members = {"classes.dex": (work / "dex/classes.dex").read_bytes(), LIBRARY: library.read_bytes(),
                    MARKER: (json.dumps(marker, sort_keys=True, indent=2) + "\n").encode()}
         members.update(license_members(args.profile))

@@ -78,7 +78,18 @@
     <string name="presentation_init_failed">게임의 화면 설정 초기화에 실패했습니다.</string>
     <string name="presentation_install_button">게임에 그래픽 기능 추가/업데이트</string>
     <string name="presentation_launch_button">그래픽 지원 게임 실행</string>
-    <string name="presentation_install_notice">게임을 종료한 뒤 그래픽 기능을 추가하고, 아래의 그래픽 지원 게임 실행을 눌러 주세요. 설치된 APK 파일을 이 기기 안에서 복사하며 추가 다운로드는 하지 않습니다. Android 설치 확인 화면이 표시됩니다. 기능 추가만으로 화면 설정의 적용을 뜻하지는 않습니다.</string>
+    <string name="presentation_install_notice">게임을 종료한 뒤 그래픽 기능을 추가하고, 아래의 그래픽 지원 게임 실행을 눌러 주세요. 기본 설치는 기존 APK와 추가 기능을 함께 준비해 일반 앱 업데이트를 요청합니다. APK는 이 기기 안에서 복사하며 추가 다운로드는 하지 않습니다. Android 설치 확인 화면이 표시됩니다. 기능 추가만으로 화면 설정의 적용을 뜻하지는 않습니다.</string>
+    <string name="presentation_install_feature_only">추가 모듈만 설치 (공간 절약)</string>
+    <string name="presentation_install_feature_only_notice">기본값은 꺼짐입니다. 켜면 기존 APK 복사를 생략하고 추가 모듈만 설치 요청에 넣습니다. Android의 기존 설치 파일 처리 방식이 달라집니다.</string>
+    <string name="presentation_install_storage_checking">예상 설치 공간 확인 중</string>
+    <string name="presentation_install_storage_profile">%1$s · 코드 저장소: %8$s\n추가 모듈 APK: %2$s\n기존 APK 복사: %3$s\n네이티브 파일 크기: %4$s\n확인된 파일 크기 합계: %5$s\n할당 가능 공간: %6$s\n코드 저장소 여유 공간: %7$s</string>
+    <string name="presentation_install_storage_basis">APK·라이브러리 크기 기준이며 Android 임시·최적화 공간은 별도입니다.</string>
+    <string name="presentation_install_storage_no_game">호환 게임을 찾으면 해당 코드 저장소의 공간 정보를 표시합니다.</string>
+    <string name="presentation_install_volume_internal">내부 저장소</string>
+    <string name="presentation_install_volume_other">다른 저장소</string>
+    <string name="presentation_install_storage_unknown">확인 불가</string>
+    <string name="presentation_install_storage_none">사용 안 함</string>
+    <string name="presentation_install_storage_insufficient">Android가 저장소 또는 파일 처리 오류로 설치 실패를 보고했습니다. 아래 공간 정보와 오류 설명을 확인해 주세요.</string>
     <string name="presentation_game_resources">아이프라 로컬 리소스 게임</string>
     <string name="presentation_game_diagnostics">아이프라 진단 게임</string>
     <string name="presentation_install_choose">그래픽 기능을 추가할 게임</string>
@@ -94,6 +105,7 @@
     <string name="presentation_install_permission">이 서버 앱의 설치 허용을 켠 뒤 돌아와 기능 추가 버튼을 다시 눌러 주세요.</string>
     <string name="presentation_install_permission_failed">이 서버 앱의 설치 허용 화면을 열지 못했습니다.</string>
     <string name="presentation_install_success">게임의 그래픽 기능 설치를 확인했습니다. 그래픽 지원 게임 실행을 눌러 주세요.</string>
+    <string name="presentation_install_already_included">이 게임에는 그래픽 기능이 이미 포함되어 있습니다. 그래픽 지원 게임 실행을 눌러 주세요.</string>
     <string name="presentation_install_failed">그래픽 기능을 추가하지 못했습니다. 아래 실패 정보를 복사하거나 진단 기록을 내보낼 수 있습니다.</string>
     <string name="presentation_install_interrupted">이전 설치 세션이 종료되거나 중단되었습니다. 다시 시도할 수 있습니다.</string>
     <string name="presentation_install_copy">설치 실패 정보 복사</string>
@@ -102,6 +114,8 @@
     <string name="presentation_install_failure_status">\nAndroid 설치 상태: %1$d</string>
     <string name="presentation_install_failure_legacy"> · 이전 설치 코드: %1$d</string>
     <string name="presentation_install_failure_hash">\nSHA-256 앞 12자리 · 예상 %1$s · 실제 %2$s</string>
+    <string name="presentation_install_failure_category">\n오류 분류: %1$s</string>
+    <string name="presentation_install_failure_message">\nAndroid 설명: %1$s</string>
     <string name="presentation_install_launch_missing">그래픽 기능이 설치된 호환 게임을 찾지 못했습니다.</string>
     <string-array name="presentation_quality_options">
         <item>원본 유지 (0)</item>

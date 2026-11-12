@@ -26,8 +26,9 @@ def main():
     parser.add_argument("--chaquopy-jar", type=Path, default=WORKSPACE / "shared/chaquopy_java-17.0.0.jar")
     args = parser.parse_args()
     sources = sorted((ROOT / "android-server/app/src/main/java" / PACKAGE).glob("*.java"))
-    test = ROOT / "android-server/tests/java" / PACKAGE / "PresentationFailurePolicyHostTest.java"
-    for path in (args.jdk_bin / "javac", args.jdk_bin / "java", args.android_jar, args.chaquopy_jar, test):
+    tests = [ROOT / "android-server/tests/java" / PACKAGE / (name + ".java") for name in
+             ("PresentationFailurePolicyHostTest", "PresentationStorageHostTest")]
+    for path in (args.jdk_bin / "javac", args.jdk_bin / "java", args.android_jar, args.chaquopy_jar, *tests):
         if not path.is_file():
             parser.error(f"Required cached tool or source is missing: {path}")
     with tempfile.TemporaryDirectory(prefix="presentation-installer-host-") as directory:
@@ -56,13 +57,14 @@ def main():
             "-J-XX:ReservedCodeCacheSize=32m", "-J-XX:+UseSerialGC", "-J-XX:ActiveProcessorCount=1",
             "--release", "17", "-encoding", "UTF-8", "-classpath",
             str(args.android_jar) + ":" + str(args.chaquopy_jar), "-d", str(classes),
-            str(resource_source), str(config_source), *(str(path) for path in sources), str(test),
+            str(resource_source), str(config_source), *(str(path) for path in sources), *(str(path) for path in tests),
         ], check=True)
         # Deliberately omit android.jar here: these tested policies use only Java.
-        subprocess.run([
-            str(args.jdk_bin / "java"), "-Xmx64m", "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1",
-            "-cp", str(classes), "game.qualiarts.idolypride.localserver.PresentationFailurePolicyHostTest",
-        ], check=True)
+        for test in tests:
+            subprocess.run([
+                str(args.jdk_bin / "java"), "-Xmx64m", "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1",
+                "-cp", str(classes), "game.qualiarts.idolypride.localserver." + test.stem,
+            ], check=True)
         print(f"Compiled {len(sources)} actual server Java sources; no APK build or Android runtime.")
 
 

@@ -77,6 +77,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private Button launchPresentation;
     private TextView presentationInstallStatus;
     private TextView presentationInstallDetails;
+    private TextView presentationInstallStorage;
+    private CheckBox presentationFeatureOnly;
+    private boolean presentationFeatureOnlyLoading;
     private Button copyPresentationInstallDetails;
     private PresentationAddonInstaller.Snapshot presentationInstallation;
 
@@ -300,6 +303,21 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView installNotice = text(R.string.presentation_install_notice, 12, Color.rgb(180, 199, 211));
         installNotice.setPadding(0, 0, 0, dp(6));
         settings.addView(installNotice);
+        presentationFeatureOnly = new CheckBox(this);
+        presentationFeatureOnly.setText(R.string.presentation_install_feature_only);
+        presentationFeatureOnly.setTextColor(Color.WHITE);
+        presentationFeatureOnly.setTextSize(13);
+        presentationFeatureOnly.setChecked(PresentationAddonInstaller.featureOnly(this));
+        settings.addView(presentationFeatureOnly);
+        TextView compatibilityNotice = text(R.string.presentation_install_feature_only_notice, 12,
+                Color.rgb(180, 199, 211));
+        compatibilityNotice.setPadding(0, 0, 0, dp(6));
+        settings.addView(compatibilityNotice);
+        presentationInstallStorage = text(R.string.presentation_install_storage_checking, 12,
+                Color.rgb(192, 212, 222));
+        presentationInstallStorage.setTextIsSelectable(true);
+        presentationInstallStorage.setPadding(0, 0, 0, dp(8));
+        settings.addView(presentationInstallStorage);
         installPresentation = button(R.string.presentation_install_button);
         installPresentation.setEnabled(false);
         installPresentation.setOnClickListener(view -> requestPresentationInstall());
@@ -327,6 +345,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
             }
         });
         settings.addView(copyPresentationInstallDetails, new LinearLayout.LayoutParams(-1, -2));
+        presentationFeatureOnly.setOnCheckedChangeListener((button, enabled) -> {
+            if (presentationFeatureOnlyLoading) return;
+            PresentationAddonInstaller.setFeatureOnly(this, enabled);
+            installPresentation.setEnabled(false);
+            setTextIfChanged(presentationInstallStorage, getString(R.string.presentation_install_storage_checking));
+            refreshPresentationInstallation();
+        });
         customGraphics = new CheckBox(this);
         customGraphics.setText(R.string.presentation_custom_graphics);
         customGraphics.setTextColor(Color.WHITE);
@@ -374,9 +399,45 @@ public final class MainActivity extends Activity implements ServerService.Observ
         PresentationAddonInstaller.refresh(this, this::showPresentationInstallation);
     }
 
+    private String presentationStorageSummary(PresentationAddonInstaller.Profile profile, long addonBytes,
+            long existingCopyBytes, long nativeExtractBytes, long totalBytes, long availableBytes,
+            long freeBytes, String volume, boolean featureOnly) {
+        return getString(R.string.presentation_install_storage_profile, getString(profile.label()),
+                presentationStorageBytes(addonBytes), featureOnly ? getString(R.string.presentation_install_storage_none)
+                        : presentationStorageBytes(existingCopyBytes),
+                presentationStorageBytes(nativeExtractBytes), presentationStorageBytes(totalBytes),
+                presentationStorageBytes(availableBytes), presentationStorageBytes(freeBytes),
+                getString("internal".equals(volume) ? R.string.presentation_install_volume_internal
+                        : "other".equals(volume) ? R.string.presentation_install_volume_other
+                        : R.string.presentation_install_storage_unknown));
+    }
+
+    private String presentationStorageBytes(long bytes) {
+        return bytes < 0 ? getString(R.string.presentation_install_storage_unknown) : formatBytes(bytes);
+    }
+
     private void showPresentationInstallation(PresentationAddonInstaller.Snapshot snapshot) {
         if (isFinishing() || isDestroyed()) return;
         presentationInstallation = snapshot;
+        presentationFeatureOnlyLoading = true;
+        presentationFeatureOnly.setChecked(snapshot.featureOnly);
+        presentationFeatureOnlyLoading = false;
+        presentationFeatureOnly.setEnabled(!snapshot.busy && Build.VERSION.SDK_INT >= 28);
+        StringBuilder storage = new StringBuilder();
+        for (PresentationAddonInstaller.Profile profile : snapshot.compatible) {
+            PresentationStorage.Estimate estimate = null;
+            for (PresentationStorage.Estimate candidate : snapshot.storage)
+                if (profile.id.equals(candidate.profileId)) { estimate = candidate; break; }
+            if (storage.length() > 0) storage.append("\n\n");
+            storage.append(presentationStorageSummary(profile, estimate == null ? -1 : estimate.addonBytes,
+                    estimate == null ? -1 : estimate.existingCopyBytes, estimate == null ? -1 : estimate.nativeExtractBytes,
+                    estimate == null ? -1 : estimate.totalBytes, estimate == null ? -1 : estimate.availableBytes,
+                    estimate == null ? -1 : estimate.freeBytes, estimate == null ? "unknown" : estimate.volume,
+                    snapshot.featureOnly));
+        }
+        if (storage.length() > 0) storage.append("\n").append(getString(R.string.presentation_install_storage_basis));
+        setTextIfChanged(presentationInstallStorage, storage.length() == 0
+                ? getString(R.string.presentation_install_storage_no_game) : storage.toString());
         installPresentation.setEnabled(!snapshot.busy && !snapshot.compatible.isEmpty());
         launchPresentation.setEnabled(!snapshot.busy && !snapshot.installed.isEmpty());
         int message;
@@ -386,7 +447,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 ? R.string.presentation_install_confirming : R.string.presentation_install_in_progress;
         else if ("interrupted".equals(snapshot.state)) message = R.string.presentation_install_interrupted;
         else if ("failed".equals(snapshot.state)) {
-            message = R.string.presentation_install_failed;
+            message = snapshot.failure != null && "storage_or_io_error".equals(snapshot.failure.category)
+                    ? R.string.presentation_install_storage_insufficient : R.string.presentation_install_failed;
         } else if (!snapshot.installed.isEmpty()) message = R.string.presentation_install_available;
         else if (snapshot.compatible.isEmpty()) message = R.string.presentation_install_incompatible;
         else message = R.string.presentation_install_ready;
@@ -407,6 +469,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (!failure.member.isEmpty()) details += "\n" + failure.member;
             if (!failure.expectedSha.isEmpty()) details += getString(R.string.presentation_install_failure_hash,
                     failure.expectedSha, failure.actualSha);
+            details += getString(R.string.presentation_install_failure_category, failure.category);
+            if (!failure.errno.isEmpty()) details += "\nerrno: " + failure.errno;
+            if (!failure.osMessage.isEmpty()) details += getString(R.string.presentation_install_failure_message,
+                    failure.osMessage);
             setTextIfChanged(presentationInstallDetails, details);
         }
     }
@@ -444,14 +510,16 @@ public final class MainActivity extends Activity implements ServerService.Observ
             }
             return;
         }
+        final boolean featureOnly = presentationFeatureOnly.isChecked();
         choosePresentationProfile(presentationInstallation.compatible, R.string.presentation_install_choose,
                 profile -> {
                     installPresentation.setEnabled(false);
                     launchPresentation.setEnabled(false);
                     presentationInstallDetails.setVisibility(View.GONE);
                     copyPresentationInstallDetails.setEnabled(false);
+                    presentationFeatureOnly.setEnabled(false);
                     setTextIfChanged(presentationInstallStatus, getString(R.string.presentation_install_in_progress));
-                    PresentationAddonInstaller.install(this, profile, this::showPresentationInstallation);
+                    PresentationAddonInstaller.install(this, profile, featureOnly, this::showPresentationInstallation);
                 });
     }
 

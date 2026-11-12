@@ -37,7 +37,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.10", 29
+VERSION, VERSION_CODE = "0.3.11", 30
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -54,7 +54,7 @@ RES_ROOT = "android-server/app/src/main/res/"
 MANIFEST = "android-server/app/src/main/AndroidManifest.xml"
 GRADLE = "android-server/app/build.gradle.kts"
 JAVA_FILES = tuple(JAVA_ROOT + name + ".java" for name in ("MainActivity", "ServerService", "CryptoBridge",
-    "PresentationSettings", "PresentationAddonInstaller", "PresentationInstallActivity"))
+    "PresentationSettings", "PresentationAddonInstaller", "PresentationInstallActivity", "PresentationStorage"))
 RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_server.xml")
 SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
@@ -680,7 +680,7 @@ def validate_presentation_archive(raw, row):
         marker = json.loads(pybundle._read(archive, infos[presentation.MARKER], META_LIMIT),
                             object_pairs_hook=pybundle._json_object)
         marker_keys = {"schema", "bridge_version", "profile", "target_package", "split_id", "base_version_code",
-                       "certificate_sha256", "required_base_members", "configuration_origin", "installation_mode",
+                       "certificate_sha256", "required_base_members", "configuration_origin", "supported_installation_modes",
                        "native_library_sha256"}
         if (not isinstance(marker, dict) or set(marker) != marker_keys or type(marker["schema"]) is not int
                 or type(marker["bridge_version"]) is not int or type(marker["base_version_code"]) is not int):
@@ -689,7 +689,8 @@ def validate_presentation_archive(raw, row):
                 ("target_package", row["target_package"]), ("split_id", presentation.SPLIT),
                 ("base_version_code", 414), ("certificate_sha256", row["certificate_sha256"]),
                 ("required_base_members", row["required_base_members"]),
-                ("configuration_origin", "http://127.0.0.1:8080"), ("installation_mode", "MODE_INHERIT_EXISTING")):
+                ("configuration_origin", "http://127.0.0.1:8080"),
+                ("supported_installation_modes", list(presentation.SUPPORTED_INSTALLATION_MODES))):
             if marker.get(key) != value:
                 raise ValueError("Presentation split public marker differs from the manifest")
         if marker.get("native_library_sha256") != hashes[presentation.LIBRARY]:

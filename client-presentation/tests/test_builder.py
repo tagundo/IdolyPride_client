@@ -90,11 +90,15 @@ def test_bundle_manifest_has_fixed_profile_assets_and_rejects_changed_identity()
     report = {"profile": "diagnostics", "target_package": profile["package"], "base_version_code": 414,
         "certificate_sha256": profile["certificate"], "split_id": tool.SPLIT,
         "signature_and_alignment_verified": True, "addon_bytes": 8000, "addon_apk_sha256": "a" * 64,
+        "supported_installation_modes": list(tool.SUPPORTED_INSTALLATION_MODES),
         "required_base_members": tool.required_base_members("diagnostics")}
     manifest = tool.bundle_manifest([report])
     assert manifest["profiles"][0]["asset"] == "presentation/diagnostics.apk"
     for change in ({"target_package": "game.qualiarts.idolypride"}, {"addon_bytes": 1048577},
                    {"certificate_sha256": "b" * 64}, {"base_version_code": 415},
+                   {"supported_installation_modes": ["MODE_INHERIT_EXISTING", "MODE_FULL_INSTALL"]},
+                   {"supported_installation_modes": ["MODE_FULL_INSTALL"]},
+                   {"supported_installation_modes": "MODE_FULL_INSTALL"},
                    {"required_base_members": {}}, {"required_base_members": {tool.BOOTSTRAP: "f" * 64}}):
         with pytest.raises(ValueError): tool.bundle_manifest([{**report, **change}])
     with pytest.raises(ValueError): tool.bundle_manifest([report, report])

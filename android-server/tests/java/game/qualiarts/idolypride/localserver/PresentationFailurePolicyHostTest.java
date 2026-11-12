@@ -38,8 +38,12 @@ final class PresentationFailurePolicyHostTest {
    eq("base.apk",plan.files.get(0).sessionName); eq("split_feature.apk",plan.files.get(1).sessionName);
    eq(true,plan.samePaths(b,names,paths));
    String[] originalNames=names.clone(),originalPaths=paths.clone();
+   PresentationAddonInstaller.ExistingPlan inherited=PresentationAddonInstaller.ExistingApkPolicy.inventory(b,names,paths,100);
+   eq(0,inherited.files.size()); eq(100L,inherited.sessionBytes);
+   eq(true,inherited.samePaths(b,names,paths));
    names[0]="changed"; paths[0]=b;
    eq(true,plan.samePaths(b,originalNames,originalPaths)); eq(false,plan.samePaths(b,names,paths));
+   eq(true,inherited.samePaths(b,originalNames,originalPaths)); eq(false,inherited.samePaths(b,names,paths));
    try {plan.files.clear(); throw new AssertionError("Plan must be immutable");}
    catch(UnsupportedOperationException expected){checks++;}
    eq(true,plan.files.get(0).unchanged()); Files.write(base,new byte[11]); eq(false,plan.files.get(0).unchanged());
@@ -56,6 +60,8 @@ final class PresentationFailurePolicyHostTest {
    rejects("existing_apk_total_limit",()->PresentationAddonInstaller.ExistingApkPolicy.plan(b,null,null,0));
    rejects("existing_apk_total_limit",()->PresentationAddonInstaller.ExistingApkPolicy.plan(b,null,null,1024*1024+1));
    rejects("existing_apk_count_limit",()->PresentationAddonInstaller.ExistingApkPolicy.plan(b,new String[33],new String[33],1));
+   rejects("split_layout_mismatch",()->PresentationAddonInstaller.ExistingApkPolicy.inventory(b,new String[]{"feature"},null,1));
+   rejects("existing_apk_count_limit",()->PresentationAddonInstaller.ExistingApkPolicy.inventory(b,new String[33],new String[33],1));
    String[] maxNames=new String[32],maxPaths=new String[32];
    for(int i=0;i<32;i++){Path split=dir.resolve("split"+i+".apk");Files.write(split,new byte[]{1});maxNames[i]="part"+i;maxPaths[i]=split.toString();}
    eq(33,PresentationAddonInstaller.ExistingApkPolicy.plan(b,maxNames,maxPaths,1).files.size());
@@ -66,6 +72,8 @@ final class PresentationFailurePolicyHostTest {
    rejects("existing_apk_total_limit",()->PresentationAddonInstaller.ExistingApkPolicy.plan(big.toString(),new String[]{"feature"},new String[]{big2.toString()},1));
    try(RandomAccessFile file=new RandomAccessFile(big.toFile(),"rw")){file.setLength(256L*1024*1024+1);}
    rejects("existing_apk_size_limit",()->PresentationAddonInstaller.ExistingApkPolicy.plan(big.toString(),null,null,1));
+   eq(0,PresentationAddonInstaller.ExistingApkPolicy.inventory(big.toString(),null,null,1).files.size());
+   eq(1L,PresentationAddonInstaller.ExistingApkPolicy.inventory(big.toString(),null,null,1).sessionBytes);
    eq("existing_apk_copy",PresentationAddonInstaller.FailurePolicy.stage("existing_apk_copy"));
    eq("android_result",PresentationAddonInstaller.FailurePolicy.stage("android_result"));
   } finally {
@@ -82,7 +90,17 @@ final class PresentationFailurePolicyHostTest {
   eq("",PresentationAddonInstaller.FailurePolicy.installToken("x".repeat(4100)+" INSTALL_FAILED_INVALID_APK"));
   eq("native_library_extract_failed",PresentationAddonInstaller.FailurePolicy.osReason("Failed to extract native libraries, res=-2 /private/path"));
   eq("abi_mismatch",PresentationAddonInstaller.FailurePolicy.osReason("INSTALL_FAILED_NO_MATCHING_ABIS: No matching ABIs"));
-  eq("storage_insufficient",PresentationAddonInstaller.FailurePolicy.osReason("Insufficient storage at /private/path"));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.osReason("Insufficient storage at /private/path"));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.osReason(6,Integer.MIN_VALUE,null));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.osReason(1,-4,"Generic I/O failure"));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.osReason(1,Integer.MIN_VALUE,"INSTALL_FAILED_INSUFFICIENT_STORAGE"));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.category(6,0,""));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.category(1,-4,""));
+  eq("storage_or_io_error",PresentationAddonInstaller.FailurePolicy.category(1,0,"INSTALL_FAILED_INSUFFICIENT_STORAGE"));
+  eq("installation_error",PresentationAddonInstaller.FailurePolicy.category(1,0,""));
+  eq("inherit_failed",PresentationAddonInstaller.FailurePolicy.osReason(6,-4,"Failed to inherit existing install: /data/app/private EACCES"));
+  eq("digest_store_failed",PresentationAddonInstaller.FailurePolicy.osReason(6,-4,"Failed to store digests EIO"));
+  eq("rename_failed",PresentationAddonInstaller.FailurePolicy.osReason(6,-4,"Failed to rename '/data/old' to '/data/new' EXDEV"));
   eq("signer_mismatch",PresentationAddonInstaller.FailurePolicy.osReason("Signatures do not match /private/name"));
   eq("user_rejected",PresentationAddonInstaller.FailurePolicy.osReason("User cancelled install"));
   eq("os_rejected",PresentationAddonInstaller.FailurePolicy.osReason("/private/account anything else"));
@@ -106,6 +124,27 @@ final class PresentationFailurePolicyHostTest {
   String joined=f.stage+f.reason+f.exceptionClass+f.member+f.expectedSha+f.actualSha+f.installToken;
   eq(false,joined.contains("secret")); eq(false,joined.contains("/private")); eq(false,joined.contains("/data"));
   eq("OtherException",PresentationAddonInstaller.FailurePolicy.make("callback","os_rejected",new SecretException(),null,null,null,1,-2,null).exceptionClass);
+  eq("EACCES",PresentationAddonInstaller.FailurePolicy.errno("Failed to inherit (EACCES)"));
+  eq("EXDEV",PresentationAddonInstaller.FailurePolicy.errno("rename errno=EXDEV"));
+  eq("ENOSPC",PresentationAddonInstaller.FailurePolicy.errno("open ENOSPC"));
+  eq("",PresentationAddonInstaller.FailurePolicy.errno("EUNKNOWN private text"));
+  String safe=PresentationAddonInstaller.FailurePolicy.redactMessage("Failed to inherit existing install: /data/app/private-user/oat/base.odex (EACCES)\n\u0000\u202e");
+  eq(true,safe.contains("Failed to inherit existing install")); eq(true,safe.contains("EACCES"));
+  eq(false,safe.contains("private-user")); eq(false,safe.contains("/data"));
+  eq(false,safe.contains("\n")); eq(false,safe.contains("\u0000")); eq(false,safe.contains("\u202e"));
+  String uri=PresentationAddonInstaller.FailurePolicy.redactMessage("Failed from https://private.example/data?token=secret and content://private/path");
+  eq(false,uri.contains("private.example")); eq(false,uri.contains("secret")); eq(false,uri.contains("content://"));
+  String credentials=PresentationAddonInstaller.FailurePolicy.redactMessage("Authorization: Bearer tinysecret password=\"short value\" token=abc123 api_key=privatekey Basic dGlueTpzZWNyZXQ=");
+  for(String secret:new String[]{"tinysecret","short value","abc123","privatekey","dGlueTpzZWNyZXQ="})eq(false,credentials.contains(secret));
+  String jwt="eyJhbGciOiJub25l"+".cHJpdmF0ZWNvbnRlbnQ.c2lnbmF0dXJl";
+  eq(false,PresentationAddonInstaller.FailurePolicy.redactMessage("failed "+jwt).contains(jwt));
+  eq(false,PresentationAddonInstaller.FailurePolicy.redactMessage("value "+"A1b2".repeat(10)).contains("A1b2".repeat(10)));
+  eq(false,PresentationAddonInstaller.FailurePolicy.redactMessage("Failed to rename '/data/old name' to '/data/new name' EXDEV").contains("old name"));
+  eq(false,PresentationAddonInstaller.FailurePolicy.redactMessage("failed C:\\private\\base.apk EACCES").contains("private"));
+  eq(true,PresentationAddonInstaller.FailurePolicy.redactMessage("failure ".repeat(1000)).length()<=512);
+  PresentationAddonInstaller.Failure detailed=PresentationAddonInstaller.FailurePolicy.make("callback","inherit_failed",null,null,null,null,6,-4,"Failed to inherit /data/app/private EACCES");
+  eq("storage_or_io_error",detailed.category); eq("EACCES",detailed.errno);
+  eq(false,detailed.osMessage.contains("/data")); eq(true,detailed.osMessage.contains("Failed to inherit"));
   existingPlanChecks();
   System.out.println("PASS: "+checks+" failure-policy and existing-APK semantic checks; no Android runtime needed.");
  }

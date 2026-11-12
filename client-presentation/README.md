@@ -83,11 +83,19 @@ by the server builder.
 
 Use the server application's installer, which verifies the installed package,
 version, current signer, required base member hashes and bundled split hash
-before creating a normal `PackageInstaller.MODE_INHERIT_EXISTING` session for
-split `idoly_presentation`. Android verifies the split's signer at commit.
+before creating a normal update session for split `idoly_presentation`.
+The marker records the exact ordered `supported_installation_modes` array
+`["MODE_FULL_INSTALL", "MODE_INHERIT_EXISTING"]`. The default complete-code
+`MODE_FULL_INSTALL` session streams the installed public base and all existing
+split APKs together with the add-on. It replaces code under the same package,
+version and certificate while retaining the application's data and UID.
+Optional feature-only `MODE_INHERIT_EXISTING` uses the installed base; it can
+encounter inherited-artifact I/O failures that Android reports as storage
+errors. Android verifies the split's signer at commit.
 This split is not a standalone app. Installation normally ends the running
 game process; relaunch the game after accepting the OS installation dialog.
-No uninstall, data clearing, SDK replacement or whole-base update is needed.
+The complete update reuses the installed base and SDK bytes unchanged. It
+needs no separately rebuilt or downloaded game APK and preserves game data.
 
 An unexported provider starts only in the supported main process. The daemon
 polls `http://127.0.0.1:8080/client/presentation` every two seconds using a
@@ -104,3 +112,22 @@ Host-only checks:
 python -m pytest -q client-presentation/tests tests/test_build_android_server_manual.py
 python -m pytest -q client-presentation/native/tests
 ```
+
+## Standalone diagnostic update
+
+`build_full_client.py` provides a normal full-APK fallback for the exact pinned
+published diagnostic base. It reuses the audited feature's own DEX and native
+library, appends `classes6.dex` and a private provider, and preserves every
+original SDK/DEX/native/resource/Unity member except the manifest. The compiled
+manifest comparison permits only that provider addition. The output retains
+the AA4e certificate, package and version414 and verifies both v2/v3 signatures.
+`assets/idoly-presentation-standalone.json` contains only the five public
+compatibility fields used by the server to recognize the bridge in the base.
+
+Use `--source`, `--feature-apk`, `--source-commit`, `--output`, `--apkeditor`,
+`--jdk-bin`, `--build-tools`, `--keystore` and `--password-file` with the existing
+matching private signing file. `--ram-directory /dev/shm` uses the approved
+mixed staging route: unsigned on the output filesystem, aligned in RAM, then
+signed on the output filesystem. At most one full APK occupies each location;
+the normal memory and disk-reserve guards still apply. Only small original
+manifest/resource members are decoded, and no whole game/native/DEX is rebuilt.

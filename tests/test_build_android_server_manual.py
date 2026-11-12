@@ -61,8 +61,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "29",
-                           tool.ANDROID + "versionName": "0.3.10"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "30",
+                           tool.ANDROID + "versionName": "0.3.11"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -102,7 +102,7 @@ def test_installer_requires_explicit_permission_and_nonexported_callback(change)
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 29;' in raw and 'VERSION_NAME = "0.3.10";' in raw
+    assert 'VERSION_CODE = 30;' in raw and 'VERSION_NAME = "0.3.11";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
         tool.build_config('"; injected')
@@ -110,7 +110,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("29")\ngradleProperty("serverVersionName").orElse("0.3.10")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("30")\ngradleProperty("serverVersionName").orElse("0.3.11")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -409,7 +409,8 @@ def feature_case(directory, monkeypatch):
             "split_id": tool.presentation.SPLIT, "base_version_code": 414, "certificate_sha256": spec["certificate"],
             "required_base_members": tool.presentation.required_base_members(profile),
             "native_library_sha256": hashlib.sha256(native).hexdigest(),
-            "configuration_origin": "http://127.0.0.1:8080", "installation_mode": "MODE_INHERIT_EXISTING"}
+            "configuration_origin": "http://127.0.0.1:8080",
+            "supported_installation_modes": list(tool.presentation.SUPPORTED_INSTALLATION_MODES)}
         members = {"AndroidManifest.xml": b"synthetic feature manifest checked by SDK in a real build",
             "classes.dex": bytes(dex), tool.presentation.LIBRARY: native,
             tool.presentation.MARKER: json.dumps(marker).encode()}
@@ -440,6 +441,28 @@ def test_presentation_snapshots_only_three_public_assets_and_validates_own_code(
         assert report["profile"] == row["id"]
         assert report["classes"] == ["Lgame/qualiarts/idolypride/presentation/" + name + ";"
                                     for name in ("NativePresentation", "PresentationClient", "PresentationProvider")]
+
+
+def test_public_storage_summary_is_part_of_the_exact_seven_java_source_inventory():
+    assert len(tool.JAVA_FILES) == 7
+    assert tool.JAVA_ROOT + "PresentationStorage.java" in tool.SOURCE_FILES
+
+
+@pytest.mark.parametrize("modes", [None, "MODE_FULL_INSTALL", ["MODE_FULL_INSTALL"],
+    ["MODE_INHERIT_EXISTING", "MODE_FULL_INSTALL"], ["MODE_FULL_INSTALL", "MODE_FULL_INSTALL"],
+    ["MODE_FULL_INSTALL", "MODE_INHERIT_EXISTING", "OTHER"]])
+def test_feature_marker_requires_both_exact_ordered_supported_session_modes(tmp_path, monkeypatch, modes):
+    value, members = feature_case(tmp_path / "presentation", monkeypatch)
+    row = value["profiles"][0];files = dict(members[row["id"]])
+    marker = json.loads(files[tool.presentation.MARKER])
+    if modes is None:
+        marker.pop("supported_installation_modes")
+        marker["installation_mode"] = "MODE_INHERIT_EXISTING"
+    else:
+        marker["supported_installation_modes"] = modes
+    files[tool.presentation.MARKER] = json.dumps(marker).encode()
+    with pytest.raises(ValueError, match="marker"):
+        tool.validate_presentation_archive(zip_bytes(files), row)
 
 
 @pytest.mark.parametrize("change", ["asset-hash", "wrong-package", "private-path", "bad-requirement", "symlink"])
