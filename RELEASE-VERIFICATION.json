@@ -1,0 +1,16 @@
+{
+  "version": "macos-v0.3.13",
+  "source_commit": "9eeb0bcfef2780f2f144b15586d2684f9c4dc809",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 101796212,
+      "sha256": "2fb458d1663fa8513fdd2b45fa283785a9335cdcffa441737e577e952c6f615d",
+      "platform": "macOS13+ Apple Silicon",
+      "public_ca": "certifi2026.10.23",
+      "tls_certificate_and_hostname_verification": true,
+      "packaged_context_public_resource_fetch_verified": true,
+      "actual_mac_execution": false
+    }
+  ]
+}
