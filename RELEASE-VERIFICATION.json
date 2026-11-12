@@ -1,0 +1,23 @@
+{
+  "version": "0.3.17",
+  "source_commit": "acd5881b9a4acb538f460481ff7cfa0f317aa4b9",
+  "Android_MT_verification_experiment": true,
+  "default_MT_requested": false,
+  "actual_device_mode_verified": false,
+  "FPS_gain_measured": false,
+  "PlayProtect_verdict_verified": false,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 99680128,
+      "sha256": "75106adefdd186729ec901f162f8ed4d264276e74df56a92f2d7b8193b7f2dfe",
+      "device_verified": false
+    },
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159438866,
+      "sha256": "332fdbd0344b1a2ed76ec7062b666ff2b2ef179b352f983d83cffbf43fd6af39",
+      "device_verified": false
+    }
+  ]
+}
