@@ -15,6 +15,75 @@ import pytest
 from tools import repack_android_server_python as tool
 
 
+def runtime_sources(extra=b""):
+    return {"idoly_local/__init__.pyc": ("src/idoly_local/__init__.py", b""),
+            "android_server_runtime.pyc": ("android-server/app/src/main/python/android_server_runtime.py", extra),
+            "idoly_local/android_package.pyc": ("src/idoly_local/android_package.py", b"raise RuntimeError('offline tool must never load')\n")}
+
+
+@pytest.mark.parametrize("source", [
+    b"import idoly_local.android_package\n", b"from idoly_local import android_package\n",
+    b"def late():\n from idoly_local.android_package import package_android\n",
+    b"import importlib as loader\nloader.import_module('idoly_local.android_package')\n",
+    b"from importlib import import_module as load\nload('.android_package', 'idoly_local')\n",
+    b"__import__('idoly_local.android_package')\n",
+    b"import builtins as b\nb.__import__('idoly_local.android_package')\n",
+    b"from builtins import __import__ as load\nload('idoly_local.android_package')\n"])
+def test_android_exclusions_reject_static_and_literal_dynamic_imports_in_all_scopes(source):
+    with pytest.raises(ValueError, match="excluded offline"):
+        tool.android_runtime_sources(runtime_sources(source))
+
+
+@pytest.mark.parametrize("source", [
+    b"import importlib\nimportlib.import_module(module_name)\n",
+    b"__import__(module_name)\n",
+    b"__import__('idoly_local', fromlist=['android_package'])\n",
+    b"import importlib\nload=importlib.import_module\nload(module_name)\n",
+    b"import importlib\ngetattr(importlib,'import_module')(module_name)\n",
+    b"import importlib\nimportlib.__dict__['import_module'](module_name)\n",
+    b"exec(source)\n"])
+def test_android_exclusions_do_not_silently_ignore_unknown_dynamic_import_forms(source):
+    with pytest.raises(ValueError, match="dynamic"):
+        tool.android_runtime_sources(runtime_sources(source))
+
+
+def test_android_exclusions_refuse_ambiguous_internal_wildcard_import():
+    with pytest.raises(ValueError,match="wildcard"):
+        tool.android_runtime_sources(runtime_sources(b"from idoly_local import *\n"))
+
+
+def test_android_policy_keeps_literal_external_descriptor_import_and_runtime_capture():
+    sources=runtime_sources(b"import importlib\nimportlib.import_module('papi_pb2')\nfrom idoly_local import dream_capture\n")
+    sources['idoly_local/dream_capture.pyc']=('src/idoly_local/dream_capture.py',b'VALUE=1\n')
+    selected=tool.android_runtime_sources(sources)
+    assert 'idoly_local/android_package.pyc' not in selected
+    assert 'idoly_local/dream_capture.pyc' in selected
+    assert len(tool.ANDROID_EXCLUDED_MODULES)==24
+
+
+def test_android_compiler_removes_only_explicit_offline_modules(case):
+    sources=runtime_sources();original=app_zip({name:value[1] for name,value in sources.items()})
+    app,rows=tool.compile_app(original,sources,123)
+    with ZipFile(io.BytesIO(app)) as archive:
+        assert set(archive.namelist())-{'__pycache__/'}=={'idoly_local/__init__.pyc','android_server_runtime.pyc'}
+    assert len(rows)==2 and all(row['code_object_matches_source'] for row in rows)
+    unknown=app_zip({**{name:value[1] for name,value in sources.items()},'idoly_local/unknown.pyc':b'VALUE=1'})
+    with pytest.raises(ValueError,match='omit an existing'):
+        tool.compile_app(unknown,sources,123)
+
+
+def test_real_android_source_selection_retains_57_runtime_modules():
+    root=Path(__file__).resolve().parents[1]
+    sources={'idoly_local/'+p.stem+'.pyc':(str(p.relative_to(root)),p.read_bytes())
+             for p in (root/'src/idoly_local').glob('*.py')}
+    bridge=root/'android-server/app/src/main/python/android_server_runtime.py'
+    sources['android_server_runtime.pyc']=(str(bridge.relative_to(root)),bridge.read_bytes())
+    selected=tool.android_runtime_sources(sources)
+    assert len(selected)==57 and len(sources)-len(selected)==24
+    assert 'idoly_local/dream_capture.pyc' in selected
+    assert not selected.keys() & tool.ANDROID_EXCLUDED_MEMBERS
+
+
 def git(root, *args):
     return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.DEVNULL).strip().decode()
 

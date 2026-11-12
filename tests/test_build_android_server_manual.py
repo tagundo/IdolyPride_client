@@ -5,6 +5,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import struct
 import sys
 import time
@@ -51,28 +52,27 @@ def zip_bytes(files):
 
 def manifest(raw=b""):
     return (b'<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-            b'<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>'
+            + b''.join(b'<uses-permission android:name="' + permission.encode() + b'"/>'
+                       for permission in sorted(tool.SERVER_PERMISSIONS)) +
             b'<application android:allowBackup="false" android:usesCleartextTraffic="true">'
             b'<activity android:name=".MainActivity" android:exported="true"/>'
-            b'<activity android:name=".PresentationInstallActivity" android:exported="false"/>'
             b'<service android:name=".ServerService" android:exported="false"/>'
             + raw + b'</application></manifest>')
 
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "34",
-                           tool.ANDROID + "versionName": "0.3.15"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "35",
+                           tool.ANDROID + "versionName": "0.3.16"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
     assert app.get(tool.ANDROID + "allowBackup") == "false"
     assert app.get(tool.ANDROID + "usesCleartextTraffic") == "true"
     assert app.get(tool.ANDROID + "extractNativeLibs") == "true"
-    assert app.get(tool.ANDROID + "debuggable") == "true"
+    assert app.get(tool.ANDROID + "debuggable") == "false"
     assert [(x.tag, x.get(tool.ANDROID + "name"), x.get(tool.ANDROID + "exported")) for x in app] == [
         ("activity", tool.PACKAGE + ".MainActivity", "true"),
-        ("activity", tool.PACKAGE + ".PresentationInstallActivity", "false"),
         ("service", tool.PACKAGE + ".ServerService", "false")]
 
 
@@ -88,21 +88,39 @@ def test_manifest_entity_and_backup_policy_rejected():
             tool.manifest_xml(raw)
 
 
-@pytest.mark.parametrize("change", ["missing-permission", "public-callback"])
-def test_installer_requires_explicit_permission_and_nonexported_callback(change):
+@pytest.mark.parametrize("change", ["missing-permission", "installer-permission", "sdk-permission", "duplicate-permission"])
+def test_release_manifest_rejects_installation_or_unexpected_permission_inventory(change):
     raw = manifest()
     if change == "missing-permission":
-        raw = raw.replace(b'<uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>', b'')
+        raw = raw.replace(b'<uses-permission android:name="android.permission.INTERNET"/>', b'')
     else:
-        raw = raw.replace(b'name=".PresentationInstallActivity" android:exported="false"',
-                          b'name=".PresentationInstallActivity" android:exported="true"')
-    with pytest.raises(ValueError, match="permission or private callback"):
+        name = "android.permission.REQUEST_INSTALL_PACKAGES" if change == "installer-permission" else "android.permission.INTERNET"
+        tag = "uses-permission-sdk-23" if change == "sdk-permission" else "uses-permission"
+        raw = raw.replace(b'<application', ('<' + tag + ' android:name="' + name + '"/><application').encode(), 1)
+    with pytest.raises(ValueError, match="permission"):
+        tool.manifest_xml(raw)
+
+
+@pytest.mark.parametrize("extra", [b'<activity android:name=".PresentationInstallActivity" android:exported="false"/>',
+                                   b'<service android:name=".Other" android:exported="false"/>'])
+def test_release_manifest_rejects_old_installer_callback_or_extra_components(extra):
+    with pytest.raises(ValueError, match="component inventory"):
+        tool.manifest_xml(manifest(extra))
+
+
+@pytest.mark.parametrize("name,old,new", [(b"MainActivity", b"true", b"false"),
+                                           (b"ServerService", b"false", b"true")])
+def test_release_component_export_policy_is_fixed(name, old, new):
+    raw = manifest().replace(b'name=".' + name + b'" android:exported="' + old + b'"',
+                             b'name=".' + name + b'" android:exported="' + new + b'"')
+    with pytest.raises(ValueError, match="export policy"):
         tool.manifest_xml(raw)
 
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 34;' in raw and 'VERSION_NAME = "0.3.15";' in raw
+    assert 'VERSION_CODE = 35;' in raw and 'VERSION_NAME = "0.3.16";' in raw
+    assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
         tool.build_config('"; injected')
@@ -110,7 +128,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("34")\ngradleProperty("serverVersionName").orElse("0.3.15")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("35")\ngradleProperty("serverVersionName").orElse("0.3.16")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -128,8 +146,7 @@ def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, m
 def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit(monkeypatch):
     root = Path(tool.__file__).resolve().parents[1]
     names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py",
-             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py",
-             "client-presentation/build_addon.py")
+             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py")
     frozen = {name: (root / name).read_bytes() for name in names}
     def git(_root, *args, limit):
         return frozen[args[2].split(":", 1)[1]]
@@ -392,125 +409,82 @@ def test_unknown_d8_synthetic_kinds_or_malformed_suffixes_remain_rejected(suffix
     assert not tool.own_synthetic(origin + suffix, {origin + ";"})
 
 
-def feature_case(directory, monkeypatch):
-    directory.mkdir()
-    native = synthetic_elf()
-    monkeypatch.setattr(tool.presentation, "SHADOW_HASHES", {
-        name: hashlib.sha256(native).hexdigest() for name in tool.presentation.SHADOW_HASHES})
-    reports, all_members = [], {}
-    primary = ["Lgame/qualiarts/idolypride/presentation/" + name + ";"
-               for name in ("NativePresentation", "PresentationClient", "PresentationProvider")]
-    dex = bytearray(synthetic_dex(primary))
-    dex[:8] = b"dex\n039\0"
-    dex[12:32] = hashlib.sha1(dex[32:]).digest()
-    struct.pack_into("<I", dex, 8, zlib.adler32(dex[12:]) & 0xffffffff)
-    for profile, spec in tool.presentation.PROFILES.items():
-        marker = {"schema": 1, "bridge_version": 1, "profile": profile, "target_package": spec["package"],
-            "split_id": tool.presentation.SPLIT, "base_version_code": 414, "certificate_sha256": spec["certificate"],
-            "required_base_members": tool.presentation.required_base_members(profile),
-            "native_library_sha256": hashlib.sha256(native).hexdigest(),
-            "configuration_origin": "http://127.0.0.1:8080",
-            "supported_installation_modes": list(tool.presentation.SUPPORTED_INSTALLATION_MODES)}
-        members = {"AndroidManifest.xml": b"synthetic feature manifest checked by SDK in a real build",
-            "classes.dex": bytes(dex), tool.presentation.LIBRARY: native,
-            tool.presentation.MARKER: json.dumps(marker).encode()}
-        members.update(tool.presentation.license_members(profile))
-        if profile == "resources":
-            members.update({name: native for name in tool.presentation.SHADOW_HASHES})
-        raw = zip_bytes(members)
-        (directory / (profile + ".apk")).write_bytes(raw)
-        reports.append({**marker, "addon_bytes": len(raw), "addon_apk_sha256": hashlib.sha256(raw).hexdigest(),
-                        "signature_and_alignment_verified": True})
-        all_members[profile] = members
-    value = tool.presentation.bundle_manifest(reports)
-    (directory / "manifest.json").write_text(json.dumps(value))
-    return value, all_members
+def test_only_six_server_sources_are_frozen_without_installer_or_client_builder():
+    assert len(tool.JAVA_FILES) == 6
+    assert {Path(name).stem for name in tool.JAVA_FILES} == {
+        "MainActivity", "ServerService", "CryptoBridge", "PresentationSettings", "PlaybackSettings", "PlaybackStorage"}
+    assert not any("Installer" in name or "PresentationStorage" in name for name in tool.SOURCE_FILES)
+    assert not hasattr(tool, "presentation")
+    assert not hasattr(tool, "presentation_assets")
 
 
-def test_presentation_snapshots_only_three_public_assets_and_validates_own_code(tmp_path, monkeypatch):
-    directory = tmp_path / "presentation"
-    value, _members = feature_case(directory, monkeypatch)
-    private = directory / "private-keystore.password"
-    private.write_bytes(b"private-neighbor-not-an-input")
-    before = private.read_bytes()
-    snapshots, actual = tool.presentation_assets(directory)
-    assert actual == value and set(snapshots) == tool.PRESENTATION_ASSETS
-    assert private.read_bytes() == before
-    for row in value["profiles"]:
-        report = tool.validate_presentation_archive(snapshots["assets/" + row["asset"]], row)
-        assert report["profile"] == row["id"]
-        assert report["classes"] == ["Lgame/qualiarts/idolypride/presentation/" + name + ";"
-                                    for name in ("NativePresentation", "PresentationClient", "PresentationProvider")]
+def test_gradle_python_exclusions_match_the_manual_server_dependency_boundary():
+    gradle = (Path(tool.__file__).resolve().parents[1] / tool.GRADLE).read_text()
+    excluded_paths = re.findall(r'"(idoly_local/[^"\n]+\.py)"', gradle)
+    expected = {name.replace(".", "/") + ".py" for name in tool.pybundle.ANDROID_EXCLUDED_MODULES}
+    assert len(excluded_paths) == len(expected) == 24
+    assert set(excluded_paths) == expected
 
 
-def test_storage_and_playback_are_part_of_the_exact_nine_java_source_inventory():
-    assert len(tool.JAVA_FILES) == 9
-    assert tool.JAVA_ROOT + "PresentationStorage.java" in tool.SOURCE_FILES
-    assert tool.JAVA_ROOT + "PlaybackSettings.java" in tool.SOURCE_FILES
-    assert tool.JAVA_ROOT + "PlaybackStorage.java" in tool.SOURCE_FILES
+@pytest.mark.parametrize("legacy", [False, True])
+def test_streaming_excludes_old_client_apks_without_accepting_new_assets(tmp_path, legacy):
+    baseline, target = tmp_path / "baseline.apk", tmp_path / "server.apk"
+    files = {"classes.dex": b"runtime", "classes2.dex": b"old own", "classes3.dex": b"old app"}
+    if legacy:
+        files.update({name: b"old client installation asset" for name in tool.LEGACY_PRESENTATION_ASSETS})
+    baseline.write_bytes(zip_bytes(files))
+    with ZipFile(baseline) as archive:
+        infos = tool.pybundle._members(archive, tool.pybundle.MAX_EXPANDED)
+        tool.stream_apk(archive, infos, target, {"classes2.dex": b"new server only"})
+    with ZipFile(target) as archive:
+        assert set(archive.namelist()) == {"classes.dex", "classes2.dex"}
+    with ZipFile(baseline) as archive, pytest.raises(ValueError, match="existing approved server"):
+        tool.stream_apk(archive, infos, tmp_path / "invalid.apk", {"assets/client.apk": b"new executable"})
+    assert not (tmp_path / "invalid.apk").exists()
 
 
-@pytest.mark.parametrize("modes", [None, "MODE_FULL_INSTALL", ["MODE_FULL_INSTALL"],
-    ["MODE_INHERIT_EXISTING", "MODE_FULL_INSTALL"], ["MODE_FULL_INSTALL", "MODE_FULL_INSTALL"],
-    ["MODE_FULL_INSTALL", "MODE_INHERIT_EXISTING", "OTHER"]])
-def test_feature_marker_requires_both_exact_ordered_supported_session_modes(tmp_path, monkeypatch, modes):
-    value, members = feature_case(tmp_path / "presentation", monkeypatch)
-    row = value["profiles"][0];files = dict(members[row["id"]])
-    marker = json.loads(files[tool.presentation.MARKER])
-    if modes is None:
-        marker.pop("supported_installation_modes")
-        marker["installation_mode"] = "MODE_INHERIT_EXISTING"
-    else:
-        marker["supported_installation_modes"] = modes
-    files[tool.presentation.MARKER] = json.dumps(marker).encode()
-    with pytest.raises(ValueError, match="marker"):
-        tool.validate_presentation_archive(zip_bytes(files), row)
+@pytest.mark.parametrize("name", ["assets/client.apk", "assets/presentation/extra.json"])
+def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(tmp_path, name):
+    baseline = tmp_path / "baseline.apk"
+    baseline.write_bytes(zip_bytes({"classes.dex": b"runtime", name: b"unapproved"}))
+    with ZipFile(baseline) as archive, pytest.raises(ValueError, match="must not embed"):
+        infos = tool.pybundle._members(archive, tool.pybundle.MAX_EXPANDED)
+        tool.stream_apk(archive, infos, tmp_path / "invalid.apk", {})
+    assert not (tmp_path / "invalid.apk").exists()
 
 
-@pytest.mark.parametrize("change", ["asset-hash", "wrong-package", "private-path", "bad-requirement", "symlink"])
-def test_presentation_asset_manifest_rejects_wrong_identity_bytes_paths_or_links(tmp_path, monkeypatch, change):
-    directory = tmp_path / "presentation"
-    value, _members = feature_case(directory, monkeypatch)
-    if change == "asset-hash": value["profiles"][0]["apk_sha256"] = "f" * 64
-    elif change == "wrong-package": value["profiles"][0]["target_package"] = "game.qualiarts.idolypride"
-    elif change == "private-path": value["profiles"][0]["asset"] = "../private"
-    elif change == "bad-requirement": value["profiles"][0]["required_base_members"] = {}
-    else:
-        target = directory / "diagnostics.apk"
-        external = tmp_path / "external.apk"
-        target.rename(external); target.symlink_to(external)
-    (directory / "manifest.json").write_text(json.dumps(value))
-    with pytest.raises(ValueError): tool.presentation_assets(directory)
+def linked_identity():
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='35' versionName='0.3.16'\n"
+               "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
+               + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
+    manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"
+                     "A: android:allowBackup(0x3)=false\n")
+    return badging, manifest_dump
 
 
-@pytest.mark.parametrize("change", ["extra-code", "marker", "native-bytes", "missing-provider", "runtime-notice"])
-def test_nested_presentation_split_rejects_extra_or_mutated_code(tmp_path, monkeypatch, change):
-    value, members = feature_case(tmp_path / "presentation", monkeypatch)
-    row = value["profiles"][0]
-    files = dict(members[row["id"]])
-    if change == "extra-code": files["classes2.dex"] = b"unapproved"
-    elif change == "marker":
-        marker = json.loads(files[tool.presentation.MARKER]); marker["account"] = "never include"
-        files[tool.presentation.MARKER] = json.dumps(marker).encode()
-    elif change == "native-bytes": files[tool.presentation.LIBRARY] += b"changed"
-    elif change == "runtime-notice":
-        files[tool.presentation.LICENSE_PREFIX + tool.presentation.RUNTIME_NOTICE] += b"changed"
-    else:
-        dex = bytearray(synthetic_dex(["Lgame/qualiarts/idolypride/presentation/NativePresentation;"]))
-        dex[:8] = b"dex\n039\0"; dex[12:32] = hashlib.sha1(dex[32:]).digest()
-        struct.pack_into("<I", dex, 8, zlib.adler32(dex[12:]) & 0xffffffff)
-        files["classes.dex"] = bytes(dex)
-    with pytest.raises(ValueError): tool.validate_presentation_archive(zip_bytes(files), row)
+def test_linked_identity_requires_release_and_no_install_permission_or_callback():
+    badging, manifest_dump = linked_identity()
+    tool._identity(badging, manifest_dump)
+    with pytest.raises(ValueError, match="identity"):
+        tool._identity(badging, manifest_dump.replace("debuggable(0x2)=false", "debuggable(0x2)=true"))
+    for forbidden in ("REQUEST_INSTALL_PACKAGES", "PresentationInstallActivity"):
+        with pytest.raises(ValueError, match="permission or installer"):
+            tool._identity(badging, manifest_dump + forbidden)
+    with pytest.raises(ValueError, match="permission or installer"):
+        tool._identity(badging + "uses-permission: name='android.permission.REQUEST_INSTALL_PACKAGES'\n", manifest_dump)
 
 
 @pytest.mark.parametrize("tamper", [None, "classes.dex", "assets/chaquopy/bootstrap.imy"])
-def test_apk_audit_accepts_only_own_replacements_and_preserves_runtime_dependency_bytes(tmp_path, tamper):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_apk_audit_accepts_only_own_replacements_and_preserves_runtime_dependency_bytes(tmp_path, tamper, legacy):
     dependencies = {f"Lcom/chaquo/python/Type{index};" for index in range(27)}
     own = {"L" + tool.PACKAGE.replace(".", "/") + "/MainActivity;"}
     files = {name: b"old mutable" for name in tool.MUTABLE_NAMES | tool.REMOVED_NAMES}
     files.update({name: synthetic_elf() for name in tool.NATIVE_NAMES})
     files["classes.dex"] = synthetic_dex(sorted(dependencies))
     files["assets/chaquopy/bootstrap.imy"] = b"immutable Python runtime"
+    if legacy:
+        files.update({name: b"old executable client asset" for name in tool.LEGACY_PRESENTATION_ASSETS})
     baseline, candidate = tmp_path / "baseline.apk", tmp_path / "candidate.apk"
     baseline.write_bytes(zip_bytes(files))
     replacements = {name: b"new approved input" for name in tool.MUTABLE_NAMES}
@@ -533,8 +507,35 @@ def test_apk_audit_accepts_only_own_replacements_and_preserves_runtime_dependenc
     else:
         report = tool.audit_apk(candidate, before, infos, hashes, dependencies, own)
         assert report["all_other_member_bytes_and_metadata_preserved"] is True
-        assert report["removed_apk_members"] == ["classes3.dex"]
+        assert report["removed_apk_members"] == sorted({"classes3.dex"} | (tool.LEGACY_PRESENTATION_ASSETS if legacy else set()))
+        assert report["client_installer_code_absent"] and report["embedded_client_apks_absent"]
         assert len(report["native_elf_load_alignments"]) == 9
+
+
+@pytest.mark.parametrize("token", tool.FORBIDDEN_INSTALLER_DEX_TOKENS)
+def test_apk_audit_rejects_retained_installer_references_even_with_approved_own_hash(tmp_path, token):
+    dependencies = {"Lcom/chaquo/python/Python;"}
+    own = {"L" + tool.PACKAGE.replace(".", "/") + "/MainActivity;"}
+    files = {name: b"old mutable" for name in tool.MUTABLE_NAMES | tool.REMOVED_NAMES}
+    files.update({name: synthetic_elf() for name in tool.NATIVE_NAMES})
+    files["classes.dex"] = synthetic_dex(sorted(dependencies))
+    baseline, candidate = tmp_path / "baseline.apk", tmp_path / "candidate.apk"
+    baseline.write_bytes(zip_bytes(files))
+    own_dex = bytearray(synthetic_dex(sorted(own)))
+    own_dex.extend(token + b"\0")
+    struct.pack_into("<I", own_dex, 32, len(own_dex))
+    own_dex[12:32] = hashlib.sha1(own_dex[32:]).digest()
+    struct.pack_into("<I", own_dex, 8, zlib.adler32(own_dex[12:]) & 0xffffffff)
+    assert tool.dex_classes(bytes(own_dex)) == own
+    replacements = {name: b"new approved input" for name in tool.MUTABLE_NAMES}
+    replacements["classes2.dex"] = bytes(own_dex)
+    hashes = {name: hashlib.sha256(raw).hexdigest() for name, raw in replacements.items()}
+    with ZipFile(baseline) as archive:
+        infos = tool.pybundle._members(archive, tool.pybundle.MAX_EXPANDED)
+        before = tool.pybundle._hash_members(archive, infos)
+        tool.stream_apk(archive, infos, candidate, replacements)
+    with pytest.raises(ValueError, match="removed client installer code"):
+        tool.audit_apk(candidate, before, infos, hashes, dependencies, own)
 
 
 def test_password_read_is_bounded_before_open_and_preserves_only_single_line(tmp_path, monkeypatch):

@@ -139,15 +139,51 @@ struct Weak {
         clear(); if (value) handle = weak_new(value, false);
     }
 };
+// BEGIN_INVOCATION_RECT_TYPE_MEMO
+// Only immutable class ancestry is reused, never object identity or liveness.
+// Each post-original callback owns its stack entries; nested callbacks get an
+// independent memo and restore the enclosing pointer even during unwinding.
+struct RectTypeMemo {
+    void *confirmed[4]{};
+    bool contains(void *type) const {
+        if (!type) return false;
+        for (void *entry : confirmed) if (entry == type) return true;
+        return false;
+    }
+    void remember(void *type) {
+        if (!type) return;
+        for (void *&entry : confirmed) {
+            if (entry == type) return;
+            if (!entry) { entry = type; return; }
+        }
+    }
+};
+thread_local RectTypeMemo *rect_type_memo = nullptr;
+class RectTypeMemoScope {
+    RectTypeMemo entries;
+    RectTypeMemo *previous;
+public:
+    RectTypeMemoScope() : previous(rect_type_memo) { rect_type_memo = &entries; }
+    ~RectTypeMemoScope() { rect_type_memo = previous; }
+    RectTypeMemoScope(const RectTypeMemoScope &) = delete;
+    RectTypeMemoScope &operator=(const RectTypeMemoScope &) = delete;
+};
 bool rect_transform(void *value) {
     if (!value || !object_alive(value, nullptr)) return false;
     void *type = object_class(value);
+    void *initial_type = type;
+    RectTypeMemo *memo = rect_type_memo;
+    if (memo && memo->contains(type)) return true;
     for (unsigned depth = 0; type && depth != 12; ++depth, type = class_parent(type)) {
         const char *name = class_name(type), *space = class_namespace(type);
-        if (name && space && !std::strcmp(name, "RectTransform") && !std::strcmp(space, "UnityEngine")) return true;
+        if (name && space && !std::strcmp(name, "RectTransform") && !std::strcmp(space, "UnityEngine")) {
+            if (memo) memo->remember(initial_type);
+            return true;
+        }
     }
     return false;
 }
+// END_INVOCATION_RECT_TYPE_MEMO
 
 #ifdef IDOLY_DARWIN_BRIDGE
 VoidMethod mv_ui_initialize_original;
@@ -640,11 +676,15 @@ void rt_hook(void *self, int width, int height, bool alpha, Method *method) {
 }
 void target_update_hook(void *self, void *texture, Method *method) {
     target_update_original(self, texture, method);
-    if (ready.load(std::memory_order_acquire) && game_call()) { identify_main_target(self, texture); observe_image(self, texture); }
+    if (ready.load(std::memory_order_acquire) && game_call()) {
+        RectTypeMemoScope type_memo;
+        identify_main_target(self, texture); observe_image(self, texture);
+    }
 }
 void target_late_hook(void *self, Method *method) {
     target_late_original(self, method);
     if (ready.load(std::memory_order_acquire) && game_call()) {
+        RectTypeMemoScope type_memo;
         void *texture = target_current(self, nullptr);
         identify_main_target(self, texture); observe_image(self, texture);
         // Original scene layout writes may happen after QualityManager.Update.
@@ -903,6 +943,7 @@ void quality_update_hook(void *self, Method *method) {
     const int desired_fps = selected_fps(config, original_fps());
     if (app_fps_get(nullptr) != desired_fps) app_fps_set_original(desired_fps, nullptr);
     quality_update_original(self, method);
+    RectTypeMemoScope type_memo;
     const bool quality_readback = read<int>(self, 0x24)
         == (config.custom_graphics && config.quality && !quality_unavailable ? config.quality : base_quality);
     const bool fps_readback = app_fps_get(nullptr) == selected_fps(config, original_fps());

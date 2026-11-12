@@ -8,6 +8,7 @@ same-certificate signing and actual Android runtime checks are separate steps.
 from __future__ import annotations
 
 import argparse
+import ast
 from collections import Counter
 import copy
 import hashlib
@@ -45,6 +46,103 @@ MAX_APK = 128 * 1024 * 1024
 MAX_EXPANDED = 256 * 1024 * 1024
 MAX_MEMBERS = 512
 GIT_TIMEOUT = 20
+# Offline developer tools are not part of the Android server entry point.
+# Source files stay available to desktop/CLI/build tooling; only app.imy omits
+# these explicit modules. Any new retained import of one fails the build.
+ANDROID_EXCLUDED_MODULES = frozenset("idoly_local." + name for name in (
+    "__main__", "cli", "android_package", "client_patch", "native_bootstrap", "ios_patch",
+    "ios_presentation", "master_build", "media_master_build", "unity_http", "unity_cache",
+    "collect", "event_capture", "firebase_archive", "official_session", "profiles", "server",
+    "appearance_qa", "lesson_qa", "main_live_qa", "story_qa", "story_read_qa", "tutorial_qa", "pvp_capture"))
+ANDROID_EXCLUDED_MEMBERS = frozenset(name.replace(".", "/") + ".pyc" for name in ANDROID_EXCLUDED_MODULES)
+
+
+def _module_name(member):
+    name = member.removesuffix(".pyc").replace("/", ".")
+    return name.removesuffix(".__init__")
+
+
+def android_runtime_sources(sources):
+    """Explicit Android-only exclusions, checked against every retained import.
+
+    All scopes/branches are examined, including function-local imports. Literal
+    importlib/__import__ calls and their imported aliases are included. Unknown
+    dynamic targets fail closed rather than shipping a missing runtime module.
+    """
+    result = {member: value for member, value in sources.items() if member not in ANDROID_EXCLUDED_MEMBERS}
+    inventory = {_module_name(member) for member in sources}
+    for member, (filename, raw) in result.items():
+        name = _module_name(member)
+        package = name if member.endswith("/__init__.pyc") else name.rpartition(".")[0]
+        tree = ast.parse(raw, filename=filename)
+        functions, libraries = {"__import__"}, {"importlib"}
+        builtin_functions, builtin_libraries = {"__import__"}, {"builtins"}
+        references = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    references.add(alias.name)
+                    if alias.name == "importlib": libraries.add(alias.asname or alias.name)
+                    if alias.name == "builtins": builtin_libraries.add(alias.asname or alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                target = (importlib.util.resolve_name("." * node.level + (node.module or ""), package)
+                          if node.level else node.module or "")
+                references.add(target)
+                for alias in node.names:
+                    if alias.name == "*" and (target == "idoly_local" or target.startswith("idoly_local.")):
+                        raise ValueError("Android runtime contains an ambiguous wildcard module import")
+                    candidate = target + "." + alias.name
+                    if candidate in inventory or candidate in ANDROID_EXCLUDED_MODULES:
+                        references.add(candidate)
+                    if target == "importlib" and alias.name == "import_module":
+                        functions.add(alias.asname or alias.name)
+                    if target == "builtins" and alias.name == "__import__":
+                        functions.add(alias.asname or alias.name)
+                        builtin_functions.add(alias.asname or alias.name)
+        parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                    and (node.value.id in libraries and node.attr != "import_module"
+                         or node.value.id in builtin_libraries and node.attr != "__import__")):
+                raise ValueError("Android runtime contains unsupported dynamic import module access")
+            importer = (isinstance(node, ast.Name) and node.id in functions
+                        or isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                        and (node.value.id in libraries and node.attr == "import_module"
+                             or node.value.id in builtin_libraries and node.attr == "__import__"))
+            if importer:
+                parent = parents.get(node)
+                if not isinstance(parent, ast.Call) or parent.func is not node:
+                    raise ValueError("Android runtime contains an indirect dynamic import function")
+            if isinstance(node, ast.Name) and node.id in libraries | builtin_libraries:
+                if not isinstance(parents.get(node), ast.Attribute):
+                    raise ValueError("Android runtime contains an indirect dynamic import module")
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call): continue
+            if isinstance(node.func, ast.Name) and node.func.id in ("eval", "exec"):
+                raise ValueError("Android runtime contains dynamic code with unresolved imports")
+            direct = isinstance(node.func, ast.Name) and node.func.id in functions
+            qualified = (isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                         and (node.func.value.id in libraries and node.func.attr == "import_module"
+                              or node.func.value.id in builtin_libraries and node.func.attr == "__import__"))
+            if not (direct or qualified): continue
+            builtin = (direct and node.func.id in builtin_functions
+                       or qualified and node.func.attr == "__import__")
+            if builtin and (len(node.args) != 1 or node.keywords):
+                raise ValueError("Android runtime contains an unsupported dynamic __import__ form")
+            if not node.args or not isinstance(node.args[0], ast.Constant) or not isinstance(node.args[0].value, str):
+                raise ValueError("Android runtime contains an unresolved dynamic module import")
+            target = node.args[0].value
+            if target.startswith("."):
+                package_arg = node.args[1] if len(node.args) > 1 else next(
+                    (arg.value for arg in node.keywords if arg.arg == "package"), None)
+                if not isinstance(package_arg, ast.Constant) or not isinstance(package_arg.value, str):
+                    raise ValueError("Android runtime contains an unresolved relative dynamic import")
+                target = importlib.util.resolve_name(target, package_arg.value)
+            references.add(target)
+        for target in references:
+            if any(target == removed or target.startswith(removed + ".") for removed in ANDROID_EXCLUDED_MODULES):
+                raise ValueError("Retained Android runtime imports an excluded offline module")
+    return result
 
 
 def digest(path):
@@ -171,7 +269,7 @@ def committed_sources(root, commit):
         sources[member] = (name, raw)
     if "idoly_local/__init__.pyc" not in sources or "android_server_runtime.pyc" not in sources:
         raise ValueError("Committed source is missing the server package or Android bridge")
-    return sources
+    return android_runtime_sources(sources)
 
 
 def _constant_key(value):
@@ -208,12 +306,13 @@ def compile_app(original, sources, epoch):
     """Compile and audit every committed source with uniform exact PYC headers."""
     if type(epoch) is not int or not 0 <= epoch <= 0xFFFFFFFF:
         raise ValueError("PYC epoch must fit its unsigned timestamp field")
+    sources = android_runtime_sources(sources)
     output, rows = io.BytesIO(), []
     with ZipFile(io.BytesIO(original)) as before:
         infos = _members(before, MAX_APP)
         if any(not n.endswith(("/", ".pyc")) for n in infos):
             raise ValueError("Baseline app archive contains unexpected non-PYC files")
-        if {n for n in infos if n.endswith(".pyc")} - sources.keys():
+        if {n for n in infos if n.endswith(".pyc")} - sources.keys() - ANDROID_EXCLUDED_MEMBERS:
             raise ValueError("Source commit would omit an existing Python module")
         compiled = {}
         for member, (source, raw) in sorted(sources.items()):
@@ -230,6 +329,8 @@ def compile_app(original, sources, epoch):
                                 + marshal.dumps(code))
         with ZipFile(output, "w") as after:
             for name, info in infos.items():
+                if name in ANDROID_EXCLUDED_MEMBERS:
+                    continue
                 after.writestr(copy.copy(info), b"" if name.endswith("/") else compiled.pop(name))
             for name, raw in sorted(compiled.items()):
                 info = ZipInfo(name, (1980, 2, 1, 0, 0, 0))
@@ -352,6 +453,7 @@ def repack(baseline, source_root, source_commit, output, *, epoch, report_path=N
                                                             "comment", "extra"],
                        "app_imy_sha1": new_sha1, "python_version": sys.version.split()[0],
                        "pyc_magic": PYC_MAGIC.hex(), "new_pyc_epoch": epoch, "modules": modules}
+            receipt["android_excluded_offline_modules"] = sorted(ANDROID_EXCLUDED_MODULES)
             receipt_stage = Path(temporary) / "provenance.json"
             receipt_stage.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
             # Both publication destinations must share this filesystem for atomic hard links.

@@ -89,8 +89,8 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("34").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.15").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("35").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.16").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
     }
@@ -117,6 +117,7 @@ android {
     buildTypes {
         debug { signingConfig = signingConfigs.getByName("publicDevelopment") }
         release {
+            isDebuggable = false
             isMinifyEnabled = false
             signingConfig = signingConfigs.findByName("privateRelease") ?: signingConfigs.getByName("publicDevelopment")
         }
@@ -156,6 +157,17 @@ chaquopy {
             srcDir("src/main/python")
             srcDir("../../src")
             exclude("**/*.go", "**/go.mod", "**/go.sum", "**/native-live-engine/**")
+            // Match the manual server package: these offline CLI, client
+            // patch/build and QA modules are outside the server dependency
+            // closure. Keep exact filenames so runtime modules remain intact.
+            exclude("idoly_local/__main__.py", "idoly_local/cli.py", "idoly_local/android_package.py",
+                "idoly_local/client_patch.py", "idoly_local/native_bootstrap.py", "idoly_local/ios_patch.py",
+                "idoly_local/ios_presentation.py", "idoly_local/master_build.py", "idoly_local/media_master_build.py",
+                "idoly_local/unity_http.py", "idoly_local/unity_cache.py", "idoly_local/collect.py",
+                "idoly_local/event_capture.py", "idoly_local/firebase_archive.py", "idoly_local/official_session.py",
+                "idoly_local/profiles.py", "idoly_local/server.py", "idoly_local/appearance_qa.py",
+                "idoly_local/lesson_qa.py", "idoly_local/main_live_qa.py", "idoly_local/story_qa.py",
+                "idoly_local/story_read_qa.py", "idoly_local/tutorial_qa.py", "idoly_local/pvp_capture.py")
         }
     }
 }

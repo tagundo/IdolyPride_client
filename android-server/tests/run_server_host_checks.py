@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Compile actual server sources and run installer policy tests without Android.
+"""Compile actual standalone server sources and run playback policy checks without Android.
 
-Run: python android-server/tests/run_presentation_installer_host_tests.py
+Run: python android-server/tests/run_server_host_checks.py
 Tool paths default to the workspace's existing cached SDK, JDK and Chaquopy JAR.
 Override them with --jdk-bin, --android-jar and --chaquopy-jar as needed.
 This does not build an APK, run Gradle, install anything, or download dependencies.
@@ -27,11 +27,11 @@ def main():
     args = parser.parse_args()
     sources = sorted((ROOT / "android-server/app/src/main/java" / PACKAGE).glob("*.java"))
     tests = [ROOT / "android-server/tests/java" / PACKAGE / (name + ".java") for name in
-             ("PresentationFailurePolicyHostTest", "PresentationStorageHostTest")]
+             ("PlaybackSettingsHostTest",)]
     for path in (args.jdk_bin / "javac", args.jdk_bin / "java", args.android_jar, args.chaquopy_jar, *tests):
         if not path.is_file():
             parser.error(f"Required cached tool or source is missing: {path}")
-    with tempfile.TemporaryDirectory(prefix="presentation-installer-host-") as directory:
+    with tempfile.TemporaryDirectory(prefix="standalone-server-host-") as directory:
         work = Path(directory)
         generated = work / "generated" / PACKAGE
         generated.mkdir(parents=True)
@@ -65,7 +65,7 @@ def main():
                 str(args.jdk_bin / "java"), "-Xmx64m", "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1",
                 "-cp", str(classes), "game.qualiarts.idolypride.localserver." + test.stem,
             ], check=True)
-        print(f"Compiled {len(sources)} actual server Java sources; no APK build or Android runtime.")
+        print(f"Compiled {len(sources)} actual standalone server Java sources; no APK build or Android runtime.")
 
 
 if __name__ == "__main__":

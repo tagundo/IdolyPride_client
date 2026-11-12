@@ -1,7 +1,9 @@
-# Presentation feature split
+# Presentation bridge and standalone client
 
-This component adds an optional graphics preference bridge to an already
-installed Android 6.1.1 ARM64 client. It inherits this repository's
+This component builds a graphics preference bridge for the Android 6.1.1 ARM64
+client. Feature splits are intermediate build inputs to the separately distributed
+standalone client APK. Since v0.3.16 the server never embeds, modifies or installs
+client APKs. It inherits this repository's
 [AGPL-3.0 license](../LICENSE). The native implementation and its original
 interface/profile evidence are described in [native/README.md](native/README.md).
 Host checks and signature checks do not establish device rendering support.
@@ -71,12 +73,10 @@ ELF alignment/dependencies, the exact output member hashes, Android feature
 metadata, v2 signature/certificate and 16 KiB ZIP alignment. Each split must
 remain at most 1 MiB. Existing base/native inputs are checked unchanged.
 
-Create `manifest.json` from the two `.provenance.json` reports with
-`build_addon.bundle_manifest()`. The server manual builder's
-`--presentation-addons` directory accepts exactly the three named inputs
-`manifest.json`, `diagnostics.apk`, `resources.apk`; it independently checks
-their fixed profile identities, lengths, hashes, own DEX namespace, signatures,
-native alignment and dependency notices. It embeds only these three assets.
+`build_addon.bundle_manifest()` can record the two `.provenance.json` reports
+for build inspection. The server manual builder no longer accepts
+`--presentation-addons` and rejects embedded client APKs. Use the verified
+diagnostics feature as an input to the standalone client builder below.
 
 The static LLVM runtime notice in both splits reproduces the compiler-rt,
 libc++abi and libunwind blocks from the pinned NDK's
@@ -88,21 +88,13 @@ by the server builder.
 
 ## Install and runtime contract
 
-Use the server application's installer, which verifies the installed package,
-version, current signer, required base member hashes and bundled split hash
-before creating a normal update session for split `idoly_presentation`.
-The marker records the exact ordered `supported_installation_modes` array
-`["MODE_FULL_INSTALL", "MODE_INHERIT_EXISTING"]`. The default complete-code
-`MODE_FULL_INSTALL` session streams the installed public base and all existing
-split APKs together with the add-on. It replaces code under the same package,
-version and certificate while retaining the application's data and UID.
-Optional feature-only `MODE_INHERIT_EXISTING` uses the installed base; it can
-encounter inherited-artifact I/O failures that Android reports as storage
-errors. Android verifies the split's signer at commit.
-This split is not a standalone app. Installation normally ends the running
-game process; relaunch the game after accepting the OS installation dialog.
-The complete update reuses the installed base and SDK bytes unchanged. It
-needs no separately rebuilt or downloaded game APK and preserves game data.
+Download the server APK and complete client APK separately. Install the client
+using Android's ordinary installer, preserving its package and signer for an
+update. The server only launches known installed clients through normal launch
+intents; it has no package-install permission, APK patcher or install callback.
+The intermediate split is not a standalone app and is not an end-user download.
+Its compatibility marker still describes its build contract; those fields do
+not expose an installation feature in the server.
 
 An unexported provider starts only in the supported main process. The daemon
 polls `http://127.0.0.1:8080/client/presentation` every two seconds using a

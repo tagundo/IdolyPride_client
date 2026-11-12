@@ -158,13 +158,23 @@ public:
         }
         void *targets[5]{};
         if (!resolve_rects(owner, targets)) { restore_layout(); return false; }
-        Vec3 desired[5]{};
+        Vec3 desired[5]{}, world_origin{}, world_edges[3]{};
+        bool have_world_origin = false, have_world_edge[3]{};
         for (unsigned i = 0; i < 5; ++i) {
             if (targets[i] == viewport) { restore_layout(); return false; }
             void *parent = api_.parent(targets[i], nullptr);
             if (!rect(parent)) { restore_layout(); return false; }
             Entry &entry = entries_[i];
-            if (entry.rect.get(api_) != targets[i] || entry.parent.get(api_) != parent) restore_entry(entry);
+            if (entry.rect.get(api_) != targets[i] || entry.parent.get(api_) != parent) {
+                const bool may_restore_position = entry.saved && entry.changed;
+                restore_entry(entry);
+                // A replaced target could have become an ancestor of the
+                // viewport. Do not reuse points across a possible restore.
+                if (may_restore_position) {
+                    have_world_origin = false;
+                    for (bool &ready : have_world_edge) ready = false;
+                }
+            }
             Vec3 current{}; api_.position_get(targets[i], &current, nullptr);
             if (!ui_position_valid(current)) { restore_layout(); return false; }
             if (!entry.saved) {
@@ -173,15 +183,27 @@ public:
             } else if (entry.changed && !panorama_ui_same_position(current, entry.written)) {
                 entry.original = current;
             }
-            Vec3 delta{}, origin{}, world_origin{}, world_moved{}, local_origin{}, local_moved{};
-            const PanoramaUiEdge edge = i == 0 ? PanoramaUiEdge::TopLeft
-                : i == 1 ? PanoramaUiEdge::BottomLeft : PanoramaUiEdge::BottomRight;
-            if (!panorama_ui_edge_delta(old_frame, full_viewport, edge, &delta)) { restore_layout(); return false; }
-            api_.transform_point(viewport, &origin, &world_origin, nullptr);
-            api_.transform_point(viewport, &delta, &world_moved, nullptr);
-            if (!ui_position_valid(world_origin) || !ui_position_valid(world_moved)) { restore_layout(); return false; }
+            const unsigned edge_index = i < 2 ? i : 2;
+            if (!have_world_edge[edge_index]) {
+                Vec3 delta{};
+                const PanoramaUiEdge edge = i == 0 ? PanoramaUiEdge::TopLeft
+                    : i == 1 ? PanoramaUiEdge::BottomLeft : PanoramaUiEdge::BottomRight;
+                if (!panorama_ui_edge_delta(old_frame, full_viewport, edge, &delta)) { restore_layout(); return false; }
+                if (!have_world_origin) {
+                    const Vec3 origin{};
+                    api_.transform_point(viewport, &origin, &world_origin, nullptr);
+                    if (!ui_position_valid(world_origin)) { restore_layout(); return false; }
+                    have_world_origin = true;
+                }
+                api_.transform_point(viewport, &delta, &world_edges[edge_index], nullptr);
+                if (!ui_position_valid(world_edges[edge_index])) { restore_layout(); return false; }
+                have_world_edge[edge_index] = true;
+            }
+            // Only the viewport points are shared within this call. Each
+            // target keeps its own current parent-space conversion below.
+            Vec3 local_origin{}, local_moved{};
             api_.inverse_transform_point(parent, &world_origin, &local_origin, nullptr);
-            api_.inverse_transform_point(parent, &world_moved, &local_moved, nullptr);
+            api_.inverse_transform_point(parent, &world_edges[edge_index], &local_moved, nullptr);
             if (!panorama_ui_local_position(entry.original, local_origin, local_moved, &desired[i])) {
                 restore_layout(); return false;
             }

@@ -24,6 +24,7 @@ static std::map<void *, Object *> objects;
 static std::map<uint32_t, void *> handles;
 static uint32_t sequence = 1;
 static unsigned visibility_writes = 0, gameobject_reads = 0;
+static unsigned viewport_point_reads = 0, parent_point_reads = 0;
 static Object *throw_on = nullptr;
 static bool write_before_throw = false;
 
@@ -81,9 +82,11 @@ static Vec3 local_point(Object &value, Vec3 point) {
             (point.z - value.position.z) / value.scale.z};
 }
 static void transform_point(void *pointer, const Vec3 *point, Vec3 *result, const void *) {
+    ++viewport_point_reads;
     *result = world_point(object(pointer), *point);
 }
 static void inverse_transform_point(void *pointer, const Vec3 *point, Vec3 *result, const void *) {
+    ++parent_point_reads;
     *result = local_point(object(pointer), *point);
 }
 static bool ui_active_get(void *pointer, const void *) { return object(pointer).active_ui; }
@@ -191,6 +194,46 @@ int main() {
         layout.restore(); assert(handles.empty());
         assert(layout.begin_session(scene.owner.pointer()) && !scene.model.active_ui && visibility_writes == before + 3);
         layout.restore();
+    }
+    {
+        Scene scene; PanoramaEdgeLayout layout; layout.configure(api());
+        const unsigned points_before = viewport_point_reads, parents_before = parent_point_reads;
+        assert(layout.update(scene.owner.pointer(), scene.viewport.pointer(), square, old_frame));
+        assert(viewport_point_reads == points_before + 4 && parent_point_reads == parents_before + 10);
+        // A later call must read the changed viewport AND each changed parent;
+        // no world point or parent conversion may survive across updates.
+        scene.viewport.angle += .27f; scene.viewport.scale = {1.2f, .65f, 1};
+        scene.camera_parent.angle -= .13f; scene.popup_parent.scale = {.7f, 1.4f, 1};
+        const Rect wider{-1280, -720, 2560, 1440};
+        assert(layout.update(scene.owner.pointer(), scene.viewport.pointer(), wider, old_frame));
+        assert(viewport_point_reads == points_before + 8 && parent_point_reads == parents_before + 20);
+        for (unsigned i = 0; i < 5; ++i) {
+            const Vec3 corner_delta{i < 2 ? -320.f : 320.f, i == 0 ? 180.f : -180.f, 0};
+            const Vec3 origin = local_point(*scene.rects[i].parent, world_point(scene.viewport, {}));
+            const Vec3 moved = local_point(*scene.rects[i].parent, world_point(scene.viewport, corner_delta));
+            assert(close(scene.rects[i].position, {scene.baseline[i].x + moved.x - origin.x,
+                scene.baseline[i].y + moved.y - origin.y, scene.baseline[i].z}));
+        }
+        layout.restore();
+        for (unsigned i = 0; i < 5; ++i) assert(close(scene.rects[i].position, scene.baseline[i]));
+    }
+    {
+        Scene scene; Object replacement{"UnityEngine", "RectTransform"};
+        objects[replacement.pointer()] = &replacement;
+        replacement.parent = &scene.popup_parent; replacement.position = {41, 42, 1};
+        PanoramaEdgeLayout layout; layout.configure(api());
+        assert(layout.update(scene.owner.pointer(), scene.viewport.pointer(), square, old_frame));
+        // Even an old target reparented above the viewport cannot leave stale
+        // points after the binding replacement restores its original position.
+        scene.viewport.parent = &scene.rects[4]; scene.popup.transform = &replacement;
+        const unsigned points_before = viewport_point_reads, parents_before = parent_point_reads;
+        assert(layout.update(scene.owner.pointer(), scene.viewport.pointer(), square, old_frame));
+        assert(close(scene.rects[4].position, scene.baseline[4]));
+        assert(viewport_point_reads == points_before + 6 && parent_point_reads == parents_before + 10);
+        const Vec3 origin = local_point(scene.popup_parent, world_point(scene.viewport, {}));
+        const Vec3 moved = local_point(scene.popup_parent, world_point(scene.viewport, {0, -180, 0}));
+        assert(close(replacement.position, {41 + moved.x - origin.x, 42 + moved.y - origin.y, 1}));
+        layout.restore(); assert(close(replacement.position, {41, 42, 1}));
     }
     {
         Scene scene; PanoramaEdgeLayout layout; layout.configure(api());
