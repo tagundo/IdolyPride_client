@@ -10,7 +10,7 @@ plugins {
 val serverAbi = providers.gradleProperty("serverAbi").orElse("arm64-v8a").get()
 require(serverAbi in listOf("arm64-v8a", "x86_64")) { "serverAbi must be arm64-v8a or x86_64" }
 val serverData = providers.gradleProperty("serverData").map { rootProject.file(it) }
-    .orElse(rootProject.file("../data/clients/IdolyPride-ServerData-v0.3.7.zip"))
+    .orElse(rootProject.file("../data/clients/IdolyPride-ServerData-v0.3.8.zip"))
 val payloadFile = serverData.get()
 val payloadHash = if (payloadFile.isFile) payloadFile.inputStream().use { input ->
     val digest = MessageDigest.getInstance("SHA-256")
@@ -89,8 +89,8 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("26").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.7").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("27").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.8").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
     }

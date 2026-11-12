@@ -180,7 +180,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
             from .codec import configure_aes
             configure_aes(aes_cbc)
         from .application import Application
-        from .assets import create_asset_server, prepare_master_tag
+        from .assets import create_asset_server, prepare_master_tag, select_master_tag
         from .catalog import FixtureStore
         from .h2_server import create_server
         from .gameplay import (repair_starter_home_positions, repair_starter_inventory,
@@ -193,6 +193,12 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         if not master_dir.is_dir():
             raise ValueError("Bundled master-json catalog is missing")
         schema = Schema.from_descriptor_set(root / "protocol" / "idolypride-6.1.1.pb")
+        archive = root / "original-master"
+        master_tag = select_master_tag(archive / "master-tag.json", media_mode=media_mode)
+        if media_mode:
+            # Detect incomplete/invalid media data before inventory seeding.
+            # The final response is rebased to the bound HTTP port below.
+            prepare_master_tag(schema, master_tag, archive / "assets" / "master", "http://127.0.0.1")
         state = State(root / ("media-state.db" if media_mode else "state.db"))
         media_scenes = None
         if media_mode:
@@ -212,7 +218,6 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
             if repair_starter_card_level_mission(state, schema, profile, master_dir):
                 runtime._log("기본 카드 레벨 달성 미션을 준비했습니다.")
             runtime._log("Loaded local profile " + profile)
-        archive = root / "original-master"
         runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets",
                                              diagnostics=runtime._diagnostics,
                                              transfer_callback=runtime._observe_transfer,
@@ -231,8 +236,10 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         # Install the gateway only after binding has selected the actual port,
         # and before any HTTP serving thread is started.
         runtime._asset.octo_gateway = gateway
-        master_response = prepare_master_tag(schema, archive / "master-tag.json",
+        master_response = prepare_master_tag(schema, master_tag,
                                              archive / "assets" / "master", runtime._asset_url)
+        if media_mode:
+            runtime._log("감상 촬영용 의상 제한 해제 마스터를 제공합니다.")
         fixtures = FixtureStore(root / ("media-fixtures" if media_mode else "fixtures"), schema)
         live_options = {}
         if experimental_main_live:

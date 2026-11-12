@@ -59,8 +59,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "26",
-                           tool.ANDROID + "versionName": "0.3.7"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "27",
+                           tool.ANDROID + "versionName": "0.3.8"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -87,7 +87,7 @@ def test_manifest_entity_and_backup_policy_rejected():
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 26;' in raw and 'VERSION_NAME = "0.3.7";' in raw
+    assert 'VERSION_CODE = 27;' in raw and 'VERSION_NAME = "0.3.8";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
         tool.build_config('"; injected')
@@ -95,7 +95,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("26")\ngradleProperty("serverVersionName").orElse("0.3.7")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("27")\ngradleProperty("serverVersionName").orElse("0.3.8")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -112,7 +112,8 @@ def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, m
 
 def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit(monkeypatch):
     root = Path(tool.__file__).resolve().parents[1]
-    names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py")
+    names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py",
+             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py")
     frozen = {name: (root / name).read_bytes() for name in names}
     def git(_root, *args, limit):
         return frozen[args[2].split(":", 1)[1]]
@@ -181,11 +182,29 @@ def public_payload(files):
 
 
 @pytest.fixture
-def payload_case(tmp_path):
-    old = {f"data/master-json/Table{index:02}.json": b'[{"id":"public"}]' for index in range(40)}
+def payload_case(tmp_path, monkeypatch):
+    from test_media_master_build import original_tag, original_rows, media_tag
+    old = {f"data/master-json/Table{index:02}.json": b'[{"id":"public"}]' for index in range(38)}
+    rows = original_rows()
+    old.update({"data/master-json/" + table + ".json": json.dumps(rows[table]).encode()
+                for table in ("Costume", "Hair")})
     old["data/protocol/idolypride-6.1.1.pb"] = b"synthetic public descriptor"
     old["data/master-json/!version.txt"] = b"synthetic-public"
+    tag = original_tag()
+    old["data/original-master/master-tag.json"] = json.dumps(tag).encode()
+    type_name = next(x["fileName"] for x in tag["masterTagPacks"] if x["type"] == "CostumeType")
+    old["data/original-master/assets/master/" + type_name] = b"synthetic original CostumeType pack"
+    monkeypatch.setattr(tool.media_master, "COSTUME_TYPE_PACK_SHA256", hashlib.sha256(
+        old["data/original-master/assets/master/" + type_name]).hexdigest())
     new = {**old, **{"data/master-json/" + name + ".json": b'[{"id":"new-public"}]' for name in tool.EXTRA_TABLES}}
+    for table, values in rows.items():
+        new["data/master-json/" + table + ".json"] = json.dumps(values).encode()
+    monkeypatch.setattr(tool, "ADDED_JSON_SHA256", {table: hashlib.sha256(
+        new["data/master-json/" + table + ".json"]).hexdigest() for table in tool.EXTRA_TABLES})
+    proofs = {name: {"bytes": 4096, "sha256": hashlib.sha256(b"x" * 4096).hexdigest()}
+              for name in tool.media_master.PACK_NAMES.values()}
+    new[tool.media_master.TAG_MEMBER] = json.dumps(media_tag(tag, rows, proofs)).encode()
+    new.update({member: b"x" * 4096 for member in tool.media_master.PACK_MEMBERS.values()})
     baseline = tmp_path / "baseline.apk"
     baseline.write_bytes(zip_bytes({tool.pybundle.PAYLOAD: zip_bytes(public_payload(old))}))
     payload = tmp_path / "public.zip"
@@ -233,6 +252,41 @@ def test_company_menu_public_tables_must_all_exist_and_be_nonempty(payload_case,
         digest = write(files)
         with ZipFile(baseline) as archive, pytest.raises(ValueError):
             tool.validate_payload(payload, digest, archive)
+
+
+@pytest.mark.parametrize("change", ["missing-tag", "missing-pack", "extra-pack", "version", "unrelated-pack", "photo-default"])
+def test_media_master_overlay_members_and_original_constraints_are_strict(payload_case, change):
+    baseline, payload, original, write = payload_case
+    files = dict(original)
+    if change == "missing-tag":
+        files.pop(tool.media_master.TAG_MEMBER)
+    elif change == "missing-pack":
+        files.pop(next(iter(tool.media_master.PACK_MEMBERS.values())))
+    elif change == "extra-pack":
+        files["data/original-master/assets/master/media-unapproved.db"] = b"x" * 4096
+    elif change in ("version", "unrelated-pack"):
+        tag = json.loads(files[tool.media_master.TAG_MEMBER])
+        if change == "version": tag["version"] += "altered"
+        else: tag["masterTagPacks"][-1]["downloadUrl"] += "altered"
+        files[tool.media_master.TAG_MEMBER] = json.dumps(tag).encode()
+    else:
+        name = "data/master-json/PhotoActivity.json"
+        rows = json.loads(files[name])
+        rows[0]["forceCostumeTypeId"] = ""
+        files[name] = json.dumps(rows).encode()
+    digest = write(files)
+    with ZipFile(baseline) as archive, pytest.raises(ValueError):
+        tool.validate_payload(payload, digest, archive)
+
+
+def test_approved_payload_hash_rejects_changed_encrypted_overlay_bytes(payload_case):
+    baseline, payload, files, write = payload_case
+    approved = write()
+    changed = dict(files)
+    changed[next(iter(tool.media_master.PACK_MEMBERS.values()))] = b"z" * 4096
+    write(changed)
+    with ZipFile(baseline) as archive, pytest.raises(ValueError, match="hash differs"):
+        tool.validate_payload(payload, approved, archive)
 
 
 @pytest.mark.parametrize("change", ["file-hash", "row-count-bool", "duplicate-path", "wrong-hash", "duplicate-member"])

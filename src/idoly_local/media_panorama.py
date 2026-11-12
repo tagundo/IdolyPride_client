@@ -15,7 +15,7 @@ from google.protobuf.message import DecodeError
 from .appearance import _owned
 from .gameplay import _Catalog
 from .live_assets import _wearable
-from .panorama_rules import MASTER_VERSION, PANORAMA_RULES, UNLOCK_CONDITION
+from .panorama_rules import MASTER_PANORAMA_RULES, MASTER_VERSION, PANORAMA_RULES
 from .rpc import RpcCode, RpcFailure
 
 
@@ -48,10 +48,11 @@ def _prepare(catalog):
         _fail("The media 360 LIVE catalog needs its pinned original masters")
     musics, stages = catalog.ids("Music", required=True), catalog.ids("Stage", required=True)
     result, orders = {}, set()
-    for rule in PANORAMA_RULES:
+
+    def add_scene(rule, view_condition_id):
         music, stage = musics.get(rule.music_id), stages.get(rule.stage_id)
         if (rule.music_id in result or type(rule.order) is not int or rule.order <= 0
-                or rule.order in orders or not _text(rule.view_condition_id)
+                or rule.order in orders
                 or music is None or type(music.get("is360LiveExist")) is not bool
                 or not music["is360LiveExist"] or not _text(music.get("assetId"))
                 or stage is None or not _text(stage.get("assetId"))):
@@ -64,13 +65,25 @@ def _prepare(catalog):
                 or len({row["index"] for row in cameras}) != len(cameras)):
             _fail("The media 360 LIVE scene lacks a valid cast or panorama camera")
         result[rule.music_id] = MediaPanoramaScene(rule.music_id, rule.stage_id, music["assetId"],
-            rule.order, rule.view_condition_id, cast_count)
+            rule.order, view_condition_id, cast_count)
         orders.add(rule.order)
+
+    for rule in PANORAMA_RULES:
+        if not _text(rule.view_condition_id):
+            _fail("The factual 360 LIVE catalog has an invalid condition reference")
+        add_scene(rule, rule.view_condition_id)
+    for rule in MASTER_PANORAMA_RULES:
+        music = musics.get(rule.music_id)
+        if (music is None or music.get("selectableStageIds") != [rule.stage_id]
+                or type(music.get("releaseTime")) not in (int, str)
+                or str(music["releaseTime"]) != str(rule.release_time)):
+            _fail("The master-backed 360 LIVE music lacks its exact original stage or release")
+        add_scene(rule, "")
     return MappingProxyType(result)
 
 
 def prepare_media_panorama(master_dir):
-    """Purely validate the fourteen factual scenes before opening a media DB.
+    """Purely validate fourteen factual and one master-backed panorama scene.
 
     Existing Music/Stage tables suffice; no PhotoQuestMusic or new master table
     is needed. This does not infer a stage for other is360LiveExist music rows.
@@ -144,8 +157,7 @@ class MediaPanorama:
         if path == _LIST:
             for scene in sorted(self._scenes.values(), key=lambda value: value.order):
                 result.musics.add(musicId=scene.music_id, stageId=scene.stage_id, assetId=scene.asset_id,
-                    order=scene.order, isUnlocked=True, unlockConditionId=UNLOCK_CONDITION,
-                    viewConditionId=scene.view_condition_id)
+                    order=scene.order, isUnlocked=True, unlockConditionId="", viewConditionId="")
         else:
             self._check(request, snapshot, self._scenes)
         result.commonResponse.updatedData.SetInParent()

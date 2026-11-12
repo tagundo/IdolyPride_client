@@ -21,6 +21,7 @@ import signal
 import stat
 import struct
 import subprocess
+import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
@@ -34,7 +35,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.7", 26
+VERSION, VERSION_CODE = "0.3.8", 27
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -56,6 +57,19 @@ SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
                           "CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
                           "CompanyEnjoyCharacterLevelSetting"))
+ADDED_JSON_SHA256 = {
+    "StoryPart": "f67cd5069ecb3dec86f6365c2a1f142a39bbc2e6a9bb3bc07123c0cdaeee5332",
+    "PhotoActivity": "6dfde902f963cf72c49729555f5c31281bc59c0c1df67c4c2374cf4ef83fe70b",
+    "PhotoQuestMusic": "03b3032bbc86a4034aafbd47c651498be5d01b0b4c34e618e9855980831ecb33",
+    "PhotoQuestStage": "19812a9fcce1d362978fc39649271c5579d8dd475e6d7f378344e5f10329e6ed",
+    "PhotoExpression": "ede48c24a81498d02569d6bc5aae81ae7ceeb36516d78fc601df679c58709ae4",
+    "CompanyGrade": "0d9a1ef4426ea4446c8332c5c038d972f298eff7af517233a0d36bb09d42e039",
+    "CompanyTrustLevel": "655d926ec7a41fde833745cba3bdf08f4789dbf1aac71e94d07ef532829edbd3",
+    "CompanyEnjoyCharacterLevel": "bc0c90e3f9b7fa82c4509aecf68ff16decf234bd66ba345ccc5924bd2f8afe01",
+    "CompanyEnjoyCharacterLevelSetting": "5b5097b5ba3dc732e1cf402f60a36ac35ac5a032276d74c93dc165320d522dbc",
+}
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from idoly_local import media_master_build as media_master
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
 NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
     "libchaquopy_java.so", "libcrypto_chaquopy.so", "libcrypto_python.so", "libidoly_live.so",
@@ -321,7 +335,9 @@ def tool_sources(root, commit):
     """Bind the executing builder and reused compiler helper to the freeze."""
     result = {}
     for name, loaded in (("tools/build_android_server_manual.py", Path(__file__)),
-                         ("tools/repack_android_server_python.py", Path(pybundle.__file__))):
+                         ("tools/repack_android_server_python.py", Path(pybundle.__file__)),
+                         ("src/idoly_local/media_master_build.py", Path(media_master.__file__)),
+                         ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py"))):
         if loaded.resolve() != (root / name).resolve():
             raise ValueError("Run the builder and compiler helper from the frozen source repository")
         raw = pybundle._git(root, "cat-file", "blob", commit + ":" + name, limit=MIB)
@@ -440,20 +456,23 @@ def dependency_classes(jar, baseline_dex):
 
 
 def validate_payload(payload, expected_sha256, baseline_archive):
-    """Only extend the pinned public payload by its nine named JSON tables."""
+    """Keep all original data and allow exactly nine JSONs plus the media overlay."""
     if (not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
             or payload.stat().st_size > MAX_APK or pybundle.digest(payload) != expected_sha256):
         raise ValueError("Validated public payload hash differs")
     with baseline_archive.open(pybundle.PAYLOAD) as stream, ZipFile(stream) as old, ZipFile(payload) as new:
         old_infos = pybundle._members(old, pybundle.MAX_EXPANDED)
         infos = pybundle._members(new, pybundle.MAX_EXPANDED)
-        added = {"data/master-json/" + name + ".json" for name in EXTRA_TABLES}
+        added = {"data/master-json/" + name + ".json" for name in EXTRA_TABLES} | media_master.PAYLOAD_MEMBERS
         if set(infos) != set(old_infos) | added or added & set(old_infos):
-            raise ValueError("Payload may add only the nine named public JSON tables")
+            raise ValueError("Payload may add only the nine named JSON tables and explicit media master files")
         old_hashes = pybundle._hash_members(old, old_infos)
         hashes = pybundle._hash_members(new, infos)
         if any(hashes[name] != digest for name, digest in old_hashes.items() if name != PAYLOAD_MANIFEST):
             raise ValueError("Payload changed an existing public input")
+        if any(hashes["data/master-json/" + table + ".json"] != digest
+               for table, digest in ADDED_JSON_SHA256.items()):
+            raise ValueError("An existing public media/company JSON table changed")
         report = json.loads(pybundle._read(new, infos[PAYLOAD_MANIFEST], META_LIMIT), object_pairs_hook=pybundle._json_object)
         old_report = json.loads(pybundle._read(old, old_infos[PAYLOAD_MANIFEST], META_LIMIT), object_pairs_hook=pybundle._json_object)
         if (not isinstance(report, dict) or {k: v for k, v in report.items() if k not in ("tables", "files")}
@@ -478,8 +497,24 @@ def validate_payload(payload, expected_sha256, baseline_archive):
                 or {row.get("path") for row in files} != set(expected)
                 or any(row != expected[row["path"]] for row in files)):
             raise ValueError("Payload file provenance differs from actual bytes")
+        original_tag = json.loads(pybundle._read(new, infos["data/original-master/master-tag.json"], META_LIMIT),
+                                  object_pairs_hook=pybundle._json_object)
+        media_tag = json.loads(pybundle._read(new, infos[media_master.TAG_MEMBER], META_LIMIT),
+                               object_pairs_hook=pybundle._json_object)
+        original_packs = media_master._tag_packs(original_tag)
+        type_pack = original_packs.get("CostumeType")
+        if (type_pack is None or hashes.get("data/original-master/assets/master/" + type_pack["fileName"])
+                != media_master.COSTUME_TYPE_PACK_SHA256):
+            raise ValueError("Original CostumeType pack differs from the audited inventory")
+        rows = {table: json.loads(pybundle._read(new, infos["data/master-json/" + table + ".json"], MAX_JSON),
+                                 object_pairs_hook=pybundle._json_object) for table in media_master.TABLES}
+        overlay_packs = {name: {"bytes": infos[media_master.PACK_MEMBERS[table]].file_size,
+                                "sha256": hashes[media_master.PACK_MEMBERS[table]]}
+                         for table, name in media_master.PACK_NAMES.items()}
+        overlay = media_master.validate_media_master_tag(original_tag, media_tag, report["schema_sha256"], rows,
+                                                         overlay_packs)
         return {"sha256": expected_sha256, "bytes": payload.stat().st_size,
-                "tables": report["tables"], "members": len(infos)}
+                "tables": report["tables"], "members": len(infos), "media_master_overlay": overlay}
 
 
 def elf_alignment(raw):

@@ -61,6 +61,11 @@ def _write_bundle(root: Path):
     (master / "master-tag.json").write_text(json.dumps({"version": "fixture-master", "masterTagPacks": [
         {"type": "Tiny", "fileName": "tiny.pack", "fileSize": 13, "cryptoKey": "fixture-key",
          "downloadUrl": "https://official.invalid/tiny"}]}))
+    (master / "assets" / "master" / "media-tiny.pack").write_bytes(b"media-outfit-pack")
+    (master / "media-master-tag.json").write_text(json.dumps({
+        "version": "local-media-outfits-v1-fixture", "masterTagPacks": [
+            {"type": "Tiny", "fileName": "media-tiny.pack", "fileSize": 17,
+             "cryptoKey": "fixture-media-key", "downloadUrl": "https://official.invalid/media-tiny"}]}))
     (root / "master-json").mkdir()
     return Schema.from_descriptor_set(schema_file)
 
@@ -157,6 +162,45 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(app.fixtures.directory, self.root / "media-fixtures")
         self.assertTrue(app.options["media_mode"])
         self.assertIs(app.options["photo_scene_access"], scenes)
+        master = self.rpc(runtime, "/api.Master/Get")
+        self.assertEqual(master.masterTag.version, "local-media-outfits-v1-fixture")
+        with urlopen(master.masterTag.masterTagPacks[0].downloadUrl, timeout=3) as response:
+            self.assertEqual(response.read(), b"media-outfit-pack")
+        original = json.loads((self.root / "original-master/master-tag.json").read_text())
+        self.assertEqual(original["version"], "fixture-master")
+        self.assertEqual((self.root / "original-master/assets/master/tiny.pack").read_bytes(), b"archived-pack")
+
+    def test_missing_media_master_stops_before_creating_or_mutating_an_account(self):
+        ordinary = State(self.root / "state.db")
+        new_profile(ordinary, self.schema, "sandbox", "Normal Manager")
+        before = (self.root / "state.db").read_bytes()
+        (self.root / "original-master/media-master-tag.json").unlink()
+        with mock.patch("idoly_local.media_runtime.prepare_media_profile") as seed:
+            with self.assertRaisesRegex(ValueError, "Media outfit master is missing"):
+                self.start(media_mode=True)
+        seed.assert_not_called()
+        self.assertFalse((self.root / "media-state.db").exists())
+        self.assertEqual((self.root / "state.db").read_bytes(), before)
+
+    def test_invalid_media_master_stops_before_seeding(self):
+        tag = self.root / "original-master/media-master-tag.json"
+        pack = self.root / "original-master/assets/master/media-tiny.pack"
+        valid_tag, valid_pack = tag.read_bytes(), pack.read_bytes()
+        for fault in ("json", "missing_pack", "pack_size"):
+            with self.subTest(fault=fault):
+                tag.write_bytes(valid_tag)
+                pack.write_bytes(valid_pack)
+                if fault == "json":
+                    tag.write_text("{broken")
+                elif fault == "missing_pack":
+                    pack.unlink()
+                else:
+                    pack.write_bytes(b"incomplete")
+                with mock.patch("idoly_local.media_runtime.prepare_media_profile") as seed:
+                    with self.assertRaises(ValueError):
+                        self.start(media_mode=True)
+                seed.assert_not_called()
+                self.assertFalse((self.root / "media-state.db").exists())
 
     def test_media_mode_requires_an_explicit_boolean(self):
         for value in (None, 0, 1, "true"):

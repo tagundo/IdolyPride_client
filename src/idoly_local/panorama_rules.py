@@ -8,8 +8,9 @@ This is a secondary catalog source, not a captured official API response.
 No implementation from that repository is included here. Every music, asset,
 stage and camera reference is checked against the pinned original masters.
 
-Music has fifteen is360LiveExist definitions. The unverified fifteenth entry,
-music-hsm-017, is deliberately absent; its stage/conditions are not inferred.
+The fifteenth entry below has separate primary-master provenance: its one
+explicit Music.selectableStageIds reference supplies its stage. It has no
+claimed official API condition mapping; the media provider ignores conditions.
 """
 from __future__ import annotations
 
@@ -27,6 +28,23 @@ class PanoramaRule:
     stage_id: str
     order: int
     view_condition_id: str
+
+
+@dataclass(frozen=True)
+class MasterPanoramaRule:
+    music_id: str
+    stage_id: str
+    order: int
+    release_time: int
+
+
+# Original Music 6.1.1: is360LiveExist=true, exactly this one selectable stage,
+# five cast positions, and this original release timestamp. The actual Stage
+# supplies its asset and four camera positions. No official condition ID is
+# guessed from the music ID or release date.
+MASTER_PANORAMA_RULES = (
+    MasterPanoramaRule("music-hsm-017", "stage-live-dome-03-00", 15, 1788145200000),
+)
 
 
 PANORAMA_RULES = (

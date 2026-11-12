@@ -32,6 +32,15 @@ class Application:
         self.profile = profile
         self.master_response = master_response
         self.media_mode = media_mode
+        self.media_master_version = None
+        if media_mode and master_response is not None:
+            try:
+                self.media_master_version = schema.response_type("/api.Master/Get").FromString(
+                    master_response).masterTag.version
+            except DecodeError:
+                raise ValueError("Media client master response is malformed") from None
+            if not self.media_master_version:
+                raise ValueError("Media client master response has no version")
         self.media_stories = None
         self.media_panorama = None
         self.company_reads = None
@@ -78,7 +87,7 @@ class Application:
         self.dream = Dream(schema, state, profile, master_dir, catalog_path=dream_catalog_path)
         self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
         self.photo_shootings = PhotoShootings(schema, state, profile, master_dir,
-            scene_access=photo_scene_access, image_urls=photo_image_urls)
+            scene_access=photo_scene_access, image_urls=photo_image_urls, media_mode=media_mode)
         self.photo_names = PhotoNames(schema, state, profile)
         self.profile_layout = ProfileLayout(schema, state, profile)
         self.main_lives = None
@@ -162,6 +171,8 @@ class Application:
             context.abort(RpcCode.UNAUTHENTICATED, "Local Auth.Login is required")
         if path == "/api.Master/Get" and self.master_response is not None:
             return self.master_response
+        if path == "/api.Master/GetVersion" and self.media_master_version is not None:
+            return self.schema.response_type(path)(version=self.media_master_version).SerializeToString()
         if self.media_stories is not None:
             from .rpc import RpcFailure
             try:

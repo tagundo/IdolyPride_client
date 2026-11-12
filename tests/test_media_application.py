@@ -19,9 +19,10 @@ def captured(game, root, path, response):
     import_response(source, root / "fixtures", game.schema, path)
 
 
-def app(game, root, media):
+def app(game, root, media, *, master_response=None):
     return Application(game.schema, game.state, FixtureStore(root / "fixtures", game.schema),
         profile="media", master_dir=game.master, media_mode=media,
+        master_response=master_response,
         photo_scene_access=PhotoSceneAccess())
 
 
@@ -30,6 +31,32 @@ def invoke(game, application, path, *, authenticated=True):
     request = game.schema.request_type(path)().SerializeToString()
     raw = application.handle(path, codec.encode(request), context)
     return game.schema.response_type(path).FromString(raw)
+
+
+def test_media_master_version_matches_served_packs_and_preserves_original_catalog(game, tmp_path):
+    version_path = "/api.Master/GetVersion"
+    old = game.schema.response_type(version_path)(version="captured-original-version")
+    captured(game, tmp_path, version_path, old)
+    tag = game.schema.response_type("/api.Master/Get")()
+    tag.masterTag.version = "local-media-outfits-v1-current"
+    tag.masterTag.masterTagPacks.add(type="PhotoActivity", fileName="media-photo.db", fileSize=123)
+    source_version = (game.master / "!version.txt").read_bytes()
+    before = game.state.snapshot("media")
+    normal = app(game, tmp_path, False, master_response=tag.SerializeToString())
+    assert invoke(game, normal, version_path) == old
+    media = app(game, tmp_path, True, master_response=tag.SerializeToString())
+    assert invoke(game, media, version_path).version == invoke(game, media, "/api.Master/Get").masterTag.version
+    with pytest.raises(RpcFailure) as denied:
+        invoke(game, media, version_path, authenticated=False)
+    assert denied.value.code == RpcCode.UNAUTHENTICATED
+    assert (game.master / "!version.txt").read_bytes() == source_version
+    assert game.state.snapshot("media") == before
+
+
+@pytest.mark.parametrize("raw", [b"\xff", b""])
+def test_media_rejects_a_master_response_without_a_usable_version(game, tmp_path, raw):
+    with pytest.raises(ValueError, match="Media client master response"):
+        app(game, tmp_path, True, master_response=raw)
 
 
 def test_media_user_get_uses_live_state_while_normal_fixture_precedence_is_unchanged(game, tmp_path):

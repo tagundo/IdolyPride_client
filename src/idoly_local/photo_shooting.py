@@ -95,11 +95,15 @@ class PhotoShootings:
     or None.  A missing original image must not be replaced with a stock asset.
     """
 
-    def __init__(self, schema, state, profile, master_dir=None, *, scene_access=None, image_urls=None):
+    def __init__(self, schema, state, profile, master_dir=None, *, scene_access=None, image_urls=None,
+                 media_mode=False):
+        if type(media_mode) is not bool:
+            raise ValueError("Media mode must be an explicit boolean")
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
         self.scene_access = scene_access
         self.image_urls = image_urls
+        self.media_mode = media_mode
 
     def _snapshot(self):
         stored = self.state.snapshot(self.profile)
@@ -215,7 +219,12 @@ class PhotoShootings:
                 allowed = activity.get("costumeTypeIds", [])
                 if not isinstance(denied, list) or not isinstance(allowed, list):
                     _fail("Photo activity style restrictions are malformed")
-                if character in denied or allowed and definition.get("costumeTypeId") not in allowed:
+                # The separate gallery permits all owned compatible outfits
+                # for a job, while retaining character/motion exclusions.
+                # The client selector also needs its media master override;
+                # this check alone cannot expand that original UI list.
+                if (character in denied
+                        or not self.media_mode and allowed and definition.get("costumeTypeId") not in allowed):
                     _fail("The photo activity does not allow this character or costume", RpcCode.INVALID_ARGUMENT)
 
     def _urls(self, request, result, snapshot):

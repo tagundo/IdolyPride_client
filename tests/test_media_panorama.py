@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from idoly_local.media_panorama import MediaPanorama, prepare_media_panorama
-from idoly_local.panorama_rules import MASTER_VERSION, PANORAMA_RULES, UNLOCK_CONDITION
+from idoly_local.panorama_rules import MASTER_PANORAMA_RULES, MASTER_VERSION, PANORAMA_RULES
 from idoly_local.rpc import RpcCode, RpcFailure
 from idoly_local.schema import Schema
 from idoly_local.state import State
@@ -45,7 +45,10 @@ def game(schema, tmp_path):
         "Hair": [{"id": "hair-" + str(index), "characterId": "char-" + str(index),
                   "wearableCostumeIds": [], "notWearableCostumeIds": []} for index in range(6)],
     }
-    rows["Music"].append({"id": "music-hsm-017", "assetId": "unmapped-real-definition",
+    rows["Music"].append({"id": "music-hsm-017", "assetId": "asset-music-hsm-017",
+        "is360LiveExist": True, "displayCharacterAmount": 5,
+        "selectableStageIds": ["stage-live-dome-03-00"], "releaseTime": "1788145200000"})
+    rows["Music"].append({"id": "unmapped-panorama", "assetId": "unmapped-real-definition",
                           "is360LiveExist": True, "displayCharacterAmount": 5})
     rows["Costume"].append({"id": "unowned-costume", "characterId": "char-0"})
     rows["Hair"].append({"id": "unowned-hair", "characterId": "char-0"})
@@ -85,7 +88,7 @@ def call(game, path, **values):
 
 def cast(game, index=0):
     count = game[3]["Music"][index]["displayCharacterAmount"]
-    return {"photoMusicId": PANORAMA_RULES[index].music_id,
+    return {"photoMusicId": (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)[index].music_id,
             "characterIds": ["char-" + str(value) for value in range(count)],
             "costumeIds": ["costume-" + str(value) for value in range(count)],
             "hairIds": ["hair-" + str(value) for value in range(count)]}
@@ -97,24 +100,25 @@ def rewrite(game, table, change):
     (game[2] / (table + ".json")).write_text(json.dumps(values))
 
 
-def test_list_returns_fourteen_verified_panorama_scenes_not_photo_quest_music(game):
+def test_list_returns_fifteen_real_panorama_scenes_without_client_unlock_conditions(game):
     before = dump(game[1])
     result = call(game, LIST)
     assert not (game[2] / "PhotoQuestMusic.json").exists()
-    assert len(result.musics) == 14
+    assert len(result.musics) == 15
     assert [(row.musicId, row.stageId, row.order) for row in result.musics] == [
-        (rule.music_id, rule.stage_id, rule.order) for rule in PANORAMA_RULES]
-    for row, rule in zip(result.musics, PANORAMA_RULES):
+        (rule.music_id, rule.stage_id, rule.order) for rule in (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)]
+    for row, rule in zip(result.musics, (*PANORAMA_RULES, *MASTER_PANORAMA_RULES)):
         assert row.isUnlocked and row.assetId == "asset-" + rule.music_id
-        assert row.unlockConditionId == UNLOCK_CONDITION and row.viewConditionId == rule.view_condition_id
-    assert "music-hsm-017" not in {row.musicId for row in result.musics}
+        assert not row.unlockConditionId and not row.viewConditionId
+    assert result.musics[-1].musicId == "music-hsm-017"
+    assert "unmapped-panorama" not in {row.musicId for row in result.musics}
     assert not result.dokanInfos
     assert result.commonResponse.HasField("updatedData") and not result.commonResponse.updatedData.ListFields()
     assert result.commonResponse.HasField("deletedData") and not result.commonResponse.deletedData.ListFields()
     assert dump(game[1]) == before
 
 
-@pytest.mark.parametrize("index", [0, 1, 2, 3])
+@pytest.mark.parametrize("index", [0, 1, 2, 3, 14])
 def test_check_uses_exact_music_id_and_master_cast_count_without_music_grants(game, index):
     before = dump(game[1])
     snapshot = game[0].schema.response_type(USER).FromString(game[1].snapshot("media")[0])
@@ -127,7 +131,7 @@ def test_check_uses_exact_music_id_and_master_cast_count_without_music_grants(ga
 
 @pytest.mark.parametrize("change,code", [
     ({"photoMusicId": "unknown"}, RpcCode.INVALID_ARGUMENT),
-    ({"photoMusicId": "music-hsm-017"}, RpcCode.FAILED_PRECONDITION),
+    ({"photoMusicId": "unmapped-panorama"}, RpcCode.FAILED_PRECONDITION),
     ({"photoMusicId": ""}, RpcCode.INVALID_ARGUMENT),
     ({"characterIds": []}, RpcCode.INVALID_ARGUMENT),
     ({"characterIds": ["char-0", "char-0", "char-2"]}, RpcCode.INVALID_ARGUMENT),
@@ -177,6 +181,36 @@ def test_malformed_public_scene_data_fails_before_db_creation_or_writes(game, ta
         prepare_media_panorama(game[2])
     assert error.value.code == RpcCode.FAILED_PRECONDITION
     assert dump(game[1]) == before
+
+
+@pytest.mark.parametrize("change", [
+    {"selectableStageIds": []},
+    {"selectableStageIds": ["stage-live-dome-01-00"]},
+    {"selectableStageIds": ["stage-live-dome-03-00", "stage-live-dome-01-00"]},
+    {"releaseTime": "0"}, {"releaseTime": True},
+    {"is360LiveExist": False},
+])
+def test_master_backed_melodies_requires_its_exact_single_stage_and_original_definition(game, change):
+    before = dump(game[1])
+    rewrite(game, "Music", lambda rows: next(row for row in rows
+        if row["id"] == "music-hsm-017").update(change))
+    with pytest.raises(RpcFailure) as error:
+        prepare_media_panorama(game[2])
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert dump(game[1]) == before
+
+
+def test_actual_melodies_stage_cast_and_camera_are_master_backed_without_added_photo_masters():
+    master = Path(__file__).resolve().parents[1] / "data/master-json"
+    if not (master / "Music.json").is_file():
+        pytest.skip("Original public master catalog is unavailable")
+    scenes = prepare_media_panorama(master)
+    assert len(scenes) == 15
+    melodies = scenes["music-hsm-017"]
+    assert melodies.stage_id == "stage-live-dome-03-00"
+    assert melodies.asset_id == "hsm-017" and melodies.cast_count == 5
+    assert melodies.order == 15 and not melodies.view_condition_id
+    assert len(PANORAMA_RULES) == 14
 
 
 def test_master_version_is_pinned_and_constructor_does_not_eagerly_read_it(game):

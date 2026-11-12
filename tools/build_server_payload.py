@@ -218,6 +218,12 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
             if not source.is_relative_to(story_root.resolve()) or not source.is_file():
                 raise ValueError("Required public story catalog is missing or outside its directory")
             files.append((source, "data/public-story/" + name))
+        from idoly_local.media_master_build import build_media_master_overlay, TAG_NAME, PACK_NAMES
+        overlay_root = stage / "media-master"
+        overlay_report = build_media_master_overlay(schema, archive / "master-tag.json", root, catalog, overlay_root)
+        files.append((overlay_root / TAG_NAME, "data/original-master/" + TAG_NAME))
+        for name in PACK_NAMES.values():
+            files.append((overlay_root / "assets/master" / name, "data/original-master/assets/master/" + name))
         summary = {"schema": 1, "master_version": response.masterTag.version,
                    "schema_sha256": schema.fingerprint, "tables": counts, "tutorial_replays": replay_report,
                    "story_catalog": story_report,
@@ -235,7 +241,8 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
             if zipped.testzip() is not None:
                 raise ValueError("Server payload CRC validation failed")
         payload.rename(output)
-    return {"file": str(output), "bytes": output.stat().st_size, "sha256": digest(output), "tables": counts}
+    return {"file": str(output), "bytes": output.stat().st_size, "sha256": digest(output), "tables": counts,
+            "media_master_overlay": overlay_report}
 
 
 def main():

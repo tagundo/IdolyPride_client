@@ -77,23 +77,28 @@ def smoke(schema):
 
 
 def serve(args, schema):
-    from .assets import create_asset_server, prepare_master_tag
+    from .assets import create_asset_server, prepare_master_tag, select_master_tag
 
     asset_server = None
+    media_mode = getattr(args, "media_mode", False)
+    if type(media_mode) is not bool:
+        raise ValueError("Media mode must be an explicit boolean")
+    if media_mode and not (args.master_tag and args.asset_root and args.asset_base_url):
+        raise ValueError("--media-mode requires --master-tag, --asset-root and --asset-base-url for its client catalog")
+    if media_mode and args.master_dir is None:
+        raise ValueError("--media-mode requires --master-dir")
     if args.master_tag and (not args.asset_root or not args.asset_base_url):
         raise ValueError("--master-tag requires --asset-root and --asset-base-url")
     master_response = None
     if args.master_tag:
-        master_response = prepare_master_tag(schema, args.master_tag, args.asset_root / "master", args.asset_base_url)
-    media_mode = getattr(args, "media_mode", False)
+        master_tag = select_master_tag(args.master_tag, media_mode=media_mode)
+        master_response = prepare_master_tag(schema, master_tag, args.asset_root / "master", args.asset_base_url)
     state_path = args.state.with_name("media-" + args.state.name) if media_mode else args.state
     fixture_path = args.fixtures.with_name("media-" + args.fixtures.name) if media_mode else args.fixtures
     fixtures = FixtureStore(fixture_path, schema)
     state = State(state_path)
     media_scenes = None
     if media_mode:
-        if args.master_dir is None:
-            raise ValueError("--media-mode requires --master-dir")
         from .media_runtime import prepare_media_profile
         media_scenes = prepare_media_profile(state, schema, args.profile, args.master_dir)
     app = Application(schema, state, fixtures, args.profile, master_response,

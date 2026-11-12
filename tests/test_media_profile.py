@@ -6,6 +6,10 @@ from pathlib import Path
 import pytest
 
 from idoly_local.media_profile import apply_media_inventory, prepare_media_inventory
+from idoly_local.media_outfit_policy import (
+    ADMIN_COSTUME_IDS, ADMIN_HAIR_IDS, COSTUME_IDS, is_audited_work_costume,
+    is_audited_admin_costume, is_audited_admin_hair,
+)
 from idoly_local.rpc import RpcCode, RpcFailure
 from idoly_local.schema import Schema
 
@@ -112,6 +116,37 @@ def rewrite(master, table, change):
     (directory / (table + ".json")).write_text(json.dumps(values))
 
 
+@pytest.fixture
+def work_master(master):
+    directory, original = master
+    rows = deepcopy(original)
+    rows["Character"].append({"id": "char-ai", "type": 1,
+        "defaultCostumeId": "cos-ai", "defaultLiveCostumeId": "cos-ai"})
+    card = deepcopy(rows["Card"][0])
+    card.update(id="card-ai", characterId="char-ai")
+    rows["Card"].append(card)
+    rows["Costume"].extend([
+        {"id": "cos-ai", "characterId": "char-ai", "defaultHairId": "hair-ai",
+         "isUserUnavailable": False},
+        {"id": "cos-ai-mizg-00", "characterId": "char-ai", "costumeTypeId": "mizg",
+         "bodyAssetId": "ai-mizg-00", "defaultHairId": "hair-ai-mizg-00",
+         "isUserUnavailable": True, "isDisableAdmin": False},
+        {"id": "cos-ai-sdam-00", "characterId": "char-ai", "costumeTypeId": "sd-ambassador",
+         "bodyAssetId": "ai-sdam-00", "defaultHairId": "hair-ai-sdam-00",
+         "isUserUnavailable": True, "isDisableAdmin": False},
+        {"id": "cos-npc-mizg-00", "characterId": "char-npc", "costumeTypeId": "mizg",
+         "bodyAssetId": "npc-mizg-00", "defaultHairId": "hair-npc-mizg-00",
+         "isUserUnavailable": True, "isDisableAdmin": False},
+    ])
+    for suffix in ("ai", "ai-mizg-00", "ai-sdam-00", "npc-mizg-00"):
+        rows["Hair"].append({"id": "hair-" + suffix,
+            "characterId": "char-npc" if suffix.startswith("npc-") else "char-ai",
+            "wearableCostumeIds": ["cos-" + suffix], "notWearableCostumeIds": []})
+    for table, values in rows.items():
+        (directory / (table + ".json")).write_text(json.dumps(values))
+    return directory, rows
+
+
 def test_prepares_all_card_owners_and_usable_appearances_without_progression(schema, master):
     plan = prepare_media_inventory(schema, master[0])
     assert plan.character_ids == ("char-a", "char-collab", "char-mana")
@@ -120,6 +155,118 @@ def test_prepares_all_card_owners_and_usable_appearances_without_progression(sch
     assert plan.hair_ids == ("hair-a", "hair-a-alt", "hair-a-mixed", "hair-collab", "hair-mana")
     assert plan.master_version == "synthetic-media-master"
     assert plan.schema_fingerprint == schema.fingerprint
+
+
+def test_audited_bath_outfit_and_its_hair_are_added_but_sd_and_npc_models_are_not(
+        schema, work_master, snapshot):
+    directory, rows = work_master
+    before_sources = {source.name: source.read_bytes() for source in directory.iterdir()}
+    plan = prepare_media_inventory(schema, directory)
+    assert "cos-ai-mizg-00" in plan.costume_ids and "hair-ai-mizg-00" in plan.hair_ids
+    assert "cos-ai-sdam-00" not in plan.costume_ids and "hair-ai-sdam-00" not in plan.hair_ids
+    assert "cos-npc-mizg-00" not in plan.costume_ids and "hair-npc-mizg-00" not in plan.hair_ids
+    # Upgrade an existing media inventory. Keep its chosen outfit, old row
+    # payloads/unknown fields and every unrelated balance/progression field.
+    snapshot.characters.add(characterId="char-ai", favoriteCostumeId="cos-ai",
+        favoriteHairId="hair-ai", liveCostumeId="cos-ai", liveHairId="hair-ai")
+    snapshot.costumes.add(costumeId="cos-ai", checked=False, obtainedTime=123).MergeFromString(UNKNOWN)
+    snapshot.hairs.add(hairId="hair-ai", checked=False).MergeFromString(UNKNOWN)
+    expected = type(snapshot)()
+    expected.CopyFrom(snapshot)
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    assert next(row for row in snapshot.costumes if row.costumeId == "cos-ai-mizg-00").checked
+    assert next(row for row in snapshot.hairs if row.hairId == "hair-ai-mizg-00").checked
+    current_ai = next(row for row in snapshot.characters if row.characterId == "char-ai")
+    assert current_ai == next(row for row in expected.characters if row.characterId == "char-ai")
+    once = snapshot.SerializeToString()
+    assert not apply_media_inventory(snapshot, plan, obtained_time=NOW + 1000)
+    assert snapshot.SerializeToString() == once
+    for field, identity in (("characters", "characterId"), ("costumes", "costumeId"),
+                            ("hairs", "hairId"), ("cards", "cardId")):
+        originals = {getattr(row, identity): row for row in getattr(expected, field)}
+        kept = [row for row in getattr(snapshot, field) if getattr(row, identity) in originals]
+        assert all(row == originals[getattr(row, identity)] for row in kept)
+        del getattr(snapshot, field)[:]
+        getattr(snapshot, field).extend(kept)
+    assert snapshot == expected
+    assert {source.name: source.read_bytes() for source in directory.iterdir()} == before_sources
+    bath = next(row for row in rows["Costume"] if row["id"] == "cos-ai-mizg-00")
+    assert bath["isUserUnavailable"] is True
+
+
+@pytest.mark.parametrize("change", [
+    {"characterId": "char-a"}, {"costumeTypeId": "sd-ambassador"},
+    {"bodyAssetId": "missing-body"}, {"defaultHairId": "hair-a"},
+    {"isDisableAdmin": True},
+])
+def test_audited_bath_definition_drift_fails_before_touching_snapshot(schema, work_master, snapshot, change):
+    before = snapshot.SerializeToString()
+    rewrite(work_master, "Costume", lambda rows: next(
+        row for row in rows if row["id"] == "cos-ai-mizg-00").update(change))
+    with pytest.raises(RpcFailure) as error:
+        prepare_media_inventory(schema, work_master[0])
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert snapshot.SerializeToString() == before
+
+
+def test_audited_bath_still_requires_compatible_same_owner_default_hair(schema, work_master, snapshot):
+    before = snapshot.SerializeToString()
+    rewrite(work_master, "Hair", lambda rows: next(
+        row for row in rows if row["id"] == "hair-ai-mizg-00").update(
+            wearableCostumeIds=[], notWearableCostumeIds=["cos-ai-mizg-00"]))
+    with pytest.raises(RpcFailure) as error:
+        prepare_media_inventory(schema, work_master[0])
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert snapshot.SerializeToString() == before
+
+
+def test_actual_bath_policy_has_exact_original_3d_rows_and_expected_inventory_counts(schema):
+    directory = Path(__file__).resolve().parents[1] / "data/master-json"
+    if not (directory / "Costume.json").is_file():
+        pytest.skip("Original public master catalog is unavailable")
+    originals = json.loads((directory / "Costume.json").read_text())
+    policy = [row for row in originals if row["id"] in COSTUME_IDS]
+    assert len(policy) == len(COSTUME_IDS) == 21
+    assert all(row["isUserUnavailable"] and is_audited_work_costume(row) for row in policy)
+    plan = prepare_media_inventory(schema, directory)
+    assert len(plan.costume_ids) == 921 and len(plan.hair_ids) == 1113
+    assert COSTUME_IDS <= set(plan.costume_ids)
+    assert {row["defaultHairId"] for row in policy} <= set(plan.hair_ids)
+    excluded = {row["id"] for row in originals if row["costumeTypeId"] in ("sd-ambassador", "sd-police")}
+    assert len(excluded) == 40 and not excluded.intersection(plan.costume_ids)
+    admin_costumes = [row for row in originals if row["isDisableAdmin"]]
+    assert {row["id"] for row in admin_costumes} == ADMIN_COSTUME_IDS
+    assert len(admin_costumes) == 18 and all(is_audited_admin_costume(row) for row in admin_costumes)
+    admin_hairs = [row for row in json.loads((directory / "Hair.json").read_text())
+                   if row["isDisableAdmin"]]
+    assert {row["id"] for row in admin_hairs} == ADMIN_HAIR_IDS
+    assert len(admin_hairs) == 19 and all(is_audited_admin_hair(row) for row in admin_hairs)
+    assert ADMIN_COSTUME_IDS <= set(plan.costume_ids)
+    assert ADMIN_HAIR_IDS <= set(plan.hair_ids)
+
+
+@pytest.mark.parametrize("field,value", (("characterId", "char-other"),
+    ("bodyAssetId", "missing-body"), ("defaultHairId", "hair-other"),
+    ("costumeTypeId", "sd-ambassador")))
+def test_admin_costume_policy_checks_real_assets_and_owner(field, value):
+    row = {"id": "cos-ai-buny-00", "characterId": "char-ai", "costumeTypeId": "idol",
+           "bodyAssetId": "ai-buny-00", "defaultHairId": "hair-ai-buny-00",
+           "isUserUnavailable": False, "isDisableAdmin": True}
+    assert is_audited_admin_costume(row)
+    row[field] = value
+    assert not is_audited_admin_costume(row)
+
+
+@pytest.mark.parametrize("field,value", (("characterId", "char-other"),
+    ("hairAssetId", "missing-hair"), ("faceAssetId", "missing-face"),
+    ("fittingCostumeId", "cos-other")))
+def test_admin_hair_policy_checks_real_assets_owner_and_fitting_reference(field, value):
+    row = {"id": "hair-kor-hair-00", "characterId": "char-kor", "hairAssetId": "kor-hair-00",
+           "faceAssetId": "kor-base-00", "fittingCostumeId": "cos-kor-casl-00",
+           "isDisableAdmin": True}
+    assert is_audited_admin_hair(row)
+    row[field] = value
+    assert not is_audited_admin_hair(row)
 
 
 def test_append_preserves_every_existing_row_and_other_snapshot_field(schema, master, snapshot):

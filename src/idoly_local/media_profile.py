@@ -16,6 +16,7 @@ from .appearance import _owned
 from .gameplay import _Catalog
 from .initial_inventory import _initial_releases, _initial_skill, _level_rows
 from .live_assets import _wearable
+from .media_outfit_policy import COSTUME_IDS, is_audited_work_costume
 from .rpc import RpcCode, RpcFailure
 
 
@@ -68,9 +69,11 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
     Card owners cover normal, Mana and collaboration characters in 6.1.1.
     NPC-only Character rows are not given invented cards or appearances.
     Acquisition/view conditions are intentionally ignored in this opt-in
-    local mode. ``isUserUnavailable`` costumes and hair with no compatible
-    available same-owner outfit are excluded. ``isDisableAdmin`` is not a
-    client ownership restriction and is not used as an exclusion.
+    local mode. ``isUserUnavailable`` costumes are excluded except for the
+    twenty-one audited 3D hot-spring work outfits; SD-only definitions and
+    hair with no compatible same-owner outfit remain excluded.
+    Existing user-available admin-hidden rows remain owned; the separate media
+    client master clears only their audited visibility flags.
 
     Every card starts at its actual initial rarity and level one, using the
     same two integer floors and initial skill-release checks as the starter.
@@ -99,7 +102,10 @@ def prepare_media_inventory(schema, master_dir: Path) -> MediaInventoryPlan:
         if type(unavailable) is not bool:
             _fail("costume user availability")
         if unavailable:
-            continue
+            if identity not in COSTUME_IDS:
+                continue
+            if not is_audited_work_costume(row):
+                _fail("audited work costume owner or resource reference")
         owner = row["characterId"]
         hair = hairs.get(_identity(row.get("defaultHairId"), "costume default hair"))
         if (hair is None or hair.get("characterId") != owner

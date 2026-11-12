@@ -158,6 +158,122 @@ def test_activity_restrictions_and_locked_scenes_are_enforced(game):
     assert dump(game[1]) == before
 
 
+def media_game(game):
+    provider, state, master, access = game
+    return (PhotoShootings(provider.schema, state, provider.profile, master,
+                           scene_access=access, media_mode=True), state, master, access)
+
+
+def test_media_job_accepts_owned_outfit_of_other_type_without_changing_normal_mode_or_state(game):
+    values = dict(actionType=1, photoActivityId="activity-a", characterIds=["char-b"],
+                  costumeIds=["cos-b"], hairIds=["hair-b"])
+    before = dump(game[1])
+    with pytest.raises(RpcFailure) as error:
+        call(game, CHECK, **values)
+    assert error.value.code == RpcCode.INVALID_ARGUMENT
+    result = call(media_game(game), CHECK, **values)
+    assert result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.updatedData.ListFields()
+    assert not result.commonResponse.deletedData.ListFields()
+    # Selecting a gallery job never changes the normal provider or any
+    # profile, session, inventory/film row, counter or unknown protobuf field.
+    with pytest.raises(RpcFailure) as error:
+        call(game, CHECK, **values)
+    assert error.value.code == RpcCode.INVALID_ARGUMENT
+    assert dump(game[1]) == before
+
+
+def test_application_wires_gallery_job_policy_only_after_authentication(game, tmp_path):
+    from idoly_local import codec
+    from idoly_local.application import Application
+    from idoly_local.catalog import FixtureStore
+
+    class Context:
+        def __init__(self, metadata):
+            self.metadata = metadata
+
+        def invocation_metadata(self):
+            return self.metadata
+
+        def abort(self, code, details):
+            raise RpcFailure(code, details)
+
+    provider, state, master, access = game
+    fixtures = FixtureStore(tmp_path / "fixtures", provider.schema)
+    ordinary = Application(provider.schema, state, fixtures, profile="player", master_dir=master,
+                           photo_scene_access=access)
+    gallery = Application(provider.schema, state, fixtures, profile="player", master_dir=master,
+                          photo_scene_access=access, media_mode=True)
+    token, _ = state.login("player")
+    request = provider.schema.request_type(CHECK)(actionType=1, photoActivityId="activity-a",
+        characterIds=["char-b"], costumeIds=["cos-b"], hairIds=["hair-b"])
+    envelope = codec.encode(request.SerializeToString())
+    context = Context((("x-auth-token", token),))
+    before = dump(state)
+    with pytest.raises(RpcFailure) as error:
+        gallery.handle(CHECK, envelope, Context(()))
+    assert error.value.code == RpcCode.UNAUTHENTICATED
+    with pytest.raises(RpcFailure) as error:
+        ordinary.handle(CHECK, envelope, context)
+    assert error.value.code == RpcCode.INVALID_ARGUMENT
+    result = provider.schema.response_type(CHECK).FromString(gallery.handle(CHECK, envelope, context))
+    assert result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.updatedData.ListFields()
+    assert dump(state) == before
+
+
+@pytest.mark.parametrize("case,code", (
+    ("blocked-character", RpcCode.INVALID_ARGUMENT),
+    ("unowned-costume", RpcCode.PERMISSION_DENIED),
+    ("unowned-character", RpcCode.PERMISSION_DENIED),
+    ("wrong-character", RpcCode.INVALID_ARGUMENT),
+    ("incompatible-hair", RpcCode.INVALID_ARGUMENT),
+    ("locked-activity", RpcCode.FAILED_PRECONDITION),
+))
+def test_media_job_keeps_character_ownership_hair_and_scene_guards(game, case, code):
+    provider, state, master, _ = game
+    values = dict(actionType=1, photoActivityId="activity-a", characterIds=["char-a"],
+                  costumeIds=["cos-a"], hairIds=["hair-a"])
+    if case == "blocked-character":
+        source = master / "PhotoActivity.json"
+        rows = json.loads(source.read_text())
+        rows[0]["impossibleShootingCharacterIds"] = ["char-b"]
+        source.write_text(json.dumps(rows))
+        values.update(characterIds=["char-b"], costumeIds=["cos-b"], hairIds=["hair-b"])
+    elif case == "unowned-costume":
+        values["costumeIds"] = ["unowned"]
+    elif case == "unowned-character":
+        raw, fingerprint = state.snapshot("player")
+        snapshot = provider.schema.response_type(USER).FromString(raw)
+        del snapshot.characters[0]
+        state.mutate_snapshot("player", fingerprint, lambda _: snapshot.SerializeToString())
+    elif case == "wrong-character":
+        values["costumeIds"] = ["cos-b"]
+    elif case == "incompatible-hair":
+        source = master / "Hair.json"
+        rows = json.loads(source.read_text())
+        rows[0]["wearableCostumeIds"] = ["unowned"]
+        source.write_text(json.dumps(rows))
+    else:
+        values["actionType"] = 2
+        values["photoActivityId"] = "activity-b"
+    before = dump(state)
+    with pytest.raises(RpcFailure) as error:
+        call(media_game(game), CHECK, **values)
+    assert error.value.code == code
+    assert dump(state) == before
+
+
+@pytest.mark.parametrize("value", (None, 0, 1, "true"))
+def test_photo_media_mode_requires_an_explicit_boolean(game, value):
+    provider, state, master, access = game
+    before = dump(state)
+    with pytest.raises(ValueError, match="explicit boolean"):
+        PhotoShootings(provider.schema, state, provider.profile, master,
+                       scene_access=access, media_mode=value)
+    assert dump(state) == before
+
+
 def test_creation_cannot_consume_film_or_fabricate_photo_without_upload_and_verified_rules(game):
     before = dump(game[1])
     values = quest_values() | {"createShootingParams": [dict(photoImageId="already-reserved",

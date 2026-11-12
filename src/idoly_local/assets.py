@@ -21,6 +21,22 @@ _RUNTIME_DIAGNOSTICS_PATH = "/diagnostics/runtime"
 _MAX_RUNTIME_DIAGNOSTICS_BYTES = 1024 * 1024
 
 
+def select_master_tag(tag_path: Path, *, media_mode=False) -> Path:
+    """Select the separate client-facing outfit catalog before opening a profile.
+
+    The ordinary archive and backend JSON catalog retain their original version.
+    Media packs are prepared by the public-data builder, not rebuilt on a phone.
+    """
+    if type(media_mode) is not bool:
+        raise ValueError("Media mode must be an explicit boolean")
+    selected = Path(tag_path)
+    if media_mode:
+        selected = selected.with_name("media-master-tag.json")
+        if not selected.is_file():
+            raise ValueError("Media outfit master is missing; update the bundled server data")
+    return selected
+
+
 def prepare_master_tag(schema, tag_path: Path, pack_dir: Path, base_url: str) -> bytes:
     """Validate a MasterTag JSON archive and point its packs at local HTTP files.
 
