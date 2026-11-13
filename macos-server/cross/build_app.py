@@ -32,7 +32,7 @@ from certificate_bundle import install_certificate_bundle
 from payload import translation_bundle_input
 APP = "IdolyPrideLocalServer"
 VERSION = "0.3.28"
-BUILD_NUMBER = "45"
+BUILD_NUMBER = "46"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
 PAYLOAD_SHA = "c94cd2ee7e722e6df67f02f31868422ff5d3bf1657c64a05a61b5059572475d8"
 PAYLOAD_BYTES = 191305222
