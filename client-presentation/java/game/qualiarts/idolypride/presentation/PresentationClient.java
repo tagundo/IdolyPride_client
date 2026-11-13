@@ -10,9 +10,11 @@ import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -50,6 +52,15 @@ public final class PresentationClient {
     private static final Set<String> RENDER_PROBE_STATES = keys("waiting", "observed", "unsupported", "init_failed");
     private static final Set<String> WARDROBE_KEYS = keys("schema", "phase", "show_failures", "released_waits", "sequence", "sample_age_ms");
     private static final Set<String> WARDROBE_PHASES = keys("idle", "show_begin", "show_failed", "hide_wait_released", "owner_closed");
+    private static final Set<String> WARDROBE_V2_KEYS = keys("schema", "phase", "show_failures", "released_waits", "sequence", "sample_age_ms", "exit");
+    private static final Set<String> WARDROBE_EXIT_KEYS = keys("schema", "room", "phase", "active", "in_original",
+            "elapsed_ms", "last_sync_ms", "max_sync_ms", "max_sync_stage", "sequence", "spans");
+    private static final Set<String> WARDROBE_EXIT_ROOMS = keys("none", "character_costume", "fitting_room");
+    private static final Set<String> WARDROBE_EXIT_PHASES = keys("idle", "back", "preclose", "hide", "disable",
+            "selection_show", "selection_open", "gc", "unload", "completed");
+    private static final Set<String> WARDROBE_EXIT_STAGES = keys("back", "preclose", "hide", "disable",
+            "selection_show", "selection_open", "gc", "unload");
+    private static final Set<String> WARDROBE_EXIT_SPAN_KEYS = keys("stage", "duration_ms");
     // No native code ran, so no preference revision or capability was applied.
     static String startupFailureStatus() {
         return "{\"schema\":1,\"bridge_version\":1,\"revision\":0,\"status\":\"init_failed\","
@@ -190,8 +201,10 @@ public final class PresentationClient {
     /** Read-only lifecycle counters; never includes a game object or account identifier. */
     public static void validateWardrobe(String json) throws IOException {
         if (json == null || json.getBytes(StandardCharsets.UTF_8).length > MAX_WARDROBE_BYTES) throw invalid();
-        Map<String, Object> row = new Json(json).parse();
-        if (!row.keySet().equals(WARDROBE_KEYS) || integer(row.get("schema")) != 1
+        Map<String, Object> row = new Json(json, true).parse();
+        long schema = integer(row.get("schema"));
+        if ((schema != 1 && schema != 2)
+                || !row.keySet().equals(schema == 1 ? WARDROBE_KEYS : WARDROBE_V2_KEYS)
                 || !WARDROBE_PHASES.contains(row.get("phase"))) throw invalid();
         long failures = integer(row.get("show_failures")), released = integer(row.get("released_waits"));
         long sequence = integer(row.get("sequence"));
@@ -200,6 +213,42 @@ public final class PresentationClient {
         if (row.get("phase").equals("idle")) {
             if (sequence != 0 || failures != 0 || released != 0 || age != null) throw invalid();
         } else if (sequence == 0 || age == null) throw invalid();
+        if (schema == 2) {
+            if (!row.get("phase").equals("idle") && (failures > sequence || released > sequence)
+                    || row.get("phase").equals("show_failed") && failures == 0
+                    || row.get("phase").equals("hide_wait_released") && released == 0) throw invalid();
+            validateWardrobeExit(row.get("exit"));
+        }
+    }
+    @SuppressWarnings("unchecked")
+    private static void validateWardrobeExit(Object value) throws IOException {
+        if (!(value instanceof Map)) throw invalid();
+        Map<String, Object> row = (Map<String, Object>) value;
+        if (!row.keySet().equals(WARDROBE_EXIT_KEYS) || integer(row.get("schema")) != 1
+                || !WARDROBE_EXIT_ROOMS.contains(row.get("room"))
+                || !WARDROBE_EXIT_PHASES.contains(row.get("phase"))) throw invalid();
+        boolean active = bool(row.get("active")), inOriginal = bool(row.get("in_original"));
+        Long elapsed = nullableInteger(row.get("elapsed_ms"), 0, Long.MAX_VALUE);
+        long last = integer(row.get("last_sync_ms")), maximum = integer(row.get("max_sync_ms"));
+        long sequence = integer(row.get("sequence"));
+        Object maximumStage = row.get("max_sync_stage");
+        if (last < 0 || maximum < 0 || sequence < 0
+                || !"none".equals(maximumStage) && !WARDROBE_EXIT_STAGES.contains(maximumStage)
+                || !(row.get("spans") instanceof List)) throw invalid();
+        List<Object> spans = (List<Object>) row.get("spans");
+        if (spans.size() > 8) throw invalid();
+        for (Object item : spans) {
+            if (!(item instanceof Map)) throw invalid();
+            Map<String, Object> span = (Map<String, Object>) item;
+            if (!span.keySet().equals(WARDROBE_EXIT_SPAN_KEYS)
+                    || !WARDROBE_EXIT_STAGES.contains(span.get("stage"))
+                    || integer(span.get("duration_ms")) < 0) throw invalid();
+        }
+        if (row.get("phase").equals("idle") && (!row.get("room").equals("none")
+                || active || inOriginal || elapsed != null || last != 0 || maximum != 0
+                || !"none".equals(maximumStage) || sequence != 0 || !spans.isEmpty())) throw invalid();
+        // The legacy show counters are independent of exit state. Clock
+        // failure or expiry must never be interpreted as operation completion.
     }
     @SuppressWarnings("unchecked")
     public static void validateStatus(String json) throws IOException {
@@ -365,12 +414,14 @@ public final class PresentationClient {
         final String token; final BigDecimal value;
         Numeric(String token) { this.token = token; this.value = new BigDecimal(token); }
     }
-    /** Just objects and scalar values; only the render-probe validator permits null. */
+    /** Arrays/deeper objects are opt-in for the bounded wardrobe exit snapshot. */
     private static final class Json {
         final String text; int at;
-        Json(String text) throws IOException {
+        final boolean wardrobeArrays;
+        Json(String text) throws IOException { this(text, false); }
+        Json(String text, boolean wardrobeArrays) throws IOException {
             if (text == null || text.getBytes(StandardCharsets.UTF_8).length > MAX_BYTES) throw invalid();
-            this.text = text;
+            this.text = text; this.wardrobeArrays = wardrobeArrays;
         }
         Map<String, Object> parse() throws IOException {
             Map<String, Object> result = object(0); space(); if (at != text.length()) throw invalid(); return result;
@@ -378,7 +429,7 @@ public final class PresentationClient {
         void space() { while (at < text.length() && " \t\r\n".indexOf(text.charAt(at)) >= 0) at++; }
         boolean take(char value) { space(); if (at < text.length() && text.charAt(at) == value) { at++; return true; } return false; }
         Map<String, Object> object(int depth) throws IOException {
-            if (depth > 1 || !take('{')) throw invalid();
+            if (depth > (wardrobeArrays ? 3 : 1) || !take('{')) throw invalid();
             Map<String, Object> result = new HashMap<String, Object>();
             if (take('}')) return result;
             do {
@@ -388,10 +439,22 @@ public final class PresentationClient {
             } while (take(','));
             throw invalid();
         }
+        List<Object> array(int depth) throws IOException {
+            if (!wardrobeArrays || depth > 3 || !take('[')) throw invalid();
+            List<Object> result = new ArrayList<Object>();
+            if (take(']')) return result;
+            do {
+                if (result.size() == 8) throw invalid();
+                result.add(value(depth));
+                if (take(']')) return result;
+            } while (take(','));
+            throw invalid();
+        }
         Object value(int depth) throws IOException {
             space(); if (at == text.length()) throw invalid();
             char first = text.charAt(at);
             if (first == '{') return object(depth + 1);
+            if (first == '[') return array(depth + 1);
             if (first == '"') return string();
             for (String literal : new String[]{"true", "false"}) if (text.startsWith(literal, at)) {
                 at += literal.length(); return literal.equals("true");
