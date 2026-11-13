@@ -766,6 +766,43 @@ def test_cache_hint_preserves_public_bytes_mode_mtime_and_uses_readonly_fd(tmp_p
     assert opened and {event["role"] for event in cache.events} == {"baseline"}
 
 
+@pytest.mark.parametrize("role", ["validated-payload", "validated-translations"])
+def test_validated_public_cache_roles_accept_only_matching_bytes_and_preserve_file(tmp_path, monkeypatch, role):
+    path = tmp_path / "synthetic-validated-public.zip"
+    raw = b"synthetic validated public archive"
+    path.write_bytes(raw)
+    expected = hashlib.sha256(raw).hexdigest()
+    before = tool._file_identity(path.stat())
+    monkeypatch.setattr(tool.os, "posix_fadvise", lambda *args: None, raising=False)
+    cache = tool.PublicCacheAdvice()
+    cache.public(role, path, expected)
+    assert cache._entries[path.absolute()] == (role, before, expected)
+    assert [event["role"] for event in cache.events] == [role]
+    assert tool._file_identity(path.stat()) == before
+    assert path.read_bytes() == raw
+
+
+@pytest.mark.parametrize("role", ["validated-payload", "validated-translations"])
+def test_validated_public_cache_roles_reject_wrong_hash_before_advice(tmp_path, monkeypatch, role):
+    path = tmp_path / "synthetic-validated-public.zip"
+    path.write_bytes(b"synthetic public bytes")
+    cache = tool.PublicCacheAdvice()
+    monkeypatch.setattr(tool.os, "posix_fadvise", lambda *args: pytest.fail("unverified bytes must not be advised"), raising=False)
+    with pytest.raises(ValueError, match="input hash differs"):
+        cache.public(role, path, "0" * 64)
+    assert not cache.events and not cache._entries
+
+
+@pytest.mark.parametrize("role", ["validated-other", "validated-translations-extra"])
+def test_unknown_validated_cache_role_rejects_even_matching_public_file_before_open(tmp_path, monkeypatch, role):
+    path = tmp_path / "synthetic-public.zip"
+    path.write_bytes(b"synthetic public bytes")
+    expected = tool.pybundle.digest(path)
+    monkeypatch.setattr(tool.os, "open", lambda *args, **kwargs: pytest.fail("unknown role must not open inputs"))
+    with pytest.raises(ValueError, match="explicitly pinned public"):
+        tool.PublicCacheAdvice().public(role, path, expected)
+
+
 @pytest.mark.parametrize("role", ["keystore", "password", "state.db", "VM-overlay", "other-file"])
 def test_private_or_arbitrary_cache_roles_reject_before_open(tmp_path, monkeypatch, role):
     monkeypatch.setattr(tool.os, "open", lambda *a, **k: pytest.fail("must not open private inputs"))

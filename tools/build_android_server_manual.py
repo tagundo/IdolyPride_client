@@ -184,7 +184,7 @@ class PublicCacheAdvice:
         self._advise(path)
 
     def public(self, role, path, expected_sha256):
-        if (role not in PUBLIC_INPUT_HASHES and role != "validated-payload"
+        if (role not in PUBLIC_INPUT_HASHES and role not in ("validated-payload", "validated-translations")
                 or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
                 or role in PUBLIC_INPUT_HASHES and PUBLIC_INPUT_HASHES[role] != expected_sha256):
             raise ValueError("Only explicitly pinned public inputs may receive cache advice")
