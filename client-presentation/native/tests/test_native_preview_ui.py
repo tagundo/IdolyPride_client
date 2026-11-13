@@ -48,7 +48,7 @@ def test_android_preview_original_fields_and_bind_are_source_bound():
     bind = text.split("void preview_ui_bind_hook(", 1)[1].split("\n}\n", 1)[0]
     assert "#else" in bind and "ready.load(std::memory_order_acquire) && game_call(true)" in bind
     assert "HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original)" in text
-    assert "!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !wardrobe_lifecycle.ready()" in text
+    assert "!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !wardrobe_lifecycle.ready()" in text
     assert "|| !wardrobe_exit_tracker.ready()" in text
     load = text.split("void load_calls() {", 1)[1].split("\n#undef CALL", 1)[0]
     assert load.index("#endif", load.index("CALL(mv_ui_hide")) < load.index("preview_ui_calls.weak_new")

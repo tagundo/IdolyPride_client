@@ -91,6 +91,9 @@ class Arm64ExecutionTests(unittest.TestCase):
             for site in profile.sites:
                 with self.subTest(platform=platform, method=site.name):
                     emulator = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+                    # Each stub is at most a few dozen instructions; keep its
+                    # isolated instruction probe's translation cache bounded.
+                    emulator.ctl_set_tcg_buffer_size(1024 * 1024)
                     for address in {site.rva & ~0xFFF, profile.host_rva & ~0xFFF, 0x77700000}:
                         emulator.mem_map(address, 0x1000)
                     emulator.mem_map(0x50000000, 0x2000)

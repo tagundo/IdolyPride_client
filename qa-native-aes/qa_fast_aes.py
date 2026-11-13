@@ -97,6 +97,9 @@ def emulate(raw, name, payload, key, iv, padding, encrypt):
 
     image, base = Image(raw), 0x1000000
     machine = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+    # The complete audited software AES code is under 8KiB. Repeated vector
+    # loops need the same translated blocks rather than the default big cache.
+    machine.ctl_set_tcg_buffer_size(1024 * 1024)
     machine.mem_map(base, 0x10000)
     for address, offset, size, _ in image.segments:
         machine.mem_write(base + address, raw[offset:offset + size])

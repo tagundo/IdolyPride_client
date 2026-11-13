@@ -77,11 +77,18 @@ def verify_abi(original, patched):
     image = Image(original)
     _check_helpers(original, image)
     offset = image.offset(INITIALIZE)
-    if (len(patched) != len(original) or patched[offset:offset + 32] != initializer_stub()
-            or patched[:offset] != original[:offset] or patched[offset + 32:] != original[offset + 32:]):
+    # The real inputs are large ELF images. Compare the same exact ranges
+    # without allocating another pair of whole-image byte slices.
+    original_view, patched_view = memoryview(original), memoryview(patched)
+    if (len(patched) != len(original) or patched_view[offset:offset + 32] != initializer_stub()
+            or patched_view[:offset] != original_view[:offset]
+            or patched_view[offset + 32:] != original_view[offset + 32:]):
         raise ValueError("IAP verification permits only the 32-byte initializer replacement")
     for initialized in (False, True):
         cpu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
+        # These probes execute fewer than 220 instructions over three tiny
+        # functions; a small translation cache preserves every ABI assertion.
+        cpu.ctl_set_tcg_buffer_size(1024 * 1024)
         pages = set()
 
         def map_page(address):
