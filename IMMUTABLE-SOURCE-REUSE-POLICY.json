@@ -1,0 +1,305 @@
+{
+  "schema": 1,
+  "status": "IMMUTABLE_SOURCE_AND_SIX_ARTIFACT_REUSE_POLICY",
+  "source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+  "source_epoch": 1794578065,
+  "base_source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+  "source_delta_paths": 18,
+  "reviewed_exact_source_hashes": {
+    "client-presentation/ios/build_native.py": "e09ddf90a4aa5ce29afab466a4c7237dc453a95fa0ada953ba74585c077c1b77",
+    "client-presentation/ios/hook-plan.json": "66e5636bb27c3f4616be3ea488eaf4450bdaaca0637e1406a43f6434d594e64a",
+    "client-presentation/ios/ios_profile.hpp": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3",
+    "client-presentation/ios/profile.json": "0f1c5bc8ac11b2c597a33e7533ddd2c59579855f65cd54dad6240d4b4a122805",
+    "client-presentation/ios/static_install.hpp": "37c521bb6e4bf1a8699417640a61a93a4a2d590032fe45b715c7934611535b63",
+    "client-presentation/native/bridge.cpp": "e19836ab08539b2be1b5f5aa45c4365b5ac3a6bf2bc11c2bc5d1102783362dfa",
+    "client-presentation/native/profile.hpp": "18fae8732f2aecdcf02aaa15c22d42c3f5db5d494757de4b4c0e3144b57f0b3d",
+    "client-presentation/native/profile.json": "959d6ca9b503279a824061fb29cc40ced90c53b65647ad36e1c76010ce4d8f91",
+    "client-presentation/native/sound-original-pins.json": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c",
+    "client-presentation/native/sound_persistence.hpp": "2b45d7d0c77b83acc47f850a587680bb4055bac576dbbb08467c87a7b05652ef",
+    "client-presentation/native/tests/sound_persistence_test.cpp": "fcb1645cb85962dceeb3a906550c3a4b35376fdb0883af5a47c226e3cc4a2724",
+    "client-presentation/native/tests/test_native_preview_ui.py": "be372603c2dd6cdb919d8e7467d16142e0a979ad1d8a760fe84c20b5853048f5",
+    "client-presentation/native/tests/test_native_render_probe.py": "6bcd0623093e04e2b4c89fd1824e140531eb5d4d00f945f9cf21109f79074d76",
+    "client-presentation/native/tests/test_native_wardrobe.py": "cb3f439bb447f8cb687cefe78c914514bf653b0e84550e03631156dfe566c181",
+    "client-presentation/native/tests/test_profile.py": "0aa0dbb175dbb221e9214fea99e99183c765e2f6136aa08eec72ddca1dbb789b",
+    "client-presentation/native/tests/test_sound_persistence.py": "93419734c14d9f936a3614483397e9d0b620c007baf74f34c6b358aa8ed3e021",
+    "src/idoly_local/ios_presentation.py": "54026b857a093f4ec3ceb462c747a6a583bd8574eee3c09b22f6532e5c142087",
+    "tests/test_ios_presentation.py": "70141749c9b2904bca2edad5150056820d4ce724f81df884baa07fa5f4bd7050"
+  },
+  "supplement_sha256": "88559aacbd3916f2e9d11e35164b6ce148bbd7cfabfd0842c060910e78babb8f",
+  "historical_QA_rebound_to_new_source": false,
+  "new_kinds": [
+    "ipa-ko",
+    "ipa-ja",
+    "ipa-en"
+  ],
+  "reused_kinds": [
+    "client-en",
+    "client-ja",
+    "client-ko",
+    "data",
+    "mac",
+    "server"
+  ],
+  "six_reused_original_rows": [
+    {
+      "kind": "data",
+      "name": "IdolyPride-ServerData-v0.3.25.zip",
+      "bytes": 191305222,
+      "sha256": "c94cd2ee7e722e6df67f02f31868422ff5d3bf1657c64a05a61b5059572475d8",
+      "source_commit": "1a0dcd15d9016cc1b9548b0bd6c6bc71f8f01356",
+      "qa_receipt_sha256": "7fd10775e85285ca5e1d6e9a8e832f2fa253aefb27bbc4ee932239a0b9498730",
+      "LFS_source_branch": "downloads/pose-font-data-v0.3.25",
+      "LFS_publication_commit": "ebc6a6c6d9f814ceb9340e2d9d0caef5c8e10235",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": true,
+      "original_release": "local-server-v0.3.25"
+    },
+    {
+      "kind": "client-ja",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "bytes": 163408329,
+      "sha256": "650caeaab71f428d0177c09f3574aa6f3244d45869e8bc2ae6babbc6016ade59",
+      "source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+      "qa_receipt_sha256": "3ecca241660ebecb02c5d8bc672ed7e3942c965673507962e274dd9d2aac025f",
+      "LFS_source_branch": "downloads/pose-font-client-ja-v0.3.25",
+      "LFS_publication_commit": "8311a2f29cebadbb97f915466ebbd1d60244b395",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "ja",
+      "reused_unchanged_artifact": true,
+      "original_release": "local-server-v0.3.25"
+    },
+    {
+      "kind": "client-ko",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "bytes": 163424713,
+      "sha256": "76499b3507475d2e49a3264b5c56191ed592441c493be46918e09d1184cbf81c",
+      "source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+      "qa_receipt_sha256": "1d7ce3422dfcd9d35445f48497039b8e1223a973ce5d4ff1f6bdc640340d3a51",
+      "LFS_source_branch": "downloads/pose-font-client-ko-v0.3.25",
+      "LFS_publication_commit": "7f316b6204da6f052a8dad01292e183bd7ac9491",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "ko",
+      "reused_unchanged_artifact": true,
+      "original_release": "local-server-v0.3.25"
+    },
+    {
+      "kind": "client-en",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "bytes": 163391945,
+      "sha256": "682f79ce3fd092ba5b1bb1056b484fdf00c9ae08f66b2fe1cb4a53fb832071bb",
+      "source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+      "qa_receipt_sha256": "e559fa1b56a7c4bfc60ce51005876ef227a24803c23fd9084f779a004b7b617f",
+      "LFS_source_branch": "downloads/pose-font-client-en-v0.3.25",
+      "LFS_publication_commit": "293f7a8aecdf5d0611af04129182d1bc573ae189",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "en",
+      "reused_unchanged_artifact": true,
+      "original_release": "local-server-v0.3.25"
+    },
+    {
+      "kind": "server",
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 284827596,
+      "sha256": "388427743ccf2039f93403c625ddd2d99cb08e6d9764b0f37630d57c01bb2bb2",
+      "source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+      "qa_receipt_sha256": "f8ce68dd99dd75ba7bfb59f442825bd370cea3a65405088b187c2d9d85250e2e",
+      "LFS_source_branch": "downloads/translation-cache-server-v0.3.26-source-07f5699d1eca3c050410cb81eabf7c532302178d",
+      "LFS_publication_commit": "73a5d2e085f9d6b90be1bdcf8735ff8b84b7b525",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": false,
+      "translations": {
+        "included": true,
+        "platform": "android",
+        "sha256": "7e9f53983c50a148695d94537b7823935384d6bce551fb5f62b103f0909e43f9",
+        "bytes": 78203472,
+        "version": "v0.3.25-text-1",
+        "manifest_sha256": "7d7731924f0cf4fc247f27496e1ace754bc29e9053325301b0e775efb997090f",
+        "files": 6,
+        "coverage": {
+          "ko": {
+            "adv_resources": 3492,
+            "missing": 401,
+            "translated": 3091,
+            "unchanged_original": 0
+          },
+          "en": {
+            "adv_resources": 3492,
+            "missing": 1,
+            "translated": 3093,
+            "unchanged_original": 398
+          }
+        },
+        "sources": {
+          "ko": {
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+            "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+          },
+          "en": {
+            "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+            "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+          }
+        }
+      }
+    },
+    {
+      "kind": "mac",
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 283223338,
+      "sha256": "ccbb031d18f9c6d745709ff4380533e24125a6245713ca592e17ea3b046f0e8d",
+      "source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+      "qa_receipt_sha256": "4ac5d96519114a5016faec69c8e4ce704cf782d39b262967e0956cea39d6ad04",
+      "LFS_source_branch": "downloads/translation-cache-mac-v0.3.26-source-07f5699d1eca3c050410cb81eabf7c532302178d",
+      "LFS_publication_commit": "579b6101aa3e930aea39bf7af2315d130e0d639f",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": false,
+      "translations": {
+        "included": true,
+        "platform": "ios",
+        "sha256": "8e44bac91acaca7661bf1b49be8663e23345df9541d7021ff2eaa5b9415bf8b0",
+        "bytes": 78210744,
+        "version": "v0.3.25-text-1",
+        "manifest_sha256": "fb22a88e3def623e0432c6f9782437be0b8d07b5e253dd7f84164c29f9982cb1",
+        "files": 6,
+        "coverage": {
+          "ko": {
+            "adv_resources": 3492,
+            "missing": 401,
+            "translated": 3091,
+            "unchanged_original": 0
+          },
+          "en": {
+            "adv_resources": 3492,
+            "missing": 1,
+            "translated": 3093,
+            "unchanged_original": 398
+          }
+        },
+        "sources": {
+          "ko": {
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+            "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+          },
+          "en": {
+            "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+            "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+          }
+        }
+      }
+    }
+  ],
+  "previous_unified_download_commit": "fee250b002b99a35a5a45da9aa9fca4a90355981",
+  "preparation_pins": {
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/independent-native-dylib-audit.py": {
+      "bytes": 21862,
+      "sha256": "729b2dec1f20d8a76259b9d883fc7df10aa59d05a13cad3ce33f3ed977f1e244"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/independent-ipa-audit.py": {
+      "bytes": 30853,
+      "sha256": "e569704e37926041bc94dd41d799acca164ecad3e9b46d0c0748f57786296c5a"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/font_asset_audit.py": {
+      "bytes": 20706,
+      "sha256": "c54376f7d68d309f72092c449e481bc65db29fc9b6f572dbaa5c29aa24c2e0f8"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/ui_asset_audit.py": {
+      "bytes": 14921,
+      "sha256": "4b42a829dbc402eba2845b97d02ea194b21ac13cd7dbb98b6bdbf9c90e6b1f4a"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/sound_audit_source_gates.py": {
+      "bytes": 15391,
+      "sha256": "6e24826c4b2c8990218cf44109b2764d75c9b112926c3efc53b4372802e9693b"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/test_font_asset_audit.py": {
+      "bytes": 4407,
+      "sha256": "075614a6615ef80d942ed69d5def1ca6d88e6a5d73ab53f9fa8fb1725c75e865"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/test_ui_asset_audit.py": {
+      "bytes": 4405,
+      "sha256": "8b6b274517622b8ba4f61e04190f4436205fb9999417c0be8ee5869c3310b44b"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/reviewed-sound-source-receipt.json": {
+      "bytes": 5466,
+      "sha256": "450fccd74d1eb37fe2f4541a1e75ddf39a7c8d9a9a3f629078132f7435a0ffbe"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/reviewed-sound-independent-source-review.json": {
+      "bytes": 5095,
+      "sha256": "df4708aebb8b5b891be3f7a0cde08e6da80f924b65cee82736a15941d6650e5c"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/reviewed-sound-original-pins.json": {
+      "bytes": 11765,
+      "sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/reviewed-sound-test-count-supplement.json": {
+      "bytes": 4229,
+      "sha256": "88559aacbd3916f2e9d11e35164b6ce148bbd7cfabfd0842c060910e78babb8f"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/independent-v0327-audit-readiness.json": {
+      "bytes": 19206,
+      "sha256": "1ede183527484110ddef0ee43de12a0b45b06602406284f58855210ef8d10aa7"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/final-test-gate.json": {
+      "bytes": 4208,
+      "sha256": "7bd15e36fb4601e950a7bd31f260a6d0262de78e4a8b4e9b926605cc16240eee"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/original-ios-slack-verification.json": {
+      "bytes": 1364,
+      "sha256": "e8d16add1a27a8dfecb9ecfdc67dc0d46ef131d1c4532b645ad7af96556f79a4"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/focused-final.log": {
+      "bytes": 261,
+      "sha256": "a48aa58781161f2988e3633471ab24b917dfe4ae1411906e73f7eb4ba60012be"
+    },
+    "/workspace/shared/artifacts/mac-sound-persistence-v0327-20261113/bootstrap-final.log": {
+      "bytes": 83,
+      "sha256": "1759b73035ea199acf4656740ffb3dc954405eb923ff204217a8a824d50ed0f1"
+    },
+    "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/release_contracts.py": {
+      "bytes": 21501,
+      "sha256": "aee067320d37936c19eb809d6d4c189cc56ea694d9f23ca25ff1c3d43461874d"
+    },
+    "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/published-release-verification.json": {
+      "bytes": 10409,
+      "sha256": "94db8af29a28abba15dcf8539e6e59bc9603c38bc91718ab7a6a2ab60681d7aa"
+    },
+    "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/final-anonymous-download-verification.json": {
+      "bytes": 6670,
+      "sha256": "3556e2329602ac8ea867b54633f3f5f09fedd1d044f49d38cd3826b7b197b489"
+    },
+    "/workspace/IdolyPride_client/tools/publish_binary_bundle_lfs.py": {
+      "bytes": 8978,
+      "sha256": "79991ddde960edcbd9f866f4303dab44c08e509a8e552b637edf9482ab91d246"
+    }
+  },
+  "required_gates": [
+    "Actual new native independent QA; exact same native hash in all three IPAs.",
+    "Fresh per-locale IPA, font and UI QA bound to6e5, SHA/bytes,111aliases41hooks and exact18source.",
+    "Sealed final-test gate146passed1skipped66subtests, zero unresolved prior failures.",
+    "Each IPA full remote LFS SHA, anonymous64KiB local match, final local SHA and completion proof.",
+    "Unified nine pointers only after all three IPA publications; six reuse original identities and production QA.",
+    "Source main normal fast-forward from exact07f to exact6e5; never force or modify old release refs."
+  ],
+  "limitations": [
+    "Autosave needs400ms quiet plus Unity update; no new immediate-quit/background flush guarantee.",
+    "Original Save normal return is not disk fsync acknowledgement.",
+    "Physical Mac persistence/gameplay/display unverified; Android sound symptom untested."
+  ],
+  "prohibited_actions": [
+    "Build or test from these operators",
+    "GitHub release asset uploads or Actions billing",
+    "Delete or modify old artifacts, operators, QA, refs, account/resource data",
+    "Print credentials or signed download URLs",
+    "Read protected VM shmem"
+  ]
+}

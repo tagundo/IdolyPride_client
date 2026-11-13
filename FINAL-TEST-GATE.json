@@ -1,0 +1,77 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+  "actual_tested_source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+  "scope": "All client-presentation tests plus iOS presentation/patch/core-presentation and separate original bootstrap tests; no physical-device execution",
+  "full_suite": {
+    "passed": 146,
+    "skipped": 1,
+    "subtests_passed": 66,
+    "failed": 0
+  },
+  "runs": [
+    {
+      "scope": [
+        "client-presentation",
+        "tests/test_ios_presentation.py",
+        "tests/test_ios_patch.py",
+        "tests/test_presentation.py"
+      ],
+      "passed": 138,
+      "skipped": 1,
+      "subtests_passed": 31,
+      "failed": 0,
+      "seconds": 24.23,
+      "log": "focused-final.log",
+      "log_sha256": "a48aa58781161f2988e3633471ab24b917dfe4ae1411906e73f7eb4ba60012be",
+      "global_AS_cap": false,
+      "existing_Java_heap_flags_unchanged": true
+    },
+    {
+      "scope": [
+        "tests/test_native_bootstrap.py"
+      ],
+      "passed": 8,
+      "skipped": 0,
+      "subtests_passed": 35,
+      "failed": 0,
+      "seconds": 0.74,
+      "log": "bootstrap-final.log",
+      "log_sha256": "1759b73035ea199acf4656740ffb3dc954405eb923ff204217a8a824d50ed0f1",
+      "AS_MiB": 1024
+    }
+  ],
+  "reviewed_scope_supplement_sha256": "88559aacbd3916f2e9d11e35164b6ce148bbd7cfabfd0842c060910e78babb8f",
+  "committed_reviewed_file_sha256": {
+    "client-presentation/ios/build_native.py": "e09ddf90a4aa5ce29afab466a4c7237dc453a95fa0ada953ba74585c077c1b77",
+    "client-presentation/ios/hook-plan.json": "66e5636bb27c3f4616be3ea488eaf4450bdaaca0637e1406a43f6434d594e64a",
+    "client-presentation/ios/ios_profile.hpp": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3",
+    "client-presentation/ios/profile.json": "0f1c5bc8ac11b2c597a33e7533ddd2c59579855f65cd54dad6240d4b4a122805",
+    "client-presentation/ios/static_install.hpp": "37c521bb6e4bf1a8699417640a61a93a4a2d590032fe45b715c7934611535b63",
+    "client-presentation/native/bridge.cpp": "e19836ab08539b2be1b5f5aa45c4365b5ac3a6bf2bc11c2bc5d1102783362dfa",
+    "client-presentation/native/profile.hpp": "18fae8732f2aecdcf02aaa15c22d42c3f5db5d494757de4b4c0e3144b57f0b3d",
+    "client-presentation/native/profile.json": "959d6ca9b503279a824061fb29cc40ced90c53b65647ad36e1c76010ce4d8f91",
+    "client-presentation/native/sound-original-pins.json": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c",
+    "client-presentation/native/sound_persistence.hpp": "2b45d7d0c77b83acc47f850a587680bb4055bac576dbbb08467c87a7b05652ef",
+    "client-presentation/native/tests/sound_persistence_test.cpp": "fcb1645cb85962dceeb3a906550c3a4b35376fdb0883af5a47c226e3cc4a2724",
+    "client-presentation/native/tests/test_native_preview_ui.py": "be372603c2dd6cdb919d8e7467d16142e0a979ad1d8a760fe84c20b5853048f5",
+    "client-presentation/native/tests/test_native_render_probe.py": "6bcd0623093e04e2b4c89fd1824e140531eb5d4d00f945f9cf21109f79074d76",
+    "client-presentation/native/tests/test_native_wardrobe.py": "cb3f439bb447f8cb687cefe78c914514bf653b0e84550e03631156dfe566c181",
+    "client-presentation/native/tests/test_profile.py": "0aa0dbb175dbb221e9214fea99e99183c765e2f6136aa08eec72ddca1dbb789b",
+    "client-presentation/native/tests/test_sound_persistence.py": "93419734c14d9f936a3614483397e9d0b620c007baf74f34c6b358aa8ed3e021",
+    "src/idoly_local/ios_presentation.py": "54026b857a093f4ec3ceb462c747a6a583bd8574eee3c09b22f6532e5c142087",
+    "tests/test_ios_presentation.py": "70141749c9b2904bca2edad5150056820d4ce724f81df884baa07fa5f4bd7050"
+  },
+  "original_iOS_extra_slack_receipt_sha256": "e8d16add1a27a8dfecb9ecfdc67dc0d46ef131d1c4532b645ad7af96556f79a4",
+  "prior_AS512_attempt_superseded": {
+    "two_stale_test_count_expectations_corrected_and_rerun": true,
+    "JVM_virtual_address_limit_and_unchanged_original_bootstrap_memory_errors_resolved_in_fresh_complete_modules": true,
+    "unresolved_failures": 0,
+    "original_crash_logs_preserved_exactly": true
+  },
+  "actual_Mac_execution": false,
+  "actual_Android_execution": false,
+  "physical_sound_persistence_verified": false,
+  "immediate_quit_before_400ms_guaranteed": false
+}
