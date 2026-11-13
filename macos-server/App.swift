@@ -20,6 +20,8 @@ final class ServerModel: ObservableObject {
     @Published var resourcesInDownloads = (UserDefaults.standard.object(forKey: "resourcesInDownloads") as? Bool) ?? true {
         didSet { UserDefaults.standard.set(resourcesInDownloads, forKey: "resourcesInDownloads") }
     }
+    @Published private(set) var resourceDirectoryPath = (UserDefaults.standard.object(forKey: "resourceDirectoryPath") as? String) ?? ""
+    @Published private(set) var resourceLocationMessage = "서버를 중지한 뒤 보관 폴더를 바꿀 수 있습니다. 기존 파일은 옮기거나 삭제하지 않습니다."
     @Published private(set) var presentation = ClientPresentationSettings.defaults
     @Published private(set) var playback = ClientPlaybackSettings.defaults
     @Published private(set) var library = ClientLibrarySettings()
@@ -38,6 +40,7 @@ final class ServerModel: ObservableObject {
     @Published private(set) var resourcePending = false
     @Published private(set) var playbackMessage = "Mac의 기본값은 꺼짐입니다. 켜면 원본 회전 대기 동작을 사용합니다."
     @Published private(set) var presentationFeedback = ClientPresentationFeedback.waiting
+    private var invalidResourceLocation = false
     private var experimentalLiveObserved = false
     @Published var status = "앱을 준비하고 있습니다."
     @Published var logs = ""
@@ -68,6 +71,9 @@ final class ServerModel: ObservableObject {
     private var presentationSaveFailed = false
 
     init() {
+        if let saved = UserDefaults.standard.object(forKey: "resourceDirectoryPath"), !(saved is String) {
+            invalidResourceLocation = true
+        }
         let arguments = ProcessInfo.processInfo.arguments
         func value(_ flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), index + 1 < arguments.count else { return nil }
@@ -147,7 +153,10 @@ final class ServerModel: ObservableObject {
 
     private func updateResourceStatus(_ state: [String: Any]) {
         resourcePending = false
-        guard let resources = state["resource_library"] as? [String: Any] else { return }
+        guard let resources = state["resource_library"] as? [String: Any] else {
+            if !running { resourceJobActive = false; resourceJobID = nil }
+            return
+        }
         let job = resources["job"] as? [String: Any]
         let phase = job?["state"] as? String ?? "idle"
         resourceJobID = job?["job_id"] as? String
@@ -224,6 +233,86 @@ final class ServerModel: ObservableObject {
             .appendingPathComponent("IdolyPride", isDirectory: true)
     }
 
+    var canChangeResourceLocation: Bool {
+        !running && !busy && !canStop && !resourceJobActive && !resourcePending && !shutdownRequested
+    }
+
+    var resourceLocationBinding: Binding<Bool> {
+        Binding(get: { self.resourcesInDownloads }, set: { enabled in
+            guard self.canChangeResourceLocation else { return }
+            self.resourcesInDownloads = enabled
+        })
+    }
+
+    private func externalResourceDirectory() -> URL? {
+        guard !invalidResourceLocation else { return nil }
+        guard !resourceDirectoryPath.isEmpty else { return downloadsResourceDirectory() }
+        guard resourceDirectoryPath.hasPrefix("/"), !resourceDirectoryPath.contains("\0") else { return nil }
+        return URL(fileURLWithPath: resourceDirectoryPath, isDirectory: true)
+    }
+
+    private var selectedResourceDirectory: URL? {
+        resourcesInDownloads ? externalResourceDirectory() : dataDirectory
+    }
+
+    var resourceLocationDescription: String {
+        guard let root = selectedResourceDirectory else { return "저장된 보관 경로를 확인해 주세요. 폴더 선택 또는 기본 위치 복원으로 다시 지정할 수 있습니다." }
+        return (resourcesInDownloads ? "직접 보관 위치: " : "앱 전용 보관 위치: ") + root.path
+    }
+
+    private static func validatedResourceDirectory(_ candidate: URL, create: Bool) -> URL? {
+        guard candidate.isFileURL else { return nil }
+        let root = candidate.standardizedFileURL.resolvingSymlinksInPath()
+        guard root.path.hasPrefix("/"), !root.path.contains("\0"), root.path.utf8.count <= 4096 else { return nil }
+        do {
+            if create { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
+            let values = try root.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true, FileManager.default.isWritableFile(atPath: root.path) else { return nil }
+            // Use the longest Boolean spellings when reserving one atomic IPC line.
+            let command: [String: Any] = ["action": "start", "experimental_main_live": false,
+                "media_mode": false, "download_missing_resources": false, "resource_cache_dir": root.path]
+            guard try JSONSerialization.data(withJSONObject: command).count + 1 <= 512 else { return nil }
+            return root
+        } catch { return nil }
+    }
+
+    private func saveResourceDirectory(_ candidate: URL, restoreDefault: Bool = false) {
+        guard canChangeResourceLocation else { return }
+        guard let root = Self.validatedResourceDirectory(candidate, create: true) else {
+            alertMessage = "쓰기 가능한 리소스 폴더를 선택해 주세요. 폴더 접근 권한과 경로 길이를 확인해 주세요. 이전 보관 위치는 유지됩니다."
+            return
+        }
+        if restoreDefault {
+            UserDefaults.standard.removeObject(forKey: "resourceDirectoryPath")
+            resourceDirectoryPath = ""
+        } else {
+            UserDefaults.standard.set(root.path, forKey: "resourceDirectoryPath")
+            resourceDirectoryPath = root.path
+        }
+        invalidResourceLocation = false
+        resourcesInDownloads = true
+        resourceLocationMessage = "보관 위치가 저장되었습니다. 다음 서버 시작부터 적용됩니다. 기존 파일은 이전 폴더에 유지되며 자동으로 옮기거나 삭제하지 않습니다."
+    }
+
+    func chooseResourceDirectory() {
+        guard canChangeResourceLocation else { return }
+        let panel = NSOpenPanel()
+        panel.title = "리소스 보관 폴더 선택"
+        panel.prompt = "이 폴더 사용"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = externalResourceDirectory()
+        guard panel.runModal() == .OK, let selected = panel.url else { return }
+        saveResourceDirectory(selected)
+    }
+
+    func restoreDefaultResourceDirectory() {
+        guard canChangeResourceLocation, let root = downloadsResourceDirectory() else { return }
+        saveResourceDirectory(root, restoreDefault: true)
+    }
+
     private func resourceExportsDirectory() -> URL? {
         guard let root = downloadsResourceDirectory() else {
             alertMessage = "Downloads 보관 폴더를 찾지 못했습니다."; return nil
@@ -235,7 +324,7 @@ final class ServerModel: ObservableObject {
     }
 
     func revealResources() {
-        guard let folder = resourcesInDownloads ? downloadsResourceDirectory() : dataDirectory else { return }
+        guard let folder = selectedResourceDirectory else { return }
         do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
         catch { alertMessage = "리소스 보관 폴더에 접근하지 못했습니다."; return }
         NSWorkspace.shared.open(folder)
@@ -511,9 +600,11 @@ final class ServerModel: ObservableObject {
         guard !running && !busy && !canStop else { return }
         var cache: String?
         if resourcesInDownloads {
-            guard let folder = downloadsResourceDirectory() else { alertMessage = "Downloads 폴더를 찾지 못했습니다."; return }
-            do { try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true) }
-            catch { alertMessage = "Downloads 폴더에 접근하지 못했습니다. 접근 권한을 확인하거나 앱 전용 보관을 선택해 주세요."; return }
+            guard let selected = externalResourceDirectory(),
+                  let folder = Self.validatedResourceDirectory(selected, create: true) else {
+                alertMessage = "리소스 보관 폴더에 접근하지 못했습니다. 쓰기 권한과 경로 길이를 확인하거나 다른 보관 폴더를 선택해 주세요."
+                return
+            }
             cache = folder.path
         }
         busy = true; status = "서버를 시작하고 있습니다."
@@ -853,9 +944,15 @@ struct ServerView: View {
                     }
                     DisclosureGroup("게임 리소스 보관·Downloads 내보내기") {
                         VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Downloads/IdolyPride에 리소스 직접 보관", isOn: $model.resourcesInDownloads)
-                                .disabled(model.running || model.busy || model.canStop)
-                            Text("켜면 CDN 원본 파일을 이 폴더 아래의 플랫폼별 캐시에 받아 게임에 바로 제공합니다. 계정·설정 데이터는 기존 앱 폴더에 유지합니다.")
+                            Toggle("선택한 폴더에 리소스 직접 보관", isOn: model.resourceLocationBinding)
+                                .disabled(!model.canChangeResourceLocation)
+                            Text(model.resourceLocationDescription).font(.caption).textSelection(.enabled)
+                            HStack {
+                                Button("보관 폴더 변경…") { model.chooseResourceDirectory() }
+                                Button("Downloads 기본 위치 복원") { model.restoreDefaultResourceDirectory() }
+                            }.disabled(!model.canChangeResourceLocation)
+                            Text(model.resourceLocationMessage).font(.caption).foregroundStyle(.secondary)
+                            Text("기본 위치는 Downloads/IdolyPride입니다. 폴더를 선택하거나 기본 위치를 복원하면 직접 보관이 켜집니다. 체크를 해제하면 앱 전용 보관을 사용하며 계정·설정은 기존 앱 폴더에 유지합니다.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Button("리소스 보관 폴더 열기") { model.revealResources() }
                             Picker("보관할 리소스", selection: $model.resourcePlatform) {

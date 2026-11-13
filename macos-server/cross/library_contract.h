@@ -87,6 +87,15 @@ static inline int id_resource_download_command(const char *platform, int paralle
         "{\"action\":\"resources_download\",\"platform\":\"%s\",\"parallelism\":%d}\n",platform,parallelism);
     return n > 0 && n <= 512 && (IDPSize)n < capacity ? n : 0;
 }
+/* NSString's encoded byte length must agree with the NUL-terminated path. */
+static inline int id_resource_location_path_valid(const char *path, IDPSize encodedBytes) {
+    return path && encodedBytes > 0 && encodedBytes <= 4096 && path[0]=='/' && strlen(path)==encodedBytes;
+}
+/* Changing the resource root while any owner may still use it is forbidden. */
+static inline int id_resource_location_change_allowed(int running, int busy, int canStop,
+        int jobActive, int pending, int quitting) {
+    return !running && !busy && !canStop && !jobActive && !pending && !quitting;
+}
 /* Only an explicitly stored Boolean false opts out of the Downloads default. */
 static inline int id_resources_in_downloads(int hasBoolean, int value) { return !hasBoolean || value != 0; }
 static inline int id_library_escape(const char *argument, char *escaped, IDPSize capacity) {

@@ -16,7 +16,7 @@ enum { C_CUSTOM = 1, C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW, C_EXP
        C_START = 200, C_STOP, C_OPEN, C_FOLDER,
        C_RESOURCE_PLATFORM = 300, C_RESOURCE_PREVIEW, C_RESOURCE_DOWNLOAD,
        C_RESOURCE_CANCEL, C_RESOURCE_EXPORT, C_RESOURCE_IMPORT,
-       C_RESOURCE_LOCATION, C_RESOURCE_REVEAL, C_RESOURCE_PARALLELISM };
+       C_RESOURCE_LOCATION, C_RESOURCE_REVEAL, C_RESOURCE_PARALLELISM, C_RESOURCE_CHOOSE, C_RESOURCE_DEFAULT };
 
 /* Official Foundation SearchPathDirectory values (swift-foundation6.0.3):
    cachesDirectory13, applicationSupportDirectory14, downloadsDirectory15. */
@@ -27,7 +27,8 @@ static struct {
     IDObj mediaURL, languageURL, libraryLabel, hideVideo, mvSort, outfitSort, language;
     IDObj resourcePlatform, resourceParallelism, resourceLabel, resourcePreview, resourceDownload, resourceCancel, resourceExport, resourceImport;
     IDObj resourceSnapshot;
-    IDObj downloadsResourcesURL, resourcesInDownloads, resourceLocationLabel, revealResources;
+    IDObj downloadsResourcesURL, customResourcesURL, resourcesInDownloads, resourceLocationLabel, revealResources;
+    IDObj chooseResources, defaultResources, resourceLocationHelp;
     IDObj serverLabel, launchLabel, visualLabel, metricLabel, logView, start, stop, openGame;
     IDObj media, live, download, waitOrientation, playbackLabel, custom, expand, menus[6];
     IDPrefs prefs;
@@ -37,7 +38,7 @@ static struct {
     int invalidPlayback, playbackSaveFailed;
     int invalidLibrary, librarySaveFailed, libraryChanged;
     int resourcePlatformIndex, resourceParallelismValue, resourceJobActive, resourcePending;
-    int resourcesDownloads;
+    int resourcesDownloads, invalidResourceLocation, resourceLocationChanged;
     char resourceJobID[65];
     int outFD, errorFD, inputFD, inputClosed, engineEnded, quitting;
     int ackBridge, ackPresent, ackState, experimentalObserved;
@@ -99,12 +100,40 @@ static int create_data_directory(void) {
         G.dataURL, 1, 0, 0);
 }
 
-static IDObj selected_resource_root(void) { return G.resourcesDownloads ? G.downloadsResourcesURL : G.dataURL; }
+static IDObj external_resource_root(void) {
+    return G.invalidResourceLocation ? 0 : G.customResourcesURL ? G.customResourcesURL : G.downloadsResourcesURL;
+}
+static IDObj selected_resource_root(void) { return G.resourcesDownloads ? external_resource_root() : G.dataURL; }
+static int resource_location_can_change(void) {
+    return id_resource_location_change_allowed(G.running,G.busy,G.canStop,G.resourceJobActive,G.resourcePending,G.quitting);
+}
 
 static int create_resource_directory(IDObj url) {
     return url && ((IDBool (*)(IDObj,IDSel,IDObj,IDBool,IDObj,IDObj *))IDRuntime.message)(
         id_get(id_class("NSFileManager"),"defaultManager"),id_sel("createDirectoryAtURL:withIntermediateDirectories:attributes:error:"),
         url,1,0,0);
+}
+
+static int valid_resource_path(IDObj path) {
+    if (!id_is(path,"NSString")) return 0;
+    IDSize bytes=((IDSize (*)(IDObj,IDSel,unsigned long))IDRuntime.message)(path,id_sel("lengthOfBytesUsingEncoding:"),4);
+    return id_resource_location_path_valid(id_utf8(path),bytes);
+}
+
+static IDObj validated_resource_directory(IDObj candidate, int create) {
+    if (!candidate || !id_bool(candidate,"isFileURL")) return 0;
+    IDObj root=id_get(id_get(candidate,"URLByStandardizingPath"),"URLByResolvingSymlinksInPath");
+    IDObj path=id_get(root,"path");
+    const char *bytes=id_utf8(path);
+    if (!valid_resource_path(path)) return 0;
+    if (create && !create_resource_directory(root)) return 0;
+    IDObj manager=id_get(id_class("NSFileManager"),"defaultManager");
+    IDBool directory=0;
+    if (!((IDBool (*)(IDObj,IDSel,IDObj,IDBool *))IDRuntime.message)(manager,
+            id_sel("fileExistsAtPath:isDirectory:"),path,&directory) || !directory
+            || !id_bool_arg(manager,"isWritableFileAtPath:",path)) return 0;
+    char command[513];
+    return id_server_start_command(0,0,0,bytes,command,sizeof command) ? root : 0;
 }
 
 static int atomic_bytes(IDObj destination, const char *bytes, IDSize count) {
@@ -262,13 +291,18 @@ static void update_controls(void) {
     id_set_bool(G.media, "setEnabled:", (IDBool)modes);
     id_set_bool(G.live, "setEnabled:", (IDBool)modes);
     id_set_bool(G.download, "setEnabled:", (IDBool)modes);
-    id_set_bool(G.resourcesInDownloads,"setEnabled:",(IDBool)modes);
+    id_set_bool(G.resourcesInDownloads,"setEnabled:",(IDBool)resource_location_can_change());
+    id_set_bool(G.chooseResources,"setEnabled:",(IDBool)resource_location_can_change());
+    id_set_bool(G.defaultResources,"setEnabled:",(IDBool)resource_location_can_change());
     id_set_long(G.resourcesInDownloads,"setState:",G.resourcesDownloads);
     id_set_bool(G.revealResources,"setEnabled:",!G.quitting);
     IDObj resourceRoot=selected_resource_root();
     if (resourceRoot) id_set(G.resourceLocationLabel,"setStringValue:",id_arg(
-        id_string(G.resourcesDownloads ? "직접 보관 (체크 해제 시 앱 전용): " : "앱 전용 보관 위치: "),"stringByAppendingString:",id_get(resourceRoot,"path")));
-    else text(G.resourceLocationLabel,"다운로드 폴더를 찾지 못했습니다. 앱 전용 보관을 직접 선택하거나 폴더 접근을 확인해 주세요.");
+        id_string(G.resourcesDownloads ? "직접 보관 위치: " : "앱 전용 보관 위치: "),"stringByAppendingString:",id_get(resourceRoot,"path")));
+    else text(G.resourceLocationLabel,"저장된 보관 경로를 확인해 주세요. 폴더 선택 또는 기본 위치 복원으로 다시 지정할 수 있습니다.");
+    text(G.resourceLocationHelp,G.resourceLocationChanged
+        ? "보관 위치가 저장되었습니다. 다음 서버 시작부터 적용됩니다. 기존 파일은 이전 폴더에 유지되며 자동으로 옮기거나 삭제하지 않습니다."
+        : "서버 중지 후 폴더를 변경할 수 있습니다. 폴더 선택·기본 위치 복원은 직접 보관을 켜며 체크 해제 시 앱 전용 보관을 사용합니다.");
     id_set_bool(G.waitOrientation, "setEnabled:", !G.quitting);
     id_set_long(G.waitOrientation, "setState:", G.playback.waitForOrientation);
     text(G.playbackLabel, G.playbackSaveFailed ? "회전 대기 설정을 저장하지 못했습니다. 이전 값을 유지합니다."
@@ -330,9 +364,10 @@ static int send_control(const char *action) {
     char command[513];
     int size;
     if (strcmp(action, "start") == 0) {
-        if (G.resourcesDownloads && !G.downloadsResourcesURL) return 0;
+        IDObj root=external_resource_root();
+        if (G.resourcesDownloads && !root) return 0;
         size=id_server_start_command(G.liveMode,G.mediaMode,G.downloadMode,
-            G.resourcesDownloads ? id_utf8(id_get(G.downloadsResourcesURL,"path")) : 0,command,sizeof command);
+            G.resourcesDownloads ? id_utf8(id_get(root,"path")) : 0,command,sizeof command);
     }
     else size = snprintf(command, sizeof command, "{\"action\":\"%s\"}\n", action);
     if (size <= 0 || (IDSize)size >= sizeof command) return 0;
@@ -343,8 +378,14 @@ static int send_control(const char *action) {
 
 static void begin_start(void) {
     if (G.running || G.busy || G.canStop || G.quitting) return;
-    if (G.resourcesDownloads && !G.downloadsResourcesURL) {
-        status("다운로드 폴더를 찾지 못해 서버를 시작하지 않았습니다. 보관 위치를 확인해 주세요."); return;
+    if (G.resourcesDownloads) {
+        IDObj root=validated_resource_directory(external_resource_root(),1);
+        if (!root) { status("리소스 보관 폴더에 접근하지 못했습니다. 쓰기 권한과 경로 길이를 확인하거나 다른 폴더를 선택해 주세요."); return; }
+        if (G.customResourcesURL) {
+            IDObj saved=G.customResourcesURL; G.customResourcesURL=id_keep(root); id_void(saved,"release");
+        } else {
+            IDObj saved=G.downloadsResourcesURL; G.downloadsResourcesURL=id_keep(root); if (saved) id_void(saved,"release");
+        }
     }
     G.busy = 1; status("서버를 시작하고 있습니다."); update_controls();
     if (!send_control("start")) { G.busy = 0; status("서버 시작 요청을 전달하지 못했습니다. 보관 위치와 앱 상태를 확인해 주세요."); update_controls(); }
@@ -488,6 +529,38 @@ static void resource_archive_panel(int importing) {
     resource_request(importing ? "resources_import" : "resources_export",id_utf8(id_get(selected,"path")));
 }
 
+static void select_resource_directory(int restoreDefault) {
+    if (!resource_location_can_change()) return;
+    IDObj chosen=G.downloadsResourcesURL;
+    if (!restoreDefault) {
+        IDObj panel=id_get(id_class("NSOpenPanel"),"openPanel");
+        id_set(panel,"setTitle:",id_string("리소스 보관 폴더 선택"));
+        id_set(panel,"setPrompt:",id_string("이 폴더 사용"));
+        id_set_bool(panel,"setCanChooseDirectories:",1); id_set_bool(panel,"setCanChooseFiles:",0);
+        id_set_bool(panel,"setCanCreateDirectories:",1); id_set_bool(panel,"setAllowsMultipleSelection:",0);
+        if (external_resource_root()) id_set(panel,"setDirectoryURL:",external_resource_root());
+        if (id_long(panel,"runModal")!=1) return;
+        chosen=id_get(panel,"URL");
+    }
+    // A nested panel run loop may have received a new engine/job state.
+    if (!resource_location_can_change()) return;
+    IDObj root=validated_resource_directory(chosen,1);
+    if (!root) { resource_message("쓰기 가능한 리소스 폴더를 선택해 주세요. 접근 권한과 경로 길이를 확인해 주세요. 이전 위치는 유지됩니다.",1); return; }
+    IDObj previous=G.customResourcesURL;
+    if (restoreDefault) {
+        id_set(G.defaults,"removeObjectForKey:",id_string("resourceDirectoryPath"));
+        G.customResourcesURL=0;
+    } else {
+        ((void (*)(IDObj,IDSel,IDObj,IDObj))IDRuntime.message)(G.defaults,id_sel("setObject:forKey:"),
+            id_get(root,"path"),id_string("resourceDirectoryPath"));
+        G.customResourcesURL=id_keep(root);
+    }
+    if (previous) id_void(previous,"release");
+    G.resourcesDownloads=1; G.invalidResourceLocation=0; G.resourceLocationChanged=1;
+    ((void (*)(IDObj,IDSel,IDBool,IDObj))IDRuntime.message)(G.defaults,id_sel("setBool:forKey:"),1,id_string("resourcesInDownloads"));
+    update_controls();
+}
+
 static void control_action(IDObj self, IDSel command, IDObj sender) {
     (void)self; (void)command;
     void *pool = IDRuntime.poolPush();
@@ -496,12 +569,14 @@ static void control_action(IDObj self, IDSel command, IDObj sender) {
     else if (tag == C_STOP) begin_stop();
     else if (tag == C_OPEN) open_game();
     else if (tag == C_RESOURCE_LOCATION) {
-        if (!G.running && !G.busy && !G.canStop && !G.quitting) {
+        if (resource_location_can_change()) {
             G.resourcesDownloads=id_long(sender,"state") == 1;
             ((void (*)(IDObj,IDSel,IDBool,IDObj))IDRuntime.message)(G.defaults,id_sel("setBool:forKey:"),
                 (IDBool)G.resourcesDownloads,id_string("resourcesInDownloads"));
         }
         update_controls();
+    } else if (tag == C_RESOURCE_CHOOSE || tag == C_RESOURCE_DEFAULT) {
+        select_resource_directory(tag == C_RESOURCE_DEFAULT);
     } else if (tag == C_RESOURCE_REVEAL) {
         IDObj root=selected_resource_root();
         if (!create_resource_directory(root)) resource_message("리소스 폴더를 열지 못했습니다. macOS의 폴더 접근 권한을 확인해 주세요.",1);
@@ -658,7 +733,7 @@ static void make_window(void) {
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
-    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1974));
+    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 2066));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
     add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
@@ -710,31 +785,34 @@ static void make_window(void) {
     G.visualLabel = add_label(document, "게임의 응답 대기", 1076, 42, 12, 1);
     G.metricLabel = add_label(document, "게임의 3D 화면·시야각 측정값 수신 대기", 1120, 42, 11, 1);
     add_label(document,"게임 리소스 보관",1174,28,17,0);
-    G.resourcesInDownloads=add_button(document,"Downloads/IdolyPride에 직접 보관 (기본)",8,1208,500,C_RESOURCE_LOCATION,1);
+    G.resourcesInDownloads=add_button(document,"선택한 폴더에 리소스 직접 보관",8,1208,500,C_RESOURCE_LOCATION,1);
     G.revealResources=add_button(document,"리소스 폴더 열기",516,1208,170,C_RESOURCE_REVEAL,0);
     G.resourceLocationLabel=add_label(document,"보관 위치를 확인하고 있습니다.",1240,44,11,1);
-    G.resourcePlatform=add_menu(document,"보관할 리소스",1296,C_RESOURCE_PLATFORM);
+    G.chooseResources=add_button(document,"보관 폴더 변경…",12,1290,220,C_RESOURCE_CHOOSE,0);
+    G.defaultResources=add_button(document,"Downloads 기본 위치 복원",242,1290,300,C_RESOURCE_DEFAULT,0);
+    G.resourceLocationHelp=add_label(document,"보관 위치 설정을 준비하고 있습니다.",1324,54,11,1);
+    G.resourcePlatform=add_menu(document,"보관할 리소스",1388,C_RESOURCE_PLATFORM);
     menu_item(G.resourcePlatform,"iOS · Mac PlayCover (기본)"); menu_item(G.resourcePlatform,"Android");
-    G.resourceParallelism=add_menu(document,"동시 다운로드 수",1330,C_RESOURCE_PARALLELISM);
+    G.resourceParallelism=add_menu(document,"동시 다운로드 수",1422,C_RESOURCE_PARALLELISM);
     const char *parallelismNames[]={"1개","2개","4개 (기본)","8개"};
     for (int i=0;i<4;++i) menu_item(G.resourceParallelism,parallelismNames[i]);
     id_set_long(G.resourceParallelism,"selectItemAtIndex:",selected_int(resourceParallelisms,4,G.resourceParallelismValue));
-    G.resourcePreview=add_button(document,"목록·예상 용량 확인",12,1368,180,C_RESOURCE_PREVIEW,0);
-    G.resourceDownload=add_button(document,"전체 리소스 받기",202,1368,180,C_RESOURCE_DOWNLOAD,0);
-    G.resourceCancel=add_button(document,"작업 취소",392,1368,120,C_RESOURCE_CANCEL,0);
-    G.resourceExport=add_button(document,"보관 ZIP 내보내기",12,1406,180,C_RESOURCE_EXPORT,0);
-    G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1406,180,C_RESOURCE_IMPORT,0);
-    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1446,128,11,1);
-    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1578,54,11,1);
-    add_label(document, "실행 기록", 1660, 26, 14, 0);
-    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1690, 676, 200));
+    G.resourcePreview=add_button(document,"목록·예상 용량 확인",12,1460,180,C_RESOURCE_PREVIEW,0);
+    G.resourceDownload=add_button(document,"전체 리소스 받기",202,1460,180,C_RESOURCE_DOWNLOAD,0);
+    G.resourceCancel=add_button(document,"작업 취소",392,1460,120,C_RESOURCE_CANCEL,0);
+    G.resourceExport=add_button(document,"보관 ZIP 내보내기",12,1498,180,C_RESOURCE_EXPORT,0);
+    G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1498,180,C_RESOURCE_IMPORT,0);
+    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1538,128,11,1);
+    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1670,54,11,1);
+    add_label(document, "실행 기록", 1752, 26, 14, 0);
+    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1782, 676, 200));
     id_set_bool(logScroll, "setHasVerticalScroller:", 1); id_set_bool(logScroll, "setHasHorizontalScroller:", 0);
     G.logView = id_init_frame(id_get(id_class("NSTextView"), "alloc"), id_rect(0, 0, 650, 200));
     id_set_bool(G.logView, "setEditable:", 0); id_set_bool(G.logView, "setSelectable:", 1);
     id_set_bool(G.logView, "setVerticallyResizable:", 1); id_set_bool(G.logView, "setHorizontallyResizable:", 0);
     id_set(G.logView, "setFont:", id_double(id_class("NSFont"), "userFixedPitchFontOfSize:", 11));
     id_set(logScroll, "setDocumentView:", G.logView); id_set(document, "addSubview:", logScroll);
-    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1902, 42, 11, 1);
+    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1994, 42, 11, 1);
     sync_graphics_controls(); sync_library_controls(); update_controls();
     id_void(G.window, "center"); id_set(G.window, "makeKeyAndOrderFront:", 0);
     id_set_bool(G.app, "activateIgnoringOtherApps:", 1);
@@ -1021,6 +1099,12 @@ int idoly_app_main(int argc, char **argv) {
         id_get(id_class("NSFileManager"),"defaultManager"),id_sel("URLsForDirectory:inDomains:"),ID_SEARCH_DOWNLOADS,ID_USER_DOMAIN);
     if (id_long(downloadDirectories,"count") > 0)
         G.downloadsResourcesURL=id_keep(childURL(id_index(downloadDirectories,"objectAtIndex:",0),"IdolyPride"));
+    IDObj savedRoot=id_arg(G.defaults,"objectForKey:",id_string("resourceDirectoryPath"));
+    if (savedRoot && !(id_is(savedRoot,"NSString") && id_long(savedRoot,"length")==0)) {
+        if (!valid_resource_path(savedRoot)) G.invalidResourceLocation=1;
+        else G.customResourcesURL=id_keep(id_get(id_get(id_arg(id_class("NSURL"),"fileURLWithPath:",savedRoot),
+            "URLByStandardizingPath"),"URLByResolvingSymlinksInPath"));
+    }
     IDObj directories = ((IDObj (*)(IDObj, IDSel, unsigned long, unsigned long))IDRuntime.message)(
         id_get(id_class("NSFileManager"), "defaultManager"), id_sel("URLsForDirectory:inDomains:"), 14, 1);
     if (id_long(directories, "count") < 1) { IDRuntime.poolPop(pool); return 1; }

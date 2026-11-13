@@ -1,0 +1,7 @@
+The Mac server's resource section shows the current storage root. Stop the server and finish or cancel resource jobs before using **보관 폴더 변경…**. The directory picker accepts one writable local directory and can create a directory. The selected canonical path survives app restarts.
+
+Choosing a directory or restoring **Downloads 기본 위치 복원** enables direct storage at that root. Clearing **선택한 폴더에 리소스 직접 보관** retains the existing app-private storage mode; its account and settings directory is unchanged. The next server start uses the chosen location. Existing files stay in their previous directory: changing the setting neither copies nor deletes them. To reuse an existing collection, select its existing IdolyPride root, containing `octo-cache`, `octo-cache-ios`, or `translations`.
+
+ZIP exports retain their default destination, `Downloads/IdolyPride/exports`, and the save panel can choose another destination. The **리소스 보관 폴더 열기** button opens the selected direct or private root. A missing/unwritable saved location blocks startup with a visible message; it does not silently fall back to another disk. A path too long for the existing atomic engine-control message is rejected before saving.
+
+These server apps are not App Sandbox bundles. Folder selection uses ordinary macOS folder permissions; security-scoped bookmarks are not required by their current signing configuration. Actual macOS picker, permissions, and relaunch behavior require a Mac execution check.
