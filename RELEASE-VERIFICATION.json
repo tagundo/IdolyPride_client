@@ -1,0 +1,11 @@
+{
+  "version": "0.3.23",
+  "source_commit": "a752492ca1f622d58994f4d134ee002199725f23",
+  "artifacts": [
+    {
+      "name": "IdolyPride-ServerData-v0.3.23.zip",
+      "bytes": 191118320,
+      "sha256": "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f"
+    }
+  ]
+}
