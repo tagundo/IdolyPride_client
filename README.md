@@ -1,5 +1,7 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
+**Android 의상룸 복귀 지연 점검 v0.3.20:** [서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.20/IdolyPride-Local-Server-Android.apk) · [진단 게임 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.20/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) · [릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.20). 변경 없는 DB 쓰기를 제거하고, 종료 구간별 시간과 서버 처리·작업 대기 시간을 기록합니다. **37초 지연 해결을 실기기에서 확인한 판은 아닙니다.** 서버·게임을 각각 업데이트한 뒤 재현하고 진단 기록을 내보냅니다. [측정 범위와 순서](docs/wardrobe-exit-latency.md). Mac 배포는 v0.3.19를 유지합니다.
+
 **[v0.3.19 앱 다운로드](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19)** · [촬영·의상·번역·리소스 보관 안내](docs/local-library-v0.3.19.md)
 
 아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행하며 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다. 서버와 게임 클라이언트는 별도 파일로 배포합니다.
