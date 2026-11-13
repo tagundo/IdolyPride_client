@@ -1,0 +1,621 @@
+{
+  "version": "0.3.28",
+  "source_commit": "7e5eaab0945629199f9823f8f58e9173e263df0b",
+  "independent_QA_sha256": "8174999a99ad34b8a293a17119aa29e83042a5119fcb0941f4bbe410133b3255",
+  "independent_QA": {
+    "schema": 1,
+    "status": "PASS",
+    "source_commit": "7e5eaab0945629199f9823f8f58e9173e263df0b",
+    "apk": "/dev/shm/idoly-v0328-work/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+    "bytes": 163408329,
+    "sha256": "81abd7e330bff72eb932f9b4b7c76271313921451df0366280d7e592c998743a",
+    "auditor_script": "/dev/shm/idoly-v0328-work/audit-android-client.py",
+    "auditor_script_sha256": "4077201bbe0ecf7e4f28a1e38a8453f971ad33c98eba0e55e12a22fde44a5b2a",
+    "pre_JDK_public_base_advice": {
+      "path": "/workspace/shared/artifacts/diagnostic-v0.2.1-release-review/IdolyPride-Local-Diagnostic-Android-arm64.apk",
+      "sha256": "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df",
+      "fresh_full_SHA_verified_above": true,
+      "before": {
+        "current": 16108736512,
+        "maximum": 17179869184,
+        "direct_headroom": 1071132672,
+        "oom_kill": 2,
+        "root_free": 161161216
+      },
+      "after": {
+        "current": 15949180928,
+        "maximum": 17179869184,
+        "direct_headroom": 1230688256,
+        "oom_kill": 2,
+        "root_free": 161161216
+      },
+      "all_visible_handles_closed_before_advice": true,
+      "identity_after_unchanged": true,
+      "only_exact_public_baseline_APK_advised": true
+    },
+    "provenance_sha256": "161b87a226a8c18e47b5a83e2d0327313dde136a2e6333d769196dc60777ee0c",
+    "native_receipt_sha256": "0b383769d352b2aec38176bbfc53bc87ea314b3f7fa5408a863f4544d4f24717",
+    "feature_provenance_sha256": "c494a8628b0391d552ec606eb958394804cd44ed419ac87f2887545397b91e3c",
+    "original_member_count": 4044,
+    "original_changed_members": [
+      "AndroidManifest.xml",
+      "assets/bin/Data/Managed/Metadata/global-metadata.dat",
+      "assets/bin/Data/dc5a3280fad6542929a0daf3a3736d29",
+      "assets/bin/Data/globalgamemanagers",
+      "assets/bin/Data/sharedassets0.assets.split0",
+      "assets/bin/Data/sharedassets0.assets.split16",
+      "assets/bin/Data/sharedassets0.assets.split17",
+      "assets/bin/Data/sharedassets0.assets.split18",
+      "assets/bin/Data/sharedassets0.assets.split19",
+      "assets/bin/Data/sharedassets0.assets.split20",
+      "assets/bin/Data/unity_app_guid"
+    ],
+    "original_five_DEX_preserved": {
+      "classes.dex": "7fb72c0f03eb06dde0d32a4b78df4e5aa9c07e1f218f5047e40d1222e09d8d2c",
+      "classes2.dex": "9267992faab11f547059af814d01cac57afbada2771398ccc4fcc25a4608c2f0",
+      "classes3.dex": "b0a204747eca560b03d5805f0ec563c24e9f49863c4d3cbd276595ab043579ce",
+      "classes4.dex": "9a7c23c5388cad7552323d225e3081e1a3c94c221ba50889889a281e94f9cf21",
+      "classes5.dex": "d839e413087ecc4fa86cd2eac17a4932e7bad1ca4128b046493b653c4bc4a057"
+    },
+    "original_25_native_preserved": {
+      "lib/arm64-v8a/lib_burst_generated.so": "b80c6bde7110afa1fad8ac053cb71cbac13a1479c75f6acd3198a2032141b45a",
+      "lib/arm64-v8a/libapplovin-native-crash-reporter.so": "16b29c217114c9e58b6cab3b8d231b675c492e87ccd7dcab49ed523cbad496b5",
+      "lib/arm64-v8a/libchecker.so": "dac7a4264e1336cbf45ef6e8585fe19c932a79e5206e5f1b5115e3b1f9c215a3",
+      "lib/arm64-v8a/libcrashlytics-common.so": "db3c33bc6e1c0d049466280c32bd7419f9708f53ca8f5f95d584ef281996918f",
+      "lib/arm64-v8a/libcrashlytics-handler.so": "810521d2e125c4f87a8bd5fa70e73877dd832494acac9e9f86734258f359935f",
+      "lib/arm64-v8a/libcrashlytics-trampoline.so": "b3d2d4bd3eb068ed624d406d8626b7300e8f65e7aa6863e08a736984fc0ecea2",
+      "lib/arm64-v8a/libcrashlytics.so": "cad4bd6e1a6fb97cea9d02ac3f2c9c0e90c62064f7b018cf26b0a806e1489b6e",
+      "lib/arm64-v8a/libCysharp.Net.Http.YetAnotherHttpHandler.Native.so": "ec7ae0f2efc334b085a24df770c8b0b3f0213d5b1e83681524e7223ff913bc39",
+      "lib/arm64-v8a/libdatastore_shared_counter.so": "d3e48717c9aa147e0ab21063ba0e8e0211cabf8bf40b222640829519edbf58e1",
+      "lib/arm64-v8a/libFastAES.so": "f8f64ab5424b6f692464e23cf47af9d399c4072b700c196e7b321e670b93fcc4",
+      "lib/arm64-v8a/libFirebaseCppAnalytics.so": "0e6869973dad704401b61380fe421ce6c529668850f0b86f1f62a10a9b492c6b",
+      "lib/arm64-v8a/libFirebaseCppApp-12_10_1.so": "177ed0095d067af7123bbf6e704f819422a3ed923966479e6bd966459aa3d148",
+      "lib/arm64-v8a/libFirebaseCppAuth.so": "c9e2255dd658b3669a5f0114c71585d1414e12d6cda24eb881f70e7237789d0a",
+      "lib/arm64-v8a/libFirebaseCppCrashlytics.so": "7875d7a715b0b66a1f6c609aa6fa967bb898971d26d48b827ae2ac72c905187d",
+      "lib/arm64-v8a/libFirebaseCppMessaging.so": "d52fe9bb06d772aa704d4783b01a75f45e2ef345108f99b7881c40932f646a29",
+      "lib/arm64-v8a/libFirebaseCppStorage.so": "552be32cc84a5509eedc3907fe4f262d8b9f8ac2e43d928e5fa911c865c8bf82",
+      "lib/arm64-v8a/libidoly_phase_probe.so": "e48226f28337cf4717e9b96dbae0b15dff4df8f16f60d970c1cf1f6f5d1396d3",
+      "lib/arm64-v8a/libil2cpp.so": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3",
+      "lib/arm64-v8a/libmain.so": "63b597ba846a804db1ade2fd2b5ddabdc2a7b5230bc4d58a6edae16036398176",
+      "lib/arm64-v8a/libnative-googlesignin.so": "de681f549d6912338f420106e4c14e4eb71bee9e2b5473f5f08024e074d79a69",
+      "lib/arm64-v8a/libshadowhook.so": "fc84287eac46e3bade2f7e07e3c9efdca005822e21191d6db5b8cb222d53e8a0",
+      "lib/arm64-v8a/libshadowhook_nothing.so": "f2cc6a6f94d7361be915daafff1d25b7b3af34972e7308ac540982cfd608bd32",
+      "lib/arm64-v8a/libsqlcipher.so": "d63a8d6bc0bb1bb1575e201f5c4d6bbcda7b9464bb309fb2f88daa6e1ee4a57b",
+      "lib/arm64-v8a/libtoolChecker.so": "eeb2317e649e287b836b5e5c30cb07700f9eb900a53c297a3823592f15aa6352",
+      "lib/arm64-v8a/libunity.so": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85"
+    },
+    "only_declared_manifest_font_UI_and_transport_members_changed": true,
+    "local_resource_transport": {
+      "literal_index": 30209,
+      "origin": "http://127.0.0.1:8080/",
+      "metadata_sha256": "e85d3cb26fad111e0b057ece90120b7ff3eea7d00bfbf2fd208a4df066be6f2a",
+      "metadata_changed_offsets": [
+        241928,
+        1450455,
+        1450456,
+        1450458,
+        1450459,
+        1450460,
+        1450461,
+        1450462,
+        1450463,
+        1450464,
+        1450465,
+        1450466,
+        1450467,
+        1450468,
+        1450469,
+        1450470,
+        1450471,
+        1450472,
+        1450473,
+        1450474,
+        1450475,
+        1450476,
+        1450477
+      ],
+      "all_other_metadata_bytes_equal": true,
+      "http_policy": 2,
+      "globalgamemanagers_sha256": "21c7da3b2fb6e0775301667d6a809918144ce5939f0e99908a467ce29ac337d1",
+      "HTTP_policy_changed_offsets": [
+        150152
+      ],
+      "all_other_Unity_settings_bytes_equal": true,
+      "derived_GUID": "7a9a27e0-a505-52cc-8f22-4eee371b1bfd",
+      "derived_GUID_independently_calculated_from_actual_metadata_and_settings_hashes": true,
+      "GUID_sha256": "0823e4960d141150038b5c8376965c2e98e162d39ae3d0744c4e4ba9e5e4160d",
+      "preserves_existing_account_and_user_preferences_files": true,
+      "native_or_SDK_internet_reachability_spoofed": false
+    },
+    "typed_manifest_exact_private_provider_added": true,
+    "no_new_permissions": true,
+    "added_member_sha256": {
+      "lib/arm64-v8a/libidoly_presentation.so": "e7be48848b3e2e9592cfa82e66f35722e76c3b1940946bc54ee2f6fa9f04431b",
+      "assets/idoly-presentation-standalone.json": "ad2b2df543e61f22c669e989209b3d2b939113e0e7477fdbeb3c6740a7aed99d",
+      "assets/idoly-presentation-licenses/NDK-RUNTIME-NOTICES.txt": "3372aab78c50872abbb69c9b3929e08a40e5fe911b43618e5405170b63ae72b1",
+      "assets/bin/Data/sharedassets0.assets.split21": "f0e1652b46fbf1e9f1ae7ecfb4a65836371df81b052817fa4a79f861b420b026",
+      "assets/bin/Data/sharedassets0.assets.split22": "d757684bae6caf46599e3b249afad828bebe7e80c13b5c0f062f87c100a3c9a2",
+      "assets/bin/Data/sharedassets0.assets.split23": "f6ef9400aa37681b06a94a2c6830782376e9ed48696c1964ccb0d52362f6a0c7",
+      "assets/idoly-fonts/IdolyFontSupport.json": "a667caffac8111aab8b72d143074e6ebe46655fc5af811306190c4520adeff0c",
+      "assets/idoly-fonts/OFL-Pretendard.txt": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a",
+      "classes6.dex": "dea9eec73cac5a4ac07db179b862345b2bb74e6cc7ee047877984816ace16c2e"
+    },
+    "added_dex_actual_classes": [
+      "Lgame/qualiarts/idolypride/presentation/NativePresentation;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$1;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$3;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$4;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Config;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Connections;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Json;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$MediaConfig;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$MediaNative;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Numeric;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$PlaybackConfig;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$PlaybackNative;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider$1;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$2;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider$2;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider$3;"
+    ],
+    "actual_eight_native_Java_method_prototypes": {
+      "configure": {
+        "return": "Z",
+        "arguments": [
+          "I",
+          "J",
+          "Z",
+          "I",
+          "I",
+          "F",
+          "I",
+          "I",
+          "I",
+          "Z"
+        ]
+      },
+      "configureMedia": {
+        "return": "Z",
+        "arguments": [
+          "I",
+          "J",
+          "Z"
+        ]
+      },
+      "configurePlayback": {
+        "return": "Z",
+        "arguments": [
+          "I",
+          "J",
+          "Z"
+        ]
+      },
+      "playbackStatus": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      },
+      "renderProbeStatus": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      },
+      "start": {
+        "return": "V",
+        "arguments": []
+      },
+      "status": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      },
+      "wardrobeStatus": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      }
+    },
+    "actual_native_JNI_exports": [
+      "JNI_OnLoad",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_configure",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_configureMedia",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_configurePlayback",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_playbackStatus",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_renderProbeStatus",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_start",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_status",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_wardrobeStatus"
+    ],
+    "native_sha256": "e7be48848b3e2e9592cfa82e66f35722e76c3b1940946bc54ee2f6fa9f04431b",
+    "native_bytes": 311432,
+    "native_profile_prefix_count": 132,
+    "native_hook_count": 57,
+    "native_sources_equal_frozen_132_57_baseline": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+    "complete_frozen_native_compile_inventory_verified": [
+      "client-presentation/native/bridge.cpp",
+      "client-presentation/native/bulk_checked_filter.hpp",
+      "client-presentation/native/hangul_font.hpp",
+      "client-presentation/native/media_policy.hpp",
+      "client-presentation/native/orientation.hpp",
+      "client-presentation/native/panorama_ui_edges.hpp",
+      "client-presentation/native/panorama_ui_math.hpp",
+      "client-presentation/native/photography_ui.hpp",
+      "client-presentation/native/playback_config.hpp",
+      "client-presentation/native/presentation_math.hpp",
+      "client-presentation/native/presentation_scope.hpp",
+      "client-presentation/native/profile.hpp",
+      "client-presentation/native/profile.json",
+      "client-presentation/native/sound_persistence.hpp",
+      "client-presentation/native/wardrobe_lifecycle.hpp",
+      "client-presentation/native/wardrobe_timing.hpp"
+    ],
+    "all_frozen_profile_prefixes_match_original_ELF": true,
+    "native_ELF_load_alignments": [
+      16384,
+      16384,
+      16384,
+      16384
+    ],
+    "native_ZIP_data_offset": 159629312,
+    "v2_v3_independent_cryptographic_signature_and_chunked_content_digest_verified": [
+      "v2",
+      "v3"
+    ],
+    "all_api_v2_v3_JDK_signature_verified": true,
+    "actual_certificate_sha256": "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc",
+    "zipalign16384_pass": true,
+    "feature_DEX_and_native_identical": true,
+    "font_restore": {
+      "status": "PASS",
+      "platform": "android",
+      "input_asset_sha256": "462bf4d9933c5dd3c74d7da6fd8ffe6059e4e4ba13f0ba7f8a6c5e846786943c",
+      "input_asset_bytes": 21490416,
+      "output_asset_sha256": "d8f4f9902eed6baa90160717367330243a6a7f83fd462dc93e1b3d1e226eba80",
+      "output_asset_bytes": 25003056,
+      "object_count": 21,
+      "object_sha256_before": {
+        "1": {
+          "class_id": 150,
+          "bytes": 205,
+          "sha256": "1a69d17ba198844381569419c0031bcde2f8759402cb1b184e118461e21c1988"
+        },
+        "2": {
+          "class_id": 21,
+          "bytes": 1764,
+          "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+        },
+        "3": {
+          "class_id": 21,
+          "bytes": 268,
+          "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+        },
+        "4": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+        },
+        "5": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+        },
+        "6": {
+          "class_id": 21,
+          "bytes": 1752,
+          "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+        },
+        "7": {
+          "class_id": 21,
+          "bytes": 1768,
+          "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+        },
+        "8": {
+          "class_id": 28,
+          "bytes": 8340,
+          "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+        },
+        "9": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "10": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "11": {
+          "class_id": 28,
+          "bytes": 118460,
+          "sha256": "091a42af6291422cc74b34ca711d5157faf60f4c907333ed2f2f24f4b4f4b583"
+        },
+        "12": {
+          "class_id": 28,
+          "bytes": 16777352,
+          "sha256": "8d4528a62bd1859c36547d593b352e43846a2e14db97cc1db8e1ee8c0627928c"
+        },
+        "13": {
+          "class_id": 28,
+          "bytes": 152,
+          "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+        },
+        "14": {
+          "class_id": 48,
+          "bytes": 14372,
+          "sha256": "e1f086daa82fea3c75943a60acb1488fc735af03b5f74a2a8888c2f9fe68d452"
+        },
+        "15": {
+          "class_id": 48,
+          "bytes": 23120,
+          "sha256": "536926347c9a427485517e269f552606f20d01afd25271d26a9ba7e7c14ad20c"
+        },
+        "16": {
+          "class_id": 48,
+          "bytes": 18308,
+          "sha256": "dc48af601b9109013550be613c7711a64fe58ed505a93bce7490ff8a2311718c"
+        },
+        "17": {
+          "class_id": 128,
+          "bytes": 269250,
+          "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+        },
+        "18": {
+          "class_id": 128,
+          "bytes": 3591562,
+          "sha256": "f8d3037d45d46caaa46a0f02899ca176300d928aa9cbe05957415ac8608f1a6d"
+        },
+        "19": {
+          "class_id": 114,
+          "bytes": 13720,
+          "sha256": "506273b3fcbc0fc2787cf397a47fb0d424ca3efb12b279b868ed98dddb19f584"
+        },
+        "20": {
+          "class_id": 114,
+          "bytes": 647500,
+          "sha256": "a8a862cbe5211c07da4107f656ba7246313ac8be4a458f590f6e95f9aaaf2ceb"
+        },
+        "21": {
+          "class_id": 114,
+          "bytes": 1056,
+          "sha256": "2fae65e7e9fb8ee7210ed1536c0ab6897d48bad476839bf4d5881662dcbfd009"
+        }
+      },
+      "object_sha256_after": {
+        "1": {
+          "class_id": 150,
+          "bytes": 205,
+          "sha256": "1a69d17ba198844381569419c0031bcde2f8759402cb1b184e118461e21c1988"
+        },
+        "2": {
+          "class_id": 21,
+          "bytes": 1764,
+          "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+        },
+        "3": {
+          "class_id": 21,
+          "bytes": 268,
+          "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+        },
+        "4": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+        },
+        "5": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+        },
+        "6": {
+          "class_id": 21,
+          "bytes": 1752,
+          "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+        },
+        "7": {
+          "class_id": 21,
+          "bytes": 1768,
+          "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+        },
+        "8": {
+          "class_id": 28,
+          "bytes": 8340,
+          "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+        },
+        "9": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "10": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "11": {
+          "class_id": 28,
+          "bytes": 118460,
+          "sha256": "091a42af6291422cc74b34ca711d5157faf60f4c907333ed2f2f24f4b4f4b583"
+        },
+        "12": {
+          "class_id": 28,
+          "bytes": 16777352,
+          "sha256": "8d4528a62bd1859c36547d593b352e43846a2e14db97cc1db8e1ee8c0627928c"
+        },
+        "13": {
+          "class_id": 28,
+          "bytes": 152,
+          "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+        },
+        "14": {
+          "class_id": 48,
+          "bytes": 14372,
+          "sha256": "e1f086daa82fea3c75943a60acb1488fc735af03b5f74a2a8888c2f9fe68d452"
+        },
+        "15": {
+          "class_id": 48,
+          "bytes": 23120,
+          "sha256": "536926347c9a427485517e269f552606f20d01afd25271d26a9ba7e7c14ad20c"
+        },
+        "16": {
+          "class_id": 48,
+          "bytes": 18308,
+          "sha256": "dc48af601b9109013550be613c7711a64fe58ed505a93bce7490ff8a2311718c"
+        },
+        "17": {
+          "class_id": 128,
+          "bytes": 3781882,
+          "sha256": "555870cf2536cec42ce247b637c3f1456304ccdb4dd67f559ff8973740156910"
+        },
+        "18": {
+          "class_id": 128,
+          "bytes": 3591574,
+          "sha256": "9079bbf411bb8f079160e4e23e4b4761e860401cc96457aa7b86f7d954d9a737"
+        },
+        "19": {
+          "class_id": 114,
+          "bytes": 13720,
+          "sha256": "506273b3fcbc0fc2787cf397a47fb0d424ca3efb12b279b868ed98dddb19f584"
+        },
+        "20": {
+          "class_id": 114,
+          "bytes": 647500,
+          "sha256": "a8a862cbe5211c07da4107f656ba7246313ac8be4a458f590f6e95f9aaaf2ceb"
+        },
+        "21": {
+          "class_id": 114,
+          "bytes": 1056,
+          "sha256": "2fae65e7e9fb8ee7210ed1536c0ab6897d48bad476839bf4d5881662dcbfd009"
+        }
+      },
+      "all_other_objects_byte_identical": true,
+      "other_object_count": 19,
+      "Font_path_id": 17,
+      "legacy_Font_path_id": 18,
+      "legacy_fallback_references": [
+        {
+          "file_id": 0,
+          "path_id": 17
+        }
+      ],
+      "legacy_Japanese_font_data_unchanged": true,
+      "type_and_external_reference_metadata_unchanged": true,
+      "Font17_raw_prefix_and_suffix_unchanged": true,
+      "legacy_all_other_raw_fields_unchanged": true,
+      "Font17_empty_fallbacks_before_after_semantically_verified": true,
+      "Font17_fallback_field_offset_before": 269240,
+      "Font17_fallback_field_offset_after": 3781872,
+      "acyclic_fallback_graph": true,
+      "TMP21_source_dynamic_Font_PPtr17_verified": true,
+      "TMP21_source_mode": {
+        "name": "SourceSansPro-Regular SDF",
+        "version": "1.1.0",
+        "source_guid": "43fa2ca56150741f682409d5e57bbc2b",
+        "source_Font_file_id": 0,
+        "source_Font_path_id": 17,
+        "atlas_population_mode": 1,
+        "source_PPtr_offset": 128,
+        "atlas_population_mode_offset": 140
+      },
+      "font": {
+        "family": "Pretendard JP SemiBold",
+        "bytes": 3781740,
+        "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+        "modern_hangul_syllables": 11172,
+        "basic_latin_characters": 95,
+        "unicode_format": 12,
+        "unicode_maps_agree": true,
+        "glyph_count": 22936,
+        "cmap_group_count": 6862,
+        "font_bytes_modified": false,
+        "license": "OFL-1.1"
+      },
+      "independent_parser": "stdlib Unity SerializedFile v22 / OpenType format12",
+      "whole_asset_buffered": false,
+      "maximum_callback_read_bytes": 65536,
+      "maximum_Font_object_buffer_bytes": 4194304,
+      "runtime_verified": false
+    },
+    "font_license_sha256": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a",
+    "font_helper_sha256": "c54376f7d68d309f72092c449e481bc65db29fc9b6f572dbaa5c29aa24c2e0f8",
+    "ui_restore": {
+      "schema": 1,
+      "policy": "fixed-ui-textasset-v1",
+      "language": "en",
+      "at_rest_payload_verified": true,
+      "actual_asset_sha256": "bf4c96da24e0c7e6b1038d846524848ee8c39c6b0bfb5b9f8d1bac1aed77e741",
+      "actual_asset_bytes": 227952,
+      "actual_object_path_id": 1,
+      "actual_script_sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702",
+      "compiled_csv_sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702",
+      "original_4199_keys_preserved": true,
+      "ui_keys": 4199,
+      "key_roster_sha256": "4e9221a7958a7f5c768585900a43db2f610ff1323b1a57727001e4f85c4f3a37",
+      "changed_keys_count": 3845,
+      "all_other_objects_byte_identical": true,
+      "only_declared_metadata_and_target_changed": true,
+      "type_and_external_metadata_unchanged": true,
+      "runtime_translation_hooks_added": false,
+      "Japanese_asset_byte_identical": false
+    },
+    "ui_language": "en",
+    "UI_independent_helper_sha256": "aca3bfa551bd78ee308a3e149a17218b3f6580c4638e72e414f5962e9cca5043",
+    "UI_reference_three_locale_proof_sha256": "3d67b03cf2affede1e496c322f9716a2c5914bc4da418a8daca436617a57eee7",
+    "seven_optional_loopback_channels_source_proof": {
+      "channels": [
+        "/client/media",
+        "/client/playback",
+        "/client/playback/status",
+        "/client/presentation",
+        "/client/presentation/status",
+        "/client/render-probe",
+        "/client/wardrobe"
+      ],
+      "off_main_daemon_minimum_poll_seconds": 2,
+      "normal_maximum_HTTP_requests_per_cycle": 7,
+      "http_request_total_deadline_ms": 1000,
+      "general_payload_cap_bytes": 8192,
+      "render_probe_and_wardrobe_cap_bytes": 2048,
+      "bounded_transport_workers": {
+        "request_active": 1,
+        "request_queued": 1,
+        "cleanup_active": 1
+      },
+      "redirects_proxy_cache_disabled": true,
+      "independent_optional_channel_exception_and_LinkageError_boundaries": true,
+      "native_ACK_only_not_requested_config_as_applied": true,
+      "limitations": [
+        "Sequential channels share bounded transport; an uninterruptible network operation can cause later requests to fail busy.",
+        "Two seconds is a minimum poll period; slow requests can lengthen a cycle.",
+        "Source review is not physical-device networking or JNI execution evidence."
+      ]
+    },
+    "resource_budget_before": {
+      "current": 15947649024,
+      "maximum": 17179869184,
+      "direct_headroom": 1232220160,
+      "oom_kill": 2,
+      "root_free": 161161216
+    },
+    "resource_budget_after": {
+      "current": 16297627648,
+      "maximum": 17179869184,
+      "direct_headroom": 882241536,
+      "oom_kill": 2,
+      "root_free": 161161216
+    },
+    "all_inputs_identity_preserved": true,
+    "seconds": 6.313,
+    "runtime_device_verified": false,
+    "installed": false,
+    "published": false,
+    "limitations": [
+      "No physical-device install, JNI load, Unity playback, offline decoding, performance or Play Protect verdict is verified.",
+      "Same package and certificate identity is preserved; an OS update can rebuild engine-managed code caches."
+    ]
+  },
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "bytes": 163408329,
+      "sha256": "81abd7e330bff72eb932f9b4b7c76271313921451df0366280d7e592c998743a"
+    }
+  ]
+}
