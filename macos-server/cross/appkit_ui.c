@@ -4,6 +4,7 @@
 #include "shutdown_policy.h"
 #include "playback_contract.h"
 #include "library_contract.h"
+#include "resource_transfer_display.h"
 
 extern int fcntl(int, int, ...);
 
@@ -26,7 +27,7 @@ static struct {
     IDObj app, delegate, window, timer, task, writer, defaults, dataURL, prefsURL, playbackURL, smokeURL;
     IDObj mediaURL, languageURL, libraryLabel, hideVideo, mvSort, outfitSort, language;
     IDObj resourcePlatform, resourceParallelism, resourceLabel, resourcePreview, resourceDownload, resourceCancel, resourceExport, resourceImport;
-    IDObj resourceSnapshot;
+    IDObj resourceSnapshot, resourceTransferLabel;
     IDObj downloadsResourcesURL, customResourcesURL, resourcesInDownloads, resourceLocationLabel, revealResources;
     IDObj chooseResources, defaultResources, resourceLocationHelp;
     IDObj serverLabel, launchLabel, visualLabel, metricLabel, logView, start, stop, openGame;
@@ -733,7 +734,7 @@ static void make_window(void) {
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
-    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 2066));
+    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 2306));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
     add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
@@ -804,15 +805,17 @@ static void make_window(void) {
     G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1498,180,C_RESOURCE_IMPORT,0);
     G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1538,128,11,1);
     add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1670,54,11,1);
-    add_label(document, "실행 기록", 1752, 26, 14, 0);
-    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1782, 676, 200));
+    add_label(document,"게임 리소스 요청 · 서버 시작 후 누적",1752,26,14,0);
+    G.resourceTransferLabel=add_label(document,"리소스 전송 상태 수신 대기",1784,192,11,1);
+    add_label(document, "실행 기록", 1992, 26, 14, 0);
+    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 2022, 676, 200));
     id_set_bool(logScroll, "setHasVerticalScroller:", 1); id_set_bool(logScroll, "setHasHorizontalScroller:", 0);
     G.logView = id_init_frame(id_get(id_class("NSTextView"), "alloc"), id_rect(0, 0, 650, 200));
     id_set_bool(G.logView, "setEditable:", 0); id_set_bool(G.logView, "setSelectable:", 1);
     id_set_bool(G.logView, "setVerticallyResizable:", 1); id_set_bool(G.logView, "setHorizontallyResizable:", 0);
     id_set(G.logView, "setFont:", id_double(id_class("NSFont"), "userFixedPitchFontOfSize:", 11));
     id_set(logScroll, "setDocumentView:", G.logView); id_set(document, "addSubview:", logScroll);
-    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1994, 42, 11, 1);
+    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 2234, 42, 11, 1);
     sync_graphics_controls(); sync_library_controls(); update_controls();
     id_void(G.window, "center"); id_set(G.window, "makeKeyAndOrderFront:", 0);
     id_set_bool(G.app, "activateIgnoringOtherApps:", 1);
@@ -902,6 +905,41 @@ static void resource_status(IDObj resources) {
     }
 }
 
+static IDTransferEntry resource_transfer_entry(IDObj value) {
+    IDTransferEntry entry={0};entry.httpStatus=-1;entry.elapsedMS=-1;
+    if (!id_is(value,"NSDictionary")) return entry;
+    entry.present=1;
+    long long http=id_json_integer(id_item(value,"http_status"),-1);
+    entry.httpStatus=http>=0 && http<=599 ? (int)http : -1;
+    entry.elapsedMS=id_json_integer(id_item(value,"elapsed_ms"),-1);
+    entry.kind=id_utf8(id_item(value,"kind"));entry.phase=id_utf8(id_item(value,"phase"));
+    entry.objectName=id_utf8(id_item(value,"object_name"));entry.cacheKey=id_utf8(id_item(value,"cache_key"));
+    entry.errorCode=id_utf8(id_item(value,"error_code"));entry.cacheResult=id_utf8(id_item(value,"cache_result"));
+    entry.causeCode=id_utf8(id_item(value,"cause_code"));
+    return entry;
+}
+
+static void resource_transfer_status(IDObj transfer) {
+    IDTransferView view={0};
+    view.served=id_json_integer(id_item(transfer,"session_served_bytes"),-1);
+    view.received=id_json_integer(id_item(transfer,"session_received_bytes"),-1);
+    view.requests=id_json_integer(id_item(transfer,"session_http_requests"),-1);
+    view.failures=id_json_integer(id_item(transfer,"session_http_failures"),-1);
+    view.hits=id_json_integer(id_item(transfer,"session_cache_hits"),-1);
+    view.misses=id_json_integer(id_item(transfer,"session_cache_misses"),-1);
+    IDObj active=id_item(transfer,"active_http_requests");
+    long count=id_is(active,"NSArray") ? id_long(active,"count") : -1;
+    view.activeKnown=count>=0 && count<=64;
+    view.hasActive=view.activeKnown && count>0;
+    IDObj current=view.hasActive ? id_index(active,"objectAtIndex:",0) : id_item(transfer,"last_request");
+    IDObj failed=id_item(transfer,"last_failed_request");
+    view.currentKnown=id_is(current,"NSDictionary") || id_is(current,"NSNull");
+    view.failedKnown=id_is(failed,"NSDictionary") || id_is(failed,"NSNull");
+    view.current=resource_transfer_entry(current);view.lastFailed=resource_transfer_entry(failed);
+    char message[2048];id_transfer_display(&view,message,sizeof message);
+    text(G.resourceTransferLabel,message);
+}
+
 static void received_event(const char *bytes, IDSize length) {
     IDObj event = id_json(id_data(bytes, length));
     if (!id_is(event, "NSDictionary")) return;
@@ -926,6 +964,7 @@ static void received_event(const char *bytes, IDSize length) {
     IDObj previous=G.resourceSnapshot; G.resourceSnapshot=id_keep(resources);
     if (previous) id_void(previous,"release");
     resource_status(resources);
+    resource_transfer_status(id_item(state,"resource_transfer"));
     if (G.running && truth(id_item(state, "experimental_main_live"))) G.experimentalObserved = 1;
     if (!G.quitting) status(G.running ? "로컬 서버가 실행 중입니다." : G.busy ? "서버를 시작하고 있습니다." : "서버가 중지되어 있습니다.");
     IDObj client = id_item(id_item(state, "presentation"), "client");

@@ -35,6 +35,7 @@ final class ServerModel: ObservableObject {
         }
     }
     @Published private(set) var resourceMessage = "서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다."
+    @Published private(set) var resourceTransferMessage = "리소스 전송 상태 수신 대기"
     @Published private(set) var resourceJobID: String?
     @Published private(set) var resourceJobActive = false
     @Published private(set) var resourcePending = false
@@ -153,6 +154,7 @@ final class ServerModel: ObservableObject {
 
     private func updateResourceStatus(_ state: [String: Any]) {
         resourcePending = false
+        resourceTransferMessage = Self.resourceTransferDescription(state["resource_transfer"] as? [String: Any])
         guard let resources = state["resource_library"] as? [String: Any] else {
             if !running { resourceJobActive = false; resourceJobID = nil }
             return
@@ -192,6 +194,71 @@ final class ServerModel: ObservableObject {
             } else { resourceMessage = "선택한 플랫폼의 목록 확인을 누르면 예상 용량을 표시합니다." }
         }
     }
+
+    // BEGIN_RESOURCE_TRANSFER_DISPLAY
+    private static func transferInteger(_ value: Any?) -> Int64? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              !["f", "d"].contains(String(cString: number.objCType)), number.int64Value >= 0 else { return nil }
+        return number.int64Value
+    }
+
+    private static func transferPlain(_ value: Any?, limit: Int) -> String? {
+        guard let text = value as? String, !text.isEmpty, text.utf8.count <= limit,
+              text.utf8.allSatisfy({ (65...90).contains($0) || (97...122).contains($0)
+                  || (48...57).contains($0) || $0 == 95 || $0 == 45 || $0 == 46 }) else { return nil }
+        return text
+    }
+
+    private static func transferBytes(_ value: Any?) -> String {
+        guard let bytes = transferInteger(value) else { return "확인 불가" }
+        if bytes < 1024 { return "\(bytes) B" }
+        let divisor: Double = bytes < 1048576 ? 1024 : bytes < 1073741824 ? 1048576 : 1073741824
+        let unit = bytes < 1048576 ? "KiB" : bytes < 1073741824 ? "MiB" : "GiB"
+        return String(format: "%.1f %@", locale: Locale(identifier: "en_US_POSIX"), Double(bytes) / divisor, unit)
+    }
+
+    private static func transferEntry(_ entry: [String: Any], active: Bool) -> String {
+        let phase = ["received": "접수", "resolving": "목록 조회", "waiting_cache": "캐시 대기",
+                     "sending": "전송 중", "completed": "완료", "failed": "실패"]
+        let cache = ["pending": "캐시 확인 중", "cache_hit": "캐시 파일", "upstream": "CDN 받기", "cache_miss": "미보관"]
+        let key = entry["cache_key"] as? String
+        let validKey = key.flatMap { value in value.utf8.count == 64
+            && value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) ? value : nil }
+        let name = entry["kind"] as? String == "manifest" ? "목록"
+            : transferPlain(entry["object_name"], limit: 160) ?? validKey ?? "리소스 확인 불가"
+        let code = transferInteger(entry["http_status"])
+        let http = code == 0 ? "응답 대기" : code.map { (100...599).contains($0) ? "HTTP \($0)" : "HTTP 확인 불가" } ?? "HTTP 확인 불가"
+        let state = transferPlain(entry["phase"], limit: 24).flatMap { phase[$0] } ?? "상태 확인 불가"
+        let result = transferPlain(entry["cache_result"], limit: 24).flatMap { cache[$0] } ?? "캐시 확인 불가"
+        var text = "\(name) · \(http) · \(state) · \(result)"
+        if let rawError = entry["error_code"] as? String, !rawError.isEmpty {
+            text += " · " + (transferPlain(rawError, limit: 64) ?? "오류 코드 확인 불가")
+        }
+        if let cause = entry["cause_code"] as? String, !cause.isEmpty {
+            text += " · " + (transferPlain(cause, limit: 64) ?? "원인 코드 확인 불가")
+        }
+        if active, let elapsed = transferInteger(entry["elapsed_ms"]) {
+            text += String(format: " · 경과 %.1f초", locale: Locale(identifier: "en_US_POSIX"), Double(elapsed) / 1000)
+        }
+        return text
+    }
+
+    private static func resourceTransferDescription(_ value: [String: Any]?) -> String {
+        let value = value ?? [:]
+        func count(_ key: String) -> String { transferInteger(value[key]).map(String.init) ?? "확인 불가" }
+        let rawActive = value["active_http_requests"] as? [[String: Any]]
+        let active = rawActive.flatMap { $0.count <= 64 ? $0 : nil }
+        let hasActive = active?.isEmpty == false
+        let current = active?.first ?? value["last_request"] as? [String: Any]
+        let currentEmpty = value["last_request"] is NSNull ? "없음" : "세부 상태 수신 대기"
+        let failedEmpty = value["last_failed_request"] is NSNull ? "없음" : "세부 상태 수신 대기"
+        let currentText = current.map { transferEntry($0, active: hasActive) } ?? currentEmpty
+        let failedText = (value["last_failed_request"] as? [String: Any]).map { transferEntry($0, active: false) } ?? failedEmpty
+        return "로컬→게임 \(transferBytes(value["session_served_bytes"])) · CDN→서버 \(transferBytes(value["session_received_bytes"]))\n"
+            + "게임 HTTP 요청 \(count("session_http_requests")) · 실패 \(count("session_http_failures")) · 캐시 적중 \(count("session_cache_hits")) · 미보관 \(count("session_cache_misses"))\n"
+            + "\(hasActive ? "현재 요청" : "최근 요청"): \(currentText)\n최근 실패: \(failedText)"
+    }
+    // END_RESOURCE_TRANSFER_DISPLAY
 
     private static func savedResourceParallelism() -> Int {
         guard let number = UserDefaults.standard.object(forKey: "resourceDownloadParallelism") as? NSNumber,
@@ -977,6 +1044,8 @@ struct ServerView: View {
                                 Button("보관 ZIP 가져오기") { model.importResources() }
                             }.disabled(!model.running || model.resourceJobActive || model.resourcePending)
                             Text(model.resourceMessage).font(.caption).textSelection(.enabled)
+                            Text("게임 리소스 요청 · 서버 시작 후 누적").font(.caption.bold())
+                            Text(model.resourceTransferMessage).font(.caption).textSelection(.enabled)
                             Text("포함된 목록의 원본 파일을 서버에 보관합니다. 전체 자료는 수십 GB가 될 수 있습니다. 다시 받으면 검증된 완료 파일부터 재사용하며, 전송 중인 파일의 바이트 단위 재개는 지원하지 않습니다. 내보낸 ZIP은 다른 서버로 가져올 수 있습니다.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }.padding(.top, 6)
