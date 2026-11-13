@@ -162,6 +162,43 @@ def test_full_media_lists_and_home_are_consistent_read_only_and_use_exact_master
     assert dump(game) == before
 
 
+def test_event_gallery_preserves_real_groups_nonconsecutive_episodes_and_retry_progress(game):
+    # The API's unlocked flags and the client's master-side gates are separate.
+    # Its gallery overlay removes the latter; this server projection keeps the
+    # real parent/episode IDs without rewriting the original master JSON.
+    definitions = [
+        {"id": "event-gated", "assetId": "actual-event-thumbnail", "viewConditionId": "expired-term",
+         "episodes": [{"episode": 1, "storyId": "media-event", "viewConditionId": "expired-episode",
+                       "unlockConditionId": "old-event-clear"},
+                      {"episode": 3, "storyId": "media-main", "viewConditionId": "",
+                       "unlockConditionId": "old-event-clear-3"}]},
+        {"id": "event-other", "viewConditionId": "old-event-period",
+         "episodes": [{"episode": 2, "storyId": "media-extra"}]},
+    ]
+    source = game.master / "EventStory.json"
+    source.write_text(json.dumps(definitions))
+    source_bytes = source.read_bytes()
+    ordinary = game.state.snapshot("ordinary")
+    before = dump(game)
+    response = invoke(game, module._LIST_EVENT)
+    assert [(row.id, [(episode.episode, episode.unlocked) for episode in row.episodes])
+            for row in response.infos] == [("event-gated", [(1, True), (3, True)]),
+                                         ("event-other", [(2, True)])]
+    assert response.HasField("commonResponse")
+    assert not response.commonResponse.HasField("updatedData")
+    assert not response.commonResponse.HasField("deletedData")
+    assert dump(game) == before
+    read = invoke(game, module._EVENT, eventStoryId="event-gated", episode=3, isLast=True)
+    current = snapshot(game)
+    assert [(row.storyId, row.statusType) for row in current.stories] == [("media-main", 2)]
+    assert list(read.commonResponse.updatedData.stories) == list(current.stories)
+    assert not read.rewards and not read.commonResponse.updatedData.HasField("balance")
+    saved = dump(game)
+    assert invoke(game, module._EVENT, eventStoryId="event-gated", episode=3, isLast=False) == read
+    assert dump(game) == saved and game.state.snapshot("ordinary") == ordinary
+    assert source.read_bytes() == source_bytes
+
+
 def test_extra_episode_reads_reuse_master_validation_without_building_menu_dtos(game, monkeypatch):
     game.rows["ExtraStory"][0]["episodes"].append({"episode": 2, "storyId": "media-event"})
     (game.master / "ExtraStory.json").write_text(json.dumps(game.rows["ExtraStory"]))

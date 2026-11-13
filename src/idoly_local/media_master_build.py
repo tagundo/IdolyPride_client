@@ -1,4 +1,4 @@
-"""Build a separate public photo master overlay; ordinary archives stay intact.
+"""Build a separate public gallery master overlay; ordinary archives stay intact.
 
 The small JSON contract validator uses only the standard library so the cached
 Python 3.13 APK builder can repeat it. SQLCipher/protobuf imports are build-only.
@@ -17,7 +17,8 @@ from .media_outfit_policy import (COSTUME_IDS, ADMIN_COSTUME_IDS, ADMIN_HAIR_IDS
 
 
 POLICY = "media-outfits-v1"
-TABLES = ("PhotoActivity", "PhotoExpression", "Costume", "Hair", "PhotoQuestMusic", "PhotoQuestStage")
+TABLES = ("PhotoActivity", "PhotoExpression", "Costume", "Hair", "PhotoQuestMusic", "PhotoQuestStage",
+          "EventStory")
 TAG_NAME = "media-master-tag.json"
 TAG_MEMBER = "data/original-master/" + TAG_NAME
 PACK_NAMES = {table: POLICY + "-" + table + ".db" for table in TABLES}
@@ -80,6 +81,30 @@ def expanded_rows(table, rows):
         if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"] or row["id"] in ids:
             raise ValueError("Original photo master IDs must be nonempty and unique")
         ids.add(row["id"])
+        if table == "EventStory":
+            # ListEvent eligibility does not override the client's master-side
+            # visibility checks. The gallery keeps the actual event/episode,
+            # thumbnail and Story/ADV references, changing only these gates.
+            if not isinstance(row.get("viewConditionId"), str):
+                raise ValueError("Original event story visibility condition is malformed")
+            episodes = row.get("episodes")
+            if not isinstance(episodes, list):
+                raise ValueError("Original event story episodes are malformed")
+            numbers = set()
+            for episode in episodes:
+                if (not isinstance(episode, dict) or type(episode.get("episode")) is not int
+                        or episode["episode"] <= 0 or episode["episode"] in numbers
+                        or not isinstance(episode.get("storyId"), str) or not episode["storyId"]
+                        or any(not isinstance(episode.get(name), str)
+                               for name in ("viewConditionId", "unlockConditionId"))):
+                    raise ValueError("Original event story episode references or conditions are malformed")
+                numbers.add(episode["episode"])
+            changed = copy.deepcopy(row)
+            changed["viewConditionId"] = ""
+            for episode in changed["episodes"]:
+                episode.update(viewConditionId="", unlockConditionId="")
+            result.append(changed)
+            continue
         if table in ("Costume", "Hair"):
             if type(row.get("isDisableAdmin")) is not bool:
                 raise ValueError("Original master admin flag is malformed")
@@ -183,7 +208,7 @@ def _identities(schema_sha256, original_tag, rows):
 
 
 def validate_media_master_tag(original_tag, media_tag, schema_sha256, rows, packs):
-    """Check the six replacements against original data and actual byte hashes.
+    """Check the replacements against original data and actual byte hashes.
 
     ``packs`` maps each new plain filename to its measured bytes/SHA256. The
     producer separately performs strict protobuf and SQLCipher row roundtrips.
@@ -211,7 +236,7 @@ def validate_media_master_tag(original_tag, media_tag, schema_sha256, rows, pack
         if after != expected or name in {row["fileName"] for row in original.values()}:
             raise ValueError("Media pack metadata does not match its explicit replacement")
     return {"policy": POLICY, "version": version, "tables": list(TABLES), "costume_types": len(TYPE_IDS),
-            "original_pack_count": len(original), "replaced_pack_count": 6}
+            "original_pack_count": len(original), "replaced_pack_count": len(TABLES)}
 
 
 def _pack_path(root, pack):
@@ -255,7 +280,7 @@ def _decode(schema, driver, root, pack):
 
 
 def build_media_master_overlay(schema, original_tag, original_pack_root, original_json_root, output):
-    """Build only six offline packs; never alter the original tag/JSON/archive."""
+    """Build the gallery packs; never alter the original tag/JSON/archive."""
     from google.protobuf import message_factory
     from google.protobuf.json_format import ParseDict
     from .master_build import build_master_packs, _sqlcipher_driver
@@ -285,6 +310,16 @@ def build_media_master_overlay(schema, original_tag, original_pack_root, origina
         message = message_factory.GetMessageClass(schema.pool.FindMessageTypeByName("master." + table))
         for before, after in zip(rows[table], patched[table], strict=True):
             left, right = ParseDict(before, message()), ParseDict(after, message())
+            if table == "EventStory":
+                left.ClearField("viewConditionId")
+                right.ClearField("viewConditionId")
+                for original, gallery in zip(left.episodes, right.episodes, strict=True):
+                    for name in ("viewConditionId", "unlockConditionId"):
+                        original.ClearField(name)
+                        gallery.ClearField(name)
+                if left.SerializeToString(deterministic=True) != right.SerializeToString(deterministic=True):
+                    raise ValueError("Media overlay changed an event story field outside its explicit allowlist")
+                continue
             fields = (("isUserUnavailable", "isDisableAdmin") if table == "Costume" else
                       ("isDisableAdmin",) if table == "Hair" else
                       ("viewConditionId", "unlockConditionId", "name") if table == "PhotoQuestMusic" else

@@ -51,11 +51,17 @@ def original_rows():
                 "viewConditionId": "original-possession", "unlockConditionId": "original-possession"}
                 for index, identity in enumerate([*sorted(overlay.COVER_LABEL_IDS), "non-cover-original"])],
             "PhotoQuestStage": [{"id": "stage-original", "stageId": "asset-original", "name": "original stage",
-                "order": 4, "viewConditionId": "original-area-gate", "unlockConditionId": "original-period"}]}
+                "order": 4, "viewConditionId": "original-area-gate", "unlockConditionId": "original-period"}],
+            "EventStory": [{"id": "event-original", "assetId": "original-event-thumbnail", "name": "Original event",
+                "description": "Original event description", "order": 17, "viewConditionId": "original-event-window",
+                "episodes": [{"episode": 1, "assetId": "original-episode-thumbnail", "storyId": "original-adv-story",
+                    "viewConditionId": "original-episode-window", "unlockConditionId": "original-event-clear", "isAppeal": True},
+                    {"episode": 3, "assetId": "other-episode-thumbnail", "storyId": "other-adv-story",
+                    "viewConditionId": "", "unlockConditionId": "original-event-clear-3", "isAppeal": False}]}]}
 
 
 def original_tag():
-    names = [*overlay.TABLES, "CostumeType", *["Other%03d" % n for n in range(195)]]
+    names = [*overlay.TABLES, "CostumeType", *["Other%03d" % n for n in range(201 - len(overlay.TABLES))]]
     return {"version": "synthetic-original", "masterTagPacks": [
         {"type": name, "fileName": "original-" + name + ".db", "fileSize": 4096,
          "cryptoKey": "a" * 64, "downloadUrl": "https://public.invalid/" + name} for name in names]}
@@ -90,6 +96,10 @@ def test_only_approved_photo_conditions_types_and_appearance_flags_change_withou
             elif table == "Hair":
                 if before["id"] in overlay.ADMIN_HAIR_IDS:
                     expected["isDisableAdmin"] = False
+            elif table == "EventStory":
+                expected["viewConditionId"] = ""
+                for episode in expected["episodes"]:
+                    episode.update(viewConditionId="", unlockConditionId="")
             else:
                 expected.update(viewConditionId="", unlockConditionId="")
                 if table not in ("PhotoQuestMusic", "PhotoQuestStage"):
@@ -150,6 +160,21 @@ def test_only_four_explicit_cover_labels_use_descriptions_with_trailing_whitespa
     assert rows == before and changed[0]["name"].startswith("  ")
 
 
+@pytest.mark.parametrize("damage", ("group-condition", "episode-condition", "episode-unlock", "episodes",
+    "duplicate-number", "episode-number", "missing-story"))
+def test_event_story_overlay_rejects_malformed_gates_or_episode_references(damage):
+    rows = original_rows()["EventStory"]
+    if damage == "group-condition": rows[0]["viewConditionId"] = True
+    elif damage == "episode-condition": rows[0]["episodes"][0]["viewConditionId"] = None
+    elif damage == "episode-unlock": rows[0]["episodes"][0]["unlockConditionId"] = []
+    elif damage == "episodes": rows[0]["episodes"] = {}
+    elif damage == "duplicate-number": rows[0]["episodes"].append(copy.deepcopy(rows[0]["episodes"][0]))
+    elif damage == "episode-number": rows[0]["episodes"][0]["episode"] = True
+    else: rows[0]["episodes"][0]["storyId"] = ""
+    with pytest.raises(ValueError, match="event story"):
+        overlay.expanded_rows("EventStory", rows)
+
+
 @pytest.mark.parametrize("change", ["missing-row", "empty-description"])
 def test_cover_label_exceptions_reject_incomplete_or_missing_original_data(change):
     rows = original_rows()["PhotoQuestMusic"]
@@ -194,6 +219,10 @@ def _schema():
     field_options = message_factory.GetMessageClass(pool.FindMessageTypeByName("google.protobuf.FieldOptions"))
     tables = descriptor_pb2.FileDescriptorProto(name="media_master.proto", package="master", syntax="proto3")
     tables.dependency.append("test_master_options.proto")
+    episode = tables.message_type.add(name="EventStoryEpisode")
+    for number, (name, kind) in enumerate((("episode", 5), ("assetId", 9), ("storyId", 9),
+            ("unlockConditionId", 9), ("viewConditionId", 9), ("isAppeal", 8)), 1):
+        episode.field.add(name=name, number=number, type=kind, label=1)
     definitions = {"CostumeType": [("id", 9, False), ("name", 9, False)],
         "PhotoActivity": [("id", 9, False), ("costumeTypeIds", 9, True), ("forceCostumeTypeId", 9, False),
                           ("deniedCharacterIds", 9, True), ("poseAssetId", 9, False),
@@ -211,13 +240,18 @@ def _schema():
                             ("description", 9, False), ("singer", 9, False), ("order", 5, False),
                             ("viewConditionId", 9, False), ("unlockConditionId", 9, False)],
         "PhotoQuestStage": [("id", 9, False), ("stageId", 9, False), ("name", 9, False), ("order", 5, False),
-                            ("viewConditionId", 9, False), ("unlockConditionId", 9, False)]}
+                            ("viewConditionId", 9, False), ("unlockConditionId", 9, False)],
+        "EventStory": [("id", 9, False), ("assetId", 9, False), ("name", 9, False),
+                       ("description", 9, False), ("order", 5, False), ("viewConditionId", 9, False),
+                       ("episodes", 11, True)]}
     for name, fields in definitions.items():
         message = tables.message_type.add(name=name)
         annotation = options(); annotation.Extensions[pool.FindExtensionByName("master.table")] = True
         message.options.ParseFromString(annotation.SerializeToString())
         for number, (name, kind, repeated) in enumerate(fields, 1):
             field = message.field.add(name=name, number=number, type=kind, label=3 if repeated else 1)
+            if name == "episodes":
+                field.type_name = ".master.EventStoryEpisode"
             if name == "id":
                 annotation = field_options(); annotation.Extensions[pool.FindExtensionByName("master.pk")] = True
                 field.options.ParseFromString(annotation.SerializeToString())
@@ -261,7 +295,7 @@ def built_original(tmp_path, monkeypatch):
     return schema, catalog, original, tag
 
 
-def test_six_encrypted_packs_roundtrip_and_leave_original_files_and_196_entries_unchanged(built_original, tmp_path):
+def test_gallery_encrypted_packs_roundtrip_and_leave_all_unrelated_original_entries_unchanged(built_original, tmp_path):
     schema, catalog, original, tag = built_original
     source_hashes = {str(path.relative_to(original)): hashlib.sha256(path.read_bytes()).hexdigest()
                      for path in original.rglob("*") if path.is_file()}
@@ -270,7 +304,7 @@ def test_six_encrypted_packs_roundtrip_and_leave_original_files_and_196_entries_
         original / "assets/master", catalog, destination)
     media = overlay.read_json(destination / overlay.TAG_NAME)
     assert report["protobuf_row_roundtrip_verified"] is True and report["device_ingestion_verified"] is False
-    assert len(report["packs"]) == 6 and report["replaced_pack_count"] == 6
+    assert len(report["packs"]) == len(overlay.TABLES) == report["replaced_pack_count"]
     assert {path.name for path in (destination / "assets/master").iterdir()} == set(overlay.PACK_NAMES.values())
     for before, after in zip(tag["masterTagPacks"], media["masterTagPacks"], strict=True):
         if before["type"] not in overlay.TABLES: assert before == after
