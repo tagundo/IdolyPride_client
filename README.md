@@ -1,0 +1,1 @@
+Idoly Pride v0.3.24 home cache and resource transfer fixes: independently verified mac server download. Server data v0.3.23 and game clients are reused unchanged. Existing apps and account data are preserved. See https://github.com/tagundo/IdolyPride_client/blob/main/docs/home-media-cache-v0.3.24.md. SHA256SUMS pins the original bytes.
