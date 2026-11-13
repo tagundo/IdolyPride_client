@@ -1,0 +1,1 @@
+Idoly Pride v0.3.22 server data-update optimization: independently verified mac download. Existing apps and account data are preserved. See main repository docs/wardrobe-exit-latency.md. SHA256SUMS pins the original bytes.
