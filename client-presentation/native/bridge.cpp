@@ -34,6 +34,7 @@
 #include "wardrobe_lifecycle.hpp"
 #include "wardrobe_timing.hpp"
 #include "bulk_checked_filter.hpp"
+#include "local_resource_policy.hpp"
 #endif
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
@@ -237,6 +238,32 @@ template<class T> void write(void *object, size_t offset, T value) {
 template<class T> T function(const pin::Entry &entry) {
     return reinterpret_cast<T>(image_base + entry.rva);
 }
+
+#ifndef IDOLY_DARWIN_BRIDGE
+// BEGIN_LOCAL_RESOURCE_REACHABILITY_HOOK
+// Android's completed file request calls CanReach before its existing native
+// error and MD5 processing, even after HTTP200. External network availability
+// cannot decide whether the configured loopback object URL is usable. Only
+// that URL class continues past this gate; every result check remains in the
+// original executor. No Unity APIs, retained strings, allocation, or IO here.
+bool (*resource_can_reach_original)(void *, Method *);
+bool resource_can_reach_hook(void *self, Method *method) {
+    if (ready.load(std::memory_order_acquire) && self && method) {
+        // Verified original + packaged bootstrap constructor stores _url at
+        // +0x10. IL2CPP System.String uses length +0x10 / UTF16 data +0x14.
+        void *url = read<void *>(self, 0x10);
+        if (url) {
+            const int32_t length = read<int32_t>(url, 0x10);
+            if (length > 0 && static_cast<size_t>(length) <= local_resources::max_url_units
+                    && local_resources::object_url(reinterpret_cast<const uint16_t *>(
+                        static_cast<const char *>(url) + 0x14), static_cast<size_t>(length)))
+                return true;
+        }
+    }
+    return resource_can_reach_original(self, method);
+}
+// END_LOCAL_RESOURCE_REACHABILITY_HOOK
+#endif
 
 uint32_t (*weak_new)(void *, bool);
 void *(*weak_get)(uint32_t);
@@ -1650,6 +1677,7 @@ void *install(void *) {
 #define HOOK(entry, replacement, original) {&pin::entry, reinterpret_cast<void *>(replacement), reinterpret_cast<void **>(&original), nullptr}
     Hook hooks[] = {
         HOOK(font_awake,font_awake_hook,font_awake_original),
+        HOOK(resource_can_reach,resource_can_reach_hook,resource_can_reach_original),
         HOOK(sound_bgm_volume,sound_bgm_volume_hook,sound_bgm_volume_original),
         HOOK(sound_bgm_soundable,sound_bgm_soundable_hook,sound_bgm_soundable_original),
         HOOK(sound_se_volume,sound_se_volume_hook,sound_se_volume_original),

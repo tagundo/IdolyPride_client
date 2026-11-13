@@ -1115,7 +1115,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
                     ? R.string.resource_transfer_idle : R.string.resource_transfer_cache_only);
         }
         setTextIfChanged(resourceStatus, summary);
-        resourceStatus.setTextColor("failed".equals(resourceState)
+        Long httpFailures = resourceDiagnosticInteger(resources, "session_http_failures", 0, Long.MAX_VALUE);
+        resourceStatus.setTextColor("failed".equals(resourceState) || (httpFailures != null && httpFailures > 0)
                 ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
         long received = Math.max(0, resources.optLong("session_received_bytes", 0));
         long verified = Math.max(0, resources.optLong("session_verified_files", 0));
@@ -1124,10 +1125,148 @@ public final class MainActivity extends Activity implements ServerService.Observ
         // percentage or proof that all of the game's resources are downloaded.
         setTextIfChanged(resourceReceived, getString(R.string.resource_transfer_received,
                 formatBytes(received), verified));
-        setTextIfChanged(resourceServed, getString(R.string.resource_transfer_served, formatBytes(served)));
+        String httpDetails = resourceHttpDiagnostics(resources);
+        setTextIfChanged(resourceServed, getString(R.string.resource_transfer_served, formatBytes(served))
+                + (httpDetails.isEmpty() ? "" : "\n" + httpDetails));
         resourceReceived.setVisibility(View.VISIBLE);
         resourceServed.setVisibility(View.VISIBLE);
     }
+
+    // Resource HTTP diagnostics formatter begins. Pure, bounded and Android-free.
+    private static Long resourceDiagnosticInteger(JSONObject row, String key, long minimum, long maximum) {
+        Object value = row == null ? null : row.opt(key);
+        // JSONObject.optLong also coerces strings and floating point values.
+        // Diagnostic protocol numbers must retain their actual integral type.
+        if (!(value instanceof Integer) && !(value instanceof Long)) return null;
+        long number = ((Number) value).longValue();
+        return number >= minimum && number <= maximum ? number : null;
+    }
+
+    private static String resourceDiagnosticString(JSONObject row, String key, int maximum) {
+        Object value = row == null ? null : row.opt(key);
+        if (!(value instanceof String)) return "";
+        String text = (String) value;
+        return text.length() <= maximum ? text : "";
+    }
+
+    private static String resourceDiagnosticCode(JSONObject row, String key) {
+        String code = resourceDiagnosticString(row, key, 40);
+        switch (code) {
+            case "octo_gateway_closed": case "octo_invalid_request": case "octo_forbidden":
+            case "octo_not_found": case "octo_revision_unavailable": case "octo_manifest_unavailable":
+            case "octo_invalid_range": case "octo_cache_invalid": case "octo_cache_miss":
+            case "octo_resource_unavailable": case "client_disconnected": case "request_aborted":
+            case "cache_closed": case "download_disabled": case "cache_io": case "upstream_redirect":
+            case "upstream_http": case "upstream_size": case "upstream_encoding": case "upstream_timeout":
+            case "upstream_data": case "upstream_digest": case "budget_exceeded": case "conflicting_metadata":
+            case "upstream_tls": case "upstream_dns": case "upstream_connect":
+                return code;
+            default: return "";
+        }
+    }
+
+    private static String resourceDiagnosticObject(JSONObject row) {
+        String name = resourceDiagnosticString(row, "object_name", 160);
+        boolean safe = !name.isEmpty() && !name.startsWith("/") && !name.endsWith("/")
+                && !name.contains("..") && !name.contains("//");
+        for (int i = 0; safe && i < name.length(); i++) {
+            char c = name.charAt(i);
+            safe = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+                    || c == '_' || c == '-' || c == '.' || c == '/';
+        }
+        if (safe) return "파일 " + name;
+        String key = resourceDiagnosticString(row, "cache_key", 64);
+        if (key.length() != 64) return "";
+        for (int i = 0; i < key.length(); i++) {
+            char c = key.charAt(i);
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return "";
+        }
+        return "파일 키 " + key;
+    }
+
+    private static boolean appendResourceRequest(StringBuilder text, JSONObject row, boolean failure) {
+        if (row == null) return false;
+        String kind = resourceDiagnosticString(row, "kind", 8);
+        if (!"manifest".equals(kind) && !"object".equals(kind)) return false;
+        String phase = resourceDiagnosticString(row, "phase", 16);
+        if (failure ? !"failed".equals(phase) : !("received".equals(phase) || "resolving".equals(phase)
+                || "waiting_cache".equals(phase) || "sending".equals(phase) || "completed".equals(phase)
+                || "failed".equals(phase))) return false;
+        Long status = resourceDiagnosticInteger(row, "http_status", 100, 599);
+        String error = resourceDiagnosticCode(row, "error_code");
+        String cause = resourceDiagnosticCode(row, "cause_code");
+        text.append(failure ? "\n마지막 실패 기록" : "\n최근 요청");
+        text.append(" · ").append("manifest".equals(kind) ? "리소스 목록" : "파일");
+        if (status != null) text.append(" · HTTP ").append(status);
+        if (!error.isEmpty()) text.append(" · ").append(error);
+        if (!cause.isEmpty()) text.append(" · ").append(cause);
+        if ("object".equals(kind)) {
+            String object = resourceDiagnosticObject(row);
+            if (!object.isEmpty()) text.append("\n").append(object);
+        } else {
+            Long application = resourceDiagnosticInteger(row, "application_version", 0, Integer.MAX_VALUE);
+            Long requested = resourceDiagnosticInteger(row, "requested_revision", 0, Integer.MAX_VALUE);
+            Long served = resourceDiagnosticInteger(row, "served_revision", 1, Integer.MAX_VALUE);
+            String mode = resourceDiagnosticString(row, "response_mode", 9);
+            if (status == null || status != 200 || requested == null
+                    || !("full".equals(mode) || "unchanged".equals(mode))
+                    || ("unchanged".equals(mode) && !requested.equals(served))
+                    || ("full".equals(mode) && served != null && requested != 0 && requested >= served)) served = null;
+            if (application != null && (application == 205051 || application == 105051) && requested != null) {
+                text.append("\n앱 ").append(application).append(" · 요청 개정 ").append(requested)
+                        .append(" · 제공 개정 ").append(served == null ? "확인 안 됨" : served.toString());
+            }
+        }
+        return true;
+    }
+
+    private static boolean resourceHasCacheResponse(JSONObject resources) {
+        Long served = resourceDiagnosticInteger(resources, "session_served_bytes", 0, Long.MAX_VALUE);
+        if (served != null && served > 0) return true;
+        JSONObject latest = resources.optJSONObject("last_request");
+        Long status = resourceDiagnosticInteger(latest, "http_status", 100, 599);
+        return "object".equals(resourceDiagnosticString(latest, "kind", 8))
+                && "completed".equals(resourceDiagnosticString(latest, "phase", 16))
+                && "cache_hit".equals(resourceDiagnosticString(latest, "cache_result", 16))
+                && status != null && (status == 200 || status == 206);
+    }
+
+    private static String resourceHttpDiagnostics(JSONObject resources) {
+        // Older server snapshots omit these keys entirely. Keep their byte-only
+        // display rather than treating missing observations as zero requests.
+        if (resources == null || !resources.has("session_http_requests")) return "";
+        Long requests = resourceDiagnosticInteger(resources, "session_http_requests", 0, Long.MAX_VALUE);
+        Long failures = resourceDiagnosticInteger(resources, "session_http_failures", 0, Long.MAX_VALUE);
+        Long hits = resourceDiagnosticInteger(resources, "session_cache_hits", 0, Long.MAX_VALUE);
+        Long misses = resourceDiagnosticInteger(resources, "session_cache_misses", 0, Long.MAX_VALUE);
+        JSONObject failed = resources.optJSONObject("last_failed_request");
+        JSONObject latest = resources.optJSONObject("last_request");
+        if (requests == null || (requests == 0 && ((failures != null && failures > 0)
+                || failed != null || latest != null))) {
+            return "로컬 HTTP 요청 기록 형식 오류";
+        }
+        StringBuilder text = new StringBuilder(512);
+        text.append("로컬 HTTP 요청 ").append(requests).append(" · 실패 ")
+                .append(failures == null ? "확인 안 됨" : failures.toString());
+        text.append("\n캐시 적중 ").append(hits == null ? "확인 안 됨" : hits.toString())
+                .append(" · 미적중 ").append(misses == null ? "확인 안 됨" : misses.toString());
+        if (requests == 0) text.append("\n로컬 요청 수신 없음 · 현재 서버 실행 기준");
+        else if (failures != null && failures > 0) text.append("\n로컬 요청 실패 기록 있음");
+        else if (resourceHasCacheResponse(resources)) text.append("\n서버 캐시에서 응답한 기록 있음");
+        else text.append("\n로컬 요청 수신됨");
+        boolean failedShown = appendResourceRequest(text, failed, true);
+        // The sticky failure and the latest request can be the same operation.
+        // Avoid repeating it; include a newer response when the IDs differ.
+        Long failedId = resourceDiagnosticInteger(failed, "request_id", 1, Long.MAX_VALUE);
+        Long latestId = resourceDiagnosticInteger(latest, "request_id", 1, Long.MAX_VALUE);
+        if (!failedShown || failedId == null || !failedId.equals(latestId)) {
+            appendResourceRequest(text, latest, false);
+        }
+        // A fixed number of validated fields is formatted, never raw paths,
+        // headers, URLs, account state or the overall game UID traffic totals.
+        return text.length() <= 1024 ? text.toString() : text.substring(0, 1023) + "…";
+    }
+    // Resource HTTP diagnostics formatter ends.
 
     private static void setTextIfChanged(TextView view, String value) {
         // Repeated service polls must not reset an unchanged text selection.

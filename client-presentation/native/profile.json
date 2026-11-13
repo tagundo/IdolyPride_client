@@ -3091,6 +3091,31 @@
       },
       "parameters": [],
       "source": "sound-persistence-original-pins"
+    },
+    "resource_can_reach": {
+      "name": "Octo.Network.BaseDownloadRequest`1.CanReach",
+      "module": "Octo.dll",
+      "type_definition_index": 28874,
+      "metadata_method_index": 197134,
+      "token": "0x06000263",
+      "token_row": 611,
+      "rva": "0x8149f68",
+      "prefix16": "fe57bea9f44f01a934f9009055bd00b0",
+      "function_size_bytes": 212,
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "parameters": [],
+      "method_flags": "0x84",
+      "is_static": false,
+      "mode": "HOOK",
+      "native_ABI": "bool(void*,const MethodInfo*)",
+      "source": "local-resource-post-HTTP-reachability-pins"
     }
   },
   "graphics_fields": [
@@ -3663,5 +3688,24 @@
     "device_reset_trigger_verified": false,
     "device_persistence_verified": false,
     "pin_packet_sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
+  },
+  "local_resource_reachability": {
+    "schema": 1,
+    "platform": "Android",
+    "scope": "Canonical object URLs at the fixed patched local Octo origin only",
+    "origin": "http://127.0.0.1:8080/",
+    "request_url_field": "Octo.Network.BaseDownloadRequest`1._url",
+    "request_url_offset": 16,
+    "string_length_offset": 16,
+    "string_utf16_offset": 20,
+    "maximum_url_units": 199,
+    "original_nonlocal_can_reach_preserved": true,
+    "original_HTTP_IO_native_error_MD5_and_storage_checks_preserved": true,
+    "global_Unity_reachability_unchanged": true,
+    "manifest_and_nonobject_URLs_unchanged": true,
+    "device_offline_play_verified": false,
+    "stock_gate_proof_sha256": "af4ca9cd3384a523e73f572a3db9435e244572429f4d0889640295637ae893c2",
+    "packaged_gate_proof_sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef",
+    "original_packaged_native_sha256": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3"
   }
 }
