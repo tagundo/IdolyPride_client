@@ -1,0 +1,11 @@
+{
+  "version": "0.3.22",
+  "source_commit": "b91affc4a2b84b205db31f197491b7a85a6e2dab",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 206180224,
+      "sha256": "a7938430f79a0fa571c2345e2a78346ca81e72f9586f91108232cbf93a131f42"
+    }
+  ]
+}
