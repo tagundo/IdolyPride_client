@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "version": "0.3.21",
+  "repository": "tagundo/IdolyPride_client",
+  "tag": "local-server-v0.3.21",
+  "product_source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+  "delivery_mode": "Git LFS downloads linked from release body",
+  "release_assets_uploaded": false,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 206180224,
+      "sha256": "ae966cc19d18df4120042f838883bf8fc1a048601ba13f40890b1f2423ba90dd",
+      "source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "8d3cd4a5ee19a7eb0922c1bed9309a5857510c94c7cc4acf155d6b9eb2a6baf6",
+      "LFS_source_branch": "downloads/android-wardrobe-server-v0.3.21",
+      "LFS_publication_commit": "dedd453a94a1eef5a0e6e79e3c87452a2f4896f1",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    },
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159475730,
+      "sha256": "cefbc205d575c435f5c494b683d444b4b206e07fec8a45cb95c6727425dc487e",
+      "source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "e51ea40c4eec8408322db8ba24f2b40d49cb68699dd02779938480161f17b421",
+      "LFS_source_branch": "downloads/android-wardrobe-client-v0.3.21",
+      "LFS_publication_commit": "2c9cebd156ea036b95ec988269d649605c671732",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    }
+  ],
+  "scope": "Android client-local checked costume/hair request filtering and empty CheckBulk parent-only ACK. Nonempty retry resynchronization preserved. No physical 37-second fix or speedup is asserted.",
+  "native_to_Java_to_HTTP_integration_verified": true,
+  "actual_device_execution": false
+}
