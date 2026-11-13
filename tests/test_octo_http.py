@@ -20,6 +20,7 @@ from idoly_local.assets import create_asset_server
 from idoly_local.octo_cache import OctoCache
 from idoly_local.octo_http import OctoGateway
 from idoly_local.octo_manifest import Database, OctoManifest, decrypt_manifest
+from idoly_local.octo_runtime import OctoResourceTracker
 
 
 APP_KEY = "synthetic-octo-http-key"
@@ -356,3 +357,114 @@ def test_gateway_close_is_idempotent_and_stops_new_manifest_or_object_work(gatew
     # Shutdown of the optional gateway does not own the existing master route.
     with gateway.request("/master/table.db") as response:
         assert response.read() == b"master-fixture"
+
+
+def observe_requests(gateway):
+    tracker = OctoResourceTracker(available=True)
+    transfer = gateway.api.transfer_callback
+    cache_event = gateway.cache.on_event
+    gateway.api.request_callback = tracker.on_http_request
+    gateway.api.transfer_callback = lambda event: (transfer(event), tracker.on_http_transfer(event))
+    gateway.cache.on_event = lambda event: (cache_event(event), tracker.on_cache_event(event))
+    return tracker
+
+
+def wait_observed_requests(tracker, count):
+    deadline = time.monotonic() + 3
+    while True:
+        snapshot = tracker.status()
+        if len(snapshot["recent_requests"]) >= count:
+            return snapshot
+        assert time.monotonic() < deadline, snapshot
+        threading.Event().wait(.005)
+
+
+def test_request_diagnostics_observe_errors_and_offline_cache_without_counting_error_bodies(gateway):
+    # Populate only one real cache file before observing the new HTTP session.
+    record = gateway.objects["assetbundle"]
+    with gateway.cache.open_verified(record) as stream:
+        assert stream.read() == gateway.content["assetbundle"]
+    previous_calls = list(gateway.state["calls"])
+    gateway.cache.allow_download = False
+    tracker = observe_requests(gateway)
+    response_error(gateway, LIST + "0", 403)
+    response_error(gateway, LIST + "1", 409, headers=HEADERS)
+    secret = "must-not-appear-in-observations"
+    response_error(gateway, "/octo/202050/resources/not_archived/123?token=" + secret, 404,
+                   headers={"Authorization": secret, "X-OCTO-KEY": APP_KEY})
+    response_error(gateway, gateway.path("resources"), 503)
+    with gateway.request(gateway.path(), method="HEAD") as response:
+        assert response.status == 200 and response.read() == b""
+    with gateway.request(gateway.path(), headers={"Range": "bytes=2-5"}) as response:
+        assert response.status == 206 and response.read() == b"2345"
+    with gateway.request(gateway.path()) as response:
+        assert response.status == 200 and response.read() == gateway.content["assetbundle"]
+    with gateway.request(LIST + "0", method="HEAD", headers=HEADERS) as response:
+        assert response.status == 200 and response.read() == b""
+    snapshot = wait_observed_requests(tracker, 8)
+    assert snapshot["session_http_requests"] == 8
+    assert snapshot["session_http_failures"] == 4
+    assert snapshot["session_cache_misses"] == 1 and snapshot["session_cache_hits"] == 3
+    assert snapshot["session_received_bytes"] == snapshot["session_verified_files"] == 0
+    assert snapshot["session_served_bytes"] == 4 + len(gateway.content["assetbundle"])
+    assert snapshot["session_manifest_bytes"] == 0 and snapshot["active_http_requests"] == []
+    assert gateway.state["calls"] == previous_calls
+    failure = snapshot["last_failed_request"]
+    assert (failure["http_status"], failure["error_code"], failure["cache_result"]) == (503, "octo_cache_miss", "cache_miss")
+    assert failure["object_name"] == "fixture-resources" and failure["cache_key"] == gateway.objects["resources"].cache_key
+    assert snapshot["last_request"]["phase"] == "completed" and snapshot["status"] == "ready"
+    ordered = sorted(snapshot["recent_requests"], key=lambda row: row["request_id"])
+    assert [row["http_status"] for row in ordered] == [403, 409, 404, 503, 200, 206, 200, 200]
+    assert all(row["cache_result"] == "cache_hit" for row in ordered[4:7])
+    text = json.dumps(snapshot)
+    assert secret not in text and APP_KEY not in text and "Authorization" not in text and "?token=" not in text
+
+
+def test_request_diagnostics_expose_waiting_object_and_observer_failure_cannot_break_http(gateway):
+    tracker = observe_requests(gateway)
+    entered, release = threading.Event(), threading.Event()
+    fetch = gateway.cache.fetcher
+    def held(url, *, timeout):
+        entered.set()
+        assert release.wait(3)
+        return fetch(url, timeout=timeout)
+    gateway.cache.fetcher = held
+    def download():
+        with gateway.request(gateway.path()) as response:
+            return response.status, response.read()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(download)
+        try:
+            assert entered.wait(2)
+            snapshot = tracker.status()
+            assert snapshot["session_http_requests"] == 1 and not snapshot["recent_requests"]
+            assert len(snapshot["active_http_requests"]) == 1
+            current = snapshot["active_http_requests"][0]
+            assert current["phase"] == "waiting_cache" and current["http_status"] == 0
+            assert current["object_name"] == "fixture-assetbundle"
+            assert current["cache_key"] == gateway.objects["assetbundle"].cache_key
+            assert current["cache_result"] == "upstream" and current["elapsed_ms"] >= 0
+            assert snapshot["session_served_bytes"] == 0
+        finally:
+            release.set()
+        assert pending.result(timeout=3) == (200, gateway.content["assetbundle"])
+    assert wait_observed_requests(tracker, 1)["active_http_requests"] == []
+    gateway.api.request_callback = lambda _event: (_ for _ in ()).throw(RuntimeError("observer failure"))
+    with gateway.request(gateway.path(), headers={"Range": "bytes=0-1"}) as response:
+        assert response.status == 206 and response.read() == b"01"
+
+
+def test_request_diagnostics_capture_upstream_failure_and_invalid_range(gateway):
+    tracker = observe_requests(gateway)
+    from idoly_local.octo_cache import OctoCacheError
+    def unavailable(*_args, **_kwargs):
+        raise OctoCacheError("upstream_dns")
+    gateway.cache.fetcher = unavailable
+    response_error(gateway, gateway.path(), 502)
+    response_error(gateway, gateway.path(), 416, headers={"Range": "bytes=999-1000"})
+    snapshot = wait_observed_requests(tracker, 2)
+    assert snapshot["session_http_failures"] == 2 and snapshot["session_served_bytes"] == 0
+    first, second = snapshot["recent_requests"]
+    assert first["error_code"] == "octo_resource_unavailable" and first["cause_code"] == "upstream_dns"
+    assert second["error_code"] == "octo_invalid_range" and second["http_status"] == 416
+    assert snapshot["last_failed_request"] == second

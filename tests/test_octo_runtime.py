@@ -370,3 +370,80 @@ def test_unrecognized_resource_platform_rejected_even_without_an_archive(tmp_pat
     with pytest.raises(ValueError, match="platform"):
         create_octo_gateway(tmp_path, "http://127.0.0.1:8080", platform=platform)
     assert not list(tmp_path.iterdir())
+
+
+def observed_request(tracker, phase, identity=1, **changes):
+    event = {"source": "octo_request", "request_id": identity, "method": "GET", "kind": "object",
+             "phase": phase, "http_status": 0, "object_name": None, "cache_key": None,
+             "route_fingerprint": "a" * 16, "error_code": None, "cause_code": None}
+    event.update(changes)
+    tracker.on_http_request(event)
+
+
+def test_request_history_is_bounded_sticky_failure_survives_success_and_snapshots_are_independent():
+    tracker = OctoResourceTracker(available=True)
+    observed_request(tracker, "received")
+    observed_request(tracker, "failed", http_status=409, error_code="octo_revision_unavailable")
+    failure = tracker.status()["last_failed_request"]
+    for identity in range(2, 75):
+        observed_request(tracker, "received", identity)
+        observed_request(tracker, "waiting_cache", identity, object_name="known stage", cache_key="b" * 64)
+        upstream(tracker, "cache_hit", key="b" * 64)
+        observed_request(tracker, "sending", identity, http_status=206, object_name="known stage", cache_key="b" * 64)
+        observed_request(tracker, "completed", identity, http_status=206, object_name="known stage", cache_key="b" * 64)
+    snapshot = tracker.status()
+    assert snapshot["session_http_requests"] == 74 and snapshot["session_http_failures"] == 1
+    assert snapshot["session_cache_hits"] == 73 and snapshot["session_cache_misses"] == 0
+    assert len(snapshot["recent_requests"]) == 32 and not snapshot["active_http_requests"]
+    assert snapshot["last_failed_request"] == failure
+    assert snapshot["last_request"]["request_id"] == 74 and snapshot["last_request"]["cache_result"] == "cache_hit"
+    assert snapshot["session_served_bytes"] == snapshot["session_received_bytes"] == 0
+    assert all(not key.startswith("_") for row in snapshot["recent_requests"] for key in row)
+    snapshot["last_failed_request"]["error_code"] = "changed"
+    snapshot["recent_requests"].clear()
+    assert tracker.status()["last_failed_request"] == failure and len(tracker.status()["recent_requests"]) == 32
+
+
+def test_active_request_observations_are_bounded_and_failure_details_are_fixed_and_redacted():
+    tracker = OctoResourceTracker(available=True)
+    for identity in range(1, 66):
+        observed_request(tracker, "received", identity, headers={"Authorization": "secret-token"}, url="?key=secret-query")
+    snapshot = tracker.status()
+    assert snapshot["session_http_requests"] == 65 and len(snapshot["active_http_requests"]) == 64
+    assert snapshot["measurement_limited"] is True
+    assert "secret" not in json.dumps(snapshot) and "headers" not in json.dumps(snapshot)
+    observed_request(tracker, "failed", 1, http_status=502, error_code="secret-error")
+    assert tracker.status()["session_http_failures"] == 0
+    observed_request(tracker, "failed", 1, http_status=502, error_code="octo_resource_unavailable", cause_code="secret-cause")
+    assert tracker.status()["session_http_failures"] == 0
+    observed_request(tracker, "failed", 1, http_status=502, error_code="octo_resource_unavailable", cause_code="upstream_timeout")
+    snapshot = tracker.status()
+    assert snapshot["session_http_failures"] == 1
+    assert snapshot["last_failed_request"]["cause_code"] == "upstream_timeout"
+    assert len(snapshot["active_http_requests"]) == 63 and "secret" not in json.dumps(snapshot)
+
+
+def test_cache_source_events_do_not_label_another_threads_matching_request():
+    tracker = OctoResourceTracker(available=True)
+    observed_request(tracker, "received")
+    observed_request(tracker, "waiting_cache", object_name="known stage", cache_key="a" * 64)
+    thread = threading.Thread(target=lambda: upstream(tracker, "cache_hit"))
+    thread.start(); thread.join(timeout=2)
+    assert not thread.is_alive()
+    snapshot = tracker.status()
+    assert snapshot["session_cache_hits"] == 1
+    assert snapshot["active_http_requests"][0]["cache_result"] == "pending"
+    upstream(tracker, "cache_hit")
+    assert tracker.status()["active_http_requests"][0]["cache_result"] == "cache_hit"
+
+
+@pytest.mark.parametrize("changes", [{"request_id": True}, {"method": "POST"}, {"http_status": True},
+    {"route_fingerprint": "a" * 17}, {"object_name": "unsafe\nname"}, {"cache_key": "not-a-key"},
+    {"phase": "progress"}, {"source": "untrusted"}])
+def test_invalid_request_observations_do_not_create_work(changes):
+    tracker = OctoResourceTracker(available=True)
+    observed_request(tracker, changes.get("phase", "received"),
+                     **{key: value for key, value in changes.items() if key != "phase"})
+    snapshot = tracker.status()
+    assert snapshot["session_http_requests"] == 0 and snapshot["active_http_requests"] == []
+    assert snapshot["recent_requests"] == [] and snapshot["last_request"] is None

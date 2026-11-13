@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import stat
 import threading
+import time
 
 
 MAX_SETTINGS_BYTES = 16 * 1024
@@ -24,6 +25,13 @@ _MAX_COUNTER = 2**63 - 1
 _MAX_ACTIVE = 1024
 _MAX_VERIFIED = 100000
 _MAX_LOG_RECEIPTS = 200
+_MAX_OBSERVED_REQUESTS = 64
+_MAX_REQUEST_HISTORY = 32
+_REQUEST_PHASES = frozenset(("received", "resolving", "waiting_cache", "sending", "completed", "failed"))
+_REQUEST_ERRORS = frozenset(("octo_gateway_closed", "octo_invalid_request", "octo_forbidden",
+    "octo_not_found", "octo_revision_unavailable", "octo_manifest_unavailable", "octo_invalid_range",
+    "octo_cache_invalid", "octo_cache_miss", "octo_resource_unavailable", "client_disconnected", "request_aborted"))
+_REQUEST_CAUSES = frozenset(("cache_closed", "download_disabled"))
 PLATFORM_ARCHIVES = {
     "android": ("public-octo", "octo-cache", 205051, 1087),
     "ios": ("public-octo-ios", "octo-cache-ios", 105051, 1159),
@@ -177,6 +185,10 @@ class OctoResourceTracker:
         self._last_received = self._last_total = 0
         self._last_status = "idle"
         self._limited = False
+        self._request_active = OrderedDict()
+        self._request_history = []
+        self._last_request = self._last_failed_request = None
+        self._http_requests = self._http_failures = self._cache_hits = self._cache_misses = 0
 
     def status(self):
         with self._lock:
@@ -189,10 +201,93 @@ class OctoResourceTracker:
                 "session_manifest_bytes": self._manifest_served,
                 "last_received_bytes": self._last_received,
                 "last_total_bytes": self._last_total,
+                "session_http_requests": self._http_requests,
+                "session_http_failures": self._http_failures,
+                "session_cache_hits": self._cache_hits,
+                "session_cache_misses": self._cache_misses,
+                "active_http_requests": [self._public_request(row) for row in self._request_active.values()],
+                "last_request": self._public_request(self._last_request),
+                "last_failed_request": self._public_request(self._last_failed_request),
+                "recent_requests": [self._public_request(row) for row in self._request_history],
                 "measurement_limited": self._limited}
             if len(self._fetches) == 1:
                 result["last_received_bytes"], result["last_total_bytes"] = next(iter(self._fetches.values()))
             return deepcopy(result)
+
+    @staticmethod
+    def _public_request(row):
+        if row is None:
+            return None
+        value = {key: item for key, item in row.items() if not key.startswith("_")}
+        value["elapsed_ms"] = max(0, min(_MAX_COUNTER,
+            int((row.get("_finished", time.monotonic()) - row["_started"]) * 1000)))
+        return value
+
+    def on_http_request(self, event):
+        """Observe bounded request outcomes, without counting JSON error bodies.
+
+        This observer is independent of the existing body-transfer callbacks.
+        No raw URL, query, headers, application key or account state is retained.
+        """
+        try:
+            self._http_request(event)
+        except Exception:
+            pass  # Diagnostics can neither delay nor own an HTTP response.
+
+    def _http_request(self, event):
+        if not isinstance(event, dict) or event.get("source") != "octo_request":
+            return
+        identity, phase = event.get("request_id"), event.get("phase")
+        method, kind, status = event.get("method"), event.get("kind"), event.get("http_status")
+        fingerprint = event.get("route_fingerprint")
+        name, key = event.get("object_name"), event.get("cache_key")
+        error, cause = event.get("error_code"), event.get("cause_code")
+        if (type(identity) is not int or not 1 <= identity <= _MAX_COUNTER or phase not in _REQUEST_PHASES
+                or method not in ("GET", "HEAD") or kind not in ("manifest", "object")
+                or type(status) is not int or status != 0 and not 100 <= status <= 599
+                or not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{16}", fingerprint) is None
+                or name is not None and (not isinstance(name, str) or len(name) > 160 or not name.isprintable())
+                or key is not None and (not isinstance(key, str) or not _HEX64.fullmatch(key))
+                or error is not None and error not in _REQUEST_ERRORS
+                or cause is not None and cause not in _FAILURE_CODES | _REQUEST_CAUSES
+                or phase == "failed" and error is None
+                or phase == "completed" and (status not in (200, 206) or error is not None)):
+            return
+        now = time.monotonic()
+        with self._lock:
+            if phase == "received":
+                if identity in self._request_active:
+                    return
+                self._http_requests = _add(self._http_requests, 1)
+                if len(self._request_active) >= _MAX_OBSERVED_REQUESTS:
+                    self._limited = True
+                    return
+                row = {"request_id": identity, "method": method, "kind": kind,
+                       "route_fingerprint": fingerprint, "cache_result": "pending",
+                       "_thread_id": threading.get_ident(), "_started": now}
+                self._request_active[identity] = row
+            else:
+                row = self._request_active.get(identity)
+                if (row is None or row["method"] != method or row["kind"] != kind
+                        or row["route_fingerprint"] != fingerprint):
+                    return
+            row.update(phase=phase, http_status=status, object_name=name, cache_key=key,
+                       error_code=error, cause_code=cause)
+            self._last_request = row
+            if phase in ("completed", "failed"):
+                row["_finished"] = now
+                del self._request_active[identity]
+                if row["cache_result"] == "pending":
+                    row["cache_result"] = "unknown"
+                if phase == "failed":
+                    self._http_failures = _add(self._http_failures, 1)
+                    self._last_failed_request = row
+                    if error == "octo_cache_miss":
+                        self._cache_misses = _add(self._cache_misses, 1)
+                        row["cache_result"] = "cache_miss"
+                self._request_history.append(row)
+                if len(self._request_history) > _MAX_REQUEST_HISTORY:
+                    del self._request_history[0]
 
     def _log(self, receipt, message):
         with self._lock:
@@ -228,11 +323,14 @@ class OctoResourceTracker:
             if phase == "cache_hit":
                 if received != 0:
                     return
+                self._cache_hits = _add(self._cache_hits, 1)
+                self._request_cache_result(key, "cache_hit")
                 self._last_status = "ready"
                 return
             if phase == "started":
                 if received != 0:
                     return
+                self._request_cache_result(key, "upstream")
                 if key not in self._fetches:
                     if len(self._fetches) >= _MAX_ACTIVE:
                         self._limited = True
@@ -271,6 +369,17 @@ class OctoResourceTracker:
                                "게임 리소스 내려받기 중단 · " + code + detail)
         if message is not None:
             self._log(*message)
+
+    def _request_cache_result(self, key, result):
+        """Called under our lock; cache callbacks run on their HTTP worker.
+
+        Key alone cannot associate concurrent requests or a different worker's
+        upstream event with this request. Keep both identity checks explicit.
+        """
+        thread = threading.get_ident()
+        for row in self._request_active.values():
+            if row["_thread_id"] == thread and row.get("cache_key") == key:
+                row["cache_result"] = result
 
     def on_http_transfer(self, event):
         """Count actual local object response deltas; manifests stay separate."""
@@ -375,6 +484,7 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
             on_event=tracker.on_cache_event, allow_download=allow_downloads,
             local_source=translation_layer.open_source if translation_layer is not None else None)
         return OctoGateway(manifest, cache, transfer_callback=tracker.on_http_transfer,
+                           request_callback=tracker.on_http_request,
                            translation_layer=translation_layer), tracker
     except BaseException:
         if translation_layer is not None:
