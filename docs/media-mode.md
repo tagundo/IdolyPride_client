@@ -1,5 +1,7 @@
 # 감상용 전체 해금
 
+최신 [v0.3.23 복원 안내](restoration-v0.3.23.md)는 촬영 포즈 146개, 교류 외출 4곳, 이벤트 스토리 59개·291편과 서버의 선택식 병렬 다운로드를 추가한다. 서버 앱을 업데이트하며 기존 게임 클라이언트를 그대로 사용한다. 이 버전은 공개 JSON 54개와 감상 마스터 7개를 포함한다. 아래의 이전 버전별 테이블 수와 다운로드 링크는 해당 버전의 기록이다.
+
 Android v0.3.9 후보는 [APK 직접 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk) 또는 [GitHub 파일 페이지](https://github.com/tagundo/IdolyPride_client/blob/downloads/local-server-v0.3.9/IdolyPride-Local-Server-Android.apk)에서 받습니다. 저장소 접근 권한이 있는 계정으로 GitHub에 로그인해야 합니다. 새 Mac 바이너리는 포함하지 않습니다.
 
 서버 앱의 **감상용 전체 해금**을 선택하고 서버를 시작합니다. 모드를 바꾸려면 서버를 중지한 뒤 선택을 바꾸고, 게임은 타이틀로 돌아가 다시 로그인합니다. Android와 Mac의 기본값은 꺼짐이며 선택을 저장합니다.

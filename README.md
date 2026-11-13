@@ -1,6 +1,6 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-**서버 응답·저장 처리 최적화 v0.3.22:** [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/server-performance-v0.3.22/IdolyPride-Local-Server-Android.apk) · [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/server-performance-v0.3.22/IdolyPride-Local-Server-macOS-arm64.app.zip) · [릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.22). 기존 사용자는 **서버만 업데이트**합니다. 촬영·360 LIVE 등 조회 14개의 빈 갱신 메시지, 무관한 덱 재전송, 특별 스토리의 전체 메뉴 생성, 같은 프로필·설정의 중복 처리를 줄였습니다. Android 게임 v0.3.21과 PlayCover IPA v0.3.19는 기존 파일을 그대로 재사용합니다. [변경·검증 범위](docs/wardrobe-exit-latency.md). 기기의 실제 지연·FPS 변화와 이번 Mac 앱의 GUI 실행은 계측하지 않았습니다.
+**병렬 다운로드·포즈·외출·이벤트 스토리 v0.3.23:** [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/restored-media-v0.3.23/IdolyPride-Local-Server-Android.apk) · [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/restored-media-v0.3.23/IdolyPride-Local-Server-macOS-arm64.app.zip) · [릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.23). 기존 사용자는 **서버만 업데이트**합니다. 전체 리소스 받기의 동시 다운로드 수를 1·2·4·8개 중 선택하며 기본값은 4개입니다. 감상 모드에 촬영 포즈 146개, 외출 4곳, 이벤트 스토리 59개·291편을 연결했습니다. Android 게임 v0.3.21과 PlayCover IPA v0.3.19는 기존 파일을 그대로 재사용합니다. [변경·검증 범위](docs/restoration-v0.3.23.md). 실제 기기의 다운로드 속도와 게임 화면 동작은 아직 검증하지 않았습니다.
 
 **[v0.3.19 앱 다운로드](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19)** · [촬영·의상·번역·리소스 보관 안내](docs/local-library-v0.3.19.md)
 
@@ -14,12 +14,12 @@ v0.3.19는 Android 의상룸 표시 실패 후 종료 대기 경로, 일반 촬�
 
 ## 앱으로 실행하기
 
-아래 표에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 각각 받습니다. [v0.3.22 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.22)는 새 서버 두 앱과 검증된 기존 클라이언트를 함께 제공합니다. 이미 사용하는 클라이언트는 다시 설치할 필요가 없습니다. 공통 서버 데이터는 v0.3.19를 재사용합니다. 새 서버 두 파일의 원격 다운로드 전체 SHA-256을 대조했습니다. 첨부파일 업로드 인증 오류와 GitHub-hosted Actions의 계정 결제/사용 한도 차단으로 **Assets 대신 아래 개별 링크로 제공합니다.** 저장소는 비공개이므로 GitHub 링크는 접근 권한이 있는 계정으로 로그인해야 열 수 있습니다. 계정 정보나 기존 사용자의 저장 데이터는 배포 파일에 포함하지 않습니다.
+아래 표에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 각각 받습니다. [v0.3.23 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.23)는 새 서버 두 앱과 검증된 기존 클라이언트를 함께 제공합니다. 이미 사용하는 클라이언트는 다시 설치할 필요가 없습니다. 새 공통 서버 데이터 v0.3.23은 서버 앱에 포함됩니다. 첨부파일 업로드 인증 오류와 GitHub-hosted Actions의 계정 결제/사용 한도 차단으로 **Assets 대신 아래 개별 링크로 제공합니다.** 저장소는 비공개이므로 GitHub 링크는 접근 권한이 있는 계정으로 로그인해야 열 수 있습니다. 계정 정보나 기존 사용자의 저장 데이터는 배포 파일에 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.22](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/server-performance-v0.3.22/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK v0.3.21 재사용](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/server-performance-v0.3.22/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
-| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.22](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/server-performance-v0.3.22/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA v0.3.19 재사용](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/server-performance-v0.3.22/IdolyPride-6.1.1-Local-PlayCover.ipa) |
+| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.23](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/restored-media-v0.3.23/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK v0.3.21 재사용](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/restored-media-v0.3.23/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
+| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.23](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/restored-media-v0.3.23/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA v0.3.19 재사용](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/restored-media-v0.3.23/IdolyPride-6.1.1-Local-PlayCover.ipa) |
 
 서버 APK는 클라이언트를 수정·설치하지 않으며 내장 게임 APK와 설치 권한을 포함하지 않습니다. **서버와 연결용 클라이언트를 각각 업데이트**합니다. Android에서는 **진단 게임 실행** 또는 **그래픽 지원 게임 실행**으로 이번 클라이언트를 엽니다. Play 프로텍트 판정과 실제 FPS 개선량은 실기기에서 확인하지 못했습니다. [권한·배포 변경](docs/android-distribution.md)을 참고합니다.
 
