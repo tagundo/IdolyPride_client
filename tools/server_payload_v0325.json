@@ -1,0 +1,1452 @@
+{
+  "schema": 1,
+  "policy": "precomputed-language-sort-v1",
+  "base_payload": {
+    "bytes": 84637208,
+    "sha256": "27522b394b021a4df002a4e34f20e89b5407be7b145aeecce45f5023b5227522"
+  },
+  "component_commit": "adcfb4ff7d76c7669ff57ed0f013ff1e1cb1810b",
+  "component_sources": {
+    "src/idoly_local/master_translation_build.py": "56287a499c25f524d2ad5b5187503fa23fb89ab706e45c27b59fafa126a15313",
+    "src/idoly_local/master_sort_build.py": "d3375426141dc9a636b72729467a4644b9b0cbafba1bd43b5b27aac389bf19b5",
+    "src/idoly_local/master_sort.py": "4e00ba2b6f5ee7dbd547747d3af7386d107b7f9b784d1fde2f7f73cd5e71427e",
+    "src/idoly_local/master_build.py": "9ae4b0d259f320458ef2a50ad54a193401fa8747524e7a57e1ae51dd4974e74d",
+    "src/idoly_local/media_master_build.py": "88fab13999fb2a8ff1ee9c21778f4b8116bdaf282e1c40d56194218e323b8e48",
+    "src/idoly_local/media_outfit_policy.py": "4d530871be97b753ccb8aa282ff5364754333bbd68cee29cadbd0b93d2312f2c",
+    "src/idoly_local/language_settings.py": "b6ca20a555bc2910ea5f03232dfc03c9b99c818c851affd7a80e8bbd6023f341"
+  },
+  "additions": [
+    {
+      "path": "data/original-master/assets/master/local-language-en-02434a4831746d472ed2f037-Emblem.db",
+      "bytes": 241664,
+      "sha256": "e37ef2c22c017366eaf201be5be00db63c202f7dc6e89026f66a22793c3deff1"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-032b12a437a68a1851c9a33b-PhotoContestQuestStage.db",
+      "bytes": 20480,
+      "sha256": "6bb649d29c42bbe377b39ae54a7382410d17480491b65d239ddb3736c27f42d4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-04d81ec8473d5713ba04e05f-HomeDramaPosition.db",
+      "bytes": 12288,
+      "sha256": "7be4cbb1fb629a4ad966f46969467f99443c3c032b46fe7193d482dbe0ead86e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-06323b61d08ef8c0bbb21098-BoxGacha.db",
+      "bytes": 28672,
+      "sha256": "8f318312078d1edbb8ba7164baf9f29c19a4cd75769752e5bf92a834b0544e04"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-14dbdc2d0339762f103cf466-CostumeType.db",
+      "bytes": 12288,
+      "sha256": "c29d586cee4a9865adaaaafebf7acedffecf6ccca4df11b4b4ff6ef87c972f1c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-163c9679ff5ada295ca7332f-Mission.db",
+      "bytes": 4816896,
+      "sha256": "46b97e7d7b9f25d816e69729ef9d5c8d88a06d6cc8a1a5ab1d054b16f2ceff34"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-1766f0647b7f2a8687938272-EventStory.db",
+      "bytes": 53248,
+      "sha256": "127f16efb0fa0886b8bbdcfca8bb2067b36e4479baab0860b484faccbb967d29"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-184b25853f50cc4e5b4c7506-LiveAbility.db",
+      "bytes": 368640,
+      "sha256": "f1fb39d0537a3b8efda278103c11be8d2fc1a5db22916415eb6f157cf48f12ac"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-188f3e749852a614bff0968d-ShowcaseHashtag.db",
+      "bytes": 12288,
+      "sha256": "20370f548fcbd3dab625de981eeda2734f4932cad04e00c7535a7e26d49a6575"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-199b668d003f8a595bfa912c-ShowcaseToy.db",
+      "bytes": 385024,
+      "sha256": "f2cf3e3496cde7e4a6b3dcd4f33e7a9d5059f5e84adbd68af1ca95fd47f6bc9f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-1aff22f8537c3741782266bf-Card.db",
+      "bytes": 327680,
+      "sha256": "00946863a1c947f36c3988a864cf1a0b63c07693e73e49378670d94087950570"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-255fe14f2b049d349105be0b-PhotoFacial.db",
+      "bytes": 12288,
+      "sha256": "ea3db9e069b6169cdcb8be853f823353a8d060338085a533db428f4ccb3af1bf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-2b712c58b4e1dd86b07cfcfd-Decoration.db",
+      "bytes": 86016,
+      "sha256": "1689dcb6ba6c290394c12022bfad54757ae3e0cf1b6603067f563c10de0fa424"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-2b77c7a0597a02385b215390-PhotoContestQuestMusic.db",
+      "bytes": 32768,
+      "sha256": "26d7662f41f2d38837dbb5e43afd0a9983b0889c8480f2ef14e59121436c2d43"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-2c1a8286348c9f7fbf4501a2-QuestPressure.db",
+      "bytes": 12288,
+      "sha256": "adda4be1dff354bdda615b578afaaa1fbb594c353bdbfe14066b145a7eae5956"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-341f3448f0dbccabd671df27-SkillEfficacy.db",
+      "bytes": 3555328,
+      "sha256": "dff6fdb7e349089c43e2a363bff314c93a8b7c8a8e2a269ff7b7451566f9b14a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-356373b10d2a41177e6a5205-HierarchyGrade.db",
+      "bytes": 12288,
+      "sha256": "9b1487734055745866629b9fac6a5beca73f840d0bb56ca794a481c5d36c473e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-3604065363e8cfd4b682d510-BacksidePanelGoalSetting.db",
+      "bytes": 20480,
+      "sha256": "6c2c108fa7ff969069a3e659aa9be57a87c72b2a64f694cc986b810cc60b1319"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-36f162af3baccd2c5db7989b-PhotoPose.db",
+      "bytes": 36864,
+      "sha256": "170a737d4f619d215767a7da09e10551f90d0ce9fcf413dcd7f0c78cf8b97718"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-3745ccc08dbca79abe0bd414-PhotoContestSection.db",
+      "bytes": 24576,
+      "sha256": "fe20ba9cf2cfd75d1909bff26850e2ca1e7aa0c0395146808d68e79bc90cc845"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-388a94c8f3985a6eb431ef9c-PhotoActivity.db",
+      "bytes": 20480,
+      "sha256": "7531a567a3d8304e2e43ae2881f7c6411f907360ce33092564acf5062d1fc935"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-3cc85bdf610a865ac2dd14a4-CardEvolutionMessage.db",
+      "bytes": 20480,
+      "sha256": "7c54a09bbb982b7f22212b45138449db98c372649a174e9c7cb496d5b494d455"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-3dbc610ba2bea94363d0accd-Character.db",
+      "bytes": 122880,
+      "sha256": "34b33f3a9bdcfb8fe8dbb769e67ece105c79da79a0a3a8e41b8f91ba662de020"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-408fd850f88481b26f3c7110-EventStory.db",
+      "bytes": 36864,
+      "sha256": "20592449f1600eb99f21ea8b64a0b1f9509b26ec738fce2252b842b4dd021c28"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-40e509dc8ad549b563974f10-StatusEffectName.db",
+      "bytes": 8192,
+      "sha256": "96e9668b79f560726f673836c741334454bf6205da2d47434bf3af5a4bb3abe1"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-434489ad1e35a07b706ecd0d-PhotoExpression.db",
+      "bytes": 28672,
+      "sha256": "b232b3df76f63a9ce277bec0b9e9a0f0cabfffa874bbab79032e52c7d983d70a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-4a15a4d6c9736303a06e7545-RaceQuest.db",
+      "bytes": 151552,
+      "sha256": "4f8c64793e6d2c188448a64f812e92c8531eb43cb3c522d6bdcde0a7bda8731d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-4f915c21c13d3ebc6c61716e-ExcursionGazeReaction.db",
+      "bytes": 118784,
+      "sha256": "5526900757fadf88ef765b0b8c12f4c6cddf4b4e7c48d698aa2c80be58319c1c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-51a3597f0ab564154e9851c7-Item.db",
+      "bytes": 495616,
+      "sha256": "96bd44c55ffe6951aaf7bcbd1845dbabfd98fbf6d6fc754143bd4eacb391395a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-542263380a3e3ddfaeb18e20-ActivityAbility.db",
+      "bytes": 20480,
+      "sha256": "abd592f14fdc2823b97eb1acb94407fc3e97005949008a5ded292f7f9aef6192"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-55861a2cac03a78c6d81a680-Area.db",
+      "bytes": 212992,
+      "sha256": "4dae19381d88d6a0a8b682b2327f6508be55636da13224e44081e3ef8ef9f7a9"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-56ed7b981e32c36adce58b92-ShowcaseFrame.db",
+      "bytes": 12288,
+      "sha256": "0c6ac451887d3d5d21c3b8f0873ed7f41442b945bcdd9427d4797659ae2b421d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-575314baac00c7d79648ead9-HomeBackgroundCategory.db",
+      "bytes": 12288,
+      "sha256": "994b57d21d9f24c9ce8e214291b924388ece02907650e5ffb303860e593eec5a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-5c999dc14cf7e9968d2244d1-Accessory.db",
+      "bytes": 122880,
+      "sha256": "133088b0cb9b08d00ba0f09f4c70ceb11a733b4bd12afa949afd0345c864cd87"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-5c9f907d9895053f2ba3214e-CharacterGroup.db",
+      "bytes": 24576,
+      "sha256": "7b52253926d1453ce58fe3d3e6b2d306914b52ea529e101cd9beb87ec74f5e02"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-619d47b2a0a3b3879eb2f597-PhotoRecipe.db",
+      "bytes": 3174400,
+      "sha256": "354806e14c74c8c0124ac3336f8307bb08f7f9d76ae48ff274363f37d0aa338d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-6a08f6720f376abf16c531c9-PhotoQuestStage.db",
+      "bytes": 12288,
+      "sha256": "645aa63f6df3ce1d811cc56a991831880fa7b4f2de823b2801b1463268aeab7f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-6a312fea44e6715eba344ee0-MessageGroup.db",
+      "bytes": 20480,
+      "sha256": "85f7326960d52d1ab028296ed2eac2e4cd845ac73585a417dc8fb8e3da0237e4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-6ef61248952fca3ea6a8d7b0-Music.db",
+      "bytes": 274432,
+      "sha256": "c86488fdd917bf1c4890d1f4ff6b7482941bbaeebaac60073952f83c9f48d76c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-70007ce6dba5f264dc03890c-CompanyPoint.db",
+      "bytes": 12288,
+      "sha256": "42406178d86c2063e5d783ad3ed89dae5da513c874a04054f4e2201771a141e8"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-71e5825e7954b21c0d21b02b-LoginBonusText.db",
+      "bytes": 12288,
+      "sha256": "2eb6dda3a7057453818029bd567fa5fbf7e6a2d232ea11d6398b5c89f944a38d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-730e3315721379fa16a5f004-PhotoExpression.db",
+      "bytes": 28672,
+      "sha256": "96e8b3d8063170056ff6bbe2030bd48a296604fa58d90ee996d0e6b827ec0367"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-7657e3c3ec596ffbca820c0c-ActivityPromotion.db",
+      "bytes": 24576,
+      "sha256": "316a5f6fbd4c442d6d49288f860420ce3fa62f1169b420a541449fae449523ef"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-7f2add486f70c1bb74b551b3-StoryPart.db",
+      "bytes": 45056,
+      "sha256": "659ff84b1f3c87848b0fbce62f6cfe37f5375b221db84f5a4899820de6875d70"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-82fd56ce19e0a6fc1ab98e06-PhotoQuestStage.db",
+      "bytes": 12288,
+      "sha256": "a4ba9ac6c770c9cc422d33aa709319120df6bb2068971cfbfb26b191b75f1de9"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-847d72caa26cd61f05512120-HomeTalk.db",
+      "bytes": 827392,
+      "sha256": "1061858d8d78c47b0f7d1f9ffc6fb3a0af242492dbcee61a1740332282a160cf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-874b66e076a1ae7a9c6d5bda-PhotoContestActivity.db",
+      "bytes": 24576,
+      "sha256": "00425eb47b6c03a800a331b15cf816761077b69e510185907cde0da0ca57fe6c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-889ca08600a265f951a82d60-CompanyEnjoyHomeAction.db",
+      "bytes": 24576,
+      "sha256": "82c6247543e0e69abcf687cadafa733c69b75fad585b29c48dd1056529a07f96"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-88c356051f315eec3b57b758-DutyPoint.db",
+      "bytes": 28672,
+      "sha256": "f7d4d746db85aedc3aa146dae374516144e679c22ee8676ce2a30a7b366346ab"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-89ebce3b7b675f61898e8e57-Hair.db",
+      "bytes": 241664,
+      "sha256": "4db6d08c4783ffb366f9040f09c98f4bd2e340983f1c8d3113d952521b266424"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-8e688d941e6d36cd19e1c4c0-PhotoQuestMusic.db",
+      "bytes": 36864,
+      "sha256": "657b52cc47b9a9c2d4df13f45f5bbbc8eecf5d528454f0777ad31a4e91c78b22"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-8ff19996bd08d7e8ecc9de20-PhotoQuestMusic.db",
+      "bytes": 28672,
+      "sha256": "2add4e8f32d148005821ad66d5243672ff8758d91a12059b29c666a321280721"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-907ccc922ea5336aaaa4d5f5-ExcursionPlace.db",
+      "bytes": 12288,
+      "sha256": "79acc88337338387a718fb64a74d4794fc9faedada90f1f908647a0a7131480d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-93de6c12d0d3e0f52e0d4464-ConditionDescription.db",
+      "bytes": 5607424,
+      "sha256": "ee8ae2c8feaafd99c456aa26a730a6057b6ffafbefdb126fdd37bb2b40cc31da"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-9418c7377e4c3373a03cdd33-Wording.db",
+      "bytes": 53248,
+      "sha256": "3cafe35c9bda0306abc0126357af332b577baca4729ff03468cadd409721c57d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-974cebad93f0fccbe703daf9-Gacha.db",
+      "bytes": 7311360,
+      "sha256": "c6a97724498471f73b63ecaebad7aa21e6218c9eafc44845349dcd96e847d73f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-9aab61ebab6b538dc0312520-Costume.db",
+      "bytes": 188416,
+      "sha256": "f4508a91d2e5f454b3a256ded54c044d7d64e07ad53329a07c81846c8f794e36"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-a19177b326a84f7203e78fb4-Quest.db",
+      "bytes": 2478080,
+      "sha256": "2d3dc30700ac85f1bb5c972892a6050ffa51110dd8967aa703d53cf0db845d06"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-a3a7154a61d56c55813fc8d9-ActivityFanEvent.db",
+      "bytes": 20480,
+      "sha256": "fe15a9c06d053c1051c9f28e8a4c8915ac3af029bff2f44ebf5f39676da592fd"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-a4e40814227193d362d554cc-GachaButton.db",
+      "bytes": 864256,
+      "sha256": "a1a6a3b03c7f6038f216c02f77628f1aee42851506ab4b73fe9351fef5692685"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-a60512a19324d96b16149d1c-ShowcaseMusicFilter.db",
+      "bytes": 12288,
+      "sha256": "67ad328f4fc4654f0b24d4dca4c0308a9270c5fa2c38b7a8358bb73ebb53c034"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-a84f6651ee1131311fa4220a-AreaGroup.db",
+      "bytes": 12288,
+      "sha256": "e263c8e59703b3e44f9f12946f131671cb767d56677977a8878f10a0f6f160e3"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-af143253c7c3e0899d68444e-LoveHomeAction.db",
+      "bytes": 102400,
+      "sha256": "62ebf6956530db76caadbbb6bff20f91465d40ce3e8049acd0adaa06c5b1d14b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-b2ce85daf8b24a85bfda0c87-ExtraStory.db",
+      "bytes": 126976,
+      "sha256": "6c25dee1b847d06d353ab54f819b633fbe7561178ba4939003f1423ba5c253e4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-b4cbc41f73fa015a82d1637e-PhotoAllInOne.db",
+      "bytes": 122880,
+      "sha256": "875216ae476cfd98b1d03b340ce36517244f4d22fb0fcdc2727563e8372ffd40"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-b5cc089d804415ef5ea22bd6-Stage.db",
+      "bytes": 24576,
+      "sha256": "e72a52c657306ecb2e5aad0524ba985c3acbd0fc10c7c8dff4faf524f8b016b1"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-b79ee1e9c6d9dbd811143597-ExtraStoryPart.db",
+      "bytes": 20480,
+      "sha256": "5441dcf65e26acbf55312c05f30603135b48a9eb8a446bfeb3248bc147eb6dd0"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-b95b8c51032f1dd88b100c47-HelpCategory.db",
+      "bytes": 266240,
+      "sha256": "574baac6e5b14935fcb0d77ae860bb27a97ca537408a41de5d99f3df9aee517c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-badcafe4c31a0b057e1d9c7e-GachaStamp.db",
+      "bytes": 282624,
+      "sha256": "b98bcf2ddc0fb7d9f8fe3252e6feb3f83e879d335ec5d2b74653039217543273"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-bbaa2d36e18647cf6503ad68-Hair.db",
+      "bytes": 241664,
+      "sha256": "dee4f937476a1a67e16bea005e53d24db46d818f06471d9ec4326512c45216de"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-bd35be814abaea9a9c13dfc7-LoginBonus.db",
+      "bytes": 106496,
+      "sha256": "a1610aa87b85a22609b329d2715668da8f915bec1e65146b31fe9c40475ac6bf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-beb36384100522cb3149d8d5-ActivityRefresh.db",
+      "bytes": 12288,
+      "sha256": "31fc176007e5db102e9379e28276b9bce990400fcf61dda91944f388633ed002"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-c37867a3fe22009ae0c9c698-PhotoExpressionStagePosition.db",
+      "bytes": 20480,
+      "sha256": "7db2f75a31a1a01dd897b5d5dee2aafe71536a3db5f305b8e4571811f4eea08e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-c44736df04132633b6f80951-Message.db",
+      "bytes": 3989504,
+      "sha256": "078afa9330f457cb9e8605a0aef21a1a1a906bf998d7a54bdacb1d59832b1c66"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-c6bf2d4aa73c0c1393c1577c-ShowcaseToyShopFilter.db",
+      "bytes": 12288,
+      "sha256": "a18d349f4b0b4fc81038d6ca795348d61acad94bf3f8ad58e4cd21abcb301309"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-c6c7921ee9e14dbc36c78331-Skill.db",
+      "bytes": 5279744,
+      "sha256": "3285f072ff957a3b613813c84cc3e454e8002d421bbf4708934b368954877731"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-c7d644b5fc981753e17d666f-Setting.db",
+      "bytes": 12288,
+      "sha256": "d9ca4f387a410d4380ac652f07187168a6d26085520f121f853091afe15d7bec"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-ccceef59d8b0dad9711bbafb-EventMission.db",
+      "bytes": 299008,
+      "sha256": "617650a1c8d265a14410ddbbb6d8b193efd7db82f7d6077e3888df6ac428969d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-ce9cd529dbc08619b80f7917-PhotoActivity.db",
+      "bytes": 24576,
+      "sha256": "c23002200ad2f2094bf981b3419f81fb1a2c3a793cd74485b7b4d9ceae0ebd86"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-d1da9998c1657db551df38ad-PhotoAbility.db",
+      "bytes": 233472,
+      "sha256": "669144e54ccbcad199fcb3894870ae31d0bcfa0dcd72115a6d65e7d76b430e35"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-e08558731f2485745291de58-Exercise.db",
+      "bytes": 20480,
+      "sha256": "7b8506c33a29990463266104a44277206265190051a7f8934f2a54cec2e15d75"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-e11964db5d23c79b782e48d3-Story.db",
+      "bytes": 1011712,
+      "sha256": "0fc2d5cb8aa96c946cb0d8ba4298b2f20d6e9d7d619a84df1003ef2974d7105f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-e510a377752d569f783bad23-ShowcaseToyCategory.db",
+      "bytes": 12288,
+      "sha256": "3b4590bb086bbbcd72c59aef507c87afb2e521214e70c843610e3e5291a9bd75"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-e56cabfc2307df70d751b775-Costume.db",
+      "bytes": 188416,
+      "sha256": "1a15ddfd808ae59eabd692a6c9c934de44fbbb3590955587acfb7daa7578bd01"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-e8e860d1041ba83aec2a78bf-MarathonBoxGachaSetting.db",
+      "bytes": 36864,
+      "sha256": "d3be6ec49e86f496fdf966b907dce81258ff737e5affcd8bec53b2a97b671fa5"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-ec57768cb009bf53364530a6-HomeBackground.db",
+      "bytes": 24576,
+      "sha256": "45595bf8affa6a286513d99d26e2c2b7e041926c1a8dfcc0b36599307aaa2a79"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-eca9cd17cbde4a721af8bee8-Telephone.db",
+      "bytes": 126976,
+      "sha256": "5a4a9fa70cfd0429188f0582acac26877c2e002ff48efe30831528c5fd98c449"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-f0e5b954766a205b91faf7b9-StaffTraining.db",
+      "bytes": 8192,
+      "sha256": "6d2d9a02aee054d7875390b758c3b70bba984ceaaef0326b6f39ec02a6761f5b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-f1dca79bce5914695eb3a03f-ExerciseHint.db",
+      "bytes": 24576,
+      "sha256": "905ba7af4e3ec6e304605d85005bc6ac5d85c5e5e635a27540ead84c013a9065"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-f21a92a4528b3ac95e90d1cb-LiveTip.db",
+      "bytes": 12288,
+      "sha256": "d840ef98e3e41d663a9cccf85df3b5836e9a7b08c6b01fefec307917c1143357"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-fab1c615f45368b60c1104a0-HomeTalkCallPattern.db",
+      "bytes": 163840,
+      "sha256": "866216e48a693e37970f3ac403f4c65a9e112ea566459a790c671fbd6dd61daa"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-fc2042c51d72b9f42b2d7b02-HomeAction.db",
+      "bytes": 823296,
+      "sha256": "748228ea2c354d42b99012b5bf8ae515118f63d53f1885159dacf0891feb1eb8"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-fc661c78d1ff9822f84a42df-Loading.db",
+      "bytes": 20480,
+      "sha256": "75c04ec1b193b0952566d25d0cb3a2214b933029d967585318d3bb3b2b9eb449"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-fcd8707b6fc0a3e6733b4e36-LiveBonus.db",
+      "bytes": 40960,
+      "sha256": "58464144ed4bad98a27b44746d2d1e3feb6cf6feeecaa274d980ee5ffdb74da0"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-fe511d7e0661786c59a890cb-Guild.db",
+      "bytes": 12288,
+      "sha256": "b30f33295bd81ecaa63a0fb74bf5c480d459aef5df8f16f6e518d190906b9058"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-en-fea970bbfe6fec120e05df06-MarathonQuest.db",
+      "bytes": 61440,
+      "sha256": "d1af29ea3219c94b2e1bf5313648ef81fc716a0fac2c3e5b76204ede7a643cdf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-06ecc12ebb4d168d8b69e557-Gacha.db",
+      "bytes": 8491008,
+      "sha256": "b68b607539401b796c2ae734839d9d2ead4dc1a03e1137b24f9a2476b527fd5b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-09c0bdde9a2cbeab75093266-PhotoContestQuestMusic.db",
+      "bytes": 32768,
+      "sha256": "5b3ae653f092d7c00ae373253273b8dc50223d73658ad792ac35166aacfaea33"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-0c4870a5545526ee0fa44236-CompanyEnjoyHomeAction.db",
+      "bytes": 24576,
+      "sha256": "4abb73681f8bffd2322bfa9f84529bf955fa3bc510c4af1211e180fe9159b7b0"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-0cf1583ca27260e02fe35ccd-LiveAbility.db",
+      "bytes": 376832,
+      "sha256": "571d0691c5570417ac326bbaf1e21936edce8b6fe5dfa98ae8942521a0668e2e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-10e6f3b4886791202c67a3c3-PhotoQuestMusic.db",
+      "bytes": 32768,
+      "sha256": "0b4ad84d95a5b3de0b5dafe5878280769278afceaedddafc2a2e815c2211147f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-127c52ad96ddb019ba1730c4-Accessory.db",
+      "bytes": 126976,
+      "sha256": "2110d2c9718a10ed462a925b23f7e36b30fed087b26b9935414db0e280c5b02e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-14ed52a95bf60a1ce0984450-GachaStamp.db",
+      "bytes": 290816,
+      "sha256": "5b476ee45dcff7facbf425d4641871d77efa5e3d487bd97448b6a0a7c5fc12d1"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-155e17fbbf06a4ef9b13f134-ExerciseHint.db",
+      "bytes": 28672,
+      "sha256": "ed248edc24147fa8f8c42064f428d40a85e054111e979fdf43b4659e4970809b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-170cd6dd24fe44f0f0c1e9d0-ActivityPromotion.db",
+      "bytes": 24576,
+      "sha256": "f6d12b73781f103ea4dd30dc6c596f877d0dbf2835fa9cb26677d65046b8153d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-18a077ae72d1a94a0fa427f4-LoginBonus.db",
+      "bytes": 110592,
+      "sha256": "dd37e08fedb9c16806c6f082bc1d8ad2e01fbbe899234f153eea23afa571ac54"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-18aa9146a2fb40c90287811b-Setting.db",
+      "bytes": 12288,
+      "sha256": "ebe2618a72735435b9af1b6635f152c2f44f91cbc5e7bbe449c7cefa8a558f1a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-1a3b85f59adffe7c73fbc8b3-StoryPart.db",
+      "bytes": 45056,
+      "sha256": "18044f83d0dfad41576bee45ad879b3dd596679e982f06501781e7bb05519b25"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-1b4d22a063316ae6cc356921-RaceQuest.db",
+      "bytes": 159744,
+      "sha256": "244ee030f5e60b991432c2a926933665fd41cb4789debc352eba0ef34525d96a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-1b95bb3e4425b56ce8e0f034-AreaGroup.db",
+      "bytes": 12288,
+      "sha256": "dc0fc780e6eaf35d83b970eb4ce37a0162640a0875ae481e9c17f0891c83fdd1"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-1d68e54e188af65592cb4c4a-Telephone.db",
+      "bytes": 126976,
+      "sha256": "ba9a3df48ce5c3e252c1ba6a977fcdfb7f1ffc88c7122bdb576a8770694f0eed"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-1fa7419cf0c455ff9e86eb56-PhotoPose.db",
+      "bytes": 36864,
+      "sha256": "ec5232ee061724655f7f3a97186d3e7dabf9b6bb673240fa86bde32e184cc3ae"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-206f9f5ebb757d10f70ec9cd-PhotoExpression.db",
+      "bytes": 28672,
+      "sha256": "4b8b0ca2539416527026c0e6e61d3707ba319415df47f1d4fa03da380f71750b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-21df85ab64dc10d60797f8ad-EventMission.db",
+      "bytes": 299008,
+      "sha256": "1fef24abbcf59b23ccb9578b24f3477712d064f87aaa946d1dfddee3c07e6c42"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-249c228e667e323f8747be56-PhotoContestSection.db",
+      "bytes": 24576,
+      "sha256": "12741e683738efb6716f4702a0e2417aa3b6948291ca0e5d1ef5342d1e3e6251"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-253b853e869ab3c8a22d4ddd-EventStory.db",
+      "bytes": 36864,
+      "sha256": "6659dc698348fab74b619ab541cc624d9dd6dadde2f67d555b10d32e24b040bf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-27aaa9220caafb13fecb54b8-Message.db",
+      "bytes": 4243456,
+      "sha256": "6b763522d5ed2a327b7e7ac09ac733561f82bdda9591833fe8ee9bc4935f1eec"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-27bb9bdbe9696aa8f09b6abd-Hair.db",
+      "bytes": 249856,
+      "sha256": "26b019fb339c45bbe8b92c90339081621a47860596fc9adebfb11df7861a43a7"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-2906cf94ac16fe863d49ef1f-ExtraStory.db",
+      "bytes": 126976,
+      "sha256": "a3dc8e4fcef648e18a1b6be2e0de1b8c30a6c0c7b03fb1791453f516f782f127"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-2e76c729e15eb69138b82f21-PhotoExpressionStagePosition.db",
+      "bytes": 20480,
+      "sha256": "6939aeb6d30ed7b7ffd623458cdccdab48a714e0c0fc363777edce3cc4c6df79"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-310fab7b0088c818b3f06ef7-HomeBackground.db",
+      "bytes": 24576,
+      "sha256": "6b1a0f90b7de424786e5d2fde7b3e11f9fd3ac697d71bf5df1b95bb0ecf3c442"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-3337182bc08c12301a94fdf7-BacksidePanelGoalSetting.db",
+      "bytes": 20480,
+      "sha256": "949852d977b580737dc7e5b884924d1935805e7c279c4a16f6964c5c5b3e3644"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-348fd52da6eb37fb39cffc3d-PhotoContestQuestStage.db",
+      "bytes": 20480,
+      "sha256": "115be82ad217ed485b1e7d8a6ffc751d0cad50e6b2fc8a3de7d40d178dc6517d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-35bbbdc1c1413d58cb28fc8c-PhotoQuestStage.db",
+      "bytes": 12288,
+      "sha256": "aa5dc2ebe7f65c1ddcb43ce50538e198cfd468a824aa1b15e33413a29bb76848"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-3dcd030aec4a9d4b1c388533-ConditionDescription.db",
+      "bytes": 5697536,
+      "sha256": "94fc7a2f7b72649b634626d66ea5bda35ceec742c79760f5eff755c64b35f1c2"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-3f05f6f2e3914bbeaeea8390-Story.db",
+      "bytes": 1085440,
+      "sha256": "41f59d02060f794516032633d100a224551362909955d9fc4d3662c983c55c91"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-407410dbde62fae380c391a2-ShowcaseToyShopFilter.db",
+      "bytes": 12288,
+      "sha256": "504b5cfd68e946da942789236a208409d13f8966647e08085ae734fb48d7a5c2"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-431988d0da7dc9281c6f3e33-Hair.db",
+      "bytes": 249856,
+      "sha256": "8802899385584eb065ea34a9ac16d852b89e17d3afa5cda5c08868e33200519e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-4a1b3100336e48cda02f9da6-Quest.db",
+      "bytes": 2486272,
+      "sha256": "cee1cc37d1f0cb7c003ca49a0ff5a650feae173074ab6c135b03c8e5151a1e2b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-4ae5a42ee57e1e9016ce3808-StaffTraining.db",
+      "bytes": 8192,
+      "sha256": "98e36d8844431b015ac1865115f4089f86b22a8b45610af3591ba4c7efd40385"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-4e26f32a71bbdd10b5d5b025-Character.db",
+      "bytes": 135168,
+      "sha256": "35ae5ec23c2179b1f251eb17d80a548b59fb7dbda412f0752d2db0070f3a766d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-507c24c6df9a812b20e24726-Music.db",
+      "bytes": 278528,
+      "sha256": "3439bc97c17b733ccd8bb307c51662eb672f76e13679c7f151e7f9bf62142f1f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-52fb1737db28ee162b5f7a71-CompanyPoint.db",
+      "bytes": 12288,
+      "sha256": "2a98360eb4117aace416947740283c0e17a4e41c6ce177a8fcd7d6ed4b9e40ab"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-53301915bf1307028059af5c-CostumeType.db",
+      "bytes": 12288,
+      "sha256": "b766f3b384ac065dd25a6dcc3e065891ea8ad07933f3fa434a8846d284dc3256"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-5f1031a32c931f1c20a1d42e-Stage.db",
+      "bytes": 24576,
+      "sha256": "170a8b57f2b2cc77091523b2535e09df81f95c4e44c49ce2e8a0be42a063a1bf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-6053b0c3bb719403412539ae-PhotoContestActivity.db",
+      "bytes": 24576,
+      "sha256": "c314faf485065dd88ae5127a256db308f2b772484446e946033da08cdb35da71"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-60dfed3ac3849c268c6be661-ExcursionGazeReaction.db",
+      "bytes": 118784,
+      "sha256": "3602f247c0da1560ae9db2dfb00ae8951c963616467e6ddf85f3b033a353df98"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-6567d69664de5d7bedbb93f8-CharacterGroup.db",
+      "bytes": 24576,
+      "sha256": "f3fa487dc62b2f02a03ded6d27880f907a3cc4e4d81f41f46b1efd9605071a49"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-659e0f5c4d53b31a9fa14d1d-Item.db",
+      "bytes": 561152,
+      "sha256": "1c3ffc7bee871219b3c8dcfe74108c7f81aa3bccae71e4e0ead9cbdac722f423"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-669343e22c8a783e236b342f-ActivityRefresh.db",
+      "bytes": 12288,
+      "sha256": "59ccd8dbb1a50d8830149fbff539546f3e1d3638a5650b8b617e76a00156925b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-6702b3f3cd60befdca683e9d-HomeTalkCallPattern.db",
+      "bytes": 176128,
+      "sha256": "372d3ff5025ab43fbc48d4e1da44c424dfffac1ad716ce917765b0d480ef79ab"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-677a8abe6ac1a16c4d2c8ffb-Wording.db",
+      "bytes": 57344,
+      "sha256": "61ee97caa9c73813a6362fe4b31257afb7adf0284f50a96e25c592bdf7c55455"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-69dc544e461cb304c5b14714-ExtraStoryPart.db",
+      "bytes": 20480,
+      "sha256": "8303f3825f3489be7003c4d1c7568cd233ea7ec16971ebd594c3cb7cd6a1183e"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-69f3328206869ded39ad2fa1-Card.db",
+      "bytes": 335872,
+      "sha256": "bf1fd997faca245e314d9b10efda1c92a6dbb77979230d855043d88b80891be2"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-6e89ff767ecca0a876757cd8-MessageGroup.db",
+      "bytes": 20480,
+      "sha256": "bd9d629af3f2a3196fa96e65ece3539d34d20493fe4487249dd3517df4294d1c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-6ea33b95f760e2f076eaa12c-PhotoExpression.db",
+      "bytes": 28672,
+      "sha256": "c431c2e10984ae8b5493e6d208b70aa45a521ca2bff3c18829454fa71891f783"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-7258c9a75ba046bc1589f129-LiveBonus.db",
+      "bytes": 40960,
+      "sha256": "9dc62efc7d7a2da951dbf1653cc6b0fa51cef6e1ce0f56d577f561014f748fc6"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-732f6341b8ac951abf69153c-LiveTip.db",
+      "bytes": 20480,
+      "sha256": "d82cb557da17914f93b792101ae045959210a80007c043cca267df2abb7d5a45"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-753629a2d4da532d5593e375-HelpCategory.db",
+      "bytes": 307200,
+      "sha256": "1b89317bcb04111bc6acee67007a59fc5f778aff4a43b6517b812677017a93be"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-7949454d678886f9b1f41d8d-ShowcaseToy.db",
+      "bytes": 409600,
+      "sha256": "98fd3c2116defb3b8cd4d05f7847fde08738f4d98566937ceb0c8f614dda1afc"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-7c278c9edb258dd923e3bec6-PhotoFacial.db",
+      "bytes": 12288,
+      "sha256": "3df6260d313cd3c08d300054b40a3dcf6dedd58af28055034fe69299dc1436ee"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-7ddc9c5defa9d5339bbeaabf-Area.db",
+      "bytes": 217088,
+      "sha256": "e1c24d083e5a069a729eb863a847edcdf43c9df197b8ddc2d60ffa3b4180c8d8"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-81635c44d9dc6909cce57634-CardEvolutionMessage.db",
+      "bytes": 20480,
+      "sha256": "269cdcb00d3addc081c52a258f4079d9455de74ce479eb68776d9aa6815265a1"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-840631d4c1ff7e4781d82198-ActivityAbility.db",
+      "bytes": 24576,
+      "sha256": "7da601ff1e422de6459ce133df480b74ecef8c5925cf6721536cf4d4a685172a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-844513b72ad52870732af871-DutyPoint.db",
+      "bytes": 28672,
+      "sha256": "c35318780cfe550d8ba0592073326e9408ce9b0654ff6e81ee6ce439ed2f21d7"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-8ae7aea342a6a4d2f53dd4c4-SkillEfficacy.db",
+      "bytes": 3764224,
+      "sha256": "6410adc10b0a383e0d4cf32b53c5ae4464d2b757282c54075ebc2e5377ae05fe"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-93adee3b89c5425341443722-ShowcaseHashtag.db",
+      "bytes": 12288,
+      "sha256": "5d76f53af6ddc960ef18fe5e637b3b4639859e30f04d3b5d6c024554135c91b3"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-954b86f5211840c2d64b8c5c-BoxGacha.db",
+      "bytes": 28672,
+      "sha256": "60ff28d110cb3c6667841355e951c8f14b5ee6ea95f45a02f8be9984eb3c7210"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-9a1f1946c85c7164902f7269-Exercise.db",
+      "bytes": 24576,
+      "sha256": "59d115b37b5fe638767854a46adeb9d253c4ec427c0428ff31b44524f1506ebc"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-9b1225628a86fec82d4de88e-Loading.db",
+      "bytes": 24576,
+      "sha256": "9bf2d4633242b62dce51e3795161a51dac09ef908b715bfc54fd311166f9907f"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-a432f0b609fa30bcc51ca5c7-PhotoAbility.db",
+      "bytes": 237568,
+      "sha256": "84018c00bcbd9d5fd19235bf4b9a90c7576708a8c73d601994fcafa87c316f59"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-a6acfedcfdfda7d2c248960d-Costume.db",
+      "bytes": 192512,
+      "sha256": "3244d644ec6ef0a95f84620cfb9a582fbf3935adc80cc1c037c1a04fa8ecc29b"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-a9ae4d23a2b8a2b2c4e62e68-Costume.db",
+      "bytes": 192512,
+      "sha256": "9b1a94202724676f057681e98b0e2a5dec1e9664ed3cb16eaf5262177b0cabc7"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-ad3542dffc8e0aa340c8bde7-LoveHomeAction.db",
+      "bytes": 106496,
+      "sha256": "02073b02547fd21820a82b49ef73e506fa31b81edb94da4fe633defebf2df4bb"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-b0b8307ea5616085f4e50632-HomeBackgroundCategory.db",
+      "bytes": 12288,
+      "sha256": "92e0b9fb6adf472613c997163d5268153bbaea72d71baaa7d85bf034d0a1e3c0"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-b2343333c8d824517d9d862c-Emblem.db",
+      "bytes": 241664,
+      "sha256": "8e63984bb5e89d7f14d5133c069333969ed2ef7d2bbe3996b5fac113fea4c9e3"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-b2c9743a8a16128634572f13-PhotoQuestStage.db",
+      "bytes": 12288,
+      "sha256": "32306cb3c2c554f9b3c64127f559d81a05c523c8dac75eadc1b224eb3f2dfc37"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-b93c7c6c3c937f21c8d67179-HomeDramaPosition.db",
+      "bytes": 12288,
+      "sha256": "74617c1736c0453f1535430c56f9dc4c2a49f4891b70474b0d43f99ec323b595"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-baed2de5daaae0ad69a5caab-PhotoRecipe.db",
+      "bytes": 3371008,
+      "sha256": "eca131a5f237e890232875eab88f61ad05a8cec81708ff95e5d3d7ba76424462"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-bbe4d93169ecd24fc4c3aa49-QuestPressure.db",
+      "bytes": 12288,
+      "sha256": "1dfd174d8a5bfe580debef38d478c9f679be76518ab96d62a6aeabaa1c666df0"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-bdf8da461439e3e7e0e3b237-PhotoActivity.db",
+      "bytes": 24576,
+      "sha256": "9f684162016269047efc0c3a07a85a5c52386353d829b85888a3339f454582e4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c02c55b5a14f08bccc6b1f76-HomeTalk.db",
+      "bytes": 921600,
+      "sha256": "c5b4f2c304de8c0eccf5588652948e850097ed06fb52c77d6ded31a596bb26c4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c0d390d7ff74a58837ef10e9-Decoration.db",
+      "bytes": 86016,
+      "sha256": "4dc73643ee9c066fa1e9ed87058c681630313fed05878581e5e067f2e495e86c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c2ec5871d8958cbce18ac34e-ShowcaseMusicFilter.db",
+      "bytes": 12288,
+      "sha256": "6112fa9901ca5cb5f76bfc8b1f241c7a677d23582b91177cc91c43c62b40e4f6"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c31ae5c93286167315efe72f-Skill.db",
+      "bytes": 5697536,
+      "sha256": "242f6edc8524e90eea6e8f3dbf9cffc56ebcacfeb857e421efe769bdcbad7f8c"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c4d062dc15471147e7da01f2-HierarchyGrade.db",
+      "bytes": 12288,
+      "sha256": "8aa7f2d12114b4be1a8afa582b6ac2f22637c1315a96984b455ddd17b77c97d4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c699a9ce01995e3d687a89ff-PhotoQuestMusic.db",
+      "bytes": 40960,
+      "sha256": "43e768c93c1e5422fe0b854e9cca20da6678d4638d5866bd4a8383f0254fbe31"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-c7a770b76626f645676d641e-StatusEffectName.db",
+      "bytes": 8192,
+      "sha256": "f622b704d351873dbbaa4daa8f16180ee8856b4ba9ac8e3d99a04956ec3023c4"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-cb2ef86f2ff37cc16f7cf813-ExcursionPlace.db",
+      "bytes": 12288,
+      "sha256": "3b5d7b5f16933e37c8e8f9982f9dd87e548ca88e6bf45d501c9587c9d1400eee"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-d13b7c46ee9206125a29df3b-ShowcaseToyCategory.db",
+      "bytes": 12288,
+      "sha256": "361641737ad92852cc2bd2a3bbc7461381ab87a8c87cb6b9490ed90e326c8bdf"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-d359a9667264998bf0910dc9-PhotoAllInOne.db",
+      "bytes": 126976,
+      "sha256": "4bc145cd74011cf2a053b4ba1224d39146bd3e9da2e0b5a8af60dd0097af1418"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-d5cb00f642926cd6d6e28d36-ActivityFanEvent.db",
+      "bytes": 20480,
+      "sha256": "f0401d6ecb06b565fa76c7fd7ec83dbb0c07c155801325bc7db5c8f94b4a26de"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-d687963e5f1e169771eef82c-EventStory.db",
+      "bytes": 53248,
+      "sha256": "3ea1057927ebe031e85d0768238ced424d9c8460e1ab14ea50556e1d25e92228"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-d94c49b0d5e0ff595fda6087-LoginBonusText.db",
+      "bytes": 12288,
+      "sha256": "646e225adddce36cb4ff6b4c7687af07735f3323f5638584ff4c8e9c19dd040a"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-d9adeb346905ce69d1a1d354-PhotoActivity.db",
+      "bytes": 20480,
+      "sha256": "cf0e574479a7668d8a97423e68e1f6f117d49cefedccad577d515c605974ed28"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-e0f76690509b051a3d59e7a2-ShowcaseFrame.db",
+      "bytes": 12288,
+      "sha256": "0f2332a1bfd29af93db6e3d03446c1e5e90a0c5ab94b0040191a35df3159085d"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-e437088f6444b4004626ed4f-Mission.db",
+      "bytes": 5107712,
+      "sha256": "234229d7a72bdb8ded6019b69bea7e1336ea7e728cd0770e14d7e6055150c803"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-e7e798f4e584d78f37b99e66-MarathonBoxGachaSetting.db",
+      "bytes": 36864,
+      "sha256": "9225a347e3dd61c1626485aaef5bf3e1f6dcb9919696a8e0f38ac72cd659aad8"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-e87aceac00c46b8d265027a8-GachaButton.db",
+      "bytes": 876544,
+      "sha256": "2801ba484ee4631c3e2a3d5397ab25dc9194a4fddc19a031aa288ddfd15cc535"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-edb23f6f5e6bd05eb6541814-HomeAction.db",
+      "bytes": 876544,
+      "sha256": "5b0cf0431e431b55e3fd77c88bdf596497389587d2836f61a2d7bb1d4302cc63"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-f7d37aa15c8e4da35f306c7a-Guild.db",
+      "bytes": 12288,
+      "sha256": "98eb3faed9ab9cb8a8660f9a5d99fef131177b76e9a37b499ab9c9e5c965b731"
+    },
+    {
+      "path": "data/original-master/assets/master/local-language-ko-faac143c1a0d2f573f82bf6f-MarathonQuest.db",
+      "bytes": 61440,
+      "sha256": "44d42cd0b6aaf508604f38c98f5d39b3db495dd50c45bea0637a2ceff93d5294"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-Costume-id-419b13c055e653f98e3e8af2.db",
+      "bytes": 188416,
+      "sha256": "635cb31fbe48a0515931fadc66fe42189b5611b74cc689693d04347df9af134b"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-Costume-old-1de57851190842b5ad78d8ab.db",
+      "bytes": 188416,
+      "sha256": "59e00c444e8487fa2bcb924061f33fd27a190b940b256058f27b379c2ba2bfad"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-Costume-original-9aab61ebab6b538dc0312520.db",
+      "bytes": 188416,
+      "sha256": "b4b82c031e359731b6b757297c0ff05061c3eeed282e5f8d144097b6b19709c4"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-Costume-recent-4ab10035c8694f790a289bdf.db",
+      "bytes": 188416,
+      "sha256": "c0cc8a5dfda19ced482e6f4fced545739769687b0aeeebcdbb6784659843b06b"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-Costume-title-b4ce76a6a788f5b434a81871.db",
+      "bytes": 188416,
+      "sha256": "09e67ce17b22f7b9ecfd4c9b30cb4abbdfd85b7a21e66475c4b43b46ad3643c2"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-PhotoQuestMusic-id-b41366a79088c30336ed1e9e.db",
+      "bytes": 28672,
+      "sha256": "7ecf8916d407579aff5dd1a41599ac7de0e61560ea5640c3d14ac662deeaea97"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-PhotoQuestMusic-old-cc66adeb05e8f66d910c5c34.db",
+      "bytes": 28672,
+      "sha256": "cbdb41c7e29b4083cab7b5ec5032e7d4eff0471c8b5b34c8710cff73bf0e8ff7"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-PhotoQuestMusic-recent-3f178e745daaf264fc09a006.db",
+      "bytes": 28672,
+      "sha256": "28ba94a1e131464f71bf35cbb6a4e2efa8e6c4dac03ea0a19fb2fe9f02a9d4e8"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-media-PhotoQuestMusic-title-1d0d8fd2c3e650d664a43100.db",
+      "bytes": 28672,
+      "sha256": "256748d7250771f4fb16c90b36304436b327e881117bad84ebd8fcf6cf193eb9"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-Costume-id-7d2c9e7238868ceabb503bea.db",
+      "bytes": 188416,
+      "sha256": "8174d8f97d55f660880c70a48f86b5565c42b02dc97b337e0db08cf75a48fa8c"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-Costume-old-e2fd9b327be6882ab10a90f6.db",
+      "bytes": 188416,
+      "sha256": "cd8f11806f3a03c27a979f5dc9c9310df3d03046cb980f5aedc43d3abbcac610"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-Costume-original-e56cabfc2307df70d751b775.db",
+      "bytes": 188416,
+      "sha256": "c4e46d38d86f1de74fbaa26f6dd94f3fee5a77fe2a09ff4f0a641c37b515d44b"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-Costume-recent-a02e2d06ec779983fb1945d9.db",
+      "bytes": 188416,
+      "sha256": "c69312df9cbf6d1233373ae614d87dec4d73373f26655d441e8b7a5a349a500e"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-Costume-title-2a72e4050fb6035ac3aa65f6.db",
+      "bytes": 188416,
+      "sha256": "c8cca506b8e1fe75a3df8a84b7c14762122af289441413e400596dd97cf1878a"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-PhotoQuestMusic-id-f03b0511a2bf6327fa7763fb.db",
+      "bytes": 36864,
+      "sha256": "afd977b786a4dfd78eff2c86d058477c4d94bbc3243c44b1706ca124eaa4607a"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-PhotoQuestMusic-old-b9cd70ee8f68f80d92a90ccb.db",
+      "bytes": 36864,
+      "sha256": "a3362fcd8af766f5fc5e30e2173f3243bf3c087c2c4897362daeaf351dbbd210"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-PhotoQuestMusic-recent-257a8cad5f7dec0abc1037ef.db",
+      "bytes": 36864,
+      "sha256": "0586f67dcf6410e66eb2a804ef7d19326873bf9ecffc5d3aff97aa7dd6613125"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-en-normal-PhotoQuestMusic-title-f28ca5780b57b4607f06ca27.db",
+      "bytes": 36864,
+      "sha256": "26af159f3568de9038993355982386ae0d0e5ff6cf48ab558a1d3cbcd77d9ccd"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-Costume-id-157fdb87fd2af6c9a45819b1.db",
+      "bytes": 200704,
+      "sha256": "8fe019f453a9caedb3d9b6ba54bec3e6d0332be9c9b29bcf8a39e2fce590266b"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-Costume-old-3d7da448aae258c6d7523c28.db",
+      "bytes": 200704,
+      "sha256": "62d836770cf3336183b55b8394db9a1a1eb3a1bc028cccb4244c78066c0cd2c1"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-Costume-original-937180c3771098cea9eb4aba.db",
+      "bytes": 200704,
+      "sha256": "76d2acda690d63980316151036a7bbc9c11d7b2383c907109e172be283a46980"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-Costume-recent-e525d33c1546ddfac05bee9e.db",
+      "bytes": 200704,
+      "sha256": "6603edc4ef9f5545534d3abb12903f4ea39fde897bcdcc183fef84679a2ee7bf"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-Costume-title-58a5eef97ecc908ef4418d92.db",
+      "bytes": 200704,
+      "sha256": "a62f5f4b91ffe1aa2e8baf8b669b9ce3995223639e440acd1db4a17d5c3a570c"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-PhotoQuestMusic-id-4cc7b966da10695625efb42a.db",
+      "bytes": 28672,
+      "sha256": "e430f0d9ce80823996fe73de3e1141975639c6a866dda609d9c4c1a50e3ad8f3"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-PhotoQuestMusic-old-67242d25564e07088667b435.db",
+      "bytes": 28672,
+      "sha256": "5c079d5bae062a5d9aefc9caeeff9d106cd690be1ee14a513e198ede3b1a6711"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-PhotoQuestMusic-recent-c5f5a90fe7e68e829c39ec6d.db",
+      "bytes": 28672,
+      "sha256": "8c07efea0bf771738e6bcae112c843bc13633be518bae918327ce36a4af54bf5"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-media-PhotoQuestMusic-title-5ecf61aaa4b05849310175e8.db",
+      "bytes": 28672,
+      "sha256": "df68b5d2b5b4c5c91597f90ac0db3066e1358b18f5eb16684473d204b10f04ec"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-Costume-id-b5036ddff06fb330bc87745c.db",
+      "bytes": 200704,
+      "sha256": "51b1a74516b9a0ba944ccca595b9e9ccd7c219b6ff36c139a8dd3f27693e92fb"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-Costume-old-f502c33b10ecec9a740121be.db",
+      "bytes": 200704,
+      "sha256": "776943cff39bd2ae44f1c07c227697d0d26922a6025314db9e64b79979226366"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-Costume-original-c3674d287cb63d3ad6c676de.db",
+      "bytes": 200704,
+      "sha256": "f89605f5929f1997f2f9f9bf63d6ba3f47fbe702f9d2c3d538592e0f728fa85c"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-Costume-recent-301be557b681de6efb240e4e.db",
+      "bytes": 200704,
+      "sha256": "78d58ff345fc305ac3f80b18bdb76ae06beaea61210932493152c0969e986432"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-Costume-title-ee5b5061bacee3b249c33805.db",
+      "bytes": 200704,
+      "sha256": "0c9cdf0398c9b6202438fbd52f4ac3592f5c114b77fb753ae7b3c4e9d76757a3"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-PhotoQuestMusic-id-ebf2ab970a9184db0d648259.db",
+      "bytes": 36864,
+      "sha256": "8b81395e9f6bcea4a7e6f4f809f3b9897dbd85bc37ca30a16120e85da3eaa2ed"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-PhotoQuestMusic-old-7e5279dac466d25ddd7c4b8f.db",
+      "bytes": 36864,
+      "sha256": "2e4a1a4024fdbfb6b6d6a08fbd2d4745180631fea254258a39727c4668775144"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-PhotoQuestMusic-recent-a2b51daaae2833acd33c31b7.db",
+      "bytes": 36864,
+      "sha256": "6d648088a8cc4ea2f6515753a52e15a1b85bddfc2ffa14eb9f52db20861d4107"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ja-normal-PhotoQuestMusic-title-3270553281d03f044b8c9cd0.db",
+      "bytes": 36864,
+      "sha256": "28c20e7f1e6bffd438abaf9346363824d8770417690dd576d58750c1138fbf91"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-Costume-id-e3e3071c24da5e2d674bfb1c.db",
+      "bytes": 192512,
+      "sha256": "13fb8efd44bc091a540150adffc44bba345b0052a28fb04db51cfdcea33cbb65"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-Costume-old-df7356324e2c74c301ac1637.db",
+      "bytes": 192512,
+      "sha256": "1991ecbe79f2b3cb2fa832427ce16a0820a399f0dac710109c53b6345e11c181"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-Costume-original-a9ae4d23a2b8a2b2c4e62e68.db",
+      "bytes": 192512,
+      "sha256": "86958583b26f8e63d32e8c59577b8d88e5c01721d939a18f6b415779d08a1280"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-Costume-recent-05a13452058ce1676490a0b5.db",
+      "bytes": 192512,
+      "sha256": "efe29d20e69b234cb796e694b7c38b2cfbef7d64e1aa28c695d45ca44cebaab3"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-Costume-title-fbdc0c8bb9895103059dd686.db",
+      "bytes": 192512,
+      "sha256": "35e69a22c1c88a306e3d19da791338e0356dc3637ae16950be3ff2d85bea2089"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-PhotoQuestMusic-id-9d95a36ae1d59ea3c83097d9.db",
+      "bytes": 32768,
+      "sha256": "f4d02bc8a50542dc937ca143eda7751bb7175b36c2322b818b194c186b46435c"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-PhotoQuestMusic-old-cb4ed933f2a8eddb94d5c223.db",
+      "bytes": 32768,
+      "sha256": "75f8102ea9de4f0497f646ad6355121075dba5b28ab37f44eafe9e0ff4a5d4f2"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-PhotoQuestMusic-recent-7658cd4c7c1a132cde48cd2b.db",
+      "bytes": 32768,
+      "sha256": "a5b0f2a56b2193c5cbcc42ac4df9cb73df4666b3334307b2ddc8c84d77b89b0d"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-media-PhotoQuestMusic-title-fa1f6af5238bf2ec03c4a5de.db",
+      "bytes": 32768,
+      "sha256": "2586e068626d78c4b4bad244fc2c1484ac5805f7828835ebec7667108c291289"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-Costume-id-a3ee30d99ffc3fedf0f4991d.db",
+      "bytes": 192512,
+      "sha256": "b8e81281ce00e149fba26bc80f169c0f53f413dbf5a2a6bf0522ad1e751bd5b1"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-Costume-old-29e33fb17ffb2e6ab4e10217.db",
+      "bytes": 192512,
+      "sha256": "2d4aa9bc4d2f11852707e674e7389176d66f5bc717a9a20510406b0b04e8b00a"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-Costume-original-a6acfedcfdfda7d2c248960d.db",
+      "bytes": 192512,
+      "sha256": "60754b6206b241c29cac93e21cce56d59d7093546711a32e183f92c9d1207b39"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-Costume-recent-d53ffecac0e4ee5c6ca02355.db",
+      "bytes": 192512,
+      "sha256": "2713d844e55389832e92bdb5dcfecd4df3444d3e75e7f9de1257e5c9049ab19c"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-Costume-title-03318ca4ee06dc40012728b2.db",
+      "bytes": 192512,
+      "sha256": "baa41cb5f11123d864cc475b602ab5b4e8f5428fb655f7be38716581b3086ad5"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-PhotoQuestMusic-id-c98cba940d48243715421e7d.db",
+      "bytes": 40960,
+      "sha256": "da3ec339c13aca342204db049f85c8dde3319014556d24e2f6600bc461c328d3"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-PhotoQuestMusic-old-da1e2fd3ce817a832995f73f.db",
+      "bytes": 40960,
+      "sha256": "eab77fc72f41a64b99ddc417310da2f34fc68baaaba118ca6ac8be29de405ed9"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-PhotoQuestMusic-recent-bc9e0a96c00fad69e7cba7cf.db",
+      "bytes": 40960,
+      "sha256": "8bba9107e0e7ea561ee1d9716c65da4e9b2425cfe2e7bb3a0b87b512c6faac24"
+    },
+    {
+      "path": "data/original-master/assets/master/menu-sort-v1-ko-normal-PhotoQuestMusic-title-eadb64d8f9cf7db020961c7b.db",
+      "bytes": 40960,
+      "sha256": "53b4917bd9a94a1f6d3bf1c2a2808e7701f8a57c45740c429e223db0880a97ca"
+    },
+    {
+      "path": "data/original-master/languages/en/coverage.json",
+      "bytes": 52072,
+      "sha256": "7e9eeb550cd3ddeea0ecdb195a5259b18791a79c65a5958348d9b6ebca67ef72"
+    },
+    {
+      "path": "data/original-master/languages/en/master-sort.json",
+      "bytes": 3866,
+      "sha256": "5a166a59f4f7baafa89e7d5a4da717e2ef437b746342ea8e5587365984cbcd33"
+    },
+    {
+      "path": "data/original-master/languages/en/master-tag.json",
+      "bytes": 64896,
+      "sha256": "2c2278989cf6a1cde1f93797b5ca1929c8d59675a5fc3b0a8c64faf3f0565f7b"
+    },
+    {
+      "path": "data/original-master/languages/en/media-coverage.json",
+      "bytes": 53766,
+      "sha256": "bcfb08c77d4abbd0559f2c78cfd159482a0f36e511d696a22de4cc5e4e5046c2"
+    },
+    {
+      "path": "data/original-master/languages/en/media-master-sort.json",
+      "bytes": 3847,
+      "sha256": "29be48721d0e05f5e99080fe2d4581c639516ee87935f347bccf5eb1f018c19e"
+    },
+    {
+      "path": "data/original-master/languages/en/media-master-tag.json",
+      "bytes": 64896,
+      "sha256": "f25016c9a3ce86bc092050d52b970718c8fa40749ac97021a6527c1ccb6dfd60"
+    },
+    {
+      "path": "data/original-master/languages/ko/coverage.json",
+      "bytes": 52046,
+      "sha256": "45b85a91d8f07b027a59f3c2adfae6c4cf623b315e8651a9488d61c853d2724a"
+    },
+    {
+      "path": "data/original-master/languages/ko/master-sort.json",
+      "bytes": 3866,
+      "sha256": "8650fe52478917911cbb3ffb1b04be034f2f8c9e2873aef862e86ec1e4398b19"
+    },
+    {
+      "path": "data/original-master/languages/ko/master-tag.json",
+      "bytes": 64896,
+      "sha256": "2270139f92d15ad3653f19e4517fd98610f17905914c6d930ef5c06cd6c654f5"
+    },
+    {
+      "path": "data/original-master/languages/ko/media-coverage.json",
+      "bytes": 53740,
+      "sha256": "6a6a60a506b842c228888a1002fdaea6847ff3a6525a052bd505415e4d7a0227"
+    },
+    {
+      "path": "data/original-master/languages/ko/media-master-sort.json",
+      "bytes": 3847,
+      "sha256": "dc993bb4a22f663033305bb29023558f8af9b5ae9b54e4df72ac4b109373d0fb"
+    },
+    {
+      "path": "data/original-master/languages/ko/media-master-tag.json",
+      "bytes": 64896,
+      "sha256": "67222a23e1e5437bda6a3126459f670814a15ed0dea1a54d3ea523c9813e18a8"
+    },
+    {
+      "path": "data/original-master/master-sort.json",
+      "bytes": 3848,
+      "sha256": "7d2cdaa63bf6e647800e8df6001e6f370356fcf46104ea0964ef257c59087389"
+    },
+    {
+      "path": "data/original-master/media-master-sort.json",
+      "bytes": 3852,
+      "sha256": "b642907287724d2b3a123adffc8dd75c4644e9c48fa1fbf2c1c95e31a29369d7"
+    }
+  ],
+  "ios_public_files": [
+    {
+      "path": "data/public-octo-ios/settings.json",
+      "bytes": 322,
+      "sha256": "8426d4e871d36803badc37d46280fb7fc94a2915cc184520fdb51d4740c43cc3"
+    },
+    {
+      "path": "data/public-octo-ios/manifest.pb",
+      "bytes": 5841650,
+      "sha256": "b431d531ef393ff1807229bbee4bbe75d4c9821007329f91e4822527d9844e9b"
+    }
+  ],
+  "prebuilt_catalogs": {
+    "schema": 1,
+    "policy": "precomputed-language-sort-v1",
+    "base_payload": {
+      "bytes": 84637208,
+      "sha256": "27522b394b021a4df002a4e34f20e89b5407be7b145aeecce45f5023b5227522"
+    },
+    "component_commit": "adcfb4ff7d76c7669ff57ed0f013ff1e1cb1810b",
+    "component_sources": {
+      "src/idoly_local/master_translation_build.py": "56287a499c25f524d2ad5b5187503fa23fb89ab706e45c27b59fafa126a15313",
+      "src/idoly_local/master_sort_build.py": "d3375426141dc9a636b72729467a4644b9b0cbafba1bd43b5b27aac389bf19b5",
+      "src/idoly_local/master_sort.py": "4e00ba2b6f5ee7dbd547747d3af7386d107b7f9b784d1fde2f7f73cd5e71427e",
+      "src/idoly_local/master_build.py": "9ae4b0d259f320458ef2a50ad54a193401fa8747524e7a57e1ae51dd4974e74d",
+      "src/idoly_local/media_master_build.py": "88fab13999fb2a8ff1ee9c21778f4b8116bdaf282e1c40d56194218e323b8e48",
+      "src/idoly_local/media_outfit_policy.py": "4d530871be97b753ccb8aa282ff5364754333bbd68cee29cadbd0b93d2312f2c",
+      "src/idoly_local/language_settings.py": "b6ca20a555bc2910ea5f03232dfc03c9b99c818c851affd7a80e8bbd6023f341"
+    },
+    "catalog_inventory_sha256": "87cb9da9d0251a6bb5a366c53537367025c95d695a2631e4ac3c676044351199",
+    "added_members": 260,
+    "sources": {
+      "ko": {
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "cf8754daa404cf353d1235cebbeef9d0e0bd0a8d",
+        "license": "NOASSERTION",
+        "license_note": "No root LICENSE in this pinned upstream data repository; Hoshimi-localify module GPL-3.0 is separate."
+      },
+      "en": {
+        "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+        "revision": "aa0993d34843bd8fad503a84ee75392ec6058246",
+        "license": "NOASSERTION",
+        "license_note": "No root LICENSE file is present in this pinned sanitized data feed; HoshimiLocalify-en module is separately GPL-3.0."
+      }
+    },
+    "coverage": {
+      "ko-normal": {
+        "version": "local-language-ko-da12150e7e8eb2dd4af266f8eb605f668a99d73b8ac097a9603429a5f8e9c960",
+        "source_tables": 90,
+        "translated_tables": 89,
+        "changed_fields": 229844,
+        "unsupported_tables": [
+          "Tutorial"
+        ]
+      },
+      "ko-media": {
+        "version": "local-language-ko-00edc858a3e20dfb5a4af986eb06215663e92a632423db0504bd36b43f2cbd72",
+        "source_tables": 90,
+        "translated_tables": 89,
+        "changed_fields": 229845,
+        "unsupported_tables": [
+          "Tutorial"
+        ]
+      },
+      "en-normal": {
+        "version": "local-language-en-b3d46cb867339fda7bb14e9d7ffc07520d266121bd5d67cf50a0e8d779f420eb",
+        "source_tables": 90,
+        "translated_tables": 89,
+        "changed_fields": 232389,
+        "unsupported_tables": [
+          "Tutorial"
+        ]
+      },
+      "en-media": {
+        "version": "local-language-en-accf05c6af85c04de701cb25bf0d12f643491e0a764fe4dcc761499119f7f5de",
+        "source_tables": 90,
+        "translated_tables": 89,
+        "changed_fields": 232390,
+        "unsupported_tables": [
+          "Tutorial"
+        ]
+      }
+    },
+    "sorts": {
+      "sort-ja-normal": {
+        "packs": 9,
+        "roundtrip_verified": true
+      },
+      "sort-ja-media": {
+        "packs": 9,
+        "roundtrip_verified": true
+      },
+      "sort-ko-normal": {
+        "packs": 9,
+        "roundtrip_verified": true
+      },
+      "sort-ko-media": {
+        "packs": 9,
+        "roundtrip_verified": true
+      },
+      "sort-en-normal": {
+        "packs": 9,
+        "roundtrip_verified": true
+      },
+      "sort-en-media": {
+        "packs": 9,
+        "roundtrip_verified": true
+      }
+    },
+    "ios_catalog_identity": {
+      "schema": 1,
+      "application_id": 212,
+      "application_version": 105051,
+      "revision": 1159,
+      "manifest_sha256": "b431d531ef393ff1807229bbee4bbe75d4c9821007329f91e4822527d9844e9b"
+    },
+    "device_verified": false,
+    "scope": [
+      "Master text and precomputed per-table sort variants",
+      "Missing/unsupported translation falls back to Japanese",
+      "ADV dialogue, voice, subtitles and asset-localized UI are outside this master catalog",
+      "Event-story gallery visibility restored; ordinary catalogs remain byte-identical"
+    ]
+  },
+  "server_json_additions": [
+    {
+      "path": "data/master-json/HomeTalk.json",
+      "bytes": 1068215,
+      "sha256": "63f332a9cf291f32ff4d6b4f65dd0f2a72784f779fd94d250932597ef32dda38",
+      "rows": 559
+    }
+  ]
+}

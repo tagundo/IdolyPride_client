@@ -76,6 +76,7 @@ class Application:
         from .pvp import Pvp
         from .photo_shooting import PhotoShootings
         from .photo_names import PhotoNames
+        from .home_talk import HomeTalks
         from .profile_layout import ProfileLayout
         self.lessons = OrdinaryLessons(schema, state, profile, master_dir)
         self.social = SocialInbox(schema)
@@ -93,6 +94,7 @@ class Application:
             scene_access=photo_scene_access, image_urls=photo_image_urls, media_mode=media_mode,
             media_settings=media_settings)
         self.photo_names = PhotoNames(schema, state, profile)
+        self.home_talks = HomeTalks(schema, state, profile, master_dir, media_mode=media_mode)
         self.profile_layout = ProfileLayout(schema, state, profile)
         self.main_lives = None
         if experimental_main_live:
@@ -213,6 +215,8 @@ class Application:
                 if self.photo_shootings is not None:
                     self.photo_shootings.fill_home(home)
                 response = home.SerializeToString()
+            if response is None:
+                response = self.home_talks.handle(path, plain)
             if response is None:
                 response = self.dream.handle(path, plain)
             if response is None:
