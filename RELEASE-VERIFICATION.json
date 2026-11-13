@@ -1,0 +1,11 @@
+{
+  "version": "0.3.25",
+  "source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+  "artifacts": [
+    {
+      "name": "IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+      "bytes": 148981520,
+      "sha256": "400c176175a3719b1c81a0f5924e9a7c5b0bc62b2057b55096bb62cfc83bc17c"
+    }
+  ]
+}
