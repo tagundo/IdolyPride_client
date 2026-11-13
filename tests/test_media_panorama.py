@@ -114,8 +114,11 @@ def test_list_returns_fifteen_scenes_with_required_unlock_description_and_unrest
     assert result.musics[-1].musicId == "music-hsm-017"
     assert "unmapped-panorama" not in {row.musicId for row in result.musics}
     assert not result.dokanInfos
-    assert result.commonResponse.HasField("updatedData") and not result.commonResponse.updatedData.ListFields()
-    assert result.commonResponse.HasField("deletedData") and not result.commonResponse.deletedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
+    assert call(game, LIST) == result
     assert dump(game[1]) == before
 
 
@@ -125,8 +128,11 @@ def test_check_uses_exact_music_id_and_master_cast_count_without_music_grants(ga
     snapshot = game[0].schema.response_type(USER).FromString(game[1].snapshot("media")[0])
     assert not snapshot.musics
     result = call(game, CHECK, **cast(game, index))
-    assert not result.commonResponse.updatedData.ListFields()
-    assert not result.commonResponse.deletedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
+    assert call(game, CHECK, **cast(game, index)) == result
     assert dump(game[1]) == before
 
 

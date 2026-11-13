@@ -52,9 +52,13 @@ class ProfileNames:
                 raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local profile snapshot is malformed") from None
             if not snapshot.HasField("user"):
                 raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local profile has no user state")
-            snapshot.user.name = name
+            changed = snapshot.user.name != name
+            if changed:
+                snapshot.user.name = name
             result.commonResponse.updatedData.user.CopyFrom(snapshot.user)
-            return snapshot.SerializeToString()
+            # A lost reply still needs the current full User ACK. An
+            # identical retry need not normalize the entire saved snapshot.
+            return snapshot.SerializeToString() if changed else payload
 
         try:
             self.state.mutate_snapshot(self.profile, self.schema.fingerprint, update)

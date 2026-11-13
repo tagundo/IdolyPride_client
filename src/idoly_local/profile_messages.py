@@ -49,9 +49,13 @@ class ProfileMessages:
             # one over an incomplete/imported snapshot and invent its settings.
             if not snapshot.HasField("profile"):
                 raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local profile has no profile state")
-            snapshot.profile.message = message
+            changed = snapshot.profile.message != message
+            if changed:
+                snapshot.profile.message = message
             result.commonResponse.updatedData.profile.CopyFrom(snapshot.profile)
-            return snapshot.SerializeToString()
+            # Keep the current profile ACK for resynchronization while
+            # preserving original wire bytes on an identical retry.
+            return snapshot.SerializeToString() if changed else payload
 
         try:
             self.state.mutate_snapshot(self.profile, self.schema.fingerprint, update)

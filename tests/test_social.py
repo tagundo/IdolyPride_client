@@ -74,13 +74,15 @@ def call(schema, path, **values):
 
 
 @pytest.mark.parametrize("path", ROUTES)
-def test_empty_lists_have_complete_common_containers_without_account_updates(schema, path):
+def test_empty_lists_keep_common_parent_without_constructing_account_deltas(schema, path):
     response = call(schema, path)
     rows = response.gifts if path.startswith("/api.Gift/") else response.profiles
     assert not rows
     assert response.HasField("commonResponse")
-    assert response.commonResponse.HasField("updatedData") and response.commonResponse.HasField("deletedData")
-    assert not response.commonResponse.updatedData.ListFields() and not response.commonResponse.deletedData.ListFields()
+    assert not response.commonResponse.HasField("updatedData")
+    assert not response.commonResponse.HasField("deletedData")
+    assert response.commonResponse.SerializeToString() == b""
+    assert call(schema, path) == response
     if path == "/api.Gift/List":
         assert response.count == 0 and response.hasNext is False
 
@@ -133,7 +135,8 @@ def test_all_lists_leave_existing_local_profiles_sessions_and_snapshots_unchange
     with state.connect() as db:
         before = tuple(db.iterdump())
     for path in ROUTES:
-        call(schema, path)
+        response = call(schema, path)
+        assert call(schema, path) == response
     with state.connect() as db:
         assert tuple(db.iterdump()) == before
     assert state.authenticated(token, "local")

@@ -155,12 +155,12 @@ def assert_saved(before, after, response, request):
         expected.photoIds.extend(selected.photoIds)
         require(actual == expected, "Saved layout differs from the explicit client selection")
     updated = response.commonResponse.updatedData
-    expected_fields = {"decks", "deckPositions"} | ({"user"} if creating else set())
+    expected_fields = {"decks"} | ({"deckPositions"} if saved else set()) | ({"user"} if creating else set())
     require({field.name for field, _ in updated.ListFields()} == expected_fields,
             "Deck response contains an unexpected update field")
-    require(row_bytes(updated.decks) == row_bytes(after.decks)
-            and row_bytes(updated.deckPositions) == row_bytes(after.deckPositions),
-            "Deck response delta differs from persisted deck data")
+    require(row_bytes(updated.decks) == row_bytes(decks)
+            and row_bytes(updated.deckPositions) == row_bytes(saved),
+            "Deck response delta differs from the affected persisted deck")
     if creating:
         require(updated.user == after.user, "New deck response omitted its assigned sequence")
     requested_slots = {row.position for row in request.userDeckPositions}

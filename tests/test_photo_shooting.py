@@ -99,9 +99,11 @@ def test_list_preserves_locked_rows_and_does_not_infer_master_ownership(game):
     assert [(row.stageId, row.isUnlocked) for row in result.stages] == [("stage-a", True)]
     assert [(row.photoExpressionId, row.isUnlocked) for row in result.expressions] == [("expression-a", False)]
     assert result.HasField("DokanInfo")
-    assert result.commonResponse.HasField("updatedData")
-    assert not result.commonResponse.updatedData.ListFields()
-    assert not result.commonResponse.deletedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
+    assert call(game, LIST) == result
     assert dump(game[1]) == before
 
 
@@ -115,14 +117,22 @@ def test_missing_unlock_evidence_fails_and_empty_preserved_catalog_is_valid(game
                            scene_access=lambda profile: PhotoSceneAccess())
     result = provider.schema.response_type(LIST).FromString(empty.handle(LIST, b""))
     assert not result.activities and not result.musics and not result.stages
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
     assert dump(state) == before
 
 
 def test_checks_validate_real_owned_scene_and_styles_without_writes(game):
     before = dump(game[1])
-    call(game, CHECK, **quest_values())
-    call(game, CHECK, actionType=1, photoActivityId="activity-a", characterIds=["char-a"],
-         costumeIds=["cos-a"], hairIds=["hair-a"])
+    for values in (quest_values(), dict(actionType=1, photoActivityId="activity-a",
+            characterIds=["char-a"], costumeIds=["cos-a"], hairIds=["hair-a"])):
+        result = call(game, CHECK, **values)
+        assert result.HasField("commonResponse")
+        assert not result.commonResponse.HasField("updatedData")
+        assert not result.commonResponse.HasField("deletedData")
+        assert result.commonResponse.SerializeToString() == b""
+        assert call(game, CHECK, **values) == result
     assert dump(game[1]) == before
 
 
@@ -172,9 +182,11 @@ def test_media_job_accepts_owned_outfit_of_other_type_without_changing_normal_mo
         call(game, CHECK, **values)
     assert error.value.code == RpcCode.INVALID_ARGUMENT
     result = call(media_game(game), CHECK, **values)
-    assert result.commonResponse.HasField("updatedData")
-    assert not result.commonResponse.updatedData.ListFields()
-    assert not result.commonResponse.deletedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
+    assert call(media_game(game), CHECK, **values) == result
     # Selecting a gallery job never changes the normal provider or any
     # profile, session, inventory/film row, counter or unknown protobuf field.
     with pytest.raises(RpcFailure) as error:
@@ -217,8 +229,12 @@ def test_application_wires_gallery_job_policy_only_after_authentication(game, tm
         ordinary.handle(CHECK, envelope, context)
     assert error.value.code == RpcCode.INVALID_ARGUMENT
     result = provider.schema.response_type(CHECK).FromString(gallery.handle(CHECK, envelope, context))
-    assert result.commonResponse.HasField("updatedData")
-    assert not result.commonResponse.updatedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
+    assert provider.schema.response_type(CHECK).FromString(
+        gallery.handle(CHECK, envelope, context)) == result
     assert dump(state) == before
 
 

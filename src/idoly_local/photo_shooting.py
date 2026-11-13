@@ -132,8 +132,9 @@ class PhotoShootings:
 
     @staticmethod
     def _common(result):
-        result.commonResponse.updatedData.SetInParent()
-        result.commonResponse.deletedData.SetInParent()
+        # Only successful read/check paths reach this helper. Preserve the
+        # Common parent without creating either unused user-data delta.
+        result.commonResponse.SetInParent()
 
     def _list(self, result, access):
         hidden = set()

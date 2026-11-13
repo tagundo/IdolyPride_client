@@ -41,13 +41,14 @@ def test_six_local_lists_require_auth_and_validate_requests_over_real_http2(sche
                 result = schema.response_type(path).FromString(
                     invoke(request.SerializeToString(), metadata=metadata, timeout=3))
                 assert result.HasField("commonResponse")
-                assert result.commonResponse.HasField("updatedData")
-                assert result.commonResponse.HasField("deletedData")
-                assert not result.commonResponse.updatedData.ListFields()
-                assert not result.commonResponse.deletedData.ListFields()
+                assert not result.commonResponse.HasField("updatedData")
+                assert not result.commonResponse.HasField("deletedData")
+                assert result.commonResponse.SerializeToString() == b""
                 assert not (result.gifts if path.startswith("/api.Gift/") else result.profiles)
                 if path == "/api.Gift/List":
                     assert result.count == 0 and result.hasNext is False
+                assert schema.response_type(path).FromString(invoke(
+                    request.SerializeToString(), metadata=metadata, timeout=3)) == result
 
             gift = channel.unary_unary("/api.Gift/List", request_serializer=codec.encode,
                                        response_deserializer=codec.decode)

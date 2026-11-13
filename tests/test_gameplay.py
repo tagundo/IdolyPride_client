@@ -382,6 +382,98 @@ def test_deck_delete_reports_deleted_data_and_preserves_other_deck(game):
     assert game.state.snapshot(game.profile) == before
 
 
+def _deck_row_maps(value):
+    return ({row.number: row.SerializeToString() for row in value.decks},
+            {(row.number, row.position): row.SerializeToString() for row in value.deckPositions})
+
+
+def _apply_keyed_deck_ack(client, response):
+    """Model original collection RemoveRange/AddRange, never list replacement."""
+    updated, deleted = response.commonResponse.updatedData, response.commonResponse.deletedData
+    assert response.commonResponse.HasField("updatedData")
+    for field, key in (("decks", lambda row: row.number),
+                       ("deckPositions", lambda row: (row.number, row.position))):
+        rows = {key(row): type(row).FromString(row.SerializeToString()) for row in getattr(client, field)}
+        for row in getattr(deleted, field):
+            rows.pop(key(row), None)
+        for row in getattr(updated, field):
+            rows[key(row)] = type(row).FromString(row.SerializeToString())
+        target = getattr(client, field)
+        del target[:]
+        target.extend(rows.values())
+    if updated.HasField("user"):
+        client.user.CopyFrom(updated.user)
+
+
+def _prepare_two_populated_decks(game):
+    prepare_deck_inventory(game)
+    unknown = b"\xc8\xa3\x09\x7b"
+
+    def prepare(raw):
+        user = game.schema.response_type("/api.User/Get").FromString(raw)
+        for row in user.decks:
+            row.MergeFromString(unknown)
+        for number, slot, card in ((1, 1, "card-a"), (1, 2, "card-b"), (2, 5, "card-a")):
+            user.deckPositions.add(number=number, position=slot, cardId=card).MergeFromString(unknown)
+        return user.SerializeToString()
+
+    game.state.mutate_snapshot(game.profile, game.schema.fingerprint, prepare)
+
+
+@pytest.mark.parametrize("mode", (1, 2, 3, 4))
+def test_multi_deck_save_ack_updates_only_selected_unit_and_merges_exactly(game, mode):
+    _prepare_two_populated_decks(game)
+    client = snapshot(game)
+    unchanged_deck = next(row.SerializeToString() for row in client.decks if row.number == 2)
+    unchanged_position = next(row.SerializeToString() for row in client.deckPositions if row.number == 2)
+    response = call(game, "/api.Deck/Save", number=1, name="Only this unit", deckEditType=mode,
+                    userDeckPositions=[{"position": 1, "cardId": "card-a", "costumeId": "costume-a"}])
+    after = snapshot(game)
+    assert list(response.commonResponse.updatedData.decks) == [row for row in after.decks if row.number == 1]
+    assert list(response.commonResponse.updatedData.deckPositions) == [
+        row for row in after.deckPositions if row.number == 1]
+    assert not response.commonResponse.updatedData.HasField("user")
+    assert [(row.number, row.position) for row in response.commonResponse.deletedData.deckPositions] == [(1, 2)]
+    _apply_keyed_deck_ack(client, response)
+    assert _deck_row_maps(client) == _deck_row_maps(after)
+    assert next(row.SerializeToString() for row in client.decks if row.number == 2) == unchanged_deck
+    assert next(row.SerializeToString() for row in client.deckPositions if row.number == 2) == unchanged_position
+    assert b"\xc8\xa3\x09\x7b" in response.commonResponse.updatedData.decks[0].SerializeToString()
+    assert b"\xc8\xa3\x09\x7b" in response.commonResponse.updatedData.deckPositions[0].SerializeToString()
+
+
+def test_lost_save_ack_retry_still_resynchronizes_all_current_rows_of_selected_deck(game):
+    _prepare_two_populated_decks(game)
+    stale_client = snapshot(game)
+    values = dict(number=1, name="Reply was lost", deckEditType=2, userDeckPositions=[
+        {"position": 1, "cardId": "card-a", "costumeId": "costume-a"},
+        {"position": 2, "cardId": "card-b", "hairId": "hair-b"}])
+    lost = call(game, "/api.Deck/Save", **values)
+    saved = game.state.snapshot(game.profile)
+    replay = call(game, "/api.Deck/Save", **values)
+    assert replay == lost
+    assert game.state.snapshot(game.profile) == saved
+    assert len(replay.commonResponse.updatedData.decks) == 1
+    assert len(replay.commonResponse.updatedData.deckPositions) == 2
+    _apply_keyed_deck_ack(stale_client, replay)
+    assert _deck_row_maps(stale_client) == _deck_row_maps(snapshot(game))
+
+
+def test_multi_deck_delete_ack_preserves_required_empty_update_and_unrelated_rows(game):
+    _prepare_two_populated_decks(game)
+    client = snapshot(game)
+    before = _deck_row_maps(client)
+    response = call(game, "/api.Deck/Delete", number=1)
+    assert response.HasField("commonResponse")
+    assert response.commonResponse.HasField("updatedData")
+    assert not response.commonResponse.updatedData.ListFields()
+    assert response.commonResponse.HasField("deletedData")
+    assert [(row.number, row.position) for row in response.commonResponse.deletedData.deckPositions] == [(1, 1), (1, 2)]
+    assert [row.number for row in response.commonResponse.deletedData.decks] == [1]
+    _apply_keyed_deck_ack(client, response)
+    assert _deck_row_maps(client) == _deck_row_maps(snapshot(game)) == ({2: before[0][2]}, {(2, 5): before[1][(2, 5)]})
+
+
 def test_starter_is_master_backed_new_only_and_persists_identity(game):
     user = snapshot(game)
     assert user.user.name == "Local manager"

@@ -7,6 +7,8 @@ photographs, paid currency, quest clears, or narrative schedules.
 """
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from google.protobuf.message import DecodeError
 
 from .gameplay import _Catalog
@@ -93,6 +95,7 @@ class MediaStories:
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
         self._story_rows = None
+        self._extra_catalog = None
 
     def _definitions(self):
         if self.schema.fingerprint != SCHEMA_SHA256:
@@ -115,6 +118,42 @@ class MediaStories:
             numbers.add(episode["episode"])
         return episodes
 
+    def _extras(self):
+        """Validate the immutable master links once, without creating a DTO.
+
+        _Catalog already keeps its parsed tables for this handler's lifetime.
+        A new handler after a master/language restart builds a fresh index.
+        Only master IDs and episode references are cached, never profile
+        progress or ordinary-account eligibility.
+        """
+        self._definitions()
+        if self._extra_catalog is not None:
+            return self._extra_catalog
+        extras = self.catalog.ids("ExtraStory", required=True)
+        assigned, parts, episodes_by_story = set(), [], {}
+        for identity, master in self.catalog.ids("ExtraStoryPart", required=True).items():
+            links = master.get("extraStoryIds")
+            if (not isinstance(links, list) or any(not _identity(link) for link in links)
+                    or len(set(links)) != len(links)):
+                _fail("Media extra story parent references are malformed")
+            stories = []
+            for link in links:
+                extra = extras.get(link)
+                if extra is None or extra.get("extraStoryPartId") != identity or link in assigned:
+                    _fail("Media extra story parent reference is malformed")
+                assigned.add(link)
+                episodes = tuple((episode["episode"], episode["storyId"])
+                                 for episode in self._episodes(extra))
+                stories.append((link, episodes))
+                episodes_by_story[link] = episodes
+            parts.append((identity, tuple(stories)))
+        if assigned != set(extras):
+            _fail("Media extra story has no linked parent")
+        # Publish only after the complete catalog passes all checks. Failed
+        # validation cannot leave a partially usable index behind.
+        self._extra_catalog = tuple(parts), MappingProxyType(episodes_by_story)
+        return self._extra_catalog
+
     def _lists(self, path):
         self._definitions()
         result = self.schema.response_type(path)()
@@ -124,26 +163,13 @@ class MediaStories:
                 for episode in self._episodes(master):
                     info.episodes.add(episode=episode["episode"], unlocked=True)
         else:
-            extras = self.catalog.ids("ExtraStory", required=True)
-            assigned = set()
-            for identity, master in self.catalog.ids("ExtraStoryPart", required=True).items():
-                links = master.get("extraStoryIds")
-                if (not isinstance(links, list) or any(not _identity(link) for link in links)
-                        or len(set(links)) != len(links)):
-                    _fail("Media extra story parent references are malformed")
+            for identity, stories in self._extras()[0]:
                 part = result.infos.add(id=identity, unlocked=True)
-                for link in links:
-                    extra = extras.get(link)
-                    if extra is None or extra.get("extraStoryPartId") != identity or link in assigned:
-                        _fail("Media extra story parent reference is malformed")
-                    assigned.add(link)
+                for link, episodes in stories:
                     info = part.stories.add(id=link, unlocked=True)
-                    for episode in self._episodes(extra):
-                        info.episodes.add(episode=episode["episode"], unlocked=True)
-            if assigned != set(extras):
-                _fail("Media extra story has no linked parent")
-        result.commonResponse.updatedData.SetInParent()
-        result.commonResponse.deletedData.SetInParent()
+                    for number, _ in episodes:
+                        info.episodes.add(episode=number, unlocked=True)
+        result.commonResponse.SetInParent()
         return result
 
     def fill_home(self, result):
@@ -181,8 +207,13 @@ class MediaStories:
             if master is None or request.episode <= 0:
                 _fail("Unknown media story episode", RpcCode.INVALID_ARGUMENT)
             if path == _EXTRA:
-                # Validate the same exact parent links as the menu DTOs.
-                self._lists(_LIST_EXTRA)
+                # Share the menu's master validation without constructing and
+                # discarding every part/story/episode DTO for one read.
+                selected = [identity for number, identity in self._extras()[1][request.extraStoryId]
+                            if number == request.episode]
+                if len(selected) != 1:
+                    _fail("Unknown media story episode", RpcCode.INVALID_ARGUMENT)
+                return selected[0]
             episodes = self._episodes(master)
         else:
             part = self.catalog.ids("StoryPart", required=True).get(request.storyPartId)

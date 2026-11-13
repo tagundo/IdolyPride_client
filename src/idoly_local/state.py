@@ -348,7 +348,9 @@ class State:
                 db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
             if setting_info is not None:
                 db.execute("INSERT INTO profile_settings VALUES (?,?,?) ON CONFLICT(profile) DO UPDATE SET "
-                           "response=excluded.response,schema_sha256=excluded.schema_sha256",
+                           "response=excluded.response,schema_sha256=excluded.schema_sha256 "
+                           "WHERE profile_settings.response IS NOT excluded.response "
+                           "OR profile_settings.schema_sha256 IS NOT excluded.schema_sha256",
                            (profile, setting_info, schema_sha256))
         return payload
 

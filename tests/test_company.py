@@ -108,10 +108,10 @@ def test_top_returns_real_grade_levels_and_only_preserved_missions_without_write
     assert not any(row.isReceivable or row.isAlreadyReceived for row in result.trustLevelInfos)
     assert not result.currentRank and not result.thisMonthSalaryPoint
     assert not result.receivableLevelRewardEnjoyCharacterIds and not result.dokanInfos
-    assert result.commonResponse.HasField("updatedData")
-    assert result.commonResponse.HasField("deletedData")
-    assert not result.commonResponse.updatedData.ListFields()
-    assert not result.commonResponse.deletedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
     assert dump(game[1]) == before
     assert call(game, TOP, isSkipReportMissions=skip) == result
     assert dump(game[1]) == before
@@ -125,6 +125,11 @@ def test_character_read_returns_only_actual_character_settings_and_stored_missio
     assert [(row.categoryType, [mission.missionId for mission in row.userMissions])
             for row in result.missionInfos] == [(1, []), (2, ["enjoy-a"]), (3, [])]
     assert not any(row.isReceivable or row.isAlreadyReceived for row in result.enjoyLevelInfos)
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
+    assert call(game, ENJOY, characterId="char-a") == result
     assert dump(game[1]) == before
 
 

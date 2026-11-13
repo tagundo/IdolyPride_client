@@ -301,7 +301,15 @@ class Gameplay:
             del target.photoIds[:]
             target.photoIds.extend(row.photoIds)
         deck.name = request.name
-        return ("user", "decks", "deckPositions") if creating else ("decks", "deckPositions")
+        # Original DeckManager consumes the API status and rebuilds from its
+        # persistent keyed user collections. ACK the affected unit in full,
+        # including unchanged rows on retry, without replacing unrelated units.
+        updated = result.commonResponse.updatedData
+        updated.decks.add().CopyFrom(deck)
+        updated.deckPositions.extend(row for row in snapshot.deckPositions if row.number == number)
+        if creating:
+            updated.user.CopyFrom(snapshot.user)
+        return ()
 
     @staticmethod
     def _delete_deck(snapshot, request, result):
@@ -319,7 +327,11 @@ class Gameplay:
         snapshot.decks.extend(kept_decks)
         del snapshot.deckPositions[:]
         snapshot.deckPositions.extend(kept_positions)
-        return ("decks", "deckPositions")
+        # The original diff consumer permits null/null, but requires a present
+        # UpdatedData whenever DeletedData is non-null. Keep this empty child;
+        # only the explicit keyed deletions need to be applied to the client.
+        result.commonResponse.updatedData.SetInParent()
+        return ()
 
     def handle(self, path: str, request_bytes: bytes) -> bytes | None:
         if path not in _ROUTES:

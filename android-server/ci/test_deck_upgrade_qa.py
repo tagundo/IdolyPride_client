@@ -87,9 +87,47 @@ def test_created_deck_sequence_is_verified_from_actual_existing_numbers(case):
     response = game.schema.response_type(probe.SAVE).FromString(game.handle(probe.SAVE, request.SerializeToString()))
     after = contract.snapshot(game)
     assert probe.assert_saved(before, after, response, request) == 2
+    assert [row.number for row in response.commonResponse.updatedData.decks] == [2]
+    assert [(row.number, row.position) for row in response.commonResponse.updatedData.deckPositions] == [(2, 5)]
+    assert response.commonResponse.updatedData.user == after.user
     response.commonResponse.updatedData.ClearField("user")
     with pytest.raises(RuntimeError, match="unexpected update field"):
         probe.assert_saved(before, after, response, request)
+
+
+@pytest.mark.parametrize("field", ("decks", "deckPositions"))
+def test_created_deck_ack_rejects_resending_unrelated_existing_rows(case, field):
+    game, _before, _after, _response, _request = case
+    before = contract.snapshot(game)
+    request = game.schema.request_type(probe.SAVE)(number=0, name="Only new deck", deckEditType=3,
+                                                  questId="quest-1")
+    request.userDeckPositions.add(position=5, cardId=before.cards[0].cardId)
+    response = game.schema.response_type(probe.SAVE).FromString(game.handle(probe.SAVE, request.SerializeToString()))
+    after = contract.snapshot(game)
+    assert probe.assert_saved(before, after, response, request) == 2
+    getattr(response.commonResponse.updatedData, field).extend(getattr(before, field))
+    with pytest.raises(RuntimeError, match="affected persisted deck"):
+        probe.assert_saved(before, after, response, request)
+
+
+def test_affected_deck_ack_must_retain_current_row_unknown_fields(case):
+    _game, before, after, response, request = case
+    response.commonResponse.updatedData.decks[0].DiscardUnknownFields()
+    with pytest.raises(RuntimeError, match="affected persisted deck"):
+        probe.assert_saved(before, after, response, request)
+
+
+def test_empty_new_deck_ack_does_not_require_unrelated_occupied_positions(case):
+    game, _before, _after, _response, _request = case
+    before = contract.snapshot(game)
+    request = game.schema.request_type(probe.SAVE)(number=0, name="Empty new deck", deckEditType=3,
+                                                  questId="quest-1")
+    response = game.schema.response_type(probe.SAVE).FromString(game.handle(probe.SAVE, request.SerializeToString()))
+    after = contract.snapshot(game)
+    assert probe.assert_saved(before, after, response, request) == 2
+    assert [row.number for row in response.commonResponse.updatedData.decks] == [2]
+    assert not response.commonResponse.updatedData.deckPositions
+    assert response.commonResponse.updatedData.user == after.user
 
 
 @pytest.mark.parametrize("condition", ("running_game", "running_server", "host_reverse", "other_target"))

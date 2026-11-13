@@ -165,6 +165,7 @@ class MediaPanorama:
                     viewConditionId="")
         else:
             self._check(request, snapshot, self._scenes)
-        result.commonResponse.updatedData.SetInParent()
-        result.commonResponse.deletedData.SetInParent()
+        # List/check do not change user state. An empty Common parent avoids
+        # constructing both delta DTOs and dispatching empty client updates.
+        result.commonResponse.SetInParent()
         return result.SerializeToString()

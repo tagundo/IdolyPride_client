@@ -154,9 +154,100 @@ def test_full_media_lists_and_home_are_consistent_read_only_and_use_exact_master
     game.handler.fill_home(home)
     assert list(home.extraStoryPartInfos) == list(extras.infos)
     for response in (events, extras):
+        assert response.HasField("commonResponse")
+        assert not response.commonResponse.HasField("updatedData")
+        assert not response.commonResponse.HasField("deletedData")
         assert not response.commonResponse.updatedData.ListFields()
         assert not response.commonResponse.deletedData.ListFields()
     assert dump(game) == before
+
+
+def test_extra_episode_reads_reuse_master_validation_without_building_menu_dtos(game, monkeypatch):
+    game.rows["ExtraStory"][0]["episodes"].append({"episode": 2, "storyId": "media-event"})
+    (game.master / "ExtraStory.json").write_text(json.dumps(game.rows["ExtraStory"]))
+    original_episodes = game.handler._episodes
+    validated = []
+
+    def episodes(row):
+        validated.append(row["id"])
+        return original_episodes(row)
+
+    def unexpected_menu(path):
+        pytest.fail("Reading one episode must not build the complete story menu")
+
+    monkeypatch.setattr(game.handler, "_episodes", episodes)
+    monkeypatch.setattr(game.handler, "_lists", unexpected_menu)
+    first = invoke(game, module._EXTRA, extraStoryId="extra", episode=1, isLast=True)
+    assert first.commonResponse.updatedData.stories[0].storyId == "media-extra"
+    assert validated == ["extra"]
+    second = invoke(game, module._EXTRA, extraStoryId="extra", episode=2, isLast=True)
+    assert second.commonResponse.updatedData.stories[0].storyId == "media-event"
+    assert validated == ["extra"]
+    assert {row.storyId for row in snapshot(game).stories} == {"media-extra", "media-event"}
+
+
+@pytest.mark.parametrize("path", (module._LIST_EXTRA, module._EXTRA))
+@pytest.mark.parametrize("damage", ("duplicate-link", "missing-extra", "wrong-parent", "orphan-extra",
+    "duplicate-parent", "duplicate-extra", "duplicate-episode", "bad-episode-number", "missing-story"))
+def test_extra_master_validation_is_shared_and_fails_before_profile_write(game, monkeypatch, path, damage):
+    extras, parts = game.rows["ExtraStory"], game.rows["ExtraStoryPart"]
+    if damage == "duplicate-link":
+        parts[0]["extraStoryIds"].append("extra")
+    elif damage == "missing-extra":
+        parts[0]["extraStoryIds"].append("missing")
+    elif damage == "wrong-parent":
+        extras[0]["extraStoryPartId"] = "other-part"
+    elif damage == "orphan-extra":
+        parts[0]["extraStoryIds"] = []
+    elif damage == "duplicate-parent":
+        parts.append(dict(parts[0]))
+    elif damage == "duplicate-extra":
+        extras.append(dict(extras[0]))
+    elif damage == "duplicate-episode":
+        extras[0]["episodes"].append(dict(extras[0]["episodes"][0]))
+    elif damage == "bad-episode-number":
+        extras[0]["episodes"][0]["episode"] = True
+    else:
+        extras[0]["episodes"][0]["storyId"] = "missing-story"
+    for name in ("ExtraStory", "ExtraStoryPart"):
+        (game.master / (name + ".json")).write_text(json.dumps(game.rows[name]))
+    before = dump(game)
+
+    def unexpected_mutation(*args, **kwargs):
+        pytest.fail("Invalid master links must fail before starting a profile mutation")
+
+    monkeypatch.setattr(game.state, "mutate_snapshot", unexpected_mutation)
+    with pytest.raises(RpcFailure) as denied:
+        fields = {"extraStoryId": "extra", "episode": 1, "isLast": True} if path == module._EXTRA else {}
+        invoke(game, path, **fields)
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION
+    assert game.handler._extra_catalog is None and dump(game) == before
+
+
+def test_new_handler_revalidates_extra_master_generation_after_an_earlier_valid_read(game):
+    invoke(game, module._EXTRA, extraStoryId="extra", episode=1, isLast=True)
+    game.rows["ExtraStoryPart"][0]["extraStoryIds"] = []
+    (game.master / "ExtraStoryPart.json").write_text(json.dumps(game.rows["ExtraStoryPart"]))
+    game.handler = module.MediaStories(game.schema, State(game.state.path), "media", game.master)
+    before = dump(game)
+    with pytest.raises(RpcFailure) as denied:
+        invoke(game, module._EXTRA, extraStoryId="extra", episode=1, isLast=True)
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION and dump(game) == before
+
+
+def test_extra_retry_still_returns_current_full_story_with_unknown_fields_and_no_reward(game):
+    value = snapshot(game)
+    value.stories.add(storyId="media-extra", statusType=1, isPhotoShot=True).MergeFromString(UNKNOWN)
+    game.state.mutate_snapshot("media", game.schema.fingerprint, lambda _: value.SerializeToString())
+    first = invoke(game, module._EXTRA, extraStoryId="extra", episode=1, isLast=True)
+    saved = dump(game)
+    retry = invoke(game, module._EXTRA, extraStoryId="extra", episode=1, isLast=False)
+    assert retry == first and dump(game) == saved
+    assert retry.commonResponse.HasField("updatedData")
+    assert retry.commonResponse.HasField("deletedData")
+    row = retry.commonResponse.updatedData.stories[0]
+    assert row.storyId == "media-extra" and row.statusType == 2 and row.isPhotoShot
+    assert UNKNOWN in row.SerializeToString() and not retry.rewards
 
 
 @pytest.mark.parametrize("is_last", (False, True), ids=("skip", "end"))

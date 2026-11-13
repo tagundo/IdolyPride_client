@@ -84,8 +84,9 @@ def test_selected_auto_save_authentication_delta_and_restart(game, tmp_path, mod
         (row.position, row.cardId) for row in request.userDeckPositions]
     assert next(row.name for row in after.decks if row.number == saved_number) == request.name
     assert projection(after, before.user.deckSequence) == projection(before, before.user.deckSequence)
-    assert list(response.commonResponse.updatedData.decks) == list(after.decks)
-    assert list(response.commonResponse.updatedData.deckPositions) == list(after.deckPositions)
+    assert list(response.commonResponse.updatedData.decks) == [row for row in after.decks if row.number == saved_number]
+    assert list(response.commonResponse.updatedData.deckPositions) == [
+        row for row in after.deckPositions if row.number == saved_number]
     if number:
         old = {row.position: row for row in before.deckPositions if row.number == number}
         assert [row.SerializeToString() for row in response.commonResponse.deletedData.deckPositions] == [

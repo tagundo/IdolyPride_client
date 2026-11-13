@@ -33,9 +33,10 @@ def values():
 def test_real_movie_can_check_with_empty_stage_and_no_invented_cast(movie):
     before = dump(movie[1])
     result = call(movie, CHECK, **values())
-    assert result.commonResponse.HasField("updatedData")
-    assert not result.commonResponse.updatedData.ListFields()
-    assert not result.commonResponse.deletedData.ListFields()
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert result.commonResponse.SerializeToString() == b""
     assert call(movie, CHECK, **values()) == result
     assert dump(movie[1]) == before
 

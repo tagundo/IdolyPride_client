@@ -54,7 +54,8 @@ class SocialInbox:
         result = self.schema.response_type(path)()
         # Repeated fields are real empty collections. Gift count=0 and
         # hasNext=false are their protobuf defaults for every valid offset.
-        # Explicit nested common containers match the captured empty inbox.
-        result.commonResponse.updatedData.SetInParent()
-        result.commonResponse.deletedData.SetInParent()
+        # These reads have no account delta. Keep the Common parent while
+        # leaving both children absent so the original client skips its
+        # empty-delta construction and user-data dispatch paths.
+        result.commonResponse.SetInParent()
         return result.SerializeToString()

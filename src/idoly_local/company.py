@@ -178,6 +178,7 @@ class CompanyReads:
                 result.enjoyLevelInfos.add(characterId=request.characterId, levelKey=level,
                                           isReceivable=False, isAlreadyReceived=False)
             self._missions(snapshot, result.missionInfos, character=request.characterId)
-        result.commonResponse.updatedData.SetInParent()
-        result.commonResponse.deletedData.SetInParent()
+        # This provider only projects stored state; no user-data delta needs
+        # to be constructed or applied by the original client.
+        result.commonResponse.SetInParent()
         return result.SerializeToString()

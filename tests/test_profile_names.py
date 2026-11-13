@@ -1,5 +1,6 @@
 """Manager name mutations retain unrelated game state and match the input ABI."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 
 from google.protobuf import descriptor_pb2
@@ -111,6 +112,42 @@ def test_exact_name_and_authoritative_user_persist_without_other_changes(game, n
     assert replay.handle(PATH, provider.schema.request_type(PATH)(name=name).SerializeToString()) == result.SerializeToString()
     assert dump(restarted) == before_retry
     assert restarted.authenticated(game[2], "player") and restarted.authenticated(game[3], "other")
+
+
+def test_identical_name_ack_preserves_noncanonical_snapshot_without_sql_update(game, monkeypatch):
+    provider, state = game[:2]
+    call(game, "Manager")
+    original = UNKNOWN + state.snapshot("player")[0]
+    with state.connect() as connection:
+        connection.execute("UPDATE snapshots SET response=? WHERE profile='player'", (original,))
+    expected = provider.schema.response_type(USER).FromString(original)
+    assert expected.SerializeToString() != original
+    before, kept = dump(state), protected(state)
+    statements = []
+    connect = state.connect
+
+    @contextmanager
+    def traced_connect():
+        with connect() as connection:
+            connection.set_trace_callback(statements.append)
+            yield connection
+
+    monkeypatch.setattr(state, "connect", traced_connect)
+    for _ in range(2):
+        result = call(game, "Manager")
+        assert result.commonResponse.updatedData.user == expected.user
+        assert UNKNOWN in result.commonResponse.updatedData.user.SerializeToString()
+        assert state.snapshot("player")[0] == original
+        assert dump(state) == before
+    assert not any(sql.upper().startswith("UPDATE SNAPSHOTS") for sql in statements)
+
+    # A real change still commits its complete post-image and current ACK.
+    changed = call(game, "New name")
+    expected.user.name = "New name"
+    assert changed.commonResponse.updatedData.user == expected.user
+    assert state.snapshot("player")[0] == expected.SerializeToString()
+    assert sum(sql.upper().startswith("UPDATE SNAPSHOTS") for sql in statements) == 1
+    assert protected(state) == kept
 
 
 @pytest.mark.parametrize("name", ("", " ", "\u3000\u00a0", "x" * 11, "😀" * 6,
