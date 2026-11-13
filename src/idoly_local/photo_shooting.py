@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
+from types import SimpleNamespace
 from uuid import uuid4
 
 from google.protobuf.message import DecodeError
@@ -25,9 +26,10 @@ from .rpc import RpcCode, RpcFailure
 _USER = "/api.User/Get"
 _LIST = "/api.Photo/ListShooting"
 _CHECK = "/api.Photo/CheckShooting"
+_EXPRESSION_CHECK = "/api.Photo/CheckExpressionShooting"
 _CREATE = "/api.Photo/CreateShootings"
 _URL = "/api.Photo/GetImageURL"
-_ROUTES = frozenset((_LIST, _CHECK, _CREATE, _URL))
+_ROUTES = frozenset((_LIST, _CHECK, _EXPRESSION_CHECK, _CREATE, _URL))
 _SAFE_IMAGE_ID = re.compile(r"[A-Za-z0-9_.~-]{1,251}\Z")
 RESERVED_IMAGE_COUNT = 20
 _MV_SCENE = object()
@@ -250,6 +252,34 @@ class PhotoShootings:
                         or not self.media_mode and allowed and definition.get("costumeTypeId") not in allowed):
                     _fail("The photo activity does not allow this character or costume", RpcCode.INVALID_ARGUMENT)
 
+    def _expression(self, request, snapshot, access):
+        if not request.photoExpressionId:
+            _fail("A photo expression ID is required", RpcCode.INVALID_ARGUMENT)
+        expression = self.catalog.ids("PhotoExpression", required=True).get(request.photoExpressionId)
+        if expression is None:
+            _fail("Unknown local photo expression", RpcCode.INVALID_ARGUMENT)
+        if access.expressions.get(request.photoExpressionId) is not True:
+            _fail("The photo expression is not owned and unlocked", RpcCode.PERMISSION_DENIED)
+        stage = self.catalog.ids("Stage", required=True).get(expression.get("stageId"))
+        amounts = expression.get("characterAmountArray")
+        if (stage is None or not isinstance(stage.get("assetId"), str) or not stage["assetId"]
+                or not isinstance(amounts, list) or not amounts
+                or any(type(value) is not int or value <= 0 for value in amounts)
+                or len(amounts) != len(set(amounts))):
+            _fail("The photo expression stage or cast definition is malformed")
+        characters, costumes, hairs = (list(request.characterIds), list(request.costumeIds),
+                                       list(request.hairIds))
+        legacy = (request.characterId, request.costumeId, request.hairId)
+        if not characters and not costumes and not hairs:
+            characters, costumes, hairs = ([legacy[0]], [legacy[1]], [legacy[2]])
+        elif any(legacy) and legacy != tuple(values[0] if values else ""
+                                             for values in (characters, costumes, hairs)):
+            _fail("Conflicting photo expression style selections", RpcCode.INVALID_ARGUMENT)
+        if len(characters) not in amounts:
+            _fail("The selected cast count is not supported by this photo expression", RpcCode.INVALID_ARGUMENT)
+        self._styles(SimpleNamespace(characterIds=characters, costumeIds=costumes, hairIds=hairs),
+                     snapshot, expression)
+
     def _urls(self, request, result, snapshot):
         if request.type not in (1, 2, 3):
             _fail("Unsupported photo image request type", RpcCode.INVALID_ARGUMENT)
@@ -286,6 +316,9 @@ class PhotoShootings:
             self._urls(request, result, snapshot)
         elif path == _LIST:
             self._list(result, self._access())
+        elif path == _EXPRESSION_CHECK:
+            self._expression(request, snapshot, self._access())
+            self._common(result)
         else:
             activity = self._scene(request, self._access())
             self._styles(request, snapshot, activity)

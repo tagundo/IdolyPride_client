@@ -2,7 +2,7 @@
 """Build the native server with cached Android tools, without Gradle or Go.
 
 Use CPython 3.13, an exact committed source snapshot and a separately validated
-49-table public payload. Existing APKs and account files are never overwritten.
+54-table public payload. Existing APKs and account files are never overwritten.
 All Java processes are sequential, bounded and run with a single CPU/worker.
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.22", 41
+VERSION, VERSION_CODE = "0.3.23", 42
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -58,7 +58,8 @@ RESOURCE_FILES = (RES_ROOT + "values/strings.xml", RES_ROOT + "drawable/ic_serve
 SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
                           "CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
-                          "CompanyEnjoyCharacterLevelSetting"))
+                          "CompanyEnjoyCharacterLevelSetting", "PhotoPose", "PhotoPoseMotion",
+                          "ExcursionPlace", "ExcursionPlaceSetting", "ExcursionGazeReaction"))
 ADDED_JSON_SHA256 = {
     "StoryPart": "f67cd5069ecb3dec86f6365c2a1f142a39bbc2e6a9bb3bc07123c0cdaeee5332",
     "PhotoActivity": "6dfde902f963cf72c49729555f5c31281bc59c0c1df67c4c2374cf4ef83fe70b",
@@ -69,6 +70,11 @@ ADDED_JSON_SHA256 = {
     "CompanyTrustLevel": "655d926ec7a41fde833745cba3bdf08f4789dbf1aac71e94d07ef532829edbd3",
     "CompanyEnjoyCharacterLevel": "bc0c90e3f9b7fa82c4509aecf68ff16decf234bd66ba345ccc5924bd2f8afe01",
     "CompanyEnjoyCharacterLevelSetting": "5b5097b5ba3dc732e1cf402f60a36ac35ac5a032276d74c93dc165320d522dbc",
+    "PhotoPose": "29556759c098ff4c506a86c8de38854de757f497a7c9401ab9e64ca8c42e338f",
+    "PhotoPoseMotion": "23671200d842f0e9a336927f58f534a78776fe82b9fdb4e4217f15839e2dc9f2",
+    "ExcursionPlace": "863b779b4ed7829cb81e55bc2cccd53f0967473404b8900bdaaa864e8010f065",
+    "ExcursionPlaceSetting": "c47007eeb9f60398b5cee4195ec15ef5f9d21df1fcf7280e3cc74b2f725b4371",
+    "ExcursionGazeReaction": "5478c9e88c7292a01d6dd1db0e398d3bf03cf2d9ce8cf0bbefdf650d35c0e164",
 }
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from idoly_local import media_master_build as media_master
@@ -81,7 +87,7 @@ SERVER_PERMISSIONS = frozenset("android.permission." + name for name in
 FORBIDDEN_INSTALLER_DEX_TOKENS = (b"PresentationAddonInstaller", b"PresentationInstallActivity",
     b"PresentationStorage", b"Landroid/content/pm/PackageInstaller", b"REQUEST_INSTALL_PACKAGES")
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
-PAYLOAD_INVENTORY = "tools/server_payload_v0319.json"
+PAYLOAD_INVENTORY = "tools/server_payload_v0323.json"
 BASE_PUBLIC_PAYLOAD = {"bytes": 84637208,
     "sha256": "27522b394b021a4df002a4e34f20e89b5407be7b145aeecce45f5023b5227522"}
 NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
@@ -436,7 +442,7 @@ def tool_sources(root, commit):
     result = {}
     for name, loaded in (("tools/build_android_server_manual.py", Path(__file__)),
                          ("tools/repack_android_server_python.py", Path(pybundle.__file__)),
-                         (PAYLOAD_INVENTORY, Path(__file__).with_name("server_payload_v0319.json")),
+                         (PAYLOAD_INVENTORY, Path(__file__).with_name("server_payload_v0323.json")),
                          ("src/idoly_local/media_master_build.py", Path(media_master.__file__)),
                          ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py"))):
         if loaded.resolve() != (root / name).resolve():
@@ -629,8 +635,8 @@ def payload_directory_bounds(path):
 
 
 def load_payload_inventory(path=None):
-    """Read the explicit, source-frozen v0.3.19 catalog additions, never a glob."""
-    path = _regular(Path(__file__).with_name("server_payload_v0319.json") if path is None else path)
+    """Read the explicit, source-frozen v0.3.23 catalog additions, never a glob."""
+    path = _regular(Path(__file__).with_name("server_payload_v0323.json") if path is None else path)
     if not 0 < path.stat().st_size <= META_LIMIT:
         raise ValueError("Versioned public catalog inventory exceeds its size bound")
     with path.open("rb") as stream:
@@ -650,7 +656,7 @@ def load_payload_inventory(path=None):
                    for name, digest in value["component_sources"].items())):
         raise ValueError("Versioned public catalog inventory identity differs")
     additions, ios = value["additions"], value["ios_public_files"]
-    if not isinstance(additions, list) or len(additions) != 258 or not isinstance(ios, list) or len(ios) != 2:
+    if not isinstance(additions, list) or len(additions) != 260 or not isinstance(ios, list) or len(ios) != 2:
         raise ValueError("Versioned public catalog inventory count differs")
     metadata = {"data/original-master/" + name for name in ("master-sort.json", "media-master-sort.json")}
     metadata.update("data/original-master/languages/" + locale + "/" + name
@@ -699,7 +705,7 @@ def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inve
             raise ValueError("Versioned public catalogs overlap original payload members")
         added |= catalog_files.keys()
         if set(infos) != set(old_infos) | added or added & set(old_infos):
-            raise ValueError("Payload may add only the nine named JSON tables and explicit media master files")
+            raise ValueError("Payload may add only the fourteen named JSON tables and explicit media master files")
         old_hashes = pybundle._hash_members(old, old_infos)
         hashes = pybundle._hash_members(new, infos)
         if any(infos[name].file_size != row["bytes"] or hashes[name] != row["sha256"]
@@ -720,8 +726,8 @@ def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inve
             raise ValueError("Payload versioned public catalog provenance differs")
         tables = {name[len("data/master-json/"):-5] for name in infos
                   if name.startswith("data/master-json/") and name.endswith(".json")}
-        if len(tables) != 49 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
-            raise ValueError("Payload must contain exactly 49 public JSON tables")
+        if len(tables) != 54 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
+            raise ValueError("Payload must contain exactly 54 public JSON tables")
         for table in tables:
             rows = json.loads(pybundle._read(new, infos["data/master-json/" + table + ".json"], MAX_JSON),
                               object_pairs_hook=pybundle._json_object)

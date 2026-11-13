@@ -25,9 +25,17 @@ final class ServerModel: ObservableObject {
     @Published private(set) var library = ClientLibrarySettings()
     @Published private(set) var libraryMessage = "목록·언어 변경은 서버 재시작 후 게임 타이틀에서 다시 로그인하면 적용됩니다."
     @Published var resourcePlatform = "ios"
+    @Published var resourceParallelism = ServerModel.savedResourceParallelism() {
+        didSet {
+            if [1, 2, 4, 8].contains(resourceParallelism) {
+                UserDefaults.standard.set(resourceParallelism, forKey: "resourceDownloadParallelism")
+            }
+        }
+    }
     @Published private(set) var resourceMessage = "서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다."
     @Published private(set) var resourceJobID: String?
     @Published private(set) var resourceJobActive = false
+    @Published private(set) var resourcePending = false
     @Published private(set) var playbackMessage = "Mac의 기본값은 꺼짐입니다. 켜면 원본 회전 대기 동작을 사용합니다."
     @Published private(set) var presentationFeedback = ClientPresentationFeedback.waiting
     private var experimentalLiveObserved = false
@@ -138,6 +146,7 @@ final class ServerModel: ObservableObject {
     }
 
     private func updateResourceStatus(_ state: [String: Any]) {
+        resourcePending = false
         guard let resources = state["resource_library"] as? [String: Any] else { return }
         let job = resources["job"] as? [String: Any]
         let phase = job?["state"] as? String ?? "idle"
@@ -150,7 +159,10 @@ final class ServerModel: ObservableObject {
             let missing = (job["missing_files"] as? NSNumber)?.intValue ?? 0
             let imported = (job["imported_files"] as? NSNumber)?.intValue ?? 0
             let failed = (job["failed_files"] as? NSNumber)?.intValue ?? 0
-            resourceMessage = "상태 \(phase) · 확인 \(files)/\(total)개 · 수신 \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) · 가져옴 \(imported)개 · 실패 \(failed)개 · 미보관 \(missing)개"
+            let parallelism = (job["parallelism"] as? NSNumber)?.intValue ?? 0
+            let transfers = job["action"] as? String == "download" && [1, 2, 4, 8].contains(parallelism)
+                ? " · 동시 \(parallelism)개" : ""
+            resourceMessage = "상태 \(phase)\(transfers) · 확인 \(files)/\(total)개 · 수신 \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) · 가져옴 \(imported)개 · 실패 \(failed)개 · 미보관 \(missing)개"
         } else if let catalogs = resources["catalogs"] as? [String: Any], let catalog = catalogs[resourcePlatform] as? [String: Any] {
             if let files = catalog["object_count"] as? NSNumber, let bytes = catalog["total_bytes"] as? NSNumber {
                 resourceMessage = "포함 목록 \(files.intValue)개 · \(ByteCountFormatter.string(fromByteCount: bytes.int64Value, countStyle: .file)). 받은 파일은 크기와 MD5를 검사해 보관합니다."
@@ -158,18 +170,32 @@ final class ServerModel: ObservableObject {
         }
     }
 
+    private static func savedResourceParallelism() -> Int {
+        guard let number = UserDefaults.standard.object(forKey: "resourceDownloadParallelism") as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID(),
+              !["f", "d"].contains(String(cString: number.objCType)),
+              [1, 2, 4, 8].contains(number.intValue) else { return 4 }
+        return number.intValue
+    }
+
     func resources(_ action: String) {
         guard running, !shutdownRequested else { alertMessage = "먼저 서버를 시작해 주세요."; return }
-        sendResource(action, extra: ["platform": resourcePlatform])
+        guard !resourceJobActive, !resourcePending else { return }
+        var extra: [String: Any] = ["platform": resourcePlatform]
+        if action == "resources_download" {
+            guard [1, 2, 4, 8].contains(resourceParallelism) else { return }
+            extra["parallelism"] = resourceParallelism
+        }
+        sendResource(action, extra: extra)
     }
 
     func cancelResources() {
-        guard let identifier = resourceJobID else { return }
+        guard !resourcePending, let identifier = resourceJobID else { return }
         sendResource("resources_cancel", extra: ["job_id": identifier])
     }
 
     func exportResources() {
-        guard running, !resourceJobActive else { return }
+        guard running, !resourceJobActive, !resourcePending else { return }
         let panel = NSSavePanel()
         panel.allowedFileTypes = ["zip"]
         guard let exports = resourceExportsDirectory() else { return }
@@ -202,7 +228,7 @@ final class ServerModel: ObservableObject {
     }
 
     func importResources() {
-        guard running, !resourceJobActive else { return }
+        guard running, !resourceJobActive, !resourcePending else { return }
         let panel = NSOpenPanel()
         panel.allowedFileTypes = ["zip"]
         panel.allowsMultipleSelection = false
@@ -213,7 +239,7 @@ final class ServerModel: ObservableObject {
     }
 
     private func sendResource(_ action: String, extra: [String: Any]) {
-        guard running, !shutdownRequested, let writer = input?.fileHandleForWriting else { return }
+        guard running, !shutdownRequested, !resourcePending, let writer = input?.fileHandleForWriting else { return }
         var command = extra
         command["action"] = action
         do {
@@ -223,6 +249,7 @@ final class ServerModel: ObservableObject {
                 alertMessage = "리소스 요청을 전달하지 못했습니다. 경로가 길면 Downloads 아래의 짧은 이름을 선택해 주세요."
                 return
             }
+            resourcePending = true
             resourceMessage = "리소스 작업을 준비하고 있습니다."
         } catch { alertMessage = "리소스 요청을 만들지 못했습니다." }
     }
@@ -334,6 +361,7 @@ final class ServerModel: ObservableObject {
                 self.running = false
                 self.busy = false
                 self.canStop = false
+                self.resourcePending = false
                 self.statusTimer?.invalidate()
                 self.statusTimer = nil
                 self.statusPolling.reset()
@@ -379,8 +407,12 @@ final class ServerModel: ObservableObject {
             switch kind {
             case "log": appendLog(event["message"] as? String ?? "")
             case "error": fail(event["message"] as? String ?? "서버 작업에 실패했습니다.")
-            case "resource_error": alertMessage = event["message"] as? String ?? "리소스 작업을 완료하지 못했습니다."
-            case "resource_result": resourceMessage = event["message"] as? String ?? "리소스 작업 상태가 갱신되었습니다."
+            case "resource_error":
+                resourcePending = false
+                alertMessage = event["message"] as? String ?? "리소스 작업을 완료하지 못했습니다."
+            case "resource_result":
+                resourcePending = false
+                resourceMessage = event["message"] as? String ?? "리소스 작업 상태가 갱신되었습니다."
             case "status":
                 guard let state = event["status"] as? [String: Any] else { continue }
                 statusPolling.received(at: ProcessInfo.processInfo.systemUptime)
@@ -549,6 +581,7 @@ final class ServerModel: ObservableObject {
         if logs.count > 60_000 { logs = String(logs.suffix(50_000)) }
     }
     private func fail(_ message: String) {
+        resourcePending = false
         busy = false; status = message; appendLog(message)
         if !smoke { alertMessage = message }
     }
@@ -814,16 +847,24 @@ struct ServerView: View {
                             Picker("보관할 리소스", selection: $model.resourcePlatform) {
                                 Text("Mac·iOS").tag("ios")
                                 Text("Android").tag("android")
-                            }.disabled(model.resourceJobActive)
+                            }.disabled(model.resourceJobActive || model.resourcePending)
+                            Picker("동시 다운로드 수", selection: $model.resourceParallelism) {
+                                ForEach([1, 2, 4, 8], id: \.self) { count in
+                                    Text(count == 4 ? "4개 (기본)" : "\(count)개").tag(count)
+                                }
+                            }.disabled(model.resourceJobActive || model.resourcePending)
                             HStack {
                                 Button("목록·예상 용량 확인") { model.resources("resources_preview") }
+                                    .disabled(model.resourceJobActive || model.resourcePending)
                                 Button("전체 리소스 받기") { model.resources("resources_download") }
-                                Button("작업 취소") { model.cancelResources() }.disabled(!model.resourceJobActive)
+                                    .disabled(model.resourceJobActive || model.resourcePending)
+                                Button("작업 취소") { model.cancelResources() }
+                                    .disabled(!model.resourceJobActive || model.resourcePending)
                             }.disabled(!model.running)
                             HStack {
                                 Button("Downloads에 내보내기") { model.exportResources() }
                                 Button("보관 ZIP 가져오기") { model.importResources() }
-                            }.disabled(!model.running || model.resourceJobActive)
+                            }.disabled(!model.running || model.resourceJobActive || model.resourcePending)
                             Text(model.resourceMessage).font(.caption).textSelection(.enabled)
                             Text("포함된 목록의 원본 파일을 서버에 보관합니다. 전체 자료는 수십 GB가 될 수 있습니다. 다시 받으면 검증된 완료 파일부터 재사용하며, 전송 중인 파일의 바이트 단위 재개는 지원하지 않습니다. 내보낸 ZIP은 다른 서버로 가져올 수 있습니다.")
                                 .font(.caption).foregroundStyle(.secondary)

@@ -40,6 +40,26 @@ public final class ResourceTransfersHostTest {
         f.putInt(0x06054b50).putShort((short)0).putShort((short)0).putShort((short)1).putShort((short)1);
         check(!ResourceTransfers.zipComplete(fake, 22));
         check(ResourceTransfers.platform("android") && ResourceTransfers.platform("ios") && !ResourceTransfers.platform("../other"));
+        for (int parallelism : new int[]{1, 2, 4, 8}) {
+            check(ResourceTransfers.downloadParallelism(parallelism));
+            check(ResourceTransfers.downloadParallelismAt(ResourceTransfers.downloadParallelismPosition(parallelism)) == parallelism);
+            for (String platform : new String[]{"android", "ios"})
+                check(ResourceTransfers.downloadPayload(platform, parallelism).equals("{\"platform\":\"" + platform
+                        + "\",\"kind\":\"all\",\"parallelism\":" + parallelism + "}"));
+        }
+        for (int invalid : new int[]{Integer.MIN_VALUE, -1, 0, 3, 5, 9, Integer.MAX_VALUE}) {
+            check(!ResourceTransfers.downloadParallelism(invalid));
+            check(ResourceTransfers.downloadParallelismAt(ResourceTransfers.downloadParallelismPosition(invalid)) == 4);
+            check(!ResourceTransfers.download(null, "android", invalid));
+            try { ResourceTransfers.downloadPayload("android", invalid); throw new AssertionError("Invalid parallelism accepted"); }
+            catch (java.io.IOException expected) { checks++; }
+        }
+        check(ResourceTransfers.downloadParallelismAt(-1) == 4 && ResourceTransfers.downloadParallelismAt(4) == 4);
+        for (String invalid : new String[]{null, "", "../other", "android\""}) {
+            check(!ResourceTransfers.download(null, invalid, 4));
+            try { ResourceTransfers.downloadPayload(invalid, 4); throw new AssertionError("Invalid platform accepted"); }
+            catch (java.io.IOException expected) { checks++; }
+        }
         check(ResourceTransfers.exportConfirmed("job", "job", "completed", true, 0));
         check(ResourceTransfers.exportConfirmed("job", "job", "partial", true, 0));
         check(!ResourceTransfers.exportConfirmed("job", "job", "partial", false, 0));

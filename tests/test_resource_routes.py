@@ -19,8 +19,9 @@ class Library:
     def catalog_summary(self, platform):
         self.calls.append(("preview", platform))
 
-    def start_download(self, platform, kind="all"):
-        self.calls.append(("download", platform, kind))
+    def start_download(self, platform, kind="all", *, parallelism=None):
+        self.calls.append(("download", platform, kind) if parallelism is None
+                          else ("download", platform, kind, parallelism))
         return {"job_id": "job-1", "state": "running"}
 
     def cancel(self, identifier):
@@ -82,6 +83,67 @@ def test_bad_commands_never_start_network_or_jobs(tmp_path, raw):
         status, _, _ = request(server, "/client/resources/download", "POST", raw,
             {"Content-Type": "application/json"})
         assert status == 400 and library.calls == []
+
+
+@pytest.mark.parametrize("parallelism", (1, 2, 4, 8))
+def test_parallel_download_selection_reaches_the_job_without_affecting_other_commands(tmp_path, parallelism):
+    library = Library()
+    with serve(tmp_path, library) as server:
+        status, _, _ = request(server, "/client/resources/download", "POST",
+            json.dumps({"platform": "ios", "parallelism": parallelism}),
+            {"Content-Type": "application/json"})
+        assert status == 202 and library.calls == [("download", "ios", "all", parallelism)]
+        status, _, _ = request(server, "/client/resources/export?platform=ios&parallelism=8")
+        assert status == 400 and len(library.calls) == 1
+
+
+@pytest.mark.parametrize("parallelism", (None, True, False, 0, 3, 9, 16, 4.0, "4", [], {}))
+def test_invalid_parallelism_never_reaches_a_download_worker(tmp_path, parallelism):
+    library = Library()
+    with serve(tmp_path, library) as server:
+        status, _, _ = request(server, "/client/resources/download", "POST",
+            json.dumps({"platform": "android", "parallelism": parallelism}),
+            {"Content-Type": "application/json"})
+        assert status == 400 and library.calls == []
+
+
+def test_http_parallelism_starts_real_overlapping_verified_downloads(tmp_path):
+    from idoly_local.resource_library import ResourceLibrary
+    from test_resource_library import AES, Response, catalog, complete
+
+    manifest, bodies = catalog(tmp_path, count=4)
+    first_wave = threading.Barrier(5)
+    release = threading.Event()
+    lock = threading.Lock()
+    calls = []
+
+    def fetch(url, *, timeout):
+        with lock:
+            calls.append(url)
+            initial = len(calls) <= 4
+        if initial:
+            first_wave.wait(timeout=3)
+            assert release.wait(3)
+        return Response(bodies[url])
+
+    library = ResourceLibrary(tmp_path, {"android": manifest}, fetcher=fetch,
+                              aes_cbc=AES, resource_cache_dir=tmp_path / "Download" / "IdolyPride")
+    try:
+        with serve(tmp_path, library) as server:
+            status, _, raw = request(server, "/client/resources/download", "POST",
+                json.dumps({"platform": "android", "parallelism": 4}),
+                {"Content-Type": "application/json"})
+            assert status == 202 and json.loads(raw)["parallelism"] == 4
+            first_wave.wait(timeout=3)  # Four real cache workers reached the transport together.
+            assert len(calls) == 4
+            release.set()
+            job = complete(library)
+            assert job["state"] == "completed" and job["failed_files"] == 0
+            assert job["verified_files"] == len(manifest.objects)
+            assert set(calls) == set(bodies)
+    finally:
+        release.set()
+        library.close()
 
 
 def test_stream_has_job_identity_no_false_length_and_head_never_exports(tmp_path):

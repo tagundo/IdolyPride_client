@@ -50,6 +50,24 @@ int main(int argc,char **argv) {
     CHECK(id_resource_active("preparing") && id_resource_active("running") && id_resource_active("export_ready") && id_resource_active("cancelling"));
     CHECK(!id_resource_active("completed") && !id_resource_active("partial") && !id_resource_active(0));
     CHECK(id_resource_job_valid("7e95d_8-A") && !id_resource_job_valid("bad\"id") && !id_resource_job_valid(""));
+    CHECK(id_resource_parallelism(-1)==4 && id_resource_parallelism(0)==4 && id_resource_parallelism(3)==4
+        && id_resource_parallelism(9)==4 && id_resource_parallelism(9223372036854775807LL)==4);
+    const int parallelisms[]={1,2,4,8};
+    for (int i=0;i<4;++i) {
+        CHECK(id_resource_parallelism_valid(parallelisms[i]) && id_resource_parallelism(parallelisms[i])==parallelisms[i]);
+        CHECK(id_resource_download_command("ios",parallelisms[i],bytes,sizeof bytes));
+        CHECK(strstr(bytes,"\"parallelism\":") && bytes[strlen(bytes)-1]=='\n');
+        if (argc==2 && !strcmp(argv[1],"--download-commands")) fputs(bytes,stdout);
+    }
+    CHECK(id_resource_download_command("android",8,bytes,sizeof bytes));
+    if (argc==2 && !strcmp(argv[1],"--download-commands")) { fputs(bytes,stdout); return 0; }
+    CHECK(!id_resource_download_command("unknown",4,bytes,sizeof bytes));
+    CHECK(!id_resource_download_command(0,4,bytes,sizeof bytes));
+    CHECK(!id_resource_download_command("ios",0,bytes,sizeof bytes));
+    CHECK(!id_resource_download_command("ios",3,bytes,sizeof bytes));
+    CHECK(!id_resource_download_command("ios",9,bytes,sizeof bytes));
+    CHECK(!id_resource_download_command("ios",4,0,sizeof bytes));
+    CHECK(!id_resource_download_command("ios",4,tiny,4) && tiny[4]=='S');
     char job[66];memset(job,'a',64);job[64]=0;CHECK(id_resource_job_valid(job));job[64]='b';job[65]=0;CHECK(!id_resource_job_valid(job));
     const char *actions[]={"resources_preview","resources_download","resources_export","resources_import","resources_cancel"};
     for(int i=0;i<5;++i) {

@@ -32,7 +32,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** One app-context transfer worker. ZIPs stream directly to the chosen destination. */
+/** One app-context control/archive worker; the server owns parallel CDN downloads.
+ * ZIPs stream directly to the chosen destination. */
 final class ResourceTransfers {
     private static final String ORIGIN = "http://127.0.0.1:8080/client/resources";
     private static final int CONTROL_LIMIT = 128 * 1024;
@@ -79,6 +80,18 @@ final class ResourceTransfers {
     static Snapshot snapshot() { return current; }
     static boolean busy() { return BUSY.get(); }
     static boolean platform(String value) { return "android".equals(value) || "ios".equals(value); }
+    static boolean downloadParallelism(int value) { return value == 1 || value == 2 || value == 4 || value == 8; }
+    static int downloadParallelismPosition(int value) {
+        return value == 1 ? 0 : value == 2 ? 1 : value == 8 ? 3 : 2;
+    }
+    static int downloadParallelismAt(int position) {
+        return position == 0 ? 1 : position == 1 ? 2 : position == 3 ? 8 : 4;
+    }
+    static String downloadPayload(String platform, int parallelism) throws IOException {
+        if (!platform(platform) || !downloadParallelism(parallelism))
+            throw new IOException("Invalid resource download selection");
+        return "{\"platform\":\"" + platform + "\",\"kind\":\"all\",\"parallelism\":" + parallelism + "}";
+    }
     private static void changed() { ServerService.resourceTransferChanged(); }
     private static void checkCancelled() throws Failure { if (CANCEL.get()) throw new Failure("cancelled"); }
     private static void progress(long bytes) {
@@ -157,9 +170,12 @@ final class ResourceTransfers {
         } finally { value.disconnect(); activeConnection = null; }
     }
     static boolean download(Context context, String platform) {
-        if (!platform(platform)) return false;
+        return download(context, platform, 4);
+    }
+    static boolean download(Context context, String platform, int parallelism) {
+        if (!platform(platform) || !downloadParallelism(parallelism)) return false;
         return begin(context, "download", app -> {
-            control("/download", new JSONObject().put("platform", platform).put("kind", "all"));
+            control("/download", new JSONObject(downloadPayload(platform, parallelism)));
             return new Snapshot(false, "download", "requested", 0, null, null);
         });
     }

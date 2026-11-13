@@ -42,6 +42,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     static final String DOWNLOAD_MISSING_RESOURCES = "download_missing_resources";
     static final String MEDIA_MODE = "media_mode";
     static final String RESOURCE_PUBLIC_DOWNLOADS = "resource_public_downloads";
+    static final String RESOURCE_DOWNLOAD_PARALLELISM = "resource_download_parallelism";
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
     private CheckBox mediaMode;
@@ -89,7 +90,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private LibrarySettings librarySettings;
     private boolean libraryLoading, libraryInvalid, librarySaveFailed;
     private boolean libraryInvalidLanguage, libraryInvalidMedia;
-    private Spinner libraryLanguage, libraryMvSort, libraryOutfitSort, resourcePlatform;
+    private Spinner libraryLanguage, libraryMvSort, libraryOutfitSort, resourcePlatform, resourceParallelism;
     private CheckBox hideVideoMv;
     private TextView libraryStatus, libraryTransferStatus;
     private Button downloadLibrary, importLibrary, exportLibrary, cancelLibrary;
@@ -438,19 +439,32 @@ public final class MainActivity extends Activity implements ServerService.Observ
         libraryStatus.setTextColor(librarySaveFailed || libraryInvalid ? Color.rgb(255, 192, 154) : Color.rgb(180, 199, 211));
     }
     private String selectedResourcePlatform() { return resourcePlatform.getSelectedItemPosition() == 1 ? "ios" : "android"; }
+    private int selectedResourceParallelism() {
+        return ResourceTransfers.downloadParallelismAt(resourceParallelism.getSelectedItemPosition());
+    }
     private void addResourceLibraryControls(LinearLayout body) {
         TextView heading = text(R.string.library_resources_title, 15, Color.WHITE);
         heading.setPadding(0, dp(12), 0, dp(4)); body.addView(heading);
         resourcePlatform = presentationSpinner(body, R.string.library_resource_platform, R.array.library_resource_platform_options);
         String selected = getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getString("resource_platform", "android");
         resourcePlatform.setSelection("ios".equals(selected) ? 1 : 0);
-        resourcePlatform.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        resourceParallelism = presentationSpinner(body, R.string.library_download_parallelism, R.array.library_download_parallelism_options);
+        int parallelism = 4;
+        try { parallelism = getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getInt(RESOURCE_DOWNLOAD_PARALLELISM, 4); }
+        catch (ClassCastException invalidPreference) { /* A malformed preference uses the normal default. */ }
+        resourceParallelism.setSelection(ResourceTransfers.downloadParallelismPosition(parallelism));
+        AdapterView.OnItemSelectedListener selectionChanged = new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putString("resource_platform", selectedResourcePlatform()).apply();
+                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
+                        .putString("resource_platform", selectedResourcePlatform())
+                        .putInt(RESOURCE_DOWNLOAD_PARALLELISM, selectedResourceParallelism()).apply();
                 updateResourceLibrary(new JSONObject());
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
-        });
+        };
+        resourcePlatform.setOnItemSelectedListener(selectionChanged);
+        resourceParallelism.setOnItemSelectedListener(selectionChanged);
+        body.addView(text(R.string.library_download_parallelism_notice, 12, Color.rgb(180, 199, 211)));
         body.addView(text(R.string.library_resources_notice, 12, Color.rgb(180, 199, 211)));
         downloadLibrary = button(R.string.library_download_all); body.addView(downloadLibrary);
         importLibrary = button(R.string.library_import); body.addView(importLibrary);
@@ -461,7 +475,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         libraryProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         libraryProgress.setMax(1000); libraryProgress.setVisibility(View.GONE); body.addView(libraryProgress, new LinearLayout.LayoutParams(-1, dp(12)));
         downloadLibrary.setOnClickListener(view -> {
-            if (!ResourceTransfers.download(getApplicationContext(), selectedResourcePlatform())) resourceUnavailable();
+            if (!ResourceTransfers.download(getApplicationContext(), selectedResourcePlatform(), selectedResourceParallelism())) resourceUnavailable();
         });
         exportLibrary.setOnClickListener(view -> exportResourceLibrary());
         importLibrary.setOnClickListener(view -> {
@@ -506,6 +520,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         boolean enabled = ServerService.resourceServerRunning() && !local.busy && !active && catalog != null && catalog.optBoolean("available", false);
         downloadLibrary.setEnabled(enabled); importLibrary.setEnabled(enabled); exportLibrary.setEnabled(enabled);
         resourcePlatform.setEnabled(!local.busy && !active);
+        resourceParallelism.setEnabled(!local.busy && !active);
         cancelLibrary.setEnabled(local.busy && local.action.equals("export") || active && currentLibraryJob != null && !currentLibraryJob.isEmpty());
         String message;
         if (local.busy) message = getString(local.state.equals("cancelling") ? R.string.library_resources_cancelling
@@ -525,6 +540,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
                     : jobState.equals("failed") ? getString(R.string.library_job_failed) : jobState.equals("cancelled") ? getString(R.string.library_job_cancelled)
                     : jobState.equals("cancelling") ? getString(R.string.library_job_cancelling) : getString(R.string.library_job_running);
             message += "\n" + getString(R.string.library_job_summary, job.optString("platform", "—"), state, verified, total, missing, failed);
+            int parallelism = job.optInt("parallelism", 0);
+            if ("download".equals(job.optString("action", "")) && ResourceTransfers.downloadParallelism(parallelism))
+                message += "\n" + getString(R.string.library_job_parallelism, parallelism, Math.max(0, job.optInt("active_files", 0)));
             libraryProgress.setVisibility(active || local.busy ? View.VISIBLE : View.GONE);
             libraryProgress.setIndeterminate(total == 0 || !active && local.busy);
             if (active && total > 0) libraryProgress.setProgress((int) Math.min(1000, 1000.0 * Math.min(total, verified + missing + failed) / total));

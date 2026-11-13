@@ -63,8 +63,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "41",
-                           tool.ANDROID + "versionName": "0.3.22"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "42",
+                           tool.ANDROID + "versionName": "0.3.23"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -120,7 +120,7 @@ def test_release_component_export_policy_is_fixed(name, old, new):
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 41;' in raw and 'VERSION_NAME = "0.3.22";' in raw
+    assert 'VERSION_CODE = 42;' in raw and 'VERSION_NAME = "0.3.23";' in raw
     assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
@@ -129,7 +129,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("41")\ngradleProperty("serverVersionName").orElse("0.3.22")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("42")\ngradleProperty("serverVersionName").orElse("0.3.23")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -162,10 +162,10 @@ def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit
 
 def test_versioned_catalog_inventory_keeps_exact_source_and_platform_boundaries():
     value = tool.load_payload_inventory()
-    assert len(value["additions"]) == 258 and len(value["ios_public_files"]) == 2
+    assert len(value["additions"]) == 260 and len(value["ios_public_files"]) == 2
     assert value["base_payload"] == tool.BASE_PUBLIC_PAYLOAD
     assert value["prebuilt_catalogs"]["device_verified"] is False
-    assert len({row["path"] for row in value["additions"] + value["ios_public_files"]}) == 260
+    assert len({row["path"] for row in value["additions"] + value["ios_public_files"]}) == 262
 
 
 @pytest.mark.parametrize("change", ["base", "duplicate", "private", "size", "digest", "ios", "extra", "device"])
@@ -244,10 +244,10 @@ def public_payload(files):
 @pytest.fixture
 def payload_case(tmp_path, monkeypatch):
     from test_media_master_build import original_tag, original_rows, media_tag
-    old = {f"data/master-json/Table{index:02}.json": b'[{"id":"public"}]' for index in range(38)}
+    old = {f"data/master-json/Table{index:02}.json": b'[{"id":"public"}]' for index in range(37)}
     rows = original_rows()
     old.update({"data/master-json/" + table + ".json": json.dumps(rows[table]).encode()
-                for table in ("Costume", "Hair")})
+                for table in ("Costume", "Hair", "EventStory")})
     old["data/protocol/idolypride-6.1.1.pb"] = b"synthetic public descriptor"
     old["data/master-json/!version.txt"] = b"synthetic-public"
     tag = original_tag()
@@ -274,12 +274,12 @@ def payload_case(tmp_path, monkeypatch):
     return baseline, payload, new, write
 
 
-def test_payload_extends_only_nine_public_tables_and_verifies_actual_file_provenance(payload_case):
+def test_payload_extends_only_fourteen_public_tables_and_verifies_actual_file_provenance(payload_case):
     baseline, payload, _files, write = payload_case
     digest = write()
     with ZipFile(baseline) as archive:
         report = tool.validate_payload(payload, digest, archive)
-    assert len(report["tables"]) == 49 and report["sha256"] == digest
+    assert len(report["tables"]) == 54 and report["sha256"] == digest
 
 
 @pytest.mark.parametrize("change", [None, "changed-catalog", "changed-proof", "extra-provenance"])
@@ -509,7 +509,7 @@ def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(t
 
 
 def linked_identity():
-    badging = (f"package: name='{tool.PACKAGE}' versionCode='41' versionName='0.3.22'\n"
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='42' versionName='0.3.23'\n"
                "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
                + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
     manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"

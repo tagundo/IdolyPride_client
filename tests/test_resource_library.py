@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import threading
 import time
@@ -136,7 +137,7 @@ def test_two_worker_bound_and_failed_digest_never_published(tmp_path):
             super().close()
     bad=next(iter(payloads))
     def fetch(url, *, timeout):return Measured(b'x'*len(payloads[url]) if url==bad else payloads[url])
-    library=ResourceLibrary(tmp_path, {'android':manifest}, fetcher=fetch)
+    library=ResourceLibrary(tmp_path, {'android':manifest}, fetcher=fetch, max_workers=2)
     library.start_download('android')
     done=complete(library)
     assert peak<=2 and done['state']=='partial' and done['failed_files']==1
@@ -144,6 +145,417 @@ def test_two_worker_bound_and_failed_digest_never_published(tmp_path):
     record=next(record for record in manifest.objects.values() if record.upstream_url==bad)
     assert not (tmp_path/'octo-cache'/record.cache_key[:2]/(record.cache_key+'.bin')).exists()
     library.close()
+
+
+@pytest.mark.parametrize('parallelism', [1, 2, 4, 8])
+def test_selected_parallel_downloads_really_overlap_and_remain_bounded(tmp_path, parallelism):
+    manifest, payloads = catalog(tmp_path, count=8)
+    lock, reached, release = threading.Lock(), threading.Event(), threading.Event()
+    active = peak = 0
+    calls = []
+
+    class Blocked(Response):
+        def __init__(self, raw):
+            nonlocal active, peak
+            super().__init__(raw)
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == parallelism:
+                    reached.set()
+
+        def read(self, count=-1):
+            assert release.wait(2), 'Selected downloads did not get a release signal'
+            return super().read(count)
+
+        def close(self):
+            nonlocal active
+            if not self.closed:
+                with lock:
+                    active -= 1
+            super().close()
+
+    def fetch(url, *, timeout):
+        with lock:
+            calls.append(url)
+        return Blocked(payloads[url])
+
+    # A constructor value is a default, not a hidden cap on the explicit job.
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch, max_workers=1)
+    try:
+        started = library.start_download('android', parallelism=parallelism)
+        assert reached.wait(1), 'The selected number of independent CDN streams did not overlap'
+        running = library.status()['job']
+        assert running['parallelism'] == started['parallelism'] == parallelism
+        assert running['active_files'] == parallelism
+        with lock:
+            assert active == peak == len(calls) == parallelism
+        release.set()
+        done = complete(library)
+        assert done['state'] == 'completed'
+        assert done['verified_files'] == done['downloaded_files'] == len(payloads)
+        assert done['received_bytes'] == sum(map(len, payloads.values()))
+        assert done['parallelism'] == parallelism and done['active_files'] == 0
+        assert len(calls) == len(set(calls)) == len(payloads) and peak == parallelism
+        assert active == 0
+        # Verified objects resume without new CDN handles even at another speed.
+        library.start_download('android', parallelism=8 if parallelism != 8 else 1)
+        assert complete(library)['cache_hit_files'] == len(payloads)
+        assert len(calls) == len(payloads)
+    finally:
+        release.set()
+        library.close()
+
+
+def test_default_parallelism_is_four_and_options_are_discoverable(tmp_path):
+    manifest, payloads = catalog(tmp_path)
+    library = ResourceLibrary.from_data_dir(tmp_path, aes_cbc=AES,
+        fetcher=lambda url, **kw: Response(payloads[url]),
+        active_gateway=SimpleNamespace(manifest=manifest))
+    try:
+        assert library.status()['download_options'] == {
+            'default_parallelism': 4, 'supported_parallelism': [1, 2, 4, 8]}
+        assert library.start_download('android')['parallelism'] == 4
+        assert complete(library)['parallelism'] == 4
+    finally:
+        library.close()
+
+
+@pytest.mark.parametrize('parallelism', [True, False, 0, -1, 3, 5, 9, 16, 2.0, '4', [], {}])
+def test_invalid_parallelism_is_rejected_before_reserving_or_replacing_a_job(tmp_path, parallelism):
+    manifest, payloads = catalog(tmp_path)
+    library = ResourceLibrary(tmp_path, {'android': manifest},
+        fetcher=lambda url, **kw: Response(payloads[url]))
+    try:
+        with pytest.raises(ResourceLibraryError, match='invalid_selection'):
+            library.start_download('android', parallelism=parallelism)
+        assert library.status()['job'] is None
+        previous = library.start_download('android', parallelism=1)['job_id']
+        complete(library)
+        with pytest.raises(ResourceLibraryError, match='invalid_selection'):
+            library.start_download('android', parallelism=parallelism)
+        assert library.status()['job']['job_id'] == previous
+    finally:
+        library.close()
+
+
+@pytest.mark.parametrize('workers', [True, False, 0, 3, 5, 9, 16, 2.0, '4'])
+def test_invalid_constructor_parallelism_is_rejected(tmp_path, workers):
+    with pytest.raises(ValueError, match='Resource workers'):
+        ResourceLibrary(tmp_path, max_workers=workers)
+
+
+def test_eight_parallel_downloads_cancel_without_publishing_or_holding_reservations(tmp_path):
+    manifest, payloads = catalog(tmp_path, count=8)
+    lock, reached, release = threading.Lock(), threading.Event(), threading.Event()
+    opened = 0
+
+    class Blocked(Response):
+        def read(self, count=-1):
+            release.wait(2)
+            return b'' if self.closed else super().read(count)
+
+    def fetch(url, *, timeout):
+        nonlocal opened
+        with lock:
+            opened += 1
+            if opened == 8:
+                reached.set()
+        return Blocked(payloads[url])
+
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch)
+    try:
+        job = library.start_download('android', parallelism=8)
+        assert reached.wait(1)
+        assert library.status()['job']['active_files'] == 8
+        before = time.monotonic()
+        library.cancel(job['job_id'])
+        assert time.monotonic() - before < .2
+        release.set()
+        done = complete(library)
+        assert done['state'] == 'cancelled' and done['verified_files'] == 0
+        assert done['pending_write_bytes'] == 0 and done['active_files'] == 0
+        assert not list(tmp_path.rglob('*.bin')) and not list(tmp_path.rglob('*.part'))
+    finally:
+        release.set()
+        library.close()
+
+
+def test_parallel_disk_reservations_stop_overcommit_before_another_cdn_handle(tmp_path, monkeypatch):
+    import idoly_local.resource_library as module
+    manifest, payloads = catalog(tmp_path, count=4)
+    records = list(manifest.objects.values())
+    # There is room for each object alone, but not for two outstanding writes.
+    # A per-file-only free-space test would open all eight CDN handles here.
+    available = module._RESERVE_BYTES + max(row.size for row in records)
+    monkeypatch.setattr(module.shutil, 'disk_usage', lambda path: SimpleNamespace(free=available))
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+
+    class Blocked(Response):
+        def read(self, count=-1):
+            release.wait(2)
+            return b'' if self.closed else super().read(count)
+
+    def fetch(url, *, timeout):
+        calls.append(url)
+        entered.set()
+        return Blocked(payloads[url])
+
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch)
+    exhausted = threading.Event()
+    close_cache = library._close_cache
+    def observed_close(job):
+        close_cache(job)
+        if job.fatal == 'insufficient_space':
+            exhausted.set()
+    monkeypatch.setattr(library, '_close_cache', observed_close)
+    try:
+        library.start_download('android', parallelism=8)
+        assert exhausted.wait(1), 'An overcommitting second transfer was not rejected'
+        release.set()
+        done = complete(library)
+        assert done['state'] == 'failed' and done['error_code'] == 'insufficient_space'
+        # Cancellation can win before the first reserved writer opens its
+        # network handle; neither ordering may open a second handle.
+        assert len(calls) <= 1 and done['pending_write_bytes'] == 0
+        assert not list(tmp_path.rglob('*.part'))
+    finally:
+        release.set()
+        library.close()
+
+
+def test_written_progress_is_not_counted_twice_against_current_free_space(tmp_path, monkeypatch):
+    import idoly_local.resource_library as module
+    manifest, payloads = catalog(tmp_path, count=1)
+    records = sorted(manifest.objects.values(), key=lambda row: row.cache_key)
+    first_written, second_opened = threading.Event(), threading.Event()
+    written = 0
+    calls = []
+    total_size = sum(row.size for row in records)
+    monkeypatch.setattr(module.shutil, 'disk_usage',
+        lambda path: SimpleNamespace(free=module._RESERVE_BYTES + total_size - written))
+    original_open = OctoCache.open_verified
+
+    @contextmanager
+    def ordered_open(cache, record):
+        if record.cache_key != records[0].cache_key:
+            assert first_written.wait(1)
+        with original_open(cache, record) as stream:
+            yield stream
+
+    monkeypatch.setattr(OctoCache, 'open_verified', ordered_open)
+
+    class FirstResponse(Response):
+        def close(self):
+            nonlocal written
+            if not self.closed:
+                # EOF is reached after the full body was written and its
+                # progress was reported, but before the final file rehash.
+                written = records[0].size
+                first_written.set()
+                assert second_opened.wait(1), 'Written bytes were reserved a second time'
+            super().close()
+
+    def fetch(url, *, timeout):
+        calls.append(url)
+        if url == records[0].upstream_url:
+            return FirstResponse(payloads[url])
+        second_opened.set()
+        return Response(payloads[url])
+
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch)
+    try:
+        library.start_download('android', parallelism=2)
+        done = complete(library)
+        assert done['state'] == 'completed' and done['verified_files'] == 2
+        assert done['pending_write_bytes'] == 0 and len(calls) == 2
+    finally:
+        second_opened.set()
+        library.close()
+
+
+def test_completed_writes_release_reservations_before_the_next_download(tmp_path, monkeypatch):
+    import idoly_local.resource_library as module
+    manifest, payloads = catalog(tmp_path, count=4)
+    available = module._RESERVE_BYTES + max(row.size for row in manifest.objects.values())
+    monkeypatch.setattr(module.shutil, 'disk_usage', lambda path: SimpleNamespace(free=available))
+    calls = []
+    def fetch(url, *, timeout):
+        calls.append(url)
+        return Response(payloads[url])
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch)
+    try:
+        library.start_download('android', parallelism=1)
+        done = complete(library)
+        assert done['state'] == 'completed' and done['verified_files'] == len(payloads)
+        assert done['pending_write_bytes'] == 0 and len(calls) == len(payloads)
+    finally:
+        library.close()
+
+
+def test_failed_fetch_releases_disk_reservation_for_later_objects(tmp_path, monkeypatch):
+    import idoly_local.resource_library as module
+    manifest, payloads = catalog(tmp_path)
+    available = module._RESERVE_BYTES + max(row.size for row in manifest.objects.values())
+    monkeypatch.setattr(module.shutil, 'disk_usage', lambda path: SimpleNamespace(free=available))
+    calls = []
+    def fetch(url, *, timeout):
+        calls.append(url)
+        raise OSError('synthetic connection failure')
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch)
+    try:
+        library.start_download('android', parallelism=1)
+        done = complete(library)
+        assert done['state'] == 'failed' and done['error_code'] != 'insufficient_space'
+        assert done['failed_files'] == len(calls) == len(payloads)
+        assert done['pending_write_bytes'] == 0
+    finally:
+        library.close()
+
+
+def test_worker_start_failure_cancels_started_workers_without_leaking_pending_writes(tmp_path, monkeypatch):
+    manifest, payloads = catalog(tmp_path, count=8)
+    release = threading.Event()
+    original_start = threading.Thread.start
+    attempts = 0
+
+    class Blocked(Response):
+        def read(self, count=-1):
+            release.wait(2)
+            return b'' if self.closed else super().read(count)
+
+    def start(thread):
+        nonlocal attempts
+        if thread.name == 'IdolyResourceDownload':
+            attempts += 1
+            if attempts == 4:
+                raise RuntimeError('synthetic worker exhaustion')
+        return original_start(thread)
+
+    library = ResourceLibrary(tmp_path, {'android': manifest},
+        fetcher=lambda url, **kw: Blocked(payloads[url]))
+    monkeypatch.setattr(threading.Thread, 'start', start)
+    try:
+        with pytest.raises(ResourceLibraryError, match='cache_io'):
+            library.start_download('android', parallelism=8)
+        release.set()
+        done = complete(library)
+        assert attempts == 4 and done['state'] == 'failed' and done['error_code'] == 'cache_io'
+        assert done['pending_write_bytes'] == done['active_files'] == done['verified_files'] == 0
+        assert not list(tmp_path.rglob('*.part'))
+    finally:
+        release.set()
+        library.close()
+
+
+def test_mixed_legacy_seed_and_cdn_share_pending_disk_budget(tmp_path, monkeypatch):
+    import idoly_local.resource_library as module
+    manifest, payloads = catalog(tmp_path, count=1)
+    records = sorted(manifest.objects.values(), key=lambda row: row.cache_key)
+    selected = tmp_path / 'Downloads' / 'IdolyPride'
+    selected.mkdir(parents=True)
+    seed = tmp_path / 'octo-cache' / records[0].cache_key[:2] / (records[0].cache_key + '.bin')
+    seed.parent.mkdir(parents=True)
+    seed.write_bytes(payloads[records[0].upstream_url])
+    seed_reserved, release, exhausted = threading.Event(), threading.Event(), threading.Event()
+    available = module._RESERVE_BYTES + max(row.size for row in records)
+    monkeypatch.setattr(module.shutil, 'disk_usage', lambda path: SimpleNamespace(free=available))
+    original_guard, original_open = OctoCache._write_guard, OctoCache.open_verified
+
+    def held_guard(cache, record, phase, written=0):
+        original_guard(cache, record, phase, written)
+        if record.cache_key == records[0].cache_key and phase == 'start':
+            seed_reserved.set()
+            release.wait(2)
+
+    @contextmanager
+    def ordered_open(cache, record):
+        if record.cache_key != records[0].cache_key:
+            assert seed_reserved.wait(1)
+        with original_open(cache, record) as stream:
+            yield stream
+
+    monkeypatch.setattr(OctoCache, '_write_guard', held_guard)
+    monkeypatch.setattr(OctoCache, 'open_verified', ordered_open)
+    calls = []
+    def fetch(url, *, timeout):
+        calls.append(url)
+        return Response(payloads[url])
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch,
+                              resource_cache_dir=selected)
+    close_cache = library._close_cache
+    def observed_close(job):
+        close_cache(job)
+        if job.fatal == 'insufficient_space':
+            exhausted.set()
+    monkeypatch.setattr(library, '_close_cache', observed_close)
+    try:
+        library.start_download('android', parallelism=2)
+        assert seed_reserved.wait(1) and exhausted.wait(1)
+        release.set()
+        done = complete(library)
+        assert done['state'] == 'failed' and done['error_code'] == 'insufficient_space'
+        assert done['pending_write_bytes'] == 0 and calls == []
+        assert seed.read_bytes() == payloads[records[0].upstream_url]
+        assert not list(selected.rglob('*.bin')) and not list(selected.rglob('*.part'))
+    finally:
+        release.set()
+        library.close()
+
+
+def test_failed_partial_seed_releases_budget_before_cdn_fallback_and_cache_hit_needs_no_space(
+        tmp_path, monkeypatch):
+    import idoly_local.resource_library as module
+    manifest, payloads = catalog(tmp_path, count=1)
+    record = next(row for row in manifest.objects.values() if row.kind == 'assetbundle')
+    selected = tmp_path / 'Downloads' / 'IdolyPride'
+    selected.mkdir(parents=True)
+    seed = tmp_path / 'octo-cache' / record.cache_key[:2] / (record.cache_key + '.bin')
+    seed.parent.mkdir(parents=True)
+    seed.write_bytes(payloads[record.upstream_url])
+    available = module._RESERVE_BYTES + record.size
+    monkeypatch.setattr(module.shutil, 'disk_usage', lambda path: SimpleNamespace(free=available))
+    original_seed = OctoCache._seed_file
+
+    class BrokenSeed:
+        def __init__(self, stream):
+            self.stream, self.once = stream, False
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            self.stream.close()
+        def fileno(self):
+            return self.stream.fileno()
+        def read(self, count):
+            if self.once:
+                raise OSError('synthetic seed read failure after a partial copy')
+            self.once = True
+            return self.stream.read(1)
+
+    def broken_source(root, identity, row):
+        source = original_seed(root, identity, row)
+        return (BrokenSeed(source[0]), source[1]) if source is not None else None
+    monkeypatch.setattr(OctoCache, '_seed_file', staticmethod(broken_source))
+    calls = []
+    def fetch(url, *, timeout):
+        calls.append(url)
+        return Response(payloads[url])
+    library = ResourceLibrary(tmp_path, {'android': manifest}, fetcher=fetch,
+                              resource_cache_dir=selected)
+    try:
+        library.start_download('android', kind='assetbundle', parallelism=8)
+        done = complete(library)
+        assert done['state'] == 'completed' and done['downloaded_files'] == 1
+        assert done['pending_write_bytes'] == 0 and calls == [record.upstream_url]
+        assert seed.read_bytes() == payloads[record.upstream_url]
+        available = 0
+        library.start_download('android', kind='assetbundle', parallelism=8)
+        resumed = complete(library)
+        assert resumed['state'] == 'completed' and resumed['cache_hit_files'] == 1
+        assert resumed['pending_write_bytes'] == 0 and calls == [record.upstream_url]
+    finally:
+        library.close()
 
 
 def test_close_is_bounded_even_when_transport_close_and_read_block(tmp_path):

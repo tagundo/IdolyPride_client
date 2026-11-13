@@ -101,7 +101,13 @@ class Controller:
                 self.status()
                 return
             if action == "resources_download":
-                library.start_download(platform)
+                if "parallelism" in command:
+                    parallelism = command["parallelism"]
+                    if type(parallelism) is not int or parallelism not in (1, 2, 4, 8):
+                        raise ValueError("Invalid download parallelism")
+                    library.start_download(platform, parallelism=parallelism)
+                else:
+                    library.start_download(platform)
                 self.status()
                 return
             value = command.get("path")

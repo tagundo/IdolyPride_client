@@ -167,6 +167,11 @@ class OctoCache:
     Matching immutable objects are verified and copied on demand into this
     cache, including offline reads. Seeds are read only and never removed.
 
+    ``write_guard`` is an optional quota callback, not an observation hook. It
+    receives (record, phase, written_bytes) for start/progress/finish of each
+    actual seed copy or CDN write. Rejection aborts that write; finish always
+    releases the caller's reservation. Existing verified reads do not call it.
+
     ``close()`` rejects new work and prevents subsequent writes/publication. It
     closes available response handles outside the cache lock. Opening DNS or
     response headers has no handle to close yet and remains bounded by the
@@ -176,7 +181,7 @@ class OctoCache:
     def __init__(self, root, *, fetcher=None, on_event=None,
                  max_object_bytes=512 * 1024 * 1024, max_parallel=2,
                  timeout=30, total_timeout=300, allow_download=True,
-                 max_download_bytes=None, seed_dirs=()):
+                 max_download_bytes=None, seed_dirs=(), write_guard=None):
         if (type(max_object_bytes) is not int or not 1 <= max_object_bytes <= 2**31-1
                 or type(max_parallel) is not int or not 1 <= max_parallel <= 16
                 or type(allow_download) is not bool
@@ -186,7 +191,9 @@ class OctoCache:
         for value in (timeout, total_timeout):
             if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                 raise ValueError("Invalid Octo cache timeout")
-        if (fetcher is not None and not callable(fetcher)) or (on_event is not None and not callable(on_event)):
+        if ((fetcher is not None and not callable(fetcher))
+                or (on_event is not None and not callable(on_event))
+                or (write_guard is not None and not callable(write_guard))):
             raise ValueError("Invalid Octo cache callback")
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -196,6 +203,7 @@ class OctoCache:
         self._root_identity = root_info.st_dev, root_info.st_ino
         self._seed_roots = self._validate_seeds(seed_dirs)
         self.fetcher, self.on_event = fetcher or open_upstream, on_event
+        self.write_guard = write_guard
         self.max_object_bytes, self.timeout, self.total_timeout = max_object_bytes, timeout, total_timeout
         self.allow_download, self.max_download_bytes = allow_download, max_download_bytes
         self._allowance_spent = 0
@@ -281,6 +289,30 @@ class OctoCache:
             self.on_event(event)
         except Exception:
             pass  # An observer cannot own a transfer or falsify its result.
+
+    def _write_guard(self, record, phase, written=0):
+        if self.write_guard is not None:
+            try:
+                self.write_guard(record, phase, written)
+            except OctoCacheError:
+                raise
+            except Exception:
+                raise OctoCacheError("cache_io") from None
+
+    def _finish_write(self, record, stream=None, *, operation_failed=False):
+        try:
+            self._write_guard(record, "finish")
+        except BaseException:
+            # A rejected release must not strand an otherwise successful
+            # return stream in the callback exception's traceback. Preserve a
+            # verification/cancellation error already being propagated.
+            if stream is not None:
+                try:
+                    stream.close()
+                except Exception:
+                    pass
+            if not operation_failed:
+                raise
 
     @contextmanager
     def _directory(self, key):
@@ -412,9 +444,12 @@ class OctoCache:
                 source = self._seed_file(root, identity, record)
                 if source is None:
                     continue
-                temporary = reader = None
+                temporary = reader = result = None
+                writing = operation_failed = False
                 try:
                     with source[0] as incoming:
+                        writing = True
+                        self._write_guard(record, "start")
                         temporary = ".octo-" + secrets.token_hex(12) + ".part"
                         descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                                              0o600, dir_fd=directory)
@@ -441,6 +476,7 @@ class OctoCache:
                                             raise OctoCacheError("cache_io")
                                         view = view[written:]
                                 digest.update(block)
+                                self._write_guard(record, "progress", received)
                             if (received != record.size or digest.hexdigest() != record.md5
                                     or _stamp(source[1]) != _stamp(os.fstat(incoming.fileno()))):
                                 raise ValueError()
@@ -470,17 +506,25 @@ class OctoCache:
                 except ValueError:
                     continue
                 except OSError as error:
+                    operation_failed = True
                     if isinstance(error, OctoCacheError):
                         raise
                     raise OctoCacheError("cache_io") from None
+                except BaseException:
+                    operation_failed = True
+                    raise
                 finally:
-                    if reader is not None:
-                        reader.close()
-                    if temporary is not None:
-                        try:
-                            os.unlink(temporary, dir_fd=directory)
-                        except FileNotFoundError:
-                            pass
+                    try:
+                        if reader is not None:
+                            reader.close()
+                        if temporary is not None:
+                            try:
+                                os.unlink(temporary, dir_fd=directory)
+                            except FileNotFoundError:
+                                pass
+                    finally:
+                        if writing:
+                            self._finish_write(record, result, operation_failed=operation_failed)
             return None
         finally:
             self._parallel.release()
@@ -519,8 +563,8 @@ class OctoCache:
                 raise OctoCacheError("upstream_timeout")
             if self._parallel.acquire(timeout=min(remaining, 0.1)):
                 break
-        temporary, received = None, 0
-        started = False
+        temporary, stream, received = None, None, 0
+        started = writing = operation_failed = False
         try:
             with self._lock:
                 self._require_open()
@@ -528,6 +572,8 @@ class OctoCache:
                         and self._allowance_spent + record.size > self.max_download_bytes):
                     raise OctoCacheError("budget_exceeded")
                 self._allowance_spent += record.size
+            writing = True
+            self._write_guard(record, "start")
             self._notify(record, "started")
             started = True
             self._require_open()
@@ -573,6 +619,7 @@ class OctoCache:
                                         raise OctoCacheError("cache_io")
                                     view = view[written:]
                             digest.update(block)
+                            self._write_guard(record, "progress", received)
                             now = time.monotonic()
                             if now - last_event >= 0.5 or received == record.size:
                                 self._notify(record, "progress", received)
@@ -605,6 +652,7 @@ class OctoCache:
                 stream.close()
                 raise
         except BaseException as error:
+            operation_failed = True
             if self._closed.is_set():
                 failure = OctoCacheError("cache_closed")
             elif isinstance(error, OctoCacheError):
@@ -619,11 +667,15 @@ class OctoCache:
             raise failure from None
         finally:
             try:
-                if temporary is not None:
-                    try:
-                        os.unlink(temporary, dir_fd=directory)
-                    except FileNotFoundError:
-                        pass
+                try:
+                    if temporary is not None:
+                        try:
+                            os.unlink(temporary, dir_fd=directory)
+                        except FileNotFoundError:
+                            pass
+                finally:
+                    if writing:
+                        self._finish_write(record, stream, operation_failed=operation_failed)
             finally:
                 self._parallel.release()
 

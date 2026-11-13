@@ -180,6 +180,9 @@
     <string name="library_resources_title">리소스 보관함</string>
     <string name="library_resource_platform">리소스 플랫폼</string>
     <string-array name="library_resource_platform_options"><item>Android</item><item>iOS · PlayCover</item></string-array>
+    <string name="library_download_parallelism">동시 다운로드 수</string>
+    <string-array name="library_download_parallelism_options"><item>1개</item><item>2개</item><item>4개 (기본)</item><item>8개</item></string-array>
+    <string name="library_download_parallelism_notice">선택한 개수만큼 파일을 동시에 받습니다. 새 다운로드 작업부터 적용됩니다.</string>
     <string name="library_resources_notice">서버 시작 전에 선택한 위치에 원본 파일을 직접 보관합니다. 전체 다운로드는 많은 데이터와 저장 공간을 사용하며, 다시 시작하면 검증 완료 파일을 재사용합니다. ZIP 가져오기·내보내기는 선택 기능이며 계정 저장은 포함하지 않습니다.</string>
     <string name="library_download_all">전체 리소스 다운로드·이어받기</string>
     <string name="library_import">리소스 ZIP 가져오기</string>
@@ -203,6 +206,7 @@
     <string name="library_job_cancelled">취소됨</string>
     <string name="library_job_cancelling">취소 중</string>
     <string name="library_job_summary">%1$s · %2$s\n검증 완료 %3$d / %4$d개 · 미보관 %5$d개 · 실패 %6$d개</string>
+    <string name="library_job_parallelism">%1$d개 동시 다운로드 · 현재 전송 %2$d개</string>
     <string name="library_export_downloads">ZIP을 다운로드/IdolyPride/exports에 저장했습니다.</string>
     <string name="library_export_document">ZIP을 선택한 위치에 저장했습니다.</string>
     <string name="library_import_result">가져온 검증 완료 파일 %1$d개 · 실패 %2$d개</string>

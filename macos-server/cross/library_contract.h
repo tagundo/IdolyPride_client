@@ -72,6 +72,21 @@ static inline int id_resource_active(const char *state) {
     return state && (!strcmp(state,"preparing") || !strcmp(state,"running")
         || !strcmp(state,"export_ready") || !strcmp(state,"cancelling"));
 }
+static inline int id_resource_parallelism_valid(long long value) {
+    return value == 1 || value == 2 || value == 4 || value == 8;
+}
+/* Invalid/missing preferences use the same default as the download service. */
+static inline int id_resource_parallelism(long long value) {
+    return id_resource_parallelism_valid(value) ? (int)value : 4;
+}
+static inline int id_resource_download_command(const char *platform, int parallelism,
+        char *output, IDPSize capacity) {
+    if (!platform || (strcmp(platform,"ios") && strcmp(platform,"android"))
+            || !id_resource_parallelism_valid(parallelism) || !output || capacity < 2) return 0;
+    int n=snprintf(output,capacity,
+        "{\"action\":\"resources_download\",\"platform\":\"%s\",\"parallelism\":%d}\n",platform,parallelism);
+    return n > 0 && n <= 512 && (IDPSize)n < capacity ? n : 0;
+}
 /* Only an explicitly stored Boolean false opts out of the Downloads default. */
 static inline int id_resources_in_downloads(int hasBoolean, int value) { return !hasBoolean || value != 0; }
 static inline int id_library_escape(const char *argument, char *escaped, IDPSize capacity) {

@@ -44,13 +44,16 @@ class Application:
         self.media_stories = None
         self.media_panorama = None
         self.company_reads = None
+        self.excursions = None
         if media_mode:
             from .media_stories import MediaStories
             from .media_panorama import MediaPanorama
             from .company import CompanyReads
+            from .excursion import Excursions
             self.media_stories = MediaStories(schema, state, profile, master_dir)
             self.media_panorama = MediaPanorama(schema, state, profile, master_dir)
             self.company_reads = CompanyReads(schema, state, profile, master_dir, media_mode=True)
+            self.excursions = Excursions(schema, state, profile, master_dir, media_mode=True)
             if photo_scene_access is None:
                 from .media_scenes import prepare_media_scenes
                 photo_scene_access = prepare_media_scenes(master_dir)
@@ -214,6 +217,8 @@ class Application:
                 response = self.pvp.handle(path, plain)
             if response is None and self.company_reads is not None:
                 response = self.company_reads.handle(path, plain)
+            if response is None and self.excursions is not None:
+                response = self.excursions.handle(path, plain)
             if response is None:
                 response = self.photo_shootings.handle(path, plain)
             if response is None and self.media_panorama is not None:

@@ -135,8 +135,17 @@ def post(handler, library):
         if not isinstance(row, dict):
             raise ValueError("Resource command object required")
         if handler.path.endswith("/download"):
-            platform, kind = _selection(row)
-            result = library.start_download(platform, kind=kind)
+            if set(row) - {"platform", "kind", "parallelism"}:
+                raise ValueError("Resource download fields")
+            platform, kind = _selection({key: value for key, value in row.items()
+                                         if key != "parallelism"})
+            if "parallelism" in row:
+                parallelism = row["parallelism"]
+                if type(parallelism) is not int or parallelism not in (1, 2, 4, 8):
+                    raise ValueError("Resource download parallelism")
+                result = library.start_download(platform, kind=kind, parallelism=parallelism)
+            else:
+                result = library.start_download(platform, kind=kind)
         else:
             if set(row) != {"job_id"} or not isinstance(row["job_id"], str) or not re.fullmatch(
                     r"[A-Za-z0-9_-]{1,64}", row["job_id"]):

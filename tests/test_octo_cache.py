@@ -87,6 +87,167 @@ def test_restart_checks_archived_file_without_network_or_a_download_event(tmp_pa
     assert events[0]["received_bytes"] == 0
 
 
+def test_write_guard_observes_actual_new_writes_without_bypassing_full_file_verification(tmp_path, monkeypatch):
+    item = record()
+    phases, hashed = [], []
+    original_md5 = octo_cache.hashlib.md5
+
+    class CountedDigest:
+        def __init__(self):
+            self.digest = original_md5(usedforsecurity=False)
+            hashed.append(0)
+            self.index = len(hashed) - 1
+        def update(self, data):
+            hashed[self.index] += len(data)
+            self.digest.update(data)
+        def hexdigest(self):
+            return self.digest.hexdigest()
+
+    monkeypatch.setattr(octo_cache.hashlib, 'md5', lambda **kw: CountedDigest())
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: Response(url=item.upstream_url),
+        write_guard=lambda row, phase, written: phases.append((row, phase, written)))
+    assert read(cache, item) == BODY
+    assert hashed == [len(BODY), len(BODY)]  # Stream digest AND post-publication file digest.
+    assert [(phase, written) for _, phase, written in phases] == [
+        ('start', 0), ('progress', len(BODY)), ('finish', 0)]
+    assert all(row == item for row, _, _ in phases)
+    phases.clear()
+    assert read(cache, item) == BODY
+    assert phases == [] and hashed == [len(BODY), len(BODY)]
+
+
+def test_rejected_write_guard_releases_before_any_transport_or_part_file(tmp_path):
+    phases = []
+    def guard(row, phase, written):
+        phases.append(phase)
+        if phase == 'start':
+            raise OctoCacheError('cache_io')
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: pytest.fail('Rejected quota must not connect'),
+        write_guard=guard)
+    with pytest.raises(OctoCacheError) as error:
+        read(cache, record())
+    assert error.value.code == 'cache_io' and phases == ['start', 'finish']
+    assert not list(tmp_path.rglob('*.part')) and not list(tmp_path.rglob('*.bin'))
+
+
+def test_write_guard_progress_failure_releases_and_leaves_no_unverified_file(tmp_path):
+    phases, events = [], []
+    reject = True
+    def guard(row, phase, written):
+        phases.append(phase)
+        if phase == 'progress' and reject:
+            raise ValueError('sensitive quota failure')
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: Response(),
+        write_guard=guard, on_event=events.append, max_parallel=1, total_timeout=.5)
+    with pytest.raises(OctoCacheError) as error:
+        read(cache, record())
+    assert error.value.code == 'cache_io'
+    assert phases == ['start', 'progress', 'finish']
+    assert not any(event['phase'] == 'verified' for event in events)
+    assert not list(tmp_path.rglob('*.part')) and not list(tmp_path.rglob('*.bin'))
+    reject = False
+    assert read(cache, record()) == BODY  # The worker semaphore and reservation were released.
+
+
+@pytest.mark.parametrize('source', ['download', 'seed'])
+def test_write_guard_finish_rejection_closes_detached_verified_return_stream(tmp_path, monkeypatch, source):
+    item = record()
+    legacy = tmp_path / 'legacy'
+    if source == 'seed':
+        seed_file(legacy, item)
+    opened, phases = [], []
+    original_fdopen = octo_cache.os.fdopen
+    def fdopen(descriptor, mode='r', *args, **kwargs):
+        stream = original_fdopen(descriptor, mode, *args, **kwargs)
+        if mode == 'rb':
+            # Retain the descriptors even through the exception traceback;
+            # cleanup must be explicit rather than depend on object GC.
+            opened.append(stream)
+        return stream
+    def guard(row, phase, written):
+        phases.append(phase)
+        if phase == 'finish':
+            raise ValueError('synthetic quota release failure')
+    monkeypatch.setattr(octo_cache.os, 'fdopen', fdopen)
+    cache = OctoCache(tmp_path / 'public', seed_dirs=(legacy,) if source == 'seed' else (),
+        allow_download=source == 'download', fetcher=lambda *a, **kw: Response(), write_guard=guard)
+    with pytest.raises(OctoCacheError) as error:
+        read(cache, item)
+    assert error.value.code == 'cache_io' and phases[-1] == 'finish'
+    assert opened and all(stream.closed for stream in opened)
+    assert destination(cache, item).read_bytes() == BODY
+    assert read(cache, item) == BODY  # Only a verified cache read; no quota hook is invoked.
+
+
+def test_write_guard_finish_failure_does_not_hide_an_existing_digest_error(tmp_path):
+    phases = []
+    def guard(row, phase, written):
+        phases.append(phase)
+        if phase == 'finish':
+            raise ValueError('synthetic quota release failure')
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: Response(b'x' * len(BODY)), write_guard=guard)
+    with pytest.raises(OctoCacheError) as error:
+        read(cache, record())
+    assert error.value.code == 'upstream_digest' and phases[-1] == 'finish'
+    assert not list(tmp_path.rglob('*.bin')) and not list(tmp_path.rglob('*.part'))
+
+
+@pytest.mark.parametrize('phase', ['start', 'progress'])
+def test_write_guard_can_cancel_without_cache_lock_inversion(tmp_path, phase):
+    phases = []
+    def guard(row, current, written):
+        phases.append(current)
+        if current == phase:
+            cache.close()
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: Response(), write_guard=guard)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = pool.submit(read, cache, record())
+        with pytest.raises(OctoCacheError) as error:
+            result.result(timeout=1)
+    assert error.value.code == 'cache_closed' and phases[-1] == 'finish'
+    assert not list(tmp_path.rglob('*.part')) and not list(tmp_path.rglob('*.bin'))
+
+
+def test_seed_copy_uses_write_guard_but_untouched_verified_reads_do_not(tmp_path):
+    item = record()
+    legacy = tmp_path / 'legacy'
+    source = seed_file(legacy, item)
+    phases, events = [], []
+    cache = OctoCache(tmp_path / 'public', seed_dirs=(legacy,), allow_download=False,
+        fetcher=no_upstream, on_event=events.append,
+        write_guard=lambda row, phase, written: phases.append((phase, written)))
+    assert read(cache, item) == BODY
+    assert phases == [('start', 0), ('progress', len(BODY)), ('finish', 0)]
+    assert [event['phase'] for event in events] == ['cache_hit']  # No invented CDN progress.
+    phases.clear()
+    assert read(cache, item) == BODY and phases == []
+    assert source.read_bytes() == BODY
+
+
+def test_rejected_seed_write_does_not_copy_or_modify_legacy_input(tmp_path):
+    item = record()
+    legacy = tmp_path / 'legacy'
+    source = seed_file(legacy, item)
+    phases = []
+    def guard(row, phase, written):
+        phases.append(phase)
+        if phase == 'start':
+            raise OctoCacheError('cache_io')
+    cache = OctoCache(tmp_path / 'public', seed_dirs=(legacy,), allow_download=False,
+        fetcher=no_upstream, write_guard=guard)
+    with pytest.raises(OctoCacheError) as error:
+        read(cache, item)
+    assert error.value.code == 'cache_io' and phases == ['start', 'finish']
+    assert source.read_bytes() == BODY
+    assert not list(cache.root.rglob('*.part')) and not list(cache.root.rglob('*.bin'))
+
+
+@pytest.mark.parametrize('guard', [True, 1, 'callback'])
+def test_invalid_write_guard_is_rejected(tmp_path, guard):
+    with pytest.raises(ValueError, match='callback'):
+        OctoCache(tmp_path, write_guard=guard)
+
+
 @pytest.mark.parametrize("body,headers,status,url,code", [
     (BODY[:-1], {}, 200, None, "upstream_size"),
     (BODY + b"extra", {}, 200, None, "upstream_size"),

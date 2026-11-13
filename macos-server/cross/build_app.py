@@ -29,11 +29,11 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
 from certificate_bundle import install_certificate_bundle
 APP = "IdolyPrideLocalServer"
-VERSION = "0.3.22"
-BUILD_NUMBER = "41"
+VERSION = "0.3.23"
+BUILD_NUMBER = "42"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
-PAYLOAD_SHA = "195788f94c4bb693810a1175d847eba5fa82f9ee77602f4a1537a870e7a7cdb0"
-PAYLOAD_BYTES = 190983804
+PAYLOAD_SHA = "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f"
+PAYLOAD_BYTES = 191118320
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
 CGROUP = Path("/sys/fs/cgroup")
 

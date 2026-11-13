@@ -21,6 +21,8 @@ _KINDS = frozenset(("all", "assetbundle", "resources"))
 _TERMINAL = frozenset(("completed", "partial", "failed", "cancelled"))
 _RESERVE_BYTES = 16 * 1024 * 1024
 _MAX_ERRORS = 20
+DOWNLOAD_PARALLELISM = (1, 2, 4, 8)
+DEFAULT_DOWNLOAD_PARALLELISM = 4
 _SAFE_ERRORS = frozenset(("cache_io", "cache_closed", "download_disabled", "budget_exceeded",
     "upstream_redirect", "upstream_http", "upstream_timeout", "upstream_size", "upstream_encoding",
     "upstream_data", "upstream_digest", "conflicting_metadata", "upstream_tls", "upstream_dns",
@@ -55,6 +57,7 @@ class _Job:
     catalog: _Catalog
     records: tuple
     total_bytes: int = 0
+    parallelism: int = 1
     archive_complete: bool = False
     state: str = "preparing"
     cancel: threading.Event = field(default_factory=threading.Event)
@@ -63,6 +66,7 @@ class _Job:
     workers: int = 0
     processed: int = 0
     received_by_key: dict = field(default_factory=dict)
+    pending_write_by_key: dict = field(default_factory=dict)
     counts: dict = field(default_factory=lambda: {name: 0 for name in (
         "verified_files", "verified_bytes", "cache_hit_files", "downloaded_files", "received_bytes",
         "exported_files", "exported_bytes", "imported_files", "imported_bytes", "missing_files",
@@ -74,10 +78,12 @@ class _Job:
 
 
 class ResourceLibrary:
-    def __init__(self, data_dir, catalogs=None, *, fetcher=None, max_workers=2,
+    # max_workers selects the default for future jobs; an explicit supported
+    # per-job value can choose a different bound without changing a running job.
+    def __init__(self, data_dir, catalogs=None, *, fetcher=None, max_workers=DEFAULT_DOWNLOAD_PARALLELISM,
                  base_url="http://127.0.0.1:8080", aes_cbc=None, resource_cache_dir=None):
-        if type(max_workers) is not int or not 1 <= max_workers <= 2:
-            raise ValueError("Resource workers must be one or two")
+        if type(max_workers) is not int or max_workers not in DOWNLOAD_PARALLELISM:
+            raise ValueError("Resource workers must be one, two, four or eight")
         if fetcher is not None and not callable(fetcher):
             raise ValueError("Invalid resource fetcher")
         self.root = Path(data_dir).resolve()
@@ -105,7 +111,8 @@ class ResourceLibrary:
 
     @classmethod
     def from_data_dir(cls, data_dir, *, base_url="http://127.0.0.1:8080", aes_cbc=None,
-                      fetcher=None, active_gateway=None, max_workers=2, resource_cache_dir=None):
+                      fetcher=None, active_gateway=None, max_workers=DEFAULT_DOWNLOAD_PARALLELISM,
+                      resource_cache_dir=None):
         catalogs = {}
         if active_gateway is not None:
             manifest = getattr(active_gateway, "manifest", None)
@@ -169,15 +176,19 @@ class ResourceLibrary:
             "total_bytes": job.total_bytes, **job.counts,
             "error_code": job.error_code, "errors": [dict(value) for value in job.errors],
             "archive_complete": job.archive_complete,
+            "parallelism": job.parallelism,
+            "pending_write_bytes": sum(job.pending_write_by_key.values()),
             "resume_mode": "verified_objects", "partial_byte_resume": False}
 
     def status(self):
         with self._lock:
             return {"schema": 1, "catalogs": self.catalog_summary(),
+                    "download_options": {"default_parallelism": self._workers,
+                                         "supported_parallelism": list(DOWNLOAD_PARALLELISM)},
                     "storage": {"mode": "private" if self.cache_root == self.root else "public_directory"},
                     "job": None if self._job is None else self._snapshot(self._job)}
 
-    def _reserve(self, action, platform, kind):
+    def _reserve(self, action, platform, kind, *, parallelism=1):
         self._selection(platform, kind)
         with self._lock:
             if self._closed:
@@ -192,7 +203,7 @@ class ResourceLibrary:
             if self._job is not None and self._job.state not in _TERMINAL:
                 raise ResourceLibraryError("busy")
             job = _Job(secrets.token_hex(16), action, platform, kind, catalog, records,
-                       total_bytes=sum(record.size for record in records))
+                       total_bytes=sum(record.size for record in records), parallelism=parallelism)
             self._job = job
             return job
 
@@ -244,6 +255,7 @@ class ResourceLibrary:
                 return
             phase, key, received = event.get("phase"), event.get("cache_key"), event.get("received_bytes", 0)
             if phase == "cache_hit":
+                job.pending_write_by_key.pop(key, None)
                 job.counts["cache_hit_files"] += 1
             elif phase == "started":
                 job.received_by_key[key] = 0
@@ -264,25 +276,59 @@ class ResourceLibrary:
             path, seed_dirs = resource_cache_paths(self.root, self.cache_root, job.platform)
         except (ValueError, OSError):
             raise ResourceLibraryError("cache_io") from None
+
+        def write_guard(record, phase, written):
+            key = record.cache_key
+            # A finish callback must release even after cancellation or a new
+            # terminal job. No cache/commit lock is acquired under our lock.
+            if phase == "finish":
+                with self._lock:
+                    job.pending_write_by_key.pop(key, None)
+                return
+            if (job.catalog.manifest.objects.get(record.identity) != record
+                    or job.kind != "all" and record.kind != job.kind):
+                raise OctoCacheError("cache_io")
+            with self._lock:
+                if self._closed or job.cancel.is_set() or self._job is not job:
+                    raise OctoCacheError("cache_closed")
+                insufficient = False
+                if phase == "start":
+                    # Remaining bytes of other active writes are not yet in
+                    # disk_usage. Already-written bytes are reflected there.
+                    insufficient = (shutil.disk_usage(path).free
+                        < record.size + sum(job.pending_write_by_key.values()) + _RESERVE_BYTES)
+                    if insufficient:
+                        job.fatal = job.error_code = "insufficient_space"
+                        job.cancel.set()
+                    else:
+                        job.pending_write_by_key[key] = record.size
+                elif phase == "progress":
+                    if (key not in job.pending_write_by_key or type(written) is not int
+                            or not 0 <= written <= record.size):
+                        raise OctoCacheError("cache_io")
+                    job.pending_write_by_key[key] = record.size - written
+                else:
+                    raise OctoCacheError("cache_io")
+            if insufficient:
+                self._close_cache(job)
+                raise OctoCacheError("cache_io")
+
         if download:
             provided = fetcher or self._fetcher
             def fetcher(url, *, timeout):
                 record = getattr(job.local, "record", None)
                 if record is None or url != record.upstream_url:
                     raise OctoCacheError("cache_io")
-                if shutil.disk_usage(path).free < record.size + _RESERVE_BYTES:
-                    with self._lock:
-                        job.fatal = job.error_code = "insufficient_space"
-                        job.cancel.set()
-                    self._close_cache(job)
-                    raise OctoCacheError("cache_io")
+                with self._lock:
+                    if self._closed or job.cancel.is_set() or self._job is not job:
+                        raise OctoCacheError("cache_closed")
                 if provided is not None:
                     return provided(url, timeout=timeout)
                 from .octo_cache import open_upstream
                 return open_upstream(url, timeout=timeout)
         cache = OctoCache(path, fetcher=fetcher, allow_download=download, seed_dirs=seed_dirs,
-            max_parallel=self._workers, max_object_bytes=2**31-1, total_timeout=900,
-            on_event=lambda event: self._observe(job, event))
+            max_parallel=job.parallelism, max_object_bytes=2**31-1, total_timeout=900,
+            on_event=lambda event: self._observe(job, event), write_guard=write_guard)
         with self._lock:
             job.cache = cache
             cancelled = self._closed or job.cancel.is_set()
@@ -306,6 +352,7 @@ class ResourceLibrary:
     def _finish(self, job):
         with self._lock:
             job.counts["active_files"] = 0
+            job.pending_write_by_key.clear()
             if job.fatal:
                 job.state, job.error_code = "failed", job.fatal
             elif job.cancel.is_set():
@@ -319,8 +366,13 @@ class ResourceLibrary:
                 job.state = "completed"
         self._close_cache(job)
 
-    def start_download(self, platform, kind="all"):
-        job = self._reserve("download", platform, kind)
+    def start_download(self, platform, kind="all", *, parallelism=None):
+        # Freeze the selected bound for this job. Commands can select a new
+        # speed for a later job without changing any running cache semaphore.
+        parallelism = self._workers if parallelism is None else parallelism
+        if type(parallelism) is not int or parallelism not in DOWNLOAD_PARALLELISM:
+            raise ResourceLibraryError("invalid_selection")
+        job = self._reserve("download", platform, kind, parallelism=parallelism)
         try:
             cache = self._cache(job, download=True)
         except Exception as error:
@@ -328,7 +380,7 @@ class ResourceLibrary:
             self._finish(job)
             raise ResourceLibraryError(getattr(error, "code", "cache_io")) from None
         with self._lock:
-            job.state, job.workers = "running", self._workers
+            job.state, job.workers = "running", job.parallelism
         def worker():
             try:
                 while True:
@@ -348,6 +400,8 @@ class ResourceLibrary:
                     except Exception as error:
                         self._error(job, error, record)
                     finally:
+                        with self._lock:
+                            job.pending_write_by_key.pop(record.cache_key, None)
                         job.local.record = None
             finally:
                 with self._lock:
@@ -355,12 +409,12 @@ class ResourceLibrary:
                     done = job.workers == 0
                 if done:
                     self._finish(job)
-        for index in range(self._workers):
+        for index in range(job.parallelism):
             try:
                 threading.Thread(target=worker, name="IdolyResourceDownload", daemon=True).start()
             except RuntimeError:
                 with self._lock:
-                    job.workers -= self._workers - index
+                    job.workers -= job.parallelism - index
                     job.fatal = job.error_code = "cache_io"
                     job.cancel.set()
                     done = job.workers == 0
@@ -441,6 +495,10 @@ class ResourceLibrary:
                                 job.counts["imported_bytes"] += record.size
                     except Exception as error:
                         self._error(job, error, record, fallback="import_failed")
+                    finally:
+                        with self._lock:
+                            job.pending_write_by_key.pop(record.cache_key, None)
+                        job.local.record = None
         except Exception as error:
             self._error(job, error, fallback="import_failed")
             self._finish(job)

@@ -13,6 +13,7 @@ from idoly_local.state import State
 USER = "/api.User/Get"
 LIST = "/api.Photo/ListShooting"
 CHECK = "/api.Photo/CheckShooting"
+EXPRESSION_CHECK = "/api.Photo/CheckExpressionShooting"
 CREATE = "/api.Photo/CreateShootings"
 URL = "/api.Photo/GetImageURL"
 UNKNOWN = b"\x80\x4b\x7b"
@@ -44,7 +45,10 @@ def game(schema, tmp_path):
                            "impossibleShootingCharacterIds": []}],
         "PhotoQuestMusic": [{"id": "music-a"}, {"id": "unowned-music"}],
         "PhotoQuestStage": [{"id": "stage-a"}],
-        "PhotoExpression": [{"id": "expression-a"}],
+        "Stage": [{"id": "expression-stage", "assetId": "expression-scene"}],
+        "PhotoExpression": [{"id": "expression-a", "stageId": "expression-stage",
+                             "characterAmountArray": [1, 2], "costumeTypeIds": ["casl"],
+                             "impossibleShootingCharacterIds": []}],
     }
     for name, values in rows.items():
         (master / (name + ".json")).write_text(json.dumps(values))
@@ -88,6 +92,92 @@ def call(game, path, **values):
 def quest_values():
     return dict(actionType=3, photoMusicId="music-a", photoStageId="stage-a",
                 characterIds=["char-a"], costumeIds=["cos-a"], hairIds=["hair-a"])
+
+
+def expression_game(game, *, media=False):
+    provider, state, master, access = game
+    access = PhotoSceneAccess(activities=access.activities, musics=access.musics,
+                              stages=access.stages, expressions={"expression-a": True})
+    return (PhotoShootings(provider.schema, state, "player", master, scene_access=access,
+                           media_mode=media), state, master, access)
+
+
+@pytest.mark.parametrize("legacy", (False, True))
+def test_expression_preview_accepts_owned_legacy_or_current_styles_without_writes(game, legacy):
+    enabled = expression_game(game)
+    values = dict(photoExpressionId="expression-a")
+    if legacy:
+        values.update(characterId="char-a", costumeId="cos-a", hairId="hair-a")
+    else:
+        values.update(characterIds=["char-a"], costumeIds=["cos-a"], hairIds=["hair-a"])
+    before = dump(game[1])
+    result = call(enabled, EXPRESSION_CHECK, **values)
+    assert result.HasField("commonResponse")
+    assert result.commonResponse.SerializeToString() == b""
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
+    assert call(enabled, EXPRESSION_CHECK, **values) == result
+    assert dump(game[1]) == before
+
+
+def test_expression_gallery_supports_master_cast_count_and_all_owned_compatible_outfits(game):
+    values = dict(photoExpressionId="expression-a", characterIds=["char-a", "char-b"],
+                  costumeIds=["cos-a", "cos-b"], hairIds=["hair-a", "hair-b"])
+    before = dump(game[1])
+    result = call(expression_game(game, media=True), EXPRESSION_CHECK, **values)
+    assert result.commonResponse.SerializeToString() == b""
+    with pytest.raises(RpcFailure) as error:
+        call(expression_game(game), EXPRESSION_CHECK, **values)
+    assert error.value.code == RpcCode.INVALID_ARGUMENT
+    assert dump(game[1]) == before
+
+
+@pytest.mark.parametrize("change,code", (
+    ({"photoExpressionId": ""}, RpcCode.INVALID_ARGUMENT),
+    ({"photoExpressionId": "absent"}, RpcCode.INVALID_ARGUMENT),
+    ({"characterIds": [], "costumeIds": [], "hairIds": []}, RpcCode.INVALID_ARGUMENT),
+    ({"characterIds": ["char-a"] * 3, "costumeIds": ["cos-a"] * 3,
+      "hairIds": ["hair-a"] * 3}, RpcCode.INVALID_ARGUMENT),
+    ({"costumeIds": []}, RpcCode.INVALID_ARGUMENT),
+    ({"costumeIds": ["unowned"]}, RpcCode.PERMISSION_DENIED),
+    ({"hairIds": ["hair-b"]}, RpcCode.INVALID_ARGUMENT),
+    ({"characterId": "char-b", "costumeId": "cos-b", "hairId": "hair-b"}, RpcCode.INVALID_ARGUMENT),
+))
+def test_expression_invalid_selection_never_changes_profile(game, change, code):
+    values = dict(photoExpressionId="expression-a", characterIds=["char-a"],
+                  costumeIds=["cos-a"], hairIds=["hair-a"])
+    values.update(change)
+    before = dump(game[1])
+    with pytest.raises(RpcFailure) as error:
+        call(expression_game(game, media=True), EXPRESSION_CHECK, **values)
+    assert error.value.code == code
+    assert dump(game[1]) == before
+
+
+def test_expression_locked_access_is_not_inferred_from_master_or_pose_ownership(game):
+    before = dump(game[1])
+    with pytest.raises(RpcFailure) as error:
+        call(game, EXPRESSION_CHECK, photoExpressionId="expression-a",
+             characterId="char-a", costumeId="cos-a", hairId="hair-a")
+    assert error.value.code == RpcCode.PERMISSION_DENIED
+    assert dump(game[1]) == before
+
+
+@pytest.mark.parametrize("field,value", (
+    ("stageId", "missing-stage"), ("characterAmountArray", []),
+    ("characterAmountArray", [0]), ("characterAmountArray", [True]),
+    ("characterAmountArray", [1, 1]),
+))
+def test_expression_requires_real_stage_and_valid_master_cast_before_success(game, field, value):
+    master = game[2] / "PhotoExpression.json"
+    rows = json.loads(master.read_text()); rows[0][field] = value
+    master.write_text(json.dumps(rows))
+    before = dump(game[1])
+    with pytest.raises(RpcFailure) as error:
+        call(expression_game(game, media=True), EXPRESSION_CHECK, photoExpressionId="expression-a",
+             characterId="char-a", costumeId="cos-a", hairId="hair-a")
+    assert error.value.code == RpcCode.FAILED_PRECONDITION
+    assert dump(game[1]) == before
 
 
 def test_list_preserves_locked_rows_and_does_not_infer_master_ownership(game):
@@ -195,7 +285,8 @@ def test_media_job_accepts_owned_outfit_of_other_type_without_changing_normal_mo
     assert dump(game[1]) == before
 
 
-def test_application_wires_gallery_job_policy_only_after_authentication(game, tmp_path):
+@pytest.mark.parametrize("path", (CHECK, EXPRESSION_CHECK))
+def test_application_wires_gallery_job_policy_only_after_authentication(game, tmp_path, path):
     from idoly_local import codec
     from idoly_local.application import Application
     from idoly_local.catalog import FixtureStore
@@ -210,31 +301,33 @@ def test_application_wires_gallery_job_policy_only_after_authentication(game, tm
         def abort(self, code, details):
             raise RpcFailure(code, details)
 
-    provider, state, master, access = game
+    provider, state, master, access = expression_game(game) if path == EXPRESSION_CHECK else game
     fixtures = FixtureStore(tmp_path / "fixtures", provider.schema)
     ordinary = Application(provider.schema, state, fixtures, profile="player", master_dir=master,
                            photo_scene_access=access)
     gallery = Application(provider.schema, state, fixtures, profile="player", master_dir=master,
                           photo_scene_access=access, media_mode=True)
     token, _ = state.login("player")
-    request = provider.schema.request_type(CHECK)(actionType=1, photoActivityId="activity-a",
-        characterIds=["char-b"], costumeIds=["cos-b"], hairIds=["hair-b"])
+    values = dict(characterIds=["char-b"], costumeIds=["cos-b"], hairIds=["hair-b"])
+    values.update(dict(photoExpressionId="expression-a") if path == EXPRESSION_CHECK else
+                  dict(actionType=1, photoActivityId="activity-a"))
+    request = provider.schema.request_type(path)(**values)
     envelope = codec.encode(request.SerializeToString())
     context = Context((("x-auth-token", token),))
     before = dump(state)
     with pytest.raises(RpcFailure) as error:
-        gallery.handle(CHECK, envelope, Context(()))
+        gallery.handle(path, envelope, Context(()))
     assert error.value.code == RpcCode.UNAUTHENTICATED
     with pytest.raises(RpcFailure) as error:
-        ordinary.handle(CHECK, envelope, context)
+        ordinary.handle(path, envelope, context)
     assert error.value.code == RpcCode.INVALID_ARGUMENT
-    result = provider.schema.response_type(CHECK).FromString(gallery.handle(CHECK, envelope, context))
+    result = provider.schema.response_type(path).FromString(gallery.handle(path, envelope, context))
     assert result.HasField("commonResponse")
     assert not result.commonResponse.HasField("updatedData")
     assert not result.commonResponse.HasField("deletedData")
     assert result.commonResponse.SerializeToString() == b""
-    assert provider.schema.response_type(CHECK).FromString(
-        gallery.handle(CHECK, envelope, context)) == result
+    assert provider.schema.response_type(path).FromString(
+        gallery.handle(path, envelope, context)) == result
     assert dump(state) == before
 
 

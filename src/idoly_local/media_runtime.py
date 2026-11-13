@@ -15,13 +15,17 @@ def prepare_media_profile(state, schema, profile, master_dir):
     from .gameplay import seed_starter_profile
     from .gameplay import _Catalog
     from .media_profile import prepare_media_inventory, apply_media_inventory
-    from .media_scenes import prepare_media_scenes, unlock_media_musics
+    from .media_scenes import (prepare_media_scenes, unlock_media_musics,
+                               prepare_media_photo_poses, apply_media_photo_poses)
     from .media_stories import unlock_media_stories
     from .media_access import prepare_media_access, apply_media_access
     from .media_panorama import prepare_media_panorama
     from .company import prepare_company_reads
+    from .excursion import prepare_excursion, apply_excursion_access
 
     plan = prepare_media_inventory(schema, master_dir)
+    pose_plan = prepare_media_photo_poses(schema, master_dir)
+    excursion_plan = prepare_excursion(master_dir)
     access = prepare_media_access(master_dir)
     prepare_media_panorama(master_dir)
     prepare_company_reads(master_dir)
@@ -49,6 +53,8 @@ def prepare_media_profile(state, schema, profile, master_dir):
         if not snapshot.HasField("user"):
             raise ValueError("Media profile has no user state")
         apply_media_inventory(snapshot, plan, obtained_time=now)
+        apply_media_photo_poses(snapshot, pose_plan)
+        apply_excursion_access(snapshot, excursion_plan)
         apply_media_access(snapshot, access)
         unlock_media_musics(snapshot, master_dir)
         unlock_media_stories(snapshot, master_dir)

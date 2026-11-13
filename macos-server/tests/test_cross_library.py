@@ -42,6 +42,14 @@ def test_resource_commands_are_exact_json_and_atomic_pipe_sized(library_contract
     assert commands[4]=={"action":"resources_cancel","job_id":"0ab123"}
     assert all(len(line.encode())+1<=512 for line in raw)
 
+def test_download_parallelism_uses_strict_bounded_command_and_default(library_contract):
+    raw=run(library_contract,"--download-commands").splitlines()
+    assert list(map(json.loads,raw))==[
+        {"action":"resources_download","platform":"ios","parallelism":value}
+        for value in (1,2,4,8)
+    ]+[{"action":"resources_download","platform":"android","parallelism":8}]
+    assert all(len(line.encode())+1<=512 for line in raw)
+
 def test_start_command_selects_primary_downloads_cache_without_changing_profile_path(library_contract):
     raw=run(library_contract,"--start-commands").splitlines()
     assert len(raw)==2

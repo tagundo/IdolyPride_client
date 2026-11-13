@@ -6,6 +6,7 @@ bytes. The caller owns keeping the media profile separate from normal play.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from .gameplay import _Catalog
@@ -20,6 +21,70 @@ def _need(ok):
 
 def _text(value):
     return isinstance(value, str) and bool(value)
+
+
+@dataclass(frozen=True)
+class MediaPhotoPosePlan:
+    """Real pose ownership for a caller-selected, separate media profile."""
+
+    schema_fingerprint: str
+    pose_ids: tuple[str, ...]
+    _snapshot_type: type = field(repr=False, compare=False)
+
+
+def prepare_media_photo_poses(schema, master_dir):
+    """Validate original pose/motion joins before any media profile is changed.
+
+    The client already receives the original pose and motion master packs.
+    UserPhotoPose ownership, independently of expression-scene unlocks, is
+    needed by its original GetUserPhotoPoses membership filter. Character,
+    costume, stage-position and motion compatibility remains client policy.
+    """
+    catalog = _Catalog(master_dir)
+    _need(bool(catalog.version()))
+    snapshot_type = schema.response_type("/api.User/Get")
+    pose_field = snapshot_type.DESCRIPTOR.fields_by_name.get("photoPoses")
+    _need(pose_field is not None and pose_field.is_repeated
+          and "photoPoseId" in pose_field.message_type.fields_by_name)
+    poses = catalog.ids("PhotoPose", required=True)
+    characters = catalog.ids("Character", required=True)
+    pose_type = schema.pool.FindMessageTypeByName("master.PhotoPose").fields_by_name["poseType"].enum_type
+    motion_type = schema.pool.FindMessageTypeByName("master.PhotoPose").fields_by_name["poseMotionType"].enum_type
+    for row in poses.values():
+        _need(type(row.get("poseType")) is int and row["poseType"] != 0
+              and row["poseType"] in pose_type.values_by_number
+              and type(row.get("poseMotionType")) is int and row["poseMotionType"] != 0
+              and row["poseMotionType"] in motion_type.values_by_number)
+    joins, supported = set(), set()
+    for row in catalog.rows("PhotoPoseMotion", required=True):
+        pose, character = row.get("photoPoseId"), row.get("characterId")
+        props = row.get("propAssetIds", [])
+        _need(_text(pose) and pose in poses and _text(character) and character in characters
+              and _text(row.get("motionAssetId"))
+              and isinstance(props, list) and all(_text(value) for value in props)
+              and (pose, character) not in joins)
+        joins.add((pose, character))
+        supported.add(pose)
+    _need(supported == set(poses))
+    return MediaPhotoPosePlan(schema.fingerprint, tuple(sorted(poses)), snapshot_type)
+
+
+def apply_media_photo_poses(snapshot, plan):
+    """Add only missing real pose IDs, retaining all existing rows verbatim.
+
+    This pure helper does not choose an account or database. Only the explicit
+    media-profile preparation path calls it; ordinary account ownership is
+    neither inferred from master rows nor changed by Photo checks.
+    """
+    _need(isinstance(plan, MediaPhotoPosePlan) and isinstance(snapshot, plan._snapshot_type)
+          and snapshot.HasField("user"))
+    owned = [row.photoPoseId for row in snapshot.photoPoses]
+    _need(all(_text(identity) and identity in plan.pose_ids for identity in owned)
+          and len(owned) == len(set(owned)))
+    missing = sorted(set(plan.pose_ids) - set(owned))
+    for identity in missing:
+        snapshot.photoPoses.add(photoPoseId=identity)
+    return bool(missing)
 
 
 def _music_rows(catalog):

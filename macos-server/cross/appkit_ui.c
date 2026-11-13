@@ -16,7 +16,7 @@ enum { C_CUSTOM = 1, C_QUALITY, C_FPS, C_SCALE, C_MAXIMUM, C_AA, C_SHADOW, C_EXP
        C_START = 200, C_STOP, C_OPEN, C_FOLDER,
        C_RESOURCE_PLATFORM = 300, C_RESOURCE_PREVIEW, C_RESOURCE_DOWNLOAD,
        C_RESOURCE_CANCEL, C_RESOURCE_EXPORT, C_RESOURCE_IMPORT,
-       C_RESOURCE_LOCATION, C_RESOURCE_REVEAL };
+       C_RESOURCE_LOCATION, C_RESOURCE_REVEAL, C_RESOURCE_PARALLELISM };
 
 /* Official Foundation SearchPathDirectory values (swift-foundation6.0.3):
    cachesDirectory13, applicationSupportDirectory14, downloadsDirectory15. */
@@ -25,7 +25,7 @@ enum { ID_SEARCH_DOWNLOADS = 15, ID_USER_DOMAIN = 1 };
 static struct {
     IDObj app, delegate, window, timer, task, writer, defaults, dataURL, prefsURL, playbackURL, smokeURL;
     IDObj mediaURL, languageURL, libraryLabel, hideVideo, mvSort, outfitSort, language;
-    IDObj resourcePlatform, resourceLabel, resourcePreview, resourceDownload, resourceCancel, resourceExport, resourceImport;
+    IDObj resourcePlatform, resourceParallelism, resourceLabel, resourcePreview, resourceDownload, resourceCancel, resourceExport, resourceImport;
     IDObj resourceSnapshot;
     IDObj downloadsResourcesURL, resourcesInDownloads, resourceLocationLabel, revealResources;
     IDObj serverLabel, launchLabel, visualLabel, metricLabel, logView, start, stop, openGame;
@@ -36,7 +36,7 @@ static struct {
     int invalidPrefs, saveFailed, running, busy, canStop, mediaMode, liveMode, downloadMode;
     int invalidPlayback, playbackSaveFailed;
     int invalidLibrary, librarySaveFailed, libraryChanged;
-    int resourcePlatformIndex, resourceJobActive, resourcePending;
+    int resourcePlatformIndex, resourceParallelismValue, resourceJobActive, resourcePending;
     int resourcesDownloads;
     char resourceJobID[65];
     int outFD, errorFD, inputFD, inputClosed, engineEnded, quitting;
@@ -56,6 +56,7 @@ static const int qualities[] = {0, 10, 20, 30, 40, 100};
 static const int rates[] = {0, 30, 60, 90, 120};
 static const int antiAlias[] = {-1, 0, 1, 2};
 static const int shadows[] = {0, 512, 1024, 2048, 4096};
+static const int resourceParallelisms[] = {1, 2, 4, 8};
 static const char *ackNames[] = {"waiting", "waiting", "applied", "disabled", "unsupported", "waiting_for_scene", "init_failed"};
 
 static double uptime(void) { return id_number(id_get(id_class("NSProcessInfo"), "processInfo"), "systemUptime"); }
@@ -286,6 +287,7 @@ static void update_controls(void) {
     id_set(G.libraryLabel,"setTextColor:",color(G.librarySaveFailed || G.invalidLibrary ? "systemOrangeColor" : "secondaryLabelColor"));
     int resources=G.running && !G.quitting && !G.engineEnded && !G.inputClosed && !G.resourcePending;
     id_set_bool(G.resourcePlatform,"setEnabled:",!G.quitting && !G.resourceJobActive && !G.resourcePending);
+    id_set_bool(G.resourceParallelism,"setEnabled:",!G.quitting && !G.resourceJobActive && !G.resourcePending);
     id_set_bool(G.resourcePreview,"setEnabled:",resources && !G.resourceJobActive);
     id_set_bool(G.resourceDownload,"setEnabled:",resources && !G.resourceJobActive);
     id_set_bool(G.resourceExport,"setEnabled:",resources && !G.resourceJobActive);
@@ -445,7 +447,10 @@ static void resource_message(const char *message, int failed) {
 static void resource_request(const char *action, const char *argument) {
     if (!G.running || G.quitting || G.engineEnded || G.inputClosed || G.resourcePending
         || !G.task || !id_bool(G.task,"isRunning")) return;
-    char bytes[513]; int count=id_resource_command(action,G.resourcePlatformIndex ? "android" : "ios",argument,bytes,sizeof bytes);
+    char bytes[513]; const char *platform=G.resourcePlatformIndex ? "android" : "ios";
+    int count=!strcmp(action,"resources_download")
+        ? id_resource_download_command(platform,G.resourceParallelismValue,bytes,sizeof bytes)
+        : id_resource_command(action,platform,argument,bytes,sizeof bytes);
     if (!count) { resource_message("요청 경로가 너무 길거나 ZIP 형식이 아닙니다. Downloads 아래의 짧은 이름을 선택해 주세요.",1); return; }
     int sent=id_control_send(G.inputFD,bytes,(IDSize)count,write);
     if (sent < 0) close_input();
@@ -502,6 +507,16 @@ static void control_action(IDObj self, IDSel command, IDObj sender) {
         if (!create_resource_directory(root)) resource_message("리소스 폴더를 열지 못했습니다. macOS의 폴더 접근 권한을 확인해 주세요.",1);
         else if (!id_bool_arg(id_get(id_class("NSWorkspace"),"sharedWorkspace"),"openURL:",root))
             resource_message("Finder에서 리소스 폴더를 열지 못했습니다.",1);
+    }
+    else if (tag == C_RESOURCE_PARALLELISM) {
+        long index=id_long(sender,"indexOfSelectedItem");
+        if (!G.quitting && !G.resourceJobActive && !G.resourcePending && index >= 0 && index < 4) {
+            G.resourceParallelismValue=resourceParallelisms[index];
+            ((void (*)(IDObj,IDSel,long,IDObj))IDRuntime.message)(G.defaults,id_sel("setInteger:forKey:"),
+                (long)G.resourceParallelismValue,id_string("resourceDownloadParallelism"));
+        }
+        id_set_long(G.resourceParallelism,"selectItemAtIndex:",selected_int(resourceParallelisms,4,G.resourceParallelismValue));
+        update_controls();
     }
     else if (tag >= C_RESOURCE_PLATFORM && tag <= C_RESOURCE_IMPORT) {
         if (tag == C_RESOURCE_PLATFORM) {
@@ -643,7 +658,7 @@ static void make_window(void) {
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
-    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1876));
+    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1910));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
     add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
@@ -700,22 +715,26 @@ static void make_window(void) {
     G.resourceLocationLabel=add_label(document,"보관 위치를 확인하고 있습니다.",1240,44,11,1);
     G.resourcePlatform=add_menu(document,"보관할 리소스",1296,C_RESOURCE_PLATFORM);
     menu_item(G.resourcePlatform,"iOS · Mac PlayCover (기본)"); menu_item(G.resourcePlatform,"Android");
-    G.resourcePreview=add_button(document,"목록·예상 용량 확인",12,1334,180,C_RESOURCE_PREVIEW,0);
-    G.resourceDownload=add_button(document,"전체 리소스 받기",202,1334,180,C_RESOURCE_DOWNLOAD,0);
-    G.resourceCancel=add_button(document,"작업 취소",392,1334,120,C_RESOURCE_CANCEL,0);
-    G.resourceExport=add_button(document,"보관 ZIP 내보내기",12,1372,180,C_RESOURCE_EXPORT,0);
-    G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1372,180,C_RESOURCE_IMPORT,0);
-    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1412,64,11,1);
-    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1480,54,11,1);
-    add_label(document, "실행 기록", 1562, 26, 14, 0);
-    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1592, 676, 200));
+    G.resourceParallelism=add_menu(document,"동시 다운로드 수",1330,C_RESOURCE_PARALLELISM);
+    const char *parallelismNames[]={"1개","2개","4개 (기본)","8개"};
+    for (int i=0;i<4;++i) menu_item(G.resourceParallelism,parallelismNames[i]);
+    id_set_long(G.resourceParallelism,"selectItemAtIndex:",selected_int(resourceParallelisms,4,G.resourceParallelismValue));
+    G.resourcePreview=add_button(document,"목록·예상 용량 확인",12,1368,180,C_RESOURCE_PREVIEW,0);
+    G.resourceDownload=add_button(document,"전체 리소스 받기",202,1368,180,C_RESOURCE_DOWNLOAD,0);
+    G.resourceCancel=add_button(document,"작업 취소",392,1368,120,C_RESOURCE_CANCEL,0);
+    G.resourceExport=add_button(document,"보관 ZIP 내보내기",12,1406,180,C_RESOURCE_EXPORT,0);
+    G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1406,180,C_RESOURCE_IMPORT,0);
+    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1446,64,11,1);
+    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1514,54,11,1);
+    add_label(document, "실행 기록", 1596, 26, 14, 0);
+    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1626, 676, 200));
     id_set_bool(logScroll, "setHasVerticalScroller:", 1); id_set_bool(logScroll, "setHasHorizontalScroller:", 0);
     G.logView = id_init_frame(id_get(id_class("NSTextView"), "alloc"), id_rect(0, 0, 650, 200));
     id_set_bool(G.logView, "setEditable:", 0); id_set_bool(G.logView, "setSelectable:", 1);
     id_set_bool(G.logView, "setVerticallyResizable:", 1); id_set_bool(G.logView, "setHorizontallyResizable:", 0);
     id_set(G.logView, "setFont:", id_double(id_class("NSFont"), "userFixedPitchFontOfSize:", 11));
     id_set(logScroll, "setDocumentView:", G.logView); id_set(document, "addSubview:", logScroll);
-    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1804, 42, 11, 1);
+    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1838, 42, 11, 1);
     sync_graphics_controls(); sync_library_controls(); update_controls();
     id_void(G.window, "center"); id_set(G.window, "makeKeyAndOrderFront:", 0);
     id_set_bool(G.app, "activateIgnoringOtherApps:", 1);
@@ -752,13 +771,17 @@ static void resource_status(IDObj resources) {
         long long total=id_json_integer(id_item(job,"total_files"),-1);
         long long bytes=id_json_integer(id_item(job,"received_bytes"),-1);
         long long missing=id_json_integer(id_item(job,"missing_files"),-1);
+        long long parallelism=id_json_integer(id_item(job,"parallelism"),-1);
         if (files < 0 || total < 0 || bytes < 0 || missing < 0) { resource_message("리소스 작업 상태를 확인하고 있습니다.",0); return; }
         const char *phases[]={"preparing","running","export_ready","cancelling","completed","partial","failed","cancelled"};
         const char *names[]={"준비","진행","내보내기 준비","취소 중","완료","일부 완료","실패","취소됨"};
         const char *name="상태 확인 중";
         for (int i=0;i<8;++i) if (!strcmp(phase,phases[i])) name=names[i];
-        snprintf(message,sizeof message,"%s · %s · 확인 %lld/%lld개 · 수신 %.1f MiB · 미보관 %lld개",
-            !strcmp(id_utf8(id_item(job,"platform")),"android") ? "Android" : "iOS",name,files,total,(double)bytes/1048576.0,missing);
+        if (!strcmp(id_utf8(id_item(job,"action")),"download") && id_resource_parallelism_valid(parallelism))
+            snprintf(message,sizeof message,"%s · %s · 동시 %lld개 · 확인 %lld/%lld개 · 수신 %.1f MiB · 미보관 %lld개",
+                !strcmp(id_utf8(id_item(job,"platform")),"android") ? "Android" : "iOS",name,parallelism,files,total,(double)bytes/1048576.0,missing);
+        else snprintf(message,sizeof message,"%s · %s · 확인 %lld/%lld개 · 수신 %.1f MiB · 미보관 %lld개",
+                !strcmp(id_utf8(id_item(job,"platform")),"android") ? "Android" : "iOS",name,files,total,(double)bytes/1048576.0,missing);
         resource_message(message,!strcmp(phase,"failed") || !strcmp(phase,"partial"));
     } else {
         IDObj catalog=id_item(id_item(resources,"catalogs"),platform);
@@ -961,6 +984,8 @@ int idoly_app_main(int argc, char **argv) {
     G.liveMode = truth(id_arg(G.defaults, "objectForKey:", id_string("experimentalMainLive")));
     IDObj downloads = id_arg(G.defaults, "objectForKey:", id_string("downloadMissingResources"));
     G.downloadMode = downloads ? truth(downloads) : 1;
+    G.resourceParallelismValue=id_resource_parallelism(id_json_integer(
+        id_arg(G.defaults,"objectForKey:",id_string("resourceDownloadParallelism")),-1));
     IDObj resourcesChoice=id_arg(G.defaults,"objectForKey:",id_string("resourcesInDownloads"));
     G.resourcesDownloads=id_resources_in_downloads(id_is(resourcesChoice,"NSNumber")
         && IDRuntime.typeID(resourcesChoice)==IDRuntime.booleanTypeID(),truth(resourcesChoice));

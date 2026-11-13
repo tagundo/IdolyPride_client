@@ -14,6 +14,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import engine
 
 
+@pytest.mark.parametrize("parallelism", (None, 1, 2, 4, 8))
+def test_resource_download_dispatches_only_an_explicit_valid_parallelism(tmp_path, parallelism):
+    calls, events = [], []
+    library = SimpleNamespace(start_download=lambda platform, **kwargs: calls.append((platform, kwargs)))
+    controller = engine.Controller(tmp_path, tmp_path / "data.zip",
+                                   emit_event=lambda event, **fields: events.append((event, fields)))
+    controller.runtime = SimpleNamespace(_library=library, status=lambda: {"running": True})
+    command = {"platform": "ios"}
+    if parallelism is not None:
+        command["parallelism"] = parallelism
+    controller.resources("resources_download", command)
+    assert calls == [("ios", {} if parallelism is None else {"parallelism": parallelism})]
+    assert events[-1][0] == "status"
+
+
+@pytest.mark.parametrize("parallelism", (None, True, False, 0, 3, 9, 16, 4.0, "4", [], {}))
+def test_resource_download_rejects_invalid_parallelism_before_start(tmp_path, parallelism):
+    calls, events = [], []
+    library = SimpleNamespace(start_download=lambda *a, **k: calls.append((a, k)))
+    controller = engine.Controller(tmp_path, tmp_path / "data.zip",
+                                   emit_event=lambda event, **fields: events.append((event, fields)))
+    controller.runtime = SimpleNamespace(_library=library, status=lambda: {"running": True})
+    controller.resources("resources_download", {"platform": "ios", "parallelism": parallelism})
+    assert calls == [] and events[-1][0] == "resource_error"
+
+
 def test_home_hierarchy_reference_requires_both_master_rows(tmp_path):
     master = tmp_path / "master-json"
     master.mkdir()
