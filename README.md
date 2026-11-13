@@ -1,0 +1,1 @@
+Idoly Pride v0.3.20 Android wardrobe timing: independently verified server download. Existing apps and account data are preserved. See main repository docs/wardrobe-exit-latency.md. SHA256SUMS pins the original bytes.
