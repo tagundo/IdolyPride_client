@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "version": "0.3.24",
+  "repository": "tagundo/IdolyPride_client",
+  "tag": "local-server-v0.3.24",
+  "product_source_commit": "d9e95de0f477447b4b9715d53ab594f6e2a1c5e8",
+  "delivery_mode": "Git LFS downloads linked from release body",
+  "release_assets_uploaded": false,
+  "artifacts": [
+    {
+      "kind": "data",
+      "name": "IdolyPride-ServerData-v0.3.23.zip",
+      "bytes": 191118320,
+      "sha256": "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f",
+      "source_commit": "a752492ca1f622d58994f4d134ee002199725f23",
+      "binary_version": "0.3.23",
+      "reused_unchanged_client": false,
+      "reused_unchanged_data": true,
+      "reused_unchanged_artifact": true,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "c28a87d3cba1845fd65097b38cc2fae8b7942fc408812db31ea791eeb5e757a7",
+      "LFS_source_branch": "downloads/restored-media-data-v0.3.23",
+      "LFS_publication_commit": "80700f613d16816d534c08cbdb8a049a40abb224",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": false
+    },
+    {
+      "kind": "server",
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 206364544,
+      "sha256": "e195159f968185c880890b5e366868369a1cc775565112911110b1d288c78a97",
+      "source_commit": "d9e95de0f477447b4b9715d53ab594f6e2a1c5e8",
+      "binary_version": "0.3.24",
+      "reused_unchanged_client": false,
+      "reused_unchanged_data": false,
+      "reused_unchanged_artifact": false,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "6190dc56e6b09803e47fa5cfe23e4b363b8d941eb8b3c2aa9b28826029279d39",
+      "LFS_source_branch": "downloads/home-cache-server-v0.3.24",
+      "LFS_publication_commit": "1d86b55846b3582a3243027abf6fdfacf38f97c1",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": true
+    },
+    {
+      "kind": "mac",
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 205231361,
+      "sha256": "359e2e4376dbbf7c9ed21677238b3e297a69415f0b994a5d31547b782973e534",
+      "source_commit": "d9e95de0f477447b4b9715d53ab594f6e2a1c5e8",
+      "binary_version": "0.3.24",
+      "reused_unchanged_client": false,
+      "reused_unchanged_data": false,
+      "reused_unchanged_artifact": false,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "29f4aece303d32a5cadbd1bdf192a0e373b9c4f8f6615a91ee218f91c8502432",
+      "LFS_source_branch": "downloads/home-cache-mac-v0.3.24",
+      "LFS_publication_commit": "2af5f172d2054a7861404524353f7fed99620da8",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": true
+    },
+    {
+      "kind": "client",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159475730,
+      "sha256": "cefbc205d575c435f5c494b683d444b4b206e07fec8a45cb95c6727425dc487e",
+      "source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+      "binary_version": "0.3.21",
+      "reused_unchanged_client": true,
+      "reused_unchanged_data": false,
+      "reused_unchanged_artifact": true,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "e51ea40c4eec8408322db8ba24f2b40d49cb68699dd02779938480161f17b421",
+      "LFS_source_branch": "downloads/android-wardrobe-client-v0.3.21",
+      "LFS_publication_commit": "2c9cebd156ea036b95ec988269d649605c671732",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": false
+    },
+    {
+      "kind": "ipa",
+      "name": "IdolyPride-6.1.1-Local-PlayCover.ipa",
+      "bytes": 146439731,
+      "sha256": "7519c86b44d8718d711e48647958513c260abdec505b6b9bf32e81ab53ba709d",
+      "source_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+      "binary_version": "0.3.19",
+      "reused_unchanged_client": true,
+      "reused_unchanged_data": false,
+      "reused_unchanged_artifact": true,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "be71e2000a04cf61af2f2be2da1597ff71adc2be1a542c6272a005df4b539960",
+      "LFS_source_branch": "downloads/playcover-client-v0.3.19",
+      "LFS_publication_commit": "2635d58b02824af7de3a21c23771bddc380f403d",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": false
+    }
+  ],
+  "host_tests": {
+    "schema": 1,
+    "status": "PASS_ALL_OBSERVED_FAILURES_RESOLVED",
+    "source_commit": "d9e95de0f477447b4b9715d53ab594f6e2a1c5e8",
+    "actual_tested_source_commit": "d9e95de0f477447b4b9715d53ab594f6e2a1c5e8",
+    "full_suite": {
+      "passed": 5201,
+      "skipped": 16,
+      "subtests_passed": 351,
+      "failed": 0,
+      "seconds": 203.21
+    },
+    "full_suite_rerun_claimed": true,
+    "execution_receipt_sha256": "5ac5c223b196ad0c78ba8e1dca7305f9ab65827b8ddc64509d577b84c4097035",
+    "first_attempt": {
+      "source_commit": "a4626da22bf310e3f47e6cb23e01461a4d637511",
+      "passed": 5183,
+      "failed": 13,
+      "test_oracle_failures_resolved": true,
+      "test_only_correction_files": [
+        "android-server/ci/test_runtime_bridge.py",
+        "tests/test_build_android_server_manual.py"
+      ],
+      "production_code_unchanged_between_attempts": true,
+      "execution_receipt_sha256": "94999ce70368c5b6374174e4ab0a28a52bddaadd3347e4a5b2c7c8a1a3a8b060"
+    },
+    "test_temp_retired": {
+      "path": "/dev/shm/idoly-v0324-integration-tests",
+      "bytes": 265477626
+    },
+    "actual_device_execution": false,
+    "actual_Mac_execution": false,
+    "assembled_payload_first_Home_runtime_smoke": {
+      "status": "PASS",
+      "receipt": "/workspace/shared/artifacts/home-cache-release-v0324-20261113/real-payload-runtime-smoke-verification.json",
+      "receipt_sha256": "6d238d0c77e66ec80e581b4c5bc0220a186fde0a713198265cd09053c5627fca",
+      "source_commit": "d9e95de0f477447b4b9715d53ab594f6e2a1c5e8",
+      "payload_sha256": "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f",
+      "seconds": 2.991,
+      "actual_device_execution": false
+    }
+  },
+  "download_parallelism": {
+    "default": 4,
+    "selectable": [
+      1,
+      2,
+      4,
+      8
+    ]
+  },
+  "changes": {
+    "gallery_Home_Enter_cache": [
+      "eventStoryInfos",
+      "photoActivities",
+      "photoMusics",
+      "photoStages",
+      "photoExpressions"
+    ],
+    "gallery_Home_Enter_uses_validated_list_DTOs": true,
+    "Android_Java_read_buffer_fill_max_bytes": 65536,
+    "Android_Python_Java_crossing_reduction": true,
+    "resource_progress": [
+      "received_bytes",
+      "average_bytes_per_second",
+      "elapsed_seconds",
+      "phase_counts",
+      "verified_bytes",
+      "total_bytes"
+    ]
+  },
+  "server_data_reused_unchanged": true,
+  "server_data_version": "0.3.23",
+  "server_data_full_remote_SHA_verification_reused": true,
+  "photo_image_creation_restored": false,
+  "ordinary_mode_unlock_and_reward_rules_unchanged": true,
+  "resource_full_digest_verification_preserved": true,
+  "actual_CDN_download_speed_measured": false,
+  "actual_device_UI_or_playback_verified": false,
+  "actual_Mac_GUI_execution": false
+}
