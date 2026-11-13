@@ -473,6 +473,7 @@ class OctoCache:
             if self._parallel.acquire(timeout=min(deadline - time.monotonic(), 0.1)):
                 break
         try:
+            self._check_deadline(deadline)
             for source in self._seed_sources(record):
                 temporary = reader = result = None
                 writing = operation_failed = False

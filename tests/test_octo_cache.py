@@ -1173,8 +1173,9 @@ def test_seed_copies_obey_parallel_limit_and_close_cancels_waiting_copy(tmp_path
     sources = [seed_file(legacy, item) for item in (first_item, next_item)]
     cache = OctoCache(tmp_path / "public", seed_dirs=(legacy,), allow_download=False,
                       fetcher=no_upstream, max_parallel=1)
-    flushing, release = threading.Event(), threading.Event()
+    flushing, release, waiting_for_permit = threading.Event(), threading.Event(), threading.Event()
     opened, original_open, original_fsync = [], cache._seed_file, octo_cache.os.fsync
+    original_acquire = cache._parallel.acquire
 
     def counted_open(*args):
         opened.append(args[-1].cache_key)
@@ -1185,12 +1186,22 @@ def test_seed_copies_obey_parallel_limit_and_close_cancels_waiting_copy(tmp_path
         assert release.wait(2)
         return original_fsync(descriptor)
 
+    def witnessed_acquire(*args, **kwargs):
+        if flushing.is_set():
+            waiting_for_permit.set()
+            assert release.wait(2)
+            assert original_acquire(timeout=2)
+            return True
+        return original_acquire(*args, **kwargs)
+
     monkeypatch.setattr(cache, "_seed_file", counted_open)
     monkeypatch.setattr(octo_cache.os, "fsync", held_fsync)
+    monkeypatch.setattr(cache._parallel, "acquire", witnessed_acquire)
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(read, cache, first_item)
         assert flushing.wait(2)
         waiting = pool.submit(read, cache, next_item)
+        assert waiting_for_permit.wait(2)
         cache.close()
         release.set()
         for future in (first, waiting):
