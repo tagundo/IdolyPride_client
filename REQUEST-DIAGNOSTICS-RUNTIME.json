@@ -1,0 +1,121 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+  "at": "2026-11-13T12:59:18.762872+00:00",
+  "diagnostic_fields_bounded": true,
+  "current_and_sticky_failure_distinguished": true,
+  "HTTP_403_404_409_503_observed": true,
+  "original_serving_range_security_cache_behavior_preserved": true,
+  "no_client_native_hooks_added": true,
+  "bounded_resource_request_diagnostics_source_bound_to_actual_runtime": true,
+  "request_diagnostics_runtime": {
+    "diagnostic_fields_bounded": true,
+    "current_and_sticky_failure_distinguished": true,
+    "HTTP_403_404_409_503_observed": true,
+    "original_serving_range_security_cache_behavior_preserved": true,
+    "no_client_native_hooks_added": true,
+    "scope": "Actual loopback HTTP gateway and tracker host tests on exact Final source; no physical client execution.",
+    "active_request_cap": 64,
+    "recent_terminal_request_cap": 32,
+    "actual_global_test_modules": [
+      {
+        "module": "tests/test_octo_http.py",
+        "expected_collected_items": 33,
+        "exit_code": 0,
+        "counts": {
+          "passed": 33
+        },
+        "subtests_passed": 0,
+        "summary": "33 passed in 17.33s",
+        "seconds": 17.533,
+        "log_segment_sha256": "6ec414fda9dc5abf02e2d3fe7493ab0e0e701d9c6aacdf61652a59dcfb01735d"
+      },
+      {
+        "module": "tests/test_octo_runtime.py",
+        "expected_collected_items": 54,
+        "exit_code": 0,
+        "counts": {
+          "passed": 54
+        },
+        "subtests_passed": 0,
+        "summary": "54 passed in 0.66s",
+        "seconds": 0.859,
+        "log_segment_sha256": "a4f3c8d14a94554fed89723ed35a1f9521aea779750ee8aa9ed00141377697f0"
+      }
+    ],
+    "privacy": "Only fixed error codes, trusted catalog names/cache keys and path SHA256 fingerprints; no raw URLs, query strings or headers."
+  },
+  "source_sha256": {
+    "src/idoly_local/octo_http.py": "4720eb3212862ae3f03c2806d31765620f0ee6ac3f55a53fde48bc00af686e57",
+    "src/idoly_local/octo_runtime.py": "71e3c1e702ae0ad40bcd6d56e9fa5577919852070e0ef53e26aedc6f50740e5b",
+    "tests/test_octo_http.py": "e4cfb0f8004acb1a85d959ce3bf3820992916391e585851562075cd320bc5f42",
+    "tests/test_octo_runtime.py": "1c27ee77b02bf7518650438bbe63491055048afac25db20edd96f8d0c09f3e7e"
+  },
+  "full_host_execution": {
+    "path": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/full-host-test-run.json",
+    "sha256": "0423f3bd369559621dc39120f478320fa4f6541cde6c6f6b084a7560d0a05bf0",
+    "passed": 5414,
+    "skipped": 17,
+    "modules": 237,
+    "failed": 0,
+    "OOM_kill_before": 2,
+    "OOM_kill_after": 2,
+    "log_sha256": "62c38818f6ec7ac89d94d0b322d1670c88f9219996555e59bb89c2e3eb4f4d91"
+  },
+  "host_test_gate": {
+    "path": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/host-test-gate.json",
+    "sha256": "d628a490a2ce506b91c12f9da39ad93a9da60900dfde10225172746ccf9a2cc3"
+  },
+  "preserved_focused_execution": {
+    "path": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/request-diagnostics-focused-tests/focused-review.json",
+    "sha256": "4da0bd6e055c867d5a05c87de28b249485eaa5bec5e0a3adb1738f1c7ae53410",
+    "initial_combined_attempt": {
+      "passed": 85,
+      "failed": 2,
+      "failure_kind": "existing concurrency tests unable to create native threads under AS512/default arena retention; no semantic assertion or OOM failure",
+      "tests_and_worker_counts_unchanged": true
+    },
+    "subsequent_fresh_process_complete_modules_passed": 87,
+    "source_binding": "Prior worktree receipt is preserved unchanged; all four byte hashes equal exact Final blobs."
+  },
+  "independent_source_only_review": {
+    "path": "/workspace/shared/artifacts/apps-v0.3.26-android/independent-request-diagnostics-source-review-precommit.json",
+    "sha256": "eb573b443cadf74be2ed62eab30e18d0f102ffb3b17873a2729f89c3b0284d08",
+    "status": "SOURCE_ONLY_PASS",
+    "critical_findings": [],
+    "actual_test_execution_by_reviewer": false,
+    "source_binding": "Review retained its precommit status; all four byte hashes equal exact Final blobs."
+  },
+  "baseline_source": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+  "changed_source_paths": [
+    "android-server/app/build.gradle.kts",
+    "docs/translation-cache-v0.3.26.md",
+    "macos-server/App.swift",
+    "macos-server/RESOURCE_STORAGE.md",
+    "macos-server/build_app.py",
+    "macos-server/cross/appkit_ui.c",
+    "macos-server/cross/build_app.py",
+    "macos-server/cross/resource_transfer_display.h",
+    "macos-server/cross/tests/resource_transfer_display_test.c",
+    "macos-server/tests/test_resource_transfer_display.py",
+    "src/idoly_local/octo_http.py",
+    "src/idoly_local/octo_runtime.py",
+    "src/idoly_local/resource_library.py",
+    "tests/test_build_android_server_manual.py",
+    "tests/test_octo_http.py",
+    "tests/test_octo_runtime.py",
+    "tests/test_resource_gateway_offline_integration.py",
+    "tests/test_resource_translation_runtime.py",
+    "tools/build_android_server_manual.py"
+  ],
+  "actual_Mac_GUI_execution": false,
+  "actual_Android_device_execution": false,
+  "physical_offline_full_download_stall_resolved": false,
+  "limitations": [
+    "The new bounded diagnostic fields expose which resource requests reach the server and their results.",
+    "Host tests do not establish the cause or resolution of the user physical Mac offline download stall.",
+    "This binder executes no test, build, native client, emulator or network operation."
+  ],
+  "byte_identical_receipt_alias": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/request-diagnostics-runtime-verification.json"
+}

@@ -1,0 +1,187 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "policy": "translation-cache-hotfix-exact-deltas-v1",
+  "previous_server_source_commit": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+  "final_server_source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+  "final_source_epoch": 1794574286,
+  "paths": {
+    "android-server/app/build.gradle.kts": {
+      "old_sha256": "69e86f02736b71b94e730d1da8c95ec1c2ac3b4d202ceec473b94e88c1370fd6",
+      "old_bytes": 11111,
+      "new_sha256": "5ade2e556b8d868df30d659282c498db3fe034e590b2d0f3176d9d539c7cd9f4",
+      "new_bytes": 11111,
+      "mode100644_preserved": true
+    },
+    "docs/translation-cache-v0.3.26.md": {
+      "old_absent": true,
+      "old_sha256": null,
+      "old_bytes": 0,
+      "new_sha256": "86a8860c436dd160d6748a7fdcca2ffd0f5e6a9f396e163598f84756e9a04a24",
+      "new_bytes": 2705,
+      "new_mode100644_verified": true
+    },
+    "macos-server/App.swift": {
+      "old_sha256": "74c467fefc987e2c3ba641cdc13232c9d72f6838e8b935d1a23e9f217a5225db",
+      "old_bytes": 58434,
+      "new_sha256": "e43262e297f16e0454f405dc35cddfe2de03d01a9dc2b273a5528124a2dd626d",
+      "new_bytes": 63446,
+      "mode100644_preserved": true
+    },
+    "macos-server/RESOURCE_STORAGE.md": {
+      "old_sha256": "082c57245fa9db934b239d95ff9e29db1ce4c8957c2c3ad39037a83e9885534b",
+      "old_bytes": 1546,
+      "new_sha256": "de9f94e9aceaf0cfc7776c440b23bed0af51235c5c96d2273ad1ae0561114d75",
+      "new_bytes": 2681,
+      "mode100644_preserved": true
+    },
+    "macos-server/build_app.py": {
+      "old_sha256": "6a19b5e1340a0a243adb13abad8cb0ea2889ff958ac8a5b1c1abf2191030bfbb",
+      "old_bytes": 22335,
+      "new_sha256": "959764f972b57986469df87b1fbef98eb59406a3405ee4335ec6378155f36e72",
+      "new_bytes": 22335,
+      "mode100644_preserved": true
+    },
+    "macos-server/cross/appkit_ui.c": {
+      "old_sha256": "9a60ebfda783f45d00cbb19fb8cddac8b873cc106ca4eb4bb972e5a6293e16f3",
+      "old_bytes": 73291,
+      "new_sha256": "531f84d34ebebde6730f7eefd381079478b2c5855a0695980d8dd3b5f9a9ac8d",
+      "new_bytes": 75734,
+      "mode100644_preserved": true
+    },
+    "macos-server/cross/build_app.py": {
+      "old_sha256": "f56c1470a1f3e4b543158f2e6ff1a04963f2f7e2e41079cb1f665345d3654861",
+      "old_bytes": 16228,
+      "new_sha256": "58863af9689b675a5cb215adc5a0fce6006df99d3f30f12a7a0d9b42c8fc0197",
+      "new_bytes": 16228,
+      "mode100644_preserved": true
+    },
+    "macos-server/cross/resource_transfer_display.h": {
+      "old_absent": true,
+      "old_sha256": null,
+      "old_bytes": 0,
+      "new_sha256": "f1c4aa74140e5672a49e4bdab7da73149f3b3c6134be01350e8e19a56634edac",
+      "new_bytes": 5713,
+      "new_mode100644_verified": true
+    },
+    "macos-server/cross/tests/resource_transfer_display_test.c": {
+      "old_absent": true,
+      "old_sha256": null,
+      "old_bytes": 0,
+      "new_sha256": "2627f333ce33b4da5a84c381fe543ee0b76b26ab507da155c02f8365b5812a8a",
+      "new_bytes": 3890,
+      "new_mode100644_verified": true
+    },
+    "macos-server/tests/test_resource_transfer_display.py": {
+      "old_absent": true,
+      "old_sha256": null,
+      "old_bytes": 0,
+      "new_sha256": "2d90030074d14b11f0ef70608f39210c9d158ca873d588f83301dc683f8bda01",
+      "new_bytes": 4685,
+      "new_mode100644_verified": true
+    },
+    "src/idoly_local/octo_http.py": {
+      "old_sha256": "ce0fb63d8fc5826f4163183ee962990227690f50737d5629ee2f346bd9d2d507",
+      "old_bytes": 9557,
+      "new_sha256": "4720eb3212862ae3f03c2806d31765620f0ee6ac3f55a53fde48bc00af686e57",
+      "new_bytes": 13118,
+      "mode100644_preserved": true
+    },
+    "src/idoly_local/octo_runtime.py": {
+      "old_sha256": "66770c1c3e9b020fb040eb1fe996bfc2ca2de491ead8b5f9f1a7400a6410124f",
+      "old_bytes": 18166,
+      "new_sha256": "71e3c1e702ae0ad40bcd6d56e9fa5577919852070e0ef53e26aedc6f50740e5b",
+      "new_bytes": 24393,
+      "mode100644_preserved": true
+    },
+    "src/idoly_local/resource_library.py": {
+      "old_sha256": "20e96a1759e55fbfe2c72100fc1336eacbdf8dcdc039cc52aa571294f828c762",
+      "old_bytes": 27337,
+      "new_sha256": "b99b097a0a0cbc7ca85ff56ec776553633b08413a3bc59552a107d3fdee7fb82",
+      "new_bytes": 27715,
+      "mode100644_preserved": true
+    },
+    "tests/test_build_android_server_manual.py": {
+      "old_sha256": "ab49ddbe7f4ee1369449023312710765ec368d1eaf18d556d7c0f97abdaa7c43",
+      "old_bytes": 46900,
+      "new_sha256": "0e93d771631915f0d1c6be91d5560107d1e60ed472f77b639092773f5f86303e",
+      "new_bytes": 46900,
+      "mode100644_preserved": true
+    },
+    "tests/test_octo_http.py": {
+      "old_sha256": "ce4d0215d5461bd15da18a63c0fb6f4f8b181059f2e00c13632d4525e8d8965c",
+      "old_bytes": 16214,
+      "new_sha256": "e4cfb0f8004acb1a85d959ce3bf3820992916391e585851562075cd320bc5f42",
+      "new_bytes": 22449,
+      "mode100644_preserved": true
+    },
+    "tests/test_octo_runtime.py": {
+      "old_sha256": "1716a6e65a7d507226680745ffc5eec1537364979a8fc49be902f78721e77746",
+      "old_bytes": 18467,
+      "new_sha256": "1c27ee77b02bf7518650438bbe63491055048afac25db20edd96f8d0c09f3e7e",
+      "new_bytes": 23292,
+      "mode100644_preserved": true
+    },
+    "tests/test_resource_gateway_offline_integration.py": {
+      "old_absent": true,
+      "old_sha256": null,
+      "old_bytes": 0,
+      "new_sha256": "54481859ceb9bc00c5b87fa3cd0500884e5953afa48a2c7cc455af191f016845",
+      "new_bytes": 9992,
+      "new_mode100644_verified": true
+    },
+    "tests/test_resource_translation_runtime.py": {
+      "old_sha256": "abb28765b6b13192ce957fd441430b8780785eeb1df97e754e36a08872fd0e65",
+      "old_bytes": 9734,
+      "new_sha256": "9e5e26a9a4997af8cc6ee9f804597a03332f7eb75b7d6b2033a4bdafef46e2d2",
+      "new_bytes": 14361,
+      "mode100644_preserved": true
+    },
+    "tools/build_android_server_manual.py": {
+      "old_sha256": "1e9462c04c8fce1f1dc39078e0a57adc7f9ab34c241ac813fe57b66a725bc8df",
+      "old_bytes": 69780,
+      "new_sha256": "ae936629da59ff4eda8e3509554abe12c29ba8655715771a7cdfd98a23d31280",
+      "new_bytes": 69780,
+      "mode100644_preserved": true
+    }
+  },
+  "changed_path_count": 19,
+  "created_path_count": 5,
+  "resource_library_changed_only_in_original_catalog_factory_selection": true,
+  "strict_base_catalog_validation_preserved": true,
+  "effective_gateway_manifests_not_used_as_original_catalog": true,
+  "client_consumed_inputs_preserved_except_unused_server_version_constants": true,
+  "Data_and_bundled_translation_inputs_unchanged": true,
+  "bounded_request_diagnostics_are_observational": true,
+  "original_serving_range_security_and_cache_behavior_preserved": true,
+  "no_native_or_client_changes": true,
+  "physical_full_download_stall_fix_not_claimed": true,
+  "source_review_evidence": [
+    {
+      "path": "/workspace/shared/artifacts/apps-v0.3.26-android/independent-request-diagnostics-source-review-precommit.json",
+      "sha256": "eb573b443cadf74be2ed62eab30e18d0f102ffb3b17873a2729f89c3b0284d08",
+      "historical_status": "SOURCE_ONLY_PASS",
+      "all_referenced_source_hashes_match_final_commit": true,
+      "historical_receipt_rebound_or_relabelled": false
+    },
+    {
+      "path": "/workspace/shared/artifacts/apps-v0.3.26-macos/independent-mac-transfer-display-source-review-precommit-v2.json",
+      "sha256": "946d62957862cc84b5639e5dceb80b71ef1e44f6bc2cb497a5185253f96ac6e5",
+      "historical_status": "SOURCE_ONLY_PASS",
+      "all_referenced_source_hashes_match_final_commit": true,
+      "historical_receipt_rebound_or_relabelled": false
+    },
+    {
+      "path": "/workspace/shared/artifacts/apps-v0.3.26-macos/mac-transfer-display-source-readiness.json",
+      "sha256": "510d888208af24b0b0e9c91a91911ece3c09d2a6c4a31852f4b27db6158dcbd9",
+      "historical_status": "SOURCE_READY_WAIT_ROOT_FREEZE_AND_FULL_SUITE",
+      "all_referenced_source_hashes_match_final_commit": true,
+      "historical_receipt_rebound_or_relabelled": false
+    }
+  ],
+  "scope": "Source-only exact Git delta/owner proof/client input closure. Whole host/runtime gates and new binary QA remain separate and pending.",
+  "new_server_count": 2,
+  "reused_artifact_count": 7,
+  "actual_build_or_binary_QA_performed": false,
+  "actual_Mac_GUI_or_physical_stall_resolution_verified": false
+}

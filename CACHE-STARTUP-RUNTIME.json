@@ -1,0 +1,119 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+  "at": "2026-11-13T13:08:14.588506+00:00",
+  "original_catalog_validation_preserved": true,
+  "predownloaded_original_object_reused_without_CDN": true,
+  "ko_restart_original_base_catalog_loaded": true,
+  "en_restart_original_base_catalog_loaded": true,
+  "ja_revision_pinned_restart_original_base_catalog_loaded": true,
+  "translated_gateway_manifest_preserved": true,
+  "cache_root_verified": true,
+  "scope": "Exact-Final actual server loopback HTTP execution of ten synthetic factory/cache integration cases, bound from completed global suite.",
+  "source_and_test_pins": {
+    "src/idoly_local/resource_library.py": {
+      "bytes": 27715,
+      "sha256": "b99b097a0a0cbc7ca85ff56ec776553633b08413a3bc59552a107d3fdee7fb82"
+    },
+    "src/idoly_local/app_runtime.py": {
+      "bytes": 20022,
+      "sha256": "955c210c54d1c8bad24393c8ec20085627fae59d9afbc53f3ef3ebf54a91e487"
+    },
+    "src/idoly_local/octo_runtime.py": {
+      "bytes": 24393,
+      "sha256": "71e3c1e702ae0ad40bcd6d56e9fa5577919852070e0ef53e26aedc6f50740e5b"
+    },
+    "src/idoly_local/octo_cache.py": {
+      "bytes": 37021,
+      "sha256": "7bde0250c75a513ce8aa7f2a9277c595563d6d3f977fdc10237ab8b13bbe9b6a"
+    },
+    "src/idoly_local/octo_http.py": {
+      "bytes": 13118,
+      "sha256": "4720eb3212862ae3f03c2806d31765620f0ee6ac3f55a53fde48bc00af686e57"
+    },
+    "src/idoly_local/resource_translation_runtime.py": {
+      "bytes": 6243,
+      "sha256": "8153d442fc20b23d864100b71c099c54460e0de5841b7028f5fbf5a66c1b065f"
+    },
+    "tests/test_resource_gateway_offline_integration.py": {
+      "bytes": 9992,
+      "sha256": "54481859ceb9bc00c5b87fa3cd0500884e5953afa48a2c7cc455af191f016845"
+    },
+    "tests/test_octo_app_runtime.py": {
+      "bytes": 10425,
+      "sha256": "72e9914b1db8560eea30a8c955b6847c7cdf9c3a70ed9b4fa910f1b9473d6720"
+    },
+    "tests/test_resource_translation_runtime.py": {
+      "bytes": 14361,
+      "sha256": "9e5e26a9a4997af8cc6ee9f804597a03332f7eb75b7d6b2033a4bdafef46e2d2"
+    },
+    "tests/test_app_runtime.py": {
+      "bytes": 21021,
+      "sha256": "a1cc1951fe7fb33c6c1584f5be520254b001f142ca94a37548126b07a5cba613"
+    },
+    "src/idoly_local/resource_translation_build.py": {
+      "bytes": 9744,
+      "sha256": "564309fd67eeda4bfacc3ed1d3617e15d62fe035107e390c772f7c2b54b7b8af"
+    }
+  },
+  "actual_encrypted_SDK_manifest_HEAD_range_full_GET": true,
+  "wrong_external_root_and_platform_subdirectory_miss_verified": true,
+  "all10_cases_passed": true,
+  "gameplay_upstream_bytes_zero": true,
+  "actual_global_execution": {
+    "path": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/full-host-test-run.json",
+    "sha256": "0423f3bd369559621dc39120f478320fa4f6541cde6c6f6b084a7560d0a05bf0",
+    "test_module": {
+      "module": "tests/test_resource_gateway_offline_integration.py",
+      "expected_collected_items": 10,
+      "exit_code": 0,
+      "counts": {
+        "passed": 10
+      },
+      "subtests_passed": 0,
+      "summary": "10 passed in 6.43s",
+      "seconds": 6.653,
+      "log_segment_sha256": "d47c05b959cfea4634a25000e75a02131c4532a6bf5541255a5a17d1161810e2"
+    },
+    "global_passed": 5414,
+    "global_skipped": 17,
+    "global_modules": 237,
+    "global_failed": 0,
+    "before_OOM_kill": 2,
+    "after_OOM_kill": 2,
+    "host_test_gate_sha256": "d628a490a2ce506b91c12f9da39ad93a9da60900dfde10225172746ccf9a2cc3",
+    "log_sha256": "62c38818f6ec7ac89d94d0b322d1670c88f9219996555e59bb89c2e3eb4f4d91"
+  },
+  "source_only_fixture_review": {
+    "path": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/factory-http-fixture-review-final.json",
+    "sha256": "943ecfae9475b120fbde58df1c0ff33be65d2d9a37cc5bfa461254ae9e4d08d1",
+    "status": "SOURCE_ONLY_PASS"
+  },
+  "preserved_old_factory_negative_control": {
+    "receipt_path": "/workspace/shared/artifacts/translation-cache-hotfix-v0326-20261113/offline-http-integration-precommit-proof.json",
+    "receipt_sha256": "5273bde14d78868ca79cb34215e514a6e50f336b7dbcaad5558ad2bc04554eb6",
+    "frozen_source": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+    "frozen_factory_source_sha256": "e38684204d7b5ff57cb8f15366dac11ccbd1a9bfb080beb5a61f9f12d79bebc7",
+    "before_log_sha256": "cd875a25c66d68a4069beff423eb30751e6924bc2b5996df87864cfa89b86717",
+    "before_replay_sha256": "b6c10b442711051fde590e5c26a3a689fb26531f19ad79b205ef590ba75bc5f9",
+    "observed_case": "ko-ios",
+    "observed_failed": 1,
+    "observed_failure": "ResourceLibraryError invalid_catalog at actual app_runtime startup",
+    "test_source_byte_identical_to_Final": true,
+    "historical_receipt_relabelled_as_Final_execution": false
+  },
+  "client_internet_reachability_bypass_verified": false,
+  "client_offline_failure_root_cause_established": false,
+  "client_preHTTP_reachability_admission_gate": "unknown",
+  "physical_offline_stall_resolved": false,
+  "actual_device_or_WiFi_toggle": false,
+  "actual_Mac_PlayCover_execution": false,
+  "tests_rerun_by_this_binder": false,
+  "build_native_or_network_execution_by_this_binder": false,
+  "limitations": [
+    "Host tests prove the server resource path and preserved original-catalog validation for synthetic resources.",
+    "They do not prove or identify why the user physical Mac full-download screen stalls with Internet disabled.",
+    "Account bootstrap is mocked; only the real app runtime resource listeners, manifests and cache path are exercised."
+  ]
+}

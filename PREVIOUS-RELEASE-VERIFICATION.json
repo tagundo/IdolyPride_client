@@ -1,0 +1,322 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "published": true,
+  "release_id": 444159048,
+  "tag": "local-server-v0.3.25",
+  "url": "https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.25",
+  "target_commit": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+  "client_source_commit": null,
+  "android_client_source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+  "ios_client_source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+  "component_source_policy": {
+    "policy": "platform-clients-pinned-ios-stub-and-server-only-deltas-v1",
+    "android_client_source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+    "ios_client_source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+    "final_server_source_commit": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+    "Data_source_is_ancestor_of_android": true,
+    "android_is_ancestor_of_ios": true,
+    "ios_is_ancestor_of_final": true,
+    "android_to_ios_exact_stub_delta": {
+      "applied_between_client_sources": true,
+      "path": "client-presentation/ios/libcxx.tbd",
+      "old_blob_sha256": "416a13020cdc59fcd309bdfa95bea838a7c7a110194d55c63e4bd2bd4f11d258",
+      "new_blob_sha256": "22fe526858df4e1097fea11937ecd18ae994693b24ebb1d83e829fc22fc1e3a9",
+      "added_export": "___cxa_end_catch",
+      "all_other_stub_bytes_and_file_mode_preserved": true,
+      "all_other_tree_paths_identical": true
+    },
+    "approved_server_builder_delta": {
+      "applied_between_iOS_and_server_sources": true,
+      "paths": {
+        "tools/build_android_server_manual.py": {
+          "old_blob_sha256": "e9eb15843d938ca5d5af36690d1903c75af09b863f1577ba8994703c80efc930",
+          "new_blob_sha256": "1e9462c04c8fce1f1dc39078e0a57adc7f9ab34c241ac813fe57b66a725bc8df",
+          "mode100644_preserved": true
+        },
+        "tests/test_build_android_server_manual.py": {
+          "old_blob_sha256": "4b2cf9254f6b2866a66763b9e71abff979208d8d4cf37cba48edc3cbf5d18fd9",
+          "new_blob_sha256": "ab49ddbe7f4ee1369449023312710765ec368d1eaf18d556d7c0f97abdaa7c43",
+          "mode100644_preserved": true
+        }
+      },
+      "only_builder_guard_line_changed": true,
+      "dynamic_roles": [
+        "validated-payload",
+        "validated-translations"
+      ],
+      "exact_security_test_delta_preserved": true,
+      "all_other_builder_bytes_preserved": true
+    },
+    "approved_server_validation_test_delta": {
+      "applied_between_iOS_and_server_sources": true,
+      "path": "tests/test_octo_runtime.py",
+      "old_blob_sha256": "222bc3625683f30a0506fadcbeabda3f4bc17371cb6c5d88a74d359c45ff681c",
+      "new_blob_sha256": "1716a6e65a7d507226680745ffc5eec1537364979a8fc49be902f78721e77746",
+      "mode100644_preserved": true,
+      "only_dual_callback_wait_and_comment_changed": true,
+      "same_two_second_deadline_five_ms_poll_GETs_and_all_assertions_preserved": true
+    },
+    "approved_server_seed_cancellation_delta": {
+      "applied_between_iOS_and_server_sources": true,
+      "paths": {
+        "src/idoly_local/octo_cache.py": {
+          "old_blob_sha256": "35c8b140cad49483a6f82095e391b64598ce727d46eac59b52bc08ff7a292a85",
+          "new_blob_sha256": "7bde0250c75a513ce8aa7f2a9277c595563d6d3f977fdc10237ab8b13bbe9b6a",
+          "mode100644_preserved": true
+        },
+        "tests/test_octo_cache.py": {
+          "old_blob_sha256": "00e35dc6c57c0bf3f806c40180d60357b326c8780caebd1518a4bfa84d71b7e0",
+          "new_blob_sha256": "9d2af4a7e4d65f4b124bae93cb5067bc00598ae0e9d9068fcef33f3c9bbd5ef3",
+          "mode100644_preserved": true
+        }
+      },
+      "only_post_acquire_closed_deadline_check_added": true,
+      "exact_deterministic_acquire_witness_test_preserved": true,
+      "client_producer_input_exclusion": {
+        "proof_file": "independent-six-client-octo-cache-input-closure.json",
+        "proof_sha256": "8a479b42cb43456bc0259d227a7c24f62a44e8a50a9131e3c58fbfd62d160ca8",
+        "android_source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+        "ios_source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+        "frozen_source_binding_counts": {
+          "751238f4b1d892eea18f7138bbca0d0432c6b37d": 43,
+          "641a142ebae0f1c0a095979d68fc96655272d719": 31
+        },
+        "cache_module_and_test_excluded_from_both_client_producers": true,
+        "no_client_runtime_packaging_of_octocache": true,
+        "imported_server_limits_helper_changed_only_in_unused_approved_guard": true
+      },
+      "server_runtime_changed_and_requires_fresh_QA": true
+    },
+    "ios_to_server_allowed_paths": [
+      "macos-server/**",
+      "README.md",
+      "docs/**/*.md",
+      "tools/build_android_server_manual.py",
+      "tests/test_build_android_server_manual.py",
+      "tests/test_octo_runtime.py",
+      "src/idoly_local/octo_cache.py",
+      "tests/test_octo_cache.py"
+    ],
+    "ios_to_server_changed_paths": [
+      "macos-server/App.swift",
+      "macos-server/RESOURCE_STORAGE.md",
+      "macos-server/cross/appkit_ui.c",
+      "macos-server/cross/library_contract.h",
+      "macos-server/cross/tests/resource_location_test.c",
+      "macos-server/tests/test_resource_location.py",
+      "src/idoly_local/octo_cache.py",
+      "tests/test_build_android_server_manual.py",
+      "tests/test_octo_cache.py",
+      "tests/test_octo_runtime.py",
+      "tools/build_android_server_manual.py"
+    ],
+    "ios_to_server_changed_paths_NUL_list_sha256": "cedf5e8bc192600fb95343e4be3c801d8dae7858bb156a60ade7518dd53185bf",
+    "client_consumed_code_paths_and_assets_preserved": true,
+    "iOS_inputs_unchanged_after_iOS_freeze": true
+  },
+  "data_source_commit": "1a0dcd15d9016cc1b9548b0bd6c6bc71f8f01356",
+  "download_branch": "downloads/pose-font-v0.3.25",
+  "download_commit": "ebf1ece3d49d5d0af99c8c8991dbea5d61882866",
+  "download_tree": "cb1b152326301ac6abace862ee9c2a308e4a1f6d",
+  "metadata_remote_readback_verified": true,
+  "release_assets_uploaded": false,
+  "body_sha256": "e7472f858a65f3e267a82c1850afc466cb4cc13964c69fff0f8dc87ca812d561",
+  "verification_sha256": "8b2bfc3d385cec2dbb4c6d28b6c7fb7d9071da8fd4e57acff42d9601d1c1b21b",
+  "artifacts": [
+    {
+      "kind": "data",
+      "name": "IdolyPride-ServerData-v0.3.25.zip",
+      "bytes": 191305222,
+      "sha256": "c94cd2ee7e722e6df67f02f31868422ff5d3bf1657c64a05a61b5059572475d8",
+      "source_commit": "1a0dcd15d9016cc1b9548b0bd6c6bc71f8f01356",
+      "qa_receipt_sha256": "7fd10775e85285ca5e1d6e9a8e832f2fa253aefb27bbc4ee932239a0b9498730",
+      "LFS_source_branch": "downloads/pose-font-data-v0.3.25",
+      "LFS_publication_commit": "ebc6a6c6d9f814ceb9340e2d9d0caef5c8e10235",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true
+    },
+    {
+      "kind": "server",
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 284819404,
+      "sha256": "d55125afe770b457e868b2307c0214ade6e553c4c6501135a423ea8dc8b9eae8",
+      "source_commit": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+      "qa_receipt_sha256": "8d444ed60d76dc5af052e3961781cffe0376094eef42c05a666edab9c5c8481d",
+      "LFS_source_branch": "downloads/pose-font-server-v0.3.25-source-0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+      "LFS_publication_commit": "75fc8eea8b37ebf402a2b25c7b1009a4a13e8683",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "translations": {
+        "included": true,
+        "platform": "android",
+        "sha256": "7e9f53983c50a148695d94537b7823935384d6bce551fb5f62b103f0909e43f9",
+        "bytes": 78203472,
+        "version": "v0.3.25-text-1",
+        "manifest_sha256": "7d7731924f0cf4fc247f27496e1ace754bc29e9053325301b0e775efb997090f",
+        "files": 6,
+        "coverage": {
+          "ko": {
+            "adv_resources": 3492,
+            "missing": 401,
+            "translated": 3091,
+            "unchanged_original": 0
+          },
+          "en": {
+            "adv_resources": 3492,
+            "missing": 1,
+            "translated": 3093,
+            "unchanged_original": 398
+          }
+        },
+        "sources": {
+          "ko": {
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+            "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+          },
+          "en": {
+            "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+            "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+          }
+        }
+      }
+    },
+    {
+      "kind": "mac",
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 283216617,
+      "sha256": "5507e0977b13385752443acdc95fc8fe34527ba325490afc5320789fa67ccdb1",
+      "source_commit": "0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+      "qa_receipt_sha256": "a2a2e90787c1c466711534189cc13eb0da8dded4dd0c303a8293c8fadb70e0af",
+      "LFS_source_branch": "downloads/pose-font-mac-v0.3.25-source-0f9f89785848291c44ecaf6ac6b42a213f7f2db1",
+      "LFS_publication_commit": "702f8ef104cc0e832fdc4c2408a4bffb8895dfb8",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "translations": {
+        "included": true,
+        "platform": "ios",
+        "sha256": "8e44bac91acaca7661bf1b49be8663e23345df9541d7021ff2eaa5b9415bf8b0",
+        "bytes": 78210744,
+        "version": "v0.3.25-text-1",
+        "manifest_sha256": "fb22a88e3def623e0432c6f9782437be0b8d07b5e253dd7f84164c29f9982cb1",
+        "files": 6,
+        "coverage": {
+          "ko": {
+            "adv_resources": 3492,
+            "missing": 401,
+            "translated": 3091,
+            "unchanged_original": 0
+          },
+          "en": {
+            "adv_resources": 3492,
+            "missing": 1,
+            "translated": 3093,
+            "unchanged_original": 398
+          }
+        },
+        "sources": {
+          "ko": {
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+            "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+          },
+          "en": {
+            "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+            "data_terms": "NOASSERTION",
+            "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+            "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+          }
+        }
+      }
+    },
+    {
+      "kind": "client-ja",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "bytes": 163408329,
+      "sha256": "650caeaab71f428d0177c09f3574aa6f3244d45869e8bc2ae6babbc6016ade59",
+      "source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+      "qa_receipt_sha256": "3ecca241660ebecb02c5d8bc672ed7e3942c965673507962e274dd9d2aac025f",
+      "LFS_source_branch": "downloads/pose-font-client-ja-v0.3.25",
+      "LFS_publication_commit": "8311a2f29cebadbb97f915466ebbd1d60244b395",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "ja"
+    },
+    {
+      "kind": "ipa-ja",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ja.ipa",
+      "bytes": 149167158,
+      "sha256": "0ea00118f936bc84f8489078e2f4560bf2f3f915ac2410d5eace30492b21c5a3",
+      "source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+      "qa_receipt_sha256": "2ac22056204527b21d5a869aac0edb563b9c5f7bebf73ef3b69198c20a2a0c69",
+      "LFS_source_branch": "downloads/pose-font-ipa-ja-v0.3.25",
+      "LFS_publication_commit": "56d34147c158ee8f048fce5df75cc9538d6f5f4f",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "ja"
+    },
+    {
+      "kind": "client-ko",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "bytes": 163424713,
+      "sha256": "76499b3507475d2e49a3264b5c56191ed592441c493be46918e09d1184cbf81c",
+      "source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+      "qa_receipt_sha256": "1d7ce3422dfcd9d35445f48497039b8e1223a973ce5d4ff1f6bdc640340d3a51",
+      "LFS_source_branch": "downloads/pose-font-client-ko-v0.3.25",
+      "LFS_publication_commit": "7f316b6204da6f052a8dad01292e183bd7ac9491",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "ko"
+    },
+    {
+      "kind": "ipa-ko",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+      "bytes": 148987096,
+      "sha256": "ed51fa31435bef05af8e68ec40f172a9dace62518d3ed4cbdd8fab120dff26e4",
+      "source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+      "qa_receipt_sha256": "577234e9905828e669ceecb4080cf18f7e1cb05382d24ba28ec9c7d51f760d8f",
+      "LFS_source_branch": "downloads/pose-font-ipa-ko-v0.3.25",
+      "LFS_publication_commit": "a12b42a1253670121d4e450e1cbb6eb0a0dde36f",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "ko"
+    },
+    {
+      "kind": "client-en",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "bytes": 163391945,
+      "sha256": "682f79ce3fd092ba5b1bb1056b484fdf00c9ae08f66b2fe1cb4a53fb832071bb",
+      "source_commit": "751238f4b1d892eea18f7138bbca0d0432c6b37d",
+      "qa_receipt_sha256": "e559fa1b56a7c4bfc60ce51005876ef227a24803c23fd9084f779a004b7b617f",
+      "LFS_source_branch": "downloads/pose-font-client-en-v0.3.25",
+      "LFS_publication_commit": "293f7a8aecdf5d0611af04129182d1bc573ae189",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "en"
+    },
+    {
+      "kind": "ipa-en",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+      "bytes": 148981520,
+      "sha256": "400c176175a3719b1c81a0f5924e9a7c5b0bc62b2057b55096bb62cfc83bc17c",
+      "source_commit": "641a142ebae0f1c0a095979d68fc96655272d719",
+      "qa_receipt_sha256": "45cabc9873f289f5a5344a1193d239112d521417c4a25f234a75083195f80b21",
+      "LFS_source_branch": "downloads/pose-font-ipa-en-v0.3.25",
+      "LFS_publication_commit": "f5b8dcc7f65e6be165d21a567efac18469949efd",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "language": "en"
+    }
+  ],
+  "new_core_data_full_LFS_download_SHA_verified": true,
+  "new_servers_full_LFS_download_SHA_verified": true,
+  "new_clients_full_LFS_download_SHA_verified": true,
+  "new_client_count": 6,
+  "artifact_count": 9,
+  "existing_clients_or_Data_reused": false,
+  "actual_device_gameplay_or_visual_font_translation_proof": false,
+  "actual_Mac_GUI_execution": false
+}
