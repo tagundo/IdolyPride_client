@@ -150,9 +150,16 @@ def test_full_media_lists_and_home_are_consistent_read_only_and_use_exact_master
     assert extras.infos[0].stories[0].id == "extra" and extras.infos[0].stories[0].unlocked
     assert extras.infos[0].stories[0].episodes[0].unlocked
     home = game.schema.response_type("/api.Home/Enter")()
+    home.eventStoryInfos.add(id="stale-normal-event").episodes.add(episode=8, unlocked=False)
     home.extraStoryPartInfos.add(id="stale-normal-list")
+    home.MergeFromString(UNKNOWN)
     game.handler.fill_home(home)
+    assert list(home.eventStoryInfos) == list(events.infos)
     assert list(home.extraStoryPartInfos) == list(extras.infos)
+    assert UNKNOWN in home.SerializeToString()
+    projected = home.SerializeToString()
+    game.handler.fill_home(home)
+    assert home.SerializeToString() == projected
     for response in (events, extras):
         assert response.HasField("commonResponse")
         assert not response.commonResponse.HasField("updatedData")
@@ -197,6 +204,48 @@ def test_event_gallery_preserves_real_groups_nonconsecutive_episodes_and_retry_p
     assert invoke(game, module._EVENT, eventStoryId="event-gated", episode=3, isLast=False) == read
     assert dump(game) == saved and game.state.snapshot("ordinary") == ordinary
     assert source.read_bytes() == source_bytes
+
+
+def test_home_event_cache_contains_every_group_before_the_event_list_can_open(game):
+    # Original StoryTop reads StoryManager's cache populated from Home.Enter
+    # field 23. It does not call ListEvent before deciding whether to open the
+    # event screen. These groups must already be present on the first Home.
+    events = [
+        {"id": "archive-a", "episodes": [{"episode": 1, "storyId": "media-event"},
+                                          {"episode": 4, "storyId": "media-main"}]},
+        {"id": "archive-b", "episodes": [{"episode": 2, "storyId": "media-extra"}]},
+    ]
+    (game.master / "EventStory.json").write_text(json.dumps(events))
+    ordinary = game.state.snapshot("ordinary")
+    before = dump(game)
+    home = game.schema.response_type("/api.Home/Enter")()
+    home.commonResponse.updatedData.balance.freeBalance = 246
+    home.eventStoryInfos.add(id="unrelated-old-captured-event")
+    game.handler.fill_home(home)
+    entered = game.schema.response_type("/api.Home/Enter").FromString(home.SerializeToString())
+    assert [(info.id, [(episode.episode, episode.unlocked) for episode in info.episodes])
+            for info in entered.eventStoryInfos] == [
+                ("archive-a", [(1, True), (4, True)]), ("archive-b", [(2, True)])]
+    assert entered.commonResponse.updatedData.balance.freeBalance == 246
+    assert list(entered.eventStoryInfos) == list(invoke(game, module._LIST_EVENT).infos)
+    assert dump(game) == before and game.state.snapshot("ordinary") == ordinary
+
+
+@pytest.mark.parametrize("broken_table", ["EventStory", "ExtraStory"])
+def test_home_story_cache_validation_failure_keeps_both_existing_lists(game, broken_table):
+    # A bad archive must not leave a partly replaced Home response that could
+    # expose menu entries without valid episodes or discard another cache.
+    game.rows[broken_table][0]["episodes"][0]["storyId"] = "absent-story"
+    (game.master / (broken_table + ".json")).write_text(json.dumps(game.rows[broken_table]))
+    home = game.schema.response_type("/api.Home/Enter")()
+    home.eventStoryInfos.add(id="keep-event").episodes.add(episode=7, unlocked=False)
+    home.extraStoryPartInfos.add(id="keep-extra", unlocked=False)
+    home.MergeFromString(UNKNOWN)
+    saved, before = home.SerializeToString(), dump(game)
+    with pytest.raises(RpcFailure) as failure:
+        game.handler.fill_home(home)
+    assert failure.value.code == RpcCode.FAILED_PRECONDITION
+    assert home.SerializeToString() == saved and dump(game) == before
 
 
 def test_extra_episode_reads_reuse_master_validation_without_building_menu_dtos(game, monkeypatch):

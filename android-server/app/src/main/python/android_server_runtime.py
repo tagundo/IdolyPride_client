@@ -142,6 +142,7 @@ class _AndroidResourceResponse:
         self._connection.setRequestProperty("Accept-Encoding", "identity")
         self._connection.setRequestProperty("User-Agent", "IdolyPride-Local-Resource-Cache")
         self._buffer = jarray(jbyte)(64 * 1024)
+        self._read_chunk = jclass("game.qualiarts.idolypride.localserver.ResourceTransfers").readResourceChunk
         self._stream = None
         self._closed = False
 
@@ -174,6 +175,10 @@ class _AndroidResourceResponse:
     def read(self, size):
         if self._closed:
             raise OSError("Resource connection is closed")
+        if type(size) is not int or size < 0:
+            raise ValueError("Resource reads require a bounded size")
+        if size == 0:
+            return b""
         if self._stream is None:
             self._stream = self._connection.getInputStream()
             if self._closed:
@@ -182,7 +187,10 @@ class _AndroidResourceResponse:
                 finally:
                     self._connection.disconnect()
                 raise OSError("Resource connection is closed")
-        count = int(self._stream.read(self._buffer, 0, min(size, len(self._buffer))))
+        # TLS commonly returns only one record per InputStream.read. Fill a
+        # bounded chunk in Java so each short read does not also pay Python
+        # bridge, allocation, write, digest and quota-callback overhead.
+        count = int(self._read_chunk(self._stream, self._buffer, min(size, len(self._buffer))))
         return b"" if count < 0 else memoryview(self._buffer).cast("B")[:count].tobytes()
 
     def close(self):

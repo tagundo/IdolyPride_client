@@ -173,11 +173,22 @@ class MediaStories:
         return result
 
     def fill_home(self, result):
-        """Use exactly the same media DTOs for Home and ListExtra."""
-        if "extraStoryPartInfos" in result.DESCRIPTOR.fields_by_name:
-            extra = self._lists(_LIST_EXTRA)
-            del result.extraStoryPartInfos[:]
-            result.extraStoryPartInfos.extend(extra.infos)
+        """Prime the original client's story caches when it enters Home.
+
+        The event tile reads the cache seeded by Home.Enter.eventStoryInfos
+        before it can open the event list. Serving ListEvent alone leaves that
+        tile showing its locked placeholder. Use the same complete projection
+        here, and validate all lists before replacing either Home field.
+        """
+        projections = []
+        for field, path in (("eventStoryInfos", _LIST_EVENT),
+                            ("extraStoryPartInfos", _LIST_EXTRA)):
+            if field in result.DESCRIPTOR.fields_by_name:
+                projections.append((field, self._lists(path).infos))
+        for field, infos in projections:
+            target = getattr(result, field)
+            del target[:]
+            target.extend(infos)
 
     def _resolve(self, path, request):
         stories = self._definitions()

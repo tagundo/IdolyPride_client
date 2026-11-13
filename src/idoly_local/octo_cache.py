@@ -172,13 +172,17 @@ class OctoCache:
     actual seed copy or CDN write. Rejection aborts that write; finish always
     releases the caller's reservation. Existing verified reads do not call it.
 
+    ``on_phase(cache_key, phase)`` optionally observes connecting, receiving,
+    saving, checking, copying and finished phases without changing ``on_event``.
+    Exceptions in either observer do not alter transfer or verification results.
+
     ``close()`` rejects new work and prevents subsequent writes/publication. It
     closes available response handles outside the cache lock. Opening DNS or
     response headers has no handle to close yet and remains bounded by the
     configured transport timeout; an arriving response is then discarded.
     """
 
-    def __init__(self, root, *, fetcher=None, on_event=None,
+    def __init__(self, root, *, fetcher=None, on_event=None, on_phase=None,
                  max_object_bytes=512 * 1024 * 1024, max_parallel=2,
                  timeout=30, total_timeout=300, allow_download=True,
                  max_download_bytes=None, seed_dirs=(), write_guard=None):
@@ -193,6 +197,7 @@ class OctoCache:
                 raise ValueError("Invalid Octo cache timeout")
         if ((fetcher is not None and not callable(fetcher))
                 or (on_event is not None and not callable(on_event))
+                or (on_phase is not None and not callable(on_phase))
                 or (write_guard is not None and not callable(write_guard))):
             raise ValueError("Invalid Octo cache callback")
         self.root = Path(root).resolve()
@@ -203,6 +208,7 @@ class OctoCache:
         self._root_identity = root_info.st_dev, root_info.st_ino
         self._seed_roots = self._validate_seeds(seed_dirs)
         self.fetcher, self.on_event = fetcher or open_upstream, on_event
+        self.on_phase = on_phase
         self.write_guard = write_guard
         self.max_object_bytes, self.timeout, self.total_timeout = max_object_bytes, timeout, total_timeout
         self.allow_download, self.max_download_bytes = allow_download, max_download_bytes
@@ -298,6 +304,15 @@ class OctoCache:
                 raise
             except Exception:
                 raise OctoCacheError("cache_io") from None
+
+    def _phase(self, record, phase):
+        # Timing is observational only. It cannot skip verification, reject a
+        # write or change the existing transfer-event contract of the gateway.
+        if self.on_phase is not None:
+            try:
+                self.on_phase(record.cache_key, phase)
+            except Exception:
+                pass
 
     def _finish_write(self, record, stream=None, *, operation_failed=False):
         try:
@@ -434,6 +449,7 @@ class OctoCache:
     def _seed(self, record, directory, deadline):
         if not self._seed_roots:
             return None
+        self._phase(record, "copying")
         while True:
             self._check_deadline(deadline)
             if self._parallel.acquire(timeout=min(deadline - time.monotonic(), 0.1)):
@@ -576,6 +592,7 @@ class OctoCache:
             self._write_guard(record, "start")
             self._notify(record, "started")
             started = True
+            self._phase(record, "connecting")
             self._require_open()
             temporary = ".octo-" + secrets.token_hex(12) + ".part"
             descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
@@ -595,6 +612,7 @@ class OctoCache:
                         self._responses[id(response)] = response
                     try:
                         self._response(response, record.size, record.upstream_url)
+                        self._phase(record, "receiving")
                         while True:
                             self._require_open()
                             if time.monotonic() >= deadline:
@@ -631,6 +649,7 @@ class OctoCache:
                     raise OctoCacheError("upstream_size")
                 if digest.hexdigest() != record.md5:
                     raise OctoCacheError("upstream_digest")
+                self._phase(record, "saving")
                 output.flush()
                 os.fchmod(output.fileno(), 0o400)
                 os.fsync(output.fileno())
@@ -641,6 +660,7 @@ class OctoCache:
                 temporary = None
             # A different cache can replace final_name immediately after our
             # publication. Its stat alone cannot prove our downloaded digest.
+            self._phase(record, "checking")
             stream = self._existing(record, directory, deadline)
             if stream is None:
                 raise OctoCacheError("cache_io")
@@ -728,9 +748,15 @@ class OctoCache:
         """Yield an independent binary descriptor for verified immutable bytes."""
         record = self._record(record)
         self._require_open()
-        stream = self._obtain(record)
+        self._phase(record, "checking")
+        stream = None
         try:
+            stream = self._obtain(record)
             self._require_open()
             yield stream
         finally:
-            stream.close()
+            try:
+                if stream is not None:
+                    stream.close()
+            finally:
+                self._phase(record, "finished")

@@ -1,5 +1,6 @@
 """Host FD/lifecycle checks only; no Android provider, server or network runs."""
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,144 @@ def boundary():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture
+def resource_response(boundary, monkeypatch):
+    """The real adapter with a controlled platform stream/Java method seam.
+
+    The actual Java method's short-read and cancellation behavior is exercised
+    by ResourceTransfersHostTest; this seam checks the Chaquopy call contract.
+    """
+    connections, chunks = [], []
+
+    class Connection:
+        def __init__(self, url, stream, headers):
+            self.url, self.stream, self.response_headers = url, stream, headers
+            self.properties, self.disconnections, self.stream_opens = {}, 0, 0
+        def setInstanceFollowRedirects(self, value):
+            self.redirects = value
+        def setConnectTimeout(self, value):
+            self.connect_timeout = value
+        def setReadTimeout(self, value):
+            self.read_timeout = value
+        def setRequestProperty(self, key, value):
+            self.properties[key] = value
+        def getResponseCode(self):
+            return 200
+        def getHeaderField(self, key):
+            return self.response_headers.get(key)
+        def getURL(self):
+            return SimpleNamespace(toString=lambda: self.url)
+        def getInputStream(self):
+            self.stream_opens += 1
+            return self.stream
+        def disconnect(self):
+            self.disconnections += 1
+
+    def create(body=b"bounded resource bytes", *, headers=None, reader=None, stream=None, url=None):
+        selected_stream = io.BytesIO(body) if stream is None else stream
+        selected_url = url or "https://d2ilil7yh5oi1v.cloudfront.net/test"
+        connection = Connection(selected_url, selected_stream, {} if headers is None else headers)
+        connections.append(connection)
+        def read_chunk(source, buffer, limit):
+            chunks.append((id(buffer), len(buffer), limit))
+            if reader is not None:
+                return reader(source, buffer, limit)
+            block = source.read(limit)
+            buffer[:len(block)] = block
+            return len(block) if block else -1
+        classes = {"java.net.URL": lambda url: SimpleNamespace(openConnection=lambda: connection),
+                   "game.qualiarts.idolypride.localserver.ResourceTransfers":
+                       SimpleNamespace(readResourceChunk=read_chunk)}
+        monkeypatch.setitem(sys.modules, "java", SimpleNamespace(
+            jclass=lambda name: classes[name], jarray=lambda kind: bytearray, jbyte=object()))
+        return boundary._AndroidResourceResponse(selected_url, 30)
+    create.connections, create.chunks = connections, chunks
+    return create
+
+
+def test_android_resource_reads_use_one_fixed_java_buffer_and_bounded_chunk_method(resource_response):
+    body = bytes(range(256)) * 256 + b"tail!"
+    with resource_response(body, headers={"Content-Length": str(len(body))}) as response:
+        connection = resource_response.connections[-1]
+        assert response.status == 200 and response.headers == {"Content-Length": str(len(body))}
+        assert not connection.redirects
+        assert connection.connect_timeout == connection.read_timeout == 30000
+        assert connection.properties["Accept-Encoding"] == "identity"
+        assert response.read(2**31 - 1) == body[:65536]
+        assert response.read(5) == body[65536:]
+        assert response.read(1) == b""
+        assert connection.stream_opens == 1
+    assert [value[2] for value in resource_response.chunks] == [65536, 5, 1]
+    assert len({value[0] for value in resource_response.chunks}) == 1
+    assert all(value[1] == 65536 for value in resource_response.chunks)
+    assert connection.stream.closed and connection.disconnections == 1
+    response.close()
+    assert connection.disconnections == 1
+    with pytest.raises(OSError):
+        response.read(1)
+
+
+@pytest.mark.parametrize("size", [None, -1, True, 1.5, "65536"])
+def test_android_resource_reads_reject_unbounded_or_invalid_sizes_before_open(resource_response, size):
+    with resource_response() as response:
+        with pytest.raises(ValueError, match="bounded"):
+            response.read(size)
+        assert response.read(0) == b""
+        assert resource_response.connections[-1].stream_opens == 0
+        assert resource_response.chunks == []
+
+
+@pytest.mark.parametrize("extra", [b"", b"!"])
+def test_android_chunk_adapter_retains_complete_digest_and_one_byte_overlong_probe(resource_response, tmp_path, extra):
+    from idoly_local.octo_cache import OctoCache, OctoCacheError
+    from idoly_local.octo_manifest import OctoObject
+    body = b"data"
+    item = OctoObject("assetbundle", 202050, "bounded_chunk", 1234567, len(body),
+                      hashlib.md5(body, usedforsecurity=False).hexdigest(), "bundle-name")
+    cache = OctoCache(tmp_path, fetcher=lambda url, timeout: resource_response(body + extra, url=url))
+    if extra:
+        with pytest.raises(OctoCacheError) as error:
+            with cache.open_verified(item):
+                pytest.fail("Overlong platform bytes entered the cache")
+        assert error.value.code == "upstream_size"
+        assert not list(tmp_path.rglob("*.bin"))
+        assert [value[2] for value in resource_response.chunks] == [len(body) + 1]
+    else:
+        with cache.open_verified(item) as source:
+            assert source.read() == body
+        assert [value[2] for value in resource_response.chunks] == [len(body) + 1, 1]
+    assert not list(tmp_path.rglob("*.part"))
+    assert resource_response.connections[-1].stream.closed
+    cache.close()
+
+
+def test_android_chunk_adapter_cancel_closes_blocked_stream_and_disconnects(resource_response):
+    entered, closed = threading.Event(), threading.Event()
+    failures = []
+    class BlockingStream:
+        def close(self):
+            closed.set()
+    def blocked_reader(stream, buffer, limit):
+        entered.set()
+        assert closed.wait(1), "Cancellation did not close the platform stream"
+        raise OSError("closed")
+    response = resource_response(stream=BlockingStream(), reader=blocked_reader)
+    def read():
+        try:
+            response.read(65536)
+        except BaseException as error:
+            failures.append(error)
+    worker = threading.Thread(target=read, daemon=True)
+    worker.start()
+    try:
+        assert entered.wait(.5)
+    finally:
+        response.close()
+    worker.join(timeout=1)
+    assert not worker.is_alive() and len(failures) == 1 and isinstance(failures[0], OSError)
+    assert closed.is_set() and resource_response.connections[-1].disconnections == 1
 
 
 def test_seekable_fd_is_duplicated_closed_and_import_does_not_hold_lifecycle_lock(boundary, tmp_path):

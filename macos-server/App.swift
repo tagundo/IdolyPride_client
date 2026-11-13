@@ -163,6 +163,20 @@ final class ServerModel: ObservableObject {
             let transfers = job["action"] as? String == "download" && [1, 2, 4, 8].contains(parallelism)
                 ? " · 동시 \(parallelism)개" : ""
             resourceMessage = "상태 \(phase)\(transfers) · 확인 \(files)/\(total)개 · 수신 \(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) · 가져옴 \(imported)개 · 실패 \(failed)개 · 미보관 \(missing)개"
+            if job["action"] as? String == "download", job["elapsed_seconds"] != nil {
+                let rawRate = (job["average_bytes_per_second"] as? NSNumber)?.doubleValue ?? 0
+                let rate = rawRate.isFinite && rawRate >= 0 && rawRate < Double(Int64.max) ? Int64(rawRate) : 0
+                let rawElapsed = (job["elapsed_seconds"] as? NSNumber)?.doubleValue ?? 0
+                let elapsed = rawElapsed.isFinite && rawElapsed >= 0 && rawElapsed < Double(Int64.max) ? Int64(rawElapsed) : 0
+                resourceMessage += "\n평균 수신 \(ByteCountFormatter.string(fromByteCount: rate, countStyle: .file))/s · \(elapsed)초 · 기존 파일 재사용 \((job["cache_hit_files"] as? NSNumber)?.intValue ?? 0)개"
+                let checkedBytes = max(0, (job["verified_bytes"] as? NSNumber)?.int64Value ?? 0)
+                let totalBytes = max(0, (job["total_bytes"] as? NSNumber)?.int64Value ?? 0)
+                resourceMessage += "\n용량 검증 완료 \(ByteCountFormatter.string(fromByteCount: checkedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: totalBytes, countStyle: .file))"
+                if let phases = job["phase_active_files"] as? [String: Any] {
+                    let entries = [("connecting", "연결"), ("receiving", "받기"), ("checking", "검증"), ("saving", "저장"), ("copying", "복사")]
+                    resourceMessage += "\n" + entries.map { key, title in "\(title) \(max(0, (phases[key] as? NSNumber)?.intValue ?? 0))" }.joined(separator: " · ") + "개"
+                }
+            }
         } else if let catalogs = resources["catalogs"] as? [String: Any], let catalog = catalogs[resourcePlatform] as? [String: Any] {
             if let files = catalog["object_count"] as? NSNumber, let bytes = catalog["total_bytes"] as? NSNumber {
                 resourceMessage = "포함 목록 \(files.intValue)개 · \(ByteCountFormatter.string(fromByteCount: bytes.int64Value, countStyle: .file)). 받은 파일은 크기와 MD5를 검사해 보관합니다."

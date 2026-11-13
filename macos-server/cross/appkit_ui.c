@@ -658,7 +658,7 @@ static void make_window(void) {
     id_set_bool(scroll, "setHasVerticalScroller:", 1);
     id_set_bool(scroll, "setHasHorizontalScroller:", 0);
     id_set_long(scroll, "setAutoresizingMask:", 2 | 16);
-    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1910));
+    IDObj document = id_init_frame(id_get(viewClass, "alloc"), id_rect(0, 0, 700, 1974));
     id_set_long(document, "setAutoresizingMask:", 2);
     id_set(scroll, "setDocumentView:", document); id_set(root, "addSubview:", scroll);
     add_label(document, "연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.", 0, 36, 12, 1);
@@ -724,17 +724,17 @@ static void make_window(void) {
     G.resourceCancel=add_button(document,"작업 취소",392,1368,120,C_RESOURCE_CANCEL,0);
     G.resourceExport=add_button(document,"보관 ZIP 내보내기",12,1406,180,C_RESOURCE_EXPORT,0);
     G.resourceImport=add_button(document,"보관 ZIP 가져오기",202,1406,180,C_RESOURCE_IMPORT,0);
-    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1446,64,11,1);
-    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1514,54,11,1);
-    add_label(document, "실행 기록", 1596, 26, 14, 0);
-    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1626, 676, 200));
+    G.resourceLabel=add_label(document,"서버를 시작하면 보관 목록과 진행 상태를 확인할 수 있습니다.",1446,128,11,1);
+    add_label(document,"선택한 보관 폴더 아래에 octo-cache(Android), octo-cache-ios(iOS)를 만듭니다. ZIP은 Downloads/IdolyPride/exports에 선택적으로 백업합니다. 계정·설정은 앱 전용 폴더에 유지됩니다.",1578,54,11,1);
+    add_label(document, "실행 기록", 1660, 26, 14, 0);
+    IDObj logScroll = id_init_frame(id_get(id_class("NSScrollView"), "alloc"), id_rect(12, 1690, 676, 200));
     id_set_bool(logScroll, "setHasVerticalScroller:", 1); id_set_bool(logScroll, "setHasHorizontalScroller:", 0);
     G.logView = id_init_frame(id_get(id_class("NSTextView"), "alloc"), id_rect(0, 0, 650, 200));
     id_set_bool(G.logView, "setEditable:", 0); id_set_bool(G.logView, "setSelectable:", 1);
     id_set_bool(G.logView, "setVerticallyResizable:", 1); id_set_bool(G.logView, "setHorizontallyResizable:", 0);
     id_set(G.logView, "setFont:", id_double(id_class("NSFont"), "userFixedPitchFontOfSize:", 11));
     id_set(logScroll, "setDocumentView:", G.logView); id_set(document, "addSubview:", logScroll);
-    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1838, 42, 11, 1);
+    add_label(document, "튜토리얼 라이브는 원본 기록을 재생합니다. 앱을 종료하면 소유한 서버 엔진도 중지됩니다.", 1902, 42, 11, 1);
     sync_graphics_controls(); sync_library_controls(); update_controls();
     id_void(G.window, "center"); id_set(G.window, "makeKeyAndOrderFront:", 0);
     id_set_bool(G.app, "activateIgnoringOtherApps:", 1);
@@ -745,6 +745,18 @@ static double metric(IDObj values, const char *key) {
     if (!id_is(number, "NSNumber")) return 0;
     double value = id_number(number, "doubleValue");
     return __builtin_isfinite(value) && value >= 0 && value <= 32768 ? value : 0;
+}
+
+static double resource_number(IDObj values, const char *key) {
+    IDObj number=id_item(values,key);
+    if (!id_is(number,"NSNumber")) return 0;
+    double value=id_number(number,"doubleValue");
+    return __builtin_isfinite(value) && value >= 0 && value < 9223372036854775807.0 ? value : 0;
+}
+
+static long long resource_phase_count(IDObj phases, const char *key) {
+    long long value=id_json_integer(id_item(phases,key),0);
+    return value >= 0 && value <= 8 ? value : 0;
 }
 
 /* Status is a cached, bounded dictionary from the owned engine. Reading it
@@ -782,6 +794,22 @@ static void resource_status(IDObj resources) {
                 !strcmp(id_utf8(id_item(job,"platform")),"android") ? "Android" : "iOS",name,parallelism,files,total,(double)bytes/1048576.0,missing);
         else snprintf(message,sizeof message,"%s · %s · 확인 %lld/%lld개 · 수신 %.1f MiB · 미보관 %lld개",
                 !strcmp(id_utf8(id_item(job,"platform")),"android") ? "Android" : "iOS",name,files,total,(double)bytes/1048576.0,missing);
+        if (!strcmp(id_utf8(id_item(job,"action")),"download") && id_item(job,"elapsed_seconds")) {
+            IDSize used=strlen(message);
+            snprintf(message+used,sizeof message-used,"\n평균 수신 %.2f MiB/s · %.0f초 · 기존 파일 재사용 %lld개",
+                resource_number(job,"average_bytes_per_second")/1048576.0,resource_number(job,"elapsed_seconds"),
+                id_json_integer(id_item(job,"cache_hit_files"),0));
+            used=strlen(message);
+            snprintf(message+used,sizeof message-used,"\n용량 검증 완료 %.1f / %.1f GiB",
+                resource_number(job,"verified_bytes")/1073741824.0,resource_number(job,"total_bytes")/1073741824.0);
+            IDObj phases=id_item(job,"phase_active_files");
+            if (id_is(phases,"NSDictionary")) {
+                used=strlen(message);
+                snprintf(message+used,sizeof message-used,"\n연결 %lld · 받기 %lld · 검증 %lld · 저장 %lld · 복사 %lld개",
+                    resource_phase_count(phases,"connecting"),resource_phase_count(phases,"receiving"),
+                    resource_phase_count(phases,"checking"),resource_phase_count(phases,"saving"),resource_phase_count(phases,"copying"));
+            }
+        }
         resource_message(message,!strcmp(phase,"failed") || !strcmp(phase,"partial"));
     } else {
         IDObj catalog=id_item(id_item(resources,"catalogs"),platform);

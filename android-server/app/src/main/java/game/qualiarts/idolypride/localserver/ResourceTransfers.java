@@ -34,9 +34,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** One app-context control/archive worker; the server owns parallel CDN downloads.
  * ZIPs stream directly to the chosen destination. */
-final class ResourceTransfers {
+public final class ResourceTransfers {
     private static final String ORIGIN = "http://127.0.0.1:8080/client/resources";
     private static final int CONTROL_LIMIT = 128 * 1024;
+    private static final int RESOURCE_CHUNK_LIMIT = 64 * 1024;
+    private static final long RESOURCE_CHUNK_NANOS = 50_000_000L;
     private static final AtomicBoolean BUSY = new AtomicBoolean(), CANCEL = new AtomicBoolean(), CLOSING = new AtomicBoolean();
     private static final ExecutorService IO = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "IdolyResourceIO"); thread.setDaemon(true); return thread;
@@ -60,6 +62,33 @@ final class ResourceTransfers {
         }
     }
     static final int STORAGE_PRIVATE = 0, STORAGE_DOWNLOADS = 1, STORAGE_PERMISSION = 2, STORAGE_UNSUPPORTED = 3;
+    /** Coalesce TLS short reads before crossing the Python/Java boundary.
+     * The caller owns the fixed buffer and closes the stream to cancel. Never
+     * retain it, allocate a whole-file buffer, or turn a short read into EOF.
+     * Return to Python after 50ms of completed reads so its transfer deadline
+     * and progress checks still run on slow, continuously readable streams.
+     * One blocked read retains the connection's configured read timeout. */
+    public static int readResourceChunk(InputStream input, byte[] buffer, int limit) throws IOException {
+        if (input == null || buffer == null || limit < 1 || limit > buffer.length || limit > RESOURCE_CHUNK_LIMIT)
+            throw new IOException("Invalid resource chunk request");
+        int total = 0;
+        final long started = System.nanoTime();
+        while (total < limit) {
+            int count = input.read(buffer, total, limit - total);
+            if (count < 0) return total == 0 ? -1 : total;
+            if (count == 0) {
+                // InputStream normally forbids zero for a positive length.
+                // A single-byte fallback avoids spinning or inventing EOF.
+                int value = input.read();
+                if (value < 0) return total == 0 ? -1 : total;
+                buffer[total++] = (byte)value;
+            } else {
+                total += count;
+            }
+            if (System.nanoTime() - started >= RESOURCE_CHUNK_NANOS) break;
+        }
+        return total;
+    }
     static int storageAccess(int sdk, boolean downloads, boolean permission) {
         if (!downloads) return STORAGE_PRIVATE;
         if (sdk < 30) return STORAGE_UNSUPPORTED;

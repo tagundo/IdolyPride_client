@@ -11,6 +11,7 @@ from pathlib import Path
 import secrets
 import shutil
 import threading
+import time
 
 from .octo_cache import OctoCache, OctoCacheError
 from .octo_manifest import OctoManifest
@@ -23,6 +24,7 @@ _RESERVE_BYTES = 16 * 1024 * 1024
 _MAX_ERRORS = 20
 DOWNLOAD_PARALLELISM = (1, 2, 4, 8)
 DEFAULT_DOWNLOAD_PARALLELISM = 4
+_PHASES = ("checking", "copying", "connecting", "receiving", "saving")
 _SAFE_ERRORS = frozenset(("cache_io", "cache_closed", "download_disabled", "budget_exceeded",
     "upstream_redirect", "upstream_http", "upstream_timeout", "upstream_size", "upstream_encoding",
     "upstream_data", "upstream_digest", "conflicting_metadata", "upstream_tls", "upstream_dns",
@@ -75,6 +77,10 @@ class _Job:
     error_code: str | None = None
     fatal: str | None = None
     local: threading.local = field(default_factory=threading.local)
+    started_at: float = field(default_factory=time.monotonic)
+    finished_at: float | None = None
+    active_phases: dict = field(default_factory=dict)
+    phase_worker_seconds: dict = field(default_factory=lambda: {name: 0.0 for name in _PHASES})
 
 
 class ResourceLibrary:
@@ -171,6 +177,13 @@ class ResourceLibrary:
             return {name: dict(value) for name, value in self._summaries.items()}
 
     def _snapshot(self, job):
+        now = job.finished_at if job.finished_at is not None else time.monotonic()
+        elapsed = max(0.0, now - job.started_at)
+        active = {name: 0 for name in _PHASES}
+        seconds = dict(job.phase_worker_seconds)
+        for phase, started in job.active_phases.values():
+            active[phase] += 1
+            seconds[phase] += max(0.0, now - started)
         return {"job_id": job.identifier, "action": job.action, "platform": job.platform,
             "kind": job.kind, "state": job.state, "total_files": len(job.records),
             "total_bytes": job.total_bytes, **job.counts,
@@ -178,7 +191,25 @@ class ResourceLibrary:
             "archive_complete": job.archive_complete,
             "parallelism": job.parallelism,
             "pending_write_bytes": sum(job.pending_write_by_key.values()),
+            "elapsed_seconds": round(elapsed, 3),
+            "average_bytes_per_second": job.counts["received_bytes"] / elapsed if elapsed else 0.0,
+            "phase_active_files": active,
+            # Parallel workers overlap: these are summed worker-seconds,
+            # not a claim that the phase consumed this much wall-clock time.
+            "phase_worker_seconds": {name: round(value, 3) for name, value in seconds.items()},
             "resume_mode": "verified_objects", "partial_byte_resume": False}
+
+    def _observe_phase(self, job, key, phase):
+        with self._lock:
+            if self._job is not job or job.state in _TERMINAL:
+                return
+            now = time.monotonic()
+            previous = job.active_phases.pop(key, None)
+            if previous is not None:
+                old_phase, started = previous
+                job.phase_worker_seconds[old_phase] += max(0.0, now - started)
+            if phase in _PHASES and not job.cancel.is_set():
+                job.active_phases[key] = phase, now
 
     def status(self):
         with self._lock:
@@ -236,6 +267,8 @@ class ResourceLibrary:
             if job.state not in _TERMINAL:
                 job.cancel.set()
                 job.state = "cancelled" if job.state == "export_ready" else "cancelling"
+                if job.state == "cancelled":
+                    job.finished_at = time.monotonic()
         self._close_cache(job)
         with self._lock:
             return self._snapshot(job)
@@ -328,7 +361,9 @@ class ResourceLibrary:
                 return open_upstream(url, timeout=timeout)
         cache = OctoCache(path, fetcher=fetcher, allow_download=download, seed_dirs=seed_dirs,
             max_parallel=job.parallelism, max_object_bytes=2**31-1, total_timeout=900,
-            on_event=lambda event: self._observe(job, event), write_guard=write_guard)
+            on_event=lambda event: self._observe(job, event), write_guard=write_guard,
+            on_phase=(lambda key, phase: self._observe_phase(job, key, phase))
+                if job.action == "download" else None)
         with self._lock:
             job.cache = cache
             cancelled = self._closed or job.cancel.is_set()
@@ -351,6 +386,11 @@ class ResourceLibrary:
 
     def _finish(self, job):
         with self._lock:
+            now = time.monotonic()
+            for phase, started in job.active_phases.values():
+                job.phase_worker_seconds[phase] += max(0.0, now - started)
+            job.active_phases.clear()
+            job.finished_at = now
             job.counts["active_files"] = 0
             job.pending_write_by_key.clear()
             if job.fatal:

@@ -87,6 +87,40 @@ def test_restart_checks_archived_file_without_network_or_a_download_event(tmp_pa
     assert events[0]["received_bytes"] == 0
 
 
+def test_optional_phase_observer_separates_network_save_and_full_verification(tmp_path):
+    item, phases, events = record(), [], []
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: Response(),
+        on_event=events.append, on_phase=lambda key, phase: phases.append((key, phase)))
+    assert read(cache, item) == BODY
+    assert [phase for key, phase in phases] == [
+        'checking', 'connecting', 'receiving', 'saving', 'checking', 'finished']
+    assert all(key == item.cache_key for key, phase in phases)
+    assert [event['phase'] for event in events] == ['started', 'progress', 'verified']
+    phases.clear()
+    assert read(cache, item) == BODY
+    assert [phase for key, phase in phases] == ['checking', 'finished']
+
+
+def test_phase_observer_failure_never_changes_verification_or_leaves_active_phase(tmp_path):
+    phases = []
+    def observe(key, phase):
+        phases.append(phase)
+        raise RuntimeError('Observer must not own verification')
+    cache = OctoCache(tmp_path, fetcher=lambda *a, **kw: Response(b'x' * len(BODY)),
+        on_phase=observe)
+    with pytest.raises(OctoCacheError) as error:
+        read(cache, record())
+    assert error.value.code == 'upstream_digest'
+    assert phases == ['checking', 'connecting', 'receiving', 'finished']
+    assert not list(tmp_path.rglob('*.bin')) and not list(tmp_path.rglob('*.part'))
+
+
+@pytest.mark.parametrize('observer', [False, 1, 'callback'])
+def test_invalid_phase_observer_is_rejected(tmp_path, observer):
+    with pytest.raises(ValueError, match='callback'):
+        OctoCache(tmp_path, on_phase=observer)
+
+
 def test_write_guard_observes_actual_new_writes_without_bypassing_full_file_verification(tmp_path, monkeypatch):
     item = record()
     phases, hashed = [], []

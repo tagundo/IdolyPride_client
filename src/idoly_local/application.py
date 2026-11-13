@@ -210,6 +210,8 @@ class Application:
             if response is not None and self.media_stories is not None and path == "/api.Home/Enter":
                 home = response_type.FromString(response)
                 self.media_stories.fill_home(home)
+                if self.photo_shootings is not None:
+                    self.photo_shootings.fill_home(home)
                 response = home.SerializeToString()
             if response is None:
                 response = self.dream.handle(path, plain)

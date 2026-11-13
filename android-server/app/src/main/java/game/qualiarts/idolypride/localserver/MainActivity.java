@@ -543,6 +543,21 @@ public final class MainActivity extends Activity implements ServerService.Observ
             int parallelism = job.optInt("parallelism", 0);
             if ("download".equals(job.optString("action", "")) && ResourceTransfers.downloadParallelism(parallelism))
                 message += "\n" + getString(R.string.library_job_parallelism, parallelism, Math.max(0, job.optInt("active_files", 0)));
+            if ("download".equals(job.optString("action", "")) && job.has("elapsed_seconds")) {
+                double rate = job.optDouble("average_bytes_per_second", 0);
+                double elapsed = job.optDouble("elapsed_seconds", 0);
+                long rateBytes = Double.isNaN(rate) || Double.isInfinite(rate) || rate < 0 ? 0 : (long) Math.min(Long.MAX_VALUE, rate);
+                long elapsedSeconds = Double.isNaN(elapsed) || Double.isInfinite(elapsed) || elapsed < 0 ? 0 : (long) Math.min(Long.MAX_VALUE, elapsed);
+                message += "\n" + getString(R.string.library_job_transfer_metrics,
+                        formatBytes(Math.max(0, job.optLong("received_bytes", 0))), formatBytes(rateBytes), elapsedSeconds);
+                message += "\n" + getString(R.string.library_job_bytes,
+                        formatBytes(Math.max(0, job.optLong("verified_bytes", 0))), formatBytes(Math.max(0, job.optLong("total_bytes", 0))));
+                JSONObject phases = job.optJSONObject("phase_active_files");
+                if (phases != null) message += "\n" + getString(R.string.library_job_phase_summary,
+                        Math.max(0, phases.optInt("connecting", 0)), Math.max(0, phases.optInt("receiving", 0)),
+                        Math.max(0, phases.optInt("checking", 0)), Math.max(0, phases.optInt("saving", 0)), Math.max(0, phases.optInt("copying", 0)));
+                message += "\n" + getString(R.string.library_job_cached, Math.max(0, job.optLong("cache_hit_files", 0)));
+            }
             libraryProgress.setVisibility(active || local.busy ? View.VISIBLE : View.GONE);
             libraryProgress.setIndeterminate(total == 0 || !active && local.busy);
             if (active && total > 0) libraryProgress.setProgress((int) Math.min(1000, 1000.0 * Math.min(total, verified + missing + failed) / total));

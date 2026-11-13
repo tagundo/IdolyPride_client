@@ -119,6 +119,68 @@ def test_explicit_bulk_download_raw_cache_and_resume_without_more_network(librar
     assert len(calls)==6 and not list(library.root.rglob('*.part'))
 
 
+def test_download_status_reports_real_wait_phases_bytes_and_frozen_terminal_average(tmp_path, monkeypatch):
+    import idoly_local.octo_cache as cache_module
+    manifest, payloads = catalog(tmp_path, count=1)
+    entered = {phase: threading.Event() for phase in ('connecting', 'receiving', 'saving', 'checking')}
+    released = {phase: threading.Event() for phase in entered}
+    held = set()
+    def hold(phase):
+        if phase not in held:
+            held.add(phase)
+            entered[phase].set()
+            assert released[phase].wait(2), phase
+    class StagedResponse(Response):
+        def read(self, count=-1):
+            hold('receiving')
+            return super().read(count)
+    def fetch(url, *, timeout):
+        hold('connecting')
+        return StagedResponse(payloads[url])
+    original_fsync, original_existing = cache_module.os.fsync, OctoCache._existing
+    def fsync(descriptor):
+        hold('saving')
+        return original_fsync(descriptor)
+    def existing(cache, item, directory, deadline=None):
+        if (cache.root / item.cache_key[:2] / (item.cache_key + '.bin')).exists():
+            hold('checking')
+        return original_existing(cache, item, directory, deadline)
+    monkeypatch.setattr(cache_module.os, 'fsync', fsync)
+    monkeypatch.setattr(OctoCache, '_existing', existing)
+    library = ResourceLibrary(tmp_path, {'android': manifest}, aes_cbc=AES,
+                              fetcher=fetch, max_workers=1)
+    try:
+        library.start_download('android')
+        for phase in entered:
+            assert entered[phase].wait(1), phase
+            status = library.status()['job']
+            assert status['phase_active_files'] == {name: int(name == phase) for name in
+                ('checking', 'copying', 'connecting', 'receiving', 'saving')}
+            assert status['verified_files'] == 0
+            if phase in ('saving', 'checking'):
+                assert status['received_bytes'] > 0 and status['average_bytes_per_second'] > 0
+            else:
+                assert status['received_bytes'] == status['average_bytes_per_second'] == 0
+            released[phase].set()
+        done = complete(library)
+        assert done['state'] == 'completed' and done['verified_files'] == 2
+        assert done['received_bytes'] == sum(map(len, payloads.values()))
+        assert done['elapsed_seconds'] >= 0 and done['average_bytes_per_second'] > 0
+        assert not any(done['phase_active_files'].values())
+        assert all(value >= 0 for value in done['phase_worker_seconds'].values())
+        time.sleep(.005)
+        assert library.status()['job'] == done
+        library.start_download('android')
+        cached = complete(library)
+        assert cached['cache_hit_files'] == 2 and cached['received_bytes'] == 0
+        assert cached['average_bytes_per_second'] == 0
+        assert not any(cached['phase_active_files'].values())
+    finally:
+        for event in released.values():
+            event.set()
+        library.close()
+
+
 def test_two_worker_bound_and_failed_digest_never_published(tmp_path):
     manifest, payloads=catalog(tmp_path, count=8)
     lock=threading.Lock();active=peak=0
@@ -668,13 +730,18 @@ def test_export_partial_cached_selection_stays_importable(library_case,tmp_path)
     target=ResourceLibrary(target_root,{'android':manifest},fetcher=lambda *a,**kw:pytest.fail('No CDN import'))
     imported=target.import_from(io.BytesIO(output.getvalue()),'android')
     assert imported['imported_files']==3 and imported['state']=='completed'
+    assert imported['average_bytes_per_second'] == 0
+    assert not any(imported['phase_worker_seconds'].values())  # Local ZIP input is not network receiving.
     target.close()
 
 
 def test_prepared_export_cancel_and_wrong_platform_import_are_safe(library_case,tmp_path):
     library,_,_,calls=library_case
     prepared=library.prepare_export('android')
-    assert library.cancel(prepared['job_id'])['state']=='cancelled'
+    cancelled = library.cancel(prepared['job_id'])
+    assert cancelled['state']=='cancelled'
+    time.sleep(.005)
+    assert library.status()['job'] == cancelled
     with pytest.raises(ResourceLibraryError,match='not_prepared'):library.write_export(prepared['job_id'],io.BytesIO())
     assert calls==[]
     library.start_download('android');complete(library)

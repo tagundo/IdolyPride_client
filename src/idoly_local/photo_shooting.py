@@ -177,6 +177,31 @@ class PhotoShootings:
         result.DokanInfo.SetInParent()
         self._common(result)
 
+    def fill_home(self, result):
+        """Supply the gallery's scene access to the original Home cache.
+
+        The original Pose tab validates its cast against the unlocked
+        ``HomeEnterResponse.photoExpressions`` cached by UserDataManager,
+        before CheckExpressionShooting or ListShooting can be called. Pose
+        ownership alone therefore leaves every character marked Shooting NG
+        when this collection is empty. Keep all four Home scene collections
+        identical to the corresponding Photo.ListShooting projection.
+
+        Ordinary account Home responses and captured permissions are outside
+        this explicit gallery policy. Validate the whole new projection
+        before replacing any Home field; unrelated/unknown fields stay intact.
+        """
+        if not self.media_mode:
+            return
+        if not isinstance(result, self.schema.response_type("/api.Home/Enter")):
+            _fail("The media photo home response has a different schema")
+        listing = self.schema.response_type(_LIST)()
+        self._list(listing, self._access())
+        for source, target in (("activities", "photoActivities"), ("musics", "photoMusics"),
+                               ("stages", "photoStages"), ("expressions", "photoExpressions")):
+            result.ClearField(target)
+            getattr(result, target).extend(getattr(listing, source))
+
     def _scene(self, request, access):
         if request.actionType in (1, 2):
             key = request.photoActivityId

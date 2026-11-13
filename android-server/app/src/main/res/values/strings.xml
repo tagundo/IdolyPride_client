@@ -206,7 +206,11 @@
     <string name="library_job_cancelled">취소됨</string>
     <string name="library_job_cancelling">취소 중</string>
     <string name="library_job_summary">%1$s · %2$s\n검증 완료 %3$d / %4$d개 · 미보관 %5$d개 · 실패 %6$d개</string>
-    <string name="library_job_parallelism">%1$d개 동시 다운로드 · 현재 전송 %2$d개</string>
+    <string name="library_job_parallelism">%1$d개 동시 다운로드 · 진행 중 %2$d개</string>
+    <string name="library_job_transfer_metrics">수신 %1$s · 평균 수신 %2$s/s · %3$d초</string>
+    <string name="library_job_bytes">용량 검증 완료 %1$s / %2$s</string>
+    <string name="library_job_phase_summary">연결 %1$d · 받기 %2$d · 검증 %3$d · 저장 %4$d · 복사 %5$d개</string>
+    <string name="library_job_cached">기존 보관 파일 재사용 %1$d개</string>
     <string name="library_export_downloads">ZIP을 다운로드/IdolyPride/exports에 저장했습니다.</string>
     <string name="library_export_document">ZIP을 선택한 위치에 저장했습니다.</string>
     <string name="library_import_result">가져온 검증 완료 파일 %1$d개 · 실패 %2$d개</string>
