@@ -152,10 +152,9 @@ def _exercise(schema, invoke, expected, selection, *, retries):
 
 def _empty_bulk(schema, invoke, expected):
     response = schema.response_type(_BULK)()
-    response.commonResponse.updatedData.SetInParent()
-    response.commonResponse.deletedData.SetInParent()
+    response.commonResponse.SetInParent()
     _require(_bytes(_rpc(schema, invoke, _BULK)) == _bytes(response),
-             "empty bulk check did not return exactly the two empty Common DTOs")
+             "empty bulk check must preserve Common without constructing either delta")
     _require(_bytes(_rpc(schema, invoke, _USER)) == _bytes(expected),
              "empty bulk check changed the snapshot")
 

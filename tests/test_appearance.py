@@ -185,11 +185,32 @@ def test_empty_and_malformed_requests_fail_without_writes(game, path):
 def test_empty_bulk_is_an_idempotent_acknowledgement_without_snapshot_or_clock_writes(game):
     before = dump(game[1])
     result = call(game, BULK)
-    assert result.commonResponse.HasField("updatedData")
-    assert result.commonResponse.HasField("deletedData")
+    assert result.HasField("commonResponse")
+    assert not result.commonResponse.HasField("updatedData")
+    assert not result.commonResponse.HasField("deletedData")
     assert not result.commonResponse.updatedData.ListFields()
     assert not result.commonResponse.deletedData.ListFields()
     assert call(game, BULK) == result
+    assert dump(game[1]) == before
+
+
+@pytest.mark.parametrize("field,identity,owned_field", (
+    ("costumeIds", "cos-a0", "costumes"),
+    ("hairIds", "hair-a0", "hairs"),
+))
+def test_bulk_with_one_nonempty_id_list_preserves_already_checked_row_acknowledgement(
+        game, field, identity, owned_field):
+    before = dump(game[1])
+    expected = snapshot(game)
+    result = call(game, BULK, **{field: [identity]})
+    assert result.HasField("commonResponse")
+    assert result.commonResponse.HasField("updatedData")
+    assert result.commonResponse.HasField("deletedData")
+    updated = result.commonResponse.updatedData
+    assert list(getattr(updated, owned_field)) == [getattr(expected, owned_field)[0]]
+    assert {descriptor.name for descriptor, _ in updated.ListFields()} == {owned_field}
+    assert not result.commonResponse.deletedData.ListFields()
+    assert call(game, BULK, **{field: [identity]}) == result
     assert dump(game[1]) == before
 
 

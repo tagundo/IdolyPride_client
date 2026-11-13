@@ -59,6 +59,10 @@
       {
         "file": "android-wardrobe-timing-original-pins.json",
         "sha256": "71a49b2cc6bea0f1380252a7a59f437f2abce9f77c5c0c2ea19d61a72b5e75ae"
+      },
+      {
+        "file": "android-bulk-checked-filter-original-pins.json",
+        "sha256": "e1237d4a4a568d304fa3c888b16c7d968947ebd05f89e4b7eb7d0dd75ca6c022"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -2482,6 +2486,164 @@
         "function_size_bytes": 40,
         "function_end_rva": "0x8f7ab34"
       }
+    },
+    "bulk_costume_filter": {
+      "name": "Solis.OutGame.CharacterCostumeScreenPresenter.<CheckBulkAsync>b__19_0",
+      "rva": "0x5374320",
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "parameters": [
+        {
+          "name": "x",
+          "type": {
+            "metadata_type_index": 77134,
+            "kind": 18,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x120000",
+            "class": "Solis.Common.Proto.Transaction.UserCostume"
+          }
+        }
+      ],
+      "prefix16": "fe4fbfa9210200b4f30300aae00301aa",
+      "metadata_method_index": 23010,
+      "flags": "0x81",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 4238,
+      "token_row": 23011,
+      "registration_pointer_slot_rva": "0x9ad78a8",
+      "mode": "HOOK",
+      "native_ABI": "bool(void*presenter,void*row,const MethodInfo*)",
+      "function_size_bytes": 76,
+      "function_boundary_proof": {
+        "rva": "0x5374320",
+        "fde_rva": "0x30595e8",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 76,
+        "function_end_rva": "0x537436c"
+      }
+    },
+    "bulk_hair_filter": {
+      "name": "Solis.OutGame.CharacterCostumeScreenPresenter.<CheckBulkAsync>b__19_2",
+      "rva": "0x537436c",
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "parameters": [
+        {
+          "name": "x",
+          "type": {
+            "metadata_type_index": 77198,
+            "kind": 18,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x120000",
+            "class": "Solis.Common.Proto.Transaction.UserHair"
+          }
+        }
+      ],
+      "prefix16": "fe4fbfa9210200b4f30300aae00301aa",
+      "metadata_method_index": 23011,
+      "flags": "0x81",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 4238,
+      "token_row": 23012,
+      "registration_pointer_slot_rva": "0x9ad78b0",
+      "mode": "HOOK",
+      "native_ABI": "bool(void*presenter,void*row,const MethodInfo*)",
+      "function_size_bytes": 76,
+      "function_boundary_proof": {
+        "rva": "0x537436c",
+        "fde_rva": "0x3059600",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 76,
+        "function_end_rva": "0x53743b8"
+      }
+    },
+    "bulk_costume_checked": {
+      "name": "Solis.Common.Proto.Transaction.UserCostume.get_Checked",
+      "rva": "0x47a4d64",
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "parameters": [],
+      "prefix16": "00804039c0035fd62800001208800039",
+      "metadata_method_index": 65621,
+      "flags": "0x886",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 13469,
+      "token_row": 65622,
+      "registration_pointer_slot_rva": "0x9b2ac40",
+      "mode": "CALL",
+      "native_ABI": "bool(void*row,const MethodInfo*)",
+      "function_size_bytes": 8,
+      "never_hook_short_body": true,
+      "checked_field_offset": 32,
+      "size_proof": {
+        "instructions": [
+          "ldrb w0,[x0,#0x20]",
+          "ret"
+        ],
+        "next_registered_method": "set_Checked",
+        "next_registered_rva": "0x47a4d6c"
+      }
+    },
+    "bulk_hair_checked": {
+      "name": "Solis.Common.Proto.Transaction.UserHair.get_Checked",
+      "rva": "0x47a7614",
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 50428,
+        "kind": 2,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80020000",
+        "class": "System.Boolean"
+      },
+      "parameters": [],
+      "prefix16": "00804039c0035fd62800001208800039",
+      "metadata_method_index": 65735,
+      "flags": "0x886",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 13477,
+      "token_row": 65736,
+      "registration_pointer_slot_rva": "0x9b2afd0",
+      "mode": "CALL",
+      "native_ABI": "bool(void*row,const MethodInfo*)",
+      "function_size_bytes": 8,
+      "never_hook_short_body": true,
+      "checked_field_offset": 32,
+      "size_proof": {
+        "instructions": [
+          "ldrb w0,[x0,#0x20]",
+          "ret"
+        ],
+        "next_registered_method": "set_Checked",
+        "next_registered_rva": "0x47a761c"
+      }
     }
   },
   "graphics_fields": [
@@ -2992,5 +3154,15 @@
     "function_boundaries": "Original.eh_frame_hdr index and CIE/FDE pcrel-sdata4 extents verified per entry",
     "physical_bottleneck_verified": false,
     "span_policy": "Per-stage maximum across eight original-call stages; first completed-stage order"
+  },
+  "bulk_checked_filter": {
+    "scope": "Android CharacterCostumeScreenPresenter.CheckBulkAsync current-character predicates only",
+    "new_hook_count": 2,
+    "original_checked_getter_call_count": 2,
+    "preserves_original_filter_first": true,
+    "never_hooks_8_byte_getters": true,
+    "does_not_write_checked_or_ownership": true,
+    "does_not_consume_or_complete_tasks": true,
+    "actual_device_latency_improvement_verified": false
   }
 }

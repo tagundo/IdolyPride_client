@@ -23,6 +23,7 @@ def test_original_hook_arguments_results_and_background_snapshot(tmp_path):
 #include <cstdio>
 #include "wardrobe_lifecycle.hpp"
 #include "wardrobe_timing.hpp"
+#include "bulk_checked_filter.hpp"
 using Method=const void;
 std::atomic<bool> ready{false};bool correct_thread=true;int64_t clock_ms=1000;
 int64_t render_probe_monotonic_ms(){return clock_ms;}

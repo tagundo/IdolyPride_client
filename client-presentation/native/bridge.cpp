@@ -31,6 +31,7 @@
 #ifndef IDOLY_DARWIN_BRIDGE
 #include "wardrobe_lifecycle.hpp"
 #include "wardrobe_timing.hpp"
+#include "bulk_checked_filter.hpp"
 #endif
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
@@ -381,6 +382,15 @@ void wardrobe_status_json(char *output,size_t capacity) {
     std::snprintf(output,capacity,"%s",legacy);
 }
 bool wardrobe_enabled() { return ready.load(std::memory_order_acquire) && game_call(false); }
+namespace bulk_check = idoly::presentation::bulk_checked_filter;
+bulk_check::Predicate bulk_costume_filter_original, bulk_hair_filter_original;
+bulk_check::Checked bulk_costume_checked, bulk_hair_checked;
+bool bulk_costume_filter_hook(void *self,void *row,Method *method) {
+    return bulk_check::filter(self,row,method,bulk_costume_filter_original,bulk_costume_checked,wardrobe_enabled());
+}
+bool bulk_hair_filter_hook(void *self,void *row,Method *method) {
+    return bulk_check::filter(self,row,method,bulk_hair_filter_original,bulk_hair_checked,wardrobe_enabled());
+}
 void wardrobe_back_hook(void *self,Method *method) {
     if (!wardrobe_enabled()) return wardrobe_back_original(self,method);
     wardrobe_exit_tracker.invoke_back(exit_timing::Room::CharacterCostume,wardrobe_back_original,self,method);
@@ -1387,6 +1397,8 @@ void load_calls() {
     wardrobe_calls.hide_predicate=reinterpret_cast<void *>(image_base+pin::wardrobe_hide_predicate.rva);
     wardrobe_calls.event=wardrobe_event; wardrobe_lifecycle.configure(wardrobe_calls);
     wardrobe_exit_tracker.configure(render_probe_monotonic_ms);
+    CALL(bulk_costume_checked, bulk_costume_checked);
+    CALL(bulk_hair_checked, bulk_hair_checked);
 #endif
     panorama_api.weak_new=weak_new; panorama_api.weak_get=weak_get; panorama_api.weak_free=weak_free;
     panorama_api.alive=object_alive; panorama_api.matches=class_matches;
@@ -1497,6 +1509,8 @@ void *install(void *) {
         HOOK(character_details_close_in,character_details_close_in_hook,character_details_close_in_original),
         HOOK(wardrobe_gc_collect,wardrobe_gc_collect_hook,wardrobe_gc_collect_original),
         HOOK(wardrobe_unload_unused,wardrobe_unload_unused_hook,wardrobe_unload_unused_original),
+        HOOK(bulk_costume_filter,bulk_costume_filter_hook,bulk_costume_filter_original),
+        HOOK(bulk_hair_filter,bulk_hair_filter_hook,bulk_hair_filter_original),
     };
 #undef HOOK
     for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; ++i) {

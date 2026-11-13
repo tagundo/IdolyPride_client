@@ -30,7 +30,7 @@ def test_real_task_lifecycle_preserves_owner_failure_cancel_and_reuse(tmp_path):
 def test_android_only_original_pins_and_readonly_jni_are_wired():
     profile = json.loads((NATIVE / "profile.json").read_text())
     aliases = profile["aliases"]
-    assert len(aliases) == 107
+    assert len(aliases) == 111
     expected = {
         "wardrobe_show": ("0x53779a4", "HOOK"),
         "wardrobe_move": ("0x497094c", "HOOK"),
@@ -43,7 +43,7 @@ def test_android_only_original_pins_and_readonly_jni_are_wired():
         assert (aliases[name]["rva"], aliases[name]["mode"]) == pair
     assert aliases["wardrobe_hide_predicate"]["function_size_bytes"] == 8
     bridge = (NATIVE / "bridge.cpp").read_text()
-    assert '#ifndef IDOLY_DARWIN_BRIDGE\n#include "wardrobe_lifecycle.hpp"\n#include "wardrobe_timing.hpp"\n#endif' in bridge
+    assert '#ifndef IDOLY_DARWIN_BRIDGE\n#include "wardrobe_lifecycle.hpp"\n#include "wardrobe_timing.hpp"\n#include "bulk_checked_filter.hpp"\n#endif' in bridge
     assert "HOOK(wardrobe_hide_predicate" not in bridge
     for name in ("wardrobe_show", "wardrobe_move", "wardrobe_fail", "wardrobe_wait"):
         assert f"HOOK({name}," in bridge

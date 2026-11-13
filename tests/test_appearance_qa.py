@@ -105,6 +105,13 @@ def game(request, tmp_path):
             if path == "/api.User/Get":
                 return type(user).FromString(user.SerializeToString())
             response = schema.response_type(path)()
+            if path.endswith("CheckBulk") and not request.costumeIds and not request.hairIds:
+                response.commonResponse.SetInParent()
+                if self.fault == "empty-bulk":
+                    response.commonResponse.updatedData.costumes.add().CopyFrom(user.costumes[0])
+                if self.fault == "empty-bulk-delta":
+                    response.commonResponse.updatedData.SetInParent()
+                return response
             updated = response.commonResponse.updatedData
             updated.SetInParent()
             response.commonResponse.deletedData.SetInParent()
@@ -169,7 +176,8 @@ def test_unchecked_owned_acknowledgements_count_only_real_selected_changes(game)
 
 
 @pytest.mark.parametrize("fault", ("wallet", "item", "deck", "story", "unknown", "obtained",
-    "unrelated-checked", "missing-deleted", "extra-common", "partial-character", "empty-bulk"))
+    "unrelated-checked", "missing-deleted", "extra-common", "partial-character", "empty-bulk",
+    "empty-bulk-delta"))
 def test_qa_rejects_unrelated_state_or_inexact_common_responses(game, fault):
     schema, master, _tables, _user, _calls, transport = game
     transport.fault = fault

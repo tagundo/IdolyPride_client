@@ -81,12 +81,15 @@ class Appearance:
             costume_ids = _ids(request.costumeIds, "costumeId")
             hair_ids = _ids(request.hairIds, "hairId")
         result = self.schema.response_type(path)()
-        result.commonResponse.updatedData.SetInParent()
-        result.commonResponse.deletedData.SetInParent()
         if path == _BULK and not costume_ids and not hair_ids:
             # The native caller sends filtered ID arrays without a nonempty
-            # guard. Acknowledging an empty batch needs no snapshot mutation.
+            # guard. Keep the Common parent, but omit both delta children:
+            # original C# holders then return null/null and DiffUpdate skips
+            # all collection/cache work. Empty child messages still run it.
+            result.commonResponse.SetInParent()
             return result.SerializeToString()
+        result.commonResponse.updatedData.SetInParent()
+        result.commonResponse.deletedData.SetInParent()
 
         def update(raw):
             try:

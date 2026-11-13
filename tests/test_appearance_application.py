@@ -117,8 +117,9 @@ def test_empty_bulk_is_authenticated_and_never_updates_a_snapshot(game, tmp_path
         assert anonymous.value.code() == grpc.StatusCode.UNAUTHENTICATED
         for _ in range(2):
             response = provider.schema.response_type(BULK).FromString(invoke(BULK))
-            assert response.commonResponse.HasField("updatedData")
-            assert response.commonResponse.HasField("deletedData")
+            assert response.HasField("commonResponse")
+            assert not response.commonResponse.HasField("updatedData")
+            assert not response.commonResponse.HasField("deletedData")
             assert not response.commonResponse.updatedData.ListFields()
             assert not response.commonResponse.deletedData.ListFields()
     assert dump(state) == before
