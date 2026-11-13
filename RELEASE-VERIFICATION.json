@@ -1,0 +1,11 @@
+{
+  "version": "0.3.23",
+  "source_commit": "e7798c6cf9c6d3422ce4e21d845897f9540023b3",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 205228927,
+      "sha256": "6a236964438a830e8cc74b58cf1494bc47bf49e2bda28a50d07d1a4bcc906afa"
+    }
+  ]
+}

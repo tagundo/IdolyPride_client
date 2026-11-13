@@ -1,0 +1,1 @@
+Idoly Pride v0.3.23 parallel downloads and gallery restoration: independently verified mac download. Existing apps and account data are preserved. See main repository docs/restoration-v0.3.23.md. SHA256SUMS pins the original bytes.
