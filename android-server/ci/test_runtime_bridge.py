@@ -359,6 +359,7 @@ class _ResourceConnection:
         self.follow_redirects = None
         self.connect_timeout = self.read_timeout = None
         self.open_calls = self.disconnect_calls = 0
+        self.chunk_calls = []
         self.open_error = self.disconnect_error = None
         self.url = "https://d2ilil7yh5oi1v.cloudfront.net/synthetic-resource"
 
@@ -390,11 +391,22 @@ def _java_resource(monkeypatch, connection):
         return lambda size: array("b", [0]) * size
     def jclass(name):
         requested_classes.append(name)
-        assert name == "java.net.URL", "must use normal URL trust, not a replacement TLS verifier"
-        def url(value):
-            opened_urls.append(value)
-            return SimpleNamespace(openConnection=lambda: connection)
-        return url
+        if name == "java.net.URL":
+            def url(value):
+                opened_urls.append(value)
+                return SimpleNamespace(openConnection=lambda: connection)
+            return url
+        if name == "game.qualiarts.idolypride.localserver.ResourceTransfers":
+            def read_chunk(stream, buffer, count):
+                # This is the bounded Java method seam, not an alternative
+                # transport/TLS implementation. Real short-read coalescing is
+                # covered by ResourceTransfersHostTest with actual Java code.
+                assert stream is connection.stream
+                assert 0 < count <= len(buffer) == 64 * 1024
+                connection.chunk_calls.append((id(buffer), count))
+                return stream.read(buffer, 0, count)
+            return SimpleNamespace(readResourceChunk=read_chunk)
+        raise AssertionError("Only platform URL and the bounded resource reader are allowed; TLS replacements are forbidden")
     java.jarray, java.jclass = jarray, jclass
     monkeypatch.setitem(sys.modules, "java", java)
     return requested_classes, opened_urls
@@ -406,7 +418,8 @@ def test_android_resource_binary_stream_uses_platform_url_identity_encoding_and_
     connection = _ResourceConnection()
     classes, urls = _java_resource(monkeypatch, connection)
     with bridge._fetch_resource(connection.url, timeout=timeout) as response:
-        assert classes == ["java.net.URL"] and urls == [connection.url]
+        assert classes == ["java.net.URL", "game.qualiarts.idolypride.localserver.ResourceTransfers"]
+        assert urls == [connection.url]
         assert connection.follow_redirects is False
         assert connection.connect_timeout == connection.read_timeout == milliseconds
         assert connection.properties == {"Accept-Encoding": "identity",
@@ -424,6 +437,29 @@ def test_android_resource_binary_stream_uses_platform_url_identity_encoding_and_
         with pytest.raises(OSError, match="closed"):
             accessor()
     assert connection.open_calls == 1
+
+
+@pytest.mark.parametrize("name", ["javax.net.ssl.SSLContext", "javax.net.ssl.HostnameVerifier",
+                                 "javax.net.ssl.TrustManager", "game.qualiarts.idolypride.localserver.CustomTls"])
+def test_android_resource_platform_seam_rejects_every_other_class(monkeypatch, name):
+    _java_resource(monkeypatch, _ResourceConnection())
+    with pytest.raises(AssertionError, match="TLS replacements are forbidden"):
+        sys.modules["java"].jclass(name)
+
+
+def test_android_resource_adapter_dispatches_bounded_chunks_without_replacing_platform_trust(monkeypatch):
+    body = bytes(range(256)) * 300
+    connection = _ResourceConnection(body)
+    classes, urls = _java_resource(monkeypatch, connection)
+    with bridge._fetch_resource(connection.url, timeout=1) as response:
+        assert response.read(2**31 - 1) == body[:65536]
+        assert response.read(2**31 - 1) == body[65536:]
+        assert response.read(1) == b""
+    assert classes == ["java.net.URL", "game.qualiarts.idolypride.localserver.ResourceTransfers"]
+    assert urls == [connection.url] and connection.follow_redirects is False
+    assert len({identity for identity, count in connection.chunk_calls}) == 1
+    assert [count for identity, count in connection.chunk_calls] == [65536, 65536, 1]
+    assert connection.stream.close_calls == connection.disconnect_calls == 1
 
 
 def test_android_resource_redirect_status_is_returned_without_enabling_following(monkeypatch):
