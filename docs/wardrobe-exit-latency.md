@@ -6,6 +6,8 @@
 
 [Android v0.3.21 다운로드](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.21). 서버와 연결용 클라이언트가 각각 필요하다.
 
+[추가 서버 최적화 v0.3.22](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.22)는 Android·Mac 서버만 교체한다. 기존 Android 클라이언트 v0.3.21과 PlayCover IPA v0.3.19는 그대로 사용한다.
+
 ## 확인한 내용
 
 - 원본의 의상 확인 요청은 현재 캐릭터의 의상·헤어만 보낸다. 전체 해금 목록을 모두 반환하지 않는다.
