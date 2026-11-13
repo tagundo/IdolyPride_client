@@ -447,3 +447,34 @@ def test_invalid_request_observations_do_not_create_work(changes):
     snapshot = tracker.status()
     assert snapshot["session_http_requests"] == 0 and snapshot["active_http_requests"] == []
     assert snapshot["recent_requests"] == [] and snapshot["last_request"] is None
+
+
+@pytest.mark.parametrize("changes", [
+    {"application_version": True, "requested_revision": 0},
+    {"application_version": 205051},
+    {"application_version": 205051, "requested_revision": "private-query"},
+    {"application_version": 205051, "requested_revision": -1},
+    {"application_version": 205051, "requested_revision": 2**31},
+    {"application_version": 205051, "requested_revision": 0, "served_revision": 1087},
+    {"application_version": 205051, "requested_revision": 0, "served_revision": 1087,
+     "response_mode": "private-query"},
+    {"application_version": 205051, "requested_revision": 0, "served_revision": 1087,
+     "response_mode": "unchanged", "http_status": 200},
+])
+def test_manifest_diagnostics_reject_invalid_or_inconsistent_protocol_metadata(changes):
+    tracker = OctoResourceTracker(available=True)
+    observed_request(tracker, "received", kind="manifest", **changes)
+    assert tracker.status()["session_http_requests"] == 0
+
+
+def test_manifest_metadata_cannot_attach_to_objects_or_change_during_a_request():
+    tracker = OctoResourceTracker(available=True)
+    observed_request(tracker, "received", application_version=205051, requested_revision=0)
+    assert tracker.status()["session_http_requests"] == 0
+    observed_request(tracker, "received", kind="manifest", application_version=205051, requested_revision=1088)
+    observed_request(tracker, "failed", kind="manifest", application_version=205051, requested_revision=0,
+                     http_status=409, error_code="octo_revision_unavailable")
+    assert tracker.status()["session_http_failures"] == 0
+    observed_request(tracker, "failed", kind="manifest", application_version=205051, requested_revision=1088,
+                     http_status=409, error_code="octo_revision_unavailable")
+    assert tracker.status()["last_failed_request"]["requested_revision"] == 1088

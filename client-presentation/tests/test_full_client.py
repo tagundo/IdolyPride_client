@@ -159,3 +159,74 @@ def test_ui_member_replacement_is_disjoint_from_font_parts_and_original_code(tmp
     assert text.count('"src/idoly_local/ui_assets.py"') == 2
     assert text.count('"src/idoly_local/ui_translation_build.py"') == 2
     assert '"ui_language":ui_language,"ui_translation":ui_report' in text
+
+
+@pytest.fixture(scope='module')
+def diagnostic_transport():
+    """Real, separately pinned base members; no SDK/JVM or full APK copy."""
+    source = PATH.parents[1] / 'data/clients/Game-r2-pinned.apk'
+    if not source.is_file():
+        pytest.skip('Pinned user-supplied client fixture is not cached')
+    with ZipFile(source) as archive:
+        originals = {name: archive.read(name) for name in (
+            tool.octo.METADATA, tool.unity_http.MEMBER, tool.unity_cache.MEMBER)}
+        replacements, proof = tool.local_resource_members(archive)
+    return originals, replacements, proof
+
+
+def test_real_base_gets_local_manifest_transport_and_new_engine_cache_version(tmp_path, diagnostic_transport):
+    from idoly_local.client_patch import literal_rows
+    originals, replacements, proof = diagnostic_transport
+    assert set(replacements) == set(originals)
+    old_header, old_literals = literal_rows(originals[tool.octo.METADATA])
+    new_header, new_literals = literal_rows(replacements[tool.octo.METADATA])
+    assert old_literals[30209][3] == b'https://api.octo-cloud.com/'
+    assert new_literals[30209][3] == b'http://127.0.0.1:8080/'
+    assert old_header == new_header
+    assert [row[3] for row in old_literals[:30209]] == [row[3] for row in new_literals[:30209]]
+    assert old_literals[30210:] == new_literals[30210:]
+    original_settings = originals[tool.unity_http.MEMBER]
+    new_settings = replacements[tool.unity_http.MEMBER]
+    at = tool.unity_http.FIELD_OFFSET
+    assert struct.unpack_from('<i', original_settings, at)[0] == 0
+    assert struct.unpack_from('<i', new_settings, at)[0] == 2
+    assert new_settings[:at] == original_settings[:at]
+    assert new_settings[at+1:] == original_settings[at+1:]
+    assert hashlib.sha256(replacements[tool.octo.METADATA]).hexdigest() == 'e85d3cb26fad111e0b057ece90120b7ff3eea7d00bfbf2fd208a4df066be6f2a'
+    # Independently pinned for this real metadata/settings pair; the separate
+    # unity_cache unit fixture uses a different illustrative metadata hash.
+    assert replacements[tool.unity_cache.MEMBER] == b'7a9a27e0-a505-52cc-8f22-4eee371b1bfd'
+    assert originals[tool.unity_cache.MEMBER] == tool.unity_cache.ORIGINAL_GUID
+    assert proof['unity_il2cpp_cache']['device_files_read_or_deleted_by_builder'] is False
+    source, output = tmp_path/'base.apk', tmp_path/'output.apk'
+    with ZipFile(source, 'w') as archive:
+        archive.writestr('AndroidManifest.xml', b'original manifest')
+        archive.writestr('classes.dex', b'original SDK code')
+        for name, raw in originals.items():
+            archive.writestr(name, raw)
+    tool.stream_apk(source, output, b'manifest with local bridge', {}, replacements=replacements)
+    with ZipFile(output) as archive:
+        tool.verify_local_resource_output(archive, proof)
+        assert archive.read('classes.dex') == b'original SDK code'
+        assert {name:hashlib.sha256(archive.read(name)).hexdigest() for name in replacements} == {
+            name:hashlib.sha256(raw).hexdigest() for name,raw in replacements.items()}
+
+
+@pytest.mark.parametrize('stale_member', ['metadata', 'http_policy', 'cache_guid'])
+def test_output_rejects_silently_retained_public_origin_http_policy_or_cache(tmp_path, diagnostic_transport, stale_member):
+    originals, replacements, proof = diagnostic_transport
+    name = {'metadata':tool.octo.METADATA, 'http_policy':tool.unity_http.MEMBER,
+            'cache_guid':tool.unity_cache.MEMBER}[stale_member]
+    output = tmp_path/'stale.apk'
+    with ZipFile(output, 'w') as archive:
+        for member, raw in replacements.items():
+            archive.writestr(member, originals[member] if member == name else raw)
+    with ZipFile(output) as archive, pytest.raises(ValueError, match='Output'):
+        tool.verify_local_resource_output(archive, proof)
+
+
+def test_resource_transport_helpers_are_frozen_for_both_build_barriers():
+    assert tool.TRANSPORT_SOURCES == (
+        'tools/patch_android_octo_origin.py', 'src/idoly_local/client_patch.py',
+        'src/idoly_local/unity_http.py', 'src/idoly_local/unity_cache.py')
+    assert PATH.read_text().count('extra=(*TRANSPORT_SOURCES,') == 2

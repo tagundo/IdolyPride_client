@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import threading
 import time
 from urllib.parse import unquote, urlsplit
@@ -17,6 +18,10 @@ from urllib.parse import unquote, urlsplit
 from .assets import _range
 from .octo_cache import OctoCacheError, OctoCacheMiss
 from .octo_manifest import OctoManifestError, OctoRequestError
+
+
+_MANIFEST_DIAGNOSTIC_ROUTE = re.compile(
+    r"/v2/pub/a/212/v/(205051|105051)/list/(0|[1-9][0-9]{0,9})\Z")
 
 
 class OctoGateway:
@@ -113,7 +118,14 @@ class OctoGateway:
         state = {"source": "octo_request", "request_id": identity, "method": "GET" if send_body else "HEAD",
                  "kind": "manifest" if path == "/v2" or path.startswith("/v2/") else "object",
                  "route_fingerprint": hashlib.sha256(path.encode("utf-8", "replace")).hexdigest()[:16],
-                 "object_name": None, "cache_key": None}
+                 "object_name": None, "cache_key": None,
+                 "application_version": None, "requested_revision": None,
+                 "served_revision": None, "response_mode": None}
+        # Only exact known platform routes contribute public protocol numbers.
+        # Unknown paths, encoded aliases and query strings remain fingerprints.
+        match = _MANIFEST_DIAGNOSTIC_ROUTE.fullmatch(target)
+        if match is not None and int(match[2]) <= 2**31 - 1:
+            state.update(application_version=int(match[1]), requested_revision=int(match[2]))
         self._request(state, "received")
         try:
             self._serve(handler, send_body=send_body, state=state)
@@ -131,6 +143,9 @@ class OctoGateway:
             self._request(state, "resolving")
             if urlsplit(target).path.startswith("/v2/") or urlsplit(target).path == "/v2":
                 body = self.manifest.manifest_response(target, handler.headers)
+                state.update(served_revision=self.manifest.revision,
+                             response_mode="unchanged" if state["requested_revision"] == self.manifest.revision
+                             else "full")
                 self._request(state, "sending", status=200)
                 success = self._manifest(handler, body, send_body)
                 self._request(state, "completed" if success else "failed", status=200,

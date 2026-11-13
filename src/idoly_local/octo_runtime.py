@@ -242,6 +242,8 @@ class OctoResourceTracker:
         fingerprint = event.get("route_fingerprint")
         name, key = event.get("object_name"), event.get("cache_key")
         error, cause = event.get("error_code"), event.get("cause_code")
+        application, requested = event.get("application_version"), event.get("requested_revision")
+        served, mode = event.get("served_revision"), event.get("response_mode")
         if (type(identity) is not int or not 1 <= identity <= _MAX_COUNTER or phase not in _REQUEST_PHASES
                 or method not in ("GET", "HEAD") or kind not in ("manifest", "object")
                 or type(status) is not int or status != 0 and not 100 <= status <= 599
@@ -250,6 +252,16 @@ class OctoResourceTracker:
                 or key is not None and (not isinstance(key, str) or not _HEX64.fullmatch(key))
                 or error is not None and error not in _REQUEST_ERRORS
                 or cause is not None and cause not in _FAILURE_CODES | _REQUEST_CAUSES
+                or application is not None and (type(application) is not int or application not in (205051, 105051))
+                or requested is not None and (type(requested) is not int or not 0 <= requested <= 2**31 - 1)
+                or (application is None) != (requested is None)
+                or served is not None and (type(served) is not int or not 1 <= served <= 2**31 - 1)
+                or mode is not None and mode not in ("full", "unchanged")
+                or (served is None) != (mode is None)
+                or kind != "manifest" and any(value is not None for value in (application, requested, served, mode))
+                or served is not None and (application is None or status != 200
+                    or mode == "unchanged" and requested != served
+                    or mode == "full" and requested != 0 and requested >= served)
                 or phase == "failed" and error is None
                 or phase == "completed" and (status not in (200, 206) or error is not None)):
             return
@@ -269,10 +281,13 @@ class OctoResourceTracker:
             else:
                 row = self._request_active.get(identity)
                 if (row is None or row["method"] != method or row["kind"] != kind
-                        or row["route_fingerprint"] != fingerprint):
+                        or row["route_fingerprint"] != fingerprint
+                        or row.get("application_version") != application
+                        or row.get("requested_revision") != requested):
                     return
             row.update(phase=phase, http_status=status, object_name=name, cache_key=key,
-                       error_code=error, cause_code=cause)
+                       error_code=error, cause_code=cause, application_version=application,
+                       requested_revision=requested, served_revision=served, response_mode=mode)
             self._last_request = row
             if phase in ("completed", "failed"):
                 row["_finished"] = now

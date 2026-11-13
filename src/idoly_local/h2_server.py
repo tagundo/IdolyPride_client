@@ -247,6 +247,13 @@ class _Connection:
                 getattr(stream.context, "_quest_start_facts", None))
             if diagnostic is not None:
                 message += " [" + diagnostic + "]"
+            if stream.path == "/api.Photo/CheckExpressionShooting":
+                from .photo_shooting import format_photo_expression_rejection
+                diagnostic = format_photo_expression_rejection(stream.path, failure.code, failure.details,
+                    getattr(stream.context, "_photo_expression_facts", None),
+                    getattr(self.server.application, "photo_shootings", None))
+                if diagnostic is not None:
+                    message += " [" + diagnostic + "]"
         except Exception:
             # Logging is advisory and cannot change the wire failure or cleanup.
             pass

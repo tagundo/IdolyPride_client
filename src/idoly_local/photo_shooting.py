@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import json
 import re
 from types import SimpleNamespace
 from uuid import uuid4
@@ -31,6 +32,26 @@ _CREATE = "/api.Photo/CreateShootings"
 _URL = "/api.Photo/GetImageURL"
 _ROUTES = frozenset((_LIST, _CHECK, _EXPRESSION_CHECK, _CREATE, _URL))
 _SAFE_IMAGE_ID = re.compile(r"[A-Za-z0-9_.~-]{1,251}\Z")
+_SAFE_MASTER_ID = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
+_DIAGNOSTIC_REQUEST_BYTES = 64 * 1024
+_DIAGNOSTIC_MASTER_BYTES = 1024 * 1024
+_EXPRESSION_REJECTION_REASONS = {
+    (RpcCode.INVALID_ARGUMENT, "A photo expression ID is required"): "expression_missing",
+    (RpcCode.INVALID_ARGUMENT, "Unknown local photo expression"): "expression_unknown",
+    (RpcCode.INVALID_ARGUMENT, "Conflicting photo expression style selections"): "legacy_conflict",
+    (RpcCode.INVALID_ARGUMENT, "The selected cast count exceeds this photo expression's capacity"): "cast_capacity",
+    (RpcCode.INVALID_ARGUMENT, "Matching nonempty photo character/style lists are required"): "style_shape",
+    (RpcCode.INVALID_ARGUMENT, "Unknown photo character or outfit"): "style_unknown",
+    (RpcCode.INVALID_ARGUMENT, "Photo character and outfit do not match"): "style_owner",
+    (RpcCode.INVALID_ARGUMENT, "The photo hair cannot be worn with this costume"): "hair_incompatible",
+    (RpcCode.INVALID_ARGUMENT, "The photo activity does not allow this character or costume"): "scene_restricted",
+    (RpcCode.PERMISSION_DENIED, "The photo expression is not owned and unlocked"): "expression_locked",
+    (RpcCode.PERMISSION_DENIED, "The photo character or outfit is not owned"): "style_unowned",
+    (RpcCode.FAILED_PRECONDITION, "The photo expression stage or cast definition is malformed"): "expression_master_invalid",
+    (RpcCode.FAILED_PRECONDITION, "Photo activity style restrictions are malformed"): "style_restrictions_invalid",
+    (RpcCode.INVALID_ARGUMENT, "Malformed photo request"): "request_malformed",
+    (RpcCode.INVALID_ARGUMENT, "Malformed encrypted protobuf request"): "request_malformed",
+}
 RESERVED_IMAGE_COUNT = 20
 _MV_SCENE = object()
 
@@ -88,6 +109,18 @@ class PhotoSceneAccess:
     expressions: Mapping[str, bool] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class PhotoExpressionRejectionFacts:
+    """Finite counts and public master IDs retained for one failed request."""
+
+    counts: tuple[int, int, int]
+    legacy: tuple[bool, bool, bool]
+    expression: str
+    characters: tuple[str, ...]
+    costumes: tuple[str, ...]
+    hairs: tuple[str, ...]
+
+
 class PhotoShootings:
     """Read/check photo endpoints; unsupported creation fails before any writes.
 
@@ -131,6 +164,63 @@ class PhotoShootings:
                            for key, value in entries.items())):
                 _fail("Preserved photo scene unlocks are malformed")
         return access
+
+    def _diagnostic_master_ids(self, table, values):
+        """Resolve a few IDs without retaining arbitrary request strings.
+
+        Only the fixed public tables used below reach here. Missing/corrupt
+        tables and unsafe identities produce a fixed marker. Diagnostics may
+        inspect a bounded table without populating the gameplay catalog cache.
+        """
+        unknown = tuple("unknown" for _ in values)
+        try:
+            rows = self.catalog.loaded.get(table)
+            if rows is None:
+                if self.catalog.directory is None:
+                    return unknown
+                with (self.catalog.directory / (table + ".json")).open("rb") as stream:
+                    raw = stream.read(_DIAGNOSTIC_MASTER_BYTES + 1)
+                if len(raw) > _DIAGNOSTIC_MASTER_BYTES:
+                    return unknown
+                rows = json.loads(raw)
+            if not isinstance(rows, list) or len(rows) > 4096:
+                return unknown
+            identities = set()
+            for row in rows:
+                identity = row.get("id") if isinstance(row, dict) else None
+                if (not isinstance(identity, str) or not _SAFE_MASTER_ID.fullmatch(identity)
+                        or identity in identities):
+                    return unknown
+                identities.add(identity)
+            return tuple(value if value in identities else "unknown" for value in values)
+        except (OSError, ValueError, TypeError):
+            return unknown
+
+    def expression_rejection_facts(self, path, code, plain):
+        """Return bounded catalog-only facts for an expression-check failure.
+
+        Call with the already decoded protobuf in Application's failure catch,
+        before aborting with the original code/details. The return value keeps
+        no request bytes, inventory, user IDs or image reservations. It is safe
+        to attach to that request's transport context for its diagnostic log.
+        """
+        if path != _EXPRESSION_CHECK or code not in (
+                RpcCode.INVALID_ARGUMENT, RpcCode.PERMISSION_DENIED, RpcCode.FAILED_PRECONDITION):
+            return None
+        if type(plain) is not bytes or len(plain) > _DIAGNOSTIC_REQUEST_BYTES:
+            return None
+        try:
+            request = self.schema.request_type(_EXPRESSION_CHECK).FromString(plain)
+            arrays = (request.characterIds, request.costumeIds, request.hairIds)
+            counts = tuple(min(len(values), 33) for values in arrays)
+            legacy = tuple(bool(value) for value in (request.characterId, request.costumeId, request.hairId))
+            expression = self._diagnostic_master_ids("PhotoExpression", (request.photoExpressionId,))[0]
+            selected = [self._diagnostic_master_ids(table, tuple(values[:3]))
+                        for table, values in zip(("Character", "Costume", "Hair"), arrays)]
+            return PhotoExpressionRejectionFacts(counts, legacy, expression, *selected)
+        except Exception:
+            # A failed diagnostic must never replace the original RPC failure.
+            return None
 
     @staticmethod
     def _common(result):
@@ -356,3 +446,52 @@ class PhotoShootings:
                 _fail("Local photo creation requires finalized image upload and verified film generation rules")
             self._common(result)
         return result.SerializeToString()
+
+
+def format_photo_expression_rejection(path, code, details, facts=None, provider=None):
+    """Format only validated facts, with room for the transport's RPC prefix.
+
+    Context attributes are untrusted at this boundary. Validate their complete
+    shape and recheck every ID against the provider's bounded public tables.
+    Never render exception text or a partial/truncated identity.
+    """
+    if path != _EXPRESSION_CHECK or code not in (
+            RpcCode.INVALID_ARGUMENT, RpcCode.PERMISSION_DENIED, RpcCode.FAILED_PRECONDITION):
+        return None
+    reason = (_EXPRESSION_REJECTION_REASONS.get((code, details), "unclassified")
+              if type(details) is str else "unclassified")
+    prefix = "photo_expression_rejection=" + reason
+    unavailable = prefix + " facts=unavailable"
+    try:
+        if type(facts) is not PhotoExpressionRejectionFacts or type(provider) is not PhotoShootings:
+            return unavailable
+        if (type(facts.counts) is not tuple or len(facts.counts) != 3
+                or any(type(value) is not int or not 0 <= value <= 33 for value in facts.counts)
+                or type(facts.legacy) is not tuple or len(facts.legacy) != 3
+                or any(type(value) is not bool for value in facts.legacy)):
+            return unavailable
+        arrays = (facts.characters, facts.costumes, facts.hairs)
+        if (type(facts.expression) is not str or not _SAFE_MASTER_ID.fullmatch(facts.expression)
+                or any(type(values) is not tuple or len(values) != min(count, 3)
+                       or any(type(value) is not str or not _SAFE_MASTER_ID.fullmatch(value) for value in values)
+                       for values, count in zip(arrays, facts.counts))):
+            return unavailable
+        if provider._diagnostic_master_ids("PhotoExpression", (facts.expression,)) != (facts.expression,):
+            return unavailable
+        if any(provider._diagnostic_master_ids(table, values) != values
+               for table, values in zip(("Character", "Costume", "Hair"), arrays)):
+            return unavailable
+        result = (prefix + " counts=" + "/".join(str(value) if value <= 32 else "32+" for value in facts.counts)
+                  + " legacy=" + "".join("1" if value else "0" for value in facts.legacy)
+                  + " expr=" + facts.expression)
+        fields = [(name, "[" + ",".join(values) + "]") for name, values in
+                  zip(("char", "costume", "hair"), arrays)]
+        for index, (name, value) in enumerate(fields):
+            # Reserve fixed markers for later arrays, and omit whole arrays
+            # when necessary. A transport log line remains below 400 chars.
+            reserve = sum(len(" " + later + "=[omitted]") for later, _ in fields[index + 1:])
+            field = " " + name + "=" + value
+            result += field if len(result) + len(field) + reserve <= 320 else " " + name + "=[omitted]"
+        return result if len(result) <= 320 else unavailable
+    except Exception:
+        return unavailable

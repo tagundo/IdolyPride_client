@@ -468,3 +468,48 @@ def test_request_diagnostics_capture_upstream_failure_and_invalid_range(gateway)
     assert first["error_code"] == "octo_resource_unavailable" and first["cause_code"] == "upstream_dns"
     assert second["error_code"] == "octo_invalid_range" and second["http_status"] == 416
     assert snapshot["last_failed_request"] == second
+
+
+def test_manifest_request_diagnostics_report_canonical_revisions_and_response_modes(gateway):
+    tracker = observe_requests(gateway)
+    gateway.api.manifest._allow_previous_revisions = True
+    for revision in (0, 1087, 1086):
+        with gateway.request(LIST + str(revision), headers=HEADERS) as response:
+            assert response.status == 200 and response.read()
+    response_error(gateway, LIST + "1088", 409, headers=HEADERS)
+    snapshot = wait_observed_requests(tracker, 4)
+    rows = sorted(snapshot["recent_requests"], key=lambda row: row["request_id"])
+    assert [row["application_version"] for row in rows] == [205051] * 4
+    assert [row["requested_revision"] for row in rows] == [0, 1087, 1086, 1088]
+    assert [row["served_revision"] for row in rows] == [1087, 1087, 1087, None]
+    assert [row["response_mode"] for row in rows] == ["full", "unchanged", "full", None]
+    assert rows[-1]["error_code"] == "octo_revision_unavailable"
+
+
+def test_manifest_diagnostics_identify_the_other_known_platform_without_claiming_it_was_served(gateway):
+    tracker = observe_requests(gateway)
+    response_error(gateway, "/v2/pub/a/212/v/105051/list/1159", 404, headers=HEADERS)
+    row = wait_observed_requests(tracker, 1)["last_failed_request"]
+    assert row["application_version"] == 105051 and row["requested_revision"] == 1159
+    assert row["served_revision"] is None and row["response_mode"] is None
+
+
+@pytest.mark.parametrize("target", [
+    "/v2/pub/a/213/v/205051/list/0", "/v2/pub/a/212/v/205052/list/0",
+    LIST + "00", LIST + "%30", LIST + "0?token=private-query",
+])
+def test_manifest_diagnostics_do_not_parse_unknown_or_noncanonical_routes(gateway, target):
+    tracker = observe_requests(gateway)
+    response_error(gateway, target, 404, headers=HEADERS)
+    row = wait_observed_requests(tracker, 1)["last_failed_request"]
+    assert all(row[key] is None for key in
+               ("application_version", "requested_revision", "served_revision", "response_mode"))
+    assert "private-query" not in json.dumps(row) and APP_KEY not in json.dumps(row)
+
+
+def test_manifest_diagnostics_keep_out_of_range_revision_as_a_fingerprint(gateway):
+    tracker = observe_requests(gateway)
+    response_error(gateway, LIST + str(2**31), 409, headers=HEADERS)
+    row = wait_observed_requests(tracker, 1)["last_failed_request"]
+    assert row["application_version"] is None and row["requested_revision"] is None
+    assert row["served_revision"] is None and row["response_mode"] is None

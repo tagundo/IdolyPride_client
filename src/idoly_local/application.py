@@ -268,6 +268,13 @@ class Application:
             if response is None:
                 response = self.quest.handle(path, plain)
         except RpcFailure as failure:
+            if path == "/api.Photo/CheckExpressionShooting":
+                try:
+                    context._photo_expression_facts = self.photo_shootings.expression_rejection_facts(
+                        path, failure.code, plain)
+                except Exception:
+                    # Advisory diagnostics cannot replace the original error.
+                    pass
             context.abort(failure.code, failure.details)
         except ValueError:
             context.abort(RpcCode.FAILED_PRECONDITION, "Local profile or master catalog is not ready for this action")

@@ -6,6 +6,7 @@ Application engine over the pure-Python HTTP/2 transport and local asset server.
 from __future__ import annotations
 
 from collections import deque
+from copy import deepcopy
 from pathlib import Path
 import threading
 
@@ -44,6 +45,7 @@ class Runtime:
         self._media_settings = None
         self._language_settings = None
         self._library = None
+        self._last_library_status = None
         self._active_media = None
         self._effective_language = None
         self._resource_translation = None
@@ -82,6 +84,8 @@ class Runtime:
                 result["experimental_main_live"] = True
                 result["live_ruleset"] = "live-v5"
             library = self._library
+            library_active = self._running
+            last_library_status = self._last_library_status
         with self._log_lock:
             result["logs"] = list(self._logs)
         diagnostics = self._diagnostics.status()
@@ -108,7 +112,10 @@ class Runtime:
             if self._resource_translation is not None:
                 result["language"]["resource_translation"] = dict(self._resource_translation)
         if library is not None:
-            result["resource_library"] = library.status()
+            result["resource_library"] = dict(library.status(), active=library_active,
+                                              snapshot_state="live")
+        elif last_library_status is not None:
+            result["resource_library"] = deepcopy(last_library_status)
         return result
 
     def diagnostics_snapshot(self) -> dict:
@@ -144,6 +151,11 @@ class Runtime:
             if self._library is not None:
                 try:
                     self._library.close()
+                    # Closing cancels asynchronously. Preserve the observed job
+                    # counts/state without retaining catalogs or claiming that
+                    # cancellation has already finished.
+                    self._last_library_status = dict(deepcopy(self._library.status()),
+                                                     active=False, snapshot_state="stopped")
                     self._library = None
                 except Exception as error:
                     failures.append(error)

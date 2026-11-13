@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Add the audited bridge to the exact diagnostic base as a normal APK update.
 
-Only declared manifest/font changes are permitted among existing members.
-Original SDK/DEX/native, Unity GUID and metadata are copied unchanged.
+Only declared manifest/font/UI and local-resource transport changes are permitted
+among existing members. Original SDK/DEX/native code is copied unchanged.
 No device is accessed.
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ from pathlib import Path, PurePosixPath
 import re
 import shutil
 import stat
+import struct
 import sys
 import tempfile
 import time
@@ -29,6 +30,8 @@ sys.path[:0] = [str(HERE), str(ROOT / "tools"), str(ROOT / "src")]
 import build_addon as addon
 import build_android_server_manual as limits
 from package_android_resource_client import write_resource_input
+import patch_android_octo_origin as octo
+from idoly_local import unity_http, unity_cache
 
 BASE_SHA256 = "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df"
 BASE_BYTES = 159549324
@@ -41,6 +44,68 @@ AUTHORITY = PACKAGE + ".idoly.presentation"
 MARKER = "assets/idoly-presentation-standalone.json"
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 MAX_APK = 192 * 1024 * 1024
+TRANSPORT_SOURCES = (
+    "tools/patch_android_octo_origin.py", "src/idoly_local/client_patch.py",
+    "src/idoly_local/unity_http.py", "src/idoly_local/unity_cache.py")
+
+
+def local_resource_members(archive):
+    """Compose the audited Octo origin, Unity HTTP policy and cache version.
+
+    The normal diagnostic base changes only the API endpoint. Leaving its Octo
+    literal unchanged sends resource manifests to the public service, bypassing
+    both the server cache and its prepared ADV translations.
+    """
+    if (not 0 < archive.getinfo(octo.METADATA).file_size <= 32 * 1024 * 1024
+            or archive.getinfo(unity_http.MEMBER).file_size != unity_http.FILE_BYTES
+            or archive.getinfo(unity_cache.MEMBER).file_size != 36):
+        raise ValueError("Diagnostic base resource transport members exceed their bounds")
+    metadata = archive.read(octo.METADATA)
+    if hashlib.sha256(metadata).hexdigest() != octo.METADATA_SHA256:
+        raise ValueError("Diagnostic base resource metadata differs")
+    patched_metadata, metadata_proof = octo.patch_octo_metadata(metadata)
+    del metadata
+    settings, settings_proof = unity_http.patch_player_http(archive.read(unity_http.MEMBER))
+    guid, guid_proof = unity_cache.derive_cache_guid(archive.read(unity_cache.MEMBER),
+        metadata_proof["output_sha256"], settings_proof["output_sha256"])
+    return {octo.METADATA: patched_metadata, unity_http.MEMBER: settings,
+            unity_cache.MEMBER: guid}, {"octo_origin": metadata_proof,
+            "unity_http_connection_policy": settings_proof,
+            "unity_il2cpp_cache": guid_proof}
+
+
+def verify_local_resource_output(archive, proof):
+    """Check the actual APK's routing fields without another full-file copy.
+
+    Complete member hashes are checked separately. These bounded reads prevent
+    a packaging path from silently preserving the original transport members.
+    """
+    with archive.open(octo.METADATA) as stream:
+        header = stream.read(24)
+        if len(header) != 24:
+            raise ValueError("Output resource metadata header is truncated")
+        magic, version, table, count, data, size = struct.unpack("<6I", header)
+        row = table + octo.LITERAL_INDEX * 8
+        if (magic != 0xFAB11BAF or version != 31 or table != 256 or count % 8
+                or row + 8 > table + count or table + count > data
+                or data + size > archive.getinfo(octo.METADATA).file_size):
+            raise ValueError("Output resource metadata layout differs")
+        stream.seek(row)
+        length, offset = struct.unpack("<II", stream.read(8))
+        expected = octo.DEFAULT_ORIGIN.encode("ascii")
+        if length != len(expected) or offset + length > size:
+            raise ValueError("Output Octo origin differs")
+        stream.seek(data + offset)
+        if stream.read(length) != expected:
+            raise ValueError("Output Octo origin differs")
+    with archive.open(unity_http.MEMBER) as stream:
+        stream.seek(unity_http.FIELD_OFFSET)
+        if stream.read(4) != struct.pack("<i", unity_http.ALWAYS_ALLOWED):
+            raise ValueError("Output Unity local HTTP policy differs")
+    guid = archive.read(unity_cache.MEMBER)
+    if (guid != proof["unity_il2cpp_cache"]["guid"].encode("ascii")
+            or guid == unity_cache.ORIGINAL_GUID):
+        raise ValueError("Output Unity cache version differs")
 
 
 def marker(native_sha256=NATIVE_SHA256):
@@ -225,7 +290,7 @@ def build(args):
         raise ValueError("Choose unused standalone APK/provenance paths")
     output.parent.mkdir(parents=True,exist_ok=True)
     if not re.fullmatch(r"[0-9a-f]{40}",args.source_commit): raise ValueError("An exact frozen source commit is required")
-    source_hashes = addon.frozen_sources(args.source_commit, extra=(
+    source_hashes = addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES,
         "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
         "tools/repack_android_server_python.py", "tools/package_android_resource_client.py",
         "src/idoly_local/font_assets.py", "client-presentation/fonts/pretendard-jp-v1.json",
@@ -286,14 +351,17 @@ def build(args):
     with ZipFile(source) as base:
         infos = members(base); before = hashes(base, infos); addon.check_base_members(base, "diagnostics")
         font_report = ui_report = None
-        existing_replacements = {}
+        existing_replacements, transport_report = local_resource_members(base)
         if font_file is not None:
             from idoly_local.font_assets import read_font, read_license, android_members, package_notices
             font_data, _font_info = read_font(font_file)
             license_path = Path(font_license_file) if font_license_file is not None else ROOT / "client-presentation/licenses/Pretendard-OFL.txt"
             license_data = read_license(license_path)
             font_parts, font_report = android_members(base, font_data)
-            existing_replacements = {name: value for name, value in font_parts.items() if name in infos}
+            font_replacements = {name: value for name, value in font_parts.items() if name in infos}
+            if existing_replacements.keys() & font_replacements.keys():
+                raise ValueError("Font and local transport replacements overlap")
+            existing_replacements.update(font_replacements)
             additions.update({name: value for name, value in font_parts.items() if name not in infos})
             notices = {"assets/idoly-fonts/" + name: raw for name, raw in package_notices(font_report, license_data).items()}
             additions.update(notices)
@@ -346,11 +414,12 @@ def build(args):
                 **{n:hashlib.sha256(v).hexdigest() for n,v in existing_replacements.items()},
                 **{n:hashlib.sha256(v).hexdigest() for n,v in additions.items()}}
             if after!=expected: raise ValueError("Original game/SDK/resource member changed")
+            verify_local_resource_output(z, transport_report)
         final_tree=run([sdk/"aapt2","dump","xmltree","--file","AndroidManifest.xml",signed]).decode()
         if compiled_tree(old_tree)!=compiled_tree(final_tree,remove_provider=True):raise ValueError("Signed manifest changed")
         postflight=limits._resource_guard(root)
         if postflight["oom_kill"]!=preflight["oom_kill"]:raise ValueError("OOM counter changed")
-        if addon.frozen_sources(args.source_commit, extra=(
+        if addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES,
                 "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
                 "tools/repack_android_server_python.py", "tools/package_android_resource_client.py",
                 "src/idoly_local/font_assets.py", "client-presentation/fonts/pretendard-jp-v1.json",
@@ -362,11 +431,15 @@ def build(args):
         report={"schema":1,"standalone":True,"source_commit":args.source_commit,"source_apk_sha256":BASE_SHA256,"source_apk_bytes":BASE_BYTES,
             "output_apk_sha256":addon.digest(signed),"output_bytes":signed.stat().st_size,"certificate_sha256":CERTIFICATE,
             "signature_v2_v3_verified":True,"manifest_original_values_preserved":True,"provider":PROVIDER,"added_dex":added_dex,
-            "all_original_members_preserved_except_manifest_and_signatures":font_report is None and (ui_report is None or ui_report["ui_asset_byte_identical"]),
-            "all_original_members_preserved_except_declared_manifest_and_font_splits":ui_report is None or ui_report["ui_asset_byte_identical"],
-            "all_original_members_preserved_except_declared_manifest_font_and_UI_assets":True,
+            "all_original_members_preserved_except_manifest_and_signatures":False,
+            "all_original_members_preserved_except_declared_manifest_and_font_splits":False,
+            "all_original_members_preserved_except_declared_manifest_font_and_UI_assets":False,
+            "all_original_members_preserved_except_declared_manifest_font_UI_and_local_resource_transport":True,
             "allowed_existing_member_replacements":["AndroidManifest.xml", *sorted(existing_replacements)],
             "font_support":font_report,"ui_language":ui_language,"ui_translation":ui_report,
+            "local_resource_transport":transport_report,
+            "local_resource_member_sha256":{n:after[n] for n in (octo.METADATA,unity_http.MEMBER,unity_cache.MEMBER)},
+            "local_resource_output_fields_verified":True,
             "original_member_sha256":before,
             "added_member_sha256":{n:after[n] for n in additions},"native_library_sha256":native_input["sha256"],
             "native_input":native_input,

@@ -20,6 +20,7 @@ def prepare_media_profile(state, schema, profile, master_dir):
     from .media_stories import unlock_media_stories
     from .media_access import prepare_media_access, apply_media_access
     from .media_panorama import prepare_media_panorama
+    from .photo_shooting import reserve_photo_image_ids
     from .company import prepare_company_reads
     from .excursion import prepare_excursion, apply_excursion_access
 
@@ -52,6 +53,10 @@ def prepare_media_profile(state, schema, profile, master_dir):
         snapshot = schema.response_type("/api.User/Get").FromString(raw)
         if not snapshot.HasField("user"):
             raise ValueError("Media profile has no user state")
+        # The original photography transition indexes these upload IDs before
+        # sending a create RPC. Reserve IDs within this snapshot transaction;
+        # they create no photograph and do not consume film.
+        reserve_photo_image_ids(snapshot.user)
         apply_media_inventory(snapshot, plan, obtained_time=now)
         apply_media_photo_poses(snapshot, pose_plan)
         apply_excursion_access(snapshot, excursion_plan)

@@ -227,3 +227,48 @@ def test_ios_runtime_uses_ios_manifest_when_both_platforms_are_installed(runtime
     assert runtime.status()["resource_transfer"]["allow_downloads"] is False
     assert (root / "state.db").read_bytes() == before
     assert not (root / "octo-cache").exists()
+
+
+def test_stop_preserves_completed_prefetch_evidence_in_an_inactive_independent_snapshot(runtime_data):
+    root, start = runtime_data
+    write_archive(root / "public-octo")
+    runtime = start(resource_fetcher=lambda url, **kwargs: ResourceResponse(url))
+    runtime._library.start_download("android")
+    completed = eventually(lambda: (status if (status := runtime.status()["resource_library"])
+                                    ["job"]["state"] == "completed" else None))
+    assert completed["active"] is True and completed["snapshot_state"] == "live"
+    assert completed["job"]["verified_files"] == completed["job"]["total_files"] == 2
+    runtime.stop()
+    snapshot = runtime.diagnostics_snapshot()["runtime"]
+    saved = snapshot["resource_library"]
+    assert snapshot["running"] is False and runtime._library is None
+    assert saved["active"] is False and saved["snapshot_state"] == "stopped"
+    assert saved["job"] == completed["job"]
+    saved["job"]["verified_files"] = 0
+    runtime.stop()
+    assert runtime.status()["resource_library"]["job"]["verified_files"] == 2
+
+
+def test_stop_does_not_label_an_unfinished_prefetch_complete(runtime_data):
+    root, start = runtime_data
+    write_archive(root / "public-octo")
+    entered, closed = threading.Event(), threading.Event()
+    class BlockedResponse(ResourceResponse):
+        def read(self, count):
+            entered.set()
+            assert closed.wait(3)
+            return b""
+        def close(self):
+            closed.set()
+            super().close()
+    runtime = start(resource_fetcher=lambda url, **kwargs: BlockedResponse(url))
+    runtime._library.start_download("android")
+    try:
+        assert entered.wait(2)
+        runtime.stop()
+        saved = runtime.status()["resource_library"]
+        assert saved["active"] is False and saved["snapshot_state"] == "stopped"
+        assert saved["job"]["state"] in ("cancelling", "cancelled")
+        assert saved["job"]["verified_files"] == 0
+    finally:
+        closed.set()
