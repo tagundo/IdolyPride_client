@@ -305,10 +305,11 @@ def test_factory_real_http_ranges_head_and_cached_restart_keep_counters_honest(t
         assert status==206 and body==PAYLOAD[2:9]
         assert request("HEAD",object_path)==(200,b"")
         assert request("GET",object_path)==(200,PAYLOAD)
-        # The HTTP body can reach the reader before the serving thread emits
-        # its final transfer callback. Wait for that observation, not a new GET.
+        # HTTP bodies can reach the reader before independent serving threads
+        # emit their final callbacks. Wait for both observations, not a new GET.
         deadline = time.monotonic() + 2
-        while (snapshot := tracker.status())["session_served_bytes"] != 7 + len(PAYLOAD) and time.monotonic() < deadline:
+        while ((snapshot := tracker.status())["session_served_bytes"] != 7 + len(PAYLOAD)
+               or snapshot["session_manifest_bytes"] != len(encrypted)) and time.monotonic() < deadline:
             threading.Event().wait(0.005)
         assert len(calls)==1
         assert snapshot["session_received_bytes"]==len(PAYLOAD)
