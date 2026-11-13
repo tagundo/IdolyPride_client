@@ -6,6 +6,7 @@ those implementations on an emulator whose translator lacks AESIMC.
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import struct
 
@@ -30,11 +31,20 @@ class Image:
             kind, flags, offset, address, _, files, memory, alignment = struct.unpack_from("<II6Q", raw, p)
             if kind == 1:
                 self.segments.append((address, offset, files, memory))
+        # IAP instruction probes need only segment-to-file offsets. The large
+        # IL2CPP image has unrelated symbol/relocation tables; parse those only
+        # for the software AES probes that actually consume them.
+        self._symbols, self._relocations = None, None
+
+    def _load_linkage(self):
+        if self._symbols is not None:
+            return
+        raw = self.raw
         sections = []
         for i in range(struct.unpack_from("<H", raw, 60)[0]):
             p = struct.unpack_from("<Q", raw, 40)[0] + i * struct.unpack_from("<H", raw, 58)[0]
             sections.append(struct.unpack_from("<II4QII2Q", raw, p))
-        self.symbols, self.relocations = {}, []
+        symbols_by_name, relocations = {}, []
         for section in sections:
             if section[1] != 11:
                 continue
@@ -46,13 +56,25 @@ class Image:
                 name = raw[start:raw.index(b"\0", start)].decode("ascii")
                 symbols.append((name, address, size))
                 if address:
-                    self.symbols[name] = (address, size)
+                    symbols_by_name[name] = (address, size)
             for relocation in sections:
                 if relocation[1] == 4 and sections[relocation[6]] == section:
                     for offset in range(relocation[4], relocation[4] + relocation[5], relocation[9]):
                         target, info, addend = struct.unpack_from("<QQq", raw, offset)
                         symbol = symbols[info >> 32]
-                        self.relocations.append((target, info & 0xFFFFFFFF, addend, symbol))
+                        relocations.append((target, info & 0xFFFFFFFF, addend, symbol))
+        # A failed parse never publishes a partially populated cache.
+        self._symbols, self._relocations = symbols_by_name, relocations
+
+    @property
+    def symbols(self):
+        self._load_linkage()
+        return self._symbols
+
+    @property
+    def relocations(self):
+        self._load_linkage()
+        return self._relocations
 
     def offset(self, address):
         for start, offset, size, _ in self.segments:
@@ -188,6 +210,10 @@ def verify_vectors(original, patched):
                     for operation, source, expected in (("encrypt", plain, encrypted), ("decrypt", encrypted, plain)):
                         name = f"AES_{mode}_{operation}_{suffix}"
                         actual = emulate(image, name, source, key, iv, padding, operation == "encrypt")
+                        # Unicorn's callback wrappers can retain a completed
+                        # engine until cyclic GC. Each vector is independent;
+                        # release its native cache before constructing the next.
+                        gc.collect()
                         if actual != expected:
                             raise ValueError(f"Software AES vector mismatch: {name}, key={len(key)}, padding={padding}, length={len(plain)}")
                         count += 1
