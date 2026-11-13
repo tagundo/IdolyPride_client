@@ -1,0 +1,150 @@
+{
+  "schema": 1,
+  "version": "0.3.23",
+  "repository": "tagundo/IdolyPride_client",
+  "tag": "local-server-v0.3.23",
+  "product_source_commit": "e7798c6cf9c6d3422ce4e21d845897f9540023b3",
+  "delivery_mode": "Git LFS downloads linked from release body",
+  "release_assets_uploaded": false,
+  "artifacts": [
+    {
+      "kind": "data",
+      "name": "IdolyPride-ServerData-v0.3.23.zip",
+      "bytes": 191118320,
+      "sha256": "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f",
+      "source_commit": "a752492ca1f622d58994f4d134ee002199725f23",
+      "binary_version": "0.3.23",
+      "reused_unchanged_client": false,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "c28a87d3cba1845fd65097b38cc2fae8b7942fc408812db31ea791eeb5e757a7",
+      "LFS_source_branch": "downloads/restored-media-data-v0.3.23",
+      "LFS_publication_commit": "80700f613d16816d534c08cbdb8a049a40abb224",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": true
+    },
+    {
+      "kind": "server",
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 206356352,
+      "sha256": "ca97d56ba093e4a3095b212567b1cee10c40884b3db773602714a83125acf455",
+      "source_commit": "e7798c6cf9c6d3422ce4e21d845897f9540023b3",
+      "binary_version": "0.3.23",
+      "reused_unchanged_client": false,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "e6145545375335e7b82b0616d8b2fac1095002452245036662ee5f5b4843542f",
+      "LFS_source_branch": "downloads/restored-media-server-v0.3.23",
+      "LFS_publication_commit": "0645cadefacded68206d44837580be5a5bf5c1a9",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": true
+    },
+    {
+      "kind": "mac",
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 205228927,
+      "sha256": "6a236964438a830e8cc74b58cf1494bc47bf49e2bda28a50d07d1a4bcc906afa",
+      "source_commit": "e7798c6cf9c6d3422ce4e21d845897f9540023b3",
+      "binary_version": "0.3.23",
+      "reused_unchanged_client": false,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "ef76c80b49ffe3a4cad898195e5d5d1555cce819b6ceb7921e2af59d2f603bcc",
+      "LFS_source_branch": "downloads/restored-media-mac-v0.3.23",
+      "LFS_publication_commit": "532776e5b3ce059bfab9e2c9ceb3d90ac4285f48",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": true
+    },
+    {
+      "kind": "client",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159475730,
+      "sha256": "cefbc205d575c435f5c494b683d444b4b206e07fec8a45cb95c6727425dc487e",
+      "source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+      "binary_version": "0.3.21",
+      "reused_unchanged_client": true,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "e51ea40c4eec8408322db8ba24f2b40d49cb68699dd02779938480161f17b421",
+      "LFS_source_branch": "downloads/android-wardrobe-client-v0.3.21",
+      "LFS_publication_commit": "2c9cebd156ea036b95ec988269d649605c671732",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": false
+    },
+    {
+      "kind": "ipa",
+      "name": "IdolyPride-6.1.1-Local-PlayCover.ipa",
+      "bytes": 146439731,
+      "sha256": "7519c86b44d8718d711e48647958513c260abdec505b6b9bf32e81ab53ba709d",
+      "source_commit": "227fc76708ecda43f9a6ef1726ab38380b02d315",
+      "binary_version": "0.3.19",
+      "reused_unchanged_client": true,
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "be71e2000a04cf61af2f2be2da1597ff71adc2be1a542c6272a005df4b539960",
+      "LFS_source_branch": "downloads/playcover-client-v0.3.19",
+      "LFS_publication_commit": "2635d58b02824af7de3a21c23771bddc380f403d",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true,
+      "new_binary_download_verification_this_release": false
+    }
+  ],
+  "host_tests": {
+    "schema": 1,
+    "status": "PASS_ALL_OBSERVED_FAILURES_RESOLVED",
+    "source_commit": "e7798c6cf9c6d3422ce4e21d845897f9540023b3",
+    "actual_tested_source_commit": "ed2a428bb6007cf87930932cf21eb74b23cc95b7",
+    "docs_only_since_test_start": [
+      "README.md",
+      "docs/media-mode.md",
+      "docs/restoration-v0.3.23.md"
+    ],
+    "full_suite": {
+      "passed": 5173,
+      "skipped": 16,
+      "subtests_passed": 351,
+      "failed": 0,
+      "seconds": 206.64
+    },
+    "execution_receipt_sha256": "7215836a2720cc8e3505f3fab3eddb429c08c77b0d1a3cfc1aa08e576d8f12ff",
+    "full_suite_rerun_claimed": false,
+    "test_temp_retired": {
+      "path": "/dev/shm/idoly-v0323-integration-tests",
+      "bytes": 264976311
+    },
+    "actual_device_execution": false,
+    "actual_Mac_execution": false,
+    "assembled_payload_runtime_smoke": {
+      "status": "PASS",
+      "source_commit": "e7798c6cf9c6d3422ce4e21d845897f9540023b3",
+      "receipt": "/workspace/shared/artifacts/company-outing-restore-20261113/real-payload-runtime-smoke-verification.json",
+      "receipt_sha256": "b38325022c75bd7b40df0ce9b3e5e3e97ae0174453ce5067b75ec862b6d4609e",
+      "payload_sha256": "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f",
+      "seconds": 3.281,
+      "actual_device_execution": false
+    }
+  },
+  "download_parallelism": {
+    "default": 4,
+    "selectable": [
+      1,
+      2,
+      4,
+      8
+    ]
+  },
+  "gallery_restorations": {
+    "poses": 146,
+    "pose_motion_links": 1596,
+    "outing_places": 4,
+    "outing_settings": 80,
+    "outing_reactions": 420,
+    "event_groups": 59,
+    "event_episodes": 291
+  },
+  "photo_image_creation_restored": false,
+  "ordinary_mode_unlock_and_reward_rules_unchanged": true,
+  "resource_full_digest_verification_preserved": true,
+  "actual_CDN_download_speed_measured": false,
+  "actual_device_UI_or_playback_verified": false,
+  "actual_Mac_GUI_execution": false
+}
