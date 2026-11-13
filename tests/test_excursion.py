@@ -1,6 +1,9 @@
 """Outing gallery uses real scene joins without inventing rewards or progress."""
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
@@ -13,6 +16,51 @@ from idoly_local.state import State
 
 USER = "/api.User/Get"
 UNKNOWN = b"\x80\x4b\x07"
+
+
+def test_runtime_costume_types_match_the_offline_audited_original_list():
+    from idoly_local.excursion import _COSTUME_TYPE_IDS
+    from idoly_local.media_master_build import TYPE_IDS
+
+    assert len(_COSTUME_TYPE_IDS) == 19
+    assert _COSTUME_TYPE_IDS == TYPE_IDS
+
+
+def test_android_application_and_excursion_import_without_offline_modules():
+    from tools.repack_android_server_python import ANDROID_EXCLUDED_MODULES
+
+    root = Path(__file__).resolve().parents[1]
+    code = """
+import importlib
+import importlib.abc
+import json
+import sys
+
+excluded = frozenset(json.loads(sys.argv[1]))
+class AndroidRuntimeImports(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if any(fullname == name or fullname.startswith(name + ".") for name in excluded):
+            raise ModuleNotFoundError("Android omits offline module: " + fullname, name=fullname)
+
+sys.meta_path.insert(0, AndroidRuntimeImports())
+try:
+    importlib.import_module("idoly_local.media_master_build")
+except ModuleNotFoundError as error:
+    assert error.name == "idoly_local.media_master_build"
+else:
+    raise AssertionError("Offline import guard did not reject the omitted builder")
+
+from idoly_local.application import Application
+from idoly_local.excursion import Excursions, prepare_excursion
+assert callable(Application) and callable(Excursions) and callable(prepare_excursion)
+assert excluded.isdisjoint(sys.modules)
+"""
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", code, json.dumps(sorted(ANDROID_EXCLUDED_MODULES))],
+        cwd=root, env=os.environ | {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": str(root / "src")},
+        capture_output=True, text=True, timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.fixture(scope="module")

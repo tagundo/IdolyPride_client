@@ -20,7 +20,6 @@ from .appearance import _owned
 from .gameplay import _Catalog
 from .live_assets import _wearable
 from .media_access import MASTER_VERSION
-from .media_master_build import TYPE_IDS
 from .rpc import RpcCode, RpcFailure
 
 _USER = "/api.User/Get"
@@ -31,6 +30,13 @@ _FINISH = "/api.Excursion/Finish"
 _CHECK = "/api.Photo/CheckExcursionShooting"
 _ROUTES = frozenset((_LIST, _START, _WATCH, _FINISH, _CHECK))
 _AREA = "area-main-013"
+# Original 6.1.1 CostumeType pack SHA-256:
+# 42bca0dec00f714e5c3510066a33d465f1d1afcca035eeea9fd315e0c1aa224e.
+# Android omits offline master builders; tests check this runtime tuple against
+# the builder's independently audited list without importing it at runtime.
+_COSTUME_TYPE_IDS = ("casl", "gene", "hruh", "idol", "idol-miku", "idol-miku-mizg", "kion", "mizg",
+                     "mizg-all-ng", "mizg-water-ng", "pajm", "schl", "sd-ambassador", "sd-police", "snro",
+                     "trbl", "trbl-mizg", "trng", "waso")
 
 
 def _fail(reason, code=RpcCode.FAILED_PRECONDITION):
@@ -69,7 +75,7 @@ def _prepare_catalog(catalog):
     characters = catalog.ids("Character", required=True)
     costumes = catalog.ids("Costume", required=True)
     types = {row.get("costumeTypeId") for row in costumes.values()}
-    if any(not _identity(value) or value not in TYPE_IDS for value in types):
+    if any(not _identity(value) or value not in _COSTUME_TYPE_IDS for value in types):
         _fail("invalid original costume types")
     areas, quests = catalog.ids("Area", required=True), catalog.ids("Quest", required=True)
     area = areas.get(_AREA)
@@ -85,9 +91,9 @@ def _prepare_catalog(catalog):
                 _fail("an original scene asset reference is missing")
         denied = _strings(row, "notWearableCostumeTypeIds")
         for field in ("advNotWearableCostumeTypeIds", "finishAdvNotWearableCostumeTypeIds"):
-            if not set(_strings(row, field)).issubset(TYPE_IDS):
+            if not set(_strings(row, field)).issubset(_COSTUME_TYPE_IDS):
                 _fail("an original scene references an unknown costume type")
-        if not set(denied).issubset(TYPE_IDS):
+        if not set(denied).issubset(_COSTUME_TYPE_IDS):
             _fail("an original scene references an unknown costume type")
         places[key] = denied
     settings = {}
