@@ -1,0 +1,1 @@
+Idoly Pride v0.3.27 Mac sound-setting persistence IPA. Use one fixed UI locale. Autosave requires400ms quiet and a Unity update; early quit is not covered. Physical Mac persistence and Android sound behavior remain unverified. Existing app identity, local API/Octo, font and fixed UI behavior are retained.
