@@ -1,0 +1,1 @@
+Idoly Pride Android local resources v0.3.28, Korean UI. Mandatory local Octo origin, Unity HTTP policy and extraction GUID are independently verified in the signed APK. Server language selects prepared dialogue. No physical-device offline verification is claimed. Existing account and downloaded server resource data are preserved.
