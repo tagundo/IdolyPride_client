@@ -114,13 +114,22 @@ void *install(void *) {
         HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original),
         HOOK(costume_sorted,costume_sorted_hook,costume_sorted_original),
         HOOK(font_awake,font_awake_hook,font_awake_original),
+        HOOK(sound_bgm_volume,sound_bgm_volume_hook,sound_bgm_volume_original),
+        HOOK(sound_bgm_soundable,sound_bgm_soundable_hook,sound_bgm_soundable_original),
+        HOOK(sound_se_volume,sound_se_volume_hook,sound_se_volume_original),
+        HOOK(sound_se_soundable,sound_se_soundable_hook,sound_se_soundable_original),
+        HOOK(sound_voice_volume,sound_voice_volume_hook,sound_voice_volume_original),
+        HOOK(sound_voice_soundable,sound_voice_soundable_hook,sound_voice_soundable_original),
+        HOOK(sound_bind,sound_bind_hook,sound_bind_original),
+        HOOK(sound_save,sound_save_hook,sound_save_original),
+
     };
 #undef HOOK
     for (auto &hook:hooks) {
         if (!hook.entry->gateway || !hook.entry->slot) { set_state("init_failed"); return nullptr; }
         *hook.original=reinterpret_cast<void *>(image_base+hook.entry->gateway+20);
     }
-    if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready()) { set_state("init_failed"); return nullptr; }
+    if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !sound_tracker.ready()) { set_state("init_failed"); return nullptr; }
     // All originals are valid before the first replacement is visible. Any
     // concurrent invocation during publication takes the original path.
     for (auto &hook:hooks) __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),

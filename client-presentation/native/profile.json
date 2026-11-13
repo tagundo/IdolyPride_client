@@ -63,6 +63,10 @@
       {
         "file": "android-bulk-checked-filter-original-pins.json",
         "sha256": "e1237d4a4a568d304fa3c888b16c7d968947ebd05f89e4b7eb7d0dd75ca6c022"
+      },
+      {
+        "file": "sound-original-pins.json",
+        "sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -2855,6 +2859,238 @@
       "prefix16": "fe0f1ff8df0bff97fe0741f8c0035fd6",
       "mode": "CALL",
       "export_GNU_hash": true
+    },
+    "sound_bgm_volume": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_BGMVolume",
+      "rva": "0x559bd64",
+      "prefix16": "fe0f1ff8000c40f9c00000b4001800bd",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31118,
+      "metadata_method_index": 31117,
+      "type_definition_index": 6020,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 72837,
+            "kind": 12,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x800c0000",
+            "class": "System.Single"
+          }
+        }
+      ],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_bgm_soundable": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_BGMSoundable",
+      "rva": "0x559bda4",
+      "prefix16": "fe0f1ff8000c40f9e00000b428000012",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31120,
+      "metadata_method_index": 31119,
+      "type_definition_index": 6020,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 50428,
+            "kind": 2,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80020000",
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_se_volume": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_SEVolume",
+      "rva": "0x559bde8",
+      "prefix16": "fe0f1ff8000c40f9c00000b4002000bd",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31122,
+      "metadata_method_index": 31121,
+      "type_definition_index": 6020,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 72837,
+            "kind": 12,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x800c0000",
+            "class": "System.Single"
+          }
+        }
+      ],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_se_soundable": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_SESoundable",
+      "rva": "0x559be28",
+      "prefix16": "fe0f1ff8000c40f9e00000b428000012",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31124,
+      "metadata_method_index": 31123,
+      "type_definition_index": 6020,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 50428,
+            "kind": 2,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80020000",
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_voice_volume": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_VoiceVolume",
+      "rva": "0x559be6c",
+      "prefix16": "fe0f1ff8000c40f9c00000b4002800bd",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31126,
+      "metadata_method_index": 31125,
+      "type_definition_index": 6020,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 72837,
+            "kind": 12,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x800c0000",
+            "class": "System.Single"
+          }
+        }
+      ],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_voice_soundable": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_VoiceSoundable",
+      "rva": "0x559beac",
+      "prefix16": "fe0f1ff8000c40f9e00000b428000012",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31128,
+      "metadata_method_index": 31127,
+      "type_definition_index": 6020,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "metadata_type_index": 50428,
+            "kind": 2,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80020000",
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_bind": {
+      "name": "Solis.OutGame.GameSettingTopScreenPresenter.BindData",
+      "rva": "0x559cac4",
+      "prefix16": "fd7bbaa9fc6f01a9fa6702a9f85f03a9",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31151,
+      "metadata_method_index": 31150,
+      "type_definition_index": 6029,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "source": "sound-persistence-original-pins"
+    },
+    "sound_save": {
+      "name": "Solis.Common.GameSetting.Save",
+      "rva": "0x45b0fa8",
+      "prefix16": "fe57bea9f44f01a915d502d0349a02f0",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 57910,
+      "metadata_method_index": 57909,
+      "type_definition_index": 12091,
+      "is_static": false,
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "source": "sound-persistence-original-pins"
     }
   },
   "graphics_fields": [
@@ -3412,5 +3648,20 @@
       "setter_rva_delta_from_verified_getter": 8,
       "setter_prefix_bytes_covered_by_existing_pin": 8
     }
+  },
+  "sound_autosave": {
+    "schema": 1,
+    "scope": "Main settings sound volume/mute only",
+    "quiet_ms": 400,
+    "failure_retry_ms": 2000,
+    "pending_weak_targets_max": 1,
+    "managed_weak_handles_max": 4,
+    "main_thread_only": true,
+    "idle_tick_clock_or_io": false,
+    "original_setter_and_close_save_preserved": true,
+    "init_gate": "post-original BindData, suppress nested binds, validated active Behaviour presenter/model/settings identities",
+    "device_reset_trigger_verified": false,
+    "device_persistence_verified": false,
+    "pin_packet_sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
   }
 }

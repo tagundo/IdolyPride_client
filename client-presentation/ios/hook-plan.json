@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "fb72f930ac7afe5fafb705f5a708c93aa7c79864e6c25cf0e4b5d137194737b9",
+  "profile_sha256": "0f1c5bc8ac11b2c597a33e7533ddd2c59579855f65cd54dad6240d4b4a122805",
   "hook_names": [
     "q_set",
     "q_apply",
@@ -39,7 +39,15 @@
     "mv_ui_initialize",
     "preview_ui_bind",
     "costume_sorted",
-    "font_awake"
+    "font_awake",
+    "sound_bgm_volume",
+    "sound_bgm_soundable",
+    "sound_se_volume",
+    "sound_se_soundable",
+    "sound_voice_volume",
+    "sound_voice_soundable",
+    "sound_bind",
+    "sound_save"
   ],
   "entries": {
     "q_set": {
@@ -371,7 +379,87 @@
       "patched_entry": "866c8114",
       "gateway_hex": "30a000b010e2269110fedfc8500000b400021fd6f657bda975937e17",
       "registration_pointer_slot": 175610496
+    },
+    "sound_bgm_volume": {
+      "rva": 49538368,
+      "original16": "000c40f9a00000b4001800bd01008052",
+      "gateway": 158893168,
+      "slot": 179886528,
+      "original_callable": 158893188,
+      "patched_entry": "cc27a115",
+      "gateway_hex": "30a000b01002279110fedfc8500000b400021fd6000c40f92fd85e16",
+      "registration_pointer_slot": 170206704
+    },
+    "sound_bgm_soundable": {
+      "rva": 49538432,
+      "original16": "000c40f9a00000b40170003901008052",
+      "gateway": 158893200,
+      "slot": 179886536,
+      "original_callable": 158893220,
+      "patched_entry": "c427a115",
+      "gateway_hex": "30a000b01022279110fedfc8500000b400021fd6000c40f937d85e16",
+      "registration_pointer_slot": 170206720
+    },
+    "sound_se_volume": {
+      "rva": 49538496,
+      "original16": "000c40f9a00000b4002000bd01008052",
+      "gateway": 158893232,
+      "slot": 179886544,
+      "original_callable": 158893252,
+      "patched_entry": "bc27a115",
+      "gateway_hex": "30a000b01042279110fedfc8500000b400021fd6000c40f93fd85e16",
+      "registration_pointer_slot": 170206736
+    },
+    "sound_se_soundable": {
+      "rva": 49538560,
+      "original16": "000c40f9a00000b40190003901008052",
+      "gateway": 158893264,
+      "slot": 179886552,
+      "original_callable": 158893284,
+      "patched_entry": "b427a115",
+      "gateway_hex": "30a000b01062279110fedfc8500000b400021fd6000c40f947d85e16",
+      "registration_pointer_slot": 170206752
+    },
+    "sound_voice_volume": {
+      "rva": 49538624,
+      "original16": "000c40f9a00000b4002800bd01008052",
+      "gateway": 158893296,
+      "slot": 179886560,
+      "original_callable": 158893316,
+      "patched_entry": "ac27a115",
+      "gateway_hex": "30a000b01082279110fedfc8500000b400021fd6000c40f94fd85e16",
+      "registration_pointer_slot": 170206768
+    },
+    "sound_voice_soundable": {
+      "rva": 49538688,
+      "original16": "000c40f9a00000b401b0003901008052",
+      "gateway": 158893328,
+      "slot": 179886568,
+      "original_callable": 158893348,
+      "patched_entry": "a427a115",
+      "gateway_hex": "30a000b010a2279110fedfc8500000b400021fd6000c40f957d85e16",
+      "registration_pointer_slot": 170206784
+    },
+    "sound_bind": {
+      "rva": 49543156,
+      "original16": "fc6fbaa9fa6701a9f85f02a9f65703a9",
+      "gateway": 158893360,
+      "slot": 179886576,
+      "original_callable": 158893380,
+      "patched_entry": "4f23a115",
+      "gateway_hex": "30a000b010c2279110fedfc8500000b400021fd6fc6fbaa9acdc5e16",
+      "registration_pointer_slot": 170206968
+    },
+    "sound_save": {
+      "rva": 30444184,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893392,
+      "slot": 179886584,
+      "original_callable": 158893412,
+      "patched_entry": "aefee915",
+      "gateway_hex": "30a000b010e2279110fedfc8500000b400021fd6f657bda94d011616",
+      "registration_pointer_slot": 170420960
     }
   },
-  "profile_header_sha256": "834d3183c302e8fe6d62670db02a3685b5509cd856bdcd39b913df4c8d12b452"
+  "profile_header_sha256": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3"
 }

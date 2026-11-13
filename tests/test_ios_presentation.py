@@ -49,9 +49,9 @@ def test_gateway_rejects_pc_relative_control_flow_and_x16_input(word):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "834d3183c302e8fe6d62670db02a3685b5509cd856bdcd39b913df4c8d12b452"
+    assert hashlib.sha256(header).hexdigest() == "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 103 and len(plan["entries"]) == 33
+    assert len(profile["aliases"]) == 111 and len(plan["entries"]) == 41
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -114,8 +114,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 1056
-    assert profile["slot_region"]["bytes"] == 264
+    assert profile["gateway_region"]["bytes"] == 41 * 32
+    assert profile["slot_region"]["bytes"] == 41 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -146,8 +146,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 33 * 32
-    assert original["slot_region"]["bytes"] == 33 * 8
+    assert original["gateway_region"]["bytes"] == 41 * 32
+    assert original["slot_region"]["bytes"] == 41 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length

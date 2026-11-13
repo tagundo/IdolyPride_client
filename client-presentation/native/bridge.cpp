@@ -27,6 +27,7 @@
 #include "playback_config.hpp"
 #include "panorama_ui_edges.hpp"
 #include "photography_ui.hpp"
+#include "sound_persistence.hpp"
 #include "media_policy.hpp"
 #include "hangul_font.hpp"
 #ifndef IDOLY_DARWIN_BRIDGE
@@ -581,6 +582,78 @@ bool class_matches(void *object, const char *space, const char *name) {
     }
     return false;
 }
+
+int64_t sound_monotonic_ms() {
+    timespec now{};
+#ifdef IDOLY_DARWIN_BRIDGE
+    constexpr unsigned clock_id=6;
+#else
+    constexpr clockid_t clock_id=CLOCK_MONOTONIC;
+#endif
+    if (clock_gettime(clock_id,&now) || now.tv_sec<0 || now.tv_nsec<0
+            || now.tv_nsec>=1000000000 || now.tv_sec>(0x7fffffffffffffffLL-999)/1000) return -1;
+    return static_cast<int64_t>(now.tv_sec)*1000+now.tv_nsec/1000000;
+}
+
+// BEGIN_SOUND_AUTOSAVE_HOOKS
+namespace sound = idoly::presentation::sound_persistence;
+sound::Tracker sound_tracker;
+using SoundVolumeMethod = void (*)(void *,float,Method *);
+using SoundToggleMethod = void (*)(void *,bool,Method *);
+SoundVolumeMethod sound_bgm_volume_original,sound_se_volume_original,sound_voice_volume_original;
+SoundToggleMethod sound_bgm_soundable_original,sound_se_soundable_original,sound_voice_soundable_original;
+VoidMethod sound_bind_original,sound_save_original;
+void sound_bind_hook(void *self,Method *method) {
+    sound_tracker.bind(self,method,sound_bind_original,
+        ready.load(std::memory_order_acquire) && game_call(false));
+}
+void sound_save_hook(void *self,Method *method) {
+    sound_save_original(self,method);
+    sound_tracker.observed_save(self,ready.load(std::memory_order_acquire) && game_call(false));
+}
+bool sound_save_auto(void *self) {
+    // Only the added autosave catches its own failure. Stock Save exceptions
+    // still propagate through sound_save_hook unchanged.
+    try { sound_save_original(self,nullptr);return true; }
+    catch (...) { return false; }
+}
+void sound_bgm_volume_hook(void *self,float value,Method *method) {
+    const bool enabled=ready.load(std::memory_order_acquire) && game_call(false);
+    const auto before=sound_tracker.before(self,sound::Field::BgmVolume,enabled);
+    sound_bgm_volume_original(self,value,method);
+    sound_tracker.after(self,before,enabled);
+}
+void sound_bgm_soundable_hook(void *self,bool value,Method *method) {
+    const bool enabled=ready.load(std::memory_order_acquire) && game_call(false);
+    const auto before=sound_tracker.before(self,sound::Field::BgmSoundable,enabled);
+    sound_bgm_soundable_original(self,value,method);
+    sound_tracker.after(self,before,enabled);
+}
+void sound_se_volume_hook(void *self,float value,Method *method) {
+    const bool enabled=ready.load(std::memory_order_acquire) && game_call(false);
+    const auto before=sound_tracker.before(self,sound::Field::SeVolume,enabled);
+    sound_se_volume_original(self,value,method);
+    sound_tracker.after(self,before,enabled);
+}
+void sound_se_soundable_hook(void *self,bool value,Method *method) {
+    const bool enabled=ready.load(std::memory_order_acquire) && game_call(false);
+    const auto before=sound_tracker.before(self,sound::Field::SeSoundable,enabled);
+    sound_se_soundable_original(self,value,method);
+    sound_tracker.after(self,before,enabled);
+}
+void sound_voice_volume_hook(void *self,float value,Method *method) {
+    const bool enabled=ready.load(std::memory_order_acquire) && game_call(false);
+    const auto before=sound_tracker.before(self,sound::Field::VoiceVolume,enabled);
+    sound_voice_volume_original(self,value,method);
+    sound_tracker.after(self,before,enabled);
+}
+void sound_voice_soundable_hook(void *self,bool value,Method *method) {
+    const bool enabled=ready.load(std::memory_order_acquire) && game_call(false);
+    const auto before=sound_tracker.before(self,sound::Field::VoiceSoundable,enabled);
+    sound_voice_soundable_original(self,value,method);
+    sound_tracker.after(self,before,enabled);
+}
+// END_SOUND_AUTOSAVE_HOOKS
 
 Weak quality_manager, main_controller;
 Weak controller_candidates[4];
@@ -1278,6 +1351,7 @@ void quality_update_hook(void *self, Method *method) {
     bool has = false; Config config = configuration(&has);
     if (!has) {
         quality_update_original(self, method);
+    sound_tracker.tick(true);
 #ifndef IDOLY_DARWIN_BRIDGE
         sample_render_probe();
 #endif
@@ -1298,6 +1372,7 @@ void quality_update_hook(void *self, Method *method) {
     const int desired_fps = selected_fps(config, original_fps());
     if (app_fps_get(nullptr) != desired_fps) app_fps_set_original(desired_fps, nullptr);
     quality_update_original(self, method);
+    sound_tracker.tick(true);
 #ifndef IDOLY_DARWIN_BRIDGE
     sample_render_probe();
 #endif
@@ -1468,6 +1543,12 @@ void load_calls() {
     CALL(local_position, local_position); CALL(local_scale, local_scale); CALL(local_rotation, local_rotation);
     CALL(size_delta_get, size_delta_get); CALL(size_delta_set, size_delta_set);
     CALL(local_position_set, local_position_set); CALL(active_enabled, active_enabled);
+    sound::Calls sound_calls;
+    sound_calls.weak_new=weak_new;sound_calls.weak_get=weak_get;sound_calls.weak_free=weak_free;
+    sound_calls.matches=class_matches;sound_calls.alive=object_alive;sound_calls.active=active_enabled;
+    sound_calls.now_ms=sound_monotonic_ms;sound_calls.save=sound_save_auto;
+    sound_tracker.configure(sound_calls);
+
     CALL(orthographic, orthographic); CALL(uv_get, uv_get);
     CALL(projection_get, projection_get); CALL(physical_get, physical_get); CALL(gate_get, gate_get);
     CALL(sensor_get, sensor_get); CALL(lens_get, lens_get); CALL(projection_mode_get, projection_mode_get);
@@ -1569,6 +1650,15 @@ void *install(void *) {
 #define HOOK(entry, replacement, original) {&pin::entry, reinterpret_cast<void *>(replacement), reinterpret_cast<void **>(&original), nullptr}
     Hook hooks[] = {
         HOOK(font_awake,font_awake_hook,font_awake_original),
+        HOOK(sound_bgm_volume,sound_bgm_volume_hook,sound_bgm_volume_original),
+        HOOK(sound_bgm_soundable,sound_bgm_soundable_hook,sound_bgm_soundable_original),
+        HOOK(sound_se_volume,sound_se_volume_hook,sound_se_volume_original),
+        HOOK(sound_se_soundable,sound_se_soundable_hook,sound_se_soundable_original),
+        HOOK(sound_voice_volume,sound_voice_volume_hook,sound_voice_volume_original),
+        HOOK(sound_voice_soundable,sound_voice_soundable_hook,sound_voice_soundable_original),
+        HOOK(sound_bind,sound_bind_hook,sound_bind_original),
+        HOOK(sound_save,sound_save_hook,sound_save_original),
+
         HOOK(q_set, quality_set_hook, quality_set_original), HOOK(q_apply, quality_apply_hook, quality_apply_original),
         HOOK(q_init, quality_init_hook, quality_init_original), HOOK(q_update, quality_update_hook, quality_update_original),
         HOOK(app_fps_set, app_fps_set_hook, app_fps_set_original),
@@ -1619,7 +1709,7 @@ void *install(void *) {
         if (i==0) pause_ms(500); // Fonts are captured during the existing graphics readiness delay.
     }
     if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !wardrobe_lifecycle.ready()
-            || !wardrobe_exit_tracker.ready()) {
+            || !wardrobe_exit_tracker.ready() || !sound_tracker.ready()) {
         for (size_t i=sizeof hooks/sizeof hooks[0];i>0;--i) shadowhook_unhook(hooks[i-1].stub);
         set_state("init_failed");return nullptr;
     }

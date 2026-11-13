@@ -1813,6 +1813,140 @@
       "native_ABI": "Il2CppObject*(Il2CppClass*)",
       "prefix16": "fd7bbfa9fd0300912ad60094fd7bc1a8",
       "mode": "CALL"
+    },
+    "sound_bgm_volume": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_BGMVolume",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31125,
+      "metadata_method_index": 31124,
+      "type_definition_index": 6022,
+      "is_static": false,
+      "rva": 49538368,
+      "registration_pointer_slot_rva": 170206704,
+      "prefix16": "000c40f9a00000b4001800bd01008052",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Single"
+        }
+      ]
+    },
+    "sound_bgm_soundable": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_BGMSoundable",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31127,
+      "metadata_method_index": 31126,
+      "type_definition_index": 6022,
+      "is_static": false,
+      "rva": 49538432,
+      "registration_pointer_slot_rva": 170206720,
+      "prefix16": "000c40f9a00000b40170003901008052",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Boolean"
+        }
+      ]
+    },
+    "sound_se_volume": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_SEVolume",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31129,
+      "metadata_method_index": 31128,
+      "type_definition_index": 6022,
+      "is_static": false,
+      "rva": 49538496,
+      "registration_pointer_slot_rva": 170206736,
+      "prefix16": "000c40f9a00000b4002000bd01008052",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Single"
+        }
+      ]
+    },
+    "sound_se_soundable": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_SESoundable",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31131,
+      "metadata_method_index": 31130,
+      "type_definition_index": 6022,
+      "is_static": false,
+      "rva": 49538560,
+      "registration_pointer_slot_rva": 170206752,
+      "prefix16": "000c40f9a00000b40190003901008052",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Boolean"
+        }
+      ]
+    },
+    "sound_voice_volume": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_VoiceVolume",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31133,
+      "metadata_method_index": 31132,
+      "type_definition_index": 6022,
+      "is_static": false,
+      "rva": 49538624,
+      "registration_pointer_slot_rva": 170206768,
+      "prefix16": "000c40f9a00000b4002800bd01008052",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Single"
+        }
+      ]
+    },
+    "sound_voice_soundable": {
+      "name": "Solis.OutGame.GameSettingTopScreenModel.set_VoiceSoundable",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31135,
+      "metadata_method_index": 31134,
+      "type_definition_index": 6022,
+      "is_static": false,
+      "rva": 49538688,
+      "registration_pointer_slot_rva": 170206784,
+      "prefix16": "000c40f9a00000b401b0003901008052",
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "System.Boolean"
+        }
+      ]
+    },
+    "sound_bind": {
+      "name": "Solis.OutGame.GameSettingTopScreenPresenter.BindData",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 31158,
+      "metadata_method_index": 31157,
+      "type_definition_index": 6031,
+      "is_static": false,
+      "rva": 49543156,
+      "registration_pointer_slot_rva": 170206968,
+      "prefix16": "fc6fbaa9fa6701a9f85f02a9f65703a9",
+      "return_type": "System.Void",
+      "parameters": []
+    },
+    "sound_save": {
+      "name": "Solis.Common.GameSetting.Save",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 57907,
+      "metadata_method_index": 57906,
+      "type_definition_index": 12089,
+      "is_static": false,
+      "rva": 30444184,
+      "registration_pointer_slot_rva": 170420960,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return_type": "System.Void",
+      "parameters": []
     }
   },
   "hook_names": [
@@ -1848,7 +1982,15 @@
     "mv_ui_initialize",
     "preview_ui_bind",
     "costume_sorted",
-    "font_awake"
+    "font_awake",
+    "sound_bgm_volume",
+    "sound_bgm_soundable",
+    "sound_se_volume",
+    "sound_se_soundable",
+    "sound_voice_volume",
+    "sound_voice_soundable",
+    "sound_bind",
+    "sound_save"
   ],
   "segments": {
     "__TEXT": {
@@ -1890,12 +2032,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 1056,
+    "bytes": 1312,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 264,
+    "bytes": 328,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -2026,5 +2168,20 @@
       "setter_rva_delta_from_verified_getter": 8,
       "setter_prefix_bytes_covered_by_existing_pin": 8
     }
+  },
+  "sound_autosave": {
+    "schema": 1,
+    "scope": "Main settings sound volume/mute only",
+    "quiet_ms": 400,
+    "failure_retry_ms": 2000,
+    "pending_weak_targets_max": 1,
+    "managed_weak_handles_max": 4,
+    "main_thread_only": true,
+    "idle_tick_clock_or_io": false,
+    "original_setter_and_close_save_preserved": true,
+    "init_gate": "post-original BindData, suppress nested binds, validated active Behaviour presenter/model/settings identities",
+    "device_reset_trigger_verified": false,
+    "device_persistence_verified": false,
+    "pin_packet_sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
   }
 }
