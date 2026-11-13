@@ -34,6 +34,12 @@ def git(arguments,*,env=None,data=None):
         check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE).stdout.decode().strip()
 
 
+def artifact_name_allowed(name):
+    return (isinstance(name, str) and re.fullmatch('[A-Za-z0-9._-]+', name) is not None
+            and (name.endswith(('.apk', '.ipa', '.app.zip'))
+                 or re.fullmatch(r'IdolyPride-ServerData-v[0-9]+\.[0-9]+\.[0-9]+\.zip', name) is not None))
+
+
 def main():
     os.umask(0o077)
     parser=argparse.ArgumentParser(description=__doc__)
@@ -51,8 +57,7 @@ def main():
     names=set()
     for item in files:
         path=Path(item['path']).resolve(strict=True); name=item['name']
-        if (path.name!=name or name in names or not re.fullmatch('[A-Za-z0-9._-]+',name)
-                or not name.endswith(('.apk','.ipa','.app.zip')) or type(item['bytes']) is not int
+        if (path.name!=name or name in names or not artifact_name_allowed(name) or type(item['bytes']) is not int
                 or not 0<item['bytes']<=2*1024**3 or path.stat().st_size!=item['bytes']
                 or not re.fullmatch('[a-f0-9]{64}',item['sha256'])): raise ValueError('Artifact identity differs')
         with path.open('rb') as stream:
