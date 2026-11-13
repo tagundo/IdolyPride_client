@@ -1,0 +1,1 @@
+Idoly Pride0.3.28 Android ja fixed UI client. The client requests resource manifests and game assets from the local server at127.0.0.1:8080. Independent actual binary, font/UI, native and signature QA is embedded in RELEASE-VERIFICATION.json. Existing app identity and original game code are preserved. Physical-device playback/offline decoding remains unverified.
