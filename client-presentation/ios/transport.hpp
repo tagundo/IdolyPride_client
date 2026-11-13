@@ -88,8 +88,13 @@ void *presentation_poll(void *) {
 __attribute__((constructor)) void start_presentation() {
     if (started.exchange(true)) return;
     pthread_t installer, poller;
-    if (pthread_create(&installer,nullptr,install,nullptr)) { set_state("init_failed"); return; }
-    pthread_detach(installer);
+    // UnityFramework is already mapped when this dependency constructor runs.
+    // Configure all original pointers and publish gates before Unity startup.
+    if (mapped_unity_header()) install(nullptr);
+    else {
+        if (pthread_create(&installer,nullptr,install,nullptr)) { set_state("init_failed"); return; }
+        pthread_detach(installer);
+    }
     if (!pthread_create(&poller,nullptr,presentation_poll,nullptr)) pthread_detach(poller);
     else set_state("init_failed");
 }

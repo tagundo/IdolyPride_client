@@ -11,9 +11,9 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "59a392fdf5c18c16c4b459cd17d2a826996531b4f0355acfaa5e51bad6c53143"
-PROFILE_ENTRY_COUNT = 90
-PROFILE_HOOK_COUNT = 32
+PROFILE_SHA256 = "fb72f930ac7afe5fafb705f5a708c93aa7c79864e6c25cf0e4b5d137194737b9"
+PROFILE_ENTRY_COUNT = 103
+PROFILE_HOOK_COUNT = 33
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
 BOOTSTRAP_SHA256 = "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce"
 IPA_SHA256 = "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
@@ -105,7 +105,9 @@ def make_plan():
         raise ValueError("Original iOS presentation target differs")
     text, data = profile["segments"]["__TEXT"], profile["segments"]["__DATA"]
     cave, slot = profile["gateway_region"]["rva"], profile["slot_region"]["rva"]
-    if (cave < text["section_end"] or cave + 32 * PROFILE_HOOK_COUNT > text["rva"] + text["filesize"]
+    if (profile["gateway_region"]["bytes"] != 32 * PROFILE_HOOK_COUNT
+            or profile["slot_region"]["bytes"] != 8 * PROFILE_HOOK_COUNT
+            or cave < text["section_end"] or cave + 32 * PROFILE_HOOK_COUNT > text["rva"] + text["filesize"]
             or slot < data["section_end"] or slot < data["rva"] + data["filesize"]
             or slot + 8 * PROFILE_HOOK_COUNT > data["rva"] + data["vmsize"]):
         raise ValueError("Gateway would overlap original code or data sections")

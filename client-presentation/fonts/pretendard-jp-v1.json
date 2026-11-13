@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "policy": "hangul-font-v1",
+  "family": "Pretendard JP SemiBold",
+  "version": "1.309",
+  "file": "PretendardJP-SemiBold.otf",
+  "bytes": 3781740,
+  "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+  "upstream": "https://github.com/orioncactus/pretendard",
+  "cached_source": {"repository": "https://github.com/tagundo/hoshimi-localify-ios", "commit": "6e60a59f2d16a6c4cdee5815644c19604c51b69f", "git_blob": "ab20ba021ecb09802976a8dcee3eaa4219bf55f7", "path": "PretendardJP-SemiBold.otf"},
+  "license": "OFL-1.1",
+  "license_file": "client-presentation/licenses/Pretendard-OFL.txt",
+  "license_bytes": 4816,
+  "license_sha256": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a",
+  "license_source": "https://raw.githubusercontent.com/orioncactus/pretendard/main/LICENSE",
+  "font_bytes_modified": false,
+  "reserved_font_names_retained": true,
+  "modern_hangul_syllables": 11172,
+  "runtime": "One-time TMP fallback activation; serialized legacy Font fallback preserves original Japanese glyphs."
+}

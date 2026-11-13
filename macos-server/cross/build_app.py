@@ -27,13 +27,15 @@ from adhoc_verify import verify_adhoc
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
+sys.path.insert(0, str(ROOT / "src"))
 from certificate_bundle import install_certificate_bundle
+from payload import translation_bundle_input
 APP = "IdolyPrideLocalServer"
 VERSION = "0.3.25"
 BUILD_NUMBER = "44"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
-PAYLOAD_SHA = "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f"
-PAYLOAD_BYTES = 191118320
+PAYLOAD_SHA = "c94cd2ee7e722e6df67f02f31868422ff5d3bf1657c64a05a61b5059572475d8"
+PAYLOAD_BYTES = 191305222
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
 CGROUP = Path("/sys/fs/cgroup")
 
@@ -152,6 +154,9 @@ def archive_app(app, archive):
 def build(args):
     if sys.version_info[:2] != (3, 12):
         raise ValueError("Use CPython 3.12 for original PYZ inspection")
+    translations, translation_report = translation_bundle_input(
+        getattr(args, "translations", None), getattr(args, "translations_sha256", None),
+        getattr(args, "translations_bytes", None))
     for path, expected, size in ((args.runtime, RUNTIME_SHA, None), (args.payload, PAYLOAD_SHA, PAYLOAD_BYTES),
                                  (args.rcodesign, SIGNER_SHA, None)):
         if path.is_symlink() or not path.is_file() or (size is not None and path.stat().st_size != size) or digest(path) != expected:
@@ -188,7 +193,8 @@ def build(args):
               "ui": "native AppKit (SDK-free C)", "actual_mac_execution": False,
               "actual_gameplay_verified": False, "notarized": False, "signature": "ad-hoc",
               "user_python_required": False, "user_terminal_required": False,
-              "input_runtime_archive_sha256": RUNTIME_SHA, "server_data_sha256": PAYLOAD_SHA}
+              "input_runtime_archive_sha256": RUNTIME_SHA, "server_data_sha256": PAYLOAD_SHA,
+              "translations": translation_report}
     report["runtime"] = export_runtime(args.runtime, resources/"runtime")
     release_public_input_cache(args.runtime)
     report["public_tls_trust"] = install_certificate_bundle(resources/"runtime/_internal", resources/"licenses/tls")
@@ -199,6 +205,11 @@ def build(args):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, target)
     report["payload_installation"] = install_payload(args.payload, resources/"ServerData.zip")
+    if translations is not None:
+        report["translations"]["installation"] = install_payload(translations, resources / "bundledTranslations.zip",
+            expected_sha=translation_report["sha256"], expected_bytes=translation_report["bytes"])
+        (resources / "bundledTranslations.json").write_text(json.dumps({"schema": 1, "platform": "ios",
+            "sha256": translation_report["sha256"], "bytes": translation_report["bytes"]}, sort_keys=True) + "\n")
     for source in (ROOT/"LICENSE", ROOT/"NOTICE"):
         if source.is_file():
             target = resources/"licenses"/source.name
@@ -235,6 +246,9 @@ def build(args):
                         args.evidence, "sign", seconds=90))
     if tree_hashes(resources/"runtime") != report["runtime_before_signing"] or digest(resources/"ServerData.zip") != PAYLOAD_SHA:
         raise ValueError("Outer signing changed an immutable runtime/payload input")
+    if translations is not None and (digest(resources / "bundledTranslations.zip") != translation_report["sha256"]
+            or digest(translations) != translation_report["sha256"]):
+        raise ValueError("Outer signing changed the optional translation input")
     # rcodesign 0.29's verify tries to parse its own empty ad-hoc CMS wrapper as
     # an X.509 signature. Verify the actual ad-hoc page/special-slot hashes.
     report["signature_verification"] = verify_adhoc(executable, info=contents/"Info.plist",
@@ -271,6 +285,9 @@ def main():
     for name in ("runtime", "payload", "llvm", "rcodesign", "app", "archive", "evidence"):
         parser.add_argument("--"+name, type=Path, required=True)
     parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--translations", type=Path, help="Optional separately prepared iOS translation ZIP")
+    parser.add_argument("--translations-sha256", help="Explicit optional translation ZIP SHA-256")
+    parser.add_argument("--translations-bytes", type=int, help="Exact optional translation ZIP size")
     build(parser.parse_args())
 
 

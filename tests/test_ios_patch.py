@@ -94,6 +94,42 @@ class IOSPackagingTests(unittest.TestCase):
                                   unity_settings_patched_sha256=sha(patched_settings),
                                   unity_settings_size=len(self.settings))
 
+    def test_fixed_ui_resource_is_streamed_and_verified_without_reading_whole_asset(self):
+        from unittest.mock import patch
+        from dataclasses import replace
+        ui_name = APP + "Data/resources.assets"
+        source_ui, localized_ui = b"original UI resource", b"translated English UI resource"
+        with ZipFile(self.source, "a") as archive:
+            archive.writestr(ui_name, source_ui)
+        profile = replace(self.profile, ipa_sha256=hashlib.sha256(self.source.read_bytes()).hexdigest())
+        actual_read = ZipFile.read
+        def bounded_read(archive, name, *args, **kwargs):
+            if name == ui_name:
+                raise AssertionError("The complete UI member must use forward ZIP streams")
+            return actual_read(archive, name, *args, **kwargs)
+        def ui_stream(archive, name, destination, value, **kwargs):
+            self.assertEqual((name, value, kwargs["language"]), (ui_name, b"compiled CSV", "en"))
+            with archive.open(name) as source:
+                self.assertEqual(source.read(), source_ui)
+            self.assertEqual(destination.write(localized_ui), len(localized_ui))
+            return {"language": "en", "output_asset_bytes": len(localized_ui),
+                    "output_asset_sha256": hashlib.sha256(localized_ui).hexdigest()}
+        with patch("idoly_local.ui_assets.load_package_inputs", return_value=(b"compiled CSV", {})), \
+                patch("idoly_local.ui_assets.patch_ios_member", side_effect=ui_stream), \
+                patch.object(ZipFile, "read", bounded_read):
+            report = package_ios_client(self.source, self.output, bootstrap=False, profile=profile,
+                                        ui_language="en", ui_csv_file=self.root/"compiled.csv",
+                                        ui_proof_file=self.root/"proof.json")
+        with ZipFile(self.output) as archive:
+            self.assertEqual(archive.read(ui_name), localized_ui)
+            self.assertEqual(archive.read(APP + "Data/keep.bin"), b"preserved game data")
+        self.assertEqual(report["ui_language"], "en")
+        self.assertEqual(report["ui_translation"]["output_asset_sha256"], hashlib.sha256(localized_ui).hexdigest())
+
+    def test_missing_fixed_ui_inputs_are_rejected_before_source_is_opened(self):
+        with self.assertRaisesRegex(ValueError, "requires CSV"):
+            package_ios_client(self.root/"missing.ipa", self.output, ui_language="ko")
+
     def test_packages_isolated_client_and_preserves_unmodified_members(self):
         original_sha = hashlib.sha256(self.source.read_bytes()).hexdigest()
         endpoint = "http://a-long-local-server-name.example:50051"
@@ -234,6 +270,55 @@ class IOSPackagingTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 package_ios_client(self.source, self.output, profile=self.profile, **kwargs)
             self.assertFalse(self.output.exists())
+
+    def test_font_asset_and_native_hook_must_be_supplied_together_before_source_read(self):
+        library, plan = self.presentation_inputs()
+        valid_plan = json.loads(plan.read_text())
+        for font_hooks, supplied_font in [(True, False), (False, True)]:
+            plan.write_text(json.dumps({**valid_plan, 'hook_names': ['font_awake'] if font_hooks else []}))
+            kwargs = {'font_file': self.root/'explicit.otf'} if supplied_font else {}
+            with self.subTest(font_hooks=font_hooks, supplied_font=supplied_font), \
+                    mock.patch('idoly_local.ios_patch._file_sha256', side_effect=AssertionError('source read')), \
+                    self.assertRaisesRegex(ValueError, 'supplied together'):
+                package_ios_client(self.source, self.output, presentation_library=library,
+                                   presentation_plan=plan, profile=self.profile, **kwargs)
+            self.assertFalse(self.output.exists())
+        with self.assertRaisesRegex(ValueError, 'license requires'):
+            package_ios_client(self.source, self.output, font_license_file=self.root/'OFL.txt')
+        with self.assertRaisesRegex(ValueError, 'native presentation fallback'):
+            package_ios_client(self.source, self.output, font_file=self.root/'explicit.otf')
+
+    def test_font_package_replaces_declared_asset_and_embeds_exact_notices(self):
+        library, plan = self.presentation_inputs()
+        document = json.loads(plan.read_text())
+        plan.write_text(json.dumps({**document, 'hook_names': ['font_awake']}))
+        asset = APP+'Data/sharedassets0.assets'
+        with ZipFile(self.source, 'a') as archive:
+            archive.writestr(asset, b'original font asset')
+        profile = replace(self.profile, ipa_sha256=hashlib.sha256(self.source.read_bytes()).hexdigest())
+        presentation = types.ModuleType('idoly_local.ios_presentation')
+        presentation.patch_presentation = mock.Mock(return_value=(self.unity, {}))
+        notices = {'IdolyFontSupport.json': b'font proof', 'OFL-Pretendard.txt': b'exact license'}
+        with mock.patch('idoly_local.native_bootstrap.patch_native', return_value=(self.unity, {'platform':'ios'})), \
+                mock.patch.dict(sys.modules, {presentation.__name__: presentation}), \
+                mock.patch('idoly_local.font_assets.read_font', return_value=(b'font bytes', {})), \
+                mock.patch('idoly_local.font_assets.read_license', return_value=b'exact license'), \
+                mock.patch('idoly_local.font_assets.patch_bytes', return_value=(b'patched font asset', {'policy':'hangul-font-v1'})) as patch, \
+                mock.patch('idoly_local.font_assets.package_notices', return_value=notices):
+            report = package_ios_client(self.source, self.output, presentation_library=library,
+                                        presentation_plan=plan, font_file=self.root/'font.otf', profile=profile)
+        patch.assert_called_once_with(b'original font asset', b'font bytes', 'ios')
+        with ZipFile(self.output) as archive:
+            self.assertEqual(archive.read(asset), b'patched font asset')
+            self.assertEqual(archive.read(APP+'Data/keep.bin'), b'preserved game data')
+            self.assertEqual(plistlib.loads(archive.read(APP+'Info.plist'))['CFBundleVersion'], '156.9005')
+            for name, raw in notices.items():
+                member = APP+'IdolyFonts/'+name
+                self.assertEqual(archive.read(member), raw)
+                self.assertEqual(report['font_support']['notice_members'][member],
+                                 {'bytes':len(raw), 'sha256':hashlib.sha256(raw).hexdigest()})
+        self.assertEqual(report['font_support']['output_members'][asset]['sha256'],
+                         hashlib.sha256(b'patched font asset').hexdigest())
 
     def test_presentation_rejects_bad_library_or_plan_before_output(self):
         library, plan = self.presentation_inputs()

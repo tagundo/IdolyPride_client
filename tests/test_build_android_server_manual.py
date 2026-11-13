@@ -148,7 +148,8 @@ def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit
     root = Path(tool.__file__).resolve().parents[1]
     names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py",
              tool.PAYLOAD_INVENTORY,
-             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py")
+             "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py",
+             "src/idoly_local/bundled_translations.py")
     frozen = {name: (root / name).read_bytes() for name in names}
     def git(_root, *args, limit):
         return frozen[args[2].split(":", 1)[1]]
@@ -259,6 +260,10 @@ def payload_case(tmp_path, monkeypatch):
     new = {**old, **{"data/master-json/" + name + ".json": b'[{"id":"new-public"}]' for name in tool.EXTRA_TABLES}}
     for table, values in rows.items():
         new["data/master-json/" + table + ".json"] = json.dumps(values).encode()
+    # Keep the authoritative row-count invariant while using tiny public fixtures.
+    new["data/master-json/HomeTalk.json"] = json.dumps([
+        {"id": f"synthetic-home-talk-{index}"} for index in range(tool.SERVER_JSON_ADDITIONS[0]["rows"])
+    ]).encode()
     monkeypatch.setattr(tool, "ADDED_JSON_SHA256", {table: hashlib.sha256(
         new["data/master-json/" + table + ".json"]).hexdigest() for table in tool.EXTRA_TABLES})
     proofs = {name: {"bytes": 4096, "sha256": hashlib.sha256(b"x" * 4096).hexdigest()}
@@ -274,18 +279,23 @@ def payload_case(tmp_path, monkeypatch):
     return baseline, payload, new, write
 
 
-def test_payload_extends_only_fourteen_public_tables_and_verifies_actual_file_provenance(payload_case):
+def test_payload_extends_only_fifteen_public_tables_and_verifies_actual_file_provenance(payload_case):
     baseline, payload, _files, write = payload_case
     digest = write()
     with ZipFile(baseline) as archive:
         report = tool.validate_payload(payload, digest, archive)
-    assert len(report["tables"]) == 54 and report["sha256"] == digest
+    assert len(report["tables"]) == 55 and report["sha256"] == digest
 
 
 @pytest.mark.parametrize("change", [None, "changed-catalog", "changed-proof", "extra-provenance"])
-def test_versioned_payload_catalog_is_bound_to_external_frozen_inventory(payload_case, change):
+def test_versioned_payload_catalog_is_bound_to_external_frozen_inventory(payload_case, change, monkeypatch):
     baseline, payload, files, _write = payload_case
     inventory = tool.load_payload_inventory()
+    home = files["data/master-json/HomeTalk.json"]
+    synthetic_home = [{"path": "data/master-json/HomeTalk.json", "bytes": len(home),
+                       "sha256": hashlib.sha256(home).hexdigest(), "rows": 559}]
+    monkeypatch.setattr(tool, "SERVER_JSON_ADDITIONS", synthetic_home)
+    inventory["server_json_additions"] = copy.deepcopy(synthetic_home)
     for row in inventory["additions"] + inventory["ios_public_files"]:
         raw = ("synthetic original public catalog " + row["path"]).encode()
         files[row["path"]] = raw
@@ -477,7 +487,7 @@ def test_gradle_python_exclusions_match_the_manual_server_dependency_boundary():
     gradle = (Path(tool.__file__).resolve().parents[1] / tool.GRADLE).read_text()
     excluded_paths = re.findall(r'"(idoly_local/[^"\n]+\.py)"', gradle)
     expected = {name.replace(".", "/") + ".py" for name in tool.pybundle.ANDROID_EXCLUDED_MODULES}
-    assert len(excluded_paths) == len(expected) == 26
+    assert len(excluded_paths) == len(expected) == 32
     assert set(excluded_paths) == expected
 
 

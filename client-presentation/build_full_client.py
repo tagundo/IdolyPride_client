@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """Add the audited bridge to the exact diagnostic base as a normal APK update.
 
-Only the manifest changes among existing members. Original SDK/DEX/native,
-resources, Unity GUID and metadata are copied unchanged. No device is accessed.
+Only declared manifest/font changes are permitted among existing members.
+Original SDK/DEX/native, Unity GUID and metadata are copied unchanged.
+No device is accessed.
 """
 from __future__ import annotations
 
 import argparse
 import copy
 import hashlib
+import gc
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -144,18 +146,23 @@ def hashes(archive, infos):
     return result
 
 
-def stream_apk(source, target, manifest, additions):
+def stream_apk(source, target, manifest, additions, *, replacements=None):
+    replacements = replacements or {}
     with ZipFile(source) as incoming, ZipFile(target, "x") as outgoing:
         for name, info in members(incoming).items():
             copied = copy.copy(info)
             if name == "AndroidManifest.xml": outgoing.writestr(copied, manifest)
+            elif name in replacements: outgoing.writestr(copied, replacements[name])
             else:
                 with incoming.open(info) as reader, outgoing.open(copied, "w") as writer:
                     shutil.copyfileobj(reader, writer, 1024 * 1024)
             outgoing.getinfo(name).external_attr = info.external_attr
         for name, raw in additions.items():
             info = ZipInfo(name); info.external_attr = 0o100644 << 16
-            info.compress_type = ZIP_STORED if name.endswith((".dex", ".so")) else ZIP_DEFLATED
+            # Unity's split asset reader may use Android asset file descriptors;
+            # new asset tails must remain directly readable like native/DEX data.
+            font_part = re.fullmatch(r"assets/bin/Data/sharedassets0\.assets\.split[0-9]+", name)
+            info.compress_type = ZIP_STORED if name.endswith((".dex", ".so")) or font_part else ZIP_DEFLATED
             outgoing.writestr(info, raw)
 
 
@@ -220,7 +227,21 @@ def build(args):
     if not re.fullmatch(r"[0-9a-f]{40}",args.source_commit): raise ValueError("An exact frozen source commit is required")
     source_hashes = addon.frozen_sources(args.source_commit, extra=(
         "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
-        "tools/repack_android_server_python.py", "tools/package_android_resource_client.py"))
+        "tools/repack_android_server_python.py", "tools/package_android_resource_client.py",
+        "src/idoly_local/font_assets.py", "client-presentation/fonts/pretendard-jp-v1.json",
+        "client-presentation/licenses/Pretendard-OFL.txt", "src/idoly_local/ui_assets.py",
+        "src/idoly_local/ui_translation_build.py"))
+    from idoly_local.ui_assets import load_package_inputs, android_members as ui_android_members
+    ui_language = getattr(args, "ui_language", "ja")
+    ui_csv, ui_proof = load_package_inputs(ui_language, getattr(args, "ui_csv_file", None),
+                                          getattr(args, "ui_proof_file", None))
+    font_file = getattr(args, "font_file", None)
+    font_license_file = getattr(args, "font_license_file", None)
+    if font_license_file is not None and font_file is None:
+        raise ValueError("A font license requires its explicit font file")
+    font_profile = json.loads((ROOT / "client-presentation/native/profile.json").read_text())
+    if ("font_awake" in font_profile.get("aliases", {})) != (font_file is not None):
+        raise ValueError("The font-aware presentation native and audited font asset must be supplied together")
     replacement_native = getattr(args, "native_library", None)
     feature_proof = addon.verified_feature(feature, args.source_commit, source_hashes)
     if feature_proof.get("base_apk_sha256") != BASE_SHA256:
@@ -264,6 +285,28 @@ def build(args):
         additions = {addon.LIBRARY: native, MARKER: (json.dumps(marker(native_input["sha256"]),sort_keys=True,indent=2)+"\n").encode(), **addon.license_members("diagnostics")}
     with ZipFile(source) as base:
         infos = members(base); before = hashes(base, infos); addon.check_base_members(base, "diagnostics")
+        font_report = ui_report = None
+        existing_replacements = {}
+        if font_file is not None:
+            from idoly_local.font_assets import read_font, read_license, android_members, package_notices
+            font_data, _font_info = read_font(font_file)
+            license_path = Path(font_license_file) if font_license_file is not None else ROOT / "client-presentation/licenses/Pretendard-OFL.txt"
+            license_data = read_license(license_path)
+            font_parts, font_report = android_members(base, font_data)
+            existing_replacements = {name: value for name, value in font_parts.items() if name in infos}
+            additions.update({name: value for name, value in font_parts.items() if name not in infos})
+            notices = {"assets/idoly-fonts/" + name: raw for name, raw in package_notices(font_report, license_data).items()}
+            additions.update(notices)
+            font_report["notice_members"] = {name: {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+                                             for name, raw in notices.items()}
+            del font_data, font_parts
+            gc.collect()
+        if ui_csv is not None:
+            ui_replacements, ui_report = ui_android_members(base, ui_csv, language=ui_language,
+                                                           translation_proof=ui_proof)
+            if existing_replacements.keys() & ui_replacements.keys():
+                raise ValueError("UI and font resource replacements overlap")
+            existing_replacements.update(ui_replacements)
     added_dex = next_dex(infos); additions[added_dex] = dex
     if additions.keys() & infos.keys(): raise ValueError("Standalone additions collide with original members")
     output.parent.mkdir(parents=True,exist_ok=True)
@@ -283,7 +326,7 @@ def build(args):
         if compiled_tree(old_tree)!=compiled_tree(new_tree,remove_provider=True): raise ValueError("An original compiled manifest value changed")
         shutil.rmtree(decoded);resource_input.unlink();rebuilt.unlink()
         unsigned,aligned,signed=work/"unsigned.apk",ram/"aligned.apk",work/"signed.apk"
-        stream_apk(source,unsigned,manifest,additions);cache.register(unsigned,None,own=True)
+        stream_apk(source,unsigned,manifest,additions,replacements=existing_replacements);cache.register(unsigned,None,own=True)
         run([sdk/"zipalign","-f","16384",unsigned,aligned]);cache.register(aligned,None,own=True)
         run([sdk/"zipalign","-c","16384",aligned]);unsigned.unlink();cache.files.pop(unsigned)
         password=Path(args.password_file);key=Path(args.keystore)
@@ -299,7 +342,9 @@ def build(args):
         run([sdk/"zipalign","-c","16384",signed])
         with ZipFile(signed) as z:
             after=hashes(z,members(z))
-            expected={**before,"AndroidManifest.xml":hashlib.sha256(manifest).hexdigest(),**{n:hashlib.sha256(v).hexdigest() for n,v in additions.items()}}
+            expected={**before,"AndroidManifest.xml":hashlib.sha256(manifest).hexdigest(),
+                **{n:hashlib.sha256(v).hexdigest() for n,v in existing_replacements.items()},
+                **{n:hashlib.sha256(v).hexdigest() for n,v in additions.items()}}
             if after!=expected: raise ValueError("Original game/SDK/resource member changed")
         final_tree=run([sdk/"aapt2","dump","xmltree","--file","AndroidManifest.xml",signed]).decode()
         if compiled_tree(old_tree)!=compiled_tree(final_tree,remove_provider=True):raise ValueError("Signed manifest changed")
@@ -307,14 +352,22 @@ def build(args):
         if postflight["oom_kill"]!=preflight["oom_kill"]:raise ValueError("OOM counter changed")
         if addon.frozen_sources(args.source_commit, extra=(
                 "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
-                "tools/repack_android_server_python.py", "tools/package_android_resource_client.py")) != source_hashes:
+                "tools/repack_android_server_python.py", "tools/package_android_resource_client.py",
+                "src/idoly_local/font_assets.py", "client-presentation/fonts/pretendard-jp-v1.json",
+                "client-presentation/licenses/Pretendard-OFL.txt", "src/idoly_local/ui_assets.py",
+                "src/idoly_local/ui_translation_build.py")) != source_hashes:
             raise ValueError("Frozen packaging sources changed")
         if addon.verified_feature(feature, args.source_commit, source_hashes) != feature_proof:
             raise ValueError("Source-bound feature changed during packaging")
         report={"schema":1,"standalone":True,"source_commit":args.source_commit,"source_apk_sha256":BASE_SHA256,"source_apk_bytes":BASE_BYTES,
             "output_apk_sha256":addon.digest(signed),"output_bytes":signed.stat().st_size,"certificate_sha256":CERTIFICATE,
             "signature_v2_v3_verified":True,"manifest_original_values_preserved":True,"provider":PROVIDER,"added_dex":added_dex,
-            "all_original_members_preserved_except_manifest_and_signatures":True,"original_member_sha256":before,
+            "all_original_members_preserved_except_manifest_and_signatures":font_report is None and (ui_report is None or ui_report["ui_asset_byte_identical"]),
+            "all_original_members_preserved_except_declared_manifest_and_font_splits":ui_report is None or ui_report["ui_asset_byte_identical"],
+            "all_original_members_preserved_except_declared_manifest_font_and_UI_assets":True,
+            "allowed_existing_member_replacements":["AndroidManifest.xml", *sorted(existing_replacements)],
+            "font_support":font_report,"ui_language":ui_language,"ui_translation":ui_report,
+            "original_member_sha256":before,
             "added_member_sha256":{n:after[n] for n in additions},"native_library_sha256":native_input["sha256"],
             "native_input":native_input,
             "reused_audited_feature_sha256":feature_sha,"source_sha256":source_hashes, "staging":placement,
@@ -335,6 +388,11 @@ def main():
     parser.add_argument("--all-tmpfs", action="store_true", help="Keep output and at most two full staged APKs inside /dev/shm; root/memory guards remain unchanged")
     parser.add_argument("--native-library",type=Path,
         help="Use a native library with an adjacent exact-source build-receipt.json; otherwise retain the source-bound feature native")
+    parser.add_argument("--font-file",type=Path,help="Audited Pretendard JP input; required by the font-aware native profile")
+    parser.add_argument("--font-license-file",type=Path,help="Audited original OFL text (defaults to the bundled source license)")
+    parser.add_argument("--ui-language", choices=("ja", "ko", "en"), default="ja", help="Fixed built-in UI language")
+    parser.add_argument("--ui-csv-file", type=Path, help="Audited original or pretranslated UI CSV")
+    parser.add_argument("--ui-proof-file", type=Path, help="Translation build proof, required for Korean/English UI")
     args=parser.parse_args();result=build(args)
     print(json.dumps({k:result[k] for k in ("output_apk_sha256","output_bytes","certificate_sha256")}))
 

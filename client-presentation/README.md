@@ -116,9 +116,9 @@ python -m pytest -q client-presentation/native/tests
 
 `build_full_client.py` provides a normal full-APK fallback for the exact pinned
 published diagnostic base. It reuses the audited feature's own DEX and native
-library, appends `classes6.dex` and a private provider, and preserves every
-original SDK/DEX/native/resource/Unity member except the manifest. The compiled
-manifest comparison permits only that provider addition. The output retains
+library, appends `classes6.dex` and a private provider, and preserves original
+SDK/DEX/native and Unity members except the declared manifest and font assets.
+The compiled manifest comparison permits only that provider addition. The output retains
 the AA4e certificate, package and version414 and verifies both v2/v3 signatures.
 `assets/idoly-presentation-standalone.json` contains only the five public
 compatibility fields used by the server to recognize the bridge in the base.
@@ -144,3 +144,29 @@ fixed by its original SHA-256 and length. Optional `--native-library` requires
 the same native receipt contract while retaining the feature's own DEX; the
 standalone marker records its actual hash. Distribute this complete client APK
 separately from the server APK.
+
+## Korean font assets
+
+The font-aware native profile requires `--font-file` on `build_full_client.py`
+and on `tools/patch_ios_client.py` together with its presentation library/plan.
+Supply the unmodified Pretendard JP SemiBold input pinned by
+`fonts/pretendard-jp-v1.json`. The offline asset writer requires
+`UnityPy==1.25.4`; the game and server do not import that build dependency.
+`--font-license-file` can explicitly supply the pinned OFL text, which otherwise
+comes from `licenses/Pretendard-OFL.txt`. Both builders reject an unpaired font
+asset/native hook, a changed font or license, and an unexpected original asset.
+
+The patch replaces the embedded SourceSansPro `Font` data and adds one legacy
+fallback reference from the original Japanese `Font`. It preserves the Japanese
+font bytes, all nineteen other serialized objects, and their external references.
+The original SourceSansPro TMP asset remains in Dynamic mode and still references
+that embedded `Font`. The native Awake hook checks the mode and source, retains
+the fallback once and generates only requested glyphs. It does not scan text
+every frame or pre-generate all 11,172 Korean syllables.
+
+Android re-splits the shared asset into its declared 24 one-MiB-or-smaller parts;
+iOS replaces the single shared asset. The client includes `IdolyFontSupport.json`
+and `OFL-Pretendard.txt` under Android `assets/idoly-fonts/` or iOS `IdolyFonts/`.
+The adjacent provenance/report records input/output hashes, actual Unicode
+coverage, the unchanged Japanese data and object proofs. These checks establish
+asset integrity and coverage; they do not claim a physical-device rendering test.

@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path, PurePosixPath
 import shutil
+import sys
 import tempfile
 import threading
 from zipfile import ZipFile
@@ -15,6 +16,7 @@ _LOCK = threading.RLock()
 _RUNTIME = None
 _LAST_STATUS = {"running": False, "message": "서버 대기"}
 _LAST_DIAGNOSTICS = {"running": False}
+_TRANSLATION_STATUS = {"state": "absent"}
 _PUBLIC_FOLDERS = {"protocol", "original-master", "master-json"}
 _TUTORIAL_FILES = {"data/public-tutorial/manifest.json", "data/public-tutorial/tutorial-short.pb",
                    "data/public-tutorial/tutorial-full.pb"}
@@ -128,6 +130,61 @@ def _copy_asset(assets, destination: Path, expected_sha256: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _install_bundled_translations(assets, build_config, files, data, resource_cache_dir, log):
+    """Read the separate optional asset only during server startup."""
+    from idoly_local.bundled_translations import MAX_BUNDLE, install_translation_bundle
+
+    expected = str(getattr(build_config, "BUNDLED_TRANSLATIONS_SHA256", ""))
+    size = int(getattr(build_config, "BUNDLED_TRANSLATIONS_BYTES", 0))
+    if not expected and size == 0:
+        return {"state": "absent"}
+    if not re.fullmatch(r"[0-9a-f]{64}", expected) or not 0 < size <= MAX_BUNDLE:
+        raise ValueError("Bundled translation identity is invalid")
+    destination = files / ("bundled-translations-" + expected + ".zip")
+    if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+        raise ValueError("Bundled translation cache is not a regular file")
+    if not (destination.is_file() and destination.stat().st_size == size and _digest(destination) == expected):
+        from java import jarray, jbyte
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        incoming = assets.open("bundledTranslations.zip")
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=destination.parent, prefix=".translations-zip-", delete=False) as output:
+                temporary = Path(output.name)
+                buffer, digest, count = jarray(jbyte)(64 * 1024), hashlib.sha256(), 0
+                while True:
+                    length = incoming.read(buffer)
+                    if length < 0:
+                        break
+                    if length:
+                        count += length
+                        if count > size:
+                            raise ValueError("Bundled translation asset exceeds its declared size")
+                        chunk = memoryview(buffer).cast("B")[:length]
+                        digest.update(chunk); output.write(chunk)
+                output.flush(); os.fsync(output.fileno())
+            if count != size or digest.hexdigest() != expected:
+                raise ValueError("Bundled translation asset failed its digest check")
+            os.replace(temporary, destination)
+        finally:
+            active_error = sys.exc_info()[0] is not None
+            try:
+                incoming.close()
+            except BaseException:
+                if not active_error:
+                    raise
+            finally:
+                if temporary is not None:
+                    temporary.unlink(missing_ok=True)
+    selected_root = Path(resource_cache_dir) if resource_cache_dir is not None else data
+    from idoly_local.resource_translation_runtime import validate_prepared_translations
+
+    return install_translation_bundle(destination, selected_root, expected_sha256=expected,
+        expected_bytes=size, platform="android", log=log,
+        validate_prepared=lambda prepared: validate_prepared_translations(prepared, data, platform="android"))
+
+
 class _AndroidResourceResponse:
     """Normal platform HTTPS trust and streaming, with no redirect or TLS bypass."""
 
@@ -217,7 +274,7 @@ def _fetch_resource(url, *, timeout):
 def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False,
           download_missing_resources=True, media_mode=False, resource_cache_dir=None):
     """Start the embedded loopback runtime; called on the service worker."""
-    global _RUNTIME, _LAST_STATUS
+    global _RUNTIME, _LAST_STATUS, _TRANSLATION_STATUS
     if type(download_missing_resources) is not bool:
         raise ValueError("Resource downloads must be an explicit boolean")
     if type(media_mode) is not bool:
@@ -250,6 +307,13 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
             bundle = files / "bundled-server-data.zip"
             _copy_asset(assets, bundle, expected)
             data = install_bundle(bundle, files, expected)
+            try:
+                _TRANSLATION_STATUS = _install_bundled_translations(
+                    assets, build_config, files, data, resource_cache_dir, log)
+            except (OSError, ValueError):
+                _TRANSLATION_STATUS = {"state": "failed", "installed": False,
+                                       "previous_files_preserved": True}
+                log("번역 패키지를 설치하지 못했습니다. 기존 번역과 원본 자료는 변경하지 않았습니다.")
             from idoly_local.app_runtime import start as start_runtime
 
             live_options = {}
@@ -264,6 +328,8 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
                                      resource_cache_dir=resource_cache_dir,
                                      resource_fetcher=_fetch_resource, **live_options)
             _LAST_STATUS = _RUNTIME.status()
+            if _TRANSLATION_STATUS.get("state") != "absent":
+                _LAST_STATUS["bundled_translations"] = dict(_TRANSLATION_STATUS)
             return json.dumps(_LAST_STATUS, ensure_ascii=False)
         except BaseException as error:
             _LAST_STATUS = {"running": False, "message": "서버를 시작하지 못했습니다", "error_type": type(error).__name__}
@@ -286,6 +352,8 @@ def stop():
 def status_json():
     with _LOCK:
         value = _RUNTIME.status() if _RUNTIME is not None else _LAST_STATUS
+        if _TRANSLATION_STATUS.get("state") != "absent":
+            value = dict(value, bundled_translations=dict(_TRANSLATION_STATUS))
         return json.dumps(value, ensure_ascii=False)
 
 
@@ -293,6 +361,8 @@ def diagnostics_json():
     """Return bounded diagnostic events only; never open profiles or state.db."""
     with _LOCK:
         value = _RUNTIME.diagnostics_snapshot() if _RUNTIME is not None else _LAST_DIAGNOSTICS
+        if _TRANSLATION_STATUS.get("state") != "absent":
+            value = dict(value, bundled_translations=dict(_TRANSLATION_STATUS))
         return json.dumps(value, ensure_ascii=False)
 
 

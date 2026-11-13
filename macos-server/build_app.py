@@ -18,11 +18,12 @@ import sys
 import tempfile
 from zipfile import ZipFile
 
-from payload import member_path
+from payload import member_path, translation_bundle_input
 from certificate_bundle import install_certificate_bundle
 
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / "src"))
 APP_NAME = "IdolyPrideLocalServer"
 LIVE_ENGINE_NAME = "libidoly_live.dylib"
 LIVE_ENGINE_LICENSE_FILES = (
@@ -149,7 +150,8 @@ def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float =
 
 
 def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
-          live_engine_library: Path | None = None, *, build_number: str = "44"):
+          live_engine_library: Path | None = None, *, build_number: str = "44", translations=None,
+          translations_sha256=None, translations_bytes=None):
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise ValueError("Build on an Apple Silicon macOS runner (macos-15, uname -m = arm64)")
     if output.suffix != ".app" or output.exists() or archive.exists():
@@ -158,6 +160,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         raise ValueError("Version must contain only digits and periods")
     if not build_number or any(char not in "0123456789" for char in build_number) or int(build_number) <= 0:
         raise ValueError("Build number must be a positive decimal integer")
+    translations, translation_report = translation_bundle_input(translations, translations_sha256, translations_bytes)
     live_engine = {"included": False}
     if live_engine_library is not None:
         live_engine_library = live_engine_library.expanduser().resolve(strict=True)
@@ -199,6 +202,14 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
         resources.mkdir()
         shutil.copytree(temporary / "dist/IdolyServerEngine", resources / "runtime", symlinks=True)
         shutil.copy2(server_data, resources / "ServerData.zip")
+        if translations is not None:
+            with translations.open("rb") as incoming, (resources / "bundledTranslations.zip").open("xb") as outgoing:
+                shutil.copyfileobj(incoming, outgoing, length=64 * 1024)
+                outgoing.flush(); os.fsync(outgoing.fileno())
+            if digest(resources / "bundledTranslations.zip") != translation_report["sha256"]:
+                raise ValueError("Copied translation archive differs from its pin")
+            write_json(resources / "bundledTranslations.json", {"schema": 1, "platform": "ios",
+                "sha256": translation_report["sha256"], "bytes": translation_report["bytes"]})
         public_tls_trust = install_certificate_bundle(resources / "runtime/_internal", resources / "licenses/tls")
         embedded_live_engine = resources / "runtime/_internal" / LIVE_ENGINE_NAME
         if live_engine_library is not None:
@@ -227,6 +238,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
              HERE / "App.swift", HERE / "PresentationSettings.swift", "-o", executable], env=environment)
         source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         provenance = {"version": version, "build_number": build_number, "architecture": "arm64", "minimum_macos": "13.0",
+            "translations": translation_report,
             "source_commit": source_commit, "server_data_sha256": digest(server_data),
             "source_sha256": {name: digest(HERE / name) for name in ("App.swift", "PresentationSettings.swift", "engine.py", "payload.py")},
             "python": platform.python_version(),
@@ -319,11 +331,16 @@ def main(argv=None):
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     parser.add_argument("--live-engine-library", type=Path,
                         help="Optional ARM64 macOS 13 libidoly_live.dylib; experimental engine remains off by default")
+    parser.add_argument("--translations", type=Path, help="Optional separately prepared iOS translation ZIP")
+    parser.add_argument("--translations-sha256", help="Explicit optional translation ZIP SHA-256")
+    parser.add_argument("--translations-bytes", type=int, help="Exact optional translation ZIP size")
     args = parser.parse_args(argv)
     try:
         build(args.server_data.resolve(), args.output.resolve(), args.archive.resolve(),
               args.evidence.resolve(), args.version, not args.skip_smoke,
-              live_engine_library=args.live_engine_library, build_number=args.build_number)
+              live_engine_library=args.live_engine_library, build_number=args.build_number,
+              translations=args.translations, translations_sha256=args.translations_sha256,
+              translations_bytes=args.translations_bytes)
     except (ValueError, OSError, subprocess.SubprocessError) as error:
         parser.exit(1, f"macOS app build failed: {error}\n")
     print(args.archive)

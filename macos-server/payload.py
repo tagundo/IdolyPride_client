@@ -113,3 +113,36 @@ def install_payload(source: Path, data_dir: Path, log=None) -> dict:
             if log and copied and copied % 25 == 0:
                 log(f"서버 데이터 준비 중: {copied}개 파일")
     return {"copied": copied, "preserved": preserved}
+
+
+def install_bundled_translations(server_data: Path, cache_root: Path, log=None, *, data_dir=None) -> dict:
+    """Install an optional, separately pinned prepared iOS language package."""
+    from idoly_local.bundled_translations import install_translation_bundle, read_translation_metadata
+
+    directory = Path(server_data).parent
+    archive, metadata = directory / "bundledTranslations.zip", directory / "bundledTranslations.json"
+    if not os.path.lexists(archive) and not os.path.lexists(metadata):
+        return {"state": "absent"}
+    pin = read_translation_metadata(metadata, platform="ios")
+    if data_dir is None:
+        raise ValueError("Installed core data directory is required for language preparation")
+    from idoly_local.resource_translation_runtime import validate_prepared_translations
+
+    return install_translation_bundle(archive, cache_root, expected_sha256=pin["sha256"],
+        expected_bytes=pin["bytes"], platform="ios", log=log,
+        validate_prepared=lambda prepared: validate_prepared_translations(prepared, data_dir, platform="ios"))
+
+
+def translation_bundle_input(source=None, expected_sha256=None, expected_bytes=None):
+    """Validate optional producer inputs identically for both Mac builders."""
+    values = (source, expected_sha256, expected_bytes)
+    if all(value is None for value in values):
+        return None, {"included": False}
+    if any(value is None for value in values):
+        raise ValueError("Optional translations require explicit path, SHA and bytes together")
+    from idoly_local.bundled_translations import validate_translation_bundle
+
+    source = Path(source).expanduser().absolute()
+    report = validate_translation_bundle(source, expected_sha256=expected_sha256,
+                                          expected_bytes=expected_bytes, platform="ios")
+    return source, {"included": True, **report}

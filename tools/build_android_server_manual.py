@@ -2,7 +2,7 @@
 """Build the native server with cached Android tools, without Gradle or Go.
 
 Use CPython 3.13, an exact committed source snapshot and a separately validated
-54-table public payload. Existing APKs and account files are never overwritten.
+55-table public payload. Existing APKs and account files are never overwritten.
 All Java processes are sequential, bounded and run with a single CPU/worker.
 """
 from __future__ import annotations
@@ -25,7 +25,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
-from zipfile import BadZipFile, ZipFile
+from zipfile import BadZipFile, ZIP_STORED, ZipFile, ZipInfo
 import zlib
 
 if __package__:
@@ -59,7 +59,7 @@ SOURCE_FILES = frozenset((*JAVA_FILES, *RESOURCE_FILES, MANIFEST, GRADLE))
 EXTRA_TABLES = frozenset(("StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression",
                           "CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
                           "CompanyEnjoyCharacterLevelSetting", "PhotoPose", "PhotoPoseMotion",
-                          "ExcursionPlace", "ExcursionPlaceSetting", "ExcursionGazeReaction"))
+                          "ExcursionPlace", "ExcursionPlaceSetting", "ExcursionGazeReaction", "HomeTalk"))
 ADDED_JSON_SHA256 = {
     "StoryPart": "f67cd5069ecb3dec86f6365c2a1f142a39bbc2e6a9bb3bc07123c0cdaeee5332",
     "PhotoActivity": "6dfde902f963cf72c49729555f5c31281bc59c0c1df67c4c2374cf4ef83fe70b",
@@ -75,9 +75,11 @@ ADDED_JSON_SHA256 = {
     "ExcursionPlace": "863b779b4ed7829cb81e55bc2cccd53f0967473404b8900bdaaa864e8010f065",
     "ExcursionPlaceSetting": "c47007eeb9f60398b5cee4195ec15ef5f9d21df1fcf7280e3cc74b2f725b4371",
     "ExcursionGazeReaction": "5478c9e88c7292a01d6dd1db0e398d3bf03cf2d9ce8cf0bbefdf650d35c0e164",
+    "HomeTalk": "63f332a9cf291f32ff4d6b4f65dd0f2a72784f779fd94d250932597ef32dda38",
 }
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from idoly_local import media_master_build as media_master
+from idoly_local import bundled_translations as translation_package
 # Older release assets may only be removed, never copied into a server release.
 LEGACY_PRESENTATION_ASSETS = frozenset("assets/presentation/" + name for name in
                                       ("manifest.json", "diagnostics.apk", "resources.apk"))
@@ -87,7 +89,16 @@ SERVER_PERMISSIONS = frozenset("android.permission." + name for name in
 FORBIDDEN_INSTALLER_DEX_TOKENS = (b"PresentationAddonInstaller", b"PresentationInstallActivity",
     b"PresentationStorage", b"Landroid/content/pm/PackageInstaller", b"REQUEST_INSTALL_PACKAGES")
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
-PAYLOAD_INVENTORY = "tools/server_payload_v0323.json"
+PAYLOAD_INVENTORY = "tools/server_payload_v0325.json"
+SERVER_JSON_ADDITIONS = [{"path": "data/master-json/HomeTalk.json", "bytes": 1068215,
+                          "sha256": ADDED_JSON_SHA256["HomeTalk"], "rows": 559}]
+
+
+def _server_json_additions_match(rows):
+    return (isinstance(rows, list) and rows == SERVER_JSON_ADDITIONS
+            and all(type(row["bytes"]) is int and type(row["rows"]) is int for row in rows))
+
+
 BASE_PUBLIC_PAYLOAD = {"bytes": 84637208,
     "sha256": "27522b394b021a4df002a4e34f20e89b5407be7b145aeecce45f5023b5227522"}
 NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
@@ -95,6 +106,7 @@ NATIVE_NAMES = frozenset("lib/arm64-v8a/" + name for name in (
     "libpython3.13.so", "libsqlite3_chaquopy.so", "libsqlite3_python.so", "libssl_chaquopy.so", "libssl_python.so"))
 RESOURCE_NAMES = frozenset(("AndroidManifest.xml", "resources.arsc", "res/drawable/ic_server.xml"))
 MUTABLE_NAMES = RESOURCE_NAMES | {pybundle.APP, pybundle.BUILD, pybundle.PAYLOAD, "classes2.dex"}
+TRANSLATIONS_ASSET = "assets/bundledTranslations.zip"
 REMOVED_NAMES = frozenset(("classes3.dex",))
 MIB = 1024 * 1024
 MAX_APK = 100 * MIB
@@ -103,6 +115,7 @@ MAX_PAYLOAD = 256 * MIB
 MAX_PAYLOAD_MEMBERS = 1024
 MAX_SERVER_APK = 320 * MIB
 MAX_SERVER_EXPANDED = 320 * MIB
+MAX_TRANSLATIONS = translation_package.MAX_BUNDLE
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
 MAX_CLEAN_INACTIVE_CREDIT = 256 * MIB
@@ -155,6 +168,7 @@ class PublicCacheAdvice:
         fd, identity = self._open(path)
         try:
             limit = (MAX_APK if role == "baseline" else MAX_PAYLOAD if role == "validated-payload"
+                     else MAX_TRANSLATIONS if role == "validated-translations"
                      else MAX_SERVER_APK if role.startswith("own-") else 64 * MIB)
             if not 0 < identity[3] <= limit or role.startswith("own-") and os.fstat(fd).st_nlink != 1:
                 raise ValueError("Cache-advice input size or owned-file identity differs")
@@ -234,7 +248,7 @@ def staging_budget(root, destination, required=None):
         raise ValueError("Insufficient staging space while preserving the root disk reserve")
 
 
-def capacity_plan(infos, payload_bytes, replacement_sizes=None):
+def capacity_plan(infos, payload_bytes, replacement_sizes=None, *, translations_bytes=0):
     """Bound this payload's two-APK peak before allocating its first output.
 
     The baseline remains independently pinned and size-limited. ZIP sizes use
@@ -243,9 +257,15 @@ def capacity_plan(infos, payload_bytes, replacement_sizes=None):
     """
     if type(payload_bytes) is not int or not 0 < payload_bytes <= MAX_PAYLOAD:
         raise ValueError("Public payload exceeds the versioned size bound")
+    if type(translations_bytes) is not int or not 0 <= translations_bytes <= MAX_TRANSLATIONS:
+        raise ValueError("Optional translations exceed their size bound")
+    if TRANSLATIONS_ASSET in infos:
+        raise ValueError("Pinned baseline unexpectedly contains translations")
     sizes = {pybundle.PAYLOAD: payload_bytes, pybundle.APP: pybundle.MAX_APP,
              pybundle.BUILD: META_LIMIT, "classes2.dex": MAX_DEX,
              **{name: MIB for name in RESOURCE_NAMES}}
+    if translations_bytes:
+        sizes[TRANSLATIONS_ASSET] = translations_bytes
     if replacement_sizes is not None:
         if set(replacement_sizes) != set(sizes):
             raise ValueError("Replacement capacity inventory differs")
@@ -255,10 +275,13 @@ def capacity_plan(infos, payload_bytes, replacement_sizes=None):
         if replacement_sizes[pybundle.PAYLOAD] != payload_bytes:
             raise ValueError("Payload capacity differs from its validated size")
         sizes = replacement_sizes
-    if not set(sizes) <= infos.keys() or infos[pybundle.PAYLOAD].compress_type != 0:
+    if not (set(sizes) - {TRANSLATIONS_ASSET}) <= infos.keys() or infos[pybundle.PAYLOAD].compress_type != 0:
         raise ValueError("Pinned server payload capacity structure differs")
     total, expanded = MIB, 0
-    for name, info in infos.items():
+    entries = list(infos.items())
+    if translations_bytes:
+        entries.append((TRANSLATIONS_ASSET, translation_asset_info()))
+    for name, info in entries:
         if name in excluded_members(infos):
             continue
         size = sizes.get(name, info.file_size)
@@ -442,9 +465,10 @@ def tool_sources(root, commit):
     result = {}
     for name, loaded in (("tools/build_android_server_manual.py", Path(__file__)),
                          ("tools/repack_android_server_python.py", Path(pybundle.__file__)),
-                         (PAYLOAD_INVENTORY, Path(__file__).with_name("server_payload_v0323.json")),
+                         (PAYLOAD_INVENTORY, Path(__file__).with_name(Path(PAYLOAD_INVENTORY).name)),
                          ("src/idoly_local/media_master_build.py", Path(media_master.__file__)),
-                         ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py"))):
+                         ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py")),
+                         ("src/idoly_local/bundled_translations.py", Path(translation_package.__file__))):
         if loaded.resolve() != (root / name).resolve():
             raise ValueError("Run the builder and compiler helper from the frozen source repository")
         raw = pybundle._git(root, "cat-file", "blob", commit + ":" + name, limit=MIB)
@@ -504,9 +528,14 @@ def manifest_xml(raw):
     return ET.tostring(tree, encoding="utf-8", xml_declaration=True)
 
 
-def build_config(payload_sha256):
+def build_config(payload_sha256, translations_sha256="", translations_bytes=0):
     if not re.fullmatch(r"[0-9a-f]{64}", payload_sha256):
         raise ValueError("An explicit payload SHA-256 is required")
+    if (type(translations_bytes) is not int or not 0 <= translations_bytes <= MAX_TRANSLATIONS
+            or not isinstance(translations_sha256, str)
+            or bool(translations_bytes) != bool(translations_sha256)
+            or translations_sha256 and not re.fullmatch(r"[0-9a-f]{64}", translations_sha256)):
+        raise ValueError("Explicit optional translations SHA and bytes must be supplied together")
     return ("package " + PACKAGE + ";\npublic final class BuildConfig {\n"
             ' public static final boolean DEBUG = Boolean.parseBoolean("false");\n'
             ' public static final String APPLICATION_ID = "' + PACKAGE + '";\n'
@@ -514,6 +543,8 @@ def build_config(payload_sha256):
             f' public static final int VERSION_CODE = {VERSION_CODE};\n'
             f' public static final String VERSION_NAME = "{VERSION}";\n'
             f' public static final String SERVER_DATA_SHA256 = "{payload_sha256}";\n'
+            f' public static final String BUNDLED_TRANSLATIONS_SHA256 = "{translations_sha256}";\n'
+            f' public static final long BUNDLED_TRANSLATIONS_BYTES = {translations_bytes}L;\n'
             "}\n").encode()
 
 
@@ -635,8 +666,8 @@ def payload_directory_bounds(path):
 
 
 def load_payload_inventory(path=None):
-    """Read the explicit, source-frozen v0.3.23 catalog additions, never a glob."""
-    path = _regular(Path(__file__).with_name("server_payload_v0323.json") if path is None else path)
+    """Read the frozen catalogs and single authoritative HomeTalk addition."""
+    path = _regular(Path(__file__).with_name(Path(PAYLOAD_INVENTORY).name) if path is None else path)
     if not 0 < path.stat().st_size <= META_LIMIT:
         raise ValueError("Versioned public catalog inventory exceeds its size bound")
     with path.open("rb") as stream:
@@ -645,7 +676,7 @@ def load_payload_inventory(path=None):
         raise ValueError("Versioned public catalog inventory exceeds its size bound")
     value = json.loads(raw.decode("utf-8"), object_pairs_hook=pybundle._json_object)
     keys = {"schema", "policy", "base_payload", "component_commit", "component_sources",
-            "additions", "ios_public_files", "prebuilt_catalogs"}
+            "additions", "ios_public_files", "prebuilt_catalogs", "server_json_additions"}
     if (not isinstance(value, dict) or value.keys() != keys or type(value["schema"]) is not int
             or value["schema"] != 1 or value["policy"] != "precomputed-language-sort-v1"
             or value["base_payload"] != BASE_PUBLIC_PAYLOAD
@@ -655,6 +686,8 @@ def load_payload_inventory(path=None):
                    or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
                    for name, digest in value["component_sources"].items())):
         raise ValueError("Versioned public catalog inventory identity differs")
+    if not _server_json_additions_match(value["server_json_additions"]):
+        raise ValueError("Versioned HomeTalk JSON inventory differs")
     additions, ios = value["additions"], value["ios_public_files"]
     if not isinstance(additions, list) or len(additions) != 260 or not isinstance(ios, list) or len(ios) != 2:
         raise ValueError("Versioned public catalog inventory count differs")
@@ -705,12 +738,18 @@ def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inve
             raise ValueError("Versioned public catalogs overlap original payload members")
         added |= catalog_files.keys()
         if set(infos) != set(old_infos) | added or added & set(old_infos):
-            raise ValueError("Payload may add only the fourteen named JSON tables and explicit media master files")
+            raise ValueError("Payload may add only the fifteen named JSON tables and explicit media master files")
         old_hashes = pybundle._hash_members(old, old_infos)
         hashes = pybundle._hash_members(new, infos)
         if any(infos[name].file_size != row["bytes"] or hashes[name] != row["sha256"]
                for name, row in catalog_files.items()):
             raise ValueError("Versioned public catalog bytes differ from the source-frozen inventory")
+        if catalog_inventory is not None:
+            if not _server_json_additions_match(catalog_inventory.get("server_json_additions")):
+                raise ValueError("Versioned HomeTalk JSON inventory differs")
+            for row in SERVER_JSON_ADDITIONS:
+                if infos[row["path"]].file_size != row["bytes"] or hashes[row["path"]] != row["sha256"]:
+                    raise ValueError("HomeTalk JSON differs from its authoritative original projection")
         if any(hashes[name] != digest for name, digest in old_hashes.items() if name != PAYLOAD_MANIFEST):
             raise ValueError("Payload changed an existing public input")
         if any(hashes["data/master-json/" + table + ".json"] != digest
@@ -726,8 +765,8 @@ def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inve
             raise ValueError("Payload versioned public catalog provenance differs")
         tables = {name[len("data/master-json/"):-5] for name in infos
                   if name.startswith("data/master-json/") and name.endswith(".json")}
-        if len(tables) != 54 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
-            raise ValueError("Payload must contain exactly 54 public JSON tables")
+        if len(tables) != 55 or not isinstance(report.get("tables"), dict) or set(report["tables"]) != tables:
+            raise ValueError("Payload must contain exactly 55 public JSON tables")
         for table in tables:
             rows = json.loads(pybundle._read(new, infos["data/master-json/" + table + ".json"], MAX_JSON),
                               object_pairs_hook=pybundle._json_object)
@@ -735,6 +774,8 @@ def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inve
                     or type(report["tables"][table]) is not int or report["tables"][table] != len(rows)
                     or (table in EXTRA_TABLES and not rows)):
                 raise ValueError("Public table counts or row structure differ")
+        if report["tables"]["HomeTalk"] != SERVER_JSON_ADDITIONS[0]["rows"]:
+            raise ValueError("HomeTalk row count differs from its authoritative original projection")
         files = report.get("files")
         expected = {name: {"path": name, "bytes": info.file_size, "sha256": hashes[name]}
                     for name, info in infos.items() if name != PAYLOAD_MANIFEST}
@@ -793,15 +834,24 @@ def _server_archive_members(infos):
         raise ValueError("Server APK must not embed client APKs or presentation installer assets")
 
 
+def translation_asset_info():
+    info = ZipInfo(TRANSLATIONS_ASSET, (1980, 1, 1, 0, 0, 0))
+    info.create_system = 3
+    info.compress_type = ZIP_STORED
+    info.external_attr = 0o100600 << 16
+    return info
+
+
 def stream_apk(incoming, infos, target, replacements):
-    # Replacements are fixed members from the pinned server, never new payloads.
-    if set(replacements) - set(infos) or set(replacements) & excluded_members(infos):
+    added = set(replacements) - set(infos)
+    if added - {TRANSLATIONS_ASSET} or set(replacements) & excluded_members(infos):
         raise ValueError("Only existing approved server members may be replaced")
     retained = {name: info for name, info in infos.items() if name not in excluded_members(infos)}
     _server_archive_members(retained)
     with ZipFile(target, "x") as outgoing:
         outgoing.comment = incoming.comment
-        for name, info in retained.items():
+        entries = list(retained.items()) + [(name, translation_asset_info()) for name in sorted(added)]
+        for name, info in entries:
             copied = copy.copy(info)
             replacement = replacements.get(name)
             with outgoing.open(copied, "w") as dst:
@@ -819,14 +869,16 @@ def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, 
         infos = pybundle._members(archive, MAX_SERVER_EXPANDED)
         _server_archive_members(infos)
         removed = excluded_members(before_infos)
-        if set(replacement_hashes) - set(before) or set(infos) != set(before) - removed:
+        added = set(replacement_hashes) - set(before)
+        if added - {TRANSLATIONS_ASSET} or set(infos) != (set(before) - removed) | added:
             raise ValueError("APK member inventory differs")
         hashes = pybundle._hash_members(archive, infos)
         for name in infos:
             expected = replacement_hashes[name] if name in replacement_hashes else before[name]
             if hashes[name] != expected:
                 raise ValueError("APK member differs from its approved input")
-            if any(getattr(infos[name], key) != getattr(before_infos[name], key)
+            expected_info = translation_asset_info() if name in added else before_infos[name]
+            if any(getattr(infos[name], key) != getattr(expected_info, key)
                    for key in ("date_time", "compress_type", "external_attr", "comment", "extra")):
                 raise ValueError("APK member metadata changed")
         if dex_classes(pybundle._read(archive, infos["classes.dex"], MAX_DEX)) != dependency_names:
@@ -842,7 +894,7 @@ def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, 
             raise ValueError("Native library inventory differs")
         elf = {name: elf_alignment(pybundle._read(archive, infos[name], 16 * MIB)) for name in NATIVE_NAMES}
         return {"changed_apk_members": sorted(name for name in infos if name in before and hashes[name] != before[name]),
-                "added_apk_members": [], "removed_apk_members": sorted(set(before) & removed),
+                "added_apk_members": sorted(added), "removed_apk_members": sorted(set(before) & removed),
                 "own_dex_classes": sorted(own), "client_installer_code_absent": True,
                 "embedded_client_apks_absent": True,
                 "dependency_dex_classes": sorted(dependency_names), "native_elf_load_alignments": elf,
@@ -869,6 +921,19 @@ def build(args):
     os.umask(0o077)
     root = Path(args.source_root).resolve(strict=True)
     baseline, payload = _regular(args.baseline), _regular(args.payload)
+    optional_values = tuple(getattr(args, name, None) for name in
+                            ("translations", "translations_sha256", "translations_bytes"))
+    translations = None
+    translations_sha256, translations_bytes = "", 0
+    if any(value is not None for value in optional_values):
+        if (any(value is None for value in optional_values) or not isinstance(optional_values[1], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", optional_values[1])
+                or type(optional_values[2]) is not int or not 0 < optional_values[2] <= MAX_TRANSLATIONS):
+            raise ValueError("Optional translations require explicit path, SHA and bytes together")
+        translations = _regular(optional_values[0])
+        translations_sha256, translations_bytes = optional_values[1:]
+        if translations.stat().st_size != translations_bytes:
+            raise ValueError("Optional translation ZIP size differs")
     jar = _regular(args.chaquopy_jar)
     keystore, password_file = _regular(args.keystore), _regular(args.password_file, private=True)
     output = Path(args.output).absolute()
@@ -905,7 +970,7 @@ def build(args):
         work = Path(temporary)
         cache.own_directory(work)
         infos = pybundle._members(incoming, pybundle.MAX_EXPANDED)
-        planned_capacity = capacity_plan(infos, payload.stat().st_size)
+        planned_capacity = capacity_plan(infos, payload.stat().st_size, translations_bytes=translations_bytes)
         capacity_preflight = _allocation_guard(root, output.parent, planned_capacity["staging_bytes"])
         before = pybundle._hash_members(incoming, infos)
         if (before.get(pybundle.PAYLOAD) != pybundle.PAYLOAD_SHA256 or not (MUTABLE_NAMES | REMOVED_NAMES) <= infos.keys()
@@ -921,6 +986,12 @@ def build(args):
         payload_report = validate_payload(payload, args.payload_sha256, incoming,
                                           catalog_inventory=load_payload_inventory())
         cache.public("validated-payload", payload, args.payload_sha256)
+        translation_report = {"included": False}
+        if translations is not None:
+            translation_report = {"included": True, **translation_package.validate_translation_bundle(
+                translations, expected_sha256=translations_sha256, expected_bytes=translations_bytes,
+                platform="android")}
+            cache.public("validated-translations", translations, translations_sha256)
         for name, raw in native_sources.items():
             path = work / "source" / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -931,7 +1002,7 @@ def build(args):
         for path in (generated, classes, dex):
             path.mkdir()
         config = generated / "BuildConfig.java"
-        config.write_bytes(build_config(args.payload_sha256))
+        config.write_bytes(build_config(args.payload_sha256, translations_sha256, translations_bytes))
         def run(command):
             return _run(command, root=root, env=env, cache=cache)
         compiled_res, resources = work / "compiled-res.zip", work / "resources.apk"
@@ -975,15 +1046,19 @@ def build(args):
             raise ValueError("D8 output exceeds its bounded read size")
         replacements.update({pybundle.APP: app, pybundle.BUILD: new_build, pybundle.PAYLOAD: payload,
                              "classes2.dex": own_dex_path.read_bytes()})
+        if translations is not None:
+            replacements[TRANSLATIONS_ASSET] = translations
         replacement_hashes = {name: pybundle.digest(value) if isinstance(value, Path) else hashlib.sha256(value).hexdigest()
                               for name, value in replacements.items()}
         # The supplied validated hash, rather than a second mutable-path read,
         # remains the authority if the payload file changes concurrently.
         replacement_hashes[pybundle.PAYLOAD] = args.payload_sha256
+        if translations is not None:
+            replacement_hashes[TRANSLATIONS_ASSET] = translations_sha256
         unsigned, aligned, signed = work / "unsigned.apk", work / "aligned.apk", work / "signed.apk"
         actual_capacity = capacity_plan(infos, payload_report["bytes"], {
             name: value.stat().st_size if isinstance(value, Path) else len(value)
-            for name, value in replacements.items()})
+            for name, value in replacements.items()}, translations_bytes=translations_bytes)
         maximum = actual_capacity["apk_bytes"]
         cache.advise()
         _allocation_guard(root, output.parent, 2 * maximum + MIB)
@@ -1027,7 +1102,8 @@ def build(args):
         _identity(badging, manifest_dump)
         audit = audit_apk(signed, before, infos, replacement_hashes, dependencies, compiled_names)
         if (pybundle.digest(baseline) != pybundle.BASELINE_SHA256 or pybundle.digest(payload) != args.payload_sha256
-                or pybundle.digest(stable_jar) != CHAQUOPY_SHA256):
+                or pybundle.digest(stable_jar) != CHAQUOPY_SHA256
+                or translations is not None and pybundle.digest(translations) != translations_sha256):
             raise ValueError("A frozen build input changed during packaging")
         signed_sha256 = pybundle.digest(signed)
         cache.advise()
@@ -1040,7 +1116,8 @@ def build(args):
                   "version_code": VERSION_CODE, "baseline_sha256": pybundle.BASELINE_SHA256,
                   "apk_sha256": signed_sha256, "apk_bytes": signed.stat().st_size,
                   "signer_sha256": CERTIFICATE, "signature_v2_only": True, "aligned": True,
-                  "payload": payload_report, "chaquopy_jar_sha256": CHAQUOPY_SHA256,
+                  "payload": payload_report, "translations": translation_report,
+                  "chaquopy_jar_sha256": CHAQUOPY_SHA256,
                   "client_distribution": "separate_apk_only", "debuggable": False,
                   "generated_r_sha256": pybundle.digest(r_sources[0]), "build_config_sha256": pybundle.digest(config),
                   "public_source_sha256": {name: hashlib.sha256(raw).hexdigest() for name, raw in native_sources.items()},
@@ -1074,6 +1151,9 @@ def main(argv=None):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--epoch", type=int, required=True)
     parser.add_argument("--key-alias", default="idoly-local-server")
+    parser.add_argument("--translations", help="Optional separately prepared Android translation ZIP")
+    parser.add_argument("--translations-sha256", help="Explicit SHA-256 of the optional translation ZIP")
+    parser.add_argument("--translations-bytes", type=int, help="Exact size of the optional translation ZIP")
     args = parser.parse_args(argv)
     try:
         report = build(args)

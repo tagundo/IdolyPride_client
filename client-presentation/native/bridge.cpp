@@ -28,6 +28,7 @@
 #include "panorama_ui_edges.hpp"
 #include "photography_ui.hpp"
 #include "media_policy.hpp"
+#include "hangul_font.hpp"
 #ifndef IDOLY_DARWIN_BRIDGE
 #include "wardrobe_lifecycle.hpp"
 #include "wardrobe_timing.hpp"
@@ -244,6 +245,82 @@ const char *(*class_name)(void *);
 const char *(*class_namespace)(void *);
 void *(*class_parent)(void *);
 bool (*object_alive)(void *, Method *);
+
+// Korean fallback is independent of graphics preferences. All engine calls run
+// after the original Awake, including startup callbacks before graphics ready.
+VoidMethod font_awake_original;
+void *(*font_name_get)(void *, Method *);
+int32_t (*font_hide_get)(void *, Method *);
+void (*font_hide_set)(void *, int32_t, Method *);
+void (*font_multi)(void *, bool, Method *);
+void (*font_clear)(void *, bool, Method *);
+void *(*font_fallback)(void *, Method *);
+uint32_t (*font_strong)(void *, bool);
+const void *(*font_method)(void *, const char *, int32_t);
+void *(*font_field)(void *, const char *);
+const void *(*font_field_type)(void *);
+void *(*font_class_type)(const void *);
+void *(*font_new)(void *);
+void (*font_fallback_set)(void *, void *, Method *);
+hangul_font::Fallback korean_fallback;
+hangul_font::ListFactory korean_list_factory;
+pthread_mutex_t font_mutex=PTHREAD_MUTEX_INITIALIZER;
+thread_local bool font_mutating=false;
+struct FontListMethods {
+    void *type=nullptr;
+    const void *contains=nullptr, *insert=nullptr;
+};
+FontListMethods font_lists[4]{};
+bool font_named(void *font,const char *expected) {
+    void *name=font_name_get(font,nullptr);
+    if (!name) return false;
+    const int32_t length=read<int32_t>(name,0x10);
+    if (length<0 || length>128 || static_cast<size_t>(length)!=std::strlen(expected)) return false;
+    for (int32_t i=0;i<length;++i)
+        if (read<uint16_t>(name,0x14+2*static_cast<size_t>(i))!=static_cast<unsigned char>(expected[i])) return false;
+    return true;
+}
+bool font_insert_first(void *list,void *font) {
+    void *type=object_class(list);
+    if (!type) return false;
+    FontListMethods *cached=nullptr;
+    for (auto &entry:font_lists) if (entry.type==type) { cached=&entry;break; }
+    if (!cached) for (auto &entry:font_lists) if (!entry.type) {
+        const void *contains=font_method(type,"Contains",1);
+        const void *insert=font_method(type,"Insert",2);
+        if (!contains || !insert) return false;
+        entry={type,contains,insert};cached=&entry;break;
+    }
+    if (!cached) return false;
+    // IL2CPP MethodInfo begins with its executable methodPointer. Class/method
+    // metadata is immutable; list and font objects are never cached here.
+    using Contains=bool (*)(void *,void *,const void *);
+    using Insert=void (*)(void *,int32_t,void *,const void *);
+    auto contains=read<Contains>(const_cast<void *>(cached->contains),0);
+    auto insert=read<Insert>(const_cast<void *>(cached->insert),0);
+    if (!contains || !insert) return false;
+    if (!contains(list,font,cached->contains)) insert(list,0,font,cached->insert);
+    return true;
+}
+void *font_owner_class(void *font) {
+    void *type=object_class(font);
+    for (unsigned depth=0;type && depth<32;++depth,type=class_parent(type)) {
+        const char *name=class_name(type), *space=class_namespace(type);
+        if (name && space && !std::strcmp(name,"TMP_FontAsset") && !std::strcmp(space,"TMPro")) return type;
+    }
+    return nullptr;
+}
+void *font_ensure_fallbacks(void *font) { return korean_list_factory.ensure(font); }
+void font_awake_hook(void *font,Method *method) {
+    if (!font_awake_original) return;
+    font_awake_original(font,method);
+    if (font_mutating) return;
+    struct MutationScope {
+        MutationScope() { font_mutating=true;pthread_mutex_lock(&font_mutex); }
+        ~MutationScope() { pthread_mutex_unlock(&font_mutex);font_mutating=false; }
+    } scope;
+    korean_fallback.after_original(font);
+}
 
 struct Weak {
     uint32_t handle = 0;
@@ -1362,6 +1439,26 @@ void load_calls() {
     CALL(weak_new, weak_new); CALL(weak_get, weak_get); CALL(weak_free, weak_free);
     CALL(object_class, object_class); CALL(class_name, class_name); CALL(class_namespace, class_namespace); CALL(class_parent, class_parent);
     CALL(object_alive, object_alive); CALL(app_fps_get, app_fps_get); CALL(quality_names, q_names);
+    CALL(font_name_get,font_name); CALL(font_hide_get,font_hide_get); CALL(font_hide_set,font_hide_set);
+    CALL(font_multi,font_multi); CALL(font_clear,font_clear); CALL(font_fallback,font_fallback);
+    CALL(font_field,font_field); CALL(font_field_type,font_field_type);
+    CALL(font_class_type,font_class_type); CALL(font_new,font_new);
+    CALL(font_strong,font_strong); CALL(font_method,font_method);
+    // The existing verified 16-byte getter prefix contains this complete
+    // adjacent 8-byte setter. Original metadata independently verifies both
+    // methods and their matching closed generic List<TMP_FontAsset> type.
+    font_fallback_set=reinterpret_cast<decltype(font_fallback_set)>(image_base+pin::font_fallback.rva+8);
+    hangul_font::FactoryCalls lists;
+    lists.object_class=font_owner_class;lists.field=font_field;lists.field_type=font_field_type;
+    lists.class_from_type=font_class_type;lists.object_new=font_new;lists.method=font_method;
+    lists.strong_new=font_strong;lists.release=weak_free;lists.get=font_fallback;lists.set=font_fallback_set;
+    korean_list_factory.configure(lists);
+    hangul_font::Calls fonts;
+    fonts.strong_new=font_strong;fonts.weak_new=weak_new;fonts.target=weak_get;fonts.release=weak_free;
+    fonts.alive=object_alive;fonts.named=font_named;fonts.get_flags=font_hide_get;fonts.set_flags=font_hide_set;
+    fonts.set_multi_atlas=font_multi;fonts.clear_data=font_clear;fonts.fallbacks=font_fallback;
+    fonts.insert_first=font_insert_first;fonts.ensure_fallbacks=font_ensure_fallbacks;
+    korean_fallback.configure(fonts);
     CALL(screen_width, screen_width); CALL(screen_height, screen_height);
     CALL(max_texture, max_texture);
     CALL(rt_width, rt_width); CALL(rt_height, rt_height);
@@ -1458,7 +1555,6 @@ void *install(void *) {
         pause_ms(200);
     }
     if (!image.base || !image.unity) { set_state("unsupported"); return nullptr; }
-    pause_ms(500);
     held_library = dlopen(image.name, RTLD_NOW | RTLD_NOLOAD);
     Image held;
     if (held_library) dl_iterate_phdr(find_image, &held);
@@ -1472,6 +1568,7 @@ void *install(void *) {
     shadowhook_set_recordable(false);
 #define HOOK(entry, replacement, original) {&pin::entry, reinterpret_cast<void *>(replacement), reinterpret_cast<void **>(&original), nullptr}
     Hook hooks[] = {
+        HOOK(font_awake,font_awake_hook,font_awake_original),
         HOOK(q_set, quality_set_hook, quality_set_original), HOOK(q_apply, quality_apply_hook, quality_apply_original),
         HOOK(q_init, quality_init_hook, quality_init_original), HOOK(q_update, quality_update_hook, quality_update_original),
         HOOK(app_fps_set, app_fps_set_hook, app_fps_set_original),
@@ -1519,8 +1616,9 @@ void *install(void *) {
             for (size_t j = i; j > 0; --j) shadowhook_unhook(hooks[j - 1].stub);
             set_state("init_failed"); return nullptr;
         }
+        if (i==0) pause_ms(500); // Fonts are captured during the existing graphics readiness delay.
     }
-    if (!rotation::ready_for_publish() || !preview_ui.ready() || !wardrobe_lifecycle.ready()
+    if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready() || !wardrobe_lifecycle.ready()
             || !wardrobe_exit_tracker.ready()) {
         for (size_t i=sizeof hooks/sizeof hooks[0];i>0;--i) shadowhook_unhook(hooks[i-1].stub);
         set_state("init_failed");return nullptr;

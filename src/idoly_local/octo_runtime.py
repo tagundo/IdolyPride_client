@@ -339,7 +339,7 @@ def _desktop_aes_backend():
 
 def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
                         allow_downloads=True, log_callback=None, platform="android",
-                        resource_cache_dir=None):
+                        resource_cache_dir=None, language="ja"):
     """Create an optional gateway without changing legacy server bundles."""
     if type(allow_downloads) is not bool:
         raise TypeError("Resource download choice must be a boolean")
@@ -355,17 +355,28 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
     if archive is None:
         return None, tracker
     settings, raw = archive
+    from .resource_translation_runtime import select_resource_translation
+    raw, translation_layer, compatible_revision = select_resource_translation(
+        raw, root, selected_cache_root, language=language, platform=platform)
     from .octo_manifest import OctoManifest
     from .octo_cache import OctoCache
     from .octo_http import OctoGateway
-    manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]),
-        client_key=settings["client_key"], base_url=base_url,
-        aes_cbc=aes_cbc if aes_cbc is not None else _desktop_aes_backend(),
-        application_version=settings["application_version"])
-    if manifest.revision != settings["revision"]:
-        raise ValueError("Game resource manifest revision differs")
-    tracker = OctoResourceTracker(available=True, allow_downloads=allow_downloads, log_callback=log_callback)
-    cache_path, seed_dirs = resource_cache_paths(root, selected_cache_root, platform)
-    cache = OctoCache(cache_path, fetcher=fetcher, seed_dirs=seed_dirs,
-        on_event=tracker.on_cache_event, allow_download=allow_downloads)
-    return OctoGateway(manifest, cache, transfer_callback=tracker.on_http_transfer), tracker
+    try:
+        manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]),
+            client_key=settings["client_key"], base_url=base_url,
+            aes_cbc=aes_cbc if aes_cbc is not None else _desktop_aes_backend(),
+            application_version=settings["application_version"],
+            allow_previous_revisions=compatible_revision)
+        if not compatible_revision and manifest.revision != settings["revision"]:
+            raise ValueError("Game resource manifest revision differs")
+        tracker = OctoResourceTracker(available=True, allow_downloads=allow_downloads, log_callback=log_callback)
+        cache_path, seed_dirs = resource_cache_paths(root, selected_cache_root, platform)
+        cache = OctoCache(cache_path, fetcher=fetcher, seed_dirs=seed_dirs,
+            on_event=tracker.on_cache_event, allow_download=allow_downloads,
+            local_source=translation_layer.open_source if translation_layer is not None else None)
+        return OctoGateway(manifest, cache, transfer_callback=tracker.on_http_transfer,
+                           translation_layer=translation_layer), tracker
+    except BaseException:
+        if translation_layer is not None:
+            translation_layer.close()
+        raise

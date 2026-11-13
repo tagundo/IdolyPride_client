@@ -846,7 +846,7 @@ struct ServerView: View {
                                 Text("한국어").tag("ko")
                                 Text("English").tag("en")
                             }
-                            Text("준비된 번역 데이터를 제공합니다. 번역이 없는 문구는 일본어로 표시됩니다.")
+                            Text("스토리·게임 데이터에 준비된 번역을 적용합니다. UI 언어를 바꾸려면 같은 언어의 클라이언트로 업데이트해 주세요. 번역이 없는 문구는 원문을 유지합니다.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Text(model.libraryMessage).font(.caption).foregroundStyle(.secondary)
                         }.padding(.top, 6)

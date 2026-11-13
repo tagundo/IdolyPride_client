@@ -51,6 +51,30 @@ def test_stream_copies_original_member_bytes_and_zero_attributes(tmp_path):
         assert z.read('AndroidManifest.xml')==b'new manifest' and z.read('classes6.dex')==b'own DEX'
 
 
+def test_stream_replaces_only_declared_existing_font_parts_and_adds_new_parts(tmp_path):
+    source, target = tmp_path/'base.apk', tmp_path/'output.apk'
+    part = 'assets/bin/Data/sharedassets0.assets.split'
+    with ZipFile(source, 'w') as archive:
+        archive.writestr('AndroidManifest.xml', b'original manifest')
+        archive.writestr(part+'0', b'original font prefix')
+        archive.writestr(part+'1', b'original font suffix')
+        archive.writestr('assets/unrelated.bin', b'untouched unrelated asset')
+        archive.writestr('classes.dex', b'original code')
+        archive.writestr('META-INF/OLD.RSA', b'obsolete signature')
+    replacements = {part+'0': b'patched font prefix', part+'1': b'patched font suffix'}
+    additions = {part+'2': b'new font tail', 'assets/idoly-fonts/OFL-Pretendard.txt': b'license'}
+    tool.stream_apk(source, target, b'new manifest', additions, replacements=replacements)
+    with ZipFile(target) as archive:
+        assert archive.read('assets/unrelated.bin') == b'untouched unrelated asset'
+        assert archive.read('classes.dex') == b'original code'
+        assert 'META-INF/OLD.RSA' not in archive.namelist()
+        assert archive.read('AndroidManifest.xml') == b'new manifest'
+        for name, value in {**replacements, **additions}.items():
+            assert archive.read(name) == value
+        assert archive.getinfo(part+'2').compress_type == tool.ZIP_STORED
+        assert len(archive.namelist()) == len(set(archive.namelist())) == 7
+
+
 def test_public_cache_preserves_bytes_modes_times_and_rejects_links(tmp_path):
     source=tmp_path/'public';source.write_bytes(b'public input');source.chmod(0o600);before=source.stat()
     cache=tool.PublicCache();expected=hashlib.sha256(source.read_bytes()).hexdigest();cache.register(source,expected)
@@ -115,3 +139,23 @@ def test_all_tmpfs_placement_keeps_root_reserve_and_at_most_two_full_apks(tmp_pa
         with pytest.raises(ValueError,match='inside'): tool.staging_placement(tmp_path,tmp_path,ram,all_tmpfs=True)
         root_free -= 1
         with pytest.raises(ValueError,match='reserves'): tool.staging_placement(tmp_path,output,ram,all_tmpfs=True)
+
+
+def test_ui_member_replacement_is_disjoint_from_font_parts_and_original_code(tmp_path):
+    source, target = tmp_path/'base.apk', tmp_path/'translated.apk'
+    ui_name = 'assets/bin/Data/dc5a3280fad6542929a0daf3a3736d29'
+    font = 'assets/bin/Data/sharedassets0.assets.split0'
+    with ZipFile(source, 'w') as archive:
+        archive.writestr('AndroidManifest.xml', b'original manifest')
+        archive.writestr(ui_name, b'original encrypted UI')
+        archive.writestr(font, b'audited font bytes')
+        archive.writestr('classes.dex', b'original code')
+    tool.stream_apk(source, target, b'local manifest', {}, replacements={ui_name:b'compiled fixed UI'})
+    with ZipFile(target) as archive:
+        assert archive.read(ui_name) == b'compiled fixed UI'
+        assert archive.read(font) == b'audited font bytes'
+        assert archive.read('classes.dex') == b'original code'
+    text = PATH.read_text()
+    assert text.count('"src/idoly_local/ui_assets.py"') == 2
+    assert text.count('"src/idoly_local/ui_translation_build.py"') == 2
+    assert '"ui_language":ui_language,"ui_translation":ui_report' in text

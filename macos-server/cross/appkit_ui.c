@@ -685,7 +685,7 @@ static void make_window(void) {
     G.language=add_menu(document,"게임 데이터 언어",526,C_LANGUAGE);
     const char *languageNames[]={"日本語 (원본)","한국어","English"};
     for (int i=0;i<3;++i) menu_item(G.language,languageNames[i]);
-    add_label(document,"언어는 준비된 게임 데이터의 곡·의상·캐릭터·스토리 제목에 적용됩니다. 음성·자막·전체 UI 번역은 포함하지 않습니다.",562,38,11,1);
+    add_label(document,"스토리·게임 데이터에 준비된 번역을 적용합니다. UI 언어를 바꾸려면 같은 언어의 클라이언트로 업데이트해 주세요. 없는 번역은 원문을 유지합니다.",562,38,11,1);
     G.libraryLabel=add_label(document,"목록·언어 설정을 준비하고 있습니다.",606,50,11,1);
     add_label(document, "그래픽·촬영 화면", 684, 30, 17, 0);
     add_label(document, "그래픽 지원 IPA가 필요합니다. 서버 실행 중에도 바꿀 수 있으며 저장 후 실제 게임의 적용 확인을 기다립니다.", 718, 38, 11, 1);

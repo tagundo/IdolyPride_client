@@ -89,7 +89,7 @@ def test_probe_is_post_original_only_and_jni_does_not_call_unity():
 def test_android_probe_and_panorama_call_pins_keep_hook_count():
     profile = json.loads((HERE.parent / "profile.json").read_text())
     aliases = profile["aliases"]
-    assert len(aliases) == 111
+    assert len(aliases) == 124
     assert aliases["rendering_mode"]["rva"] == "0x8f8826c"
     assert aliases["graphics_api"]["rva"] == "0x8f8812c"
     for name in ("rendering_mode", "graphics_api"):
@@ -102,7 +102,7 @@ def test_android_probe_and_panorama_call_pins_keep_hook_count():
         assert name in aliases
     text = BRIDGE.read_text()
     hooks = re.findall(r"HOOK\((\w+),", text)
-    assert len(hooks) - 1 == 48  # Exclude the HOOK macro's own entry parameter.
+    assert len(hooks) - 1 == 49  # Exclude the HOOK macro's own entry parameter.
     assert "rendering_mode" not in hooks and "graphics_api" not in hooks
     header = (HERE.parent / "profile.hpp").read_text()
     entries = set(re.findall(r"inline constexpr Entry (\w+)\{", header))

@@ -50,8 +50,9 @@ GIT_TIMEOUT = 20
 # Source files stay available to desktop/CLI/build tooling; only app.imy omits
 # these explicit modules. Any new retained import of one fails the build.
 ANDROID_EXCLUDED_MODULES = frozenset("idoly_local." + name for name in (
-    "__main__", "cli", "android_package", "client_patch", "native_bootstrap", "ios_patch",
+    "__main__", "cli", "android_package", "client_patch", "font_assets", "native_bootstrap", "ios_patch",
     "ios_presentation", "master_build", "media_master_build", "master_translation_build", "master_sort_build",
+    "resource_translation_build", "text_translation_build", "ui_translation_build", "ui_assets", "translation_bundle_build",
     "unity_http", "unity_cache",
     "collect", "event_capture", "firebase_archive", "official_session", "profiles", "server",
     "appearance_qa", "lesson_qa", "main_live_qa", "story_qa", "story_read_qa", "tutorial_qa", "pvp_capture"))

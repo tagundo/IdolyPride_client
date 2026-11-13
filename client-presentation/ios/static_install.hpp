@@ -62,19 +62,26 @@ bool verify_static_image(const void *header) {
     return true;
 }
 struct Hook { const pin::Entry *entry; void *replacement; void **original; };
+// All objects read here are zero/constant-initialized; this path does not
+// invoke Unity or make network calls. The constructor may arm a mapped image
+// synchronously so startup FontAsset.Awake cannot race the worker scheduler.
+const void *mapped_unity_header() {
+    constexpr const char suffix[]="/UnityFramework.framework/UnityFramework";
+    const void *header=nullptr;
+    const unsigned count=_dyld_image_count();
+    for (unsigned i=0;i<count;++i) {
+        const char *name=_dyld_get_image_name(i);if (!name) continue;
+        if (::strstr(name,"/AppKit.framework/")) desktop_host=true;
+        const size_t length=std::strlen(name);
+        if (length>=sizeof suffix-1 && !std::strcmp(name+length-(sizeof suffix-1),suffix))
+            header=_dyld_get_image_header(i);
+    }
+    return header;
+}
 void *install(void *) {
     const void *header=nullptr;
-    constexpr const char suffix[]="/UnityFramework.framework/UnityFramework";
     for (unsigned attempt=0;attempt<900 && !header;++attempt) {
-        const unsigned count=_dyld_image_count();
-        for (unsigned i=0;i<count;++i) {
-            const char *name=_dyld_get_image_name(i); if (!name) continue;
-            if (::strstr(name,"/AppKit.framework/")) desktop_host=true;
-            const size_t length=std::strlen(name);
-            if (length>=sizeof suffix-1 && !std::strcmp(name+length-(sizeof suffix-1),suffix)) {
-                header=_dyld_get_image_header(i);
-            }
-        }
+        header=mapped_unity_header();
         if (!header) pause_ms(200);
     }
     if (!header) { set_state("unsupported"); return nullptr; }
@@ -106,13 +113,14 @@ void *install(void *) {
         HOOK(mv_ui_initialize,mv_ui_initialize_hook,mv_ui_initialize_original),
         HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original),
         HOOK(costume_sorted,costume_sorted_hook,costume_sorted_original),
+        HOOK(font_awake,font_awake_hook,font_awake_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {
         if (!hook.entry->gateway || !hook.entry->slot) { set_state("init_failed"); return nullptr; }
         *hook.original=reinterpret_cast<void *>(image_base+hook.entry->gateway+20);
     }
-    if (!rotation::ready_for_publish() || !preview_ui.ready()) { set_state("init_failed"); return nullptr; }
+    if (!rotation::ready_for_publish() || !preview_ui.ready() || !korean_fallback.ready() || !korean_list_factory.ready()) { set_state("init_failed"); return nullptr; }
     // All originals are valid before the first replacement is visible. Any
     // concurrent invocation during publication takes the original path.
     for (auto &hook:hooks) __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),

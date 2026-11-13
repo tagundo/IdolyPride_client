@@ -7,7 +7,9 @@ patches. An optional verified presentation bridge is composed after bootstrap.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import copy
 import hashlib
+import gc
 import json
 from pathlib import Path
 import plistlib
@@ -241,6 +243,11 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                        native_library: Path | None = None,
                        presentation_library: Path | None = None,
                        presentation_plan: Path | None = None,
+                       font_file: Path | None = None,
+                       font_license_file: Path | None = None,
+                       ui_language: str = "ja",
+                       ui_csv_file: Path | None = None,
+                       ui_proof_file: Path | None = None,
                        bundle_id: str = DEFAULT_BUNDLE_ID,
                        bootstrap: bool = True,
                        profile: IOSProfile = PROFILE_6_1_1) -> dict:
@@ -258,9 +265,18 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
     report_path = output.with_suffix(".report.json")
     if output.exists() or report_path.exists():
         raise ValueError("Output already exists; choose a new IPA filename")
+    from .ui_assets import load_package_inputs, patch_ios_member
+    ui_csv, ui_proof = load_package_inputs(ui_language, ui_csv_file, ui_proof_file)
+    ui_report = None
     presentation_enabled = presentation_library is not None or presentation_plan is not None
     if (presentation_library is None) != (presentation_plan is None):
         raise ValueError("Presentation library and plan must be supplied together")
+    if font_license_file is not None and font_file is None:
+        raise ValueError("A font license requires its explicit font file")
+    if font_file is not None and not presentation_enabled:
+        raise ValueError("The Korean font asset requires its native presentation fallback")
+    if ui_language == "ko" and font_file is None:
+        raise ValueError("Korean UI requires the audited font asset and native fallback")
     if presentation_enabled and (native_library is not None or not bootstrap):
         raise ValueError("Presentation requires the default bootstrap without a native override or host-only mode")
     library = plan = presentation_report = None
@@ -286,6 +302,8 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
             raise ValueError("Presentation build receipt does not match the iOS dylib and plan")
         if "library_sha256" in plan and plan["library_sha256"] != library_info["sha256"]:
             raise ValueError("Presentation plan library SHA-256 mismatch")
+        if ("font_awake" in (plan.get("hook_names") or ())) != (font_file is not None):
+            raise ValueError("The font-aware presentation plan and audited font asset must be supplied together")
     if (not re.fullmatch(r"[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*", bundle_id)
             or not (bundle_id == DEFAULT_BUNDLE_ID or bundle_id.startswith(DEFAULT_BUNDLE_ID + "."))):
         raise ValueError("Use an isolated bundle ID under game.qualiarts.idolypride.local")
@@ -310,6 +328,33 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
             "game.qualiarts.idolypride", profile.game_version, profile.game_build,
         ):
             raise ValueError("Input IPA game identity/version differs from the verified profile")
+        font_replacement = font_report = None
+        font_notices = {}
+        font_name = app + "Data/sharedassets0.assets"
+        ui_name = app + "Data/resources.assets"
+        if ui_csv is not None and ui_name not in names:
+            raise ValueError("Input IPA has no original UI resources.assets member")
+        if font_file is not None:
+            from .font_assets import read_font, read_license, patch_bytes, package_notices
+            font_data, _font_info = read_font(font_file)
+            license_path = (Path(font_license_file) if font_license_file is not None else
+                            Path(__file__).resolve().parents[2] / "client-presentation/licenses/Pretendard-OFL.txt")
+            license_data = read_license(license_path)
+            if archive.getinfo(font_name).file_size > 64 * 1024 * 1024:
+                raise ValueError("Shared font asset exceeds its bound")
+            font_replacement, font_report = patch_bytes(archive.read(font_name), font_data, "ios")
+            font_report["input_members"] = [font_name]
+            font_report["output_members"] = {font_name: {"bytes": len(font_replacement), "sha256": _sha256(font_replacement)}}
+            font_notices = {app + "IdolyFonts/" + name: raw
+                            for name, raw in package_notices(font_report, license_data).items()}
+            if any(name in names for name in font_notices):
+                raise ValueError("Input IPA already contains font support notices")
+            font_report["notice_members"] = {name: {"bytes": len(raw), "sha256": _sha256(raw)}
+                                             for name, raw in font_notices.items()}
+            del font_data
+            # Release build-only UnityPy object cycles before opening the much
+            # larger native image. The saved serialized asset remains bounded.
+            gc.collect()
         executable_name = info.get("CFBundleExecutable")
         if not isinstance(executable_name, str) or not executable_name or "/" in executable_name or executable_name in (".", ".."):
             raise ValueError("Invalid app executable name")
@@ -346,7 +391,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         info["CFBundleIdentifier"] = bundle_id
         info["CFBundleDisplayName"] = "아이프라 로컬"
         info["CFBundleName"] = "IdolyPrideLocal"
-        info["CFBundleVersion"] = profile.game_build + ".9004"
+        info["CFBundleVersion"] = profile.game_build + (".9005" if font_file is not None else ".9004")
         # The local login does not use the original federated-login callbacks.
         # Register one isolated scheme so both apps can coexist without stealing
         # the original game's deep links or Google/Twitter callback URLs.
@@ -368,6 +413,8 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                         settings_name: unity_settings}
         if presentation_enabled:
             replacements[presentation_name] = library
+        if font_replacement is not None:
+            replacements[font_name] = font_replacement
         stage = "local-api-bootstrap-presentation-client" if presentation_enabled else (
             "local-api-and-bootstrap-client" if bootstrap_report else "local-api-host-client")
         report = {"stage": stage, "source_sha256": source_sha,
@@ -381,15 +428,25 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                   "native_replacement": native_library is not None,
                   "bootstrap_patch": bootstrap_report,
                   "presentation_patch": presentation_report,
+                  "font_support": font_report, "ui_language": ui_language,
+                  "ui_translation": None,
                   "signing": "Import in PlayCover, which must re-sign the app and embedded binaries",
                   "device_verified": False,
-                  "scope": "API/resource routing, HTTP transport, selected bootstrap hooks and optional presentation bridge; gameplay/device execution remains unverified"}
+                  "scope": "API/resource routing, HTTP transport, selected bootstrap hooks, optional presentation bridge and fixed offline UI data; gameplay/device execution remains unverified"}
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".ios-local-client-", dir=output.parent) as temporary:
             staged = Path(temporary) / "client.ipa"
             with ZipFile(staged, "w") as packaged:
                 for item in archive.infolist():
                     if _is_signature(item.filename):
+                        continue
+                    if ui_csv is not None and item.filename == ui_name:
+                        # resources.assets is 65MiB. Patch it directly between
+                        # ZIP streams; retain only its pinned 10MiB metadata.
+                        with packaged.open(copy.copy(item), "w") as destination:
+                            ui_report = patch_ios_member(archive, ui_name, destination, ui_csv,
+                                language=ui_language, translation_proof=ui_proof)
+                        report["ui_translation"] = ui_report
                         continue
                     data = replacements.get(item.filename)
                     if data is None:
@@ -402,11 +459,26 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                     item.create_system = 3
                     item.external_attr = 0o100755 << 16
                     packaged.writestr(item, library, compress_type=ZIP_DEFLATED, compresslevel=6)
+                for name, raw in font_notices.items():
+                    item = ZipInfo(name)
+                    item.create_system = 3
+                    item.external_attr = 0o100644 << 16
+                    packaged.writestr(item, raw, compress_type=ZIP_DEFLATED, compresslevel=6)
             with ZipFile(staged) as check:
                 if check.testzip() is not None:
                     raise ValueError("Output IPA failed ZIP CRC verification")
                 for name, data in replacements.items():
                     _verify_zip_member(check, name, data)
+                for name, data in font_notices.items():
+                    _verify_zip_member(check, name, data)
+                if ui_report is not None:
+                    digest, size = hashlib.sha256(), 0
+                    with check.open(ui_name) as member:
+                        while block := member.read(_COPY_BYTES):
+                            digest.update(block); size += len(block)
+                    if (size != ui_report["output_asset_bytes"]
+                            or digest.hexdigest() != ui_report["output_asset_sha256"]):
+                        raise ValueError("Output IPA UI resource verification failed")
                 if any(_is_signature(name) for name in check.namelist()):
                     raise ValueError("Output IPA contains stale resource signatures")
                 final_info = plistlib.loads(check.read(info_name))

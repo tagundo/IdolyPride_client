@@ -46,6 +46,7 @@ class Runtime:
         self._library = None
         self._active_media = None
         self._effective_language = None
+        self._resource_translation = None
         self._grpc_address = None
         self._asset_url = None
         from .diagnostics import ClientDiagnostics
@@ -104,6 +105,8 @@ class Runtime:
         if self._language_settings is not None:
             result["language"] = self._language_settings.status()
             result["language"]["effective_language"] = self._effective_language
+            if self._resource_translation is not None:
+                result["language"]["resource_translation"] = dict(self._resource_translation)
         if library is not None:
             result["resource_library"] = library.status()
         return result
@@ -303,7 +306,14 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         gateway, runtime._resources = create_octo_gateway(
             root, runtime._asset_url, aes_cbc=aes_cbc, fetcher=resource_fetcher,
             allow_downloads=download_missing_resources, log_callback=runtime._log,
-            platform=resource_platform, resource_cache_dir=resource_cache_dir)
+            platform=resource_platform, resource_cache_dir=resource_cache_dir,
+            language=runtime._effective_language)
+        if gateway is not None:
+            layer = gateway.translation_layer
+            runtime._resource_translation = {"language": runtime._effective_language,
+                "prepared": layer is not None, "revision": gateway.manifest.revision,
+                "coverage": dict(layer.report["coverage"]) if layer is not None else {},
+                "fallback": "original_japanese"}
         # Install the gateway only after binding has selected the actual port,
         # and before any HTTP serving thread is started.
         runtime._asset.octo_gateway = gateway

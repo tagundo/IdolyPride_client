@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 
-from payload import install_payload
+from payload import install_bundled_translations, install_payload
 
 _OUTPUT_LOCK = threading.Lock()
 _TUTORIAL_PINS = {
@@ -39,6 +39,7 @@ class Controller:
         self.cancelled = False
         self.closed = False
         self.resource_worker = None
+        self.translation_status = {"state": "absent"}
 
     def log(self, message):
         self.emit("log", message=str(message))
@@ -53,6 +54,8 @@ class Controller:
             status = {key: value for key, value in status.items() if key != "logs"}
             status["starting"] = starting
             status["can_stop"] = runtime is not None or starting
+            if self.translation_status.get("state") != "absent":
+                status["bundled_translations"] = dict(self.translation_status)
         self.emit("status", status=status)
         return status
 
@@ -181,6 +184,14 @@ class Controller:
         try:
             self.log("서버 데이터를 준비하고 있습니다.")
             install_payload(self.server_data, self.data_dir, self.log)
+            try:
+                selected_root = Path(resource_cache_dir) if resource_cache_dir is not None else self.data_dir
+                self.translation_status = install_bundled_translations(
+                    self.server_data, selected_root, self.log, data_dir=self.data_dir)
+            except (OSError, ValueError):
+                self.translation_status = {"state": "failed", "installed": False,
+                                           "previous_files_preserved": True}
+                self.log("번역 패키지를 설치하지 못했습니다. 기존 번역과 원본 자료는 변경하지 않았습니다.")
             from idoly_local import app_runtime
             with self.lock:
                 if self.cancelled or self.closed:

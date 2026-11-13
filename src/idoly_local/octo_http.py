@@ -27,17 +27,20 @@ class OctoGateway:
     cache explicitly allows downloads, but it sends no object response bytes.
     """
 
-    def __init__(self, manifest, cache, *, transfer_callback=None):
+    def __init__(self, manifest, cache, *, transfer_callback=None, translation_layer=None):
         if transfer_callback is not None and not callable(transfer_callback):
             raise ValueError("Octo transfer observer must be callable")
         self.manifest, self.cache = manifest, cache
         self.transfer_callback = transfer_callback
+        self.translation_layer = translation_layer
         self._closed = threading.Event()
 
     def close(self):
         """Reject new work and cancel cache retrievals before listener shutdown."""
         self._closed.set()
         self.cache.close()
+        if self.translation_layer is not None:
+            self.translation_layer.close()
 
     @staticmethod
     def handles(target):

@@ -30,7 +30,7 @@ def test_real_task_lifecycle_preserves_owner_failure_cancel_and_reuse(tmp_path):
 def test_android_only_original_pins_and_readonly_jni_are_wired():
     profile = json.loads((NATIVE / "profile.json").read_text())
     aliases = profile["aliases"]
-    assert len(aliases) == 111
+    assert len(aliases) == 124
     expected = {
         "wardrobe_show": ("0x53779a4", "HOOK"),
         "wardrobe_move": ("0x497094c", "HOOK"),

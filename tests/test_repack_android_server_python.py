@@ -28,7 +28,10 @@ def runtime_sources(extra=b""):
     b"from importlib import import_module as load\nload('.android_package', 'idoly_local')\n",
     b"__import__('idoly_local.android_package')\n",
     b"import builtins as b\nb.__import__('idoly_local.android_package')\n",
-    b"from builtins import __import__ as load\nload('idoly_local.android_package')\n"])
+    b"from builtins import __import__ as load\nload('idoly_local.android_package')\n",
+    b"from idoly_local import font_assets\n",
+    b"def build_on_device():\n import idoly_local.font_assets\n",
+    b"from idoly_local import translation_bundle_build\n"])
 def test_android_exclusions_reject_static_and_literal_dynamic_imports_in_all_scopes(source):
     with pytest.raises(ValueError, match="excluded offline"):
         tool.android_runtime_sources(runtime_sources(source))
@@ -58,7 +61,8 @@ def test_android_policy_keeps_literal_external_descriptor_import_and_runtime_cap
     selected=tool.android_runtime_sources(sources)
     assert 'idoly_local/android_package.pyc' not in selected
     assert 'idoly_local/dream_capture.pyc' in selected
-    assert len(tool.ANDROID_EXCLUDED_MODULES)==26
+    assert len(tool.ANDROID_EXCLUDED_MODULES)==32
+    assert 'idoly_local.font_assets' in tool.ANDROID_EXCLUDED_MODULES
 
 
 def test_android_compiler_removes_only_explicit_offline_modules(case):
@@ -80,7 +84,9 @@ def test_real_android_source_selection_keeps_new_runtime_features_and_excludes_h
     sources['android_server_runtime.pyc']=(str(bridge.relative_to(root)),bridge.read_bytes())
     selected=tool.android_runtime_sources(sources)
     assert len(selected)==len(sources)-len(sources.keys() & tool.ANDROID_EXCLUDED_MEMBERS)
-    assert len(sources.keys() & tool.ANDROID_EXCLUDED_MEMBERS)==26
+    assert len(sources.keys() & tool.ANDROID_EXCLUDED_MEMBERS)==32
+    for name in ("font_assets", "resource_translation_build", "text_translation_build", "ui_translation_build", "ui_assets", "translation_bundle_build"):
+        assert 'idoly_local/'+name+'.pyc' not in selected
     for name in ("language_settings", "media_settings", "master_sort", "resource_library", "resource_archive", "resource_routes"):
         assert "idoly_local/"+name+".pyc" in selected
     assert 'idoly_local/render_probe.pyc' in selected

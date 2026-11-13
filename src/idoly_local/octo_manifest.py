@@ -209,11 +209,15 @@ class OctoObject:
 
 class OctoManifest:
     def __init__(self, plain_protobuf: bytes, *, aes_key: bytes, client_key: str,
-                 base_url: str, aes_cbc: AESCallback, application_version: int = 205051):
+                 base_url: str, aes_cbc: AESCallback, application_version: int = 205051,
+                 allow_previous_revisions=False):
         _key_and_backend(aes_key, aes_cbc)
         if type(application_version) is not int or application_version not in _VERSIONS:
             raise OctoManifestError("Unsupported Octo client platform version")
         self.application_version = application_version
+        if type(allow_previous_revisions) is not bool:
+            raise OctoManifestError("Invalid local revision compatibility mode")
+        self._allow_previous_revisions = allow_previous_revisions
         self._list = re.compile(r"/v2/pub/a/212/v/" + str(application_version)
                                 + r"/list/(0|[1-9][0-9]{0,9})\Z")
         if (not isinstance(client_key, str) or not client_key
@@ -292,9 +296,10 @@ class OctoManifest:
         if not valid_key or not valid_accept:
             raise OctoRequestError(403, "Octo application headers differ")
         revision = int(match[1])
-        if revision not in (0, self.revision):
+        previous = self._allow_previous_revisions and 0 < revision < self.revision
+        if revision not in (0, self.revision) and not previous:
             raise OctoRequestError(409, "Requested Octo revision is not archived")
-        plain = self._full if revision == 0 else self._unchanged
+        plain = self._full if revision == 0 or previous else self._unchanged
         count = 16 - len(plain) % 16
         iv = os.urandom(16)
         return iv + _crypt(self._aes, True, self._key, iv, plain + bytes((count,)) * count)

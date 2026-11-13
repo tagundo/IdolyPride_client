@@ -185,7 +185,7 @@ class OctoCache:
     def __init__(self, root, *, fetcher=None, on_event=None, on_phase=None,
                  max_object_bytes=512 * 1024 * 1024, max_parallel=2,
                  timeout=30, total_timeout=300, allow_download=True,
-                 max_download_bytes=None, seed_dirs=(), write_guard=None):
+                 max_download_bytes=None, seed_dirs=(), write_guard=None, local_source=None):
         if (type(max_object_bytes) is not int or not 1 <= max_object_bytes <= 2**31-1
                 or type(max_parallel) is not int or not 1 <= max_parallel <= 16
                 or type(allow_download) is not bool
@@ -198,6 +198,7 @@ class OctoCache:
         if ((fetcher is not None and not callable(fetcher))
                 or (on_event is not None and not callable(on_event))
                 or (on_phase is not None and not callable(on_phase))
+                or (local_source is not None and not callable(local_source))
                 or (write_guard is not None and not callable(write_guard))):
             raise ValueError("Invalid Octo cache callback")
         self.root = Path(root).resolve()
@@ -210,6 +211,7 @@ class OctoCache:
         self.fetcher, self.on_event = fetcher or open_upstream, on_event
         self.on_phase = on_phase
         self.write_guard = write_guard
+        self.local_source = local_source
         self.max_object_bytes, self.timeout, self.total_timeout = max_object_bytes, timeout, total_timeout
         self.allow_download, self.max_download_bytes = allow_download, max_download_bytes
         self._allowance_spent = 0
@@ -446,8 +448,24 @@ class OctoCache:
                 if opened is not None:
                     os.close(opened)
 
+    def _seed_sources(self, record):
+        for root, identity in self._seed_roots:
+            source = self._seed_file(root, identity, record)
+            if source is not None:
+                yield source
+        if self.local_source is not None:
+            try:
+                stream = self.local_source(record)
+            except Exception:
+                raise OctoCacheError("cache_io") from None
+            if stream is not None:
+                # Prepared compressed language archives have no file descriptor
+                # per entry. Their data still follows the same complete MD5,
+                # size, guarded atomic write and cancellation checks below.
+                yield stream, None
+
     def _seed(self, record, directory, deadline):
-        if not self._seed_roots:
+        if not self._seed_roots and self.local_source is None:
             return None
         self._phase(record, "copying")
         while True:
@@ -455,15 +473,12 @@ class OctoCache:
             if self._parallel.acquire(timeout=min(deadline - time.monotonic(), 0.1)):
                 break
         try:
-            for root, identity in self._seed_roots:
-                self._check_deadline(deadline)
-                source = self._seed_file(root, identity, record)
-                if source is None:
-                    continue
+            for source in self._seed_sources(record):
                 temporary = reader = result = None
                 writing = operation_failed = False
                 try:
                     with source[0] as incoming:
+                        self._check_deadline(deadline)
                         writing = True
                         self._write_guard(record, "start")
                         temporary = ".octo-" + secrets.token_hex(12) + ".part"
@@ -494,7 +509,7 @@ class OctoCache:
                                 digest.update(block)
                                 self._write_guard(record, "progress", received)
                             if (received != record.size or digest.hexdigest() != record.md5
-                                    or _stamp(source[1]) != _stamp(os.fstat(incoming.fileno()))):
+                                    or source[1] is not None and _stamp(source[1]) != _stamp(os.fstat(incoming.fileno()))):
                                 raise ValueError()
                             self._check_deadline(deadline)
                             os.fchmod(output.fileno(), 0o400)
@@ -525,6 +540,9 @@ class OctoCache:
                     operation_failed = True
                     if isinstance(error, OctoCacheError):
                         raise
+                    raise OctoCacheError("cache_io") from None
+                except Exception:
+                    operation_failed = True
                     raise OctoCacheError("cache_io") from None
                 except BaseException:
                     operation_failed = True
@@ -570,6 +588,10 @@ class OctoCache:
 
     def _download(self, record, directory, deadline):
         self._require_open()
+        if record.object_name.startswith(("local_ko_", "local_en_")):
+            # Prepared local language identities have no public CDN object.
+            # Missing/corrupt packaged data must never become a network fetch.
+            raise OctoCacheError("cache_io")
         if not self.allow_download:
             raise OctoCacheMiss()
         while True:

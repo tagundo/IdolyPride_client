@@ -23,12 +23,46 @@ val payloadHash = if (payloadFile.isFile) payloadFile.inputStream().use { input 
     digest.digest().joinToString("") { "%02x".format(it) }
 } else "missing"
 val generatedAssets = layout.buildDirectory.dir("generated/serverDataAssets")
+val bundledTranslations = providers.gradleProperty("bundledTranslations").map { rootProject.file(it) }
+val bundledTranslationsHash = providers.gradleProperty("bundledTranslationsSha256").orElse("").get()
+val bundledTranslationsBytes = providers.gradleProperty("bundledTranslationsBytes").orElse("0").get().toLong()
+require(if (bundledTranslations.isPresent) bundledTranslationsHash.matches(Regex("[0-9a-f]{64}"))
+    && bundledTranslationsBytes in 1L..(128L * 1024 * 1024)
+    else bundledTranslationsHash.isEmpty() && bundledTranslationsBytes == 0L) {
+    "bundledTranslations requires explicit SHA-256 and bytes (or omit all three properties)"
+}
 val prepareServerDataAssets = tasks.register<Copy>("prepareServerDataAssets") {
     inputs.file(serverData)
+    inputs.property("bundledTranslations", bundledTranslations.map { it.absolutePath }.orElse(""))
+    inputs.property("bundledTranslationsSha256", bundledTranslationsHash)
+    inputs.property("bundledTranslationsBytes", bundledTranslationsBytes)
+    if (bundledTranslations.isPresent) {
+        inputs.file(bundledTranslations)
+        from(bundledTranslations) { rename { "bundledTranslations.zip" } }
+    }
     from(serverData) { rename { "ServerData.zip" } }
     into(generatedAssets)
     doFirst {
         require(payloadFile.isFile) { "Provide ServerData.zip with -PserverData=/absolute/path/ServerData.zip" }
+        val translations = bundledTranslations.orNull
+        if (translations != null) {
+            require(translations.isFile && translations.length() == bundledTranslationsBytes) { "Optional translation ZIP size differs" }
+            val digest = MessageDigest.getInstance("SHA-256")
+            translations.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (count > 0) digest.update(buffer, 0, count)
+                }
+            }
+            require(digest.digest().joinToString("") { "%02x".format(it) } == bundledTranslationsHash) {
+                "Optional translation ZIP SHA-256 differs"
+            }
+        }
+        // This is generated build storage only. Omitting the property must
+        // remove an optional asset staged by an earlier build.
+        project.delete(generatedAssets.get().asFile.resolve("bundledTranslations.zip"))
     }
 }
 
@@ -93,6 +127,8 @@ android {
         versionName = providers.gradleProperty("serverVersionName").orElse("0.3.25").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
+        buildConfigField("String", "BUNDLED_TRANSLATIONS_SHA256", "\"$bundledTranslationsHash\"")
+        buildConfigField("long", "BUNDLED_TRANSLATIONS_BYTES", "${bundledTranslationsBytes}L")
     }
     buildFeatures { buildConfig = true }
     signingConfigs {
@@ -161,14 +197,16 @@ chaquopy {
             // patch/build and QA modules are outside the server dependency
             // closure. Keep exact filenames so runtime modules remain intact.
             exclude("idoly_local/__main__.py", "idoly_local/cli.py", "idoly_local/android_package.py",
-                "idoly_local/client_patch.py", "idoly_local/native_bootstrap.py", "idoly_local/ios_patch.py",
+                "idoly_local/client_patch.py", "idoly_local/font_assets.py", "idoly_local/native_bootstrap.py", "idoly_local/ios_patch.py",
                 "idoly_local/ios_presentation.py", "idoly_local/master_build.py", "idoly_local/media_master_build.py",
                 "idoly_local/unity_http.py", "idoly_local/unity_cache.py", "idoly_local/collect.py",
                 "idoly_local/event_capture.py", "idoly_local/firebase_archive.py", "idoly_local/official_session.py",
                 "idoly_local/profiles.py", "idoly_local/server.py", "idoly_local/appearance_qa.py",
                 "idoly_local/lesson_qa.py", "idoly_local/main_live_qa.py", "idoly_local/story_qa.py",
                 "idoly_local/story_read_qa.py", "idoly_local/tutorial_qa.py", "idoly_local/pvp_capture.py",
-                "idoly_local/master_translation_build.py", "idoly_local/master_sort_build.py")
+                "idoly_local/master_translation_build.py", "idoly_local/master_sort_build.py",
+                "idoly_local/resource_translation_build.py", "idoly_local/text_translation_build.py",
+                "idoly_local/ui_translation_build.py", "idoly_local/ui_assets.py", "idoly_local/translation_bundle_build.py")
         }
     }
 }

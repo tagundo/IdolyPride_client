@@ -2644,6 +2644,217 @@
         "next_registered_method": "set_Checked",
         "next_registered_rva": "0x47a761c"
       }
+    },
+    "font_name": {
+      "name": "UnityEngine.Object.get_name",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24029,
+      "metadata_method_index": 164928,
+      "token_row": 3436,
+      "rva": "0x8f83df8",
+      "parameters_count": 0,
+      "flags": "0x886",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa01f6e0",
+      "prefix16": "fe57bea9f44f01a9b48700d0754b00d0",
+      "mode": "CALL",
+      "return_type_index": 74263,
+      "return_type": "System.String",
+      "parameters": [],
+      "parameter_count": 0,
+      "native_ABI": "Il2CppString*(void*,const MethodInfo*)"
+    },
+    "font_hide_get": {
+      "name": "UnityEngine.Object.get_hideFlags",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24029,
+      "metadata_method_index": 164967,
+      "token_row": 3475,
+      "rva": "0x8f84c3c",
+      "parameters_count": 0,
+      "flags": "0x886",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa01f818",
+      "prefix16": "fe0f1ef8f44f01a9b48700b0817a41f9",
+      "mode": "CALL",
+      "return_type_index": 58946,
+      "return_type": "UnityEngine.HideFlags",
+      "parameters": [],
+      "parameter_count": 0,
+      "native_ABI": "int32_t(void*,const MethodInfo*)"
+    },
+    "font_hide_set": {
+      "name": "UnityEngine.Object.set_hideFlags",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24029,
+      "metadata_method_index": 164968,
+      "token_row": 3476,
+      "rva": "0x8f84c78",
+      "parameters_count": 1,
+      "flags": "0x886",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa01f820",
+      "prefix16": "fe57bea9f44f01a9b58700b0a27e41f9",
+      "mode": "CALL",
+      "return_type_index": 78154,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "metadata_type_index": 58946,
+          "type_name": "UnityEngine.HideFlags"
+        }
+      ],
+      "parameter_count": 1,
+      "native_ABI": "void(void*,int32_t,const MethodInfo*)"
+    },
+    "font_multi": {
+      "name": "TMPro.TMP_FontAsset.set_isMultiAtlasTexturesEnabled",
+      "module": "Unity.TextMeshPro.dll",
+      "type_definition_index": 26447,
+      "metadata_method_index": 181743,
+      "token_row": 488,
+      "rva": "0x8e9b710",
+      "parameters_count": 1,
+      "flags": "0x886",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa00f2e0",
+      "prefix16": "2800001208900339c0035fd600944339",
+      "mode": "CALL",
+      "return_type_index": 78154,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "metadata_type_index": 50428,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 1,
+      "native_ABI": "void(void*,bool,const MethodInfo*)"
+    },
+    "font_fallback": {
+      "name": "TMPro.TMP_FontAsset.get_fallbackFontAssetTable",
+      "module": "Unity.TextMeshPro.dll",
+      "type_definition_index": 26447,
+      "metadata_method_index": 181761,
+      "token_row": 506,
+      "rva": "0x8e9b7a8",
+      "parameters_count": 0,
+      "flags": "0x886",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa00f370",
+      "prefix16": "009c40f9c0035fd6019c00f9c0035fd6",
+      "mode": "CALL",
+      "return_type_index": 31151,
+      "return_type": "System.Collections.Generic.List<TMPro.TMP_FontAsset>",
+      "parameters": [],
+      "parameter_count": 0,
+      "native_ABI": "List<TMP_FontAsset>*(void*,const MethodInfo*)"
+    },
+    "font_awake": {
+      "name": "TMPro.TMP_FontAsset.Awake",
+      "module": "Unity.TextMeshPro.dll",
+      "type_definition_index": 26447,
+      "metadata_method_index": 181769,
+      "token_row": 514,
+      "rva": "0x8e9bd6c",
+      "parameters_count": 0,
+      "flags": "0x81",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa00f3b0",
+      "prefix16": "fe57bea9f44f01a9d58e00b0b45200d0",
+      "mode": "HOOK",
+      "return_type_index": 78154,
+      "return_type": "System.Void",
+      "parameters": [],
+      "parameter_count": 0,
+      "native_ABI": "void(void*,const MethodInfo*)",
+      "function_size_bytes": 136,
+      "function_boundary_proof": {
+        "kind": "original ELF unwind FDE",
+        "next_function_rva": "0x8e9bdf4",
+        "source_proof_sha256": "d51dca8d928065b8586ea4e96ed418c7a48ebcdd494f1d2ece1f93c03a09accd"
+      }
+    },
+    "font_clear": {
+      "name": "TMPro.TMP_FontAsset.ClearFontAssetData",
+      "module": "Unity.TextMeshPro.dll",
+      "type_definition_index": 26447,
+      "metadata_method_index": 181810,
+      "token_row": 555,
+      "rva": "0x8ea2b28",
+      "parameters_count": 1,
+      "flags": "0x86",
+      "is_static": false,
+      "registration_pointer_slot_rva": "0xa00f4f8",
+      "prefix16": "fe0f1ef8f44f01a9f303012af40300aa",
+      "mode": "CALL",
+      "return_type_index": 78154,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "setAtlasSizeToZero",
+          "metadata_type_index": 50451,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 1,
+      "native_ABI": "void(void*,bool,const MethodInfo*)"
+    },
+    "font_strong": {
+      "name": "il2cpp_gchandle_new",
+      "rva": "0x419e228",
+      "is_export": true,
+      "export_GNU_hash": true,
+      "native_ABI": "uint32_t(void*,bool)",
+      "mode": "CALL",
+      "prefix16": "210000126848ff17ff0301d1fe4f03a9"
+    },
+    "font_method": {
+      "name": "il2cpp_class_get_method_from_name",
+      "rva": "0x419dae8",
+      "is_export": true,
+      "export_GNU_hash": true,
+      "native_ABI": "const MethodInfo*(Il2CppClass*,const char*,int32_t)",
+      "mode": "CALL",
+      "prefix16": "d787fe171f88fe172088fe175e88fe17"
+    },
+    "font_field": {
+      "name": "il2cpp_class_get_field_from_name",
+      "rva": "0x419dae0",
+      "is_export": true,
+      "native_ABI": "FieldInfo*(Il2CppClass*,const char*)",
+      "prefix16": "4487fe17a487fe17d787fe171f88fe17",
+      "mode": "CALL",
+      "export_GNU_hash": true
+    },
+    "font_field_type": {
+      "name": "il2cpp_field_get_type",
+      "rva": "0x419e18c",
+      "is_export": true,
+      "native_ABI": "const Il2CppType*(FieldInfo*)",
+      "prefix16": "a5cf0014b2f1001424f2001481f30014",
+      "mode": "CALL",
+      "export_GNU_hash": true
+    },
+    "font_class_type": {
+      "name": "il2cpp_class_from_type",
+      "rva": "0x419db64",
+      "is_export": true,
+      "native_ABI": "Il2CppClass*(const Il2CppType*)",
+      "prefix16": "210080521a85fe1700800091c0035fd6",
+      "mode": "CALL",
+      "export_GNU_hash": true
+    },
+    "font_new": {
+      "name": "il2cpp_object_new",
+      "rva": "0x419e394",
+      "is_export": true,
+      "native_ABI": "Il2CppObject*(Il2CppClass*)",
+      "prefix16": "fe0f1ff8df0bff97fe0741f8c0035fd6",
+      "mode": "CALL",
+      "export_GNU_hash": true
     }
   },
   "graphics_fields": [
@@ -3164,5 +3375,42 @@
     "does_not_write_checked_or_ownership": true,
     "does_not_consume_or_complete_tasks": true,
     "actual_device_latency_improvement_verified": false
+  },
+  "hangul_font_fallback": {
+    "schema": 1,
+    "asset_policy": "SourceSansPro Font17 replacement + Japanese Font18 fallback PPtr(0,17)",
+    "source_TMP_name": "SourceSansPro-Regular SDF",
+    "reference_TMP_name": "Solis-MK5 SDF",
+    "face_info_offset": 80,
+    "face_info_numeric_offset": 24,
+    "face_info_numeric_size": 72,
+    "native_retention_hide_flags_or": 32,
+    "strong_source_handles_max": 1,
+    "weak_observed_fonts_max": 512,
+    "weak_reference_handles_max": 1,
+    "callbacks": "post-original TMP_FontAsset.Awake only; no frame hooks, scans, glyph prewarming or translation lookups",
+    "source_proof_sha256": "1aadc77cab265edf5f22433852ec68698c3be38dd5bba9e2177bb29dc5506fe1",
+    "ready_requires": "source/reference captured, sourceFont non-null, Dynamic(1), source retained, multi-atlas enabled, font data cleared, at least one fallback registered",
+    "registered_layout_proof_sha256": "d51dca8d928065b8586ea4e96ed418c7a48ebcdd494f1d2ece1f93c03a09accd",
+    "face_info_numeric_range_proof": {
+      "boxed_header_size": 16,
+      "m_PointSize_boxed_offset": 40,
+      "m_TabWidth_boxed_offset": 108,
+      "family_style_managed_references_untouched": true
+    },
+    "source_font_field_offset": 64,
+    "atlas_population_mode_field_offset": 72,
+    "required_atlas_population_mode": 1,
+    "requires_non_null_source_font": true,
+    "mode_enum_metadata_proof_sha256": "0938532140a7ffa16e836cf8cf210d39f2219fa0925a7fb0f5533c719c3a1bb9",
+    "nullable_fallback_lists": {
+      "strategy": "Resolve actual closed generic field type, allocate managed object, invoke actual .ctor0 MethodInfo, then verified adjacent setter",
+      "temporary_strong_handles_max": 1,
+      "immutable_factory_classes_max": 4,
+      "per_frame_allocation": false,
+      "factory_export_proof_sha256": "b3fe6355c8e7026f01f479a136678d85c0e95b7be4e8ad96c8ea6a23b9541f55",
+      "setter_rva_delta_from_verified_getter": 8,
+      "setter_prefix_bytes_covered_by_existing_pin": 8
+    }
   }
 }
