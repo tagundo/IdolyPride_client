@@ -122,8 +122,13 @@ class ResourceLibrary:
         catalogs = {}
         if active_gateway is not None:
             manifest = getattr(active_gateway, "manifest", None)
-            for platform, (_, _, version, _) in PLATFORM_ARCHIVES.items():
-                if isinstance(manifest, OctoManifest) and manifest.application_version == version:
+            for platform, (_, _, version, revision) in PLATFORM_ARCHIVES.items():
+                # Bulk preservation uses the original archive, while a game
+                # session can advertise localized or monotonically pinned JP.
+                # Only an original-revision candidate can use the reuse path;
+                # _load_catalog still verifies its complete original identity.
+                if (isinstance(manifest, OctoManifest) and manifest.application_version == version
+                        and manifest.revision == revision):
                     catalogs[platform] = manifest
         return cls(data_dir, catalogs, fetcher=fetcher, max_workers=max_workers,
                    base_url=base_url, aes_cbc=aes_cbc, resource_cache_dir=resource_cache_dir)

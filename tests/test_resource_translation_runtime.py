@@ -2,6 +2,7 @@ from dataclasses import replace
 import hashlib
 import io
 import json
+import time
 
 from Crypto.Cipher import AES
 import pytest
@@ -12,6 +13,7 @@ from idoly_local.resource_translation import ResourceTranslation
 from idoly_local.resource_translation_build import build_resource_overlay
 from idoly_local.resource_translation_runtime import pin_manifest_revision, validate_prepared_translations
 from idoly_local.octo_runtime import create_octo_gateway
+from idoly_local.resource_library import ResourceLibrary, ResourceLibraryError
 
 URL = "https://d2ilil7yh5oi1v.cloudfront.net/solis-{v}-{type}/{o}?generation={g}&alt=media"
 SOURCE = {"repository": "https://example.invalid/translations", "revision": "a" * 40}
@@ -120,6 +122,86 @@ def test_gateway_factory_uses_selected_downloads_language_data_and_restores_japa
     assert (archive / "manifest.pb").read_bytes() == raw
     assert list((public / "octo-cache").rglob("*.bin"))
     japanese.close()
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+@pytest.mark.parametrize("language", ["ko", "en", "ja"])
+def test_bulk_library_keeps_original_catalog_while_game_uses_selected_language(tmp_path, platform, language):
+    ios = platform == "ios"
+    revision, version = (1159, 105051) if ios else (1087, 205051)
+    private, public = tmp_path / "private", tmp_path / "Downloads/IdolyPride"
+    archive = private / ("public-octo-ios" if ios else "public-octo")
+    archive.mkdir(parents=True); public.mkdir(parents=True)
+    original = database(); original.revision = revision
+    for rows in (original.assetBundleList, original.resourceList):
+        for row in rows:
+            row.uploadVersionId = 101050 if ios else 202050
+    raw = original.SerializeToString()
+    settings = {"schema": 1, "application_id": 212, "application_version": version,
+        "revision": revision, "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+        "aes_key_hex": KEY.hex(), "client_key": "synthetic"}
+    (archive / "manifest.pb").write_bytes(raw)
+    (archive / "settings.json").write_text(json.dumps(settings))
+    source = tmp_path / "source"; source.mkdir()
+    translated = ("로컬 번역" if language != "en" else "local translation").encode()
+    (source / "adv_bond_ai_01_01.txt").write_bytes(translated)
+    overlay_language = "ko" if language == "ja" else language
+    build_resource_overlay(raw, source, public / "translations" / overlay_language / platform,
+        language=overlay_language, revision=revision + 1, source=SOURCE)
+    calls = []
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Gameplay must reuse local files, never contact the CDN")
+    if language == "ja":
+        # A previous localized session also pins a newer revision on restored JP.
+        previous, _ = create_octo_gateway(private, "http://127.0.0.1:8080", aes_cbc=aes,
+            resource_cache_dir=public, platform=platform, language="ko", allow_downloads=False,
+            fetcher=forbidden)
+        previous.close()
+    gateway, _ = create_octo_gateway(private, "http://127.0.0.1:8080", aes_cbc=aes,
+        resource_cache_dir=public, platform=platform, language=language, allow_downloads=False,
+        fetcher=forbidden)
+    library = None
+    class Response(io.BytesIO):
+        status = 200
+        headers = {"Content-Length": "3"}
+    def fetch(url, *, timeout):
+        calls.append(url)
+        return Response(b"old")
+    try:
+        assert gateway.manifest.revision > revision
+        with pytest.raises(ResourceLibraryError, match="invalid_catalog"):
+            ResourceLibrary(private, {platform: gateway.manifest}, aes_cbc=aes,
+                resource_cache_dir=public)
+        library = ResourceLibrary.from_data_dir(private, aes_cbc=aes, fetcher=fetch,
+            active_gateway=gateway, resource_cache_dir=public)
+        library.catalog_summary(platform)
+        catalog = library._catalogs[platform]
+        assert catalog.manifest.revision == revision and catalog.raw == raw
+        assert all(record.object_name.startswith("original_") for record in catalog.records)
+        library.start_download(platform, parallelism=1)
+        deadline = time.monotonic() + 2
+        while (job := library.status()["job"])["state"] not in {"completed", "partial", "failed", "cancelled"}:
+            assert time.monotonic() < deadline
+            time.sleep(.005)
+        assert job["state"] == "completed" and job["verified_files"] == 2
+        assert job["received_bytes"] == 6 and len(calls) == 2
+        assert set(calls) == {record.upstream_url for record in catalog.records}
+        assert gateway.cache.root == public / ("octo-cache-ios" if ios else "octo-cache")
+        for record in gateway.manifest.objects.values():
+            with gateway.cache.open_verified(record) as stream:
+                expected = translated if language != "ja" and record.kind == "resources" else b"old"
+                assert stream.read() == expected
+        library.start_download(platform, parallelism=1)
+        deadline = time.monotonic() + 2
+        while (job := library.status()["job"])["state"] not in {"completed", "partial", "failed", "cancelled"}:
+            assert time.monotonic() < deadline
+            time.sleep(.005)
+        assert job["state"] == "completed" and job["cache_hit_files"] == 2 and job["received_bytes"] == 0
+        assert len(calls) == 2 and (archive / "manifest.pb").read_bytes() == raw
+    finally:
+        if library is not None:
+            library.close()
+        gateway.close()
 
 
 def test_installer_semantic_helper_validates_both_languages_closes_archives_and_rejects_wrong_base(tmp_path, monkeypatch):
