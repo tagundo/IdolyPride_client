@@ -300,8 +300,13 @@ class PhotoShootings:
         elif any(legacy) and legacy != tuple(values[0] if values else ""
                                              for values in (characters, costumes, hairs)):
             _fail("Conflicting photo expression style selections", RpcCode.INVALID_ARGUMENT)
-        if len(characters) not in amounts:
-            _fail("The selected cast count is not supported by this photo expression", RpcCode.INVALID_ARGUMENT)
+        # The original confirm caller serializes only selected actorCostumes,
+        # taking at most the current display capacity; unfilled scene places
+        # are not request entries. Its pose model explicitly supports one
+        # selected actor even in a larger scene. These master amounts describe
+        # layout capacities, not a requirement to occupy every available place.
+        if not 0 < len(characters) <= max(amounts):
+            _fail("The selected cast count exceeds this photo expression's capacity", RpcCode.INVALID_ARGUMENT)
         self._styles(SimpleNamespace(characterIds=characters, costumeIds=costumes, hairIds=hairs),
                      snapshot, expression)
 

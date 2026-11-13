@@ -29,8 +29,8 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
 from certificate_bundle import install_certificate_bundle
 APP = "IdolyPrideLocalServer"
-VERSION = "0.3.24"
-BUILD_NUMBER = "43"
+VERSION = "0.3.25"
+BUILD_NUMBER = "44"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
 PAYLOAD_SHA = "ebc46092a253e75f5b295972d04442b1d9c48a9c4d969c512ef8344415728a1f"
 PAYLOAD_BYTES = 191118320

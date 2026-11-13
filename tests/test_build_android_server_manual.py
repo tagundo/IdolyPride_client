@@ -63,8 +63,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "43",
-                           tool.ANDROID + "versionName": "0.3.24"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "44",
+                           tool.ANDROID + "versionName": "0.3.25"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -120,7 +120,7 @@ def test_release_component_export_policy_is_fixed(name, old, new):
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 43;' in raw and 'VERSION_NAME = "0.3.24";' in raw
+    assert 'VERSION_CODE = 44;' in raw and 'VERSION_NAME = "0.3.25";' in raw
     assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
@@ -129,7 +129,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("43")\ngradleProperty("serverVersionName").orElse("0.3.24")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("44")\ngradleProperty("serverVersionName").orElse("0.3.25")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -509,7 +509,7 @@ def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(t
 
 
 def linked_identity():
-    badging = (f"package: name='{tool.PACKAGE}' versionCode='43' versionName='0.3.24'\n"
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='44' versionName='0.3.25'\n"
                "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
                + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
     manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"
@@ -521,8 +521,8 @@ def test_linked_identity_requires_release_and_no_install_permission_or_callback(
     badging, manifest_dump = linked_identity()
     tool._identity(badging, manifest_dump)
     with pytest.raises(ValueError, match="identity"):
-        tool._identity(badging.replace("versionCode='43' versionName='0.3.24'",
-                                      "versionCode='42' versionName='0.3.23'"), manifest_dump)
+        tool._identity(badging.replace("versionCode='44' versionName='0.3.25'",
+                                      "versionCode='43' versionName='0.3.24'"), manifest_dump)
     with pytest.raises(ValueError, match="identity"):
         tool._identity(badging, manifest_dump.replace("debuggable(0x2)=false", "debuggable(0x2)=true"))
     for forbidden in ("REQUEST_INSTALL_PACKAGES", "PresentationInstallActivity"):
