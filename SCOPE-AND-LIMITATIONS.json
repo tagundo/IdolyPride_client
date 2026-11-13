@@ -1,0 +1,209 @@
+{
+  "schema": 1,
+  "status": "PASS_READ_ONLY_SOURCE_AND_SMALL_RECEIPT_SCOPE_REVIEW_WITH_RUNTIME_LIMITS",
+  "at_utc": "2026-11-13T18:23:15.772700+00:00",
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "source_epoch": 1794591784,
+  "review_operations": {
+    "working_tree_clean": true,
+    "source_read": true,
+    "small_JSON_receipt_SHA_bindings_checked": true,
+    "fresh_local_and_Git_Darwin_header_link_files_compared": 26,
+    "fresh_iOS_profile_and_hook_plan_byte_equality": true,
+    "large_APK_or_native_read": false,
+    "network": false,
+    "tests_or_JVM_run": false,
+    "device_or_VM_execution": false,
+    "secret_or_signed_download_file_read": false,
+    "repository_edits": false
+  },
+  "source_sha256": {
+    "client-presentation/native/bridge.cpp": "51bab04d224c24b6843d8e9abca1aca477d4f53ec8f8a9caa1fa90f66a61c709",
+    "client-presentation/native/profile.json": "5bc347544e2d0c696f11223b826834aae02a6e01c2343ad6f3c51c9f53de2f6f",
+    "client-presentation/native/profile.hpp": "221b0e6dc75905717d68d65a3924142a225de6edd5d9fa8c793268ca086b9c85",
+    "client-presentation/native/local_resource_policy.hpp": "991219111e40d50271e8b2194e96795d02263c8ffa81f80a4473abdbde9359f2",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java": "3978e9e37d1e6017e00495f53eef9ea2dc01f9b76d724b29527490b881b6820b",
+    "docs/android-local-resources-v0.3.28.md": "fac62fa7e2e53ee7cbdac5caa4aeac6e5d3eaba1883bfed0dc1ab8e638abe7f6"
+  },
+  "confirmed_source_scope": {
+    "fixed_origin": "http://127.0.0.1:8080/",
+    "accepted_object_route": "/octo/<positive-int32>/(assetbundle|resources)/<ASCII A-Z a-z 0-9 _ - name length1..128>/<positive-uint64>",
+    "maximum_UTF16_URL_units": 199,
+    "no_URL_normalization_or_alias_hosts_ports_queries_fragments": true,
+    "Android_only": true,
+    "ABI": "bool(self, MethodInfo*)",
+    "request_url_offset": 16,
+    "managed_string_length_offset": 16,
+    "managed_string_UTF16_offset": 20,
+    "requires_existing_ready_and_nonnull_self_and_method": true,
+    "critical_known_caller_initializes_and_loads_MethodInfo": true,
+    "other_cases_forward_original_self_and_method_without_exception_suppression": true,
+    "existing_HTTP_IO_native_error_hash_storage_flow_not_edited": true,
+    "global_Unity_reachability_not_edited": true,
+    "Android_aliases": 133,
+    "Android_hooks": 58,
+    "previous132_alias_objects_unchanged": true,
+    "font_hook_remains_first_before_existing500ms_delay": true,
+    "iOS_aliases": 111,
+    "iOS_hooks": 41,
+    "Darwin_preprocessing_equal_to_source6e5_bytes": 173180,
+    "Darwin_code_exclusion_is_not_Mac_runtime_verification": true
+  },
+  "observed_failure_and_causal_evidence": {
+    "diagnostics19_selected_counters_only": {
+      "server_version": "0.3.26",
+      "running": true,
+      "HTTP_requests": 21,
+      "HTTP_failures": 0,
+      "cache_hits": 20,
+      "cache_misses": 0,
+      "served_object_bytes": 628845,
+      "served_manifest_bytes": 80,
+      "unique_objects": 4,
+      "repeats_each": 5,
+      "all_twenty_object_HTTP_records_completed200": true,
+      "last_failed_request": null
+    },
+    "exact_native_flow": "Normal HTTP0/200 -> IsIoError false -> CanReach at8755198 -> IsError -> MD5 result/create success. Offline external reachability can reject before success handling.",
+    "Java_scope": "Original targeted DEX trace shows destination open/write/close, MD5 computation, then completion with normal isIoError=false. Custom checksum/ETag/Content-Disposition response headers are not required by the traced Java methods.",
+    "important_correction": "Earlier android-offline-sdk-trace failed-results-only description is superseded for Android FILE transport. Unity manifest transport must remain a separate flow.",
+    "limit": "Server HTTP200 completion is a response-write observation; actual phone callback/hash/file state was not captured in diagnostics19. Static causality plus correlation supports this scoped fix, not a completed phone validation claim."
+  },
+  "verified_receipt_bindings": {
+    "native_source_and_host_tests": {
+      "path": "/dev/shm/idoly-local-reachability-fix-tests/final-verification.json",
+      "bytes": 4855,
+      "sha256": "f7f086353972f9e8fc299969730a7466de19a61a7472d98acdfc561ad6120450"
+    },
+    "prototype_completion": {
+      "path": "/dev/shm/idoly-v0328-work/offline-gate-test/prototype-completion.json",
+      "bytes": 2299,
+      "sha256": "9ae2a36c5eaf7ad07232141b7eece5393b7cd3da9ea8fc366ab6f8ce5b748cb9"
+    },
+    "prototype_actual_APK_QA": {
+      "path": "/dev/shm/idoly-v0328-work/offline-gate-test/qa-android-ko-r3/independent-full-client-review-ko.json",
+      "bytes": 27485,
+      "sha256": "cb801e768116e4a12c71835f6b649893ddd911dac170d23ed1e6659bda6a1a2b"
+    },
+    "post_HTTP_causality_correction": {
+      "path": "/dev/shm/idoly-v0328-work/android-post-HTTP-reachability-causality-correction.json",
+      "bytes": 13064,
+      "sha256": "7f521e52a6c44419c7195d423127f18290160c0b1b151b6c3f5ad434120a70b8"
+    },
+    "stock_branch_trace": {
+      "path": "/dev/shm/android-http200-reachability-gate-proof-20261113.json",
+      "bytes": 9279,
+      "sha256": "af4ca9cd3384a523e73f572a3db9435e244572429f4d0889640295637ae893c2"
+    },
+    "actual_packaged_451_window_trace": {
+      "path": "/dev/shm/local-resource-packaged-gate-proof-20261113.json",
+      "bytes": 2681,
+      "sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef"
+    },
+    "MethodInfo_context_trace": {
+      "path": "/dev/shm/local-resource-method-context-probe-20261113.json",
+      "bytes": 1751,
+      "sha256": "528a5f37e27c6cf1d327c466ac9282a7a1ad33c8b005b140d744eff95a8081fa"
+    },
+    "Darwin_preprocessed_scope": {
+      "path": "/dev/shm/idoly-local-reachability-fix-tests/darwin-preprocessor-scope.json",
+      "bytes": 4433,
+      "sha256": "ca29de812754361cf350afbd6133eb60656d4bfce8c80609a31476391d3db162"
+    },
+    "Android_HTTP_UI_host_tests": {
+      "path": "/dev/shm/idoly-android-http-ui-tests/host-verification.json",
+      "bytes": 812,
+      "sha256": "7beb660f45b024cd974bfdde5936fd31de7c298b36021f6861ee63fcb1bdabb6"
+    },
+    "prototype_publication": {
+      "path": "/dev/shm/idoly-v0328-work/offline-gate-test/publish-client-ko/evidence/publication.json",
+      "bytes": 603,
+      "sha256": "b838e7cc603cfd81c445ecbea0bb1b2a64116583639f6f1354812f9408d50994"
+    },
+    "prototype_retirement": {
+      "path": "/dev/shm/idoly-v0328-work/offline-gate-test/publish-client-ko/retirement.json",
+      "bytes": 985,
+      "sha256": "a700b59f1220374f88401cb89a8e57fa932f9e4c326e86481f4265126c309bd7"
+    },
+    "Android_server_actual_binary_QA": {
+      "path": "/dev/shm/idoly-v0328-work/qa-results/android/independent-server-binary-review.json",
+      "bytes": 65838,
+      "sha256": "91c0537bbbb6d1e5849d63d39ad7ff977588873ed4939154b75cc66b0f75989f"
+    },
+    "Android_server_signature_QA": {
+      "path": "/dev/shm/idoly-v0328-work/qa-results/android/independent-server-v2-signature.json",
+      "bytes": 694,
+      "sha256": "c26fd69dc7fc1835a3c2974ec65082c2e9126c40de5c5bb61aef0abf7c71cfca"
+    },
+    "Android_server_publication": {
+      "path": "/dev/shm/idoly-v0328-work/publish-server-android/evidence/publication.json",
+      "bytes": 581,
+      "sha256": "cf150f51ff374995dfb27bb62ee9ff5b0cdec03caa93041d4ad8bd1338e52fa3"
+    },
+    "Elichika_reference": {
+      "path": "/dev/shm/elichika-latest-reference.json",
+      "bytes": 3133,
+      "sha256": "a833dcba1b4e9ec9aa550ca107a50e455f721996bb56cfd85f81af544786775b"
+    }
+  },
+  "artifact_state_at_review": {
+    "KO_prototype": {
+      "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+      "bytes": 163441097,
+      "sha256": "abc43346602851ab23dbf8a5541e64097d3a04a7ce6caba42f46b38327482080",
+      "native_sha256": "4c034a74a74eaccd602a4f91ea581ab8132c91e3cb4d1c4dd951f8df1ad311b9",
+      "native_bytes": 312776,
+      "QA_sha256": "cb801e768116e4a12c71835f6b649893ddd911dac170d23ed1e6659bda6a1a2b",
+      "published_commit": "0c0fbf18dc19316a46fcfc57812fe9c2ac897d82",
+      "full_remote_SHA_verified": true,
+      "anonymous_prefix_verified": true,
+      "final_local_SHA_verified": true,
+      "only_owned_derived_APK_retired": true,
+      "phone_offline_play_verified": false
+    },
+    "Android_server_receipt": "453 source / 0.3.28 code46 / 284835788 bytes / 85ef31e0df9952aefaf96022ad741ab06f1afd7a0589750207cc58b8aefde48b; actual source/PYC/UI/signature QA and full remote SHA reported PASS, not re-executed here.",
+    "historical_snapshot_flags": "Artifact QA published=false or source-edit task produced-no-binary flags describe their own earlier phase; completion/publication receipts supersede distribution state without retroactively changing those receipts.",
+    "do_not_use_old_source7e5_JA_EN_as_final_gate_fixed_clients": true,
+    "final_aggregate_or_JA_EN_gate_fixed_build_completion_not_established_by_this_review": true
+  },
+  "measured_host_checks": {
+    "native_and_builder": {
+      "passed": 49,
+      "skipped": 0,
+      "AS_MiB": 512
+    },
+    "Android_HTTP_UI": {
+      "passed": 29,
+      "actual_extracted_Java_formatter_run": true
+    },
+    "counts_are_separate_suites_not_a_claim_of_unique_total": true
+  },
+  "reference_and_feature_limits": {
+    "Elichika": "v2026.11.12.4 / a91843474f9d672189c1ca2f15ca846de8e41458: actual manifest/DEX/resources bounded HTTP inspections totaled10843759 bytes. DEX integrity checked; full290866852-byte APK SHA/signature and native Go/runtime offline behavior were not verified. Source cache-first routing and translation-DB regeneration were reviewed; readiness NO_PROXY is not proof of every client transport.",
+    "photo_reservations": "Media startup now supplies missing reserved image IDs up to20; it does not create images/photos, consume film or implement Firebase upload/final photo creation. 86 host-test receipt covers startup/index repair; current user INVALID_ARGUMENT remains unclassified until new failure diagnostics.",
+    "unresolved_RadioButtonView": "Serialized CanvasGroup fade binding remains unobserved and unpatched. No NRE disappearance claim.",
+    "translation": "Keyed Korean UI scope4198 nonempty translations+1 original fallback,3822 changed values; documented ADV scope3091 changed scripts of3492 and401 Japanese fallbacks. These counts do not establish all lines, prefab/image text, subtitles or all UI translation.",
+    "Mac": "Existing IPA local-origin settings and Darwin source exclusion are verified separately; actual Mac offline execution, playback and full-download success remain unverified."
+  },
+  "nonblocking_wording_findings": [
+    {
+      "priority": "P3",
+      "path": "docs/android-local-resources-v0.3.28.md",
+      "finding": "The phrase following checks includes file I/O; the traced Java write/MD5 computation and native IO-error branch precede CanReach. Release prose should be sequence-neutral.",
+      "suggested": "기존 HTTP·파일 I/O·오류·MD5 검증은 유지합니다."
+    },
+    {
+      "priority": "P3_historical",
+      "path": "docs/pose-font-v0.3.25.md:3",
+      "finding": "Broad historical pose InvalidArgument fixed wording cannot establish the current error is resolved or full photo shooting works. Do not repeat as a current result."
+    }
+  ],
+  "release_gates": [
+    "Record the new KO phone result against abc433 artifact before claiming this E202 reproduction passes on device.",
+    "Use source453/133-prefix58-hook gate-fixed binaries for all newly released Android locales; source7e5 metadata-only clients remain superseded pretests.",
+    "Preserve original source and QA bindings for reused Data25 and IPA27; Darwin source equivalence does not make those binaries newly built or physically tested.",
+    "Report unresolved NRE, current photo condition error/full capture support and partial translations accurately.",
+    "Do not claim full Android or Mac game restoration, all assets offline, Play Protect clearance, or visual/performance success from these file/source checks alone."
+  ],
+  "reviewer_findings": "No blocking source or small-receipt consistency finding. Two nonblocking wording cautions above."
+}

@@ -1,0 +1,68 @@
+{
+  "repository": "tagundo/elichika",
+  "release_tag": "v2026.11.12.4",
+  "release_published": "2026-11-12T20:19:53Z",
+  "source_commit": "a91843474f9d672189c1ca2f15ca846de8e41458",
+  "apk_url": "https://github.com/tagundo/elichika/releases/download/v2026.11.12.4/elichika-2026.11.12.4.apk",
+  "apk_size": 290866852,
+  "published_apk_sha256": "f1b9b1060f2fd7b3fec912aa76b1c53c9f368f99841df18f8872b0a25169a7e3",
+  "whole_apk_sha256_verified": false,
+  "exact_http_body_bytes_read": 10843759,
+  "range_policy": "All body reads required exact206/Content-Range and exact bounded length; no ignored Range body consumed",
+  "zip_entries": 7371,
+  "manifest": {
+    "package": "com.tagundo.elichika",
+    "version_name": "2026.11.12.4",
+    "version_code": 2026111204,
+    "min_sdk": 29,
+    "target_sdk": 34,
+    "uses_cleartext_traffic": true,
+    "network_security_config": "0x7f120000 -> res/8G.xml",
+    "cleartext_domains": [
+      "127.0.0.1",
+      "localhost"
+    ],
+    "all_files_storage_permission": true
+  },
+  "dex": {
+    "size": 9092976,
+    "crc32_valid": true,
+    "header_sha1_valid": true,
+    "adler32_valid": true,
+    "app_classes_inspected": 180,
+    "direct_app_ConnectivityManager_or_NetworkCapabilities_calls": 0,
+    "readiness": "ServerReadiness.responds invokes URL.openConnection(Proxy.NO_PROXY)",
+    "asset_cache": "AssetInstaller.ensureCacheDir references DIRECTORY_DOWNLOADS,getExternalStoragePublicDirectory,sukusta/packs",
+    "shared_links": "AssetInstaller.ensureSharedLinks references storage/downloads,sukusta/addons,Os.symlink"
+  },
+  "source_patterns": {
+    "handler/asset/routing.go:178": "packDownloadURL probes localPath(data.File) even cache off; local /static or /static_map URLs; source upstream separate",
+    "handler/asset/whole.go:53": "localPath hit served before upstream fetch",
+    "clientdb/clientdb.go:35": "Hash all authoritative clear SQLite inputs, derive version, rekey encrypted client DB outputs, validate then publish manifests with hash and size",
+    "replace_jp_client_dictionary.py": "Actual client dictionary and story dictionary_s patched separately from Android/WebUI language"
+  },
+  "limits": [
+    "Static reference only; no runtime offline behavior tested",
+    "Go routing source verified at release commit, native Go library not inspected",
+    "This server APK does not bypass or test Idoly client native connection-state checks",
+    "No whole APK signature or full SHA verification"
+  ],
+  "extracted_files": {
+    "/dev/shm/elichika-latest-manifest.bin": {
+      "size": 7352,
+      "sha256": "f68095f154641bc4e38620b48d46955342c8cf4eaa061284ad2735216fd5dcc7"
+    },
+    "/dev/shm/elichika-latest-classes.dex": {
+      "size": 9092976,
+      "sha256": "14c6c27bfeaf0ede1ac528ec07635aac854b19c23e79d2668b37517e88db0b61"
+    },
+    "/dev/shm/elichika-latest-resources.arsc": {
+      "size": 1087160,
+      "sha256": "7d995f6f9759880671893c8425778bbd4be452629d6e07abc036fac0499c0e4a"
+    },
+    "/dev/shm/elichika-latest-network-security.bin": {
+      "size": 552,
+      "sha256": "04c409941801c2bacb0f176ee38ca50b53d6447d4dceee6007740b9432fb3975"
+    }
+  }
+}

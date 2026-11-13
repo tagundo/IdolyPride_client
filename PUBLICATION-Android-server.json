@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "branch": "downloads/local-resources-server-v0.3.28-source-45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "sha256": "85ef31e0df9952aefaf96022ad741ab06f1afd7a0589750207cc58b8aefde48b",
+      "bytes": 284835788,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "b374fa97b970f8d0deb0744c0fa765d75760a737",
+  "tree": "96fdcc303776f9ad840baf5ef79b224c8a7b50db"
+}

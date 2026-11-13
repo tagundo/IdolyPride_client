@@ -1,0 +1,24 @@
+{
+  "status": "PASS",
+  "before": {
+    "current": 15766953984,
+    "headroom": 1412915200,
+    "root_free": 161058816,
+    "oom_kill": 2
+  },
+  "after": {
+    "current": 15767613440,
+    "headroom": 1412255744,
+    "root_free": 161058816,
+    "oom_kill": 2
+  },
+  "minimum_observed_headroom": 1319194624,
+  "seconds": 1.06,
+  "child_peak_rss_kib": 91092,
+  "no_global_AS_cap_on_JVM": true,
+  "source_sha256": {
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java": "3978e9e37d1e6017e00495f53eef9ea2dc01f9b76d724b29527490b881b6820b",
+    "tests/test_android_resource_http_ui.py": "9fe98a795e44aecae06b2b14cb856e361315af566946b4e4942b7a1103a68b75"
+  },
+  "output": ".............................                                            [100%]\n29 passed in 0.88s\n"
+}

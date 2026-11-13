@@ -1,0 +1,363 @@
+{
+  "status": "PASS",
+  "platform": "ios",
+  "input_asset_sha256": "899ad32e8b6730252f84389cff657b6edb065a6716e32c52db258dca1a69ba62",
+  "input_asset_bytes": 4572576,
+  "output_asset_sha256": "104890b56122dbd3362b7b8801f9d6c3e6d0535e9c691d8dc4a660bc8bf35c69",
+  "output_asset_bytes": 8085216,
+  "object_count": 21,
+  "object_sha256_before": {
+    "1": {
+      "class_id": 150,
+      "bytes": 205,
+      "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+    },
+    "2": {
+      "class_id": 21,
+      "bytes": 1764,
+      "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+    },
+    "3": {
+      "class_id": 21,
+      "bytes": 268,
+      "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+    },
+    "4": {
+      "class_id": 21,
+      "bytes": 148,
+      "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+    },
+    "5": {
+      "class_id": 21,
+      "bytes": 148,
+      "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+    },
+    "6": {
+      "class_id": 21,
+      "bytes": 1752,
+      "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+    },
+    "7": {
+      "class_id": 21,
+      "bytes": 1768,
+      "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+    },
+    "8": {
+      "class_id": 28,
+      "bytes": 8340,
+      "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+    },
+    "9": {
+      "class_id": 28,
+      "bytes": 128,
+      "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+    },
+    "10": {
+      "class_id": 28,
+      "bytes": 128,
+      "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+    },
+    "11": {
+      "class_id": 28,
+      "bytes": 152,
+      "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+    },
+    "12": {
+      "class_id": 28,
+      "bytes": 164,
+      "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+    },
+    "13": {
+      "class_id": 28,
+      "bytes": 152,
+      "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+    },
+    "14": {
+      "class_id": 48,
+      "bytes": 8036,
+      "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+    },
+    "15": {
+      "class_id": 48,
+      "bytes": 14160,
+      "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+    },
+    "16": {
+      "class_id": 48,
+      "bytes": 11260,
+      "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+    },
+    "17": {
+      "class_id": 128,
+      "bytes": 269250,
+      "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+    },
+    "18": {
+      "class_id": 128,
+      "bytes": 3591562,
+      "sha256": "f8d3037d45d46caaa46a0f02899ca176300d928aa9cbe05957415ac8608f1a6d"
+    },
+    "19": {
+      "class_id": 114,
+      "bytes": 13720,
+      "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+    },
+    "20": {
+      "class_id": 114,
+      "bytes": 647500,
+      "sha256": "5a7ff93731061e781e1a36a96500909dd6edb8b6af893421bf272badb469d9f1"
+    },
+    "21": {
+      "class_id": 114,
+      "bytes": 1056,
+      "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+    }
+  },
+  "object_sha256_after": {
+    "1": {
+      "class_id": 150,
+      "bytes": 205,
+      "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+    },
+    "2": {
+      "class_id": 21,
+      "bytes": 1764,
+      "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+    },
+    "3": {
+      "class_id": 21,
+      "bytes": 268,
+      "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+    },
+    "4": {
+      "class_id": 21,
+      "bytes": 148,
+      "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+    },
+    "5": {
+      "class_id": 21,
+      "bytes": 148,
+      "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+    },
+    "6": {
+      "class_id": 21,
+      "bytes": 1752,
+      "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+    },
+    "7": {
+      "class_id": 21,
+      "bytes": 1768,
+      "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+    },
+    "8": {
+      "class_id": 28,
+      "bytes": 8340,
+      "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+    },
+    "9": {
+      "class_id": 28,
+      "bytes": 128,
+      "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+    },
+    "10": {
+      "class_id": 28,
+      "bytes": 128,
+      "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+    },
+    "11": {
+      "class_id": 28,
+      "bytes": 152,
+      "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+    },
+    "12": {
+      "class_id": 28,
+      "bytes": 164,
+      "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+    },
+    "13": {
+      "class_id": 28,
+      "bytes": 152,
+      "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+    },
+    "14": {
+      "class_id": 48,
+      "bytes": 8036,
+      "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+    },
+    "15": {
+      "class_id": 48,
+      "bytes": 14160,
+      "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+    },
+    "16": {
+      "class_id": 48,
+      "bytes": 11260,
+      "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+    },
+    "17": {
+      "class_id": 128,
+      "bytes": 3781882,
+      "sha256": "555870cf2536cec42ce247b637c3f1456304ccdb4dd67f559ff8973740156910"
+    },
+    "18": {
+      "class_id": 128,
+      "bytes": 3591574,
+      "sha256": "9079bbf411bb8f079160e4e23e4b4761e860401cc96457aa7b86f7d954d9a737"
+    },
+    "19": {
+      "class_id": 114,
+      "bytes": 13720,
+      "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+    },
+    "20": {
+      "class_id": 114,
+      "bytes": 647500,
+      "sha256": "5a7ff93731061e781e1a36a96500909dd6edb8b6af893421bf272badb469d9f1"
+    },
+    "21": {
+      "class_id": 114,
+      "bytes": 1056,
+      "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+    }
+  },
+  "all_other_objects_byte_identical": true,
+  "other_object_count": 19,
+  "Font_path_id": 17,
+  "legacy_Font_path_id": 18,
+  "legacy_fallback_references": [
+    {
+      "file_id": 0,
+      "path_id": 17
+    }
+  ],
+  "legacy_Japanese_font_data_unchanged": true,
+  "type_and_external_reference_metadata_unchanged": true,
+  "Font17_raw_prefix_and_suffix_unchanged": true,
+  "legacy_all_other_raw_fields_unchanged": true,
+  "Font17_empty_fallbacks_before_after_semantically_verified": true,
+  "Font17_fallback_field_offset_before": 269240,
+  "Font17_fallback_field_offset_after": 3781872,
+  "acyclic_fallback_graph": true,
+  "TMP21_source_dynamic_Font_PPtr17_verified": true,
+  "TMP21_source_mode": {
+    "name": "SourceSansPro-Regular SDF",
+    "version": "1.1.0",
+    "source_guid": "43fa2ca56150741f682409d5e57bbc2b",
+    "source_Font_file_id": 0,
+    "source_Font_path_id": 17,
+    "atlas_population_mode": 1,
+    "source_PPtr_offset": 128,
+    "atlas_population_mode_offset": 140
+  },
+  "font": {
+    "family": "Pretendard JP SemiBold",
+    "bytes": 3781740,
+    "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+    "modern_hangul_syllables": 11172,
+    "basic_latin_characters": 95,
+    "unicode_format": 12,
+    "unicode_maps_agree": true,
+    "glyph_count": 22936,
+    "cmap_group_count": 6862,
+    "font_bytes_modified": false,
+    "license": "OFL-1.1"
+  },
+  "independent_parser": "stdlib Unity SerializedFile v22 / OpenType format12",
+  "whole_asset_buffered": false,
+  "maximum_callback_read_bytes": 65536,
+  "maximum_Font_object_buffer_bytes": 4194304,
+  "runtime_verified": false,
+  "base_source_commit": "07f5699d1eca3c050410cb81eabf7c532302178d",
+  "reviewed_patch_sha256": "f98d2722cc8e1d6c7563777b5b9e7cae64c59dcdad3f7ef544e1fe69b80494ba",
+  "independent_source_review_sha256": "df4708aebb8b5b891be3f7a0cde08e6da80f924b65cee82736a15941d6650e5c",
+  "independent_test_count_supplement_sha256": "88559aacbd3916f2e9d11e35164b6ce148bbd7cfabfd0842c060910e78babb8f",
+  "reviewed_exact_source_hashes": {
+    "client-presentation/ios/build_native.py": "e09ddf90a4aa5ce29afab466a4c7237dc453a95fa0ada953ba74585c077c1b77",
+    "client-presentation/ios/hook-plan.json": "66e5636bb27c3f4616be3ea488eaf4450bdaaca0637e1406a43f6434d594e64a",
+    "client-presentation/ios/ios_profile.hpp": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3",
+    "client-presentation/ios/profile.json": "0f1c5bc8ac11b2c597a33e7533ddd2c59579855f65cd54dad6240d4b4a122805",
+    "client-presentation/ios/static_install.hpp": "37c521bb6e4bf1a8699417640a61a93a4a2d590032fe45b715c7934611535b63",
+    "client-presentation/native/bridge.cpp": "e19836ab08539b2be1b5f5aa45c4365b5ac3a6bf2bc11c2bc5d1102783362dfa",
+    "client-presentation/native/profile.hpp": "18fae8732f2aecdcf02aaa15c22d42c3f5db5d494757de4b4c0e3144b57f0b3d",
+    "client-presentation/native/profile.json": "959d6ca9b503279a824061fb29cc40ced90c53b65647ad36e1c76010ce4d8f91",
+    "client-presentation/native/sound-original-pins.json": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c",
+    "client-presentation/native/sound_persistence.hpp": "2b45d7d0c77b83acc47f850a587680bb4055bac576dbbb08467c87a7b05652ef",
+    "client-presentation/native/tests/sound_persistence_test.cpp": "fcb1645cb85962dceeb3a906550c3a4b35376fdb0883af5a47c226e3cc4a2724",
+    "client-presentation/native/tests/test_native_preview_ui.py": "be372603c2dd6cdb919d8e7467d16142e0a979ad1d8a760fe84c20b5853048f5",
+    "client-presentation/native/tests/test_native_render_probe.py": "6bcd0623093e04e2b4c89fd1824e140531eb5d4d00f945f9cf21109f79074d76",
+    "client-presentation/native/tests/test_native_wardrobe.py": "cb3f439bb447f8cb687cefe78c914514bf653b0e84550e03631156dfe566c181",
+    "client-presentation/native/tests/test_profile.py": "0aa0dbb175dbb221e9214fea99e99183c765e2f6136aa08eec72ddca1dbb789b",
+    "client-presentation/native/tests/test_sound_persistence.py": "93419734c14d9f936a3614483397e9d0b620c007baf74f34c6b358aa8ed3e021",
+    "src/idoly_local/ios_presentation.py": "54026b857a093f4ec3ceb462c747a6a583bd8574eee3c09b22f6532e5c142087",
+    "tests/test_ios_presentation.py": "70141749c9b2904bca2edad5150056820d4ce724f81df884baa07fa5f4bd7050"
+  },
+  "exact_eighteen_path_git_delta_verified": true,
+  "all_previous_103_aliases_33_hooks_unchanged": true,
+  "original_eight_sound_alias_pins_and_typed_ABI_verified": true,
+  "original_sound_pin_packet_sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c",
+  "extended_original_gateway_slot_slack_proof_sha256": "e8d16add1a27a8dfecb9ecfdc67dc0d46ef131d1c4532b645ad7af96556f79a4",
+  "extended_original_gateway_slot_slack_proof_verified": true,
+  "native_review_sha256": "85734a53fef6222aec4b9d744df869d4232f8a2802ee2a78838f095d4fd4b9de",
+  "native_sha256": "eb185b11636eec5d30153872252cfe8668bf17a3a9af766c7312bfd0fdd594c4",
+  "native_bytes": 157520,
+  "IPA_sha256": "e94cca06d011e7988f120b9079c864384b8f537b0b19c2294f3cf6e39ce5b2ec",
+  "IPA_bytes": 149170261,
+  "language": "ja",
+  "schema": 1,
+  "source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+  "font_sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+  "font_bytes": 3781740,
+  "modern_hangul_syllables": 11172,
+  "basic_latin_characters": 95,
+  "metadata_equal": true,
+  "all_19_other_objects_byte_identical": true,
+  "Font18_fallback_PPtr17_verified": true,
+  "source_Font17_suffix_and_empty_fallback_tail_semantically_verified": true,
+  "source_archive": "/workspace/shared/artifacts/idolypride-6.1.1-decrypted.ipa",
+  "output_archive": "/dev/shm/idoly-apps-v0327-delivery/IdolyPride-6.1.1-Local-PlayCover-ja.ipa",
+  "archive_stat_before_after_identical": {
+    "/workspace/shared/artifacts/idolypride-6.1.1-decrypted.ipa": [
+      27,
+      1049864,
+      146438450,
+      1794212684035041710,
+      1794212684035041710
+    ],
+    "/dev/shm/idoly-apps-v0327-delivery/IdolyPride-6.1.1-Local-PlayCover-ja.ipa": [
+      26,
+      1181953,
+      149170261,
+      1794579045999326861,
+      1794579048791383798
+    ]
+  },
+  "license_OFL_bundled_verified": true,
+  "license_member": "Payload/IDOLY PRIDE.app/IdolyFonts/OFL-Pretendard.txt",
+  "resource_budget_before": {
+    "current": 16072056832,
+    "maximum": 17179869184,
+    "direct_headroom": 1107812352,
+    "oom_kill": 2,
+    "root_free": 158593024
+  },
+  "resource_budget_after": {
+    "current": 16075509760,
+    "maximum": 17179869184,
+    "direct_headroom": 1104359424,
+    "oom_kill": 2,
+    "root_free": 158593024
+  },
+  "AS_MiB": 128,
+  "seconds": 0.405,
+  "all_ZIP_handles_closed": true,
+  "physical_device_verified": false,
+  "font_restore": {
+    "font_sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+    "font_bytes": 3781740,
+    "hangul_syllables": 11172,
+    "all_19_other_objects_byte_identical": true,
+    "legacy_Japanese_font_data_unchanged": true,
+    "Font18_fallback_PPtr17_verified": true,
+    "license_OFL_bundled_verified": true
+  }
+}

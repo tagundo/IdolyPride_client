@@ -1,0 +1,16 @@
+{
+  "result": "PASS",
+  "apk": "/dev/shm/idoly-v0328-work/delivery/IdolyPride-Local-Server-Android.apk",
+  "apk_sha256": "85ef31e0df9952aefaf96022ad741ab06f1afd7a0589750207cc58b8aefde48b",
+  "apk_bytes": 284835788,
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "signature_schemes": [
+    "v2"
+  ],
+  "certificate_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "actual_RSA_signature_verified": true,
+  "actual_chunked_APK_content_digest_verified": true,
+  "JVM_used": false,
+  "verification": "RSA PKCS1-v1_5/SHA256 and independent streamed v2 APK 1MiB chunk digest; no installation or Play Protect verdict",
+  "max_APK_chunk_bytes": 1048576
+}

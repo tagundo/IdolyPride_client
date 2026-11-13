@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "status": "PASS_ANDROID_PUBLICATION_AND_RECOVERABILITY",
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "name": "IdolyPride-Local-Server-Android.apk",
+  "bytes": 284835788,
+  "sha256": "85ef31e0df9952aefaf96022ad741ab06f1afd7a0589750207cc58b8aefde48b",
+  "before": {
+    "direct_headroom": 1291689984,
+    "root_free": 160849920,
+    "oom_kill": 2
+  },
+  "published_commit": "b374fa97b970f8d0deb0744c0fa765d75760a737",
+  "published_branch": "downloads/local-resources-server-v0.3.28-source-45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "QA_sha256": "91c0537bbbb6d1e5849d63d39ad7ff977588873ed4939154b75cc66b0f75989f",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_verified": true,
+  "prefix_sha256": "0c19089f0f50e5340e8a2cf60702ddf1cbe6a7b94b53f7bfb1e8c40607f99417",
+  "content_disposition": "attachment; filename=\"IdolyPride-Local-Server-Android.apk\"",
+  "embedded_translation": {
+    "member": "assets/bundledTranslations.zip",
+    "bytes": 78203472,
+    "sha256": "7e9f53983c50a148695d94537b7823935384d6bce551fb5f62b103f0909e43f9",
+    "whole_member_SHA_and_CRC_verified": true,
+    "exact_input_SHA_verified": true
+  },
+  "final_local_SHA_verified": true,
+  "only_owned_derived_APK_retired": true,
+  "owned_verified_translation_input_retired": true,
+  "original_inputs_private_data_VM_backups_untouched": true,
+  "after": {
+    "direct_headroom": 1652183040,
+    "root_free": 160849920,
+    "oom_kill": 2
+  }
+}

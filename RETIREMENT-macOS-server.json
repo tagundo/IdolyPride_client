@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "status": "PASS_MAC_PUBLICATION_AND_RECOVERABILITY",
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+  "bytes": 283226341,
+  "sha256": "445378dfe08643aa814a7971cd381dcb49dcf0dbc0f72dffa49a693c1034fefb",
+  "before": {
+    "direct_headroom": 858767360,
+    "root_free": 160845824,
+    "oom_kill": 2
+  },
+  "published_commit": "37a43bdd1d9d8dd6d7af10afe7a11fa83507e812",
+  "published_branch": "downloads/local-resources-server-macos-v0.3.28-source-45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "QA_sha256": "cb183af9f33f83dde7f284cd8b38c83a2beddc197d28c14308376d25f90d79b4",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_verified": true,
+  "prefix_sha256": "92691930af574b5de94ae4e340e6b1668fc83416595e4414529681c492ee3f86",
+  "content_disposition": "attachment; filename=\"IdolyPride-Local-Server-macOS-arm64.app.zip\"",
+  "embedded_translation": {
+    "member": "IdolyPrideLocalServer.app/Contents/Resources/bundledTranslations.zip",
+    "bytes": 78210744,
+    "sha256": "8e44bac91acaca7661bf1b49be8663e23345df9541d7021ff2eaa5b9415bf8b0",
+    "whole_member_SHA_and_CRC_verified": true,
+    "exact_input_SHA_verified": true
+  },
+  "final_local_SHA_verified": true,
+  "final_app_regular_file_SHA_rechecked": 545,
+  "final_app_symlink_inventory_rechecked": 4,
+  "actual_Mac_execution_verified": false,
+  "actual_gameplay_verified": false,
+  "only_owned_derived_archive_and_app_stage_retired": true,
+  "owned_verified_translation_input_retired": true,
+  "original_inputs_user_data_VM_backups_untouched": true,
+  "after": {
+    "direct_headroom": 1454395392,
+    "root_free": 160845824,
+    "oom_kill": 2
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "status": "PASS_SCOPED_ANDROID_LOCAL_RESOURCE_POLICY_SOURCE_AND_HOST_CONTRACTS",
+  "source_sha256": {
+    "client-presentation/native/bridge.cpp": "51bab04d224c24b6843d8e9abca1aca477d4f53ec8f8a9caa1fa90f66a61c709",
+    "client-presentation/native/profile.json": "5bc347544e2d0c696f11223b826834aae02a6e01c2343ad6f3c51c9f53de2f6f",
+    "client-presentation/native/profile.hpp": "221b0e6dc75905717d68d65a3924142a225de6edd5d9fa8c793268ca086b9c85",
+    "client-presentation/native/local_resource_policy.hpp": "991219111e40d50271e8b2194e96795d02263c8ffa81f80a4473abdbde9359f2",
+    "client-presentation/native/tests/test_local_resources.py": "827bd481d1b18b0987aa069885c7b9cea76b58b16d87c43c1dec93baf5b39fa6",
+    "client-presentation/native/tests/local_resource_policy_test.cpp": "9f63ba9c3f5bfd27b8bb9acdc48b5bceb728f3e6354ec9672cae68a7a38c5118",
+    "client-presentation/native/tests/test_profile.py": "2a748428482a9517571dc19e5628db81fce7db5a990392e6a6f57692afd06c75",
+    "client-presentation/native/tests/test_native_wardrobe.py": "b55e8c8238775301e6a8cf1b51680208088fc9ebd6b30958c83d45b9020daee3",
+    "client-presentation/native/tests/test_native_preview_ui.py": "13f80fa17ffca9d4dcbaf85cd207798cb09f2d79d712145a2db0eff774107988",
+    "client-presentation/native/tests/test_native_render_probe.py": "17581938a648e488f90a9235482177dd53813b3b80a9f2c0feb7b82542f79a78"
+  },
+  "new_alias": {
+    "name": "Octo.Network.BaseDownloadRequest`1.CanReach",
+    "module": "Octo.dll",
+    "type_definition_index": 28874,
+    "metadata_method_index": 197134,
+    "token": "0x06000263",
+    "token_row": 611,
+    "rva": "0x8149f68",
+    "prefix16": "fe57bea9f44f01a934f9009055bd00b0",
+    "function_size_bytes": 212,
+    "return_type": {
+      "metadata_type_index": 50428,
+      "kind": 2,
+      "byref": false,
+      "attributes": 0,
+      "native_type_bits": "0x80020000",
+      "class": "System.Boolean"
+    },
+    "parameters": [],
+    "method_flags": "0x84",
+    "is_static": false,
+    "mode": "HOOK",
+    "native_ABI": "bool(void*,const MethodInfo*)",
+    "source": "local-resource-post-HTTP-reachability-pins"
+  },
+  "Android_aliases": 133,
+  "Android_hooks": 58,
+  "all_prior132_Android_aliases_unchanged": true,
+  "iOS_aliases": 111,
+  "iOS_hooks": 41,
+  "iOS_profile_bytes_unchanged": true,
+  "Darwin_preprocess_scope_proof": "/dev/shm/idoly-local-reachability-fix-tests/darwin-preprocessor-scope.json",
+  "Darwin_preprocess_scope_proof_sha256": "ca29de812754361cf350afbd6133eb60656d4bfce8c80609a31476391d3db162",
+  "deployed_bootstrap_proof": "/dev/shm/local-resource-packaged-gate-proof-20261113.json",
+  "deployed_bootstrap_proof_sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef",
+  "scope": {
+    "schema": 1,
+    "platform": "Android",
+    "scope": "Canonical object URLs at the fixed patched local Octo origin only",
+    "origin": "http://127.0.0.1:8080/",
+    "request_url_field": "Octo.Network.BaseDownloadRequest`1._url",
+    "request_url_offset": 16,
+    "string_length_offset": 16,
+    "string_utf16_offset": 20,
+    "maximum_url_units": 199,
+    "original_nonlocal_can_reach_preserved": true,
+    "original_HTTP_IO_native_error_MD5_and_storage_checks_preserved": true,
+    "global_Unity_reachability_unchanged": true,
+    "manifest_and_nonobject_URLs_unchanged": true,
+    "device_offline_play_verified": false,
+    "stock_gate_proof_sha256": "af4ca9cd3384a523e73f572a3db9435e244572429f4d0889640295637ae893c2",
+    "packaged_gate_proof_sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef",
+    "original_packaged_native_sha256": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3"
+  },
+  "tests": {
+    "final_modules": [
+      "client-presentation/native/tests",
+      "client-presentation/tests/test_builder.py"
+    ],
+    "passed": 49,
+    "skipped": 0,
+    "AS_MiB": 512,
+    "final_log_sha256": "5187d387f7f14d1c7218ef19fc23159d20a1bab76515272bd1952e5209cd3988",
+    "observed_twenty_HTTP200_callbacks_reproduced_in_host_model": true,
+    "original_IO_native_error_and_hash_difference_paths_preserved": true,
+    "nonlocal_and_invalid_original_arguments_and_exceptions_preserved": true,
+    "font_hook_remains_first_preserving_original500ms_capture_delay": true,
+    "null_MethodInfo_uses_original": true
+  },
+  "independent_read_only_review": "photo_native_trace: P2 font hook ordering fixed and re-reviewed; no remaining finding",
+  "memory_events": "low 0\nhigh 0\nmax 282062\noom 6\noom_kill 2\noom_group_kill 0\n",
+  "limitations": [
+    "No device or JNI execution has verified this adapter.",
+    "No native library, APK, IPA or release produced by this source-edit task.",
+    "Mac/iOS code exclusion proved by preprocessing; actual Mac offline behavior remains unverified.",
+    "Unrelated RadioButtonView serialized-binding exception remains unchanged."
+  ]
+}

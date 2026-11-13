@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "branch": "downloads/offline-gate-client-ko-v0.3.28-source-45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "sha256": "abc43346602851ab23dbf8a5541e64097d3a04a7ce6caba42f46b38327482080",
+      "bytes": 163441097,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "0c0fbf18dc19316a46fcfc57812fe9c2ac897d82",
+  "tree": "49a82a5b94fa371818d4e5c7af0fdfa5c27c7250"
+}

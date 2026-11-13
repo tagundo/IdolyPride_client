@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "branch": "downloads/local-resources-server-macos-v0.3.28-source-45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "sha256": "445378dfe08643aa814a7971cd381dcb49dcf0dbc0f72dffa49a693c1034fefb",
+      "bytes": 283226341,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "37a43bdd1d9d8dd6d7af10afe7a11fa83507e812",
+  "tree": "65142c066b15538ee7ff86484bed430c70b5b5ac"
+}
