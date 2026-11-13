@@ -1,6 +1,6 @@
 # IDOLY PRIDE 로컬 서버 프로토타입
 
-**Android 의상룸 복귀 지연 점검 v0.3.20:** [서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.20/IdolyPride-Local-Server-Android.apk) · [진단 게임 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.20/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) · [릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.20). 변경 없는 DB 쓰기를 제거하고, 종료 구간별 시간과 서버 처리·작업 대기 시간을 기록합니다. **37초 지연 해결을 실기기에서 확인한 판은 아닙니다.** 서버·게임을 각각 업데이트한 뒤 재현하고 진단 기록을 내보냅니다. [측정 범위와 순서](docs/wardrobe-exit-latency.md). Mac 배포는 v0.3.19를 유지합니다.
+**Android 의상룸 중복 확인 처리 개선 v0.3.21:** [서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.21/IdolyPride-Local-Server-Android.apk) · [진단 게임 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.21/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) · [릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.21). 이미 확인된 의상·헤어의 중복 요청과 빈 변경 목록의 사용자 데이터 갱신을 줄이고, 미확인 항목과 응답 유실 후 재동기화를 유지합니다. 관련 테스트 278개와 실제 APK 서명·소스 연결·원격 전체 다운로드 해시를 검증했습니다. **37초 지연 감소는 아직 실기기에서 확인하지 못했습니다.** 서버·게임을 각각 업데이트합니다. [변경 범위와 확인 순서](docs/wardrobe-exit-latency.md). Mac 배포는 v0.3.19를 유지합니다.
 
 **[v0.3.19 앱 다운로드](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19)** · [촬영·의상·번역·리소스 보관 안내](docs/local-library-v0.3.19.md)
 
@@ -14,11 +14,11 @@ v0.3.19는 Android 의상룸 표시 실패 후 종료 대기 경로, 일반 촬�
 
 ## 앱으로 실행하기
 
-아래 표에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 각각 받습니다. v0.3.19의 네 앱과 초기 서버 데이터는 [릴리즈 본문의 다운로드 표](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19)와 [별도 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/apps-v0.3.19)에서 받습니다. 원격 다운로드 전체의 SHA-256을 대조했습니다. 릴리즈 첨부파일 업로드 인증 오류와 GitHub-hosted Actions의 계정 결제/사용 한도 차단으로 **Assets에 앱은 없으며 아래 개별 링크로 제공합니다.** 저장소는 비공개이므로 GitHub 링크는 접근 권한이 있는 계정으로 로그인해야 열 수 있습니다. 계정 정보나 기존 사용자의 저장 데이터는 배포 파일에 포함하지 않습니다.
+아래 표에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 각각 받습니다. Android 최신판은 [v0.3.21 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.21)에서 받습니다. Mac 앱과 공통 서버 데이터가 포함된 v0.3.19 배포는 [릴리즈 본문의 다운로드 표](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19)와 [별도 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/apps-v0.3.19)에서 받습니다. 원격 다운로드 전체의 SHA-256을 대조했습니다. 릴리즈 첨부파일 업로드 인증 오류와 GitHub-hosted Actions의 계정 결제/사용 한도 차단으로 **Assets에 앱은 없으며 아래 개별 링크로 제공합니다.** 저장소는 비공개이므로 GitHub 링크는 접근 권한이 있는 계정으로 로그인해야 열 수 있습니다. 계정 정보나 기존 사용자의 저장 데이터는 배포 파일에 포함하지 않습니다.
 
 | 기기 | 서버 앱 | 게임 클라이언트 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.19](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.19/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.19/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
+| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.21](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.21/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/android-wardrobe-v0.3.21/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
 | Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.19](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.19/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/apps-v0.3.19/IdolyPride-6.1.1-Local-PlayCover.ipa) |
 
 서버 APK는 클라이언트를 수정·설치하지 않으며 내장 게임 APK와 설치 권한을 포함하지 않습니다. **서버와 연결용 클라이언트를 각각 업데이트**합니다. Android에서는 **진단 게임 실행** 또는 **그래픽 지원 게임 실행**으로 이번 클라이언트를 엽니다. Play 프로텍트 판정과 실제 FPS 개선량은 실기기에서 확인하지 못했습니다. [권한·배포 변경](docs/android-distribution.md)을 참고합니다.

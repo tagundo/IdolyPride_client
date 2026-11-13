@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "published": true,
+  "release_id": 443730857,
+  "tag": "local-server-v0.3.21",
+  "url": "https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.21",
+  "target_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+  "download_branch": "downloads/android-wardrobe-v0.3.21",
+  "download_commit": "feb6d3fab185adffe4eb41ad666d3c0e9a54868e",
+  "download_tree": "d07ce3b2b17db9cd9ec3f1ad636fe64bc48c1914",
+  "metadata_remote_readback_verified": true,
+  "release_assets_uploaded": false,
+  "body_sha256": "46e5d300f1f9c343508358fcfe99477945e21330571e43036caa2043194db077",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 206180224,
+      "sha256": "ae966cc19d18df4120042f838883bf8fc1a048601ba13f40890b1f2423ba90dd",
+      "source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "8d3cd4a5ee19a7eb0922c1bed9309a5857510c94c7cc4acf155d6b9eb2a6baf6",
+      "LFS_source_branch": "downloads/android-wardrobe-server-v0.3.21",
+      "LFS_publication_commit": "dedd453a94a1eef5a0e6e79e3c87452a2f4896f1",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    },
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk",
+      "bytes": 159475730,
+      "sha256": "cefbc205d575c435f5c494b683d444b4b206e07fec8a45cb95c6727425dc487e",
+      "source_commit": "c7e1d03ffb4707ea398e812a9136a0de81fddbdf",
+      "qa_status": "PASS",
+      "qa_receipt_sha256": "e51ea40c4eec8408322db8ba24f2b40d49cb68699dd02779938480161f17b421",
+      "LFS_source_branch": "downloads/android-wardrobe-client-v0.3.21",
+      "LFS_publication_commit": "2c9cebd156ea036b95ec988269d649605c671732",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_attachment_prefix_verified": true
+    }
+  ],
+  "all_binary_full_LFS_download_SHA_verified": true,
+  "actual37_second_fix_verified": false
+}
