@@ -306,6 +306,8 @@ def test_gallery_encrypted_packs_roundtrip_and_leave_all_unrelated_original_entr
     assert report["protobuf_row_roundtrip_verified"] is True and report["device_ingestion_verified"] is False
     assert len(report["packs"]) == len(overlay.TABLES) == report["replaced_pack_count"]
     assert {path.name for path in (destination / "assets/master").iterdir()} == set(overlay.PACK_NAMES.values())
+    legacy_names = {"media-outfits-v1-" + table + ".db" for table in overlay.TABLES if table != "EventStory"}
+    assert not legacy_names.intersection(row["fileName"] for row in media["masterTagPacks"])
     for before, after in zip(tag["masterTagPacks"], media["masterTagPacks"], strict=True):
         if before["type"] not in overlay.TABLES: assert before == after
     assert source_hashes == {str(path.relative_to(original)): hashlib.sha256(path.read_bytes()).hexdigest()

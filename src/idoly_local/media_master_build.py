@@ -16,7 +16,7 @@ from .media_outfit_policy import (COSTUME_IDS, ADMIN_COSTUME_IDS, ADMIN_HAIR_IDS
     is_audited_work_costume, is_audited_admin_costume, is_audited_admin_hair)
 
 
-POLICY = "media-outfits-v1"
+POLICY = "media-outfits-v2"
 TABLES = ("PhotoActivity", "PhotoExpression", "Costume", "Hair", "PhotoQuestMusic", "PhotoQuestStage",
           "EventStory")
 TAG_NAME = "media-master-tag.json"
