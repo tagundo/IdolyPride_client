@@ -30,6 +30,7 @@
 #include "media_policy.hpp"
 #ifndef IDOLY_DARWIN_BRIDGE
 #include "wardrobe_lifecycle.hpp"
+#include "wardrobe_timing.hpp"
 #endif
 #ifdef IDOLY_DARWIN_BRIDGE
 #include "ios_profile.hpp"
@@ -343,6 +344,19 @@ wardrobe::Fail wardrobe_fail_original;
 wardrobe::Wait wardrobe_wait_original;
 pthread_mutex_t wardrobe_mutex = PTHREAD_MUTEX_INITIALIZER;
 wardrobe::Tracker wardrobe_tracker;
+namespace exit_timing = idoly::presentation::wardrobe_timing;
+exit_timing::Tracker wardrobe_exit_tracker;
+using ExitVoid = void (*)(void *, Method *);
+using ExitTransition = void (*)(void *, void *, Method *);
+using ExitTaskTransition = wardrobe::Task (*)(void *, void *, wardrobe::Token, Method *);
+using ExitGC = void (*)(Method *);
+using ExitUnload = void *(*)(Method *);
+ExitVoid wardrobe_back_original, fitting_back_original, wardrobe_hide_move_original, wardrobe_disable_original;
+ExitTransition character_list_open_in_original, character_list_close_in_original;
+ExitTaskTransition wardrobe_preclose_original, character_details_close_in_original;
+wardrobe::Show character_list_show_original;
+ExitGC wardrobe_gc_collect_original;
+ExitUnload wardrobe_unload_unused_original;
 void wardrobe_event(const char *phase) {
     const int64_t now=render_probe_monotonic_ms();
     pthread_mutex_lock(&wardrobe_mutex); wardrobe_tracker.event(phase,now);
@@ -351,9 +365,69 @@ void wardrobe_event(const char *phase) {
 void wardrobe_status_json(char *output,size_t capacity) {
     pthread_mutex_lock(&wardrobe_mutex); const wardrobe::Snapshot copy=wardrobe_tracker.snapshot();
     pthread_mutex_unlock(&wardrobe_mutex);
-    wardrobe::Tracker::json(copy,render_probe_monotonic_ms(),output,capacity);
+    const int64_t now=render_probe_monotonic_ms();
+    char legacy[320], timing[1024];
+    wardrobe::Tracker::json(copy,now,legacy,sizeof legacy);
+    constexpr char prefix[]="{\"schema\":1";
+    const size_t length=std::strlen(legacy);
+    if (length && legacy[length-1]=='}' && !std::strncmp(legacy,prefix,sizeof prefix-1)
+            && exit_timing::Tracker::json(wardrobe_exit_tracker.snapshot(now),timing,sizeof timing)) {
+        legacy[length-1]='\0';
+        const int written=std::snprintf(output,capacity,"{\"schema\":2%s,\"exit\":%s}",
+            legacy+sizeof prefix-1,timing);
+        if (written>=0 && static_cast<size_t>(written)<capacity) return;
+        legacy[length-1]='}';
+    }
+    std::snprintf(output,capacity,"%s",legacy);
 }
 bool wardrobe_enabled() { return ready.load(std::memory_order_acquire) && game_call(false); }
+void wardrobe_back_hook(void *self,Method *method) {
+    if (!wardrobe_enabled()) return wardrobe_back_original(self,method);
+    wardrobe_exit_tracker.invoke_back(exit_timing::Room::CharacterCostume,wardrobe_back_original,self,method);
+}
+void fitting_back_hook(void *self,Method *method) {
+    if (!wardrobe_enabled()) return fitting_back_original(self,method);
+    wardrobe_exit_tracker.invoke_back(exit_timing::Room::FittingRoom,fitting_back_original,self,method);
+}
+wardrobe::Task wardrobe_preclose_hook(void *self,void *info,wardrobe::Token token,Method *method) {
+    if (!wardrobe_enabled()) return wardrobe_preclose_original(self,info,token,method);
+    return wardrobe_exit_tracker.invoke_close(exit_timing::Room::CharacterCostume,
+        exit_timing::Stage::Preclose,wardrobe_preclose_original,self,info,token,method);
+}
+void wardrobe_hide_move_hook(void *self,Method *method) {
+    if (!wardrobe_enabled()) return wardrobe_hide_move_original(self,method);
+    wardrobe_exit_tracker.invoke(exit_timing::Stage::Hide,wardrobe_hide_move_original,self,method);
+}
+void wardrobe_disable_hook(void *self,Method *method) {
+    if (!wardrobe_enabled()) return wardrobe_disable_original(self,method);
+    wardrobe_exit_tracker.invoke(exit_timing::Stage::Disable,wardrobe_disable_original,self,method);
+}
+wardrobe::Task character_list_show_hook(void *self,wardrobe::Token token,Method *method) {
+    if (!wardrobe_enabled()) return character_list_show_original(self,token,method);
+    return wardrobe_exit_tracker.invoke(exit_timing::Stage::SelectionShow,character_list_show_original,self,token,method);
+}
+void character_list_open_in_hook(void *self,void *info,Method *method) {
+    if (!wardrobe_enabled()) return character_list_open_in_original(self,info,method);
+    wardrobe_exit_tracker.invoke(exit_timing::Stage::SelectionOpen,character_list_open_in_original,self,info,method);
+    wardrobe_exit_tracker.complete();
+}
+void character_list_close_in_hook(void *self,void *info,Method *method) {
+    if (!wardrobe_enabled()) return character_list_close_in_original(self,info,method);
+    wardrobe_exit_tracker.invoke(exit_timing::Stage::SelectionOpen,character_list_close_in_original,self,info,method);
+    wardrobe_exit_tracker.complete();
+}
+wardrobe::Task character_details_close_in_hook(void *self,void *info,wardrobe::Token token,Method *method) {
+    if (!wardrobe_enabled()) return character_details_close_in_original(self,info,token,method);
+    return wardrobe_exit_tracker.invoke(exit_timing::Stage::SelectionOpen,character_details_close_in_original,self,info,token,method);
+}
+void wardrobe_gc_collect_hook(Method *method) {
+    if (!wardrobe_enabled() || !wardrobe_exit_tracker.active()) return wardrobe_gc_collect_original(method);
+    wardrobe_exit_tracker.invoke(exit_timing::Stage::GC,wardrobe_gc_collect_original,method);
+}
+void *wardrobe_unload_unused_hook(Method *method) {
+    if (!wardrobe_enabled() || !wardrobe_exit_tracker.active()) return wardrobe_unload_unused_original(method);
+    return wardrobe_exit_tracker.invoke(exit_timing::Stage::Unload,wardrobe_unload_unused_original,method);
+}
 void cleanup_wardrobe() { if (wardrobe_enabled()) wardrobe_lifecycle.cleanup(); }
 wardrobe::Task wardrobe_show_hook(void *self,wardrobe::Token token,Method *method) {
     return wardrobe_lifecycle.show(self,token,method,wardrobe_show_original,wardrobe_enabled());
@@ -1312,6 +1386,7 @@ void load_calls() {
     CALL(wardrobe_calls.yield, wardrobe_yield);
     wardrobe_calls.hide_predicate=reinterpret_cast<void *>(image_base+pin::wardrobe_hide_predicate.rva);
     wardrobe_calls.event=wardrobe_event; wardrobe_lifecycle.configure(wardrobe_calls);
+    wardrobe_exit_tracker.configure(render_probe_monotonic_ms);
 #endif
     panorama_api.weak_new=weak_new; panorama_api.weak_get=weak_get; panorama_api.weak_free=weak_free;
     panorama_api.alive=object_alive; panorama_api.matches=class_matches;
@@ -1411,6 +1486,17 @@ void *install(void *) {
         HOOK(wardrobe_move,wardrobe_move_hook,wardrobe_move_original),
         HOOK(wardrobe_fail,wardrobe_fail_hook,wardrobe_fail_original),
         HOOK(wardrobe_wait,wardrobe_wait_hook,wardrobe_wait_original),
+        HOOK(wardrobe_back,wardrobe_back_hook,wardrobe_back_original),
+        HOOK(fitting_back,fitting_back_hook,fitting_back_original),
+        HOOK(wardrobe_preclose,wardrobe_preclose_hook,wardrobe_preclose_original),
+        HOOK(wardrobe_hide_move,wardrobe_hide_move_hook,wardrobe_hide_move_original),
+        HOOK(wardrobe_disable,wardrobe_disable_hook,wardrobe_disable_original),
+        HOOK(character_list_show,character_list_show_hook,character_list_show_original),
+        HOOK(character_list_open_in,character_list_open_in_hook,character_list_open_in_original),
+        HOOK(character_list_close_in,character_list_close_in_hook,character_list_close_in_original),
+        HOOK(character_details_close_in,character_details_close_in_hook,character_details_close_in_original),
+        HOOK(wardrobe_gc_collect,wardrobe_gc_collect_hook,wardrobe_gc_collect_original),
+        HOOK(wardrobe_unload_unused,wardrobe_unload_unused_hook,wardrobe_unload_unused_original),
     };
 #undef HOOK
     for (size_t i = 0; i < sizeof hooks / sizeof hooks[0]; ++i) {
@@ -1420,7 +1506,8 @@ void *install(void *) {
             set_state("init_failed"); return nullptr;
         }
     }
-    if (!rotation::ready_for_publish() || !preview_ui.ready() || !wardrobe_lifecycle.ready()) {
+    if (!rotation::ready_for_publish() || !preview_ui.ready() || !wardrobe_lifecycle.ready()
+            || !wardrobe_exit_tracker.ready()) {
         for (size_t i=sizeof hooks/sizeof hooks[0];i>0;--i) shadowhook_unhook(hooks[i-1].stub);
         set_state("init_failed");return nullptr;
     }
@@ -1469,7 +1556,7 @@ extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentatio
     return accept_media_configuration(schema,revision,use_master_order!=0)?JNI_TRUE:JNI_FALSE;
 }
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_wardrobeStatus(JNIEnv *env,jclass) {
-    char json[256];wardrobe_status_json(json,sizeof json);return env->NewStringUTF(json);
+    char json[1536];wardrobe_status_json(json,sizeof json);return env->NewStringUTF(json);
 }
 
 #else

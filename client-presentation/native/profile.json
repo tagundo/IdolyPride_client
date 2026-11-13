@@ -55,6 +55,10 @@
       {
         "file": "android-wardrobe-lean-original-pins.json",
         "sha256": "d205ee0e8b23687e1ce6f9b0a12d629c8d6ab6ead53864c76d1b3520e87c8832"
+      },
+      {
+        "file": "android-wardrobe-timing-original-pins.json",
+        "sha256": "71a49b2cc6bea0f1380252a7a59f437f2abce9f77c5c0c2ea19d61a72b5e75ae"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -2013,6 +2017,471 @@
       },
       "metadata_method_index": 8009,
       "is_static": false
+    },
+    "wardrobe_back": {
+      "name": "Solis.OutGame.CharacterCostumeScreenPresenter.RecursiveBack",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 23007,
+      "type_definition_index": 4238,
+      "token_row": 23008,
+      "registration_pointer_slot_rva": "0x9ad7890",
+      "rva": "0x5374224",
+      "prefix16": "fe0f1ef8f44f01a95467029088027439",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc6",
+      "native_ABI": "void(void*,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 148,
+      "function_boundary_proof": {
+        "rva": "0x5374224",
+        "fde_rva": "0x3059590",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 148,
+        "function_end_rva": "0x53742b8"
+      }
+    },
+    "fitting_back": {
+      "name": "Solis.OutGame.CostumeFittingRoomScreenPresenter.RecursiveBack",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 47363,
+      "type_definition_index": 9701,
+      "token_row": 47364,
+      "registration_pointer_slot_rva": "0x9b071b0",
+      "rva": "0x59d7354",
+      "prefix16": "fe0f1ef8f44f01a95434029088ae6439",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc6",
+      "native_ABI": "void(void*,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 116,
+      "function_boundary_proof": {
+        "rva": "0x59d7354",
+        "fde_rva": "0x311c080",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 116,
+        "function_end_rva": "0x59d73c8"
+      }
+    },
+    "wardrobe_preclose": {
+      "name": "Solis.OutGame.CharacterCostumeScreenPresenter.OnPreCloseOutAsync",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 22987,
+      "type_definition_index": 4238,
+      "token_row": 22988,
+      "registration_pointer_slot_rva": "0x9ad77f0",
+      "rva": "0x53726f4",
+      "prefix16": "ffc301d1fe5f04a9f65705a9f44f06a9",
+      "return_type": {
+        "metadata_type_index": 76686,
+        "kind": 17,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80110000",
+        "class": "Cysharp.Threading.Tasks.UniTask"
+      },
+      "parameters": [
+        {
+          "name": "info",
+          "type": {
+            "metadata_type_index": 76119,
+            "kind": 18,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x120000",
+            "class": "Qua.UI.TransitionInfo"
+          }
+        },
+        {
+          "name": "ct",
+          "type": {
+            "metadata_type_index": 50865,
+            "kind": 17,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80110000",
+            "class": "System.Threading.CancellationToken"
+          }
+        }
+      ],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc4",
+      "native_ABI": "UniTask16(void*,TransitionInfo*,CancellationToken8,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 160,
+      "function_boundary_proof": {
+        "rva": "0x53726f4",
+        "fde_rva": "0x30592f0",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 160,
+        "function_end_rva": "0x5372794"
+      }
+    },
+    "wardrobe_hide_move": {
+      "name": "Solis.OutGame.CharacterCostumeScreenView.<HideAnimationAsync>d__39.MoveNext",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 23089,
+      "type_definition_index": 4241,
+      "token_row": 23090,
+      "registration_pointer_slot_rva": "0x9ad7b20",
+      "rva": "0x537c658",
+      "prefix16": "ff0301d1fe5f01a9f65702a9f44f03a9",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "is_static": false,
+      "state_machine_self": "unboxed MoveNext state pointer",
+      "mode": "HOOK",
+      "flags": "0x1e1",
+      "native_ABI": "void(void*unboxed_state,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 1028,
+      "function_boundary_proof": {
+        "rva": "0x537c658",
+        "fde_rva": "0x3c8f710",
+        "cie_rva": "0x3c6f748",
+        "cie_augmentation": "zPLR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 1028,
+        "function_end_rva": "0x537ca5c"
+      }
+    },
+    "wardrobe_disable": {
+      "name": "Solis.OutGame.CharacterCostumeScreenPresenter.OnDisable",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 23008,
+      "type_definition_index": 4238,
+      "token_row": 23009,
+      "registration_pointer_slot_rva": "0x9ad7898",
+      "rva": "0x53742b8",
+      "prefix16": "fe4fbfa9e1031faaf30300aac8c0f994",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc4",
+      "native_ABI": "void(void*,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 32,
+      "function_boundary_proof": {
+        "rva": "0x53742b8",
+        "fde_rva": "0x30595b0",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 32,
+        "function_end_rva": "0x53742d8"
+      }
+    },
+    "character_list_show": {
+      "name": "Solis.OutGame.CharacterListScreenPresenter.ShowAnimationAsync",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 15024,
+      "type_definition_index": 2664,
+      "token_row": 15025,
+      "registration_pointer_slot_rva": "0x9ac7f18",
+      "rva": "0x51c4ad8",
+      "prefix16": "ffc301d1fe2300f9f65705a9f44f06a9",
+      "return_type": {
+        "metadata_type_index": 76686,
+        "kind": 17,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80110000",
+        "class": "Cysharp.Threading.Tasks.UniTask"
+      },
+      "parameters": [
+        {
+          "name": "ct",
+          "type": {
+            "metadata_type_index": 50865,
+            "kind": 17,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80110000",
+            "class": "System.Threading.CancellationToken"
+          }
+        }
+      ],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0x81",
+      "native_ABI": "UniTask16(void*,CancellationToken8,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 152,
+      "function_boundary_proof": {
+        "rva": "0x51c4ad8",
+        "fde_rva": "0x3022650",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 152,
+        "function_end_rva": "0x51c4b70"
+      }
+    },
+    "character_list_open_in": {
+      "name": "Solis.OutGame.CharacterListScreenPresenter.OnEndOpenIn",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 15023,
+      "type_definition_index": 2664,
+      "token_row": 15024,
+      "registration_pointer_slot_rva": "0x9ac7f10",
+      "rva": "0x51c4a40",
+      "prefix16": "fe0f1df8f65701a9f44f02a9d6740290",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "info",
+          "type": {
+            "metadata_type_index": 76119,
+            "kind": 18,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x120000",
+            "class": "Qua.UI.TransitionInfo"
+          }
+        }
+      ],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc6",
+      "native_ABI": "void(void*,TransitionInfo*,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 152,
+      "function_boundary_proof": {
+        "rva": "0x51c4a40",
+        "fde_rva": "0x3022630",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 152,
+        "function_end_rva": "0x51c4ad8"
+      }
+    },
+    "character_list_close_in": {
+      "name": "Solis.OutGame.CharacterListScreenPresenter.OnEndCloseIn",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 15022,
+      "type_definition_index": 2664,
+      "token_row": 15023,
+      "registration_pointer_slot_rva": "0x9ac7f08",
+      "rva": "0x51c49dc",
+      "prefix16": "fe0f1df8f65701a9f44f02a9d6740290",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [
+        {
+          "name": "info",
+          "type": {
+            "metadata_type_index": 76119,
+            "kind": 18,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x120000",
+            "class": "Qua.UI.TransitionInfo"
+          }
+        }
+      ],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc6",
+      "native_ABI": "void(void*,TransitionInfo*,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 100,
+      "function_boundary_proof": {
+        "rva": "0x51c49dc",
+        "fde_rva": "0x3022610",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 100,
+        "function_end_rva": "0x51c4a40"
+      }
+    },
+    "character_details_close_in": {
+      "name": "Solis.OutGame.CharacterDetailsScreenPresenter.OnCloseInAsync",
+      "module": "Assembly-CSharp.dll",
+      "metadata_method_index": 14694,
+      "type_definition_index": 2583,
+      "token_row": 14695,
+      "registration_pointer_slot_rva": "0x9ac74c8",
+      "rva": "0x51b308c",
+      "prefix16": "fe67bca9f85f01a9f65702a9f44f03a9",
+      "return_type": {
+        "metadata_type_index": 76686,
+        "kind": 17,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80110000",
+        "class": "Cysharp.Threading.Tasks.UniTask"
+      },
+      "parameters": [
+        {
+          "name": "info",
+          "type": {
+            "metadata_type_index": 76119,
+            "kind": 18,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x120000",
+            "class": "Qua.UI.TransitionInfo"
+          }
+        },
+        {
+          "name": "ct",
+          "type": {
+            "metadata_type_index": 50865,
+            "kind": 17,
+            "byref": false,
+            "attributes": 0,
+            "native_type_bits": "0x80110000",
+            "class": "System.Threading.CancellationToken"
+          }
+        }
+      ],
+      "is_static": false,
+      "state_machine_self": "managed instance pointer",
+      "mode": "HOOK",
+      "flags": "0xc6",
+      "native_ABI": "UniTask16(void*,TransitionInfo*,CancellationToken8,const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 508,
+      "function_boundary_proof": {
+        "rva": "0x51b308c",
+        "fde_rva": "0x301fe30",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 508,
+        "function_end_rva": "0x51b3288"
+      }
+    },
+    "wardrobe_gc_collect": {
+      "name": "System.GC.Collect",
+      "module": "mscorlib.dll",
+      "metadata_method_index": 129511,
+      "type_definition_index": 19006,
+      "token_row": 3648,
+      "registration_pointer_slot_rva": "0x9f9c2a8",
+      "rva": "0x8675e74",
+      "prefix16": "fe0f1ef8f44f01a9d3cf00d0f49800f0",
+      "return_type": {
+        "metadata_type_index": 78154,
+        "kind": 1,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x80010000",
+        "class": "System.Void"
+      },
+      "parameters": [],
+      "is_static": true,
+      "mode": "HOOK",
+      "flags": "0x96",
+      "native_ABI": "void(const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 80,
+      "function_boundary_proof": {
+        "rva": "0x8675e74",
+        "fde_rva": "0x3a5edc8",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 80,
+        "function_end_rva": "0x8675ec4"
+      }
+    },
+    "wardrobe_unload_unused": {
+      "name": "UnityEngine.Resources.UnloadUnusedAssets",
+      "module": "UnityEngine.CoreModule.dll",
+      "metadata_method_index": 164596,
+      "type_definition_index": 23962,
+      "token_row": 3104,
+      "registration_pointer_slot_rva": "0xa01ec80",
+      "rva": "0x8f7ab0c",
+      "prefix16": "fe4fbfa9f38700d060ae47f9a00000b5",
+      "return_type": {
+        "metadata_type_index": 49182,
+        "kind": 18,
+        "byref": false,
+        "attributes": 0,
+        "native_type_bits": "0x120000",
+        "class": "UnityEngine.AsyncOperation"
+      },
+      "parameters": [],
+      "is_static": true,
+      "mode": "HOOK",
+      "flags": "0x96",
+      "native_ABI": "AsyncOperation*(const MethodInfo*)",
+      "diagnostic_only": true,
+      "function_size_bytes": 40,
+      "function_boundary_proof": {
+        "rva": "0x8f7ab0c",
+        "fde_rva": "0x3bbbdd8",
+        "cie_rva": "0x2d7b250",
+        "cie_augmentation": "zR",
+        "FDE_pointer_encoding": "0x1b pcrel sdata4",
+        "function_size_bytes": 40,
+        "function_end_rva": "0x8f7ab34"
+      }
     }
   },
   "graphics_fields": [
@@ -2508,5 +2977,20 @@
     "scheduler": "original Yield(timing,CT)",
     "predicate_identity_only": true,
     "physical_cause_verified": false
+  },
+  "wardrobe_exit_timing": {
+    "schema": 1,
+    "scope": "Android CharacterCostumeScreenPresenter andCostumeFittingRoomScreenPresenter return only",
+    "diagnostic_only": true,
+    "new_hook_count": 11,
+    "observation_window_ms": 120000,
+    "nested_schema": 1,
+    "max_original_spans": 8,
+    "preserves_all_original_calls": true,
+    "does_not_await_or_consume_managed_tasks": true,
+    "does_not_shorten_or_skip_cleanup": true,
+    "function_boundaries": "Original.eh_frame_hdr index and CIE/FDE pcrel-sdata4 extents verified per entry",
+    "physical_bottleneck_verified": false,
+    "span_policy": "Per-stage maximum across eight original-call stages; first completed-stage order"
   }
 }

@@ -22,13 +22,13 @@ def values_for(evidence, table):
     return [{pin["identity_field"]: f"synthetic-public-row-{i}"} for i in range(pin["rows"])]
 
 
-def test_event_read_export_is_optional_and_preserves_existing_forty_table_contract():
+def test_event_read_export_is_optional_and_preserves_existing_table_contract():
     before = payload.TABLES
-    assert payload.payload_tables() is before and len(before) == 40
+    assert payload.payload_tables() is before and len(before) == 49
     assert not set(before).intersection(payload.EVENT_READ_TABLES)
     selected = payload.payload_tables(True)
-    assert selected[:40] == before and selected[40:] == payload.EVENT_READ_TABLES
-    assert len(selected) == len(set(selected)) == 45 and payload.TABLES == before
+    assert selected[:49] == before and selected[49:] == payload.EVENT_READ_TABLES
+    assert len(selected) == len(set(selected)) == 54 and payload.TABLES == before
     for value in (1, "true", None):
         with pytest.raises(TypeError):
             payload.payload_tables(value)

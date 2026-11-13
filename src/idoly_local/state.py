@@ -340,10 +340,12 @@ class State:
                 raise ValueError("Local profile has no snapshot")
             if row["schema_sha256"] != schema_sha256:
                 raise ValueError("Local profile snapshot uses a different schema")
-            payload = callback(bytes(row["response"]))
+            original = bytes(row["response"])
+            payload = callback(original)
             if not isinstance(payload, bytes):
                 raise ValueError("Snapshot mutation must return protobuf bytes")
-            db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            if payload != original:
+                db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
             if setting_info is not None:
                 db.execute("INSERT INTO profile_settings VALUES (?,?,?) ON CONFLICT(profile) DO UPDATE SET "
                            "response=excluded.response,schema_sha256=excluded.schema_sha256",

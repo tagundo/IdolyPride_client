@@ -40,6 +40,23 @@ MAX_STREAMS = 32
 MAX_HEADERS = 16 * 1024
 _TIMEOUT = re.compile(r"([0-9]{1,8})([HMSmun])\Z")
 _TIMEOUT_UNITS = {"H": 3600, "M": 60, "S": 1, "m": 1e-3, "u": 1e-6, "n": 1e-9}
+_APPEARANCE_TIMED = frozenset(("/api.Costume/CheckBulk", "/api.Costume/SetCostume",
+                               "/api.Costume/SetLiveCostume"))
+
+
+def _timing_clock():
+    try:
+        return time.monotonic_ns()
+    except Exception:
+        return None
+
+
+def _appearance_timing_suffix(context):
+    value = getattr(context, "_appearance_timing", None)
+    if (not isinstance(value, tuple) or len(value) != 2
+            or any(type(ms) is not int or not 0 <= ms <= 2**63 - 1 for ms in value)):
+        return ""
+    return f" [의상룸 API 처리 {value[0]}ms · 작업 대기 {value[1]}ms]"
 
 
 class Context:
@@ -163,6 +180,25 @@ class _Connection:
         self.wake_write.setblocking(False)
 
     def _invoke(self, path, payload, context):
+        started = _timing_clock() if path in _APPEARANCE_TIMED else None
+        try:
+            return self._invoke_application(path, payload, context)
+        finally:
+            # A finite route name and elapsed times only: no request IDs,
+            # inventory, tokens or exception strings. Store only values here:
+            # no UI/log callback may delay this worker's RPC completion.
+            if started is not None:
+                try:
+                    ended = _timing_clock()
+                    queued = getattr(context, "_appearance_queued_ns", None)
+                    if ended is not None:
+                        elapsed_ms = max(0, (ended - started) // 1_000_000)
+                        queue_ms = max(0, (started - queued) // 1_000_000) if queued is not None else 0
+                        context._appearance_timing = (elapsed_ms, queue_ms)
+                except Exception:
+                    pass
+
+    def _invoke_application(self, path, payload, context):
         if not context.is_active():
             raise RpcFailure(RpcCode.DEADLINE_EXCEEDED, "RPC deadline exceeded")
         try:
@@ -214,7 +250,7 @@ class _Connection:
         except Exception:
             # Logging is advisory and cannot change the wire failure or cleanup.
             pass
-        self.server._log(message)
+        self.server._log(message + _appearance_timing_suffix(stream.context))
         self.streams.pop(sid, None)
         self.replies.pop(sid, None)
 
@@ -272,6 +308,8 @@ class _Connection:
             self._failure(sid, error)
             return
         try:
+            if stream.path in _APPEARANCE_TIMED:
+                stream.context._appearance_queued_ns = _timing_clock()
             future = self.server._executor.submit(self._invoke, stream.path, payload, stream.context)
         except RuntimeError:
             self._failure(sid, RpcFailure(RpcCode.UNAVAILABLE, "Local server is stopping"))
@@ -332,7 +370,8 @@ class _Connection:
                         stream = self.streams.pop(sid, None)
                         self.replies.pop(sid, None)
                         if stream is not None:
-                            self.server._log(f"RPC {stream.path[:180]} -> OK")
+                            self.server._log(f"RPC {stream.path[:180]} -> OK"
+                                             + _appearance_timing_suffix(stream.context))
                 except (StreamClosedError, H2Error):
                     self.streams.pop(sid, None)
                     self.replies.pop(sid, None)

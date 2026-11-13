@@ -29,7 +29,7 @@ def test_common_preview_helper_preserves_original_and_user_visibility(tmp_path):
 def test_android_preview_original_fields_and_bind_are_source_bound():
     profile = json.loads((NATIVE / "profile.json").read_text())
     entries = profile["aliases"]
-    assert len(entries) == 96
+    assert len(entries) == 107
     for name, rva, result, parameters in [
         ("preview_ui_bind", "0x5657df0", "System.Void", 0),
         ("preview_ui_get", "0x5657a7c", "System.Boolean", 0),
@@ -49,6 +49,7 @@ def test_android_preview_original_fields_and_bind_are_source_bound():
     assert "#else" in bind and "ready.load(std::memory_order_acquire) && game_call(true)" in bind
     assert "HOOK(preview_ui_bind,preview_ui_bind_hook,preview_ui_bind_original)" in text
     assert "!rotation::ready_for_publish() || !preview_ui.ready() || !wardrobe_lifecycle.ready()" in text
+    assert "|| !wardrobe_exit_tracker.ready()" in text
     load = text.split("void load_calls() {", 1)[1].split("\n#undef CALL", 1)[0]
     assert load.index("#endif", load.index("CALL(mv_ui_hide")) < load.index("preview_ui_calls.weak_new")
     assert "CALL(preview_ui_calls.ui_get, preview_ui_get); CALL(preview_ui_calls.ui_set, preview_ui_set);" in load
