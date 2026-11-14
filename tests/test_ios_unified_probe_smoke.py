@@ -280,6 +280,14 @@ def test_actual_python_commoncrypto_bridge_flags_are_all_required(field):
         probe.validate_report(report)
 
 
+@pytest.mark.parametrize("number", (0, 1))
+def test_native_crypto_numeric_flags_do_not_count_as_json_booleans(number):
+    report = native_report()
+    report["native_crypto"]["ok"] = number
+    with pytest.raises(probe.ProbeError, match="python_commoncrypto_bridge_failed"):
+        probe.validate_report(report)
+
+
 def test_duplicate_json_and_symlink_report_fail_closed(tmp_path):
     with pytest.raises(probe.ProbeError, match="duplicate_json_key"):
         probe.parse_json(b'{"schema":1,"schema":1}')

@@ -245,7 +245,18 @@ def wait_report(container, remaining):
     while True:
         remaining()
         try:
-            return validate_report(parse_json(read_bounded(final, MAX_JSON)))
+            observed = parse_json(read_bounded(final, MAX_JSON))
+            try:
+                return validate_report(observed)
+            except ProbeError as error:
+                crypto = observed.get("native_crypto")
+                if type(crypto) is dict:
+                    # Only fixed scalar test flags from the fresh probe; no
+                    # credentials, server payloads or arbitrary exception text.
+                    error.native_crypto = {k: v for k, v in crypto.items()
+                                           if k in ("ok", "nist_encrypt", "nist_decrypt", "invalid_iv_rejected", "worker_main_thread")
+                                           and type(v) in (bool, int)}
+                raise
         except FileNotFoundError:
             pass
         try:
@@ -426,6 +437,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
         if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
             report["native_startup_error"] = error.native_detail
+        if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
+            report["native_crypto_observed"] = error.native_crypto
     finally:
         if created is not None:
             for action in ("shutdown", "delete"):

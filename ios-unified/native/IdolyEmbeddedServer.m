@@ -373,7 +373,10 @@ void IdolyEmbeddedServerCryptoSelfTest(void (^completion)(NSString *)) {
         BOOL rejects = !invalid && PyErr_ExceptionMatches(PyExc_ValueError);
         Py_XDECREF(invalid); Py_XDECREF(shortIV); Py_XDECREF(k); Py_XDECREF(v); Py_XDECREF(p); Py_XDECREF(c); PyErr_Clear();
         pythonThread = PyEval_SaveThread();
-        NSString *reply = JSON(@{@"ok":@(enc&&dec&&rejects), @"nist_encrypt":@(enc), @"nist_decrypt":@(dec),
+        // C logical expressions have type int. Box a BOOL so JSON carries
+        // true/false rather than 1/0 across the native/Python boundary.
+        BOOL passed = enc && dec && rejects;
+        NSString *reply = JSON(@{@"ok":@(passed), @"nist_encrypt":@(enc), @"nist_decrypt":@(dec),
             @"invalid_iv_rejected":@(rejects), @"worker_main_thread":@(NSThread.isMainThread)});
         dispatch_async(dispatch_get_main_queue(), ^{ completion(reply); });
     }];
