@@ -1,0 +1,208 @@
+{
+  "schema": 1,
+  "python_abi": "3.13",
+  "support": {
+    "url": "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b18/Python-3.13-iOS-support.b18.tar.gz",
+    "filename": "Python-3.13-iOS-support.b18.tar.gz",
+    "bytes": 34524958,
+    "sha256": "d06acf2a9c7964a8689566353a0e707402eff822037de5e29ba0e16040f7047d",
+    "xcframework": "Python.xcframework",
+    "stdlib": "Python.xcframework/lib/python3.13",
+    "libraries": {
+      "device": "ios-arm64",
+      "simulator": "ios-arm64_x86_64-simulator"
+    }
+  },
+  "pure_wheels": [
+    {
+      "name": "h2",
+      "version": "4.3.0",
+      "filename": "h2-4.3.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/69/b2/119f6e6dcbd96f9069ce9a2665e0146588dc9f88f29549711853645e736a/h2-4.3.0-py3-none-any.whl",
+      "bytes": 61779,
+      "sha256": "c438f029a25f7945c69e0ccf0fb951dc3f73a5f6412981daee861431b70e2bdd",
+      "imports": [
+        "h2"
+      ]
+    },
+    {
+      "name": "hpack",
+      "version": "4.2.0",
+      "filename": "hpack-4.2.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/71/b4/4a9fcfb2aef6ba44d9073ecd301443aa00b3dac95de5619f2a7de7ec8a91/hpack-4.2.0-py3-none-any.whl",
+      "bytes": 34246,
+      "sha256": "858ac0b02280fa582b5080d68db0899c62a80375e0e5413a74970c5e518b6986",
+      "imports": [
+        "hpack"
+      ]
+    },
+    {
+      "name": "hyperframe",
+      "version": "6.1.0",
+      "filename": "hyperframe-6.1.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/48/30/47d0bf6072f7252e6521f3447ccfa40b421b6824517f82854703d0f5a98b/hyperframe-6.1.0-py3-none-any.whl",
+      "bytes": 13007,
+      "sha256": "b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5",
+      "imports": [
+        "hyperframe"
+      ]
+    },
+    {
+      "name": "protobuf",
+      "version": "6.33.0",
+      "filename": "protobuf-6.33.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/07/d1/0a28c21707807c6aacd5dc9c3704b2aa1effbf37adebd8caeaf68b17a636/protobuf-6.33.0-py3-none-any.whl",
+      "bytes": 170477,
+      "sha256": "25c9e1963c6734448ea2d308cfa610e692b801304ba0908d7bfa564ac5132995",
+      "imports": [
+        "google/protobuf"
+      ]
+    },
+    {
+      "name": "googleapis-common-protos",
+      "version": "1.70.0",
+      "filename": "googleapis_common_protos-1.70.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/86/f1/62a193f0227cf15a920390abe675f386dec35f7ae3ffe6da582d3ade42c7/googleapis_common_protos-1.70.0-py3-none-any.whl",
+      "bytes": 294530,
+      "sha256": "b8bfcca8c25a2bb253e0e0b0adaf8c00773e5e6af6fd92397576680b807e0fd8",
+      "imports": [
+        "google/api",
+        "google/rpc",
+        "google/longrunning",
+        "google/type",
+        "google/cloud",
+        "google/logging"
+      ]
+    }
+  ],
+  "project_roots": [
+    "idoly_local.ios_host"
+  ],
+  "required_extensions": [
+    "_socket",
+    "select",
+    "_sqlite3",
+    "zlib",
+    "_ssl",
+    "_hashlib",
+    "_ctypes",
+    "_struct",
+    "_json",
+    "_datetime",
+    "_queue",
+    "array",
+    "binascii",
+    "unicodedata"
+  ],
+  "required_pure_dependencies": [
+    "h2",
+    "hpack",
+    "hyperframe",
+    "google/protobuf",
+    "google/rpc"
+  ],
+  "inputs": {
+    "base_ipa": {
+      "bytes": 150132823,
+      "sha256": "d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1",
+      "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+      "branch": "downloads/local-v0.3.31-client-macos-ko-source-cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa"
+    },
+    "original_unity": {
+      "sha256": "7455d0faecdb7100794021ba3a2c49ada2ad391ed035eac66c787b7ea01ae6c8"
+    },
+    "server_data": {
+      "bytes": 191343014,
+      "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"
+    },
+    "translations": {
+      "bytes": 125717042,
+      "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72",
+      "manifest_sha256": "6ce312fd735e15681c40232d0437c864d3e6f9116b56dd59c50c881ac9f4deec",
+      "platform": "ios",
+      "version": "0.3.31"
+    }
+  },
+  "capacity": {
+    "max_ipa_bytes": 629145600,
+    "max_expanded_bytes": 1073741824,
+    "max_runtime_bytes": 201326592,
+    "max_archive_entries": 8192
+  },
+  "protobuf_implementation": "python",
+  "new_native_modules": "signed_frameworks_with_fwork_origin_mappings",
+  "project_modules": [
+    "idoly_local",
+    "idoly_local.app_runtime",
+    "idoly_local.appearance",
+    "idoly_local.application",
+    "idoly_local.assets",
+    "idoly_local.bundled_translations",
+    "idoly_local.card_level_missions",
+    "idoly_local.card_progression",
+    "idoly_local.catalog",
+    "idoly_local.codec",
+    "idoly_local.company",
+    "idoly_local.diagnostics",
+    "idoly_local.dream",
+    "idoly_local.dream_capture",
+    "idoly_local.excursion",
+    "idoly_local.gameplay",
+    "idoly_local.h2_server",
+    "idoly_local.home_talk",
+    "idoly_local.initial_inventory",
+    "idoly_local.ios_host",
+    "idoly_local.language_settings",
+    "idoly_local.lessons",
+    "idoly_local.live_accessories",
+    "idoly_local.live_assets",
+    "idoly_local.live_engine",
+    "idoly_local.live_input",
+    "idoly_local.live_rejection_diagnostics",
+    "idoly_local.main_live",
+    "idoly_local.master_sort",
+    "idoly_local.media_access",
+    "idoly_local.media_outfit_policy",
+    "idoly_local.media_panorama",
+    "idoly_local.media_profile",
+    "idoly_local.media_runtime",
+    "idoly_local.media_scenes",
+    "idoly_local.media_settings",
+    "idoly_local.media_stories",
+    "idoly_local.octo_cache",
+    "idoly_local.octo_http",
+    "idoly_local.octo_manifest",
+    "idoly_local.octo_runtime",
+    "idoly_local.panorama_rules",
+    "idoly_local.photo_names",
+    "idoly_local.photo_shooting",
+    "idoly_local.playback",
+    "idoly_local.presentation",
+    "idoly_local.profile_favorites",
+    "idoly_local.profile_layout",
+    "idoly_local.profile_messages",
+    "idoly_local.profile_names",
+    "idoly_local.profile_top",
+    "idoly_local.public_payload",
+    "idoly_local.pvp",
+    "idoly_local.quest",
+    "idoly_local.render_probe",
+    "idoly_local.resource_archive",
+    "idoly_local.resource_library",
+    "idoly_local.resource_routes",
+    "idoly_local.resource_translation",
+    "idoly_local.resource_translation_runtime",
+    "idoly_local.rpc",
+    "idoly_local.schema",
+    "idoly_local.social",
+    "idoly_local.state",
+    "idoly_local.story_catalog",
+    "idoly_local.story_read_rules",
+    "idoly_local.story_reads",
+    "idoly_local.tutorial_messages",
+    "idoly_local.tutorial_progression",
+    "idoly_local.tutorial_replay",
+    "idoly_local.wardrobe_diagnostics"
+  ]
+}

@@ -1,0 +1,138 @@
+"""Portable malformed-input and byte-preservation checks; no Apple/device claim."""
+from pathlib import Path
+import copy
+import hashlib
+import io
+import json
+import plistlib
+import struct
+import sys
+import tarfile
+from zipfile import ZipFile
+import pytest
+
+sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'ios-unified'))
+import packaging_common as common
+import prepare_runtime as runtime
+import package_unified as package
+
+
+def sha(raw): return hashlib.sha256(raw).hexdigest()
+
+def native(platform=2,cpu=common.ARM64,name='Python',dependencies=(),signed=True):
+    def dylib(command,path):
+        raw=path.encode()+b'\0'; size=(24+len(raw)+7)&~7
+        return (struct.pack('<6I',command,size,24,0,0,0)+raw).ljust(size,b'\0')
+    build=struct.pack('<6I',0x32,24,platform,13<<16,17<<16,0)
+    identity=dylib(0xD,'@rpath/'+name+'.framework/'+name)
+    segment=bytearray(152);struct.pack_into('<II',segment,0,0x19,152);segment[8:14]=b'__TEXT';struct.pack_into('<QQ',segment,40,0,4096);struct.pack_into('<I',segment,64,1);struct.pack_into('<Q',segment,72+40,64);struct.pack_into('<I',segment,72+48,1024)
+    commands=[build,identity,bytes(segment)]+[dylib(0xC,d) for d in dependencies]
+    if signed: commands.append(struct.pack('<4I',0x1D,16,2048,32))
+    body=b''.join(commands); result=bytearray(4096);struct.pack_into('<8I',result,0,0xFEEDFACF,cpu,0,6,len(commands),len(body),0,0);result[32:32+len(body)]=body;result[1024:1088]=b'C'*64
+    if signed: result[2048:2080]=b'S'*32
+    return bytes(result)
+
+def framework(root,name,target='device',signed=True,dependencies=()):
+    path=root/(name+'.framework');path.mkdir(parents=True)
+    raw=native(2 if target=='device' else 7,name=name,signed=signed,dependencies=dependencies)
+    (path/name).write_bytes(raw);(path/name).chmod(0o755)
+    (path/'Info.plist').write_bytes(plistlib.dumps({'CFBundleExecutable':name,'CFBundlePackageType':'FMWK','CFBundleSupportedPlatforms':['iPhoneOS' if target=='device' else 'iPhoneSimulator']}))
+    return path
+
+def patched(raw):
+    result=bytearray(raw);count,size=struct.unpack_from('<II',raw,16);value=package.LOAD_PATH.encode()+b'\0';length=(24+len(value)+7)&~7;command=(struct.pack('<6I',0xC,length,24,0,0,0)+value).ljust(length,b'\0');result[32+size:32+size+length]=command;struct.pack_into('<II',result,16,count+1,size+length);return bytes(result)
+
+@pytest.mark.parametrize('name',['../a','/a','a/../b','a\\b','a//b','a/./b','a\0b'])
+def test_unsafe_paths_fail(name):
+    with pytest.raises(ValueError): common.safe_name(name)
+
+@pytest.mark.parametrize('platform,target',[(1,'device'),(7,'device'),(2,'simulator'),(6,'simulator')])
+def test_wrong_actual_macho_platform_fails(tmp_path,platform,target):
+    p=tmp_path/'binary';p.write_bytes(native(platform))
+    with pytest.raises(ValueError): common.audit_macho(p,target)
+
+def test_fat_single_arm64_device_and_wrong_cpu(tmp_path):
+    body=native();offset=4096;raw=struct.pack('>7I',0xCAFEBABE,1,common.ARM64,0,offset,len(body),12).ljust(offset,b'\0')+body;p=tmp_path/'Python';p.write_bytes(raw)
+    assert common.audit_macho(p,'device')['slices'][0]['architecture']=='arm64'
+    p.write_bytes(native(cpu=common.X86_64))
+    with pytest.raises(ValueError):common.audit_macho(p,'device')
+
+def test_framework_dependency_and_metadata_admission(tmp_path):
+    framework(tmp_path,'Python');bad=framework(tmp_path,'_ssl',dependencies=['@rpath/libcrypto.dylib'])
+    with pytest.raises(ValueError):common.audit_frameworks(tmp_path,'device')
+    (bad/'_ssl').write_bytes(native(name='_ssl',dependencies=['@rpath/Python.framework/Python']))
+    assert set(common.audit_frameworks(tmp_path,'device'))=={'Python','_ssl'}
+    (bad/'Info.plist').write_bytes(plistlib.dumps({'CFBundleExecutable':'wrong'}))
+    with pytest.raises(ValueError):common.audit_frameworks(tmp_path,'device')
+
+def test_missing_signature_and_truncated_commands(tmp_path):
+    p=tmp_path/'b';p.write_bytes(native(signed=False))
+    with pytest.raises(ValueError):common.audit_macho(p,'device',require_signature=True)
+    p.write_bytes(native()[:40])
+    with pytest.raises(ValueError):common.audit_macho(p,'device')
+
+@pytest.mark.parametrize('variant,target',[('simulator','device'),('','simulator')])
+def test_xcframework_slice_never_falls_back(variant,target):
+    info={'AvailableLibraries':[{'LibraryIdentifier':'wrong','LibraryPath':'Python.framework','BinaryPath':'Python.framework/Python','SupportedPlatform':'ios','SupportedPlatformVariant':variant,'SupportedArchitectures':['arm64']}]}
+    with pytest.raises(ValueError):runtime.select_library(info,target)
+
+def test_tar_traversal_and_selected_link_rejected():
+    raw=io.BytesIO()
+    with tarfile.open(fileobj=raw,mode='w') as t:
+        info=tarfile.TarInfo('../private.db');info.size=1;t.addfile(info,io.BytesIO(b'x'))
+    with tarfile.open(fileobj=io.BytesIO(raw.getvalue())) as t:
+        with pytest.raises(ValueError):runtime.tar_inventory(t)
+
+def test_runtime_source_closure_is_explicit_and_rejects_grpc(tmp_path):
+    src=tmp_path/'src/idoly_local';src.mkdir(parents=True);(src/'__init__.py').write_text('');(src/'ios_host.py').write_text('from . import app_runtime\n');(src/'app_runtime.py').write_text('import grpc\n')
+    with pytest.raises(ValueError,match='grpcio'):runtime.runtime_sources(tmp_path,['idoly_local.ios_host'])
+    (src/'app_runtime.py').write_text('from . import cli\n');(src/'cli.py').write_text('')
+    with pytest.raises(ValueError,match='Developer'):runtime.runtime_sources(tmp_path,['idoly_local.ios_host'])
+
+def test_real_core_closure_matches_manifest_without_developer_tools():
+    repo=Path(__file__).resolve().parents[1];manifest=json.loads((repo/'ios-unified/runtime_inputs.json').read_text());actual=runtime.runtime_sources(repo,manifest['project_roots'])
+    assert set(actual)==set(manifest['project_modules'])
+    assert 'idoly_local.dream_capture' in actual and not {'idoly_local.cli','idoly_local.server','idoly_local.ios_patch'}&actual.keys()
+
+def test_unity_patch_all_other_bytes_preserved(tmp_path):
+    original=native(name='UnityFramework');p=tmp_path/'patched';p.write_bytes(patched(original));r=package.verify_unity_patch(io.BytesIO(original),p,sha(original));assert r['all_other_Unity_bytes_equal'] and not r['code_moved']
+    changed=bytearray(p.read_bytes());changed[1024]^=1;p.write_bytes(changed)
+    with pytest.raises(ValueError,match='changed code'):package.verify_unity_patch(io.BytesIO(original),p,sha(original))
+
+def test_unity_patch_rejects_nonzero_padding_and_wrong_load(tmp_path):
+    original=native(name='UnityFramework');p=tmp_path/'patched';p.write_bytes(patched(original));bad=bytearray(original);_,size=struct.unpack_from('<II',bad,16);bad[32+size]=1
+    with pytest.raises(ValueError,match='zero padding'):package.verify_unity_patch(io.BytesIO(bad),p,sha(bad))
+    p.write_bytes(patched(original).replace(b'IdolyEmbeddedServer.framework',b'XdolyEmbeddedServer.framework'))
+    with pytest.raises(ValueError):package.verify_unity_patch(io.BytesIO(original),p,sha(original))
+
+
+def package_fixture(tmp_path,target='device'):
+    root=tmp_path/'runtime';fr=root/'Frameworks';framework(fr,'Python',target);stdlib=root/'python-stdlib';stdlib.mkdir();(stdlib/'os.py').write_text('#pure\n');host=root/'LocalServer/python/idoly_local';host.mkdir(parents=True);(host/'ios_host.py').write_text('#host\n')
+    files={str(p.relative_to(root)):{'bytes':p.stat().st_size,'sha256':sha(p.read_bytes())} for p in root.rglob('*') if p.is_file()};report={'target':target,'python_abi':'3.13','protobuf_implementation':'python','frameworks_codesign_verify_passed':True,'files':files,'extension_mappings':{},'frameworks':{'Python':{}}};(root/'runtime-report.json').write_text(json.dumps(report))
+    native_root=framework(tmp_path/'native','IdolyEmbeddedServer',target,dependencies=['@rpath/Python.framework/Python'])
+    data=tmp_path/'Data.zip';data.write_bytes(b'public-data');trans=tmp_path/'Translations.zip';trans.write_bytes(b'public-translations');web=tmp_path/'web';web.mkdir()
+    for name in ['index.html','styles.css','app.js']:(web/name).write_text('local '+name)
+    unity=native(name='UnityFramework');main=b'ORIGINAL MAIN';source=tmp_path/'base.ipa'
+    with ZipFile(source,'w') as z:
+        z.writestr('Payload/Game.app/Info.plist',plistlib.dumps({'CFBundleExecutable':'Main','CFBundleIdentifier':'game.original'}));z.writestr('Payload/Game.app/'+package.UNITY,unity);z.writestr('Payload/Game.app/Main',main);z.writestr('Payload/Game.app/Frameworks/SDK.framework/SDK',b'ORIGINAL SDK')
+    replacement=tmp_path/'Unity';replacement.write_bytes(patched(unity));manifest={'inputs':{'base_ipa':{'bytes':source.stat().st_size,'sha256':sha(source.read_bytes())},'original_unity':{'sha256':sha(unity)},'server_data':{'bytes':data.stat().st_size,'sha256':sha(data.read_bytes())},'translations':{'bytes':trans.stat().st_size,'sha256':sha(trans.read_bytes()),'manifest_sha256':'a'*64,'version':'0.3.31'}},'capacity':{'max_runtime_bytes':2*1024**2,'max_archive_entries':8192,'max_ipa_bytes':8*1024**2,'max_expanded_bytes':16*1024**2}}
+    return root,native_root,data,trans,source,replacement,manifest,web
+
+def test_full_small_package_preserves_original_main_and_sdk(tmp_path):
+    runtime_root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path);out=tmp_path/'unified.ipa';report=package.package(source,replacement,runtime_root,nat,data,trans,out,source_commit='b'*40,manifest=manifest,web_root=web)
+    assert report['original_SDK_members_unchanged'] and report['max_stream_chunk_bytes']==65536 and not report['actual_device_or_PlayCover_execution']
+    with ZipFile(out) as z:
+        assert z.read('Payload/Game.app/Main')==b'ORIGINAL MAIN' and z.read('Payload/Game.app/Frameworks/SDK.framework/SDK')==b'ORIGINAL SDK'
+        metadata=plistlib.loads(z.read('Payload/Game.app/Info.plist')); assert metadata['UIFileSharingEnabled'] is True and metadata['CFBundleVersion']=='156.9100' and metadata['CFBundleDisplayName']=='아이프라 로컬' and metadata['CFBundleIdentifier']=='game.original'
+        assert z.read('Payload/Game.app/LocalServer/ServerData.zip')==b'public-data'
+
+def test_simulator_stage_needs_no_game_but_never_device_package(tmp_path):
+    root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path,'simulator');prepared=tmp_path/'Prepared.app';package.stage_app(root,nat,data,trans,prepared,manifest=manifest,web_root=web)
+    assert (prepared/'LocalServer/ServerData.zip').read_bytes()==b'public-data' and not (prepared/'Main').exists()
+    with pytest.raises(ValueError):package.package(source,replacement,root,nat,data,trans,tmp_path/'bad.ipa',source_commit='b'*40,manifest=manifest,web_root=web)
+
+def test_runtime_extra_files_and_broken_fwork_rejected(tmp_path):
+    root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path);(root/'private.db').write_bytes(b'never-bundle')
+    with pytest.raises(ValueError,match='inventory'):package.runtime_files(root,'device',manifest)
+    (root/'private.db').unlink();r=json.loads((root/'runtime-report.json').read_text());r['extension_mappings']={'_socket':{'fwork':'python-stdlib/os.py','origin':'python-stdlib/os.py','binary':'Frameworks/Python.framework/Python'}};(root/'runtime-report.json').write_text(json.dumps(r))
+    with pytest.raises(ValueError,match='mapping'):package.runtime_files(root,'device',manifest)

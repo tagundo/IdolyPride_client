@@ -3,6 +3,10 @@ name: Build native server candidates or draft assets
 on:
   workflow_dispatch:
     inputs:
+      ios_unified:
+        description: Build an Actions-only integrated iPhone/iPad IPA and run a disposable iOS Simulator core probe
+        type: boolean
+        default: false
       artifact_only:
         description: Build Actions-only candidates for separate Android native runtime QA; leave the release draft untouched
         type: boolean
@@ -16,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-server-apps-${{ inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0' }}
+  group: native-server-apps-${{ inputs.ios_unified && 'ios-unified' || (inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0') }}
   cancel-in-progress: true
 
 env:
@@ -29,6 +33,7 @@ env:
 
 jobs:
   prepare:
+    if: ${{ !inputs.ios_unified }}
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
@@ -267,7 +272,7 @@ jobs:
     # Release uploads stay paused until native ARM runtime QA replaces the
     # translated gate. artifact_only builds bytes for that separate QA and
     # never uploads Android APKs to the release or claims runtime success.
-    if: ${{ inputs.artifact_only || vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true' }}
+    if: ${{ !inputs.ios_unified && (inputs.artifact_only || vars.IDOLY_ANDROID_NATIVE_RUNTIME_QA_READY == 'true') }}
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 75
@@ -748,6 +753,7 @@ jobs:
           compression-level: 0
 
   macos:
+    if: ${{ !inputs.ios_unified }}
     needs: prepare
     runs-on: macos-15
     timeout-minutes: 35
@@ -970,7 +976,7 @@ jobs:
           if-no-files-found: warn
 
   verify:
-    if: ${{ !inputs.artifact_only }}
+    if: ${{ !inputs.ios_unified && !inputs.artifact_only }}
     needs: [prepare, android, macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1115,3 +1121,49 @@ jobs:
           name: native-server-release-verification-v${{ env.IDOLY_APP_VERSION }}
           path: data/release-verification
           if-no-files-found: error
+
+  ios-unified:
+    if: ${{ inputs.ios_unified }}
+    runs-on: macos-15
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch exact public runtime, game and server-data inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B ios-unified/fetch_inputs.py --output "$RUNNER_TEMP/idoly-unified-inputs"
+      - name: Install build verification dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check pytest==8.4.2 pycryptodome==3.23.0
+          python3 -m pip install --no-index "$RUNNER_TEMP"/idoly-unified-inputs/wheels/*.whl
+      - name: Verify host lifecycle, packaging, load gate and settings bridge
+        run: |
+          python3 -B -m pytest -q -p no:cacheprovider tests/test_ios_host.py tests/test_public_payload.py tests/test_ios_unified_*.py ios-unified/native/tests/test_build_native.py
+          python3 -B ios-unified/native/build_native.py --portable-tests
+      - name: Compile real iOS frameworks, compose IPA and run fresh Simulator core probe
+        run: >-
+          python3 -B ios-unified/ci_build.py
+          --inputs "$RUNNER_TEMP/idoly-unified-inputs"
+          --work "$RUNNER_TEMP/idoly-unified-build"
+          --output "$RUNNER_TEMP/idoly-unified-output"
+          --source-commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ios-unified-prototype-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-unified-output
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14

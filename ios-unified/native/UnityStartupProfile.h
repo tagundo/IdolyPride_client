@@ -1,0 +1,13 @@
+#ifndef IDOLY_UNITY_STARTUP_PROFILE_H
+#define IDOLY_UNITY_STARTUP_PROFILE_H
+// Read from the original, SHA-locked 6.1.1 iOS UnityFramework Objective-C
+// class_ro/method list: UnityAppController, startUnity:, v24@0:8@16.
+// Original Unity SHA256 b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf.
+static const unsigned char IDUnityUUID[16] = {
+    0xcd,0x2f,0xb0,0x4c,0x5a,0x5b,0x3c,0x29,0x83,0x83,0xbb,0xc2,0x0b,0x92,0x3b,0x91
+};
+static const unsigned long IDUnityStartRVA = 0xf340;
+static const unsigned char IDUnityStartPrefix[16] = {
+    0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91
+};
+#endif

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; font-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>IDOLY PRIDE 로컬 설정</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">IDOLY PRIDE · LOCAL</p><h1>서버 설정</h1></div>
+      <button id="refresh" type="button" class="secondary">새로고침</button>
+    </header>
+    <section class="overview" aria-labelledby="server-heading">
+      <div class="section-title"><h2 id="server-heading">서버 상태</h2><span id="server-state" class="badge">확인 중</span></div>
+      <p id="server-summary">기기에 저장된 설정을 불러옵니다.</p>
+      <p id="restart-notice" class="notice" hidden>변경한 감상 모드·언어·자동 받기는 다음 앱 실행부터 적용됩니다.</p>
+      <p class="hint">게임에서 세 손가락으로 길게 누르면 다시 열 수 있습니다.</p>
+    </section>
+    <p id="message" class="message" role="status" aria-live="polite" hidden></p>
+
+    <section aria-labelledby="options-heading">
+      <h2 id="options-heading">감상 모드·언어</h2>
+      <p class="hint">저장 후 앱을 완전히 종료하고 다시 실행하면 적용됩니다. 일반 모드의 저장 자료는 따로 유지됩니다.</p>
+      <form id="options-form">
+        <fieldset id="options-fields" disabled>
+          <label class="switch"><span>감상 모드 · 전체 해금</span><input id="media_mode" type="checkbox"></label>
+          <label class="switch"><span>없는 리소스 자동 받기</span><input id="download_missing_resources" type="checkbox"></label>
+          <label class="row"><span>게임 언어</span><select id="language"><option value="ko">한국어</option><option value="ja">日本語</option><option value="en">English</option></select></label>
+          <button type="submit">다음 실행 설정 저장</button>
+        </fieldset>
+      </form>
+      <p id="effective-options" class="hint">현재 적용 값 확인 중</p>
+    </section>
+
+    <section aria-labelledby="graphics-heading">
+      <div class="section-title"><h2 id="graphics-heading">그래픽·촬영 화면</h2><span id="graphics-state" class="badge">대기</span></div>
+      <form id="presentation-form">
+        <fieldset id="presentation-fields" disabled>
+          <label class="switch"><span>사용자 그래픽 설정</span><input id="custom_graphics" type="checkbox"></label>
+          <div class="grid">
+            <label class="row"><span>그래픽 품질</span><select id="quality"><option value="0">원본</option><option value="10">최저</option><option value="20">낮음</option><option value="30">보통</option><option value="40">높음</option><option value="100">Recording</option></select></label>
+            <label class="row"><span>목표 프레임 수</span><select id="target_fps"><option value="0">원본</option><option value="30">30</option><option value="60">60</option><option value="90">90</option><option value="120">120</option></select></label>
+            <label class="row"><span>3D 렌더 배율</span><input id="render_scale" type="number" min="0.25" max="2" step="any" inputmode="decimal" list="render-scales"></label>
+            <label class="row"><span>렌더 버퍼 최대 크기</span><input id="max_buffer_pixel" type="number" min="256" max="4096" step="2" inputmode="numeric" list="buffer-sizes"></label>
+            <label class="row"><span>가장자리 다듬기</span><select id="anti_aliasing"><option value="-1">원본</option><option value="0">없음</option><option value="1">FXAA</option><option value="2">SMAA</option></select></label>
+            <label class="row"><span>캐릭터 그림자</span><select id="shadow_resolution"><option value="0">원본</option><option value="512">512</option><option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option></select></label>
+          </div>
+          <label class="switch"><span>촬영·360 화면 확장</span><input id="expand_photography" type="checkbox"></label>
+          <p class="hint">화면 확장은 그래픽 설정과 독립적으로 적용됩니다. 목표 프레임 수는 실제 성능을 보장하지 않습니다.</p>
+          <button type="submit">그래픽 설정 저장</button>
+        </fieldset>
+      </form>
+      <p id="graphics-detail" class="hint">게임 적용 상태 확인 중</p>
+      <datalist id="render-scales"><option value="0.25"><option value="0.5"><option value="0.75"><option value="1"><option value="1.25"><option value="1.5"><option value="2"></datalist>
+      <datalist id="buffer-sizes"><option value="720"><option value="1080"><option value="1440"><option value="1920"><option value="2560"><option value="3840"><option value="4096"></datalist>
+    </section>
+
+    <section aria-labelledby="playback-heading">
+      <div class="section-title"><h2 id="playback-heading">MV 재생</h2><span id="playback-state" class="badge">대기</span></div>
+      <form id="playback-form">
+        <fieldset id="playback-fields" disabled>
+          <label class="switch"><span>화면 회전 후 재생 시작</span><input id="wait_for_orientation" type="checkbox" checked></label>
+          <p class="hint">기본값은 켜짐입니다. 화면이 가로 방향으로 바뀔 때까지 기다립니다.</p>
+          <button type="submit">재생 설정 저장</button>
+        </fieldset>
+      </form>
+    </section>
+
+    <section aria-labelledby="media-heading">
+      <h2 id="media-heading">MV·의상 목록</h2>
+      <form id="media-form">
+        <fieldset id="media-fields" disabled>
+          <label class="switch"><span>영상 MV 숨기기</span><input id="hide_video_mv" type="checkbox"></label>
+          <label class="row"><span>MV 정렬</span><select id="mv_sort"><option value="recent">최신순</option><option value="old">오래된 순</option><option value="title">이름순</option><option value="id">ID순</option></select></label>
+          <label class="row"><span>의상 정렬</span><select id="outfit_sort"><option value="original">원본</option><option value="recent">최신순</option><option value="old">오래된 순</option><option value="title">이름순</option><option value="id">ID순</option></select></label>
+          <button type="submit">목록 설정 저장</button>
+        </fieldset>
+      </form>
+      <p id="media-effective" class="hint">목록 설정은 다음 앱 실행부터 적용됩니다.</p>
+    </section>
+
+    <section aria-labelledby="resources-heading">
+      <div class="section-title"><h2 id="resources-heading">iOS 리소스 보관</h2><span id="resource-state" class="badge">대기</span></div>
+      <p class="hint">받은 파일은 크기·MD5를 검증해 기기에 보관합니다. 중단 후 다시 받으면 검증된 파일을 재사용합니다.</p>
+      <label class="row"><span>동시 다운로드</span><select id="parallelism"><option value="1">1개</option><option value="2">2개</option><option value="4" selected>4개 · 기본</option><option value="8">8개</option></select></label>
+      <div class="actions"><button id="resources-preview" type="button" class="secondary" disabled>목록·용량 확인</button><button id="resources-download" type="button" disabled>전체 리소스 받기</button></div>
+      <progress id="resource-progress" max="1" value="0" aria-label="리소스 검증 진행률" hidden></progress>
+      <p id="resource-summary" class="resource-text">서버 상태를 확인하고 있습니다.</p>
+      <p id="resource-detail" class="hint"></p>
+      <div class="actions"><button id="resources-import" type="button" class="secondary" disabled>ZIP 가져오기</button><button id="resources-export" type="button" class="secondary" disabled>ZIP 내보내기</button><button id="resources-cancel" type="button" class="secondary danger" disabled>작업 취소</button></div>
+      <p class="hint">파일 앱에서 ZIP을 선택하거나 저장합니다. 내보내기에는 현재 보관된 파일만 포함됩니다.</p>
+    </section>
+
+    <section aria-labelledby="diagnostics-heading">
+      <h2 id="diagnostics-heading">진단</h2>
+      <p id="diagnostic-summary">게임 진단 대기 중</p>
+      <details><summary>상태·최근 기록 보기</summary><pre id="diagnostics" tabindex="0">기록 없음</pre></details>
+    </section>
+    <footer>설정은 이 기기에 저장됩니다.</footer>
+  </main>
+</body>
+</html>
