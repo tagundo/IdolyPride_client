@@ -4,6 +4,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Inspection/retry/command entry points also used by the independent UIKit probe.
 FOUNDATION_EXPORT __attribute__((visibility("default"))) NSString *IdolyEmbeddedServerStatusJSON(void);
 FOUNDATION_EXPORT __attribute__((visibility("default"))) void IdolyEmbeddedServerRetry(void);
+// The launcher calls this only after the user presses Game Start. Readiness
+// alone never starts Unity; premature/duplicate requests are ignored.
+FOUNDATION_EXPORT __attribute__((visibility("default"))) void IdolyEmbeddedServerLaunchGame(void);
 // Completion always runs on the main queue; Python never runs on that queue.
 FOUNDATION_EXPORT __attribute__((visibility("default"))) void IdolyEmbeddedServerCommand(NSString *request,
                                                   void (^completion)(NSString *reply));

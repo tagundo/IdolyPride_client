@@ -122,8 +122,8 @@ def main():
     (output / "README.txt").write_text(
         "IdolyPride integrated iPhone/iPad IPA (prototype)\n"
         "Sign this IPA with your iOS sideloading method before installing.\n"
-        "The local server starts inside the game; no separate server app is needed.\n"
-        "Hold three fingers on the game for one second to open server settings.\n"
+        "The app opens the server menu first. Press 게임 시작 after the server is ready.\n"
+        "While playing, hold the upper-right corner for three seconds to reopen the server menu.\n"
         "Mac/PlayCover: app menu > 로컬 서버 설정… (Command+Shift+,).\n"
         "Resource files: Files > On My iPhone/iPad > 아이프라 로컬 > IdolyPride.\n"
         "The real iOS server framework compiled and a disposable Simulator core probe passed.\n"

@@ -208,6 +208,7 @@ static void forwardUnityIfVisible(void) {
     NSCAssert(NSThread.isMainThread, @"Unity startup belongs to main thread");
     if (!IDGateForwardVisible(&gate, UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)) return;
     lastError = nil; IDNativeDismissFailure();
+    IDNativeHideLauncher();
     id controller = savedController, application = savedApplication;
     savedController = nil; savedApplication = nil;
     ((void (*)(id, SEL, id))originalStartUnity)(controller, startSelector, application);
@@ -215,6 +216,7 @@ static void forwardUnityIfVisible(void) {
 static void beginServer(void) {
     NSCAssert([NSThread isMainThread], @"Gate state belongs to main thread");
     if (!hookInstalled || !IDGateBegin(&gate)) return;
+    IDNativeSetServerReady(NO, @"서버를 준비하고 있습니다…");
     if (!worker) worker = [IDServerWorker new];
     [worker enqueue:^{
         NSString *error = nil, *app = NSBundle.mainBundle.bundlePath;
@@ -240,9 +242,11 @@ static void beginServer(void) {
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (good && IDGateSucceeded(&gate)) {
-                forwardUnityIfVisible();
+                IDNativeSetServerReady(YES, @"서버 실행 중");
             } else if (!good && IDGateFailedAttempt(&gate)) {
-                lastError = error ?: @"서버 시작 실패"; IDNativeStartupFailure(lastError);
+                lastError = error ?: @"서버 시작 실패";
+                IDNativeSetServerReady(NO, @"서버를 시작하지 못했습니다");
+                IDNativeStartupFailure(lastError);
             }
         });
     }];
@@ -266,6 +270,7 @@ static void deferredStart(id self, SEL selector, id application) {
     void (^capture)(void) = ^{
         if (!IDGateCapture(&gate)) return;
         savedController = self; savedApplication = application; startSelector = selector;
+        IDNativeShowLauncher();
         beginServer();
     };
     if (NSThread.isMainThread) capture(); else dispatch_async(dispatch_get_main_queue(), capture);
@@ -325,6 +330,8 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled),
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),
+        @"launch_requested":@((BOOL)gate.launch_requested), @"launch_prepared":@((BOOL)gate.launch_prepared),
+        @"launcher_visible":@(IDNativeLauncherVisible()),
         @"error":hookError ?: lastError ?: (id)NSNull.null}); };
     if (NSThread.isMainThread) read(); else dispatch_sync(dispatch_get_main_queue(), read);
     return result;
@@ -332,10 +339,37 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
 void IdolyEmbeddedServerRetry(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (hookError) IDNativeStartupFailure(hookError);
-        else if (gate.phase == IDGateReady) forwardUnityIfVisible();
+        else if (gate.phase == IDGateReady) {
+            IDNativeShowLauncher();
+            IDNativeSetServerReady(!gate.launch_requested, gate.launch_requested ? @"게임 시작을 준비하고 있습니다…" : @"서버 실행 중");
+        }
         else if (gate.phase == IDGateRunning) recoverForeground();
         else beginServer();
     });
+}
+void IdolyEmbeddedServerLaunchGame(void) {
+    void (^request)(void) = ^{
+        if (!worker || !atomic_load(&pythonReady) || !IDGateRequestLaunch(&gate)) return;
+        IDNativeSetServerReady(NO, @"게임 시작을 준비하고 있습니다…");
+        [worker enqueue:^{
+            // Recheck the active server on its worker. Pending language/profile
+            // choices retain their documented next-app-launch behavior.
+            NSString *error = nil, *reply = callHost("foreground", nil, &error);
+            NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
+            id status = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+            BOOL ready = !error && [status isKindOfClass:NSDictionary.class]
+                && [status[@"running"] isEqual:@YES] && [status[@"state"] isEqual:@"ready"];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (ready && IDGatePreparedLaunch(&gate)) forwardUnityIfVisible();
+                else if (!ready && IDGateLaunchFailed(&gate)) {
+                    lastError = error ?: @"서버 연결을 확인하지 못했습니다. 다시 시도해 주세요.";
+                    IDNativeSetServerReady(NO, @"서버 연결 확인 실패");
+                    IDNativeStartupFailure(lastError);
+                }
+            });
+        }];
+    };
+    if (NSThread.isMainThread) request(); else dispatch_async(dispatch_get_main_queue(), request);
 }
 void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *)) {
     NSData *raw = [request dataUsingEncoding:NSUTF8StringEncoding];
@@ -396,6 +430,9 @@ __attribute__((constructor)) static void embeddedServerLoaded(void) {
                 forwardUnityIfVisible();
                 recoverForeground();
             }];
-        if (hookError) IDNativeStartupFailure(hookError);
+        if (hookError) {
+            IDNativeShowLauncher(); IDNativeSetServerReady(NO, @"게임 버전을 확인할 수 없습니다");
+            IDNativeStartupFailure(hookError);
+        }
     });
 }

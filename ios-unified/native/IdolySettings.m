@@ -1,33 +1,55 @@
 #import "IdolyEmbeddedServer.h"
 #import "IdolyNativeUI.h"
 #import "IdolyMacMenu.h"
+#include "CornerPolicy.h"
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 #include <stdatomic.h>
 
 static atomic_bool settingsVisible;
+static UIWindow *launcherWindow;
 static UIWindow *failureWindow;
-static __weak UIWindow *previousKeyWindow;
+static __weak UIWindow *previousGameWindow;
+static __weak UIWindow *previousFailureWindow;
 static NSString *pendingFailure;
+static BOOL serverReady;
+static NSString *serverReadyStatus;
 static const NSUInteger maxJSON = 65536;
 
+static BOOL gameWindowCandidate(UIWindow *window) {
+    // Ignore our independent windows and UIKit keyboard/alert windows. Unity's
+    // game window is normal-level, including under PlayCover.
+    return window != failureWindow && window != launcherWindow
+        && window.windowLevel <= UIWindowLevelNormal + 0.5;
+}
 static UIWindow *gameWindow(void) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *window in ((UIWindowScene *)scene).windows)
-            if (window != failureWindow && window.isKeyWindow) return window;
+            if (gameWindowCandidate(window) && window.isKeyWindow && !window.hidden) return window;
     }
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
         for (UIWindow *window in ((UIWindowScene *)scene).windows)
-            if (window != failureWindow && !window.hidden && window.rootViewController) return window;
+            if (gameWindowCandidate(window) && !window.hidden && window.rootViewController) return window;
     }
     // Unity 6.1.1 uses a classic UIApplicationDelegate and may have no scenes.
     for (UIWindow *window in UIApplication.sharedApplication.windows)
-        if (window != failureWindow && window.isKeyWindow) return window;
+        if (gameWindowCandidate(window) && window.isKeyWindow && !window.hidden) return window;
     for (UIWindow *window in UIApplication.sharedApplication.windows)
-        if (window != failureWindow && !window.hidden && window.rootViewController) return window;
+        if (gameWindowCandidate(window) && !window.hidden && window.rootViewController) return window;
+    return nil;
+}
+static UIWindowScene *windowScene(void) {
+    UIWindowScene *gameScene = gameWindow().windowScene;
+    if (gameScene) return gameScene;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if ([scene isKindOfClass:UIWindowScene.class] && scene.activationState == UISceneActivationStateForegroundActive)
+            return (UIWindowScene *)scene;
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes)
+        if ([scene isKindOfClass:UIWindowScene.class] && scene.activationState != UISceneActivationStateUnattached)
+            return (UIWindowScene *)scene;
     return nil;
 }
 static UIViewController *presenter(void) {
@@ -47,33 +69,85 @@ static NSString *encode(id object) {
 @property (nonatomic,copy) NSDictionary *pendingImport;
 @property (nonatomic) BOOL pendingExport;
 @property (nonatomic,copy) NSString *lastExportPath;
+@property (nonatomic) BOOL launcherMode;
+@property (nonatomic,strong) UILabel *launcherStatus;
+@property (nonatomic,strong) UIBarButtonItem *gameStartButton;
 - (void)event:(NSString *)json;
 - (void)releaseWeb;
 - (void)exportPath:(NSString *)path;
 - (void)retireExport;
 - (void)closeSettings;
+- (void)startGame;
+- (void)updateServerReady;
 - (void)dispatchRequest:(NSDictionary *)request;
 - (void)sendRequest:(NSDictionary *)request;
 - (void)sendReply:(NSNumber *)identifier json:(NSString *)json;
 - (void)localFailure:(NSNumber *)identifier message:(NSString *)message;
 @end
 static __weak IDSettingsController *settingsController;
+static __weak IDSettingsController *launcherController;
 
 @implementation IDSettingsController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"아이프라 서버 설정";
+    self.title = self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
-        target:self action:@selector(closeSettings)];
+    if (self.launcherMode) {
+        _gameStartButton = [[UIBarButtonItem alloc] initWithTitle:@"게임 시작" style:UIBarButtonItemStyleDone
+            target:self action:@selector(startGame)];
+        _gameStartButton.accessibilityIdentifier = @"idoly.game-start";
+        _gameStartButton.enabled = NO;
+        self.navigationItem.rightBarButtonItem = _gameStartButton;
+    } else {
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"게임으로 돌아가기"
+            style:UIBarButtonItemStyleDone target:self action:@selector(closeSettings)];
+        self.navigationItem.rightBarButtonItem.accessibilityIdentifier = @"idoly.server-close";
+    }
     _page = [NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"LocalServer/settings/index.html"];
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
     configuration.websiteDataStore = WKWebsiteDataStore.nonPersistentDataStore;
     [configuration.userContentController addScriptMessageHandler:self name:@"idolyServer"];
     _web = [[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];
-    _web.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    _web.translatesAutoresizingMaskIntoConstraints = NO;
     _web.navigationDelegate = self; [self.view addSubview:_web];
+    UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    NSLayoutYAxisAnchor *webTop = safe.topAnchor;
+    if (self.launcherMode) {
+        _launcherStatus = [UILabel new];
+        _launcherStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+        _launcherStatus.numberOfLines = 0;
+        _launcherStatus.accessibilityIdentifier = @"idoly.server-status";
+        _launcherStatus.accessibilityTraits |= UIAccessibilityTraitUpdatesFrequently;
+        UILabel *hint = [UILabel new];
+        hint.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+        hint.textColor = UIColor.secondaryLabelColor; hint.numberOfLines = 0;
+        hint.text = @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요.\n게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 3초간 누르면 서버 메뉴가 다시 열립니다.";
+        UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[_launcherStatus, hint]];
+        header.axis = UILayoutConstraintAxisVertical; header.spacing = 6;
+        header.translatesAutoresizingMaskIntoConstraints = NO;
+        [self.view addSubview:header];
+        [NSLayoutConstraint activateConstraints:@[
+            [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
+            [header.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
+            [header.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16]]];
+        webTop = header.bottomAnchor;
+        [self updateServerReady];
+    }
+    [NSLayoutConstraint activateConstraints:@[
+        [_web.topAnchor constraintEqualToAnchor:webTop constant:(self.launcherMode ? 12 : 0)],
+        [_web.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
+        [_web.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
+        [_web.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor]]];
     [_web loadFileURL:_page allowingReadAccessToURL:_page.URLByDeletingLastPathComponent];
+}
+- (void)updateServerReady {
+    if (!self.launcherMode) return;
+    _gameStartButton.enabled = serverReady;
+    _launcherStatus.text = serverReadyStatus.length ? serverReadyStatus
+        : (serverReady ? @"서버가 준비되었습니다." : @"서버를 준비하고 있습니다…");
+}
+- (void)startGame {
+    if (self.launcherMode && serverReady) IdolyEmbeddedServerLaunchGame();
 }
 - (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; atomic_store(&settingsVisible, true); }
 - (void)viewWillDisappear:(BOOL)animated { [super viewWillDisappear:animated]; atomic_store(&settingsVisible, false); }
@@ -85,12 +159,14 @@ static __weak IDSettingsController *settingsController;
     atomic_store(&settingsVisible, false);
     [_web.configuration.userContentController removeScriptMessageHandlerForName:@"idolyServer"];
     [_web stopLoading]; _web.navigationDelegate = nil;
-    [_web removeFromSuperview]; _web = nil; settingsController = nil;
+    [_web removeFromSuperview]; _web = nil;
+    if (settingsController == self) settingsController = nil;
 }
 - (void)presentationControllerDidDismiss:(UIPresentationController *)presentationController {
     (void)presentationController; [self releaseWeb];
 }
 - (void)closeSettings {
+    if (self.launcherMode) return; // Unity starts only through the explicit button.
     [self releaseWeb];
     [self dismissViewControllerAnimated:YES completion:nil];
 }
@@ -287,7 +363,44 @@ static __weak IDSettingsController *settingsController;
 }
 @end
 
-@interface IDGestureTarget : NSObject
+void IDNativeShowLauncher(void) {
+    NSCAssert(NSThread.isMainThread, @"Launcher UI belongs to the main thread");
+    if (launcherWindow) {
+        if (!failureWindow) [launcherWindow makeKeyAndVisible];
+        return;
+    }
+    previousGameWindow = gameWindow();
+    UIWindowScene *scene = windowScene();
+    CGRect initialFrame = previousGameWindow ? previousGameWindow.bounds : UIScreen.mainScreen.bounds;
+    launcherWindow = scene ? [[UIWindow alloc] initWithWindowScene:scene]
+        : [[UIWindow alloc] initWithFrame:initialFrame];
+    launcherWindow.windowLevel = UIWindowLevelNormal + 1;
+    IDSettingsController *settings = [IDSettingsController new];
+    settings.launcherMode = YES;
+    launcherController = settings; settingsController = settings;
+    launcherWindow.rootViewController = [[UINavigationController alloc] initWithRootViewController:settings];
+    [launcherWindow makeKeyAndVisible];
+}
+void IDNativeSetServerReady(BOOL ready, NSString *status) {
+    NSCAssert(NSThread.isMainThread, @"Launcher status belongs to the main thread");
+    serverReady = ready; serverReadyStatus = [status copy];
+    [launcherController updateServerReady];
+}
+void IDNativeHideLauncher(void) {
+    NSCAssert(NSThread.isMainThread, @"Launcher UI belongs to the main thread");
+    [launcherController releaseWeb];
+    [launcherWindow.rootViewController dismissViewControllerAnimated:NO completion:nil];
+    launcherWindow.hidden = YES; launcherWindow.rootViewController = nil;
+    launcherController = nil; launcherWindow = nil;
+    UIWindow *restore = previousGameWindow ?: gameWindow(); previousGameWindow = nil;
+    [restore makeKeyWindow];
+}
+BOOL IDNativeLauncherVisible(void) {
+    NSCAssert(NSThread.isMainThread, @"Launcher inspection belongs to the main thread");
+    return launcherWindow && !launcherWindow.hidden && launcherWindow.rootViewController != nil;
+}
+
+@interface IDGestureTarget : NSObject <UIGestureRecognizerDelegate>
 @property (nonatomic) BOOL attachQueued;
 - (void)open:(UILongPressGestureRecognizer *)gesture;
 - (void)openMenu:(id)sender;
@@ -306,6 +419,8 @@ static __weak IDSettingsController *settingsController;
 }
 - (void)openSettings {
     NSCAssert(NSThread.isMainThread, @"Server settings belong to the main thread");
+    if (failureWindow) return;
+    if (IDNativeLauncherVisible()) { [launcherWindow makeKeyAndVisible]; return; }
     if (settingsController) return;
     UIViewController *parent = presenter(); if (!parent) return;
     IDSettingsController *settings = [IDSettingsController new]; settingsController = settings;
@@ -314,16 +429,29 @@ static __weak IDSettingsController *settingsController;
     [parent presentViewController:navigation animated:YES completion:nil];
     navigation.presentationController.delegate = settings;
 }
+- (BOOL)gestureRecognizer:(UIGestureRecognizer *)gesture shouldReceiveTouch:(UITouch *)touch {
+    if (settingsController || launcherWindow || failureWindow) return NO;
+    UIWindow *window = [gesture.view isKindOfClass:UIWindow.class] ? (UIWindow *)gesture.view : nil;
+    if (!window || window != gameWindow() || touch.window != window || window.hidden) return NO;
+    // Resolve the safe area at touch-down. There is no resize/frame observer.
+    CGRect safe = UIEdgeInsetsInsetRect(window.bounds, window.safeAreaInsets);
+    CGPoint point = [touch locationInView:window];
+    return IDCornerContainsPoint(safe.origin.x, safe.origin.y, safe.size.width, safe.size.height, point.x, point.y);
+}
 - (void)attach {
     // The Mac menu can be created/replaced independently of the Unity window.
     // This is event-driven; it adds no overlay or per-frame polling.
     IDMacInstallSettingsMenu(self, @selector(openMenu:));
-    UIWindow *window = gameWindow(); if (!window) return;
+    UIWindow *window = gameWindow(); if (!window || !window.rootViewController) return;
     static const void *key = &key;
     if (objc_getAssociatedObject(window,key)) return;
     UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(open:)];
-    gesture.numberOfTouchesRequired = 3; gesture.minimumPressDuration = 0.8;
-    gesture.cancelsTouchesInView = NO;
+    gesture.numberOfTouchesRequired = 1; gesture.minimumPressDuration = 3.0;
+    gesture.allowableMovement = 12.0; gesture.delegate = self;
+    // Short taps and normal drags go straight to Unity. Only a recognized hold
+    // cancels its underlying touch, avoiding a stuck game control after opening.
+    gesture.delaysTouchesBegan = NO; gesture.delaysTouchesEnded = NO;
+    gesture.cancelsTouchesInView = YES;
     [window addGestureRecognizer:gesture]; objc_setAssociatedObject(window,key,gesture,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 - (void)scheduleAttach {
@@ -353,10 +481,8 @@ void IDNativeStartupFailure(NSString *message) {
     NSCAssert(NSThread.isMainThread, @"Startup UI belongs to main thread");
     pendingFailure = message;
     if (failureWindow) return;
-    UIWindowScene *scene = nil;
-    for (UIScene *candidate in UIApplication.sharedApplication.connectedScenes)
-        if ([candidate isKindOfClass:UIWindowScene.class] && candidate.activationState != UISceneActivationStateUnattached) { scene = (id)candidate; break; }
-    previousKeyWindow = gameWindow();
+    UIWindowScene *scene = launcherWindow.windowScene ?: windowScene();
+    previousFailureWindow = launcherWindow ?: gameWindow();
     failureWindow = scene ? [[UIWindow alloc] initWithWindowScene:scene]
         : [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     failureWindow.windowLevel = UIWindowLevelAlert + 1; failureWindow.rootViewController = [UIViewController new];
@@ -370,6 +496,7 @@ void IDNativeStartupFailure(NSString *message) {
     [failureWindow.rootViewController presentViewController:alert animated:YES completion:nil];
 }
 void IDNativeDismissFailure(void) {
+    NSCAssert(NSThread.isMainThread, @"Startup UI belongs to the main thread");
     pendingFailure = nil; failureWindow.hidden = YES; failureWindow.rootViewController = nil; failureWindow = nil;
-    [previousKeyWindow makeKeyWindow]; previousKeyWindow = nil;
+    [previousFailureWindow makeKeyWindow]; previousFailureWindow = nil;
 }

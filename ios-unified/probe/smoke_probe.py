@@ -35,9 +35,18 @@ MAX_JSON = 64 * 1024
 MAX_DESCRIPTOR = 16 * 1024 * 1024
 MAX_RESPONSE = 4 * 1024 * 1024
 MAX_COMMAND_OUTPUT = 2 * 1024 * 1024
+MAX_TOOL_DETAIL = 8 * 1024
 RPC_PATHS = ("/api.System/Check", "/api.Auth/Login", "/api.Home/Enter")
 # A well-formed unknown protobuf varint makes empty requests exercise AES too.
 PUBLIC_PROBE_FIELD = b"\xc0\xa3\x09\x01"  # field 19000, wire type 0, value 1
+LAUNCHER_FAILURE_CODES = frozenset((
+    "premature_launch_not_ignored", "server_left_ready_before_launch",
+    "unity_started_before_launch_button", "ready_launcher_not_visible",
+    "ready_launcher_flags_differ", "ready_launch_button_missing",
+    "ready_launch_button_ambiguous", "ready_launch_button_disabled",
+    "ready_launch_button_title_differs", "ready_launch_action_missing",
+    "ready_launch_action_not_dispatched",
+))
 
 
 class ProbeError(ValueError):
@@ -102,16 +111,43 @@ def write_audit(path, report):
         os.fsync(output.fileno())
 
 
+def _simctl_error(code, arguments, stdout=None, stderr=None):
+    error = ProbeError(code)
+    # Only installation/launch of this invocation's disposable public probe
+    # can contribute tool diagnostics. Do not copy command arguments or
+    # output from simulator discovery and unrelated host surfaces.
+    if arguments and arguments[0] in ("install", "launch"):
+        detail = {"action": arguments[0]}
+        for name, value in (("stdout", stdout), ("stderr", stderr)):
+            if type(value) is bytes:
+                text = value[:MAX_TOOL_DETAIL].decode("utf-8", errors="replace")
+                truncated = len(value) > MAX_TOOL_DETAIL
+            elif type(value) is str:
+                text, truncated = value[:MAX_TOOL_DETAIL], len(value) > MAX_TOOL_DETAIL
+            else:
+                text, truncated = "", False
+            # Bound the escaped JSON too, including hostile control bytes or
+            # invalid UTF-8; the entire detail remains below eight KiB.
+            while len(json.dumps(text, ensure_ascii=True)) > MAX_TOOL_DETAIL // 2 - 256:
+                text = text[:len(text) // 2]
+                truncated = True
+            detail[name] = text
+            detail[name + "_truncated"] = truncated
+        error.tool_detail = detail
+    return error
+
+
 def _simctl(arguments, timeout):
     try:
         result = subprocess.run(["/usr/bin/xcrun", "simctl", *arguments],
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, timeout=timeout, check=False)
-    except subprocess.TimeoutExpired:
-        raise ProbeError("simctl_timeout") from None
-    require(len(result.stdout) <= MAX_COMMAND_OUTPUT and len(result.stderr) <= MAX_COMMAND_OUTPUT,
-            "simctl_output_bound")
-    require(result.returncode == 0, "simctl_failed")
+    except subprocess.TimeoutExpired as error:
+        raise _simctl_error("simctl_timeout", arguments, error.stdout, error.stderr) from None
+    if len(result.stdout) > MAX_COMMAND_OUTPUT or len(result.stderr) > MAX_COMMAND_OUTPUT:
+        raise _simctl_error("simctl_output_bound", arguments, result.stdout, result.stderr)
+    if result.returncode != 0:
+        raise _simctl_error("simctl_failed", arguments, result.stdout, result.stderr)
     return result.stdout
 
 
@@ -203,6 +239,39 @@ def validate_report(value):
             and all(type(status.get(key)) is int and status[key] == 1
                     for key in ("captured", "forwarded", "attempts")),
             "embedded_server_not_ready")
+    require(status.get("launch_requested") is True and status.get("launch_prepared") is True
+            and status.get("launcher_visible") is False, "launcher_handoff_failed")
+    launcher = value.get("launcher")
+    require(type(launcher) is dict, "launcher_evidence_missing")
+    require(type(launcher.get("premature_phase")) is int and launcher["premature_phase"] == 1
+            and type(launcher.get("premature_original_called")) is int
+            and launcher["premature_original_called"] == 0
+            and launcher.get("premature_launch_requested") is False,
+            "premature_launch_not_ignored")
+    require(type(launcher.get("ready_phase")) is int and launcher["ready_phase"] == 2
+            and type(launcher.get("ready_original_called")) is int and launcher["ready_original_called"] == 0
+            and launcher.get("ready_launch_requested") is False
+            and launcher.get("ready_launch_prepared") is False
+            and type(launcher.get("ready_observations")) is int and launcher["ready_observations"] >= 2
+            and type(launcher.get("ready_wait_seconds")) in (int, float)
+            and 1.0 <= launcher["ready_wait_seconds"] <= 60.0,
+            "unity_started_before_launch_button")
+    require(launcher.get("ready_launcher_visible") is True and launcher.get("ready_button_found") is True
+            and launcher.get("ready_button_enabled") is True
+            and launcher.get("ready_button_title") == "게임 시작", "ready_launch_control_failed")
+    require(launcher.get("button_action_dispatched") is True
+            and type(launcher.get("button_dispatch_count")) is int and launcher["button_dispatch_count"] == 1
+            and launcher.get("duplicate_launch_called") is True
+            and launcher.get("forwarded_after_button") is True, "explicit_launch_action_failed")
+    corner = value.get("corner_gesture")
+    require(type(corner) is dict and corner.get("game_window_key") is True
+            and type(corner.get("one_finger_count")) is int and corner["one_finger_count"] == 1
+            and type(corner.get("three_finger_count")) is int and corner["three_finger_count"] == 0
+            and type(corner.get("minimum_press_seconds")) in (int, float) and corner["minimum_press_seconds"] == 3.0
+            and type(corner.get("allowable_movement_points")) in (int, float) and corner["allowable_movement_points"] == 12.0
+            and corner.get("delegate_present") is True and corner.get("delays_touches_began") is False
+            and corner.get("delays_touches_ended") is False and corner.get("cancels_touches_in_view") is True,
+            "corner_gesture_configuration_failed")
     require(type(ports.get("grpc")) is int and ports["grpc"] == 50051
             and type(ports.get("assets")) is int and ports["assets"] == 8080
             and ports.get("grpc_connect") is True and ports.get("assets_connect") is True,
@@ -231,8 +300,19 @@ def validate_report(value):
             "crypto_completion_main_thread": True,
             "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
                               "invalid_iv_rejected": True, "worker_main_thread": False},
+            "launcher": {key: launcher[key] for key in (
+                "premature_phase", "premature_original_called", "premature_launch_requested",
+                "ready_phase", "ready_original_called", "ready_launch_requested", "ready_launch_prepared",
+                "ready_observations", "ready_wait_seconds", "ready_launcher_visible", "ready_button_found",
+                "ready_button_enabled", "ready_button_title", "button_action_dispatched",
+                "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button")},
+            "corner_gesture": {key: corner[key] for key in (
+                "game_window_key", "one_finger_count", "three_finger_count", "minimum_press_seconds",
+                "allowable_movement_points", "delegate_present", "delays_touches_began",
+                "delays_touches_ended", "cancels_touches_in_view")},
             "server_status": {key: status[key] for key in
-                ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts")},
+                ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts",
+                 "launch_requested", "launch_prepared", "launcher_visible")},
             "ports": {key: ports[key] for key in ("grpc", "assets", "grpc_connect", "assets_connect")},
             "commoncrypto": {"nist_aes128_cbc": True, "nist_aes256_cbc": True},
             "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
@@ -260,7 +340,13 @@ def wait_report(container, remaining):
         except FileNotFoundError:
             pass
         try:
-            status = parse_json(read_bounded(waiting, MAX_JSON)).get("server_status")
+            waiting_value = parse_json(read_bounded(waiting, MAX_JSON))
+            failure = waiting_value.get("probe_error")
+            if failure is not None:
+                require(type(failure) is str and failure in LAUNCHER_FAILURE_CODES,
+                        "invalid_launcher_failure_code")
+                raise ProbeError(failure)
+            status = waiting_value.get("server_status")
             require(type(status) is dict, "invalid_waiting_status")
             if status.get("phase") == 3 or status.get("error") is not None:
                 error = ProbeError("native_startup_failed")
@@ -422,7 +508,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         report["fresh_local_state_before_launch"] = True
         stage = "app_launch"
-        _simctl(["launch", created, BUNDLE_ID], remaining())
+        _simctl(["launch", created, BUNDLE_ID], remaining(180))
         stage = "startup_gate_report"
         report["native_probe"] = wait_report(container, remaining)
         stage = "asset_listener"
@@ -439,6 +525,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             report["native_startup_error"] = error.native_detail
         if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
             report["native_crypto_observed"] = error.native_crypto
+        if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
+            report["simctl_failure"] = error.tool_detail
     finally:
         if created is not None:
             for action in ("shutdown", "delete"):

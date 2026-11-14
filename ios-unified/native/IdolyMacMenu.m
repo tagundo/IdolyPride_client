@@ -1,6 +1,8 @@
 #import "IdolyMacMenu.h"
+#import <TargetConditionals.h>
 #import <objc/runtime.h>
 
+#if !TARGET_OS_SIMULATOR
 // These are public AppKit selectors with their exact Objective-C ABI. Keeping
 // the declarations local lets the same source compile for the real iOS SDK;
 // NSApplication/NSMenu/NSMenuItem are looked up only when present at runtime.
@@ -47,8 +49,17 @@ static BOOL IDMacUsableItem(id item, Class itemClass) {
         && [item respondsToSelector:@selector(setAction:)]
         && [item respondsToSelector:@selector(setKeyEquivalentModifierMask:)];
 }
+#endif
 
 BOOL IDMacInstallSettingsMenu(id target, SEL action) {
+#if TARGET_OS_SIMULATOR
+    // A UIKit Simulator process may expose AppKit classes while its host
+    // application is still being initialized. Never query or create NSApp
+    // there. PlayCover uses the device binary (this branch is compiled out).
+    (void)target;
+    (void)action;
+    return NO;
+#else
     if (!NSThread.isMainThread || !target || !action || ![target respondsToSelector:action]) return NO;
     Class<IDMacApplicationClass> applicationClass = (Class<IDMacApplicationClass>)NSClassFromString(@"NSApplication");
     Class menuClass = NSClassFromString(@"NSMenu");
@@ -112,4 +123,5 @@ BOOL IDMacInstallSettingsMenu(id target, SEL action) {
         (void)exception;
         return NO;
     }
+#endif
 }

@@ -41,7 +41,53 @@ static BOOL ProbeWrite(NSString *name, NSDictionary *value) {
     if (!raw || raw.length > 65536) return NO;
     NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
                                                            inDomains:NSUserDomainMask].firstObject;
+    if (!documents || ![NSFileManager.defaultManager createDirectoryAtURL:documents
+            withIntermediateDirectories:YES attributes:nil error:nil]) return NO;
     return [raw writeToURL:[documents URLByAppendingPathComponent:name] options:NSDataWritingAtomic error:nil];
+}
+
+static void ProbeFindLaunchButtons(UIViewController *screen, NSMutableArray<UIBarButtonItem *> *items) {
+    if (!screen) return;
+    if ([screen isKindOfClass:UINavigationController.class]) {
+        UINavigationController *navigation = (UINavigationController *)screen;
+        UIBarButtonItem *item = navigation.topViewController.navigationItem.rightBarButtonItem;
+        if ([item.accessibilityIdentifier isEqualToString:@"idoly.game-start"]
+                && navigation.topViewController.viewIfLoaded.window && ![items containsObject:item]) {
+            [items addObject:item];
+        }
+    }
+    for (UIViewController *child in screen.childViewControllers) ProbeFindLaunchButtons(child, items);
+    ProbeFindLaunchButtons(screen.presentedViewController, items);
+}
+
+static NSArray<UIBarButtonItem *> *ProbeVisibleLaunchButtons(void) {
+    NSMutableOrderedSet<UIWindow *> *windows = [NSMutableOrderedSet orderedSetWithArray:UIApplication.sharedApplication.windows];
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if ([scene isKindOfClass:UIWindowScene.class]) {
+            [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
+        }
+    }
+    NSMutableArray<UIBarButtonItem *> *items = [NSMutableArray array];
+    for (UIWindow *window in windows) {
+        if (!window.hidden && window.alpha > 0) ProbeFindLaunchButtons(window.rootViewController, items);
+    }
+    return items;
+}
+
+static NSDictionary *ProbeCornerGesture(UIWindow *window) {
+    NSUInteger oneFinger = 0, threeFinger = 0;
+    UILongPressGestureRecognizer *corner = nil;
+    for (UIGestureRecognizer *recognizer in window.gestureRecognizers) {
+        if (![recognizer isKindOfClass:UILongPressGestureRecognizer.class]) continue;
+        UILongPressGestureRecognizer *hold = (UILongPressGestureRecognizer *)recognizer;
+        if (hold.numberOfTouchesRequired == 1) { ++oneFinger; corner = hold; }
+        if (hold.numberOfTouchesRequired == 3) ++threeFinger;
+    }
+    return @{@"game_window_key":@(window.isKeyWindow), @"one_finger_count":@(oneFinger),
+        @"three_finger_count":@(threeFinger), @"minimum_press_seconds":@(corner.minimumPressDuration),
+        @"allowable_movement_points":@(corner.allowableMovement), @"delegate_present":@(corner.delegate != nil),
+        @"delays_touches_began":@(corner.delaysTouchesBegan), @"delays_touches_ended":@(corner.delaysTouchesEnded),
+        @"cancels_touches_in_view":@(corner.cancelsTouchesInView)};
 }
 
 static BOOL ProbePort(uint16_t port) {
@@ -100,7 +146,12 @@ static NSDictionary *ProbeCrypto(void) {
 @property(nonatomic, strong) NSTimer *waitingTimer;
 @property(nonatomic) NSUInteger originalCount;
 @property(nonatomic) BOOL reportScheduled;
+@property(nonatomic, strong) NSMutableDictionary *launcherProbe;
+@property(nonatomic, copy) NSString *probeError;
+@property(nonatomic) NSTimeInterval readySince;
+@property(nonatomic) BOOL launchDispatched;
 - (void)startUnity:(UIApplication *)application;
+- (void)probeLauncher:(NSDictionary *)status;
 @end
 
 @implementation UnityAppController
@@ -113,22 +164,83 @@ static NSDictionary *ProbeCrypto(void) {
     self.label.textAlignment = NSTextAlignmentCenter; self.label.numberOfLines = 0;
     self.label.text = @"Embedded server probe: waiting for READY";
     [screen.view addSubview:self.label]; self.window.rootViewController = screen; [self.window makeKeyAndVisible];
+    self.launcherProbe = [NSMutableDictionary dictionary];
     self.waitingTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         (void)timer;
+        NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
+        [self probeLauncher:status];
         ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
             @"original_called":@(self.originalCount),
-            @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON())});
+            @"server_status":status, @"probe_error":self.probeError ?: NSNull.null});
     }];
     dispatch_async(dispatch_get_main_queue(), ^{
         // Two requests also exercise the gate's exactly-once forwarding policy.
         [self startUnity:application]; [self startUnity:application];
+        IdolyEmbeddedServerLaunchGame();
+        NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
+        self.launcherProbe[@"premature_phase"] = ProbeScalar(status, @"phase");
+        self.launcherProbe[@"premature_original_called"] = @(self.originalCount);
+        self.launcherProbe[@"premature_launch_requested"] = ProbeScalar(status, @"launch_requested");
+        if (![status[@"phase"] isEqual:@1] || self.originalCount != 0
+                || ![status[@"launch_requested"] isEqual:@NO]) {
+            self.probeError = @"premature_launch_not_ignored";
+        }
     });
     return YES;
+}
+
+- (void)probeLauncher:(NSDictionary *)status {
+    if (self.probeError || self.launchDispatched || self.reportScheduled) return;
+    if (![status[@"phase"] isEqual:@2]) {
+        if (self.readySince != 0) self.probeError = @"server_left_ready_before_launch";
+        return;
+    }
+    if (self.originalCount != 0) {
+        self.probeError = @"unity_started_before_launch_button"; return;
+    }
+    if (![status[@"launcher_visible"] isEqual:@YES]) {
+        self.probeError = @"ready_launcher_not_visible"; return;
+    }
+    if (![status[@"launch_requested"] isEqual:@NO] || ![status[@"launch_prepared"] isEqual:@NO]) {
+        self.probeError = @"ready_launcher_flags_differ"; return;
+    }
+    NSArray<UIBarButtonItem *> *items = ProbeVisibleLaunchButtons();
+    if (items.count != 1) {
+        self.probeError = items.count ? @"ready_launch_button_ambiguous" : @"ready_launch_button_missing";
+        return;
+    }
+    UIBarButtonItem *item = items.firstObject;
+    if (!item.enabled) { self.probeError = @"ready_launch_button_disabled"; return; }
+    if (![item.title isEqualToString:@"게임 시작"]) {
+        self.probeError = @"ready_launch_button_title_differs"; return;
+    }
+    if (!item.target || !item.action) { self.probeError = @"ready_launch_action_missing"; return; }
+    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+    if (self.readySince == 0) self.readySince = now;
+    NSUInteger observations = [self.launcherProbe[@"ready_observations"] unsignedIntegerValue] + 1;
+    [self.launcherProbe addEntriesFromDictionary:@{@"ready_phase":@2,
+        @"ready_original_called":@(self.originalCount), @"ready_launch_requested":@NO,
+        @"ready_launch_prepared":@NO, @"ready_launcher_visible":@YES,
+        @"ready_button_found":@YES, @"ready_button_enabled":@(item.enabled),
+        @"ready_button_title":item.title, @"ready_observations":@(observations),
+        @"ready_wait_seconds":@(now - self.readySince)}];
+    // Remain Ready for a full second without forwarding Unity. This proves
+    // readiness alone does not enter the game, before invoking the real UI.
+    if (now - self.readySince < 1.0) return;
+    self.launchDispatched = YES;
+    self.launcherProbe[@"button_dispatch_count"] = @1;
+    BOOL dispatched = [UIApplication.sharedApplication sendAction:item.action to:item.target from:item forEvent:nil];
+    self.launcherProbe[@"button_action_dispatched"] = @(dispatched);
+    if (!dispatched) { self.probeError = @"ready_launch_action_not_dispatched"; return; }
+    // Repeated clicks must not forward Unity a second time.
+    IdolyEmbeddedServerLaunchGame();
+    self.launcherProbe[@"duplicate_launch_called"] = @YES;
 }
 
 // Exact Unity ABI: void return, instance receiver, selector, one object argument.
 - (void)startUnity:(UIApplication *)application {
     ++self.originalCount;
+    self.launcherProbe[@"forwarded_after_button"] = @(self.launchDispatched);
     if (self.reportScheduled) return;
     self.reportScheduled = YES; [self.waitingTimer invalidate]; self.waitingTimer = nil;
     BOOL originalOnMain = NSThread.isMainThread;
@@ -148,6 +260,8 @@ static NSDictionary *ProbeCrypto(void) {
                     NSDictionary *report = @{@"schema":@1, @"original_called":@(self.originalCount),
                         @"main_thread":@(originalOnMain), @"application_argument_matches":@(argumentMatches),
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
+                        @"launcher":self.launcherProbe.copy,
+                        @"corner_gesture":ProbeCornerGesture(self.window),
                         @"crypto_completion_main_thread":@(cryptoCompletionOnMain), @"native_crypto":nativeCrypto,
                         @"host_status":hostStatus, @"ports":ports, @"commoncrypto":crypto};
                     BOOL written = ProbeWrite(@"embedded-probe.json", report);

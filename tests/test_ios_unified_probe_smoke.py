@@ -34,7 +34,19 @@ def native_report():
                               "invalid_iv_rejected": True, "worker_main_thread": False},
             "server_status": {"schema": 1, "hook_installed": True, "phase": 4,
                               "captured": 1, "forwarded": 1, "attempts": 1,
-                              "python_initialized": True, "error": None},
+                              "python_initialized": True, "error": None,
+                              "launch_requested": True, "launch_prepared": True, "launcher_visible": False},
+            "launcher": {"premature_phase": 1, "premature_original_called": 0,
+                "premature_launch_requested": False, "ready_phase": 2, "ready_original_called": 0,
+                "ready_launch_requested": False, "ready_launch_prepared": False,
+                "ready_observations": 5, "ready_wait_seconds": 1.003,
+                "ready_launcher_visible": True, "ready_button_found": True,
+                "ready_button_enabled": True, "ready_button_title": "게임 시작",
+                "button_action_dispatched": True, "button_dispatch_count": 1,
+                "duplicate_launch_called": True, "forwarded_after_button": True},
+            "corner_gesture": {"game_window_key": True, "one_finger_count": 1, "three_finger_count": 0,
+                "minimum_press_seconds": 3.0, "allowable_movement_points": 12.0, "delegate_present": True,
+                "delays_touches_began": False, "delays_touches_ended": False, "cancels_touches_in_view": True},
             "ports": {"grpc": 50051, "assets": 8080,
                       "grpc_connect": True, "assets_connect": True},
             "commoncrypto": {"nist_aes128_cbc": True, "nist_aes256_cbc": True},
@@ -84,12 +96,14 @@ class FakeSimctl:
         self.container = container
         self.container.mkdir()
         self.calls = []
+        self.timeouts = []
         self.failed_action = failed_action
         self.startup_failure = startup_failure
 
     def __call__(self, arguments, timeout):
         self.calls.append(tuple(arguments))
-        assert 0 < timeout <= (180 if arguments[0] == "install" else 60)
+        self.timeouts.append(timeout)
+        assert 0 < timeout <= (180 if arguments[0] in ("install", "launch") else 60)
         action = arguments[0]
         if action == self.failed_action:
             raise probe.ProbeError("simctl_failed")
@@ -174,11 +188,15 @@ def test_fresh_simulator_is_only_mutation_target_and_cleanup_runs(app, tmp_path)
         result = probe.run_probe(app, audit)
     assert result["status"] == "PASS"
     assert result["fresh_local_state_before_launch"] is True
+    assert result["native_probe"]["launcher"]["ready_original_called"] == 0
+    assert result["native_probe"]["launcher"]["button_dispatch_count"] == 1
+    assert result["native_probe"]["server_status"]["launcher_visible"] is False
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
     assert [call[0] for call in controller.calls] == ["list", "list", "create", "boot", "bootstatus", "install",
                                                     "get_app_container", "launch", "shutdown", "delete"]
     socket_call.assert_called_once()
     assert socket_call.call_args.args[0] == ("127.0.0.1", 8080)
+    assert 60 < controller.timeouts[7] <= 180  # Cold UIKit/WK startup has its own bounded budget.
     assert audit.stat().st_size < probe.MAX_JSON
     assert audit.stat().st_mode & 0o777 == 0o600
 
@@ -191,6 +209,81 @@ def test_stage_failures_clean_up_only_created_uuid(app, tmp_path, failed_action)
     assert result["status"] == "FAIL"
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
     assert result["cleanup"] == {"shutdown": True, "delete": True}
+
+
+def test_launch_budget_remains_clamped_to_original_overall_deadline(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    clock = {"now": 0.0}
+
+    def command(arguments, timeout):
+        result = controller(arguments, timeout)
+        if arguments[0] == "install":
+            clock["now"] = 50.0
+        return result
+
+    with mock.patch.object(probe.sys, "platform", "darwin"), \
+            mock.patch.object(probe.time, "monotonic", side_effect=lambda: clock["now"]), \
+            mock.patch.object(probe, "_simctl", command), \
+            mock.patch.object(probe.socket, "create_connection"), \
+            mock.patch.object(probe, "probe_rpcs", return_value=[]):
+        result = probe.run_probe(app, tmp_path / "audit.json", timeout=90)
+    assert result["status"] == "PASS"
+    assert controller.timeouts[5] == 90.0
+    assert controller.timeouts[7] == 40.0
+
+
+@pytest.mark.parametrize("action", ("install", "launch"))
+@pytest.mark.parametrize("timed_out", (False, True))
+def test_probe_install_launch_failure_keeps_fixed_code_and_bounded_cli_context(action, timed_out):
+    arguments = [action, CREATED, "do-not-copy-command-arguments"]
+    # Include invalid UTF-8 and escaping-heavy text to bound serialized JSON,
+    # rather than assuming a character bound is also an audit-size bound.
+    stdout = b"public-probe-output\n" + b"\xff\x00" * 10000
+    stderr = b"public-probe-error\n" + "\u2000".encode() * 10000
+    if timed_out:
+        effect = probe.subprocess.TimeoutExpired("not copied", 180, output=stdout, stderr=stderr)
+        command = mock.Mock(side_effect=effect)
+    else:
+        command = mock.Mock(return_value=probe.subprocess.CompletedProcess([], 1, stdout, stderr))
+    with mock.patch.object(probe.subprocess, "run", command), pytest.raises(probe.ProbeError) as raised:
+        probe._simctl(arguments, 180)
+    assert str(raised.value) == ("simctl_timeout" if timed_out else "simctl_failed")
+    detail = raised.value.tool_detail
+    assert detail["action"] == action
+    assert detail["stdout"].startswith("public-probe-output\n")
+    assert detail["stderr"].startswith("public-probe-error\n")
+    assert detail["stdout_truncated"] is True and detail["stderr_truncated"] is True
+    encoded = json.dumps(detail, ensure_ascii=True).encode()
+    assert len(encoded) <= probe.MAX_TOOL_DETAIL
+    assert b"do-not-copy-command-arguments" not in encoded
+
+
+@pytest.mark.parametrize("action", ("list", "create", "boot", "get_app_container", "shutdown", "delete"))
+def test_other_simulator_commands_do_not_contribute_host_cli_context(action):
+    result = probe.subprocess.CompletedProcess([], 1, b"do not retain", b"private unrelated host text")
+    with mock.patch.object(probe.subprocess, "run", return_value=result), \
+            pytest.raises(probe.ProbeError, match="^simctl_failed$") as raised:
+        probe._simctl([action, CREATED], 30)
+    assert not hasattr(raised.value, "tool_detail")
+
+
+def test_launch_failure_audits_cli_context_and_still_cleans_only_owned_simulator(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+
+    def command(arguments, timeout):
+        if arguments[0] == "launch":
+            controller(arguments, timeout)
+            raise probe._simctl_error("simctl_timeout", arguments, b"probe-start-output", b"probe-start-error")
+        return controller(arguments, timeout)
+
+    with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command):
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["error"] == "simctl_timeout"
+    assert result["failed_stage"] == "app_launch"
+    assert result["simctl_failure"] == {"action": "launch", "stdout": "probe-start-output",
+        "stderr": "probe-start-error", "stdout_truncated": False, "stderr_truncated": False}
+    assert result["cleanup"] == {"shutdown": True, "delete": True}
+    assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
 
 
 def test_startup_failure_is_immediate_and_still_deletes_simulator(app, tmp_path):
@@ -252,6 +345,93 @@ def test_port_crypto_and_native_readiness_are_not_inferred():
     assert "unexpected_private_text" not in probe.validate_report(report)
 
 
+@pytest.mark.parametrize("field,value", (("launch_requested", False), ("launch_prepared", False),
+                                          ("launcher_visible", True), ("launch_requested", 1),
+                                          ("launch_prepared", 1), ("launcher_visible", 0)))
+def test_explicit_handoff_requires_preparation_and_hidden_launcher(field, value):
+    report = native_report()
+    report["server_status"][field] = value
+    with pytest.raises(probe.ProbeError, match="launcher_handoff_failed"):
+        probe.validate_report(report)
+
+
+@pytest.mark.parametrize("field,value", (("premature_phase", 2), ("premature_phase", True),
+        ("premature_original_called", 1), ("premature_original_called", False),
+        ("premature_launch_requested", True), ("premature_launch_requested", 0)))
+def test_launch_before_ready_must_be_ignored(field, value):
+    report = native_report()
+    report["launcher"][field] = value
+    with pytest.raises(probe.ProbeError, match="premature_launch_not_ignored"):
+        probe.validate_report(report)
+
+
+@pytest.mark.parametrize("field,value", (("ready_phase", 4), ("ready_original_called", 1),
+        ("ready_launch_requested", True), ("ready_launch_prepared", True),
+        ("ready_observations", 1), ("ready_observations", True),
+        ("ready_wait_seconds", 0.99), ("ready_wait_seconds", True),
+        ("ready_wait_seconds", float("nan")), ("ready_wait_seconds", float("inf"))))
+def test_ready_must_remain_idle_for_observation_before_explicit_click(field, value):
+    report = native_report()
+    report["launcher"][field] = value
+    with pytest.raises(probe.ProbeError, match="unity_started_before_launch_button"):
+        probe.validate_report(report)
+
+
+@pytest.mark.parametrize("field,value", (("ready_launcher_visible", False),
+        ("ready_button_found", False), ("ready_button_enabled", False),
+        ("ready_button_found", 1), ("ready_button_title", "Start")))
+def test_ready_requires_real_visible_enabled_launch_button(field, value):
+    report = native_report()
+    report["launcher"][field] = value
+    with pytest.raises(probe.ProbeError, match="ready_launch_control_failed"):
+        probe.validate_report(report)
+
+
+@pytest.mark.parametrize("field,value", (("button_action_dispatched", False),
+        ("button_action_dispatched", 1), ("button_dispatch_count", 0),
+        ("button_dispatch_count", 2), ("button_dispatch_count", True),
+        ("duplicate_launch_called", False), ("forwarded_after_button", False)))
+def test_forwarding_requires_exactly_one_real_ui_action_and_duplicate_launch_guard(field, value):
+    report = native_report()
+    report["launcher"][field] = value
+    with pytest.raises(probe.ProbeError, match="explicit_launch_action_failed"):
+        probe.validate_report(report)
+
+
+def test_launcher_evidence_is_required_and_only_checked_fields_are_audited():
+    report = native_report()
+    del report["launcher"]
+    with pytest.raises(probe.ProbeError, match="launcher_evidence_missing"):
+        probe.validate_report(report)
+    report = native_report()
+    report["launcher"]["unexpected_private_text"] = "must not enter audit"
+    checked = probe.validate_report(report)
+    assert "unexpected_private_text" not in checked["launcher"]
+    assert checked["launcher"]["ready_wait_seconds"] >= 1.0
+
+
+@pytest.mark.parametrize("field,value", (("game_window_key", False), ("one_finger_count", 0),
+        ("one_finger_count", 2), ("one_finger_count", True), ("three_finger_count", 1),
+        ("three_finger_count", False), ("minimum_press_seconds", 0.6), ("minimum_press_seconds", True),
+        ("allowable_movement_points", 100), ("delegate_present", False),
+        ("delays_touches_began", True), ("delays_touches_ended", True), ("cancels_touches_in_view", False)))
+def test_actual_game_window_has_one_configured_corner_hold_and_no_three_finger_hold(field, value):
+    report = native_report()
+    report["corner_gesture"][field] = value
+    with pytest.raises(probe.ProbeError, match="corner_gesture_configuration_failed"):
+        probe.validate_report(report)
+
+
+def test_corner_gesture_evidence_is_required_and_drops_unchecked_details():
+    report = native_report()
+    del report["corner_gesture"]
+    with pytest.raises(probe.ProbeError, match="corner_gesture_configuration_failed"):
+        probe.validate_report(report)
+    report = native_report()
+    report["corner_gesture"]["unchecked"] = "not copied"
+    assert "unchecked" not in probe.validate_report(report)["corner_gesture"]
+
+
 def test_control_bridge_must_report_real_python_host_readiness_and_fixed_listeners():
     for field, value in (("state", "starting"), ("running", False), ("last_error", "test failure")):
         report = native_report()
@@ -308,6 +488,28 @@ def test_polling_has_a_deadline_without_native_report(tmp_path):
         return 1
     with mock.patch.object(probe.time, "sleep"), pytest.raises(probe.ProbeError, match="probe_deadline_exceeded"):
         probe.wait_report(tmp_path, remaining)
+
+
+@pytest.mark.parametrize("failure", sorted(probe.LAUNCHER_FAILURE_CODES))
+def test_missing_button_or_explicit_action_fails_immediately_instead_of_waiting(tmp_path, failure):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    (documents / "embedded-probe-status.json").write_text(json.dumps({
+        "server_status": {"phase": 2, "error": None}, "probe_error": failure}))
+    with mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(probe.ProbeError, match="^" + failure + "$"):
+        probe.wait_report(tmp_path, lambda: 1)
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", ("arbitrary private text", 1, False, ["ready_launch_button_missing"]))
+def test_waiting_launcher_failure_diagnostic_is_a_fixed_public_code(tmp_path, failure):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    (documents / "embedded-probe-status.json").write_text(json.dumps({
+        "server_status": {"phase": 2, "error": None}, "probe_error": failure}))
+    with pytest.raises(probe.ProbeError, match="^invalid_launcher_failure_code$"):
+        probe.wait_report(tmp_path, lambda: 1)
 
 
 class FixtureApplication:
