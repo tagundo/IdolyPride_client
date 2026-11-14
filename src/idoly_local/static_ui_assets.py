@@ -24,6 +24,7 @@ TYPE_HASH = "cbd21103d83440b5b53d46c595501eba"
 MAX_METADATA = 12 * 1024 * 1024
 MAX_ASSET = 72 * 1024 * 1024
 MAX_OBJECT = 1024 * 1024
+MAX_IMAGE_OBJECTS = 256
 CHUNK = 64 * 1024
 
 
@@ -163,9 +164,11 @@ def _rewrite(source, destination, profile, targets, texts, platform, language,
             selected.append((target, text, translated))
     extra_replacements = extra_replacements or {}
     append_objects = append_objects or []
-    _need(isinstance(extra_replacements, dict) and len(extra_replacements) <= 16
-          and isinstance(append_objects, list) and len(append_objects) <= 16,
+    _need(isinstance(extra_replacements, dict) and len(extra_replacements) <= MAX_IMAGE_OBJECTS
+          and isinstance(append_objects, list) and len(append_objects) <= MAX_IMAGE_OBJECTS,
           "Static UI extra object patch list exceeds its bound")
+    if extra_replacements or append_objects:
+        from .static_ui_images import MAX_TEXTURE_BYTES
     by_path = {target[0]: target for target, _, _ in selected}
     _need(not by_path.keys() & extra_replacements.keys(), "Static UI and image target objects overlap")
     csv_target = None
@@ -214,18 +217,20 @@ def _rewrite(source, destination, profile, targets, texts, platform, language,
         replacements[csv_target["target_path_id"]] = (raw if language == "ja"
             else ui_assets._replacement(raw, csv_bytes, csv_target))
     for path, item in extra_replacements.items():
+        class_id = types[object_records[path][3]][0]
+        _need(class_id in (213, 28), "Extra replacement must target an existing Sprite or Texture2D")
+        maximum = MAX_OBJECT if class_id == 213 else MAX_TEXTURE_BYTES
         _need(isinstance(item, dict) and isinstance(item.get("raw"), bytes)
-              and 0 < len(item["raw"]) <= MAX_OBJECT
+              and 0 < len(item["raw"]) <= maximum
               and _sha(originals[path]) == item.get("input_sha256"),
               "Extra static image object does not bind the exact original payload")
-        _need(types[object_records[path][3]][0] == 213, "Extra replacement must target an existing Sprite")
         replacements[path] = item["raw"]
     last_path = struct.unpack_from("<q", metadata, profile["table_offset"] + 24 * (profile["object_count"] - 1))[0]
     for item in append_objects:
         _need(isinstance(item, dict) and type(item.get("path_id")) is int
               and item["path_id"] > last_path and type(item.get("type_id")) is int
               and 0 <= item["type_id"] < len(types) and types[item["type_id"]][0] == 28
-              and isinstance(item.get("raw"), bytes) and 0 < len(item["raw"]) <= MAX_OBJECT,
+              and isinstance(item.get("raw"), bytes) and 0 < len(item["raw"]) <= MAX_TEXTURE_BYTES,
               "Appended static image must be a new private Texture2D object")
         last_path = item["path_id"]
     ordered = sorted(replacements, key=lambda path: wanted[path][0])
@@ -340,7 +345,7 @@ def android_members(archive, language="ja", *, existing_replacements=None):
 
 def patch_ios_stream(source, destination, language="ja", *, ui_csv=None, ui_proof=None,
                      extra_replacements=None, append_objects=None, image_proof=None):
-    """Combine fixed UI CSV, static labels, and declared selected-badge sprites."""
+    """Combine fixed UI CSV, static labels, and declared Sprite/Texture2D images."""
     profile = _profile(); asset = profile["ios"][0]
     return _rewrite(source, destination, asset, asset["targets"], profile["texts"], "ios", language,
                     csv_bytes=ui_csv, csv_proof=ui_proof, extra_replacements=extra_replacements,

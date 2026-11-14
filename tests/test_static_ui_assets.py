@@ -65,6 +65,35 @@ def rewrite(raw, profile, target, source="センター", translated="센터", **
     return destination.getvalue(), report
 
 
+def image_fixture(objects):
+    """Give the small fixture an arbitrary original image-object inventory."""
+    original, base, _, _, _ = fixture(script=(1, 7002))
+    metadata = bytearray(original[48:base["table_offset"]])
+    struct.pack_into("<i", metadata, base["count_offset"] - 48, len(objects))
+    data = bytearray()
+    for path, value, type_id in objects:
+        metadata.extend(struct.pack("<qQIi", path, len(data), len(value), type_id))
+        data.extend(value)
+        data.extend(b"\0" * (-len(data) % 8))
+    metadata.extend(original[base["table_offset"] + 24 * 3:48 + base["metadata_bytes"]])
+    metadata_size = len(metadata)
+    data_offset = (48 + metadata_size + 15) & ~15
+    header = (struct.pack(">4I", 0, 0, 22, 0) + b"\0" * 4
+              + struct.pack(">IQQQ", metadata_size, data_offset + len(data), data_offset, 0))
+    metadata = header + metadata + b"\0" * (data_offset - 48 - metadata_size)
+    raw = metadata + data
+    profile = {**base, "bytes": len(raw), "metadata_bytes": metadata_size,
+               "data_offset": data_offset, "metadata_sha256": sha(metadata),
+               "object_count": len(objects), "sha256": sha(raw)}
+    return raw, profile
+
+
+def rewrite_images(raw, profile, **kwargs):
+    destination = io.BytesIO()
+    report = ui._rewrite(io.BytesIO(raw), destination, profile, [], [], "ios", "ko", **kwargs)
+    return destination.getvalue(), report
+
+
 def test_resize_changes_only_m_text_and_rebases_following_objects():
     raw, profile, target, label, records = fixture()
     result, report = rewrite(raw, profile, target, translated="화면 중앙의 센터")
@@ -147,6 +176,130 @@ def test_rejects_image_patch_into_a_text_object():
     raw, profile, target, label, records = fixture()
     with pytest.raises(ValueError, match="overlap"):
         rewrite(raw, profile, target, extra_replacements={1: {"input_sha256": sha(label), "raw": b"bad"}})
+
+
+def test_composes_all_ios_sprites_direct_textures_and_large_private_textures():
+    objects = [(path, f"original-sprite-{path}".encode(), 1) for path in range(1, 140)]
+    objects += [(path, f"original-texture-{path}".encode(), 2) for path in range(140, 154)]
+    objects += [(path, f"unselected-object-{path}".encode(), 1 + path % 2)
+                for path in range(154, 181)]
+    raw, profile = image_fixture(objects)
+    replacements = {path: {"input_sha256": sha(value), "raw": b"localized-" + value}
+                    for path, value, _ in objects if path < 154}
+    appended = [{"path_id": 181 + index, "type_id": 2,
+                 "raw": b"R" * (ui.MAX_OBJECT + 1) if index == 0
+                        else f"private-RGBA-texture-{index}".encode()}
+                for index in range(139)]
+    result, report = rewrite_images(raw, profile, extra_replacements=replacements,
+                                    append_objects=appended)
+    after = output_objects(result, profile, len(objects) + 139)
+    assert report["image_object_replacements"] == 139 + 14
+    assert report["appended_texture_objects"] == 139
+    assert report["output_object_count"] == len(objects) + 139
+    assert report["output_asset_sha256"] == sha(result)
+    assert report["output_asset_bytes"] == len(result)
+    for path, original, type_id in objects:
+        expected = replacements[path]["raw"] if path in replacements else original
+        assert after[path][0] == expected
+        assert after[path][2] == type_id
+        assert after[path][1] % 8 == 0
+    for item in appended:
+        assert after[item["path_id"]][0] == item["raw"]
+        assert after[item["path_id"]][2] == 2
+        assert after[item["path_id"]][1] % 8 == 0
+    assert b"EXTERNALS-AND-OTHER-METADATA" in result
+
+
+def test_accepts_exact_image_object_count_bounds_together():
+    objects = [(path, f"sprite-{path}".encode(), 1) for path in range(1, 257)]
+    objects.append((257, b"unselected-original-texture", 2))
+    raw, profile = image_fixture(objects)
+    replacements = {path: {"input_sha256": sha(value), "raw": b"localized-" + value}
+                    for path, value, _ in objects[:-1]}
+    appended = [{"path_id": 258 + index, "type_id": 2, "raw": b"new-texture"}
+                for index in range(256)]
+    result, report = rewrite_images(raw, profile, extra_replacements=replacements,
+                                    append_objects=appended)
+    assert report["image_object_replacements"] == report["appended_texture_objects"] == 256
+    after = output_objects(result, profile, 257 + 256)
+    assert after[257][0] == objects[-1][1]
+    assert len(after) == 257 + 256
+
+
+@pytest.mark.parametrize("kind", ["replacement", "append"])
+def test_rejects_image_object_count_257_before_writing(kind):
+    raw, profile, _, _, _ = fixture()
+    kwargs = ({"extra_replacements": {path: {"input_sha256": "0" * 64, "raw": b"image"}
+                                      for path in range(1, 258)}} if kind == "replacement"
+              else {"append_objects": [{"path_id": 4 + index, "type_id": 2, "raw": b"image"}
+                                        for index in range(257)]})
+    out = io.BytesIO()
+    with pytest.raises(ValueError, match="bound"):
+        ui._rewrite(io.BytesIO(raw), out, profile, [], [], "ios", "ko", **kwargs)
+    assert out.getvalue() == b""
+
+
+@pytest.mark.parametrize("path", [2, 3])
+def test_sprite_and_existing_texture_require_the_exact_original_sha(path):
+    raw, profile, _, _, _ = fixture()
+    out = io.BytesIO()
+    with pytest.raises(ValueError, match="exact original"):
+        ui._rewrite(io.BytesIO(raw), out, profile, [], [], "ios", "ko",
+                    extra_replacements={path: {"input_sha256": "0" * 64, "raw": b"image"}})
+    assert out.getvalue() == b""
+
+
+@pytest.mark.parametrize("kind", ["replace_text", "append_sprite"])
+def test_image_changes_reject_unrelated_existing_or_appended_types(kind):
+    raw, profile, _, label, _ = fixture()
+    kwargs = ({"extra_replacements": {1: {"input_sha256": sha(label), "raw": b"image"}}}
+              if kind == "replace_text" else
+              {"append_objects": [{"path_id": 4, "type_id": 1, "raw": b"image"}]})
+    out = io.BytesIO()
+    with pytest.raises(ValueError):
+        ui._rewrite(io.BytesIO(raw), out, profile, [], [], "ios", "ko", **kwargs)
+    assert out.getvalue() == b""
+
+
+def test_sprite_replacement_retains_the_strict_one_MiB_bound():
+    raw, profile, _, _, _ = fixture()
+    original = output_objects(raw, profile)[2][0]
+    out = io.BytesIO()
+    with pytest.raises(ValueError, match="original"):
+        ui._rewrite(io.BytesIO(raw), out, profile, [], [], "ios", "ko",
+                    extra_replacements={2: {"input_sha256": sha(original),
+                                            "raw": b"S" * (ui.MAX_OBJECT + 1)}})
+    assert out.getvalue() == b""
+
+
+@pytest.mark.parametrize("kind", ["existing", "append"])
+def test_texture_output_uses_the_shared_texture_size_bound(monkeypatch, kind):
+    from idoly_local import static_ui_images
+    # Exercise the exact configured boundary without allocating a 17MiB fixture.
+    monkeypatch.setattr(static_ui_images, "MAX_TEXTURE_BYTES", 32)
+    raw, profile, _, _, _ = fixture()
+    original = output_objects(raw, profile)[3][0]
+    def kwargs(value):
+        return ({"extra_replacements": {3: {"input_sha256": sha(original), "raw": value}}}
+                if kind == "existing" else
+                {"append_objects": [{"path_id": 4, "type_id": 2, "raw": value}]})
+    result, _ = rewrite_images(raw, profile, **kwargs(b"T" * 32))
+    assert output_objects(result, profile, 3 if kind == "existing" else 4)[
+        3 if kind == "existing" else 4][0] == b"T" * 32
+    out = io.BytesIO()
+    with pytest.raises(ValueError):
+        ui._rewrite(io.BytesIO(raw), out, profile, [], [], "ios", "ko", **kwargs(b"T" * 33))
+    assert out.getvalue() == b""
+
+
+def test_original_image_input_retains_the_strict_one_MiB_bound():
+    original = b"S" * (ui.MAX_OBJECT + 1)
+    raw, profile, _, _, _ = fixture(second=original)
+    out = io.BytesIO()
+    with pytest.raises(ValueError, match="target overlaps"):
+        ui._rewrite(io.BytesIO(raw), out, profile, [], [], "ios", "ko",
+                    extra_replacements={2: {"input_sha256": sha(original), "raw": b"image"}})
+    assert out.getvalue() == b""
 
 
 def test_ios_uses_its_own_pinned_solistext_script_reference():
