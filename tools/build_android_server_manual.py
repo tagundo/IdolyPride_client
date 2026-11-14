@@ -989,7 +989,7 @@ def build(args):
     validate_epoch(epoch, args.epoch)
     jdk, sdk, android = Path(args.jdk_bin).resolve(strict=True), Path(args.build_tools).resolve(strict=True), _regular(args.android_jar)
     in_place_signer = _regular(Path(__file__).with_name("sign_apk_v2_in_place.py"))
-    signer_python = _regular("/usr/bin/python3")
+    signer_python = _regular(Path("/usr/bin/python3").resolve(strict=True))
     tools = [jdk / "java", jdk / "javac", jdk / "keytool", sdk / "aapt2", sdk / "zipalign",
              sdk / "lib/d8.jar", sdk / "lib/apksigner.jar", android, signer_python, in_place_signer]
     for tool in tools:
