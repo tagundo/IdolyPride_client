@@ -23,7 +23,8 @@ MAX_JSON_BYTES = 64 * 1024
 MAX_SETTINGS_BYTES = 8192
 MAX_ARCHIVE_BYTES = 512 * 1024**3
 MAX_EXPORT_FILES = 4
-DEFAULT_OPTIONS = {"schema": 1, "media_mode": True, "download_missing_resources": True}
+DEFAULT_OPTIONS = {"schema": 1, "media_mode": True, "download_missing_resources": True,
+                   "interface_language": "system"}
 
 
 @dataclass(frozen=True)
@@ -183,13 +184,18 @@ class _Host:
             path = data / "ios-host.json"
             _regular(path, maximum=MAX_SETTINGS_BYTES)
             value = _decode(path.read_text("utf-8"), MAX_SETTINGS_BYTES)
-            if (not isinstance(value, dict) or set(value) not in (set(DEFAULT_OPTIONS), set(DEFAULT_OPTIONS) | {"language"})
+            required = {"schema", "media_mode", "download_missing_resources"}
+            if (not isinstance(value, dict) or not required <= value.keys()
+                    or value.keys() - required - {"language", "interface_language"}
                     or type(value["schema"]) is not int or value["schema"] != 1):
                 raise ValueError("Invalid host preferences")
             if any(type(value[k]) is not bool for k in ("media_mode", "download_missing_resources")):
                 raise ValueError("Invalid host preferences")
         except FileNotFoundError:
             value = dict(DEFAULT_OPTIONS)
+        value.setdefault("interface_language", "system")
+        if value["interface_language"] not in ("system", "ko", "ja", "en"):
+            raise ValueError("Invalid interface language")
         if "language" in value:
             validate_settings({"schema": 1, "language": value["language"]})
             return value
@@ -216,7 +222,8 @@ class _Host:
             invalid = False
         observed = dict(runtime.status() if runtime is not None else {"running": False})
         observed["logs"] = [str(x)[:512] for x in observed.get("logs", [])[-20:]]
-        restart = effective is not None and options != effective
+        restart = effective is not None and any(options.get(key) != effective.get(key)
+            for key in ("media_mode", "download_missing_resources", "language"))
         media = observed.get("media_options", {})
         if media.get("effective_settings") is not None and media.get("settings") != media["effective_settings"]:
             restart = True
@@ -351,6 +358,47 @@ class _Host:
             return self.status()
         return self.start(*paths, ports=ports)
 
+    def prepare_game_start(self):
+        """Apply pending game options and prepare immutable data before Unity init."""
+        with self._commands:
+            status = self.status()
+            if status["state"] != "ready" or not status["running"]:
+                raise RuntimeError("The local server must be ready before starting the game")
+            runtime = status.get("runtime", {})
+            job = runtime.get("resource_library", {}).get("job")
+            operation = status.get("resource_operation")
+            if ((isinstance(job, dict) and job.get("state") in
+                    ("preparing", "running", "export_ready", "cancelling"))
+                    or (isinstance(operation, dict) and operation.get("accepted") is True
+                        and operation.get("ready") is not True)):
+                raise RuntimeError("Finish or cancel the resource operation before starting the game")
+            with self._condition:
+                paths, ports, current = self._paths, self._ports, self._runtime
+            if status["restart_required"]:
+                try:
+                    current.stop()
+                except Exception:
+                    with self._condition:
+                        self._state = "failed"
+                        self._error = {"code": "cleanup_failed", "message": "Server cleanup must complete before retry"}
+                    raise
+                with self._condition:
+                    self._runtime = None
+                    self._state = "idle"
+                status = self.start(*paths, ports=ports)
+                if not status["running"]:
+                    raise RuntimeError("The local server could not apply the selected game options")
+            from .ios_client_data import prepare_client_data
+            selected = self._options()["language"]
+            prepared = prepare_client_data(paths[0].parent, paths[1], selected)
+            result = self.status()
+            return {"state": result["state"], "running": result["running"],
+                    "effective_options": result["effective_options"], "client_data": prepared}
+
+    def readiness(self):
+        result = self.status()
+        return {"state": result["state"], "running": result["running"]}
+
     def close(self):
         with self._condition:
             self._closed = True; self._generation += 1; self._state = "closed"
@@ -447,7 +495,7 @@ class _Host:
 
     def _dispatch(self, value):
         action = value.get("action")
-        fields = {"status": set(), "save_options": {"media_mode", "download_missing_resources", "language"},
+        fields = {"status": set(), "save_options": {"media_mode", "download_missing_resources", "language", "interface_language"},
             "save_presentation": {"settings"}, "save_playback": {"settings"}, "save_media": {"settings"},
             "resources_preview": set(), "resources_download": {"parallelism"}, "resources_cancel": {"job_id"},
             "resources_import": {"path"}, "resources_export": set()}
@@ -467,6 +515,10 @@ class _Host:
                 from .language_settings import validate_settings
                 validate_settings({"schema": 1, "language": value["language"]})
                 options["language"] = value["language"]
+            if "interface_language" in value:
+                if value["interface_language"] not in ("system", "ko", "ja", "en"):
+                    raise ValueError("Invalid interface language")
+                options["interface_language"] = value["interface_language"]
             _atomic_json(self._paths[1] / "ios-host.json", options)
         elif action.startswith("save_"):
             self._save(action, value.get("settings"))
@@ -539,6 +591,14 @@ def command(raw_json):
 
 def foreground():
     return _HOST.foreground()
+
+
+def prepare_game_start():
+    return _HOST.prepare_game_start()
+
+
+def readiness():
+    return _HOST.readiness()
 
 
 def close():

@@ -121,7 +121,7 @@ def test_existing_preferences_and_both_databases_are_preserved(harness):
     (h.data / "ios-host.json").write_text(json.dumps(options))
     (h.data / "client-language.json").write_text('{"schema":1,"language":"en"}')
     result = start(h)
-    assert result["options"] == {**options, "language": "en"}
+    assert result["options"] == {**options, "language": "en", "interface_language": "system"}
     assert h.calls[0]["media_mode"] is False and h.calls[0]["download_missing_resources"] is False
     assert normal.read_bytes() == b"normal account" and media.read_bytes() == b"gallery account"
     assert json.loads((h.data / "ios-host.json").read_text()) == options
@@ -380,3 +380,75 @@ def test_real_core_loopback_http_h2_sqlite_start_and_shutdown(harness, monkeypat
         probe=socket.socket();probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
         try:probe.bind(("127.0.0.1",port))
         finally:probe.close()
+
+
+def test_interface_language_saves_without_restarting_the_game_server(harness):
+    h = harness; start(h)
+    result = command(h, "save_options", interface_language="ja")
+    assert result["ok"] and result["result"]["options"]["interface_language"] == "ja"
+    assert result["result"]["restart_required"] is False
+    assert h.runtimes[0].stops == 0 and len(h.runtimes) == 1
+    assert json.loads((h.data / "ios-host.json").read_text())["interface_language"] == "ja"
+
+
+@pytest.mark.parametrize("value", [None, True, 1, "fr", [], {}])
+def test_interface_language_rejects_invalid_values_without_overwriting_preferences(harness, value):
+    h = harness; start(h)
+    before = (h.data / "ios-host.json").read_bytes()
+    assert not command(h, "save_options", interface_language=value)["ok"]
+    assert (h.data / "ios-host.json").read_bytes() == before
+
+
+def test_game_start_applies_selected_language_before_preparing_embedded_data(harness, monkeypatch):
+    from idoly_local import ios_client_data
+    h = harness; start(h)
+    assert command(h, "save_options", language="ja", media_mode=False)["ok"]
+    observed = []
+    def prepare(app, data, language):
+        assert app == h.bundle.parent and data == h.data
+        assert language == h.subject.status()["effective_options"]["language"] == "ja"
+        assert json.loads((h.data / "client-language.json").read_text())["language"] == "ja"
+        observed.append(language)
+        return {"schema": 1, "language": language, "bundle_id": "local.idoly.client-data",
+                "bundle_path": str(data / "client-data/ja.bundle"), "files": 46, "reused": False}
+    monkeypatch.setattr(ios_client_data, "prepare_client_data", prepare)
+    result = h.subject.prepare_game_start()
+    assert result["running"] and result["client_data"]["language"] == "ja"
+    assert observed == ["ja"] and len(h.runtimes) == 2 and h.runtimes[0].stops == 1
+    assert h.calls[-1]["media_mode"] is False
+
+
+@pytest.mark.parametrize("state", ["preparing", "running", "export_ready", "cancelling"])
+def test_game_start_preserves_an_active_resource_job(harness, monkeypatch, state):
+    from idoly_local import ios_client_data
+    h = harness; start(h); runtime = h.runtimes[0]
+    original_status = runtime.status
+    monkeypatch.setattr(runtime, "status", lambda: {**original_status(), "resource_library": {"job": {"state": state}}})
+    monkeypatch.setattr(ios_client_data, "prepare_client_data", lambda *_: pytest.fail("active job must be retained"))
+    assert command(h, "save_options", language="en")["ok"]
+    with pytest.raises(RuntimeError, match="Finish or cancel"):
+        h.subject.prepare_game_start()
+    assert runtime.stops == 0 and len(h.runtimes) == 1
+
+
+def test_failed_game_start_restart_reports_server_unavailable(harness, monkeypatch):
+    h = harness; start(h)
+    assert command(h, "save_options", language="en")["ok"]
+    def failed_factory(*_args, **_kwargs):
+        raise OSError("fixture listener failure")
+    h.subject._factory = failed_factory
+    with pytest.raises(RuntimeError, match="could not apply"):
+        h.subject.prepare_game_start()
+    assert h.subject.readiness() == {"state": "failed", "running": False}
+    assert h.runtimes[0].stops == 1
+
+
+def test_data_only_failure_keeps_existing_server_available(harness, monkeypatch):
+    from idoly_local import ios_client_data
+    h = harness; start(h)
+    def damaged_data(*_args): raise ValueError("fixture client data damaged")
+    monkeypatch.setattr(ios_client_data, "prepare_client_data", damaged_data)
+    with pytest.raises(ValueError, match="client data damaged"):
+        h.subject.prepare_game_start()
+    assert h.subject.readiness() == {"state": "ready", "running": True}
+    assert h.runtimes[0].stops == 0

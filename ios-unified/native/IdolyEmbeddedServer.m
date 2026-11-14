@@ -1,6 +1,7 @@
 #import "IdolyEmbeddedServer.h"
 #import "IdolyNativeUI.h"
 #import "IdolyHTTP.h"
+#import "IdolyClientData.h"
 #import "GatePolicy.h"
 #if !IDOLY_SMOKE_SIMULATOR
 #import "UnityStartupProfile.h"
@@ -18,7 +19,8 @@ static IDGate gate;
 static IMP originalStartUnity;
 static id savedController, savedApplication;
 static SEL startSelector;
-static NSString *hookError, *lastError, *dataDirectory;
+static NSString *hookError, *lastError, *lastGameError, *dataDirectory;
+static BOOL recovering;
 static BOOL hookInstalled;
 static atomic_bool pythonReady;
 static PyObject *hostModule;
@@ -207,7 +209,9 @@ static NSString *callHost(const char *name, NSString *argument, NSString **error
 static void forwardUnityIfVisible(void) {
     NSCAssert(NSThread.isMainThread, @"Unity startup belongs to main thread");
     if (!IDGateForwardVisible(&gate, UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)) return;
-    lastError = nil; IDNativeDismissFailure();
+    lastError = nil; lastGameError = nil; IDNativeDismissFailure();
+    IDNativeSetServerState(YES, NO, @"서버 실행 중");
+    IDNativeSetGameStartAvailable(NO);
     IDNativeHideLauncher();
     id controller = savedController, application = savedApplication;
     savedController = nil; savedApplication = nil;
@@ -215,11 +219,13 @@ static void forwardUnityIfVisible(void) {
 }
 static void beginServer(void) {
     NSCAssert([NSThread isMainThread], @"Gate state belongs to main thread");
-    if (!hookInstalled || !IDGateBegin(&gate)) return;
-    IDNativeSetServerReady(NO, @"서버를 준비하고 있습니다…");
+    if (!IDGateBegin(&gate)) return;
+    lastError = nil; lastGameError = nil; IDNativeDismissFailure();
+    IDNativeSetServerState(NO, YES, @"서버를 준비하고 있습니다…");
     if (!worker) worker = [IDServerWorker new];
     [worker enqueue:^{
         NSString *error = nil, *app = NSBundle.mainBundle.bundlePath;
+        NSString *interfaceLanguage = @"system";
         NSFileManager *fm = NSFileManager.defaultManager;
         NSURL *support = [[fm URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] firstObject];
         NSURL *documents = [[fm URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] firstObject];
@@ -237,23 +243,32 @@ static void beginServer(void) {
             PyObject *state = reply && PyDict_Check(reply) ? PyDict_GetItemString(reply, "state") : NULL;
             good = running == Py_True && state && PyUnicode_Check(state)
                 && PyUnicode_CompareWithASCIIString(state, "ready") == 0;
+            PyObject *options = reply && PyDict_Check(reply) ? PyDict_GetItemString(reply, "options") : NULL;
+            PyObject *locale = options && PyDict_Check(options) ? PyDict_GetItemString(options, "interface_language") : NULL;
+            if (locale && PyUnicode_Check(locale)) {
+                const char *name = PyUnicode_AsUTF8(locale);
+                if (name) interfaceLanguage = [NSString stringWithUTF8String:name];
+            }
             if (!good) error = PyErr_Occurred() ? pythonFailure() : @"로컬 서버가 준비 완료 상태를 보고하지 않았습니다.";
             Py_XDECREF(reply); pythonThread = PyEval_SaveThread();
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (good && IDGateSucceeded(&gate)) {
+                IDNativeSetInterfaceLanguage(interfaceLanguage);
                 lastError = nil; IDNativeDismissFailure();
-                IDNativeSetServerReady(YES, @"서버 실행 중");
+                IDNativeSetServerState(YES, NO, @"서버 실행 중");
             } else if (!good && IDGateFailedAttempt(&gate)) {
                 lastError = error ?: @"서버 시작 실패";
-                IDNativeSetServerReady(NO, @"서버를 시작하지 못했습니다");
+                IDNativeSetServerState(NO, NO, @"서버를 시작하지 못했습니다");
                 IDNativeStartupFailure(lastError);
             }
         });
     }];
 }
 static void recoverForeground(void) {
-    if (gate.phase != IDGateRunning || !atomic_load(&pythonReady)) return;
+    if ((gate.phase != IDGateRunning && gate.phase != IDGateReady) || !atomic_load(&pythonReady) || recovering) return;
+    recovering = YES;
+    IDNativeSetServerState(YES, YES, @"서버 연결을 확인하고 있습니다…");
     [worker enqueue:^{
         NSString *error = nil, *reply = callHost("foreground", nil, &error);
         NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
@@ -261,16 +276,20 @@ static void recoverForeground(void) {
         if (!error && (![status isKindOfClass:NSDictionary.class] || ![status[@"running"] isEqual:@YES]))
             error = @"로컬 서버 연결을 복구하지 못했습니다. 게임을 다시 열어 주세요.";
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (error) IDNativeStartupFailure(error); else IDNativeDismissFailure();
+            recovering = NO;
+            if (error) { lastError = error; IDGateServerUnavailable(&gate); IDNativeSetServerState(NO, NO, @"서버 연결 확인 실패"); IDNativeStartupFailure(error); }
+            else { lastError = nil; IDNativeDismissFailure(); IDNativeSetServerState(YES, NO, @"서버 실행 중"); }
         });
     }];
 }
 static void deferredStart(id self, SEL selector, id application) {
-    // startUnity: is a UIKit main-thread entry; unexpected cross-thread calls
+    // Capture initialization before NoGraphics loads localized client data.
+    // Unexpected cross-thread calls
     // are queued instead of touching Unity or waiting on the Python worker.
     void (^capture)(void) = ^{
         if (!IDGateCapture(&gate)) return;
         savedController = self; savedApplication = application; startSelector = selector;
+        IDNativeSetGameStartAvailable(hookInstalled && gate.captured);
         IDNativeShowLauncher();
         beginServer();
     };
@@ -280,9 +299,9 @@ static BOOL exactType(Method method, unsigned index, const char *expected) {
     char *type = method_copyArgumentType(method, index); BOOL matches = type && !strcmp(type, expected);
     free(type); return matches;
 }
-static BOOL originalUnityEntry(IMP implementation) {
+static BOOL auditedUnityEntry(IMP implementation, unsigned long rva, const void *prefix, size_t prefixSize) {
 #if IDOLY_SMOKE_SIMULATOR
-    (void)implementation;
+    (void)implementation; (void)rva; (void)prefix; (void)prefixSize;
     return YES; // The explicit simulator probe owns a fake Unity class.
 #else
     Dl_info image = {0};
@@ -303,12 +322,53 @@ static BOOL originalUnityEntry(IMP implementation) {
         cursor += command->cmdsize;
     }
     return cursor == end && uuidMatches
-        && (const unsigned char *)implementation == (const unsigned char *)header+IDUnityStartRVA
-        && !memcmp((const void *)implementation,IDUnityStartPrefix,sizeof IDUnityStartPrefix);
+        && (const unsigned char *)implementation == (const unsigned char *)header+rva
+        && !memcmp((const void *)implementation,prefix,prefixSize);
 #endif
 }
+static BOOL auditedInitialization(IMP implementation) {
+#if IDOLY_SMOKE_SIMULATOR
+    return auditedUnityEntry(implementation, 0, NULL, 0);
+#else
+    return auditedUnityEntry(implementation, IDUnityStartRVA, IDUnityStartPrefix, sizeof IDUnityStartPrefix);
+#endif
+}
+static BOOL selectClientData(NSDictionary *prepared, NSString *effectiveLanguage, NSString **error) {
+    NSString *language = [prepared[@"language"] isKindOfClass:NSString.class] ? prepared[@"language"] : nil;
+    if (![prepared[@"schema"] isEqual:@1] || ![prepared[@"bundle_id"] isEqual:@"local.idoly.client-data"]
+            || ![@[@"ko", @"ja", @"en"] containsObject:language ?: @""] || ![language isEqual:effectiveLanguage]) {
+        *error = @"서버와 게임의 언어 데이터가 일치하지 않습니다."; return NO;
+    }
+    NSString *path = [prepared[@"bundle_path"] isKindOfClass:NSString.class] ? prepared[@"bundle_path"] : nil;
+    NSString *root = [IDNativeDataDirectory() stringByAppendingPathComponent:@"client-data"];
+    if (!path || !root || ![path.lastPathComponent isEqual:[language stringByAppendingString:@".bundle"]]) {
+        *error = @"게임 언어 데이터가 준비되지 않았습니다."; return NO;
+    }
+    Class cls = objc_getClass("UnityFramework"); SEL getter = sel_registerName("getInstance");
+    SEL setter = sel_registerName("setDataBundleId:");
+    Method get = cls ? class_getClassMethod(cls, getter) : NULL;
+    Method set = cls ? class_getInstanceMethod(cls, setter) : NULL;
+    char *ret = get ? method_copyReturnType(get) : NULL;
+    BOOL valid = get && set && ret && !strcmp(ret, "@") && method_getNumberOfArguments(get) == 2
+        && exactType(get, 0, "@") && exactType(get, 1, ":");
+    free(ret);
+#if !IDOLY_SMOKE_SIMULATOR
+    valid = valid && auditedUnityEntry(method_getImplementation(get), IDUnityGetInstanceRVA,
+        IDUnityGetInstancePrefix, sizeof IDUnityGetInstancePrefix)
+        && auditedUnityEntry(method_getImplementation(set), IDUnitySetDataRVA,
+            IDUnitySetDataPrefix, sizeof IDUnitySetDataPrefix);
+#endif
+    if (!valid) { *error = @"이 게임의 언어 데이터 진입점을 확인하지 못했습니다."; return NO; }
+    id framework = ((id (*)(id, SEL))method_getImplementation(get))((id)cls, getter);
+    if (!framework || object_getClass(framework) != cls) { *error = @"게임 데이터 컨트롤러를 확인하지 못했습니다."; return NO; }
+    NSError *nativeError = nil;
+    BOOL selected = IDClientDataSelectBundle([NSURL fileURLWithPath:path isDirectory:YES],
+        [NSURL fileURLWithPath:root isDirectory:YES], framework, &nativeError);
+    if (!selected) *error = nativeError.localizedDescription ?: @"게임 언어 데이터를 선택하지 못했습니다.";
+    return selected;
+}
 static void installGate(void) {
-    Class cls = objc_getClass("UnityAppController"); SEL selector = sel_registerName("startUnity:");
+    Class cls = objc_getClass("UnityAppController"); SEL selector = sel_registerName("initUnityWithApplication:");
     Method target = NULL; unsigned count = 0;
     Method *methods = cls ? class_copyMethodList(cls, &count) : NULL;
     for (unsigned i = 0; i < count; ++i) if (method_getName(methods[i]) == selector) target = methods[i];
@@ -316,9 +376,9 @@ static void installGate(void) {
     char *ret = target ? method_copyReturnType(target) : NULL;
     BOOL valid = cls && target && method_getNumberOfArguments(target) == 3 && ret && !strcmp(ret, "v")
         && exactType(target, 0, "@") && exactType(target, 1, ":") && exactType(target, 2, "@")
-        && originalUnityEntry(method_getImplementation(target));
+        && auditedInitialization(method_getImplementation(target));
     free(ret);
-    if (!valid) { hookError = @"이 게임의 UnityAppController startUnity: 서명이 지원되지 않습니다. 통합 서버를 시작하지 않았습니다."; return; }
+    if (!valid) { hookError = @"이 게임의 Unity 초기화 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다."; return; }
     originalStartUnity = method_setImplementation(target, (IMP)deferredStart);
     hookInstalled = originalStartUnity != NULL;
     if (!hookInstalled) hookError = @"Unity 시작 진입점을 연결하지 못했습니다.";
@@ -333,16 +393,17 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),
         @"launch_requested":@((BOOL)gate.launch_requested), @"launch_prepared":@((BOOL)gate.launch_prepared),
         @"launcher_visible":@(IDNativeLauncherVisible()),
-        @"error":hookError ?: lastError ?: (id)NSNull.null}); };
+        @"game_hook_error":hookError ?: (id)NSNull.null,
+        @"game_error":lastGameError ?: (id)NSNull.null, @"client_data":IDClientDataSelectionInfo(),
+        @"error":lastError ?: (id)NSNull.null}); };
     if (NSThread.isMainThread) read(); else dispatch_sync(dispatch_get_main_queue(), read);
     return result;
 }
 void IdolyEmbeddedServerRetry(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (hookError) IDNativeStartupFailure(hookError);
-        else if (gate.phase == IDGateReady) {
-            IDNativeShowLauncher();
-            IDNativeSetServerReady(!gate.launch_requested, gate.launch_requested ? @"게임 시작을 준비하고 있습니다…" : @"서버 실행 중");
+        if (gate.phase == IDGateReady) {
+            if (gate.captured) IDNativeShowLauncher();
+            recoverForeground();
         }
         else if (gate.phase == IDGateRunning) recoverForeground();
         else beginServer();
@@ -351,21 +412,34 @@ void IdolyEmbeddedServerRetry(void) {
 void IdolyEmbeddedServerLaunchGame(void) {
     void (^request)(void) = ^{
         if (!worker || !atomic_load(&pythonReady) || !IDGateRequestLaunch(&gate)) return;
-        IDNativeSetServerReady(NO, @"게임 시작을 준비하고 있습니다…");
+        lastGameError = nil;
+        IDNativeSetServerState(YES, YES, @"게임 데이터와 선택한 언어를 준비하고 있습니다…");
         [worker enqueue:^{
-            // Recheck the active server on its worker. Pending language/profile
-            // choices retain their documented next-app-launch behavior.
-            NSString *error = nil, *reply = callHost("foreground", nil, &error);
+            // Prepare the selected immutable data before Unity initializes.
+            NSString *error = nil, *reply = callHost("prepare_game_start", nil, &error);
             NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
             id status = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
             BOOL ready = !error && [status isKindOfClass:NSDictionary.class]
                 && [status[@"running"] isEqual:@YES] && [status[@"state"] isEqual:@"ready"];
+            BOOL serving = ready;
+            if (!ready) {
+                NSString *healthError = nil, *health = callHost("readiness", nil, &healthError);
+                id observed = health ? [NSJSONSerialization JSONObjectWithData:[health dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] : nil;
+                serving = !healthError && [observed isKindOfClass:NSDictionary.class] && [observed[@"running"] isEqual:@YES];
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (ready && IDGatePreparedLaunch(&gate)) forwardUnityIfVisible();
-                else if (!ready && IDGateLaunchFailed(&gate)) {
-                    lastError = error ?: @"서버 연결을 확인하지 못했습니다. 다시 시도해 주세요.";
-                    IDNativeSetServerReady(NO, @"서버 연결 확인 실패");
-                    IDNativeStartupFailure(lastError);
+                NSString *selectionError = nil;
+                id effective = ready ? status[@"effective_options"] : nil;
+                NSString *language = [effective isKindOfClass:NSDictionary.class]
+                    && [effective[@"language"] isKindOfClass:NSString.class] ? effective[@"language"] : nil;
+                BOOL selected = ready && [status[@"client_data"] isKindOfClass:NSDictionary.class]
+                    && selectClientData(status[@"client_data"], language, &selectionError);
+                if (selected && IDGatePreparedLaunch(&gate)) forwardUnityIfVisible();
+                else if (!selected && IDGateLaunchFailed(&gate)) {
+                    lastGameError = error ?: selectionError ?: @"게임 시작을 준비하지 못했습니다. 다시 시도해 주세요.";
+                    if (!serving) IDGateServerUnavailable(&gate);
+                    IDNativeSetServerState(serving, NO, serving ? @"서버 실행 중 · 게임 데이터 준비 실패" : @"서버 연결 확인 실패");
+                    IDNativeStartupFailure(lastGameError);
                 }
             });
         }];
@@ -373,14 +447,47 @@ void IdolyEmbeddedServerLaunchGame(void) {
     if (NSThread.isMainThread) request(); else dispatch_async(dispatch_get_main_queue(), request);
 }
 void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *)) {
-    NSData *raw = [request dataUsingEncoding:NSUTF8StringEncoding];
-    if (!raw || raw.length > IDJSONLimit || !worker || !atomic_load(&pythonReady)) {
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(failureReply(@"not_ready", @"서버가 준비되지 않았습니다.")); }); return;
-    }
-    [worker enqueue:^{
-        NSString *error = nil, *reply = callHost("command", request, &error);
-        dispatch_async(dispatch_get_main_queue(), ^{ completion(reply ?: failureReply(@"native_failure", error)); });
-    }];
+    void (^dispatchRequest)(void) = ^{
+        NSData *raw = [request dataUsingEncoding:NSUTF8StringEncoding];
+        id decoded = raw && raw.length <= IDJSONLimit ? [NSJSONSerialization JSONObjectWithData:raw options:0 error:NULL] : nil;
+        NSDictionary *object = [decoded isKindOfClass:NSDictionary.class] ? decoded : nil;
+        NSNumber *identifier = [object[@"id"] isKindOfClass:NSNumber.class] ? object[@"id"] : nil;
+        if (identifier && (CFGetTypeID((__bridge CFTypeRef)identifier) == CFBooleanGetTypeID()
+                || identifier.longLongValue < 1 || identifier.longLongValue > INT32_MAX)) identifier = nil;
+        NSString *(^failure)(NSString *, NSString *) = ^NSString *(NSString *code, NSString *message) {
+            return JSON(@{@"id":identifier ?: (id)NSNull.null, @"ok":@NO,
+                @"error":@{@"code":code, @"message":message ?: @"서버 오류"}});
+        };
+        if (!raw || raw.length > IDJSONLimit || !object || !identifier) {
+            completion(failure(@"invalid_request", @"설정 요청 형식이 올바르지 않습니다.")); return;
+        }
+        if ([object[@"action"] isEqual:@"status"] && gate.phase != IDGateReady && gate.phase != IDGateRunning) {
+            NSString *state = gate.phase == IDGateStarting ? @"starting" : gate.phase == IDGateFailed ? @"failed" : @"idle";
+            NSDictionary *native = [NSJSONSerialization JSONObjectWithData:[IdolyEmbeddedServerStatusJSON() dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+            completion(JSON(@{@"id":identifier, @"ok":@YES, @"result":@{@"state":state, @"running":@NO,
+                @"options":@{}, @"runtime":@{}, @"native":native ?: @{},
+                @"last_error":lastError ?: (id)NSNull.null, @"restart_required":@NO}})); return;
+        }
+        if (!worker || !atomic_load(&pythonReady)) {
+            completion(failure(@"not_ready", @"서버가 준비되지 않았습니다. 서버 시작 버튼을 눌러 주세요.")); return;
+        }
+        [worker enqueue:^{
+            NSString *error = nil, *reply = callHost("command", request, &error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (!reply) { completion(failure(@"native_failure", error)); return; }
+                id parsed = [NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:NULL];
+                if ([parsed isKindOfClass:NSMutableDictionary.class] && [parsed[@"ok"] isEqual:@YES]
+                        && [parsed[@"result"] isKindOfClass:NSMutableDictionary.class]) {
+                    id options = parsed[@"result"][@"options"];
+                    if ([options isKindOfClass:NSDictionary.class] && [options[@"interface_language"] isKindOfClass:NSString.class])
+                        IDNativeSetInterfaceLanguage(options[@"interface_language"]);
+                    parsed[@"result"][@"native"] = [NSJSONSerialization JSONObjectWithData:[IdolyEmbeddedServerStatusJSON() dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] ?: @{};
+                    completion(JSON(parsed) ?: failure(@"native_failure", @"서버 응답이 너무 큽니다."));
+                } else completion(reply);
+            });
+        }];
+    };
+    if (NSThread.isMainThread) dispatchRequest(); else dispatch_async(dispatch_get_main_queue(), dispatchRequest);
 }
 void IdolyEmbeddedServerCryptoSelfTest(void (^completion)(NSString *)) {
     if (!worker || !atomic_load(&pythonReady)) {
@@ -424,16 +531,16 @@ __attribute__((constructor)) static void embeddedServerLoaded(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!worker) worker = [IDServerWorker new];
         IDNativeInstallSettings();
+        IDNativeSetGameStartAvailable(hookInstalled && gate.captured && !gate.forwarded);
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
                 (void)note;
-                if (hookError || lastError) IDNativeStartupFailure(hookError ?: lastError);
+                if (lastError) IDNativeStartupFailure(lastError);
                 forwardUnityIfVisible();
                 recoverForeground();
             }];
-        if (hookError) {
-            IDNativeShowLauncher(); IDNativeSetServerReady(NO, @"게임 버전을 확인할 수 없습니다");
-            IDNativeStartupFailure(hookError);
-        }
+        // Server ownership is independent of Unity's initialization hook.
+        // PlayCover may open the settings menu before Unity calls that entry.
+        beginServer();
     });
 }

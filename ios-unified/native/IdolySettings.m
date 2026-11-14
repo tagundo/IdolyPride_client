@@ -14,8 +14,81 @@ static __weak UIWindow *previousGameWindow;
 static __weak UIWindow *previousFailureWindow;
 static NSString *pendingFailure;
 static BOOL serverReady;
+static BOOL gameStartAvailable;
+static BOOL serverBusy;
+static BOOL serverAttempted;
 static NSString *serverReadyStatus;
+static NSString *interfaceLanguage = @"system";
+static NSInteger interfaceLanguageIndex = -1;
 static const NSUInteger maxJSON = 65536;
+
+static NSInteger resolvedInterfaceLanguage(void) {
+    NSString *language = [interfaceLanguage isEqualToString:@"system"]
+        ? NSLocale.preferredLanguages.firstObject.lowercaseString : interfaceLanguage;
+    if ([language hasPrefix:@"ko"]) return 0;
+    if ([language hasPrefix:@"ja"]) return 1;
+    return 2;
+}
+static NSString *localized(NSString *source) {
+    if (interfaceLanguageIndex < 0) interfaceLanguageIndex = resolvedInterfaceLanguage();
+    if (interfaceLanguageIndex == 0 || !source) return source;
+    static NSDictionary<NSString *, NSArray<NSString *> *> *catalog;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ catalog = @{
+        @"아이프라 서버":@[@"アイプラサーバー", @"Idoly Server"],
+        @"아이프라 서버 설정":@[@"サーバー設定", @"Server Settings"],
+        @"서버":@[@"サーバー", @"Server"],
+        @"서버 시작":@[@"サーバー開始", @"Start Server"],
+        @"게임 시작":@[@"ゲーム開始", @"Start Game"],
+        @"게임으로 돌아가기":@[@"ゲームに戻る", @"Return to Game"],
+        @"서버 실행 중":@[@"サーバー稼働中", @"Server Running"],
+        @"서버 준비 중":@[@"サーバー準備中", @"Starting Server"],
+        @"다시 시도":@[@"再試行", @"Retry"],
+        @"앱·게임 준비 실패":@[@"アプリ・ゲームの準備に失敗", @"App or Game Preparation Failed"],
+        @"서버가 준비되었습니다.":@[@"サーバーの準備ができました。", @"The server is ready."],
+        @"서버를 준비하고 있습니다…":@[@"サーバーを準備しています…", @"Preparing the server…"],
+        @"서버가 실행 중이 아닙니다. ‘서버 시작’을 눌러 주세요.":@[@"サーバーは停止中です。「サーバー開始」を押してください。", @"The server is stopped. Select Start Server."],
+        @"서버를 시작하지 못했습니다":@[@"サーバーを開始できませんでした", @"The server could not start"],
+        @"서버 시작 실패":@[@"サーバーの開始に失敗しました", @"Server startup failed"],
+        @"서버 연결 확인 실패":@[@"サーバー接続を確認できませんでした", @"Server connection check failed"],
+        @"게임 시작을 준비하고 있습니다…":@[@"ゲームの開始を準備しています…", @"Preparing to start the game…"],
+        @"게임 데이터와 선택한 언어를 준비하고 있습니다…":@[@"ゲームデータと選択した言語を準備しています…", @"Preparing game data and the selected language…"],
+        @"게임 시작 준비 실패":@[@"ゲームの開始準備に失敗しました", @"Game preparation failed"],
+        @"게임 시작을 준비하지 못했습니다. 다시 시도해 주세요.":@[@"ゲームの開始を準備できませんでした。再試行してください。", @"The game could not be prepared. Please retry."],
+        @"서버 연결을 확인하지 못했습니다. 다시 시도해 주세요.":@[@"サーバー接続を確認できませんでした。再試行してください。", @"The server connection could not be verified. Please retry."],
+        @"게임 버전을 확인할 수 없습니다":@[@"ゲームのバージョンを確認できません", @"The game version could not be verified"],
+        @"이 게임의 Unity 초기화 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다.":@[@"このゲームのUnity初期化処理を確認できませんでした。サーバーは単独で開始します。", @"This game's Unity initialization entry could not be verified. The server will start independently."],
+        @"Unity 시작 진입점을 연결하지 못했습니다.":@[@"Unityの開始処理に接続できませんでした。", @"The Unity startup entry could not be connected."],
+        @"게임 언어 데이터가 준비되지 않았습니다.":@[@"ゲームの言語データが準備されていません。", @"The game language data is not ready."],
+        @"이 게임의 언어 데이터 진입점을 확인하지 못했습니다.":@[@"このゲームの言語データ設定処理を確認できませんでした。", @"This game's language data entry could not be verified."],
+        @"게임 데이터 컨트롤러를 확인하지 못했습니다.":@[@"ゲームデータコントローラーを確認できませんでした。", @"The game data controller could not be verified."],
+        @"Python 경로 설정에 실패했습니다.":@[@"Pythonのパスを設定できませんでした。", @"The Python paths could not be configured."],
+        @"다른 Python 인터프리터가 이미 실행 중입니다.":@[@"別のPythonインタープリターがすでに動作しています。", @"Another Python interpreter is already running."],
+        @"iOS 서버 모듈을 등록하지 못했습니다.":@[@"iOSサーバーモジュールを登録できませんでした。", @"The iOS server module could not be registered."],
+        @"Python 경로의 문자를 변환하지 못했습니다.":@[@"Pythonのパスの文字を変換できませんでした。", @"The Python path characters could not be converted."],
+        @"Python 검색 경로를 준비하지 못했습니다.":@[@"Pythonの検索パスを準備できませんでした。", @"The Python search paths could not be prepared."],
+        @"Python 서버가 준비되지 않았습니다.":@[@"Pythonサーバーの準備ができていません。", @"The Python server is not ready."],
+        @"로컬 서버가 준비 완료 상태를 보고하지 않았습니다.":@[@"ローカルサーバーが準備完了を報告しませんでした。", @"The local server did not report a ready state."],
+        @"서버 응답이 64 KiB를 초과했습니다.":@[@"サーバーの応答が64 KiBを超えました。", @"The server response exceeded 64 KiB."],
+        @"서버가 준비되지 않았습니다.":@[@"サーバーの準備ができていません。", @"The server is not ready."],
+        @"서버가 준비되지 않았습니다. 서버 시작 버튼을 눌러 주세요.":@[@"サーバーの準備ができていません。「サーバー開始」を押してください。", @"The server is not ready. Select Start Server."],
+        @"서버와 게임의 언어 데이터가 일치하지 않습니다.":@[@"サーバーとゲームの言語データが一致しません。", @"The server and game language data do not match."],
+        @"설정 요청 형식이 올바르지 않습니다.":@[@"設定リクエストの形式が正しくありません。", @"The settings request format is invalid."],
+        @"서버 응답이 너무 큽니다.":@[@"サーバーの応答が大きすぎます。", @"The server response is too large."],
+        @"로컬 서버 연결을 복구하지 못했습니다. 게임을 다시 열어 주세요.":@[@"ローカルサーバーへの接続を復旧できませんでした。ゲームを開き直してください。", @"The local server connection could not be restored. Please reopen the game."],
+        @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 서버 메뉴가 다시 열립니다.":@[@"準備ができたら右上の「ゲーム開始」を押してください。ゲーム中は画面右上の隅を指1本で2秒間押すと、サーバーメニューを再び開けます。", @"When ready, select Start Game at the top right. During play, hold the screen's upper-right corner with one finger for 2 seconds to reopen this menu."],
+        @"이 메뉴를 닫아도 서버는 계속 실행됩니다.":@[@"このメニューを閉じてもサーバーは動作し続けます。", @"Closing this menu keeps the server running."],
+        @"요청이 너무 큽니다.":@[@"リクエストが大きすぎます。", @"The request is too large."],
+        @"허용되지 않은 서버 요청입니다.":@[@"許可されていないサーバーリクエストです。", @"This server request is not allowed."],
+        @"이미 파일을 선택하고 있습니다.":@[@"すでにファイルを選択中です。", @"A file selection is already open."],
+        @"파일 선택을 취소했습니다.":@[@"ファイル選択をキャンセルしました。", @"File selection was cancelled."],
+        @"ZIP 파일을 선택해 주세요.":@[@"ZIPファイルを選択してください。", @"Please select a ZIP file."],
+        @"ZIP 파일을 앱 보관 폴더로 가져오지 못했습니다.":@[@"ZIPファイルをアプリの保存先に取り込めませんでした。", @"The ZIP file could not be imported into app storage."]
+    }; });
+    NSArray<NSString *> *row = catalog[source];
+    return row ? row[(NSUInteger)interfaceLanguageIndex - 1] : source;
+}
+static void refreshFailureAlert(void);
 
 static BOOL gameWindowCandidate(UIWindow *window) {
     // Ignore our independent windows and UIKit keyboard/alert windows. Unity's
@@ -71,6 +144,11 @@ static NSString *encode(id object) {
 @property (nonatomic,copy) NSString *lastExportPath;
 @property (nonatomic) BOOL launcherMode;
 @property (nonatomic,strong) UILabel *launcherStatus;
+@property (nonatomic,strong) UILabel *launcherHint;
+@property (nonatomic,strong) NSLayoutConstraint *headerTopConstraint;
+@property (nonatomic,strong) NSLayoutConstraint *webTopConstraint;
+@property (nonatomic) CGSize lastLayoutSize;
+@property (nonatomic,strong) UIBarButtonItem *serverStartButton;
 @property (nonatomic,strong) UIBarButtonItem *gameStartButton;
 - (void)event:(NSString *)json;
 - (void)releaseWeb;
@@ -78,7 +156,10 @@ static NSString *encode(id object) {
 - (void)retireExport;
 - (void)closeSettings;
 - (void)startGame;
+- (void)startServer;
 - (void)updateServerReady;
+- (void)updateLocalizedText;
+- (void)updateCompactLayout;
 - (void)dispatchRequest:(NSDictionary *)request;
 - (void)sendRequest:(NSDictionary *)request;
 - (void)sendReply:(NSNumber *)identifier json:(NSString *)json;
@@ -90,16 +171,21 @@ static __weak IDSettingsController *launcherController;
 @implementation IDSettingsController
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정";
+    self.title = localized(self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
     self.view.backgroundColor = UIColor.systemBackgroundColor;
+    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
+    _serverStartButton = [[UIBarButtonItem alloc] initWithTitle:localized(@"서버 시작") style:UIBarButtonItemStylePlain
+        target:self action:@selector(startServer)];
+    _serverStartButton.accessibilityIdentifier = @"idoly.server-start";
+    self.navigationItem.leftBarButtonItem = _serverStartButton;
     if (self.launcherMode) {
-        _gameStartButton = [[UIBarButtonItem alloc] initWithTitle:@"게임 시작" style:UIBarButtonItemStyleDone
+        _gameStartButton = [[UIBarButtonItem alloc] initWithTitle:localized(@"게임 시작") style:UIBarButtonItemStyleDone
             target:self action:@selector(startGame)];
         _gameStartButton.accessibilityIdentifier = @"idoly.game-start";
         _gameStartButton.enabled = NO;
         self.navigationItem.rightBarButtonItem = _gameStartButton;
     } else {
-        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"게임으로 돌아가기"
+        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localized(@"게임으로 돌아가기")
             style:UIBarButtonItemStyleDone target:self action:@selector(closeSettings)];
         self.navigationItem.rightBarButtonItem.accessibilityIdentifier = @"idoly.server-close";
     }
@@ -111,43 +197,78 @@ static __weak IDSettingsController *launcherController;
     _web.translatesAutoresizingMaskIntoConstraints = NO;
     _web.navigationDelegate = self; [self.view addSubview:_web];
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
-    NSLayoutYAxisAnchor *webTop = safe.topAnchor;
-    if (self.launcherMode) {
-        _launcherStatus = [UILabel new];
-        _launcherStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-        _launcherStatus.numberOfLines = 0;
-        _launcherStatus.accessibilityIdentifier = @"idoly.server-status";
-        _launcherStatus.accessibilityTraits |= UIAccessibilityTraitUpdatesFrequently;
-        UILabel *hint = [UILabel new];
-        hint.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-        hint.textColor = UIColor.secondaryLabelColor; hint.numberOfLines = 0;
-        hint.text = @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요.\n게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 3초간 누르면 서버 메뉴가 다시 열립니다.";
-        UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[_launcherStatus, hint]];
-        header.axis = UILayoutConstraintAxisVertical; header.spacing = 6;
-        header.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.view addSubview:header];
-        [NSLayoutConstraint activateConstraints:@[
-            [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12],
-            [header.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
-            [header.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16]]];
-        webTop = header.bottomAnchor;
-        [self updateServerReady];
-    }
+    _launcherStatus = [UILabel new];
+    _launcherStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
+    _launcherStatus.adjustsFontForContentSizeCategory = YES;
+    _launcherStatus.numberOfLines = 0;
+    _launcherStatus.accessibilityIdentifier = @"idoly.server-status";
+    _launcherStatus.accessibilityTraits |= UIAccessibilityTraitUpdatesFrequently;
+    _launcherHint = [UILabel new];
+    _launcherHint.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
+    _launcherHint.adjustsFontForContentSizeCategory = YES;
+    _launcherHint.textColor = UIColor.secondaryLabelColor; _launcherHint.numberOfLines = 0;
+    UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[_launcherStatus, _launcherHint]];
+    header.axis = UILayoutConstraintAxisVertical; header.spacing = 6;
+    header.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:header];
+    _headerTopConstraint = [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12];
+    _webTopConstraint = [_web.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12];
     [NSLayoutConstraint activateConstraints:@[
-        [_web.topAnchor constraintEqualToAnchor:webTop constant:(self.launcherMode ? 12 : 0)],
+        _headerTopConstraint,
+        [header.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
+        [header.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        _webTopConstraint,
         [_web.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
         [_web.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
         [_web.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor]]];
+    [self updateLocalizedText];
+    [self updateCompactLayout];
     [_web loadFileURL:_page allowingReadAccessToURL:_page.URLByDeletingLastPathComponent];
 }
 - (void)updateServerReady {
-    if (!self.launcherMode) return;
-    _gameStartButton.enabled = serverReady;
-    _launcherStatus.text = serverReadyStatus.length ? serverReadyStatus
-        : (serverReady ? @"서버가 준비되었습니다." : @"서버를 준비하고 있습니다…");
+    _gameStartButton.enabled = serverReady && !serverBusy && gameStartAvailable;
+    _serverStartButton.enabled = !serverReady && !serverBusy;
+    _serverStartButton.title = localized(serverReady ? @"서버 실행 중" : serverBusy ? @"서버 준비 중"
+        : serverAttempted ? @"다시 시도" : @"서버 시작");
+    _launcherStatus.text = localized(serverReadyStatus.length ? serverReadyStatus
+        : (serverReady ? @"서버가 준비되었습니다." : serverBusy ? @"서버를 준비하고 있습니다…"
+            : @"서버가 실행 중이 아닙니다. ‘서버 시작’을 눌러 주세요."));
+    BOOL healthyStatus = serverReady && (!serverReadyStatus.length || [serverReadyStatus isEqualToString:@"서버 실행 중"]
+        || [serverReadyStatus isEqualToString:@"서버가 준비되었습니다."]);
+    _launcherStatus.textColor = healthyStatus ? UIColor.systemGreenColor : UIColor.labelColor;
+}
+- (void)updateLocalizedText {
+    _gameStartButton.title = localized(@"게임 시작");
+    if (!self.launcherMode) self.navigationItem.rightBarButtonItem.title = localized(@"게임으로 돌아가기");
+    _launcherHint.text = localized(self.launcherMode
+        ? @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 서버 메뉴가 다시 열립니다."
+        : @"이 메뉴를 닫아도 서버는 계속 실행됩니다.");
+    self.title = localized(self.view.bounds.size.width < 420 ? @"서버"
+        : self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
+    [self updateServerReady];
+}
+- (void)updateCompactLayout {
+    CGSize size = self.view.bounds.size;
+    if (CGSizeEqualToSize(size, _lastLayoutSize)) return;
+    _lastLayoutSize = size;
+    // UIKit layout/resize events only. No game-frame observer or timer exists.
+    BOOL compact = size.height < 540;
+    _launcherHint.hidden = compact;
+    _headerTopConstraint.constant = compact ? 6 : 12;
+    _webTopConstraint.constant = compact ? 6 : 12;
+    self.title = localized(size.width < 420 ? @"서버" : self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
+}
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    [self updateCompactLayout];
+}
+- (void)startServer {
+    if (serverReady || serverBusy) return;
+    IDNativeDismissFailure();
+    IdolyEmbeddedServerRetry();
 }
 - (void)startGame {
-    if (self.launcherMode && serverReady) IdolyEmbeddedServerLaunchGame();
+    if (self.launcherMode && serverReady && !serverBusy && gameStartAvailable) IdolyEmbeddedServerLaunchGame();
 }
 - (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; atomic_store(&settingsVisible, true); }
 - (void)viewWillDisappear:(BOOL)animated { [super viewWillDisappear:animated]; atomic_store(&settingsVisible, false); }
@@ -179,15 +300,20 @@ static __weak IDSettingsController *launcherController;
     decisionHandler(local ? WKNavigationActionPolicyAllow : WKNavigationActionPolicyCancel);
 }
 - (void)sendReply:(NSNumber *)identifier json:(NSString *)json {
-    if (!atomic_load(&settingsVisible) || !_web) return;
+    // An initial page request may finish before viewDidAppear. The retained
+    // web view owns that reply; releaseWeb clears it when the menu is closed.
+    if (!_web) return;
     NSData *bytes = [json dataUsingEncoding:NSUTF8StringEncoding];
-    id value = bytes && bytes.length <= maxJSON ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+    id value = bytes && bytes.length <= maxJSON ? [NSJSONSerialization JSONObjectWithData:bytes options:NSJSONReadingMutableContainers error:NULL] : nil;
+    if ([value isKindOfClass:NSDictionary.class] && [value[@"error"] isKindOfClass:NSMutableDictionary.class]
+            && [value[@"error"][@"message"] isKindOfClass:NSString.class])
+        value[@"error"][@"message"] = localized(value[@"error"][@"message"]);
     NSString *array = value ? encode(@[identifier, value]) : nil;
     if (array) [_web evaluateJavaScript:[@"window.idolyServerReply.apply(null," stringByAppendingFormat:@"%@)",array] completionHandler:nil];
 }
 - (void)localFailure:(NSNumber *)identifier message:(NSString *)message {
     [self sendReply:identifier json:encode(@{@"id":identifier, @"ok":@NO,
-        @"error":@{@"code":@"native_files", @"message":message}})];
+        @"error":@{@"code":@"native_files", @"message":localized(message)}})];
 }
 - (void)dispatchRequest:(NSDictionary *)request {
     if (![request[@"action"] isEqual:@"resources_export"]) { [self sendRequest:request]; return; }
@@ -381,10 +507,31 @@ void IDNativeShowLauncher(void) {
     launcherWindow.rootViewController = [[UINavigationController alloc] initWithRootViewController:settings];
     [launcherWindow makeKeyAndVisible];
 }
+void IDNativeSetInterfaceLanguage(NSString *language) {
+    NSCAssert(NSThread.isMainThread, @"Interface language belongs to the main thread");
+    if (![language isKindOfClass:NSString.class] || ![@[@"system", @"ko", @"ja", @"en"] containsObject:language])
+        language = @"system";
+    NSInteger previous = interfaceLanguageIndex;
+    interfaceLanguage = [language copy];
+    interfaceLanguageIndex = resolvedInterfaceLanguage();
+    if (previous == interfaceLanguageIndex) return;
+    [settingsController updateLocalizedText];
+    refreshFailureAlert();
+}
+void IDNativeSetGameStartAvailable(BOOL available) {
+    NSCAssert(NSThread.isMainThread, @"Game startup state belongs to main thread");
+    gameStartAvailable = available;
+    [settingsController updateServerReady];
+}
 void IDNativeSetServerReady(BOOL ready, NSString *status) {
+    IDNativeSetServerState(ready, NO, status);
+}
+void IDNativeSetServerState(BOOL ready, BOOL busy, NSString *status) {
     NSCAssert(NSThread.isMainThread, @"Launcher status belongs to the main thread");
-    serverReady = ready; serverReadyStatus = [status copy];
-    [launcherController updateServerReady];
+    serverReady = ready; serverBusy = busy;
+    serverAttempted = serverAttempted || ready || busy;
+    serverReadyStatus = [status copy];
+    [settingsController updateServerReady];
 }
 void IDNativeHideLauncher(void) {
     NSCAssert(NSThread.isMainThread, @"Launcher UI belongs to the main thread");
@@ -425,7 +572,7 @@ BOOL IDNativeLauncherVisible(void) {
     UIViewController *parent = presenter(); if (!parent) return;
     IDSettingsController *settings = [IDSettingsController new]; settingsController = settings;
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:settings];
-    navigation.modalPresentationStyle = UIModalPresentationFormSheet;
+    navigation.modalPresentationStyle = UIModalPresentationFullScreen;
     [parent presentViewController:navigation animated:YES completion:nil];
     navigation.presentationController.delegate = settings;
 }
@@ -447,7 +594,7 @@ BOOL IDNativeLauncherVisible(void) {
     if (objc_getAssociatedObject(window,key)) return;
     UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(open:)];
     gesture.name = @"idoly.server-menu-corner";
-    gesture.numberOfTouchesRequired = 1; gesture.minimumPressDuration = 3.0;
+    gesture.numberOfTouchesRequired = 1; gesture.minimumPressDuration = 2.0;
     gesture.allowableMovement = 12.0; gesture.delegate = self;
     // Short taps and normal drags go straight to Unity. Only a recognized hold
     // cancels its underlying touch, avoiding a stuck game control after opening.
@@ -478,6 +625,24 @@ void IDNativeEvent(NSString *json) {
     if (!atomic_load(&settingsVisible)) return;
     dispatch_async(dispatch_get_main_queue(), ^{ [settingsController event:json]; });
 }
+static UIAlertController *makeFailureAlert(NSString *message) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:localized(@"앱·게임 준비 실패")
+        message:localized(message) preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:localized(@"다시 시도") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        (void)action; IDNativeDismissFailure(); IdolyEmbeddedServerRetry();
+    }]];
+    return alert;
+}
+static void refreshFailureAlert(void) {
+    UIViewController *root = failureWindow.rootViewController;
+    if (!root || !pendingFailure) return;
+    void (^show)(void) = ^{
+        if (failureWindow.rootViewController == root && pendingFailure && !root.presentedViewController)
+            [root presentViewController:makeFailureAlert(pendingFailure) animated:NO completion:nil];
+    };
+    if (root.presentedViewController) [root dismissViewControllerAnimated:NO completion:show];
+    else show();
+}
 void IDNativeStartupFailure(NSString *message) {
     NSCAssert(NSThread.isMainThread, @"Startup UI belongs to main thread");
     pendingFailure = message;
@@ -489,12 +654,7 @@ void IDNativeStartupFailure(NSString *message) {
     failureWindow.windowLevel = UIWindowLevelAlert + 1; failureWindow.rootViewController = [UIViewController new];
     failureWindow.rootViewController.view.backgroundColor = UIColor.systemBackgroundColor;
     [failureWindow makeKeyAndVisible];
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"로컬 서버 시작 실패"
-        message:message preferredStyle:UIAlertControllerStyleAlert];
-    [alert addAction:[UIAlertAction actionWithTitle:@"다시 시도" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
-        (void)action; IDNativeDismissFailure(); IdolyEmbeddedServerRetry();
-    }]];
-    [failureWindow.rootViewController presentViewController:alert animated:YES completion:nil];
+    [failureWindow.rootViewController presentViewController:makeFailureAlert(message) animated:YES completion:nil];
 }
 void IDNativeDismissFailure(void) {
     NSCAssert(NSThread.isMainThread, @"Startup UI belongs to the main thread");

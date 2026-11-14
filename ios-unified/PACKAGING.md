@@ -34,7 +34,7 @@ python ios-unified/patch_load.py --source-ipa INPUTS/base.ipa --output PATCHED-U
 python ios-unified/package_unified.py --base-ipa INPUTS/base.ipa --patched-unity PATCHED-UNITY --runtime-root RUNTIME --native-framework NATIVE/IdolyEmbeddedServer.framework --server-data INPUTS/ServerData.zip --translations INPUTS/bundledTranslations.zip --source-commit EXACT_COMMIT --output Unified.ipa
 ```
 
-The package adds `LocalServer/ServerData.zip`, `bundledTranslations.zip`, verified selection metadata and local settings files. It preserves the client's identifier and protocol version; the display name is 아이프라 로컬 and CFBundleVersion is156.9102. File Sharing and opening Documents in place are enabled. The original small executable and SDK members remain byte-identical. The Unity comparison streams the entire input and patched file, permitting only the two load-command counters and the exact new command in previously zero header padding. No code or presentation gateways move.
+The package adds `LocalServer/ServerData.zip`, `bundledTranslations.zip`, verified selection metadata and local settings files. It preserves the client's identifier and protocol version; the display name is 아이프라 로컬 and CFBundleVersion is156.9103. File Sharing and opening Documents in place are enabled. The original small executable and SDK members remain byte-identical. The Unity comparison streams the entire input and patched file, permitting only the two load-command counters and the exact new command in previously zero header padding. No code or presentation gateways move.
 
 The explicit unified package capacity is600MiB compressed and1GiB expanded. Large files are streamed in64KiB chunks. All output members are read back through CRC/SHA verification before the owned partial is promoted. Existing output paths are preserved.
 
@@ -46,3 +46,6 @@ python ios-unified/build_probe.py --prepared-app Prepared.app --output Probe.app
 ```
 
 Stage-only mode supplies no executable or app Info.plist. It permits the explicitly unsigned native smoke framework; the probe builder must sign every copied framework and its own app before launch. Device IPA composition continues to require a signed embedded framework. Simulator host tests do not establish phone gameplay, FPS or PlayCover compatibility. The combined IPA still requires user sideload/PlayCover signing; no signing certificate or private account data is included.
+
+
+The multilingual package additionally includes LocalServer/client-languages.zip and its SHA-256 descriptor. The ZIP stores only the language-dependent serialized assets and native metadata, with a manifest binding every common/variant member to the pinned original and Korean-base IPA inputs. Build verification reconstructs and reuses all three complete Data bundles. The Simulator app receives the original base Data as non-executable files to exercise this preparation path; it never runs original device game code.

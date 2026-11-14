@@ -254,7 +254,7 @@ env.elements.get('language').value = 'en';
 env.elements.get('options-form').fire('change');
 env.elements.get('options-form').fire('submit');
 const options = env.posted.at(-1);
-assert.deepEqual(options, {id: options.id, action: 'save_options', media_mode: false, download_missing_resources: false, language: 'en'});
+assert.deepEqual(options, {id: options.id, action: 'save_options', media_mode: false, download_missing_resources: false, language: 'en', interface_language: 'system'});
 const saved = status();
 saved.options = {schema: 1, media_mode: false, download_missing_resources: false, language: 'en'};
 saved.restart_required = true;
@@ -379,3 +379,135 @@ def test_page_has_only_bundled_scripts_and_no_network_or_html_sinks() -> None:
     assert 'href="styles.css"' in html
     assert not any(value in javascript for value in ("innerHTML", "insertAdjacentHTML", "eval(", "fetch(", "XMLHttpRequest", "setInterval("))
     assert not any(value in html for value in ("https://", "http://", "<img", "onclick="))
+
+
+def test_graphics_presets_keep_custom_values_and_save_upper_supported_choices() -> None:
+    run_js(r"""
+const env = environment();
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+env.respond(env.posted[0], status());
+await flush();
+assert.equal(env.elements.get('render_scale').value, '1.234');
+assert.equal(env.elements.get('render_scale_preset').value, 'custom');
+assert.equal(env.elements.get('max_buffer_pixel').value, '2222');
+assert.equal(env.elements.get('max_buffer_pixel_preset').value, 'custom');
+env.elements.get('render_scale_preset').value = '2';
+env.elements.get('render_scale_preset').fire('change');
+env.elements.get('max_buffer_pixel_preset').value = '4096';
+env.elements.get('max_buffer_pixel_preset').fire('change');
+assert.equal(env.elements.get('render_scale').value, '2');
+assert.equal(env.elements.get('max_buffer_pixel').value, '4096');
+env.elements.get('presentation-form').fire('submit');
+const request = env.posted.at(-1);
+assert.equal(request.action, 'save_presentation');
+assert.equal(request.settings.render_scale, 2);
+assert.equal(request.settings.max_buffer_pixel, 4096);
+env.respond(request, status());
+await flush();
+env.elements.get('render_scale').value = '1.875';
+env.elements.get('render_scale').fire('input');
+assert.equal(env.elements.get('render_scale_preset').value, 'custom');
+env.elements.get('presentation-form').fire('submit');
+assert.equal(env.posted.at(-1).settings.render_scale, 1.875);
+app.dispose();
+""")
+
+
+def test_interface_language_is_available_before_ready_without_overwriting_game_options() -> None:
+    run_js(r"""
+const env = environment();
+env.scope.navigator = {language: 'en-US'};
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+assert.equal(env.elements.get('interface_language').disabled, false);
+assert.equal(env.elements.get('interface_language').value, 'system');
+env.elements.get('interface_language').value = 'ja';
+env.elements.get('interface_language').fire('change');
+assert.equal(env.posted.length, 1, 'Choosing the interface language sends no unready host mutation');
+env.respond(env.posted[0], status());
+await flush();
+assert.equal(env.elements.get('interface_language').value, 'ja');
+assert.equal(env.elements.get('language').value, 'ko');
+assert.equal(env.elements.get('media_mode').checked, true);
+assert.equal(env.elements.get('download_missing_resources').checked, true);
+env.elements.get('options-form').fire('submit');
+const request = env.posted.at(-1);
+assert.deepEqual(request, {id: request.id, action: 'save_options', media_mode: true,
+  download_missing_resources: true, language: 'ko', interface_language: 'ja'});
+const saved = status(); saved.options.interface_language = 'ja';
+env.respond(request, saved);
+await flush();
+assert.equal(env.elements.get('interface_language').value, 'ja');
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'ja'));
+app.dispose();
+""")
+
+
+def test_saved_interface_language_overrides_device_and_preserves_unsaved_graphics() -> None:
+    run_js(r"""
+const env = environment(); env.scope.navigator = {languages: ['ja-JP'], language: 'ja-JP'};
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const ready = status(); ready.options.interface_language = 'en';
+env.respond(env.posted[0], ready); await flush();
+assert.equal(env.elements.get('interface_language').value, 'en');
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'en'));
+env.elements.get('render_scale').value = '1.875';
+env.elements.get('render_scale').fire('input');
+env.elements.get('interface_language').value = 'ko';
+env.elements.get('interface_language').fire('change');
+assert.equal(env.elements.get('render_scale').value, '1.875');
+assert.equal(env.elements.get('server-state').textContent, '실행 중');
+assert.equal(env.elements.get('language').value, 'ko');
+assert.equal(env.posted.length, 1, 'Local UI switches do not implicitly change game language or graphics');
+app.dispose();
+assert.equal(api.resolveInterfaceLanguage('system', {languages: ['en-GB']}), 'en');
+assert.equal(api.resolveInterfaceLanguage('system', {language: 'ja_JP'}), 'ja');
+assert.equal(api.resolveInterfaceLanguage('system', {language: 'fr-FR'}), 'en');
+assert.equal(api.resolveInterfaceLanguage('ko', {language: 'en-US'}), 'ko');
+assert.equal(api.translateUI('<img src=x onerror=malicious>', 'ja'), '<img src=x onerror=malicious>');
+""")
+
+
+def test_structured_startup_error_keeps_its_message_visible() -> None:
+    run_js(r"""
+const env = environment(); const app = api.createSettingsApp(env.scope, env.document, env.timers);
+env.respond(env.posted[0], {state: 'failed', running: false, options: status().options,
+  runtime: null, last_error: {code: 'startup_failed', message: 'Local startup failed', type: 'ValueError'}});
+await flush();
+assert.equal(env.elements.get('server-summary').textContent, 'Local startup failed');
+app.dispose();
+""")
+
+
+def test_graphics_choices_match_native_supported_presets_and_numeric_quality_labels() -> None:
+    import re
+    html = (WEB / "index.html").read_text()
+    def choices(identifier):
+        body = re.search(r'<select id="' + identifier + r'"[^>]*>(.*?)</select>', html).group(1)
+        return re.findall(r'<option value="([^"]+)">([^<]+)</option>', body)
+    assert [value for value, _ in choices('render_scale_preset')] == ['0.25', '0.5', '0.75', '1', '1.25', '1.5', '2', 'custom']
+    assert [value for value, _ in choices('max_buffer_pixel_preset')] == ['720', '1080', '1440', '1920', '2560', '3840', '4096', 'custom']
+    for value, label in choices('quality'):
+        assert '(' + value + ')' in label
+    assert 'min="0.25" max="2"' in html and 'min="256" max="4096"' in html
+    assert [value for value, _ in choices('interface_language')] == ['system', 'ko', 'ja', 'en']
+
+
+def test_partial_native_startup_status_keeps_interface_choice_and_forms_disabled() -> None:
+    run_js(r"""
+const env = environment(); env.scope.navigator = {language: 'en-US'};
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+env.elements.get('interface_language').value = 'ja';
+env.elements.get('interface_language').fire('change');
+env.respond(env.posted[0], {state: 'starting', running: false, options: {}, runtime: {}, last_error: null});
+await flush();
+assert.equal(env.elements.get('interface_language').value, 'ja');
+assert.equal(env.elements.get('interface_language').disabled, false);
+for (const name of ['options', 'presentation', 'playback', 'media']) assert.equal(env.elements.get(name+'-fields').disabled, true);
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('준비 중', 'ja'));
+env.scope.idolyServerEvent({event: 'error', status: {state: 'failed', running: false, options: {}, runtime: {},
+  last_error: {code:'not_ready', message:'The native startup error remains readable'}}});
+assert.equal(env.elements.get('server-summary').textContent, 'The native startup error remains readable');
+assert.equal(env.elements.get('interface_language').value, 'ja');
+assert.equal(env.elements.get('resources-download').disabled, true);
+app.dispose();
+""")

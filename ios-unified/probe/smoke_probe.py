@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -46,6 +47,10 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "ready_launch_button_ambiguous", "ready_launch_button_disabled",
     "ready_launch_button_title_differs", "ready_launch_action_missing",
     "ready_launch_action_not_dispatched",
+    "early_status_correlation_failed", "server_not_ready_before_capture", "ready_capture_restarted_server",
+    "settings_menu_open_failed", "settings_menu_not_presented", "settings_menu_controls_or_layout_failed",
+    "settings_web_readiness_or_layout_failed", "settings_return_action_failed", "settings_menu_not_dismissed",
+    "final_report_write_failed",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
@@ -254,6 +259,10 @@ def validate_report(value):
             and all(type(status.get(key)) is int and status[key] == 1
                     for key in ("captured", "forwarded", "attempts")),
             "embedded_server_not_ready")
+    data = status.get("client_data")
+    require(type(data) is dict and data.get("selected") is True
+            and data.get("language") in ("ko", "ja", "en")
+            and data.get("bundle_identifier") == "local.idoly.client-data", "client_language_selection_failed")
     require(status.get("launch_requested") is True and status.get("launch_prepared") is True
             and status.get("launcher_visible") is False, "launcher_handoff_failed")
     launcher = value.get("launcher")
@@ -263,6 +272,17 @@ def validate_report(value):
             and launcher["premature_original_called"] == 0
             and launcher.get("premature_launch_requested") is False,
             "premature_launch_not_ignored")
+    early = value.get("early_status")
+    require(type(early) is dict and type(early.get("id")) is int and early["id"] == 2718
+            and early.get("ok") is True and early.get("state") == "starting" and early.get("running") is False
+            and type(early.get("phase")) is int and early["phase"] == 1
+            and type(early.get("captured")) is int and early["captured"] == 0
+            and early.get("completion_main_thread") is True, "early_status_correlation_failed")
+    require(type(launcher.get("premature_captured")) is int and launcher["premature_captured"] == 0
+            and launcher.get("server_ready_before_capture") is True
+            and type(launcher.get("uncaptured_original_called")) is int and launcher["uncaptured_original_called"] == 0
+            and type(launcher.get("uncaptured_attempts")) is int and launcher["uncaptured_attempts"] == 1
+            and launcher.get("capture_after_ready_once") is True, "server_not_ready_before_capture")
     require(type(launcher.get("ready_phase")) is int and launcher["ready_phase"] == 2
             and type(launcher.get("ready_original_called")) is int and launcher["ready_original_called"] == 0
             and launcher.get("ready_launch_requested") is False
@@ -273,7 +293,7 @@ def validate_report(value):
             "unity_started_before_launch_button")
     require(launcher.get("ready_launcher_visible") is True and launcher.get("ready_button_found") is True
             and launcher.get("ready_button_enabled") is True
-            and launcher.get("ready_button_title") == "게임 시작", "ready_launch_control_failed")
+            and launcher.get("ready_button_title") in ("게임 시작", "ゲーム開始", "Start Game"), "ready_launch_control_failed")
     require(launcher.get("button_action_dispatched") is True
             and type(launcher.get("button_dispatch_count")) is int and launcher["button_dispatch_count"] == 1
             and launcher.get("duplicate_launch_called") is True
@@ -284,7 +304,7 @@ def validate_report(value):
             and corner.get("recognizer_name") == "idoly.server-menu-corner"
             and type(corner.get("one_finger_count")) is int and corner["one_finger_count"] == 1
             and type(corner.get("three_finger_count")) is int and corner["three_finger_count"] == 0
-            and type(corner.get("minimum_press_seconds")) in (int, float) and corner["minimum_press_seconds"] == 3.0
+            and type(corner.get("minimum_press_seconds")) in (int, float) and corner["minimum_press_seconds"] == 2.0
             and type(corner.get("allowable_movement_points")) in (int, float) and corner["allowable_movement_points"] == 12.0
             and corner.get("delegate_present") is True and corner.get("delays_touches_began") is False
             and corner.get("delays_touches_ended") is False and corner.get("cancels_touches_in_view") is True,
@@ -311,14 +331,43 @@ def validate_report(value):
     require(type(runtime) is dict and runtime.get("running") is True
             and runtime.get("grpc_address") == "127.0.0.1:50051"
             and runtime.get("asset_url") == "http://127.0.0.1:8080", "python_host_listeners_differ")
+    menu = value.get("menu_lifetime")
+    require(type(menu) is dict and all(menu.get(key) is True for key in (
+        "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
+        "server_control_found", "server_control_disabled_while_running",
+        "return_action_dispatched", "dismissed", "game_window_key_after_close", "status_completion_main_thread",
+        "grpc_connected_after_close", "assets_connected_after_close")), "settings_menu_lifetime_failed")
+    width, window_width = menu.get("frame_width"), menu.get("window_width")
+    require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
+            and abs(width - window_width) <= 2, "settings_menu_width_failed")
+    web = menu.get("web")
+    require(type(web) is dict and all(web.get(key) is True for key in (
+        "web_found", "evaluation_succeeded", "ready", "forms_present", "scale_2_present", "buffer_4096_present",
+        "no_horizontal_overflow")) and web.get("timed_out") is False, "settings_web_readiness_or_layout_failed")
+    viewport, content = web.get("viewport_width"), web.get("content_width")
+    require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (viewport, content))
+            and content <= viewport + 2 and type(web.get("select_count")) is int and 4 <= web["select_count"] <= 100,
+            "settings_web_metrics_failed")
+    after = menu.get("host_status_after_close")
+    after_result = after.get("result") if type(after) is dict else None
+    after_runtime = after_result.get("runtime") if type(after_result) is dict else None
+    require(type(after) is dict and type(after.get("id")) is int and after["id"] == 2 and after.get("ok") is True
+            and type(after_result) is dict and after_result.get("state") == "ready"
+            and after_result.get("running") is True and after_result.get("last_error") is None
+            and type(after_runtime) is dict and after_runtime.get("running") is True
+            and after_runtime.get("grpc_address") == "127.0.0.1:50051"
+            and after_runtime.get("asset_url") == "http://127.0.0.1:8080", "server_stopped_after_menu_close")
     # Copy only public, explicitly checked fields into the audit.
     return {"schema": 1, "original_called": 1, "main_thread": True,
             "application_argument_matches": True, "command_completion_main_thread": True,
             "crypto_completion_main_thread": True,
             "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
                               "invalid_iv_rejected": True, "worker_main_thread": False},
+            "early_status": {key: early[key] for key in (
+                "id", "ok", "state", "running", "phase", "captured", "completion_main_thread")},
             "launcher": {key: launcher[key] for key in (
-                "premature_phase", "premature_original_called", "premature_launch_requested",
+                "premature_phase", "premature_original_called", "premature_launch_requested", "premature_captured",
+                "server_ready_before_capture", "uncaptured_original_called", "uncaptured_attempts", "capture_after_ready_once",
                 "ready_phase", "ready_original_called", "ready_launch_requested", "ready_launch_prepared",
                 "ready_observations", "ready_wait_seconds", "ready_launcher_visible", "ready_button_found",
                 "ready_button_enabled", "ready_button_title", "button_action_dispatched",
@@ -327,9 +376,20 @@ def validate_report(value):
                 "game_window_key", "matching_count", "recognizer_name", "one_finger_count", "three_finger_count", "minimum_press_seconds",
                 "allowable_movement_points", "delegate_present", "delays_touches_began",
                 "delays_touches_ended", "cancels_touches_in_view")},
-            "server_status": {key: status[key] for key in
+            "server_status": {**{key: status[key] for key in
                 ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts",
                  "launch_requested", "launch_prepared", "launcher_visible")},
+                 "client_data":{key: data[key] for key in ("selected", "language", "bundle_identifier")}},
+            "menu_lifetime": {**{key: menu[key] for key in (
+                "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
+                "server_control_found", "server_control_disabled_while_running",
+                "return_action_dispatched", "dismissed", "game_window_key_after_close", "status_completion_main_thread",
+                "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
+                "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
+                    "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
+                    "viewport_width", "content_width", "select_count")},
+                "host_status_after_close": {"id":2,"ok":True,"result":{"state":"ready","running":True,
+                    "runtime":{key:after_runtime[key] for key in ("running","grpc_address","asset_url")}}}},
             "ports": {key: ports[key] for key in ("grpc", "assets", "grpc_connect", "assets_connect")},
             "commoncrypto": {"nist_aes128_cbc": True, "nist_aes256_cbc": True},
             "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
@@ -368,6 +428,11 @@ def wait_report(container, remaining):
                 raise ProbeError(failure)
             status = waiting_value.get("server_status")
             require(type(status) is dict, "invalid_waiting_status")
+            if status.get("game_error") is not None:
+                error = ProbeError("native_game_preparation_failed")
+                detail = status.get("game_error")
+                if isinstance(detail, str): error.native_detail = detail[:2000]
+                raise error
             if status.get("phase") == 3 or status.get("error") is not None:
                 error = ProbeError("native_startup_failed")
                 # This fresh probe contains only the pinned public payload.

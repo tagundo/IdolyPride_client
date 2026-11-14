@@ -27,7 +27,7 @@ RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-18-5"
 
 
 def native_report():
-    return {"schema": 1, "original_called": 1, "main_thread": True,
+    report = {"schema": 1, "original_called": 1, "main_thread": True,
             "application_argument_matches": True, "command_completion_main_thread": True,
             "crypto_completion_main_thread": True,
             "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
@@ -35,7 +35,8 @@ def native_report():
             "server_status": {"schema": 1, "hook_installed": True, "phase": 4,
                               "captured": 1, "forwarded": 1, "attempts": 1,
                               "python_initialized": True, "error": None,
-                              "launch_requested": True, "launch_prepared": True, "launcher_visible": False},
+                              "launch_requested": True, "launch_prepared": True, "launcher_visible": False,
+                              "client_data": {"selected": True, "language": "ko", "bundle_identifier": "local.idoly.client-data"}},
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
                 "premature_launch_requested": False, "ready_phase": 2, "ready_original_called": 0,
                 "ready_launch_requested": False, "ready_launch_prepared": False,
@@ -46,7 +47,7 @@ def native_report():
                 "duplicate_launch_called": True, "forwarded_after_button": True},
             "corner_gesture": {"game_window_key": True, "matching_count": 1,
                 "recognizer_name": "idoly.server-menu-corner", "one_finger_count": 1, "three_finger_count": 0,
-                "minimum_press_seconds": 3.0, "allowable_movement_points": 12.0, "delegate_present": True,
+                "minimum_press_seconds": 2.0, "allowable_movement_points": 12.0, "delegate_present": True,
                 "delays_touches_began": False, "delays_touches_ended": False, "cancels_touches_in_view": True},
             "ports": {"grpc": 50051, "assets": 8080,
                       "grpc_connect": True, "assets_connect": True},
@@ -54,6 +55,56 @@ def native_report():
             "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
                 "last_error": None, "runtime": {"running": True, "grpc_address": "127.0.0.1:50051",
                                                 "asset_url": "http://127.0.0.1:8080"}}}}
+    report["early_status"] = {"id":2718,"ok":True,"state":"starting","running":False,
+                              "phase":1,"captured":0,"completion_main_thread":True}
+    report["launcher"].update(premature_captured=0,server_ready_before_capture=True,
+        uncaptured_original_called=0,uncaptured_attempts=1,capture_after_ready_once=True)
+    report["menu_lifetime"] = {"opened_via_owned_menu_target":True,"full_screen":True,
+        "frame_width_matches":True,"frame_width":393.0,"window_width":393.0,"return_button_found":True,
+        "server_control_found":True,"server_control_disabled_while_running":True,
+        "return_action_dispatched":True,"dismissed":True,"game_window_key_after_close":True,
+        "status_completion_main_thread":True,"grpc_connected_after_close":True,"assets_connected_after_close":True,
+        "web":{"web_found":True,"evaluation_succeeded":True,"ready":True,"forms_present":True,
+               "scale_2_present":True,"buffer_4096_present":True,"no_horizontal_overflow":True,
+               "timed_out":False,"viewport_width":393,"content_width":393,"select_count":14},
+        "host_status_after_close":{"id":2,"ok":True,"result":{"state":"ready","running":True,
+               "last_error":None,"runtime":{"running":True,"grpc_address":"127.0.0.1:50051",
+                                              "asset_url":"http://127.0.0.1:8080"}}}}
+    return report
+
+
+@pytest.mark.parametrize("path,replacement,code", [
+    (("early_status", "id"), 2719, "early_status_correlation_failed"),
+    (("early_status", "captured"), 1, "early_status_correlation_failed"),
+    (("launcher", "server_ready_before_capture"), False, "server_not_ready_before_capture"),
+    (("launcher", "uncaptured_attempts"), 2, "server_not_ready_before_capture"),
+    (("menu_lifetime", "dismissed"), False, "settings_menu_lifetime_failed"),
+    (("menu_lifetime", "grpc_connected_after_close"), False, "settings_menu_lifetime_failed"),
+    (("menu_lifetime", "host_status_after_close", "result", "running"), False, "server_stopped_after_menu_close"),
+    (("menu_lifetime", "frame_width"), 250, "settings_menu_width_failed"),
+    (("menu_lifetime", "web", "scale_2_present"), False, "settings_web_readiness_or_layout_failed"),
+    (("menu_lifetime", "web", "buffer_4096_present"), False, "settings_web_readiness_or_layout_failed"),
+    (("menu_lifetime", "web", "content_width"), 500, "settings_web_metrics_failed"),
+])
+def test_autostart_before_capture_and_menu_survival_are_required(path, replacement, code):
+    observed = native_report()
+    target = observed
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = replacement
+    with pytest.raises(probe.ProbeError, match=code):
+        probe.validate_report(observed)
+
+
+def test_new_flow_audit_discards_unrecognized_native_values():
+    observed = native_report()
+    observed["server_status"]["client_data"]["unrecognized_payload"] = "must-not-export"
+    observed["menu_lifetime"]["unrecognized_payload"] = "must-not-export"
+    result = probe.validate_report(observed)
+    assert result["launcher"]["server_ready_before_capture"] is True
+    assert result["early_status"]["id"] == 2718
+    assert result["menu_lifetime"]["host_status_after_close"]["result"]["running"] is True
+    assert "must-not-export" not in json.dumps(result)
 
 
 def public_descriptor():
@@ -907,3 +958,12 @@ def test_cold_boot_keeps_overall_deadline_and_does_not_hide_other_failures(monke
     monkeypatch.setattr(probe, "_simctl", mock.Mock(side_effect=probe.ProbeError("simctl_failed")))
     with pytest.raises(probe.ProbeError, match="simctl_failed"):
         probe.boot_created_simulator(CREATED, lambda: 60)
+
+
+def test_game_data_failure_ends_wait_without_waiting_for_server_timeout(tmp_path):
+    documents = tmp_path / "Documents"; documents.mkdir()
+    (documents / "embedded-probe-status.json").write_text(json.dumps({
+        "schema": 1, "server_status": {"phase": 2, "error": None, "game_error": "public fixture error"}}))
+    with pytest.raises(probe.ProbeError, match="native_game_preparation_failed") as caught:
+        probe.wait_report(tmp_path, lambda: 1)
+    assert caught.value.native_detail == "public fixture error"

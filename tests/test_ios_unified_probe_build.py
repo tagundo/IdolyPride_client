@@ -136,3 +136,20 @@ def test_linux_build_cannot_claim_an_apple_binary(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="macOS/Xcode"):
         builder.build(app, tmp_path / "Probe.app", arch="arm64")
     assert not (tmp_path / "Probe.app").exists()
+
+
+def test_language_probe_copies_original_data_as_nonexecutable_without_game_binary(tmp_path):
+    app=prepared(tmp_path)
+    for name in ('client-languages.zip','client-languages.json'):(app/'LocalServer'/name).write_bytes(b'fixture')
+    path=app/'Data/Managed/Metadata/global-metadata.dat';path.parent.mkdir(parents=True);path.write_bytes(b'data only');path.chmod(0o644)
+    files,_=builder.collect_layout(app)
+    assert 'Data/Managed/Metadata/global-metadata.dat' in {row[0] for row in files}
+    path.chmod(0o755)
+    with pytest.raises(ValueError,match='nonexecutable'):builder.collect_layout(app)
+
+
+def test_language_probe_rejects_missing_base_data_before_build(tmp_path):
+    app=prepared(tmp_path)
+    (app/'LocalServer/client-languages.zip').write_bytes(b'fixture')
+    with pytest.raises(ValueError,match='requires the original nonexecutable Data tree'):
+        builder.collect_layout(app)

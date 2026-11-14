@@ -21,7 +21,7 @@ from packaging_common import audit_frameworks, audit_macho, regular, require, sa
 HERE = Path(__file__).resolve().parent
 BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
 EXECUTABLE = "IdolyEmbeddedProbe"
-LAYOUT = ("Frameworks", "python-stdlib", "LocalServer")
+LAYOUT = ("Frameworks", "python-stdlib", "LocalServer", "Data")
 MAX_TOTAL = 1024 * 1024**2
 MAX_FILE = 256 * 1024**2
 MAX_FILES = 30000
@@ -42,6 +42,11 @@ def collect_layout(prepared):
     total = 0
     for name in LAYOUT:
         base = prepared / name
+        if name == "Data" and not base.exists() and not base.is_symlink():
+            require(not (prepared / "LocalServer/client-languages.zip").exists()
+                    and not (prepared / "LocalServer/client-languages.json").exists(),
+                    "Client-language probe requires the original nonexecutable Data tree")
+            continue  # Legacy synthetic core-only fixtures have no game Data.
         require(base.is_dir() and not base.is_symlink(), "Prepared Simulator runtime layout missing")
         for root, directories, names in os.walk(base, followlinks=False):
             for directory in directories:
@@ -51,6 +56,7 @@ def collect_layout(prepared):
                 relative = source.relative_to(prepared).as_posix()
                 safe_name(relative)
                 info = regular(source)
+                if name == "Data": require(not info.st_mode & 0o111, "Probe Data must be nonexecutable")
                 require(info.st_size <= MAX_FILE, "Prepared runtime member exceeds bound")
                 total += info.st_size
                 require(total <= MAX_TOTAL and len(files) < MAX_FILES, "Prepared runtime exceeds its bound")
@@ -86,7 +92,7 @@ def clang_command(compiler, sdk, output, arch):
             "-fobjc-arc", "-fblocks", "-O2", "-Wall", "-Wextra", "-Werror",
             "-Wno-deprecated-declarations", "-I", str(HERE / "native"),
             "-F", str(Path(output) / "Frameworks"), "-framework", "IdolyEmbeddedServer",
-            "-framework", "Foundation", "-framework", "UIKit", "-Wl,-headerpad_max_install_names",
+            "-framework", "Foundation", "-framework", "UIKit", "-framework", "WebKit", "-Wl,-headerpad_max_install_names",
             "-Wl,-rpath,@executable_path/Frameworks", str(HERE / "probe/main.m"),
             "-o", str(Path(output) / EXECUTABLE)]
 
@@ -148,7 +154,9 @@ def build(prepared, output, *, arch, report_path=None):
                   "source_sha256": source_pins, "copied_input_sha256": copied,
                   "framework_inputs": framework_inputs, "framework_outputs": framework_outputs,
                   "executable": executable, "clang_command": command,
-                  "original_game_used_or_modified": False, "phone_or_PlayCover_gameplay_verified": False}
+                  "original_game_executable_used_or_modified": False,
+                  "original_game_Data_copied_as_nonexecutable": any(name.startswith("Data/") for name in copied),
+                  "phone_or_PlayCover_gameplay_verified": False}
         report_path.parent.mkdir(parents=True, exist_ok=True)
         with report_path.open("x") as stream:
             json.dump(result, stream, indent=2); stream.write("\n")

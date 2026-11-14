@@ -63,6 +63,14 @@ def main():
     env.update(simulator_sdk=sdk, selected_simulator_runtime=selected_runtime)
     (output / "build-environment.json").write_text(json.dumps(env, indent=2) + "\n")
     run(python, "-B", HERE / "native/test_mac_menu.py", "--report", output / "mac-menu-test.json")
+    run(python, "-B", HERE / "native/test_client_data.py", "--report", output / "client-data-native-test.json")
+    client_languages = work / "client-languages.zip"
+    run(python, "-B", HERE.parent / "tools/build_ios_client_languages.py",
+        "--stock-ipa", inputs / "stock.ipa", "--base-ipa", inputs / "base.ipa",
+        "--english-csv", inputs / "en.csv", "--english-proof", inputs / "en-report.json",
+        "--output", client_languages, "--report", output / "client-languages-build.json")
+    client_descriptor = client_languages.with_suffix(".json")
+    (output / "client-languages.json").write_bytes(client_descriptor.read_bytes())
 
     def prepare(target, architecture):
         runtime = work / (target + "-runtime")
@@ -94,8 +102,9 @@ def main():
     framework = compile_native(runtime, "device", "arm64")
     unity = work / "UnityFramework"
     run(python, "-B", HERE / "patch_load.py", "--source-ipa", inputs / "base.ipa", "--output", unity)
-    ipa = output / "IdolyPride-6.1.1-Unified-iOS-ko.ipa"
-    common = ["--server-data", inputs / "ServerData.zip", "--translations", inputs / "bundledTranslations.zip"]
+    ipa = output / "IdolyPride-6.1.1-Unified-iOS.ipa"
+    common = ["--server-data", inputs / "ServerData.zip", "--translations", inputs / "bundledTranslations.zip",
+              "--client-languages", client_languages, "--client-languages-metadata", client_descriptor]
     run(python, "-B", HERE / "package_unified.py", "--runtime-root", runtime,
         "--native-framework", framework, *common, "--output", ipa,
         "--base-ipa", inputs / "base.ipa", "--patched-unity", unity, "--source-commit", args.source_commit)
@@ -108,7 +117,10 @@ def main():
     simframework = compile_native(simruntime, "simulator", arch)
     prepared, probe = work / "Prepared.app", work / "Probe.app"
     run(python, "-B", HERE / "package_unified.py", "--stage-only", "--target", "simulator",
-        "--runtime-root", simruntime, "--native-framework", simframework, *common, "--output", prepared)
+        "--runtime-root", simruntime, "--native-framework", simframework, *common,
+        "--base-ipa", inputs / "base.ipa", "--output", prepared)
+    run(python, "-B", HERE / "verify_client_languages.py", "--prepared-app", prepared,
+        "--work", work / "client-language-check", "--report", output / "client-language-runtime-check.json")
     run(python, "-B", HERE / "build_probe.py", "--prepared-app", prepared, "--output", probe, "--arch", arch)
     run(python, "-B", HERE / "probe/smoke_probe.py", "--app", probe,
         "--runtime", selected_runtime, "--timeout", "600", "--audit", output / "simulator-smoke.json")
@@ -122,8 +134,10 @@ def main():
     (output / "README.txt").write_text(
         "IdolyPride integrated iPhone/iPad IPA (prototype)\n"
         "Sign this IPA with your iOS sideloading method before installing.\n"
-        "The app opens the server menu first. Press 게임 시작 after the server is ready.\n"
-        "While playing, hold the upper-right corner for three seconds to reopen the server menu.\n"
+        "The app opens the server menu first. Start the server, choose the game language, then press 게임 시작.\n"
+        "Japanese, Korean and English client Data is prepared before Unity starts; no per-frame text replacement.\n"
+        "Missing translations and untranslated images retain the original content.\n"
+        "While playing, hold the upper-right corner for two seconds to reopen the server menu.\n"
         "Mac/PlayCover: app menu > 로컬 서버 설정… (Command+Shift+,).\n"
         "Resource files: Files > On My iPhone/iPad > 아이프라 로컬 > IdolyPride.\n"
         "The real iOS server framework compiled and a disposable Simulator core probe passed.\n"

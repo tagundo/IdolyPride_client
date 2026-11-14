@@ -8,7 +8,7 @@ import plistlib
 import struct
 import sys
 import tarfile
-from zipfile import ZipFile
+from zipfile import ZipFile, ZipInfo
 import pytest
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'ios-unified'))
@@ -123,7 +123,7 @@ def test_full_small_package_preserves_original_main_and_sdk(tmp_path):
     assert report['original_SDK_members_unchanged'] and report['max_stream_chunk_bytes']==65536 and not report['actual_device_or_PlayCover_execution']
     with ZipFile(out) as z:
         assert z.read('Payload/Game.app/Main')==b'ORIGINAL MAIN' and z.read('Payload/Game.app/Frameworks/SDK.framework/SDK')==b'ORIGINAL SDK'
-        metadata=plistlib.loads(z.read('Payload/Game.app/Info.plist')); assert metadata['UIFileSharingEnabled'] is True and metadata['CFBundleVersion']=='156.9102' and metadata['CFBundleDisplayName']=='아이프라 로컬' and metadata['CFBundleIdentifier']=='game.original'
+        metadata=plistlib.loads(z.read('Payload/Game.app/Info.plist')); assert metadata['UIFileSharingEnabled'] is True and metadata['CFBundleVersion']=='156.9103' and metadata['CFBundleDisplayName']=='아이프라 로컬' and metadata['CFBundleIdentifier']=='game.original'
         assert z.read('Payload/Game.app/LocalServer/ServerData.zip')==b'public-data'
 
 def test_simulator_stage_needs_no_game_but_never_device_package(tmp_path):
@@ -161,3 +161,155 @@ def test_python_plist_normalization_never_substitutes_for_binary_platform_and_ar
     path=framework(tmp_path,'Python',target=actual_target);info_path=path/'Info.plist';before=info_path.read_bytes()
     with pytest.raises(ValueError):runtime.normalize_python_framework_metadata(path,requested_target,expected_architectures)
     assert info_path.read_bytes()==before
+
+
+def language_package_fixture(tmp_path, target='device'):
+    values = package_fixture(tmp_path, target)
+    root,nat,data,trans,source,replacement,manifest,web = values
+    base_data = {'Data/sharedassets0.assets': b'common-fonts',
+                 'Data/resources.assets': b'Korean UI',
+                 'Data/Managed/Metadata/global-metadata.dat': b'Korean metadata'}
+    with ZipFile(source,'a') as z:
+        for name, raw in base_data.items(): z.writestr('Payload/Game.app/'+name, raw)
+    manifest['inputs']['base_ipa'] = {'bytes':source.stat().st_size, 'sha256':sha(source.read_bytes())}
+    manifest['inputs']['stock_ipa'] = {'sha256':'a'*64}
+    manifest['inputs']['english_ui'] = {'sha256':'b'*64}
+    common = {'Data/sharedassets0.assets': {'bytes':len(base_data['Data/sharedassets0.assets']), 'sha256':sha(base_data['Data/sharedassets0.assets'])}}
+    overlays = ('Data/resources.assets','Data/Managed/Metadata/global-metadata.dat')
+    languages = {'ko':{name:{'bytes':len(base_data[name]), 'sha256':sha(base_data[name]),'source':'base'} for name in overlays}}
+    archive_data = {}
+    for code in ('ja','en'):
+        languages[code] = {}
+        for name in overlays:
+            raw = (code+':'+name).encode();member=code+'/'+name;archive_data[member]=raw
+            languages[code][name]={'bytes':len(raw),'sha256':sha(raw),'source':'archive','member':member}
+    language = {'schema':1,'policy':'ios-prebuilt-client-data-v1','bundle_id':'local.idoly.client-data',
+                'common':common,'languages':languages,'source':{'stock_ipa_sha256':'a'*64,
+                'base_ipa_sha256':manifest['inputs']['base_ipa']['sha256'],'english_ui_sha256':'b'*64}}
+    client_zip=tmp_path/'client-languages.zip'
+    with ZipFile(client_zip,'w') as z:
+        for name, raw in archive_data.items():z.writestr(name,raw)
+        z.writestr('manifest.json',json.dumps(language))
+    descriptor=tmp_path/'client-languages.json'
+    descriptor.write_text(json.dumps({'schema':1,'bytes':client_zip.stat().st_size,'sha256':sha(client_zip.read_bytes())}))
+    return values,client_zip,descriptor,language,base_data
+
+
+def rewrite_language_archive(path, descriptor, replacement):
+    with ZipFile(path) as z: contents={i.filename:z.read(i) for i in z.infolist()}
+    replacement(contents)
+    with ZipFile(path,'w') as z:
+        for name,raw in contents.items():z.writestr(name,raw)
+    descriptor.write_text(json.dumps({'schema':1,'bytes':path.stat().st_size,'sha256':sha(path.read_bytes())}))
+
+
+def test_device_package_contains_three_language_data_without_changing_base_data(tmp_path):
+    values,client_zip,descriptor,language,base_data=language_package_fixture(tmp_path)
+    root,nat,data,trans,source,replacement,manifest,web=values
+    out=tmp_path/'unified.ipa'
+    report=package.package(source,replacement,root,nat,data,trans,out,source_commit='c'*40,
+                           manifest=manifest,web_root=web,client_languages=client_zip,client_languages_metadata=descriptor)
+    assert set(report['client_languages']['manifest']['languages'])=={'ja','ko','en'}
+    assert report['client_languages']['descriptor']['sha256']==sha(client_zip.read_bytes())
+    with ZipFile(out) as z:
+        assert z.read('Payload/Game.app/LocalServer/client-languages.zip')==client_zip.read_bytes()
+        assert z.read('Payload/Game.app/LocalServer/client-languages.json')==descriptor.read_bytes()
+        for name,raw in base_data.items():assert z.read('Payload/Game.app/'+name)==raw
+        assert z.read('Payload/Game.app/Main')==b'ORIGINAL MAIN'
+
+
+def test_simulator_stage_copies_full_data_nonexecutable_and_actual_worker_prepares_english(tmp_path):
+    from idoly_local.ios_client_data import prepare_client_data
+    values,client_zip,descriptor,language,base_data=language_package_fixture(tmp_path,'simulator')
+    root,nat,data,trans,source,replacement,manifest,web=values
+    out=tmp_path/'Prepared.app'
+    report=package.stage_app(root,nat,data,trans,out,manifest=manifest,web_root=web,base_ipa=source,
+                             client_languages=client_zip,client_languages_metadata=descriptor)
+    assert report['base_Data']['files']==len(base_data) and report['base_Data']['nonexecutable_data_only'] is True
+    assert {str(p.relative_to(out)) for p in (out/'Data').rglob('*') if p.is_file()}==set(base_data)
+    for name,raw in base_data.items():
+        assert (out/name).read_bytes()==raw and (out/name).stat().st_mode&0o777==0o644
+    assert not (out/'Main').exists() and not (out/'Frameworks/SDK.framework/SDK').exists()
+    (tmp_path/'state').mkdir()
+    prepared=prepare_client_data(out,tmp_path/'state','en')
+    result=Path(prepared['bundle_path'])
+    assert (result/'Data/resources.assets').read_bytes()==b'en:Data/resources.assets'
+    assert (result/'Data/sharedassets0.assets').read_bytes()==b'common-fonts'
+    assert (out/'Data/resources.assets').read_bytes()==b'Korean UI'
+
+
+def test_real_manifest_requires_language_package_and_matching_source_pins(tmp_path):
+    values,client_zip,descriptor,language,_=language_package_fixture(tmp_path)
+    manifest=values[6]
+    with pytest.raises(ValueError,match='package is required'):package.client_language_files(None,None,manifest)
+    with pytest.raises(ValueError,match='both required'):package.client_language_files(client_zip,None,manifest)
+    manifest['inputs']['stock_ipa']['sha256']='d'*64
+    with pytest.raises(ValueError,match='source pin'):package.client_language_files(client_zip,descriptor,manifest)
+
+
+@pytest.mark.parametrize('mutation',[lambda row:row.update(bytes=True),lambda row:row.update(bytes=1),
+    lambda row:row.update(sha256='x'*64),lambda row:row.update(extra='untrusted'),lambda row:row.update(schema=True)])
+def test_language_outer_descriptor_is_strict_and_hash_bound(tmp_path,mutation):
+    values,client_zip,descriptor,_,_=language_package_fixture(tmp_path)
+    row=json.loads(descriptor.read_text());mutation(row);descriptor.write_text(json.dumps(row))
+    with pytest.raises(ValueError):package.client_language_files(client_zip,descriptor,values[6])
+
+
+@pytest.mark.parametrize('extra',['../outside','en/Data/unexpected.assets'])
+def test_language_archive_rejects_extra_or_traversing_member(tmp_path,extra):
+    values,client_zip,descriptor,_,_=language_package_fixture(tmp_path)
+    rewrite_language_archive(client_zip,descriptor,lambda data:data.update({extra:b'not selected'}))
+    with pytest.raises(ValueError,match='inventory'):package.client_language_files(client_zip,descriptor,values[6])
+
+
+def test_language_descriptor_and_baseline_data_cannot_be_symlinks_or_missing(tmp_path):
+    values,client_zip,descriptor,_,_=language_package_fixture(tmp_path,'simulator')
+    root,nat,data,trans,source,replacement,manifest,web=values
+    link=tmp_path/'descriptor-link.json';link.symlink_to(descriptor)
+    with pytest.raises(ValueError,match='non-symlink'):package.client_language_files(client_zip,link,manifest)
+    with pytest.raises(ValueError,match='requires the pinned base IPA Data'):
+        package.stage_app(root,nat,data,trans,tmp_path/'Missing.app',manifest=manifest,web_root=web,
+                           client_languages=client_zip,client_languages_metadata=descriptor)
+
+
+def test_device_language_manifest_common_hash_must_match_original_data(tmp_path):
+    values,client_zip,descriptor,_,_=language_package_fixture(tmp_path)
+    def wrong_common(contents):
+        value=json.loads(contents['manifest.json']);value['common']['Data/sharedassets0.assets']['sha256']='c'*64
+        contents['manifest.json']=json.dumps(value).encode()
+    rewrite_language_archive(client_zip,descriptor,wrong_common)
+    root,nat,data,trans,source,replacement,manifest,web=values
+    with pytest.raises(ValueError,match='Base Data SHA'):
+        package.package(source,replacement,root,nat,data,trans,tmp_path/'unified.ipa',source_commit='c'*40,
+                        manifest=manifest,web_root=web,client_languages=client_zip,client_languages_metadata=descriptor)
+
+
+def test_language_archive_rejects_executable_data_permission(tmp_path):
+    values,client_zip,descriptor,_,_=language_package_fixture(tmp_path)
+    with ZipFile(client_zip) as z:contents={i.filename:z.read(i) for i in z.infolist()}
+    with ZipFile(client_zip,'w') as z:
+        for name,raw in contents.items():
+            info=ZipInfo(name);info.external_attr=0o100755<<16 if name.startswith('en/') else 0o100644<<16
+            z.writestr(info,raw)
+    descriptor.write_text(json.dumps({'schema':1,'bytes':client_zip.stat().st_size,'sha256':sha(client_zip.read_bytes())}))
+    with pytest.raises(ValueError,match='nonexecutable data'):package.client_language_files(client_zip,descriptor,values[6])
+
+
+def test_all_language_resource_verifier_reconstructs_and_reuses_each_variant(tmp_path):
+    import importlib.util
+    tool=Path(__file__).resolve().parents[1]/'ios-unified/verify_client_languages.py'
+    spec=importlib.util.spec_from_file_location('client_language_verifier_test',tool)
+    verifier=importlib.util.module_from_spec(spec);spec.loader.exec_module(verifier)
+    values,client_zip,descriptor,language,base_data=language_package_fixture(tmp_path,'simulator')
+    root,nat,data,trans,source,replacement,manifest,web=values
+    out=tmp_path/'Prepared.app'
+    package.stage_app(root,nat,data,trans,out,manifest=manifest,web_root=web,base_ipa=source,
+                      client_languages=client_zip,client_languages_metadata=descriptor)
+    report=verifier.verify(out,tmp_path/'verification',expected_sources=language['source'])
+    assert report['status']=='PASS' and report['Unity_executed'] is False
+    assert [r['language'] for r in report['languages']]==['ja','ko','en']
+    assert all(r['files']==3 and r['second_reused'] is True for r in report['languages'])
+    assert str(tmp_path) not in json.dumps(report)
+    assert all((out/name).read_bytes()==raw for name,raw in base_data.items())
+    with pytest.raises(ValueError,match='Fresh absolute'):
+        verifier.verify(out,tmp_path/'verification',expected_sources=language['source'])

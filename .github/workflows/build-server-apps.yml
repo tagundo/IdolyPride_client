@@ -1126,8 +1126,11 @@ jobs:
     if: ${{ inputs.ios_unified }}
     runs-on: macos-15
     timeout-minutes: 40
+    # GitHub requires contents:write to read the pinned original IPA from its
+    # unpublished input release. Only the fetch step receives GH_TOKEN; no
+    # release or source mutation is performed by this job.
     permissions:
-      contents: read
+      contents: write
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
@@ -1140,7 +1143,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Fetch exact public runtime, game and server-data inputs
+      - name: Fetch SHA-pinned runtime, original game and server-data inputs
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 -B ios-unified/fetch_inputs.py --output "$RUNNER_TEMP/idoly-unified-inputs"

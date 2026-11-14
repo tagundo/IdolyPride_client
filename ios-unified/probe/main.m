@@ -1,11 +1,13 @@
 // Simulator-only UIKit host. This fake Unity class never enters a game IPA.
 #import <UIKit/UIKit.h>
+#import <WebKit/WebKit.h>
 #import "IdolyEmbeddedServer.h"
 #import <CommonCrypto/CommonCryptor.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <math.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -46,18 +48,25 @@ static BOOL ProbeWrite(NSString *name, NSDictionary *value) {
     return [raw writeToURL:[documents URLByAppendingPathComponent:name] options:NSDataWritingAtomic error:nil];
 }
 
-static void ProbeFindLaunchButtons(UIViewController *screen, NSMutableArray<UIBarButtonItem *> *items) {
+static void ProbeFindButtons(UIViewController *screen, NSString *identifier, NSMutableArray<UIBarButtonItem *> *items) {
     if (!screen) return;
     if ([screen isKindOfClass:UINavigationController.class]) {
         UINavigationController *navigation = (UINavigationController *)screen;
-        UIBarButtonItem *item = navigation.topViewController.navigationItem.rightBarButtonItem;
-        if ([item.accessibilityIdentifier isEqualToString:@"idoly.game-start"]
-                && navigation.topViewController.viewIfLoaded.window && ![items containsObject:item]) {
-            [items addObject:item];
+        UINavigationItem *bar = navigation.topViewController.navigationItem;
+        NSMutableOrderedSet<UIBarButtonItem *> *buttons = [NSMutableOrderedSet orderedSet];
+        if (bar.leftBarButtonItem) [buttons addObject:bar.leftBarButtonItem];
+        if (bar.rightBarButtonItem) [buttons addObject:bar.rightBarButtonItem];
+        if (bar.leftBarButtonItems) [buttons addObjectsFromArray:bar.leftBarButtonItems];
+        if (bar.rightBarButtonItems) [buttons addObjectsFromArray:bar.rightBarButtonItems];
+        for (UIBarButtonItem *item in buttons) {
+            if ([item.accessibilityIdentifier isEqualToString:identifier]
+                    && navigation.topViewController.viewIfLoaded.window && ![items containsObject:item]) {
+                [items addObject:item];
+            }
         }
     }
-    for (UIViewController *child in screen.childViewControllers) ProbeFindLaunchButtons(child, items);
-    ProbeFindLaunchButtons(screen.presentedViewController, items);
+    for (UIViewController *child in screen.childViewControllers) ProbeFindButtons(child, identifier, items);
+    ProbeFindButtons(screen.presentedViewController, identifier, items);
 }
 
 static NSArray<UIBarButtonItem *> *ProbeVisibleLaunchButtons(void) {
@@ -69,7 +78,7 @@ static NSArray<UIBarButtonItem *> *ProbeVisibleLaunchButtons(void) {
     }
     NSMutableArray<UIBarButtonItem *> *items = [NSMutableArray array];
     for (UIWindow *window in windows) {
-        if (!window.hidden && window.alpha > 0) ProbeFindLaunchButtons(window.rootViewController, items);
+        if (!window.hidden && window.alpha > 0) ProbeFindButtons(window.rootViewController, @"idoly.game-start", items);
     }
     return items;
 }
@@ -91,6 +100,78 @@ static NSDictionary *ProbeCornerGesture(UIWindow *window) {
         @"allowable_movement_points":@(corner.allowableMovement), @"delegate_present":@((BOOL)(corner.delegate != nil)),
         @"delays_touches_began":@(corner.delaysTouchesBegan), @"delays_touches_ended":@(corner.delaysTouchesEnded),
         @"cancels_touches_in_view":@(corner.cancelsTouchesInView)};
+}
+
+// Simulator probe only; requires #import <WebKit/WebKit.h> and -framework WebKit.
+// Inspect the real presented settings WKWebView. Does not mutate DOM/settings.
+static WKWebView *ProbeFindSettingsWebBounded(UIView *root, NSUInteger *remaining) {
+    if (!root || !*remaining) return nil;
+    --(*remaining);
+    if ([root isKindOfClass:WKWebView.class]) return (WKWebView *)root;
+    for (UIView *child in root.subviews) {
+        WKWebView *found = ProbeFindSettingsWebBounded(child, remaining);
+        if (found) return found;
+    }
+    return nil;
+}
+static WKWebView *ProbeFindSettingsWeb(UIView *root) {
+    NSUInteger remaining = 512;
+    return ProbeFindSettingsWebBounded(root, &remaining);
+}
+
+static NSString *const ProbeSettingsDOMScript =
+    @"(() => { const d=document.documentElement, b=document.body;"
+     "const o=document.getElementById('options-fields'), p=document.getElementById('presentation-fields');"
+     "const s=document.getElementById('render_scale_preset'), m=document.getElementById('max_buffer_pixel_preset');"
+     "const has=(e,v)=>!!e&&Array.from(e.options).some(x=>x.value===v);"
+     "const w=d?d.clientWidth:0, c=Math.max(d?d.scrollWidth:0,b?b.scrollWidth:0);"
+     "return {ready:document.readyState==='complete'&&!!o&&!!p&&!o.disabled&&!p.disabled,"
+     "forms_present:!!o&&!!p,scale_2_present:has(s,'2'),buffer_4096_present:has(m,'4096'),"
+     "viewport_width:w,content_width:c,no_horizontal_overflow:w>0&&c<=w+2,"
+     "select_count:document.querySelectorAll('select').length}; })()";
+
+static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictionary *state,
+                                    void (^finish)(NSDictionary *)) {
+    if ([state[@"finished"] boolValue]) return;
+    WKWebView *web = weakWeb;
+    if (!web) { finish(@{@"web_found":@NO, @"timed_out":@NO}); return; }
+    [web evaluateJavaScript:ProbeSettingsDOMScript completionHandler:^(id value, NSError *error) {
+        if ([state[@"finished"] boolValue]) return;
+        NSMutableDictionary *metrics = [NSMutableDictionary dictionaryWithDictionary:
+            @{@"web_found":@YES, @"timed_out":@NO, @"evaluation_succeeded":@((BOOL)(!error && [value isKindOfClass:NSDictionary.class]))}];
+        if (!error && [value isKindOfClass:NSDictionary.class]) {
+            for (NSString *key in @[@"ready", @"forms_present", @"scale_2_present", @"buffer_4096_present",
+                    @"viewport_width", @"content_width", @"no_horizontal_overflow", @"select_count"]) {
+                id scalar = value[key];
+                if ([scalar isKindOfClass:NSNumber.class]) metrics[key] = scalar;
+            }
+        }
+        state[@"last"] = metrics;
+        // Retry only page/bridge readiness. A ready page with a wrong preset or
+        // overflow is returned immediately for the caller's strict validator.
+        if ([metrics[@"ready"] isEqual:@YES]) { finish(metrics); return; }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+            ProbeSettingsDOMAttempt(weakWeb, state, finish);
+        });
+    }];
+}
+
+static void ProbeSettingsDOM(WKWebView *web, void (^completion)(NSDictionary *)) {
+    NSCAssert(NSThread.isMainThread, @"WK inspection belongs on main thread");
+    BOOL webFound = web != nil;
+    NSMutableDictionary *state = [NSMutableDictionary dictionaryWithDictionary:@{@"finished":@NO}];
+    void (^finish)(NSDictionary *) = ^(NSDictionary *metrics) {
+        if ([state[@"finished"] boolValue]) return;
+        state[@"finished"] = @YES;
+        completion(metrics);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NSMutableDictionary *metrics = [state[@"last"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        metrics[@"web_found"] = @(webFound);
+        metrics[@"timed_out"] = @YES;
+        finish(metrics);
+    });
+    ProbeSettingsDOMAttempt(web, state, finish);
 }
 
 static BOOL ProbePort(uint16_t port) {
@@ -143,6 +224,25 @@ static NSDictionary *ProbeCrypto(void) {
              @"nist_aes256_cbc": @(ProbeAES(key256, sizeof(key256), cipher256))};
 }
 
+// Public Unity data API stand-in; no original device code is executed here.
+@interface UnityFramework : NSObject
++ (instancetype)getInstance;
+- (void)setDataBundleId:(const char *)identifier;
+@end
+@implementation UnityFramework
++ (instancetype)getInstance {
+    static UnityFramework *instance; static dispatch_once_t once;
+    dispatch_once(&once, ^{ instance = [UnityFramework new]; }); return instance;
+}
+- (void)setDataBundleId:(const char *)identifier {
+    NSString *name = identifier ? [NSString stringWithUTF8String:identifier] : nil;
+    NSCAssert([name isEqualToString:@"local.idoly.client-data"], @"Unexpected data bundle");
+    NSBundle *bundle = [NSBundle bundleWithIdentifier:name];
+    NSCAssert(bundle && [NSFileManager.defaultManager fileExistsAtPath:
+        [bundle.bundlePath stringByAppendingPathComponent:@"Data/Managed/Metadata/global-metadata.dat"]], @"Prepared language data missing");
+}
+@end
+
 @interface UnityAppController : UIResponder <UIApplicationDelegate>
 @property(nonatomic, strong) UIWindow *window;
 @property(nonatomic, strong) UILabel *label;
@@ -153,12 +253,23 @@ static NSDictionary *ProbeCrypto(void) {
 @property(nonatomic, copy) NSString *probeError;
 @property(nonatomic) NSTimeInterval readySince;
 @property(nonatomic) BOOL launchDispatched;
-- (void)startUnity:(UIApplication *)application;
+@property(nonatomic) BOOL captureDispatched;
+@property(nonatomic, strong) NSDictionary *earlyStatus;
+- (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
+- (void)failProbe:(NSString *)code;
+- (void)probeMenuAfterLaunch:(NSMutableDictionary *)report;
+- (void)finishReport:(NSDictionary *)report;
 @end
 
 @implementation UnityAppController
+- (void)failProbe:(NSString *)code {
+    self.probeError = code;
+    ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
+        @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
+        @"probe_error":code});
+}
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
     ProbeWrite(@"embedded-probe-checkpoint.json", @{@"schema":@1, @"stage":stage,
@@ -169,7 +280,7 @@ static NSDictionary *ProbeCrypto(void) {
         @"launcher_visible":ProbeScalar(status, @"launcher_visible")});
 }
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    (void)options;
+    (void)application; (void)options;
     [self recordCheckpoint:@"delegate_entered"];
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UIViewController *screen = [UIViewController new]; screen.view.backgroundColor = UIColor.systemBackgroundColor;
@@ -190,18 +301,31 @@ static NSDictionary *ProbeCrypto(void) {
             @"server_status":status, @"probe_error":self.probeError ?: NSNull.null});
     }];
     dispatch_async(dispatch_get_main_queue(), ^{
-        // Two requests also exercise the gate's exactly-once forwarding policy.
-        [self startUnity:application]; [self startUnity:application];
-        [self recordCheckpoint:@"unity_requests_captured"];
+        // The process-owned server must start before Unity reaches its hook.
+        // An early launch request cannot create or forward a Unity invocation.
         IdolyEmbeddedServerLaunchGame();
         NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
         self.launcherProbe[@"premature_phase"] = ProbeScalar(status, @"phase");
         self.launcherProbe[@"premature_original_called"] = @(self.originalCount);
         self.launcherProbe[@"premature_launch_requested"] = ProbeScalar(status, @"launch_requested");
-        if (![status[@"phase"] isEqual:@1] || self.originalCount != 0
+        self.launcherProbe[@"premature_captured"] = ProbeScalar(status, @"captured");
+        if (![status[@"phase"] isEqual:@1] || ![status[@"captured"] isEqual:@0] || self.originalCount != 0
                 || ![status[@"launch_requested"] isEqual:@NO]) {
             self.probeError = @"premature_launch_not_ignored";
         }
+        IdolyEmbeddedServerCommand(@"{\"id\":2718,\"action\":\"status\"}", ^(NSString *reply) {
+            NSDictionary *value = ProbeObject(reply);
+            NSDictionary *result = [value[@"result"] isKindOfClass:NSDictionary.class] ? value[@"result"] : @{};
+            NSDictionary *native = [result[@"native"] isKindOfClass:NSDictionary.class] ? result[@"native"] : @{};
+            self.earlyStatus = @{@"id":ProbeScalar(value,@"id"), @"ok":ProbeScalar(value,@"ok"),
+                @"state":ProbeScalar(result,@"state"), @"running":ProbeScalar(result,@"running"),
+                @"phase":ProbeScalar(native,@"phase"), @"captured":ProbeScalar(native,@"captured"),
+                @"completion_main_thread":@(NSThread.isMainThread)};
+            if (![value[@"id"] isEqual:@2718] || ![value[@"ok"] isEqual:@YES]
+                    || ![result[@"state"] isEqual:@"starting"] || ![result[@"running"] isEqual:@NO]
+                    || ![native[@"phase"] isEqual:@1] || ![native[@"captured"] isEqual:@0]
+                    || !NSThread.isMainThread) [self failProbe:@"early_status_correlation_failed"];
+        });
         [self recordCheckpoint:@"premature_launch_checked"];
     });
     return YES;
@@ -212,6 +336,26 @@ static NSDictionary *ProbeCrypto(void) {
     if (![status[@"phase"] isEqual:@2]) {
         if (self.readySince != 0) self.probeError = @"server_left_ready_before_launch";
         return;
+    }
+    if (!self.captureDispatched) {
+        if (!self.earlyStatus) return;
+        if (![status[@"captured"] isEqual:@0] || ![status[@"attempts"] isEqual:@1] || self.originalCount != 0) {
+            [self failProbe:@"server_not_ready_before_capture"]; return;
+        }
+        self.launcherProbe[@"server_ready_before_capture"] = @YES;
+        self.launcherProbe[@"uncaptured_original_called"] = @(self.originalCount);
+        self.launcherProbe[@"uncaptured_attempts"] = ProbeScalar(status,@"attempts");
+        self.captureDispatched = YES;
+        [self initUnityWithApplication:UIApplication.sharedApplication];
+        [self initUnityWithApplication:UIApplication.sharedApplication];
+        NSDictionary *captured = ProbeObject(IdolyEmbeddedServerStatusJSON());
+        if (![captured[@"captured"] isEqual:@1] || ![captured[@"phase"] isEqual:@2]
+                || ![captured[@"attempts"] isEqual:@1] || self.originalCount != 0) {
+            [self failProbe:@"ready_capture_restarted_server"]; return;
+        }
+        self.launcherProbe[@"capture_after_ready_once"] = @YES;
+        [self recordCheckpoint:@"unity_requests_captured"];
+        return; // Observe the newly presented launcher on the next UIKit tick.
     }
     if (self.originalCount != 0) {
         self.probeError = @"unity_started_before_launch_button"; return;
@@ -229,7 +373,7 @@ static NSDictionary *ProbeCrypto(void) {
     }
     UIBarButtonItem *item = items.firstObject;
     if (!item.enabled) { self.probeError = @"ready_launch_button_disabled"; return; }
-    if (![item.title isEqualToString:@"게임 시작"]) {
+    if (![@[@"게임 시작", @"ゲーム開始", @"Start Game"] containsObject:item.title]) {
         self.probeError = @"ready_launch_button_title_differs"; return;
     }
     if (!item.target || !item.action) { self.probeError = @"ready_launch_action_missing"; return; }
@@ -258,7 +402,7 @@ static NSDictionary *ProbeCrypto(void) {
 }
 
 // Exact Unity ABI: void return, instance receiver, selector, one object argument.
-- (void)startUnity:(UIApplication *)application {
+- (void)initUnityWithApplication:(UIApplication *)application {
     ++self.originalCount;
     self.launcherProbe[@"forwarded_after_button"] = @(self.launchDispatched);
     [self recordCheckpoint:@"unity_forwarded"];
@@ -281,18 +425,88 @@ static NSDictionary *ProbeCrypto(void) {
                 NSDictionary *crypto = ProbeCrypto();
                 dispatch_async(dispatch_get_main_queue(), ^{
                     [self recordCheckpoint:@"loopback_checked"];
-                    NSDictionary *report = @{@"schema":@1, @"original_called":@(self.originalCount),
+                    NSMutableDictionary *report = [@{@"schema":@1, @"original_called":@(self.originalCount),
                         @"main_thread":@(originalOnMain), @"application_argument_matches":@(argumentMatches),
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
                         @"launcher":self.launcherProbe.copy,
+                        @"early_status":self.earlyStatus ?: @{},
                         @"corner_gesture":ProbeCornerGesture(self.window),
                         @"crypto_completion_main_thread":@(cryptoCompletionOnMain), @"native_crypto":nativeCrypto,
-                        @"host_status":hostStatus, @"ports":ports, @"commoncrypto":crypto};
-                    BOOL written = ProbeWrite(@"embedded-probe.json", report);
-                    if (written) [self recordCheckpoint:@"report_written"];
-                    if (!written) NSLog(@"Embedded server probe report write failed");
-                    self.label.text = written ? @"Embedded server probe: original Unity start forwarded"
-                                              : @"Embedded server probe: report write failed";
+                        @"host_status":hostStatus, @"ports":ports, @"commoncrypto":crypto} mutableCopy];
+                    [self probeMenuAfterLaunch:report];
+                });
+            });
+        });
+    });
+}
+- (void)finishReport:(NSDictionary *)report {
+    BOOL written = ProbeWrite(@"embedded-probe.json", report);
+    if (!written) { [self failProbe:@"final_report_write_failed"]; return; }
+    [self recordCheckpoint:@"report_written"];
+    self.label.text = @"Embedded server probe: startup, menu close and listeners verified";
+}
+- (void)probeMenuAfterLaunch:(NSMutableDictionary *)report {
+    UILongPressGestureRecognizer *corner = nil;
+    for (UIGestureRecognizer *item in self.window.gestureRecognizers)
+        if ([item.name isEqualToString:@"idoly.server-menu-corner"]
+                && [item isKindOfClass:UILongPressGestureRecognizer.class]) corner = (UILongPressGestureRecognizer *)item;
+    SEL open = NSSelectorFromString(@"openMenu:");
+    id target = corner.delegate;
+    if (!corner || ![target respondsToSelector:open]
+            || ![UIApplication.sharedApplication sendAction:open to:target from:corner forEvent:nil]) {
+        [self failProbe:@"settings_menu_open_failed"]; return;
+    }
+    [self recordCheckpoint:@"settings_menu_requested"];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        UIViewController *presented = self.window.rootViewController.presentedViewController;
+        if (![presented isKindOfClass:UINavigationController.class] || !presented.viewIfLoaded.window) {
+            [self failProbe:@"settings_menu_not_presented"]; return;
+        }
+        UINavigationController *navigation = (UINavigationController *)presented;
+        NSMutableArray<UIBarButtonItem *> *buttons = [NSMutableArray array];
+        ProbeFindButtons(navigation, @"idoly.server-close", buttons);
+        NSMutableArray<UIBarButtonItem *> *serverButtons = [NSMutableArray array];
+        ProbeFindButtons(navigation, @"idoly.server-start", serverButtons);
+        CGFloat width = CGRectGetWidth(navigation.view.bounds), windowWidth = CGRectGetWidth(self.window.bounds);
+        BOOL fullScreen = navigation.modalPresentationStyle == UIModalPresentationFullScreen;
+        BOOL widthMatches = width > 0 && windowWidth > 0 && fabs(width - windowWidth) <= 2.0;
+        if (buttons.count != 1 || !buttons.firstObject.target || !buttons.firstObject.action
+                || !buttons.firstObject.enabled || serverButtons.count != 1 || serverButtons.firstObject.enabled
+                || !fullScreen || !widthMatches) {
+            [self failProbe:@"settings_menu_controls_or_layout_failed"]; return;
+        }
+        UIBarButtonItem *close = buttons.firstObject;
+        NSMutableDictionary *menu = [@{@"opened_via_owned_menu_target":@YES,
+            @"full_screen":@(fullScreen), @"frame_width_matches":@(widthMatches),
+            @"frame_width":@(width), @"window_width":@(windowWidth), @"return_button_found":@YES,
+            @"server_control_found":@YES, @"server_control_disabled_while_running":@YES} mutableCopy];
+        ProbeSettingsDOM(ProbeFindSettingsWeb(navigation.topViewController.view), ^(NSDictionary *metrics) {
+            menu[@"web"] = metrics;
+            if (![metrics[@"web_found"] isEqual:@YES] || ![metrics[@"ready"] isEqual:@YES]
+                    || ![metrics[@"evaluation_succeeded"] isEqual:@YES]
+                    || ![metrics[@"scale_2_present"] isEqual:@YES] || ![metrics[@"buffer_4096_present"] isEqual:@YES]
+                    || ![metrics[@"no_horizontal_overflow"] isEqual:@YES]) {
+                [self failProbe:@"settings_web_readiness_or_layout_failed"]; return;
+            }
+            BOOL closed = [UIApplication.sharedApplication sendAction:close.action to:close.target from:close forEvent:nil];
+            menu[@"return_action_dispatched"] = @(closed);
+            if (!closed) { [self failProbe:@"settings_return_action_failed"]; return; }
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+                BOOL dismissed = self.window.rootViewController.presentedViewController == nil;
+                menu[@"dismissed"] = @(dismissed); menu[@"game_window_key_after_close"] = @(self.window.isKeyWindow);
+                if (!dismissed || !self.window.isKeyWindow) { [self failProbe:@"settings_menu_not_dismissed"]; return; }
+                IdolyEmbeddedServerCommand(@"{\"id\":2,\"action\":\"status\"}", ^(NSString *reply) {
+                    menu[@"status_completion_main_thread"] = @(NSThread.isMainThread);
+                    menu[@"host_status_after_close"] = ProbeHostStatus(reply);
+                    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                        BOOL grpc = ProbePort(50051), assets = ProbePort(8080);
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            menu[@"grpc_connected_after_close"] = @(grpc);
+                            menu[@"assets_connected_after_close"] = @(assets);
+                            report[@"menu_lifetime"] = menu;
+                            [self finishReport:report];
+                        });
+                    });
                 });
             });
         });

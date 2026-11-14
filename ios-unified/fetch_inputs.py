@@ -9,6 +9,11 @@ import json
 import os
 from pathlib import Path
 import re
+import selectors
+import stat
+import subprocess
+import threading
+import time
 from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
@@ -20,6 +25,9 @@ DONOR = {"bytes": 330787485, "sha256": "f40a393ad766ac36035332ba741236eea00da9ba
 DONOR_ROOT = "IdolyPrideLocalServer.app/Contents/Resources/"
 CHUNK = 128 * 1024
 MAX_JSON = 128 * 1024
+RELEASE_ASSET_ID = 725761399
+RELEASE_ASSET_NAME = "game.qualiarts.idolypride-6.1.1-Decrypted.ipa"
+RELEASE_TIMEOUT = 180
 HOSTS = {"github.com", "lfs.github.com", "github-cloud.githubusercontent.com", "media.githubusercontent.com", "objects.githubusercontent.com", "github-cloud.s3.amazonaws.com", "release-assets.githubusercontent.com", "files.pythonhosted.org"}
 
 
@@ -95,16 +103,187 @@ def lfs_download(row, path):
     download(href, row, path, headers=headers)
 
 
-def copy_pinned(source, destination, row):
+def copy_pinned(source, destination, row, *, on_create=None):
     digest = hashlib.sha256()
     total = 0
     with destination.open("xb") as output:
+        if on_create is not None:
+            on_create(os.fstat(output.fileno()))
         while block := source.read(CHUNK):
             total += len(block)
             need(total <= row["bytes"], "Donor member exceeds pinned size")
             digest.update(block)
             output.write(block)
     need(total == row["bytes"] and digest.hexdigest() == row["sha256"], "Donor member digest differs")
+
+
+def _pinned_row(row, *, maximum):
+    need(isinstance(row, dict) and type(row.get("bytes")) is int and 0 < row["bytes"] <= maximum
+         and isinstance(row.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", row["sha256"]),
+         "Pinned input metadata invalid")
+
+
+def _fresh(path):
+    need(not path.exists() and not path.is_symlink(), "Fresh build input path required")
+
+
+def _identity(info):
+    return info.st_dev, info.st_ino
+
+
+def _retire_partial(path, identity):
+    try:
+        current = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISREG(current.st_mode) and _identity(current) == identity:
+        path.unlink()
+
+
+def _publish_partial(partial, destination, identity):
+    info = partial.lstat()
+    need(stat.S_ISREG(info.st_mode) and _identity(info) == identity, "Owned input partial changed")
+    # A hard link publishes the verified file without replacing a destination
+    # created while the download was running. Both paths share one directory.
+    try:
+        os.link(partial, destination, follow_symlinks=False)
+    except FileExistsError:
+        raise ValueError("Fresh build input path required") from None
+    partial.unlink()
+
+
+def _gh_api_stream(accept, consume, maximum, *, timeout=RELEASE_TIMEOUT):
+    need(type(timeout) in (int, float) and 0 < timeout <= RELEASE_TIMEOUT,
+         "Release asset timeout invalid")
+    need(os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN"), "Repository read token required")
+    endpoint = "repos/" + REPO + "/releases/assets/" + str(RELEASE_ASSET_ID)
+    command = ["gh", "api", "--hostname", "github.com", endpoint, "-H", "Accept: " + accept]
+    # Credentials stay in gh's inherited environment. Neither command arguments
+    # nor diagnostics contain a token or a signed redirect URL.
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL)
+    expired = threading.Event()
+    def stop_own_process():
+        expired.set()
+        if process.poll() is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+    timer = threading.Timer(timeout, stop_own_process)
+    timer.daemon = True
+    deadline = time.monotonic() + timeout
+    timer.start()
+    total = 0
+    try:
+        os.set_blocking(process.stdout.fileno(), False)
+        with selectors.DefaultSelector() as incoming:
+            incoming.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                need(not expired.is_set() and remaining > 0, "Release asset request timed out")
+                if not incoming.select(min(1, remaining)):
+                    continue
+                try:
+                    block = os.read(process.stdout.fileno(), CHUNK)
+                except BlockingIOError:
+                    continue
+                if not block:
+                    break
+                total += len(block)
+                need(total <= maximum, "Release asset response exceeds bound")
+                consume(block)
+        try:
+            code = process.wait(timeout=max(0.01, min(5, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            raise ValueError("Release asset request timed out") from None
+        need(not expired.is_set(), "Release asset request timed out")
+        need(code == 0, "Release asset request failed")
+    finally:
+        timer.cancel()
+        if process.poll() is None:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            process.wait(timeout=5)
+        finally:
+            process.stdout.close()
+
+
+def release_asset_download(row, destination):
+    _pinned_row(row, maximum=256 * 1024 * 1024)
+    need(type(row.get("asset_id")) is int and row["asset_id"] == RELEASE_ASSET_ID
+         and row.get("filename") == RELEASE_ASSET_NAME, "Pinned release asset differs")
+    destination = Path(destination)
+    partial = destination.with_name(destination.name + ".partial")
+    _fresh(destination); _fresh(partial)
+    metadata = bytearray()
+    _gh_api_stream("application/vnd.github+json", metadata.extend, MAX_JSON)
+    try:
+        value = json.loads(metadata)
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError("Release asset metadata invalid") from None
+    need(isinstance(value, dict) and type(value.get("id")) is int and value["id"] == row["asset_id"]
+         and value.get("name") == row["filename"] and type(value.get("size")) is int
+         and value["size"] == row["bytes"] and value.get("state") == "uploaded",
+         "Release asset metadata differs")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    identity = None
+    try:
+        with partial.open("xb") as output:
+            identity = _identity(os.fstat(output.fileno()))
+            digest = hashlib.sha256()
+            total = 0
+            def receive(block):
+                nonlocal total
+                total += len(block)
+                digest.update(block)
+                output.write(block)
+            _gh_api_stream("application/octet-stream", receive, row["bytes"])
+        need(total == row["bytes"] and digest.hexdigest() == row["sha256"], "Release asset digest differs")
+        _publish_partial(partial, destination, identity)
+    finally:
+        if identity is not None:
+            _retire_partial(partial, identity)
+
+
+def copy_local_pinned(filename, destination, row):
+    _pinned_row(row, maximum=8 * 1024 * 1024)
+    need(filename in ("en.csv", "en-report.json") and row.get("filename") == filename,
+         "Pinned English input filename differs")
+    folder = HERE / "client-language-inputs"
+    folder_info = folder.lstat()
+    source = folder / filename
+    before = source.lstat()
+    need(stat.S_ISDIR(folder_info.st_mode) and not stat.S_ISLNK(folder_info.st_mode)
+         and stat.S_ISREG(before.st_mode) and not stat.S_ISLNK(before.st_mode)
+         and before.st_size == row["bytes"], "Pinned English input must be a regular file")
+    destination = Path(destination)
+    partial = destination.with_name(destination.name + ".partial")
+    _fresh(destination); _fresh(partial)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    identity = None
+    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as incoming:
+        opened = os.fstat(incoming.fileno())
+        need(stat.S_ISREG(opened.st_mode) and (_identity(before), before.st_size, before.st_mtime_ns)
+             == (_identity(opened), opened.st_size, opened.st_mtime_ns), "Pinned English input changed")
+        try:
+            # copy_pinned keeps the same streaming size/hash admission as donor
+            # members, but this local wrapper publishes only a verified partial.
+            def created(info):
+                nonlocal identity
+                identity = _identity(info)
+            copy_pinned(incoming, partial, row, on_create=created)
+            after = os.fstat(incoming.fileno())
+            need((_identity(opened), opened.st_size, opened.st_mtime_ns)
+                 == (_identity(after), after.st_size, after.st_mtime_ns), "Pinned English input changed")
+            _publish_partial(partial, destination, identity)
+        finally:
+            if identity is not None:
+                _retire_partial(partial, identity)
 
 
 def main():
@@ -121,6 +300,10 @@ def main():
         download(row["url"], row, output / "wheels" / row["filename"])
     base = manifest["inputs"]["base_ipa"]
     lfs_download(base, output / "base.ipa")
+    stock = manifest["inputs"]["stock_ipa"]
+    release_asset_download(stock, output / "stock.ipa")
+    for key, filename in (("english_ui", "en.csv"), ("english_ui_proof", "en-report.json")):
+        copy_local_pinned(filename, output / filename, manifest["inputs"][key])
     donor = output / "donor-macos.zip"
     lfs_download(DONOR, donor)
     with ZipFile(donor) as archive:
@@ -136,7 +319,7 @@ def main():
         name = "Payload/IDOLY PRIDE.app/Frameworks/IdolyPresentation.dylib"
         with archive.open(name) as source:
             copy_pinned(source, output / "IdolyPresentation.dylib", {"bytes": 157520, "sha256": "85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5"})
-    (output / "fetch-report.json").write_text(json.dumps({"schema": 1, "verified": True, "base_sha256": base["sha256"], "support_sha256": manifest["support"]["sha256"], "donor_sha256": DONOR["sha256"], "Mac_executable_bundled": False}, indent=2) + "\n")
+    (output / "fetch-report.json").write_text(json.dumps({"schema": 1, "verified": True, "base_sha256": base["sha256"], "stock_ipa_sha256": stock["sha256"], "english_ui_sha256": manifest["inputs"]["english_ui"]["sha256"], "english_ui_proof_sha256": manifest["inputs"]["english_ui_proof"]["sha256"], "support_sha256": manifest["support"]["sha256"], "donor_sha256": DONOR["sha256"], "Mac_executable_bundled": False}, indent=2) + "\n")
     print("PASS_VERIFIED_IOS_UNIFIED_INPUTS")
 
 

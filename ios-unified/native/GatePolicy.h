@@ -12,7 +12,8 @@ static inline int IDGateCapture(IDGate *g) {
     g->captured = 1; return 1;
 }
 static inline int IDGateBegin(IDGate *g) {
-    if (!g->captured || g->forwarded || (g->phase != IDGateIdle && g->phase != IDGateFailed)) return 0;
+    // The server can start before Unity reaches its captured initialization.
+    if (g->forwarded || (g->phase != IDGateIdle && g->phase != IDGateFailed)) return 0;
     g->phase = IDGateStarting; g->launch_requested = 0; g->launch_prepared = 0;
     ++g->attempts; return 1;
 }
@@ -39,6 +40,10 @@ static inline int IDGatePreparedLaunch(IDGate *g) {
 }
 static inline int IDGateLaunchFailed(IDGate *g) {
     if (g->phase != IDGateReady || !g->launch_requested || g->forwarded) return 0;
+    g->launch_requested = 0; g->launch_prepared = 0; return 1;
+}
+static inline int IDGateServerUnavailable(IDGate *g) {
+    if (g->phase != IDGateReady || g->forwarded) return 0;
     g->launch_requested = 0; g->launch_prepared = 0; g->phase = IDGateFailed; return 1;
 }
 static inline int IDGateForwardVisible(IDGate *g, int background) {

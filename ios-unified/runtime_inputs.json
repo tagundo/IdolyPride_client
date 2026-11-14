@@ -122,13 +122,30 @@
       "manifest_sha256": "6ce312fd735e15681c40232d0437c864d3e6f9116b56dd59c50c881ac9f4deec",
       "platform": "ios",
       "version": "0.3.31"
+    },
+    "stock_ipa": {
+      "asset_id": 725761399,
+      "filename": "game.qualiarts.idolypride-6.1.1-Decrypted.ipa",
+      "bytes": 146438450,
+      "sha256": "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
+    },
+    "english_ui": {
+      "filename": "en.csv",
+      "bytes": 227781,
+      "sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702"
+    },
+    "english_ui_proof": {
+      "filename": "en-report.json",
+      "bytes": 348,
+      "sha256": "298138bcadd69249a4b064b1b96ada4c15e6da2c42327d1d97e27a2b6c69cb62"
     }
   },
   "capacity": {
     "max_ipa_bytes": 629145600,
     "max_expanded_bytes": 1073741824,
     "max_runtime_bytes": 201326592,
-    "max_archive_entries": 8192
+    "max_archive_entries": 8192,
+    "max_client_languages_bytes": 268435456
   },
   "protobuf_implementation": "python",
   "new_native_modules": "signed_frameworks_with_fwork_origin_mappings",
@@ -152,6 +169,7 @@
     "idoly_local.h2_server",
     "idoly_local.home_talk",
     "idoly_local.initial_inventory",
+    "idoly_local.ios_client_data",
     "idoly_local.ios_host",
     "idoly_local.language_settings",
     "idoly_local.lessons",
