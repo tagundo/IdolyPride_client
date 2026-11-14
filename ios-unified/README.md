@@ -1,23 +1,40 @@
 # iPhone·iPad 통합 IPA
 
-기존 한국어 게임 IPA에 iOS용 로컬 서버를 넣습니다. 앱을 열면 서버 화면이 먼저 표시되고, 앱 내부의 별도 스레드에서 서버와 리소스 서버를 준비합니다. 준비가 끝난 뒤 사용자가 **게임 시작**을 눌러야 Unity가 시작됩니다. macOS용 Python이나 별도 서버 프로세스를 실행하지 않습니다.
+빌드 `156.9103` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 시험판](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-063f23ab8104f8ae9afa499378141a4ce4e324b7)과 정확한 [검증 범위](VALIDATION.md)를 확인할 수 있습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-f4af114d64bf8a210670915a134d015f0c941cef)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
 
-빌드 `156.9102`에서는 **게임 중 화면 오른쪽 위를 한 손가락으로 3초간 길게 누르면** 서버 메뉴를 다시 엽니다. 모서리의 작은 영역에만 적용되며 짧은 터치와 드래그는 일반 게임 입력으로 전달됩니다. Mac에서는 앱 메뉴의 **로컬 서버 설정…** 또는 **⌘⇧,**도 사용할 수 있습니다. 세 손가락 제스처는 사용하지 않습니다. 언어·해금 모드·그래픽·화면 확장·촬영 옵션과 리소스 다운로드·ZIP 가져오기/내보내기를 사용할 수 있습니다. 언어와 해금 모드 변경은 다음 앱 실행부터 적용합니다. 다운로드 리소스는 앱의 `Documents/IdolyPride`에 보관하고 iOS ‘파일’ 앱으로 접근합니다. 계정과 설정은 `Library/Application Support/IdolyPrideLocal`에 별도로 보관합니다.
+## 실행과 설정
 
-iPhone·iPad를 우선합니다. 기기용 IPA는 개인 서명 후 설치해야 합니다. 같은 IPA의 PlayCover 호환성은 별도 확인 대상입니다. 실제 기기에서의 MV 재생·성능 검증과 시뮬레이터의 서버 코어 검증은 구분합니다. 시뮬레이터용 가짜 Unity 진입점과 검사 우회 코드는 기기용 프레임워크에 포함하지 않습니다. 선택적인 실험용 Go 라이브 시뮬레이터는 이 iOS 이식 범위에 포함하지 않습니다.
+앱을 열면 서버 메뉴를 먼저 표시하고, Unity의 초기화 호출과 독립적으로 서버와 리소스 서버를 준비합니다. **서버 시작** 버튼으로 시작할 수 있고, 실패하면 상태·오류를 확인하고 **다시 시도**할 수 있습니다. 서버 준비가 끝난 뒤 **게임 시작**을 눌러야 게임에 진입합니다.
+
+게임 중에는 화면 오른쪽 위 안전 영역을 한 손가락으로 **2초간 길게 눌러** 서버 메뉴를 다시 엽니다. 짧은 터치와 드래그는 일반 게임 입력으로 전달합니다. Mac에서는 앱 메뉴의 **로컬 서버 설정…** 또는 **⌘⇧,**도 사용할 수 있습니다. 메뉴의 **게임으로 돌아가기**는 설정 화면만 닫고 서버를 유지합니다. 통합 앱 자체를 종료하면 게임과 서버가 함께 종료됩니다.
+
+설정 화면은 가로 창과 큰 게임 해상도에 맞춰 영역·글자·컨트롤 크기를 조정합니다. 그래픽 품질은 기존 서버 앱과 같은 이름과 숫자 값 `0 / 10 / 20 / 30 / 40 / 100`을 표시합니다. 렌더 배율은 **최대 2배**, 렌더 버퍼는 **최대 4096px**까지 프리셋으로 선택하고, 지원 범위 내의 직접 입력값도 보존합니다. 직접 입력 지원 범위는 배율 `0.25–2`, 버퍼 `256–4096px`입니다.
+
+**서버 화면 언어**와 **게임 언어**는 별개입니다. 서버 화면은 기기 언어를 기본으로 일본어·한국어·영어를 지원합니다. 게임 시작 전에 게임 언어를 선택하고 저장하면 **게임 시작** 때 해당 언어 데이터를 준비합니다. 게임에 진입한 뒤 바꾼 게임 언어는 다음 앱 실행부터 적용됩니다. 번역이 없는 문구와 번역 이미지가 없는 항목은 원본으로 표시합니다.
+
+해금 모드·그래픽·화면 확장·촬영 옵션, 리소스 다운로드와 ZIP 가져오기·내보내기를 사용할 수 있습니다. 다운로드 리소스는 앱의 `Documents/IdolyPride`에 보관하며 iOS ‘파일’ 앱으로 접근합니다. 계정·설정과 준비한 언어 데이터는 `Library/Application Support/IdolyPrideLocal`에 보관합니다.
+
+## 언어 데이터와 서버 구조
+
+일본어 원본, 기존 한국어 데이터와 사전에 생성한 영어 데이터를 묶습니다. 게임 시작 전에 선택한 언어의 리소스 전용 번들을 준비하고 Unity가 그 번들을 읽도록 연결합니다. 공통 Data 파일은 검증된 캐시를 재사용하며, 언어별 파일은 해시를 검증해 준비합니다. 서명된 앱의 `Data`를 실행 중 덮어쓰거나, 게임 프레임마다 문자열을 번역하지 않습니다.
+
+서버는 앱 안의 별도 작업 스레드에서 실행됩니다. macOS용 Python이나 별도 서버 프로세스를 실행하지 않습니다. 설정 WebView는 게임 진입·메뉴 닫기 때 해제하고, 모서리 영역은 터치를 시작할 때 현재 화면 크기로 계산합니다.
 
 ## 빌드와 검증
 
-`.github/workflows/build-server-apps.yml`의 `ios_unified=true`를 선택합니다. 기존 Android·Mac 릴리즈 작업을 실행하거나 기존 배포 파일을 바꾸지 않고 Actions 후보 파일을 만듭니다.
+`.github/workflows/build-server-apps.yml`의 `ios_unified=true`를 선택합니다. 기존 Android·Mac 릴리즈 작업과 별도로 Actions 후보 파일을 생성합니다.
 
-1. `fetch_inputs.py`가 SHA-256으로 고정한 기존 게임·서버 데이터·번역 데이터, BeeWare iOS Python과 순수 Python 의존성을 받습니다.
-2. `prepare_runtime.py`가 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다. `.fwork`/`.origin`으로 로드하며 느슨한 `.so`를 넣지 않습니다.
-3. `native/build_native.py`가 실제 Apple SDK로 기기용 서버 프레임워크를 빌드합니다. Unity의 UUID·진입점 ABI가 일치할 때만 시작을 대기시킵니다.
-4. `patch_load.py`와 `package_unified.py`가 기존 Unity 헤더의 빈 공간에 의존성 하나를 추가합니다. 기존 게임 코드·SDK·리소스 바이트는 유지하고, 앱 정보와 추가 서버 파일만 바꿉니다.
-5. 별도 시뮬레이터용 프레임워크·검사용 앱을 만들고 새 시뮬레이터에서 서버 준비, CommonCrypto AES, 암호화된 실제 RPC와 상태 저장을 검사합니다. 기존 시뮬레이터나 사용자 데이터를 사용하지 않습니다.
+1. `fetch_inputs.py`가 고정된 SHA-256으로 원본·한국어 IPA, 서버·번역 데이터, 영어 UI 입력, BeeWare iOS Python과 순수 Python 의존성을 검증합니다.
+2. `tools/build_ios_client_languages.py`가 일본어·영어 Data와 언어별 매니페스트를 생성합니다. 한국어 파일과 공통 Data는 검증된 기존 한국어 앱을 사용합니다.
+3. `native/test_client_data.py`와 `native/test_mac_menu.py`가 실제 macOS Foundation 번들 선택 및 AppKit 메뉴·단축키를 검사합니다. `prepare_runtime.py`는 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다.
+4. `native/build_native.py`가 실제 Apple SDK로 서버 프레임워크를 빌드합니다. 검증된 Unity 초기화 진입점과 데이터 번들 선택 경로를 사용합니다. `patch_load.py`와 `package_unified.py`는 기존 게임 코드·SDK 바이트를 보존하고 필요한 로드 명령·앱 정보·추가 파일을 구성합니다.
+5. `verify_client_languages.py`가 준비된 실제 Data로 일본어·한국어·영어 번들을 각각 재구성하고 다시 호출해 검증된 캐시 재사용을 확인합니다.
+6. 새 Simulator용 프레임워크·검사용 앱에서 서버 시작·게임 진입·설정 메뉴 닫기 후 서버 유지, 설정 화면 배치, 모서리 제스처 등록, CommonCrypto AES와 실제 암호화 RPC를 검사합니다. 원본 게임 실행 파일과 기존 Simulator·사용자 데이터는 사용하지 않습니다.
 
-빌드 산출물에는 IPA, SHA-256, 프레임워크·원본 보존 검사와 시뮬레이터 결과를 함께 보관합니다. 자세한 내부 경계는 [CONTRACT.md](CONTRACT.md)에 정리했습니다.
+산출물에는 IPA와 SHA-256, 프레임워크·원본 보존 검사, 언어 데이터 검사 및 Simulator 결과를 함께 보관합니다. 자세한 경계는 [CONTRACT.md](CONTRACT.md)에 정리했습니다.
 
-GitHub Actions를 사용할 수 없는 경우 Mac에서 전체 Xcode·iOS Simulator 런타임·기본 아키텍처의 Python 3.13·GitHub CLI와 여유 공간 8 GiB를 준비합니다. 별도 아이프라 서버를 종료하고 `gh auth login` 후 `ios-unified/build_on_mac.command`를 실행합니다. 새 `~/Downloads/IdolyPride/builds/날짜-커밋/` 안에서 같은 빌드와 검사를 진행합니다. 기존 게임·서버·리소스·계정 폴더를 변경하지 않습니다.
+실제 iPhone·iPad의 터치·MV 재생·성능과 새 IPA의 PlayCover 실행은 별도 검증 대상입니다. Simulator의 가짜 Unity 진입점과 데이터 준비 검사는 실제 Unity 공연 실행 검사가 아닙니다. 검사용 가짜 Unity 코드와 우회는 기기용 IPA에 포함하지 않습니다. 선택적인 실험용 Go 라이브 시뮬레이터는 이 iOS 이식 범위에 포함하지 않았습니다.
+
+GitHub Actions를 사용할 수 없는 경우 Mac에서 전체 Xcode·iOS Simulator 런타임·기본 아키텍처의 Python 3.13·GitHub CLI와 여유 공간 8 GiB를 준비합니다. 별도 아이프라 서버를 종료하고 `gh auth login` 후 `ios-unified/build_on_mac.command`를 실행합니다. 새 `~/Downloads/IdolyPride/builds/날짜-커밋/` 안에서 같은 빌드와 검사를 진행합니다. 기존 게임·서버·리소스·계정 폴더를 보존합니다.
