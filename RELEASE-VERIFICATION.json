@@ -1,0 +1,935 @@
+{
+  "version": "0.3.29",
+  "scope": "Story loading bindings and local ADV routes; fixed UI language ja",
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "source_epoch": 1794615679,
+  "phone_offline_play_verified": false,
+  "Mac_play_verified": false,
+  "production_driver_sha256": {
+    "build-android-client-stage.py": "7cdff0637706650ea9e697538325208866562d1adb296f1e9bdb93cd0d3e2713",
+    "audit-android-client.py": "f94c3567fade7a04843a1546834aee5bb8b8c8575e5cb2a0f1fe06cc4ffd4824",
+    "independent-story-asset.py": "4f9fdd796270201ba90bf020faa5d2b92ca26b37bc4882261e5d0fc0bca174b9",
+    "bind-ko-inputs.py": "ad5a4b94cfe1dad2debb4a08463d670e6ad0271e4f28dd1ef65d202ed8ed2736"
+  },
+  "reused_KO29_native_feature_binding_sha256": "f2690017c1f94dc97fe443163cf0c7afda871cc4c2e097b16d368ce971e1037f",
+  "owned_cleanup_helper_SHA256": "516c5bff61c5fab855deb8b734bf2269b6f13648ee7a819e822fd98f9a5a7372",
+  "independent_QA_sha256": "ab4fd0c616ec3fcd65936ae45cf0ea600e6ec8ac6b0e6113aed5700b5af0068a",
+  "independent_QA": {
+    "schema": 1,
+    "status": "PASS",
+    "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+    "apk": "/dev/shm/idoly-v0329-work/locales-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+    "bytes": 163424713,
+    "sha256": "43e8ea7e1fb6bc8ee0132cbabe6fc68812ee0f1f02a313d7e15f3d334b0c5f2d",
+    "auditor_script": "/dev/shm/idoly-v0329-work/locales-preparation/audit-android-client.py",
+    "auditor_script_sha256": "f94c3567fade7a04843a1546834aee5bb8b8c8575e5cb2a0f1fe06cc4ffd4824",
+    "pre_JDK_public_base_advice": {
+      "path": "/workspace/shared/artifacts/diagnostic-v0.2.1-release-review/IdolyPride-Local-Diagnostic-Android-arm64.apk",
+      "sha256": "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df",
+      "fresh_full_SHA_verified_above": true,
+      "before": {
+        "current": 15945248768,
+        "maximum": 17179869184,
+        "direct_headroom": 1234620416,
+        "oom_kill": 2,
+        "root_free": 160268288
+      },
+      "after": {
+        "current": 15784886272,
+        "maximum": 17179869184,
+        "direct_headroom": 1394982912,
+        "oom_kill": 2,
+        "root_free": 160268288
+      },
+      "all_visible_handles_closed_before_advice": true,
+      "identity_after_unchanged": true,
+      "only_exact_public_baseline_APK_advised": true
+    },
+    "provenance_sha256": "d394a036b14833921197d4d3289faca1ffc431db3abcee87409f5635293221c4",
+    "native_receipt_sha256": "24d3a1074d9771359794038e09f8b27934ee9d513b2dff37c609976efe9a66d8",
+    "feature_provenance_sha256": "8586c6eff3bbf54d2daeb757ce58b5814d7bcb5f30e4b1f2fc675a4c31581cc2",
+    "original_member_count": 4044,
+    "original_changed_members": [
+      "AndroidManifest.xml",
+      "assets/bin/Data/7880e7e422d314c04a16c4690ae21a43",
+      "assets/bin/Data/Managed/Metadata/global-metadata.dat",
+      "assets/bin/Data/globalgamemanagers",
+      "assets/bin/Data/sharedassets0.assets.split0",
+      "assets/bin/Data/sharedassets0.assets.split16",
+      "assets/bin/Data/sharedassets0.assets.split17",
+      "assets/bin/Data/sharedassets0.assets.split18",
+      "assets/bin/Data/sharedassets0.assets.split19",
+      "assets/bin/Data/sharedassets0.assets.split20",
+      "assets/bin/Data/unity_app_guid"
+    ],
+    "original_five_DEX_preserved": {
+      "classes.dex": "7fb72c0f03eb06dde0d32a4b78df4e5aa9c07e1f218f5047e40d1222e09d8d2c",
+      "classes2.dex": "9267992faab11f547059af814d01cac57afbada2771398ccc4fcc25a4608c2f0",
+      "classes3.dex": "b0a204747eca560b03d5805f0ec563c24e9f49863c4d3cbd276595ab043579ce",
+      "classes4.dex": "9a7c23c5388cad7552323d225e3081e1a3c94c221ba50889889a281e94f9cf21",
+      "classes5.dex": "d839e413087ecc4fa86cd2eac17a4932e7bad1ca4128b046493b653c4bc4a057"
+    },
+    "original_25_native_preserved": {
+      "lib/arm64-v8a/lib_burst_generated.so": "b80c6bde7110afa1fad8ac053cb71cbac13a1479c75f6acd3198a2032141b45a",
+      "lib/arm64-v8a/libapplovin-native-crash-reporter.so": "16b29c217114c9e58b6cab3b8d231b675c492e87ccd7dcab49ed523cbad496b5",
+      "lib/arm64-v8a/libchecker.so": "dac7a4264e1336cbf45ef6e8585fe19c932a79e5206e5f1b5115e3b1f9c215a3",
+      "lib/arm64-v8a/libcrashlytics-common.so": "db3c33bc6e1c0d049466280c32bd7419f9708f53ca8f5f95d584ef281996918f",
+      "lib/arm64-v8a/libcrashlytics-handler.so": "810521d2e125c4f87a8bd5fa70e73877dd832494acac9e9f86734258f359935f",
+      "lib/arm64-v8a/libcrashlytics-trampoline.so": "b3d2d4bd3eb068ed624d406d8626b7300e8f65e7aa6863e08a736984fc0ecea2",
+      "lib/arm64-v8a/libcrashlytics.so": "cad4bd6e1a6fb97cea9d02ac3f2c9c0e90c62064f7b018cf26b0a806e1489b6e",
+      "lib/arm64-v8a/libCysharp.Net.Http.YetAnotherHttpHandler.Native.so": "ec7ae0f2efc334b085a24df770c8b0b3f0213d5b1e83681524e7223ff913bc39",
+      "lib/arm64-v8a/libdatastore_shared_counter.so": "d3e48717c9aa147e0ab21063ba0e8e0211cabf8bf40b222640829519edbf58e1",
+      "lib/arm64-v8a/libFastAES.so": "f8f64ab5424b6f692464e23cf47af9d399c4072b700c196e7b321e670b93fcc4",
+      "lib/arm64-v8a/libFirebaseCppAnalytics.so": "0e6869973dad704401b61380fe421ce6c529668850f0b86f1f62a10a9b492c6b",
+      "lib/arm64-v8a/libFirebaseCppApp-12_10_1.so": "177ed0095d067af7123bbf6e704f819422a3ed923966479e6bd966459aa3d148",
+      "lib/arm64-v8a/libFirebaseCppAuth.so": "c9e2255dd658b3669a5f0114c71585d1414e12d6cda24eb881f70e7237789d0a",
+      "lib/arm64-v8a/libFirebaseCppCrashlytics.so": "7875d7a715b0b66a1f6c609aa6fa967bb898971d26d48b827ae2ac72c905187d",
+      "lib/arm64-v8a/libFirebaseCppMessaging.so": "d52fe9bb06d772aa704d4783b01a75f45e2ef345108f99b7881c40932f646a29",
+      "lib/arm64-v8a/libFirebaseCppStorage.so": "552be32cc84a5509eedc3907fe4f262d8b9f8ac2e43d928e5fa911c865c8bf82",
+      "lib/arm64-v8a/libidoly_phase_probe.so": "e48226f28337cf4717e9b96dbae0b15dff4df8f16f60d970c1cf1f6f5d1396d3",
+      "lib/arm64-v8a/libil2cpp.so": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3",
+      "lib/arm64-v8a/libmain.so": "63b597ba846a804db1ade2fd2b5ddabdc2a7b5230bc4d58a6edae16036398176",
+      "lib/arm64-v8a/libnative-googlesignin.so": "de681f549d6912338f420106e4c14e4eb71bee9e2b5473f5f08024e074d79a69",
+      "lib/arm64-v8a/libshadowhook.so": "fc84287eac46e3bade2f7e07e3c9efdca005822e21191d6db5b8cb222d53e8a0",
+      "lib/arm64-v8a/libshadowhook_nothing.so": "f2cc6a6f94d7361be915daafff1d25b7b3af34972e7308ac540982cfd608bd32",
+      "lib/arm64-v8a/libsqlcipher.so": "d63a8d6bc0bb1bb1575e201f5c4d6bbcda7b9464bb309fb2f88daa6e1ee4a57b",
+      "lib/arm64-v8a/libtoolChecker.so": "eeb2317e649e287b836b5e5c30cb07700f9eb900a53c297a3823592f15aa6352",
+      "lib/arm64-v8a/libunity.so": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85"
+    },
+    "only_declared_manifest_font_UI_transport_and_story_loading_members_changed": true,
+    "local_resource_transport": {
+      "literal_index": 30209,
+      "origin": "http://127.0.0.1:8080/",
+      "metadata_sha256": "e85d3cb26fad111e0b057ece90120b7ff3eea7d00bfbf2fd208a4df066be6f2a",
+      "metadata_changed_offsets": [
+        241928,
+        1450455,
+        1450456,
+        1450458,
+        1450459,
+        1450460,
+        1450461,
+        1450462,
+        1450463,
+        1450464,
+        1450465,
+        1450466,
+        1450467,
+        1450468,
+        1450469,
+        1450470,
+        1450471,
+        1450472,
+        1450473,
+        1450474,
+        1450475,
+        1450476,
+        1450477
+      ],
+      "all_other_metadata_bytes_equal": true,
+      "http_policy": 2,
+      "globalgamemanagers_sha256": "21c7da3b2fb6e0775301667d6a809918144ce5939f0e99908a467ce29ac337d1",
+      "HTTP_policy_changed_offsets": [
+        150152
+      ],
+      "all_other_Unity_settings_bytes_equal": true,
+      "derived_GUID": "afad44e0-4868-53a2-82b3-be2cd7df84a2",
+      "derived_GUID_independently_calculated_from_actual_metadata_settings_and_story_hashes": true,
+      "previous_v0328_GUID": "7a9a27e0-a505-52cc-8f22-4eee371b1bfd",
+      "serialized_asset_sha256": "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350",
+      "story_loading_prefab": {
+        "status": "PASS_INDEPENDENT_ACTUAL_STORY_PREFAB_SEMANTICS",
+        "member": "assets/bin/Data/7880e7e422d314c04a16c4690ae21a43",
+        "bytes": 49540,
+        "before_sha256": "5e55c12ddc6a08a8d96e8b3f616537ef5f833d99a3948c90de99bfd0521da292",
+        "after_sha256": "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350",
+        "serialized_version": 22,
+        "Unity_version": "2022.3.57f1",
+        "types_parsed": 50,
+        "objects_parsed": 371,
+        "script_types_parsed": 44,
+        "externals_parsed": 16,
+        "changed_object_paths": [
+          297,
+          310
+        ],
+        "all_369_other_object_bytes_equal": true,
+        "metadata_object_table_and_external_references_equal": true,
+        "orientation_checks": [
+          {
+            "view": 297,
+            "GameObject": 27,
+            "name": "Horizontal",
+            "existing_same_GameObject_CanvasGroup": 221,
+            "label_unchanged": 242,
+            "hierarchy": [
+              {
+                "transform": 196,
+                "GameObject": 27,
+                "name": "Horizontal"
+              },
+              {
+                "transform": 142,
+                "GameObject": 22,
+                "name": "OrientSelector"
+              },
+              {
+                "transform": 191,
+                "GameObject": 12,
+                "name": "Layout"
+              },
+              {
+                "transform": 197,
+                "GameObject": 10,
+                "name": "Root"
+              },
+              {
+                "transform": 161,
+                "GameObject": 16,
+                "name": "StoryFullScreenLoading"
+              },
+              {
+                "transform": 81,
+                "GameObject": 1,
+                "name": "StoryPlayerScreen"
+              }
+            ]
+          },
+          {
+            "view": 310,
+            "GameObject": 29,
+            "name": "Portrait",
+            "existing_same_GameObject_CanvasGroup": 224,
+            "label_unchanged": 230,
+            "hierarchy": [
+              {
+                "transform": 193,
+                "GameObject": 29,
+                "name": "Portrait"
+              },
+              {
+                "transform": 142,
+                "GameObject": 22,
+                "name": "OrientSelector"
+              },
+              {
+                "transform": 191,
+                "GameObject": 12,
+                "name": "Layout"
+              },
+              {
+                "transform": 197,
+                "GameObject": 10,
+                "name": "Root"
+              },
+              {
+                "transform": 161,
+                "GameObject": 16,
+                "name": "StoryFullScreenLoading"
+              },
+              {
+                "transform": 81,
+                "GameObject": 1,
+                "name": "StoryPlayerScreen"
+              }
+            ]
+          }
+        ],
+        "loader_references_existing_same_two_CanvasGroups": true,
+        "byte_differences": [
+          [
+            39724,
+            0,
+            221
+          ],
+          [
+            41988,
+            0,
+            224
+          ]
+        ],
+        "native_code_or_exception_handling_changed": false,
+        "runtime_device_verified": false
+      },
+      "GUID_sha256": "4742c53231cfb7574f05ee56ce0ed049faea1c7f11ce6afaca1b91c5e5c14b77",
+      "preserves_existing_account_and_user_preferences_files": true,
+      "native_or_SDK_internet_reachability_spoofed": false
+    },
+    "story_loading_prefab": {
+      "status": "PASS_INDEPENDENT_ACTUAL_STORY_PREFAB_SEMANTICS",
+      "member": "assets/bin/Data/7880e7e422d314c04a16c4690ae21a43",
+      "bytes": 49540,
+      "before_sha256": "5e55c12ddc6a08a8d96e8b3f616537ef5f833d99a3948c90de99bfd0521da292",
+      "after_sha256": "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350",
+      "serialized_version": 22,
+      "Unity_version": "2022.3.57f1",
+      "types_parsed": 50,
+      "objects_parsed": 371,
+      "script_types_parsed": 44,
+      "externals_parsed": 16,
+      "changed_object_paths": [
+        297,
+        310
+      ],
+      "all_369_other_object_bytes_equal": true,
+      "metadata_object_table_and_external_references_equal": true,
+      "orientation_checks": [
+        {
+          "view": 297,
+          "GameObject": 27,
+          "name": "Horizontal",
+          "existing_same_GameObject_CanvasGroup": 221,
+          "label_unchanged": 242,
+          "hierarchy": [
+            {
+              "transform": 196,
+              "GameObject": 27,
+              "name": "Horizontal"
+            },
+            {
+              "transform": 142,
+              "GameObject": 22,
+              "name": "OrientSelector"
+            },
+            {
+              "transform": 191,
+              "GameObject": 12,
+              "name": "Layout"
+            },
+            {
+              "transform": 197,
+              "GameObject": 10,
+              "name": "Root"
+            },
+            {
+              "transform": 161,
+              "GameObject": 16,
+              "name": "StoryFullScreenLoading"
+            },
+            {
+              "transform": 81,
+              "GameObject": 1,
+              "name": "StoryPlayerScreen"
+            }
+          ]
+        },
+        {
+          "view": 310,
+          "GameObject": 29,
+          "name": "Portrait",
+          "existing_same_GameObject_CanvasGroup": 224,
+          "label_unchanged": 230,
+          "hierarchy": [
+            {
+              "transform": 193,
+              "GameObject": 29,
+              "name": "Portrait"
+            },
+            {
+              "transform": 142,
+              "GameObject": 22,
+              "name": "OrientSelector"
+            },
+            {
+              "transform": 191,
+              "GameObject": 12,
+              "name": "Layout"
+            },
+            {
+              "transform": 197,
+              "GameObject": 10,
+              "name": "Root"
+            },
+            {
+              "transform": 161,
+              "GameObject": 16,
+              "name": "StoryFullScreenLoading"
+            },
+            {
+              "transform": 81,
+              "GameObject": 1,
+              "name": "StoryPlayerScreen"
+            }
+          ]
+        }
+      ],
+      "loader_references_existing_same_two_CanvasGroups": true,
+      "byte_differences": [
+        [
+          39724,
+          0,
+          221
+        ],
+        [
+          41988,
+          0,
+          224
+        ]
+      ],
+      "native_code_or_exception_handling_changed": false,
+      "runtime_device_verified": false
+    },
+    "independent_story_asset_auditor_SHA256": "4f9fdd796270201ba90bf020faa5d2b92ca26b37bc4882261e5d0fc0bca174b9",
+    "typed_manifest_exact_private_provider_added": true,
+    "no_new_permissions": true,
+    "added_member_sha256": {
+      "lib/arm64-v8a/libidoly_presentation.so": "4c034a74a74eaccd602a4f91ea581ab8132c91e3cb4d1c4dd951f8df1ad311b9",
+      "assets/idoly-presentation-standalone.json": "0d4fbf66a28d568252a11c5cc1013f89118bf58cbdc2fbc1eff39a44ac1fbf43",
+      "assets/idoly-presentation-licenses/NDK-RUNTIME-NOTICES.txt": "3372aab78c50872abbb69c9b3929e08a40e5fe911b43618e5405170b63ae72b1",
+      "assets/bin/Data/sharedassets0.assets.split21": "f0e1652b46fbf1e9f1ae7ecfb4a65836371df81b052817fa4a79f861b420b026",
+      "assets/bin/Data/sharedassets0.assets.split22": "d757684bae6caf46599e3b249afad828bebe7e80c13b5c0f062f87c100a3c9a2",
+      "assets/bin/Data/sharedassets0.assets.split23": "f6ef9400aa37681b06a94a2c6830782376e9ed48696c1964ccb0d52362f6a0c7",
+      "assets/idoly-fonts/IdolyFontSupport.json": "a667caffac8111aab8b72d143074e6ebe46655fc5af811306190c4520adeff0c",
+      "assets/idoly-fonts/OFL-Pretendard.txt": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a",
+      "classes6.dex": "dea9eec73cac5a4ac07db179b862345b2bb74e6cc7ee047877984816ace16c2e"
+    },
+    "added_dex_actual_classes": [
+      "Lgame/qualiarts/idolypride/presentation/NativePresentation;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$1;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$3;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$4;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Config;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Connections;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Json;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$MediaConfig;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$MediaNative;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$Numeric;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$PlaybackConfig;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$PlaybackNative;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider$1;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationClient$2;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider$2;",
+      "Lgame/qualiarts/idolypride/presentation/PresentationProvider$3;"
+    ],
+    "actual_eight_native_Java_method_prototypes": {
+      "configure": {
+        "return": "Z",
+        "arguments": [
+          "I",
+          "J",
+          "Z",
+          "I",
+          "I",
+          "F",
+          "I",
+          "I",
+          "I",
+          "Z"
+        ]
+      },
+      "configureMedia": {
+        "return": "Z",
+        "arguments": [
+          "I",
+          "J",
+          "Z"
+        ]
+      },
+      "configurePlayback": {
+        "return": "Z",
+        "arguments": [
+          "I",
+          "J",
+          "Z"
+        ]
+      },
+      "playbackStatus": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      },
+      "renderProbeStatus": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      },
+      "start": {
+        "return": "V",
+        "arguments": []
+      },
+      "status": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      },
+      "wardrobeStatus": {
+        "return": "Ljava/lang/String;",
+        "arguments": []
+      }
+    },
+    "actual_native_JNI_exports": [
+      "JNI_OnLoad",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_configure",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_configureMedia",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_configurePlayback",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_playbackStatus",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_renderProbeStatus",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_start",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_status",
+      "Java_game_qualiarts_idolypride_presentation_NativePresentation_wardrobeStatus"
+    ],
+    "native_sha256": "4c034a74a74eaccd602a4f91ea581ab8132c91e3cb4d1c4dd951f8df1ad311b9",
+    "native_bytes": 312776,
+    "native_profile_prefix_count": 133,
+    "native_hook_count": 58,
+    "native_source_precise_lineage": {
+      "baseline_source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "old132_alias_rows_unchanged": true,
+      "added_alias": "resource_can_reach",
+      "added_mode": "HOOK",
+      "added_RVA": "0x8149f68",
+      "added_native_ABI": "bool(void*,const MethodInfo*)",
+      "stock_and_actual_packaged_gate_windows": {
+        "stock_gate_proof_sha256": "af4ca9cd3384a523e73f572a3db9435e244572429f4d0889640295637ae893c2",
+        "packaged_gate_proof_sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef",
+        "actual_output_and_baseline_bootstrap_and_stock_bytes_equal": true,
+        "windows": [
+          {
+            "name": "base_constructor",
+            "rva": 135569004,
+            "file_offset": 135552620,
+            "bytes": 64,
+            "sha256": "098c63e16431a1f5433a66a7b8de30d5124259ca20f61f075c64d0ab6b3210f9"
+          },
+          {
+            "name": "can_reach",
+            "rva": 135569256,
+            "file_offset": 135552872,
+            "bytes": 212,
+            "sha256": "d71eadcf74027c9b2c7d8150028b9ee2ae3529f11ddf371c15c7de823bd518f4"
+          },
+          {
+            "name": "android_constructor",
+            "rva": 141902556,
+            "file_offset": 141886172,
+            "bytes": 112,
+            "sha256": "3edf84ab5f5c7fadf41c16212f00fa21d80126194c6db0b98698b1e280e24935"
+          },
+          {
+            "name": "url_to_bridge",
+            "rva": 141905916,
+            "file_offset": 141889532,
+            "bytes": 44,
+            "sha256": "80c526c8766a50cacd0c706c6bed5c17854808f53617d63932ebf04cb13eda85"
+          },
+          {
+            "name": "post200_gate",
+            "rva": 141906312,
+            "file_offset": 141889928,
+            "bytes": 52,
+            "sha256": "33666ede1e5a4c83ae388ee85387927123b486fbdacf041466116bafefe46d97"
+          }
+        ],
+        "maximum_window_bytes": 256,
+        "whole_native_buffered_or_rewritten": false
+      },
+      "allowed_native_lineage_files": [
+        "client-presentation/native/bridge.cpp",
+        "client-presentation/native/local_resource_policy.hpp",
+        "client-presentation/native/profile.hpp",
+        "client-presentation/native/profile.json"
+      ],
+      "all_other_native_source_bytes_equal_baseline": true,
+      "old_bridge_recovered_by_removing_only_scoped_include_marked_hook_and_one_HOOK_entry": true,
+      "old_profile_header_recovered_by_removing_only_one_entry_and_array_row": true,
+      "local_resource_policy_sha256": "991219111e40d50271e8b2194e96795d02263c8ffa81f80a4473abdbde9359f2",
+      "Darwin_preprocessed_proof_sha256": "ca29de812754361cf350afbd6133eb60656d4bfce8c80609a31476391d3db162",
+      "Darwin_preprocessed_bytes": 173180,
+      "Darwin_preprocessed_sha256": "85738915b1e3e0827a4c3b0ccf4c30323ef3249b86ae781b437c7ecebf5355f4",
+      "iOS_profile111_hooks41_unchanged": true,
+      "no_untracked_native_header_can_shadow_the_verified_Darwin_header": true,
+      "old_IPA27_retains_its_original_source_provenance": true,
+      "physical_device_offline_play_verified": false
+    },
+    "complete_frozen_native_compile_inventory_verified": [
+      "client-presentation/native/bridge.cpp",
+      "client-presentation/native/bulk_checked_filter.hpp",
+      "client-presentation/native/hangul_font.hpp",
+      "client-presentation/native/local_resource_policy.hpp",
+      "client-presentation/native/media_policy.hpp",
+      "client-presentation/native/orientation.hpp",
+      "client-presentation/native/panorama_ui_edges.hpp",
+      "client-presentation/native/panorama_ui_math.hpp",
+      "client-presentation/native/photography_ui.hpp",
+      "client-presentation/native/playback_config.hpp",
+      "client-presentation/native/presentation_math.hpp",
+      "client-presentation/native/presentation_scope.hpp",
+      "client-presentation/native/profile.hpp",
+      "client-presentation/native/profile.json",
+      "client-presentation/native/sound_persistence.hpp",
+      "client-presentation/native/wardrobe_lifecycle.hpp",
+      "client-presentation/native/wardrobe_timing.hpp"
+    ],
+    "all58_hook_sources_byte_identical_to_v0328_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+    "all_frozen_profile_prefixes_match_original_ELF": true,
+    "native_ELF_load_alignments": [
+      16384,
+      16384,
+      16384,
+      16384
+    ],
+    "native_ZIP_data_offset": 159645696,
+    "v2_v3_independent_cryptographic_signature_and_chunked_content_digest_verified": [
+      "v2",
+      "v3"
+    ],
+    "all_api_v2_v3_JDK_signature_verified": true,
+    "actual_certificate_sha256": "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc",
+    "zipalign16384_pass": true,
+    "feature_DEX_and_native_identical": true,
+    "font_restore": {
+      "status": "PASS",
+      "platform": "android",
+      "input_asset_sha256": "462bf4d9933c5dd3c74d7da6fd8ffe6059e4e4ba13f0ba7f8a6c5e846786943c",
+      "input_asset_bytes": 21490416,
+      "output_asset_sha256": "d8f4f9902eed6baa90160717367330243a6a7f83fd462dc93e1b3d1e226eba80",
+      "output_asset_bytes": 25003056,
+      "object_count": 21,
+      "object_sha256_before": {
+        "1": {
+          "class_id": 150,
+          "bytes": 205,
+          "sha256": "1a69d17ba198844381569419c0031bcde2f8759402cb1b184e118461e21c1988"
+        },
+        "2": {
+          "class_id": 21,
+          "bytes": 1764,
+          "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+        },
+        "3": {
+          "class_id": 21,
+          "bytes": 268,
+          "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+        },
+        "4": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+        },
+        "5": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+        },
+        "6": {
+          "class_id": 21,
+          "bytes": 1752,
+          "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+        },
+        "7": {
+          "class_id": 21,
+          "bytes": 1768,
+          "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+        },
+        "8": {
+          "class_id": 28,
+          "bytes": 8340,
+          "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+        },
+        "9": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "10": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "11": {
+          "class_id": 28,
+          "bytes": 118460,
+          "sha256": "091a42af6291422cc74b34ca711d5157faf60f4c907333ed2f2f24f4b4f4b583"
+        },
+        "12": {
+          "class_id": 28,
+          "bytes": 16777352,
+          "sha256": "8d4528a62bd1859c36547d593b352e43846a2e14db97cc1db8e1ee8c0627928c"
+        },
+        "13": {
+          "class_id": 28,
+          "bytes": 152,
+          "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+        },
+        "14": {
+          "class_id": 48,
+          "bytes": 14372,
+          "sha256": "e1f086daa82fea3c75943a60acb1488fc735af03b5f74a2a8888c2f9fe68d452"
+        },
+        "15": {
+          "class_id": 48,
+          "bytes": 23120,
+          "sha256": "536926347c9a427485517e269f552606f20d01afd25271d26a9ba7e7c14ad20c"
+        },
+        "16": {
+          "class_id": 48,
+          "bytes": 18308,
+          "sha256": "dc48af601b9109013550be613c7711a64fe58ed505a93bce7490ff8a2311718c"
+        },
+        "17": {
+          "class_id": 128,
+          "bytes": 269250,
+          "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+        },
+        "18": {
+          "class_id": 128,
+          "bytes": 3591562,
+          "sha256": "f8d3037d45d46caaa46a0f02899ca176300d928aa9cbe05957415ac8608f1a6d"
+        },
+        "19": {
+          "class_id": 114,
+          "bytes": 13720,
+          "sha256": "506273b3fcbc0fc2787cf397a47fb0d424ca3efb12b279b868ed98dddb19f584"
+        },
+        "20": {
+          "class_id": 114,
+          "bytes": 647500,
+          "sha256": "a8a862cbe5211c07da4107f656ba7246313ac8be4a458f590f6e95f9aaaf2ceb"
+        },
+        "21": {
+          "class_id": 114,
+          "bytes": 1056,
+          "sha256": "2fae65e7e9fb8ee7210ed1536c0ab6897d48bad476839bf4d5881662dcbfd009"
+        }
+      },
+      "object_sha256_after": {
+        "1": {
+          "class_id": 150,
+          "bytes": 205,
+          "sha256": "1a69d17ba198844381569419c0031bcde2f8759402cb1b184e118461e21c1988"
+        },
+        "2": {
+          "class_id": 21,
+          "bytes": 1764,
+          "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+        },
+        "3": {
+          "class_id": 21,
+          "bytes": 268,
+          "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+        },
+        "4": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+        },
+        "5": {
+          "class_id": 21,
+          "bytes": 148,
+          "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+        },
+        "6": {
+          "class_id": 21,
+          "bytes": 1752,
+          "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+        },
+        "7": {
+          "class_id": 21,
+          "bytes": 1768,
+          "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+        },
+        "8": {
+          "class_id": 28,
+          "bytes": 8340,
+          "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+        },
+        "9": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "10": {
+          "class_id": 28,
+          "bytes": 128,
+          "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+        },
+        "11": {
+          "class_id": 28,
+          "bytes": 118460,
+          "sha256": "091a42af6291422cc74b34ca711d5157faf60f4c907333ed2f2f24f4b4f4b583"
+        },
+        "12": {
+          "class_id": 28,
+          "bytes": 16777352,
+          "sha256": "8d4528a62bd1859c36547d593b352e43846a2e14db97cc1db8e1ee8c0627928c"
+        },
+        "13": {
+          "class_id": 28,
+          "bytes": 152,
+          "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+        },
+        "14": {
+          "class_id": 48,
+          "bytes": 14372,
+          "sha256": "e1f086daa82fea3c75943a60acb1488fc735af03b5f74a2a8888c2f9fe68d452"
+        },
+        "15": {
+          "class_id": 48,
+          "bytes": 23120,
+          "sha256": "536926347c9a427485517e269f552606f20d01afd25271d26a9ba7e7c14ad20c"
+        },
+        "16": {
+          "class_id": 48,
+          "bytes": 18308,
+          "sha256": "dc48af601b9109013550be613c7711a64fe58ed505a93bce7490ff8a2311718c"
+        },
+        "17": {
+          "class_id": 128,
+          "bytes": 3781882,
+          "sha256": "555870cf2536cec42ce247b637c3f1456304ccdb4dd67f559ff8973740156910"
+        },
+        "18": {
+          "class_id": 128,
+          "bytes": 3591574,
+          "sha256": "9079bbf411bb8f079160e4e23e4b4761e860401cc96457aa7b86f7d954d9a737"
+        },
+        "19": {
+          "class_id": 114,
+          "bytes": 13720,
+          "sha256": "506273b3fcbc0fc2787cf397a47fb0d424ca3efb12b279b868ed98dddb19f584"
+        },
+        "20": {
+          "class_id": 114,
+          "bytes": 647500,
+          "sha256": "a8a862cbe5211c07da4107f656ba7246313ac8be4a458f590f6e95f9aaaf2ceb"
+        },
+        "21": {
+          "class_id": 114,
+          "bytes": 1056,
+          "sha256": "2fae65e7e9fb8ee7210ed1536c0ab6897d48bad476839bf4d5881662dcbfd009"
+        }
+      },
+      "all_other_objects_byte_identical": true,
+      "other_object_count": 19,
+      "Font_path_id": 17,
+      "legacy_Font_path_id": 18,
+      "legacy_fallback_references": [
+        {
+          "file_id": 0,
+          "path_id": 17
+        }
+      ],
+      "legacy_Japanese_font_data_unchanged": true,
+      "type_and_external_reference_metadata_unchanged": true,
+      "Font17_raw_prefix_and_suffix_unchanged": true,
+      "legacy_all_other_raw_fields_unchanged": true,
+      "Font17_empty_fallbacks_before_after_semantically_verified": true,
+      "Font17_fallback_field_offset_before": 269240,
+      "Font17_fallback_field_offset_after": 3781872,
+      "acyclic_fallback_graph": true,
+      "TMP21_source_dynamic_Font_PPtr17_verified": true,
+      "TMP21_source_mode": {
+        "name": "SourceSansPro-Regular SDF",
+        "version": "1.1.0",
+        "source_guid": "43fa2ca56150741f682409d5e57bbc2b",
+        "source_Font_file_id": 0,
+        "source_Font_path_id": 17,
+        "atlas_population_mode": 1,
+        "source_PPtr_offset": 128,
+        "atlas_population_mode_offset": 140
+      },
+      "font": {
+        "family": "Pretendard JP SemiBold",
+        "bytes": 3781740,
+        "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+        "modern_hangul_syllables": 11172,
+        "basic_latin_characters": 95,
+        "unicode_format": 12,
+        "unicode_maps_agree": true,
+        "glyph_count": 22936,
+        "cmap_group_count": 6862,
+        "font_bytes_modified": false,
+        "license": "OFL-1.1"
+      },
+      "independent_parser": "stdlib Unity SerializedFile v22 / OpenType format12",
+      "whole_asset_buffered": false,
+      "maximum_callback_read_bytes": 65536,
+      "maximum_Font_object_buffer_bytes": 4194304,
+      "runtime_verified": false
+    },
+    "font_license_sha256": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a",
+    "font_helper_sha256": "c54376f7d68d309f72092c449e481bc65db29fc9b6f572dbaa5c29aa24c2e0f8",
+    "ui_restore": {
+      "schema": 1,
+      "policy": "fixed-ui-textasset-v1",
+      "language": "ja",
+      "at_rest_payload_verified": true,
+      "actual_asset_sha256": "6c522891fb2ed310c9a6669871c76550e4d144e9aa538b5074b064ef7ecb020e",
+      "actual_asset_bytes": 244584,
+      "actual_object_path_id": 1,
+      "actual_script_sha256": "069541fc013bec1676fc777fbbd6df3ae4b88f7a8ac5b5ceef0b2471b85b6fad",
+      "compiled_csv_sha256": "16cf848f7f677f85262b7ff10d787fc8444c2358a5d81d46dc67d0ff573be8c3",
+      "original_4199_keys_preserved": true,
+      "ui_keys": 4199,
+      "key_roster_sha256": "4e9221a7958a7f5c768585900a43db2f610ff1323b1a57727001e4f85c4f3a37",
+      "changed_keys_count": 0,
+      "all_other_objects_byte_identical": true,
+      "only_declared_metadata_and_target_changed": true,
+      "type_and_external_metadata_unchanged": true,
+      "runtime_translation_hooks_added": false,
+      "Japanese_asset_byte_identical": true
+    },
+    "ui_language": "ja",
+    "UI_independent_helper_sha256": "aca3bfa551bd78ee308a3e149a17218b3f6580c4638e72e414f5962e9cca5043",
+    "UI_reference_three_locale_proof_sha256": "3d67b03cf2affede1e496c322f9716a2c5914bc4da418a8daca436617a57eee7",
+    "seven_optional_loopback_channels_source_proof": {
+      "channels": [
+        "/client/media",
+        "/client/playback",
+        "/client/playback/status",
+        "/client/presentation",
+        "/client/presentation/status",
+        "/client/render-probe",
+        "/client/wardrobe"
+      ],
+      "off_main_daemon_minimum_poll_seconds": 2,
+      "normal_maximum_HTTP_requests_per_cycle": 7,
+      "http_request_total_deadline_ms": 1000,
+      "general_payload_cap_bytes": 8192,
+      "render_probe_and_wardrobe_cap_bytes": 2048,
+      "bounded_transport_workers": {
+        "request_active": 1,
+        "request_queued": 1,
+        "cleanup_active": 1
+      },
+      "redirects_proxy_cache_disabled": true,
+      "independent_optional_channel_exception_and_LinkageError_boundaries": true,
+      "native_ACK_only_not_requested_config_as_applied": true,
+      "limitations": [
+        "Sequential channels share bounded transport; an uninterruptible network operation can cause later requests to fail busy.",
+        "Two seconds is a minimum poll period; slow requests can lengthen a cycle.",
+        "Source review is not physical-device networking or JNI execution evidence."
+      ]
+    },
+    "resource_budget_before": {
+      "current": 15783243776,
+      "maximum": 17179869184,
+      "direct_headroom": 1396625408,
+      "oom_kill": 2,
+      "root_free": 160268288
+    },
+    "resource_budget_after": {
+      "current": 16131657728,
+      "maximum": 17179869184,
+      "direct_headroom": 1048211456,
+      "oom_kill": 2,
+      "root_free": 160268288
+    },
+    "all_inputs_identity_preserved": true,
+    "seconds": 6.955,
+    "runtime_device_verified": false,
+    "installed": false,
+    "published": false,
+    "limitations": [
+      "No physical-device install, JNI load, Unity playback, offline decoding, performance or Play Protect verdict is verified.",
+      "Same package and certificate identity is preserved; an OS update can rebuild engine-managed code caches."
+    ]
+  },
+  "source_provenance_sha256": "d394a036b14833921197d4d3289faca1ffc431db3abcee87409f5635293221c4",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "bytes": 163424713,
+      "sha256": "43e8ea7e1fb6bc8ee0132cbabe6fc68812ee0f1f02a313d7e15f3d334b0c5f2d"
+    }
+  ]
+}
