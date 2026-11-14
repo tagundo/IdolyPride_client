@@ -28,7 +28,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
-DESCRIPTOR_MEMBER = "protocol/idolypride-6.1.1.pb"
+# ServerData archives contain a data/ root; the installer removes that prefix
+# when creating the writable core directory. The probe reads the archive itself.
+DESCRIPTOR_MEMBER = "data/protocol/idolypride-6.1.1.pb"
 MAX_JSON = 64 * 1024
 MAX_DESCRIPTOR = 16 * 1024 * 1024
 MAX_RESPONSE = 4 * 1024 * 1024
@@ -249,8 +251,15 @@ def wait_report(container, remaining):
         try:
             status = parse_json(read_bounded(waiting, MAX_JSON)).get("server_status")
             require(type(status) is dict, "invalid_waiting_status")
-            require(status.get("phase") != 3 and status.get("error") is None,
-                    "native_startup_failed")
+            if status.get("phase") == 3 or status.get("error") is not None:
+                error = ProbeError("native_startup_failed")
+                # This fresh probe contains only the pinned public payload.
+                # Preserve the bounded bootstrap error before deleting its
+                # disposable Simulator, so missing modules can be diagnosed.
+                detail = status.get("error")
+                if isinstance(detail, str):
+                    error.native_detail = detail[:2000]
+                raise error
         except FileNotFoundError:
             pass
         time.sleep(min(0.25, remaining()))
@@ -411,6 +420,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
+        if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
+            report["native_startup_error"] = error.native_detail
     finally:
         if created is not None:
             for action in ("shutdown", "delete"):

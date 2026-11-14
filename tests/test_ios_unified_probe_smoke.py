@@ -72,7 +72,9 @@ def app(tmp_path):
     (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": probe.BUNDLE_ID,
                                                    "CFBundleSupportedPlatforms": ["iPhoneSimulator"]}))
     with ZipFile(app / "LocalServer/ServerData.zip", "w") as archive:
-        archive.writestr(probe.DESCRIPTOR_MEMBER, public_descriptor())
+        # Match the distributed ServerData archive, independently of the
+        # probe's lookup constant (installed core paths omit the data/ root).
+        archive.writestr("data/protocol/idolypride-6.1.1.pb", public_descriptor())
     return app
 
 
@@ -197,6 +199,7 @@ def test_startup_failure_is_immediate_and_still_deletes_simulator(app, tmp_path)
             mock.patch.object(probe, "_simctl", controller), mock.patch.object(probe, "probe_rpcs") as rpc:
         result = probe.run_probe(app, tmp_path / "failure.json")
     assert result["error"] == "native_startup_failed"
+    assert result["native_startup_error"] == "native-startup-fixture"
     assert result["failed_stage"] == "startup_gate_report"
     assert result["cleanup"]["delete"] is True
     rpc.assert_not_called()
