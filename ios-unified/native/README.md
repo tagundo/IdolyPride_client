@@ -6,15 +6,23 @@ and signed native stdlib frameworks. It never loads the macOS server app.
 
 The device build has a required load dependency on the existing presentation
 dylib. Presentation's early font gateways initialize first; this framework then
-validates the original Unity UUID, `startUnity:` RVA/prefix, and exact Objective-C
-ABI before replacing that one method implementation. The replacement defers
-Unity startup without blocking UIKit. A persistent native worker initializes
-isolated CPython, installs/starts the server, and forwards the original method
-on the main queue exactly once after both listeners report ready.
+validates the original Unity UUID, `initUnityWithApplication:` RVA/prefix, and
+exact Objective-C ABI before deferring initialization without blocking UIKit.
+A persistent native worker initializes isolated CPython and starts both local
+listeners independently. After an explicit Game Start, verified language Data
+is selected and the original initialization is forwarded on the main queue once.
+
+The same audit checks `UnityFramework -keyboardTextField`. Before the original
+initialization returns, this public getter returns nil so external input queries
+cannot lazily create KeyboardDelegate ahead of its required Initialize call.
+After normal return it forwards the original getter unchanged. A separate atomic
+completion flag is used because the startup gate enters Running before calling
+the original initializer. Internal keyboard methods, singleton state and Unity
+assertions remain unchanged.
 
 Python is never finalized during gameplay. Commands and foreground recovery run
-on the same worker, with its GIL released while idle. Three-finger long press
-opens a temporary local WKWebView; it accepts messages only from the main frame
+on the same worker, with its GIL released while idle. A two-second one-finger hold
+at the upper-right corner opens a temporary local WKWebView; it accepts messages only from the main frame
 of the bundled settings page. Closing it releases the WebView and message handler.
 
 ```sh

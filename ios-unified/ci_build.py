@@ -136,6 +136,7 @@ def main():
         "Sign this IPA with your iOS sideloading method before installing.\n"
         "The app opens the server menu first. Start the server, choose the game language, then press 게임 시작.\n"
         "Japanese, Korean and English client Data is prepared before Unity starts; no per-frame text replacement.\n"
+        "Unity keyboard access is guarded until original initialization completes.\n"
         "Missing translations and untranslated images retain the original content.\n"
         "While playing, hold the upper-right corner for two seconds to reopen the server menu.\n"
         "Mac/PlayCover: app menu > 로컬 서버 설정… (Command+Shift+,).\n"

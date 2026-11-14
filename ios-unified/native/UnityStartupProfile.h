@@ -16,4 +16,10 @@ static const unsigned char IDUnityGetInstancePrefix[16] = {
 };
 static const unsigned long IDUnitySetDataRVA = 0x146a8;
 static const unsigned char IDUnitySetDataPrefix[8] = {0xe0,0x03,0x02,0xaa,0xca,0xf9,0xff,0x17};
+// UnityFramework -keyboardTextField, @16@0:8. Its original implementation
+// lazily creates KeyboardDelegate via +Instance before returning the field.
+static const unsigned long IDUnityKeyboardFieldRVA = 0x1442c;
+static const unsigned char IDUnityKeyboardFieldPrefix[16] = {
+    0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xc8,0x05,0x05,0xb0
+};
 #endif

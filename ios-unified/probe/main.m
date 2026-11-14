@@ -225,9 +225,15 @@ static NSDictionary *ProbeCrypto(void) {
 }
 
 // Public Unity data API stand-in; no original device code is executed here.
+// The stock public keyboard getter lazily creates the same keyboard singleton
+// that Unity's initializer requires to be absent. Model that side effect so a
+// launcher/UIKit query can expose the ordering regression in this fake host.
+static UITextField *probeKeyboardField;
+static NSUInteger probeKeyboardGetterCalls, probeKeyboardCreations;
 @interface UnityFramework : NSObject
 + (instancetype)getInstance;
 - (void)setDataBundleId:(const char *)identifier;
+- (UITextField *)keyboardTextField;
 @end
 @implementation UnityFramework
 + (instancetype)getInstance {
@@ -241,7 +247,26 @@ static NSDictionary *ProbeCrypto(void) {
     NSCAssert(bundle && [NSFileManager.defaultManager fileExistsAtPath:
         [bundle.bundlePath stringByAppendingPathComponent:@"Data/Managed/Metadata/global-metadata.dat"]], @"Prepared language data missing");
 }
+- (UITextField *)keyboardTextField {
+    ++probeKeyboardGetterCalls;
+    if (!probeKeyboardField) {
+        probeKeyboardField = [[UITextField alloc] initWithFrame:CGRectZero];
+        ++probeKeyboardCreations;
+    }
+    return probeKeyboardField;
+}
 @end
+
+static NSDictionary *ProbeKeyboardObservation(void) {
+    UITextField *field = [[UnityFramework getInstance] keyboardTextField];
+    NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
+    BOOL returnedNil = field == nil;
+    BOOL initializedField = field != nil && field == probeKeyboardField;
+    return @{@"guard_installed":ProbeScalar(status,@"keyboard_guard_installed"),
+        @"ready":ProbeScalar(status,@"keyboard_ready"), @"phase":ProbeScalar(status,@"phase"),
+        @"returned_nil":@(returnedNil), @"returned_initialized_field":@(initializedField),
+        @"original_calls":@(probeKeyboardGetterCalls), @"field_creation_count":@(probeKeyboardCreations)};
+}
 
 @interface UnityAppController : UIResponder <UIApplicationDelegate>
 @property(nonatomic, strong) UIWindow *window;
@@ -256,10 +281,13 @@ static NSDictionary *ProbeCrypto(void) {
 @property(nonatomic) BOOL captureDispatched;
 @property(nonatomic, strong) NSDictionary *earlyStatus;
 @property(nonatomic, strong) NSDictionary *menuCloseObservation;
+@property(nonatomic, strong) NSMutableDictionary *keyboardProbe;
 - (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
 - (void)failProbe:(NSString *)code;
+- (BOOL)observeKeyboard:(NSString *)name phase:(NSUInteger)phase ready:(BOOL)ready failure:(NSString *)code;
+- (void)probeAfterOriginalReturnedOnMain:(BOOL)originalOnMain applicationMatches:(BOOL)argumentMatches;
 - (void)probeMenuAfterLaunch:(NSMutableDictionary *)report;
 - (void)observeMenuDismissal:(UINavigationController *)navigation report:(NSMutableDictionary *)report
                        menu:(NSMutableDictionary *)menu started:(NSTimeInterval)started observations:(NSUInteger)observations;
@@ -271,7 +299,8 @@ static NSDictionary *ProbeCrypto(void) {
     self.probeError = code;
     ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
-        @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{}});
+        @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
+        @"keyboard":self.keyboardProbe.copy ?: @{}});
 }
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
@@ -281,7 +310,21 @@ static NSDictionary *ProbeCrypto(void) {
         @"launch_requested":ProbeScalar(status, @"launch_requested"),
         @"launch_prepared":ProbeScalar(status, @"launch_prepared"),
         @"launcher_visible":ProbeScalar(status, @"launcher_visible"),
-        @"menu_close":self.menuCloseObservation ?: @{}});
+        @"keyboard_guard_installed":ProbeScalar(status,@"keyboard_guard_installed"),
+        @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
+        @"menu_close":self.menuCloseObservation ?: @{}, @"keyboard":self.keyboardProbe.copy ?: @{}});
+}
+- (BOOL)observeKeyboard:(NSString *)name phase:(NSUInteger)phase ready:(BOOL)ready failure:(NSString *)code {
+    NSDictionary *value = ProbeKeyboardObservation();
+    self.keyboardProbe[name] = value;
+    NSNumber *expectedCalls = ready ? @1 : @0;
+    BOOL correct = [value[@"guard_installed"] isEqual:@YES] && [value[@"ready"] isEqual:@(ready)]
+        && [value[@"phase"] isEqual:@(phase)] && [value[@"returned_nil"] isEqual:@((BOOL)!ready)]
+        && [value[@"returned_initialized_field"] isEqual:@(ready)]
+        && [value[@"original_calls"] isEqual:expectedCalls]
+        && [value[@"field_creation_count"] isEqual:expectedCalls];
+    if (!correct) [self failProbe:code];
+    return correct;
 }
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)application; (void)options;
@@ -294,6 +337,7 @@ static NSDictionary *ProbeCrypto(void) {
     self.label.text = @"Embedded server probe: waiting for READY";
     [screen.view addSubview:self.label]; self.window.rootViewController = screen; [self.window makeKeyAndVisible];
     self.launcherProbe = [NSMutableDictionary dictionary];
+    self.keyboardProbe = [NSMutableDictionary dictionary];
     [self recordCheckpoint:@"window_ready"];
     self.waitingTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         (void)timer;
@@ -302,7 +346,8 @@ static NSDictionary *ProbeCrypto(void) {
         [self probeLauncher:status];
         ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
             @"original_called":@(self.originalCount),
-            @"server_status":status, @"probe_error":self.probeError ?: NSNull.null});
+            @"server_status":status, @"probe_error":self.probeError ?: NSNull.null,
+            @"keyboard":self.keyboardProbe.copy});
     }];
     dispatch_async(dispatch_get_main_queue(), ^{
         // The process-owned server must start before Unity reaches its hook.
@@ -349,6 +394,8 @@ static NSDictionary *ProbeCrypto(void) {
         self.launcherProbe[@"server_ready_before_capture"] = @YES;
         self.launcherProbe[@"uncaptured_original_called"] = @(self.originalCount);
         self.launcherProbe[@"uncaptured_attempts"] = ProbeScalar(status,@"attempts");
+        if (![self observeKeyboard:@"before_capture" phase:2 ready:NO failure:@"keyboard_guard_before_capture_failed"]) return;
+        [self recordCheckpoint:@"keyboard_before_capture_checked"];
         self.captureDispatched = YES;
         [self initUnityWithApplication:UIApplication.sharedApplication];
         [self initUnityWithApplication:UIApplication.sharedApplication];
@@ -393,6 +440,8 @@ static NSDictionary *ProbeCrypto(void) {
     // Remain Ready for a full second without forwarding Unity. This proves
     // readiness alone does not enter the game, before invoking the real UI.
     if (now - self.readySince < 1.0) return;
+    if (![self observeKeyboard:@"before_launch" phase:2 ready:NO failure:@"keyboard_guard_before_launch_failed"]) return;
+    [self recordCheckpoint:@"keyboard_before_launch_checked"];
     self.launchDispatched = YES;
     self.launcherProbe[@"button_dispatch_count"] = @1;
     [self recordCheckpoint:@"launch_action_requested"];
@@ -414,6 +463,24 @@ static NSDictionary *ProbeCrypto(void) {
     self.reportScheduled = YES; [self.waitingTimer invalidate]; self.waitingTimer = nil;
     BOOL originalOnMain = NSThread.isMainThread;
     BOOL argumentMatches = application == UIApplication.sharedApplication;
+    // phase=Running is already set by the native gate here. Its separate
+    // keyboard-ready flag must remain false through the original invocation.
+    if (![self observeKeyboard:@"during_init" phase:4 ready:NO failure:@"keyboard_guard_during_init_failed"]) return;
+    [self recordCheckpoint:@"keyboard_during_init_checked"];
+    if (probeKeyboardField || probeKeyboardCreations != 0) {
+        [self failProbe:@"keyboard_created_before_initialize"]; return;
+    }
+    probeKeyboardField = [[UITextField alloc] initWithFrame:CGRectZero];
+    ++probeKeyboardCreations;
+    // This continuation cannot execute until the fake original IMP returns
+    // and the native gate marks that invocation fully complete.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self probeAfterOriginalReturnedOnMain:originalOnMain applicationMatches:argumentMatches];
+    });
+}
+- (void)probeAfterOriginalReturnedOnMain:(BOOL)originalOnMain applicationMatches:(BOOL)argumentMatches {
+    if (![self observeKeyboard:@"after_init" phase:4 ready:YES failure:@"keyboard_guard_after_init_failed"]) return;
+    [self recordCheckpoint:@"keyboard_after_init_checked"];
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
     IdolyEmbeddedServerCommand(@"{\"id\":1,\"action\":\"status\"}", ^(NSString *reply) {
         [self recordCheckpoint:@"status_received"];
@@ -433,6 +500,7 @@ static NSDictionary *ProbeCrypto(void) {
                         @"main_thread":@(originalOnMain), @"application_argument_matches":@(argumentMatches),
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
                         @"launcher":self.launcherProbe.copy,
+                        @"keyboard":self.keyboardProbe.copy,
                         @"early_status":self.earlyStatus ?: @{},
                         @"corner_gesture":ProbeCornerGesture(self.window),
                         @"crypto_completion_main_thread":@(cryptoCompletionOnMain), @"native_crypto":nativeCrypto,

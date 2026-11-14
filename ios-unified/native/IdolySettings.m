@@ -59,6 +59,8 @@ static NSString *localized(NSString *source) {
         @"게임 버전을 확인할 수 없습니다":@[@"ゲームのバージョンを確認できません", @"The game version could not be verified"],
         @"이 게임의 Unity 초기화 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다.":@[@"このゲームのUnity初期化処理を確認できませんでした。サーバーは単独で開始します。", @"This game's Unity initialization entry could not be verified. The server will start independently."],
         @"Unity 시작 진입점을 연결하지 못했습니다.":@[@"Unityの開始処理に接続できませんでした。", @"The Unity startup entry could not be connected."],
+        @"이 게임의 Unity 키보드 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다.":@[@"このゲームのUnityキーボード処理を確認できませんでした。サーバーは単独で開始します。", @"This game's Unity keyboard entry could not be verified. The server will start independently."],
+        @"Unity 키보드 초기화 보호를 연결하지 못했습니다.":@[@"Unityキーボードの初期化保護を設定できませんでした。", @"The Unity keyboard initialization guard could not be connected."],
         @"게임 언어 데이터가 준비되지 않았습니다.":@[@"ゲームの言語データが準備されていません。", @"The game language data is not ready."],
         @"이 게임의 언어 데이터 진입점을 확인하지 못했습니다.":@[@"このゲームの言語データ設定処理を確認できませんでした。", @"This game's language data entry could not be verified."],
         @"게임 데이터 컨트롤러를 확인하지 못했습니다.":@[@"ゲームデータコントローラーを確認できませんでした。", @"The game data controller could not be verified."],

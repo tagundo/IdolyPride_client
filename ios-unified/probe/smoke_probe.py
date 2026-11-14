@@ -51,6 +51,9 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "settings_menu_open_failed", "settings_menu_not_presented", "settings_menu_controls_or_layout_failed",
     "settings_web_readiness_or_layout_failed", "settings_return_action_failed", "settings_menu_not_dismissed",
     "final_report_write_failed",
+    "keyboard_guard_before_capture_failed", "keyboard_guard_before_launch_failed",
+    "keyboard_guard_during_init_failed", "keyboard_guard_after_init_failed",
+    "keyboard_created_before_initialize",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
@@ -58,7 +61,12 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "launch_action_dispatched", "unity_forwarded", "status_received", "crypto_received",
     "loopback_checked", "report_written", "settings_menu_requested", "settings_return_requested",
     "settings_return_observed", "settings_return_timeout", "settings_menu_dismissed",
+    "keyboard_before_capture_checked", "keyboard_before_launch_checked",
+    "keyboard_during_init_checked", "keyboard_after_init_checked",
 ))
+KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
+KEYBOARD_BOOL_FIELDS = ("guard_installed", "ready", "returned_nil", "returned_initialized_field")
+KEYBOARD_INT_FIELDS = ("phase", "original_calls", "field_creation_count")
 CHECKPOINT_READ_CODES = frozenset((
     "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
     "json_size_bound", "duplicate_json_key", "nonfinite_json", "invalid_json", "json_object_required",
@@ -260,6 +268,29 @@ def validate_report(value):
             and all(type(status.get(key)) is int and status[key] == 1
                     for key in ("captured", "forwarded", "attempts")),
             "embedded_server_not_ready")
+    require(status.get("keyboard_guard_installed") is True and status.get("keyboard_ready") is True,
+            "keyboard_guard_after_init_failed")
+    keyboard = value.get("keyboard")
+    require(type(keyboard) is dict, "keyboard_guard_evidence_missing")
+    expected_keyboard = {
+        "before_capture": {"guard_installed": True, "ready": False, "phase": 2,
+                           "returned_nil": True, "returned_initialized_field": False,
+                           "original_calls": 0, "field_creation_count": 0},
+        "before_launch": {"guard_installed": True, "ready": False, "phase": 2,
+                          "returned_nil": True, "returned_initialized_field": False,
+                          "original_calls": 0, "field_creation_count": 0},
+        "during_init": {"guard_installed": True, "ready": False, "phase": 4,
+                        "returned_nil": True, "returned_initialized_field": False,
+                        "original_calls": 0, "field_creation_count": 0},
+        "after_init": {"guard_installed": True, "ready": True, "phase": 4,
+                       "returned_nil": False, "returned_initialized_field": True,
+                       "original_calls": 1, "field_creation_count": 1},
+    }
+    for name, expected in expected_keyboard.items():
+        observed = keyboard.get(name)
+        require(type(observed) is dict and all(type(observed.get(key)) is type(wanted)
+                and observed[key] == wanted for key, wanted in expected.items()),
+                "keyboard_guard_" + name + "_failed")
     data = status.get("client_data")
     require(type(data) is dict and data.get("selected") is True
             and data.get("language") in ("ko", "ja", "en")
@@ -369,6 +400,7 @@ def validate_report(value):
             "crypto_completion_main_thread": True,
             "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
                               "invalid_iv_rejected": True, "worker_main_thread": False},
+            "keyboard": keyboard_observation(keyboard),
             "early_status": {key: early[key] for key in (
                 "id", "ok", "state", "running", "phase", "captured", "completion_main_thread")},
             "launcher": {key: launcher[key] for key in (
@@ -385,6 +417,7 @@ def validate_report(value):
             "server_status": {**{key: status[key] for key in
                 ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts",
                  "launch_requested", "launch_prepared", "launcher_visible")},
+                 "keyboard_guard_installed":True, "keyboard_ready":True,
                  "client_data":{key: data[key] for key in ("selected", "language", "bundle_identifier")}},
             "menu_lifetime": {**{key: menu[key] for key in (
                 "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
@@ -406,8 +439,16 @@ def validate_report(value):
 def wait_report(container, remaining):
     documents = Path(container) / "Documents"
     final, waiting = documents / "embedded-probe.json", documents / "embedded-probe-status.json"
+    last_keyboard = {}
+    def checked_remaining():
+        try:
+            return remaining()
+        except ProbeError as error:
+            if last_keyboard:
+                error.native_keyboard = dict(last_keyboard)
+            raise
     while True:
-        remaining()
+        checked_remaining()
         try:
             observed = parse_json(read_bounded(final, MAX_JSON))
             try:
@@ -423,11 +464,16 @@ def wait_report(container, remaining):
                 corner = corner_observation(observed.get("corner_gesture"))
                 if corner:
                     error.native_corner = corner
+                keyboard = keyboard_observation(observed.get("keyboard"))
+                if keyboard:
+                    error.native_keyboard = keyboard
                 raise
         except FileNotFoundError:
             pass
+        waiting_value = None
         try:
             waiting_value = parse_json(read_bounded(waiting, MAX_JSON))
+            last_keyboard.update(keyboard_observation(waiting_value.get("keyboard")))
             failure = waiting_value.get("probe_error")
             if failure is not None:
                 require(type(failure) is str and failure in LAUNCHER_FAILURE_CODES,
@@ -458,8 +504,32 @@ def wait_report(container, remaining):
             # only a verified regular, bounded inode replacement; in-place
             # mutation and all final-report checks remain strict.
             if str(error) != "file_changed_while_opening" or getattr(error, "regular_replacement", False) is not True:
+                if type(waiting_value) is dict:
+                    keyboard = keyboard_observation(waiting_value.get("keyboard"))
+                    if keyboard:
+                        error.native_keyboard = keyboard
                 raise
-        time.sleep(min(0.25, remaining()))
+        time.sleep(min(0.25, checked_remaining()))
+
+
+def keyboard_observation(value):
+    """Keep only fixed phases and bounded keyboard-guard scalar observations."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    for name in KEYBOARD_PHASES:
+        observation = value.get(name)
+        if type(observation) is not dict:
+            continue
+        scalars = {key: observation[key] for key in KEYBOARD_BOOL_FIELDS
+                   if type(observation.get(key)) is bool}
+        for key in KEYBOARD_INT_FIELDS:
+            item = observation.get(key)
+            if type(item) is int and 0 <= item <= (4 if key == "phase" else 16):
+                scalars[key] = item
+        if scalars:
+            clean[name] = scalars
+    return clean
 
 
 def corner_observation(value):
@@ -519,7 +589,8 @@ def failure_checkpoint(container):
         count = value.get("original_called")
         if type(count) is int and 0 <= count <= 16:
             clean["original_called"] = count
-        for key in ("launch_requested", "launch_prepared", "launcher_visible"):
+        for key in ("launch_requested", "launch_prepared", "launcher_visible",
+                    "keyboard_guard_installed", "keyboard_ready"):
             if type(value.get(key)) is bool:
                 clean[key] = value[key]
         return clean
@@ -542,6 +613,9 @@ def failure_checkpoint(container):
         menu = menu_close_observation(observed.get("menu_close"))
         if menu:
             result["menu_close"] = menu
+        keyboard = keyboard_observation(observed.get("keyboard"))
+        if keyboard:
+            result.setdefault("keyboard", {}).update(keyboard)
         if source == "checkpoint":
             stage = observed.get("stage")
             if type(observed.get("schema")) is int and observed["schema"] == 1 \
@@ -747,6 +821,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             report["native_corner_observed"] = error.native_corner
         if isinstance(error, ProbeError) and type(getattr(error, "native_menu", None)) is dict and error.native_menu:
             report["native_menu_close_observed"] = error.native_menu
+        if isinstance(error, ProbeError) and type(getattr(error, "native_keyboard", None)) is dict and error.native_keyboard:
+            report["native_keyboard_observed"] = keyboard_observation(error.native_keyboard)
         if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
             report["simctl_failure"] = error.tool_detail
     finally:

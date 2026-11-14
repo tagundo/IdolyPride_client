@@ -17,6 +17,9 @@
 static const NSUInteger IDJSONLimit = 65536;
 static IDGate gate;
 static IMP originalStartUnity;
+static _Atomic(IMP) originalKeyboardTextField;
+static atomic_bool unityKeyboardReady;
+static BOOL keyboardGuardInstalled;
 static id savedController, savedApplication;
 static SEL startSelector;
 static NSString *hookError, *lastError, *lastGameError, *dataDirectory;
@@ -206,6 +209,16 @@ static NSString *callHost(const char *name, NSString *argument, NSString **error
     if (!result) *error = PyErr_Occurred() ? pythonFailure() : @"서버 응답이 64 KiB를 초과했습니다.";
     pythonThread = PyEval_SaveThread(); return result;
 }
+static id guardedUnityKeyboardTextField(id self, SEL selector) {
+    // UIKit/PlayCover can query the Unity field while our WK launcher is open.
+    // The original getter lazily creates KeyboardDelegate, but Unity's later
+    // +Initialize asserts that it has not been created yet (Keyboard.mm:260).
+    // Keep internal initialization untouched; expose the original field only
+    // after the complete original initialization call has returned.
+    if (!atomic_load(&unityKeyboardReady)) return nil;
+    IMP original = atomic_load(&originalKeyboardTextField);
+    return original ? ((id (*)(id, SEL))original)(self, selector) : nil;
+}
 static void forwardUnityIfVisible(void) {
     NSCAssert(NSThread.isMainThread, @"Unity startup belongs to main thread");
     if (!IDGateForwardVisible(&gate, UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)) return;
@@ -216,6 +229,7 @@ static void forwardUnityIfVisible(void) {
     id controller = savedController, application = savedApplication;
     savedController = nil; savedApplication = nil;
     ((void (*)(id, SEL, id))originalStartUnity)(controller, startSelector, application);
+    atomic_store(&unityKeyboardReady, true);
 }
 static void beginServer(void) {
     NSCAssert([NSThread isMainThread], @"Gate state belongs to main thread");
@@ -379,9 +393,37 @@ static void installGate(void) {
         && auditedInitialization(method_getImplementation(target));
     free(ret);
     if (!valid) { hookError = @"이 게임의 Unity 초기화 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다."; return; }
+    Class framework = objc_getClass("UnityFramework");
+    SEL keyboardSelector = sel_registerName("keyboardTextField");
+    Method keyboard = framework ? class_getInstanceMethod(framework, keyboardSelector) : NULL;
+    char *keyboardReturn = keyboard ? method_copyReturnType(keyboard) : NULL;
+    BOOL keyboardValid = keyboard && method_getNumberOfArguments(keyboard) == 2
+        && keyboardReturn && !strcmp(keyboardReturn, "@")
+        && exactType(keyboard, 0, "@") && exactType(keyboard, 1, ":");
+    free(keyboardReturn);
+#if !IDOLY_SMOKE_SIMULATOR
+    keyboardValid = keyboardValid && auditedUnityEntry(method_getImplementation(keyboard),
+        IDUnityKeyboardFieldRVA, IDUnityKeyboardFieldPrefix, sizeof IDUnityKeyboardFieldPrefix);
+#endif
+    if (!keyboardValid) {
+        hookError = @"이 게임의 Unity 키보드 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다.";
+        return;
+    }
+    atomic_store(&originalKeyboardTextField, method_getImplementation(keyboard));
+    IMP previousKeyboard = method_setImplementation(keyboard, (IMP)guardedUnityKeyboardTextField);
+    keyboardGuardInstalled = previousKeyboard != NULL;
+    if (!keyboardGuardInstalled) {
+        atomic_store(&originalKeyboardTextField, NULL);
+        hookError = @"Unity 키보드 초기화 보호를 연결하지 못했습니다."; return;
+    }
+    atomic_store(&originalKeyboardTextField, previousKeyboard);
     originalStartUnity = method_setImplementation(target, (IMP)deferredStart);
     hookInstalled = originalStartUnity != NULL;
-    if (!hookInstalled) hookError = @"Unity 시작 진입점을 연결하지 못했습니다.";
+    if (!hookInstalled) {
+        method_setImplementation(keyboard, previousKeyboard);
+        atomic_store(&originalKeyboardTextField, NULL); keyboardGuardInstalled = NO;
+        hookError = @"Unity 시작 진입점을 연결하지 못했습니다.";
+    }
 }
 NSString *IDNativeDataDirectory(void) {
     @synchronized (IDServerWorker.class) { return dataDirectory; }
@@ -389,6 +431,7 @@ NSString *IDNativeDataDirectory(void) {
 NSString *IdolyEmbeddedServerStatusJSON(void) {
     __block NSString *result;
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled),
+        @"keyboard_guard_installed":@(keyboardGuardInstalled), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),
         @"launch_requested":@((BOOL)gate.launch_requested), @"launch_prepared":@((BOOL)gate.launch_prepared),

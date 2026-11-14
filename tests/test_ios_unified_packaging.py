@@ -123,7 +123,7 @@ def test_full_small_package_preserves_original_main_and_sdk(tmp_path):
     assert report['original_SDK_members_unchanged'] and report['max_stream_chunk_bytes']==65536 and not report['actual_device_or_PlayCover_execution']
     with ZipFile(out) as z:
         assert z.read('Payload/Game.app/Main')==b'ORIGINAL MAIN' and z.read('Payload/Game.app/Frameworks/SDK.framework/SDK')==b'ORIGINAL SDK'
-        metadata=plistlib.loads(z.read('Payload/Game.app/Info.plist')); assert metadata['UIFileSharingEnabled'] is True and metadata['CFBundleVersion']=='156.9103' and metadata['CFBundleDisplayName']=='아이프라 로컬' and metadata['CFBundleIdentifier']=='game.original'
+        metadata=plistlib.loads(z.read('Payload/Game.app/Info.plist')); assert metadata['UIFileSharingEnabled'] is True and metadata['CFBundleVersion']=='156.9104' and metadata['CFBundleDisplayName']=='아이프라 로컬' and metadata['CFBundleIdentifier']=='game.original'
         assert z.read('Payload/Game.app/LocalServer/ServerData.zip')==b'public-data'
 
 def test_simulator_stage_needs_no_game_but_never_device_package(tmp_path):

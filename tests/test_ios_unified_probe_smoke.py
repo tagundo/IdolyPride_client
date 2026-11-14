@@ -35,6 +35,7 @@ def native_report():
             "server_status": {"schema": 1, "hook_installed": True, "phase": 4,
                               "captured": 1, "forwarded": 1, "attempts": 1,
                               "python_initialized": True, "error": None,
+                              "keyboard_guard_installed": True, "keyboard_ready": True,
                               "launch_requested": True, "launch_prepared": True, "launcher_visible": False,
                               "client_data": {"selected": True, "language": "ko", "bundle_identifier": "local.idoly.client-data"}},
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
@@ -55,6 +56,16 @@ def native_report():
             "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
                 "last_error": None, "runtime": {"running": True, "grpc_address": "127.0.0.1:50051",
                                                 "asset_url": "http://127.0.0.1:8080"}}}}
+    report["keyboard"] = {
+        "before_capture":{"guard_installed":True,"ready":False,"phase":2,"returned_nil":True,
+                          "returned_initialized_field":False,"original_calls":0,"field_creation_count":0},
+        "before_launch":{"guard_installed":True,"ready":False,"phase":2,"returned_nil":True,
+                         "returned_initialized_field":False,"original_calls":0,"field_creation_count":0},
+        "during_init":{"guard_installed":True,"ready":False,"phase":4,"returned_nil":True,
+                       "returned_initialized_field":False,"original_calls":0,"field_creation_count":0},
+        "after_init":{"guard_installed":True,"ready":True,"phase":4,"returned_nil":False,
+                      "returned_initialized_field":True,"original_calls":1,"field_creation_count":1},
+    }
     report["early_status"] = {"id":2718,"ok":True,"state":"starting","running":False,
                               "phase":1,"captured":0,"completion_main_thread":True}
     report["launcher"].update(premature_captured=0,server_ready_before_capture=True,
@@ -74,6 +85,153 @@ def native_report():
                "last_error":None,"runtime":{"running":True,"grpc_address":"127.0.0.1:50051",
                                               "asset_url":"http://127.0.0.1:8080"}}}}
     return report
+
+
+@pytest.mark.parametrize("phase,field,replacement", (
+    ("before_capture", "ready", True), ("before_capture", "original_calls", 1),
+    ("before_capture", "field_creation_count", 1),
+    ("before_launch", "returned_nil", False), ("before_launch", "original_calls", 1),
+    ("before_launch", "field_creation_count", 1),
+    ("during_init", "ready", True), ("during_init", "returned_nil", False),
+    ("during_init", "returned_initialized_field", True), ("during_init", "original_calls", 1),
+    ("during_init", "field_creation_count", 1),
+    ("after_init", "ready", False), ("after_init", "returned_nil", True),
+    ("after_init", "returned_initialized_field", False), ("after_init", "original_calls", 0),
+    ("after_init", "original_calls", 2), ("after_init", "field_creation_count", 0),
+    ("after_init", "field_creation_count", 2),
+    ("before_capture", "phase", True), ("before_launch", "original_calls", False),
+    ("during_init", "field_creation_count", False), ("after_init", "original_calls", True),
+    ("after_init", "field_creation_count", True), ("before_capture", "guard_installed", 1),
+    ("during_init", "ready", 0), ("after_init", "ready", 1),
+))
+def test_keyboard_guard_only_calls_original_after_unity_initialization(phase, field, replacement):
+    observed = native_report()
+    observed["keyboard"][phase][field] = replacement
+    with pytest.raises(probe.ProbeError, match="^keyboard_guard_" + phase + "_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("key,value", (("keyboard_guard_installed", False), ("keyboard_guard_installed", 1),
+                                      ("keyboard_ready", False), ("keyboard_ready", 1)))
+def test_final_native_status_requires_keyboard_guard_and_readiness(key, value):
+    observed = native_report()
+    observed["server_status"][key] = value
+    with pytest.raises(probe.ProbeError, match="^keyboard_guard_after_init_failed$"):
+        probe.validate_report(observed)
+
+
+def test_keyboard_phase_evidence_is_required_and_validated_output_drops_unknown_data():
+    observed = native_report()
+    del observed["keyboard"]["during_init"]
+    with pytest.raises(probe.ProbeError, match="^keyboard_guard_during_init_failed$"):
+        probe.validate_report(observed)
+    observed = native_report()
+    observed["keyboard"]["private_phase"] = {"credentials":"must-not-export"}
+    observed["keyboard"]["after_init"]["private_field"] = "must-not-export"
+    result = probe.validate_report(observed)
+    assert result["keyboard"]["during_init"]["ready"] is False
+    assert result["keyboard"]["after_init"]["original_calls"] == 1
+    assert result["server_status"]["keyboard_ready"] is True
+    assert "must-not-export" not in json.dumps(result)
+
+
+def test_keyboard_diagnostic_projection_keeps_only_strict_bounded_public_scalars():
+    observed = probe.keyboard_observation({
+        "before_capture":{"guard_installed":1,"ready":False,"phase":True,"returned_nil":"private",
+                          "returned_initialized_field":False,"original_calls":17,"field_creation_count":-1,
+                          "private_field":"never-copy"},
+        "before_launch":["private"],
+        "during_init":{"phase":4,"original_calls":16,"field_creation_count":16,"ready":True},
+        "after_init":{"phase":5,"original_calls":True,"field_creation_count":{},"guard_installed":False},
+        "private_phase":{"token":"never-copy"}})
+    assert observed == {
+        "before_capture":{"ready":False,"returned_initialized_field":False},
+        "during_init":{"phase":4,"original_calls":16,"field_creation_count":16,"ready":True},
+        "after_init":{"guard_installed":False}}
+    assert "private" not in json.dumps(observed) and "never-copy" not in json.dumps(observed)
+
+
+@pytest.mark.parametrize("source,filename,stage", (
+    ("checkpoint","embedded-probe-checkpoint.json","keyboard_before_capture_checked"),
+    ("status","embedded-probe-status.json","keyboard_before_launch_checked"),
+    ("report","embedded-probe.json","keyboard_after_init_checked"),
+))
+def test_keyboard_failure_checkpoint_is_projected_from_fixed_public_files(tmp_path, source, filename, stage):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    observed = native_report() if source == "report" else {
+        "schema":1,"stage":stage,"keyboard_guard_installed":True,"keyboard_ready":False,
+        "server_status":{"phase":2,"keyboard_guard_installed":True,"keyboard_ready":False},
+        "keyboard":native_report()["keyboard"]}
+    observed["keyboard"]["before_capture"]["field_creation_count"] = 1
+    observed["keyboard"]["before_capture"]["arbitrary_payload"] = "never-copy"
+    observed["keyboard"]["private_phase"] = {"token":"never-copy"}
+    (documents / filename).write_text(json.dumps(observed))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["keyboard"]["before_capture"]["field_creation_count"] == 1
+    if source == "checkpoint":
+        assert result["stage"] == stage and result["keyboard_guard_installed"] is True
+        assert result["keyboard_ready"] is False
+    if source == "status":
+        assert result["status_keyboard_guard_installed"] is True and result["status_keyboard_ready"] is False
+    if source == "report":
+        assert result["report_valid"] is False
+    assert "never-copy" not in json.dumps(result)
+
+
+def test_final_keyboard_failure_preserves_only_bounded_observation_in_audit(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    observed = native_report()
+    observed["keyboard"]["during_init"]["field_creation_count"] = 1
+    observed["keyboard"]["during_init"]["private_field"] = "never-copy"
+    with mock.patch.object(probe.sys, "platform", "darwin"), \
+            mock.patch.object(probe, "_simctl", controller), \
+            mock.patch(__name__ + ".native_report", return_value=observed), \
+            mock.patch.object(probe, "probe_rpcs") as rpc:
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["error"] == "keyboard_guard_during_init_failed"
+    assert result["native_keyboard_observed"]["during_init"]["field_creation_count"] == 1
+    assert result["native_checkpoint"]["keyboard"]["during_init"]["field_creation_count"] == 1
+    assert "never-copy" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_waiting_keyboard_failure_keeps_known_scalars_and_cleans_owned_simulator(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    def simctl(arguments, timeout):
+        result = controller(arguments, timeout)
+        if arguments[0] == "launch":
+            documents = controller.container / "Documents"
+            (documents / "embedded-probe.json").unlink()
+            observed = {"server_status":{"phase":2,"error":None},
+                        "probe_error":"keyboard_created_before_initialize",
+                        "keyboard":native_report()["keyboard"]}
+            observed["keyboard"]["before_capture"]["field_creation_count"] = 1
+            observed["keyboard"]["private_phase"] = {"token":"never-copy"}
+            (documents / "embedded-probe-status.json").write_text(json.dumps(observed))
+        return result
+    with mock.patch.object(probe.sys, "platform", "darwin"), \
+            mock.patch.object(probe, "_simctl", simctl), mock.patch.object(probe, "probe_rpcs") as rpc:
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["error"] == "keyboard_created_before_initialize"
+    assert result["native_keyboard_observed"]["before_capture"]["field_creation_count"] == 1
+    assert result["cleanup"] == {"shutdown":True,"delete":True}
+    assert "never-copy" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_waiting_deadline_retains_only_previously_valid_keyboard_scalars(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    observed = {"server_status":{"phase":2,"error":None}, "keyboard":native_report()["keyboard"]}
+    observed["keyboard"]["after_init"]["private_text"] = "never-copy"
+    (documents / "embedded-probe-status.json").write_text(json.dumps(observed))
+    remaining = mock.Mock(side_effect=[1, 1, probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time, "sleep"), pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path, remaining)
+    assert str(caught.value) == "probe_deadline_exceeded"
+    assert caught.value.native_keyboard["during_init"]["ready"] is False
+    assert "never-copy" not in json.dumps(caught.value.native_keyboard)
 
 
 @pytest.mark.parametrize("path,replacement,code", [
@@ -515,7 +673,9 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert result["status_phase"] == 2 and result["status_original_called"] == 0
     assert result["report_phase"] == 4 and result["report_original_called"] == 1
     assert result["report_valid"] is True
-    assert all(type(value) in (str, int, bool, float, type(None)) for value in result.values())
+    assert all(type(value) in (str, int, bool, float, type(None))
+               for key, value in result.items() if key != "keyboard")
+    assert result["keyboard"] == raw_report["keyboard"]
     assert "must not retain" not in json.dumps(result)
 
 
