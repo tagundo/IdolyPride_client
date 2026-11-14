@@ -1159,11 +1159,20 @@ jobs:
           --work "$RUNNER_TEMP/idoly-unified-build"
           --output "$RUNNER_TEMP/idoly-unified-output"
           --source-commit "$GITHUB_SHA"
-      - uses: actions/upload-artifact@v4
-        if: ${{ always() }}
+      - name: Keep diagnostics when the build or probe fails
+        uses: actions/upload-artifact@v4
+        if: ${{ failure() }}
+        with:
+          name: ios-unified-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-unified-output/*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the IPA after the Simulator core probe passes
+        uses: actions/upload-artifact@v4
+        if: ${{ success() }}
         with:
           name: ios-unified-prototype-${{ github.sha }}
           path: ${{ runner.temp }}/idoly-unified-output
-          if-no-files-found: warn
+          if-no-files-found: error
           compression-level: 0
           retention-days: 14

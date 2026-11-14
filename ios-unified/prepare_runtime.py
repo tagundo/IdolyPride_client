@@ -103,6 +103,24 @@ def unpack_wheel(path, row, destination):
     require(copied, 'Pure dependency wheel contained no selected runtime files')
     return copied
 
+def normalize_python_framework_metadata(framework, target, expected_architectures):
+    """Correct BeeWare's Simulator plist only after auditing its actual binary."""
+    framework = Path(framework)
+    image = audit_macho(framework / 'Python', target)
+    require({item['architecture'] for item in image['slices']} == set(expected_architectures), 'Python framework architecture inventory differs')
+    require(all(item['filetype'] == 6 and item['install_name'] == '@rpath/Python.framework/Python' for item in image['slices']), 'Python framework dylib identity differs')
+    path = framework / 'Info.plist'; require(regular(path).st_size <= 128 * 1024, 'Python Info.plist exceeds bound')
+    raw = path.read_bytes(); info = plistlib.loads(raw)
+    require(info.get('CFBundleExecutable') == 'Python' and info.get('CFBundlePackageType') == 'FMWK', 'Python framework metadata identity differs')
+    expected = ['iPhoneOS' if target == 'device' else 'iPhoneSimulator']
+    corrected = target == 'simulator' and info.get('CFBundleSupportedPlatforms') == ['iPhoneOS']
+    if corrected:
+        info['CFBundleSupportedPlatforms'] = expected
+        path.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY if raw.startswith(b'bplist00') else plistlib.FMT_XML))
+    require(info.get('CFBundleSupportedPlatforms') == expected, 'Python framework metadata platform differs')
+    return {'actual_binary': image, 'supported_platforms': expected, 'vendor_Simulator_metadata_corrected': corrected}
+
+
 def _run(tool, args):
     result = subprocess.run([str(tool), *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=90)
     require(result.returncode == 0 and len(result.stdout) <= 65536 and len(result.stderr) <= 65536, 'Apple framework tool failed')
@@ -155,6 +173,7 @@ def prepare(support, wheel_dir, output, *, target, architecture, project_root, c
                     (framework / (module + '.origin')).write_text(mapping + '\n')
                     (framework / 'Info.plist').write_bytes(plistlib.dumps({'CFBundleExecutable':module,'CFBundleIdentifier':'org.python.stdlib.mod-' + module.replace('_','-'),'CFBundleName':module,'CFBundlePackageType':'FMWK','CFBundleVersion':'1','CFBundleShortVersionString':'1.0','MinimumOSVersion':'13.0','CFBundleSupportedPlatforms':['iPhoneOS' if target == 'device' else 'iPhoneSimulator']}))
                     mappings[module] = {'fwork':mapping,'binary':'Frameworks/' + module + '.framework/' + module,'origin':'Frameworks/' + module + '.framework/' + module + '.origin'}
+    python_metadata = normalize_python_framework_metadata(framework_root / 'Python.framework', target, selected['SupportedArchitectures'])
     require(set(manifest['required_extensions']) <= mappings.keys(), 'Required native stdlib modules are missing')
     for row in manifest['pure_wheels']: unpack_wheel(Path(wheel_dir) / row['filename'], row, python)
     license_path = output / 'LocalServer/licenses/AGPL-3.0.txt'; license_path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,7 +187,7 @@ def prepare(support, wheel_dir, output, *, target, architecture, project_root, c
     require(not list(output.rglob('*.so')) and not list(output.rglob('*.dylib')), 'Loose native modules cannot be loaded by the target')
     files = {str(p.relative_to(output)): {'bytes':regular(p).st_size,'sha256':sha_file(p)} for p in sorted(output.rglob('*')) if p.is_file()}
     require(sum(v['bytes'] for v in files.values()) <= manifest['capacity']['max_runtime_bytes'], 'Prepared runtime exceeds capacity')
-    report = {'schema':1,'target':target,'architecture':architecture,'python_abi':manifest['python_abi'],'support_sha256':manifest['support']['sha256'],'frameworks':native,'extension_mappings':mappings,'project_source_modules':sorted(sources),'source_sha256':{name:sha_file(path) for name,(path,raw) in sources.items()},'files':files,'stdlib_test_and_editor_members_omitted':skipped,'protobuf_implementation':'python','frameworks_codesign_verify_passed':True,'actual_device_execution':False}
+    report = {'schema':1,'target':target,'architecture':architecture,'python_abi':manifest['python_abi'],'support_sha256':manifest['support']['sha256'],'frameworks':native,'python_framework_metadata':python_metadata,'extension_mappings':mappings,'project_source_modules':sorted(sources),'source_sha256':{name:sha_file(path) for name,(path,raw) in sources.items()},'files':files,'stdlib_test_and_editor_members_omitted':skipped,'protobuf_implementation':'python','frameworks_codesign_verify_passed':True,'actual_device_execution':False}
     (output / 'runtime-report.json').write_text(json.dumps(report,indent=2)+'\n'); return report
 
 def main():

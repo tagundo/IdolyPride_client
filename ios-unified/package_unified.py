@@ -53,7 +53,7 @@ def bundle_files(runtime_root, native_framework, server_data, translations, targ
     web = Path(web_root or HERE / 'web'); require({p.name for p in web.iterdir() if p.is_file()} == {'index.html','styles.css','app.js'}, 'Bundled settings inventory differs')
     for name in ('index.html','styles.css','app.js'):
         p = web / name; require(regular(p).st_size <= 256 * 1024, 'Settings file exceeds bound'); files['LocalServer/settings/' + name] = p
-    t = manifest['inputs']['translations']; metadata = {'schema':1,'version':t['version'],'platform':'ios','archive_sha256':t['sha256'],'archive_bytes':t['bytes'],'manifest_sha256':t['manifest_sha256']}
+    t = manifest['inputs']['translations']; metadata = {'schema':1,'platform':'ios','sha256':t['sha256'],'bytes':t['bytes']}
     generated = {'LocalServer/bundledTranslations.json':(json.dumps(metadata,indent=2)+'\n').encode()}
     require(len(files) <= manifest['capacity']['max_archive_entries'], 'Unified app inventory exceeds bound')
     return files, generated, {'runtime':runtime,'native':native}

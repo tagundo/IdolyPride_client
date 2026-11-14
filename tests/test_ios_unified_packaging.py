@@ -136,3 +136,28 @@ def test_runtime_extra_files_and_broken_fwork_rejected(tmp_path):
     with pytest.raises(ValueError,match='inventory'):package.runtime_files(root,'device',manifest)
     (root/'private.db').unlink();r=json.loads((root/'runtime-report.json').read_text());r['extension_mappings']={'_socket':{'fwork':'python-stdlib/os.py','origin':'python-stdlib/os.py','binary':'Frameworks/Python.framework/Python'}};(root/'runtime-report.json').write_text(json.dumps(r))
     with pytest.raises(ValueError,match='mapping'):package.runtime_files(root,'device',manifest)
+
+@pytest.mark.parametrize('target',['device','simulator'])
+def test_generated_outer_translation_pin_is_consumed_by_actual_runtime_validator(tmp_path,target):
+    from idoly_local.bundled_translations import read_translation_metadata
+    root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path,target)
+    _,generated,_=package.bundle_files(root,nat,data,trans,target,manifest,web)
+    path=tmp_path/'bundledTranslations.json';path.write_bytes(generated['LocalServer/bundledTranslations.json'])
+    actual=read_translation_metadata(path,platform='ios')
+    assert actual=={'schema':1,'platform':'ios','sha256':sha(trans.read_bytes()),'bytes':trans.stat().st_size}
+
+
+def test_simulator_vendor_plist_corrected_after_real_binary_platform_audit(tmp_path):
+    path=framework(tmp_path,'Python',target='simulator');info_path=path/'Info.plist';info=plistlib.loads(info_path.read_bytes());info['CFBundleSupportedPlatforms']=['iPhoneOS'];info_path.write_bytes(plistlib.dumps(info));before=common.sha_file(path/'Python')
+    result=runtime.normalize_python_framework_metadata(path,'simulator',{'arm64'})
+    assert result['vendor_Simulator_metadata_corrected'] is True
+    assert plistlib.loads(info_path.read_bytes())['CFBundleSupportedPlatforms']==['iPhoneSimulator']
+    assert common.sha_file(path/'Python')==before
+    assert common.audit_frameworks(tmp_path,'simulator')['Python']['slices'][0]['build_version']['platform']==7
+
+
+@pytest.mark.parametrize('actual_target,requested_target,expected_architectures',[('device','simulator',{'arm64'}),('simulator','simulator',{'x86_64'}),('simulator','device',{'arm64'})])
+def test_python_plist_normalization_never_substitutes_for_binary_platform_and_arch(tmp_path,actual_target,requested_target,expected_architectures):
+    path=framework(tmp_path,'Python',target=actual_target);info_path=path/'Info.plist';before=info_path.read_bytes()
+    with pytest.raises(ValueError):runtime.normalize_python_framework_metadata(path,requested_target,expected_architectures)
+    assert info_path.read_bytes()==before
