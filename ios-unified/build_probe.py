@@ -92,7 +92,8 @@ def clang_command(compiler, sdk, output, arch):
             "-fobjc-arc", "-fblocks", "-O2", "-Wall", "-Wextra", "-Werror",
             "-Wno-deprecated-declarations", "-I", str(HERE / "native"),
             "-F", str(Path(output) / "Frameworks"), "-framework", "IdolyEmbeddedServer",
-            "-framework", "Foundation", "-framework", "UIKit", "-framework", "WebKit", "-Wl,-headerpad_max_install_names",
+            "-framework", "Foundation", "-framework", "UIKit", "-framework", "WebKit",
+            "-framework", "CoreGraphics", "-Wl,-headerpad_max_install_names",
             "-Wl,-rpath,@executable_path/Frameworks", str(HERE / "probe/main.m"),
             "-o", str(Path(output) / EXECUTABLE)]
 
