@@ -161,7 +161,9 @@ class Fallback {
         struct Scope { bool &value; Scope(bool &value):value(value){value=true;} ~Scope(){value=false;} } scope(inside_);
         if (source_ && !live(source_)) { release(source_);active_=false; }
         const size_t index=track(font);
-        if (api_.named(font,"SourceSansPro-Regular SDF") && live(source_)!=font) {
+        // The original SourceSansPro asset contains the game's two/three-em
+        // dash glyphs. Only the separate Korean asset may be cleared.
+        if (api_.named(font,"Pretendard JP SemiBold SDF") && live(source_)!=font) {
             release(source_);source_=api_.strong_new(font,false);active_=false;
             if (++generation_==0) {
                 generation_=1;

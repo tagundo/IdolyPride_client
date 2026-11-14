@@ -3639,8 +3639,8 @@
   },
   "hangul_font_fallback": {
     "schema": 1,
-    "asset_policy": "SourceSansPro Font17 replacement + Japanese Font18 fallback PPtr(0,17)",
-    "source_TMP_name": "SourceSansPro-Regular SDF",
+    "asset_policy": "Preserve original Font17/TMP21 dash glyphs; separate Pretendard Font22/TMP23/Texture24/Material25, Japanese Font18 fallback PPtr(0,22)",
+    "source_TMP_name": "Pretendard JP SemiBold SDF",
     "reference_TMP_name": "Solis-MK5 SDF",
     "face_info_offset": 80,
     "face_info_numeric_offset": 24,

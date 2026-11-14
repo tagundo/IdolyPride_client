@@ -153,6 +153,13 @@ def load_package_inputs(language="ja", csv_file=None, proof_file=None):
         return None, None
     value = read_ui_csv(csv_file)
     proof = read_ui_proof(proof_file, value, language) if proof_file is not None else validate_proof(None, value, language)
+    if language == "ko":
+        from .ui_text_finishes import apply_csv
+        value, finishes = apply_csv(value)
+        proof = {**proof, "prepared_input_proof": proof,
+                 "bytes": len(value), "output_sha256": _sha(value),
+                 "curated_korean_ui": finishes}
+        validate_proof(proof, value, language)
     return value, proof
 
 

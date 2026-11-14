@@ -265,7 +265,8 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
     report_path = output.with_suffix(".report.json")
     if output.exists() or report_path.exists():
         raise ValueError("Output already exists; choose a new IPA filename")
-    from .ui_assets import load_package_inputs, patch_ios_member
+    from .ui_assets import load_package_inputs
+    from .static_ui_assets import patch_ios_stream
     ui_csv, ui_proof = load_package_inputs(ui_language, ui_csv_file, ui_proof_file)
     ui_report = None
     presentation_enabled = presentation_library is not None or presentation_plan is not None
@@ -330,6 +331,11 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
             raise ValueError("Input IPA game identity/version differs from the verified profile")
         font_replacement = font_report = None
         font_notices = {}
+        from .static_ui_images import ios_patches as static_image_patches
+        image_replacements, image_appends, image_report = static_image_patches(archive,
+            language=ui_language,
+            image_dir=Path(__file__).resolve().parents[2] / "client-presentation/images/ko")
+        gc.collect()
         font_name = app + "Data/sharedassets0.assets"
         ui_name = app + "Data/resources.assets"
         if ui_csv is not None and ui_name not in names:
@@ -368,6 +374,9 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         del metadata
         patched_metadata, metadata_report = patch_metadata(octo_metadata, endpoint)
         del octo_metadata
+        from .ui_display_literals import patch_bytes as patch_display_literals
+        patched_metadata, display_literals_report = patch_display_literals(patched_metadata, "ios", ui_language,
+            expected_sha256=metadata_report["output_sha256"])
         settings_name = app + _UNITY_SETTINGS
         unity_settings, unity_http_report = _patch_unity_http(archive.read(settings_name), profile)
         endpoint = metadata_report["endpoint"]
@@ -391,7 +400,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         info["CFBundleIdentifier"] = bundle_id
         info["CFBundleDisplayName"] = "아이프라 로컬"
         info["CFBundleName"] = "IdolyPrideLocal"
-        info["CFBundleVersion"] = profile.game_build + (".9005" if font_file is not None else ".9004")
+        info["CFBundleVersion"] = profile.game_build + (".9006" if font_file is not None else ".9004")
         # The local login does not use the original federated-login callbacks.
         # Register one isolated scheme so both apps can coexist without stealing
         # the original game's deep links or Google/Twitter callback URLs.
@@ -423,6 +432,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                   "bundle_id": bundle_id, "display_name": info["CFBundleDisplayName"],
                   "url_schemes": [bundle_id],
                   "metadata": metadata_report, "octo_metadata": octo_report,
+                  "ui_display_literals": display_literals_report,
                   "unity_http_transport": unity_http_report, "source_unity": source_unity,
                   "output_unity": output_unity, "main_executable": main_executable,
                   "native_replacement": native_library is not None,
@@ -430,6 +440,8 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                   "presentation_patch": presentation_report,
                   "font_support": font_report, "ui_language": ui_language,
                   "ui_translation": None,
+                  "static_ui_translation": None,
+                  "static_ui_images": image_report,
                   "signing": "Import in PlayCover, which must re-sign the app and embedded binaries",
                   "device_verified": False,
                   "scope": "API/resource routing, HTTP transport, selected bootstrap hooks, optional presentation bridge and fixed offline UI data; gameplay/device execution remains unverified"}
@@ -444,9 +456,17 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                         # resources.assets is 65MiB. Patch it directly between
                         # ZIP streams; retain only its pinned 10MiB metadata.
                         with packaged.open(copy.copy(item), "w") as destination:
-                            ui_report = patch_ios_member(archive, ui_name, destination, ui_csv,
-                                language=ui_language, translation_proof=ui_proof)
+                            with archive.open(ui_name) as original_ui:
+                                static_report = patch_ios_stream(original_ui, destination,
+                                    language=ui_language, ui_csv=ui_csv, ui_proof=ui_proof,
+                                    extra_replacements=image_replacements, append_objects=image_appends,
+                                    image_proof=image_report)
+                            ui_report = {"translation": static_report["ui_translation"],
+                                "output_asset_bytes": static_report["output_asset_bytes"],
+                                "output_asset_sha256": static_report["output_asset_sha256"],
+                                "policy": "fixed-ui-csv-in-combined-asset-v2"}
                         report["ui_translation"] = ui_report
+                        report["static_ui_translation"] = static_report
                         continue
                     data = replacements.get(item.filename)
                     if data is None:

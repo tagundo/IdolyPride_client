@@ -17,10 +17,12 @@ ORIGINAL_GUID = b"a711296b-d0fa-4aa6-a376-90142093f41a"
 ORIGINAL_SHA256 = "0495a6f0504dda9edd55c550dcf58e582df6a1c80cc530328bdf5ce5998c832a"
 DOMAIN = "idoly-local-code-v1"
 ASSET_DOMAIN = "idoly-local-code-assets-v2"
+PRESENTATION_DOMAIN = "idoly-local-code-presentation-v3"
 
 
 def derive_cache_guid(original: bytes, metadata_sha256: str, settings_sha256: str, *,
-                      serialized_asset_sha256: str | None = None) -> tuple[bytes, dict]:
+                      serialized_asset_sha256: str | None = None,
+                      presentation_assets_sha256: str | None = None) -> tuple[bytes, dict]:
     if not isinstance(original, bytes) or len(original) != 36:
         raise ValueError("Expected a 36-byte Unity build GUID")
     try:
@@ -38,10 +40,19 @@ def derive_cache_guid(original: bytes, metadata_sha256: str, settings_sha256: st
     if serialized_asset_sha256 is not None and (not isinstance(serialized_asset_sha256, str)
             or re.fullmatch(r"[0-9a-f]{64}", serialized_asset_sha256) is None):
         raise ValueError("Unity serialized asset input requires a lowercase SHA-256 digest")
+    if presentation_assets_sha256 is not None and (not isinstance(presentation_assets_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", presentation_assets_sha256) is None):
+        raise ValueError("Unity presentation assets input requires a lowercase SHA-256 digest")
+    if presentation_assets_sha256 is not None and serialized_asset_sha256 is None:
+        raise ValueError("Presentation assets require the serialized asset input")
     domain = DOMAIN if serialized_asset_sha256 is None else ASSET_DOMAIN
+    if presentation_assets_sha256 is not None:
+        domain = PRESENTATION_DOMAIN
     inputs = (domain, metadata_sha256, settings_sha256)
     if serialized_asset_sha256 is not None:
         inputs += (serialized_asset_sha256,)
+    if presentation_assets_sha256 is not None:
+        inputs += (presentation_assets_sha256,)
     name = "|".join(inputs)
     result = str(uuid.uuid5(namespace, name)).encode("ascii")
     if len(result) != 36 or result == original:
@@ -55,4 +66,6 @@ def derive_cache_guid(original: bytes, metadata_sha256: str, settings_sha256: st
         "account_settings_sdk_flags_or_clocks_changed": False}
     if serialized_asset_sha256 is not None:
         proof["serialized_asset_sha256"] = serialized_asset_sha256
+    if presentation_assets_sha256 is not None:
+        proof["presentation_assets_sha256"] = presentation_assets_sha256
     return result, proof

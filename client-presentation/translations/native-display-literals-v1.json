@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "policy": "native-display-literals-v1",
+  "source_text": "開催中のイベントはありません",
+  "translations": {
+    "ko": "진행 중인 이벤트가 없습니다.",
+    "en": "There are no ongoing events."
+  },
+  "translation_source": "Manual completion; this text is absent from the pinned Korean generic and localization dictionaries.",
+  "display_method": "Solis.OutGame.MenuButtonUtility.<OnClickAsync>d__7.MoveNext",
+  "callee": "Solis.Common.ToastManager.Show",
+  "platforms": {
+    "android": {
+      "original_metadata_sha256": "f03b65e71c07648215ae18d6bb787462f2b049c45212f379eaa9ea05f8ba874e",
+      "literal_index": 35651,
+      "usage_slot_rva": "0x9d69318",
+      "method_rva": "0x5250d48",
+      "display_call_rva": "0x5252cb0",
+      "callee_rva": "0x4654510"
+    },
+    "ios": {
+      "original_metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+      "literal_index": 34989,
+      "usage_slot_rva": "0xa4d3458",
+      "method_rva": "0x2bb28e0",
+      "display_call_rva": "0x2bb2e44",
+      "callee_rva": "0x1dbe3fc"
+    }
+  },
+  "input_identity": "The preceding verified metadata producer supplies its exact output SHA-256; original platform SHA-256 values document the source audit.",
+  "japanese_bytes_unchanged": true,
+  "only_selected_literal_indexes_changed": true,
+  "runtime_translation_work": false,
+  "physical_device_verified": false
+}

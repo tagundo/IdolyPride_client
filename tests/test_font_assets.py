@@ -88,7 +88,7 @@ def test_font_license_and_marker_are_pinned_and_exclude_large_per_object_ledgers
     policy = json.loads((root / 'client-presentation/fonts/pretendard-jp-v1.json').read_text())
     assert (policy['bytes'], policy['sha256']) == (font.FONT_BYTES, font.FONT_SHA256)
     license = font.read_license(root / policy['license_file'])
-    report = {'schema': 1, 'policy': 'hangul-font-v1', 'font': {'sha256': font.FONT_SHA256},
+    report = {'schema': 2, 'policy': font.POLICY, 'font': {'sha256': font.FONT_SHA256},
               'object_sha256_before': {'17': 'old'}, 'object_sha256_after': {'17': 'new'}}
     notices = font.package_notices(report, license)
     assert set(notices) == {'IdolyFontSupport.json', 'OFL-Pretendard.txt'}
@@ -132,3 +132,120 @@ def test_tmp_source_font_and_dynamic_mode_are_verified_without_mutating_the_asse
         monkeypatch.setitem(font.TMP_SOURCE_SHA256, 'ios', hashlib.sha256(raw).hexdigest())
         with pytest.raises(ValueError, match='Font17 in Dynamic'):
             font._source_tmp(bytes(raw), 'ios')
+
+
+def test_explicit_glyph_coverage_distinguishes_horizontal_bar_from_two_em_dash():
+    raw = cmap_font([(0x2015, 0x2015, 1), (0x2E3A, 0x2E3B, 5)])
+    assert font.unicode_glyphs(raw, (0x2015, 0x2E3A, 0x2E3B, 0x005F)) == {
+        0x2015: 1, 0x2E3A: 5, 0x2E3B: 6, 0x005F: 0}
+    for invalid in (-1, 0x110000, True, '2015'):
+        with pytest.raises(ValueError, match='code point'):
+            font.unicode_glyphs(raw, (invalid,))
+
+
+def original_dash_tmp(monkeypatch):
+    raw = bytearray(1056)
+    def text(at, value):
+        data = value.encode()
+        struct.pack_into('<i', raw, at, len(data))
+        raw[at+4:at+4+len(data)] = data
+    text(28, 'SourceSansPro-Regular SDF')
+    struct.pack_into('<IiqI', raw, 60, font._tmp_hash('SourceSansPro-Regular SDF'),
+                     0, 2, font._tmp_hash('SourceSansPro-Regular Atlas Material'))
+    text(80, '1.1.0')
+    text(92, '43fa2ca56150741f682409d5e57bbc2b')
+    struct.pack_into('<iqi', raw, 128, 0, 17, 1)
+    text(148, 'Source Sans Pro'); text(168, 'Regular')
+    struct.pack_into('<I', raw, 252, 2)
+    struct.pack_into('<I', raw, 360, 2)
+    for i, codepoint in enumerate((0x2E3A, 0x2E3B)):
+        struct.pack_into('<IIIf', raw, 364+16*i, 1, codepoint, 1127+i, 1.)
+    struct.pack_into('<iiq', raw, 396, 1, 0, 8)
+    struct.pack_into('<I', raw, 424, 2); struct.pack_into('<I', raw, 460, 3)
+    struct.pack_into('<ii', raw, 608, 128, 64)
+    struct.pack_into('<ii', raw, 700, 128, 64)
+    text(652, '43fa2ca56150741f682409d5e57bbc2b')
+    text(712, '2E3A-2E3B'); text(728, 'ad7a71ee6bd7e467d9bd41506fada03a')
+    monkeypatch.setitem(font.TMP_SOURCE_SHA256, 'android', hashlib.sha256(raw).hexdigest())
+    return bytes(raw)
+
+
+def test_korean_clone_keeps_original_dash_asset_and_gets_independent_empty_graph(monkeypatch):
+    original = original_dash_tmp(monkeypatch)
+    new = font._korean_tmp(original, 'android')
+    assert len(original) == 1056 and len(new) == 864
+    assert font._source_tmp(original, 'android')['all_serialized_bytes_unchanged']
+    assert new[32:32+len(font.KOREAN_TMP_NAME)] == font.KOREAN_TMP_NAME.encode()
+    assert struct.unpack_from('<IiqI', new, 60) == (
+        font._tmp_hash(font.KOREAN_TMP_NAME), 0, 25, font._tmp_hash('Pretendard JP SemiBold SDF Atlas Material'))
+    assert struct.unpack_from('<iq', new, 128) == (0, 22)
+    assert struct.unpack_from('<ii', new, 252) == (0, 0)
+    assert struct.unpack_from('<iiq', new, 260) == (1, 0, 24)
+    assert struct.unpack_from('<iiiiii', new, 288) == (0, 1, 0, 0, 1023, 1023)
+    assert struct.unpack_from('<ii', new, 408) == (1024, 1024)
+    assert struct.unpack_from('<ii', new, 500) == (1024, 1024)
+    assert b'2E3A-2E3B' not in new and b'0020-007E,AC00-D7A3' in new
+    assert b'43fa2ca56150741f682409d5e57bbc2b' not in new
+    assert b'ad7a71ee6bd7e467d9bd41506fada03a' not in new
+    assert new.count(font.FONT_SHA256[:32].encode()) == 2
+    assert new.count(font.FONT_SHA256[32:].encode()) == 1
+    assert original == original_dash_tmp(monkeypatch)
+
+
+@pytest.mark.parametrize('offset,value', [(64, 9), (360, 1), (404, 9), (424, 1), (608, 256), (704, 512)])
+def test_korean_clone_rejects_changed_original_graph_or_tables(monkeypatch, offset, value):
+    raw = bytearray(original_dash_tmp(monkeypatch)); struct.pack_into('<i', raw, offset, value)
+    monkeypatch.setitem(font.TMP_SOURCE_SHA256, 'android', hashlib.sha256(raw).hexdigest())
+    with pytest.raises(ValueError, match='long-dash TMP tables'):
+        font._korean_tmp(bytes(raw), 'android')
+
+
+def test_fallback_append_preserves_original_dash_dependency_and_unrelated_bytes():
+    old = b'prefix00' + struct.pack('<iiqiq', 2, 0, 19, 0, 21) + b'original-tail'
+    new = font._fallback_array(old, 8, (19, 21), (19, 21, 23))
+    assert new[:8] == old[:8] and new[-13:] == old[-13:]
+    assert struct.unpack_from('<iiqiqiq', new, 8) == (3, 0, 19, 0, 21, 0, 23)
+    with pytest.raises(ValueError, match='fallback array'):
+        font._fallback_array(old, 8, (21, 19), (21, 19, 23))
+
+
+def test_private_atlas_uses_matching_alpha8_dimensions_counts_and_empty_pixels(monkeypatch):
+    raw = bytearray(8340)
+    name = b'SourceSansPro-Regular SDF Atlas'
+    struct.pack_into('<i', raw, 0, len(name)); raw[4:4+len(name)] = name
+    struct.pack_into('<iii', raw, 44, 128, 64, 8192)
+    struct.pack_into('<i', raw, 60, 1)
+    struct.pack_into('<i', raw, 128, 8192)
+    raw[132:8324] = b'X' * 8192
+    monkeypatch.setattr(font, 'ATLAS_SOURCE_SHA256', hashlib.sha256(raw).hexdigest())
+    original = bytes(raw)
+    new = font._korean_atlas(original)
+    assert len(new) == 148 + 1024*1024
+    assert struct.unpack_from('<iii', new, 44) == (1024, 1024, 1024*1024)
+    assert struct.unpack_from('<i', new, 60) == (1,)
+    assert struct.unpack_from('<i', new, 128) == (1024*1024,)
+    assert new[132:132+1024*1024] == b'\0' * (1024*1024)
+    assert new[-16:] == original[-16:]
+    assert original[132:8324] == b'X' * 8192
+
+
+def test_private_material_points_to_private_texture_and_matches_shader_texel_metrics(monkeypatch):
+    raw = bytearray(1764)
+    for at, text in [(0, 'SourceSansPro-Regular Atlas Material'), (204, '_MainTex'),
+                     (1160, '_TextureHeight'), (1184, '_TextureWidth')]:
+        value = text.encode(); struct.pack_into('<i', raw, at, len(value))
+        raw[at+4:at+4+len(value)] = value
+    struct.pack_into('<iq', raw, 216, 0, 8)
+    struct.pack_into('<f', raw, 1180, 64.)
+    struct.pack_into('<f', raw, 1204, 128.)
+    raw[1400:1419] = b'OTHER SHADER BYTES!'
+    monkeypatch.setattr(font, 'MATERIAL_SOURCE_SHA256', hashlib.sha256(raw).hexdigest())
+    original = bytes(raw)
+    new = font._korean_material(original)
+    # The longer material name shifts all following serialized fields by eight.
+    assert len(new) == len(original) + 8
+    assert struct.unpack_from('<iq', new, 224) == (0, 24)
+    assert struct.unpack_from('<f', new, 1188) == (1024.,)
+    assert struct.unpack_from('<f', new, 1212) == (1024.,)
+    assert new[1408:1427] == original[1400:1419]
+    assert struct.unpack_from('<iq', original, 216) == (0, 8)

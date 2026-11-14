@@ -227,3 +227,26 @@ def test_package_locale_inputs_do_not_silently_fall_back(monkeypatch, tmp_path):
     path = tmp_path/"ja.csv";path.write_bytes(original_csv)
     value, proof = ui.load_package_inputs("ja", path)
     assert value == original_csv and proof["language"] == "ja"
+
+
+def test_korean_package_inputs_bind_curated_output_and_retain_the_prepared_proof(monkeypatch, tmp_path):
+    original = csv_bytes().replace(b'key-0,', b'photo.materialNotEnough,', 1)
+    translated = original.replace(b'photo.materialNotEnough,"original"',
+        'photo.materialNotEnough,"{0}[이/가] 부족합니다"'.encode(), 1)
+    keys = ['photo.materialNotEnough', *[f'key-{i}' for i in range(1, 4199)]]
+    monkeypatch.setattr(ui, 'ORIGINAL_CSV_SHA256', sha(original))
+    monkeypatch.setattr(ui, 'ORIGINAL_KEYS_SHA256', sha(b'\0'.join(k.encode() for k in sorted(keys))))
+    prepared = {'language': 'ko', 'input_sha256': sha(original), 'output_sha256': sha(translated),
+                'bytes': len(translated), 'source_ui_keys': 4199, 'changed_keys_count': 1}
+    path, evidence = tmp_path / 'ko.csv', tmp_path / 'proof.json'
+    path.write_bytes(translated); evidence.write_text(json.dumps(prepared))
+    value, proof = ui.load_package_inputs('ko', path, evidence)
+    assert '{0} 부족'.encode() in value and '[이/가]'.encode() not in value
+    assert proof['prepared_input_proof'] == prepared
+    assert proof['curated_korean_ui']['changed_keys'] == ['photo.materialNotEnough']
+    assert proof['output_sha256'] == sha(value) != prepared['output_sha256']
+    assert proof['bytes'] == len(value) and ui.validate_csv(value)['ui_keys'] == 4199
+    assert ui.validate_proof(proof, value, 'ko') == proof
+    evidence.write_text(json.dumps({**prepared, 'output_sha256': '0' * 64}))
+    with pytest.raises(ValueError, match='does not bind'):
+        ui.load_package_inputs('ko', path, evidence)

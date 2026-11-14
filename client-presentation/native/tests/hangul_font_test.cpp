@@ -74,7 +74,7 @@ static void *restore_table(void *font) {
 }
 static void nullable_lists_are_created_without_another_awake() {
     Fallback helper;auto api=calls();api.ensure_fallbacks=restore_table;helper.configure(api);
-    Font source("SourceSansPro-Regular SDF"),solis("Solis-MK5 SDF"),pending("Story SDF");
+    Font source("Pretendard JP SemiBold SDF"),solis("Solis-MK5 SDF"),pending("Story SDF");
     solis.table=pending.table=false;
     helper.awake(&pending,nullptr,original);helper.awake(&source,nullptr,original);helper.awake(&solis,nullptr,original);
     assert(helper.activated() && solis.table && pending.table);
@@ -83,7 +83,7 @@ static void nullable_lists_are_created_without_another_awake() {
 }
 static void run(bool source_first) {
     Fallback helper;helper.configure(calls());assert(helper.ready());
-    Font source("SourceSansPro-Regular SDF"),solis("Solis-MK5 SDF"),other("StoryTitle SDF"),existing("other fallback");
+    Font source("Pretendard JP SemiBold SDF"),solis("Solis-MK5 SDF"),other("StoryTitle SDF"),existing("other fallback");
     std::fill(std::begin(source.storage),std::end(source.storage),0x11);
     std::fill(std::begin(solis.storage),std::end(solis.storage),0x55);
     const int32_t dynamic=1;void *file=&source;
@@ -117,9 +117,20 @@ static void run(bool source_first) {
     assert(replacement.fallback==std::vector<void *>{&source});
     // An externally destroyed source must be re-rooted/rebuilt, never reused.
     source.native=false;
-    Font source2("SourceSansPro-Regular SDF");helper.awake(&source2,nullptr,original);
+    Font source2("Pretendard JP SemiBold SDF");helper.awake(&source2,nullptr,original);
     assert(source2.flags==33 && source2.clear==1 && helper.activated());
     assert(replacement.fallback.front()==&source2);
+    helper.clear();assert(handles.empty());
+}
+static void original_symbol_font_is_never_activated_or_cleared() {
+    Fallback helper;helper.configure(calls());
+    Font symbols("SourceSansPro-Regular SDF"),solis("Solis-MK5 SDF"),source("Pretendard JP SemiBold SDF");
+    helper.awake(&symbols,nullptr,original);helper.awake(&solis,nullptr,original);
+    assert(!helper.activated() && symbols.clear==0 && symbols.multi==0 && symbols.flags_set==0);
+    helper.awake(&source,nullptr,original);
+    assert(helper.activated() && source.clear==1);
+    assert(symbols.clear==0 && symbols.multi==0 && symbols.flags_set==0);
+    assert(symbols.fallback==std::vector<void *>{&source} && source.fallback.empty());
     helper.clear();assert(handles.empty());
 }
 static void exceptions() {
@@ -140,7 +151,7 @@ static void bounded() {
         fonts.push_back(new Font("other font"));helper.awake(fonts.back(),nullptr,original);
     }
     assert(handles.size()==512);
-    Font solis("Solis-MK5 SDF"),source("SourceSansPro-Regular SDF");
+    Font solis("Solis-MK5 SDF"),source("Pretendard JP SemiBold SDF");
     helper.awake(&solis,nullptr,original);helper.awake(&source,nullptr,original);
     assert(helper.activated() && handles.size()==514);
     assert(fonts.front()->fallback.front()==&source);
@@ -150,7 +161,7 @@ static void bounded() {
 }
 static void pending_until_registered() {
     Fallback helper;helper.configure(calls());
-    Font solis("Solis-MK5 SDF"),source("SourceSansPro-Regular SDF");
+    Font solis("Solis-MK5 SDF"),source("Pretendard JP SemiBold SDF");
     solis.table=false;source.table=false;
     helper.awake(&source,nullptr,original);helper.awake(&solis,nullptr,original);
     assert(source.clear==1 && !helper.activated() && helper.applied()==0);
@@ -160,7 +171,7 @@ static void pending_until_registered() {
 }
 static void missing_or_static_source_remains_pending() {
     Fallback helper;helper.configure(calls());
-    Font solis("Solis-MK5 SDF"),source("SourceSansPro-Regular SDF");
+    Font solis("Solis-MK5 SDF"),source("Pretendard JP SemiBold SDF");
     int32_t mode=0;void *file=nullptr;
     std::memcpy(source.storage+0x48,&mode,sizeof mode);
     helper.awake(&solis,nullptr,original);helper.awake(&source,nullptr,original);
@@ -178,4 +189,5 @@ int main() {
     run(false);run(true);exceptions();bounded();pending_until_registered();missing_or_static_source_remains_pending();
     assert(strong_count==7 && weak_count>=512);
     nullable_lists_are_created_without_another_awake();
+    original_symbol_font_is_never_activated_or_cleared();
 }

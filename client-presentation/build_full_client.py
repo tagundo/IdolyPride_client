@@ -48,9 +48,21 @@ TRANSPORT_SOURCES = (
     "tools/patch_android_octo_origin.py", "src/idoly_local/client_patch.py",
     "src/idoly_local/unity_http.py", "src/idoly_local/unity_cache.py",
     "src/idoly_local/story_loading_prefab.py")
+STATIC_UI_SOURCES = (
+    "src/idoly_local/static_ui_assets.py",
+    "client-presentation/translations/static-ui-v1.json",
+    "src/idoly_local/static_ui_images.py",
+    "client-presentation/images/korean-static-sprites-v1.json",
+    "src/idoly_local/ui_text_finishes.py",
+    "client-presentation/translations/ko-ui-final-phrases-v1.json",
+    "src/idoly_local/ui_display_literals.py",
+    "client-presentation/translations/native-display-literals-v1.json",
+    *("client-presentation/images/ko/" + name + ".png" for name in (
+        "grid_list_select", "grid_list_select_vertical", "home_txt_live", "home_gift",
+        "home_login_bonus", "home_mission", "home_new_story")))
 
 
-def local_resource_members(archive):
+def local_resource_members(archive, ui_language="ja"):
     """Compose the audited Octo origin, Unity HTTP policy and cache version.
 
     The normal diagnostic base changes only the API endpoint. Leaving its Octo
@@ -67,16 +79,20 @@ def local_resource_members(archive):
         raise ValueError("Diagnostic base resource metadata differs")
     patched_metadata, metadata_proof = octo.patch_octo_metadata(metadata)
     del metadata
+    from idoly_local.ui_display_literals import patch_bytes as patch_display_literals
+    patched_metadata, display_proof = patch_display_literals(patched_metadata, "android", ui_language,
+        expected_sha256=metadata_proof["output_sha256"])
     settings, settings_proof = unity_http.patch_player_http(archive.read(unity_http.MEMBER))
     story, story_proof = story_loading_prefab.patch_story_loading_prefab(
         archive.read(story_loading_prefab.MEMBER))
     guid, guid_proof = unity_cache.derive_cache_guid(archive.read(unity_cache.MEMBER),
-        metadata_proof["output_sha256"], settings_proof["output_sha256"],
+        display_proof["output_sha256"], settings_proof["output_sha256"],
         serialized_asset_sha256=story_proof["output_sha256"])
     return {octo.METADATA: patched_metadata, unity_http.MEMBER: settings,
             unity_cache.MEMBER: guid, story_loading_prefab.MEMBER: story}, {"octo_origin": metadata_proof,
             "unity_http_connection_policy": settings_proof,
-            "unity_il2cpp_cache": guid_proof, "story_loading_prefab": story_proof}
+            "unity_il2cpp_cache": guid_proof, "story_loading_prefab": story_proof,
+            "ui_display_literals": display_proof, "metadata_output_sha256": display_proof["output_sha256"]}
 
 
 def verify_local_resource_output(archive, proof):
@@ -111,12 +127,40 @@ def verify_local_resource_output(archive, proof):
     if (guid != proof["unity_il2cpp_cache"]["guid"].encode("ascii")
             or guid == unity_cache.ORIGINAL_GUID):
         raise ValueError("Output Unity cache version differs")
-    if (archive.getinfo(story_loading_prefab.MEMBER).file_size != story_loading_prefab.FILE_BYTES
-            or hashlib.sha256(archive.read(story_loading_prefab.MEMBER)).hexdigest()
-            != story_loading_prefab.OUTPUT_SHA256
+    story_member = proof.get("presentation_asset_members", {}).get(story_loading_prefab.MEMBER)
+    story_hash = story_member["sha256"] if story_member is not None else story_loading_prefab.OUTPUT_SHA256
+    story_size = story_member["bytes"] if story_member is not None else story_loading_prefab.FILE_BYTES
+    if (archive.getinfo(story_loading_prefab.MEMBER).file_size != story_size
+            or hashlib.sha256(archive.read(story_loading_prefab.MEMBER)).hexdigest() != story_hash
             or proof["story_loading_prefab"]["output_sha256"] != story_loading_prefab.OUTPUT_SHA256
-            or proof["unity_il2cpp_cache"].get("serialized_asset_sha256") != story_loading_prefab.OUTPUT_SHA256):
+            or proof["unity_il2cpp_cache"].get("serialized_asset_sha256") != story_hash):
         raise ValueError("Output story loading bindings differ")
+    for name, record in proof.get("presentation_asset_members", {}).items():
+        if (archive.getinfo(name).file_size != record["bytes"]
+                or hashlib.sha256(archive.read(name)).hexdigest() != record["sha256"]):
+            raise ValueError("Output presentation asset differs")
+
+
+def version_presentation_assets(archive, replacements, additions, transport):
+    """Bind normal Unity extraction to the final font, UI and bridge bytes.
+
+    Locale changes and new serialized assets must invalidate the old extracted
+    IL2CPP resources too. The GUID itself is excluded to avoid a circular hash.
+    This only writes a build input; it never opens device or account files.
+    """
+    records = {name: {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+               for name, raw in sorted({**replacements, **additions}.items())
+               if name != unity_cache.MEMBER and (name.startswith("assets/bin/Data/")
+                                                  or name == addon.LIBRARY)}
+    digest = hashlib.sha256(json.dumps(records, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    guid, proof = unity_cache.derive_cache_guid(archive.read(unity_cache.MEMBER),
+        transport.get("metadata_output_sha256", transport["octo_origin"]["output_sha256"]),
+        transport["unity_http_connection_policy"]["output_sha256"],
+        serialized_asset_sha256=records[story_loading_prefab.MEMBER]["sha256"],
+        presentation_assets_sha256=digest)
+    replacements[unity_cache.MEMBER] = guid
+    transport["unity_il2cpp_cache"] = proof
+    transport["presentation_asset_members"] = records
 
 
 def marker(native_sha256=NATIVE_SHA256):
@@ -301,7 +345,7 @@ def build(args):
         raise ValueError("Choose unused standalone APK/provenance paths")
     output.parent.mkdir(parents=True,exist_ok=True)
     if not re.fullmatch(r"[0-9a-f]{40}",args.source_commit): raise ValueError("An exact frozen source commit is required")
-    source_hashes = addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES,
+    source_hashes = addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES, *STATIC_UI_SOURCES,
         "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
         "tools/repack_android_server_python.py", "tools/package_android_resource_client.py",
         "src/idoly_local/font_assets.py", "client-presentation/fonts/pretendard-jp-v1.json",
@@ -361,8 +405,8 @@ def build(args):
         additions = {addon.LIBRARY: native, MARKER: (json.dumps(marker(native_input["sha256"]),sort_keys=True,indent=2)+"\n").encode(), **addon.license_members("diagnostics")}
     with ZipFile(source) as base:
         infos = members(base); before = hashes(base, infos); addon.check_base_members(base, "diagnostics")
-        font_report = ui_report = None
-        existing_replacements, transport_report = local_resource_members(base)
+        font_report = ui_report = static_ui_report = static_images_report = None
+        existing_replacements, transport_report = local_resource_members(base, ui_language)
         if font_file is not None:
             from idoly_local.font_assets import read_font, read_license, android_members, package_notices
             font_data, _font_info = read_font(font_file)
@@ -386,6 +430,18 @@ def build(args):
             if existing_replacements.keys() & ui_replacements.keys():
                 raise ValueError("UI and font resource replacements overlap")
             existing_replacements.update(ui_replacements)
+        from idoly_local.static_ui_assets import android_members as static_ui_members
+        static_parts, static_ui_report = static_ui_members(base, ui_language,
+            existing_replacements=existing_replacements)
+        existing_replacements.update(static_parts)
+        from idoly_local.static_ui_images import android_members as static_image_members
+        image_parts, static_images_report = static_image_members(base, language=ui_language,
+            image_dir=ROOT / "client-presentation/images/ko")
+        if existing_replacements.keys() & image_parts.keys():
+            raise ValueError("Static image and text/font resource replacements overlap")
+        existing_replacements.update(image_parts)
+        gc.collect()
+        version_presentation_assets(base, existing_replacements, additions, transport_report)
     added_dex = next_dex(infos); additions[added_dex] = dex
     if additions.keys() & infos.keys(): raise ValueError("Standalone additions collide with original members")
     output.parent.mkdir(parents=True,exist_ok=True)
@@ -430,7 +486,7 @@ def build(args):
         if compiled_tree(old_tree)!=compiled_tree(final_tree,remove_provider=True):raise ValueError("Signed manifest changed")
         postflight=limits._resource_guard(root)
         if postflight["oom_kill"]!=preflight["oom_kill"]:raise ValueError("OOM counter changed")
-        if addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES,
+        if addon.frozen_sources(args.source_commit, extra=(*TRANSPORT_SOURCES, *STATIC_UI_SOURCES,
                 "client-presentation/build_full_client.py", "tools/build_android_server_manual.py",
                 "tools/repack_android_server_python.py", "tools/package_android_resource_client.py",
                 "src/idoly_local/font_assets.py", "client-presentation/fonts/pretendard-jp-v1.json",
@@ -449,6 +505,8 @@ def build(args):
             "all_original_members_preserved_except_declared_manifest_font_UI_transport_and_story_loading":True,
             "allowed_existing_member_replacements":["AndroidManifest.xml", *sorted(existing_replacements)],
             "font_support":font_report,"ui_language":ui_language,"ui_translation":ui_report,
+            "static_ui_translation":static_ui_report,
+            "static_ui_images":static_images_report,
             "local_resource_transport":transport_report,
             "local_resource_member_sha256":{n:after[n] for n in (octo.METADATA,unity_http.MEMBER,unity_cache.MEMBER,story_loading_prefab.MEMBER)},
             "local_resource_output_fields_verified":True,

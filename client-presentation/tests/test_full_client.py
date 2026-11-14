@@ -228,9 +228,42 @@ def test_output_rejects_silently_retained_public_origin_http_policy_or_cache(tmp
         tool.verify_local_resource_output(archive, proof)
 
 
+def test_updated_static_ui_and_font_assets_get_a_new_verified_engine_cache(tmp_path, diagnostic_transport):
+    import copy
+    originals, prior, proof = diagnostic_transport
+    source = tmp_path / 'base.apk'
+    with ZipFile(source, 'w') as archive:
+        for name, raw in originals.items():
+            archive.writestr(name, raw)
+    font_name = 'assets/bin/Data/sharedassets0.assets.split0'
+    for locale, translated in [('ko', b'Korean static UI'), ('en', b'English static UI')]:
+        replacements, transport = dict(prior), copy.deepcopy(proof)
+        replacements[font_name] = translated
+        additions = {tool.addon.LIBRARY: b'new font-aware native bridge'}
+        with ZipFile(source) as archive:
+            tool.version_presentation_assets(archive, replacements, additions, transport)
+        assert replacements[tool.unity_cache.MEMBER] != prior[tool.unity_cache.MEMBER]
+        output = tmp_path / (locale + '.apk')
+        with ZipFile(output, 'w') as archive:
+            for name, raw in {**replacements, **additions}.items():
+                archive.writestr(name, raw)
+        with ZipFile(output) as archive:
+            tool.verify_local_resource_output(archive, transport)
+        if locale == 'ko':
+            korean_guid = replacements[tool.unity_cache.MEMBER]
+        else:
+            assert replacements[tool.unity_cache.MEMBER] != korean_guid
+        stale = tmp_path / (locale + '-stale.apk')
+        with ZipFile(stale, 'w') as archive:
+            for name, raw in {**replacements, **additions}.items():
+                archive.writestr(name, b'stale font' if name == font_name else raw)
+        with ZipFile(stale) as archive, pytest.raises(ValueError, match='presentation asset'):
+            tool.verify_local_resource_output(archive, transport)
+
+
 def test_resource_transport_helpers_are_frozen_for_both_build_barriers():
     assert tool.TRANSPORT_SOURCES == (
         'tools/patch_android_octo_origin.py', 'src/idoly_local/client_patch.py',
         'src/idoly_local/unity_http.py', 'src/idoly_local/unity_cache.py',
         'src/idoly_local/story_loading_prefab.py')
-    assert PATH.read_text().count('extra=(*TRANSPORT_SOURCES,') == 2
+    assert PATH.read_text().count('extra=(*TRANSPORT_SOURCES, *STATIC_UI_SOURCES,') == 2

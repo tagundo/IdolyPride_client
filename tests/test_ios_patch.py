@@ -62,6 +62,13 @@ def padded_macho_fixture(section_offset=512):
 
 class IOSPackagingTests(unittest.TestCase):
     def setUp(self):
+        # The small synthetic metadata has two literals, not the real 6.1.1
+        # toast index. Its version-locked writer has separate real-layout tests.
+        display = mock.patch('idoly_local.ui_display_literals.patch_bytes',
+            side_effect=lambda raw, *args, **kwargs: (raw,
+                {'output_sha256': hashlib.sha256(raw).hexdigest(), 'changed_indexes': []}))
+        display.start()
+        self.addCleanup(display.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -107,15 +114,15 @@ class IOSPackagingTests(unittest.TestCase):
             if name == ui_name:
                 raise AssertionError("The complete UI member must use forward ZIP streams")
             return actual_read(archive, name, *args, **kwargs)
-        def ui_stream(archive, name, destination, value, **kwargs):
-            self.assertEqual((name, value, kwargs["language"]), (ui_name, b"compiled CSV", "en"))
-            with archive.open(name) as source:
-                self.assertEqual(source.read(), source_ui)
+        def ui_stream(source, destination, **kwargs):
+            self.assertEqual((kwargs["ui_csv"], kwargs["language"]), (b"compiled CSV", "en"))
+            self.assertEqual(source.read(), source_ui)
             self.assertEqual(destination.write(localized_ui), len(localized_ui))
             return {"language": "en", "output_asset_bytes": len(localized_ui),
-                    "output_asset_sha256": hashlib.sha256(localized_ui).hexdigest()}
+                    "output_asset_sha256": hashlib.sha256(localized_ui).hexdigest(),
+                    "ui_translation": {"language": "en"}, "changed_static_texts": 3}
         with patch("idoly_local.ui_assets.load_package_inputs", return_value=(b"compiled CSV", {})), \
-                patch("idoly_local.ui_assets.patch_ios_member", side_effect=ui_stream), \
+                patch("idoly_local.static_ui_assets.patch_ios_stream", side_effect=ui_stream), \
                 patch.object(ZipFile, "read", bounded_read):
             report = package_ios_client(self.source, self.output, bootstrap=False, profile=profile,
                                         ui_language="en", ui_csv_file=self.root/"compiled.csv",
@@ -125,6 +132,7 @@ class IOSPackagingTests(unittest.TestCase):
             self.assertEqual(archive.read(APP + "Data/keep.bin"), b"preserved game data")
         self.assertEqual(report["ui_language"], "en")
         self.assertEqual(report["ui_translation"]["output_asset_sha256"], hashlib.sha256(localized_ui).hexdigest())
+        self.assertEqual(report["static_ui_translation"]["changed_static_texts"], 3)
 
     def test_missing_fixed_ui_inputs_are_rejected_before_source_is_opened(self):
         with self.assertRaisesRegex(ValueError, "requires CSV"):
@@ -303,7 +311,7 @@ class IOSPackagingTests(unittest.TestCase):
                 mock.patch.dict(sys.modules, {presentation.__name__: presentation}), \
                 mock.patch('idoly_local.font_assets.read_font', return_value=(b'font bytes', {})), \
                 mock.patch('idoly_local.font_assets.read_license', return_value=b'exact license'), \
-                mock.patch('idoly_local.font_assets.patch_bytes', return_value=(b'patched font asset', {'policy':'hangul-font-v1'})) as patch, \
+                mock.patch('idoly_local.font_assets.patch_bytes', return_value=(b'patched font asset', {'policy':'hangul-font-v2-original-dashes'})) as patch, \
                 mock.patch('idoly_local.font_assets.package_notices', return_value=notices):
             report = package_ios_client(self.source, self.output, presentation_library=library,
                                         presentation_plan=plan, font_file=self.root/'font.otf', profile=profile)
@@ -311,7 +319,7 @@ class IOSPackagingTests(unittest.TestCase):
         with ZipFile(self.output) as archive:
             self.assertEqual(archive.read(asset), b'patched font asset')
             self.assertEqual(archive.read(APP+'Data/keep.bin'), b'preserved game data')
-            self.assertEqual(plistlib.loads(archive.read(APP+'Info.plist'))['CFBundleVersion'], '156.9005')
+            self.assertEqual(plistlib.loads(archive.read(APP+'Info.plist'))['CFBundleVersion'], '156.9006')
             for name, raw in notices.items():
                 member = APP+'IdolyFonts/'+name
                 self.assertEqual(archive.read(member), raw)

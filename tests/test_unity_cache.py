@@ -62,6 +62,30 @@ def test_invalid_serialized_resource_digest_rejected(value):
                                 serialized_asset_sha256=value)
 
 
+def test_localized_font_and_prefab_outputs_version_the_extracted_cache():
+    serialized = "f" * 64
+    prior, _ = cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+                                      serialized_asset_sha256=serialized)
+    korean, proof = cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+        serialized_asset_sha256=serialized, presentation_assets_sha256="a" * 64)
+    other, _ = cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+        serialized_asset_sha256=serialized, presentation_assets_sha256="b" * 64)
+    assert len({prior, korean, other}) == 3
+    assert proof["domain"] == "idoly-local-code-presentation-v3"
+    assert proof["presentation_assets_sha256"] == "a" * 64
+    assert proof["device_files_read_or_deleted_by_builder"] is False
+    with pytest.raises(ValueError, match="serialized asset"):
+        cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+                                 presentation_assets_sha256="a" * 64)
+
+
+@pytest.mark.parametrize("value", ["", "A" * 64, "g" * 64, 1, b"a" * 64])
+def test_invalid_presentation_asset_digest_rejected(value):
+    with pytest.raises(ValueError, match="presentation assets"):
+        cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+            serialized_asset_sha256="f" * 64, presentation_assets_sha256=value)
+
+
 @pytest.mark.parametrize("value", [b"", cache.ORIGINAL_GUID + b"\n", b"x" * 36,
     cache.ORIGINAL_GUID.upper(), b"00000000-0000-0000-0000-000000000000", "not bytes"])
 def test_wrong_or_noncanonical_original_guid_rejected(value):

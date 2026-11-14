@@ -11,7 +11,7 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "0f1c5bc8ac11b2c597a33e7533ddd2c59579855f65cd54dad6240d4b4a122805"
+PROFILE_SHA256 = "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510"
 PROFILE_ENTRY_COUNT = 111
 PROFILE_HOOK_COUNT = 41
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"

@@ -1,13 +1,18 @@
 {
-  "schema": 1,
-  "policy": "hangul-font-v1",
+  "schema": 2,
+  "policy": "hangul-font-v2-original-dashes",
   "family": "Pretendard JP SemiBold",
   "version": "1.309",
   "file": "PretendardJP-SemiBold.otf",
   "bytes": 3781740,
   "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
   "upstream": "https://github.com/orioncactus/pretendard",
-  "cached_source": {"repository": "https://github.com/tagundo/hoshimi-localify-ios", "commit": "6e60a59f2d16a6c4cdee5815644c19604c51b69f", "git_blob": "ab20ba021ecb09802976a8dcee3eaa4219bf55f7", "path": "PretendardJP-SemiBold.otf"},
+  "cached_source": {
+    "repository": "https://github.com/tagundo/hoshimi-localify-ios",
+    "commit": "6e60a59f2d16a6c4cdee5815644c19604c51b69f",
+    "git_blob": "ab20ba021ecb09802976a8dcee3eaa4219bf55f7",
+    "path": "PretendardJP-SemiBold.otf"
+  },
   "license": "OFL-1.1",
   "license_file": "client-presentation/licenses/Pretendard-OFL.txt",
   "license_bytes": 4816,
@@ -16,5 +21,27 @@
   "font_bytes_modified": false,
   "reserved_font_names_retained": true,
   "modern_hangul_syllables": 11172,
-  "runtime": "One-time TMP fallback activation; serialized legacy Font fallback preserves original Japanese glyphs."
+  "runtime": "One-time activation of a separate Korean TMP font with a 1024x1024 Alpha8 atlas; original Japanese and SourceSansPro long-dash fonts, materials and atlases are preserved.",
+  "korean_graph": {
+    "Font": 22,
+    "TMP_FontAsset": 23,
+    "TMP_name": "Pretendard JP SemiBold SDF",
+    "Texture2D": 24,
+    "Material": 25,
+    "atlas_width": 1024,
+    "atlas_height": 1024,
+    "atlas_format": "Alpha8",
+    "initial_pixel_bytes": 1048576
+  },
+  "original_long_dash_glyphs_preserved": [
+    "U+2E3A",
+    "U+2E3B"
+  ],
+  "original_text_unicode_unchanged": true,
+  "original_font_and_atlas_ids_preserved": [
+    17,
+    21,
+    8,
+    2
+  ]
 }

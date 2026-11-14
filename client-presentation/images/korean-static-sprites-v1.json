@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "policy": "korean-static-sprites-v1",
+  "source": {
+    "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+    "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f",
+    "data_terms": "NOASSERTION"
+  },
+  "inputs": [
+    {
+      "name": "grid_list_select.png",
+      "bytes": 6084,
+      "sha256": "46730f33157fc47ea508689f9edcc31d908674279628d8fe3bf31defdb6d9a75"
+    },
+    {
+      "name": "grid_list_select_vertical.png",
+      "bytes": 4073,
+      "sha256": "7a5d5faa3eb743d23170cf5c4f5340792f6c82fe34a8f97d84ba448d42114686"
+    },
+    {
+      "name": "home_txt_live.png",
+      "bytes": 4564,
+      "sha256": "944408c2901917090aee5dbf8af5efdfcd4890cdde9b3763164cd8f8456734bf"
+    },
+    {
+      "name": "home_mission.png",
+      "bytes": 4796,
+      "sha256": "ab00554d60114ae2f9a3a0a2dc39a6eb3f21ba076fb7a674f17ed869f112e61b"
+    },
+    {
+      "name": "home_new_story.png",
+      "bytes": 5143,
+      "sha256": "fd0b8a59e58489e7b7e53cd7f1eae2a2ac72354050c7d1495960c2e4157e213d"
+    },
+    {
+      "name": "home_gift.png",
+      "bytes": 4700,
+      "sha256": "37c87c383440a0b1e283ca513c9f567c5c90ffa89f5a39f405b0faa398d70597"
+    },
+    {
+      "name": "home_login_bonus.png",
+      "bytes": 4942,
+      "sha256": "2b2e18ecbe266f954d13aad3bec5aa49112ef907dbe4a38bf4ea19e05ce898ad"
+    }
+  ],
+  "applies_at": "client build only",
+  "sprite_policy": "Preserve original Sprite IDs, rectangles, pivots, borders and pixels-per-unit. Independent RGBA32 texture and full rectangle mesh; atlas bytes unchanged.",
+  "vertical_padding": "grid_list_select_vertical original trim rounds to (7,7), translated 59x138 retained without scaling inside original72x152 transparent rectangle."
+}
