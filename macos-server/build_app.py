@@ -18,12 +18,13 @@ import sys
 import tempfile
 from zipfile import ZipFile
 
-from payload import member_path, translation_bundle_input
-from certificate_bundle import install_certificate_bundle
-
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
+
+from payload import member_path, translation_bundle_input
+from certificate_bundle import install_certificate_bundle
+
 APP_NAME = "IdolyPrideLocalServer"
 LIVE_ENGINE_NAME = "libidoly_live.dylib"
 LIVE_ENGINE_LICENSE_FILES = (
