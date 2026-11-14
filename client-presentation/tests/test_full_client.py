@@ -169,7 +169,8 @@ def diagnostic_transport():
         pytest.skip('Pinned user-supplied client fixture is not cached')
     with ZipFile(source) as archive:
         originals = {name: archive.read(name) for name in (
-            tool.octo.METADATA, tool.unity_http.MEMBER, tool.unity_cache.MEMBER)}
+            tool.octo.METADATA, tool.unity_http.MEMBER, tool.unity_cache.MEMBER,
+            tool.story_loading_prefab.MEMBER)}
         replacements, proof = tool.local_resource_members(archive)
     return originals, replacements, proof
 
@@ -195,7 +196,9 @@ def test_real_base_gets_local_manifest_transport_and_new_engine_cache_version(tm
     assert hashlib.sha256(replacements[tool.octo.METADATA]).hexdigest() == 'e85d3cb26fad111e0b057ece90120b7ff3eea7d00bfbf2fd208a4df066be6f2a'
     # Independently pinned for this real metadata/settings pair; the separate
     # unity_cache unit fixture uses a different illustrative metadata hash.
-    assert replacements[tool.unity_cache.MEMBER] == b'7a9a27e0-a505-52cc-8f22-4eee371b1bfd'
+    assert replacements[tool.unity_cache.MEMBER] != b'7a9a27e0-a505-52cc-8f22-4eee371b1bfd'
+    assert hashlib.sha256(replacements[tool.story_loading_prefab.MEMBER]).hexdigest() == tool.story_loading_prefab.OUTPUT_SHA256
+    assert proof['unity_il2cpp_cache']['serialized_asset_sha256'] == tool.story_loading_prefab.OUTPUT_SHA256
     assert originals[tool.unity_cache.MEMBER] == tool.unity_cache.ORIGINAL_GUID
     assert proof['unity_il2cpp_cache']['device_files_read_or_deleted_by_builder'] is False
     source, output = tmp_path/'base.apk', tmp_path/'output.apk'
@@ -212,11 +215,11 @@ def test_real_base_gets_local_manifest_transport_and_new_engine_cache_version(tm
             name:hashlib.sha256(raw).hexdigest() for name,raw in replacements.items()}
 
 
-@pytest.mark.parametrize('stale_member', ['metadata', 'http_policy', 'cache_guid'])
+@pytest.mark.parametrize('stale_member', ['metadata', 'http_policy', 'cache_guid', 'story_loading'])
 def test_output_rejects_silently_retained_public_origin_http_policy_or_cache(tmp_path, diagnostic_transport, stale_member):
     originals, replacements, proof = diagnostic_transport
     name = {'metadata':tool.octo.METADATA, 'http_policy':tool.unity_http.MEMBER,
-            'cache_guid':tool.unity_cache.MEMBER}[stale_member]
+            'cache_guid':tool.unity_cache.MEMBER, 'story_loading':tool.story_loading_prefab.MEMBER}[stale_member]
     output = tmp_path/'stale.apk'
     with ZipFile(output, 'w') as archive:
         for member, raw in replacements.items():
@@ -228,5 +231,6 @@ def test_output_rejects_silently_retained_public_origin_http_policy_or_cache(tmp
 def test_resource_transport_helpers_are_frozen_for_both_build_barriers():
     assert tool.TRANSPORT_SOURCES == (
         'tools/patch_android_octo_origin.py', 'src/idoly_local/client_patch.py',
-        'src/idoly_local/unity_http.py', 'src/idoly_local/unity_cache.py')
+        'src/idoly_local/unity_http.py', 'src/idoly_local/unity_cache.py',
+        'src/idoly_local/story_loading_prefab.py')
     assert PATH.read_text().count('extra=(*TRANSPORT_SOURCES,') == 2

@@ -1,4 +1,4 @@
-from hashlib import sha256
+from hashlib import sha1, sha256
 import uuid
 
 import pytest
@@ -34,6 +34,32 @@ def test_old_engine_cache_marker_differs_and_either_build_input_versions_it():
     assert cache.derive_cache_guid(old_cached_unity_ver, METADATA, "1" * 64)[0] != new
     # Unity's original equal/mismatch decision can now take its normal extraction path.
     assert (old_cached_unity_ver == cache.ORIGINAL_GUID) and not (old_cached_unity_ver == new)
+
+
+def test_serialized_prefab_repair_versions_existing_extracted_resources():
+    before = "5e55c12ddc6a08a8d96e8b3f616537ef5f833d99a3948c90de99bfd0521da292"
+    after = "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350"
+    old, _ = cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS)
+    fixed, proof = cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+                                         serialized_asset_sha256=after)
+    assert fixed != old
+    assert fixed != cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+                                           serialized_asset_sha256=before)[0]
+    # Independently derive the UUID bits from the namespace and exact asset hash.
+    name = "|".join(("idoly-local-code-assets-v2", METADATA, SETTINGS, after))
+    digest = bytearray(sha1(uuid.UUID(cache.ORIGINAL_GUID.decode()).bytes + name.encode()).digest()[:16])
+    digest[6] = digest[6] & 15 | 80
+    digest[8] = digest[8] & 63 | 128
+    assert fixed == str(uuid.UUID(bytes=bytes(digest))).encode()
+    assert proof['serialized_asset_sha256'] == after
+    assert proof['device_files_read_or_deleted_by_builder'] is False
+
+
+@pytest.mark.parametrize('value', ['', 'g' * 64, 'A' * 64, 1, b'a' * 64])
+def test_invalid_serialized_resource_digest_rejected(value):
+    with pytest.raises(ValueError, match='SHA-256'):
+        cache.derive_cache_guid(cache.ORIGINAL_GUID, METADATA, SETTINGS,
+                                serialized_asset_sha256=value)
 
 
 @pytest.mark.parametrize("value", [b"", cache.ORIGINAL_GUID + b"\n", b"x" * 36,

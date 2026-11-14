@@ -490,7 +490,8 @@ def create_octo_gateway(data_dir, base_url, *, aes_cbc=None, fetcher=None,
             client_key=settings["client_key"], base_url=base_url,
             aes_cbc=aes_cbc if aes_cbc is not None else _desktop_aes_backend(),
             application_version=settings["application_version"],
-            allow_previous_revisions=compatible_revision)
+            allow_previous_revisions=compatible_revision,
+            object_aliases=translation_layer.object_aliases if translation_layer is not None else None)
         if not compatible_revision and manifest.revision != settings["revision"]:
             raise ValueError("Game resource manifest revision differs")
         tracker = OctoResourceTracker(available=True, allow_downloads=allow_downloads, log_callback=log_callback)

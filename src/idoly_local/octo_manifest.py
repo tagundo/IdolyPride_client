@@ -210,7 +210,7 @@ class OctoObject:
 class OctoManifest:
     def __init__(self, plain_protobuf: bytes, *, aes_key: bytes, client_key: str,
                  base_url: str, aes_cbc: AESCallback, application_version: int = 205051,
-                 allow_previous_revisions=False):
+                 allow_previous_revisions=False, object_aliases=None):
         _key_and_backend(aes_key, aes_cbc)
         if type(application_version) is not int or application_version not in _VERSIONS:
             raise OctoManifestError("Unsupported Octo client platform version")
@@ -270,6 +270,28 @@ class OctoManifest:
             deterministic=True)
         self.objects = MappingProxyType(records)
         self._key, self._client_key, self._aes = aes_key, client_key, aes_cbc
+        # Aliases are derived only from a validated language layer's original
+        # and translated rows. They do not add catalog/download objects: both
+        # request spellings return the canonical record and its checked bytes.
+        aliases = {}
+        if object_aliases is not None:
+            if not isinstance(object_aliases, Mapping) or len(object_aliases) > 8192:
+                raise OctoManifestError("Invalid prepared language object aliases")
+            for identity, target in object_aliases.items():
+                if (not isinstance(identity, tuple) or len(identity) != 4
+                        or identity[0] != "resources"
+                        or type(identity[1]) is not int or not 1 <= identity[1] <= 2**31-1
+                        or not isinstance(identity[2], str) or not _OBJECT_NAME.fullmatch(identity[2])
+                        or type(identity[3]) is not int or not 1 <= identity[3] <= 2**64-1
+                        or type(target) is not OctoObject or target.kind != "resources"
+                        or not isinstance(target.object_name, str)
+                        or not target.object_name.startswith(("local_ko_", "local_en_"))
+                        or identity[1] != target.upload_version or identity[3] != target.generation
+                        or records.get(target.identity) != target
+                        or identity in records or identity in aliases or len(aliases) >= 8192):
+                    raise OctoManifestError("Invalid prepared language object alias")
+                aliases[identity] = records[target.identity]
+        self._object_aliases = MappingProxyType(aliases)
 
     def manifest_response(self, path: str, headers: Mapping[str, str]) -> bytes:
         """Return a full revision0 or same-revision delta in the original envelope.
@@ -308,7 +330,8 @@ class OctoManifest:
         match = _OBJECT.fullmatch(path) if isinstance(path, str) else None
         if match:
             version, kind, name, generation = match.groups()
-            record = self.objects.get((kind, int(version), name, int(generation)))
+            identity = kind, int(version), name, int(generation)
+            record = self.objects.get(identity) or self._object_aliases.get(identity)
             if record is not None:
                 return record
         raise OctoRequestError(404, "Octo object is not in the archived whitelist")

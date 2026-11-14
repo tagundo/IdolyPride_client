@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Add the audited bridge to the exact diagnostic base as a normal APK update.
 
-Only declared manifest/font/UI and local-resource transport changes are permitted
+Only declared manifest/font/UI, story-loading bindings and local-resource transport changes are permitted
 among existing members. Original SDK/DEX/native code is copied unchanged.
 No device is accessed.
 """
@@ -31,7 +31,7 @@ import build_addon as addon
 import build_android_server_manual as limits
 from package_android_resource_client import write_resource_input
 import patch_android_octo_origin as octo
-from idoly_local import unity_http, unity_cache
+from idoly_local import unity_http, unity_cache, story_loading_prefab
 
 BASE_SHA256 = "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df"
 BASE_BYTES = 159549324
@@ -46,7 +46,8 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 MAX_APK = 192 * 1024 * 1024
 TRANSPORT_SOURCES = (
     "tools/patch_android_octo_origin.py", "src/idoly_local/client_patch.py",
-    "src/idoly_local/unity_http.py", "src/idoly_local/unity_cache.py")
+    "src/idoly_local/unity_http.py", "src/idoly_local/unity_cache.py",
+    "src/idoly_local/story_loading_prefab.py")
 
 
 def local_resource_members(archive):
@@ -58,7 +59,8 @@ def local_resource_members(archive):
     """
     if (not 0 < archive.getinfo(octo.METADATA).file_size <= 32 * 1024 * 1024
             or archive.getinfo(unity_http.MEMBER).file_size != unity_http.FILE_BYTES
-            or archive.getinfo(unity_cache.MEMBER).file_size != 36):
+            or archive.getinfo(unity_cache.MEMBER).file_size != 36
+            or archive.getinfo(story_loading_prefab.MEMBER).file_size != story_loading_prefab.FILE_BYTES):
         raise ValueError("Diagnostic base resource transport members exceed their bounds")
     metadata = archive.read(octo.METADATA)
     if hashlib.sha256(metadata).hexdigest() != octo.METADATA_SHA256:
@@ -66,12 +68,15 @@ def local_resource_members(archive):
     patched_metadata, metadata_proof = octo.patch_octo_metadata(metadata)
     del metadata
     settings, settings_proof = unity_http.patch_player_http(archive.read(unity_http.MEMBER))
+    story, story_proof = story_loading_prefab.patch_story_loading_prefab(
+        archive.read(story_loading_prefab.MEMBER))
     guid, guid_proof = unity_cache.derive_cache_guid(archive.read(unity_cache.MEMBER),
-        metadata_proof["output_sha256"], settings_proof["output_sha256"])
+        metadata_proof["output_sha256"], settings_proof["output_sha256"],
+        serialized_asset_sha256=story_proof["output_sha256"])
     return {octo.METADATA: patched_metadata, unity_http.MEMBER: settings,
-            unity_cache.MEMBER: guid}, {"octo_origin": metadata_proof,
+            unity_cache.MEMBER: guid, story_loading_prefab.MEMBER: story}, {"octo_origin": metadata_proof,
             "unity_http_connection_policy": settings_proof,
-            "unity_il2cpp_cache": guid_proof}
+            "unity_il2cpp_cache": guid_proof, "story_loading_prefab": story_proof}
 
 
 def verify_local_resource_output(archive, proof):
@@ -106,6 +111,12 @@ def verify_local_resource_output(archive, proof):
     if (guid != proof["unity_il2cpp_cache"]["guid"].encode("ascii")
             or guid == unity_cache.ORIGINAL_GUID):
         raise ValueError("Output Unity cache version differs")
+    if (archive.getinfo(story_loading_prefab.MEMBER).file_size != story_loading_prefab.FILE_BYTES
+            or hashlib.sha256(archive.read(story_loading_prefab.MEMBER)).hexdigest()
+            != story_loading_prefab.OUTPUT_SHA256
+            or proof["story_loading_prefab"]["output_sha256"] != story_loading_prefab.OUTPUT_SHA256
+            or proof["unity_il2cpp_cache"].get("serialized_asset_sha256") != story_loading_prefab.OUTPUT_SHA256):
+        raise ValueError("Output story loading bindings differ")
 
 
 def marker(native_sha256=NATIVE_SHA256):
@@ -434,11 +445,12 @@ def build(args):
             "all_original_members_preserved_except_manifest_and_signatures":False,
             "all_original_members_preserved_except_declared_manifest_and_font_splits":False,
             "all_original_members_preserved_except_declared_manifest_font_and_UI_assets":False,
-            "all_original_members_preserved_except_declared_manifest_font_UI_and_local_resource_transport":True,
+            "all_original_members_preserved_except_declared_manifest_font_UI_and_local_resource_transport":False,
+            "all_original_members_preserved_except_declared_manifest_font_UI_transport_and_story_loading":True,
             "allowed_existing_member_replacements":["AndroidManifest.xml", *sorted(existing_replacements)],
             "font_support":font_report,"ui_language":ui_language,"ui_translation":ui_report,
             "local_resource_transport":transport_report,
-            "local_resource_member_sha256":{n:after[n] for n in (octo.METADATA,unity_http.MEMBER,unity_cache.MEMBER)},
+            "local_resource_member_sha256":{n:after[n] for n in (octo.METADATA,unity_http.MEMBER,unity_cache.MEMBER,story_loading_prefab.MEMBER)},
             "local_resource_output_fields_verified":True,
             "original_member_sha256":before,
             "added_member_sha256":{n:after[n] for n in additions},"native_library_sha256":native_input["sha256"],

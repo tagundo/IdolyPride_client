@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import stat
 import threading
+from types import MappingProxyType
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile
 
 from .octo_manifest import Database, OctoObject
@@ -40,6 +41,7 @@ class ResourceTranslation:
             raise ValueError("Unknown language resource source")
         self._lock, self._archive = threading.Lock(), None
         self._records, self._entries = {}, {}
+        object_aliases = {}
         self.language = language
         directory = Path(directory)
         if directory.is_symlink() or not directory.is_dir():
@@ -88,6 +90,14 @@ class ResourceTranslation:
                         + "_" + hashlib.sha256(new.name.encode("utf-8")).hexdigest()[:12]
                     or new.generation != (int(expected["sha256"][40:56], 16) or 1)):
                 raise ValueError("Prepared language object identity differs")
+            # Existing SDK metadata can retain the original objectName while
+            # adopting the translated generation. Resolve that exact observed
+            # combination to the same verified local record, without changing
+            # its cache key, content hash, or the canonical manifest identity.
+            alias = ("resources", old.uploadVersionId, old.objectName, new.generation)
+            if alias in object_aliases:
+                raise ValueError("Prepared language object alias differs")
+            object_aliases[alias] = record
             # Reverse exactly the six authorized data-integrity fields. Proto
             # equality below also checks all other scalars, repeated fields,
             # asset bundles, tag lists and unknown protobuf fields.
@@ -114,6 +124,7 @@ class ResourceTranslation:
         except BaseException:
             archive.close(); raise
         self._archive, self.manifest, self.report = archive, translated, report
+        self.object_aliases = MappingProxyType(object_aliases)
 
     def open_source(self, record):
         """Open a named local seed; cache still checks complete size and MD5."""

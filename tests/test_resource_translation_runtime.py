@@ -8,7 +8,7 @@ from Crypto.Cipher import AES
 import pytest
 
 from idoly_local.octo_cache import OctoCache, OctoCacheError
-from idoly_local.octo_manifest import Database, OctoManifest, OctoObject, decrypt_manifest
+from idoly_local.octo_manifest import Database, OctoManifest, OctoObject, OctoRequestError, decrypt_manifest
 from idoly_local.resource_translation import ResourceTranslation
 from idoly_local.resource_translation_build import build_resource_overlay
 from idoly_local.resource_translation_runtime import pin_manifest_revision, validate_prepared_translations
@@ -110,6 +110,9 @@ def test_gateway_factory_uses_selected_downloads_language_data_and_restores_japa
         resource_cache_dir=public, language="ko", allow_downloads=False,
         fetcher=lambda *args, **kwargs: calls.append(args))
     record = next(value for value in gateway.manifest.objects.values() if value.kind == "resources")
+    original_name = Database.FromString(raw).resourceList[0].objectName
+    mixed_path = f"/octo/{record.upload_version}/resources/{original_name}/{record.generation}"
+    assert gateway.manifest.lookup_object(mixed_path) == record
     with gateway.cache.open_verified(record) as stream:
         assert stream.read() == body
     assert gateway.translation_layer is not None and not calls
@@ -119,6 +122,9 @@ def test_gateway_factory_uses_selected_downloads_language_data_and_restores_japa
     restored = next(value for value in japanese.manifest.objects.values() if value.kind == "resources")
     assert japanese.manifest.revision > previous_revision
     assert restored.object_name.startswith("original_") and japanese.translation_layer is None
+    with pytest.raises(OctoRequestError) as mixed_failure:
+        japanese.manifest.lookup_object(mixed_path)
+    assert getattr(mixed_failure.value, "status", None) == 404
     assert (archive / "manifest.pb").read_bytes() == raw
     assert list((public / "octo-cache").rglob("*.bin"))
     japanese.close()
