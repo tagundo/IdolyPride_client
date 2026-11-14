@@ -2,7 +2,7 @@
 
 기존 한국어 게임 IPA에 iOS용 로컬 서버를 넣습니다. 앱을 열면 서버 화면이 먼저 표시되고, 앱 내부의 별도 스레드에서 서버와 리소스 서버를 준비합니다. 준비가 끝난 뒤 사용자가 **게임 시작**을 눌러야 Unity가 시작됩니다. macOS용 Python이나 별도 서버 프로세스를 실행하지 않습니다.
 
-[검증된 통합 IPA 시험판](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-7afaeda34a7c762c9a7fe2ffe4ea3fc9b6c4d2a6)과 정확한 [검증 범위](VALIDATION.md)를 확인할 수 있습니다.
+[검증된 통합 IPA 시험판](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-063f23ab8104f8ae9afa499378141a4ce4e324b7)과 정확한 [검증 범위](VALIDATION.md)를 확인할 수 있습니다.
 
 빌드 `156.9102`에서는 **게임 중 화면 오른쪽 위를 한 손가락으로 3초간 길게 누르면** 서버 메뉴를 다시 엽니다. 모서리의 작은 영역에만 적용되며 짧은 터치와 드래그는 일반 게임 입력으로 전달됩니다. Mac에서는 앱 메뉴의 **로컬 서버 설정…** 또는 **⌘⇧,**도 사용할 수 있습니다. 세 손가락 제스처는 사용하지 않습니다. 언어·해금 모드·그래픽·화면 확장·촬영 옵션과 리소스 다운로드·ZIP 가져오기/내보내기를 사용할 수 있습니다. 언어와 해금 모드 변경은 다음 앱 실행부터 적용합니다. 다운로드 리소스는 앱의 `Documents/IdolyPride`에 보관하고 iOS ‘파일’ 앱으로 접근합니다. 계정과 설정은 `Library/Application Support/IdolyPrideLocal`에 별도로 보관합니다.
 
