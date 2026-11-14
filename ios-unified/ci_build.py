@@ -19,6 +19,22 @@ def run(*args):
     subprocess.run(list(map(str, args)), check=True)
 
 
+def compatible_runtime(sdk, catalog):
+    def version(value):
+        if not isinstance(value, str) or not re.fullmatch(r"\d+(?:\.\d+){0,2}", value):
+            raise ValueError("Invalid iOS SDK/runtime version")
+        parts = tuple(map(int, value.split(".")))
+        return parts + (0,) * (3 - len(parts))
+    maximum = version(sdk)
+    available = [r for r in catalog.get("runtimes", []) if isinstance(r, dict)
+                 and r.get("isAvailable") is True
+                 and str(r.get("identifier", "")).startswith("com.apple.CoreSimulator.SimRuntime.iOS-")
+                 and version(r.get("version")) <= maximum]
+    if not available:
+        raise ValueError("Install an available iOS Simulator runtime compatible with the selected Xcode SDK")
+    return max(available, key=lambda r: version(r["version"]))["identifier"]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", type=Path, required=True)
@@ -39,6 +55,12 @@ def main():
     env = {"schema": 1, "source_commit": args.source_commit, "host_arch": platform.machine(),
            "xcode": subprocess.check_output(["xcodebuild", "-version"], text=True),
            "server_runs_in_process": True, "actual_phone_or_PlayCover_execution": False}
+    sdk = subprocess.check_output(["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"], text=True).strip()
+    raw_catalog = subprocess.check_output(["xcrun", "simctl", "list", "runtimes", "--json"])
+    if len(raw_catalog) > 2 * 1024**2:
+        raise ValueError("Simulator runtime catalog exceeds bound")
+    selected_runtime = compatible_runtime(sdk, json.loads(raw_catalog))
+    env.update(simulator_sdk=sdk, selected_simulator_runtime=selected_runtime)
     (output / "build-environment.json").write_text(json.dumps(env, indent=2) + "\n")
 
     def prepare(target, architecture):
@@ -87,7 +109,8 @@ def main():
     run(python, "-B", HERE / "package_unified.py", "--stage-only", "--target", "simulator",
         "--runtime-root", simruntime, "--native-framework", simframework, *common, "--output", prepared)
     run(python, "-B", HERE / "build_probe.py", "--prepared-app", prepared, "--output", probe, "--arch", arch)
-    run(python, "-B", HERE / "probe/smoke_probe.py", "--app", probe, "--audit", output / "simulator-smoke.json")
+    run(python, "-B", HERE / "probe/smoke_probe.py", "--app", probe,
+        "--runtime", selected_runtime, "--timeout", "600", "--audit", output / "simulator-smoke.json")
     # The device artifact and the disposable Simulator probe are deliberately
     # separate: a successful core probe does not imply physical game playback.
     digest = hashlib.sha256()

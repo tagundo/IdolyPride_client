@@ -366,10 +366,10 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
     created = None
     start = time.monotonic()
     stage = "platform"
-    def remaining():
+    def remaining(cap=60):
         value = timeout - (time.monotonic() - start)
         require(value > 0, "probe_deadline_exceeded")
-        return min(60, value)
+        return min(cap, value)
     try:
         require(sys.platform == "darwin", "macos_required_no_simulator_execution")
         require(type(timeout) in (int, float) and 5 <= timeout <= 600, "invalid_probe_timeout")
@@ -392,9 +392,13 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
         created = str(uuid.UUID(value)).upper()
         report.update(simulator_created=True, simulator_uuid=created)
         stage = "simulator_boot"
+        stage_start = time.monotonic()
         boot_created_simulator(created, remaining)
+        report["simulator_boot_seconds"] = round(time.monotonic() - stage_start, 3)
         stage = "app_install"
-        _simctl(["install", created, str(app)], remaining())
+        stage_start = time.monotonic()
+        _simctl(["install", created, str(app)], remaining(180))
+        report["app_install_seconds"] = round(time.monotonic() - stage_start, 3)
         stage = "fresh_container"
         raw = _simctl(["get_app_container", created, BUNDLE_ID, "data"], remaining())
         container = Path(raw.decode("utf-8").strip())

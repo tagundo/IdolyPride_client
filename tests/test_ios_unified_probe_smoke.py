@@ -89,7 +89,7 @@ class FakeSimctl:
 
     def __call__(self, arguments, timeout):
         self.calls.append(tuple(arguments))
-        assert 0 < timeout <= 60
+        assert 0 < timeout <= (180 if arguments[0] == "install" else 60)
         action = arguments[0]
         if action == self.failed_action:
             raise probe.ProbeError("simctl_failed")
