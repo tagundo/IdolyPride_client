@@ -2,30 +2,32 @@
 
 2026-11-15(KST) 한 IPA에서 일본어·한국어·영어를 선택하는 통합 시험판을 생성하고, 실제 Apple SDK 빌드와 새 iOS Simulator 검사를 통과했습니다.
 
-- 빌드 소스: `8c0f12c9178bece66d1626520cbd4bbd7e0c92b7`
-- 빌드 버전: `156.9104`
-- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43610016635)
-- [검증된 IPA 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-8c0f12c9178bece66d1626520cbd4bbd7e0c92b7)
-- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,659,589 bytes
-- SHA-256: `8b0a57c2df336ec3e630a616d2326ca94d84a77a46edec35c1a57ae39fff6f0c`
+- 빌드 소스: `5fc643b49b4fbcdbb947b495658f7b011a4c21d1`
+- 빌드 버전: `156.9105`
+- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43613546278)
+- [검증된 IPA 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-5fc643b49b4fbcdbb947b495658f7b011a4c21d1)
+- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,662,000 bytes
+- SHA-256: `f9eddac30262f4d7b3e2744de551e20106a5100a63326cca0260e90bb9aaf9a6`
 
 ## 통과한 검사
 
-현재 소스의 로컬 검사 397개와 하위 검사 3개가 통과했습니다. Xcode 16.4 / iOS SDK 18.5로 기기용 arm64 프레임워크와 시뮬레이터용 프레임워크를 빌드했습니다. Python 런타임 프레임워크 54개와 프로젝트 모듈 72개의 입력·플랫폼·의존성, 서명, 기존 게임 코드·SDK 보존, 완성 IPA 전체 멤버의 SHA/CRC를 확인했습니다.
+현재 소스의 로컬 검사 424개와 하위 검사 3개가 통과했습니다. Xcode 16.4 / iOS SDK 18.5로 기기용 arm64 프레임워크와 시뮬레이터용 프레임워크를 빌드했습니다. Python 런타임 프레임워크 54개와 프로젝트 모듈 72개의 입력·플랫폼·의존성, 서명, 기존 게임 코드·SDK 보존, 완성 IPA 전체 멤버의 SHA/CRC를 확인했습니다.
 
 실제 원본·한국어 IPA를 사용해 일본어·한국어·영어 Data를 생성했습니다. 각 언어의 완전한 리소스 전용 번들 46개 파일을 재구성하고 모든 입력·출력 해시와 두 번째 호출의 캐시 재사용을 확인했습니다. 공통 파일 44개를 공유하고 언어별 리소스와 메타데이터를 게임 시작 전에 선택합니다. 서명된 앱의 Data를 실행 중 수정하지 않습니다.
 
 실제 macOS Foundation에서 데이터 번들 선택, 고정된 번들 ID 범위, 경로·심볼릭 링크·언어 일치 검증과 번들 등록 실패 시의 제한된 대체 경로를 확인했습니다. 실제 AppKit에서도 메뉴 대상·액션, 합성 키 이벤트를 통한 ⌘⇧, 전달, 제거한 메뉴 복원과 메뉴 교체 시 중복 방지를 확인했습니다. 기기용 프레임워크에는 AppKit 의존성을 추가하지 않습니다.
+
+키보드 lifecycle helper도 실제 Mac Foundation의 별도 cold/warm 프로세스에서 실행했습니다. 미생성 상태의 첫 초기화는 원본을 호출하고, 기생성 상태에서는 같은 객체와 입력란을 유지합니다. 공개 getter 보존, 잘못된 ABI·다른 클래스·변경된 메서드·메인 스레드 밖 설치 거부, 관련 없는 원본 예외 전달과 Destroy 호출·전역값 재설정 없음 검사가 통과했습니다. 보고서의 총 카운터에는 의도적인 오류 전파 검사 세 번이 포함됩니다.
 
 새 iPhone 16 Pro / iOS 18.5 Simulator와 새 저장소에서 다음을 확인했습니다.
 
 - Unity 진입점이 아직 캡처되지 않았을 때 서버가 독립적으로 준비됨. 초기 상태 요청의 ID가 일치하며 메인 스레드에서 응답함.
 - 서버가 준비된 후에도 명시적인 게임 시작 전까지 대기함. 보이는 버튼의 UIKit 액션 전달 후 검사용 Unity 초기화 진입점을 메인 스레드에서 정확히 한 번 호출하고 중복 요청을 무시함.
 - 선택된 한국어 Data 번들이 검사용 Unity 데이터 선택기로 전달됨. 실제 원본 게임의 번역 표시 검사는 별도 대상임.
-- 공개 키보드 getter를 초기화 캡처 전·게임 시작 전·원본 초기화 도중(이미 Running인 단계)에 조회해 모두 nil, 원본 조회 0회, 키보드 생성 0회를 확인함. 원본 초기화가 반환한 뒤에는 준비 플래그가 켜지고 같은 입력란을 원본 조회 1회·생성 1회로 반환함.
+- 키보드를 초기화 캡처 전에 미리 생성함. 캡처 전·게임 시작 전·원본 초기화 도중·반환 후의 네 번 조회에서 모두 같은 입력란을 반환하고 생성 횟수는 1회로 유지됨. 공개 getter 원본 호출은 1/2/3/4회로 증가하며 기존 동작을 유지함. 초기화 보호는 기생성 객체를 1회 재사용하고 원본 Initialize를 다시 호출하지 않으며, 전체 초기화 반환 후 준비 플래그가 켜짐.
 - 실제 게임 창에 한 손가락·2초·12pt 허용 이동의 모서리 제스처가 하나 등록됨. 짧은 터치 지연 없음과 델리게이트 연결을 확인함.
 - 설정 메뉴를 열어 전체 화면 폭 402pt, 준비 완료한 실제 WKWebView, 가로 넘침 없음, 렌더 2배·버퍼 4096px 선택 항목을 확인함. 가로 화면과 고해상도에서의 실제 게임 창 검사는 별도 대상임.
-- 실제 ‘게임으로 돌아가기’ 액션 후 모달 해제·메뉴 뷰 분리·게임 창의 키 상태 복귀를 확인함. 닫힘 관측은 약 0.553초였으며, 제한 시간 내 여러 번 관측하도록 검사함.
+- 실제 ‘게임으로 돌아가기’ 액션 후 모달 해제·메뉴 뷰 분리·게임 창의 키 상태 복귀를 확인함. 닫힘 관측은 약 0.624초였으며, 제한 시간 내 여러 번 관측하도록 검사함.
 - 메뉴를 닫은 후 서버 상태가 실행 중이고 게임·리소스 두 리스너가 계속 연결됨.
 - 네이티브 CommonCrypto의 NIST AES 128/256 비트, Python 작업 스레드의 암호화·복호화와 잘못된 IV 거부, 실제 암호화 H2 요청·응답의 System.Check / Auth.Login / Home.Enter 성공.
 - 검사가 만든 Simulator만 종료·삭제함.
@@ -36,9 +38,11 @@ Actions ZIP 전체를 API가 제공한 SHA-256으로 검증하고 IPA를 추출�
 
 ## 보고된 Mac 충돌과 수정
 
-156.9103 Mac 충돌 보고서의 Unity 반환 위치 0x15f20을 고정된 원본 바이너리와 대조했습니다. 해당 검사는 Keyboard.mm 260행의 `[KeyboardDelegate Initialize] called after creating keyboard`입니다. 공개 UnityFramework.keyboardTextField getter가 KeyboardDelegate.Instance를 통해 객체를 먼저 생성할 수 있어, 이후 원본 초기화와 충돌하는 경로를 확인했습니다. 실제 외부 조회 호출자는 충돌 보고서만으로 특정하지 않았습니다.
+156.9103과 156.9104의 Mac 보고서는 같은 Unity 반환 위치 0x15f20에서 종료됐습니다. 원본의 Keyboard.mm 260행 검사 `[KeyboardDelegate Initialize] called after creating keyboard`입니다. 공개 getter만 차단한 이전 수정은 이미 존재하는 키보드 상태를 처리하지 못했습니다.
 
-수정판은 원본 UUID·RVA·명령어·Objective-C ABI를 확인한 공개 getter만 보호합니다. 별도 atomic 준비 플래그는 원본 초기화가 정상 반환할 때 켜며, 그 전에는 nil을 반환하고 이후에는 원래 함수를 호출합니다. 내부 Initialize/Instance/Destroy, 키보드 전역값과 Unity assertion은 변경하지 않습니다. 위 Simulator 회귀 검사는 같은 조기 조회 순서를 검사하며 실제 PlayCover 전체 게임 실행을 대신하지 않습니다.
+고정된 원본에서 Initialize의 미생성 경로와 Instance의 미생성 경로가 같은 클래스에 `_objc_alloc_init`을 호출하고 같은 전역값에 저장함을 확인했습니다. Initialize의 기생성 경로에는 추가 설정 없이 assertion과 반환만 있습니다. 수정판은 같은 클래스의 살아 있는 객체가 이미 있으면 재사용하고, 없거나 지원하지 않는 상태면 원본 구현과 예외를 유지합니다. 공개 getter를 변경하지 않고 객체·입력란을 교체하거나 Destroy로 초기화하지 않습니다.
+
+기기용 경로는 원본 UUID·RVA·ABI와 Initialize 184바이트, Instance 80바이트, Destroy 16바이트의 전체 본문을 확인합니다. 읽기 전용으로 접근하는 전역값은 정렬된 __DATA,__bss 내부 주소인지 검증합니다. 보호 설치는 게임 시작 직전이며 실패하면 게임을 넘기지 않고 서버 메뉴에서 오류를 표시합니다. 실제 외부 조회 호출자는 보고서만으로 특정하지 않았습니다. Foundation fixture와 Simulator의 대역 Unity 검사는 실제 PlayCover 전체 실행을 대신하지 않습니다.
 
 ## 번역 범위와 남은 검증
 
