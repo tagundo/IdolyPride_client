@@ -41,7 +41,7 @@ def native_report():
                               "http_readiness":{"schema":1,"ok":True,"transport":"NSURLSession",
                                   "url":"http://127.0.0.1:8080/client/playback","http_status":200,
                                   "error_code":"none","body_is_json":True,"received_bytes":128,
-                                  "worker_main_thread":False,"ns_error_domain":"","ns_error_code":0},
+                                  "worker_main_thread":False,"ns_error_domain":None,"ns_error_code":None},
                               "launch_requested": True, "launch_prepared": True, "launcher_visible": False,
                               "client_data": {"selected": True, "language": "ko", "bundle_identifier": "local.idoly.client-data"}},
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
@@ -172,7 +172,9 @@ def test_native_actions_require_real_button_controls_and_touch_up_inside(group, 
     ("error_code","unknown private failure"),("body_is_json",False),("body_is_json",1),
     ("received_bytes",0),("received_bytes",16385),("received_bytes",True),
     ("worker_main_thread",True),("worker_main_thread",0),("ns_error_domain","private domain"),
-    ("ns_error_code",False),("ns_error_code",1)))
+    ("ns_error_domain",""),("ns_error_domain",0),("ns_error_domain",False),("ns_error_domain",{}),
+    ("ns_error_code",False),("ns_error_code",1),("ns_error_code",0),("ns_error_code",""),
+    ("ns_error_code",0.0),("ns_error_code",[])))
 def test_native_preflight_requires_real_loopback_urlsession_json_success(key, value):
     observed = native_report()
     observed["server_status"]["http_readiness"][key] = value
@@ -180,17 +182,34 @@ def test_native_preflight_requires_real_loopback_urlsession_json_success(key, va
         probe.validate_report(observed)
 
 
-def test_validated_native_layout_and_http_discard_unknown_payloads_and_accept_absent_optional_error_fields():
+@pytest.mark.parametrize("missing", (("ns_error_domain",), ("ns_error_code",), ("ns_error_domain", "ns_error_code")))
+def test_native_preflight_requires_explicit_null_error_fields(missing):
+    observed = native_report()
+    for key in missing:
+        del observed["server_status"]["http_readiness"][key]
+    with pytest.raises(probe.ProbeError, match="^native_http_readiness_failed$"):
+        probe.validate_report(observed)
+
+
+def test_validated_native_layout_and_http_discard_unknown_payloads_and_preserve_null_error_fields():
     observed = native_report()
     observed["native_header"]["private_phase"] = {"secret":"never-copy"}
     observed["native_header"]["current"]["private_text"] = "never-copy"
     http = observed["server_status"]["http_readiness"]
     http["private_field"] = "never-copy"
-    del http["ns_error_domain"], http["ns_error_code"]
     result = probe.validate_report(observed)
     assert result["native_header"]["ultrawide"]["button_min_font"] > result["native_header"]["wide"]["button_min_font"]
     assert result["server_status"]["http_readiness"]["url"] == "http://127.0.0.1:8080/client/playback"
+    assert result["server_status"]["http_readiness"]["ns_error_domain"] is None
+    assert result["server_status"]["http_readiness"]["ns_error_code"] is None
     assert "never-copy" not in json.dumps(result)
+
+
+def test_http_error_projection_retains_only_present_explicit_null_fields():
+    assert probe.http_readiness_observation({"ns_error_domain":None,"ns_error_code":None}) == {
+        "ns_error_domain":None,"ns_error_code":None}
+    assert probe.http_readiness_observation({}) == {}
+    assert probe.http_readiness_observation({"ns_error_domain":"","ns_error_code":0}) == {}
 
 
 def test_native_header_and_http_failure_projections_keep_only_known_bounded_fields():

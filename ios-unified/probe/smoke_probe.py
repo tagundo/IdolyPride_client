@@ -290,8 +290,8 @@ def validate_report(value):
             and http.get("error_code") == "none" and http.get("body_is_json") is True
             and type(http.get("received_bytes")) is int and 1 <= http["received_bytes"] <= 16384
             and http.get("worker_main_thread") is False
-            and ("ns_error_domain" not in http or type(http["ns_error_domain"]) is str and http["ns_error_domain"] == "")
-            and ("ns_error_code" not in http or type(http["ns_error_code"]) is int and http["ns_error_code"] == 0),
+            and "ns_error_domain" in http and http["ns_error_domain"] is None
+            and "ns_error_code" in http and http["ns_error_code"] is None,
             "native_http_readiness_failed")
     header = value.get("native_header")
     require(type(header) is dict and header.get("owned_root_only") is True, "native_header_layout_failed")
@@ -680,11 +680,12 @@ def http_readiness_observation(value):
         if type(number) is int and 0 <= number <= maximum:
             clean[key] = number
     for key, expected in (("transport","NSURLSession"), ("url",HTTP_READINESS_URL),
-                          ("error_code","none"), ("ns_error_domain","")):
+                          ("error_code","none")):
         if type(value.get(key)) is str and value[key] == expected:
             clean[key] = value[key]
-    if type(value.get("ns_error_code")) is int and value["ns_error_code"] == 0:
-        clean["ns_error_code"] = 0
+    for key in ("ns_error_domain", "ns_error_code"):
+        if key in value and value[key] is None:
+            clean[key] = None
     return clean
 
 
