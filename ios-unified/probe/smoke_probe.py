@@ -56,7 +56,8 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
     "unity_requests_captured", "premature_launch_checked", "launch_action_requested",
     "launch_action_dispatched", "unity_forwarded", "status_received", "crypto_received",
-    "loopback_checked", "report_written",
+    "loopback_checked", "report_written", "settings_menu_requested", "settings_return_requested",
+    "settings_return_observed", "settings_return_timeout", "settings_menu_dismissed",
 ))
 CHECKPOINT_READ_CODES = frozenset((
     "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
@@ -335,11 +336,16 @@ def validate_report(value):
     require(type(menu) is dict and all(menu.get(key) is True for key in (
         "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
         "server_control_found", "server_control_disabled_while_running",
-        "return_action_dispatched", "dismissed", "game_window_key_after_close", "status_completion_main_thread",
+        "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
         "grpc_connected_after_close", "assets_connected_after_close")), "settings_menu_lifetime_failed")
     width, window_width = menu.get("frame_width"), menu.get("window_width")
     require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
             and abs(width - window_width) <= 2, "settings_menu_width_failed")
+    dismissal = menu_close_observation(menu.get("dismiss_observation"))
+    require(all(dismissal.get(key) is False for key in (
+        "presented_controller_remaining", "settings_controller_still_presented", "settings_view_attached", "timed_out"))
+        and dismissal.get("game_window_key") is True and dismissal.get("observations", 0) >= 1
+        and "wait_seconds" in dismissal, "settings_menu_dismissal_evidence_failed")
     web = menu.get("web")
     require(type(web) is dict and all(web.get(key) is True for key in (
         "web_found", "evaluation_succeeded", "ready", "forms_present", "scale_2_present", "buffer_4096_present",
@@ -383,8 +389,9 @@ def validate_report(value):
             "menu_lifetime": {**{key: menu[key] for key in (
                 "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
                 "server_control_found", "server_control_disabled_while_running",
-                "return_action_dispatched", "dismissed", "game_window_key_after_close", "status_completion_main_thread",
+                "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
                 "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
+                "dismiss_observation":dismissal,
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count")},
@@ -425,7 +432,9 @@ def wait_report(container, remaining):
             if failure is not None:
                 require(type(failure) is str and failure in LAUNCHER_FAILURE_CODES,
                         "invalid_launcher_failure_code")
-                raise ProbeError(failure)
+                error = ProbeError(failure)
+                error.native_menu = menu_close_observation(waiting_value.get("menu_close"))
+                raise error
             status = waiting_value.get("server_status")
             require(type(status) is dict, "invalid_waiting_status")
             if status.get("game_error") is not None:
@@ -473,6 +482,23 @@ def corner_observation(value):
     return clean
 
 
+def menu_close_observation(value):
+    """Retain public UIKit transition state, never view names or arbitrary text."""
+    if type(value) is not dict:
+        return {}
+    clean = {key: value[key] for key in (
+        "presented_controller_remaining", "settings_controller_still_presented", "settings_view_attached",
+        "settings_is_being_dismissed", "game_window_key", "timed_out") if type(value.get(key)) is bool}
+    for key, maximum in (("application_state", 2), ("observations", 10000)):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= maximum:
+            clean[key] = item
+    seconds = value.get("wait_seconds")
+    if type(seconds) in (int, float) and math.isfinite(seconds) and 0 <= seconds <= 600:
+        clean["wait_seconds"] = seconds
+    return clean
+
+
 def failure_checkpoint(container):
     """Read only fixed scalar progress from this invocation's fresh container."""
     result = {"stage": "not_observed", "container_available": container is not None}
@@ -513,6 +539,9 @@ def failure_checkpoint(container):
             result[source + "_read_error"] = "unreadable_checkpoint"
             continue
         result[source + "_available"] = True
+        menu = menu_close_observation(observed.get("menu_close"))
+        if menu:
+            result["menu_close"] = menu
         if source == "checkpoint":
             stage = observed.get("stage")
             if type(observed.get("schema")) is int and observed["schema"] == 1 \
@@ -716,6 +745,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             report["native_crypto_observed"] = error.native_crypto
         if isinstance(error, ProbeError) and type(getattr(error, "native_corner", None)) is dict:
             report["native_corner_observed"] = error.native_corner
+        if isinstance(error, ProbeError) and type(getattr(error, "native_menu", None)) is dict and error.native_menu:
+            report["native_menu_close_observed"] = error.native_menu
         if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
             report["simctl_failure"] = error.tool_detail
     finally:

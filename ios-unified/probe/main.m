@@ -255,11 +255,14 @@ static NSDictionary *ProbeCrypto(void) {
 @property(nonatomic) BOOL launchDispatched;
 @property(nonatomic) BOOL captureDispatched;
 @property(nonatomic, strong) NSDictionary *earlyStatus;
+@property(nonatomic, strong) NSDictionary *menuCloseObservation;
 - (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
 - (void)failProbe:(NSString *)code;
 - (void)probeMenuAfterLaunch:(NSMutableDictionary *)report;
+- (void)observeMenuDismissal:(UINavigationController *)navigation report:(NSMutableDictionary *)report
+                       menu:(NSMutableDictionary *)menu started:(NSTimeInterval)started observations:(NSUInteger)observations;
 - (void)finishReport:(NSDictionary *)report;
 @end
 
@@ -268,7 +271,7 @@ static NSDictionary *ProbeCrypto(void) {
     self.probeError = code;
     ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
-        @"probe_error":code});
+        @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{}});
 }
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
@@ -277,7 +280,8 @@ static NSDictionary *ProbeCrypto(void) {
         @"application_state":@(UIApplication.sharedApplication.applicationState),
         @"launch_requested":ProbeScalar(status, @"launch_requested"),
         @"launch_prepared":ProbeScalar(status, @"launch_prepared"),
-        @"launcher_visible":ProbeScalar(status, @"launcher_visible")});
+        @"launcher_visible":ProbeScalar(status, @"launcher_visible"),
+        @"menu_close":self.menuCloseObservation ?: @{}});
 }
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)application; (void)options;
@@ -491,25 +495,49 @@ static NSDictionary *ProbeCrypto(void) {
             BOOL closed = [UIApplication.sharedApplication sendAction:close.action to:close.target from:close forEvent:nil];
             menu[@"return_action_dispatched"] = @(closed);
             if (!closed) { [self failProbe:@"settings_return_action_failed"]; return; }
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
-                BOOL dismissed = self.window.rootViewController.presentedViewController == nil;
-                menu[@"dismissed"] = @(dismissed); menu[@"game_window_key_after_close"] = @(self.window.isKeyWindow);
-                if (!dismissed || !self.window.isKeyWindow) { [self failProbe:@"settings_menu_not_dismissed"]; return; }
-                IdolyEmbeddedServerCommand(@"{\"id\":2,\"action\":\"status\"}", ^(NSString *reply) {
-                    menu[@"status_completion_main_thread"] = @(NSThread.isMainThread);
-                    menu[@"host_status_after_close"] = ProbeHostStatus(reply);
-                    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-                        BOOL grpc = ProbePort(50051), assets = ProbePort(8080);
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            menu[@"grpc_connected_after_close"] = @(grpc);
-                            menu[@"assets_connected_after_close"] = @(assets);
-                            report[@"menu_lifetime"] = menu;
-                            [self finishReport:report];
-                        });
-                    });
+            [self recordCheckpoint:@"settings_return_requested"];
+            [self observeMenuDismissal:navigation report:report menu:menu
+                              started:NSProcessInfo.processInfo.systemUptime observations:0];
+        });
+    });
+}
+- (void)observeMenuDismissal:(UINavigationController *)navigation report:(NSMutableDictionary *)report
+                       menu:(NSMutableDictionary *)menu started:(NSTimeInterval)started observations:(NSUInteger)observations {
+    NSCAssert(NSThread.isMainThread, @"Dismissal observation belongs on main thread");
+    UIViewController *presented = self.window.rootViewController.presentedViewController;
+    BOOL noPresented = presented == nil, detached = navigation.viewIfLoaded.window == nil;
+    BOOL key = self.window.isKeyWindow;
+    NSTimeInterval elapsed = NSProcessInfo.processInfo.systemUptime - started;
+    BOOL complete = noPresented && detached && key;
+    BOOL timedOut = !complete && elapsed >= 6.0;
+    self.menuCloseObservation = @{@"presented_controller_remaining":@((BOOL)!noPresented),
+        @"settings_controller_still_presented":@((BOOL)(presented == navigation)),
+        @"settings_view_attached":@((BOOL)!detached),
+        @"settings_is_being_dismissed":@((BOOL)(navigation.isBeingDismissed || navigation.topViewController.isBeingDismissed)),
+        @"game_window_key":@(key), @"application_state":@(UIApplication.sharedApplication.applicationState),
+        @"observations":@(observations + 1), @"wait_seconds":@(elapsed), @"timed_out":@(timedOut)};
+    [self recordCheckpoint:timedOut ? @"settings_return_timeout" : @"settings_return_observed"];
+    if (complete) {
+        menu[@"dismissed"] = @YES; menu[@"menu_view_detached_after_close"] = @YES;
+        menu[@"game_window_key_after_close"] = @YES;
+        menu[@"dismiss_observation"] = self.menuCloseObservation;
+        [self recordCheckpoint:@"settings_menu_dismissed"];
+        IdolyEmbeddedServerCommand(@"{\"id\":2,\"action\":\"status\"}", ^(NSString *reply) {
+            menu[@"status_completion_main_thread"] = @(NSThread.isMainThread);
+            menu[@"host_status_after_close"] = ProbeHostStatus(reply);
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+                BOOL grpc = ProbePort(50051), assets = ProbePort(8080);
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    menu[@"grpc_connected_after_close"] = @(grpc);
+                    menu[@"assets_connected_after_close"] = @(assets);
+                    report[@"menu_lifetime"] = menu;
+                    [self finishReport:report];
                 });
             });
         });
+    } else if (timedOut) [self failProbe:@"settings_menu_not_dismissed"];
+    else dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+        [self observeMenuDismissal:navigation report:report menu:menu started:started observations:observations + 1];
     });
 }
 @end

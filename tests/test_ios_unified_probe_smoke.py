@@ -62,7 +62,10 @@ def native_report():
     report["menu_lifetime"] = {"opened_via_owned_menu_target":True,"full_screen":True,
         "frame_width_matches":True,"frame_width":393.0,"window_width":393.0,"return_button_found":True,
         "server_control_found":True,"server_control_disabled_while_running":True,
-        "return_action_dispatched":True,"dismissed":True,"game_window_key_after_close":True,
+        "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
+        "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
+            "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":True,
+            "application_state":0,"observations":4,"wait_seconds":0.303,"timed_out":False},
         "status_completion_main_thread":True,"grpc_connected_after_close":True,"assets_connected_after_close":True,
         "web":{"web_found":True,"evaluation_succeeded":True,"ready":True,"forms_present":True,
                "scale_2_present":True,"buffer_4096_present":True,"no_horizontal_overflow":True,
@@ -82,6 +85,9 @@ def native_report():
     (("menu_lifetime", "grpc_connected_after_close"), False, "settings_menu_lifetime_failed"),
     (("menu_lifetime", "host_status_after_close", "result", "running"), False, "server_stopped_after_menu_close"),
     (("menu_lifetime", "frame_width"), 250, "settings_menu_width_failed"),
+    (("menu_lifetime", "dismiss_observation", "settings_view_attached"), True, "settings_menu_dismissal_evidence_failed"),
+    (("menu_lifetime", "dismiss_observation", "game_window_key"), False, "settings_menu_dismissal_evidence_failed"),
+    (("menu_lifetime", "dismiss_observation", "timed_out"), True, "settings_menu_dismissal_evidence_failed"),
     (("menu_lifetime", "web", "scale_2_present"), False, "settings_web_readiness_or_layout_failed"),
     (("menu_lifetime", "web", "buffer_4096_present"), False, "settings_web_readiness_or_layout_failed"),
     (("menu_lifetime", "web", "content_width"), 500, "settings_web_metrics_failed"),
@@ -105,6 +111,53 @@ def test_new_flow_audit_discards_unrecognized_native_values():
     assert result["early_status"]["id"] == 2718
     assert result["menu_lifetime"]["host_status_after_close"]["result"]["running"] is True
     assert "must-not-export" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("stage", ("settings_menu_requested", "settings_return_requested", "settings_return_observed",
+                                  "settings_return_timeout", "settings_menu_dismissed"))
+def test_owned_menu_checkpoints_are_projected_before_simulator_cleanup(tmp_path, stage):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    value = {"schema":1,"stage":stage,"original_called":1,"phase":4,
+             "menu_close":{"presented_controller_remaining":True,"game_window_key":False,
+                           "wait_seconds":0.6,"observations":7,"unknown":"must-not-export"}}
+    (documents / "embedded-probe-checkpoint.json").write_text(json.dumps(value))
+    observed = probe.failure_checkpoint(tmp_path)
+    assert observed["stage"] == stage
+    assert "checkpoint_read_error" not in observed
+    assert observed["menu_close"] == {"presented_controller_remaining":True,"game_window_key":False,
+                                      "wait_seconds":0.6,"observations":7}
+
+
+def test_menu_dismissal_diagnostics_drop_nonboolean_or_unbounded_values():
+    assert probe.menu_close_observation({"game_window_key":1,"settings_view_attached":"private",
+        "presented_controller_remaining":True,"application_state":5,"wait_seconds":float("nan"),
+        "observations":100000,"unknown":"private"}) == {"presented_controller_remaining":True}
+
+
+def test_menu_timeout_distinguishes_transition_and_key_window_without_weakening_failure(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    detail = {"presented_controller_remaining":False,"settings_controller_still_presented":False,
+              "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":False,
+              "application_state":0,"observations":61,"wait_seconds":6.05,"timed_out":True,
+              "unknown":"must-not-export"}
+    def command(arguments, timeout):
+        result = controller(arguments, timeout)
+        if arguments[0] == "launch":
+            documents = controller.container / "Documents"
+            (documents / "embedded-probe.json").unlink()
+            (documents / "embedded-probe-status.json").write_text(json.dumps({"schema":1,"original_called":1,
+                "server_status":{"phase":4,"error":None},"probe_error":"settings_menu_not_dismissed","menu_close":detail}))
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"), mock.patch.object(probe,"_simctl",command), \
+            mock.patch.object(probe,"probe_rpcs") as rpc:
+        observed = probe.run_probe(app,tmp_path / "dismissal-timeout.json")
+    assert observed["status"] == "FAIL" and observed["error"] == "settings_menu_not_dismissed"
+    assert observed["native_menu_close_observed"]["presented_controller_remaining"] is False
+    assert observed["native_menu_close_observed"]["game_window_key"] is False
+    assert observed["cleanup"] == {"shutdown":True,"delete":True}
+    assert "must-not-export" not in json.dumps(observed)
+    rpc.assert_not_called()
 
 
 def public_descriptor():
