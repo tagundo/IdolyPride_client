@@ -24,4 +24,7 @@ static inline int IDGateForward(IDGate *g) {
     if (!g->captured || g->forwarded || g->phase != IDGateReady) return 0;
     g->forwarded = 1; g->phase = IDGateRunning; return 1;
 }
+static inline int IDGateForwardVisible(IDGate *g, int background) {
+    return !background && IDGateForward(g);
+}
 #endif

@@ -17,3 +17,5 @@ iPhone·iPad를 우선합니다. 기기용 IPA는 개인 서명 후 설치해야
 5. 별도 시뮬레이터용 프레임워크·검사용 앱을 만들고 새 시뮬레이터에서 서버 준비, CommonCrypto AES, 암호화된 실제 RPC와 상태 저장을 검사합니다. 기존 시뮬레이터나 사용자 데이터를 사용하지 않습니다.
 
 빌드 산출물에는 IPA, SHA-256, 프레임워크·원본 보존 검사와 시뮬레이터 결과를 함께 보관합니다. 자세한 내부 경계는 [CONTRACT.md](CONTRACT.md)에 정리했습니다.
+
+GitHub Actions를 사용할 수 없는 경우 Mac에서 전체 Xcode·iOS Simulator 런타임·기본 아키텍처의 Python 3.13·GitHub CLI와 여유 공간 8 GiB를 준비합니다. 별도 아이프라 서버를 종료하고 `gh auth login` 후 `ios-unified/build_on_mac.command`를 실행합니다. 새 `~/Downloads/IdolyPride/builds/날짜-커밋/` 안에서 같은 빌드와 검사를 진행합니다. 기존 게임·서버·리소스·계정 폴더를 변경하지 않습니다.

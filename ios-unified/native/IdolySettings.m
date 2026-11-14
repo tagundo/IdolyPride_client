@@ -238,23 +238,27 @@ static __weak IDSettingsController *settingsController;
             attributes:@{NSFilePosixPermissions:@0700} error:&failure];
         if (!failure) {
             NSFileCoordinator *coordinator = [NSFileCoordinator new];
-            [coordinator coordinateReadingItemAtURL:source options:0 error:&failure byAccessor:^(NSURL *readURL) {
+            NSError *coordinationError = nil;
+            __block NSError *copyError = nil;
+            [coordinator coordinateReadingItemAtURL:source options:0 error:&coordinationError byAccessor:^(NSURL *readURL) {
                 NSInputStream *in = [NSInputStream inputStreamWithURL:readURL];
                 NSOutputStream *out = [NSOutputStream outputStreamWithURL:destination append:NO];
                 [in open]; [out open]; uint8_t buffer[65536]; NSInteger size;
                 while ((size = [in read:buffer maxLength:sizeof buffer]) > 0) {
-                    if (!weakSelf) { failure = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]; break; }
+                    if (!weakSelf) { copyError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]; break; }
                     NSInteger used = 0;
                     while (used < size) {
                         NSInteger n = [out write:buffer+used maxLength:(NSUInteger)(size-used)];
-                        if (n <= 0) { failure = out.streamError ?: [NSError errorWithDomain:@"IdolyImport" code:1 userInfo:nil]; break; }
+                        if (n <= 0) { copyError = out.streamError ?: [NSError errorWithDomain:@"IdolyImport" code:1 userInfo:nil]; break; }
                         used += n;
                     }
-                    if (failure) break;
+                    if (copyError) break;
                 }
-                if (size < 0) failure = in.streamError ?: [NSError errorWithDomain:@"IdolyImport" code:2 userInfo:nil];
+                if (size < 0) copyError = in.streamError ?: [NSError errorWithDomain:@"IdolyImport" code:2 userInfo:nil];
                 [in close]; [out close];
             }];
+            // Keep accessor errors separate from the NSError** ARC writeback.
+            failure = coordinationError ?: copyError;
         }
         if (scoped) [source stopAccessingSecurityScopedResource];
         if (failure) [NSFileManager.defaultManager removeItemAtURL:destination error:NULL];

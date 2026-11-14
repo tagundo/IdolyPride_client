@@ -348,3 +348,34 @@ def test_login_without_fresh_identity_token_never_reaches_home(app):
     finally:
         server.stop()
     assert application.calls == list(probe.RPC_PATHS[:2])
+
+
+def test_cold_boot_retries_bounded_observer_for_only_the_created_uuid(monkeypatch):
+    calls = []
+
+    def simctl(arguments, timeout):
+        calls.append((arguments, timeout))
+        if arguments[0] == "bootstatus" and len(calls) == 2:
+            raise probe.ProbeError("simctl_timeout")
+        return b"booted"
+
+    monkeypatch.setattr(probe, "_simctl", simctl)
+    probe.boot_created_simulator(CREATED, lambda: 60)
+    assert [row[0] for row in calls] == [
+        ["boot", CREATED], ["bootstatus", CREATED, "-b"], ["bootstatus", CREATED, "-b"]]
+    assert all(timeout == 60 for _, timeout in calls)
+
+
+def test_cold_boot_keeps_overall_deadline_and_does_not_hide_other_failures(monkeypatch):
+    def timed_out(arguments, timeout):
+        if arguments[0] == "bootstatus":
+            raise probe.ProbeError("simctl_timeout")
+        return b""
+
+    remaining = mock.Mock(side_effect=[60, 60, probe.ProbeError("probe_deadline_exceeded")])
+    monkeypatch.setattr(probe, "_simctl", timed_out)
+    with pytest.raises(probe.ProbeError, match="probe_deadline_exceeded"):
+        probe.boot_created_simulator(CREATED, remaining)
+    monkeypatch.setattr(probe, "_simctl", mock.Mock(side_effect=probe.ProbeError("simctl_failed")))
+    with pytest.raises(probe.ProbeError, match="simctl_failed"):
+        probe.boot_created_simulator(CREATED, lambda: 60)

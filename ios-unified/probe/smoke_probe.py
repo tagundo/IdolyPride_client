@@ -151,6 +151,20 @@ def discover(device_type, runtime, remaining):
     return chosen_type["identifier"], chosen_runtime["identifier"]
 
 
+def boot_created_simulator(created, remaining):
+    _simctl(["boot", created], remaining())
+    # A cold first boot can take longer than one bounded simctl invocation.
+    # Timing out that observer does not cancel the owned Simulator's boot.
+    while True:
+        try:
+            _simctl(["bootstatus", created, "-b"], remaining())
+            return
+        except ProbeError as error:
+            if str(error) != "simctl_timeout":
+                raise
+            remaining()  # The original overall deadline remains authoritative.
+
+
 def load_schema(app):
     from idoly_local.schema import Schema
     payload = Path(app) / "LocalServer" / "ServerData.zip"
@@ -369,8 +383,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
         created = str(uuid.UUID(value)).upper()
         report.update(simulator_created=True, simulator_uuid=created)
         stage = "simulator_boot"
-        _simctl(["boot", created], remaining())
-        _simctl(["bootstatus", created, "-b"], remaining())
+        boot_created_simulator(created, remaining)
         stage = "app_install"
         _simctl(["install", created, str(app)], remaining())
         stage = "fresh_container"

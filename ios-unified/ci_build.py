@@ -58,7 +58,12 @@ def main():
             "--output", framework, *flags)
         run("/usr/bin/codesign", "--force", "--sign", "-", "--timestamp=none", framework)
         run("/usr/bin/codesign", "--verify", "--strict", framework)
-        (output / (target + "-native-build.json")).write_bytes(framework.with_suffix(".build.json").read_bytes())
+        report = json.loads(framework.with_suffix(".build.json").read_text())
+        binary = framework / "IdolyEmbeddedServer"
+        report["post_sign_binary_sha256"] = hashlib.sha256(binary.read_bytes()).hexdigest()
+        report["post_sign_binary_bytes"] = binary.stat().st_size
+        report["codesign_strict_verified"] = True
+        (output / (target + "-native-build.json")).write_text(json.dumps(report, indent=2) + "\n")
         (output / (target + "-runtime-report.json")).write_bytes((runtime / "runtime-report.json").read_bytes())
         return framework
 
@@ -95,7 +100,7 @@ def main():
         "Sign this IPA with your iOS sideloading method before installing.\n"
         "The local server starts inside the game; no separate server app is needed.\n"
         "Hold three fingers on the game for one second to open server settings.\n"
-        "Resource files: Files > On My iPhone/iPad > IdolyPride Local > IdolyPride.\n"
+        "Resource files: Files > On My iPhone/iPad > 아이프라 로컬 > IdolyPride.\n"
         "The real iOS server framework compiled and a disposable Simulator core probe passed.\n"
         "Physical iPhone/iPad game playback and PlayCover execution remain unverified.\n"
         "The Simulator probe is excluded from the device IPA.\n"

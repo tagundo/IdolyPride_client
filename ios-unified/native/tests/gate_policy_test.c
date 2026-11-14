@@ -11,7 +11,8 @@ int main(void) {
     assert(!IDGateSucceeded(&g) && !IDGateForward(&g));
     assert(IDGateBegin(&g) && g.attempts == 2);
     assert(IDGateSucceeded(&g) && !IDGateSucceeded(&g));
-    assert(IDGateForward(&g) && g.phase == IDGateRunning);
+    assert(!IDGateForwardVisible(&g, 1) && g.phase == IDGateReady && !g.forwarded);
+    assert(IDGateForwardVisible(&g, 0) && g.phase == IDGateRunning);
     for (unsigned i = 0; i < 10000; ++i)
         assert(!IDGateForward(&g) && !IDGateBegin(&g) && !IDGateCapture(&g));
     puts("PASS: startup deferral, retry, and exactly-once forwarding policy");

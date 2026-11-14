@@ -204,6 +204,14 @@ static NSString *callHost(const char *name, NSString *argument, NSString **error
     if (!result) *error = PyErr_Occurred() ? pythonFailure() : @"서버 응답이 64 KiB를 초과했습니다.";
     pythonThread = PyEval_SaveThread(); return result;
 }
+static void forwardUnityIfVisible(void) {
+    NSCAssert(NSThread.isMainThread, @"Unity startup belongs to main thread");
+    if (!IDGateForwardVisible(&gate, UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)) return;
+    lastError = nil; IDNativeDismissFailure();
+    id controller = savedController, application = savedApplication;
+    savedController = nil; savedApplication = nil;
+    ((void (*)(id, SEL, id))originalStartUnity)(controller, startSelector, application);
+}
 static void beginServer(void) {
     NSCAssert([NSThread isMainThread], @"Gate state belongs to main thread");
     if (!hookInstalled || !IDGateBegin(&gate)) return;
@@ -231,11 +239,8 @@ static void beginServer(void) {
             Py_XDECREF(reply); pythonThread = PyEval_SaveThread();
         }
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (good && IDGateSucceeded(&gate) && IDGateForward(&gate)) {
-                lastError = nil; IDNativeDismissFailure();
-                id controller = savedController, application = savedApplication;
-                savedController = nil; savedApplication = nil;
-                ((void (*)(id, SEL, id))originalStartUnity)(controller, startSelector, application);
+            if (good && IDGateSucceeded(&gate)) {
+                forwardUnityIfVisible();
             } else if (!good && IDGateFailedAttempt(&gate)) {
                 lastError = error ?: @"서버 시작 실패"; IDNativeStartupFailure(lastError);
             }
@@ -327,6 +332,7 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
 void IdolyEmbeddedServerRetry(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (hookError) IDNativeStartupFailure(hookError);
+        else if (gate.phase == IDGateReady) forwardUnityIfVisible();
         else if (gate.phase == IDGateRunning) recoverForeground();
         else beginServer();
     });
@@ -384,6 +390,7 @@ __attribute__((constructor)) static void embeddedServerLoaded(void) {
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
                 (void)note;
                 if (hookError || lastError) IDNativeStartupFailure(hookError ?: lastError);
+                forwardUnityIfVisible();
                 recoverForeground();
             }];
         if (hookError) IDNativeStartupFailure(hookError);
