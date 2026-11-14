@@ -46,6 +46,9 @@ def original_rows():
                 "forceCostumeTypeId": "idol", "deniedCharacterIds": ["other"], "poseAssetId": "pose-stage",
                 "viewConditionId": "original-view", "unlockConditionId": "original-unlock"}],
             "Costume": costumes, "Hair": hairs,
+            "Setting": [{"id": "1", "liveMinimumGuaranteedAudienceAmount": 10,
+                "liveLightFanAmountWeightPermil": 50, "liveMiddleFanAmountWeightPermil": 200,
+                "liveHeavyFanAmountWeightPermil": 500}],
             "PhotoQuestMusic": [{"id": identity, "assetId": "asset-" + identity, "name": "shared original name",
                 "description": "  original cover " + identity + " \t", "singer": "original three singers", "order": index,
                 "viewConditionId": "original-possession", "unlockConditionId": "original-possession"}
@@ -100,6 +103,8 @@ def test_only_approved_photo_conditions_types_and_appearance_flags_change_withou
                 expected["viewConditionId"] = ""
                 for episode in expected["episodes"]:
                     episode.update(viewConditionId="", unlockConditionId="")
+            elif table == "Setting":
+                expected["liveMinimumGuaranteedAudienceAmount"] = 1000
             else:
                 expected.update(viewConditionId="", unlockConditionId="")
                 if table not in ("PhotoQuestMusic", "PhotoQuestStage"):
@@ -137,6 +142,34 @@ def test_reordered_source_keys_keep_version_source_bytes_and_local_keys_identica
     reordered = {table: [{key: row[key] for key in reversed(row)} for row in values]
                  for table, values in rows.items()}
     assert overlay._identities("a" * 64, tag, rows) == overlay._identities("a" * 64, tag, reordered)
+
+
+@pytest.mark.parametrize("minimum", [0, 1, 10, 999, 1000, 4321])
+def test_gallery_minimum_covers_native_special_character_fallback_without_lowering_existing_limits(minimum):
+    from idoly_local.media_profile import MEDIA_AUDIENCE_CANDIDATES
+    row = original_rows()["Setting"][0]
+    row["liveMinimumGuaranteedAudienceAmount"] = minimum
+    original = copy.deepcopy(row)
+    changed = overlay.expanded_rows("Setting", [row])[0]
+    expected = copy.deepcopy(original)
+    expected["liveMinimumGuaranteedAudienceAmount"] = max(minimum, MEDIA_AUDIENCE_CANDIDATES)
+    assert changed == expected and row == original
+    assert overlay.MEDIA_AUDIENCE_CANDIDATES == MEDIA_AUDIENCE_CANDIDATES == 1000
+
+
+@pytest.mark.parametrize("minimum", [True, -1, "10", None, 2**31])
+def test_gallery_minimum_rejects_malformed_original_settings(minimum):
+    row = original_rows()["Setting"][0]
+    row["liveMinimumGuaranteedAudienceAmount"] = minimum
+    with pytest.raises(ValueError, match="minimum audience"):
+        overlay.expanded_rows("Setting", [row])
+
+
+def test_gallery_minimum_requires_the_single_original_setting_row():
+    row = original_rows()["Setting"][0]
+    other = {**row, "id": "2"}
+    with pytest.raises(ValueError, match="Exactly one"):
+        overlay.expanded_rows("Setting", [row, other])
 
 
 @pytest.mark.parametrize("table", ["PhotoActivity", "PhotoExpression", "PhotoQuestMusic", "PhotoQuestStage"])
@@ -224,6 +257,10 @@ def _schema():
             ("unlockConditionId", 9), ("viewConditionId", 9), ("isAppeal", 8)), 1):
         episode.field.add(name=name, number=number, type=kind, label=1)
     definitions = {"CostumeType": [("id", 9, False), ("name", 9, False)],
+        "Setting": [("id", 9, False), ("liveMinimumGuaranteedAudienceAmount", 5, False),
+                    ("liveLightFanAmountWeightPermil", 5, False),
+                    ("liveMiddleFanAmountWeightPermil", 5, False),
+                    ("liveHeavyFanAmountWeightPermil", 5, False)],
         "PhotoActivity": [("id", 9, False), ("costumeTypeIds", 9, True), ("forceCostumeTypeId", 9, False),
                           ("deniedCharacterIds", 9, True), ("poseAssetId", 9, False),
                           ("viewConditionId", 9, False), ("unlockConditionId", 9, False)],

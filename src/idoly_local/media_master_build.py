@@ -16,9 +16,12 @@ from .media_outfit_policy import (COSTUME_IDS, ADMIN_COSTUME_IDS, ADMIN_HAIR_IDS
     is_audited_work_costume, is_audited_admin_costume, is_audited_admin_hair)
 
 
-POLICY = "media-outfits-v2"
+POLICY = "media-outfits-v3"
 TABLES = ("PhotoActivity", "PhotoExpression", "Costume", "Hair", "PhotoQuestMusic", "PhotoQuestStage",
-          "EventStory")
+          "EventStory", "Setting")
+# Keep in step with media_profile.MEDIA_AUDIENCE_CANDIDATES without importing
+# its protobuf/runtime dependencies into this stdlib-only contract validator.
+MEDIA_AUDIENCE_CANDIDATES = 1000
 TAG_NAME = "media-master-tag.json"
 TAG_MEMBER = "data/original-master/" + TAG_NAME
 PACK_NAMES = {table: POLICY + "-" + table + ".db" for table in TABLES}
@@ -75,12 +78,26 @@ def costume_type_ids(costumes, types):
 def expanded_rows(table, rows):
     if table not in TABLES or not isinstance(rows, list) or not rows:
         raise ValueError("Both original photo master tables are required")
+    if table == "Setting" and len(rows) != 1:
+        raise ValueError("Exactly one original media Setting row is required")
     ids = set()
     result = []
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"] or row["id"] in ids:
             raise ValueError("Original photo master IDs must be nonempty and unique")
         ids.add(row["id"])
+        if table == "Setting":
+            minimum = row.get("liveMinimumGuaranteedAudienceAmount")
+            if type(minimum) is not int or not 0 <= minimum <= 2**31 - 1:
+                raise ValueError("Original minimum audience setting is malformed")
+            # Normal characters use the raw UserCharacter candidate amount.
+            # Mana and collaborators instead use the fan-derived average,
+            # clamped by this setting (10 in original 6.1.1). Media fans remain
+            # real/unchanged; raise only this separate gallery master minimum.
+            changed = copy.deepcopy(row)
+            changed["liveMinimumGuaranteedAudienceAmount"] = max(minimum, MEDIA_AUDIENCE_CANDIDATES)
+            result.append(changed)
+            continue
         if table == "EventStory":
             # ListEvent eligibility does not override the client's master-side
             # visibility checks. The gallery keeps the actual event/episode,
@@ -202,6 +219,7 @@ def _identities(schema_sha256, original_tag, rows):
               "bath_costume_ids": sorted(COSTUME_IDS),
               "admin_costume_ids": sorted(ADMIN_COSTUME_IDS), "admin_hair_ids": sorted(ADMIN_HAIR_IDS),
               "cover_label_ids": sorted(COVER_LABEL_IDS), "cover_label_rule": "description.rstrip()",
+              "minimum_visual_audience": MEDIA_AUDIENCE_CANDIDATES,
               "source_tables": {table: _hash(canonical(rows[table])) for table in TABLES},
               "patched_tables": {table: _hash(canonical(patched[table])) for table in TABLES}}
     return "local-media-outfits-v1-" + _hash(canonical(policy)), keys, sources, patched
@@ -320,7 +338,8 @@ def build_media_master_overlay(schema, original_tag, original_pack_root, origina
                 if left.SerializeToString(deterministic=True) != right.SerializeToString(deterministic=True):
                     raise ValueError("Media overlay changed an event story field outside its explicit allowlist")
                 continue
-            fields = (("isUserUnavailable", "isDisableAdmin") if table == "Costume" else
+            fields = (("liveMinimumGuaranteedAudienceAmount",) if table == "Setting" else
+                      ("isUserUnavailable", "isDisableAdmin") if table == "Costume" else
                       ("isDisableAdmin",) if table == "Hair" else
                       ("viewConditionId", "unlockConditionId", "name") if table == "PhotoQuestMusic" else
                       ("viewConditionId", "unlockConditionId") if table == "PhotoQuestStage" else

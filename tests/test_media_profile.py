@@ -175,6 +175,8 @@ def test_audited_bath_outfit_and_its_hair_are_added_but_sd_and_npc_models_are_no
     snapshot.hairs.add(hairId="hair-ai", checked=False).MergeFromString(UNKNOWN)
     expected = type(snapshot)()
     expected.CopyFrom(snapshot)
+    for character in expected.characters:
+        character.audienceCandidateAmount = 1000
     assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
     assert next(row for row in snapshot.costumes if row.costumeId == "cos-ai-mizg-00").checked
     assert next(row for row in snapshot.hairs if row.hairId == "hair-ai-mizg-00").checked
@@ -273,6 +275,7 @@ def test_admin_hair_policy_checks_real_assets_owner_and_fitting_reference(field,
 
 def test_append_preserves_every_existing_row_and_other_snapshot_field(schema, master, snapshot):
     plan = prepare_media_inventory(schema, master[0])
+    snapshot.characters[0].audienceCandidateAmount = 4321
     before = snapshot.SerializeToString()
     existing = {name: {getattr(row, field): row.SerializeToString() for row in getattr(snapshot, name)}
                 for name, field in (("characters", "characterId"), ("costumes", "costumeId"),
@@ -400,11 +403,12 @@ def test_invalid_timestamp_does_not_touch_snapshot(schema, master, snapshot, obt
     assert snapshot.SerializeToString() == before
 
 
-def test_zero_media_audience_is_repaired_without_fan_or_progress_changes(schema, master, snapshot):
+@pytest.mark.parametrize("candidate", [-1, 0, 1, 10, 999])
+def test_sparse_media_audience_is_repaired_without_fan_or_progress_changes(schema, master, snapshot, candidate):
     plan = prepare_media_inventory(schema, master[0])
     apply_media_inventory(snapshot, plan, obtained_time=NOW)
     actor = next(row for row in snapshot.characters if row.characterId == "char-a")
-    actor.audienceCandidateAmount = 0
+    actor.audienceCandidateAmount = candidate
     actor.lightFanAmount, actor.middleFanAmount, actor.heavyFanAmount = 11, 22, 33
     actor.MergeFromString(UNKNOWN)
     snapshot.characters.add(characterId="unrelated-npc", audienceCandidateAmount=0)
@@ -427,3 +431,53 @@ def test_new_media_characters_have_positive_visual_audience_and_zero_actual_fans
     assert all(row.audienceCandidateAmount == 1000 for row in snapshot.characters)
     assert all((row.lightFanAmount, row.middleFanAmount, row.heavyFanAmount) == (0, 0, 0)
                for row in snapshot.characters)
+
+
+def test_real_mana_and_collaborators_receive_the_native_fan_average_minimum_without_invented_fans(schema):
+    """Regression against the original getter's normal/special branch.
+
+    The 6.1.1 native getter ignores special actors' raw candidate field. It
+    derives candidates from the normal roster's average three fan tiers and
+    the master minimum. Raising their raw zero/ten alone cannot fix this path.
+    """
+    from math import ceil
+    from idoly_local.media_master_build import expanded_rows
+    directory = Path(__file__).resolve().parents[1] / "data/master-json"
+    if not (directory / "Character.json").is_file():
+        pytest.skip("Original public master catalog is unavailable")
+    sources = {name: json.loads((directory / (name + ".json")).read_text())
+               for name in ("Character", "Card", "Setting")}
+    original_setting = deepcopy(sources["Setting"])
+    actors = {row["id"]: row for row in sources["Character"]}
+    special = {"char-mna", "char-cca", "char-chk", "char-chn", "char-mku", "char-rik", "char-ymk", "char-yo"}
+    owners = {row["characterId"] for row in sources["Card"]}
+    assert special == {owner for owner in owners if actors[owner]["type"] in (3, 4)}
+    plan = prepare_media_inventory(schema, directory)
+    snapshot = schema.response_type("/api.User/Get")()
+    snapshot.user.name = "Media"
+    assert apply_media_inventory(snapshot, plan, obtained_time=NOW)
+    characters = {row.characterId: row for row in snapshot.characters}
+    normals = [characters[owner] for owner in owners if actors[owner]["type"] == 1]
+    assert len(normals) == 20 and all(row.audienceCandidateAmount == 1000 for row in normals)
+
+    def native_candidates(setting, owner):
+        if actors[owner]["type"] == 1:
+            return characters[owner].audienceCandidateAmount
+        average_fans = [sum(getattr(row, tier + "FanAmount") for row in normals) // len(normals)
+                        for tier in ("light", "middle", "heavy")]
+        weights = [setting["live" + tier + "FanAmountWeightPermil"] for tier in ("Light", "Middle", "Heavy")]
+        return max(setting["liveMinimumGuaranteedAudienceAmount"],
+                   sum(amount * weight // 1000 for amount, weight in zip(average_fans, weights)))
+
+    cast = ["char-ktn", "char-ngs", "char-mna", "char-rik", "char-yo"]
+    original = sources["Setting"][0]
+    assert original["liveMinimumGuaranteedAudienceAmount"] == 10
+    assert [native_candidates(original, owner) for owner in cast] == [1000, 1000, 10, 10, 10]
+    gallery = expanded_rows("Setting", sources["Setting"])[0]
+    assert all(native_candidates(gallery, owner) == 1000 for owner in owners)
+    counts = [native_candidates(gallery, owner) for owner in cast]
+    # Original full-audience helper normalizes these five weights to 10,000.
+    assert [ceil(count * 10000 / sum(counts)) for count in counts] == [2000] * 5
+    assert all((row.lightFanAmount, row.middleFanAmount, row.heavyFanAmount) == (0, 0, 0)
+               for row in snapshot.characters)
+    assert sources["Setting"] == original_setting

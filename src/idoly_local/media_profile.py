@@ -21,7 +21,9 @@ from .rpc import RpcCode, RpcFailure
 
 
 # Original photo crowd builders use this field, independently of actual fans.
-# All-zero candidates also make the original 360 normalization produce zero.
+# The media-only Setting overlay applies this same minimum to the original
+# fan-derived average used for Mana and collaboration characters. Their native
+# ModifiedAudienceCandidateAmount getter does not read this raw user field.
 MEDIA_AUDIENCE_CANDIDATES = 1000
 
 
@@ -240,7 +242,7 @@ def apply_media_inventory(snapshot, plan: MediaInventoryPlan, *, obtained_time: 
                 activityLevel=1, activityStamina=plan._stamina, staminaUpdatedTime=obtained_time)
             changed = True
         character = result_characters[owner]
-        if character.audienceCandidateAmount == 0:
+        if character.audienceCandidateAmount < MEDIA_AUDIENCE_CANDIDATES:
             character.audienceCandidateAmount = MEDIA_AUDIENCE_CANDIDATES
             changed = True
     for identity in plan.costume_ids:
