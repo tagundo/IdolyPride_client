@@ -1,17 +1,17 @@
 # 검증 상태
 
-2026-11-14 한 IPA에서 일본어·한국어·영어를 선택하는 통합 시험판을 생성하고, 실제 Apple SDK 빌드와 새 iOS Simulator 검사를 통과했습니다.
+2026-11-15(KST) 한 IPA에서 일본어·한국어·영어를 선택하는 통합 시험판을 생성하고, 실제 Apple SDK 빌드와 새 iOS Simulator 검사를 통과했습니다.
 
-- 빌드 소스: `f4af114d64bf8a210670915a134d015f0c941cef`
-- 빌드 버전: `156.9103`
-- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43606054875)
-- [검증된 IPA 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-f4af114d64bf8a210670915a134d015f0c941cef)
-- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,658,964 bytes
-- SHA-256: `0ca704ee550470106f4559fb90398616ae58487b1de8b586a00a1b5ee9522faf`
+- 빌드 소스: `8c0f12c9178bece66d1626520cbd4bbd7e0c92b7`
+- 빌드 버전: `156.9104`
+- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43610016635)
+- [검증된 IPA 다운로드 브랜치](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-8c0f12c9178bece66d1626520cbd4bbd7e0c92b7)
+- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,659,589 bytes
+- SHA-256: `8b0a57c2df336ec3e630a616d2326ca94d84a77a46edec35c1a57ae39fff6f0c`
 
 ## 통과한 검사
 
-현재 소스의 로컬 검사 351개가 통과했습니다. Xcode 16.4 / iOS SDK 18.5로 기기용 arm64 프레임워크와 시뮬레이터용 프레임워크를 빌드했습니다. Python 표준 확장 모듈 54개와 프로젝트 모듈 72개의 입력·플랫폼·의존성, 서명, 기존 게임 코드·SDK 보존, 완성 IPA 전체 멤버의 SHA/CRC를 확인했습니다.
+현재 소스의 로컬 검사 397개와 하위 검사 3개가 통과했습니다. Xcode 16.4 / iOS SDK 18.5로 기기용 arm64 프레임워크와 시뮬레이터용 프레임워크를 빌드했습니다. Python 런타임 프레임워크 54개와 프로젝트 모듈 72개의 입력·플랫폼·의존성, 서명, 기존 게임 코드·SDK 보존, 완성 IPA 전체 멤버의 SHA/CRC를 확인했습니다.
 
 실제 원본·한국어 IPA를 사용해 일본어·한국어·영어 Data를 생성했습니다. 각 언어의 완전한 리소스 전용 번들 46개 파일을 재구성하고 모든 입력·출력 해시와 두 번째 호출의 캐시 재사용을 확인했습니다. 공통 파일 44개를 공유하고 언어별 리소스와 메타데이터를 게임 시작 전에 선택합니다. 서명된 앱의 Data를 실행 중 수정하지 않습니다.
 
@@ -22,16 +22,23 @@
 - Unity 진입점이 아직 캡처되지 않았을 때 서버가 독립적으로 준비됨. 초기 상태 요청의 ID가 일치하며 메인 스레드에서 응답함.
 - 서버가 준비된 후에도 명시적인 게임 시작 전까지 대기함. 보이는 버튼의 UIKit 액션 전달 후 검사용 Unity 초기화 진입점을 메인 스레드에서 정확히 한 번 호출하고 중복 요청을 무시함.
 - 선택된 한국어 Data 번들이 검사용 Unity 데이터 선택기로 전달됨. 실제 원본 게임의 번역 표시 검사는 별도 대상임.
+- 공개 키보드 getter를 초기화 캡처 전·게임 시작 전·원본 초기화 도중(이미 Running인 단계)에 조회해 모두 nil, 원본 조회 0회, 키보드 생성 0회를 확인함. 원본 초기화가 반환한 뒤에는 준비 플래그가 켜지고 같은 입력란을 원본 조회 1회·생성 1회로 반환함.
 - 실제 게임 창에 한 손가락·2초·12pt 허용 이동의 모서리 제스처가 하나 등록됨. 짧은 터치 지연 없음과 델리게이트 연결을 확인함.
 - 설정 메뉴를 열어 전체 화면 폭 402pt, 준비 완료한 실제 WKWebView, 가로 넘침 없음, 렌더 2배·버퍼 4096px 선택 항목을 확인함. 가로 화면과 고해상도에서의 실제 게임 창 검사는 별도 대상임.
-- 실제 ‘게임으로 돌아가기’ 액션 후 모달 해제·메뉴 뷰 분리·게임 창의 키 상태 복귀를 확인함. 닫힘 관측은 약 0.526초였으며, 제한 시간 내 여러 번 관측하도록 검사함.
+- 실제 ‘게임으로 돌아가기’ 액션 후 모달 해제·메뉴 뷰 분리·게임 창의 키 상태 복귀를 확인함. 닫힘 관측은 약 0.553초였으며, 제한 시간 내 여러 번 관측하도록 검사함.
 - 메뉴를 닫은 후 서버 상태가 실행 중이고 게임·리소스 두 리스너가 계속 연결됨.
 - 네이티브 CommonCrypto의 NIST AES 128/256 비트, Python 작업 스레드의 암호화·복호화와 잘못된 IV 거부, 실제 암호화 H2 요청·응답의 System.Check / Auth.Login / Home.Enter 성공.
 - 검사가 만든 Simulator만 종료·삭제함.
 
-이번 실행에서 simctl의 앱 실행 확인 응답은 시간 초과했습니다. 같은 프로세스가 이후 작성한 상태·최종 보고서와 실제 RPC 검사는 원래 검사 제한 시간 안에서 모두 통과했으며, 앱을 재실행해 결과를 대체하지 않았습니다. 전체 검사 시간은 부팅·설치·명령 대기를 포함하므로 앱이나 서버의 시작 성능 측정값이 아닙니다.
+이번 실행에서 simctl의 앱 실행 확인 응답은 시간 초과 없이 완료됐고, 같은 프로세스의 상태·최종 보고서와 실제 RPC 검사가 모두 통과했습니다. 전체 검사 시간은 부팅·설치·명령 대기를 포함하므로 앱이나 서버의 시작 성능 측정값이 아닙니다.
 
 Actions ZIP 전체를 API가 제공한 SHA-256으로 검증하고 IPA를 추출했습니다. 빌드 소스 해시, 입력 핀, 언어별 전체 매니페스트와 원본 보존 보고서를 대조했으며, 게시한 LFS IPA도 전체 재다운로드 SHA 검증을 통과했습니다.
+
+## 보고된 Mac 충돌과 수정
+
+156.9103 Mac 충돌 보고서의 Unity 반환 위치 0x15f20을 고정된 원본 바이너리와 대조했습니다. 해당 검사는 Keyboard.mm 260행의 `[KeyboardDelegate Initialize] called after creating keyboard`입니다. 공개 UnityFramework.keyboardTextField getter가 KeyboardDelegate.Instance를 통해 객체를 먼저 생성할 수 있어, 이후 원본 초기화와 충돌하는 경로를 확인했습니다. 실제 외부 조회 호출자는 충돌 보고서만으로 특정하지 않았습니다.
+
+수정판은 원본 UUID·RVA·명령어·Objective-C ABI를 확인한 공개 getter만 보호합니다. 별도 atomic 준비 플래그는 원본 초기화가 정상 반환할 때 켜며, 그 전에는 nil을 반환하고 이후에는 원래 함수를 호출합니다. 내부 Initialize/Instance/Destroy, 키보드 전역값과 Unity assertion은 변경하지 않습니다. 위 Simulator 회귀 검사는 같은 조기 조회 순서를 검사하며 실제 PlayCover 전체 게임 실행을 대신하지 않습니다.
 
 ## 번역 범위와 남은 검증
 

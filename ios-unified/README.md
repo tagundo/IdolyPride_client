@@ -1,8 +1,10 @@
 # iPhone·iPad 통합 IPA
 
-빌드 `156.9103` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
+빌드 `156.9104` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-f4af114d64bf8a210670915a134d015f0c941cef)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-8c0f12c9178bece66d1626520cbd4bbd7e0c92b7)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+
+156.9104는 Mac에서 보고된 Unity 키보드 중복 초기화 경로를 보호합니다. 서버 메뉴가 떠 있는 동안 Unity 입력란을 미리 조회해 키보드가 생성되지 않도록 하고, 원본 초기화가 정상 반환한 후 원래 조회 함수로 전달합니다. 초기화 전·도중·후의 Simulator 회귀 검사를 통과했으며 실제 PlayCover 재실행 확인은 별도 대상입니다.
 
 ## 실행과 설정
 
