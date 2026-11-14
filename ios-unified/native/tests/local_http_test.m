@@ -15,8 +15,16 @@ static NSDictionary *WorkerRequest(NSUInteger port, NSTimeInterval timeout) {
         @autoreleasepool { value = IDLocalHTTPReadiness(port, timeout); }
         dispatch_semaphore_signal(done);
     });
-    Require(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 12*NSEC_PER_SEC)) == 0,
-        "worker_request_exceeded_deadline");
+    // The real app keeps its main run loop active while the worker performs
+    // this request. Do the same here: a cold NSURLSession may schedule initial
+    // Foundation work on main before its private delegate queue can respond.
+    // The request remains on the worker, with the same absolute fixture bound.
+    NSTimeInterval deadline = NSProcessInfo.processInfo.systemUptime + 12;
+    while (dispatch_semaphore_wait(done, DISPATCH_TIME_NOW) != 0) {
+        Require(NSProcessInfo.processInfo.systemUptime < deadline, "worker_request_exceeded_deadline");
+        [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode
+            beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
     Require(value != nil && [value[@"worker_main_thread"] isEqual:@NO], "request_did_not_run_on_worker");
     return value;
 }

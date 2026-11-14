@@ -23,6 +23,20 @@ HERE = Path(__file__).resolve().parent
 MAX_BODY = 16384
 
 
+def attempted_response(fixture, result, observations):
+    """Fixed bounded metadata for failed assertions, never fixture body text."""
+    readiness = result.get("readiness", {}) if type(result) is dict else {}
+    value = {"fixture": fixture,
+             "request_count": min(len(observations["requests"]), 100),
+             "requested_fixed_path_once": observations["requests"] == ["/client/playback"]}
+    # request() already validates the exact loopback URL and response bound.
+    # Keep only the helper's public, fixed diagnostics; no headers/body/errors.
+    value["readiness"] = {key: readiness[key] for key in (
+        "schema", "ok", "transport", "url", "http_status", "error_code", "body_is_json",
+        "received_bytes", "worker_main_thread", "ns_error_domain", "ns_error_code") if key in readiness}
+    return value
+
+
 @contextmanager
 def loopback(mode, *, redirect_port=None):
     observations = {"requests": [], "release": threading.Event()}
@@ -127,6 +141,7 @@ def main():
                                    ("oversized", "response_too_large"), ("timeout", "timeout")):
                 with loopback(mode) as (port, observations):
                     result, readiness = request(port, 1 if mode == "timeout" else 2)
+                    report["last_attempt"] = attempted_response(mode, result, observations)
                     host.require(readiness.get("error_code") == expected and readiness.get("ok") is (mode == "json")
                                  and readiness.get("body_is_json") is (mode == "json")
                                  and observations["requests"] == ["/client/playback"], "local_http_response_case_failed")
@@ -136,6 +151,8 @@ def main():
             with loopback("json") as (target_port, target):
                 with loopback("redirect", redirect_port=target_port) as (port, observations):
                     result, readiness = request(port)
+                    report["last_attempt"] = attempted_response("redirect_not_followed", result, observations)
+                    report["last_attempt"]["redirect_target_request_count"] = min(len(target["requests"]), 100)
                     host.require(readiness.get("error_code") == "redirect" and readiness.get("http_status") == 302
                                  and readiness.get("ok") is False and target["requests"] == []
                                  and observations["requests"] == ["/client/playback"], "local_http_redirect_followed")
@@ -144,6 +161,7 @@ def main():
                 reservation.bind(("127.0.0.1", 0))
                 closed_port = reservation.getsockname()[1]
             result, readiness = request(closed_port)
+            report["last_attempt"] = attempted_response("closed_loopback_port", result, {"requests": []})
             host.require(readiness.get("error_code") == "connection" and readiness.get("http_status") == 0
                          and readiness.get("ok") is False, "local_http_connection_failure_not_classified")
             report["runs"].append({"fixture": "closed_loopback_port", **result})
