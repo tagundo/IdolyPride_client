@@ -12,13 +12,15 @@ A persistent native worker initializes isolated CPython and starts both local
 listeners independently. After an explicit Game Start, verified language Data
 is selected and the original initialization is forwarded on the main queue once.
 
-The same audit checks `UnityFramework -keyboardTextField`. Before the original
-initialization returns, this public getter returns nil so external input queries
-cannot lazily create KeyboardDelegate ahead of its required Initialize call.
-After normal return it forwards the original getter unchanged. A separate atomic
-completion flag is used because the startup gate enters Running before calling
-the original initializer. Internal keyboard methods, singleton state and Unity
-assertions remain unchanged.
+Immediately before forwarding initialization, the device audit checks the full
+KeyboardDelegate Initialize/Instance/Destroy method bodies and the singleton's
+readable/writable __DATA,__bss location. The native lifecycle helper reuses an
+already-created exact-class keyboard on the main thread; when absent, it calls
+the original Initialize. Both stock creation paths perform the same allocation
+and initialization. The helper preserves existing keyboard/field references,
+public getter behavior and unrelated original exceptions. It never resets the
+singleton or calls Destroy. A separate completion flag records when the full
+original Unity initializer has returned.
 
 Python is never finalized during gameplay. Commands and foreground recovery run
 on the same worker, with its GIL released while idle. A two-second one-finger hold
@@ -29,6 +31,9 @@ of the bundled settings page. Closing it releases the WebView and message handle
 # Linux: portable C state/origin policies and Mach-O admission fixtures only.
 python3 -B ios-unified/native/build_native.py --portable-tests
 python3 -B -m unittest discover -s ios-unified/native/tests -p 'test_*.py'
+
+# macOS: actual Foundation cold/precreated keyboard regression processes.
+python3 -B ios-unified/native/test_keyboard_lifecycle.py --report /fresh/keyboard-lifecycle-native-test.json
 
 # macOS/Xcode, actual device framework.
 python3 -B ios-unified/native/build_native.py \

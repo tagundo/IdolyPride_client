@@ -35,7 +35,9 @@ def native_report():
             "server_status": {"schema": 1, "hook_installed": True, "phase": 4,
                               "captured": 1, "forwarded": 1, "attempts": 1,
                               "python_initialized": True, "error": None,
-                              "keyboard_guard_installed": True, "keyboard_ready": True,
+                              "keyboard_ready": True,
+                              "keyboard_lifecycle":{"installed":True,"strategy":"reuse-existing",
+                                  "initialize_calls":1,"original_initialize_calls":0,"reused_existing_calls":1},
                               "launch_requested": True, "launch_prepared": True, "launcher_visible": False,
                               "client_data": {"selected": True, "language": "ko", "bundle_identifier": "local.idoly.client-data"}},
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
@@ -57,14 +59,26 @@ def native_report():
                 "last_error": None, "runtime": {"running": True, "grpc_address": "127.0.0.1:50051",
                                                 "asset_url": "http://127.0.0.1:8080"}}}}
     report["keyboard"] = {
-        "before_capture":{"guard_installed":True,"ready":False,"phase":2,"returned_nil":True,
-                          "returned_initialized_field":False,"original_calls":0,"field_creation_count":0},
-        "before_launch":{"guard_installed":True,"ready":False,"phase":2,"returned_nil":True,
-                         "returned_initialized_field":False,"original_calls":0,"field_creation_count":0},
-        "during_init":{"guard_installed":True,"ready":False,"phase":4,"returned_nil":True,
-                       "returned_initialized_field":False,"original_calls":0,"field_creation_count":0},
-        "after_init":{"guard_installed":True,"ready":True,"phase":4,"returned_nil":False,
-                      "returned_initialized_field":True,"original_calls":1,"field_creation_count":1},
+        "before_capture":{"ready":False,"phase":2,"returned_nil":False,
+                          "returned_initialized_field":True,"returned_same_field":True,
+                          "original_calls":1,"field_creation_count":1,
+                          "lifecycle":{"installed":False,"strategy":"reuse-existing","initialize_calls":0,
+                              "original_initialize_calls":0,"reused_existing_calls":0}},
+        "before_launch":{"ready":False,"phase":2,"returned_nil":False,
+                         "returned_initialized_field":True,"returned_same_field":True,
+                         "original_calls":2,"field_creation_count":1,
+                         "lifecycle":{"installed":False,"strategy":"reuse-existing","initialize_calls":0,
+                             "original_initialize_calls":0,"reused_existing_calls":0}},
+        "during_init":{"ready":False,"phase":4,"returned_nil":False,
+                       "returned_initialized_field":True,"returned_same_field":True,
+                       "original_calls":3,"field_creation_count":1,
+                       "lifecycle":{"installed":True,"strategy":"reuse-existing","initialize_calls":1,
+                           "original_initialize_calls":0,"reused_existing_calls":1}},
+        "after_init":{"ready":True,"phase":4,"returned_nil":False,
+                      "returned_initialized_field":True,"returned_same_field":True,
+                      "original_calls":4,"field_creation_count":1,
+                      "lifecycle":{"installed":True,"strategy":"reuse-existing","initialize_calls":1,
+                          "original_initialize_calls":0,"reused_existing_calls":1}},
     }
     report["early_status"] = {"id":2718,"ok":True,"state":"starting","running":False,
                               "phase":1,"captured":0,"completion_main_thread":True}
@@ -88,66 +102,100 @@ def native_report():
 
 
 @pytest.mark.parametrize("phase,field,replacement", (
-    ("before_capture", "ready", True), ("before_capture", "original_calls", 1),
-    ("before_capture", "field_creation_count", 1),
-    ("before_launch", "returned_nil", False), ("before_launch", "original_calls", 1),
-    ("before_launch", "field_creation_count", 1),
-    ("during_init", "ready", True), ("during_init", "returned_nil", False),
-    ("during_init", "returned_initialized_field", True), ("during_init", "original_calls", 1),
-    ("during_init", "field_creation_count", 1),
+    ("before_capture", "ready", True), ("before_capture", "original_calls", 0),
+    ("before_capture", "field_creation_count", 2), ("before_capture", "returned_nil", True),
+    ("before_launch", "returned_initialized_field", False), ("before_launch", "original_calls", 1),
+    ("before_launch", "field_creation_count", 2), ("before_launch", "returned_same_field", False),
+    ("during_init", "ready", True), ("during_init", "returned_nil", True),
+    ("during_init", "returned_initialized_field", False), ("during_init", "original_calls", 2),
+    ("during_init", "field_creation_count", 2), ("during_init", "returned_same_field", False),
     ("after_init", "ready", False), ("after_init", "returned_nil", True),
-    ("after_init", "returned_initialized_field", False), ("after_init", "original_calls", 0),
-    ("after_init", "original_calls", 2), ("after_init", "field_creation_count", 0),
-    ("after_init", "field_creation_count", 2),
-    ("before_capture", "phase", True), ("before_launch", "original_calls", False),
-    ("during_init", "field_creation_count", False), ("after_init", "original_calls", True),
-    ("after_init", "field_creation_count", True), ("before_capture", "guard_installed", 1),
-    ("during_init", "ready", 0), ("after_init", "ready", 1),
+    ("after_init", "returned_initialized_field", False), ("after_init", "original_calls", 3),
+    ("after_init", "original_calls", 5), ("after_init", "field_creation_count", 2),
+    ("after_init", "returned_same_field", False),
+    ("before_capture", "phase", True), ("before_launch", "original_calls", True),
+    ("during_init", "field_creation_count", True), ("after_init", "original_calls", True),
+    ("after_init", "field_creation_count", True), ("before_capture", "returned_nil", 0),
+    ("during_init", "ready", 0), ("after_init", "ready", 1), ("after_init", "returned_same_field", 1),
 ))
-def test_keyboard_guard_only_calls_original_after_unity_initialization(phase, field, replacement):
+def test_keyboard_getter_stays_available_and_reuses_one_precreated_field(phase, field, replacement):
     observed = native_report()
     observed["keyboard"][phase][field] = replacement
-    with pytest.raises(probe.ProbeError, match="^keyboard_guard_" + phase + "_failed$"):
+    with pytest.raises(probe.ProbeError, match="^keyboard_" + phase + "_failed$"):
         probe.validate_report(observed)
 
 
-@pytest.mark.parametrize("key,value", (("keyboard_guard_installed", False), ("keyboard_guard_installed", 1),
-                                      ("keyboard_ready", False), ("keyboard_ready", 1)))
-def test_final_native_status_requires_keyboard_guard_and_readiness(key, value):
+@pytest.mark.parametrize("phase,field,replacement", (
+    ("before_capture", "installed", True), ("before_capture", "initialize_calls", 1),
+    ("before_launch", "installed", True), ("before_launch", "reused_existing_calls", 1),
+    ("during_init", "installed", False), ("during_init", "initialize_calls", 0),
+    ("during_init", "original_initialize_calls", 1), ("during_init", "reused_existing_calls", 0),
+    ("after_init", "installed", False), ("after_init", "original_initialize_calls", 1),
+    ("after_init", "initialize_calls", 2), ("after_init", "reused_existing_calls", 2),
+    ("after_init", "strategy", "unknown private strategy"), ("after_init", "installed", 1),
+    ("after_init", "initialize_calls", True), ("before_capture", "original_initialize_calls", False),
+))
+def test_warm_keyboard_lifecycle_hooks_only_initialize_and_skips_duplicate_creation(phase, field, replacement):
     observed = native_report()
-    observed["server_status"][key] = value
-    with pytest.raises(probe.ProbeError, match="^keyboard_guard_after_init_failed$"):
+    observed["keyboard"][phase]["lifecycle"][field] = replacement
+    with pytest.raises(probe.ProbeError, match="^keyboard_" + phase + "_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("field,replacement", (("installed",False),("installed",1),
+    ("strategy","unrecognized"),("initialize_calls",0),("initialize_calls",True),
+    ("original_initialize_calls",1),("reused_existing_calls",0),("reused_existing_calls",True)))
+def test_final_native_lifecycle_must_confirm_warm_instance_reuse(field, replacement):
+    observed = native_report()
+    observed["server_status"]["keyboard_lifecycle"][field] = replacement
+    with pytest.raises(probe.ProbeError, match="^keyboard_after_init_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("replacement", (False,1,None))
+def test_final_native_keyboard_readiness_is_a_strict_true_boolean(replacement):
+    observed = native_report()
+    observed["server_status"]["keyboard_ready"] = replacement
+    with pytest.raises(probe.ProbeError, match="^keyboard_after_init_failed$"):
         probe.validate_report(observed)
 
 
 def test_keyboard_phase_evidence_is_required_and_validated_output_drops_unknown_data():
     observed = native_report()
     del observed["keyboard"]["during_init"]
-    with pytest.raises(probe.ProbeError, match="^keyboard_guard_during_init_failed$"):
+    with pytest.raises(probe.ProbeError, match="^keyboard_during_init_failed$"):
         probe.validate_report(observed)
     observed = native_report()
     observed["keyboard"]["private_phase"] = {"credentials":"must-not-export"}
     observed["keyboard"]["after_init"]["private_field"] = "must-not-export"
+    observed["keyboard"]["after_init"]["lifecycle"]["private_field"] = "must-not-export"
+    observed["server_status"]["keyboard_lifecycle"]["private_field"] = "must-not-export"
     result = probe.validate_report(observed)
     assert result["keyboard"]["during_init"]["ready"] is False
-    assert result["keyboard"]["after_init"]["original_calls"] == 1
+    assert result["keyboard"]["after_init"]["original_calls"] == 4
+    assert result["keyboard"]["after_init"]["returned_same_field"] is True
+    assert result["server_status"]["keyboard_lifecycle"]["strategy"] == "reuse-existing"
     assert result["server_status"]["keyboard_ready"] is True
     assert "must-not-export" not in json.dumps(result)
 
 
 def test_keyboard_diagnostic_projection_keeps_only_strict_bounded_public_scalars():
     observed = probe.keyboard_observation({
-        "before_capture":{"guard_installed":1,"ready":False,"phase":True,"returned_nil":"private",
-                          "returned_initialized_field":False,"original_calls":17,"field_creation_count":-1,
-                          "private_field":"never-copy"},
+        "before_capture":{"ready":False,"phase":True,"returned_nil":"private",
+            "returned_initialized_field":True,"returned_same_field":1,"original_calls":17,
+            "field_creation_count":-1,"private_field":"never-copy",
+            "lifecycle":{"installed":False,"strategy":"reuse-existing","initialize_calls":0,
+                "original_initialize_calls":False,"reused_existing_calls":17,"private_field":"never-copy"}},
         "before_launch":["private"],
         "during_init":{"phase":4,"original_calls":16,"field_creation_count":16,"ready":True},
-        "after_init":{"phase":5,"original_calls":True,"field_creation_count":{},"guard_installed":False},
+        "after_init":{"phase":5,"original_calls":True,"field_creation_count":{},
+                      "lifecycle":{"installed":True,"strategy":"private value","initialize_calls":1}},
         "private_phase":{"token":"never-copy"}})
     assert observed == {
-        "before_capture":{"ready":False,"returned_initialized_field":False},
+        "before_capture":{"ready":False,"returned_initialized_field":True,
+            "lifecycle":{"installed":False,"strategy":"reuse-existing","initialize_calls":0}},
         "during_init":{"phase":4,"original_calls":16,"field_creation_count":16,"ready":True},
-        "after_init":{"guard_installed":False}}
+        "after_init":{"lifecycle":{"installed":True,"initialize_calls":1}}}
     assert "private" not in json.dumps(observed) and "never-copy" not in json.dumps(observed)
 
 
@@ -159,21 +207,23 @@ def test_keyboard_diagnostic_projection_keeps_only_strict_bounded_public_scalars
 def test_keyboard_failure_checkpoint_is_projected_from_fixed_public_files(tmp_path, source, filename, stage):
     documents = tmp_path / "Documents"
     documents.mkdir()
+    lifecycle = {"installed":False,"strategy":"reuse-existing","initialize_calls":0,
+                 "original_initialize_calls":0,"reused_existing_calls":0,"private":"never-copy"}
     observed = native_report() if source == "report" else {
-        "schema":1,"stage":stage,"keyboard_guard_installed":True,"keyboard_ready":False,
-        "server_status":{"phase":2,"keyboard_guard_installed":True,"keyboard_ready":False},
+        "schema":1,"stage":stage,"keyboard_lifecycle":lifecycle,"keyboard_ready":False,
+        "server_status":{"phase":2,"keyboard_lifecycle":lifecycle,"keyboard_ready":False},
         "keyboard":native_report()["keyboard"]}
-    observed["keyboard"]["before_capture"]["field_creation_count"] = 1
-    observed["keyboard"]["before_capture"]["arbitrary_payload"] = "never-copy"
+    observed["keyboard"]["before_capture"]["field_creation_count"] = 2
+    observed["keyboard"]["before_capture"]["lifecycle"]["private_field"] = "never-copy"
     observed["keyboard"]["private_phase"] = {"token":"never-copy"}
     (documents / filename).write_text(json.dumps(observed))
     result = probe.failure_checkpoint(tmp_path)
-    assert result["keyboard"]["before_capture"]["field_creation_count"] == 1
+    assert result["keyboard"]["before_capture"]["field_creation_count"] == 2
     if source == "checkpoint":
-        assert result["stage"] == stage and result["keyboard_guard_installed"] is True
+        assert result["stage"] == stage and result["keyboard_lifecycle"]["installed"] is False
         assert result["keyboard_ready"] is False
     if source == "status":
-        assert result["status_keyboard_guard_installed"] is True and result["status_keyboard_ready"] is False
+        assert result["status_keyboard_lifecycle"]["installed"] is False and result["status_keyboard_ready"] is False
     if source == "report":
         assert result["report_valid"] is False
     assert "never-copy" not in json.dumps(result)
@@ -182,16 +232,16 @@ def test_keyboard_failure_checkpoint_is_projected_from_fixed_public_files(tmp_pa
 def test_final_keyboard_failure_preserves_only_bounded_observation_in_audit(app, tmp_path):
     controller = FakeSimctl(tmp_path / "container")
     observed = native_report()
-    observed["keyboard"]["during_init"]["field_creation_count"] = 1
-    observed["keyboard"]["during_init"]["private_field"] = "never-copy"
+    observed["keyboard"]["during_init"]["field_creation_count"] = 2
+    observed["keyboard"]["during_init"]["lifecycle"]["private_field"] = "never-copy"
     with mock.patch.object(probe.sys, "platform", "darwin"), \
             mock.patch.object(probe, "_simctl", controller), \
             mock.patch(__name__ + ".native_report", return_value=observed), \
             mock.patch.object(probe, "probe_rpcs") as rpc:
         result = probe.run_probe(app, tmp_path / "failure.json")
-    assert result["error"] == "keyboard_guard_during_init_failed"
-    assert result["native_keyboard_observed"]["during_init"]["field_creation_count"] == 1
-    assert result["native_checkpoint"]["keyboard"]["during_init"]["field_creation_count"] == 1
+    assert result["error"] == "keyboard_during_init_failed"
+    assert result["native_keyboard_observed"]["during_init"]["field_creation_count"] == 2
+    assert result["native_checkpoint"]["keyboard"]["during_init"]["field_creation_count"] == 2
     assert "never-copy" not in json.dumps(result)
     rpc.assert_not_called()
 
@@ -204,17 +254,17 @@ def test_waiting_keyboard_failure_keeps_known_scalars_and_cleans_owned_simulator
             documents = controller.container / "Documents"
             (documents / "embedded-probe.json").unlink()
             observed = {"server_status":{"phase":2,"error":None},
-                        "probe_error":"keyboard_created_before_initialize",
+                        "probe_error":"keyboard_precreated_instance_not_reused",
                         "keyboard":native_report()["keyboard"]}
-            observed["keyboard"]["before_capture"]["field_creation_count"] = 1
-            observed["keyboard"]["private_phase"] = {"token":"never-copy"}
+            observed["keyboard"]["before_capture"]["field_creation_count"] = 2
+            observed["keyboard"]["before_capture"]["lifecycle"]["private_field"] = "never-copy"
             (documents / "embedded-probe-status.json").write_text(json.dumps(observed))
         return result
     with mock.patch.object(probe.sys, "platform", "darwin"), \
             mock.patch.object(probe, "_simctl", simctl), mock.patch.object(probe, "probe_rpcs") as rpc:
         result = probe.run_probe(app, tmp_path / "failure.json")
-    assert result["error"] == "keyboard_created_before_initialize"
-    assert result["native_keyboard_observed"]["before_capture"]["field_creation_count"] == 1
+    assert result["error"] == "keyboard_precreated_instance_not_reused"
+    assert result["native_keyboard_observed"]["before_capture"]["field_creation_count"] == 2
     assert result["cleanup"] == {"shutdown":True,"delete":True}
     assert "never-copy" not in json.dumps(result)
     rpc.assert_not_called()
@@ -224,7 +274,7 @@ def test_waiting_deadline_retains_only_previously_valid_keyboard_scalars(tmp_pat
     documents = tmp_path / "Documents"
     documents.mkdir()
     observed = {"server_status":{"phase":2,"error":None}, "keyboard":native_report()["keyboard"]}
-    observed["keyboard"]["after_init"]["private_text"] = "never-copy"
+    observed["keyboard"]["after_init"]["lifecycle"]["private_text"] = "never-copy"
     (documents / "embedded-probe-status.json").write_text(json.dumps(observed))
     remaining = mock.Mock(side_effect=[1, 1, probe.ProbeError("probe_deadline_exceeded")])
     with mock.patch.object(probe.time, "sleep"), pytest.raises(probe.ProbeError) as caught:
@@ -674,8 +724,9 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert result["report_phase"] == 4 and result["report_original_called"] == 1
     assert result["report_valid"] is True
     assert all(type(value) in (str, int, bool, float, type(None))
-               for key, value in result.items() if key != "keyboard")
+               for key, value in result.items() if key not in ("keyboard", "report_keyboard_lifecycle"))
     assert result["keyboard"] == raw_report["keyboard"]
+    assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert "must not retain" not in json.dumps(result)
 
 

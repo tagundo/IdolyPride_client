@@ -51,9 +51,9 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "settings_menu_open_failed", "settings_menu_not_presented", "settings_menu_controls_or_layout_failed",
     "settings_web_readiness_or_layout_failed", "settings_return_action_failed", "settings_menu_not_dismissed",
     "final_report_write_failed",
-    "keyboard_guard_before_capture_failed", "keyboard_guard_before_launch_failed",
-    "keyboard_guard_during_init_failed", "keyboard_guard_after_init_failed",
-    "keyboard_created_before_initialize",
+    "keyboard_before_capture_failed", "keyboard_before_launch_failed",
+    "keyboard_during_init_failed", "keyboard_after_init_failed",
+    "keyboard_precreated_instance_not_reused",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
@@ -65,8 +65,9 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_during_init_checked", "keyboard_after_init_checked",
 ))
 KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
-KEYBOARD_BOOL_FIELDS = ("guard_installed", "ready", "returned_nil", "returned_initialized_field")
+KEYBOARD_BOOL_FIELDS = ("ready", "returned_nil", "returned_initialized_field", "returned_same_field")
 KEYBOARD_INT_FIELDS = ("phase", "original_calls", "field_creation_count")
+KEYBOARD_LIFECYCLE_COUNTERS = ("initialize_calls", "original_initialize_calls", "reused_existing_calls")
 CHECKPOINT_READ_CODES = frozenset((
     "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
     "json_size_bound", "duplicate_json_key", "nonfinite_json", "invalid_json", "json_object_required",
@@ -268,29 +269,40 @@ def validate_report(value):
             and all(type(status.get(key)) is int and status[key] == 1
                     for key in ("captured", "forwarded", "attempts")),
             "embedded_server_not_ready")
-    require(status.get("keyboard_guard_installed") is True and status.get("keyboard_ready") is True,
-            "keyboard_guard_after_init_failed")
+    expected_lifecycle = {"installed":True, "strategy":"reuse-existing", "initialize_calls":1,
+                          "original_initialize_calls":0, "reused_existing_calls":1}
+    lifecycle = status.get("keyboard_lifecycle")
+    require(status.get("keyboard_ready") is True and type(lifecycle) is dict
+            and all(type(lifecycle.get(key)) is type(wanted) and lifecycle[key] == wanted
+                    for key, wanted in expected_lifecycle.items()), "keyboard_after_init_failed")
     keyboard = value.get("keyboard")
-    require(type(keyboard) is dict, "keyboard_guard_evidence_missing")
+    require(type(keyboard) is dict, "keyboard_evidence_missing")
     expected_keyboard = {
-        "before_capture": {"guard_installed": True, "ready": False, "phase": 2,
-                           "returned_nil": True, "returned_initialized_field": False,
-                           "original_calls": 0, "field_creation_count": 0},
-        "before_launch": {"guard_installed": True, "ready": False, "phase": 2,
-                          "returned_nil": True, "returned_initialized_field": False,
-                          "original_calls": 0, "field_creation_count": 0},
-        "during_init": {"guard_installed": True, "ready": False, "phase": 4,
-                        "returned_nil": True, "returned_initialized_field": False,
-                        "original_calls": 0, "field_creation_count": 0},
-        "after_init": {"guard_installed": True, "ready": True, "phase": 4,
-                       "returned_nil": False, "returned_initialized_field": True,
-                       "original_calls": 1, "field_creation_count": 1},
+        "before_capture": {"ready":False, "phase":2, "returned_nil":False,
+                           "returned_initialized_field":True, "returned_same_field":True,
+                           "original_calls":1, "field_creation_count":1},
+        "before_launch": {"ready":False, "phase":2, "returned_nil":False,
+                          "returned_initialized_field":True, "returned_same_field":True,
+                          "original_calls":2, "field_creation_count":1},
+        "during_init": {"ready":False, "phase":4, "returned_nil":False,
+                        "returned_initialized_field":True, "returned_same_field":True,
+                        "original_calls":3, "field_creation_count":1},
+        "after_init": {"ready":True, "phase":4, "returned_nil":False,
+                       "returned_initialized_field":True, "returned_same_field":True,
+                       "original_calls":4, "field_creation_count":1},
     }
     for name, expected in expected_keyboard.items():
         observed = keyboard.get(name)
         require(type(observed) is dict and all(type(observed.get(key)) is type(wanted)
                 and observed[key] == wanted for key, wanted in expected.items()),
-                "keyboard_guard_" + name + "_failed")
+                "keyboard_" + name + "_failed")
+        expected = dict(expected_lifecycle)
+        if name in ("before_capture", "before_launch"):
+            expected.update(installed=False, initialize_calls=0, reused_existing_calls=0)
+        seen_lifecycle = observed.get("lifecycle")
+        require(type(seen_lifecycle) is dict and all(type(seen_lifecycle.get(key)) is type(wanted)
+                and seen_lifecycle[key] == wanted for key, wanted in expected.items()),
+                "keyboard_" + name + "_failed")
     data = status.get("client_data")
     require(type(data) is dict and data.get("selected") is True
             and data.get("language") in ("ko", "ja", "en")
@@ -417,7 +429,7 @@ def validate_report(value):
             "server_status": {**{key: status[key] for key in
                 ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts",
                  "launch_requested", "launch_prepared", "launcher_visible")},
-                 "keyboard_guard_installed":True, "keyboard_ready":True,
+                 "keyboard_lifecycle":keyboard_lifecycle_observation(lifecycle), "keyboard_ready":True,
                  "client_data":{key: data[key] for key in ("selected", "language", "bundle_identifier")}},
             "menu_lifetime": {**{key: menu[key] for key in (
                 "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
@@ -512,8 +524,24 @@ def wait_report(container, remaining):
         time.sleep(min(0.25, checked_remaining()))
 
 
+def keyboard_lifecycle_observation(value):
+    """Keep the fixed reuse strategy and bounded initialization counters only."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    if type(value.get("installed")) is bool:
+        clean["installed"] = value["installed"]
+    if type(value.get("strategy")) is str and value["strategy"] == "reuse-existing":
+        clean["strategy"] = value["strategy"]
+    for key in KEYBOARD_LIFECYCLE_COUNTERS:
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= 16:
+            clean[key] = item
+    return clean
+
+
 def keyboard_observation(value):
-    """Keep only fixed phases and bounded keyboard-guard scalar observations."""
+    """Keep only fixed phases, bounded public getter state and lifecycle info."""
     if type(value) is not dict:
         return {}
     clean = {}
@@ -527,6 +555,9 @@ def keyboard_observation(value):
             item = observation.get(key)
             if type(item) is int and 0 <= item <= (4 if key == "phase" else 16):
                 scalars[key] = item
+        lifecycle = keyboard_lifecycle_observation(observation.get("lifecycle"))
+        if lifecycle:
+            scalars["lifecycle"] = lifecycle
         if scalars:
             clean[name] = scalars
     return clean
@@ -589,10 +620,12 @@ def failure_checkpoint(container):
         count = value.get("original_called")
         if type(count) is int and 0 <= count <= 16:
             clean["original_called"] = count
-        for key in ("launch_requested", "launch_prepared", "launcher_visible",
-                    "keyboard_guard_installed", "keyboard_ready"):
+        for key in ("launch_requested", "launch_prepared", "launcher_visible", "keyboard_ready"):
             if type(value.get(key)) is bool:
                 clean[key] = value[key]
+        lifecycle = keyboard_lifecycle_observation(value.get("keyboard_lifecycle"))
+        if lifecycle:
+            clean["keyboard_lifecycle"] = lifecycle
         return clean
 
     for source, name in (("checkpoint", "embedded-probe-checkpoint.json"),

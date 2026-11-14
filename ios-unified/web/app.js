@@ -666,7 +666,7 @@
         native: object(snapshot.native) ? Object.fromEntries([
           "schema", "phase", "captured", "forwarded", "attempts", "hook_installed",
           "python_initialized", "launch_requested", "launch_prepared", "launcher_visible",
-          "keyboard_guard_installed", "keyboard_ready",
+          "keyboard_lifecycle", "keyboard_ready",
           "game_hook_error", "error", "game_error", "client_data"
         ].filter(key => Object.prototype.hasOwnProperty.call(snapshot.native, key)).map(key => [key, snapshot.native[key]])) : null,
         game: diagnostic,

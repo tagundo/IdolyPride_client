@@ -64,6 +64,7 @@ def main():
     (output / "build-environment.json").write_text(json.dumps(env, indent=2) + "\n")
     run(python, "-B", HERE / "native/test_mac_menu.py", "--report", output / "mac-menu-test.json")
     run(python, "-B", HERE / "native/test_client_data.py", "--report", output / "client-data-native-test.json")
+    run(python, "-B", HERE / "native/test_keyboard_lifecycle.py", "--report", output / "keyboard-lifecycle-native-test.json")
     client_languages = work / "client-languages.zip"
     run(python, "-B", HERE.parent / "tools/build_ios_client_languages.py",
         "--stock-ipa", inputs / "stock.ipa", "--base-ipa", inputs / "base.ipa",
@@ -136,7 +137,7 @@ def main():
         "Sign this IPA with your iOS sideloading method before installing.\n"
         "The app opens the server menu first. Start the server, choose the game language, then press 게임 시작.\n"
         "Japanese, Korean and English client Data is prepared before Unity starts; no per-frame text replacement.\n"
-        "Unity keyboard access is guarded until original initialization completes.\n"
+        "Unity initialization reuses a keyboard that was already created.\n"
         "Missing translations and untranslated images retain the original content.\n"
         "While playing, hold the upper-right corner for two seconds to reopen the server menu.\n"
         "Mac/PlayCover: app menu > 로컬 서버 설정… (Command+Shift+,).\n"

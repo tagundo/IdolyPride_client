@@ -2,6 +2,7 @@
 #import "IdolyNativeUI.h"
 #import "IdolyHTTP.h"
 #import "IdolyClientData.h"
+#import "IdolyKeyboardLifecycle.h"
 #import "GatePolicy.h"
 #if !IDOLY_SMOKE_SIMULATOR
 #import "UnityStartupProfile.h"
@@ -13,13 +14,18 @@
 #include <stdatomic.h>
 #include <dlfcn.h>
 #include <mach-o/loader.h>
+#include <mach/vm_prot.h>
+#include <stdint.h>
 
 static const NSUInteger IDJSONLimit = 65536;
 static IDGate gate;
 static IMP originalStartUnity;
-static _Atomic(IMP) originalKeyboardTextField;
 static atomic_bool unityKeyboardReady;
-static BOOL keyboardGuardInstalled;
+#if IDOLY_SMOKE_SIMULATOR
+static Class probeKeyboardClass;
+#else
+static const void *keyboardSingletonSlot;
+#endif
 static id savedController, savedApplication;
 static SEL startSelector;
 static NSString *hookError, *lastError, *lastGameError, *dataDirectory;
@@ -209,18 +215,19 @@ static NSString *callHost(const char *name, NSString *argument, NSString **error
     if (!result) *error = PyErr_Occurred() ? pythonFailure() : @"서버 응답이 64 KiB를 초과했습니다.";
     pythonThread = PyEval_SaveThread(); return result;
 }
-static id guardedUnityKeyboardTextField(id self, SEL selector) {
-    // UIKit/PlayCover can query the Unity field while our WK launcher is open.
-    // The original getter lazily creates KeyboardDelegate, but Unity's later
-    // +Initialize asserts that it has not been created yet (Keyboard.mm:260).
-    // Keep internal initialization untouched; expose the original field only
-    // after the complete original initialization call has returned.
-    if (!atomic_load(&unityKeyboardReady)) return nil;
-    IMP original = atomic_load(&originalKeyboardTextField);
-    return original ? ((id (*)(id, SEL))original)(self, selector) : nil;
-}
+static BOOL prepareKeyboardLifecycle(NSString **error);
 static void forwardUnityIfVisible(void) {
     NSCAssert(NSThread.isMainThread, @"Unity startup belongs to main thread");
+    if (!IDGateCanForward(&gate) || UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) return;
+    NSString *keyboardError = nil;
+    if (!prepareKeyboardLifecycle(&keyboardError)) {
+        if (IDGateLaunchFailed(&gate)) {
+            lastGameError = keyboardError ?: @"Unity 키보드 초기화 보호를 연결하지 못했습니다.";
+            IDNativeSetServerState(YES, NO, @"서버 실행 중 · 게임 데이터 준비 실패");
+            IDNativeStartupFailure(lastGameError);
+        }
+        return;
+    }
     if (!IDGateForwardVisible(&gate, UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)) return;
     lastError = nil; lastGameError = nil; IDNativeDismissFailure();
     IDNativeSetServerState(YES, NO, @"서버 실행 중");
@@ -347,6 +354,98 @@ static BOOL auditedInitialization(IMP implementation) {
     return auditedUnityEntry(implementation, IDUnityStartRVA, IDUnityStartPrefix, sizeof IDUnityStartPrefix);
 #endif
 }
+static id currentUnityKeyboard(void) {
+#if IDOLY_SMOKE_SIMULATOR
+    // The explicit probe provides a read-only singleton accessor. This branch
+    // and its fake Objective-C classes are absent from the device framework.
+    SEL selector = sel_registerName("idolyCurrentInstance");
+    Method getter = probeKeyboardClass ? class_getClassMethod(probeKeyboardClass, selector) : NULL;
+    return getter ? ((id (*)(id, SEL))method_getImplementation(getter))((id)probeKeyboardClass, selector) : nil;
+#else
+    // Both audited creation paths own this live object. Never write the slot,
+    // invoke Instance (which can allocate), or reset keyboard/UI references.
+    uintptr_t value = keyboardSingletonSlot ? *(const uintptr_t *)keyboardSingletonSlot : 0;
+    return (__bridge id)(void *)value;
+#endif
+}
+#if !IDOLY_SMOKE_SIMULATOR
+static BOOL selectAuditedKeyboardSlot(IMP initialize) {
+    Dl_info image = {0};
+    if (!dladdr((const void *)initialize, &image) || !image.dli_fbase) return NO;
+    const struct mach_header_64 *header = image.dli_fbase;
+    const unsigned char *cursor = (const unsigned char *)(header + 1), *end = cursor + header->sizeofcmds;
+    if (IDUnityKeyboardSingletonRVA % sizeof(uintptr_t)) return NO;
+    for (uint32_t i = 0; i < header->ncmds; ++i) {
+        if ((size_t)(end - cursor) < sizeof(struct load_command)) return NO;
+        const struct load_command *command = (const void *)cursor;
+        if (command->cmdsize < sizeof(*command) || command->cmdsize > (size_t)(end - cursor)) return NO;
+        if (command->cmd == LC_SEGMENT_64) {
+            if (command->cmdsize < sizeof(struct segment_command_64)) return NO;
+            const struct segment_command_64 *segment = (const void *)command;
+            if (segment->nsects > (command->cmdsize - sizeof(*segment)) / sizeof(struct section_64)) return NO;
+            if (!strncmp(segment->segname, "__DATA", sizeof(segment->segname))
+                    && (segment->initprot & (VM_PROT_READ | VM_PROT_WRITE)) == (VM_PROT_READ | VM_PROT_WRITE)) {
+                const struct section_64 *sections = (const void *)(segment + 1);
+                for (uint32_t j = 0; j < segment->nsects; ++j) {
+                    const struct section_64 *section = &sections[j];
+                    if (!strncmp(section->sectname, "__bss", sizeof(section->sectname))
+                            && !strncmp(section->segname, "__DATA", sizeof(section->segname))
+                            && (section->flags & SECTION_TYPE) == S_ZEROFILL
+                            && section->addr == IDUnityKeyboardBssRVA && section->size == IDUnityKeyboardBssSize
+                            && IDUnityKeyboardSingletonRVA >= section->addr
+                            && IDUnityKeyboardSingletonRVA - section->addr <= section->size - sizeof(uintptr_t)
+                            && (uintptr_t)header <= UINTPTR_MAX - IDUnityKeyboardSingletonRVA) {
+                        keyboardSingletonSlot = (const unsigned char *)header + IDUnityKeyboardSingletonRVA;
+                        return YES;
+                    }
+                }
+            }
+        }
+        cursor += command->cmdsize;
+    }
+    return NO;
+}
+#endif
+static BOOL keyboardMethodType(Method method, const char *result) {
+    char *type = method ? method_copyReturnType(method) : NULL;
+    BOOL matches = method && type && !strcmp(type, result) && method_getNumberOfArguments(method) == 2
+        && exactType(method, 0, "@") && exactType(method, 1, ":");
+    free(type); return matches;
+}
+static BOOL prepareKeyboardLifecycle(NSString **error) {
+    Class cls = objc_getClass("KeyboardDelegate");
+    NSError *nativeError = nil;
+    if ([IDKeyboardLifecycleInfo()[@"installed"] isEqual:@YES]) {
+        BOOL good = IDKeyboardLifecycleInstall(cls, currentUnityKeyboard, &nativeError);
+        if (!good) *error = nativeError.localizedDescription;
+        return good;
+    }
+    Method initialize = cls ? class_getClassMethod(cls, sel_registerName("Initialize")) : NULL;
+    Method instance = cls ? class_getClassMethod(cls, sel_registerName("Instance")) : NULL;
+    BOOL valid = keyboardMethodType(initialize, "v") && keyboardMethodType(instance, "@");
+#if IDOLY_SMOKE_SIMULATOR
+    Method reader = cls ? class_getClassMethod(cls, sel_registerName("idolyCurrentInstance")) : NULL;
+    valid = valid && keyboardMethodType(reader, "@");
+    if (valid) probeKeyboardClass = cls;
+#else
+    Method destroy = cls ? class_getClassMethod(cls, sel_registerName("Destroy")) : NULL;
+    valid = valid && keyboardMethodType(destroy, "v")
+        && auditedUnityEntry(method_getImplementation(initialize), IDUnityKeyboardInitializeRVA,
+            IDUnityKeyboardInitializeCode, sizeof IDUnityKeyboardInitializeCode)
+        && auditedUnityEntry(method_getImplementation(instance), IDUnityKeyboardInstanceRVA,
+            IDUnityKeyboardInstanceCode, sizeof IDUnityKeyboardInstanceCode)
+        && auditedUnityEntry(method_getImplementation(destroy), IDUnityKeyboardDestroyRVA,
+            IDUnityKeyboardDestroyCode, sizeof IDUnityKeyboardDestroyCode)
+        && selectAuditedKeyboardSlot(method_getImplementation(initialize));
+#endif
+    if (!valid) {
+        *error = @"이 게임의 Unity 키보드 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다.";
+        return NO;
+    }
+    BOOL good = IDKeyboardLifecycleInstall(cls, currentUnityKeyboard, &nativeError);
+    if (!good) *error = nativeError.localizedDescription ?: @"Unity 키보드 초기화 보호를 연결하지 못했습니다.";
+    return good;
+}
 static BOOL selectClientData(NSDictionary *prepared, NSString *effectiveLanguage, NSString **error) {
     NSString *language = [prepared[@"language"] isKindOfClass:NSString.class] ? prepared[@"language"] : nil;
     if (![prepared[@"schema"] isEqual:@1] || ![prepared[@"bundle_id"] isEqual:@"local.idoly.client-data"]
@@ -393,37 +492,9 @@ static void installGate(void) {
         && auditedInitialization(method_getImplementation(target));
     free(ret);
     if (!valid) { hookError = @"이 게임의 Unity 초기화 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다."; return; }
-    Class framework = objc_getClass("UnityFramework");
-    SEL keyboardSelector = sel_registerName("keyboardTextField");
-    Method keyboard = framework ? class_getInstanceMethod(framework, keyboardSelector) : NULL;
-    char *keyboardReturn = keyboard ? method_copyReturnType(keyboard) : NULL;
-    BOOL keyboardValid = keyboard && method_getNumberOfArguments(keyboard) == 2
-        && keyboardReturn && !strcmp(keyboardReturn, "@")
-        && exactType(keyboard, 0, "@") && exactType(keyboard, 1, ":");
-    free(keyboardReturn);
-#if !IDOLY_SMOKE_SIMULATOR
-    keyboardValid = keyboardValid && auditedUnityEntry(method_getImplementation(keyboard),
-        IDUnityKeyboardFieldRVA, IDUnityKeyboardFieldPrefix, sizeof IDUnityKeyboardFieldPrefix);
-#endif
-    if (!keyboardValid) {
-        hookError = @"이 게임의 Unity 키보드 진입점을 확인하지 못했습니다. 서버는 독립적으로 시작합니다.";
-        return;
-    }
-    atomic_store(&originalKeyboardTextField, method_getImplementation(keyboard));
-    IMP previousKeyboard = method_setImplementation(keyboard, (IMP)guardedUnityKeyboardTextField);
-    keyboardGuardInstalled = previousKeyboard != NULL;
-    if (!keyboardGuardInstalled) {
-        atomic_store(&originalKeyboardTextField, NULL);
-        hookError = @"Unity 키보드 초기화 보호를 연결하지 못했습니다."; return;
-    }
-    atomic_store(&originalKeyboardTextField, previousKeyboard);
     originalStartUnity = method_setImplementation(target, (IMP)deferredStart);
     hookInstalled = originalStartUnity != NULL;
-    if (!hookInstalled) {
-        method_setImplementation(keyboard, previousKeyboard);
-        atomic_store(&originalKeyboardTextField, NULL); keyboardGuardInstalled = NO;
-        hookError = @"Unity 시작 진입점을 연결하지 못했습니다.";
-    }
+    if (!hookInstalled) hookError = @"Unity 시작 진입점을 연결하지 못했습니다.";
 }
 NSString *IDNativeDataDirectory(void) {
     @synchronized (IDServerWorker.class) { return dataDirectory; }
@@ -431,7 +502,7 @@ NSString *IDNativeDataDirectory(void) {
 NSString *IdolyEmbeddedServerStatusJSON(void) {
     __block NSString *result;
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled),
-        @"keyboard_guard_installed":@(keyboardGuardInstalled), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
+        @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),
         @"launch_requested":@((BOOL)gate.launch_requested), @"launch_prepared":@((BOOL)gate.launch_prepared),

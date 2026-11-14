@@ -25,9 +25,12 @@ static inline int IDGateFailedAttempt(IDGate *g) {
     if (g->phase != IDGateStarting) return 0;
     g->phase = IDGateFailed; return 1;
 }
+static inline int IDGateCanForward(const IDGate *g) {
+    return g->captured && !g->forwarded && g->phase == IDGateReady
+        && g->launch_requested && g->launch_prepared;
+}
 static inline int IDGateForward(IDGate *g) {
-    if (!g->captured || g->forwarded || g->phase != IDGateReady
-            || !g->launch_requested || !g->launch_prepared) return 0;
+    if (!IDGateCanForward(g)) return 0;
     g->forwarded = 1; g->phase = IDGateRunning; return 1;
 }
 static inline int IDGateRequestLaunch(IDGate *g) {
