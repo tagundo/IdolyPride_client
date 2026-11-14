@@ -1,0 +1,2823 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "source_epoch": 1794628262,
+  "platform": "ios",
+  "language": "ko",
+  "sha256": "e3b15238a1beabc9e20307b58fadf9a0fa5e0ef21c4effd949e4f63b0a1d7f6e",
+  "bytes": 149146718,
+  "device_execution_verified": false,
+  "independent_full_package_review_binding": {
+    "path": "/dev/shm/idoly-v0330-work/client-preparation/qa-ios-ko-final-r1/independent-full-client-review.json",
+    "bytes": 121319,
+    "sha256": "d857c1d38b21f1e8e93c456a2b6299a239c0a5ee6e9f11b364f303f955621036"
+  },
+  "independent_full_package_review": {
+    "schema": 1,
+    "status": "PASS_INDEPENDENT_FULL_IPA_V0330",
+    "platform": "ios",
+    "language": "ko",
+    "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+    "package_sha256": "e3b15238a1beabc9e20307b58fadf9a0fa5e0ef21c4effd949e4f63b0a1d7f6e",
+    "package_bytes": 149146718,
+    "original_sha256": "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848",
+    "native_sha256": "85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5",
+    "native_review_sha256": "aeedaaefbb6405bde7a6f2c2093267646986c9078628f10a46853e2cbbe5c42c",
+    "profile_sha256": "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510",
+    "hook_plan_sha256": "abab2208dd956df53c6391bd92c935357f2c03637d74ace59a25eff8ad7fe212",
+    "unchanged_original_members": 188,
+    "original_member_sha256": {
+      "Payload/IDOLY PRIDE.app/AppIcon60x60@2x.png": "51f1fc20aa673c8db1ab846a1d48db835496e7838b840e0f019389455c983e2b",
+      "Payload/IDOLY PRIDE.app/AppIcon76x76@2x~ipad.png": "6de8d22c17f2d7fc9d348ae6e4050cd1feb07157dc3e8243db894eff274454fc",
+      "Payload/IDOLY PRIDE.app/Assets.car": "25fae110d996e8b43ec38aacfa4d1fa89615dace2534d1f66d6dd14aa3ece809",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/Microsoft.Extensions.Logging.Abstractions.dll-resources.dat": "97e9ce1489b1700e7810da58d59aaca6a7e1b7c67973e687a064dd3508e4753e",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.Data.dll-resources.dat": "98a7950ec6de3242c2e190dfa630188dfa32511a125542b94baa952d1c757d49",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.Diagnostics.DiagnosticSource.dll-resources.dat": "665b373254d2b641ac4ca6c0c1015e1bf1e7220258a5e8aace8cdb86d2747988",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.Drawing.dll-resources.dat": "7c33aa707bc3fdc83991b81a97d6fc622b140762a767300f08f616c2c0a91255",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.IO.Pipelines.dll-resources.dat": "5cd796024c23f1a7e9878ec9cb004e91df14d05bac3ae3b9821382a249777a66",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/mscorlib.dll-resources.dat": "c5baa176a5b72cd545266340e42102d393a5e43d38c95796bc828918bb95277f",
+      "Payload/IDOLY PRIDE.app/Data/Managed/mono/4.0/machine.config": "e60aec2c5115d65b3acb3c55ea21576dbd770f579166c017125571e46ae560ed",
+      "Payload/IDOLY PRIDE.app/Data/Octo/A/52506D4C4F667A.mp4": "733d21f112454515526861205781dfd15258e460af9ac1c85b33839ce4aa4f32",
+      "Payload/IDOLY PRIDE.app/Data/Octo/l": "a3479047ec91f4107310d3d23424159bdba1d3126a29903d2ce4cc8ca75b03a8",
+      "Payload/IDOLY PRIDE.app/Data/Raw/UnityServicesProjectConfiguration.json": "eeac9c52a7239cda039299b17fb7f557f6008828480d050f6c0053ac4aaca0ef",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Inquiry.html": "091c814fabc9c85f1d6e537a19b7e1fadb51178463ba99ba98cdbbf007a55f91",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Scripts/Common.js": "644487153aac7126e775afb7d07847b274f106ad487f457d3ecd7eb4b6acb407",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Scripts/Inquiry.js": "6ee3f1e8a57fe39e2e7bc8c88c95beaa6588ee12b0365a5a77c7eecd239bea27",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Scripts/ResponsiveZoom.js": "893227bc1cbce50f5d4a1d41c644104e37483d0fd4d32fe435e70b32795f200f",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Styles/Common.css": "e386d6061d1bd10f5743f34a778253257af34df886db8b9d8b1dbec53ed0c879",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Styles/Inquiry.css": "7f077ed4f45ee92578d5055a34a46b159cadd01019bffe07d48617fadc059941",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Svg/Pencil.svg": "6c6f0575c32b4b861bd840f9c71ab0bccb3e1a59a7bc2eaca36d3166c58787bd",
+      "Payload/IDOLY PRIDE.app/Data/Raw/google-services-desktop.json": "efcce789dd5df02d6531ea7ad89d3bf2d38600464afd9b49dce0dd6f398a978c",
+      "Payload/IDOLY PRIDE.app/Data/Resources/unity_builtin_extra": "072143c3112b0fb598ec4bca356551453725333d495e0ba5f488c7f1c72da068",
+      "Payload/IDOLY PRIDE.app/Data/RuntimeInitializeOnLoads.json": "b7d2ce42667e9a3368afbab701e8aa676285cceadca89a531483ef66f64677b3",
+      "Payload/IDOLY PRIDE.app/Data/ScriptingAssemblies.json": "8cb19fd62edd9cdbd833caeebb3fbe3f2b6a5ea817191ab1478ecb1980946b5d",
+      "Payload/IDOLY PRIDE.app/Data/boot.config": "ed98aa7925d21f3a5a792eefbd1bb4d2ecb20cd9f52d6b66541753ec62e80862",
+      "Payload/IDOLY PRIDE.app/Data/globalgamemanagers.assets": "ec850f6a1af52579f5a84e7914df67a4559e7539202606cf53fed697ed0dd9c7",
+      "Payload/IDOLY PRIDE.app/Data/globalgamemanagers.assets.resS": "83c82699e91e4fc7304526ce002811196b7bdfd8cb50c0dc47cca49c4b89b91f",
+      "Payload/IDOLY PRIDE.app/Data/level0": "95df2d22dddbdf7d386f21ce98ff19053de9d93472823c921df43381fc4cb793",
+      "Payload/IDOLY PRIDE.app/Data/level1": "5e87b84b144e9d536da922531aabdf1f4a78713a3ff17772772164fa7c886c49",
+      "Payload/IDOLY PRIDE.app/Data/level2": "84933e344307c499caa3c6d6c84df0ba4372728f90ab5e7b999b165b169913e5",
+      "Payload/IDOLY PRIDE.app/Data/level3": "1ad6e221a5152e970bc4e97f0657aae02f58f3082a6ee0475522e26b70bcd779",
+      "Payload/IDOLY PRIDE.app/Data/level4": "67fdb40dd510568818c794710da1d91d2b475a1c415deb7adbc1ea419c3fa2f6",
+      "Payload/IDOLY PRIDE.app/Data/level5": "8601e87e980373ff2a8f94014aa627b094a27a73b0bcf82d1032a274e6756987",
+      "Payload/IDOLY PRIDE.app/Data/resources.assets.resS": "eb153e5a1a06ccd55853f840ceb1256946de63f81cb4af7e2cbeaba97ec76d80",
+      "Payload/IDOLY PRIDE.app/Data/resources.resource": "f6f847fad9e2629a01091eb3a9548c562df4963ef39bbe3094108447ffe4afe9",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets0.assets.resS": "cc10665643abf9a6e6ad2e0d12a6a1415e79e6bb71f0a0b7e8759b427035d96f",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets1.assets": "3e30d57c9aca1967b9f4393683da749a466a82f4c7ea6ff7c2dca35d7530241e",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets1.assets.resS": "c0218a406ed54249d446e8a1b708a154ef0b0565e2f6f0cb0ddc3049cfe54391",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets1.resource": "657be85a52688de1ce61ea59b8288f6b703a3a84f0448b9261207807eea49156",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets2.assets": "98482cb7295ad32e62f916cacae7420668b4564036294cbd32cca04dc1db4d42",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets3.assets": "851696bbf13462e5b1c5f92cb43eebc78ec067e6d036f6c3c58b311ee5c345fc",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets3.assets.resS": "c410e071b07ade538320808949a2e53777aa5e9aba68924d9a776a876f258469",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets4.assets": "610ac92496ab21e32b7a84523663d8d05e9cf963c5c6fb47fb024972006dc6ad",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets5.assets": "2cffc640e479a7f6acbe50d84c3e483a95b9de444b629c7f445a419daa1068d3",
+      "Payload/IDOLY PRIDE.app/Data/unity default resources": "ba56d706e7078e7603f3149c1335d29122ef59591ccf4b8bf363514d8f6a2b4f",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDK": "cf9216c78bf472c882e0bc1ae20e8892bf2a468f2db51c6e22a1635b1430b6a5",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowATT.json": "23c302f0f88d7cb77a027886fc487fa0df944c05dc26da5bbed6bdc0266cc5da",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowPrivacyPolicy.json": "2e568e03e6b58ff32c372eafbac58e82e2eb0af2b53c0106008e50ad1d997943",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowPrivacyPolicyAndATT.json": "e7eceaa0a3a4ea009e453caa8b27d1708ed5d1d305eeacd7804f76ae5a815216",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowTermsOfServiceAndPrivacyPolicy.json": "3ac4776508ca11ca71eae75ab584da8a90a02bf5fc806a9e9d1d04404fa9cc8c",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowTermsOfServiceAndPrivacyPolicyAndATT.json": "298be76d31e5f4af11b09418de4c66b8e4f91d6304f82dd7a6b6bd872a4c61f5",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowUnifiedCMP.json": "300b9b5801c52c111818cbf28a9cf0640b99b7f485a259f46c0ba99c00f7396c",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDDetailTableViewCell.nib": "fc45428653d158a8f17e274897d7f390a7210d047868cdf622d620568161fbfd",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDMultiAdViewController.storyboardc/3jf-B1-XNL-view-Iqa-CO-DFs.nib": "8bfc67717feac03625126d5b29f22e42627bac776c001679c1568c05cc6d1c83",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDMultiAdViewController.storyboardc/ALDMultiAdViewController.nib": "0f92720c3f65328a349387f944c2c7e1ebd94b5f675b96f06fafc41efdf8e504",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDMultiAdViewController.storyboardc/Info.plist": "ae470b1bf3c37585b0084981e8dabff9e9d66d8f86e0f08e43230490e3fa280e",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDRightDetailTableViewCell.nib": "ed807f6ec286e05eae5f8b4575c3cd77d7f2498966dcfad40fde2ffa6b5d8434",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/Assets.car": "eff8e97fccba471becf580675678114301dcca8e19213ecd7337a752210f5645",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/Base.lproj/Localizable.strings": "67c2132cb7ed4a0a5bb91112fe110b4f6aaca34a899d93cffc8c1207ec5ea676",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/Info.plist": "7fdc4c63e929120ad61cf958d61c5edf8192b032e7edd211d9d1894ee7d5eacd",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MAHybridNativeAdView.nib": "cd4177d8df9b0f6105534ce50d818629aa4f53fea175557446e3720f9158b614",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdBannerView.nib": "4e5e34899fa0af94927c9263ca367cbc85088e0fdffa4b46ec311334bffd43dd",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdLeaderView.nib": "183b9be44bd7a8c0541053d0ed473649a649be8aca8e41367a08dc28326d0133",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdMRecView.nib": "bd7aed459e785e6f336ee8025e6fd7d18d3a6da238038cc7eea94f3f8a736b3e",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdMediaBannerView.nib": "e5ab39b67dbae6a780f2b9b4a4282b9ff2d9a09a5bfe8ff1844982935a331fb2",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdMediumTemplate1.nib": "389f91416af657e99fa9ed820cf22ccac80bc6273fa820c894ec9fd195545d22",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdSmallTemplate1.nib": "a2b48010a3643f29254d89edf97aee629ebfa3c2ccd18e61ce64307a6f7f6b36",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdVerticalBannerView.nib": "0ab752bc0d15462abe4bad24497fae97a3d83909a69dc556bf9241277b1c1c03",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdVerticalLeaderView.nib": "3e770eb77e9c7dd9e4fe1889b43e15da7f693bd82603e02acfa9cf79219d5d62",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdVerticalMediaBannerView.nib": "8329f43960d3b72a4bf63e3d0e026e0ec26945f323dbe27fb9d875a5d94a7c36",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/OMLICENSE": "61e5c9893014e38ed58c96cf522078ca82c61a58be9d09705a5d49e5c653f7e2",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/de.lproj/Localizable.strings": "abb0c5e2afb26d6d511b70edd2f5c1539d6cb64e32316c350b03c32c7cd0def6",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/en.lproj/Localizable.strings": "67c2132cb7ed4a0a5bb91112fe110b4f6aaca34a899d93cffc8c1207ec5ea676",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/es.lproj/Localizable.strings": "e459719f544334d63d2bc9fde07d80af0e21a6f0f25a3794b2de28832e8e68ed",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/fr.lproj/Localizable.strings": "ca02a2d66042f83f13cf601e941221790d20217120f15273eb5060d34630e4a6",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ja.lproj/Localizable.strings": "83245be375a92486f360f89f59c4395125b8d87dd66d4d22cc9130b0e24a9c15",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ko.lproj/Localizable.strings": "ba6b62952ae0c34606dd3c3c1182dcc2b36c6b981625718ee91771512d0ed362",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/mute.aiff": "5944ed3b29e814f111b7bb5b329ab00cfbf7617f447d98d00cbcf55f7851570c",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/omsdk-v1.4.12.js": "896cf905b2b562818da58e19e25b525083f18638f6b9b0d7c6aea411a9907585",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/zh-Hans.lproj/Localizable.strings": "3522d79d9a51806bf8a3ec30bde5bf5dff9157598179b1c84fc05ee9287b2d4d",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/zh-Hant.lproj/Localizable.strings": "44b30a430c159e42aa8c31ec992143ba0aba685d8593c18e351d760130cc932e",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/Info.plist": "951a02eaae040e80c672eb43266c28b6ff7509fc47bed4208127306292257483",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/PrivacyInfo.xcprivacy": "80e38881dbfb3b165f9ef35cfa43b28eac00d5b18058a127588c294193841c9f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/AppAuthCore_Privacy.bundle/Info.plist": "4ed3f94cc4892ea221ba4dd949adec82099ff1e3307e385cb73cda7c9dc5b3bb",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/AppAuthCore_Privacy.bundle/PrivacyInfo.xcprivacy": "5ade962faaea1eddbbdd06c4cf8a872cec554f64c55a00e00136004d378e1ced",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBAudienceNetwork.bundle/Info.plist": "088a7012c909efeb909d51b719ad4aa7df89981ef7b2bf5639068000ddd936f1",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBAudienceNetwork.bundle/PrivacyInfo.xcprivacy": "712c3ddf15ad20fc5d68c94da48c89bb6dde68c7bf57942492c61ac844b08657",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBLPromises_Privacy.bundle/Info.plist": "12820078a8cd25103b523a50bd3279a87c16aaa3e806fe70c5ebcf52da65f09f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBLPromises_Privacy.bundle/PrivacyInfo.xcprivacy": "74b0cd72fc23c1ef302f22ee2753f61817cdc5af0ff7a7f2d0632b524fb8acea",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseAuth_Privacy.bundle/Info.plist": "1537762045f5e2176118e87ba9afc13aa1252101e3e65e1a586f33fd8355950d",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseAuth_Privacy.bundle/PrivacyInfo.xcprivacy": "04c162eafa49b2ced0663231a89cc9f5793506c802b68486719b5da0608aefd5",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreExtension_Privacy.bundle/Info.plist": "3ef3c43530a06a230c1df94943a31e4186dbc0307f4c37054855ee8b560acffe",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreExtension_Privacy.bundle/PrivacyInfo.xcprivacy": "1377eccedff8f8320f78040e9c9d3e17ecc0ea569594b56af0ef17be44197c7a",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreInternal_Privacy.bundle/Info.plist": "b7097581db85580cc3bdddab153dafc7f6d64e72d97d46db23b9edc36d010002",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreInternal_Privacy.bundle/PrivacyInfo.xcprivacy": "5b7fe979423dede3e08afc29a42f00f6086275dc548a84c29774235863eed3ef",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCore_Privacy.bundle/Info.plist": "4bec0f4f8ef4771646fdcaa7c988a08f418a0fbaa107477323176bee0b2429be",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCore_Privacy.bundle/PrivacyInfo.xcprivacy": "11e31f5f6b60e80ebd5901549fce5043f9af3e683f874022945000b405306c3f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCrashlytics_Privacy.bundle/Info.plist": "7e4fd7d6c82ce242a9115babb1b3b77933d0a9b3e68d66b73dc8b5f14ae297ae",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCrashlytics_Privacy.bundle/PrivacyInfo.xcprivacy": "e9bcc6e9c7382bf506cadabe74cfd4ed155686806ba81c195a634b86aa5fcce0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseInstallations_Privacy.bundle/Info.plist": "49efa2be024117e217c698e320ddb3366ac67af26e38f759747ba4535a1f7bed",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseInstallations_Privacy.bundle/PrivacyInfo.xcprivacy": "cfbb3c4f76a66d53698bae91f7110c00f2148e6e6f13ad7d32592909bc010e51",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseMessaging_Privacy.bundle/Info.plist": "bab645bb3b388487213d6c2d29acfded23900e8e2fc7782134545f7d5656f720",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseMessaging_Privacy.bundle/PrivacyInfo.xcprivacy": "98762096372ac27f5e888c7372d512f0d3f5cf3283c64006070f4cde1a72a071",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GADTMediumTemplateView.nib": "a910d1c9fc54fff427061156cb0a07dc57e11a6b01c4ce875d9482ad1815dd13",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GADTSmallTemplateView.nib": "5db2a460e99d78f20fbc9c6ea8876f771a53ef1360ab2d8c83e4d6ac201cf788",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMAppAuth_Privacy.bundle/Info.plist": "344b7332ab44273c65867c9f8b61f76ebdffd18740fd141a978b81c8cfa52945",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMAppAuth_Privacy.bundle/PrivacyInfo.xcprivacy": "5a9b8fc0cddb10201bb47cc2804b3f004c7251476622d25bfc4eb54ed46e1084",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMSessionFetcher_Core_Privacy.bundle/Info.plist": "f75b019a16b83e1df5c3023e4130417f978b348247b04f566bfc79c6e1c3463c",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMSessionFetcher_Core_Privacy.bundle/PrivacyInfo.xcprivacy": "3e4a93cbe86acef7dd7e063a28c849992f556e7f52cadc5f37c1e8b0e1b54686",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleDataTransport_Privacy.bundle/Info.plist": "a7e41a65e9c13fd060e82874500d7b7336ef5f944c36109dea25696d75a6fd53",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleDataTransport_Privacy.bundle/PrivacyInfo.xcprivacy": "cfbb3c4f76a66d53698bae91f7110c00f2148e6e6f13ad7d32592909bc010e51",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleMobileAdsResources.bundle/Info.plist": "3b9aeaab541c3a74544bbe3a00504b0e427d79315cbfa827f2ce31fc87ce2b79",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleMobileAdsResources.bundle/PrivacyInfo.xcprivacy": "69fb112582fc23fc06c635c961d262a3f7b4b5654d284787491de3000dadf9d2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleService-Info.plist": "e4f3ad5aa7e6ef3538e8e1cd5cf5be8e03bfb57cc22e3543dd4b10276818aa48",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/Info.plist": "292ce50f6949e1e4c3364cbc851ff445d9e8acb6a9080cb662c4d06298b49dde",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/PrivacyInfo.xcprivacy": "9300972853096f7d570d6c4a4bf7152a36c798e89c4f0d81d3b4c6b5dfaddfd0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/Roboto-Bold.ttf": "594d74a49e307be7cc9e1ee5f1023684e6820cf11bcc968bee590391e1ad5a5a",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ar.lproj/GoogleSignIn.strings": "b2cf9e8d9fc8ad0f9610b3e54ef0b8b494f021b7fa23acef6094b2205abe8c72",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ca.lproj/GoogleSignIn.strings": "33e88ff500dc3db2462e2ac933c11c28929fad351f57b3e6d62ac44610ad61aa",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/cs.lproj/GoogleSignIn.strings": "51da08624c2a79de47c81683b29e8a1344a47887563be256e1a77a67f6be3544",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/da.lproj/GoogleSignIn.strings": "e8261b9646d8ea89f7bf7a61a73aedce30fe51f68aa947ecbdfe8cc7e04db7da",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/de.lproj/GoogleSignIn.strings": "16cd413df1ab77e509df76f873a5a687ffcf360b1f150743d934c5ab3377c228",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/el.lproj/GoogleSignIn.strings": "9cc0c1349cf665fc773330d31a2628f600a43caa8b5c880b034a5667f8f0fabc",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/en.lproj/GoogleSignIn.strings": "c726a39c382e3f1a7c1f58ecf470f812da263749f930da87f7c0c3aa0ec648c2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/en_GB.lproj/GoogleSignIn.strings": "a2bd782a051b1a0b3c437ec6a31e9bf7f6778995a72acc32a0eb4a6399ad1ac2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/es.lproj/GoogleSignIn.strings": "501e44c4f3bb9c05b13297c60240fd0e16e79f8a63e6fb25198208dcb9421ca6",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/es_MX.lproj/GoogleSignIn.strings": "84d327c7197b7e549a1e9e8d8bb3e1cb02e0282c6323e5fb3dde0a47395af634",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/fi.lproj/GoogleSignIn.strings": "0e99f31a89ead8cc0fc72ad6abdcc84abd26f699265eeff61a889b3739da773b",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/fr.lproj/GoogleSignIn.strings": "b5513877acf2d79c8f0eaff7fcde4aa165f3abb01611b606112602fd443777ba",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/fr_CA.lproj/GoogleSignIn.strings": "f71092cf3fdba7e3e03d0d99748378b111947ca77a991830ddd24c39922b086e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/google.png": "299600c6c3f9960bc680b76e12317dd350d63a00ecbf5de478311bd943e986f6",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/google@2x.png": "6083050c6e2f77dc978e0e13d70700b430bb56b7a36b5a5c80a2733ac66072a6",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/google@3x.png": "56a3d9d4042a18a595a677ed6464dea105f1e8da32e07c3c5c8404af3aaa878c",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/he.lproj/GoogleSignIn.strings": "2ad0751665fa6100761107c40a08df049067400ed7d8d3fb42e3eec4567a60b0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/hi.lproj/GoogleSignIn.strings": "dd41d72736ab5f4a97d09ddb14c4800ee40b9bed2369d64f0c5ffab96a62461e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/hr.lproj/GoogleSignIn.strings": "240fb2998ce9e3a796a97906fc6f960a5611c0784dc73b16cae914faed0a5bfe",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/hu.lproj/GoogleSignIn.strings": "1a8445f99c68fbb05f3714f80f70ed088a62371b5b9885e312b4516f07d89e4f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/id.lproj/GoogleSignIn.strings": "3f246fe3732f813c93a04952365102a965a2248ae24e504f19531398588b2bf9",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/it.lproj/GoogleSignIn.strings": "4edc697cfa93600e8b6904d8722840355057bcb2e9c62426a97cecb642f633c8",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ja.lproj/GoogleSignIn.strings": "864dce623eb1a99beea7e72a1db9008610c403c97585704c1f780b2089381114",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ko.lproj/GoogleSignIn.strings": "021a829945c7e477b6e89a7cd9da683f5a29c0ffc0c012ee839baf50ef7ac013",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ms.lproj/GoogleSignIn.strings": "cb6c11480bf45c4b99ac1c2dcfdb67a5f82a799917a2630d4fb3e961357b5c93",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/nb.lproj/GoogleSignIn.strings": "02a0ce4613ef0c23ec3f161d59d5c493e9de626c81b04be93180a11a42caeab0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/nl.lproj/GoogleSignIn.strings": "49051865c00640eded4c359b1e820e11d1f191055dbb480591f9397d37ab5e0d",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pl.lproj/GoogleSignIn.strings": "cc1ef4452fcc98acbeed22950bd7f0a22a579e025a8f50c78fdbb600ed38e55d",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pt.lproj/GoogleSignIn.strings": "8789b92e1a14c1fd45f26619273c573d1b109e3cf400e56e80a5870baaebccee",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pt_BR.lproj/GoogleSignIn.strings": "8789b92e1a14c1fd45f26619273c573d1b109e3cf400e56e80a5870baaebccee",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pt_PT.lproj/GoogleSignIn.strings": "56004febb8c697dfc2844b493b2d1fda94f7d71881c5e9f457dd50b434600e99",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ro.lproj/GoogleSignIn.strings": "af87451f0d584649dc36d5bd174adbf3aa7a490e7742272f2f7dd86e2262e3dd",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ru.lproj/GoogleSignIn.strings": "1d379702a951ecf98843d957092a8c4afee3eefe866a6001643e3b77755dc5dc",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/sk.lproj/GoogleSignIn.strings": "3ff722865a3c2e610d9b84cb055d936320b83d66cafa24c8eb819368d41d5dac",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/sv.lproj/GoogleSignIn.strings": "101e93a9c6ce8a01e7a86337aa212f6881045411d6e45270179fef261861431e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/th.lproj/GoogleSignIn.strings": "f3b0083f38b726109db921a7904a98de4a5017b978c5b09a8480c5447a3c4fc7",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/tr.lproj/GoogleSignIn.strings": "0d49eb542849a6b7c689a72562f7204ca7451ce1be2beaad0743520d9bab80d2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/uk.lproj/GoogleSignIn.strings": "261c6ee81d9ffeb32feefaa9e2bf490ca6dbfa56e788432a95b4a333e2c7aeef",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/vi.lproj/GoogleSignIn.strings": "5dd81023a8de776c88096b792e07363668e595dead4be8e5219bbbdd88398fe0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/zh_CN.lproj/GoogleSignIn.strings": "5274434127f770963d92af8700a2b838cae491bb7608642d4ff2a517fb81d677",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/zh_TW.lproj/GoogleSignIn.strings": "f0af4ba5c0339e860cb1b938679f8f4cd1f910401bbea187cfbb239ab13bb7e5",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleUtilities_Privacy.bundle/Info.plist": "1491564448722f7188ee82445db4e95131fd1344c3e349a01b2ad21d4a1b3dfa",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleUtilities_Privacy.bundle/PrivacyInfo.xcprivacy": "f81b5cf8f043662712eca9e9785767264cf190025fe7bdb49777296c068de53c",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/Info.plist": "9a73fbd110c62ec5f82ffbf2daf05d5797b2241b6cc3ce4ad115496f3b3ca870",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/IronSourcePrivacyInfo.bundle/Info.plist": "01eaa199da6ef2b27e39cf8ca85b53d96b68de1380008bf13e5f1b43cc8a3665",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/IronSourcePrivacyInfo.bundle/PrivacyInfo.xcprivacy": "112ff01cf511ae1aa85aa968b87e89c9523963b14a635a6069632991b3c6a341",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/PrivacyInfo.xcprivacy": "9eb23295b1aa4c96da85731fa0f7cb4693de1eca472fa382611b9d7fd4f17a8b",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/Promises_Privacy.bundle/Info.plist": "57846d1f0ac66efcd6b39376a0ab1824b9fc686ff68c660bc178bed2d02e2f55",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/Promises_Privacy.bundle/PrivacyInfo.xcprivacy": "74b0cd72fc23c1ef302f22ee2753f61817cdc5af0ff7a7f2d0632b524fb8acea",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/Info.plist": "e9f9eece6238eadd137ea151948a6d017e2671c77b53f07bc05b4484f6c06e50",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/PrivacyInfo.xcprivacy": "7f71483c998ffd2671dd5960e292e62a797201b9070f624a168ef9928267546e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/omid-session-client-v1.js": "f15e5ce012c87bd32c15d71d2fd0b954b9b2fd9d5818d817b3820af3d93d5a35",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/omsdk-v1.js": "896cf905b2b562818da58e19e25b525083f18638f6b9b0d7c6aea411a9907585",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UserMessagingPlatformResources.bundle/Info.plist": "7c0cdf22c781dac4a67445da138806d0e248b0bda8ca39f0d4372124f8b21a3f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UserMessagingPlatformResources.bundle/PrivacyInfo.xcprivacy": "45b7adb99fcd2d962a1c800fbfcc1325b57a7fa4165f416182323bb5ffe9c900",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/nanopb_Privacy.bundle/Info.plist": "1ac91189d4135e3b916b578c9001cb3caa4dbead26623e9794970787f4d33bc5",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/nanopb_Privacy.bundle/PrivacyInfo.xcprivacy": "729ba3cbd0f458c78cd61edf17350edafe0e34ca86e314ec64c8cb22ccd21b54",
+      "Payload/IDOLY PRIDE.app/Frameworks/libswift_Concurrency.dylib": "14fc9fb7e1bfe1e09e76fdeec0bd38150cf02ae77e048ca93978e6563bbe036d",
+      "Payload/IDOLY PRIDE.app/GoogleService-Info.plist": "e4f3ad5aa7e6ef3538e8e1cd5cf5be8e03bfb57cc22e3543dd4b10276818aa48",
+      "Payload/IDOLY PRIDE.app/IDOLY PRIDE": "3a05f12accae537bc4ebcd02f8e6b3c66a74c7a040c5872d4a33a318501873f1",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.png": "19d05cb72980a9e652e1a680792e9daaabf510277e800b854acc8ab93d1f8cd3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.storyboardc/Info.plist": "0c4bdfb10ab88fb30ae0ac81f4211a031624a678491af2a9803feffd316721c3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.storyboardc/UIViewController-UnityLaunchScreen-ViewController.nib": "c05da469ccf319c394038b8358a79ad618466c3d165a590a25dd3fc566a061fb",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.storyboardc/UnityLaunchScreen-ViewController-view-UnityLaunchScreen-RootView.nib": "502404d75a441d55b68404ccfbb2e78e84f4a2da2b5f3f332d199ac28232934d",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhone.storyboardc/Info.plist": "0c4bdfb10ab88fb30ae0ac81f4211a031624a678491af2a9803feffd316721c3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhone.storyboardc/UIViewController-UnityLaunchScreen-ViewController.nib": "c05da469ccf319c394038b8358a79ad618466c3d165a590a25dd3fc566a061fb",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhone.storyboardc/UnityLaunchScreen-ViewController-view-UnityLaunchScreen-RootView.nib": "cbae8f9bcbefc9f24ab0fc38140eee0e80fdbc250918fc10361210f9b70cd026",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhoneLandscape.png": "19d05cb72980a9e652e1a680792e9daaabf510277e800b854acc8ab93d1f8cd3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhonePortrait.png": "19d05cb72980a9e652e1a680792e9daaabf510277e800b854acc8ab93d1f8cd3",
+      "Payload/IDOLY PRIDE.app/PkgInfo": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "iTunesArtwork": "ccd628fe6811c74bbd1c22cd54031024d553fdc6ebeef0792b7bbc0c262e545e"
+    },
+    "removed_only_signature_members": [
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeDirectory",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeRequirements",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeRequirements-1",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeResources",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeSignature",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/_CodeSignature/CodeResources",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/_CodeSignature/CodeResources",
+      "Payload/IDOLY PRIDE.app/_CodeSignature/CodeResources"
+    ],
+    "added_only_members": [
+      "Payload/IDOLY PRIDE.app/Frameworks/IdolyPresentation.dylib",
+      "Payload/IDOLY PRIDE.app/IdolyFonts/IdolyFontSupport.json",
+      "Payload/IDOLY PRIDE.app/IdolyFonts/OFL-Pretendard.txt"
+    ],
+    "modified_only_members": [
+      "Payload/IDOLY PRIDE.app/Data/Managed/Metadata/global-metadata.dat",
+      "Payload/IDOLY PRIDE.app/Data/globalgamemanagers",
+      "Payload/IDOLY PRIDE.app/Data/resources.assets",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets0.assets",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityFramework",
+      "Payload/IDOLY PRIDE.app/Info.plist"
+    ],
+    "all_original_member_modes_preserved": true,
+    "member_CRC_checked_at_EOF": true,
+    "Info_plist": {
+      "bundle_id": "game.qualiarts.idolypride.local",
+      "bundle_build": "156.9006",
+      "game_version": "6.1.1",
+      "exact_Info_plist_allowlist_verified": true
+    },
+    "metadata": {
+      "source_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+      "output_sha256": "aa117e6a0ce9dad6710384507838fd2b81c87be744fe5cfa7453844e58dd0d27",
+      "literal_indexes": {
+        "api": 29808,
+        "octo": 29810,
+        "toast": 34989
+      },
+      "changed_indexes": [
+        29808,
+        29810,
+        34989
+      ],
+      "appended_bytes": 64,
+      "all_other_literals_and_sections_byte_identical": true,
+      "source_toast": "開催中のイベントはありません",
+      "output_toast": "진행 중인 이벤트가 없습니다.",
+      "production_metadata_patcher_used": false
+    },
+    "HTTP_Always": {
+      "source_sha256": "c1e01c54c9e6da21cfbffd30f0f602b387a67f5c03ccb12a71c2b9183d77d56c",
+      "output_sha256": "1c49cb988699c2344f0c1e186ad8cd1ba59984fe200cf243a7c524d07ba1644c",
+      "stage_sha256": {}
+    },
+    "Unity_bootstrap_gateways_load_command": {
+      "source_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+      "output_sha256": "7455d0faecdb7100794021ba3a2c49ada2ad391ed035eac66c787b7ea01ae6c8",
+      "stage_sha256": {
+        "bootstrap": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
+        "presentation": "6f284e80ac73c27c41547e4a907d7bfa14998badf41296a956a257715c170889"
+      },
+      "profile_prefixes_verified": 111,
+      "gateways_verified": 41,
+      "load_command_path": "@loader_path/../IdolyPresentation.dylib",
+      "original_code_not_moved": true,
+      "all_other_Unity_bytes_preserved": true,
+      "loader_zero_fill_slots_verified": true,
+      "font_Awake_original_function_bytes": 192
+    },
+    "expected_CSV": {
+      "language": "ko",
+      "bytes": 252548,
+      "sha256": "0c25c475fc106a70b9b1c6480579bc7061705e442f44321079b71187723ecb01",
+      "stock_keys": 4199,
+      "changed_keys": 3822,
+      "curated_keys": [
+        "error.dialog.update.app.message",
+        "overlay.manager.lv.up.function",
+        "overlay.manager.lv.up.activity",
+        "card.detail.action.itemNotEnough",
+        "card.support.confirmSheet.description",
+        "card.support.remove.description",
+        "card.support.release.description",
+        "deck.copy.confirm.description",
+        "deck.sheet.allRelease.subtitle",
+        "photo.reroll.confirm.description",
+        "photo.recipe.drop.description",
+        "photo.materialNotEnough",
+        "fanEvent.cheer.appearance",
+        "live.sheet.useStamina.caution.quest.item",
+        "story.release.toast.pointNotEnough",
+        "exchange.card.confirm.description",
+        "exchange.card.notEnough",
+        "gacha.confirm.description",
+        "boxGacha.confirm.description",
+        "guild.training.toast.result",
+        "guild.live.consumption.select.sheet.checkbox.label",
+        "event.locked.condition",
+        "backside.areaSelect.otherHalf",
+        "backside.stage.sheet.staminaConsume.description",
+        "marathon.music.select.sheet.difficulty.raid.locked.description",
+        "marathon.boxGacha.resetSheetDescription.limitReset",
+        "race.lesson.sheet.reset.description",
+        "love.sheet.load.description",
+        "message.messageTemplate.image",
+        "message.messageTemplate.stamp",
+        "message.picture.sheet.title",
+        "mosaic.sheet.panelReward.description",
+        "showcase.gacha.confirm.sheet.description"
+      ],
+      "production_translation_module_used": false
+    },
+    "object_auditors": {
+      "font": {
+        "status": "PASS",
+        "platform": "ios",
+        "input_asset_bytes": 4572576,
+        "input_asset_sha256": "899ad32e8b6730252f84389cff657b6edb065a6716e32c52db258dca1a69ba62",
+        "output_asset_bytes": 9405944,
+        "output_asset_sha256": "174f23e290028dd19a9623dae9b6d2520e3f55276878d6679c0fbd822c9d8e82",
+        "original_objects": 21,
+        "output_objects": 25,
+        "original_19_other_objects_byte_identical": true,
+        "original_Font17_TMP21_Texture8_Material2_byte_identical": true,
+        "type_script_external_metadata_preserved": true,
+        "object_sha256_before": {
+          "1": {
+            "class_id": 150,
+            "bytes": 205,
+            "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+          },
+          "2": {
+            "class_id": 21,
+            "bytes": 1764,
+            "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+          },
+          "3": {
+            "class_id": 21,
+            "bytes": 268,
+            "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+          },
+          "4": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+          },
+          "5": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+          },
+          "6": {
+            "class_id": 21,
+            "bytes": 1752,
+            "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+          },
+          "7": {
+            "class_id": 21,
+            "bytes": 1768,
+            "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+          },
+          "8": {
+            "class_id": 28,
+            "bytes": 8340,
+            "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+          },
+          "9": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "10": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "11": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+          },
+          "12": {
+            "class_id": 28,
+            "bytes": 164,
+            "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+          },
+          "13": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+          },
+          "14": {
+            "class_id": 48,
+            "bytes": 8036,
+            "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+          },
+          "15": {
+            "class_id": 48,
+            "bytes": 14160,
+            "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+          },
+          "16": {
+            "class_id": 48,
+            "bytes": 11260,
+            "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+          },
+          "17": {
+            "class_id": 128,
+            "bytes": 269250,
+            "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+          },
+          "18": {
+            "class_id": 128,
+            "bytes": 3591562,
+            "sha256": "f8d3037d45d46caaa46a0f02899ca176300d928aa9cbe05957415ac8608f1a6d"
+          },
+          "19": {
+            "class_id": 114,
+            "bytes": 13720,
+            "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+          },
+          "20": {
+            "class_id": 114,
+            "bytes": 647500,
+            "sha256": "5a7ff93731061e781e1a36a96500909dd6edb8b6af893421bf272badb469d9f1"
+          },
+          "21": {
+            "class_id": 114,
+            "bytes": 1056,
+            "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+          }
+        },
+        "object_sha256_after": {
+          "1": {
+            "class_id": 150,
+            "bytes": 205,
+            "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+          },
+          "2": {
+            "class_id": 21,
+            "bytes": 1764,
+            "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+          },
+          "3": {
+            "class_id": 21,
+            "bytes": 268,
+            "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+          },
+          "4": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+          },
+          "5": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+          },
+          "6": {
+            "class_id": 21,
+            "bytes": 1752,
+            "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+          },
+          "7": {
+            "class_id": 21,
+            "bytes": 1768,
+            "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+          },
+          "8": {
+            "class_id": 28,
+            "bytes": 8340,
+            "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+          },
+          "9": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "10": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "11": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+          },
+          "12": {
+            "class_id": 28,
+            "bytes": 164,
+            "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+          },
+          "13": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+          },
+          "14": {
+            "class_id": 48,
+            "bytes": 8036,
+            "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+          },
+          "15": {
+            "class_id": 48,
+            "bytes": 14160,
+            "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+          },
+          "16": {
+            "class_id": 48,
+            "bytes": 11260,
+            "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+          },
+          "17": {
+            "class_id": 128,
+            "bytes": 269250,
+            "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+          },
+          "18": {
+            "class_id": 128,
+            "bytes": 3591574,
+            "sha256": "3391698e37a79e3d5803614d57983c6b9e29ec60c0ff0175df5401bbe59d9b7f"
+          },
+          "19": {
+            "class_id": 114,
+            "bytes": 13720,
+            "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+          },
+          "20": {
+            "class_id": 114,
+            "bytes": 647512,
+            "sha256": "b473aa660a2156ca60ae9b0476b5f29f68d567e10a658307aaf94e603fbfa6bd"
+          },
+          "21": {
+            "class_id": 114,
+            "bytes": 1056,
+            "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+          },
+          "22": {
+            "class_id": 128,
+            "bytes": 3781882,
+            "sha256": "9fdceac933e264558c09cdf46cbb916aac5ca460067ebabe3d5e238c5f4cded4"
+          },
+          "23": {
+            "class_id": 114,
+            "bytes": 864,
+            "sha256": "86f35bbc666f76907ff9cb158b4d99ab5beb2eccdfb20a733a8e06da2f158c23"
+          },
+          "24": {
+            "class_id": 28,
+            "bytes": 1048724,
+            "sha256": "d0e2b23a1f60ff7f428c1bf15bc94e09433cc520968ed0a1a6ee5131038cdd60"
+          },
+          "25": {
+            "class_id": 21,
+            "bytes": 1772,
+            "sha256": "46f0cb2f37850f30ec897abdc5b2e1f92a327aa1066952ecc522d77cacf197a0"
+          }
+        },
+        "original_font17": {
+          "name": "SourceSansPro-Regular",
+          "bytes": 269108,
+          "font_data_sha256": "c9868de61ff2bab0b5a3a6d01c4b76f299459f08c6ae2f2c0383b4f9f6bedbf3",
+          "long_dash_glyphs": {
+            "U+2E3A": 1127,
+            "U+2E3B": 1128
+          },
+          "cmap": {
+            "glyph_count": 1896,
+            "format": 12,
+            "groups": 791,
+            "unicode_platform_maps_agree": true
+          }
+        },
+        "Korean_font22": {
+          "name": "Pretendard JP SemiBold",
+          "font_data_bytes": 3781740,
+          "font_data_sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+          "long_dash_glyphs": {
+            "U+2E3A": 0,
+            "U+2E3B": 0
+          },
+          "Hangul_syllables": 11172,
+          "Latin": 95,
+          "cmap": {
+            "glyph_count": 22936,
+            "format": 12,
+            "groups": 6862,
+            "unicode_platform_maps_agree": true
+          }
+        },
+        "original_TMP21": {
+          "name": "SourceSansPro-Regular SDF",
+          "source": [
+            0,
+            17
+          ],
+          "material": [
+            0,
+            2
+          ],
+          "atlases": [
+            [
+              0,
+              8
+            ]
+          ],
+          "characters": [
+            [
+              1,
+              11834,
+              1127,
+              1.0
+            ],
+            [
+              1,
+              11835,
+              1128,
+              1.0
+            ]
+          ]
+        },
+        "Korean_TMP23": {
+          "name": "Pretendard JP SemiBold SDF",
+          "source": [
+            0,
+            22
+          ],
+          "mode": 1,
+          "material": [
+            0,
+            25
+          ],
+          "material_hash": 3107587863,
+          "atlases": [
+            [
+              0,
+              24
+            ]
+          ],
+          "glyph_count": 0,
+          "character_count": 0,
+          "used_rects": [],
+          "free_rects": [
+            [
+              0,
+              0,
+              1023,
+              1023
+            ]
+          ],
+          "fallbacks": [],
+          "legacy_fallbacks": [],
+          "family": "Pretendard JP",
+          "style": "SemiBold",
+          "dimensions": [
+            1024,
+            1024,
+            5,
+            4165
+          ],
+          "creation_head": [
+            1,
+            34,
+            5,
+            0,
+            1024,
+            1024,
+            6
+          ],
+          "creation_sequence": "0020-007E,AC00-D7A3"
+        },
+        "Korean_material25": {
+          "name": "Pretendard JP SemiBold SDF Atlas Material",
+          "MainTex": [
+            0,
+            24
+          ],
+          "TextureWidth": 1024.0,
+          "TextureHeight": 1024.0,
+          "all_other_material_body_bytes_preserved": true
+        },
+        "Korean_texture24": {
+          "name": "Pretendard JP SemiBold SDF Atlas",
+          "width": 1024,
+          "height": 1024,
+          "format": 1,
+          "initial_pixels_all_zero": true,
+          "header_equal_except_dimensions_and_byte_lengths": true,
+          "stream_tail_equal_original": true
+        },
+        "Solis20_fallbacks_before": [
+          [
+            0,
+            19
+          ],
+          [
+            0,
+            21
+          ]
+        ],
+        "Solis20_fallbacks_after": [
+          [
+            0,
+            19
+          ],
+          [
+            0,
+            21
+          ],
+          [
+            0,
+            23
+          ]
+        ],
+        "legacy_Font18_fallbacks": [
+          [
+            0,
+            22
+          ]
+        ],
+        "all_other_legacy_and_Solis_bytes_unchanged": true,
+        "TMP_fallback_graph": {
+          "19": [],
+          "20": [
+            19,
+            21,
+            23
+          ],
+          "21": [],
+          "23": []
+        },
+        "acyclic_TMP_and_legacy_Font_graphs": true,
+        "independent_parser": "stdlib Unity v22 + typed TMP/Font/Texture/Material + OpenType cmap12",
+        "whole_asset_buffered": false,
+        "maximum_callback_read_bytes": 65536,
+        "no_font_patcher_imported_or_called": true,
+        "UnityPy_imported": false,
+        "actual_device_verified": false,
+        "auditor_sha256": "b999242cb42c61a27526dfcb8c36afd18bc0143fca6ddafd6b66da591f54aaab",
+        "seconds": 0.476672,
+        "address_space_limit_mib": 384,
+        "peak_RSS_KiB": 49524,
+        "process_memory": {
+          "VmPeak": "75476 kB",
+          "VmSize": "51904 kB",
+          "VmHWM": "49524 kB",
+          "VmRSS": "26140 kB"
+        },
+        "RLIMIT_AS_actual": [
+          402653184,
+          402653184
+        ],
+        "cgroup_memory_events": "low 0\nhigh 0\nmax 282062\noom 6\noom_kill 2\noom_group_kill 0\n"
+      },
+      "static_ui": {
+        "schema": 1,
+        "status": "PASS_INDEPENDENT_ACTUAL_PACKAGE_STATIC_UI",
+        "platform": "ios",
+        "language": "ko",
+        "profile_sha256": "7175b060b21334dbdc1604fdc2f873ee4e042b0af1a46e4d28cfddf66cc6c147",
+        "expected_csv_sha256": "0c25c475fc106a70b9b1c6480579bc7061705e442f44321079b71187723ecb01",
+        "expected_csv_bytes": 252548,
+        "original_package": "/workspace/shared/artifacts/idolypride-6.1.1-decrypted.ipa",
+        "actual_package": "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+        "reviewed_member_count": 1,
+        "totals": {
+          "static_labels": 1961,
+          "original_others": 416852,
+          "csv": 1,
+          "sprites": 7,
+          "story_fade_references": 0
+        },
+        "members": [
+          {
+            "member": "Data/resources.assets",
+            "input_bytes": 65784784,
+            "input_sha256": "decc41f679e31e4ff9708bea2f66b9bcbd53ff560aeeaa4c38092550c356a38b",
+            "output_bytes": 66127248,
+            "output_sha256": "83de50e6a83ccd6a7986bfe4f71eb346824179f61157787175f1ab5ae2cf9e77",
+            "counts": {
+              "static_labels": 1961,
+              "original_others": 416852,
+              "csv": 1,
+              "sprites": 7,
+              "story_fade_references": 0
+            },
+            "source_object_count": 418821,
+            "output_object_count": 418828,
+            "appended_textures": 7,
+            "image_object_hashes": [
+              {
+                "path_id": 567,
+                "kind": "Sprite",
+                "input_sha256": "5251caaa60bbf8a3ef7ee5f1e7198e3e6115e00066f5aa40df05f17c50a64880",
+                "output_sha256": "8c874377aa22d7d4bc2b3ac54f81159030cb2276045a1e140c847cd3d30d195a",
+                "bytes": 628
+              },
+              {
+                "path_id": 851,
+                "kind": "Sprite",
+                "input_sha256": "2db4592cd64ca4f9ceceaf7a4dfd5811febdbbe7faadda10b9248e5c3c75a2f0",
+                "output_sha256": "cf0898468eff80cca565f7556c56a212ce06bbd1160bc0525eed4e5438e15f89",
+                "bytes": 672
+              },
+              {
+                "path_id": 867,
+                "kind": "Sprite",
+                "input_sha256": "3d304948c42f5a29cd6a72cd2bef1301e22164c55fb660ed0f1634dba5c41c3f",
+                "output_sha256": "d9e710fe975fc024b525e4b4dcce8357210e7641542ecdce508e067c0e722f59",
+                "bytes": 564
+              },
+              {
+                "path_id": 1138,
+                "kind": "Sprite",
+                "input_sha256": "964c281e48f691509750ac952001d90dc3cd4e32d14d39c3f644bdf5f93895d3",
+                "output_sha256": "55a14ef3ac1a7bca09f48683187c649be59d90485d0ed2086eaeea825d35de0f",
+                "bytes": 572
+              },
+              {
+                "path_id": 1376,
+                "kind": "Sprite",
+                "input_sha256": "054d80417af596b1c1e5abef5dc590e29ea0a221f5b6e51a6725b28bb1fbe275",
+                "output_sha256": "bf0dcd14ed081c3e45b4a8d93087ff6f670c00cba32aa104e9de0b023aafdb99",
+                "bytes": 592
+              },
+              {
+                "path_id": 1480,
+                "kind": "Sprite",
+                "input_sha256": "6263b96ae185cbdf1656ae6ead89aa180b2db47e46504443f24e2da4a682d0b4",
+                "output_sha256": "49e5c22fd90ed17f93f1733f4cb8a1b74020c2f1210b93d4af8db66e7b03df22",
+                "bytes": 660
+              },
+              {
+                "path_id": 1619,
+                "kind": "Sprite",
+                "input_sha256": "6c036f6d9413722171fc87bbb6b9973983b6bf69caac5e50a92991c1035fec01",
+                "output_sha256": "cc754d453de9227c9febe8d17131ef625ece3eab856547d0399473c3786ad23b",
+                "bytes": 560
+              },
+              {
+                "path_id": 418822,
+                "kind": "Texture2D",
+                "output_sha256": "dcff5c2312533bee8395868f88b4c8d20c9e527211130801405c6d4813423ca5",
+                "bytes": 43924
+              },
+              {
+                "path_id": 418823,
+                "kind": "Texture2D",
+                "output_sha256": "cf1d45f1ef653fa6f655e30d6e83f12685382fc2c569092535f882f4cd8cf600",
+                "bytes": 43932
+              },
+              {
+                "path_id": 418824,
+                "kind": "Texture2D",
+                "output_sha256": "7878adaa3bb0d7fd645127373482012ab3eb76d4624b4ee85dffff2cc372d08f",
+                "bytes": 38032
+              },
+              {
+                "path_id": 418825,
+                "kind": "Texture2D",
+                "output_sha256": "0effc32a780eac4782a112a96bf23485e55dfa72e249c371249f3f036aaa8ad3",
+                "bytes": 63984
+              },
+              {
+                "path_id": 418826,
+                "kind": "Texture2D",
+                "output_sha256": "40da11256649fdec1e0d3f62b56621e099e00d573ca7f731b75d35f51f2633ae",
+                "bytes": 45744
+              },
+              {
+                "path_id": 418827,
+                "kind": "Texture2D",
+                "output_sha256": "6ec4ce551ae98f966072668147ebac159e7f78ca2aa94f19422e0a4f99c2e225",
+                "bytes": 45740
+              },
+              {
+                "path_id": 418828,
+                "kind": "Texture2D",
+                "output_sha256": "44e31c871d0a12ef690b0d89598ca822daf24c3172e31c60f8ee68d777a54bdb",
+                "bytes": 53044
+              }
+            ],
+            "all_original_non_declared_payloads_byte_identical": true,
+            "all_non_m_Text_label_bytes_identical": true,
+            "original_type_script_external_metadata_preserved": true,
+            "object_offsets_and_alignment_verified": true,
+            "actual_member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+          }
+        ],
+        "production_modules_imported": false,
+        "UnityPy_loaded": false,
+        "new_runtime_hooks_required": false,
+        "image_pixels_and_render_semantics_verified_here": false,
+        "font_sharedassets_verified_here": false,
+        "physical_device_or_Mac_play_verified": false,
+        "seconds": 3.527165480016265
+      },
+      "images": {
+        "schema": 1,
+        "status": "PASS_ACTUAL_PACKAGE_STATIC_IMAGE_READBACK",
+        "platform": "ios",
+        "package": "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+        "original_source": "/workspace/shared/artifacts/idolypride-6.1.1-decrypted.ipa",
+        "policy": "korean-static-sprites-v1",
+        "source_profile": {
+          "path": "/workspace/IdolyPride_client/src/idoly_local/static_ui_images.py",
+          "bytes": 21381,
+          "sha256": "784a86c745a7709302a779e17fef23ace300527bbf038943fd5f041eb0f018cb"
+        },
+        "source_png_manifest_sha256": "b050e44befde25689fae45b7d1433bfc5518e9e2ae694f298143c82dc9740a1e",
+        "decoder": {
+          "UnityPy": "1.25.4",
+          "Pillow": "13.0.0"
+        },
+        "product_patcher_imported_or_called": false,
+        "complete_iOS_asset_loaded_into_UnityPy": false,
+        "runtime_device_rendering_verified": false,
+        "signature_and_whole_package_hash_verification": "separate root package audit",
+        "AS_limit_bytes": 402653184,
+        "audit": {
+          "sprites": [
+            {
+              "name": "grid_list_select",
+              "sprite_path_id": 867,
+              "private_texture_path_id": 418822,
+              "output_sprite_payload_sha256": "d9e710fe975fc024b525e4b4dcce8357210e7641542ecdce508e067c0e722f59",
+              "output_texture_payload_sha256": "dcff5c2312533bee8395868f88b4c8d20c9e527211130801405c6d4813423ca5",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "2e90e9b2b0bc551a1f7290ceda9211ca4abfa2adf1178c6523bf713e1157d9bf",
+                "stored_bottom_up_rgba_sha256": "196ffe8f43dad6415aec89176bf87e180a66e2495dde4b1e77cbd57f76390247",
+                "png_sha256": "46730f33157fc47ea508689f9edcc31d908674279628d8fe3bf31defdb6d9a75",
+                "layout_size": [
+                  152,
+                  72
+                ],
+                "png_size": [
+                  152,
+                  72
+                ],
+                "padding_offset": [
+                  0,
+                  0
+                ]
+              }
+            },
+            {
+              "name": "grid_list_select_vertical",
+              "sprite_path_id": 1619,
+              "private_texture_path_id": 418823,
+              "output_sprite_payload_sha256": "cc754d453de9227c9febe8d17131ef625ece3eab856547d0399473c3786ad23b",
+              "output_texture_payload_sha256": "cf1d45f1ef653fa6f655e30d6e83f12685382fc2c569092535f882f4cd8cf600",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "1f078f5439a351f9c7726b22865087f41aca9b343e030ebb41cff5cca79c2d1e",
+                "stored_bottom_up_rgba_sha256": "22b19836e678689a396bcc01c983ff7c7fd3c797cdb6a65f61bd2a475fe6bf25",
+                "png_sha256": "7a5d5faa3eb743d23170cf5c4f5340792f6c82fe34a8f97d84ba448d42114686",
+                "layout_size": [
+                  72,
+                  152
+                ],
+                "png_size": [
+                  59,
+                  138
+                ],
+                "padding_offset": [
+                  7,
+                  7
+                ]
+              }
+            },
+            {
+              "name": "home_txt_live",
+              "sprite_path_id": 567,
+              "private_texture_path_id": 418824,
+              "output_sprite_payload_sha256": "8c874377aa22d7d4bc2b3ac54f81159030cb2276045a1e140c847cd3d30d195a",
+              "output_texture_payload_sha256": "7878adaa3bb0d7fd645127373482012ab3eb76d4624b4ee85dffff2cc372d08f",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "4ee0b4dac9bd637abd14c4762ff143f5f1c23710d414f5afb5940db0576a68cc",
+                "stored_bottom_up_rgba_sha256": "beb38724ecd36b06df637ba2d18dd250c49c2e110acebb2c3cf7af2e7435588a",
+                "png_sha256": "944408c2901917090aee5dbf8af5efdfcd4890cdde9b3763164cd8f8456734bf",
+                "layout_size": [
+                  148,
+                  64
+                ],
+                "png_size": [
+                  148,
+                  64
+                ],
+                "padding_offset": [
+                  0,
+                  0
+                ]
+              }
+            },
+            {
+              "name": "home_mission",
+              "sprite_path_id": 851,
+              "private_texture_path_id": 418825,
+              "output_sprite_payload_sha256": "cf0898468eff80cca565f7556c56a212ce06bbd1160bc0525eed4e5438e15f89",
+              "output_texture_payload_sha256": "0effc32a780eac4782a112a96bf23485e55dfa72e249c371249f3f036aaa8ad3",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "5f74ddc1c91ece8a23ac05e3edf18c998f7e13b7e9bb97b0e33042b4f51a40e3",
+                "stored_bottom_up_rgba_sha256": "29236ce3334b04ba299dcad5ea113c84411c41e9fe97485bacda0148bca797d2",
+                "png_sha256": "ab00554d60114ae2f9a3a0a2dc39a6eb3f21ba076fb7a674f17ed869f112e61b",
+                "layout_size": [
+                  140,
+                  114
+                ],
+                "png_size": [
+                  140,
+                  114
+                ],
+                "padding_offset": [
+                  0,
+                  0
+                ]
+              }
+            },
+            {
+              "name": "home_new_story",
+              "sprite_path_id": 1138,
+              "private_texture_path_id": 418826,
+              "output_sprite_payload_sha256": "55a14ef3ac1a7bca09f48683187c649be59d90485d0ed2086eaeea825d35de0f",
+              "output_texture_payload_sha256": "40da11256649fdec1e0d3f62b56621e099e00d573ca7f731b75d35f51f2633ae",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "a982a505a4a384c073511655b601a377ea937766f20d9503e2b4efbf64729236",
+                "stored_bottom_up_rgba_sha256": "7287215fc6254e757d32f01a78a38f2e3893dc2e9c4f8c23e1d42675d17e4b1b",
+                "png_sha256": "fd0b8a59e58489e7b7e53cd7f1eae2a2ac72354050c7d1495960c2e4157e213d",
+                "layout_size": [
+                  100,
+                  114
+                ],
+                "png_size": [
+                  100,
+                  114
+                ],
+                "padding_offset": [
+                  0,
+                  0
+                ]
+              }
+            },
+            {
+              "name": "home_gift",
+              "sprite_path_id": 1376,
+              "private_texture_path_id": 418827,
+              "output_sprite_payload_sha256": "bf0dcd14ed081c3e45b4a8d93087ff6f670c00cba32aa104e9de0b023aafdb99",
+              "output_texture_payload_sha256": "6ec4ce551ae98f966072668147ebac159e7f78ca2aa94f19422e0a4f99c2e225",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "64f5c899a7bb246b05f82902da5653d5cfe3c601d071d6b2bcdaa2d8964365ce",
+                "stored_bottom_up_rgba_sha256": "91f002fad68e9c189df66b9dade0dc2a681e4a01c14196d48444fc8d431f81a6",
+                "png_sha256": "37c87c383440a0b1e283ca513c9f567c5c90ffa89f5a39f405b0faa398d70597",
+                "layout_size": [
+                  100,
+                  114
+                ],
+                "png_size": [
+                  100,
+                  114
+                ],
+                "padding_offset": [
+                  0,
+                  0
+                ]
+              }
+            },
+            {
+              "name": "home_login_bonus",
+              "sprite_path_id": 1480,
+              "private_texture_path_id": 418828,
+              "output_sprite_payload_sha256": "49e5c22fd90ed17f93f1733f4cb8a1b74020c2f1210b93d4af8db66e7b03df22",
+              "output_texture_payload_sha256": "44e31c871d0a12ef690b0d89598ca822daf24c3172e31c60f8ee68d777a54bdb",
+              "sprite": {
+                "path_id_preserved": true,
+                "original_layout_and_physics_preserved": true,
+                "private_render_key_verified": true,
+                "private_texture_reference_verified": true,
+                "full_rectangle_mesh_verified": true
+              },
+              "texture": {
+                "format": "RGBA32",
+                "color_space": 1,
+                "all_pixels_rgba_exact": true,
+                "vertical_origin_verified": true,
+                "transparent_padding_verified": true,
+                "decoded_top_down_rgba_sha256": "1bd7787e3add60f5c56a10be3342d0c5dcaf8395e8a6ef198f05e78d62306def",
+                "stored_bottom_up_rgba_sha256": "0dad6afb50d16248b881bca1e3fb51095de89fab60a22a6ee55320935ec7c6c7",
+                "png_sha256": "2b2e18ecbe266f954d13aad3bec5aa49112ef907dbe4a38bf4ea19e05ce898ad",
+                "layout_size": [
+                  116,
+                  114
+                ],
+                "png_size": [
+                  116,
+                  114
+                ],
+                "padding_offset": [
+                  0,
+                  0
+                ]
+              }
+            }
+          ],
+          "source_ui_member": {
+            "metadata_sha256": "4ba38495615f9bfd9a3534dc08235bf4a61f4693c1dd77147a4667062ef96d6e",
+            "file_bytes": 65784784,
+            "data_offset": 10240528,
+            "metadata_size": 10240478,
+            "version": "2022.3.57f1",
+            "platform": 9,
+            "object_count": 418821,
+            "type_count": 3735,
+            "externals": [],
+            "member": "Payload/IDOLY PRIDE.app/Data/resources.assets",
+            "sha256": "decc41f679e31e4ff9708bea2f66b9bcbd53ff560aeeaa4c38092550c356a38b"
+          },
+          "output_ui_member": {
+            "metadata_sha256": "8ea72a091c7f537d527efda418c86709c36422c57f7d38a4e77f111c8f98d57a",
+            "file_bytes": 66127248,
+            "data_offset": 10240704,
+            "metadata_size": 10240646,
+            "version": "2022.3.57f1",
+            "platform": 9,
+            "object_count": 418828,
+            "type_count": 3735,
+            "externals": [],
+            "member": "Payload/IDOLY PRIDE.app/Data/resources.assets",
+            "sha256": "83de50e6a83ccd6a7986bfe4f71eb346824179f61157787175f1ab5ae2cf9e77"
+          },
+          "original_texture_and_atlas_payloads_unchanged": [
+            {
+              "path_id": 76,
+              "class_id": 28,
+              "bytes": 524432,
+              "sha256": "10dc0ce34637a712491692515e4a1a593b1b49d3ea922f6561c30895007e5564"
+            },
+            {
+              "path_id": 77,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "202b1438aaa866a485af682e905d24e2d66c3ccdc6811c4ae338135849d68c85"
+            },
+            {
+              "path_id": 78,
+              "class_id": 28,
+              "bytes": 184,
+              "sha256": "0d4f7573542dddd6b2e1215c258be6b2d158e6900d9df8f503ffc567db2de5ef"
+            },
+            {
+              "path_id": 79,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "7f5af4b5df8151c43301c0ee73930f6de58e60332ed1c7d70e360c7e2b97e46f"
+            },
+            {
+              "path_id": 80,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "4852fe2adc599f4559bc225fbb54f9027422be570cdd71a06e8b58f3a4d6d386"
+            },
+            {
+              "path_id": 81,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "dd41e1ca053dfd134ff7dab1bb78bd5d3010ffcf61bf1589cdf2ac1bafe2908a"
+            },
+            {
+              "path_id": 82,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "fd09e95dc82a52b1e08de2008d258d69f1e3a0ed67a643edb7ca5714582236c1"
+            },
+            {
+              "path_id": 83,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "f040ac56ec59433fec37c0e145acd25533dd0f116f8ff9c40aa2eb688c37f4d4"
+            },
+            {
+              "path_id": 84,
+              "class_id": 28,
+              "bytes": 184,
+              "sha256": "e3c53eac5ad2d684d255915b5f5781da51a0d0f8c5274dbc27c6e634f67b39dc"
+            },
+            {
+              "path_id": 85,
+              "class_id": 28,
+              "bytes": 204,
+              "sha256": "62c1e3687f2f8fa4dad7a9cbea84d741620111de48400a0f2e05c6d1fe8465d0"
+            },
+            {
+              "path_id": 86,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "fd2c0b7031714e4470f632bfcc4df6769c1c6b730f2740ba5436e4ac1797bceb"
+            },
+            {
+              "path_id": 87,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "ec3d41b99c7954ae09836f0f979ffb3efc052f8e1e7ae2bb30add94312dd7fc6"
+            },
+            {
+              "path_id": 88,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "358fea86273dd6187523de67c5ff5b228241c0c476b5af233b25b265e3f096fe"
+            },
+            {
+              "path_id": 89,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "1ef37d257d5ffa56ef6c172da98d8344742dfa341a769c9e748ce94c74e3d820"
+            },
+            {
+              "path_id": 90,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "0c679cce0f289dc09affcd4e48244f668769b50628aad5da1b706c00138ecfb0"
+            },
+            {
+              "path_id": 91,
+              "class_id": 28,
+              "bytes": 184,
+              "sha256": "59f6470e8d802fd6bdc0a0b89c5214741beb8a4e2206d4762a2df54db0d056d7"
+            },
+            {
+              "path_id": 92,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "ee2fc92845603b220812e5e62a506c187f99d81b0ca8ab76d1a111a5db42c4da"
+            },
+            {
+              "path_id": 93,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "a490cf1a46cabbd835e9fbd968f898eeff8aec509b73a9c3d0d189ffe41a8ad0"
+            },
+            {
+              "path_id": 94,
+              "class_id": 28,
+              "bytes": 184,
+              "sha256": "d0b8a2fe3d416c25cc0bab61082cced46d36127793239c872b8a78eb5a0c88e4"
+            },
+            {
+              "path_id": 95,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "8ee02cb8525b5f072f14f0ef4d8248f35631cc1989fc493f2ce9596b01d6692b"
+            },
+            {
+              "path_id": 96,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "36f583017bbd2e25ee47904501965af2dbf933c98943574d0b7145ec14bea324"
+            },
+            {
+              "path_id": 97,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "f3b4178412bea49405444cba7f534bf0071a102cf6b9dfe731f949321244207b"
+            },
+            {
+              "path_id": 98,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "4903d6f35f191310127a4a31e87199f4af7538353ef9bac344abafb7bb94e0a7"
+            },
+            {
+              "path_id": 99,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "f104c6690fc7d1307409ecb121d076b7a7fd3d9ee43913c700c63bc3180c9102"
+            },
+            {
+              "path_id": 100,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "27e1a7861c1a257ba53147420f465f51f7f9fecbdfdb2298ee24513db5baf20c"
+            },
+            {
+              "path_id": 101,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "a2175db23d51607c164ed831c8f7ed133e873a61240018744497a2a78f7285e2"
+            },
+            {
+              "path_id": 102,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "795d105f0a6e5447d49333c6805a6739cdfac68ecbdf53c3e473554bf5b4c168"
+            },
+            {
+              "path_id": 103,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "3a7a4dee7f668eb8627e26f85ccbf1b576fbea08cea9f03962a66867dd379f14"
+            },
+            {
+              "path_id": 104,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "6d8a8bf4600df429687dc879a7498b34c1113607b209c06606dacb59114ce97f"
+            },
+            {
+              "path_id": 105,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "c9249fb9c4170d1a79af5da2777e660093d25d6b1017bff25ec35969c1711449"
+            },
+            {
+              "path_id": 106,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "0745debf6e221525b65d86148a9238c33086ffa2b5e4457cf6e63af8bfc702af"
+            },
+            {
+              "path_id": 107,
+              "class_id": 28,
+              "bytes": 192,
+              "sha256": "ed4bb7b7920c7526f7d64d6f24882cbdb5bd80344446deebdc12386a21f10e1f"
+            },
+            {
+              "path_id": 108,
+              "class_id": 28,
+              "bytes": 188,
+              "sha256": "42b3d4c3450eb6176d626cf6afdbe4f9ccca512c706d5c20e56e7bea1a027acc"
+            },
+            {
+              "path_id": 109,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "436a0ad0f2d8939cb4bd90bad90742714d6e3d5d4b338101a735f5c153a65457"
+            },
+            {
+              "path_id": 110,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "a602ba08ea60a03f7dbb0e32b6983575409f879bcf93b350bf880f7253d1aee0"
+            },
+            {
+              "path_id": 111,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "8579c665ec95cc47c90d5f05152489772a4e67c2460a18776c8d1742d74fdefc"
+            },
+            {
+              "path_id": 112,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "c8e4a05e0201197cc6e6b2fe747ddb930e022c790c276c1bceec01e68df8d749"
+            },
+            {
+              "path_id": 113,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "70c33e1d08c8da2db565fe8aab0c48dbad75358397ff03e15e2ba898191ad016"
+            },
+            {
+              "path_id": 114,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "cee91abf1745c7b68d4124d0c24ff41a2b5363396604bd7f8c2f097a1b37fa24"
+            },
+            {
+              "path_id": 115,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "8d5b5195068b7c51b5da652033be4c2e884b3d0f69d66ac59f7e066f5f49f128"
+            },
+            {
+              "path_id": 116,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "2de10c327286c8ca5e39a9b416f6eef31d6b70d496dde091cb399810d5368126"
+            },
+            {
+              "path_id": 117,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "f61023d5c03b29acc0531506cdf59163ee9ab9077c3def6c0d40efdfc3f1ff2d"
+            },
+            {
+              "path_id": 118,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "b3bf5769c09fe7c109567a191e2c03c849689a8ffb4f50f0354dcdd021a0916e"
+            },
+            {
+              "path_id": 119,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "765dbda705ce60ac26e728758d6af1f5f03394779e42b2dbb748528a270132ff"
+            },
+            {
+              "path_id": 120,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "b614309a5ac7e0615a91b9114b3448bcc0c8b5f3a642f76be562014cb15161f9"
+            },
+            {
+              "path_id": 121,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "6a4a28c2969f7a5ab929c1b4d826fadcb595ee2948b8809020c651ee049ccd76"
+            },
+            {
+              "path_id": 122,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "39ef284ceba4311d37caad9f97b2fe0b626eae2f379d6051c04e3089fce5ad3a"
+            },
+            {
+              "path_id": 123,
+              "class_id": 28,
+              "bytes": 172,
+              "sha256": "f2c0cb6f6c9eeed52837aa056eda5b6fde264757da7b614b0265cf5124e3ab5f"
+            },
+            {
+              "path_id": 124,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "06871d80af70d4e8353fe5db25d2426ec1025c86b0fff6535a2a505379049858"
+            },
+            {
+              "path_id": 125,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "d3d968021636dc6fb5d375e0bb253c177d5e0a831bfe74d91dd8429f0171ecc4"
+            },
+            {
+              "path_id": 126,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "ad1d824fdfcef5c250d9c29f8c3dbaea167b07be5cc724bce458efc2aed54744"
+            },
+            {
+              "path_id": 127,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "a9622f876e8ef334768f3b6a5b100e1464f2d0407a2a085331a5afb2b57f4ad5"
+            },
+            {
+              "path_id": 128,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "eda00bcc53c6c7837a89911fb4ce4b5a0162b20e2fbefd92a875f18ae6ed95d9"
+            },
+            {
+              "path_id": 129,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "44d330a44a0240ab170ca7b929febc5c3f198d57d365c4052c1abef7b777db3e"
+            },
+            {
+              "path_id": 130,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "05ac3a7d0c95da59b01244c35ee65bbae304c0e13218bfbf01ba04bfa5494b36"
+            },
+            {
+              "path_id": 131,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "ded527258d991959f2c8179140e1dec8acee126a46f30aadb3fdfe9dc95ea10d"
+            },
+            {
+              "path_id": 132,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "bd0d9421f7ec308320a069c6fe1debc20e8ce94f78ad2ad02082f3eddf5f2dbd"
+            },
+            {
+              "path_id": 133,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "953f1831b4fc389659c416fee36c0ab257a47ee4a7e91a9fa52ce38c2ebbecc9"
+            },
+            {
+              "path_id": 134,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "e9f76fbf8d402b0dee0418aea00438423f4b20f037d7107b7951a6cc464a2881"
+            },
+            {
+              "path_id": 135,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "dca9a493291c5085259dfcfce68aa80727e46c65b090c9ce5ddd6ba4529c9d94"
+            },
+            {
+              "path_id": 136,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "2151ca4b6a36e13c1e20db64f934ac9529dc161183d1780c3d18968c499133bd"
+            },
+            {
+              "path_id": 137,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "92e94281e298f40b16ed4605eef4ab80c203799d130204730b48f494181e59c6"
+            },
+            {
+              "path_id": 138,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "3be800d57faac5812a9fc0062d434806602caec5984bb65bad55bdbe89e5dc1d"
+            },
+            {
+              "path_id": 139,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "95f192a92aacc18b7ecbc2355a340a545f5c15461291b978a2c42d337710b13b"
+            },
+            {
+              "path_id": 140,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "505011d2b8abbd2557355f1172dca36c5b7ee5760366e900340962cd67ef9b3a"
+            },
+            {
+              "path_id": 141,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "59549b6bcfe1e8200b1add3b140b76d6ffd352d381e9c8b207b9c5ddb1355cc5"
+            },
+            {
+              "path_id": 142,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "4a19e00ecf45535a3c1910b7fa76f60701991ce61de3d6cf6dae16a1b7c5646e"
+            },
+            {
+              "path_id": 143,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "af8b94de863fd492d5018a23545eafd8a6e945f01c4c14d8e47fae075397046f"
+            },
+            {
+              "path_id": 144,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "5a622ec97f08d50068680374216c5e92110e32d8c9e0fa0ee33f49d5f56c96be"
+            },
+            {
+              "path_id": 145,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "7a333e066f8b297f68647fe065fcd293f8bf2c20383737aaafb44df5d90bf106"
+            },
+            {
+              "path_id": 146,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "6f96603294b867cf277b6fb08421bb6beba50153f295019b3815e5a713481201"
+            },
+            {
+              "path_id": 147,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "96949f9d773d47b24af07ff2f25735f0364e516251654b3a1a707cd8d8da478a"
+            },
+            {
+              "path_id": 148,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "085960c9bd516f888f8d5c47dc031c6532fbb9f4ff62c3a647980527c64c5c79"
+            },
+            {
+              "path_id": 149,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "05620512cef66da94e2bda1c27a9f8855f78025088fb7abc8851603620ac69cc"
+            },
+            {
+              "path_id": 150,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "b2c328cdd4ee3dca7aadd684cb8c75ff8f5e04fa201516f93643207739c7d4f6"
+            },
+            {
+              "path_id": 151,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "36ab7c67f7975d6ea55a82c7524d213a5b8690fbd6d4039e91e1d70b5f557bb1"
+            },
+            {
+              "path_id": 152,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "c97bcbaa41f50b2f34fb2a2b3aa073486881215e530c34c93c142b828e0fe877"
+            },
+            {
+              "path_id": 153,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "c5b687a2ffac61f1ab92d85b9e09fc926e8450ab6a70dfaec9292b63b06dbb8b"
+            },
+            {
+              "path_id": 154,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "53227327dcc18c5128edffcfa94903d7a42a538ae953f207ac3787171fad8206"
+            },
+            {
+              "path_id": 155,
+              "class_id": 28,
+              "bytes": 128,
+              "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+            },
+            {
+              "path_id": 156,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "18f34b6df267c5ad11752f9de408fbc7abece3de984259a299b647cc9d26e853"
+            },
+            {
+              "path_id": 157,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "239d9f4abdddd4d7a003e8c5c824c996c30e753e29c8d16738420e77e5d03fd6"
+            },
+            {
+              "path_id": 158,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "c459276d84ffeae9cfa8fb84fa4c674f9789d12eca35611f19483ea2cf46cb51"
+            },
+            {
+              "path_id": 159,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "b379845709835539f7ea4b8b9aa042888e83f028fb8b149b1cf49abbf9eb2d04"
+            },
+            {
+              "path_id": 160,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "299c77e03960593e517677a58c89ceab4f632fdb65e816714d30a00f71af0499"
+            },
+            {
+              "path_id": 161,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "ae538eff9acbd11211034b21dc138702bbee7dfdae95217bf27a00294a8a56af"
+            },
+            {
+              "path_id": 162,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "6fc4e77b14fdc861becfc054f30331b965e6ce0ce2aa34c21b96cf9a870c4b4b"
+            },
+            {
+              "path_id": 163,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "804fc3be874e424e543e32d1b431df9669086f194848688278042832d641a741"
+            },
+            {
+              "path_id": 164,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "90f3c58ffa525e45b8e7445af07e1b0ee8f842fdf445f9f9513437f8b696c995"
+            },
+            {
+              "path_id": 165,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "1b1308b2e2aeb0921d577a04a5e6c15d597ced164fa708c94a02e8b9ebb68d8e"
+            },
+            {
+              "path_id": 166,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "2af2976141e2b939c1ada74f64662b4871a804fb86e1dc42965fa1e1e5e568aa"
+            },
+            {
+              "path_id": 167,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "8af94c0a5cbcf86f13c2c0464eb3f254a011cd658f490f4faa697fc468ee1c69"
+            },
+            {
+              "path_id": 168,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "1d512e01324bdb21713d24a218fd8d9abb50607721f2d59549c638d6460ada26"
+            },
+            {
+              "path_id": 169,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "8d07778cca8cfd799311b1a848a79d244140b7c8e4ae6a2675778070b59b1a6b"
+            },
+            {
+              "path_id": 170,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "a889e370542cc08cf3e8776981f3b09724b1f8f2960217e9819b40265c8e7cff"
+            },
+            {
+              "path_id": 171,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "f1fb1fad3aef78f738cf0dc629a439a2e6b7726e56ad42fbc8dce5b45f3eaa05"
+            },
+            {
+              "path_id": 172,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "6eee2f15f71e7232148672c3dd10b6bb4dfb3d2a1c3702c613f5cf6f6fd51d43"
+            },
+            {
+              "path_id": 173,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "fc327d62fe16ea78f71d4c3e32bbed3023eca5756c707845d2847bb60be40c2c"
+            },
+            {
+              "path_id": 174,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "5cd74c4c345e78b2c5fa621999f0cfedaf87e9a5be73768f6d5aa9524d43a66f"
+            },
+            {
+              "path_id": 175,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "147188c3ef2d9ea4e4664179b1fb2567adc05b02b71949727a74ccb800f529a5"
+            },
+            {
+              "path_id": 176,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "46a097e9b37b448c024474e2b991f2c32bc26adfceb2944066b8728449c34d0a"
+            },
+            {
+              "path_id": 177,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "74afc1cf6252cadcf8763301a9b55adee99601adf7a4f0412b86654af61ae456"
+            },
+            {
+              "path_id": 178,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "6142f3d2ee77dcd8bd4160950719caf44be1245c63bf7e5b7f6768687cb1fd2e"
+            },
+            {
+              "path_id": 179,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "2b57ab10d851995e8e93615e0da6f7ff4211a1dadedc3dd4500faf2ff884fb9b"
+            },
+            {
+              "path_id": 180,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "b0d4925649b4478b2f7fa42c92d527cfb39b21290d7ce116f18f980b1e10de01"
+            },
+            {
+              "path_id": 181,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "6793eef000efc3ed0222feb745f75eddf16a042dd73dbd857e2d5a7729a0fb0a"
+            },
+            {
+              "path_id": 182,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "fca8c1da5281fbd8b5a55323ab6c533966d0958cbeea39dfdfdc345e74a5034e"
+            },
+            {
+              "path_id": 183,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "7b995207e244f9a900f34e887b887bf0267d3197181fa97124f4638d7b3d526f"
+            },
+            {
+              "path_id": 184,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "ff9695cbd269349ab56cef4e0974ba5a2eb04537e91f13d45236722c553f1e2b"
+            },
+            {
+              "path_id": 185,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "6c87b4abccbcd074632a71392446f0e90d952b6d694bbad6725706c8adee3deb"
+            },
+            {
+              "path_id": 186,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "efd1a3e1e8bae3009cad551b7312972ddfe1fd5fbb237fa9720f406434955ec1"
+            },
+            {
+              "path_id": 187,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "60170f5249a3fbbd68fa8cd2a632b608a44c13eaf63fa6eab8464904c1617ce5"
+            },
+            {
+              "path_id": 188,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "5dd71464ced265f218deb67cdbe6a6f23cf8eb031cd680c254027ce9a53d46a6"
+            },
+            {
+              "path_id": 189,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "e087c949f6a2f9d7a522965de00c1f849963b7dc11c91220d71d4b81233f059e"
+            },
+            {
+              "path_id": 190,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "328a13199aa08f315492a92261cf3a488273327c9e405aa8e9aa4b07196ed73b"
+            },
+            {
+              "path_id": 191,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "a71cb4f8a96f5ec81deddffa804d77a7821fb33774f15424573f8c5c72bfdd25"
+            },
+            {
+              "path_id": 192,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "e9ca2a0c0c76dfd50382f3ad1389501adbfaf3a513ee0ff1e7f24f36a22eb847"
+            },
+            {
+              "path_id": 193,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "5f463d03bcddc18e2c63ad7ef755f85c6b8e5b2f5a6b34f065fd1af8a0c775fa"
+            },
+            {
+              "path_id": 194,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "16bc17d6d06b1035b5e17fa9189d985f25ea4836f1c625f5d331f249b4da1733"
+            },
+            {
+              "path_id": 195,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "239771dbd588b9fad776b4510f5c2a8afc78b7c982829e7229f3ce8102e8684c"
+            },
+            {
+              "path_id": 196,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "a033358abfa973445fbdfc43da0ee733000fe467c87be89c656a2fd8bce19484"
+            },
+            {
+              "path_id": 197,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "ae8de46cde40f4fc92cbcfe70903a46b98a6dc95dd8a800c72eee6bf8abd0191"
+            },
+            {
+              "path_id": 198,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "bc3543e51a843de406b6c76ff967ef45cf62c90f5e3306008c5a9b1bd8ab396a"
+            },
+            {
+              "path_id": 199,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "63aca51612b6fa147e1e802bbbfa46108632fde743140f0fe9fecb80d30516a0"
+            },
+            {
+              "path_id": 200,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "717c2a2f21b27e285b741ebac407531373d178aa30cec391f1937b009c01ddca"
+            },
+            {
+              "path_id": 201,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "e8904f1b598fd42ff345ed23358fe7c0915e01366a323c93da9874f7a954036e"
+            },
+            {
+              "path_id": 202,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "35ccf08fb6b894a5da5f480a4b4d68b88caa6dc73167e02f01f4c08e737c0565"
+            },
+            {
+              "path_id": 203,
+              "class_id": 28,
+              "bytes": 128,
+              "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+            },
+            {
+              "path_id": 204,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "fa8514fac7ba145c3345f23d19283ec6d1f0156cad4d99c9ae51cc1047a42b1e"
+            },
+            {
+              "path_id": 205,
+              "class_id": 28,
+              "bytes": 172,
+              "sha256": "f8718c18413e37bd7530321ba068956be6e3497e08e0c0f1fe78478637231403"
+            },
+            {
+              "path_id": 206,
+              "class_id": 28,
+              "bytes": 172,
+              "sha256": "0689c07a075f36361ba29b64eed736785d3e28eea1947722d20a3460566fd711"
+            },
+            {
+              "path_id": 207,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "3e90b0b0166fa1d076de6dca493e126351ebc92722d0c441e1785f9b5cc06097"
+            },
+            {
+              "path_id": 208,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "91bddc369aee4922f2c3062ca6a47f211645d123768e90a891c73144f4601976"
+            },
+            {
+              "path_id": 209,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "8eeb68842e9e0c192367706bba4c2861f679c8940caf2e14a0ec012c5aa09fa0"
+            },
+            {
+              "path_id": 210,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "e39bf9460ec45023aa3048163109ce6661d6d41c6489339f65ede48d8c71cdde"
+            },
+            {
+              "path_id": 211,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "d6d3cd0b8ce20e4926963a213f3a28bc0291d903ece492671b77d64aa6d3dfea"
+            },
+            {
+              "path_id": 212,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "1716414935b780f05976fe8397d409b4c7909496563509424d6085909d6162b8"
+            },
+            {
+              "path_id": 213,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "83ceaacbbd02d4dfe1129137b5d2c50fa1d46eda90fedca2f50078374a4f2c37"
+            },
+            {
+              "path_id": 214,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "e1a8e0bad267d85d039f7ed04091ac404bcab10b2d815720968623c90c146596"
+            },
+            {
+              "path_id": 215,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "02a834d54327affc4bcebe6523d6a56ce68d90d6f3827219edc6298d4b570565"
+            },
+            {
+              "path_id": 216,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "954a29db989ae9101121407aafc27b0dda71210f69d80a91fabd5c35b51e7eb8"
+            },
+            {
+              "path_id": 217,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "9dcf18175f4a9ef00214c327e7ba6a3b38f3d257e5c9cb2c1e755f88930650fb"
+            },
+            {
+              "path_id": 218,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "8bb4c4eb5fe184b0cfc599c680a229cdde99dbe737eff42071d6d2ce5db61004"
+            },
+            {
+              "path_id": 219,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "edf5db0875b1357e255561b5fb82b348b22fa63aa6a879644e6bb36e8edc218c"
+            },
+            {
+              "path_id": 220,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "0953d575759d08ee72fb70ef08dbb2072c69d358c490a6b3c63e7c5bc35ecf47"
+            },
+            {
+              "path_id": 221,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "93e3ac4794f6b2aa871e1bb2de143679b6e1377e00b0bf1d59627e75335ba6c7"
+            },
+            {
+              "path_id": 222,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "b28d1e5c8192c467dc518a7949c18872394cedb6df4ccab406e4386c99ae3984"
+            },
+            {
+              "path_id": 223,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "b137d3f5c07c2ae460d2de3fe7d0b4fb4633d949bc85bf54580bd9c1a232f37d"
+            },
+            {
+              "path_id": 224,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "6dd8605f0e372be6f18bc08f6f3b64124ddaffd3b20b45c3d327269addcb974a"
+            },
+            {
+              "path_id": 225,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "53296cf9d16a2077ffcdaa00475f8814aeabb703966c56461aef2d1942e95012"
+            },
+            {
+              "path_id": 226,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "4d82a52d1511e4056f060bd59f063c088e64bf62ab7b508715c0cc16eba8b2a2"
+            },
+            {
+              "path_id": 227,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "d0a9397f4c5d76e56861fc8a02eed8a193cc9fc72509cc137de063f64e3ea9ba"
+            },
+            {
+              "path_id": 228,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "eb2063963317dacd32fcaa9c1fc1128774687f814882e7a3e65fcad7d5b79cbf"
+            },
+            {
+              "path_id": 229,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "0df8502ad96350c743e3bdaa16d1faaca3e11ab9e7fcd879b99650a54cb315b6"
+            },
+            {
+              "path_id": 230,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "4f81c8787784e84b07e8c935ab7cb65cc74d2a4adbe51cc0e1e216c5d65d4c7d"
+            },
+            {
+              "path_id": 231,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "e12e360dd5ca056c9f092a377464ba1d92090836f130eac3292d8efc0890dc3c"
+            },
+            {
+              "path_id": 232,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "daef592c7b9782362a7d49a49543cb6e5ec61cc9cbab3d890e86af65cab10291"
+            },
+            {
+              "path_id": 233,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "1a87d780f62a716598ea9c9e513ed0407f0df49df8c48dbc1b0d16fe00f3b8a1"
+            },
+            {
+              "path_id": 234,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "f79df061e980c697247fd0443f944b9d9424967b83e991d0afdb8a6f54350ed6"
+            },
+            {
+              "path_id": 235,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "5925be83ce1c04969a91b0b2c77446c62e8fb60a5f8cd870cfe6ad7ff746eec1"
+            },
+            {
+              "path_id": 236,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "b593315fb4371db9b387decfa4786a038c3cf9d08c8a5707ae9d83baac5c7aa0"
+            },
+            {
+              "path_id": 237,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "08bb8ed8d4a81c8e04a2470deb39c86586c01cde391bd15eafdf31c9213fd107"
+            },
+            {
+              "path_id": 238,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "a14121177a431e03c962b4f2eb79af85eca2adcc5b4275e275a92b4df360a542"
+            },
+            {
+              "path_id": 239,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "9d64cd232917b99c2d0a0f26ead165638b1ba7a613735a42076df05b71a4fbcc"
+            },
+            {
+              "path_id": 240,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "17a1729e7a10c99406a27519365ae3adf49e57b6c46c8690a9f20cfdfeb4232a"
+            },
+            {
+              "path_id": 241,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "eee303fcc349fe6af97900771c3e8e92ff7d2cd3c9bda7ede369d1a9244a42e5"
+            },
+            {
+              "path_id": 242,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "f6a682abb9dfb666b8fe78486e13eff67ca09078460eb2c9184120c443c3c12b"
+            },
+            {
+              "path_id": 243,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "b00964f713e8cd78f5f7fba603ca49e44c9d09c69db7616c3d0d3607ef8801b9"
+            },
+            {
+              "path_id": 244,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "db94653e4cba5ff3f1ac4069e5ac51fa3dc4092b7e38f1b18be59476f25ead07"
+            },
+            {
+              "path_id": 245,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "579ec10ddc91da4b9ff8dfbd9de6e60931c03cf811ab8430b83eab5dc91c14d1"
+            },
+            {
+              "path_id": 246,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "f659a0454d623b2f6460cf5524fd77a41041983399284f19d5500b246c1fe99e"
+            },
+            {
+              "path_id": 247,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "928f58fd76c6b8393db65d8ad4268c6e72463d5f51c2fd3efd27be5e31ade35c"
+            },
+            {
+              "path_id": 248,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "4cc83fb7118dc0108b01856936dae0dccc1be5344032cd29aa8dc61aff8da00f"
+            },
+            {
+              "path_id": 249,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "f580575e32b1c990cb148e178457749ab6ebb5eafb87f845d3f6101094ef2aec"
+            },
+            {
+              "path_id": 250,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "ca57a92d8b6340d021f9d917b78ee9a11b8e8d22d992b06ebee731a7c519db52"
+            },
+            {
+              "path_id": 251,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "c3e155bef1232ba540c42f70b510f5c0c010f8ec70c78b2739d9019fc1955284"
+            },
+            {
+              "path_id": 252,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "aff40e70064cb229e60fe3f4c72ce97aae5e4233825ad0c9e0b35d8b0dc6c033"
+            },
+            {
+              "path_id": 253,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "0f68d4d6a0845cd8d63491dd319d6e2ace7375d352e5a83b235e6d8038e99f97"
+            },
+            {
+              "path_id": 254,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "d42045566bcf1eee3faca17acbfca1ddf05a8d169cb5c1e2b283fdd36ca830aa"
+            },
+            {
+              "path_id": 255,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "7dd4d4813bc36e4581b5841ccf8afe72a422a3ed8a662a992b73b71c9aef58d0"
+            },
+            {
+              "path_id": 256,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "29607334364cf2a91618969df1affd619160f541b8dbf77fab6df890807ff200"
+            },
+            {
+              "path_id": 257,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "c0d70c0bb3df301c9d188b6663bf608da06df4dba95fa66c086c8bd4c825bcff"
+            },
+            {
+              "path_id": 258,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "3da4d1f64d82fbd69781d3aeabb0def31e1e4e98335dd75f32683cbf76d0b1e2"
+            },
+            {
+              "path_id": 259,
+              "class_id": 28,
+              "bytes": 172,
+              "sha256": "97ee1b6e5daf5f82f95b415035b73a7697fe999886e4f45ae6125d7daa9301d5"
+            },
+            {
+              "path_id": 260,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "03cd746a39779188d72b3fdc5c6a744fd6f5da6b870d39e7fefe5fe445f76c14"
+            },
+            {
+              "path_id": 261,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "4923ab9404827306ed5d98492b02fbc9d96be622baf9de9163b67dd8b404d8d0"
+            },
+            {
+              "path_id": 262,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "2573bdc29f2e595365e1aab2c9189fc85ad50dee604c595d3d597292196ae2fc"
+            },
+            {
+              "path_id": 263,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "dea594ed03814deb5c26abdf5d0584d071b33b160375eda3719e2b5f69b6c591"
+            },
+            {
+              "path_id": 264,
+              "class_id": 28,
+              "bytes": 172,
+              "sha256": "0823c73b7dd355edba5661c0ed7389887bb85ddc8347a3e8cd3004c8aa51558f"
+            },
+            {
+              "path_id": 265,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "8bf74d2aa031705336edad6d0b19e9a828a6dfb969670a0a7bd4364846bd291c"
+            },
+            {
+              "path_id": 266,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "fd0323631f2e2ad0707168cacf4031fd3ce4008136f9d061a5b26478f05a1073"
+            },
+            {
+              "path_id": 267,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "89cc90523fb3de50bc2274920174009e53e9b972a522a017f580def4281a7451"
+            },
+            {
+              "path_id": 268,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "4df22bb1156abffeb8bc595805399253b6f1a6cb03ebc167f0b1f5a8a3f3ac4f"
+            },
+            {
+              "path_id": 269,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "1c658513e352294bb1b4ec41449df4a8771f6bdaa73de4a84b7932a14ae4b60a"
+            },
+            {
+              "path_id": 270,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "7bf80e76c8636839d5a537748c6fd34e3473bfd36a0e1b97b7f6ac96151af1ed"
+            },
+            {
+              "path_id": 271,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "4146ca674ff7a8242c445bd7caf5571ca731aa5e843740790f6d480c1cb3087a"
+            },
+            {
+              "path_id": 272,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "06e9bd728aefde0734897ca77cf42480b4bff5ce7ba637b3d97728d3d1e482be"
+            },
+            {
+              "path_id": 273,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "6ceaa75752580e9b52d2db7fdf58c3bec31e80fb0900af0b6e2941f7163195cc"
+            },
+            {
+              "path_id": 274,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "e39ba5b2ac52771470165bf3979402a9262c5dbd209d827d93d6cb26e8b273f2"
+            },
+            {
+              "path_id": 275,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "6c80402ed46dc2a5e66899b1d4a45ee5713cf8d2831d364241977a25fc64e3e5"
+            },
+            {
+              "path_id": 276,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "6d3eb6496cc27731814a7884e0dee68ed23486ecca3f03914cdaaf7a016e65e9"
+            },
+            {
+              "path_id": 277,
+              "class_id": 28,
+              "bytes": 164,
+              "sha256": "07b448067908f1872349e35e8c596c6ef97efae4b47ade3bd29f5c18fa2ccaed"
+            },
+            {
+              "path_id": 278,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "bd26b43fcda26d27a62f53536df86541d3e6285a99550ab625f6129692413a77"
+            },
+            {
+              "path_id": 279,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "082380e8bbf23a116df9862518c670b5e2e1aceae5814e4736f4482f02c13b69"
+            },
+            {
+              "path_id": 280,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "f7d78ad6b2ff3ae4103b1c56c0105f55c6ad871d05aabe03ad324030d2dc34a4"
+            },
+            {
+              "path_id": 281,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "a9c73f810c52c092e8958bc20cbbd134507604b029dfd5af9a9b9bed094232a9"
+            },
+            {
+              "path_id": 282,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "917b30ee3c9c4706dedd12295a89ade488e16dc7f0dc0d1feafd838cb9569258"
+            },
+            {
+              "path_id": 283,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "412c92d1530e3fb3759bde4da251640f9182b402a8c57b1ae4796cb4d8d9ad99"
+            },
+            {
+              "path_id": 284,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "1403d2654390ce8ce47e84dae04f1a7c7adf987120d3fdaf2f77d5b03cdf88bc"
+            },
+            {
+              "path_id": 285,
+              "class_id": 28,
+              "bytes": 144,
+              "sha256": "4d7d859da38879df430dd5052dab6d050ede8570a7b1d6994b20659ad510b3f3"
+            },
+            {
+              "path_id": 286,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "5a4c2dbda389149f140b7fa6cab971976fa09c1f013f6492466ded3eb9884fa2"
+            },
+            {
+              "path_id": 287,
+              "class_id": 28,
+              "bytes": 172,
+              "sha256": "bbd45f7be816a10dcd385b5a63b91130423e31263ced02ac6d54f24976254c8a"
+            },
+            {
+              "path_id": 288,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "5d4436918014c11fd7ff752f5d6b908546f5f8d0dc9a3a5d43f615978e5c0899"
+            },
+            {
+              "path_id": 289,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "7dcabd34af5105e0171602a8e7bff689cdb4db3fec9157c7c01500629a75f219"
+            },
+            {
+              "path_id": 290,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "b4c0adceae64ec59c59bfd137b785b8eb13f79729c3b5912edb6992c18d6b95c"
+            },
+            {
+              "path_id": 291,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "32a03ad524acb63026488b4faf2f374f9f68188e874f8434ec8d9d3730939462"
+            },
+            {
+              "path_id": 292,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "8be91dd08702c53b9d2e5268fc40aea4c0038d1bd6f18fe5f6d2ba0f1c4eb4c8"
+            },
+            {
+              "path_id": 293,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "9b0dd923fb623203e32d1f78cbaf358134fb133202b9c5d3b13de3eb859d479f"
+            },
+            {
+              "path_id": 294,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "d62bfc08bf0463f159166ca8f13655f1d33f78e94d4db9448152b6468b1ebae0"
+            },
+            {
+              "path_id": 295,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "68f5c2e264152f3621d7d1cc570362eb9fcdeb7d3068f807a96b9da7e92149e1"
+            },
+            {
+              "path_id": 296,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "bd5e68559e00b4e12d65da0fe708feb6ddf90292eac34db1aa11a582682fdd50"
+            },
+            {
+              "path_id": 297,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "3893fb4d982a6988ffeb4d4fa750e1849f6ab2160d0fabadab31e57d7a91c216"
+            },
+            {
+              "path_id": 298,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "4d4c2af544b84835d83da8f2bc3a19bf6a400df49303be5c638c4406073a042a"
+            },
+            {
+              "path_id": 299,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "2fd081a5ff4417a04fa4ef763454448f8dd83d8539862202aff191e5af364358"
+            },
+            {
+              "path_id": 300,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "04d9ab0133120802e4833f95aea98f0f15b661a42912e36b0d22cb39830c1b47"
+            },
+            {
+              "path_id": 301,
+              "class_id": 28,
+              "bytes": 152,
+              "sha256": "5fe3a08a9cd62ba7ec007f5451b946ce9de4d8b5e72b5cac3df30407596138fb"
+            },
+            {
+              "path_id": 302,
+              "class_id": 28,
+              "bytes": 160,
+              "sha256": "c209bc890168d568a0a5aab754b7e387e885d13e538aa25724180fbcd2d7810c"
+            },
+            {
+              "path_id": 303,
+              "class_id": 28,
+              "bytes": 156,
+              "sha256": "68ed904432f476288dd912514a5834478a3dc77274da16c8e82d74d7f15b3155"
+            },
+            {
+              "path_id": 304,
+              "class_id": 28,
+              "bytes": 176,
+              "sha256": "fe3594a3f842519896b6a9fb6caa2286c2a5f48869d973a0612c9000fd7fcf56"
+            },
+            {
+              "path_id": 305,
+              "class_id": 28,
+              "bytes": 180,
+              "sha256": "6813d6008535d56d103270a24c0475e96f453f0981e0ef0342863ee7780aef1c"
+            },
+            {
+              "path_id": 306,
+              "class_id": 28,
+              "bytes": 168,
+              "sha256": "7f19e501a7ad94dc3d179d2d5b46aa93e2a1eb95e820105d19436e93b35a6cb6"
+            },
+            {
+              "path_id": 307,
+              "class_id": 28,
+              "bytes": 148,
+              "sha256": "2a385987c060bad440e3b03ab612889167e8d4420b2b95aabb6b0ff0280b4174"
+            },
+            {
+              "path_id": 289807,
+              "class_id": 687078895,
+              "bytes": 4304,
+              "sha256": "ac3eb741b330f0e7ac0f9e728c7d4615389bf913232f1fb9ae6295702f11f6e9"
+            },
+            {
+              "path_id": 289808,
+              "class_id": 687078895,
+              "bytes": 6424,
+              "sha256": "35ff562ad067fb19c9193dda7f80a05feb1e2e2295de16037f3fffda947ef23c"
+            },
+            {
+              "path_id": 289809,
+              "class_id": 687078895,
+              "bytes": 348,
+              "sha256": "d15fac340b82e84b56aa91507611ad0ac4befaafefdfff51fd0afd6bc4eea36a"
+            },
+            {
+              "path_id": 289810,
+              "class_id": 687078895,
+              "bytes": 1112,
+              "sha256": "0d559c6c83141430909d6ec28bf8a46e2b34c8b2ceb05d266867614c0cee5a74"
+            },
+            {
+              "path_id": 289811,
+              "class_id": 687078895,
+              "bytes": 49800,
+              "sha256": "c4855a2b202069dd55582deb4fa65110d1008a2cf455a3b0d39f5ba433406b1b"
+            },
+            {
+              "path_id": 289812,
+              "class_id": 687078895,
+              "bytes": 2956,
+              "sha256": "483a3f23cd1e134ecc7c3f4d28b5cdf7d3b516307db6517ec7fa3b694d421d23"
+            },
+            {
+              "path_id": 289813,
+              "class_id": 687078895,
+              "bytes": 4208,
+              "sha256": "7e509cc58fd2aebec5e90a48285603ff8e5d651d3955cfda07845982a5a4d2ba"
+            },
+            {
+              "path_id": 289814,
+              "class_id": 687078895,
+              "bytes": 3400,
+              "sha256": "38378fa184338b20d5e563d7d2ec89dd780112b60f31ad583b747bb03f89a760"
+            },
+            {
+              "path_id": 289815,
+              "class_id": 687078895,
+              "bytes": 3884,
+              "sha256": "262f0e043f1fad117c81bed75efe29bc8a9893b6b419f4df9ea540bee5a80360"
+            },
+            {
+              "path_id": 289816,
+              "class_id": 687078895,
+              "bytes": 192,
+              "sha256": "efc9214858583f827bba3fd31d6554dce4b16b536e8ddc352cf638fec3cccba3"
+            },
+            {
+              "path_id": 289817,
+              "class_id": 687078895,
+              "bytes": 8200,
+              "sha256": "1abd16501c444a3510c2e6079058be8140c22ef8da977f40034f3cbc010c9aa2"
+            },
+            {
+              "path_id": 289818,
+              "class_id": 687078895,
+              "bytes": 9232,
+              "sha256": "018c0001c80b87a7383f2cd42315e8839e4c37590d6101e447d787f159fdbdb9"
+            },
+            {
+              "path_id": 289819,
+              "class_id": 687078895,
+              "bytes": 1620,
+              "sha256": "464ddfc29736df83fa4ca23c2cd7c6aea9d1e0b55d6a9f0b214a4bdc04897f4a"
+            },
+            {
+              "path_id": 289820,
+              "class_id": 687078895,
+              "bytes": 3844,
+              "sha256": "a525257a05f776593ede8b317e04a9a68f3baf28c2bbe764dad6c74abe2a7063"
+            },
+            {
+              "path_id": 289821,
+              "class_id": 687078895,
+              "bytes": 8812,
+              "sha256": "66a79599fad5ad7136fee1394953213dc5b7613421fd2ce684a3171c49ddc501"
+            },
+            {
+              "path_id": 289822,
+              "class_id": 687078895,
+              "bytes": 14048,
+              "sha256": "50a24c54005db4cabe6b13a11a5a8118aacdf7af57c1733a88a6b5bb20561686"
+            },
+            {
+              "path_id": 289823,
+              "class_id": 687078895,
+              "bytes": 56,
+              "sha256": "72f6174ef04bfc8c621088a4b1ff85bc6062452565f02430bdbf56dcd4036217"
+            },
+            {
+              "path_id": 289824,
+              "class_id": 687078895,
+              "bytes": 756,
+              "sha256": "33d9be63a15dcfb9669789d0cd89fc1418a6d9eaa7b5ec4fc7dc0ec0cda7c039"
+            },
+            {
+              "path_id": 289825,
+              "class_id": 687078895,
+              "bytes": 2316,
+              "sha256": "68e93dc90ab6d93d64031a530423285384c3be88d38ecb5a6cd2644e66e359d6"
+            },
+            {
+              "path_id": 289826,
+              "class_id": 687078895,
+              "bytes": 1052,
+              "sha256": "3412baee674d20755684eb1228f5f9bf56718c27ec1018af124105c1c6899e2c"
+            },
+            {
+              "path_id": 289827,
+              "class_id": 687078895,
+              "bytes": 832,
+              "sha256": "068487ab1e0ee2bb81caf78aafd4b00a63d763e312b400b7f849fb0260419429"
+            },
+            {
+              "path_id": 289828,
+              "class_id": 687078895,
+              "bytes": 1324,
+              "sha256": "2001370628fd96b1a1c480fa536a8c8d21c2d68036a7023229008f7718efd9d9"
+            },
+            {
+              "path_id": 289829,
+              "class_id": 687078895,
+              "bytes": 2764,
+              "sha256": "68fc924399b197afc2108a28722cd00e32d0e99593ed20ac1e6a2bba973c5ceb"
+            },
+            {
+              "path_id": 289830,
+              "class_id": 687078895,
+              "bytes": 476,
+              "sha256": "596c3bd3a02f70958485c8b1e782f56acc94b101e83201a85658546023a0ab60"
+            },
+            {
+              "path_id": 289831,
+              "class_id": 687078895,
+              "bytes": 2648,
+              "sha256": "4eb8398797768bbf739b1a2b20f5f32891ac793c4737fd8a2a836886498e9d23"
+            },
+            {
+              "path_id": 289832,
+              "class_id": 687078895,
+              "bytes": 3084,
+              "sha256": "a2550b8e0470b0d5f11a1e86dd458beb0ca99df8f052133d8867c9672df1eed7"
+            },
+            {
+              "path_id": 289833,
+              "class_id": 687078895,
+              "bytes": 3708,
+              "sha256": "04fa85626d5ec7d9d46621c6edcd0d8edc796634ea6eb398174d623386f6cc31"
+            },
+            {
+              "path_id": 289834,
+              "class_id": 687078895,
+              "bytes": 1260,
+              "sha256": "5b5891b27c479d2ddfee67bede23a5f4d2dbb389e218cff14be2e1005f71b46c"
+            },
+            {
+              "path_id": 289835,
+              "class_id": 687078895,
+              "bytes": 4512,
+              "sha256": "25bac05cf9d5edb36f7ef9ab5db1b339926101e25b84edc5d7477070db56e6af"
+            },
+            {
+              "path_id": 289836,
+              "class_id": 687078895,
+              "bytes": 5604,
+              "sha256": "185bae4251cfe2d80822a3dad2772401389698352c6f5134b0919c3043457fe8"
+            }
+          ],
+          "original_atlas_pixels_unchanged": true
+        }
+      }
+    },
+    "private_font_scratch": "/dev/shm/idoly-v0330-work/client-preparation/qa-ios-ko-final-r1/independent-full-client-review-font.assets",
+    "root_controls_scratch_retirement": true,
+    "PlayCover_resigning_required": true,
+    "physical_device_or_Mac_play_verified": false,
+    "server_rebuilt": false,
+    "network_or_emulator_actions": false,
+    "resource_before": {
+      "maximum": 17179869184,
+      "current": 16021962752,
+      "direct_headroom": 1157906432,
+      "root_free": 158191616,
+      "oom_kill": 2
+    },
+    "resource_after": {
+      "maximum": 17179869184,
+      "current": 16190513152,
+      "direct_headroom": 989356032,
+      "root_free": 158191616,
+      "oom_kill": 2
+    },
+    "seconds": 9.944928875018377
+  },
+  "actual_payload_read_or_hashed_by_materializer": false
+}

@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "source_epoch": 1794628262,
+  "stage": "android_client",
+  "language": "ja",
+  "command": [
+    "/workspace/.setup/venvs/toolkit/bin/python",
+    "-B",
+    "/workspace/IdolyPride_client/client-presentation/build_full_client.py",
+    "--source",
+    "/workspace/shared/artifacts/diagnostic-v0.2.1-release-review/IdolyPride-Local-Diagnostic-Android-arm64.apk",
+    "--feature-apk",
+    "/dev/shm/idoly-v0330-work/client-preparation/addons/diagnostics.apk",
+    "--source-commit",
+    "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+    "--output",
+    "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+    "--ram-directory",
+    "/dev/shm",
+    "--all-tmpfs",
+    "--apkeditor",
+    "/workspace/shared/APKEditor-1.4.1-public.jar",
+    "--jdk-bin",
+    "/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64/bin",
+    "--build-tools",
+    "/workspace/.setup/android-sdk/build-tools/34.0.0",
+    "--keystore",
+    "/workspace/IdolyPride_client/android-diagnostics/local-diagnostics-development.keystore",
+    "--password-file",
+    "/dev/shm/idoly-v0328-work/signing/diagnostic-password.txt",
+    "--font-file",
+    "/workspace/hoshimi-localify-ios/PretendardJP-SemiBold.otf",
+    "--font-license-file",
+    "/workspace/IdolyPride_client/client-presentation/licenses/Pretendard-OFL.txt",
+    "--ui-language",
+    "ja",
+    "--ui-csv-file",
+    "/dev/shm/idoly-translation-probe-20261113/i18n-original.csv"
+  ],
+  "config_sha256": "f0187239ad144aa3c1f760b7e5f491dedcc2c49a3422238a4a4f909e31aaaf7e",
+  "operator_sha256": "316e0723f7a90d029e49620fde103ab2bd841e95a552158f1c8699d982b93045",
+  "status": "PASS_PRODUCTION_AWAIT_INDEPENDENT_ACTUAL_ARTIFACT_QA",
+  "runtime_device_verified": false,
+  "server_rebuilt": false,
+  "network_publication_or_VM_actions": false,
+  "resources": {
+    "before": {
+      "memory_current": 15876259840,
+      "memory_max": 17179869184,
+      "direct_headroom": 1303609344,
+      "root_free": 158191616,
+      "tmpfs_free": 8769605632,
+      "oom_kill": 2
+    },
+    "after": {
+      "memory_current": 16042246144,
+      "memory_max": 17179869184,
+      "direct_headroom": 1137623040,
+      "root_free": 158191616,
+      "tmpfs_free": 8604753920,
+      "oom_kill": 2
+    },
+    "seconds": 33.137581,
+    "minimum_sampled_headroom": 674701312,
+    "budget_samples": 654,
+    "subreaper": {
+      "manager_pid": 697353,
+      "manager_start_ticks": 41777404,
+      "subreaper_enabled": true,
+      "process_groups_signalled": false
+    },
+    "returncode": 0,
+    "entry_mib": 1024,
+    "ongoing_floor_mib": 512,
+    "AS_mib": null
+  },
+  "artifact": {
+    "path": "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+    "bytes": 164276861,
+    "sha256": "e2756b79628613df984d405dc2f96812c1919cb275e1f0ab950b22d990e3451b"
+  }
+}

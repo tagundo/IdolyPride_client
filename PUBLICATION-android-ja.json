@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "branch": "downloads/client-translation-android-ja-v0.3.30-source-a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "sha256": "e2756b79628613df984d405dc2f96812c1919cb275e1f0ab950b22d990e3451b",
+      "bytes": 164276861,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "77501d666fd6218c59bad70bf075637a1cfbc88e",
+  "tree": "bb449712803203909b89834982cb0f6b9ed719ef"
+}

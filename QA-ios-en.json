@@ -1,0 +1,821 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "source_epoch": 1794628262,
+  "platform": "ios",
+  "language": "en",
+  "sha256": "c537aeab942056498bffcc81338cf4d6494070c1b4124b285fef0926e7aee1da",
+  "bytes": 149105654,
+  "device_execution_verified": false,
+  "independent_full_package_review_binding": {
+    "path": "/dev/shm/idoly-v0330-work/client-preparation/qa-ios-en-final-r1/independent-full-client-review.json",
+    "bytes": 51665,
+    "sha256": "c6ec9f6fe47ca1fa90605bb02b3ec782a961f2bc5890cafb547f3740bbda2a31"
+  },
+  "independent_full_package_review": {
+    "schema": 1,
+    "status": "PASS_INDEPENDENT_FULL_IPA_V0330",
+    "platform": "ios",
+    "language": "en",
+    "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+    "package_sha256": "c537aeab942056498bffcc81338cf4d6494070c1b4124b285fef0926e7aee1da",
+    "package_bytes": 149105654,
+    "original_sha256": "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848",
+    "native_sha256": "85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5",
+    "native_review_sha256": "aeedaaefbb6405bde7a6f2c2093267646986c9078628f10a46853e2cbbe5c42c",
+    "profile_sha256": "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510",
+    "hook_plan_sha256": "abab2208dd956df53c6391bd92c935357f2c03637d74ace59a25eff8ad7fe212",
+    "unchanged_original_members": 188,
+    "original_member_sha256": {
+      "Payload/IDOLY PRIDE.app/AppIcon60x60@2x.png": "51f1fc20aa673c8db1ab846a1d48db835496e7838b840e0f019389455c983e2b",
+      "Payload/IDOLY PRIDE.app/AppIcon76x76@2x~ipad.png": "6de8d22c17f2d7fc9d348ae6e4050cd1feb07157dc3e8243db894eff274454fc",
+      "Payload/IDOLY PRIDE.app/Assets.car": "25fae110d996e8b43ec38aacfa4d1fa89615dace2534d1f66d6dd14aa3ece809",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/Microsoft.Extensions.Logging.Abstractions.dll-resources.dat": "97e9ce1489b1700e7810da58d59aaca6a7e1b7c67973e687a064dd3508e4753e",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.Data.dll-resources.dat": "98a7950ec6de3242c2e190dfa630188dfa32511a125542b94baa952d1c757d49",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.Diagnostics.DiagnosticSource.dll-resources.dat": "665b373254d2b641ac4ca6c0c1015e1bf1e7220258a5e8aace8cdb86d2747988",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.Drawing.dll-resources.dat": "7c33aa707bc3fdc83991b81a97d6fc622b140762a767300f08f616c2c0a91255",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/System.IO.Pipelines.dll-resources.dat": "5cd796024c23f1a7e9878ec9cb004e91df14d05bac3ae3b9821382a249777a66",
+      "Payload/IDOLY PRIDE.app/Data/Managed/Resources/mscorlib.dll-resources.dat": "c5baa176a5b72cd545266340e42102d393a5e43d38c95796bc828918bb95277f",
+      "Payload/IDOLY PRIDE.app/Data/Managed/mono/4.0/machine.config": "e60aec2c5115d65b3acb3c55ea21576dbd770f579166c017125571e46ae560ed",
+      "Payload/IDOLY PRIDE.app/Data/Octo/A/52506D4C4F667A.mp4": "733d21f112454515526861205781dfd15258e460af9ac1c85b33839ce4aa4f32",
+      "Payload/IDOLY PRIDE.app/Data/Octo/l": "a3479047ec91f4107310d3d23424159bdba1d3126a29903d2ce4cc8ca75b03a8",
+      "Payload/IDOLY PRIDE.app/Data/Raw/UnityServicesProjectConfiguration.json": "eeac9c52a7239cda039299b17fb7f557f6008828480d050f6c0053ac4aaca0ef",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Inquiry.html": "091c814fabc9c85f1d6e537a19b7e1fadb51178463ba99ba98cdbbf007a55f91",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Scripts/Common.js": "644487153aac7126e775afb7d07847b274f106ad487f457d3ecd7eb4b6acb407",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Scripts/Inquiry.js": "6ee3f1e8a57fe39e2e7bc8c88c95beaa6588ee12b0365a5a77c7eecd239bea27",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Scripts/ResponsiveZoom.js": "893227bc1cbce50f5d4a1d41c644104e37483d0fd4d32fe435e70b32795f200f",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Styles/Common.css": "e386d6061d1bd10f5743f34a778253257af34df886db8b9d8b1dbec53ed0c879",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Styles/Inquiry.css": "7f077ed4f45ee92578d5055a34a46b159cadd01019bffe07d48617fadc059941",
+      "Payload/IDOLY PRIDE.app/Data/Raw/WebView/Svg/Pencil.svg": "6c6f0575c32b4b861bd840f9c71ab0bccb3e1a59a7bc2eaca36d3166c58787bd",
+      "Payload/IDOLY PRIDE.app/Data/Raw/google-services-desktop.json": "efcce789dd5df02d6531ea7ad89d3bf2d38600464afd9b49dce0dd6f398a978c",
+      "Payload/IDOLY PRIDE.app/Data/Resources/unity_builtin_extra": "072143c3112b0fb598ec4bca356551453725333d495e0ba5f488c7f1c72da068",
+      "Payload/IDOLY PRIDE.app/Data/RuntimeInitializeOnLoads.json": "b7d2ce42667e9a3368afbab701e8aa676285cceadca89a531483ef66f64677b3",
+      "Payload/IDOLY PRIDE.app/Data/ScriptingAssemblies.json": "8cb19fd62edd9cdbd833caeebb3fbe3f2b6a5ea817191ab1478ecb1980946b5d",
+      "Payload/IDOLY PRIDE.app/Data/boot.config": "ed98aa7925d21f3a5a792eefbd1bb4d2ecb20cd9f52d6b66541753ec62e80862",
+      "Payload/IDOLY PRIDE.app/Data/globalgamemanagers.assets": "ec850f6a1af52579f5a84e7914df67a4559e7539202606cf53fed697ed0dd9c7",
+      "Payload/IDOLY PRIDE.app/Data/globalgamemanagers.assets.resS": "83c82699e91e4fc7304526ce002811196b7bdfd8cb50c0dc47cca49c4b89b91f",
+      "Payload/IDOLY PRIDE.app/Data/level0": "95df2d22dddbdf7d386f21ce98ff19053de9d93472823c921df43381fc4cb793",
+      "Payload/IDOLY PRIDE.app/Data/level1": "5e87b84b144e9d536da922531aabdf1f4a78713a3ff17772772164fa7c886c49",
+      "Payload/IDOLY PRIDE.app/Data/level2": "84933e344307c499caa3c6d6c84df0ba4372728f90ab5e7b999b165b169913e5",
+      "Payload/IDOLY PRIDE.app/Data/level3": "1ad6e221a5152e970bc4e97f0657aae02f58f3082a6ee0475522e26b70bcd779",
+      "Payload/IDOLY PRIDE.app/Data/level4": "67fdb40dd510568818c794710da1d91d2b475a1c415deb7adbc1ea419c3fa2f6",
+      "Payload/IDOLY PRIDE.app/Data/level5": "8601e87e980373ff2a8f94014aa627b094a27a73b0bcf82d1032a274e6756987",
+      "Payload/IDOLY PRIDE.app/Data/resources.assets.resS": "eb153e5a1a06ccd55853f840ceb1256946de63f81cb4af7e2cbeaba97ec76d80",
+      "Payload/IDOLY PRIDE.app/Data/resources.resource": "f6f847fad9e2629a01091eb3a9548c562df4963ef39bbe3094108447ffe4afe9",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets0.assets.resS": "cc10665643abf9a6e6ad2e0d12a6a1415e79e6bb71f0a0b7e8759b427035d96f",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets1.assets": "3e30d57c9aca1967b9f4393683da749a466a82f4c7ea6ff7c2dca35d7530241e",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets1.assets.resS": "c0218a406ed54249d446e8a1b708a154ef0b0565e2f6f0cb0ddc3049cfe54391",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets1.resource": "657be85a52688de1ce61ea59b8288f6b703a3a84f0448b9261207807eea49156",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets2.assets": "98482cb7295ad32e62f916cacae7420668b4564036294cbd32cca04dc1db4d42",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets3.assets": "851696bbf13462e5b1c5f92cb43eebc78ec067e6d036f6c3c58b311ee5c345fc",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets3.assets.resS": "c410e071b07ade538320808949a2e53777aa5e9aba68924d9a776a876f258469",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets4.assets": "610ac92496ab21e32b7a84523663d8d05e9cf963c5c6fb47fb024972006dc6ad",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets5.assets": "2cffc640e479a7f6acbe50d84c3e483a95b9de444b629c7f445a419daa1068d3",
+      "Payload/IDOLY PRIDE.app/Data/unity default resources": "ba56d706e7078e7603f3149c1335d29122ef59591ccf4b8bf363514d8f6a2b4f",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDK": "cf9216c78bf472c882e0bc1ae20e8892bf2a468f2db51c6e22a1635b1430b6a5",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowATT.json": "23c302f0f88d7cb77a027886fc487fa0df944c05dc26da5bbed6bdc0266cc5da",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowPrivacyPolicy.json": "2e568e03e6b58ff32c372eafbac58e82e2eb0af2b53c0106008e50ad1d997943",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowPrivacyPolicyAndATT.json": "e7eceaa0a3a4ea009e453caa8b27d1708ed5d1d305eeacd7804f76ae5a815216",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowTermsOfServiceAndPrivacyPolicy.json": "3ac4776508ca11ca71eae75ab584da8a90a02bf5fc806a9e9d1d04404fa9cc8c",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowTermsOfServiceAndPrivacyPolicyAndATT.json": "298be76d31e5f4af11b09418de4c66b8e4f91d6304f82dd7a6b6bd872a4c61f5",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALConsentFlowUnifiedCMP.json": "300b9b5801c52c111818cbf28a9cf0640b99b7f485a259f46c0ba99c00f7396c",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDDetailTableViewCell.nib": "fc45428653d158a8f17e274897d7f390a7210d047868cdf622d620568161fbfd",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDMultiAdViewController.storyboardc/3jf-B1-XNL-view-Iqa-CO-DFs.nib": "8bfc67717feac03625126d5b29f22e42627bac776c001679c1568c05cc6d1c83",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDMultiAdViewController.storyboardc/ALDMultiAdViewController.nib": "0f92720c3f65328a349387f944c2c7e1ebd94b5f675b96f06fafc41efdf8e504",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDMultiAdViewController.storyboardc/Info.plist": "ae470b1bf3c37585b0084981e8dabff9e9d66d8f86e0f08e43230490e3fa280e",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ALDRightDetailTableViewCell.nib": "ed807f6ec286e05eae5f8b4575c3cd77d7f2498966dcfad40fde2ffa6b5d8434",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/Assets.car": "eff8e97fccba471becf580675678114301dcca8e19213ecd7337a752210f5645",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/Base.lproj/Localizable.strings": "67c2132cb7ed4a0a5bb91112fe110b4f6aaca34a899d93cffc8c1207ec5ea676",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/Info.plist": "7fdc4c63e929120ad61cf958d61c5edf8192b032e7edd211d9d1894ee7d5eacd",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MAHybridNativeAdView.nib": "cd4177d8df9b0f6105534ce50d818629aa4f53fea175557446e3720f9158b614",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdBannerView.nib": "4e5e34899fa0af94927c9263ca367cbc85088e0fdffa4b46ec311334bffd43dd",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdLeaderView.nib": "183b9be44bd7a8c0541053d0ed473649a649be8aca8e41367a08dc28326d0133",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdMRecView.nib": "bd7aed459e785e6f336ee8025e6fd7d18d3a6da238038cc7eea94f3f8a736b3e",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdMediaBannerView.nib": "e5ab39b67dbae6a780f2b9b4a4282b9ff2d9a09a5bfe8ff1844982935a331fb2",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdMediumTemplate1.nib": "389f91416af657e99fa9ed820cf22ccac80bc6273fa820c894ec9fd195545d22",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdSmallTemplate1.nib": "a2b48010a3643f29254d89edf97aee629ebfa3c2ccd18e61ce64307a6f7f6b36",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdVerticalBannerView.nib": "0ab752bc0d15462abe4bad24497fae97a3d83909a69dc556bf9241277b1c1c03",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdVerticalLeaderView.nib": "3e770eb77e9c7dd9e4fe1889b43e15da7f693bd82603e02acfa9cf79219d5d62",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/MANativeAdVerticalMediaBannerView.nib": "8329f43960d3b72a4bf63e3d0e026e0ec26945f323dbe27fb9d875a5d94a7c36",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/OMLICENSE": "61e5c9893014e38ed58c96cf522078ca82c61a58be9d09705a5d49e5c653f7e2",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/de.lproj/Localizable.strings": "abb0c5e2afb26d6d511b70edd2f5c1539d6cb64e32316c350b03c32c7cd0def6",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/en.lproj/Localizable.strings": "67c2132cb7ed4a0a5bb91112fe110b4f6aaca34a899d93cffc8c1207ec5ea676",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/es.lproj/Localizable.strings": "e459719f544334d63d2bc9fde07d80af0e21a6f0f25a3794b2de28832e8e68ed",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/fr.lproj/Localizable.strings": "ca02a2d66042f83f13cf601e941221790d20217120f15273eb5060d34630e4a6",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ja.lproj/Localizable.strings": "83245be375a92486f360f89f59c4395125b8d87dd66d4d22cc9130b0e24a9c15",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/ko.lproj/Localizable.strings": "ba6b62952ae0c34606dd3c3c1182dcc2b36c6b981625718ee91771512d0ed362",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/mute.aiff": "5944ed3b29e814f111b7bb5b329ab00cfbf7617f447d98d00cbcf55f7851570c",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/omsdk-v1.4.12.js": "896cf905b2b562818da58e19e25b525083f18638f6b9b0d7c6aea411a9907585",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/zh-Hans.lproj/Localizable.strings": "3522d79d9a51806bf8a3ec30bde5bf5dff9157598179b1c84fc05ee9287b2d4d",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/zh-Hant.lproj/Localizable.strings": "44b30a430c159e42aa8c31ec992143ba0aba685d8593c18e351d760130cc932e",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/Info.plist": "951a02eaae040e80c672eb43266c28b6ff7509fc47bed4208127306292257483",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/PrivacyInfo.xcprivacy": "80e38881dbfb3b165f9ef35cfa43b28eac00d5b18058a127588c294193841c9f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/AppAuthCore_Privacy.bundle/Info.plist": "4ed3f94cc4892ea221ba4dd949adec82099ff1e3307e385cb73cda7c9dc5b3bb",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/AppAuthCore_Privacy.bundle/PrivacyInfo.xcprivacy": "5ade962faaea1eddbbdd06c4cf8a872cec554f64c55a00e00136004d378e1ced",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBAudienceNetwork.bundle/Info.plist": "088a7012c909efeb909d51b719ad4aa7df89981ef7b2bf5639068000ddd936f1",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBAudienceNetwork.bundle/PrivacyInfo.xcprivacy": "712c3ddf15ad20fc5d68c94da48c89bb6dde68c7bf57942492c61ac844b08657",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBLPromises_Privacy.bundle/Info.plist": "12820078a8cd25103b523a50bd3279a87c16aaa3e806fe70c5ebcf52da65f09f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FBLPromises_Privacy.bundle/PrivacyInfo.xcprivacy": "74b0cd72fc23c1ef302f22ee2753f61817cdc5af0ff7a7f2d0632b524fb8acea",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseAuth_Privacy.bundle/Info.plist": "1537762045f5e2176118e87ba9afc13aa1252101e3e65e1a586f33fd8355950d",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseAuth_Privacy.bundle/PrivacyInfo.xcprivacy": "04c162eafa49b2ced0663231a89cc9f5793506c802b68486719b5da0608aefd5",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreExtension_Privacy.bundle/Info.plist": "3ef3c43530a06a230c1df94943a31e4186dbc0307f4c37054855ee8b560acffe",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreExtension_Privacy.bundle/PrivacyInfo.xcprivacy": "1377eccedff8f8320f78040e9c9d3e17ecc0ea569594b56af0ef17be44197c7a",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreInternal_Privacy.bundle/Info.plist": "b7097581db85580cc3bdddab153dafc7f6d64e72d97d46db23b9edc36d010002",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCoreInternal_Privacy.bundle/PrivacyInfo.xcprivacy": "5b7fe979423dede3e08afc29a42f00f6086275dc548a84c29774235863eed3ef",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCore_Privacy.bundle/Info.plist": "4bec0f4f8ef4771646fdcaa7c988a08f418a0fbaa107477323176bee0b2429be",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCore_Privacy.bundle/PrivacyInfo.xcprivacy": "11e31f5f6b60e80ebd5901549fce5043f9af3e683f874022945000b405306c3f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCrashlytics_Privacy.bundle/Info.plist": "7e4fd7d6c82ce242a9115babb1b3b77933d0a9b3e68d66b73dc8b5f14ae297ae",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseCrashlytics_Privacy.bundle/PrivacyInfo.xcprivacy": "e9bcc6e9c7382bf506cadabe74cfd4ed155686806ba81c195a634b86aa5fcce0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseInstallations_Privacy.bundle/Info.plist": "49efa2be024117e217c698e320ddb3366ac67af26e38f759747ba4535a1f7bed",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseInstallations_Privacy.bundle/PrivacyInfo.xcprivacy": "cfbb3c4f76a66d53698bae91f7110c00f2148e6e6f13ad7d32592909bc010e51",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseMessaging_Privacy.bundle/Info.plist": "bab645bb3b388487213d6c2d29acfded23900e8e2fc7782134545f7d5656f720",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/FirebaseMessaging_Privacy.bundle/PrivacyInfo.xcprivacy": "98762096372ac27f5e888c7372d512f0d3f5cf3283c64006070f4cde1a72a071",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GADTMediumTemplateView.nib": "a910d1c9fc54fff427061156cb0a07dc57e11a6b01c4ce875d9482ad1815dd13",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GADTSmallTemplateView.nib": "5db2a460e99d78f20fbc9c6ea8876f771a53ef1360ab2d8c83e4d6ac201cf788",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMAppAuth_Privacy.bundle/Info.plist": "344b7332ab44273c65867c9f8b61f76ebdffd18740fd141a978b81c8cfa52945",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMAppAuth_Privacy.bundle/PrivacyInfo.xcprivacy": "5a9b8fc0cddb10201bb47cc2804b3f004c7251476622d25bfc4eb54ed46e1084",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMSessionFetcher_Core_Privacy.bundle/Info.plist": "f75b019a16b83e1df5c3023e4130417f978b348247b04f566bfc79c6e1c3463c",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GTMSessionFetcher_Core_Privacy.bundle/PrivacyInfo.xcprivacy": "3e4a93cbe86acef7dd7e063a28c849992f556e7f52cadc5f37c1e8b0e1b54686",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleDataTransport_Privacy.bundle/Info.plist": "a7e41a65e9c13fd060e82874500d7b7336ef5f944c36109dea25696d75a6fd53",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleDataTransport_Privacy.bundle/PrivacyInfo.xcprivacy": "cfbb3c4f76a66d53698bae91f7110c00f2148e6e6f13ad7d32592909bc010e51",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleMobileAdsResources.bundle/Info.plist": "3b9aeaab541c3a74544bbe3a00504b0e427d79315cbfa827f2ce31fc87ce2b79",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleMobileAdsResources.bundle/PrivacyInfo.xcprivacy": "69fb112582fc23fc06c635c961d262a3f7b4b5654d284787491de3000dadf9d2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleService-Info.plist": "e4f3ad5aa7e6ef3538e8e1cd5cf5be8e03bfb57cc22e3543dd4b10276818aa48",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/Info.plist": "292ce50f6949e1e4c3364cbc851ff445d9e8acb6a9080cb662c4d06298b49dde",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/PrivacyInfo.xcprivacy": "9300972853096f7d570d6c4a4bf7152a36c798e89c4f0d81d3b4c6b5dfaddfd0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/Roboto-Bold.ttf": "594d74a49e307be7cc9e1ee5f1023684e6820cf11bcc968bee590391e1ad5a5a",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ar.lproj/GoogleSignIn.strings": "b2cf9e8d9fc8ad0f9610b3e54ef0b8b494f021b7fa23acef6094b2205abe8c72",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ca.lproj/GoogleSignIn.strings": "33e88ff500dc3db2462e2ac933c11c28929fad351f57b3e6d62ac44610ad61aa",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/cs.lproj/GoogleSignIn.strings": "51da08624c2a79de47c81683b29e8a1344a47887563be256e1a77a67f6be3544",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/da.lproj/GoogleSignIn.strings": "e8261b9646d8ea89f7bf7a61a73aedce30fe51f68aa947ecbdfe8cc7e04db7da",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/de.lproj/GoogleSignIn.strings": "16cd413df1ab77e509df76f873a5a687ffcf360b1f150743d934c5ab3377c228",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/el.lproj/GoogleSignIn.strings": "9cc0c1349cf665fc773330d31a2628f600a43caa8b5c880b034a5667f8f0fabc",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/en.lproj/GoogleSignIn.strings": "c726a39c382e3f1a7c1f58ecf470f812da263749f930da87f7c0c3aa0ec648c2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/en_GB.lproj/GoogleSignIn.strings": "a2bd782a051b1a0b3c437ec6a31e9bf7f6778995a72acc32a0eb4a6399ad1ac2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/es.lproj/GoogleSignIn.strings": "501e44c4f3bb9c05b13297c60240fd0e16e79f8a63e6fb25198208dcb9421ca6",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/es_MX.lproj/GoogleSignIn.strings": "84d327c7197b7e549a1e9e8d8bb3e1cb02e0282c6323e5fb3dde0a47395af634",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/fi.lproj/GoogleSignIn.strings": "0e99f31a89ead8cc0fc72ad6abdcc84abd26f699265eeff61a889b3739da773b",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/fr.lproj/GoogleSignIn.strings": "b5513877acf2d79c8f0eaff7fcde4aa165f3abb01611b606112602fd443777ba",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/fr_CA.lproj/GoogleSignIn.strings": "f71092cf3fdba7e3e03d0d99748378b111947ca77a991830ddd24c39922b086e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/google.png": "299600c6c3f9960bc680b76e12317dd350d63a00ecbf5de478311bd943e986f6",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/google@2x.png": "6083050c6e2f77dc978e0e13d70700b430bb56b7a36b5a5c80a2733ac66072a6",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/google@3x.png": "56a3d9d4042a18a595a677ed6464dea105f1e8da32e07c3c5c8404af3aaa878c",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/he.lproj/GoogleSignIn.strings": "2ad0751665fa6100761107c40a08df049067400ed7d8d3fb42e3eec4567a60b0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/hi.lproj/GoogleSignIn.strings": "dd41d72736ab5f4a97d09ddb14c4800ee40b9bed2369d64f0c5ffab96a62461e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/hr.lproj/GoogleSignIn.strings": "240fb2998ce9e3a796a97906fc6f960a5611c0784dc73b16cae914faed0a5bfe",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/hu.lproj/GoogleSignIn.strings": "1a8445f99c68fbb05f3714f80f70ed088a62371b5b9885e312b4516f07d89e4f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/id.lproj/GoogleSignIn.strings": "3f246fe3732f813c93a04952365102a965a2248ae24e504f19531398588b2bf9",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/it.lproj/GoogleSignIn.strings": "4edc697cfa93600e8b6904d8722840355057bcb2e9c62426a97cecb642f633c8",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ja.lproj/GoogleSignIn.strings": "864dce623eb1a99beea7e72a1db9008610c403c97585704c1f780b2089381114",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ko.lproj/GoogleSignIn.strings": "021a829945c7e477b6e89a7cd9da683f5a29c0ffc0c012ee839baf50ef7ac013",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ms.lproj/GoogleSignIn.strings": "cb6c11480bf45c4b99ac1c2dcfdb67a5f82a799917a2630d4fb3e961357b5c93",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/nb.lproj/GoogleSignIn.strings": "02a0ce4613ef0c23ec3f161d59d5c493e9de626c81b04be93180a11a42caeab0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/nl.lproj/GoogleSignIn.strings": "49051865c00640eded4c359b1e820e11d1f191055dbb480591f9397d37ab5e0d",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pl.lproj/GoogleSignIn.strings": "cc1ef4452fcc98acbeed22950bd7f0a22a579e025a8f50c78fdbb600ed38e55d",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pt.lproj/GoogleSignIn.strings": "8789b92e1a14c1fd45f26619273c573d1b109e3cf400e56e80a5870baaebccee",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pt_BR.lproj/GoogleSignIn.strings": "8789b92e1a14c1fd45f26619273c573d1b109e3cf400e56e80a5870baaebccee",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/pt_PT.lproj/GoogleSignIn.strings": "56004febb8c697dfc2844b493b2d1fda94f7d71881c5e9f457dd50b434600e99",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ro.lproj/GoogleSignIn.strings": "af87451f0d584649dc36d5bd174adbf3aa7a490e7742272f2f7dd86e2262e3dd",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/ru.lproj/GoogleSignIn.strings": "1d379702a951ecf98843d957092a8c4afee3eefe866a6001643e3b77755dc5dc",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/sk.lproj/GoogleSignIn.strings": "3ff722865a3c2e610d9b84cb055d936320b83d66cafa24c8eb819368d41d5dac",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/sv.lproj/GoogleSignIn.strings": "101e93a9c6ce8a01e7a86337aa212f6881045411d6e45270179fef261861431e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/th.lproj/GoogleSignIn.strings": "f3b0083f38b726109db921a7904a98de4a5017b978c5b09a8480c5447a3c4fc7",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/tr.lproj/GoogleSignIn.strings": "0d49eb542849a6b7c689a72562f7204ca7451ce1be2beaad0743520d9bab80d2",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/uk.lproj/GoogleSignIn.strings": "261c6ee81d9ffeb32feefaa9e2bf490ca6dbfa56e788432a95b4a333e2c7aeef",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/vi.lproj/GoogleSignIn.strings": "5dd81023a8de776c88096b792e07363668e595dead4be8e5219bbbdd88398fe0",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/zh_CN.lproj/GoogleSignIn.strings": "5274434127f770963d92af8700a2b838cae491bb7608642d4ff2a517fb81d677",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleSignIn.bundle/zh_TW.lproj/GoogleSignIn.strings": "f0af4ba5c0339e860cb1b938679f8f4cd1f910401bbea187cfbb239ab13bb7e5",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleUtilities_Privacy.bundle/Info.plist": "1491564448722f7188ee82445db4e95131fd1344c3e349a01b2ad21d4a1b3dfa",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/GoogleUtilities_Privacy.bundle/PrivacyInfo.xcprivacy": "f81b5cf8f043662712eca9e9785767264cf190025fe7bdb49777296c068de53c",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/Info.plist": "9a73fbd110c62ec5f82ffbf2daf05d5797b2241b6cc3ce4ad115496f3b3ca870",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/IronSourcePrivacyInfo.bundle/Info.plist": "01eaa199da6ef2b27e39cf8ca85b53d96b68de1380008bf13e5f1b43cc8a3665",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/IronSourcePrivacyInfo.bundle/PrivacyInfo.xcprivacy": "112ff01cf511ae1aa85aa968b87e89c9523963b14a635a6069632991b3c6a341",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/PrivacyInfo.xcprivacy": "9eb23295b1aa4c96da85731fa0f7cb4693de1eca472fa382611b9d7fd4f17a8b",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/Promises_Privacy.bundle/Info.plist": "57846d1f0ac66efcd6b39376a0ab1824b9fc686ff68c660bc178bed2d02e2f55",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/Promises_Privacy.bundle/PrivacyInfo.xcprivacy": "74b0cd72fc23c1ef302f22ee2753f61817cdc5af0ff7a7f2d0632b524fb8acea",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/Info.plist": "e9f9eece6238eadd137ea151948a6d017e2671c77b53f07bc05b4484f6c06e50",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/PrivacyInfo.xcprivacy": "7f71483c998ffd2671dd5960e292e62a797201b9070f624a168ef9928267546e",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/omid-session-client-v1.js": "f15e5ce012c87bd32c15d71d2fd0b954b9b2fd9d5818d817b3820af3d93d5a35",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityAdsResources.bundle/omsdk-v1.js": "896cf905b2b562818da58e19e25b525083f18638f6b9b0d7c6aea411a9907585",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UserMessagingPlatformResources.bundle/Info.plist": "7c0cdf22c781dac4a67445da138806d0e248b0bda8ca39f0d4372124f8b21a3f",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UserMessagingPlatformResources.bundle/PrivacyInfo.xcprivacy": "45b7adb99fcd2d962a1c800fbfcc1325b57a7fa4165f416182323bb5ffe9c900",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/nanopb_Privacy.bundle/Info.plist": "1ac91189d4135e3b916b578c9001cb3caa4dbead26623e9794970787f4d33bc5",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/nanopb_Privacy.bundle/PrivacyInfo.xcprivacy": "729ba3cbd0f458c78cd61edf17350edafe0e34ca86e314ec64c8cb22ccd21b54",
+      "Payload/IDOLY PRIDE.app/Frameworks/libswift_Concurrency.dylib": "14fc9fb7e1bfe1e09e76fdeec0bd38150cf02ae77e048ca93978e6563bbe036d",
+      "Payload/IDOLY PRIDE.app/GoogleService-Info.plist": "e4f3ad5aa7e6ef3538e8e1cd5cf5be8e03bfb57cc22e3543dd4b10276818aa48",
+      "Payload/IDOLY PRIDE.app/IDOLY PRIDE": "3a05f12accae537bc4ebcd02f8e6b3c66a74c7a040c5872d4a33a318501873f1",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.png": "19d05cb72980a9e652e1a680792e9daaabf510277e800b854acc8ab93d1f8cd3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.storyboardc/Info.plist": "0c4bdfb10ab88fb30ae0ac81f4211a031624a678491af2a9803feffd316721c3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.storyboardc/UIViewController-UnityLaunchScreen-ViewController.nib": "c05da469ccf319c394038b8358a79ad618466c3d165a590a25dd3fc566a061fb",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPad.storyboardc/UnityLaunchScreen-ViewController-view-UnityLaunchScreen-RootView.nib": "502404d75a441d55b68404ccfbb2e78e84f4a2da2b5f3f332d199ac28232934d",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhone.storyboardc/Info.plist": "0c4bdfb10ab88fb30ae0ac81f4211a031624a678491af2a9803feffd316721c3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhone.storyboardc/UIViewController-UnityLaunchScreen-ViewController.nib": "c05da469ccf319c394038b8358a79ad618466c3d165a590a25dd3fc566a061fb",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhone.storyboardc/UnityLaunchScreen-ViewController-view-UnityLaunchScreen-RootView.nib": "cbae8f9bcbefc9f24ab0fc38140eee0e80fdbc250918fc10361210f9b70cd026",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhoneLandscape.png": "19d05cb72980a9e652e1a680792e9daaabf510277e800b854acc8ab93d1f8cd3",
+      "Payload/IDOLY PRIDE.app/LaunchScreen-iPhonePortrait.png": "19d05cb72980a9e652e1a680792e9daaabf510277e800b854acc8ab93d1f8cd3",
+      "Payload/IDOLY PRIDE.app/PkgInfo": "82502191c9484b04d685374f9879a0066069c49b8acae7a04b01d38d07e8eca0",
+      "iTunesArtwork": "ccd628fe6811c74bbd1c22cd54031024d553fdc6ebeef0792b7bbc0c262e545e"
+    },
+    "removed_only_signature_members": [
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeDirectory",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeRequirements",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeRequirements-1",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeResources",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/AppLovinSDKResources.bundle/_CodeSignature/CodeSignature",
+      "Payload/IDOLY PRIDE.app/Frameworks/AppLovinSDK.framework/_CodeSignature/CodeResources",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/_CodeSignature/CodeResources",
+      "Payload/IDOLY PRIDE.app/_CodeSignature/CodeResources"
+    ],
+    "added_only_members": [
+      "Payload/IDOLY PRIDE.app/Frameworks/IdolyPresentation.dylib",
+      "Payload/IDOLY PRIDE.app/IdolyFonts/IdolyFontSupport.json",
+      "Payload/IDOLY PRIDE.app/IdolyFonts/OFL-Pretendard.txt"
+    ],
+    "modified_only_members": [
+      "Payload/IDOLY PRIDE.app/Data/Managed/Metadata/global-metadata.dat",
+      "Payload/IDOLY PRIDE.app/Data/globalgamemanagers",
+      "Payload/IDOLY PRIDE.app/Data/resources.assets",
+      "Payload/IDOLY PRIDE.app/Data/sharedassets0.assets",
+      "Payload/IDOLY PRIDE.app/Frameworks/UnityFramework.framework/UnityFramework",
+      "Payload/IDOLY PRIDE.app/Info.plist"
+    ],
+    "all_original_member_modes_preserved": true,
+    "member_CRC_checked_at_EOF": true,
+    "Info_plist": {
+      "bundle_id": "game.qualiarts.idolypride.local",
+      "bundle_build": "156.9006",
+      "game_version": "6.1.1",
+      "exact_Info_plist_allowlist_verified": true
+    },
+    "metadata": {
+      "source_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+      "output_sha256": "8e2a72ba0146f5a99b1aebc1e8d73601ea105d59e404f044405b47a031f87ad8",
+      "literal_indexes": {
+        "api": 29808,
+        "octo": 29810,
+        "toast": 34989
+      },
+      "changed_indexes": [
+        29808,
+        29810,
+        34989
+      ],
+      "appended_bytes": 56,
+      "all_other_literals_and_sections_byte_identical": true,
+      "source_toast": "開催中のイベントはありません",
+      "output_toast": "There are no ongoing events.",
+      "production_metadata_patcher_used": false
+    },
+    "HTTP_Always": {
+      "source_sha256": "c1e01c54c9e6da21cfbffd30f0f602b387a67f5c03ccb12a71c2b9183d77d56c",
+      "output_sha256": "1c49cb988699c2344f0c1e186ad8cd1ba59984fe200cf243a7c524d07ba1644c",
+      "stage_sha256": {}
+    },
+    "Unity_bootstrap_gateways_load_command": {
+      "source_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+      "output_sha256": "7455d0faecdb7100794021ba3a2c49ada2ad391ed035eac66c787b7ea01ae6c8",
+      "stage_sha256": {
+        "bootstrap": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
+        "presentation": "6f284e80ac73c27c41547e4a907d7bfa14998badf41296a956a257715c170889"
+      },
+      "profile_prefixes_verified": 111,
+      "gateways_verified": 41,
+      "load_command_path": "@loader_path/../IdolyPresentation.dylib",
+      "original_code_not_moved": true,
+      "all_other_Unity_bytes_preserved": true,
+      "loader_zero_fill_slots_verified": true,
+      "font_Awake_original_function_bytes": 192
+    },
+    "expected_CSV": {
+      "language": "en",
+      "bytes": 227781,
+      "sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702",
+      "stock_keys": 4199,
+      "changed_keys": 3845,
+      "curated_keys": [],
+      "production_translation_module_used": false
+    },
+    "object_auditors": {
+      "font": {
+        "status": "PASS",
+        "platform": "ios",
+        "input_asset_bytes": 4572576,
+        "input_asset_sha256": "899ad32e8b6730252f84389cff657b6edb065a6716e32c52db258dca1a69ba62",
+        "output_asset_bytes": 9405944,
+        "output_asset_sha256": "174f23e290028dd19a9623dae9b6d2520e3f55276878d6679c0fbd822c9d8e82",
+        "original_objects": 21,
+        "output_objects": 25,
+        "original_19_other_objects_byte_identical": true,
+        "original_Font17_TMP21_Texture8_Material2_byte_identical": true,
+        "type_script_external_metadata_preserved": true,
+        "object_sha256_before": {
+          "1": {
+            "class_id": 150,
+            "bytes": 205,
+            "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+          },
+          "2": {
+            "class_id": 21,
+            "bytes": 1764,
+            "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+          },
+          "3": {
+            "class_id": 21,
+            "bytes": 268,
+            "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+          },
+          "4": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+          },
+          "5": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+          },
+          "6": {
+            "class_id": 21,
+            "bytes": 1752,
+            "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+          },
+          "7": {
+            "class_id": 21,
+            "bytes": 1768,
+            "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+          },
+          "8": {
+            "class_id": 28,
+            "bytes": 8340,
+            "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+          },
+          "9": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "10": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "11": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+          },
+          "12": {
+            "class_id": 28,
+            "bytes": 164,
+            "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+          },
+          "13": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+          },
+          "14": {
+            "class_id": 48,
+            "bytes": 8036,
+            "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+          },
+          "15": {
+            "class_id": 48,
+            "bytes": 14160,
+            "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+          },
+          "16": {
+            "class_id": 48,
+            "bytes": 11260,
+            "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+          },
+          "17": {
+            "class_id": 128,
+            "bytes": 269250,
+            "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+          },
+          "18": {
+            "class_id": 128,
+            "bytes": 3591562,
+            "sha256": "f8d3037d45d46caaa46a0f02899ca176300d928aa9cbe05957415ac8608f1a6d"
+          },
+          "19": {
+            "class_id": 114,
+            "bytes": 13720,
+            "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+          },
+          "20": {
+            "class_id": 114,
+            "bytes": 647500,
+            "sha256": "5a7ff93731061e781e1a36a96500909dd6edb8b6af893421bf272badb469d9f1"
+          },
+          "21": {
+            "class_id": 114,
+            "bytes": 1056,
+            "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+          }
+        },
+        "object_sha256_after": {
+          "1": {
+            "class_id": 150,
+            "bytes": 205,
+            "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+          },
+          "2": {
+            "class_id": 21,
+            "bytes": 1764,
+            "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+          },
+          "3": {
+            "class_id": 21,
+            "bytes": 268,
+            "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+          },
+          "4": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+          },
+          "5": {
+            "class_id": 21,
+            "bytes": 148,
+            "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+          },
+          "6": {
+            "class_id": 21,
+            "bytes": 1752,
+            "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+          },
+          "7": {
+            "class_id": 21,
+            "bytes": 1768,
+            "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+          },
+          "8": {
+            "class_id": 28,
+            "bytes": 8340,
+            "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+          },
+          "9": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "10": {
+            "class_id": 28,
+            "bytes": 128,
+            "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+          },
+          "11": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+          },
+          "12": {
+            "class_id": 28,
+            "bytes": 164,
+            "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+          },
+          "13": {
+            "class_id": 28,
+            "bytes": 152,
+            "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+          },
+          "14": {
+            "class_id": 48,
+            "bytes": 8036,
+            "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+          },
+          "15": {
+            "class_id": 48,
+            "bytes": 14160,
+            "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+          },
+          "16": {
+            "class_id": 48,
+            "bytes": 11260,
+            "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+          },
+          "17": {
+            "class_id": 128,
+            "bytes": 269250,
+            "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+          },
+          "18": {
+            "class_id": 128,
+            "bytes": 3591574,
+            "sha256": "3391698e37a79e3d5803614d57983c6b9e29ec60c0ff0175df5401bbe59d9b7f"
+          },
+          "19": {
+            "class_id": 114,
+            "bytes": 13720,
+            "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+          },
+          "20": {
+            "class_id": 114,
+            "bytes": 647512,
+            "sha256": "b473aa660a2156ca60ae9b0476b5f29f68d567e10a658307aaf94e603fbfa6bd"
+          },
+          "21": {
+            "class_id": 114,
+            "bytes": 1056,
+            "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+          },
+          "22": {
+            "class_id": 128,
+            "bytes": 3781882,
+            "sha256": "9fdceac933e264558c09cdf46cbb916aac5ca460067ebabe3d5e238c5f4cded4"
+          },
+          "23": {
+            "class_id": 114,
+            "bytes": 864,
+            "sha256": "86f35bbc666f76907ff9cb158b4d99ab5beb2eccdfb20a733a8e06da2f158c23"
+          },
+          "24": {
+            "class_id": 28,
+            "bytes": 1048724,
+            "sha256": "d0e2b23a1f60ff7f428c1bf15bc94e09433cc520968ed0a1a6ee5131038cdd60"
+          },
+          "25": {
+            "class_id": 21,
+            "bytes": 1772,
+            "sha256": "46f0cb2f37850f30ec897abdc5b2e1f92a327aa1066952ecc522d77cacf197a0"
+          }
+        },
+        "original_font17": {
+          "name": "SourceSansPro-Regular",
+          "bytes": 269108,
+          "font_data_sha256": "c9868de61ff2bab0b5a3a6d01c4b76f299459f08c6ae2f2c0383b4f9f6bedbf3",
+          "long_dash_glyphs": {
+            "U+2E3A": 1127,
+            "U+2E3B": 1128
+          },
+          "cmap": {
+            "glyph_count": 1896,
+            "format": 12,
+            "groups": 791,
+            "unicode_platform_maps_agree": true
+          }
+        },
+        "Korean_font22": {
+          "name": "Pretendard JP SemiBold",
+          "font_data_bytes": 3781740,
+          "font_data_sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+          "long_dash_glyphs": {
+            "U+2E3A": 0,
+            "U+2E3B": 0
+          },
+          "Hangul_syllables": 11172,
+          "Latin": 95,
+          "cmap": {
+            "glyph_count": 22936,
+            "format": 12,
+            "groups": 6862,
+            "unicode_platform_maps_agree": true
+          }
+        },
+        "original_TMP21": {
+          "name": "SourceSansPro-Regular SDF",
+          "source": [
+            0,
+            17
+          ],
+          "material": [
+            0,
+            2
+          ],
+          "atlases": [
+            [
+              0,
+              8
+            ]
+          ],
+          "characters": [
+            [
+              1,
+              11834,
+              1127,
+              1.0
+            ],
+            [
+              1,
+              11835,
+              1128,
+              1.0
+            ]
+          ]
+        },
+        "Korean_TMP23": {
+          "name": "Pretendard JP SemiBold SDF",
+          "source": [
+            0,
+            22
+          ],
+          "mode": 1,
+          "material": [
+            0,
+            25
+          ],
+          "material_hash": 3107587863,
+          "atlases": [
+            [
+              0,
+              24
+            ]
+          ],
+          "glyph_count": 0,
+          "character_count": 0,
+          "used_rects": [],
+          "free_rects": [
+            [
+              0,
+              0,
+              1023,
+              1023
+            ]
+          ],
+          "fallbacks": [],
+          "legacy_fallbacks": [],
+          "family": "Pretendard JP",
+          "style": "SemiBold",
+          "dimensions": [
+            1024,
+            1024,
+            5,
+            4165
+          ],
+          "creation_head": [
+            1,
+            34,
+            5,
+            0,
+            1024,
+            1024,
+            6
+          ],
+          "creation_sequence": "0020-007E,AC00-D7A3"
+        },
+        "Korean_material25": {
+          "name": "Pretendard JP SemiBold SDF Atlas Material",
+          "MainTex": [
+            0,
+            24
+          ],
+          "TextureWidth": 1024.0,
+          "TextureHeight": 1024.0,
+          "all_other_material_body_bytes_preserved": true
+        },
+        "Korean_texture24": {
+          "name": "Pretendard JP SemiBold SDF Atlas",
+          "width": 1024,
+          "height": 1024,
+          "format": 1,
+          "initial_pixels_all_zero": true,
+          "header_equal_except_dimensions_and_byte_lengths": true,
+          "stream_tail_equal_original": true
+        },
+        "Solis20_fallbacks_before": [
+          [
+            0,
+            19
+          ],
+          [
+            0,
+            21
+          ]
+        ],
+        "Solis20_fallbacks_after": [
+          [
+            0,
+            19
+          ],
+          [
+            0,
+            21
+          ],
+          [
+            0,
+            23
+          ]
+        ],
+        "legacy_Font18_fallbacks": [
+          [
+            0,
+            22
+          ]
+        ],
+        "all_other_legacy_and_Solis_bytes_unchanged": true,
+        "TMP_fallback_graph": {
+          "19": [],
+          "20": [
+            19,
+            21,
+            23
+          ],
+          "21": [],
+          "23": []
+        },
+        "acyclic_TMP_and_legacy_Font_graphs": true,
+        "independent_parser": "stdlib Unity v22 + typed TMP/Font/Texture/Material + OpenType cmap12",
+        "whole_asset_buffered": false,
+        "maximum_callback_read_bytes": 65536,
+        "no_font_patcher_imported_or_called": true,
+        "UnityPy_imported": false,
+        "actual_device_verified": false,
+        "auditor_sha256": "b999242cb42c61a27526dfcb8c36afd18bc0143fca6ddafd6b66da591f54aaab",
+        "seconds": 0.453539,
+        "address_space_limit_mib": 384,
+        "peak_RSS_KiB": 49400,
+        "process_memory": {
+          "VmPeak": "75360 kB",
+          "VmSize": "51908 kB",
+          "VmHWM": "49400 kB",
+          "VmRSS": "25136 kB"
+        },
+        "RLIMIT_AS_actual": [
+          402653184,
+          402653184
+        ],
+        "cgroup_memory_events": "low 0\nhigh 0\nmax 282062\noom 6\noom_kill 2\noom_group_kill 0\n"
+      },
+      "static_ui": {
+        "schema": 1,
+        "status": "PASS_INDEPENDENT_ACTUAL_PACKAGE_STATIC_UI",
+        "platform": "ios",
+        "language": "en",
+        "profile_sha256": "7175b060b21334dbdc1604fdc2f873ee4e042b0af1a46e4d28cfddf66cc6c147",
+        "expected_csv_sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702",
+        "expected_csv_bytes": 227781,
+        "original_package": "/workspace/shared/artifacts/idolypride-6.1.1-decrypted.ipa",
+        "actual_package": "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+        "reviewed_member_count": 1,
+        "totals": {
+          "static_labels": 1684,
+          "original_others": 417136,
+          "csv": 1,
+          "sprites": 0,
+          "story_fade_references": 0
+        },
+        "members": [
+          {
+            "member": "Data/resources.assets",
+            "input_bytes": 65784784,
+            "input_sha256": "decc41f679e31e4ff9708bea2f66b9bcbd53ff560aeeaa4c38092550c356a38b",
+            "output_bytes": 65765360,
+            "output_sha256": "71a7464ad9824e9dfc7c5bd07a84cab2018b55849e6a0a302286944f159303b9",
+            "counts": {
+              "static_labels": 1684,
+              "original_others": 417136,
+              "csv": 1,
+              "sprites": 0,
+              "story_fade_references": 0
+            },
+            "source_object_count": 418821,
+            "output_object_count": 418821,
+            "appended_textures": 0,
+            "image_object_hashes": [],
+            "all_original_non_declared_payloads_byte_identical": true,
+            "all_non_m_Text_label_bytes_identical": true,
+            "original_type_script_external_metadata_preserved": true,
+            "object_offsets_and_alignment_verified": true,
+            "actual_member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+          }
+        ],
+        "production_modules_imported": false,
+        "UnityPy_loaded": false,
+        "new_runtime_hooks_required": false,
+        "image_pixels_and_render_semantics_verified_here": false,
+        "font_sharedassets_verified_here": false,
+        "physical_device_or_Mac_play_verified": false,
+        "seconds": 3.4553740809787996
+      },
+      "images": {
+        "status": "NOT_APPLICABLE",
+        "reason": "Japanese/English preserve original sprite data"
+      }
+    },
+    "private_font_scratch": "/dev/shm/idoly-v0330-work/client-preparation/qa-ios-en-final-r1/independent-full-client-review-font.assets",
+    "root_controls_scratch_retirement": true,
+    "PlayCover_resigning_required": true,
+    "physical_device_or_Mac_play_verified": false,
+    "server_rebuilt": false,
+    "network_or_emulator_actions": false,
+    "resource_before": {
+      "maximum": 17179869184,
+      "current": 16038342656,
+      "direct_headroom": 1141526528,
+      "root_free": 158191616,
+      "oom_kill": 2
+    },
+    "resource_after": {
+      "maximum": 17179869184,
+      "current": 16204840960,
+      "direct_headroom": 975028224,
+      "root_free": 158191616,
+      "oom_kill": 2
+    },
+    "seconds": 8.103490773006342
+  },
+  "actual_payload_read_or_hashed_by_materializer": false
+}

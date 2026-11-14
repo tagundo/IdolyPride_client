@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "branch": "downloads/client-translation-ios-en-v0.3.30-source-a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+      "sha256": "c537aeab942056498bffcc81338cf4d6494070c1b4124b285fef0926e7aee1da",
+      "bytes": 149105654,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "cca97f6af6ea8bc491d2014348e13d48c0761aa5",
+  "tree": "9c941ce36ea2e80620da9e6cdac38d048181dc9a"
+}

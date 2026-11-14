@@ -1,0 +1,15 @@
+{
+  "status": "PASS",
+  "HTTP_status": 206,
+  "Content_Range": "bytes 0-4095/149146718",
+  "actual_attachment_filename": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+  "Content_Disposition": "attachment; filename=\"IdolyPride-6.1.1-Local-PlayCover-ko.ipa\"",
+  "prefix_bytes": 4096,
+  "prefix_sha256": "b3d86204523fe9b9dd5b2ec05a6a8514b453b2608e89a45726fb9304261930bc",
+  "local_prefix_sha256": "b3d86204523fe9b9dd5b2ec05a6a8514b453b2608e89a45726fb9304261930bc",
+  "no_authentication_headers_sent": true,
+  "complete_remote_SHA256_already_verified": true,
+  "anonymous_full_HTTP200_verified": true,
+  "anonymous_full_bytes": 149146718,
+  "anonymous_full_sha256": "e3b15238a1beabc9e20307b58fadf9a0fa5e0ef21c4effd949e4f63b0a1d7f6e"
+}

@@ -1,0 +1,654 @@
+{
+  "stage": "local-api-bootstrap-presentation-client",
+  "source_sha256": "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848",
+  "endpoint": "http://127.0.0.1:50051",
+  "game_version": "6.1.1",
+  "source_build": "156",
+  "bundle_build": "156.9006",
+  "bundle_id": "game.qualiarts.idolypride.local",
+  "display_name": "아이프라 로컬",
+  "url_schemes": [
+    "game.qualiarts.idolypride.local"
+  ],
+  "metadata": {
+    "metadata_version": 31,
+    "endpoint": "http://127.0.0.1:50051",
+    "literal_indexes": [
+      29808
+    ],
+    "inserted_bytes": 24,
+    "input_sha256": "c2aca958f0ae8e6ca3ab601e1cd86b7f5c4376ee2404a993075d257a00a630eb",
+    "output_sha256": "28c722d379ebcfda619a41610042e90b3e8720de2d0a5492b7e534d8883908a7"
+  },
+  "octo_metadata": {
+    "literal_index": 29810,
+    "row_offset": 238736,
+    "value_offset": 1433442,
+    "origin": "http://127.0.0.1:8080/",
+    "metadata_layout_preserved": true,
+    "input_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+    "output_sha256": "c2aca958f0ae8e6ca3ab601e1cd86b7f5c4376ee2404a993075d257a00a630eb"
+  },
+  "ui_display_literals": {
+    "schema": 1,
+    "policy": "native-display-literals-v1",
+    "platform": "ios",
+    "language": "ja",
+    "audited_original_metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+    "audited_display_literal_indexes": [
+      34989
+    ],
+    "source_text": "開催中のイベントはありません",
+    "translated_text": "開催中のイベントはありません",
+    "display_method": "Solis.OutGame.MenuButtonUtility.<OnClickAsync>d__7.MoveNext",
+    "display_call_rva": "0x2bb2e44",
+    "callee": "Solis.Common.ToastManager.Show",
+    "generic_dictionary_match_all": false,
+    "all_other_literals_and_metadata_sections_unchanged": true,
+    "input_bound_to_preceding_producer": true,
+    "runtime_translation_work": false,
+    "changed_indexes": [],
+    "missing_indexes": [],
+    "inserted_bytes": 0,
+    "input_sha256": "28c722d379ebcfda619a41610042e90b3e8720de2d0a5492b7e534d8883908a7",
+    "output_sha256": "28c722d379ebcfda619a41610042e90b3e8720de2d0a5492b7e534d8883908a7"
+  },
+  "unity_http_transport": {
+    "member": "Data/globalgamemanagers",
+    "unity_version": "2022.3.57f1",
+    "serialized_file_version": 22,
+    "player_settings_class_id": 129,
+    "player_settings_path_id": 1,
+    "field": "insecureHttpOption",
+    "field_offset": 2120,
+    "original_value": 0,
+    "value": 2,
+    "input_sha256": "c1e01c54c9e6da21cfbffd30f0f602b387a67f5c03ccb12a71c2b9183d77d56c",
+    "output_sha256": "1c49cb988699c2344f0c1e186ad8cd1ba59984fe200cf243a7c524d07ba1644c"
+  },
+  "source_unity": {
+    "architecture": "arm64",
+    "decrypted": true,
+    "encryption_commands": [
+      {
+        "offset": 16384,
+        "bytes": 158875648,
+        "cryptid": 0
+      }
+    ],
+    "sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
+  },
+  "output_unity": {
+    "architecture": "arm64",
+    "decrypted": true,
+    "encryption_commands": [
+      {
+        "offset": 16384,
+        "bytes": 158875648,
+        "cryptid": 0
+      }
+    ],
+    "sha256": "7455d0faecdb7100794021ba3a2c49ada2ad391ed035eac66c787b7ea01ae6c8"
+  },
+  "main_executable": {
+    "architecture": "arm64",
+    "decrypted": true,
+    "encryption_commands": [
+      {
+        "offset": 16384,
+        "bytes": 16384,
+        "cryptid": 0
+      }
+    ],
+    "sha256": "3a05f12accae537bc4ebcd02f8e6b3c66a74c7a040c5872d4a33a318501873f1"
+  },
+  "native_replacement": false,
+  "bootstrap_patch": {
+    "client_version": "6.1.1",
+    "platform": "ios",
+    "input_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+    "output_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
+    "patches": [
+      {
+        "method": "SeedWrapper.IsInitialized",
+        "rva": "0x1e38f6c",
+        "file_offset": "0x1e38f6c",
+        "action": "true",
+        "original_hex": "f44fbea9fd7b01a9",
+        "patched_hex": "20008052c0035fd6"
+      },
+      {
+        "method": "SeedWrapper.SeedId",
+        "rva": "0x1e3928c",
+        "file_offset": "0x1e3928c",
+        "action": "host",
+        "original_hex": "f44fbea9",
+        "patched_hex": "95ca0014"
+      },
+      {
+        "method": "SeedWrapper.InitializeAsync",
+        "rva": "0x1e39480",
+        "file_offset": "0x1e39480",
+        "action": "completed_error",
+        "original_hex": "ff4302d1f85f05a9f65706a9",
+        "patched_hex": "1f7d00a91f0900f9c0035fd6"
+      },
+      {
+        "method": "SeedWrapper.RefreshSeedIdAsync",
+        "rva": "0x1e39560",
+        "file_offset": "0x1e39560",
+        "action": "completed_void",
+        "original_hex": "ffc301d1f65704a9f44f05a9",
+        "patched_hex": "000080d2010080d2c0035fd6"
+      },
+      {
+        "method": "AccountManager.IsCreatedUser",
+        "rva": "0x298d8e8",
+        "file_offset": "0x298d8e8",
+        "action": "true",
+        "original_hex": "fd7bbfa9fd030091",
+        "patched_hex": "20008052c0035fd6"
+      },
+      {
+        "method": "AccountManager.GetFirebaseIdTokenAsync",
+        "rva": "0x2990060",
+        "file_offset": "0x2990060",
+        "action": "completed_token",
+        "original_hex": "ff4302d1f85f05a9f65706a9f44f07a9fd7b08a9fd030291f40300aaf30308aa",
+        "patched_hex": "f37bbfa9f30308aae0031faa1d6fd3977f0200a97f0a00f9f37bc1a8c0035fd6"
+      }
+    ],
+    "device_verified": false,
+    "token": "Api.GetHost managed URL used only as an offline placeholder"
+  },
+  "presentation_patch": {
+    "patch": {
+      "schema": 1,
+      "platform": "ios",
+      "input_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
+      "output_sha256": "6f284e80ac73c27c41547e4a907d7bfa14998badf41296a956a257715c170889",
+      "profile_sha256": "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510",
+      "profile_header_sha256": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3",
+      "hook_count": 41,
+      "call_entry_count": 111,
+      "runtime_executable_memory_writes": false,
+      "existing_section_layout_or_bss_modified": false,
+      "runtime_verified": false
+    },
+    "load_command": {
+      "path": "@loader_path/../IdolyPresentation.dylib",
+      "load_command_offset": 12008,
+      "load_command_size": 64,
+      "first_text_section_offset": 16384,
+      "code_moved": false
+    },
+    "library": {
+      "architecture": "arm64",
+      "decrypted": true,
+      "encryption_commands": [
+        {
+          "offset": 16384,
+          "bytes": 81920,
+          "cryptid": 0
+        }
+      ],
+      "sha256": "85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5"
+    },
+    "library_bytes": 157520,
+    "library_member": "Payload/IDOLY PRIDE.app/Frameworks/IdolyPresentation.dylib",
+    "plan_sha256": "abab2208dd956df53c6391bd92c935357f2c03637d74ace59a25eff8ad7fe212",
+    "bootstrap_composed": true,
+    "build_receipt": {
+      "name": "IdolyPresentation.build.json",
+      "sha256": "28dbab78dd6a4c528132daf6ecde6db00007a127c1b7f8cb5ee59820aaa460f0"
+    },
+    "owned_native_buffer_reused": true,
+    "device_verified": false
+  },
+  "font_support": {
+    "schema": 2,
+    "policy": "hangul-font-v2-original-dashes",
+    "platform": "ios",
+    "input_asset_sha256": "899ad32e8b6730252f84389cff657b6edb065a6716e32c52db258dca1a69ba62",
+    "input_asset_bytes": 4572576,
+    "output_asset_sha256": "174f23e290028dd19a9623dae9b6d2520e3f55276878d6679c0fbd822c9d8e82",
+    "output_asset_bytes": 9405944,
+    "font": {
+      "family": "Pretendard JP SemiBold",
+      "bytes": 3781740,
+      "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314",
+      "modern_hangul_syllables": 11172,
+      "required_modern_hangul_syllables": 11172,
+      "basic_latin_characters": 95,
+      "required_basic_latin_characters": 95,
+      "unicode_format": 12,
+      "unicode_maps_agree": true,
+      "font_bytes_modified": false,
+      "license": "OFL-1.1"
+    },
+    "Font_path_id": 22,
+    "legacy_Font_path_id": 18,
+    "TMP_FontAsset": {
+      "path_id": 23,
+      "name": "Pretendard JP SemiBold SDF",
+      "source_Font_reference": {
+        "file_id": 0,
+        "path_id": 22
+      },
+      "atlas_population_mode": 1,
+      "atlas_population_mode_name": "Dynamic",
+      "initial_glyph_and_character_tables_empty": true,
+      "fallback_FontAsset_references": [],
+      "atlas_width": 1024,
+      "atlas_height": 1024,
+      "creation_atlas_width": 1024,
+      "creation_atlas_height": 1024,
+      "atlas_path_id": 24,
+      "material_path_id": 25
+    },
+    "original_TMP_FontAsset": {
+      "path_id": 21,
+      "bytes": 1056,
+      "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1",
+      "source_Font_reference": {
+        "file_id": 0,
+        "path_id": 17
+      },
+      "atlas_population_mode": 1,
+      "atlas_population_mode_name": "Dynamic",
+      "source_reference_offset": 128,
+      "population_mode_offset": 140,
+      "all_serialized_bytes_unchanged": true
+    },
+    "original_long_dash_font_retained": true,
+    "original_TMP_long_dash_asset_retained": true,
+    "original_long_dash_glyphs": {
+      "U+2E3A": 1127,
+      "U+2E3B": 1128
+    },
+    "independent_atlas_and_material": true,
+    "atlas_format": "Alpha8",
+    "atlas_pixel_bytes": 1048576,
+    "material_texture_width": 1024,
+    "material_texture_height": 1024,
+    "Solis_fallback_references": [
+      {
+        "file_id": 0,
+        "path_id": 19
+      },
+      {
+        "file_id": 0,
+        "path_id": 21
+      },
+      {
+        "file_id": 0,
+        "path_id": 23
+      }
+    ],
+    "legacy_fallback_references": [
+      {
+        "file_id": 0,
+        "path_id": 22
+      }
+    ],
+    "legacy_Japanese_font_data_unchanged": true,
+    "acyclic_fallback_graph": true,
+    "object_count": 25,
+    "original_object_count": 21,
+    "other_object_count": 19,
+    "all_other_objects_byte_identical": true,
+    "original_atlas_and_material_byte_identical": true,
+    "type_and_external_reference_metadata_unchanged": true,
+    "object_sha256_before": {
+      "1": {
+        "class_id": 150,
+        "bytes": 205,
+        "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+      },
+      "2": {
+        "class_id": 21,
+        "bytes": 1764,
+        "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+      },
+      "3": {
+        "class_id": 21,
+        "bytes": 268,
+        "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+      },
+      "4": {
+        "class_id": 21,
+        "bytes": 148,
+        "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+      },
+      "5": {
+        "class_id": 21,
+        "bytes": 148,
+        "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+      },
+      "6": {
+        "class_id": 21,
+        "bytes": 1752,
+        "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+      },
+      "7": {
+        "class_id": 21,
+        "bytes": 1768,
+        "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+      },
+      "8": {
+        "class_id": 28,
+        "bytes": 8340,
+        "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+      },
+      "9": {
+        "class_id": 28,
+        "bytes": 128,
+        "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+      },
+      "10": {
+        "class_id": 28,
+        "bytes": 128,
+        "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+      },
+      "11": {
+        "class_id": 28,
+        "bytes": 152,
+        "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+      },
+      "12": {
+        "class_id": 28,
+        "bytes": 164,
+        "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+      },
+      "13": {
+        "class_id": 28,
+        "bytes": 152,
+        "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+      },
+      "14": {
+        "class_id": 48,
+        "bytes": 8036,
+        "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+      },
+      "15": {
+        "class_id": 48,
+        "bytes": 14160,
+        "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+      },
+      "16": {
+        "class_id": 48,
+        "bytes": 11260,
+        "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+      },
+      "17": {
+        "class_id": 128,
+        "bytes": 269250,
+        "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+      },
+      "18": {
+        "class_id": 128,
+        "bytes": 3591562,
+        "sha256": "f8d3037d45d46caaa46a0f02899ca176300d928aa9cbe05957415ac8608f1a6d"
+      },
+      "19": {
+        "class_id": 114,
+        "bytes": 13720,
+        "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+      },
+      "20": {
+        "class_id": 114,
+        "bytes": 647500,
+        "sha256": "5a7ff93731061e781e1a36a96500909dd6edb8b6af893421bf272badb469d9f1"
+      },
+      "21": {
+        "class_id": 114,
+        "bytes": 1056,
+        "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+      }
+    },
+    "object_sha256_after": {
+      "1": {
+        "class_id": 150,
+        "bytes": 205,
+        "sha256": "2125b1c8b126faddd89338b5caa2f4fcfc70a2aa4db10e4403361d0d9562aa43"
+      },
+      "2": {
+        "class_id": 21,
+        "bytes": 1764,
+        "sha256": "d6a6a0cd8b7fe8ea4e67c2e4f4645129f949367537902d081cc714a910d70d22"
+      },
+      "3": {
+        "class_id": 21,
+        "bytes": 268,
+        "sha256": "c177fb7a896edccf8c55dc4b97a6e76332618b90f265021dcaa3b631b3b6080e"
+      },
+      "4": {
+        "class_id": 21,
+        "bytes": 148,
+        "sha256": "679e97170188ff284de35da22fc9004c203753840ce8200d1ea75f8b9774e4e0"
+      },
+      "5": {
+        "class_id": 21,
+        "bytes": 148,
+        "sha256": "d5c2cccb47df8f9a3b7843c6b3a3e4458807db0cff1c96e6bc90a1a450bb40b1"
+      },
+      "6": {
+        "class_id": 21,
+        "bytes": 1752,
+        "sha256": "a07f3d257432643da7456badb43e7ae7a681c79e0fe105aa597eea53127de491"
+      },
+      "7": {
+        "class_id": 21,
+        "bytes": 1768,
+        "sha256": "b864090fef81a1d9c885e80d76a5400c7de28ce4829ac744337c408f48eae765"
+      },
+      "8": {
+        "class_id": 28,
+        "bytes": 8340,
+        "sha256": "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
+      },
+      "9": {
+        "class_id": 28,
+        "bytes": 128,
+        "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+      },
+      "10": {
+        "class_id": 28,
+        "bytes": 128,
+        "sha256": "d638c2a961d1315449fca13356a3bdc3435da621941062f959f71b980e108e07"
+      },
+      "11": {
+        "class_id": 28,
+        "bytes": 152,
+        "sha256": "cd6e291daed28a282215425324d651cad632aea8b5438baf7e23a05a97022749"
+      },
+      "12": {
+        "class_id": 28,
+        "bytes": 164,
+        "sha256": "f89d2fbeeeb073b48b81368dcc1f3383cf236ff6c6eaf9b3203a2a75be57aecc"
+      },
+      "13": {
+        "class_id": 28,
+        "bytes": 152,
+        "sha256": "73be5fa4e7460187de8d7b7de4df4a2eeb090afc68d0ce28a6b360bd948d63bc"
+      },
+      "14": {
+        "class_id": 48,
+        "bytes": 8036,
+        "sha256": "bab864522c4399a56a3f996c02100fd096f0c238352bae64bc2ec723e5e399fa"
+      },
+      "15": {
+        "class_id": 48,
+        "bytes": 14160,
+        "sha256": "78e1c676b3f05eb41b4ef59468b0dfaddf34e936e18f6f97199b43fc2d4e70aa"
+      },
+      "16": {
+        "class_id": 48,
+        "bytes": 11260,
+        "sha256": "ccba65f44c8ab4b79e639e638fa31601cb42226c583dcf9bea7de4b0039ec5d0"
+      },
+      "17": {
+        "class_id": 128,
+        "bytes": 269250,
+        "sha256": "8f44291449f24fb70e217bc3ea5a1fdc233aea35c4a96af2341cc9465e3ed922"
+      },
+      "18": {
+        "class_id": 128,
+        "bytes": 3591574,
+        "sha256": "3391698e37a79e3d5803614d57983c6b9e29ec60c0ff0175df5401bbe59d9b7f"
+      },
+      "19": {
+        "class_id": 114,
+        "bytes": 13720,
+        "sha256": "607058cb75d4d68f7d254e0368f112137ae0a7f41ac78adccb0fc4ae8611780c"
+      },
+      "20": {
+        "class_id": 114,
+        "bytes": 647512,
+        "sha256": "b473aa660a2156ca60ae9b0476b5f29f68d567e10a658307aaf94e603fbfa6bd"
+      },
+      "21": {
+        "class_id": 114,
+        "bytes": 1056,
+        "sha256": "55a301be92b4dbc93e9dfe603e3b39c37b29f34cdcbb09fc91544ecaec0184b1"
+      },
+      "22": {
+        "class_id": 128,
+        "bytes": 3781882,
+        "sha256": "9fdceac933e264558c09cdf46cbb916aac5ca460067ebabe3d5e238c5f4cded4"
+      },
+      "23": {
+        "class_id": 114,
+        "bytes": 864,
+        "sha256": "86f35bbc666f76907ff9cb158b4d99ab5beb2eccdfb20a733a8e06da2f158c23"
+      },
+      "24": {
+        "class_id": 28,
+        "bytes": 1048724,
+        "sha256": "d0e2b23a1f60ff7f428c1bf15bc94e09433cc520968ed0a1a6ee5131038cdd60"
+      },
+      "25": {
+        "class_id": 21,
+        "bytes": 1772,
+        "sha256": "46f0cb2f37850f30ec897abdc5b2e1f92a327aa1066952ecc522d77cacf197a0"
+      }
+    },
+    "UnityPy": "1.25.4",
+    "physical_device_verified": false,
+    "input_members": [
+      "Payload/IDOLY PRIDE.app/Data/sharedassets0.assets"
+    ],
+    "output_members": {
+      "Payload/IDOLY PRIDE.app/Data/sharedassets0.assets": {
+        "bytes": 9405944,
+        "sha256": "174f23e290028dd19a9623dae9b6d2520e3f55276878d6679c0fbd822c9d8e82"
+      }
+    },
+    "notice_members": {
+      "Payload/IDOLY PRIDE.app/IdolyFonts/IdolyFontSupport.json": {
+        "bytes": 3268,
+        "sha256": "2d653c1b0e9eb64d6e288f680ec41884961d49173dc45d6df576331e4ded4cc1"
+      },
+      "Payload/IDOLY PRIDE.app/IdolyFonts/OFL-Pretendard.txt": {
+        "bytes": 4816,
+        "sha256": "82e9c8a4b203261f10ddba1296422d64914ff3d4b7bd8a12896d03f0f088d70a"
+      }
+    }
+  },
+  "ui_language": "ja",
+  "ui_translation": {
+    "translation": {
+      "language": "ja",
+      "input_sha256": "16cf848f7f677f85262b7ff10d787fc8444c2358a5d81d46dc67d0ff573be8c3",
+      "output_sha256": "16cf848f7f677f85262b7ff10d787fc8444c2358a5d81d46dc67d0ff573be8c3",
+      "bytes": 244413,
+      "source_ui_keys": 4199,
+      "changed_keys_count": 0
+    },
+    "output_asset_bytes": 65784784,
+    "output_asset_sha256": "decc41f679e31e4ff9708bea2f66b9bcbd53ff560aeeaa4c38092550c356a38b",
+    "policy": "fixed-ui-csv-in-combined-asset-v2"
+  },
+  "static_ui_translation": {
+    "schema": 1,
+    "policy": "prebuilt-static-solistext-v1",
+    "platform": "ios",
+    "language": "ja",
+    "input_asset_bytes": 65784784,
+    "input_asset_sha256": "decc41f679e31e4ff9708bea2f66b9bcbd53ff560aeeaa4c38092550c356a38b",
+    "output_asset_bytes": 65784784,
+    "output_asset_sha256": "decc41f679e31e4ff9708bea2f66b9bcbd53ff560aeeaa4c38092550c356a38b",
+    "input_metadata_sha256": "4ba38495615f9bfd9a3534dc08235bf4a61f4693c1dd77147a4667062ef96d6e",
+    "output_metadata_sha256": "4ba38495615f9bfd9a3534dc08235bf4a61f4693c1dd77147a4667062ef96d6e",
+    "source_profile_sha256": "7175b060b21334dbdc1604fdc2f873ee4e042b0af1a46e4d28cfddf66cc6c147",
+    "changed_static_texts": 0,
+    "changes": [],
+    "source_object_count": 418821,
+    "output_object_count": 418821,
+    "image_object_replacements": 0,
+    "appended_texture_objects": 0,
+    "shifted_object_offsets": 0,
+    "original_other_payload_bytes_sha256": "aaa0e1ce5263b8f206c5d0b84b2831c9fa9bb1f769bd930fdbd481b205591ba9",
+    "all_other_object_payloads_unchanged": true,
+    "existing_type_and_external_metadata_unchanged": true,
+    "runtime_translation_hooks_added": false,
+    "ui_translation": {
+      "language": "ja",
+      "input_sha256": "16cf848f7f677f85262b7ff10d787fc8444c2358a5d81d46dc67d0ff573be8c3",
+      "output_sha256": "16cf848f7f677f85262b7ff10d787fc8444c2358a5d81d46dc67d0ff573be8c3",
+      "bytes": 244413,
+      "source_ui_keys": 4199,
+      "changed_keys_count": 0
+    },
+    "images": {
+      "schema": 1,
+      "policy": "korean-static-sprites-v1",
+      "platform": "ios",
+      "language": "ja",
+      "source": {
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f",
+        "data_terms": "NOASSERTION"
+      },
+      "sprites": [],
+      "translated_sprites": 0,
+      "runtime_image_hooks": false,
+      "atlas_pixels_modified": false,
+      "original_layout_preserved": true,
+      "texture_format": "RGBA32",
+      "lossy_recompression": false,
+      "private_sprite_render_data_keys": true
+    },
+    "device_playback_verified": false
+  },
+  "static_ui_images": {
+    "schema": 1,
+    "policy": "korean-static-sprites-v1",
+    "platform": "ios",
+    "language": "ja",
+    "source": {
+      "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+      "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f",
+      "data_terms": "NOASSERTION"
+    },
+    "sprites": [],
+    "translated_sprites": 0,
+    "runtime_image_hooks": false,
+    "atlas_pixels_modified": false,
+    "original_layout_preserved": true,
+    "texture_format": "RGBA32",
+    "lossy_recompression": false,
+    "private_sprite_render_data_keys": true
+  },
+  "signing": "Import in PlayCover, which must re-sign the app and embedded binaries",
+  "device_verified": false,
+  "scope": "API/resource routing, HTTP transport, selected bootstrap hooks, optional presentation bridge and fixed offline UI data; gameplay/device execution remains unverified",
+  "output_sha256": "5f74b06961f6968392be1cce19e613d04c653fc53a6188fcbb95703fdb048986",
+  "output_bytes": 149294669,
+  "verification": {
+    "zip_crc": true,
+    "modified_members": true,
+    "isolated_bundle_identity": true,
+    "stale_signatures_removed": true
+  }
+}

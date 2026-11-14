@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "kind": "ios-en",
+  "name": "IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+  "bytes": 149105654,
+  "sha256": "c537aeab942056498bffcc81338cf4d6494070c1b4124b285fef0926e7aee1da",
+  "published_commit": "cca97f6af6ea8bc491d2014348e13d48c0761aa5",
+  "published_branch": "downloads/client-translation-ios-en-v0.3.30-source-a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_verified": true,
+  "anonymous_full_HTTP200_verified": false,
+  "actual_attachment_filename": "IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+  "final_local_SHA_verified": true,
+  "all_visible_handles_closed_before_retirement": true,
+  "only_owned_derived_client_retired": true,
+  "publication_manifest_sha256": "3d5ba3d3dafa60633ef147056a1b0ce398ab5179a79037200330b4c75673f900",
+  "independent_QA_sha256": "6e6966bb1605158c2deb41e2ca094bf1a3f52fab6d0e2d89f3f0e10c5cb67ef7",
+  "producer_receipt_sha256": "a641eab974a468b0ac916c52601e5268d26af6dde4fd41a8880fd9d0e1bfc56f",
+  "provenance_sha256": "70a7f0f4292aacbe1ff2ddcf0bf66408030ea16964e86ba35378bc17026d04a3",
+  "native_and_feature_retained": true,
+  "private_grant_mode": "0600",
+  "actual_device_execution_verified": false,
+  "resource_budget_after": {
+    "direct_headroom": 1138294784,
+    "root_free": 158191616,
+    "tmpfs_free": 8760344576,
+    "oom_kill": 2
+  }
+}

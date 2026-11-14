@@ -1,0 +1,71 @@
+{
+  "schema": 1,
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "source_epoch": 1794628262,
+  "stage": "ios_client",
+  "language": "en",
+  "command": [
+    "/workspace/.setup/venvs/toolkit/bin/python",
+    "-B",
+    "/workspace/IdolyPride_client/tools/patch_ios_client.py",
+    "/workspace/shared/artifacts/idolypride-6.1.1-decrypted.ipa",
+    "--output",
+    "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+    "--presentation-library",
+    "/dev/shm/idoly-v0330-work/client-preparation/native-ios/IdolyPresentation.dylib",
+    "--presentation-plan",
+    "/workspace/IdolyPride_client/client-presentation/ios/hook-plan.json",
+    "--font-file",
+    "/workspace/hoshimi-localify-ios/PretendardJP-SemiBold.otf",
+    "--font-license-file",
+    "/workspace/IdolyPride_client/client-presentation/licenses/Pretendard-OFL.txt",
+    "--ui-language",
+    "en",
+    "--ui-csv-file",
+    "/dev/shm/idoly-translation-probe-20261113/en-i18n.csv",
+    "--ui-proof-file",
+    "/dev/shm/idoly-translation-probe-20261113/en-i18n-report.json"
+  ],
+  "config_sha256": "f0187239ad144aa3c1f760b7e5f491dedcc2c49a3422238a4a4f909e31aaaf7e",
+  "operator_sha256": "316e0723f7a90d029e49620fde103ab2bd841e95a552158f1c8699d982b93045",
+  "status": "PASS_PRODUCTION_AWAIT_INDEPENDENT_ACTUAL_ARTIFACT_QA",
+  "runtime_device_verified": false,
+  "server_rebuilt": false,
+  "network_publication_or_VM_actions": false,
+  "resources": {
+    "before": {
+      "memory_current": 15884120064,
+      "memory_max": 17179869184,
+      "direct_headroom": 1295749120,
+      "root_free": 158191616,
+      "tmpfs_free": 8761872384,
+      "oom_kill": 2
+    },
+    "after": {
+      "memory_current": 16181243904,
+      "memory_max": 17179869184,
+      "direct_headroom": 998625280,
+      "root_free": 158191616,
+      "tmpfs_free": 8612241408,
+      "oom_kill": 2
+    },
+    "seconds": 19.23796,
+    "minimum_sampled_headroom": 651456512,
+    "budget_samples": 380,
+    "subreaper": {
+      "manager_pid": 698839,
+      "manager_start_ticks": 41801280,
+      "subreaper_enabled": true,
+      "process_groups_signalled": false
+    },
+    "returncode": 0,
+    "entry_mib": 1024,
+    "ongoing_floor_mib": 512,
+    "AS_mib": 1280
+  },
+  "artifact": {
+    "path": "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+    "bytes": 149105654,
+    "sha256": "c537aeab942056498bffcc81338cf4d6494070c1b4124b285fef0926e7aee1da"
+  }
+}

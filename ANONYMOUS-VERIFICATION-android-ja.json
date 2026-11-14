@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "HTTP_status": 206,
+  "Content_Range": "bytes 0-4095/164276861",
+  "actual_attachment_filename": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+  "Content_Disposition": "attachment; filename=\"IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk\"",
+  "prefix_bytes": 4096,
+  "prefix_sha256": "24839d6c2f1a39e7d8f570fd6b9bab2bb3dd8a9287c953e7ad23c05e6171aabb",
+  "local_prefix_sha256": "24839d6c2f1a39e7d8f570fd6b9bab2bb3dd8a9287c953e7ad23c05e6171aabb",
+  "no_authentication_headers_sent": true,
+  "complete_remote_SHA256_already_verified": true,
+  "anonymous_full_HTTP200_verified": false
+}

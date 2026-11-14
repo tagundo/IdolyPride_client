@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "status": "PASS_CLIENT_ONLY_V0330_SCOPE",
+  "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+  "source_epoch": 1794628262,
+  "client_version": "0.3.30",
+  "server_rebuilt": false,
+  "compatible_existing_server": "0.3.29",
+  "physical_device_playback_verified": false,
+  "all_translation_complete": false,
+  "historical_user_acceptance_rebound": false,
+  "publication_recovery": {
+    "android-ko": {
+      "recovery_plan_binding": {
+        "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-android-ko-r2/recovery-plan.json",
+        "bytes": 2548,
+        "sha256": "d66671bcd77b73e2e436849682fda196dfa81b4729f4742f2edec3278014dd74"
+      },
+      "recovery_plan": {
+        "schema": 1,
+        "status": "PREPARED_EXPLICIT_SINGLE_RECOVERY",
+        "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03",
+        "kind": "android-ko",
+        "artifact": {
+          "kind": "android-ko",
+          "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+          "path": "/dev/shm/idoly-v0330-work/client-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+          "bytes": 164309629,
+          "sha256": "d4b21e88a52d1da145153acb7275e15686a08656fc1fbb89ba7fc396ea5c91e9",
+          "source_commit": "a6f3c687b6610ab8416e2e515bafb618e249bc03"
+        },
+        "contract_sha256": "b09ddff9a324d40982f6ffe1d28b15966c0211131524444651f0d5c6875d4ff1",
+        "original_prepared_plan_sha256": "6a60d374fbc21e73caf8abf0dc7ecdb913fd9d77e2c7f57a2d9c19fef7f133f9",
+        "original_operator": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-client-once.py",
+          "bytes": 16413,
+          "sha256": "979bf3fa76c651db17ae62d4f599c4a999384b64b557b2be3c0d66bc00cc2203"
+        },
+        "common": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/publication_common.py",
+          "bytes": 11134,
+          "sha256": "86aeea48d42b2ecabacaf1372e66ffe832db03d7c5062cd41993ebb9ca558741"
+        },
+        "recovery_operator": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/recover-client-publication-once.py",
+          "bytes": 5091,
+          "sha256": "60bf4541833ba68f4a6a9add78c98124dc58ebf45173d51434cc93f73f1b477b"
+        },
+        "diagnostic_auth_shim": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/run-reviewed-lfs-with-diagnostics.py",
+          "bytes": 2195,
+          "sha256": "3d221a21a24d0cc5356bf2e7e5728a55eb928b468e2118a155db1aabee7fa63f"
+        },
+        "unchanged_LFS_publisher": {
+          "path": "/workspace/IdolyPride_client/tools/publish_binary_bundle_lfs.py",
+          "bytes": 8978,
+          "sha256": "79991ddde960edcbd9f866f4303dab44c08e509a8e552b637edf9482ab91d246"
+        },
+        "prior_verified_unpublished_attempt": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-android-ko/evidence/publication.json",
+          "bytes": 562,
+          "sha256": "09737c9a9f3b05a62e8a392f4a8b9b4d65f43e14017199a740ae13018b004c8c"
+        },
+        "prior_owned_cleanup": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-android-ko/publication-owned-cleanup.json",
+          "bytes": 439,
+          "sha256": "9e271b0dd31cbdc938c866e9e4040e58b338bb9a569bce149f7b75bea4d846fd"
+        },
+        "per_child_exact_GitHub_repo_header_only": true,
+        "automatic_retry": false,
+        "prior_attempt_preserved": true,
+        "post_publication_full_SHA_anonymous_final_local_retirement_checks_unchanged": true
+      },
+      "recovery_completion_binding": {
+        "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-android-ko-r2/recovery-completion.json",
+        "bytes": 559,
+        "sha256": "707f05b8da96bf28d1d0f25f07e0aeff69691fdc3d0fbaa7b228ad619541a2f8"
+      },
+      "recovery_completion": {
+        "status": "PASS_EXPLICIT_REVIEWED_RECOVERY",
+        "recovery_plan": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-android-ko-r2/recovery-plan.json",
+          "bytes": 2548,
+          "sha256": "d66671bcd77b73e2e436849682fda196dfa81b4729f4742f2edec3278014dd74"
+        },
+        "publication_completion": {
+          "path": "/dev/shm/idoly-v0330-work/release-preparation/publish-android-ko-r2/publication-completion.json",
+          "bytes": 2338,
+          "sha256": "e8800525e3eb3016ba0b024f8201a2a6c93930011b08ef9693b0fdecdc766fcf"
+        },
+        "prior_attempt_preserved": true
+      },
+      "Root_reviewed_recovery_driver_SHA_verified": true,
+      "original_manifest_driver_closure_preserved": true
+    }
+  }
+}
