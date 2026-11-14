@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import struct
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -147,6 +148,7 @@ def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, m
 def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit(monkeypatch):
     root = Path(tool.__file__).resolve().parents[1]
     names = ("tools/build_android_server_manual.py", "tools/repack_android_server_python.py",
+             "tools/sign_apk_v2_in_place.py",
              tool.PAYLOAD_INVENTORY,
              "src/idoly_local/media_master_build.py", "src/idoly_local/media_outfit_policy.py",
              "src/idoly_local/bundled_translations.py")
@@ -431,6 +433,53 @@ def test_streaming_keeps_original_dependency_bytes_and_zero_metadata_without_who
             assert stream.read(1024) == b"immutable dependency DEX"
         with archive.open(tool.pybundle.PAYLOAD) as stream:
             assert stream.read(1024) == payload.read_bytes()
+
+
+@pytest.mark.parametrize("zip64", [False, True])
+def test_local_alignment_accounts_for_optional_twenty_byte_zip64_header_extra(zip64):
+    info = ZipInfo("folder/한글")
+    info.extra = struct.pack("<HH", 0xCAFE, 1) + b"x"
+    encoded, _flags = info._encodeFilenameFlags()
+    for offset in range(4):
+        extra = tool._stored_local_extra(info, offset, zip64=zip64)
+        assert extra.startswith(info.extra)
+        assert (offset + 30 + len(encoded) + len(extra) + (20 if zip64 else 0)) % 4 == 0
+
+
+def test_streamed_stored_members_are_sdk_aligned_with_ordinary_headers_and_exact_central_metadata(tmp_path):
+    baseline, target = tmp_path / "base.apk", tmp_path / "one-file.apk"
+    originals = {}
+    with ZipFile(baseline, "w") as archive:
+        for index, name in enumerate(("a", "bb", "ccc", "folder/한글", "compressed")):
+            info = ZipInfo(name)
+            info.extra = struct.pack("<HH", 0xCAFE, index) + b"x" * index
+            info.compress_type = ZIP_DEFLATED if name == "compressed" else ZIP_STORED
+            originals[name] = b"immutable SDK bytes" + b"x" * index
+            archive.writestr(info, originals[name])
+    with ZipFile(baseline) as archive:
+        before = {info.filename: copy.copy(info) for info in archive.infolist()}
+        tool.stream_apk(archive, before, target, {})
+    with ZipFile(target) as archive, target.open("rb") as raw:
+        for info in archive.infolist():
+            assert info.extra == before[info.filename].extra
+            assert info.create_version == before[info.filename].create_version
+            assert info.extract_version == before[info.filename].extract_version
+            with archive.open(info) as incoming:
+                assert incoming.read(1024) == originals[info.filename]
+            raw.seek(info.header_offset)
+            header = raw.read(30)
+            assert header[:4] == b"PK\x03\x04"
+            assert struct.unpack_from("<II", header, 18) == (info.compress_size, info.file_size)
+            name_size, extra_size = struct.unpack_from("<HH", header, 26)
+            raw.read(name_size); local_extra = raw.read(extra_size)
+            assert local_extra.startswith(info.extra)
+            if info.compress_type == ZIP_STORED:
+                assert raw.tell() % 4 == 0
+    zipalign = Path("/workspace/.setup/android-sdk/build-tools/34.0.0/zipalign")
+    if zipalign.is_file():
+        result = subprocess.run([str(zipalign), "-c", "4", str(target)],
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+        assert result.returncode == 0, (result.stdout, result.stderr)
 
 
 def synthetic_elf(align=16384):

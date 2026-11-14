@@ -50,16 +50,17 @@ def test_payload_capacity_grows_without_relaxing_pinned_baseline_or_runtime_limi
 
 
 @pytest.mark.parametrize("payload_mib", [101, 190, 220, 256])
-def test_large_public_payload_has_bounded_two_apk_capacity(payload_mib):
+def test_large_public_payload_has_bounded_one_apk_and_metadata_capacity(payload_mib):
     payload_bytes = payload_mib * tool.MIB
     plan = tool.capacity_plan(inventory(), payload_bytes)
-    assert plan["schema"] == 1 and plan["policy"] == "server-library-v1"
+    assert plan["schema"] == 1 and plan["policy"] == "server-library-single-apk-v2"
     assert plan["payload_bytes"] == payload_bytes
     assert payload_bytes < plan["apk_bytes"] <= tool.MAX_SERVER_APK
     assert plan["apk_bytes"] % tool.MIB == 0
     assert payload_bytes < plan["expanded_bytes"] <= tool.MAX_SERVER_EXPANDED
-    assert plan["staging_bytes"] == 2 * plan["apk_bytes"] + 8 * tool.MIB
-    assert plan["staging_bytes"] <= 2 * tool.MAX_SERVER_APK + 8 * tool.MIB
+    assert plan["full_apk_copies"] == 1
+    assert plan["staging_bytes"] == plan["apk_bytes"] + tool.SERVER_APK_METADATA_STAGING
+    assert plan["staging_bytes"] <= tool.MAX_SERVER_APK + 8 * tool.MIB
 
 
 def test_exact_compiled_sizes_reduce_conservative_default_reservation():
@@ -82,7 +83,7 @@ def test_capacity_includes_retained_zip_names_extras_and_comments():
     large = tool.capacity_plan(infos, payload_bytes)
     assert large["expanded_bytes"] == small["expanded_bytes"]
     assert large["apk_bytes"] >= small["apk_bytes"] + tool.MIB
-    assert large["staging_bytes"] >= small["staging_bytes"] + 2 * tool.MIB
+    assert large["staging_bytes"] >= small["staging_bytes"] + tool.MIB
 
 
 def test_removed_installer_assets_do_not_consume_new_server_capacity():
@@ -213,7 +214,7 @@ def test_tmpfs_peak_preserves_strict_direct_server_floor_without_cache_credit(al
 
 def test_clean_credit_cannot_replace_projected_tmpfs_direct_floor(allocation_case):
     state, _ = allocation_case
-    future = 500 * tool.MIB
+    future = 300 * tool.MIB
     state["direct"] = tool.SERVER_STAGE_HEADROOM + future - 1
     state["effective"] = 16 * 1024 * tool.MIB
     with pytest.raises(ValueError, match="memory reserve"):
@@ -223,19 +224,19 @@ def test_clean_credit_cannot_replace_projected_tmpfs_direct_floor(allocation_cas
 def test_non_tmpfs_staging_still_checks_server_memory_and_disk_guards(allocation_case, monkeypatch):
     state, calls = allocation_case
     state.update(tmpfs=False, direct=tool.SERVER_STAGE_HEADROOM, effective=0)
-    report = tool._allocation_guard("root", "destination", 500 * tool.MIB)
+    report = tool._allocation_guard("root", "destination", 300 * tool.MIB)
     assert report["future_tmpfs_bytes"] == 0
-    assert calls == [("root", "destination", 500 * tool.MIB), ("resource", "root")]
+    assert calls == [("root", "destination", 300 * tool.MIB), ("resource", "root")]
 
     def reject(_):
         raise ValueError("server resource guard")
 
     monkeypatch.setattr(tool, "_server_stage_guard", reject)
     with pytest.raises(ValueError, match="server resource guard"):
-        tool._allocation_guard("root", "destination", 500 * tool.MIB)
+        tool._allocation_guard("root", "destination", 300 * tool.MIB)
 
 
-@pytest.mark.parametrize("required", [0, -1, True, 2 * tool.MAX_SERVER_APK + 8 * tool.MIB + 1])
+@pytest.mark.parametrize("required", [0, -1, True, tool.MAX_SERVER_APK + tool.SERVER_APK_METADATA_STAGING + 1])
 def test_invalid_staging_projection_is_rejected_before_filesystem_access(monkeypatch, required):
     monkeypatch.setattr(tool.shutil, "disk_usage", lambda _: pytest.fail("invalid size must not inspect disk"))
     with pytest.raises(ValueError, match="capacity"):

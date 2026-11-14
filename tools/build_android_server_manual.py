@@ -115,6 +115,7 @@ MAX_PAYLOAD = 256 * MIB
 MAX_PAYLOAD_MEMBERS = 1024
 MAX_SERVER_APK = 384 * MIB
 MAX_SERVER_EXPANDED = 384 * MIB
+SERVER_APK_METADATA_STAGING = 8 * MIB
 MAX_TRANSLATIONS = translation_package.MAX_BUNDLE
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
@@ -241,7 +242,7 @@ def _regular(path, *, private=False):
 
 def staging_budget(root, destination, required=None):
     required = MAX_APK_STAGING + 8 * MIB if required is None else required
-    if type(required) is not int or not 0 < required <= 2 * MAX_SERVER_APK + 8 * MIB:
+    if type(required) is not int or not 0 < required <= MAX_SERVER_APK + SERVER_APK_METADATA_STAGING:
         raise ValueError("Invalid versioned server staging budget")
     if Path(root).stat().st_dev == Path(destination).stat().st_dev:
         required += MIN_ROOT_FREE
@@ -250,7 +251,7 @@ def staging_budget(root, destination, required=None):
 
 
 def capacity_plan(infos, payload_bytes, replacement_sizes=None, *, translations_bytes=0):
-    """Bound this payload's two-APK peak before allocating its first output.
+    """Bound one full APK plus small in-place signing metadata before output.
 
     The baseline remains independently pinned and size-limited. ZIP sizes use
     each retained entry's original compression method, a conservative DEFLATE
@@ -297,9 +298,9 @@ def capacity_plan(infos, payload_bytes, replacement_sizes=None, *, translations_
     maximum = ((total + MIB - 1) // MIB) * MIB
     if maximum > MAX_SERVER_APK or expanded > MAX_SERVER_EXPANDED:
         raise ValueError("Server APK exceeds the versioned capacity bound")
-    return {"schema": 1, "policy": "server-library-v1", "payload_bytes": payload_bytes,
+    return {"schema": 1, "policy": "server-library-single-apk-v2", "payload_bytes": payload_bytes,
             "apk_bytes": maximum, "expanded_bytes": expanded,
-            "staging_bytes": 2 * maximum + 8 * MIB}
+            "full_apk_copies": 1, "staging_bytes": maximum + SERVER_APK_METADATA_STAGING}
 
 
 def _tmpfs(destination):
@@ -327,7 +328,7 @@ def _tmpfs(destination):
 
 def _allocation_guard(root, destination, future_bytes):
     """Reserve future server tmpfs bytes above its strict direct 512MiB floor."""
-    if type(future_bytes) is not int or not 0 < future_bytes <= 2 * MAX_SERVER_APK + 8 * MIB:
+    if type(future_bytes) is not int or not 0 < future_bytes <= MAX_SERVER_APK + SERVER_APK_METADATA_STAGING:
         raise ValueError("Invalid future staging capacity")
     staging_budget(root, destination, future_bytes)
     budget = _server_stage_guard(root)
@@ -481,6 +482,7 @@ def tool_sources(root, commit):
     result = {}
     for name, loaded in (("tools/build_android_server_manual.py", Path(__file__)),
                          ("tools/repack_android_server_python.py", Path(pybundle.__file__)),
+                         ("tools/sign_apk_v2_in_place.py", Path(__file__).with_name("sign_apk_v2_in_place.py")),
                          (PAYLOAD_INVENTORY, Path(__file__).with_name(Path(PAYLOAD_INVENTORY).name)),
                          ("src/idoly_local/media_master_build.py", Path(media_master.__file__)),
                          ("src/idoly_local/media_outfit_policy.py", Path(media_master.__file__).with_name("media_outfit_policy.py")),
@@ -858,6 +860,16 @@ def translation_asset_info():
     return info
 
 
+def _stored_local_extra(info, offset, *, zip64):
+    """Append a local-only alignment field; central-directory extras stay exact."""
+    encoded, _flags = info._encodeFilenameFlags()
+    start = offset + 30 + len(encoded) + len(info.extra) + (20 if zip64 else 0)
+    if start % 4 == 0:
+        return info.extra
+    padding = (-(start + 6)) % 4
+    return info.extra + struct.pack("<HHH", 0xD935, 2 + padding, 4) + b"\0" * padding
+
+
 def stream_apk(incoming, infos, target, replacements):
     added = set(replacements) - set(infos)
     if added - {TRANSLATIONS_ASSET} or set(replacements) & excluded_members(infos):
@@ -870,7 +882,13 @@ def stream_apk(incoming, infos, target, replacements):
         for name, info in entries:
             copied = copy.copy(info)
             replacement = replacements.get(name)
-            with outgoing.open(copied, "w") as dst:
+            copied.file_size = (len(replacement) if isinstance(replacement, bytes) else
+                                replacement.stat().st_size if isinstance(replacement, Path) else info.file_size)
+            if type(copied.file_size) is not int or not 0 <= copied.file_size <= MAX_SERVER_EXPANDED:
+                raise ValueError("Streamed server member exceeds its ordinary ZIP size bound")
+            if copied.compress_type == ZIP_STORED:
+                copied.extra = _stored_local_extra(copied, outgoing.fp.tell(), zip64=False)
+            with outgoing.open(copied, "w", force_zip64=False) as dst:
                 if isinstance(replacement, bytes):
                     dst.write(replacement)
                 else:
@@ -878,6 +896,7 @@ def stream_apk(incoming, infos, target, replacements):
                     with src:
                         shutil.copyfileobj(src, dst, pybundle.CHUNK)
             copied.external_attr = info.external_attr
+            copied.extra = info.extra
 
 
 def audit_apk(path, before, before_infos, replacement_hashes, dependency_names, compiled_names):
@@ -969,7 +988,10 @@ def build(args):
     epoch = pybundle._git(root, "show", "-s", "--format=%ct", args.source_commit, limit=32).strip()
     validate_epoch(epoch, args.epoch)
     jdk, sdk, android = Path(args.jdk_bin).resolve(strict=True), Path(args.build_tools).resolve(strict=True), _regular(args.android_jar)
-    tools = [jdk / "java", jdk / "javac", sdk / "aapt2", sdk / "zipalign", sdk / "lib/d8.jar", sdk / "lib/apksigner.jar", android]
+    in_place_signer = _regular(Path(__file__).with_name("sign_apk_v2_in_place.py"))
+    signer_python = _regular("/usr/bin/python3")
+    tools = [jdk / "java", jdk / "javac", jdk / "keytool", sdk / "aapt2", sdk / "zipalign",
+             sdk / "lib/d8.jar", sdk / "lib/apksigner.jar", android, signer_python, in_place_signer]
     for tool in tools:
         _regular(tool)
     for role, path in (("android-jar", android), ("d8-jar", sdk / "lib/d8.jar"),
@@ -1077,34 +1099,34 @@ def build(args):
             for name, value in replacements.items()}, translations_bytes=translations_bytes)
         maximum = actual_capacity["apk_bytes"]
         cache.advise()
-        _allocation_guard(root, output.parent, 2 * maximum + MIB)
+        _allocation_guard(root, output.parent, maximum + SERVER_APK_METADATA_STAGING)
         stream_apk(incoming, infos, unsigned, replacements)
         if not 0 < unsigned.stat().st_size <= maximum:
             raise ValueError("Unsigned server APK exceeded its calculated capacity")
         audit_apk(unsigned, before, infos, replacement_hashes, dependencies, compiled_names)
         cache.completed_apk("unsigned.apk")
         cache.advise()
-        _allocation_guard(root, output.parent, maximum + MIB)
-        run([sdk / "zipalign", "-f", "4", unsigned, aligned])
+        unsigned.rename(aligned)
         if not 0 < aligned.stat().st_size <= maximum:
             raise ValueError("Aligned server APK exceeded its calculated capacity")
-        unsigned.unlink()
         cache.completed_apk("aligned.apk")
         run([sdk / "zipalign", "-c", "4", aligned])
         cache.advise()
-        _allocation_guard(root, output.parent, maximum + MIB)
+        _allocation_guard(root, output.parent, SERVER_APK_METADATA_STAGING)
+        aligned.rename(signed)
         env["IDOLY_MANUAL_SERVER_PASSWORD"] = read_password(password_file)
+        env["IDOLY_MANUAL_SERVER_KEYSTORE"] = str(keystore)
         try:
             signer = [jdk / "java", *JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
-            run([*signer, "sign", "--ks", keystore, "--ks-key-alias", args.key_alias,
-                 "--ks-pass", "env:IDOLY_MANUAL_SERVER_PASSWORD", "--key-pass", "env:IDOLY_MANUAL_SERVER_PASSWORD",
-                 "--min-sdk-version", "26", "--v1-signing-enabled", "false", "--v2-signing-enabled", "true",
-                 "--v3-signing-enabled", "false", "--v4-signing-enabled", "false", "--out", signed, aligned])
+            run([signer_python, "-B", in_place_signer, "--apk", signed,
+                 "--keystore-env", "IDOLY_MANUAL_SERVER_KEYSTORE", "--key-alias", args.key_alias,
+                 "--password-env", "IDOLY_MANUAL_SERVER_PASSWORD", "--keytool", jdk / "keytool",
+                 "--expected-certificate-sha256", CERTIFICATE])
         finally:
             env.pop("IDOLY_MANUAL_SERVER_PASSWORD", None)
+            env.pop("IDOLY_MANUAL_SERVER_KEYSTORE", None)
         if not 0 < signed.stat().st_size <= maximum:
             raise ValueError("Signed server APK exceeded its calculated capacity")
-        aligned.unlink()
         cache.completed_apk("signed.apk")
         signature = run([*signer, "verify", "--verbose", "--print-certs", signed]).decode("utf-8")
         if ("Signer #1 certificate SHA-256 digest: " + CERTIFICATE not in signature
@@ -1120,6 +1142,7 @@ def build(args):
         audit = audit_apk(signed, before, infos, replacement_hashes, dependencies, compiled_names)
         if (pybundle.digest(baseline) != pybundle.BASELINE_SHA256 or pybundle.digest(payload) != args.payload_sha256
                 or pybundle.digest(stable_jar) != CHAQUOPY_SHA256
+                or pybundle.digest(in_place_signer) != builder_sources["tools/sign_apk_v2_in_place.py"]
                 or translations is not None and pybundle.digest(translations) != translations_sha256):
             raise ValueError("A frozen build input changed during packaging")
         signed_sha256 = pybundle.digest(signed)
