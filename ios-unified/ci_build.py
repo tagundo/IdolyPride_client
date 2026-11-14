@@ -62,6 +62,7 @@ def main():
     selected_runtime = compatible_runtime(sdk, json.loads(raw_catalog))
     env.update(simulator_sdk=sdk, selected_simulator_runtime=selected_runtime)
     (output / "build-environment.json").write_text(json.dumps(env, indent=2) + "\n")
+    run(python, "-B", HERE / "native/test_mac_menu.py", "--report", output / "mac-menu-test.json")
 
     def prepare(target, architecture):
         runtime = work / (target + "-runtime")
@@ -123,6 +124,7 @@ def main():
         "Sign this IPA with your iOS sideloading method before installing.\n"
         "The local server starts inside the game; no separate server app is needed.\n"
         "Hold three fingers on the game for one second to open server settings.\n"
+        "Mac/PlayCover: app menu > 로컬 서버 설정… (Command+Shift+,).\n"
         "Resource files: Files > On My iPhone/iPad > 아이프라 로컬 > IdolyPride.\n"
         "The real iOS server framework compiled and a disposable Simulator core probe passed.\n"
         "Physical iPhone/iPad game playback and PlayCover execution remain unverified.\n"

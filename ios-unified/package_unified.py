@@ -111,7 +111,7 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
         matches = [i.filename[:-len('Info.plist')] for i in infos if i.filename.startswith('Payload/') and i.filename.endswith('.app/Info.plist') and i.filename.count('/') == 2]
         require(len(matches) == 1, 'Expected exactly one app bundle'); app = matches[0]
         require(source.getinfo(app + 'Info.plist').file_size <= 128 * 1024, 'Original Info.plist exceeds bound')
-        info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion='156.9100',CFBundleDisplayName='아이프라 로컬')
+        info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion='156.9101',CFBundleDisplayName='아이프라 로컬')
         generated['Info.plist'] = plistlib.dumps(info,fmt=plistlib.FMT_BINARY)
         with source.open(app + UNITY) as incoming: unity = verify_unity_patch(incoming,patched_unity,manifest['inputs']['original_unity']['sha256'])
         audit_macho(patched_unity,'device',maximum=256 * 1024**2)

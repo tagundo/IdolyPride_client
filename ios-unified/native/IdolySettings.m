@@ -1,5 +1,6 @@
 #import "IdolyEmbeddedServer.h"
 #import "IdolyNativeUI.h"
+#import "IdolyMacMenu.h"
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
@@ -287,12 +288,25 @@ static __weak IDSettingsController *settingsController;
 @end
 
 @interface IDGestureTarget : NSObject
+@property (nonatomic) BOOL attachQueued;
 - (void)open:(UILongPressGestureRecognizer *)gesture;
+- (void)openMenu:(id)sender;
+- (void)openSettings;
 - (void)attach;
+- (void)scheduleAttach;
 @end
 @implementation IDGestureTarget
 - (void)open:(UILongPressGestureRecognizer *)gesture {
-    if (gesture.state != UIGestureRecognizerStateBegan || settingsController) return;
+    if (gesture.state == UIGestureRecognizerStateBegan) [self openSettings];
+}
+- (void)openMenu:(id)sender {
+    (void)sender;
+    if (NSThread.isMainThread) [self openSettings];
+    else dispatch_async(dispatch_get_main_queue(), ^{ [self openSettings]; });
+}
+- (void)openSettings {
+    NSCAssert(NSThread.isMainThread, @"Server settings belong to the main thread");
+    if (settingsController) return;
     UIViewController *parent = presenter(); if (!parent) return;
     IDSettingsController *settings = [IDSettingsController new]; settingsController = settings;
     UINavigationController *navigation = [[UINavigationController alloc] initWithRootViewController:settings];
@@ -301,6 +315,9 @@ static __weak IDSettingsController *settingsController;
     navigation.presentationController.delegate = settings;
 }
 - (void)attach {
+    // The Mac menu can be created/replaced independently of the Unity window.
+    // This is event-driven; it adds no overlay or per-frame polling.
+    IDMacInstallSettingsMenu(self, @selector(openMenu:));
     UIWindow *window = gameWindow(); if (!window) return;
     static const void *key = &key;
     if (objc_getAssociatedObject(window,key)) return;
@@ -309,15 +326,23 @@ static __weak IDSettingsController *settingsController;
     gesture.cancelsTouchesInView = NO;
     [window addGestureRecognizer:gesture]; objc_setAssociatedObject(window,key,gesture,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
+- (void)scheduleAttach {
+    if (_attachQueued) return;
+    _attachQueued = YES;
+    dispatch_async(dispatch_get_main_queue(), ^{ self.attachQueued = NO; [self attach]; });
+}
 @end
 void IDNativeInstallSettings(void) {
     static IDGestureTarget *target; static dispatch_once_t once;
     dispatch_once(&once, ^{
         target = [IDGestureTarget new];
-        for (NSString *name in @[UIApplicationDidBecomeActiveNotification, UIWindowDidBecomeKeyNotification])
+        for (NSString *name in @[UIApplicationDidBecomeActiveNotification, UIWindowDidBecomeKeyNotification,
+                @"NSApplicationDidFinishLaunchingNotification", @"NSApplicationDidBecomeActiveNotification",
+                @"NSMenuDidAddItemNotification", @"NSMenuDidRemoveItemNotification"])
             [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:NSOperationQueue.mainQueue
-                usingBlock:^(NSNotification *note) { (void)note; [target attach]; if (pendingFailure) IDNativeStartupFailure(pendingFailure); }];
+                usingBlock:^(NSNotification *note) { (void)note; [target scheduleAttach]; if (pendingFailure) IDNativeStartupFailure(pendingFailure); }];
         [target attach];
+        [target scheduleAttach];
     });
 }
 void IDNativeEvent(NSString *json) {

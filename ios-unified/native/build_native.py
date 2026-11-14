@@ -97,7 +97,7 @@ def main():
     output = args.output.absolute()
     if output.name != 'IdolyEmbeddedServer.framework' or output.exists():
         raise ValueError('Fresh IdolyEmbeddedServer.framework output required')
-    sources = [here/name for name in ('IdolyEmbeddedServer.m','IdolySettings.m','IdolyHTTP.m')]
+    sources = [here/name for name in ('IdolyEmbeddedServer.m','IdolySettings.m','IdolyHTTP.m','IdolyMacMenu.m')]
     inputs = sources + sorted(here.glob('*.h')) + [Path(__file__).resolve()]
     pins = {str(p.relative_to(here)):sha(p) for p in inputs}
     command = [compiler,'-target',args.arch+'-apple-ios13.0'+('-simulator' if args.smoke_simulator else ''),
