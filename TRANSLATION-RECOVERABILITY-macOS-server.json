@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "status": "PASS_PUBLISHED_MAC_ARCHIVE_EXACT_AUDITED_IOS_TRANSLATION_RECOVERABILITY",
+  "published_archive_sha256": "0824507d2713c642fd31298efc8665ee142ad9d769cde1a412ee88a60e48996c",
+  "published_archive_bytes": 283229438,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "publication_commit": "544a5c597d9cf538e45beb399dd5de9c5cbf19f2",
+  "publication_receipt_sha256": "76c347756094bb4aca54c4664c55ddf13ed5fbc425a46f86b50ff09d7fc70058",
+  "actual_binary_QA_sha256": "a9ffd2ed7c92d7cda30f9e072b3334174952ff00ea0f297227787ca462acb85d",
+  "embedded_member": "IdolyPrideLocalServer.app/Contents/Resources/bundledTranslations.zip",
+  "embedded_translation_bytes": 78210744,
+  "embedded_translation_sha256": "8e44bac91acaca7661bf1b49be8663e23345df9541d7021ff2eaa5b9415bf8b0",
+  "all6_translation_member_SHA_CRC": {
+    "en/ios/manifest.json": "a2cb9de16f5114bc03ef75f211b15778aebacd8cc85223344ec8da05d3d79676",
+    "en/ios/manifest.pb": "8f1fc1a893b355b291f0f3ff2254ec2e2448f93352131d73ce494b4659a5a661",
+    "en/ios/objects.zip": "be3fdc92292bf0687de59ef9ad48255a87c08b95254945f51bb0850ac2e8a6dc",
+    "ko/ios/manifest.json": "51bd01631bc8487545bcd7f515f89fdfa3ca8e1ae674e774171df1346babf00b",
+    "ko/ios/manifest.pb": "8a6dd851dc0888c767b6abdb89b1e8024a7394e7dda64156021df41613f2bd1f",
+    "ko/ios/objects.zip": "e3b94adfa64657c8d77adacaf745687d99b33f60f9082783a389afdf758070d6"
+  },
+  "basis": "Complete remote archive SHA equals the actual independently audited local archive. Actual ZIP-member SHA/CRC verification binds the embedded original iOS translation archive and all six contained files.",
+  "new_remote_nested_member_download_performed": false
+}

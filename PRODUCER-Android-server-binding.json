@@ -1,0 +1,42 @@
+{
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "producer_receipt": {
+    "path": "/dev/shm/idoly-v0329-work/server-preparation/android-server-production.json",
+    "bytes": 12349,
+    "sha256": "ded26f9b7a92513764da10bf75c859c33c073cc783357b445228b115cae03b27"
+  },
+  "producer_receipt_SHA256": "ded26f9b7a92513764da10bf75c859c33c073cc783357b445228b115cae03b27",
+  "driver_bindings": {
+    "independent-server-audit.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent-server-audit.py",
+      "bytes": 49596,
+      "sha256": "068e7da50dd3b39e8a87f53b581118dd047a7bfe10d24985a6c28862cc7f3bcd"
+    },
+    "independent-server-signature.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent-server-signature.py",
+      "bytes": 5606,
+      "sha256": "a1bd40b23f7085bfc5e7c9140033f45bc78569c73493deaaec7da44bf04e8751"
+    },
+    "independent_runtime_contracts.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_runtime_contracts.py",
+      "bytes": 32519,
+      "sha256": "fdbb04f4690916f256273ecf3665351663277efd7d60bc13e8b9f354dd7114fa"
+    },
+    "independent_translation_bundle.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_translation_bundle.py",
+      "bytes": 9510,
+      "sha256": "b6d0bad3058f0d26d6d21e3b440fa6c4b55ae83fa7e82b007bed37ede3bc949d"
+    },
+    "independent_object_alias_contracts.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_object_alias_contracts.py",
+      "bytes": 7671,
+      "sha256": "fbe924d7fbfb723a7ddfadccf157386244bcf6be941d7671c353acbcf3c4c9ba"
+    },
+    "build-android-server.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/build-android-server.py",
+      "bytes": 12469,
+      "sha256": "ddccbbfcda09a4095eee192029c4f31c1e3413e1fca2f6d7505043f9df9e78cd"
+    }
+  },
+  "producer_result_status": "PASS"
+}

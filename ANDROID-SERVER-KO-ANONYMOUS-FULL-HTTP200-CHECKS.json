@@ -1,0 +1,30 @@
+{
+  "status": "PASS_TWO_ANONYMOUS_HTTP200_FULL_SHA_AND_FILENAMES",
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "authentication_headers_sent": false,
+  "large_local_copy_created": false,
+  "chunk_bytes": 65536,
+  "artifacts": [
+    {
+      "kind": "server",
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 284835788,
+      "sha256": "46b3c16b1aa90ddaae318af1ba4c37f0a5726d1b776584e589a3762334b1a86f",
+      "HTTP_status": 200,
+      "actual_attachment_filename": "IdolyPride-Local-Server-Android.apk",
+      "seconds": 35.774,
+      "minimum_direct_headroom": 1168850944
+    },
+    {
+      "kind": "client-ko",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "bytes": 163441097,
+      "sha256": "b91211a9d97cf519ba60b2cd34887529f4136cbb0f6b9556f7b688ad9038111e",
+      "HTTP_status": 200,
+      "actual_attachment_filename": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "seconds": 19.941,
+      "minimum_direct_headroom": 1172267008
+    }
+  ],
+  "phone_playback_verified": false
+}

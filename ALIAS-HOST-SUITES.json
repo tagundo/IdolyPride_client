@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "scope": "Translated mixed object identity aliases; host HTTP/MD5/range/factory/protocol contracts",
+  "command": [
+    ".venv/bin/python",
+    "-B",
+    "-m",
+    "pytest",
+    "-q",
+    "-p",
+    "no:cacheprovider",
+    "--basetemp=/dev/shm/idoly-v0329-work/alias-tests-final-r2",
+    "tests/test_translated_object_aliases.py",
+    "tests/test_octo_manifest.py",
+    "tests/test_octo_http.py",
+    "tests/test_octo_runtime.py",
+    "tests/test_resource_translation.py",
+    "tests/test_resource_translation_build.py",
+    "tests/test_resource_translation_runtime.py"
+  ],
+  "exit_code": 0,
+  "stdout": "......................................................... [ 35%]\n........................................................................ [ 79%]\n.................................                                        [100%]\n162 passed, 87 subtests passed in 23.18s\n",
+  "elapsed_seconds": 23.359,
+  "AS_limit_bytes": 536870912,
+  "MALLOC_ARENA_MAX": 1,
+  "previous_attempt": "r1own512MiBASwithoutMALLOC_ARENA_MAXhitglibcthreadarenavirtualreservation; no product assertion failed in added tests",
+  "source_SHA256": {
+    "src/idoly_local/resource_translation.py": "ec90c4f3f2725547da40de25ceff48ef5a8ada6c6e85c8e8a514ad237c544fd8",
+    "src/idoly_local/octo_manifest.py": "dd4b4394ce0890420237565e7ad8c90990606501ecfbc09d28bb64707a867bd7",
+    "src/idoly_local/octo_runtime.py": "0b06c4bcfb997dc78af3497f92ecfa6bec6445a20af818372bb745334e37e4ec",
+    "tests/test_translated_object_aliases.py": "8d0399479b00486a285f3ff63f5275796cce216c31886e1d656f2f0e559647d4",
+    "tests/test_octo_manifest.py": "f8ddf1a7fde6a02c9a8a8bc9a38412dda79b7b4497c9fd40b7513406cc11d8f6",
+    "tests/test_octo_http.py": "e2b22e5e172f1bbae9a39e25aaee7f143443a32d9dff6ddd4853220caeceaba7",
+    "tests/test_octo_runtime.py": "d895b4782bce47a8d32b0e39d8c1c529f73d2f74cf292f225562513afd19dd9a",
+    "tests/test_resource_translation.py": "1737cf7b911789acd1ca5835d696c97c5b4bac004edf90ddec78ac5e9827d852",
+    "tests/test_resource_translation_build.py": "c53ed8ac9bda218b2c158f17e05c9b94493d64f998ba10d22a9d0056af886eb3",
+    "tests/test_resource_translation_runtime.py": "cd0ca82fc6ab5e08b593ed57924013f9146df67891d5d4c6a923a6cbb570bca6"
+  },
+  "log_SHA256": "f4a28e2bd9fc219cbfae2815aab3102cc4bee2cb41b48bab4885b7427535dac8",
+  "device_verification": false,
+  "Mac_gameplay_verification": false
+}

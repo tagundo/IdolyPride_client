@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "status": "PASS_ONLY_OWN_PUBLISHED_ANDROID_DERIVED_APK_AND_RECOVERED_TRANSLATION_RETIRED",
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "name": "IdolyPride-Local-Server-Android.apk",
+  "sha256": "46b3c16b1aa90ddaae318af1ba4c37f0a5726d1b776584e589a3762334b1a86f",
+  "bytes": 284835788,
+  "QA_sha256": "70a8d9b3431591cd99069ff59ab36d7c264b40e52cafaf87d012d651bbda46f8",
+  "independent_QA_sha256": "70a8d9b3431591cd99069ff59ab36d7c264b40e52cafaf87d012d651bbda46f8",
+  "publication_commit": "feae745fd463176db53e4d96ef5301f50632bc0c",
+  "publication_branch": "downloads/story-server-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+  "publication_receipt_sha256": "95b7f21372e0f9e435a53e76af192de6b203077fccf7c866337f13661108602b",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_and_actual_filename_verified": true,
+  "final_closed_local_SHA_verified": true,
+  "apk": {
+    "path": "/dev/shm/idoly-v0329-work/server-preparation/delivery/IdolyPride-Local-Server-Android.apk",
+    "identity": {
+      "device": 26,
+      "inode": 1212701,
+      "bytes": 284835788,
+      "sha256": "46b3c16b1aa90ddaae318af1ba4c37f0a5726d1b776584e589a3762334b1a86f",
+      "closed_file_hash_verified": true,
+      "stat_identity_unchanged": true
+    },
+    "retired": true
+  },
+  "translation_input": {
+    "path": "/dev/shm/idoly-v0329-work/server-preparation/inputs/IdolyPride-Translations-Android-v0.3.25.zip",
+    "identity": {
+      "device": 26,
+      "inode": 1212601,
+      "bytes": 78203472,
+      "sha256": "7e9f53983c50a148695d94537b7823935384d6bce551fb5f62b103f0909e43f9",
+      "closed_file_hash_verified": true,
+      "stat_identity_unchanged": true
+    },
+    "retired": true,
+    "published_APK_member_recoverability_sha256": "b9c1fc1c875141c28bd9e5f191a6b7c77f08941d59350982b57ee0b5b74faa92"
+  },
+  "only_owned_new_outputs_retired": true,
+  "canonical_inputs_user_data_rollback_VM_untouched": true,
+  "metadata_logs_signatures_and_source_QA_retained": true,
+  "before": {
+    "direct_headroom": 1217802240,
+    "root_free": 160268288,
+    "oom_kill": 2
+  },
+  "after": {
+    "direct_headroom": 1578991616,
+    "root_free": 160268288,
+    "oom_kill": 2
+  },
+  "all_owned_jobs_and_handles_idle": true,
+  "Mac_jobs_executed": false,
+  "actual_phone_or_Mac_playback_verified": false
+}

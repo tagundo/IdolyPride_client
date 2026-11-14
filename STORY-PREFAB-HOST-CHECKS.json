@@ -1,0 +1,25 @@
+{
+  "status": "PASS_BOUNDED_STORY_PREFAB_BUILD_HELPER",
+  "source_file_sha256": {
+    "src/idoly_local/story_loading_prefab.py": "268d84fb68ca138c636db8bc147d33b31b8d1f73f0724e235ec0bf022d9180fc",
+    "tests/test_story_loading_prefab.py": "014d3d9532124813875dfd3abffe4e3c7c8aaa148a295e83dc8cb9d72f9a1e8c"
+  },
+  "helper_API": {
+    "MEMBER": "assets/bin/Data/7880e7e422d314c04a16c4690ae21a43",
+    "FILE_BYTES": 49540,
+    "INPUT_SHA256": "5e55c12ddc6a08a8d96e8b3f616537ef5f833d99a3948c90de99bfd0521da292",
+    "OUTPUT_SHA256": "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350",
+    "patch_function": "patch_story_loading_prefab(raw)->(bytes,proof)"
+  },
+  "tests": {
+    "passed": 16,
+    "skipped": 0,
+    "AS_MiB": 256,
+    "log_sha256": "590dbc4f5c123295cd127dfad099b8f0f74b5daff9de9099967616ab6655a2b8"
+  },
+  "canonical_proof_final_sha256": "af642dcac4dd566846c6df70b7b4740c49f08189f887cd3b08d70a8d1d9a1d36",
+  "candidate_RAM_payload": "/dev/shm/idoly-v0329-work/radio/StoryPlayerScreen-radio-fade-candidate.asset",
+  "runtime_device_verified": false,
+  "product_build_performed": false,
+  "builder_cache_version_and_ios_sources_edited": false
+}

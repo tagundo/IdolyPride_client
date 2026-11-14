@@ -1,0 +1,1 @@
+{"status": "PASS_TWO_IDLE_DEV_SERVICES_RESTORED", "service_count": 2, "exact_argv_cwd_environment_restored": true, "original_logs_appended": true, "private_checkpoint_removed": true, "VM_or_container_stopped": false, "must_restore": false}

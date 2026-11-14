@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "sha256": "4c034a74a74eaccd602a4f91ea581ab8132c91e3cb4d1c4dd951f8df1ad311b9",
+  "bytes": 312776,
+  "so": "/dev/shm/idoly-v0329-work/client-preparation/native-android/libidoly_presentation.so",
+  "source_sha256": {
+    "client-presentation/native/bridge.cpp": "51bab04d224c24b6843d8e9abca1aca477d4f53ec8f8a9caa1fa90f66a61c709",
+    "client-presentation/native/bulk_checked_filter.hpp": "80989b9bfde91d529f9ea89ddcf6d9051a3d1c0b810507d6b82d8944e31b5176",
+    "client-presentation/native/hangul_font.hpp": "7a2f3fc063c614234cd7410ebe8c93d6f9adfa0689f793da8aa2e14d391be8a9",
+    "client-presentation/native/local_resource_policy.hpp": "991219111e40d50271e8b2194e96795d02263c8ffa81f80a4473abdbde9359f2",
+    "client-presentation/native/media_policy.hpp": "a36bd4d5c432d30f51735bbc8653aa16d936865238d8b6ae16262b9bf682f197",
+    "client-presentation/native/orientation.hpp": "eb92a06e8405c42625e2757830572467fc88f198204f89d01b84c19131a0e508",
+    "client-presentation/native/panorama_ui_edges.hpp": "70a5595887bb1f0d0c8754400358d85e9dbce6b1f65ce039fd61891b7b5945a9",
+    "client-presentation/native/panorama_ui_math.hpp": "c723ab84d5155bc1042ed64cb043ad9b09fbeb5f7c03516918745c4a2fc3f9e3",
+    "client-presentation/native/photography_ui.hpp": "2ad204e70be282f33a65a20e06236d9ab7b0738521f9337cb3a1ba1865b08509",
+    "client-presentation/native/playback_config.hpp": "79029ccecdc25ad87e5bbafe78a7362ba753a2c2c12cdf85e0ed78d496caa274",
+    "client-presentation/native/presentation_math.hpp": "02803131c0a639db9f8a6b22bcb304aa09c21f5f40fdc93a90cb9f26d7c74004",
+    "client-presentation/native/presentation_scope.hpp": "b706eab220d6917cdfc266eb93b5d60a0c39fa375693ec4d1a519d6992df50e0",
+    "client-presentation/native/profile.hpp": "221b0e6dc75905717d68d65a3924142a225de6edd5d9fa8c793268ca086b9c85",
+    "client-presentation/native/profile.json": "5bc347544e2d0c696f11223b826834aae02a6e01c2343ad6f3c51c9f53de2f6f",
+    "client-presentation/native/sound_persistence.hpp": "2b45d7d0c77b83acc47f850a587680bb4055bac576dbbb08467c87a7b05652ef",
+    "client-presentation/native/wardrobe_lifecycle.hpp": "bd1cabe985c3837a3c9cb02194d1358f435794b9a299522356e5b05ca7d8b0bd",
+    "client-presentation/native/wardrobe_timing.hpp": "a16886176209580a076efeef4250bbb6f80b2e224491a7eac9fdf28423d29d3b"
+  },
+  "source_unchanged_during_build": true,
+  "profile_prefix_count": 133,
+  "profile_hook_count": 58,
+  "abi": "arm64-v8a",
+  "minimum_api": 28,
+  "segment_alignment": 16384,
+  "dt_needed": [
+    "libshadowhook.so",
+    "libdl.so",
+    "libm.so",
+    "libc.so"
+  ],
+  "load_segments": [
+    16384,
+    16384,
+    16384,
+    16384
+  ],
+  "exports": [
+    "JNI_OnLoad",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_configure",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_configureMedia",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_configurePlayback",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_playbackStatus",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_renderProbeStatus",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_start",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_status",
+    "Java_game_qualiarts_idolypride_presentation_NativePresentation_wardrobeStatus"
+  ],
+  "command": [
+    "/workspace/.setup/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android28-clang++",
+    "-std=c++17",
+    "-O2",
+    "-fPIC",
+    "-fvisibility=hidden",
+    "-fexceptions",
+    "-fno-rtti",
+    "-nostdlib++",
+    "-ffunction-sections",
+    "-fdata-sections",
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-shared",
+    "-Wl,--gc-sections",
+    "-Wl,--exclude-libs,ALL",
+    "-Wl,--no-undefined",
+    "-Wl,-z,max-page-size=16384",
+    "-Wl,-z,common-page-size=16384",
+    "-Wl,-soname,libidoly_presentation.so",
+    "-I/workspace/shared/artifacts/shadowhook-2.0.1/include",
+    "-I/workspace/IdolyPride_client/client-presentation/native",
+    "/workspace/IdolyPride_client/client-presentation/native/bridge.cpp",
+    "/workspace/.setup/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++abi.a",
+    "-L/workspace/shared/artifacts/shadowhook-2.0.1/lib",
+    "-lshadowhook",
+    "-ldl",
+    "-lm",
+    "-o",
+    "/dev/shm/idoly-v0329-work/client-preparation/native-android/libidoly_presentation.so"
+  ],
+  "postprocess": [
+    "/workspace/.setup/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip",
+    "--strip-unneeded",
+    "/dev/shm/idoly-v0329-work/client-preparation/native-android/libidoly_presentation.so"
+  ],
+  "driver_sha256": "a36a6611f4507ff113c903eef3172aa256676a5a8f1654fa1bf4b846486d54b9",
+  "preflight": {
+    "memory_current": 15618334720,
+    "memory_max": 17179869184,
+    "memory_direct_headroom": 1561534464,
+    "memory_clean_inactive_credit": 268435456,
+    "memory_effective_headroom": 1829969920,
+    "oom_kill": "2"
+  },
+  "postflight": {
+    "memory_current": 15619919872,
+    "memory_max": 17179869184,
+    "memory_direct_headroom": 1559949312,
+    "memory_clean_inactive_credit": 268435456,
+    "memory_effective_headroom": 1828384768,
+    "oom_kill": "2"
+  },
+  "stages": [
+    {
+      "stage": "compile",
+      "seconds": 1.3330958180013113,
+      "before": {
+        "memory_current": 15617802240,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1562066944,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1830502400,
+        "oom_kill": "2"
+      },
+      "after": {
+        "memory_current": 15618748416,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1561120768,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1829556224,
+        "oom_kill": "2"
+      }
+    },
+    {
+      "stage": "strip",
+      "seconds": 0.07073840004159138,
+      "before": {
+        "memory_current": 15618215936,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1561653248,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1830088704,
+        "oom_kill": "2"
+      },
+      "after": {
+        "memory_current": 15618109440,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1561759744,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1830195200,
+        "oom_kill": "2"
+      }
+    },
+    {
+      "stage": "readelf-dynamic",
+      "seconds": 0.07070400897646323,
+      "before": {
+        "memory_current": 15618109440,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1561759744,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1830195200,
+        "oom_kill": "2"
+      },
+      "after": {
+        "memory_current": 15618998272,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1560870912,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1829306368,
+        "oom_kill": "2"
+      }
+    }
+  ],
+  "seconds": 1.8101748519693501,
+  "child_peak_rss_kib": 80568,
+  "self_peak_rss_kib": 23668,
+  "runtime_device_tested": false,
+  "limits": {
+    "address_space": 536870912,
+    "cpus": 1,
+    "nice": 19,
+    "tool_timeout_seconds": 60
+  }
+}

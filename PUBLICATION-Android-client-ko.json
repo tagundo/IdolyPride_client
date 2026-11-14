@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "branch": "downloads/story-adv-client-ko-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "sha256": "b91211a9d97cf519ba60b2cd34887529f4136cbb0f6b9556f7b688ad9038111e",
+      "bytes": 163441097,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "7a4fe32385573ef54ff84f70c76f663f9ecb496a",
+  "tree": "2a023f62d60ee09e3b3473a9833a682061c4c7eb"
+}

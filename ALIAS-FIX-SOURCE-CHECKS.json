@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "status": "PASS_SERVER_ALIAS_FIX_READY_FOR_PARENT_FREEZE",
+  "base_commit": "45378d05d3b987923a3f6ca67a23c7166cf56b35",
+  "owned_source_SHA256": {
+    "src/idoly_local/resource_translation.py": "ec90c4f3f2725547da40de25ceff48ef5a8ada6c6e85c8e8a514ad237c544fd8",
+    "src/idoly_local/octo_manifest.py": "dd4b4394ce0890420237565e7ad8c90990606501ecfbc09d28bb64707a867bd7",
+    "src/idoly_local/octo_runtime.py": "0b06c4bcfb997dc78af3497f92ecfa6bec6445a20af818372bb745334e37e4ec",
+    "tests/test_translated_object_aliases.py": "8d0399479b00486a285f3ff63f5275796cce216c31886e1d656f2f0e559647d4",
+    "tests/test_resource_translation_runtime.py": "cd0ca82fc6ab5e08b593ed57924013f9146df67891d5d4c6a923a6cbb570bca6"
+  },
+  "independent_read_only_review": {
+    "agent": "translation_route_candidates",
+    "blocking_findings": [],
+    "actual_original_ADV_rows_have_no_duplicate_upload_object_name": true
+  },
+  "targeted_suites_receipt": {
+    "path": "/dev/shm/idoly-v0329-work/alias-targeted-suites-verification.json",
+    "SHA256": "3e4bf1e1acc44e23aee835a37dda64fc9647c4e14f5b4271ebfac01542b7bf22",
+    "tests_passed": 162,
+    "subtests_passed": 87
+  },
+  "real_KO_HTTP_receipt": {
+    "path": "/dev/shm/idoly-v0329-work/real-ko-routes-http-verification.json",
+    "SHA256": "c8a0ef94faf84ad17bf119cca895a704e3491743646cb4235890e2febf2b31e5"
+  },
+  "failed_fingerprint_both_match_proof": {
+    "path": "/dev/shm/idoly-v0329-work/ko-mixed-identity-all-candidates.json",
+    "SHA256": "5006488121ced045340a2c2d5711a8f6ac8ade5309f12118ed68a54f6e8c3f64"
+  },
+  "no_commits_builds_versions_or_releases_changed_by_this_task": true,
+  "no_remote_recovery_executed": true,
+  "device_offline_success_verified": false,
+  "Mac_gameplay_verified": false,
+  "SDK_SQL_UPDATE_implementation_proven": false
+}

@@ -1,0 +1,37 @@
+{
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "producer_receipt": {
+    "path": "/dev/shm/idoly-v0329-work/server-preparation/mac-server-production.json",
+    "bytes": 4163,
+    "sha256": "883730a5f16ad65d3d7a4858a69fd705b299e91e0b41931ec665eeae498d4407"
+  },
+  "producer_receipt_SHA256": "883730a5f16ad65d3d7a4858a69fd705b299e91e0b41931ec665eeae498d4407",
+  "driver_bindings": {
+    "independent-mac-app-audit.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent-mac-app-audit.py",
+      "bytes": 54112,
+      "sha256": "de120b2e0b09daa3f68f8d4db31e18200f880b8eb172ff0e21cc89f781e7dea5"
+    },
+    "independent_runtime_contracts.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_runtime_contracts.py",
+      "bytes": 32519,
+      "sha256": "fdbb04f4690916f256273ecf3665351663277efd7d60bc13e8b9f354dd7114fa"
+    },
+    "independent_translation_bundle.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_translation_bundle.py",
+      "bytes": 9510,
+      "sha256": "b6d0bad3058f0d26d6d21e3b440fa6c4b55ae83fa7e82b007bed37ede3bc949d"
+    },
+    "independent_object_alias_contracts.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_object_alias_contracts.py",
+      "bytes": 7671,
+      "sha256": "fbe924d7fbfb723a7ddfadccf157386244bcf6be941d7671c353acbcf3c4c9ba"
+    },
+    "build-mac-server.py": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/build-mac-server.py",
+      "bytes": 10214,
+      "sha256": "003396fa0ea96d3e8b1065a688d0c0bbe7896a49f546562040ccf20d2024179f"
+    }
+  },
+  "producer_result_status": "PRODUCER_PASS_AWAIT_INDEPENDENT_QA"
+}

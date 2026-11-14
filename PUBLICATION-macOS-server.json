@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "branch": "downloads/story-server-macos-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "sha256": "0824507d2713c642fd31298efc8665ee142ad9d769cde1a412ee88a60e48996c",
+      "bytes": 283229438,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "544a5c597d9cf538e45beb399dd5de9c5cbf19f2",
+  "tree": "ee13ce8b17c77c1c90b3c34fb588bfe8b6bfa5c4"
+}

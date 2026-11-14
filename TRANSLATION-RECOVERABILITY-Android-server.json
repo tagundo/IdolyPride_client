@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "status": "PASS_PUBLISHED_APK_EXACT_AUDITED_EMBEDDED_TRANSLATION_RECOVERABILITY",
+  "published_APK_sha256": "46b3c16b1aa90ddaae318af1ba4c37f0a5726d1b776584e589a3762334b1a86f",
+  "published_APK_bytes": 284835788,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "publication_commit": "feae745fd463176db53e4d96ef5301f50632bc0c",
+  "publication_receipt_sha256": "95b7f21372e0f9e435a53e76af192de6b203077fccf7c866337f13661108602b",
+  "actual_binary_QA_sha256": "70a8d9b3431591cd99069ff59ab36d7c264b40e52cafaf87d012d651bbda46f8",
+  "embedded_member": "assets/bundledTranslations.zip",
+  "embedded_translation_bytes": 78203472,
+  "embedded_translation_sha256": "7e9f53983c50a148695d94537b7823935384d6bce551fb5f62b103f0909e43f9",
+  "all6_translation_member_SHA_CRC": {
+    "en/android/manifest.json": "4cc61d6c819b1064a34113e9da410e44eccbbf7ef277cb840dadfe8eeab2d289",
+    "en/android/manifest.pb": "9482c6ac04eb0880f8e0f6b545ffca0423b8a7ef3475abd8082fdf69989ca744",
+    "en/android/objects.zip": "534975726e143e5afb031e2a61cbc531fa10d91d39897e514eafce44a25930cf",
+    "ko/android/manifest.json": "4a16bd32de3b0850b6a50f3fdb1a28eb11678f7845caf65a106660872fc03c83",
+    "ko/android/manifest.pb": "825169cfa440042818f06c3c98df7827812a75d7fbdf07dd271a65f40560beb8",
+    "ko/android/objects.zip": "27e1af755baf3596282490883b930e1377390247974c2388b15f7b69c676012e"
+  },
+  "basis": "Complete remote APK SHA equals the actual independently audited local APK. Actual ZIP-member SHA/CRC verification binds the embedded original translation archive and six contained files.",
+  "new_remote_nested_member_download_performed": false
+}

@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "status": "PASS_SOURCE_AND_HOST_SCOPE_REVIEW_PENDING_ARTIFACT_QA",
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "source_epoch": 1794615679,
+  "working_tree_clean_at_review": true,
+  "review_scope": "Read-only frozen source and existing bounded host evidence. Final binary QA, publication and physical playback are separate gates.",
+  "source_SHA256": {
+    "src/idoly_local/octo_manifest.py": "dd4b4394ce0890420237565e7ad8c90990606501ecfbc09d28bb64707a867bd7",
+    "src/idoly_local/octo_runtime.py": "0b06c4bcfb997dc78af3497f92ecfa6bec6445a20af818372bb745334e37e4ec",
+    "src/idoly_local/resource_translation.py": "ec90c4f3f2725547da40de25ceff48ef5a8ada6c6e85c8e8a514ad237c544fd8",
+    "src/idoly_local/story_loading_prefab.py": "268d84fb68ca138c636db8bc147d33b31b8d1f73f0724e235ec0bf022d9180fc",
+    "src/idoly_local/unity_cache.py": "c90fa579019862f8c06ea339d5ce83e17a5114e64b582a72fa923c2bc74c75f3",
+    "client-presentation/build_full_client.py": "5c58c9810f7e56a4a5ee58e8f298053e4dd5004e03075a44faab384377c66663",
+    "tools/repack_android_server_python.py": "74b75654c77c7eea8a53fd8ebd56244925a31dd69967c249685332ba056ab039",
+    "tests/test_repack_android_server_python.py": "36720872c6ae0e929e9efeba958f6ce41f4f2a19c8019a03fd41e609a5ab4819",
+    "tests/test_unity_cache.py": "b69a1b9bf94a9c6bb514046f10fa893007662d287efab2072875fab3062bf91c",
+    "client-presentation/tests/test_full_client.py": "c452ae92b412fbb375f73819c3686a371017ccd7fa22cca0a7db89578e905e77",
+    "docs/story-resource-v0.3.29.md": "e6eaadcd423586501e2b29ef1cddca8d4c7c35ba5ebcd233d2c4a1e5b6523bdc"
+  },
+  "proofs": {
+    "diagnostics21-sanitized-comparison.json": {
+      "path": "/dev/shm/idoly-v0329-work/diagnostics21-sanitized-comparison.json",
+      "bytes": 2923,
+      "sha256": "76afb9b57f58c5013ed70428de38fee4c9d148baae186f9792e81b211baa9a1c"
+    },
+    "ko-mixed-identity-all-candidates.json": {
+      "path": "/dev/shm/idoly-v0329-work/ko-mixed-identity-all-candidates.json",
+      "bytes": 2175,
+      "sha256": "5006488121ced045340a2c2d5711a8f6ac8ade5309f12118ed68a54f6e8c3f64"
+    },
+    "real-ko-routes-http-verification.json": {
+      "path": "/dev/shm/idoly-v0329-work/real-ko-routes-http-verification.json",
+      "bytes": 2348,
+      "sha256": "c8a0ef94faf84ad17bf119cca895a704e3491743646cb4235890e2febf2b31e5"
+    },
+    "alias-targeted-suites-verification.json": {
+      "path": "/dev/shm/idoly-v0329-work/alias-targeted-suites-verification.json",
+      "bytes": 2418,
+      "sha256": "3e4bf1e1acc44e23aee835a37dda64fc9647c4e14f5b4271ebfac01542b7bf22"
+    },
+    "radio/root-independent-prefab-review.json": {
+      "path": "/dev/shm/idoly-v0329-work/radio/root-independent-prefab-review.json",
+      "bytes": 741,
+      "sha256": "36757c250b89ce46bc170396999f6a3d6ab347d94cf6007605f9c5120aa09d60"
+    },
+    "radio/helper-verification.json": {
+      "path": "/dev/shm/idoly-v0329-work/radio/helper-verification.json",
+      "bytes": 1170,
+      "sha256": "372e8677e530fc34fa52b0987bc6be9257265d4f8a77adf67e5281faf0f2aa29"
+    },
+    "builder-cache-prefab-host-verification.json": {
+      "path": "/dev/shm/idoly-v0329-work/builder-cache-prefab-host-verification.json",
+      "bytes": 4935,
+      "sha256": "b519081d578f4e88192aeef23288cb0a00d40c88e90956fd52e684159e038cfd"
+    },
+    "client-preparation/transport-host-preflight.json": {
+      "path": "/dev/shm/idoly-v0329-work/client-preparation/transport-host-preflight.json",
+      "bytes": 9588,
+      "sha256": "9fd759ed2d3eeaf0361c463a3069bcf36dc995a16868b09b50799cdb05879045"
+    },
+    "server-preparation/version-checks/verification.json": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/version-checks/verification.json",
+      "bytes": 1532,
+      "sha256": "aee8f34ef24072c23d21c15cd5194a49baf147f42082015b51d579645a48a838"
+    },
+    "server-preparation/version-checks/version-source-verification.json": {
+      "path": "/dev/shm/idoly-v0329-work/server-preparation/version-checks/version-source-verification.json",
+      "bytes": 768,
+      "sha256": "2d46a00538592df0c148609a97b3076920f69fbb5923dbdfa9d944d3b9b0d704"
+    }
+  },
+  "diagnostics21": {
+    "network_state": "Internet connected (user confirmed)",
+    "server_version": "0.3.28",
+    "cache_verified_files": 54442,
+    "cache_http_successes": 10,
+    "HTTP404_requests": 2,
+    "offline_play_observed": false,
+    "failed_logical_stories": {
+      "6c10406869023b10": "adv_main_01_01_02.txt",
+      "25d1a14e7fffa4db": "adv_event_2510_01_01.txt"
+    }
+  },
+  "server_mixed_identity_alias_implementation_present": true,
+  "server_aliases_derived_from_validated_original_and_translated_rows_only": true,
+  "canonical_MD5_size_cache_key_and_download_catalog_preserved": true,
+  "unknown_or_noncanonical_routes_still_rejected": true,
+  "host_both_observed_story_routes_verified": true,
+  "host_HTTP_payload_scope": "Two exact pinned KO scripts with complete original catalog; no full production bundle rebuild or device run.",
+  "static_prefab_bindings_repaired": true,
+  "static_prefab_scope": "Android-only build-time repair of two exact same-GameObject CanvasGroup references. Mac IPA unchanged.",
+  "static_prefab_objects": 371,
+  "static_prefab_changed_bytes": 2,
+  "static_prefab_after_SHA256": "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350",
+  "new_Unity_GUID": "afad44e0-4868-53a2-82b3-be2cd7df84a2",
+  "all_native_hook_sources_unchanged_from_v0328": true,
+  "new_runtime_hooks_or_frame_work_added": false,
+  "host_suites": {
+    "aliases": {
+      "passed": 162,
+      "subtests": 87,
+      "direct_source_hash_bindings": true
+    },
+    "prefab_helper": {
+      "passed": 16,
+      "skipped": 0,
+      "direct_source_hash_bindings": true
+    },
+    "builder_cache_prefab": {
+      "passed": 53,
+      "skipped": 1,
+      "basis": "Root execution and owned scratch retirement receipt; actual builder hash also matches independent composition preflight."
+    },
+    "Android_module_exclusions": {
+      "passed": 47,
+      "basis": "Root-reported execution in parent transcript; no standalone original test log receipt exists. Current frozen exclusion code and tests statically verified at 33 build-only exclusions."
+    },
+    "version_packaging": {
+      "passed": 171,
+      "direct_five_version_source_hash_bindings": true
+    },
+    "counts_are_not_summed_or_claimed_unique": true
+  },
+  "actual_five_artifact_QA_review_performed": false,
+  "actual_five_artifact_QA_status": "PENDING_SEPARATE_ACTUAL_RECEIPTS",
+  "physical_phone_offline_play_verified": false,
+  "RadioButtonView_NRE_device_verified_fixed": false,
+  "actual_Mac_execution_verified": false,
+  "actual_Mac_offline_full_download_verified": false,
+  "current_photo_INVALID_ARGUMENT_confirmed_fixed": false,
+  "full_photo_capture_and_Firebase_upload_supported": false,
+  "all_translation_complete": false,
+  "translation_scope_unchanged": {
+    "ADV_total": 3492,
+    "translated": 3091,
+    "Japanese_fallback": 401
+  },
+  "SDK_SQL_UPDATE_implementation_proven": false,
+  "limits": [
+    "Static repair of the null references is verified; disappearance of the NRE on the device is not.",
+    "Successful host HTTP replies do not prove Unity asset acceptance or physical offline playback.",
+    "Mac receives the common server alias code when its new server is built; Mac IPA and its UI assets are not changed.",
+    "Original resource/translation payloads, private credentials, raw diagnostics, VM, devices and external sources were not reread or changed for this scope review.",
+    "Root retains final artifact QA/publication approval, fresh grants, durable evidence and restoration of temporarily paused idle development services."
+  ]
+}

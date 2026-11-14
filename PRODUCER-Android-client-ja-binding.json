@@ -1,0 +1,42 @@
+{
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "producer_receipt": {
+    "path": "/dev/shm/idoly-v0329-work/locales-preparation/ja-production.json",
+    "bytes": 2326,
+    "sha256": "e4212ba2cba9f6eeb94fb10232cf9fd99eaf74c1d5302b4e954bef1a97c64325"
+  },
+  "producer_receipt_SHA256": "e4212ba2cba9f6eeb94fb10232cf9fd99eaf74c1d5302b4e954bef1a97c64325",
+  "driver_bindings": {
+    "build-android-client-stage.py": {
+      "path": "/dev/shm/idoly-v0329-work/locales-preparation/build-android-client-stage.py",
+      "bytes": 7942,
+      "sha256": "7cdff0637706650ea9e697538325208866562d1adb296f1e9bdb93cd0d3e2713"
+    },
+    "audit-android-client.py": {
+      "path": "/dev/shm/idoly-v0329-work/locales-preparation/audit-android-client.py",
+      "bytes": 62192,
+      "sha256": "f94c3567fade7a04843a1546834aee5bb8b8c8575e5cb2a0f1fe06cc4ffd4824"
+    },
+    "independent-story-asset.py": {
+      "path": "/dev/shm/idoly-v0329-work/locales-preparation/independent-story-asset.py",
+      "bytes": 6448,
+      "sha256": "4f9fdd796270201ba90bf020faa5d2b92ca26b37bc4882261e5d0fc0bca174b9"
+    },
+    "bind-ko-inputs.py": {
+      "path": "/dev/shm/idoly-v0329-work/locales-preparation/bind-ko-inputs.py",
+      "bytes": 7128,
+      "sha256": "ad5a4b94cfe1dad2debb4a08463d670e6ad0271e4f28dd1ef65d202ed8ed2736"
+    },
+    "manage-ja-en-client.py": {
+      "path": "/dev/shm/idoly-v0329-work/locales-preparation/manage-ja-en-client.py",
+      "bytes": 19147,
+      "sha256": "b2898a5e78c816f07e654f8d99bd57d4f78a2564acd8586a70c7ec23c102d798"
+    },
+    "owned_process_cleanup.py": {
+      "path": "/dev/shm/idoly-v0329-work/owned_process_cleanup.py",
+      "bytes": 6547,
+      "sha256": "516c5bff61c5fab855deb8b734bf2269b6f13648ee7a819e822fd98f9a5a7372"
+    }
+  },
+  "producer_result_status": "PASS_AWAIT_INDEPENDENT_QA"
+}

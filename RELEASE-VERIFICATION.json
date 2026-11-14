@@ -1,0 +1,741 @@
+{
+  "schema": 1,
+  "status": "PASS_LOCAL_METADATA_ACTUAL_QA_BINDINGS",
+  "version": "0.3.29",
+  "version_code": 47,
+  "product_source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "source_epoch": 1794615679,
+  "tag": "local-server-v0.3.29",
+  "repository": "tagundo/IdolyPride_client",
+  "artifact_count": 9,
+  "new_source5dd_artifact_count": 5,
+  "reused_artifact_count": 4,
+  "artifacts": [
+    {
+      "kind": "client-en",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "bytes": 163408329,
+      "sha256": "9d3268a3c80828e717194db49e5af2f91bd56c1e0d33d2c9d27f59123ac53d63",
+      "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+      "qa_receipt_sha256": "2c5c149d8e3dad213a8f984ba1a45badd631ceca8a500c2cf6ef683fc997b910",
+      "publication_manifest_sha256": "8c990803db4d81b3eda6e64d76d50c55b3d754864f94a904306ea44e37c8b834",
+      "publication_sha256": "e31d913540fe276e2aa6776b9f85e867e46d561629a9ec5c9e3752e8b0dc1076",
+      "retirement_sha256": "7e4d9147af4138a63894bf086679dba3c141b50c1fa493d9a580ce1f51be844e",
+      "producer_receipt_sha256": "e7837ef34e22ec385b7b02e1140e05a3fc5223f9e82524abe5b0395585f05d2e",
+      "retirement_verified_facts": {
+        "basis": "Derived only from the original bound client retirement, anonymous response and exact binary QA receipts; originals retained unchanged.",
+        "complete_remote_SHA_verified": true,
+        "anonymous_prefix_verified": true,
+        "final_local_SHA_verified": true,
+        "only_owned_derived_APK_retired": true,
+        "original_retirement_SHA256": "7e4d9147af4138a63894bf086679dba3c141b50c1fa493d9a580ce1f51be844e",
+        "anonymous_receipt_SHA256": "1ef46992f0e06fc83f5c6de0b46efad2ccb5dd0729d417871dddc9b1ff994e6a"
+      },
+      "client_build_receipt_bindings": {
+        "native_receipt_SHA256": "24d3a1074d9771359794038e09f8b27934ee9d513b2dff37c609976efe9a66d8",
+        "feature_provenance_SHA256": "8586c6eff3bbf54d2daeb757ce58b5814d7bcb5f30e4b1f2fc675a4c31581cc2",
+        "source_provenance": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.provenance.json",
+          "bytes": 554377,
+          "sha256": "0621dce5ddf42997b7377f1bc655dbbeafb2b7d6dda561ef6b1e8ac5905bff56",
+          "stream_chunk_bytes": 65536,
+          "metadata_only": true,
+          "full_copy_published": false
+        },
+        "actual_locale_reuse_binding": {
+          "actual_manager_SHA256": "b2898a5e78c816f07e654f8d99bd57d4f78a2564acd8586a70c7ec23c102d798",
+          "managed_state_SHA256": "edf6cfb1f630f52a94a29586d5a7225b5a1bf884c2d8ebc4dae169652201d94d",
+          "manager_plan_SHA256": "487fa2f4c39903a6ecbe897a992d89ad4b0bc2dc77a114db220911ad51f2479e",
+          "native_feature_reuse_binding_SHA256": "f2690017c1f94dc97fe443163cf0c7afda871cc4c2e097b16d368ce971e1037f",
+          "KO_QA_SHA256": "f46527ead17ef9d1b1a6a4ca94350bb1778b8641833dccb41b64199cce451a14",
+          "KO_publication_SHA256": "f64390f333c7f3659e91da504e3ca1773e62ddf853072b025ab9a02f4ecffc1a",
+          "KO_retirement_SHA256": "2f9b94bd90f8dd327fc58ddce9df1d138eb9c7a89a54ead285d7e62dfb33869a",
+          "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+          "old_source_or_binary_hashes_substituted": false
+        }
+      },
+      "driver_bindings": {
+        "build-android-client-stage.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/build-android-client-stage.py",
+          "bytes": 7942,
+          "sha256": "7cdff0637706650ea9e697538325208866562d1adb296f1e9bdb93cd0d3e2713"
+        },
+        "audit-android-client.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/audit-android-client.py",
+          "bytes": 62192,
+          "sha256": "f94c3567fade7a04843a1546834aee5bb8b8c8575e5cb2a0f1fe06cc4ffd4824"
+        },
+        "independent-story-asset.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/independent-story-asset.py",
+          "bytes": 6448,
+          "sha256": "4f9fdd796270201ba90bf020faa5d2b92ca26b37bc4882261e5d0fc0bca174b9"
+        },
+        "bind-ko-inputs.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/bind-ko-inputs.py",
+          "bytes": 7128,
+          "sha256": "ad5a4b94cfe1dad2debb4a08463d670e6ad0271e4f28dd1ef65d202ed8ed2736"
+        },
+        "manage-ja-en-client.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/manage-ja-en-client.py",
+          "bytes": 19147,
+          "sha256": "b2898a5e78c816f07e654f8d99bd57d4f78a2564acd8586a70c7ec23c102d798"
+        },
+        "owned_process_cleanup.py": {
+          "path": "/dev/shm/idoly-v0329-work/owned_process_cleanup.py",
+          "bytes": 6547,
+          "sha256": "516c5bff61c5fab855deb8b734bf2269b6f13648ee7a819e822fd98f9a5a7372"
+        }
+      },
+      "LFS_source_branch": "downloads/story-adv-client-en-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+      "LFS_publication_commit": "65eeafaecb774c85c96e2dc9b63c96b6767abe50",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "final_local_SHA_verified": true,
+      "reused_unchanged_artifact": false,
+      "as_of_build_assistant_device_playback_verified": false,
+      "actual_Mac_execution_verified": false
+    },
+    {
+      "kind": "client-ja",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+      "bytes": 163424713,
+      "sha256": "43e8ea7e1fb6bc8ee0132cbabe6fc68812ee0f1f02a313d7e15f3d334b0c5f2d",
+      "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+      "qa_receipt_sha256": "ab4fd0c616ec3fcd65936ae45cf0ea600e6ec8ac6b0e6113aed5700b5af0068a",
+      "publication_manifest_sha256": "4502763830a4f5fe251bdf427b87dbb2ab8f886060fd1b932146c070da9f72c2",
+      "publication_sha256": "99650c5852f027f02980cab5b9d32f6d845fa6508c93eea8300ac4b5aa4aef32",
+      "retirement_sha256": "6db38d489db2c4ffdef7f4bbb09dfd5c94778dcf66978ca8f7d8cc8f34509877",
+      "producer_receipt_sha256": "e4212ba2cba9f6eeb94fb10232cf9fd99eaf74c1d5302b4e954bef1a97c64325",
+      "retirement_verified_facts": {
+        "basis": "Derived only from the original bound client retirement, anonymous response and exact binary QA receipts; originals retained unchanged.",
+        "complete_remote_SHA_verified": true,
+        "anonymous_prefix_verified": true,
+        "final_local_SHA_verified": true,
+        "only_owned_derived_APK_retired": true,
+        "original_retirement_SHA256": "6db38d489db2c4ffdef7f4bbb09dfd5c94778dcf66978ca8f7d8cc8f34509877",
+        "anonymous_receipt_SHA256": "ff8837e9d71859afc9eb2086e3a598be2a939e6f4af32d5f8d5a3e22486e36d9"
+      },
+      "client_build_receipt_bindings": {
+        "native_receipt_SHA256": "24d3a1074d9771359794038e09f8b27934ee9d513b2dff37c609976efe9a66d8",
+        "feature_provenance_SHA256": "8586c6eff3bbf54d2daeb757ce58b5814d7bcb5f30e4b1f2fc675a4c31581cc2",
+        "source_provenance": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.provenance.json",
+          "bytes": 554279,
+          "sha256": "d394a036b14833921197d4d3289faca1ffc431db3abcee87409f5635293221c4",
+          "stream_chunk_bytes": 65536,
+          "metadata_only": true,
+          "full_copy_published": false
+        },
+        "actual_locale_reuse_binding": {
+          "actual_manager_SHA256": "b2898a5e78c816f07e654f8d99bd57d4f78a2564acd8586a70c7ec23c102d798",
+          "managed_state_SHA256": "115bf720641af62aa5a6666d8dbd21cf368b17e4b0625ed17d65006b15cf350f",
+          "manager_plan_SHA256": "487fa2f4c39903a6ecbe897a992d89ad4b0bc2dc77a114db220911ad51f2479e",
+          "native_feature_reuse_binding_SHA256": "f2690017c1f94dc97fe443163cf0c7afda871cc4c2e097b16d368ce971e1037f",
+          "KO_QA_SHA256": "f46527ead17ef9d1b1a6a4ca94350bb1778b8641833dccb41b64199cce451a14",
+          "KO_publication_SHA256": "f64390f333c7f3659e91da504e3ca1773e62ddf853072b025ab9a02f4ecffc1a",
+          "KO_retirement_SHA256": "2f9b94bd90f8dd327fc58ddce9df1d138eb9c7a89a54ead285d7e62dfb33869a",
+          "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+          "old_source_or_binary_hashes_substituted": false
+        }
+      },
+      "driver_bindings": {
+        "build-android-client-stage.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/build-android-client-stage.py",
+          "bytes": 7942,
+          "sha256": "7cdff0637706650ea9e697538325208866562d1adb296f1e9bdb93cd0d3e2713"
+        },
+        "audit-android-client.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/audit-android-client.py",
+          "bytes": 62192,
+          "sha256": "f94c3567fade7a04843a1546834aee5bb8b8c8575e5cb2a0f1fe06cc4ffd4824"
+        },
+        "independent-story-asset.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/independent-story-asset.py",
+          "bytes": 6448,
+          "sha256": "4f9fdd796270201ba90bf020faa5d2b92ca26b37bc4882261e5d0fc0bca174b9"
+        },
+        "bind-ko-inputs.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/bind-ko-inputs.py",
+          "bytes": 7128,
+          "sha256": "ad5a4b94cfe1dad2debb4a08463d670e6ad0271e4f28dd1ef65d202ed8ed2736"
+        },
+        "manage-ja-en-client.py": {
+          "path": "/dev/shm/idoly-v0329-work/locales-preparation/manage-ja-en-client.py",
+          "bytes": 19147,
+          "sha256": "b2898a5e78c816f07e654f8d99bd57d4f78a2564acd8586a70c7ec23c102d798"
+        },
+        "owned_process_cleanup.py": {
+          "path": "/dev/shm/idoly-v0329-work/owned_process_cleanup.py",
+          "bytes": 6547,
+          "sha256": "516c5bff61c5fab855deb8b734bf2269b6f13648ee7a819e822fd98f9a5a7372"
+        }
+      },
+      "LFS_source_branch": "downloads/story-adv-client-ja-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+      "LFS_publication_commit": "865f96e84b8e6bd85e60851a39ca46717848d886",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "final_local_SHA_verified": true,
+      "reused_unchanged_artifact": false,
+      "as_of_build_assistant_device_playback_verified": false,
+      "actual_Mac_execution_verified": false
+    },
+    {
+      "kind": "client-ko",
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "bytes": 163441097,
+      "sha256": "b91211a9d97cf519ba60b2cd34887529f4136cbb0f6b9556f7b688ad9038111e",
+      "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+      "qa_receipt_sha256": "f46527ead17ef9d1b1a6a4ca94350bb1778b8641833dccb41b64199cce451a14",
+      "publication_manifest_sha256": "e8488b1c84259991bc0959100389af4fc636cdc663443d500d71146b895787d0",
+      "publication_sha256": "f64390f333c7f3659e91da504e3ca1773e62ddf853072b025ab9a02f4ecffc1a",
+      "retirement_sha256": "2f9b94bd90f8dd327fc58ddce9df1d138eb9c7a89a54ead285d7e62dfb33869a",
+      "producer_receipt_sha256": "d72cc6923af782b9a94ad45537aa148e62a57b8348376e926f1007e3577169d4",
+      "retirement_verified_facts": {
+        "basis": "Derived only from the original bound client retirement, anonymous response and exact binary QA receipts; originals retained unchanged.",
+        "complete_remote_SHA_verified": true,
+        "anonymous_prefix_verified": true,
+        "final_local_SHA_verified": true,
+        "only_owned_derived_APK_retired": true,
+        "original_retirement_SHA256": "2f9b94bd90f8dd327fc58ddce9df1d138eb9c7a89a54ead285d7e62dfb33869a",
+        "anonymous_receipt_SHA256": "16ad4a7ae52f01baa80bc9ba10490cb7a5e38ebdc6c338409b51b783e0aa8fd1"
+      },
+      "client_build_receipt_bindings": {
+        "native_receipt_SHA256": "24d3a1074d9771359794038e09f8b27934ee9d513b2dff37c609976efe9a66d8",
+        "feature_provenance_SHA256": "8586c6eff3bbf54d2daeb757ce58b5814d7bcb5f30e4b1f2fc675a4c31581cc2",
+        "source_provenance": {
+          "path": "/dev/shm/idoly-v0329-work/client-preparation/delivery/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.provenance.json",
+          "bytes": 554369,
+          "sha256": "63134c688389afe6621d502d327b21226936091b4b5563cc42329e1daaf73782",
+          "stream_chunk_bytes": 65536,
+          "metadata_only": true,
+          "full_copy_published": false
+        },
+        "actual_locale_reuse_binding": null
+      },
+      "driver_bindings": {
+        "build-native.py": {
+          "path": "/dev/shm/idoly-v0329-work/client-preparation/build-native.py",
+          "bytes": 5540,
+          "sha256": "a36a6611f4507ff113c903eef3172aa256676a5a8f1654fa1bf4b846486d54b9"
+        },
+        "build-android-client-stage.py": {
+          "path": "/dev/shm/idoly-v0329-work/client-preparation/build-android-client-stage.py",
+          "bytes": 8433,
+          "sha256": "a0308e006d686233dd42bfda71c45b0296886845b4c40c3edf4614eda2eef0c6"
+        },
+        "audit-android-client.py": {
+          "path": "/dev/shm/idoly-v0329-work/client-preparation/audit-android-client.py",
+          "bytes": 62186,
+          "sha256": "2cb3ec51c15849d324db33ff4ea92ea2635ca8940f99294c84f0af77ee7a67db"
+        },
+        "independent-story-asset.py": {
+          "path": "/dev/shm/idoly-v0329-work/client-preparation/independent-story-asset.py",
+          "bytes": 6448,
+          "sha256": "4f9fdd796270201ba90bf020faa5d2b92ca26b37bc4882261e5d0fc0bca174b9"
+        },
+        "manage-ko-build-and-qa.py": {
+          "path": "/dev/shm/idoly-v0329-work/client-preparation/manage-ko-build-and-qa.py",
+          "bytes": 15045,
+          "sha256": "e69ce644c15b02043fd12e4f43cae7bf3fe77c8d7b474c6370fdd00fb6443b3f"
+        },
+        "owned_process_cleanup.py": {
+          "path": "/dev/shm/idoly-v0329-work/owned_process_cleanup.py",
+          "bytes": 6547,
+          "sha256": "516c5bff61c5fab855deb8b734bf2269b6f13648ee7a819e822fd98f9a5a7372"
+        }
+      },
+      "LFS_source_branch": "downloads/story-adv-client-ko-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+      "LFS_publication_commit": "7a4fe32385573ef54ff84f70c76f663f9ecb496a",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "final_local_SHA_verified": true,
+      "reused_unchanged_artifact": false,
+      "as_of_build_assistant_device_playback_verified": false,
+      "actual_Mac_execution_verified": false
+    },
+    {
+      "kind": "data",
+      "name": "IdolyPride-ServerData-v0.3.25.zip",
+      "bytes": 191305222,
+      "sha256": "c94cd2ee7e722e6df67f02f31868422ff5d3bf1657c64a05a61b5059572475d8",
+      "source_commit": "1a0dcd15d9016cc1b9548b0bd6c6bc71f8f01356",
+      "qa_receipt_sha256": "7fd10775e85285ca5e1d6e9a8e832f2fa253aefb27bbc4ee932239a0b9498730",
+      "LFS_source_branch": "downloads/pose-font-data-v0.3.25",
+      "LFS_publication_commit": "ebc6a6c6d9f814ceb9340e2d9d0caef5c8e10235",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": true,
+      "original_release": "local-server-v0.3.25",
+      "reuse_from_release": "local-server-v0.3.27"
+    },
+    {
+      "kind": "ipa-en",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-en.ipa",
+      "bytes": 148984623,
+      "sha256": "9a9d5164b0495a1ebdae4a34ca69ae70a92fbdc2903a42b01b32367e18d295a7",
+      "source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "qa_receipt_sha256": "07db049b8b7c2b951bc318001d38851b3f12fadde7653d646ad45b541e26397b",
+      "native_review_sha256": "85734a53fef6222aec4b9d744df869d4232f8a2802ee2a78838f095d4fd4b9de",
+      "font_object_review_sha256": "24dee06158c8d42577602c44d384923d9b763f533647f2022a98b8c9345e252f",
+      "ui_object_review_sha256": "3b8f70ec6248afeda837571f8d5a0b497f85aaa2488bbd0319951c1a2e01a33c",
+      "native_sha256": "eb185b11636eec5d30153872252cfe8668bf17a3a9af766c7312bfd0fdd594c4",
+      "native_bytes": 157520,
+      "language": "en",
+      "LFS_source_branch": "downloads/mac-sound-ipa-en-v0.3.27-source-6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "LFS_publication_commit": "71b2ebd92e3ff3215a8ceab07120e38802f033e0",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": true,
+      "reuse_from_release": "local-server-v0.3.27"
+    },
+    {
+      "kind": "ipa-ja",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ja.ipa",
+      "bytes": 149170261,
+      "sha256": "e94cca06d011e7988f120b9079c864384b8f537b0b19c2294f3cf6e39ce5b2ec",
+      "source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "qa_receipt_sha256": "df1841a01f8cb95ebd4ca3750fa3be91166e1f30e855a9c5fcfed8b15efaa0e9",
+      "native_review_sha256": "85734a53fef6222aec4b9d744df869d4232f8a2802ee2a78838f095d4fd4b9de",
+      "font_object_review_sha256": "c76906987e1c33f94520f7c336b5cae45bcf67d652a8965687f5af75621f2ec4",
+      "ui_object_review_sha256": "66a981cdebdfcef3445617d4d87441c94de76ed3fc16387ae606dd965ebc0bcc",
+      "native_sha256": "eb185b11636eec5d30153872252cfe8668bf17a3a9af766c7312bfd0fdd594c4",
+      "native_bytes": 157520,
+      "language": "ja",
+      "LFS_source_branch": "downloads/mac-sound-ipa-ja-v0.3.27-source-6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "LFS_publication_commit": "ec5b9e7830b11a06e16948a198f0d81145427b94",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": true,
+      "reuse_from_release": "local-server-v0.3.27"
+    },
+    {
+      "kind": "ipa-ko",
+      "name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa",
+      "bytes": 148990199,
+      "sha256": "788e05ca2321e7d27e087248eb48607b6e6e47b46b5bd21e2e795a2dd788ec74",
+      "source_commit": "6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "qa_receipt_sha256": "2149d64166846b071af786563744b9a66144b0a1d1eb25cab8b28658adb1aa83",
+      "native_review_sha256": "85734a53fef6222aec4b9d744df869d4232f8a2802ee2a78838f095d4fd4b9de",
+      "font_object_review_sha256": "798e7cf08ca3f27e9a13f0294a06c3c424b21273651b95cdc120ea8b32e4c944",
+      "ui_object_review_sha256": "bf39ec421711163bba66b18e225018eae248da330698412f116338bc63e2d522",
+      "native_sha256": "eb185b11636eec5d30153872252cfe8668bf17a3a9af766c7312bfd0fdd594c4",
+      "native_bytes": 157520,
+      "language": "ko",
+      "LFS_source_branch": "downloads/mac-sound-ipa-ko-v0.3.27-source-6e5fccaffe0f9c218cc8c38446b2de261f823af7",
+      "LFS_publication_commit": "da7a8a1cea4b35e48bbe464c3126da85b191e62f",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "reused_unchanged_artifact": true,
+      "reuse_from_release": "local-server-v0.3.27"
+    },
+    {
+      "kind": "mac",
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 283229438,
+      "sha256": "0824507d2713c642fd31298efc8665ee142ad9d769cde1a412ee88a60e48996c",
+      "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+      "qa_receipt_sha256": "a9ffd2ed7c92d7cda30f9e072b3334174952ff00ea0f297227787ca462acb85d",
+      "publication_manifest_sha256": "7542adb259d31abad49c284205a6e847c4194332ad4ec587ec24509b5ef6fb41",
+      "publication_sha256": "76c347756094bb4aca54c4664c55ddf13ed5fbc425a46f86b50ff09d7fc70058",
+      "retirement_sha256": "8d46c53770f699bb4cbff86e1b665d8affafab7834c7364f9822cd7f5c5a246c",
+      "producer_receipt_sha256": "883730a5f16ad65d3d7a4858a69fd705b299e91e0b41931ec665eeae498d4407",
+      "retirement_verified_facts": {
+        "basis": "Derived only from the original bound Mac retirement, actual 546-file/4-symlink QA, anonymous response and iOS translation recoverability receipts; originals retained unchanged.",
+        "complete_remote_SHA_verified": true,
+        "anonymous_prefix_verified": true,
+        "final_local_SHA_verified": true,
+        "final_staged_file_count": 546,
+        "final_staged_symlink_count": 4,
+        "final_stage_inventory_SHA256_recorded": "52d1a120362906733fd4fa7ba3200d6d90f44a4d7ab1ec9261d429b30607db81",
+        "hardlink_unique_inode_count": 547,
+        "shared_translation_bytes_counted_once": 78210744,
+        "embedded_translation": {
+          "member": "IdolyPrideLocalServer.app/Contents/Resources/bundledTranslations.zip",
+          "bytes": 78210744,
+          "sha256": "8e44bac91acaca7661bf1b49be8663e23345df9541d7021ff2eaa5b9415bf8b0",
+          "whole_member_SHA_and_CRC_verified": true,
+          "exact_input_SHA_verified": true
+        },
+        "original_retirement_SHA256": "8d46c53770f699bb4cbff86e1b665d8affafab7834c7364f9822cd7f5c5a246c",
+        "anonymous_receipt_SHA256": "c436cb81c9979aef2f709b019b3cf045e59207897ae89e70729bbfe02430073c",
+        "translation_recoverability_receipt_SHA256": "8e26a56e8d48522ba653212f023146be31d6a8ca974b07231df582ed56f25c70",
+        "actual_Mac_execution_verified": false
+      },
+      "client_build_receipt_bindings": null,
+      "driver_bindings": {
+        "independent-mac-app-audit.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent-mac-app-audit.py",
+          "bytes": 54112,
+          "sha256": "de120b2e0b09daa3f68f8d4db31e18200f880b8eb172ff0e21cc89f781e7dea5"
+        },
+        "independent_runtime_contracts.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_runtime_contracts.py",
+          "bytes": 32519,
+          "sha256": "fdbb04f4690916f256273ecf3665351663277efd7d60bc13e8b9f354dd7114fa"
+        },
+        "independent_translation_bundle.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_translation_bundle.py",
+          "bytes": 9510,
+          "sha256": "b6d0bad3058f0d26d6d21e3b440fa6c4b55ae83fa7e82b007bed37ede3bc949d"
+        },
+        "independent_object_alias_contracts.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_object_alias_contracts.py",
+          "bytes": 7671,
+          "sha256": "fbe924d7fbfb723a7ddfadccf157386244bcf6be941d7671c353acbcf3c4c9ba"
+        },
+        "build-mac-server.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/build-mac-server.py",
+          "bytes": 10214,
+          "sha256": "003396fa0ea96d3e8b1065a688d0c0bbe7896a49f546562040ccf20d2024179f"
+        }
+      },
+      "LFS_source_branch": "downloads/story-server-macos-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+      "LFS_publication_commit": "544a5c597d9cf538e45beb399dd5de9c5cbf19f2",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "final_local_SHA_verified": true,
+      "reused_unchanged_artifact": false,
+      "as_of_build_assistant_device_playback_verified": false,
+      "actual_Mac_execution_verified": false
+    },
+    {
+      "kind": "server",
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 284835788,
+      "sha256": "46b3c16b1aa90ddaae318af1ba4c37f0a5726d1b776584e589a3762334b1a86f",
+      "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+      "qa_receipt_sha256": "70a8d9b3431591cd99069ff59ab36d7c264b40e52cafaf87d012d651bbda46f8",
+      "publication_manifest_sha256": "860ac695e8a75b0af106368335e145e98c301cabb81447c7a5790d810ce5ace9",
+      "publication_sha256": "95b7f21372e0f9e435a53e76af192de6b203077fccf7c866337f13661108602b",
+      "retirement_sha256": "54499a92cd3f81c46033153257328a598ad5956460fd4a442e5037089af1f26f",
+      "producer_receipt_sha256": "ded26f9b7a92513764da10bf75c859c33c073cc783357b445228b115cae03b27",
+      "retirement_verified_facts": {
+        "basis": "Derived only from the original bound retirement, anonymous response, exact binary QA and embedded-input recoverability receipts; originals retained unchanged.",
+        "complete_remote_SHA_verified": true,
+        "anonymous_prefix_verified": true,
+        "final_local_SHA_verified": true,
+        "embedded_translation": {
+          "member": "assets/bundledTranslations.zip",
+          "bytes": 78203472,
+          "sha256": "7e9f53983c50a148695d94537b7823935384d6bce551fb5f62b103f0909e43f9",
+          "whole_member_SHA_and_CRC_verified": true,
+          "exact_input_SHA_verified": true
+        },
+        "original_retirement_SHA256": "54499a92cd3f81c46033153257328a598ad5956460fd4a442e5037089af1f26f",
+        "anonymous_receipt_SHA256": "21e726d802b3119228cb23b2489bfc108b9df33e67a43e61c9ddf3d449d852e2",
+        "translation_recoverability_receipt_SHA256": "b9c1fc1c875141c28bd9e5f191a6b7c77f08941d59350982b57ee0b5b74faa92"
+      },
+      "client_build_receipt_bindings": null,
+      "driver_bindings": {
+        "independent-server-audit.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent-server-audit.py",
+          "bytes": 49596,
+          "sha256": "068e7da50dd3b39e8a87f53b581118dd047a7bfe10d24985a6c28862cc7f3bcd"
+        },
+        "independent-server-signature.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent-server-signature.py",
+          "bytes": 5606,
+          "sha256": "a1bd40b23f7085bfc5e7c9140033f45bc78569c73493deaaec7da44bf04e8751"
+        },
+        "independent_runtime_contracts.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_runtime_contracts.py",
+          "bytes": 32519,
+          "sha256": "fdbb04f4690916f256273ecf3665351663277efd7d60bc13e8b9f354dd7114fa"
+        },
+        "independent_translation_bundle.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_translation_bundle.py",
+          "bytes": 9510,
+          "sha256": "b6d0bad3058f0d26d6d21e3b440fa6c4b55ae83fa7e82b007bed37ede3bc949d"
+        },
+        "independent_object_alias_contracts.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/qa/independent_object_alias_contracts.py",
+          "bytes": 7671,
+          "sha256": "fbe924d7fbfb723a7ddfadccf157386244bcf6be941d7671c353acbcf3c4c9ba"
+        },
+        "build-android-server.py": {
+          "path": "/dev/shm/idoly-v0329-work/server-preparation/build-android-server.py",
+          "bytes": 12469,
+          "sha256": "ddccbbfcda09a4095eee192029c4f31c1e3413e1fca2f6d7505043f9df9e78cd"
+        }
+      },
+      "LFS_source_branch": "downloads/story-server-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+      "LFS_publication_commit": "feae745fd463176db53e4d96ef5301f50632bc0c",
+      "complete_remote_download_SHA256_verified": true,
+      "anonymous_prefix_verified": true,
+      "final_local_SHA_verified": true,
+      "reused_unchanged_artifact": false,
+      "as_of_build_assistant_device_playback_verified": false,
+      "actual_Mac_execution_verified": false
+    }
+  ],
+  "historical_QA_rebound_to_new_source": false,
+  "release_assets_uploaded": false,
+  "default_prerelease": true,
+  "assistant_observed_phone_offline_play_verified": false,
+  "Android_user_reported_connected_story_playback": true,
+  "Android_user_reported_airplane_new_episode_playback": true,
+  "assistant_device_instrumentation": false,
+  "later_user_acceptance": {
+    "Android_user_reported_connected_story_playback": true,
+    "Android_user_reported_airplane_new_episode_playback": true,
+    "assistant_device_instrumentation": false,
+    "Mac_execution_verified": false,
+    "device_APK_hash_attested": false,
+    "new_phone_HTTP_request_counters_measured": false,
+    "RadioButtonView_exception_absence_in_logs_measured": false,
+    "user_acceptance_receipt_SHA256": "2670e23be3618671e8507485dfbec7b8a8d8030d3bdd7fde7f3af582015fa1c9",
+    "services_restored_receipt_SHA256": "c56428f4cf557bc63df1967bc7d969968255171222e774e44d1f04e8ac3bf04c",
+    "two_idle_development_services_restored": true,
+    "original_producer_QA_and_source_host_flags_preserved_as_of_build": true
+  },
+  "original_artifact_and_source_host_device_flags_semantics": "As of their build/review time; immutable. Later user-reported connected/offline story success is recorded separately.",
+  "actual_Mac_execution_verified": false,
+  "actual_Mac_offline_full_download_verified": false,
+  "all_translation_complete": false,
+  "full_photo_capture_supported": false,
+  "current_photo_INVALID_ARGUMENT_confirmed_fixed": false,
+  "RadioButtonView_exception_absence_in_logs_measured": false,
+  "static_prefab_bindings_repaired": true,
+  "source_reuse_policy_sha256": "77f50ac76bd7a4e473c22e22f433d6e3b732d1a2928854c8d1f1cdb1678879ff",
+  "previous_release_verification_sha256": "3a43e3d60f5becb0a5fa3c9fc7ed99dc74c3790bea4cdae973290573208e3503",
+  "artifact_registry_sha256": "b1028de2afb386595678d4da448a6cfec28de52e8e3b2da29a8afb62b13b628c",
+  "scope_review_sha256": "0d722be42ddcd5e5b79491029f7882d304e6c53d13bac7651af379a453187178",
+  "host_suites_not_summed_or_claimed_unique": true,
+  "anonymous_full_HTTP200_identity_checks": {
+    "kinds": [
+      "server",
+      "client-ko"
+    ],
+    "receipt_SHA256": "4eafc4c1325a1ece6ec67e05b84d717d28f97b9e062de918de151b9fc522992b",
+    "exact_artifact_identity_bound": true,
+    "no_device_playback_claim": true,
+    "repeated_full_downloads_required": false
+  },
+  "alias_host_suite": {
+    "passed": 162,
+    "subtests": 87,
+    "receipt_sha256": "3e4bf1e1acc44e23aee835a37dda64fc9647c4e14f5b4271ebfac01542b7bf22"
+  },
+  "metadata_proofs": {
+    "ALIAS-FIX-SOURCE-CHECKS.json": {
+      "bytes": 1811,
+      "sha256": "948ee4ee273abeae2d42147a83bc4162a724f8a36f7da1d3e83c98fdbe1a163d"
+    },
+    "ALIAS-HOST-SUITES.json": {
+      "bytes": 2418,
+      "sha256": "3e4bf1e1acc44e23aee835a37dda64fc9647c4e14f5b4271ebfac01542b7bf22"
+    },
+    "ANDROID-SERVER-KO-ANONYMOUS-FULL-HTTP200-CHECKS.json": {
+      "bytes": 1076,
+      "sha256": "4eafc4c1325a1ece6ec67e05b84d717d28f97b9e062de918de151b9fc522992b"
+    },
+    "ANONYMOUS-Android-client-en.json": {
+      "bytes": 591,
+      "sha256": "1ef46992f0e06fc83f5c6de0b46efad2ccb5dd0729d417871dddc9b1ff994e6a"
+    },
+    "ANONYMOUS-Android-client-ja.json": {
+      "bytes": 591,
+      "sha256": "ff8837e9d71859afc9eb2086e3a598be2a939e6f4af32d5f8d5a3e22486e36d9"
+    },
+    "ANONYMOUS-Android-client-ko.json": {
+      "bytes": 591,
+      "sha256": "16ad4a7ae52f01baa80bc9ba10490cb7a5e38ebdc6c338409b51b783e0aa8fd1"
+    },
+    "ANONYMOUS-Android-server.json": {
+      "bytes": 897,
+      "sha256": "21e726d802b3119228cb23b2489bfc108b9df33e67a43e61c9ddf3d449d852e2"
+    },
+    "ANONYMOUS-macOS-server.json": {
+      "bytes": 921,
+      "sha256": "c436cb81c9979aef2f709b019b3cf045e59207897ae89e70729bbfe02430073c"
+    },
+    "DARWIN-SOURCE-EQUIVALENCE.json": {
+      "bytes": 4433,
+      "sha256": "ca29de812754361cf350afbd6133eb60656d4bfce8c80609a31476391d3db162"
+    },
+    "FEATURE-Android-presentation-provenance.json": {
+      "bytes": 8869,
+      "sha256": "8586c6eff3bbf54d2daeb757ce58b5814d7bcb5f30e4b1f2fc675a4c31581cc2"
+    },
+    "IDLE-DEV-SERVICES-RESTORED.json": {
+      "bytes": 240,
+      "sha256": "c56428f4cf557bc63df1967bc7d969968255171222e774e44d1f04e8ac3bf04c"
+    },
+    "NATIVE-POLICY-HOST-CHECKS.json": {
+      "bytes": 4855,
+      "sha256": "f7f086353972f9e8fc299969730a7466de19a61a7472d98acdfc561ad6120450"
+    },
+    "OBSERVED-STORY-ROUTE-IDENTITIES.json": {
+      "bytes": 2175,
+      "sha256": "5006488121ced045340a2c2d5711a8f6ac8ade5309f12118ed68a54f6e8c3f64"
+    },
+    "PRODUCER-Android-client-en-binding.json": {
+      "bytes": 1830,
+      "sha256": "83c9008113ed11f11dce9d609864d0eba0b009ca387c5374838c37b4eeda538a"
+    },
+    "PRODUCER-Android-client-ja-binding.json": {
+      "bytes": 1830,
+      "sha256": "7ff2081c7902775e21590c2f3610af803b996b8cd1305419313046ab1a6d0681"
+    },
+    "PRODUCER-Android-client-ko-binding.json": {
+      "bytes": 1838,
+      "sha256": "ced58dedcaaa9e09b17b7f988bf24357814e6b7e022c1411be29273e30873315"
+    },
+    "PRODUCER-Android-server-binding.json": {
+      "bytes": 1935,
+      "sha256": "ac2dbdbbfee4ebf51a5615bc105c39ef7d84b5e1b20e6d067ecfcaba19444c00"
+    },
+    "PRODUCER-macOS-server-binding.json": {
+      "bytes": 1705,
+      "sha256": "3188c9d3b08a720d8de2c6583a9263cd11e01520640bf17e5bfa7e4905c8051e"
+    },
+    "PUBLICATION-Android-client-en.json": {
+      "bytes": 600,
+      "sha256": "e31d913540fe276e2aa6776b9f85e867e46d561629a9ec5c9e3752e8b0dc1076"
+    },
+    "PUBLICATION-Android-client-ja.json": {
+      "bytes": 600,
+      "sha256": "99650c5852f027f02980cab5b9d32f6d845fa6508c93eea8300ac4b5aa4aef32"
+    },
+    "PUBLICATION-Android-client-ko.json": {
+      "bytes": 600,
+      "sha256": "f64390f333c7f3659e91da504e3ca1773e62ddf853072b025ab9a02f4ecffc1a"
+    },
+    "PUBLICATION-Android-server.json": {
+      "bytes": 571,
+      "sha256": "95b7f21372e0f9e435a53e76af192de6b203077fccf7c866337f13661108602b"
+    },
+    "PUBLICATION-macOS-server.json": {
+      "bytes": 585,
+      "sha256": "76c347756094bb4aca54c4664c55ddf13ed5fbc425a46f86b50ff09d7fc70058"
+    },
+    "QA-Android-client-en.json": {
+      "bytes": 33956,
+      "sha256": "2c5c149d8e3dad213a8f984ba1a45badd631ceca8a500c2cf6ef683fc997b910"
+    },
+    "QA-Android-client-ja.json": {
+      "bytes": 33896,
+      "sha256": "ab4fd0c616ec3fcd65936ae45cf0ea600e6ec8ac6b0e6113aed5700b5af0068a"
+    },
+    "QA-Android-client-ko.json": {
+      "bytes": 33954,
+      "sha256": "f46527ead17ef9d1b1a6a4ca94350bb1778b8641833dccb41b64199cce451a14"
+    },
+    "QA-Android-presentation-native-build.json": {
+      "bytes": 7454,
+      "sha256": "24d3a1074d9771359794038e09f8b27934ee9d513b2dff37c609976efe9a66d8"
+    },
+    "QA-Android-server-signature.json": {
+      "bytes": 713,
+      "sha256": "54f16157775b0c245642a8f6e086dc46d66112b685a339f7590b960d05de8050"
+    },
+    "QA-Android-server.json": {
+      "bytes": 67921,
+      "sha256": "70a8d9b3431591cd99069ff59ab36d7c264b40e52cafaf87d012d651bbda46f8"
+    },
+    "QA-Data-v0.3.25.json": {
+      "bytes": 210108,
+      "sha256": "7fd10775e85285ca5e1d6e9a8e832f2fa253aefb27bbc4ee932239a0b9498730"
+    },
+    "QA-IPA-v0.3.27-en-IPA-review.json": {
+      "bytes": 42984,
+      "sha256": "07db049b8b7c2b951bc318001d38851b3f12fadde7653d646ad45b541e26397b"
+    },
+    "QA-IPA-v0.3.27-en-font-object-review.json": {
+      "bytes": 13443,
+      "sha256": "24dee06158c8d42577602c44d384923d9b763f533647f2022a98b8c9345e252f"
+    },
+    "QA-IPA-v0.3.27-en-ui-object-review.json": {
+      "bytes": 7645,
+      "sha256": "3b8f70ec6248afeda837571f8d5a0b497f85aaa2488bbd0319951c1a2e01a33c"
+    },
+    "QA-IPA-v0.3.27-ja-IPA-review.json": {
+      "bytes": 42880,
+      "sha256": "df1841a01f8cb95ebd4ca3750fa3be91166e1f30e855a9c5fcfed8b15efaa0e9"
+    },
+    "QA-IPA-v0.3.27-ja-font-object-review.json": {
+      "bytes": 13443,
+      "sha256": "c76906987e1c33f94520f7c336b5cae45bcf67d652a8965687f5af75621f2ec4"
+    },
+    "QA-IPA-v0.3.27-ja-ui-object-review.json": {
+      "bytes": 7380,
+      "sha256": "66a981cdebdfcef3445617d4d87441c94de76ed3fc16387ae606dd965ebc0bcc"
+    },
+    "QA-IPA-v0.3.27-ko-IPA-review.json": {
+      "bytes": 42981,
+      "sha256": "2149d64166846b071af786563744b9a66144b0a1d1eb25cab8b28658adb1aa83"
+    },
+    "QA-IPA-v0.3.27-ko-font-object-review.json": {
+      "bytes": 13443,
+      "sha256": "798e7cf08ca3f27e9a13f0294a06c3c424b21273651b95cdc120ea8b32e4c944"
+    },
+    "QA-IPA-v0.3.27-ko-ui-object-review.json": {
+      "bytes": 7642,
+      "sha256": "bf39ec421711163bba66b18e225018eae248da330698412f116338bc63e2d522"
+    },
+    "QA-IPA-v0.3.27-native.json": {
+      "bytes": 7869,
+      "sha256": "85734a53fef6222aec4b9d744df869d4232f8a2802ee2a78838f095d4fd4b9de"
+    },
+    "QA-macOS-server.json": {
+      "bytes": 105541,
+      "sha256": "a9ffd2ed7c92d7cda30f9e072b3334174952ff00ea0f297227787ca462acb85d"
+    },
+    "REAL-KO-HTTP-CHECKS.json": {
+      "bytes": 2348,
+      "sha256": "c8a0ef94faf84ad17bf119cca895a704e3491743646cb4235890e2febf2b31e5"
+    },
+    "RETIREMENT-Android-client-en.json": {
+      "bytes": 1170,
+      "sha256": "7e4d9147af4138a63894bf086679dba3c141b50c1fa493d9a580ce1f51be844e"
+    },
+    "RETIREMENT-Android-client-ja.json": {
+      "bytes": 1170,
+      "sha256": "6db38d489db2c4ffdef7f4bbb09dfd5c94778dcf66978ca8f7d8cc8f34509877"
+    },
+    "RETIREMENT-Android-client-ko.json": {
+      "bytes": 1182,
+      "sha256": "2f9b94bd90f8dd327fc58ddce9df1d138eb9c7a89a54ead285d7e62dfb33869a"
+    },
+    "RETIREMENT-Android-server.json": {
+      "bytes": 2335,
+      "sha256": "54499a92cd3f81c46033153257328a598ad5956460fd4a442e5037089af1f26f"
+    },
+    "RETIREMENT-macOS-server.json": {
+      "bytes": 3545,
+      "sha256": "8d46c53770f699bb4cbff86e1b665d8affafab7834c7364f9822cd7f5c5a246c"
+    },
+    "REUSED-KO29-NATIVE-FEATURE-BINDING.json": {
+      "bytes": 2003,
+      "sha256": "f2690017c1f94dc97fe443163cf0c7afda871cc4c2e097b16d368ce971e1037f"
+    },
+    "SCOPE-AND-LIMITATIONS.json": {
+      "bytes": 7715,
+      "sha256": "0d722be42ddcd5e5b79491029f7882d304e6c53d13bac7651af379a453187178"
+    },
+    "SOURCE-REUSE-POLICY.json": {
+      "bytes": 9485,
+      "sha256": "77f50ac76bd7a4e473c22e22f433d6e3b732d1a2928854c8d1f1cdb1678879ff"
+    },
+    "STORY-PREFAB-CANONICAL-BINDINGS.json": {
+      "bytes": 9466,
+      "sha256": "af642dcac4dd566846c6df70b7b4740c49f08189f887cd3b08d70a8d1d9a1d36"
+    },
+    "STORY-PREFAB-HOST-CHECKS.json": {
+      "bytes": 1170,
+      "sha256": "372e8677e530fc34fa52b0987bc6be9257265d4f8a77adf67e5281faf0f2aa29"
+    },
+    "TRANSLATION-RECOVERABILITY-Android-server.json": {
+      "bytes": 1650,
+      "sha256": "b9c1fc1c875141c28bd9e5f191a6b7c77f08941d59350982b57ee0b5b74faa92"
+    },
+    "TRANSLATION-RECOVERABILITY-macOS-server.json": {
+      "bytes": 1691,
+      "sha256": "8e26a56e8d48522ba653212f023146be31d6a8ca974b07231df582ed56f25c70"
+    },
+    "USER-ANDROID-STORY-ACCEPTANCE.json": {
+      "bytes": 1452,
+      "sha256": "2670e23be3618671e8507485dfbec7b8a8d8030d3bdd7fde7f3af582015fa1c9"
+    }
+  }
+}

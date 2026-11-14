@@ -1,0 +1,356 @@
+{
+  "schema": 1,
+  "status": "CANONICAL_STORY_ORIENTATION_RADIO_FADE_BINDING_DEFECT_IDENTIFIED",
+  "created_utc": "2026-11-14T00:10:25Z",
+  "member": "assets/bin/Data/7880e7e422d314c04a16c4690ae21a43",
+  "bytes": 49540,
+  "original_sha256": "5e55c12ddc6a08a8d96e8b3f616537ef5f833d99a3948c90de99bfd0521da292",
+  "original_APK": "/workspace/shared/artifacts/client-6.1.1/game.qualiarts.idolypride.apk",
+  "original_and_diagnostic_base_member_equal": true,
+  "base_APK": "/workspace/shared/artifacts/diagnostic-v0.2.1-release-review/IdolyPride-Local-Diagnostic-Android-arm64.apk",
+  "published_v0328_KO_APK_SHA256": "abc43346602851ab23dbf8a5541e64097d3a04a7ce6caba42f46b38327482080",
+  "published_v0328_QA": {
+    "path": "/dev/shm/idoly-v0328-work/offline-gate-test/qa-android-ko-r3/independent-full-client-review-ko.json",
+    "sha256": "cb801e768116e4a12c71835f6b649893ddd911dac170d23ed1e6659bda6a1a2b",
+    "member_preserved_from_base": true
+  },
+  "prior_native_trace": {
+    "path": "/dev/shm/story-radio-native-trace-20261113.json",
+    "sha256": "718afd34232e64771078561cb51abba53b6f116dea472867d52d2d42d26758a2",
+    "fade_native_offset": 32,
+    "NRE_explicit_null_branch": true
+  },
+  "repairs": [
+    {
+      "view_path_id": 297,
+      "view_bytes": 56,
+      "view_sha256": "5f8e9b885e27c06274da0248580af2d9628a496c5c024940b0f2de059f5387c6",
+      "view_file_offset": 39688,
+      "script": {
+        "file_id": 1,
+        "path_id": 4753,
+        "MonoScript": "Solis.Common.RadioButtonView"
+      },
+      "gameobject": {
+        "path_id": 27,
+        "name": "Horizontal",
+        "components": [
+          {
+            "file_id": 0,
+            "path_id": 196
+          },
+          {
+            "file_id": 0,
+            "path_id": 113
+          },
+          {
+            "file_id": 0,
+            "path_id": 285
+          },
+          {
+            "file_id": 0,
+            "path_id": 297
+          },
+          {
+            "file_id": 0,
+            "path_id": 255
+          },
+          {
+            "file_id": 0,
+            "path_id": 356
+          },
+          {
+            "file_id": 0,
+            "path_id": 221
+          }
+        ]
+      },
+      "hierarchy_to_root": [
+        {
+          "path_id": 196,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 27
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 142
+          },
+          "gameobject_name": "Horizontal"
+        },
+        {
+          "path_id": 142,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 22
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 191
+          },
+          "gameobject_name": "OrientSelector"
+        },
+        {
+          "path_id": 191,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 12
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 197
+          },
+          "gameobject_name": "Layout"
+        },
+        {
+          "path_id": 197,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 10
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 161
+          },
+          "gameobject_name": "Root"
+        },
+        {
+          "path_id": 161,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 16
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 81
+          },
+          "gameobject_name": "StoryFullScreenLoading"
+        },
+        {
+          "path_id": 81,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 1
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 0
+          },
+          "gameobject_name": "StoryPlayerScreen"
+        }
+      ],
+      "serialized_fade_offset": 32,
+      "before_fade_PPtr": {
+        "file_id": 0,
+        "path_id": 0
+      },
+      "after_fade_PPtr": {
+        "file_id": 0,
+        "path_id": 221
+      },
+      "same_GameObject_CanvasGroup_path_id": 221,
+      "CanvasGroup_sha256": "db095eb7b74af0df9df01a8e7e714770afd9d72055a123d8cc2b50b5fd426e04",
+      "serialized_label_PPtr_unchanged": {
+        "file_id": 0,
+        "path_id": 242
+      }
+    },
+    {
+      "view_path_id": 310,
+      "view_bytes": 56,
+      "view_sha256": "875de43c1e95be0fdea1269ceefbbd6dcd0158a41e2c5387653706f11501b997",
+      "view_file_offset": 41952,
+      "script": {
+        "file_id": 1,
+        "path_id": 4753,
+        "MonoScript": "Solis.Common.RadioButtonView"
+      },
+      "gameobject": {
+        "path_id": 29,
+        "name": "Portrait",
+        "components": [
+          {
+            "file_id": 0,
+            "path_id": 193
+          },
+          {
+            "file_id": 0,
+            "path_id": 107
+          },
+          {
+            "file_id": 0,
+            "path_id": 275
+          },
+          {
+            "file_id": 0,
+            "path_id": 310
+          },
+          {
+            "file_id": 0,
+            "path_id": 265
+          },
+          {
+            "file_id": 0,
+            "path_id": 365
+          },
+          {
+            "file_id": 0,
+            "path_id": 224
+          }
+        ]
+      },
+      "hierarchy_to_root": [
+        {
+          "path_id": 193,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 29
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 142
+          },
+          "gameobject_name": "Portrait"
+        },
+        {
+          "path_id": 142,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 22
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 191
+          },
+          "gameobject_name": "OrientSelector"
+        },
+        {
+          "path_id": 191,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 12
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 197
+          },
+          "gameobject_name": "Layout"
+        },
+        {
+          "path_id": 197,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 10
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 161
+          },
+          "gameobject_name": "Root"
+        },
+        {
+          "path_id": 161,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 16
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 81
+          },
+          "gameobject_name": "StoryFullScreenLoading"
+        },
+        {
+          "path_id": 81,
+          "gameobject": {
+            "file_id": 0,
+            "path_id": 1
+          },
+          "parent": {
+            "file_id": 0,
+            "path_id": 0
+          },
+          "gameobject_name": "StoryPlayerScreen"
+        }
+      ],
+      "serialized_fade_offset": 32,
+      "before_fade_PPtr": {
+        "file_id": 0,
+        "path_id": 0
+      },
+      "after_fade_PPtr": {
+        "file_id": 0,
+        "path_id": 224
+      },
+      "same_GameObject_CanvasGroup_path_id": 224,
+      "CanvasGroup_sha256": "74b676f718e93cabb65c8cd8ca25a2776d0fe8b4e9dd85d0f611e9d7bf9b66fc",
+      "serialized_label_PPtr_unchanged": {
+        "file_id": 0,
+        "path_id": 230
+      }
+    }
+  ],
+  "StoryFullScreenLoading": {
+    "path_id": 352,
+    "gameobject": 16,
+    "orientation_group_PPtr": {
+      "file_id": 0,
+      "path_id": 329
+    },
+    "selector_canvas_list": [
+      {
+        "file_id": 0,
+        "path_id": 224
+      },
+      {
+        "file_id": 0,
+        "path_id": 221
+      }
+    ],
+    "same_groups_already_referenced_by_loader": true
+  },
+  "candidate_in_memory_patch": {
+    "bytes": 49540,
+    "sha256": "fbb0ced4360da452cc6b389d30847021903dea731cdc900cae932d99191b0350",
+    "difference_count": 2,
+    "differences": [
+      {
+        "offset": 39724,
+        "before": 0,
+        "after": 221
+      },
+      {
+        "offset": 41988,
+        "before": 0,
+        "after": 224
+      }
+    ],
+    "serialized_metadata_object_table_and_all_other_bytes_unchanged": true,
+    "derived_RAM_candidate_path": "/dev/shm/idoly-v0329-work/radio/StoryPlayerScreen-radio-fade-candidate.asset",
+    "derived_RAM_candidate_saved": true,
+    "packaged": false,
+    "product_package_modified": false
+  },
+  "limits": [
+    "Actual installed client prefab bytes not measured. Published v0.3.28 lineage is proven by QA, not device hash.",
+    "No runtime execution or physical device NRE resolution verified.",
+    "Canonical original asset itself has the two missing bindings; this does not establish when official client users would trigger this latent path.",
+    "No null-swallowing/global state change/component invention/native instruction edit proposed.",
+    "Only exact two same-GameObject existing CanvasGroups are candidate targets."
+  ],
+  "product_edits": false,
+  "memory": {
+    "scanner_AS_MiB": 512,
+    "scanner_peak_RSS_KiB": 424348,
+    "streaming_hashed_members": 2742,
+    "streaming_body_bytes": 137058622,
+    "streaming_chunk_bytes": 65536
+  },
+  "original_APK_full_identity": {
+    "bytes": 110914967,
+    "sha256": "3d54e05f897bfb54716a0ad645562955ceb0081cead696cb29595941ac08faa9",
+    "whole_file_freshly_streamed_SHA256_verified": true,
+    "stream_chunk_bytes": 65536
+  },
+  "prior_discovery_proof_sha256": "77779153daf41091bb5486ab7cbf9951bf440de232f2ce7e0ad36227b3c771a4"
+}

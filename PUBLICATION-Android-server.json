@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "branch": "downloads/story-server-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "sha256": "46b3c16b1aa90ddaae318af1ba4c37f0a5726d1b776584e589a3762334b1a86f",
+      "bytes": 284835788,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "feae745fd463176db53e4d96ef5301f50632bc0c",
+  "tree": "3d17cb4df0fddd637fb2ff2082e0b5d45c83de7b"
+}

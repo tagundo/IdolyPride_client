@@ -1,0 +1,25 @@
+{
+  "status": "PASS",
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+  "bytes": 163441097,
+  "sha256": "b91211a9d97cf519ba60b2cd34887529f4136cbb0f6b9556f7b688ad9038111e",
+  "published_commit": "7a4fe32385573ef54ff84f70c76f663f9ecb496a",
+  "published_branch": "downloads/story-adv-client-ko-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_verified": true,
+  "actual_attachment_filename": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+  "final_local_SHA_verified": true,
+  "all_visible_handles_closed_before_retirement": true,
+  "only_owned_derived_KO_delivery_APK_retired": true,
+  "independent_QA_sha256": "f46527ead17ef9d1b1a6a4ca94350bb1778b8641833dccb41b64199cce451a14",
+  "publication_manifest_sha256": "e8488b1c84259991bc0959100389af4fc636cdc663443d500d71146b895787d0",
+  "native_and_feature_retained": true,
+  "private_grant_mode": "0600",
+  "physical_phone_or_Mac_play_verified": false,
+  "resource_budget_after": {
+    "direct_headroom": 1249943552,
+    "root_free": 160268288,
+    "oom_kill": 2
+  }
+}

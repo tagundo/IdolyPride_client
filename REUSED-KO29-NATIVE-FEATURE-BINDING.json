@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "status": "PASS_ACTUAL_KO29_INPUTS_QA_PUBLISHED_RETIRED_BOUND",
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "epoch": 1794615679,
+  "native": {
+    "path": "/dev/shm/idoly-v0329-work/client-preparation/native-android/libidoly_presentation.so",
+    "bytes": 312776,
+    "sha256": "4c034a74a74eaccd602a4f91ea581ab8132c91e3cb4d1c4dd951f8df1ad311b9",
+    "receipt": "/dev/shm/idoly-v0329-work/client-preparation/native-android/build-receipt.json",
+    "receipt_sha256": "24d3a1074d9771359794038e09f8b27934ee9d513b2dff37c609976efe9a66d8"
+  },
+  "feature": {
+    "path": "/dev/shm/idoly-v0329-work/client-preparation/addons/diagnostics.apk",
+    "bytes": 344472,
+    "sha256": "feff303b88e5624c15b60173c9aa582d2803ce75475cdaeba8e6dbedc467ae81",
+    "receipt": "/dev/shm/idoly-v0329-work/client-preparation/addons/diagnostics.provenance.json",
+    "receipt_sha256": "8586c6eff3bbf54d2daeb757ce58b5814d7bcb5f30e4b1f2fc675a4c31581cc2"
+  },
+  "KO_QA": {
+    "path": "/dev/shm/idoly-v0329-work/client-preparation/qa-android-ko-r1/independent-full-client-review-ko.json",
+    "sha256": "f46527ead17ef9d1b1a6a4ca94350bb1778b8641833dccb41b64199cce451a14"
+  },
+  "KO_publication": {
+    "path": "/dev/shm/idoly-v0329-work/client-preparation/publish-client-ko/evidence/publication.json",
+    "sha256": "f64390f333c7f3659e91da504e3ca1773e62ddf853072b025ab9a02f4ecffc1a"
+  },
+  "KO_retirement": {
+    "path": "/dev/shm/idoly-v0329-work/client-preparation/publish-client-ko/retirement.json",
+    "sha256": "2f9b94bd90f8dd327fc58ddce9df1d138eb9c7a89a54ead285d7e62dfb33869a"
+  },
+  "native_feature_reused_without_rebuild": true,
+  "old_source_or_binary_hashes_substituted": false,
+  "actual_phone_or_Mac_play_verified": false,
+  "execution_authorized_by_binding": false,
+  "budget_before": {
+    "direct_headroom": 1170161664,
+    "root_free": 160268288,
+    "OOM_kill": 2
+  },
+  "budget_after": {
+    "direct_headroom": 1169899520,
+    "root_free": 160268288,
+    "OOM_kill": 2
+  }
+}

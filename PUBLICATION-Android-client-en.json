@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "5dd78609c945f834ea17cc495e070f42050804dd",
+  "branch": "downloads/story-adv-client-en-v0.3.29-source-5dd78609c945f834ea17cc495e070f42050804dd",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+      "sha256": "9d3268a3c80828e717194db49e5af2f91bd56c1e0d33d2c9d27f59123ac53d63",
+      "bytes": 163408329,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "65eeafaecb774c85c96e2dc9b63c96b6767abe50",
+  "tree": "e398d7c9a1e7c5008ca6420865ed01146b6636d4"
+}
