@@ -118,6 +118,7 @@ MAX_SERVER_EXPANDED = 384 * MIB
 MAX_TRANSLATIONS = translation_package.MAX_BUNDLE
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
+SERVER_STAGE_HEADROOM = 512 * MIB
 MAX_CLEAN_INACTIVE_CREDIT = 256 * MIB
 JAVA_FLAGS = ("-Xmx128m", "-XX:MaxMetaspaceSize=128m", "-XX:ReservedCodeCacheSize=32m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
@@ -325,16 +326,17 @@ def _tmpfs(destination):
 
 
 def _allocation_guard(root, destination, future_bytes):
-    """Reserve future tmpfs growth above the unchanged runtime headroom floor."""
+    """Reserve future server tmpfs bytes above its strict direct 512MiB floor."""
     if type(future_bytes) is not int or not 0 < future_bytes <= 2 * MAX_SERVER_APK + 8 * MIB:
         raise ValueError("Invalid future staging capacity")
     staging_budget(root, destination, future_bytes)
-    budget = _resource_guard(root)
+    budget = _server_stage_guard(root)
     growth = future_bytes if _tmpfs(destination) else 0
-    if (budget["memory_direct_headroom"] < MIN_HEADROOM - MAX_CLEAN_INACTIVE_CREDIT + growth
-            or budget["memory_effective_headroom"] < MIN_HEADROOM + growth):
-        raise ValueError("Defer build until projected staging preserves the unchanged memory reserve")
-    return {**budget, "future_staging_bytes": future_bytes, "future_tmpfs_bytes": growth}
+    projected = budget["memory_direct_headroom"] - growth
+    if projected < SERVER_STAGE_HEADROOM:
+        raise ValueError("Defer build until projected staging preserves the direct 512 MiB memory reserve")
+    return {**budget, "future_staging_bytes": future_bytes, "future_tmpfs_bytes": growth,
+            "projected_direct_headroom": projected, "ongoing_direct_floor": SERVER_STAGE_HEADROOM}
 
 
 def read_password(path):
@@ -378,10 +380,15 @@ def _memory_budget():
             "memory_effective_headroom": direct + credit}
 
 
-def _resource_guard(root):
+def _resource_guard(root, *, direct_floor=None):
     budget = _memory_budget()
-    if (budget["memory_direct_headroom"] < MIN_HEADROOM - MAX_CLEAN_INACTIVE_CREDIT
-            or budget["memory_effective_headroom"] < MIN_HEADROOM):
+    if direct_floor is not None:
+        if direct_floor != SERVER_STAGE_HEADROOM or type(direct_floor) is not int:
+            raise ValueError("Unsupported explicit server direct-memory floor")
+        if budget["memory_direct_headroom"] < direct_floor:
+            raise ValueError("Defer server stage until 512 MiB direct cgroup headroom is available")
+    elif (budget["memory_direct_headroom"] < MIN_HEADROOM - MAX_CLEAN_INACTIVE_CREDIT
+          or budget["memory_effective_headroom"] < MIN_HEADROOM):
         raise ValueError("Defer build until at least 1 GiB cgroup headroom is available")
     for entry in Path("/proc").iterdir():
         if not entry.name.isdecimal():
@@ -399,11 +406,20 @@ def _resource_guard(root):
     return {**budget, "oom_kill": events.get("oom_kill")}
 
 
-def _run(command, *, root, env, timeout=180, cache=None):
+def _server_stage_guard(root, *, entry=False):
+    budget = _resource_guard(root, direct_floor=SERVER_STAGE_HEADROOM)
+    if entry and budget["memory_direct_headroom"] < MIN_HEADROOM:
+        raise ValueError("Server build entry requires 1 GiB direct cgroup headroom")
+    if budget["oom_kill"] != "2":
+        raise ValueError("Server stage OOM baseline differs")
+    return {**budget, "clean_credit_applied_to_guard": False}
+
+
+def _run(command, *, root, env, timeout=180, cache=None, guard=None):
     """Bound both pipe reads and process lifetime; never print command/output."""
     if cache is not None:
         cache.advise()
-    _resource_guard(root)
+    (_resource_guard if guard is None else guard)(root)
     process = subprocess.Popen(["/usr/bin/nice", "-n", "19", *map(str, command)],
                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                env=env, start_new_session=True)
@@ -946,7 +962,7 @@ def build(args):
     cache = PublicCacheAdvice()
     cache.public("baseline", baseline, pybundle.BASELINE_SHA256)
     cache.advise()
-    preflight = _resource_guard(root)
+    preflight = _server_stage_guard(root, entry=True)
     sources = pybundle.committed_sources(root, args.source_commit)
     native_sources = source_blobs(root, args.source_commit)
     builder_sources = tool_sources(root, args.source_commit)
@@ -1004,7 +1020,7 @@ def build(args):
         config = generated / "BuildConfig.java"
         config.write_bytes(build_config(args.payload_sha256, translations_sha256, translations_bytes))
         def run(command):
-            return _run(command, root=root, env=env, cache=cache)
+            return _run(command, root=root, env=env, cache=cache, guard=_server_stage_guard)
         compiled_res, resources = work / "compiled-res.zip", work / "resources.apk"
         run([sdk / "aapt2", "compile", "--dir", work / "source" / RES_ROOT, "-o", compiled_res])
         run([sdk / "aapt2", "link", "-I", android, "--manifest", manifest, "--java", generated,
@@ -1108,7 +1124,7 @@ def build(args):
             raise ValueError("A frozen build input changed during packaging")
         signed_sha256 = pybundle.digest(signed)
         cache.advise()
-        postflight = _resource_guard(root)
+        postflight = _server_stage_guard(root)
         if postflight["oom_kill"] != preflight["oom_kill"]:
             raise ValueError("An OOM occurred during the build; candidate not published")
         report = {"schema": 1, "build_method": "cached manual aapt2/javac/D8; no Gradle, Go or downloads",
@@ -1125,6 +1141,9 @@ def build(args):
                   "modules": modules, "app_imy_sha1": hashlib.sha1(app).hexdigest(), "audit": audit,
                   "tool_sha256": tool_hashes, "public_cache_advice": cache.events,
                   "java_flags": JAVA_FLAGS, "preflight": preflight, "postflight": postflight,
+                  "server_memory_profile": {"entry_direct_bytes": MIN_HEADROOM,
+                                            "ongoing_direct_bytes": SERVER_STAGE_HEADROOM,
+                                            "clean_credit_applied": False},
                   "capacity": {"planned": planned_capacity, "actual": actual_capacity,
                                "preflight": capacity_preflight},
                   "seconds": time.monotonic() - started,

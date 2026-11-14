@@ -42,8 +42,9 @@ def test_payload_capacity_grows_without_relaxing_pinned_baseline_or_runtime_limi
     assert tool.pybundle.MAX_APP == 8 * tool.MIB
     assert tool.MAX_PAYLOAD == 256 * tool.MIB
     assert tool.MAX_PAYLOAD_MEMBERS == 1024
-    assert tool.MAX_SERVER_APK == tool.MAX_SERVER_EXPANDED == 320 * tool.MIB
+    assert tool.MAX_SERVER_APK == tool.MAX_SERVER_EXPANDED == 384 * tool.MIB
     assert tool.MIN_HEADROOM == 1024 * tool.MIB
+    assert tool.SERVER_STAGE_HEADROOM == 512 * tool.MIB
     assert tool.MIN_ROOT_FREE == 150 * tool.MIB
     assert tool.MAX_CLEAN_INACTIVE_CREDIT == 256 * tool.MIB
 
@@ -187,54 +188,54 @@ def allocation_case(monkeypatch):
         return {"memory_direct_headroom": state["direct"],
                 "memory_effective_headroom": state["effective"], "oom_kill": "2"}
 
-    monkeypatch.setattr(tool, "_resource_guard", resource_guard)
+    monkeypatch.setattr(tool, "_server_stage_guard", resource_guard)
     monkeypatch.setattr(tool, "_tmpfs", lambda _: state["tmpfs"])
     return state, calls
 
 
-def test_tmpfs_peak_preserves_both_direct_and_effective_memory_floors(allocation_case):
+def test_tmpfs_peak_preserves_strict_direct_server_floor_without_cache_credit(allocation_case):
     state, calls = allocation_case
     future = tool.capacity_plan(inventory(), 220 * tool.MIB)["staging_bytes"]
-    state["direct"] = 768 * tool.MIB + future
-    state["effective"] = tool.MIN_HEADROOM + future
+    state["direct"] = tool.SERVER_STAGE_HEADROOM + future
+    state["effective"] = state["direct"]
     report = tool._allocation_guard("root", "destination", future)
     assert calls == [("root", "destination", future), ("resource", "root")]
     assert report["future_staging_bytes"] == report["future_tmpfs_bytes"] == future
+    assert report["projected_direct_headroom"] == report["ongoing_direct_floor"] == 512 * tool.MIB
     assert report["oom_kill"] == "2"
     state["direct"] -= 1
     with pytest.raises(ValueError, match="memory reserve"):
         tool._allocation_guard("root", "destination", future)
     state["direct"] += 1
-    state["effective"] -= 1
-    with pytest.raises(ValueError, match="memory reserve"):
-        tool._allocation_guard("root", "destination", future)
+    state["effective"] = 0  # Observed clean-cache credit is irrelevant to this direct reservation.
+    assert tool._allocation_guard("root", "destination", future)["projected_direct_headroom"] == 512 * tool.MIB
 
 
 def test_clean_credit_cannot_replace_projected_tmpfs_direct_floor(allocation_case):
     state, _ = allocation_case
     future = 500 * tool.MIB
-    state["direct"] = 768 * tool.MIB + future - 1
+    state["direct"] = tool.SERVER_STAGE_HEADROOM + future - 1
     state["effective"] = 16 * 1024 * tool.MIB
     with pytest.raises(ValueError, match="memory reserve"):
         tool._allocation_guard("root", "destination", future)
 
 
-def test_non_tmpfs_staging_still_checks_original_memory_and_disk_guards(allocation_case, monkeypatch):
+def test_non_tmpfs_staging_still_checks_server_memory_and_disk_guards(allocation_case, monkeypatch):
     state, calls = allocation_case
-    state.update(tmpfs=False, direct=768 * tool.MIB, effective=tool.MIN_HEADROOM)
+    state.update(tmpfs=False, direct=tool.SERVER_STAGE_HEADROOM, effective=0)
     report = tool._allocation_guard("root", "destination", 500 * tool.MIB)
     assert report["future_tmpfs_bytes"] == 0
     assert calls == [("root", "destination", 500 * tool.MIB), ("resource", "root")]
 
     def reject(_):
-        raise ValueError("original resource guard")
+        raise ValueError("server resource guard")
 
-    monkeypatch.setattr(tool, "_resource_guard", reject)
-    with pytest.raises(ValueError, match="original resource guard"):
+    monkeypatch.setattr(tool, "_server_stage_guard", reject)
+    with pytest.raises(ValueError, match="server resource guard"):
         tool._allocation_guard("root", "destination", 500 * tool.MIB)
 
 
-@pytest.mark.parametrize("required", [0, -1, True, 2 * 320 * tool.MIB + 8 * tool.MIB + 1])
+@pytest.mark.parametrize("required", [0, -1, True, 2 * tool.MAX_SERVER_APK + 8 * tool.MIB + 1])
 def test_invalid_staging_projection_is_rejected_before_filesystem_access(monkeypatch, required):
     monkeypatch.setattr(tool.shutil, "disk_usage", lambda _: pytest.fail("invalid size must not inspect disk"))
     with pytest.raises(ValueError, match="capacity"):

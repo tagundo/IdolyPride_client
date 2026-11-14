@@ -34,7 +34,7 @@ def test_optional_asset_capacity_includes_every_byte_without_enlarging_core_limi
     assert optional["expanded_bytes"] == baseline["expanded_bytes"] + translations
     assert optional["apk_bytes"] >= baseline["apk_bytes"] + translations
     assert optional["staging_bytes"] == 2 * optional["apk_bytes"] + 8 * tool.MIB
-    assert tool.MAX_SERVER_APK == tool.MAX_SERVER_EXPANDED == 320 * tool.MIB
+    assert tool.MAX_SERVER_APK == tool.MAX_SERVER_EXPANDED == 384 * tool.MIB
     with pytest.raises(ValueError, match="capacity bound"):
         tool.capacity_plan(inventory(), 256 * tool.MIB, translations_bytes=128 * tool.MIB)
     for size in (-1, True, tool.MAX_TRANSLATIONS + 1):

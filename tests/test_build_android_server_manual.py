@@ -716,6 +716,61 @@ def test_resource_guard_rereads_clean_cache_before_each_tool(memory_guard_case, 
         tool._resource_guard(tmp_path)
 
 
+def test_server_profile_uses_direct_512_without_relaxing_default_guard(memory_guard_case, tmp_path):
+    cgroup = memory_guard_case(direct_mib=512)
+    server = tool._server_stage_guard(tmp_path)
+    assert server["memory_direct_headroom"] == tool.SERVER_STAGE_HEADROOM == 512 * tool.MIB
+    assert server["clean_credit_applied_to_guard"] is False
+    assert server["oom_kill"] == "2"
+    with pytest.raises(ValueError, match="1 GiB"):
+        tool._resource_guard(tmp_path)  # Client/native callers retain their old default.
+    maximum = int((cgroup / "memory.max").read_text())
+    (cgroup / "memory.current").write_text(str(maximum - 512 * tool.MIB + 1))
+    with pytest.raises(ValueError, match="512 MiB direct"):
+        tool._server_stage_guard(tmp_path)  # Cache credit cannot replace even one direct byte.
+
+
+def test_server_entry_requires_full_direct_gib_even_with_clean_cache_credit(memory_guard_case, tmp_path):
+    cgroup = memory_guard_case(direct_mib=1024)
+    assert tool._server_stage_guard(tmp_path, entry=True)["memory_direct_headroom"] == tool.MIN_HEADROOM
+    maximum = int((cgroup / "memory.max").read_text())
+    (cgroup / "memory.current").write_text(str(maximum - tool.MIN_HEADROOM + 1))
+    with pytest.raises(ValueError, match="entry requires 1 GiB direct"):
+        tool._server_stage_guard(tmp_path, entry=True)
+    # The exact same snapshot remains valid as an ongoing stage.
+    tool._server_stage_guard(tmp_path)
+
+
+def test_server_stage_preserves_root_reserve_and_exact_oom_baseline(memory_guard_case, tmp_path, monkeypatch):
+    cgroup = memory_guard_case(direct_mib=512)
+    monkeypatch.setattr(tool.shutil, "disk_usage", lambda _: SimpleNamespace(free=tool.MIN_ROOT_FREE - 1))
+    with pytest.raises(ValueError, match="150 MiB"):
+        tool._server_stage_guard(tmp_path)
+    monkeypatch.setattr(tool.shutil, "disk_usage", lambda _: SimpleNamespace(free=tool.MIN_ROOT_FREE))
+    (cgroup / "memory.events").write_text("oom_kill 3\n")
+    with pytest.raises(ValueError, match="OOM baseline"):
+        tool._server_stage_guard(tmp_path)
+
+
+@pytest.mark.parametrize("floor", (0, True, 256 * tool.MIB, "512"))
+def test_server_direct_floor_cannot_be_arbitrarily_lowered(memory_guard_case, tmp_path, floor):
+    memory_guard_case(direct_mib=1024)
+    with pytest.raises(ValueError, match="Unsupported explicit server"):
+        tool._resource_guard(tmp_path, direct_floor=floor)
+
+
+def test_explicit_server_tool_guard_is_checked_before_spawn_without_using_default(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(tool, "_resource_guard", lambda _: pytest.fail("Explicit server stage must use its direct guard"))
+    def server_guard(root):
+        calls.append(root)
+        raise ValueError("server stage deferred")
+    monkeypatch.setattr(tool.subprocess, "Popen", lambda *a, **k: pytest.fail("Guard failure must not spawn"))
+    with pytest.raises(ValueError, match="server stage deferred"):
+        tool._run(["must-not-run"], root=tmp_path, env={}, guard=server_guard)
+    assert calls == [tmp_path]
+
+
 def test_offline_subprocess_timeout_bounds_silent_pipe_and_reaps_child(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "_resource_guard", lambda _: {})
     started = time.monotonic()
