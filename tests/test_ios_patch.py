@@ -16,7 +16,8 @@ from zipfile import ZipFile
 
 from idoly_local.client_patch import OFFICIAL_API, literal_rows
 from idoly_local.ios_patch import (IOSProfile, DEFAULT_BUNDLE_ID, _add_presentation_load,
-                                   _patch_octo_origin, _patch_unity_http, macho_info, package_ios_client)
+                                   _patch_octo_origin, _patch_unity_http, _read_native_member,
+                                   macho_info, package_ios_client)
 
 
 APP = "Payload/Test Game.app/"
@@ -134,6 +135,26 @@ class IOSPackagingTests(unittest.TestCase):
         self.assertEqual(report["ui_translation"]["output_asset_sha256"], hashlib.sha256(localized_ui).hexdigest())
         self.assertEqual(report["static_ui_translation"]["changed_static_texts"], 3)
 
+    def test_native_member_uses_bounded_decompression_and_checks_declared_size(self):
+        import io
+        from idoly_local import ios_patch as writer
+        payload = b'0123456789' * (writer._COPY_BYTES // 5)
+        class Bounded(io.BytesIO):
+            def read(self, size=-1):
+                self_outer.assertGreaterEqual(size, 0)
+                self_outer.assertLessEqual(size, writer._COPY_BYTES)
+                return super().read(size)
+        self_outer = self
+        archive = mock.Mock()
+        archive.getinfo.return_value = types.SimpleNamespace(file_size=len(payload))
+        archive.open.side_effect = lambda name: Bounded(payload)
+        self.assertEqual(_read_native_member(archive, 'native'), payload)
+        archive.read.assert_not_called()
+        for declared in (len(payload) - 1, len(payload) + 1, writer._MAX_NATIVE_MEMBER_BYTES + 1):
+            archive.getinfo.return_value.file_size = declared
+            with self.assertRaisesRegex(ValueError, 'native IPA member|Native IPA member'):
+                _read_native_member(archive, 'native')
+
     def test_missing_fixed_ui_inputs_are_rejected_before_source_is_opened(self):
         with self.assertRaisesRegex(ValueError, "requires CSV"):
             package_ios_client(self.root/"missing.ipa", self.output, ui_language="ko")
@@ -219,7 +240,7 @@ class IOSPackagingTests(unittest.TestCase):
         patched = macho_fixture(marker=b"shared bootstrap patch")
         with mock.patch("idoly_local.native_bootstrap.patch_native", return_value=(patched, {"platform": "ios"})) as patch:
             report = package_ios_client(self.source, self.output, profile=self.profile)
-        patch.assert_called_once_with(self.unity, "ios")
+        patch.assert_called_once_with(self.unity, "ios", mutable_output=False)
         self.assertEqual(report["bootstrap_patch"], {"platform": "ios"})
         with ZipFile(self.output) as archive:
             self.assertEqual(archive.read(UNITY), patched)
@@ -249,10 +270,10 @@ class IOSPackagingTests(unittest.TestCase):
                 mock.patch.dict(sys.modules, {presentation.__name__: presentation}):
             report = package_ios_client(self.source, self.output, presentation_library=library,
                                         presentation_plan=plan, profile=self.profile)
-        bootstrap.assert_called_once_with(self.unity, "ios")
+        bootstrap.assert_called_once_with(self.unity, "ios", mutable_output=True)
         presentation.patch_presentation.assert_called_once_with(
             bootstrap_native, {"schema": 1, "fixture": True, "profile_header_sha256": "a" * 64},
-            bootstrap_report=bootstrap_report)
+            bootstrap_report=bootstrap_report, in_place=False)
         with ZipFile(self.output) as archive:
             embedded = APP + "Frameworks/IdolyPresentation.dylib"
             self.assertEqual(archive.read(embedded), library.read_bytes())
@@ -295,6 +316,23 @@ class IOSPackagingTests(unittest.TestCase):
             package_ios_client(self.source, self.output, font_license_file=self.root/'OFL.txt')
         with self.assertRaisesRegex(ValueError, 'native presentation fallback'):
             package_ios_client(self.source, self.output, font_file=self.root/'explicit.otf')
+
+    def test_presentation_build_reuses_the_owned_native_buffer_after_bootstrap(self):
+        library, plan = self.presentation_inputs()
+        presentation = types.ModuleType('idoly_local.ios_presentation')
+        presentation.patch_presentation = mock.Mock(side_effect=lambda value, *args, **kwargs: (value, {}))
+        def bootstrap(value, platform, *, mutable_output=False):
+            self.assertEqual(platform, 'ios')
+            self.assertTrue(mutable_output)
+            return bytearray(value), {'platform': 'ios'}
+        with mock.patch('idoly_local.native_bootstrap.patch_native', side_effect=bootstrap), \
+                mock.patch.dict(sys.modules, {presentation.__name__: presentation}):
+            report = package_ios_client(self.source, self.output, presentation_library=library,
+                                       presentation_plan=plan, profile=self.profile)
+        self.assertTrue(presentation.patch_presentation.call_args.kwargs['in_place'])
+        self.assertTrue(report['presentation_patch']['owned_native_buffer_reused'])
+        with ZipFile(self.output) as archive:
+            self.assertEqual(archive.read(UNITY), _add_presentation_load(self.unity)[0])
 
     def test_font_package_replaces_declared_asset_and_embeds_exact_notices(self):
         library, plan = self.presentation_inputs()
@@ -378,6 +416,17 @@ class IOSPackagingTests(unittest.TestCase):
     def test_presentation_load_refuses_unsafe_padding_or_duplicate_commands(self):
         source = padded_macho_fixture()
         final, report = _add_presentation_load(source)
+        owned = bytearray(source)
+        reused, same_report = _add_presentation_load(owned, in_place=True)
+        self.assertIs(reused, owned)
+        self.assertEqual(reused, final)
+        self.assertEqual(same_report, report)
+        with self.assertRaisesRegex(ValueError, 'owned bytearray'):
+            _add_presentation_load(source, in_place=True)
+        before = bytes(owned)
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            _add_presentation_load(owned, in_place=True)
+        self.assertEqual(owned, before)
         self.assertEqual(len(final), len(source))
         self.assertEqual(final[512:], source[512:])
         self.assertFalse(report["code_moved"])

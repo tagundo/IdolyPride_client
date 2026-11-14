@@ -55,6 +55,7 @@ _MAX_PRESENTATION_PLAN_BYTES = 256 * 1024
 _MAX_PRESENTATION_LIBRARY_BYTES = 8 * 1024 * 1024
 _MAX_PRESENTATION_BUILD_BYTES = 64 * 1024
 _COPY_BYTES = 128 * 1024
+_MAX_NATIVE_MEMBER_BYTES = 256 * 1024 * 1024
 
 
 def _sha256(data: bytes) -> str:
@@ -67,6 +68,25 @@ def _file_sha256(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _read_native_member(archive: ZipFile, name: str) -> bytes:
+    """Inflate in small chunks, avoiding a full compressed-native temporary."""
+    size = archive.getinfo(name).file_size
+    if type(size) is not int or not 0 < size <= _MAX_NATIVE_MEMBER_BYTES:
+        raise ValueError("Native IPA member exceeds its bound")
+    result = bytearray(size)
+    position = 0
+    with archive.open(name) as source:
+        while position < size:
+            block = source.read(min(_COPY_BYTES, size - position))
+            if not isinstance(block, bytes) or not block or len(block) > size - position:
+                raise ValueError("Truncated or oversized native IPA member")
+            result[position:position + len(block)] = block
+            position += len(block)
+        if source.read(1) != b"":
+            raise ValueError("Native IPA member exceeds its declared size")
+    return bytes(result)
 
 
 def macho_info(data: bytes) -> dict:
@@ -169,8 +189,10 @@ def _patch_unity_http(data: bytes, profile: IOSProfile) -> tuple[bytes, dict]:
                     "output_sha256": profile.unity_settings_patched_sha256}
 
 
-def _add_presentation_load(native: bytes) -> tuple[bytes, dict]:
+def _add_presentation_load(native: bytes | bytearray, *, in_place: bool = False) -> tuple[bytes | bytearray, dict]:
     """Add one load command in verified zero header padding, without moving code."""
+    if type(in_place) is not bool or in_place and type(native) is not bytearray:
+        raise ValueError("In-place load commands require an owned bytearray")
     macho_info(native)
     count, command_bytes = struct.unpack_from("<II", native, 16)
     old_end = 32 + command_bytes
@@ -219,11 +241,12 @@ def _add_presentation_load(native: bytes) -> tuple[bytes, dict]:
     first_section = min(text_offsets)
     if old_end + size > first_section or any(native[old_end:old_end + size]):
         raise ValueError("No verified zero header padding; refusing to move code")
-    output = bytearray(native)
     command = struct.pack("<6I", 0xC, size, 24, 0, 0x10000, 0x10000) + path
-    output[old_end:old_end + size] = command.ljust(size, b"\0")
+    encoded = command.ljust(size, b"\0")
+    output = native if in_place else bytearray(native)
+    output[old_end:old_end + size] = encoded
     struct.pack_into("<II", output, 16, count + 1, command_bytes + size)
-    return bytes(output), {"path": _PRESENTATION_LOAD, "load_command_offset": old_end,
+    return (output if in_place else bytes(output)), {"path": _PRESENTATION_LOAD, "load_command_offset": old_end,
                            "load_command_size": size, "first_text_section_offset": first_section,
                            "code_moved": False}
 
@@ -365,7 +388,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         if not isinstance(executable_name, str) or not executable_name or "/" in executable_name or executable_name in (".", ".."):
             raise ValueError("Invalid app executable name")
         metadata_name, unity_name = app + _METADATA, app + _UNITY
-        metadata, unity = archive.read(metadata_name), archive.read(unity_name)
+        metadata, unity = archive.read(metadata_name), _read_native_member(archive, unity_name)
         if _sha256(metadata) != profile.metadata_sha256 or _sha256(unity) != profile.unity_sha256:
             raise ValueError("Game native library or metadata SHA-256 differs from the verified profile")
         source_unity = macho_info(unity)
@@ -385,16 +408,19 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
             unity = Path(native_library).read_bytes()
         elif bootstrap:
             from .native_bootstrap import patch_native
-            unity, bootstrap_report = patch_native(unity, "ios")
+            unity, bootstrap_report = patch_native(unity, "ios", mutable_output=presentation_enabled)
         if presentation_enabled:
             from .ios_presentation import patch_presentation
-            unity, patch_report = patch_presentation(unity, plan, bootstrap_report=bootstrap_report)
-            unity, load_report = _add_presentation_load(unity)
+            owned_native = type(unity) is bytearray
+            unity, patch_report = patch_presentation(unity, plan, bootstrap_report=bootstrap_report,
+                                                    in_place=owned_native)
+            unity, load_report = _add_presentation_load(unity, in_place=owned_native)
             presentation_report = {"patch": patch_report, "load_command": load_report,
                                    "library": library_info, "library_bytes": len(library),
                                    "library_member": presentation_name,
                                    "plan_sha256": _sha256(plan_bytes), "bootstrap_composed": True,
                                    "build_receipt": {"name": build_path.name, "sha256": _sha256(build_bytes)},
+                                   "owned_native_buffer_reused": owned_native,
                                    "device_verified": False}
         output_unity = macho_info(unity)
         info["CFBundleIdentifier"] = bundle_id

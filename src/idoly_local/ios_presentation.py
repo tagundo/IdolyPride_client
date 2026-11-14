@@ -141,13 +141,20 @@ def validate_plan(plan):
         raise ValueError("Presentation plan differs from the pinned original iOS profile")
 
 
-def patch_presentation(native, plan, *, bootstrap_report=None):
+def patch_presentation(native, plan, *, bootstrap_report=None, in_place=False):
     """Patch only locked render entry points and verified zero executable slack.
 
     The loader command and exact compiled dylib embedding are the IPA packager's
     responsibility. Mutable pointers live after all declared DATA sections in
     the existing zero-fill tail; no existing BSS object or segment is extended.
+    in_place=True requires an exclusively caller-owned bytearray and returns
+    that same object. Every validation and small write payload is completed
+    before mutation, so rejected inputs leave the supplied buffer unchanged.
     """
+    if type(in_place) is not bool:
+        raise ValueError("Presentation in_place must be a boolean")
+    if in_place and type(native) is not bytearray:
+        raise ValueError("In-place presentation requires an owned bytearray")
     validate_plan(plan)
     input_hash = hashlib.sha256(native).hexdigest()
     if input_hash not in (SOURCE_SHA256, BOOTSTRAP_SHA256):
@@ -167,12 +174,18 @@ def patch_presentation(native, plan, *, bootstrap_report=None):
     region = profile["gateway_region"]
     if any(native[region["rva"]:region["rva"] + region["bytes"]]):
         raise ValueError("Original executable slack is not zero")
-    output = bytearray(native)
+    changes = []
     for row in plan["entries"].values():
-        output[row["rva"]:row["rva"] + 4] = bytes.fromhex(row["patched_entry"])
+        entry = bytes.fromhex(row["patched_entry"])
         code = bytes.fromhex(row["gateway_hex"])
-        output[row["gateway"]:row["gateway"] + len(code)] = code
-    result = bytes(output)
+        if (len(entry) != 4 or not 0 <= row["rva"] <= len(native) - len(entry)
+                or not 0 <= row["gateway"] <= len(native) - len(code)):
+            raise ValueError("Presentation write exceeds the validated native buffer")
+        changes.extend(((row["rva"], entry), (row["gateway"], code)))
+    output = native if in_place else bytearray(native)
+    for offset, payload in changes:
+        output[offset:offset + len(payload)] = payload
+    result = output if in_place else bytes(output)
     return result, {"schema": 1, "platform": "ios", "input_sha256": input_hash,
                     "output_sha256": hashlib.sha256(result).hexdigest(),
                     "profile_sha256": PROFILE_SHA256,

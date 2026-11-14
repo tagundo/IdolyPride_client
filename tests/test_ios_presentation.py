@@ -3,6 +3,7 @@ import hashlib
 from pathlib import Path
 import re
 import struct
+import tracemalloc
 
 import pytest
 
@@ -154,3 +155,69 @@ def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
         monkeypatch.setattr(p, "load_profile", lambda: changed)
         with pytest.raises(ValueError, match="Gateway would overlap"):
             p.make_plan()
+
+
+def mutable_patch_fixture(monkeypatch, *, size=512):
+    """Small typed-profile substitute to exercise write ownership and ordering."""
+    raw = bytearray(b'\xaa' * size)
+    raw[32:48] = bytes(range(16)); raw[64:80] = bytes(range(16, 32))
+    struct.pack_into('<QQ', raw, 128, 32, 64)
+    raw[192:256] = b'\0' * 64
+    profile = {'aliases': {
+        'first': {'rva': 32, 'prefix16': raw[32:48].hex(), 'registration_pointer_slot_rva': 128},
+        'last': {'rva': 64, 'prefix16': raw[64:80].hex(), 'registration_pointer_slot_rva': 136},
+    }, 'gateway_region': {'rva': 192, 'bytes': 64}}
+    plan = {'entries': {
+        name: {'rva': offset, 'patched_entry': '00000014', 'gateway': 192+32*n,
+               'gateway_hex': bytes(range(28)).hex()}
+        for n, (name, offset) in enumerate((('first', 32), ('last', 64)))
+    }, 'profile_header_sha256': 'a' * 64}
+    monkeypatch.setattr(p, 'validate_plan', lambda _: None)
+    monkeypatch.setattr(p, 'load_profile', lambda: profile)
+    monkeypatch.setattr(p, 'SOURCE_SHA256', hashlib.sha256(raw).hexdigest())
+    return bytes(raw), profile, plan
+
+
+def test_in_place_owned_output_matches_immutable_default_without_native_sized_copy(monkeypatch):
+    raw, _, plan = mutable_patch_fixture(monkeypatch, size=1024*1024)
+    original = bytearray(raw)
+    expected, expected_report = p.patch_presentation(original, plan)
+    assert type(expected) is bytes and original == raw
+    owned = bytearray(raw)
+    tracemalloc.start()
+    result, report = p.patch_presentation(owned, plan, in_place=True)
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    assert result is owned and type(result) is bytearray
+    assert result == expected and report == expected_report
+    assert original == raw and peak < 64*1024
+
+
+@pytest.mark.parametrize('kind', ['late_prefix', 'registration', 'slack', 'late_code', 'late_bounds'])
+def test_in_place_rejections_leave_all_caller_owned_bytes_unchanged(monkeypatch, kind):
+    raw, profile, plan = mutable_patch_fixture(monkeypatch)
+    owned = bytearray(raw)
+    if kind == 'late_prefix':
+        profile['aliases']['last']['prefix16'] = '00' * 16
+    elif kind == 'registration':
+        profile['aliases']['last']['registration_pointer_slot_rva'] = 128
+    elif kind == 'slack':
+        owned[224] = 1
+        monkeypatch.setattr(p, 'SOURCE_SHA256', hashlib.sha256(owned).hexdigest())
+    elif kind == 'late_code':
+        plan['entries']['last']['gateway_hex'] = 'not hex'
+    else:
+        plan['entries']['last']['gateway'] = len(owned) - 1
+    before = bytes(owned)
+    with pytest.raises(ValueError):
+        p.patch_presentation(owned, plan, in_place=True)
+    assert owned == before
+
+
+def test_in_place_requires_explicit_boolean_and_owned_bytearray_before_validation():
+    for value in (b'not owned', memoryview(b'not owned')):
+        with pytest.raises(ValueError, match='owned bytearray'):
+            p.patch_presentation(value, {}, in_place=True)
+    for value in (1, 'yes', None):
+        with pytest.raises(ValueError, match='boolean'):
+            p.patch_presentation(bytearray(), {}, in_place=value)

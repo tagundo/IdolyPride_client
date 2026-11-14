@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -51,6 +52,47 @@ class NativeProfileTests(unittest.TestCase):
         self.assertEqual(report["output_sha256"], hashlib.sha256(result).hexdigest())
         self.assertFalse(report["device_verified"])
         json.dumps(report)
+
+    def test_mutable_output_is_the_same_patch_without_a_final_full_size_copy(self):
+        raw, profile = fixture_profile()
+        raw += b'\xaa' * (1024 * 1024 - len(raw))
+        profile = replace(profile, sha256=hashlib.sha256(raw).hexdigest())
+        with patch.dict(bootstrap._PROFILES, android=profile):
+            tracemalloc.start()
+            immutable, expected_report = bootstrap.patch_native(raw, 'android')
+            _, immutable_peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+            tracemalloc.start()
+            mutable, report = bootstrap.patch_native(raw, 'android', mutable_output=True)
+            _, mutable_peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
+        self.assertIs(type(immutable), bytes)
+        self.assertIs(type(mutable), bytearray)
+        self.assertEqual(mutable, immutable)
+        self.assertEqual(report, expected_report)
+        self.assertEqual(raw[:512], fixture_profile()[0])
+        self.assertGreaterEqual(immutable_peak, 2 * len(raw))
+        self.assertLess(mutable_peak, len(raw) + 64 * 1024)
+
+    def test_mutable_output_never_allocates_a_patch_buffer_before_every_prefix_check(self):
+        raw, profile = fixture_profile()
+        invalid = replace(profile, sites=profile.sites + (
+            bootstrap._Site('late bad entry', 0x3000, 256, '00' * 16, 'true'),))
+        with patch.dict(bootstrap._PROFILES, android=invalid):
+            with patch.object(bootstrap, 'bytearray', create=True) as allocate:
+                with self.assertRaisesRegex(ValueError, 'late bad entry'):
+                    bootstrap.patch_native(raw, 'android', mutable_output=True)
+                allocate.assert_not_called()
+        self.assertEqual(raw, fixture_profile()[0])
+
+    def test_mutable_output_is_explicit_and_input_bytes_remain_required(self):
+        raw, profile = fixture_profile()
+        with patch.dict(bootstrap._PROFILES, android=profile):
+            for invalid in (1, 'yes', None):
+                with self.subTest(flag=invalid), self.assertRaisesRegex(ValueError, 'boolean'):
+                    bootstrap.patch_native(raw, 'android', mutable_output=invalid)
+            with self.assertRaisesRegex(ValueError, 'input must be bytes'):
+                bootstrap.patch_native(bytearray(raw), 'android', mutable_output=True)
 
     def test_entry_checks_remain_required_after_hash_validation(self):
         raw, profile = fixture_profile()
@@ -154,17 +196,18 @@ class ActualClientProfileTests(unittest.TestCase):
         for platform, path in available:
             with self.subTest(platform=platform):
                 raw = path.read_bytes()
-                result, report = bootstrap.patch_native(raw, platform)
+                result, report = bootstrap.patch_native(raw, platform, mutable_output=True)
                 self.assertEqual(len(result), len(raw))
                 self.assertEqual(len(report["patches"]), 6)
                 cursor = 0
-                for entry in sorted(report["patches"], key=lambda item: int(item["file_offset"], 16)):
-                    offset = int(entry["file_offset"], 16)
-                    self.assertEqual(result[cursor:offset], raw[cursor:offset])
-                    replacement = bytes.fromhex(entry["patched_hex"])
-                    self.assertEqual(result[offset:offset + len(replacement)], replacement)
-                    cursor = offset + len(replacement)
-                self.assertEqual(result[cursor:], raw[cursor:])
+                with memoryview(raw) as source_view, memoryview(result) as output_view:
+                    for entry in sorted(report["patches"], key=lambda item: int(item["file_offset"], 16)):
+                        offset = int(entry["file_offset"], 16)
+                        self.assertTrue(output_view[cursor:offset] == source_view[cursor:offset])
+                        replacement = bytes.fromhex(entry["patched_hex"])
+                        self.assertEqual(result[offset:offset + len(replacement)], replacement)
+                        cursor = offset + len(replacement)
+                    self.assertTrue(output_view[cursor:] == source_view[cursor:])
 
 
 if __name__ == "__main__":

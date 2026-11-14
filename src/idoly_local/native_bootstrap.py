@@ -100,16 +100,21 @@ def _replacement(site: _Site, host_rva: int) -> bytes:
     raise ValueError("Unknown native bootstrap patch action")
 
 
-def patch_native(native: bytes, platform: str) -> tuple[bytes, dict]:
+def patch_native(native: bytes, platform: str, *, mutable_output: bool = False) -> tuple[bytes | bytearray, dict]:
     """Patch one original 6.1.1 binary without changing its length or layout.
 
     The native hash and every entry prefix are checked before mutation. Unknown,
     translated, previously patched or other-version binaries are rejected; an
     explicit prepatched-native override belongs to the packaging tool.
+    With mutable_output=True the validated copy is returned as an owned
+    bytearray, avoiding the final full-size immutable copy. The bytes input is
+    never mutated; the caller can release it before the next in-place stage.
     """
+    if type(mutable_output) is not bool:
+        raise ValueError("Native bootstrap mutable_output must be a boolean")
     if not isinstance(native, bytes):
         raise ValueError("Native bootstrap input must be bytes")
-    if platform not in _PROFILES:
+    if not isinstance(platform, str) or platform not in _PROFILES:
         raise ValueError("Native bootstrap platform must be android or ios")
     profile = _PROFILES[platform]
     source_hash = hashlib.sha256(native).hexdigest()
@@ -134,7 +139,7 @@ def patch_native(native: bytes, platform: str) -> tuple[bytes, dict]:
         evidence.append({"method": site.name, "rva": hex(site.rva), "file_offset": hex(site.offset),
                          "action": site.action, "original_hex": native[site.offset:site.offset + len(replacement)].hex(),
                          "patched_hex": replacement.hex()})
-    result = bytes(patched)
+    result = patched if mutable_output else bytes(patched)
     return result, {"client_version": "6.1.1", "platform": platform,
                     "input_sha256": source_hash, "output_sha256": hashlib.sha256(result).hexdigest(),
                     "patches": evidence, "device_verified": False,

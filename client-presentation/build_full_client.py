@@ -463,12 +463,18 @@ def build(args):
         unsigned,aligned,signed=work/"unsigned.apk",ram/"aligned.apk",work/"signed.apk"
         stream_apk(source,unsigned,manifest,additions,replacements=existing_replacements);cache.register(unsigned,None,own=True)
         run([sdk/"zipalign","-f","16384",unsigned,aligned]);cache.register(aligned,None,own=True)
-        run([sdk/"zipalign","-c","16384",aligned]);unsigned.unlink();cache.files.pop(unsigned)
+        # The aligned output is independently checked below; the disposable
+        # unsigned input is no longer needed at the next tool's entry barrier.
+        unsigned.unlink();cache.files.pop(unsigned)
+        run([sdk/"zipalign","-c","16384",aligned])
         password=Path(args.password_file);key=Path(args.keystore)
         if password.is_symlink() or not password.is_file() or password.stat().st_mode&0o077 or not key.is_file() or key.is_symlink():
             raise ValueError("Existing matching private signing files are required")
         run([*signer,"sign","--ks",key,"--ks-key-alias","idoly-diagnostics-public","--ks-pass","file:"+str(password),
             "--min-sdk-version","28","--v1-signing-enabled","false","--v2-signing-enabled","true","--v3-signing-enabled","true","--v4-signing-enabled","false","--out",signed,aligned])
+        # Signing has completed. Verify the signed file with the obsolete
+        # aligned input retired, preserving the same memory reserve per tool.
+        aligned.unlink();cache.files.pop(aligned)
         cache.register(signed,None,own=True)
         signature=run(output_verify_command(signer,signed)).decode()
         if (re.findall(r"^Signer #\d+ certificate SHA-256 digest: ([a-f0-9]{64})$",signature,re.M)!=[CERTIFICATE]
