@@ -279,11 +279,11 @@ class OctoManifest:
                 raise OctoManifestError("Invalid prepared language object aliases")
             for identity, target in object_aliases.items():
                 if (not isinstance(identity, tuple) or len(identity) != 4
-                        or identity[0] != "resources"
+                        or identity[0] not in ("resources", "assetbundle")
                         or type(identity[1]) is not int or not 1 <= identity[1] <= 2**31-1
                         or not isinstance(identity[2], str) or not _OBJECT_NAME.fullmatch(identity[2])
                         or type(identity[3]) is not int or not 1 <= identity[3] <= 2**64-1
-                        or type(target) is not OctoObject or target.kind != "resources"
+                        or type(target) is not OctoObject or target.kind != identity[0]
                         or not isinstance(target.object_name, str)
                         or not target.object_name.startswith(("local_ko_", "local_en_"))
                         or identity[1] != target.upload_version or identity[3] != target.generation

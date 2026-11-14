@@ -1,0 +1,13 @@
+# Korean image data and audience repair v0.3.31
+
+The Korean clients use the existing translated images from CyleAR/ipr-translation-data-ko. The current upstream image inventory contains 836 PNG files; their bytes match the previous pinned image revision. Images without an existing translated PNG keep their original artwork. No Korean caption bands or replacement event logos are generated.
+
+Both bundled and downloaded resources are covered. Bundled Sprite replacements retain their original object IDs, normalized pivots, borders and pixel scale. The original seven replacements keep their previous output bytes; additional sprites follow Localify's translated-PNG rectangle behavior. The build accepts an explicit image directory and verifies every input against a checked-in SHA256 catalog. It performs no game-time image replacement.
+
+Downloaded image bundles are translated before packaging. Their original GPU texture format is retained and ASTC images are encoded at medium quality with one build thread. ASTC encoding is lossy. A translated PNG with different dimensions receives corresponding texture and stream dimensions; unrelated texture fields and Unity objects remain unchanged. Each translated bundle receives a new local object name, generation, size and MD5 in a complete platform manifest. The original cache objects are preserved, and language selection publishes the matching prepared manifest. Existing story-script translations and English resources are retained.
+
+The media account now floors sparse candidate values at 1,000. Mana and collaboration characters use the original client's fan-average fallback instead of the normal character's stored candidate value. Their media-only Setting floor is therefore also 1,000, replacing the original floor of 10. The normal master data, actual fan counts and progression are preserved. All localized media Setting packs retain their existing translated strings. No additional native hooks are installed for this fix.
+
+The currently used Android Diagnostics package is now displayed as **아이프라 로컬**. Its package ID and signing certificate are retained for normal updates and data continuity. The server's single **아이프라 실행** button opens that package; the obsolete separate Local/Resources launch paths have been removed. Diagnostic records and export remain available.
+
+This update requires the new server for downloaded image manifests and the media audience repair, and the new Korean client for bundled images and the Android display name. Restart the server and game after updating. Package/data checks do not establish physical Android or PlayCover rendering; that remains a separate device check.

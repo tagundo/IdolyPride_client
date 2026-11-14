@@ -41,6 +41,8 @@ PACKAGE = addon.PROFILES["diagnostics"]["package"]
 CERTIFICATE = addon.PROFILES["diagnostics"]["certificate"]
 PROVIDER = "game.qualiarts.idolypride.presentation.PresentationProvider"
 AUTHORITY = PACKAGE + ".idoly.presentation"
+BASE_CLIENT_LABEL = "아이프라 진단"
+CLIENT_LABEL = "아이프라 로컬"
 MARKER = "assets/idoly-presentation-standalone.json"
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 MAX_APK = 192 * 1024 * 1024
@@ -53,6 +55,10 @@ STATIC_UI_SOURCES = (
     "client-presentation/translations/static-ui-v1.json",
     "src/idoly_local/static_ui_images.py",
     "client-presentation/images/korean-static-sprites-v1.json",
+    "client-presentation/images/korean-static-sprites-v2.json",
+    "src/idoly_local/static_ui_textures.py",
+    "src/idoly_local/cdn_image_translation.py",
+    "client-presentation/images/korean-static-textures-v1.json",
     "src/idoly_local/ui_text_finishes.py",
     "client-presentation/translations/ko-ui-final-phrases-v1.json",
     "src/idoly_local/ui_display_literals.py",
@@ -193,6 +199,8 @@ def add_provider(path):
     tree = ET.parse(path); root = tree.getroot(); app = root.find("application")
     if root.get("package") != PACKAGE or root.get(ANDROID + "sharedUserId") or app is None:
         raise ValueError("Expected the existing separate diagnostic package")
+    if app.get(ANDROID + "label") != BASE_CLIENT_LABEL:
+        raise ValueError("Pinned client display name differs")
     if any(child.get(ANDROID + "name") == PROVIDER or child.get(ANDROID + "authorities") == AUTHORITY for child in app):
         raise ValueError("Presentation provider already exists")
     before = xml_shape(root)
@@ -200,6 +208,7 @@ def add_provider(path):
         ANDROID + "authorities": AUTHORITY, ANDROID + "exported": "false", ANDROID + "initOrder": "1"})
     app.remove(provider)
     if xml_shape(root) != before: raise ValueError("An original manifest element changed")
+    app.set(ANDROID + "label", CLIENT_LABEL)
     app.append(provider); ET.register_namespace("android", ANDROID[1:-1])
     tree.write(path, encoding="utf-8", xml_declaration=True)
     return before
@@ -233,7 +242,15 @@ def compiled_tree(text, *, remove_provider=False):
                     raise ValueError("Presentation provider attribute differs")
             removed += 1; return None
         children = [normalize(child) for child in node[2]]
-        return (node[0], tuple(sorted(node[1])), tuple(child for child in children if child is not None))
+        attributes = list(node[1])
+        if node[0] == "application":
+            expected = CLIENT_LABEL if remove_provider else BASE_CLIENT_LABEL
+            labels = [value for value in attributes if ":label(" in value]
+            exact = 'http://schemas.android.com/apk/res/android:label(0x01010001)="' + expected + '" (Raw: "' + expected + '")'
+            if labels != [exact]:
+                raise ValueError("Compiled client display name differs")
+            attributes[attributes.index(exact)] = "local-client-display-name"
+        return (node[0], tuple(sorted(attributes)), tuple(child for child in children if child is not None))
     result = tuple(normalize(node) for node in roots)
     if len(result) != 1 or remove_provider and removed != 1:
         raise ValueError("Expected exactly one compiled manifest/provider")
@@ -436,7 +453,14 @@ def build(args):
         existing_replacements.update(static_parts)
         from idoly_local.static_ui_images import android_members as static_image_members
         image_parts, static_images_report = static_image_members(base, language=ui_language,
-            image_dir=ROOT / "client-presentation/images/ko")
+            image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko")
+        from idoly_local.static_ui_textures import android_members as static_texture_members
+        texture_parts, texture_report = static_texture_members(base, language=ui_language,
+            image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko")
+        if image_parts.keys() & texture_parts.keys():
+            raise ValueError("Sprite and direct texture replacements overlap")
+        image_parts.update(texture_parts)
+        static_images_report["direct_textures"] = texture_report
         if existing_replacements.keys() & image_parts.keys():
             raise ValueError("Static image and text/font resource replacements overlap")
         existing_replacements.update(image_parts)
@@ -542,6 +566,7 @@ def main():
     parser.add_argument("--ui-language", choices=("ja", "ko", "en"), default="ja", help="Fixed built-in UI language")
     parser.add_argument("--ui-csv-file", type=Path, help="Audited original or pretranslated UI CSV")
     parser.add_argument("--ui-proof-file", type=Path, help="Translation build proof, required for Korean/English UI")
+    parser.add_argument("--image-dir", type=Path, help="Pinned Korean translation PNG directory; every used file is checked against the frozen image profile")
     args=parser.parse_args();result=build(args)
     print(json.dumps({k:result[k] for k in ("output_apk_sha256","output_bytes","certificate_sha256")}))
 

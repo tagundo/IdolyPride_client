@@ -168,6 +168,49 @@ def test_producer_rejects_inconsistent_or_untyped_coverage(tmp_path, field, valu
         bundle.validate_translation_bundle(source, **pins)
 
 
+def with_image_report(index, files, mutation=None):
+    name = "ko/android/manifest.json"
+    report = json.loads(files[name])
+    report.update(schema=2,
+        image_source={"repository": "https://example.test/images", "revision": "b" * 40},
+        image_coverage={"candidates": 3, "translated": 1, "missing": 1, "unchanged_original": 1},
+        changed_images=[{"name": "img_story_top_main-new"}])
+    if mutation is not None:
+        mutation(report)
+    files[name] = json.dumps(report).encode()
+    index["files"][name] = {"bytes": len(files[name]), "sha256": hashlib.sha256(files[name]).hexdigest()}
+
+
+def test_schema_two_image_counts_and_provenance_stay_separate_from_story_coverage(tmp_path):
+    source, pins = make_bundle(tmp_path, change=with_image_report)
+    verified = bundle.validate_translation_bundle(source, **pins)
+    assert verified["coverage"]["ko"] == {
+        "adv_resources": 3, "translated": 1, "missing": 1, "unchanged_original": 1}
+    assert verified["image_coverage"] == {"ko": {
+        "candidates": 3, "translated": 1, "missing": 1, "unchanged_original": 1}}
+    assert verified["image_sources"]["ko"]["revision"] == "b" * 40
+    assert verified["sources"]["ko"]["revision"] == "a" * 40
+    assert "en" not in verified["image_coverage"]  # Schema-one language remains valid.
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda report: report["image_coverage"].update(translated=True),
+    lambda report: report["image_coverage"].update(missing=-1),
+    lambda report: report["image_coverage"].update(candidates=99),
+    lambda report: report["image_coverage"].update(unapproved=0),
+    lambda report: report.update(image_coverage=None),
+    lambda report: report.update(changed_images={}),
+    lambda report: report.update(changed_images=[]),
+    lambda report: report.update(image_source={"repository": "", "revision": "b" * 40}),
+    lambda report: report["image_source"].update(revision="invalid"),
+])
+def test_schema_two_rejects_incoherent_image_report_with_valid_outer_hash(tmp_path, mutation):
+    source, pins = make_bundle(tmp_path,
+        change=lambda index, files: with_image_report(index, files, mutation))
+    with pytest.raises(ValueError, match="image coverage/source"):
+        bundle.validate_translation_bundle(source, **pins)
+
+
 @pytest.mark.parametrize("bad", ("../state.db", "/ko/android/manifest.pb", "ko//android/manifest.pb",
     "ko/android/../state.db", "ja/android/manifest.pb", "ko/ios/manifest.pb", "ko/android/private.bin"))
 def test_index_paths_are_checked_before_any_version_is_visible(tmp_path, bad):

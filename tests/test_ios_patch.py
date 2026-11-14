@@ -357,7 +357,7 @@ class IOSPackagingTests(unittest.TestCase):
         with ZipFile(self.output) as archive:
             self.assertEqual(archive.read(asset), b'patched font asset')
             self.assertEqual(archive.read(APP+'Data/keep.bin'), b'preserved game data')
-            self.assertEqual(plistlib.loads(archive.read(APP+'Info.plist'))['CFBundleVersion'], '156.9006')
+            self.assertEqual(plistlib.loads(archive.read(APP+'Info.plist'))['CFBundleVersion'], '156.9007')
             for name, raw in notices.items():
                 member = APP+'IdolyFonts/'+name
                 self.assertEqual(archive.read(member), raw)

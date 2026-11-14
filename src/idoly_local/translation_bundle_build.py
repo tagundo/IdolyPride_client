@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZIP_STORED, ZipFile, ZipInfo
 
-from .bundled_translations import validate_translation_bundle
+from .bundled_translations import _bundle, validate_translation_bundle
 
 
 def _hash(path):
@@ -81,7 +81,87 @@ def build_translation_bundle(prepared, output, *, platform, version, text_root=N
         return {"schema": 1, "platform": platform, "version": version,
                 "bytes": identity["bytes"], "sha256": identity["sha256"], "index": index,
                 "manifest_sha256": verified["manifest_sha256"],
-                "coverage": verified["coverage"], "sources": verified["sources"]}
+                "coverage": verified["coverage"], "sources": verified["sources"],
+                "image_coverage": verified["image_coverage"], "image_sources": verified["image_sources"]}
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def build_translation_bundle_overlay(source_bundle, overlay_ko_dir, output, *, platform, version,
+                                     expected_source_sha256, expected_source_bytes,
+                                     max_bytes=128 * 1024 * 1024, checkpoint=None):
+    """Replace only the prepared Korean resource group, streaming other files.
+
+    The pinned source archive is read in place. English resources and optional
+    text groups retain their complete bytes, sizes and hashes; no old language
+    archive needs to be extracted to a second directory or held in memory.
+    """
+    if (platform not in ("android", "ios") or not isinstance(version, str) or not version
+            or type(max_bytes) is not int or not 1 <= max_bytes <= 128 * 1024 * 1024
+            or checkpoint is not None and not callable(checkpoint)):
+        raise ValueError("Invalid language bundle overlay settings")
+    source_bundle, overlay_ko_dir, output = map(Path, (source_bundle, overlay_ko_dir, output))
+    if overlay_ko_dir.is_symlink() or not overlay_ko_dir.is_dir() or output.exists() or output.is_symlink():
+        raise ValueError("Use an existing prepared Korean directory and unused output")
+    replacement = {f"ko/{platform}/{leaf}": overlay_ko_dir / leaf
+                   for leaf in ("manifest.pb", "manifest.json", "objects.zip")}
+    identities = {}
+    for name, path in replacement.items():
+        if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 128 * 1024 * 1024:
+            raise ValueError("Prepared Korean overlay member is unavailable")
+        if checkpoint is not None:
+            checkpoint()
+        identities[name] = _hash(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + ".part")
+    if temporary.exists():
+        raise ValueError("A prior incomplete language package requires explicit cleanup")
+    try:
+        with _bundle(source_bundle, expected_source_sha256, expected_source_bytes, platform) as (source, old_index, old_raw):
+            if not replacement.keys() <= old_index["files"].keys():
+                raise ValueError("Pinned source lacks the complete Korean resource group")
+            index = {**old_index, "version": version, "files": {**old_index["files"], **identities}}
+            preserved = {name: row for name, row in old_index["files"].items() if name not in replacement}
+            with ZipFile(temporary, "x", compression=ZIP_DEFLATED, compresslevel=6) as archive:
+                for name, identity in sorted(index["files"].items()):
+                    if checkpoint is not None:
+                        checkpoint()
+                    info = ZipInfo("translations/" + name, (1980, 1, 1, 0, 0, 0))
+                    info.compress_type = ZIP_STORED if name.endswith("/objects.zip") else ZIP_DEFLATED
+                    info.external_attr = 0o100644 << 16
+                    incoming = replacement[name].open("rb") if name in replacement else source.open("translations/" + name)
+                    with incoming, archive.open(info, "w", force_zip64=True) as target:
+                        digest, count = hashlib.sha256(), 0
+                        while block := incoming.read(64 * 1024):
+                            if checkpoint is not None:
+                                checkpoint()
+                            count += len(block)
+                            if count > identity["bytes"]:
+                                raise ValueError("Language overlay input exceeds its pinned size")
+                            digest.update(block); target.write(block)
+                            if archive.fp.tell() > max_bytes:
+                                raise ValueError("Language bundle exceeds its producer bound")
+                    if {"bytes": count, "sha256": digest.hexdigest()} != identity:
+                        raise ValueError("Language overlay input changed while packaging")
+                info = ZipInfo("translation-package.json", (1980, 1, 1, 0, 0, 0))
+                info.compress_type = ZIP_DEFLATED; info.external_attr = 0o100644 << 16
+                archive.writestr(info, json.dumps(index, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        identity = _hash(temporary)
+        if identity["bytes"] > max_bytes:
+            raise ValueError("Language bundle exceeds its producer bound")
+        verified = validate_translation_bundle(temporary, expected_sha256=identity["sha256"],
+                                               expected_bytes=identity["bytes"], platform=platform)
+        if output.exists():
+            raise ValueError("Language bundle output already exists")
+        temporary.rename(output)
+        return {"schema": 1, "platform": platform, "version": version, **identity,
+                "index": index, "manifest_sha256": verified["manifest_sha256"],
+                "coverage": verified["coverage"], "sources": verified["sources"],
+                "image_coverage": verified["image_coverage"], "image_sources": verified["image_sources"],
+                "source_bundle": {"bytes": expected_source_bytes, "sha256": expected_source_sha256,
+                                  "manifest_sha256": hashlib.sha256(old_raw).hexdigest(), "version": old_index["version"]},
+                "preserved_files": preserved, "replaced_files": identities}
     except BaseException:
         temporary.unlink(missing_ok=True)
         raise

@@ -123,8 +123,8 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("47").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.29").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("48").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.31").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
         buildConfigField("String", "BUNDLED_TRANSLATIONS_SHA256", "\"$bundledTranslationsHash\"")
@@ -205,8 +205,10 @@ chaquopy {
                 "idoly_local/lesson_qa.py", "idoly_local/main_live_qa.py", "idoly_local/story_qa.py",
                 "idoly_local/story_read_qa.py", "idoly_local/tutorial_qa.py", "idoly_local/pvp_capture.py",
                 "idoly_local/master_translation_build.py", "idoly_local/master_sort_build.py",
-                "idoly_local/resource_translation_build.py", "idoly_local/text_translation_build.py",
-                "idoly_local/ui_translation_build.py", "idoly_local/ui_assets.py", "idoly_local/translation_bundle_build.py")
+                "idoly_local/resource_translation_build.py", "idoly_local/cdn_image_translation.py", "idoly_local/text_translation_build.py",
+                "idoly_local/ui_translation_build.py", "idoly_local/ui_assets.py", "idoly_local/translation_bundle_build.py",
+                "idoly_local/story_loading_prefab.py", "idoly_local/static_ui_assets.py", "idoly_local/static_ui_images.py", "idoly_local/static_ui_textures.py",
+                "idoly_local/ui_text_finishes.py", "idoly_local/ui_display_literals.py")
         }
     }
 }

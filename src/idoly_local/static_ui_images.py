@@ -1,6 +1,8 @@
 """Offline, pinned Korean sprite data; no game-time image replacement.
 
-Each original Sprite keeps its object ID, rectangle, pivot, border and scale.
+Each original Sprite keeps its object ID, normalized pivot, border and scale.
+New replacements use the translated PNG rectangle, as Localify does; the
+original seven retain their previous padded rectangle for compatibility.
 A separate RGBA32 texture and full rectangle mesh replace its atlas dependency,
 so no neighbouring atlas pixels are decoded or recompressed. Original image
 translation data remains subject to its upstream terms (NOASSERTION).
@@ -17,15 +19,18 @@ import struct
 
 from . import font_assets
 
-POLICY = "korean-static-sprites-v1"
+POLICY = "korean-static-sprites-v2"
+LEGACY_POLICY = "korean-static-sprites-v1"
 SOURCE_REPOSITORY = "https://github.com/CyleAR/ipr-translation-data-ko"
 SOURCE_REVISION = "f6e5689bcd6878d962996edfd390c1442b926c0f"
 TEXTURE_TEMPLATE_BYTES = 8340
 TEXTURE_TEMPLATE_SHA256 = "cd14c7a999509a84225972f1de577290fbbbba735fd35bd8296379a7f2e2d463"
 TYPE_HASHES = {28: "31f65ae343f671bf462f15c1b41e9768", 213: "7012a9da776ed53774e22013565dbbd2"}
-MAX_PNG_BYTES = 256 * 1024
-MAX_SPRITE_BYTES = 16 * 1024
-PROFILES = (
+MAX_PNG_BYTES = 1024 * 1024
+MAX_SPRITE_BYTES = 64 * 1024
+MAX_TEXTURE_BYTES = 16 * 1024 * 1024 + 64 * 1024
+MAX_IMAGE_PIXELS = 4 * 1024 * 1024
+LEGACY_PROFILES = (
     {"name": "grid_list_select", "png_bytes": 6084,
      "png_sha256": "46730f33157fc47ea508689f9edcc31d908674279628d8fe3bf31defdb6d9a75",
      "png_size": (152, 72), "sprite_size": (152, 72), "padding_offset": (0, 0),
@@ -55,6 +60,59 @@ def _need(ok, message):
         raise ValueError(message)
 
 
+def _profiles():
+    path = Path(__file__).resolve().parents[2] / "client-presentation/images/korean-static-sprites-v2.json"
+    _need(not path.is_symlink() and stat.S_ISREG(path.stat().st_mode)
+          and 0 < path.stat().st_size <= 256 * 1024, "Expected bounded frozen static-image profile")
+    data = json.loads(path.read_bytes())
+    _need(data.get("schema") == 2 and data.get("policy") == POLICY
+          and data.get("source") == {"repository": SOURCE_REPOSITORY, "revision": SOURCE_REVISION,
+                                     "data_terms": "NOASSERTION"}, "Frozen static-image provenance differs")
+    profiles = data["inputs"]
+    _need(len(profiles) == data["input_count"] == 138
+          and len({row["name"] for row in profiles}) == len(profiles), "Frozen image roster differs")
+    legacy = {row["name"]: row for row in LEGACY_PROFILES}
+    for row in profiles:
+        _need(row["name"] and all(ch.isascii() and (ch.isalnum() or ch in "_-") for ch in row["name"])
+              and 0 < row["png_bytes"] <= MAX_PNG_BYTES
+              and len(row["png_sha256"]) == 64 and row["png_color_type"] in (2, 6)
+              and len(row["png_size"]) == 2
+              and all(type(v) is int and 0 < v <= 4096 for v in row["png_size"])
+              and row["png_size"][0] * row["png_size"][1] <= MAX_IMAGE_PIXELS,
+              "Frozen PNG bounds differ")
+        if row["name"] in legacy:
+            old = legacy[row["name"]]
+            _need(row["layout_policy"] == "preserved-v1-layout"
+                  and row["render_key_policy"] == LEGACY_POLICY
+                  and tuple(row["sprite_size"]) == old["sprite_size"]
+                  and tuple(row["padding_offset"]) == old["padding_offset"]
+                  and row["png_sha256"] == old["png_sha256"], "Legacy image layout changed")
+        else:
+            _need(row["layout_policy"] == "localify-png-rect"
+                  and row["render_key_policy"] == POLICY
+                  and row["sprite_size"] == row["png_size"] and row["padding_offset"] == [0, 0],
+                  "New image must retain its exact translated PNG rectangle")
+        for target in ([row["android"]] if row["android"] is not None else []) + row["ios"]:
+            layout = target["source_layout"]
+            _need(0 < target["bytes"] <= MAX_SPRITE_BYTES and target["path_id"] > 0
+                  and len(target["object_sha256"]) == 64
+                  and layout["pivot"] == [0.5, 0.5] and layout["offset"] == [0.0, 0.0]
+                  and layout["rect_xy"] == [0.0, 0.0] and layout["pixels_per_unit"] == 100
+                  and layout["bones"] == 0 and len(layout["border"]) == 4,
+                  "Frozen Sprite target/layout differs")
+    _need(sum(row["android"] is not None for row in profiles) == data["android_sprites"] == 134
+          and sum(len(row["ios"]) for row in profiles) == data["ios_sprites"] == 139,
+          "Frozen per-platform Sprite coverage differs")
+    by_name = {row["name"]: row for row in profiles}
+    # Preserve the seven v1 texture IDs as well as their private GUIDs/pixels.
+    order = [row["name"] for row in LEGACY_PROFILES]
+    order += sorted(set(by_name) - set(order))
+    return tuple(by_name[name] for name in order)
+
+
+PROFILES = _profiles()
+
+
 def _sha(raw):
     return hashlib.sha256(raw).hexdigest()
 
@@ -74,8 +132,9 @@ def _png(directory, profile):
     _need(len(raw) == profile["png_bytes"] and _sha(raw) == profile["png_sha256"],
           "Translated sprite PNG differs from the pinned upstream input")
     _need(raw[:16] == b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"
-          and struct.unpack_from(">II", raw, 16) == profile["png_size"]
-          and raw[24:26] == b"\x08\x06", "Translated sprite must retain its audited RGBA8 dimensions")
+          and struct.unpack_from(">II", raw, 16) == tuple(profile["png_size"])
+          and raw[24] == 8 and raw[25] == profile.get("png_color_type", 6)
+          and raw[25] in (2, 6), "Translated sprite must retain its audited RGB8/RGBA8 dimensions")
     return raw
 
 
@@ -83,9 +142,10 @@ def _canvas(png, profile):
     from io import BytesIO
     _, Image = _imports()
     with Image.open(BytesIO(png)) as source:
-        _need(source.format == "PNG" and source.mode == "RGBA" and source.size == profile["png_size"],
+        _need(source.format == "PNG" and source.mode == ("RGB" if profile.get("png_color_type", 6) == 2 else "RGBA")
+              and source.size == tuple(profile["png_size"]),
               "Translated sprite PNG decode differs")
-        image = source.copy()
+        image = source.convert("RGBA")
     canvas = Image.new("RGBA", profile["sprite_size"], (0, 0, 0, 0))
     x, y = profile["padding_offset"]
     _need(0 <= x and 0 <= y and x + image.width <= canvas.width and y + image.height <= canvas.height,
@@ -157,7 +217,8 @@ def _texture_template(archive, platform):
 
 def _mini_asset(raw, cls, platform):
     """A tiny virtual reader uses the unchanged built-in class schema only."""
-    _need(cls in TYPE_HASHES and 0 < len(raw) <= 1024 * 1024 and platform in (9, 13),
+    _need(cls in TYPE_HASHES and 0 < len(raw) <= (MAX_SPRITE_BYTES if cls == 213 else MAX_TEXTURE_BYTES)
+          and platform in (9, 13),
           "Unsupported virtual sprite/texture schema")
     metadata = bytearray(b"2022.3.57f1\0" + struct.pack("<iBi", platform, 0, 1))
     metadata.extend(struct.pack("<iBh", cls, 0, -1) + bytes.fromhex(TYPE_HASHES[cls]))
@@ -173,28 +234,39 @@ def _mini_asset(raw, cls, platform):
     return environment, next(iter(environment.objects))
 
 
-def _sprite(raw, profile, platform, texture_id):
+def _sprite(raw, profile, platform, texture_id, *, target=None):
     from UnityPy.classes import PPtr
     from UnityPy.classes.math import Vector2f, Vector3f, Vector4f
     from UnityPy.classes.generated import Rectf, AABB
-    expected = profile["android_object_sha256"] if platform == 13 else profile["ios_sha256"]
+    if target is None:
+        target = profile["android"] if platform == 13 else profile["ios"][0]
+    expected = target["object_sha256"]
     _need(_sha(raw) == expected, "Original sprite payload differs")
     environment, reader = _mini_asset(raw, 213, platform)
     sprite = reader.read()
     width, height = profile["sprite_size"]
-    _need(sprite.m_Name == profile["name"] and sprite.m_Rect.x == sprite.m_Rect.y == 0
-          and (sprite.m_Rect.width, sprite.m_Rect.height) == (width, height)
-          and (sprite.m_Pivot.x, sprite.m_Pivot.y) == (0.5, 0.5)
-          and (sprite.m_Border.x, sprite.m_Border.y, sprite.m_Border.z, sprite.m_Border.w) == (0, 0, 0, 0)
-          and sprite.m_PixelsToUnits == 100 and (sprite.m_Offset.x, sprite.m_Offset.y) == (0, 0)
-          and not sprite.m_Bones,
-          "Original translated sprite layout differs")
+    layout = target["source_layout"]
+    _need(sprite.m_Name == profile["name"]
+          and [sprite.m_Rect.x, sprite.m_Rect.y] == layout["rect_xy"]
+          and [sprite.m_Rect.width, sprite.m_Rect.height] == layout["sprite_size"]
+          and [sprite.m_Pivot.x, sprite.m_Pivot.y] == layout["pivot"]
+          and [sprite.m_Border.x, sprite.m_Border.y, sprite.m_Border.z, sprite.m_Border.w] == layout["border"]
+          and sprite.m_PixelsToUnits == layout["pixels_per_unit"]
+          and [sprite.m_Offset.x, sprite.m_Offset.y] == layout["offset"]
+          and len(sprite.m_Bones) == layout["bones"], "Original translated sprite layout differs")
+    # Match Localify's Sprite.Create(PNG rectangle, normalized original pivot,
+    # original PPU/border) offline. The seven legacy translations retain v1.
+    sprite.m_Rect = Rectf(x=0., y=0., width=float(width), height=float(height))
     sprite.m_AtlasTags = []
     sprite.m_SpriteAtlas = PPtr(m_FileID=0, m_PathID=0, assetsfile=reader.assets_file)
     # The original atlas may still load for other sprites. A private key keeps
     # its packed render-data map from rebinding this now-independent sprite.
     key = copy.copy(sprite.m_RenderDataKey[0])
-    private_key = hashlib.sha256((POLICY + ":" + profile["name"]).encode("ascii")).digest()[:16]
+    key_name = profile["name"]
+    key_policy = profile["render_key_policy"]
+    if key_policy != LEGACY_POLICY:
+        key_name += ":" + str(target["path_id"])
+    private_key = hashlib.sha256((key_policy + ":" + key_name).encode("ascii")).digest()[:16]
     for index, value in enumerate(struct.unpack("<4I", private_key)):
         setattr(key, "data_" + str(index) + "_", value)
     _need(key != sprite.m_RenderDataKey[0], "Private sprite render key collides with its original atlas")
@@ -236,6 +308,7 @@ def _texture(raw, canvas, name, platform):
     environment, reader = _mini_asset(raw, 28, platform)
     texture = reader.read()
     texture.m_Name = "Idoly-Korean-" + name
+    _need(canvas.width * canvas.height <= MAX_IMAGE_PIXELS, "Static image exceeds its frozen pixel bound")
     texture.set_image(canvas, target_format=4, mipmap_count=1)
     texture.m_IsReadable = False  # Static UI needs no retained CPU pixel copy.
     texture.m_ColorSpace = 1
@@ -248,13 +321,17 @@ def _texture(raw, canvas, name, platform):
 
 
 def _proof(platform, language, rows):
-    return {"schema": 1, "policy": POLICY, "platform": platform, "language": language,
+    return {"schema": 2, "policy": POLICY, "platform": platform, "language": language,
             "source": {"repository": SOURCE_REPOSITORY, "revision": SOURCE_REVISION,
                        "data_terms": "NOASSERTION"},
             "sprites": rows, "translated_sprites": len(rows),
             "runtime_image_hooks": False, "atlas_pixels_modified": False,
-            "original_layout_preserved": True, "texture_format": "RGBA32",
-            "lossy_recompression": False, "private_sprite_render_data_keys": True}
+            "original_sprite_IDs_preserved": True,
+            "original_pivots_borders_pixels_per_unit_preserved": True,
+            "layout_policy": "preserved-v1-layout or Localify PNG rectangle",
+            "original_layout_preserved": all(row["original_layout_size"] == row["layout_size"] for row in rows),
+            "texture_format": "RGBA32", "lossy_recompression": False,
+            "private_sprite_render_data_keys": True}
 
 
 def android_members(archive, *, language="ja", image_dir=None):
@@ -266,18 +343,21 @@ def android_members(archive, *, language="ja", image_dir=None):
     template = _texture_template(archive, "android")
     replacements, rows = {}, []
     for profile in PROFILES:
-        name = profile["android_member"]
-        _need(archive.namelist().count(name) == 1 and archive.getinfo(name).file_size == profile["android_bytes"],
+        target = profile["android"]
+        if target is None:
+            continue
+        name = target["member"]
+        _need(archive.namelist().count(name) == 1 and archive.getinfo(name).file_size == target["asset_bytes"],
               "Original standalone sprite member differs")
         raw = archive.read(name)
-        _need(_sha(raw) == profile["android_sha256"], "Original standalone sprite fingerprint differs")
+        _need(_sha(raw) == target["asset_sha256"], "Original standalone sprite fingerprint differs")
         env = UnityPy.load(raw); source = next(iter(env.files.values()))
         _need(len(source.objects) == len(source.types) == 1 and 1 in source.objects
               and source.objects[1].class_id == 213 and int(source.target_platform) == 13,
               "Original standalone Sprite object graph differs")
         original = source.objects[1].get_raw_data()
         png = _png(image_dir, profile); canvas = _canvas(png, profile)
-        source.objects[1].set_raw_data(_sprite(original, profile, 13, 2))
+        source.objects[1].set_raw_data(_sprite(original, profile, 13, 2, target=target))
         texture = _texture(template, canvas, profile["name"], 13)
         tiny, texture_reader = _mini_asset(texture, 28, 13)
         clone = copy.copy(texture_reader)
@@ -294,14 +374,36 @@ def android_members(archive, *, language="ja", image_dir=None):
               "Localized sprite pixels differ from the pinned translation")
         replacements[name] = saved
         rows.append({"name": profile["name"], "input_member": name,
-                     "input_sha256": profile["android_sha256"], "output_sha256": _sha(saved),
+                     "input_sha256": target["asset_sha256"], "output_sha256": _sha(saved),
                      "output_bytes": len(saved), "png_sha256": profile["png_sha256"],
                      "sprite_path_id": 1, "private_texture_path_id": 2,
+                     "original_layout_size": target["source_layout"]["sprite_size"],
                      "layout_size": list(profile["sprite_size"]), "png_size": list(profile["png_size"]),
+                     "layout_policy": profile["layout_policy"],
                      "transparent_padding_offset": list(profile["padding_offset"]),
                      "readback_pixel_exact": True})
         del env, source, tiny, check
     return replacements, _proof("android", language, rows)
+
+
+def _ios_originals(archive, member, data_offset):
+    targets = sorted((target["relative_offset"], target) for profile in PROFILES for target in profile["ios"])
+    originals = {}
+    with archive.open(member) as source:
+        position = 0
+        for relative, target in targets:
+            offset = data_offset + relative
+            _need(offset >= position, "Original iOS Sprite ranges overlap")
+            while position < offset:
+                block = source.read(min(65536, offset - position))
+                _need(bool(block), "Truncated original iOS Sprite stream")
+                position += len(block)
+            original = source.read(target["bytes"])
+            _need(len(original) == target["bytes"] and _sha(original) == target["object_sha256"],
+                  "Original iOS translated Sprite payload differs")
+            originals[target["path_id"]] = original
+            position += len(original)
+    return originals
 
 
 def ios_patches(archive, *, language="ja", image_dir=None):
@@ -315,28 +417,30 @@ def ios_patches(archive, *, language="ja", image_dir=None):
     _need(len(names) == 1 and archive.getinfo(names[0]).file_size == profile["source_bytes"],
           "Expected one original iOS UI source member")
     template = _texture_template(archive, "ios")
+    originals = _ios_originals(archive, names[0], profile["data_offset"])
     replacements, appended, rows = {}, [], []
-    for index, target in enumerate(PROFILES):
-        with archive.open(names[0]) as stream:
-            stream.seek(profile["data_offset"] + target["ios_relative_offset"])
-            original = stream.read(target["ios_bytes"])
-        _need(len(original) == target["ios_bytes"] and _sha(original) == target["ios_sha256"],
-              "Original iOS translated Sprite payload differs")
-        png = _png(image_dir, target); canvas = _canvas(png, target)
-        texture_id = profile["object_count"] + 1 + index
-        sprite = _sprite(original, target, 9, texture_id)
-        texture = _texture(template, canvas, target["name"], 9)
-        tiny, reader = _mini_asset(texture, 28, 9)
-        _need(reader.read().image.tobytes() == canvas.tobytes(), "Localized iOS texture pixels differ")
-        replacements[target["ios_path_id"]] = {"input_sha256": target["ios_sha256"], "raw": sprite}
-        appended.append({"path_id": texture_id, "type_id": 2, "raw": texture})
-        rows.append({"name": target["name"], "sprite_path_id": target["ios_path_id"],
-                     "input_sha256": target["ios_sha256"], "output_sha256": _sha(sprite),
-                     "output_bytes": len(sprite), "png_sha256": target["png_sha256"],
-                     "private_texture_path_id": texture_id, "texture_sha256": _sha(texture),
-                     "texture_bytes": len(texture), "layout_size": list(target["sprite_size"]),
-                     "png_size": list(target["png_size"]),
-                     "transparent_padding_offset": list(target["padding_offset"]),
-                     "readback_pixel_exact": True})
-        del tiny
+    for translated in PROFILES:
+        png = _png(image_dir, translated); canvas = _canvas(png, translated)
+        for target in translated["ios"]:
+            original = originals.pop(target["path_id"])
+            texture_id = profile["object_count"] + 1 + len(appended)
+            sprite = _sprite(original, translated, 9, texture_id, target=target)
+            texture = _texture(template, canvas, translated["name"], 9)
+            tiny, reader = _mini_asset(texture, 28, 9)
+            _need(reader.read().image.tobytes() == canvas.tobytes(), "Localized iOS texture pixels differ")
+            replacements[target["path_id"]] = {"input_sha256": target["object_sha256"], "raw": sprite}
+            appended.append({"path_id": texture_id, "type_id": 2, "raw": texture})
+            rows.append({"name": translated["name"], "sprite_path_id": target["path_id"],
+                         "input_sha256": target["object_sha256"], "output_sha256": _sha(sprite),
+                         "output_bytes": len(sprite), "png_sha256": translated["png_sha256"],
+                         "private_texture_path_id": texture_id, "texture_sha256": _sha(texture),
+                         "texture_bytes": len(texture),
+                         "original_layout_size": target["source_layout"]["sprite_size"],
+                         "layout_size": list(translated["sprite_size"]),
+                         "layout_policy": translated["layout_policy"],
+                         "png_size": list(translated["png_size"]),
+                         "transparent_padding_offset": list(translated["padding_offset"]),
+                         "readback_pixel_exact": True})
+            del tiny
+    _need(not originals, "Original iOS Sprite inventory was not fully consumed")
     return replacements, appended, _proof("ios", language, rows)

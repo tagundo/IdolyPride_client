@@ -24,6 +24,7 @@ def main():
     parser.add_argument("--font-file", type=Path, help="Audited Pretendard JP font; required by a font-aware presentation plan")
     parser.add_argument("--font-license-file", type=Path, help="Audited original OFL text (defaults to the bundled source license)")
     parser.add_argument("--ui-language", choices=("ja", "ko", "en"), default="ja", help="Fixed built-in UI language")
+    parser.add_argument("--image-dir", type=Path, help="Pinned Korean image translation directory for offline sprite preparation")
     parser.add_argument("--ui-csv-file", type=Path, help="Audited original or pretranslated UI CSV")
     parser.add_argument("--ui-proof-file", type=Path, help="Translation build proof, required for Korean/English UI")
     parser.add_argument("--host-only", action="store_true", help="Diagnostic: omit native bootstrap hooks; incompatible with presentation")
@@ -38,6 +39,7 @@ def main():
                                     font_license_file=args.font_license_file,
                                     ui_language=args.ui_language, ui_csv_file=args.ui_csv_file,
                                     ui_proof_file=args.ui_proof_file,
+                                    image_dir=args.image_dir,
                                     bundle_id=args.bundle_id, bootstrap=not args.host_only)
     except (ValueError, OSError, KeyError, BadZipFile, struct.error, plistlib.InvalidFileException) as exc:
         parser.exit(1, f"iOS client packaging failed: {exc}\n")

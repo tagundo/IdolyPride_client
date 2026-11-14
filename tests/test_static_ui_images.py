@@ -39,14 +39,14 @@ def test_unknown_languages_are_rejected_before_asset_access(language):
 
 def test_all_vendored_translations_match_their_source_and_profile_pins():
     profile = json.loads((ROOT / "client-presentation/images/korean-static-sprites-v1.json").read_text())
-    assert profile["policy"] == images.POLICY
+    assert profile["policy"] == images.LEGACY_POLICY
     assert profile["source"] == {"repository": images.SOURCE_REPOSITORY,
                                   "revision": images.SOURCE_REVISION,
                                   "data_terms": "NOASSERTION"}
     files = {entry["name"]: entry for entry in profile["inputs"]}
-    assert set(files) == {entry["name"] + ".png" for entry in images.PROFILES}
+    assert set(files) == {entry["name"] + ".png" for entry in images.LEGACY_PROFILES}
     assert len(files) == 7
-    for entry in images.PROFILES:
+    for entry in images.LEGACY_PROFILES:
         raw = images._png(INPUTS, entry)
         assert files[entry["name"] + ".png"] == {
             "name": entry["name"] + ".png", "bytes": len(raw),
@@ -80,8 +80,10 @@ def test_vertical_padding_retains_pixels_without_scaling():
     assert canvas.getpixel((0, 0)) == canvas.getpixel((71, 151)) == (0, 0, 0, 0)
 
 
-def test_virtual_reader_does_not_accept_unbounded_or_unrelated_objects():
-    for raw, cls, platform in [(b"", 28, 9), (b"a" * (1024 * 1024 + 1), 28, 9),
+def test_virtual_reader_does_not_accept_unbounded_or_unrelated_objects(monkeypatch):
+    monkeypatch.setattr(images, "MAX_TEXTURE_BYTES", 32)
+    for raw, cls, platform in [(b"", 28, 9), (b"a" * 33, 28, 9),
+                               (b"a" * (images.MAX_SPRITE_BYTES + 1), 213, 9),
                                (b"a", 114, 9), (b"a", 213, 99)]:
         with pytest.raises(ValueError, match="Unsupported virtual"):
             images._mini_asset(raw, cls, platform)
@@ -103,3 +105,44 @@ def test_static_texture_discards_cpu_copy_and_preserves_exact_rgba_pixels():
     assert not texture.m_IsReadable and not texture.m_StreamingMipmaps
     assert texture.m_MipCount == 1 and texture.m_CompleteImageSize == 152 * 72 * 4
     assert texture.image.tobytes() == canvas.tobytes()
+
+
+def test_all_pinned_bundled_translations_cover_both_platforms_without_dropping_duplicate_names():
+    assert len(images.PROFILES) == 138
+    android = [row["android"] for row in images.PROFILES if row["android"] is not None]
+    ios = [target for row in images.PROFILES for target in row["ios"]]
+    assert len(android) == len({row["member"] for row in android}) == 134
+    assert len(ios) == len({row["path_id"] for row in ios}) == 139
+    ka = next(row for row in images.PROFILES if row["name"] == "Ka")
+    assert {row["path_id"] for row in ka["ios"]} == {550, 675}
+    assert {row["name"] for row in images.PROFILES if row["android"] is None} == {
+        "Kai", "Nou", "Sai", "love_loading_logo"}
+
+
+def test_new_wider_translation_uses_png_rect_without_resampling_or_clipping():
+    pytest.importorskip("UnityPy")
+    from PIL import Image
+    directory = Path("/workspace/ipr-translation-data-ko/local-files/resource/img")
+    if not directory.is_dir():
+        pytest.skip("Pinned public image translation checkout is not cached")
+    entry = next(row for row in images.PROFILES if row["name"] == "love_label_koi")
+    assert entry["png_size"] == [63, 32]
+    assert entry["android"]["source_layout"]["sprite_size"] == [32, 32]
+    canvas = images._canvas(images._png(directory, entry), entry)
+    with Image.open(directory / (entry["name"] + ".png")) as source:
+        assert canvas.size == source.size == (63, 32)
+        assert canvas.tobytes() == source.convert("RGBA").tobytes()
+
+
+def test_pinned_rgb_image_expands_to_rgba_without_changing_its_rgb_samples(tmp_path):
+    pytest.importorskip("UnityPy")
+    from PIL import Image
+    source = Image.new("RGB", (3, 2), (17, 91, 203))
+    path = tmp_path / "rgb.png"
+    source.save(path)
+    raw = path.read_bytes()
+    entry = {"name": "rgb", "png_bytes": len(raw), "png_sha256": hashlib.sha256(raw).hexdigest(),
+             "png_color_type": 2, "png_size": [3, 2], "sprite_size": [3, 2], "padding_offset": [0, 0]}
+    canvas = images._canvas(images._png(tmp_path, entry), entry)
+    assert canvas.mode == "RGBA" and canvas.size == source.size
+    assert canvas.tobytes() == source.convert("RGBA").tobytes()

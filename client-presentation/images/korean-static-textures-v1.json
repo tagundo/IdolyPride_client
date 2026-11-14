@@ -1,0 +1,658 @@
+{
+  "schema": 1,
+  "policy": "korean-static-textures-v1",
+  "source": {
+    "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+    "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f",
+    "data_terms": "NOASSERTION"
+  },
+  "input_count": 14,
+  "GPU_format_policy": "Preserve original ASTC6x6; encode once during build with ASTC medium quality60 one thread",
+  "stream_policy": "New pixels inline in the same original Texture2D object; original shared resS member and every other stream range remain unchanged",
+  "inputs": [
+    {
+      "name": "occurred",
+      "png_bytes": 21399,
+      "png_sha256": "a0041fcec2192f1b21994ffc998d08370152e3ae3db2d14136e89d9b132ce334",
+      "png_size": [
+        512,
+        256
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 59292,
+        "object_sha256": "03844a8e568eb3abe2217f09cfb6f7754789c1100498fa508f4f7203ab882ddb",
+        "width": 512,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 59436,
+        "asset_sha256": "958ffd76c4d1452f5153907f95f9170056e6fdf6c449c28566a4f29e94246dbb",
+        "member": "assets/bin/Data/8c679440ae0854f3bb3f028ad6fea2ca"
+      },
+      "ios": {
+        "path_id": 217,
+        "relative_offset": 633912,
+        "bytes": 148,
+        "object_sha256": "9dcf18175f4a9ef00214c327e7ba6a3b38f3d257e5c9cb2c1e755f88930650fb",
+        "width": 512,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 36056848,
+          "size": 59168
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "profile_card_default",
+      "png_bytes": 113452,
+      "png_sha256": "1d27b407bf0c82bcb129529b39e82e90a997dfffbb4c0edab30800f6cd577c60",
+      "png_size": [
+        2048,
+        1024
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 935848,
+        "object_sha256": "0f26e60e63d073afd72aeb0d9c0fbcf68f9cf9f9c4406bcace8884d612c517cd",
+        "width": 2048,
+        "height": 1024,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 935992,
+        "asset_sha256": "738bb6f2a6e7c19b7e3187417710f8559ce949c959b7e3dc71326bbb71649b9e",
+        "member": "assets/bin/Data/187f531d3aa884a878b5e758848f8199"
+      },
+      "ios": {
+        "path_id": 133,
+        "relative_offset": 620744,
+        "bytes": 160,
+        "object_sha256": "953f1831b4fc389659c416fee36c0ab257a47ee4a7e91a9fa52ce38c2ebbecc9",
+        "width": 2048,
+        "height": 1024,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 26918832,
+          "size": 935712
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "random_character",
+      "png_bytes": 4792,
+      "png_sha256": "d7ed4ed63c9794ba93246c4bb3d6a942d9760103fe90c9f05099dc12d9a6ef21",
+      "png_size": [
+        124,
+        124
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 7188,
+        "object_sha256": "2dfb50d0197018e1cf349b4048e636127908573eac38137b32fd29238bc649a1",
+        "width": 124,
+        "height": 124,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 7332,
+        "asset_sha256": "8c7f4a558a1f008efb8f02406a9e612c66df4169d2815b510036538c66f72998",
+        "member": "assets/bin/Data/33a71b169b75743239cc8542344de726"
+      },
+      "ios": {
+        "path_id": 157,
+        "relative_offset": 624520,
+        "bytes": 156,
+        "object_sha256": "239d9f4abdddd4d7a003e8c5c824c996c30e753e29c8d16738420e77e5d03fd6",
+        "width": 124,
+        "height": 124,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 29205712,
+          "size": 7056
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "surprise",
+      "png_bytes": 39405,
+      "png_sha256": "14b514347f84238633de48c1c24b99f31b23568078a91e4fcd5c10541657bbfa",
+      "png_size": [
+        1024,
+        256
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 117772,
+        "object_sha256": "4effafdcce6e0492b33c6733beef3153ba7514fc7c062ca8be2db324d83f69bf",
+        "width": 1024,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 117916,
+        "asset_sha256": "8a854b654e6bdb8197e0a69ebc3df365ab438451ce4b89320cbfc7edd367b60c",
+        "member": "assets/bin/Data/32ef5d3fad34d450fa00f5a309f33ed4"
+      },
+      "ios": {
+        "path_id": 156,
+        "relative_offset": 624368,
+        "bytes": 148,
+        "object_sha256": "18f34b6df267c5ad11752f9de408fbc7abece3de984259a299b647cc9d26e853",
+        "width": 1024,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 29088064,
+          "size": 117648
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_achievement",
+      "png_bytes": 7250,
+      "png_sha256": "e88a03f919333229fbc6e859b5f574e7649be30a8fac87bda999f7ba46349752",
+      "png_size": [
+        693,
+        137
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 42824,
+        "object_sha256": "eb4c378026a1c8510acb5805cf7a1fca4bcf40f3ecf25df70eb2f0901455ebe1",
+        "width": 693,
+        "height": 137,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 42968,
+        "asset_sha256": "5b59014e5df4916d8377c284458fe38d55ae5a12d94d42a260cefd27a94902e2",
+        "member": "assets/bin/Data/80c7d676e578c401ba077e0cbccc504f"
+      },
+      "ios": {
+        "path_id": 211,
+        "relative_offset": 632968,
+        "bytes": 160,
+        "object_sha256": "d6d3cd0b8ce20e4926963a213f3a28bc0291d903ece492671b77d64aa6d3dfea",
+        "width": 693,
+        "height": 137,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 35828608,
+          "size": 42688
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_chr_all",
+      "png_bytes": 8909,
+      "png_sha256": "67b1c48c15dc0b2cf1fad7053864d0ae38ec849137d4292deff8809ebfe0cce4",
+      "png_size": [
+        977,
+        137
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 60116,
+        "object_sha256": "8bb60eef48dfcf4125abf605bb3f2773eb488d17ddb4c7e49076a930cf1de41d",
+        "width": 977,
+        "height": 137,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 60260,
+        "asset_sha256": "acfdec2d5ca8cfbc4779ed49bac8fda04d506de5459233ccc63047b7d748ef5a",
+        "member": "assets/bin/Data/9091f12d2c81d491cba1d99901ed0d62"
+      },
+      "ios": {
+        "path_id": 219,
+        "relative_offset": 634216,
+        "bytes": 156,
+        "object_sha256": "edf5db0875b1357e255561b5fb82b348b22fa63aa6a879644e6bb36e8edc218c",
+        "width": 977,
+        "height": 137,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 36583872,
+          "size": 59984
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_core_fan",
+      "png_bytes": 6771,
+      "png_sha256": "501620ece0d72bb773934ca1d326cce2d3f69b2ac22f794c35c0a7e3d1b9cbd7",
+      "png_size": [
+        1620,
+        169
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 125416,
+        "object_sha256": "67bea588a38a10f4f9efc16e852d117cf36db595e4c2451261bfe56ce09920bc",
+        "width": 1620,
+        "height": 169,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 125560,
+        "asset_sha256": "e1b7edcd6bcf4424307d5d694d740b48d6c06aa44134091a877ef1ca6ffe9703",
+        "member": "assets/bin/Data/568852dc10446426f9a82113c4e043fb"
+      },
+      "ios": {
+        "path_id": 181,
+        "relative_offset": 628288,
+        "bytes": 160,
+        "object_sha256": "6793eef000efc3ed0222feb745f75eddf16a042dd73dbd857e2d5a7729a0fb0a",
+        "width": 1620,
+        "height": 169,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 31197664,
+          "size": 125280
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_fan",
+      "png_bytes": 3365,
+      "png_sha256": "62f79ef044d5862d2531c2b23ff08d0e560b34d0a7614a9130d4449b16a8c282",
+      "png_size": [
+        1620,
+        169
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 125408,
+        "object_sha256": "0e2ea72f9a5f9a70b9a3cfeca6fd194b1c13ce7bf28fdb2bc5f52d199ebe5ff4",
+        "width": 1620,
+        "height": 169,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 125552,
+        "asset_sha256": "16771000fc5a78cda6f4f843cfcf2ce1a9e3042e4a29f487317d721801faecf0",
+        "member": "assets/bin/Data/0d8682264068f437dafe19a4ad9173b1"
+      },
+      "ios": {
+        "path_id": 124,
+        "relative_offset": 619344,
+        "bytes": 152,
+        "object_sha256": "06871d80af70d4e8353fe5db25d2426ec1025c86b0fff6535a2a505379049858",
+        "width": 1620,
+        "height": 169,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 24532960,
+          "size": 125280
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_get",
+      "png_bytes": 3403,
+      "png_sha256": "d4a3eb46dd75f92978f7d721a88f5b091f3c740d648df66135a9a4aca9f3d509",
+      "png_size": [
+        256,
+        64
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 7696,
+        "object_sha256": "0084f803ff3d8aab06ee7bf01987e40c379ccd609057a6a3ef152b1d677eaf28",
+        "width": 256,
+        "height": 64,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 7840,
+        "asset_sha256": "f05d16cd665020e75d223b69c35258329ae813886e1182d2d2445a0d33fb6376",
+        "member": "assets/bin/Data/dfa184184b49f4159bae5f4e735aadd0"
+      },
+      "ios": {
+        "path_id": 281,
+        "relative_offset": 643976,
+        "bytes": 152,
+        "object_sha256": "a9c73f810c52c092e8958bc20cbbd134507604b029dfd5af9a9b9bed094232a9",
+        "width": 256,
+        "height": 64,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 43860224,
+          "size": 7568
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_highscore",
+      "png_bytes": 12613,
+      "png_sha256": "307ec790cd50c8086697f0aa24e0fc1831ff54215f896ab94563afdc26820590",
+      "png_size": [
+        790,
+        128
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 38152,
+        "object_sha256": "950ff4064feb7eec0bc90b915dce0f4edaa2fea0bbf15070d5acec4170dcb69a",
+        "width": 647,
+        "height": 128,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 38296,
+        "asset_sha256": "19b2c73e160dc0e310c772b14ab71d326bd1556311e9dad8a9636ec969ac7cf8",
+        "member": "assets/bin/Data/adadb10ebfe764c2f89d98c9a5d7c922"
+      },
+      "ios": {
+        "path_id": 235,
+        "relative_offset": 636744,
+        "bytes": 160,
+        "object_sha256": "5925be83ce1c04969a91b0b2c77446c62e8fb60a5f8cd870cfe6ad7ff746eec1",
+        "width": 647,
+        "height": 128,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 38792416,
+          "size": 38016
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_live",
+      "png_bytes": 7475,
+      "png_sha256": "5ecff78ebde6376d7fe31d1027d077b3611015e26b490e73a57dbc21325e1953",
+      "png_size": [
+        512,
+        256
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 59300,
+        "object_sha256": "710631b27d3fdca3e6ce5de7e544e07bdb0626400b33fe8124cf58138366bd49",
+        "width": 512,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 59444,
+        "asset_sha256": "f0b6c2d242682c7133bef9896f329626f601ad31fa6ffce32828f7b16471948b",
+        "member": "assets/bin/Data/565bd64e8ed78433c8b767dea17b6179"
+      },
+      "ios": {
+        "path_id": 180,
+        "relative_offset": 628128,
+        "bytes": 156,
+        "object_sha256": "b0d4925649b4478b2f7fa42c92d527cfb39b21290d7ce116f18f980b1e10de01",
+        "width": 512,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 31138496,
+          "size": 59168
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_open",
+      "png_bytes": 5128,
+      "png_sha256": "5ef76cb41635a72b4f9b13456dba76cf9f88d5f1dc302907bb1dd13668188afd",
+      "png_size": [
+        256,
+        64
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 7700,
+        "object_sha256": "0c16c78ec3ddf6a5bd7d1a6d80becf224d5bc9064dd52ac698807cf79097b929",
+        "width": 256,
+        "height": 64,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 7844,
+        "asset_sha256": "536aa0435237e7f265cc4aa48029fd18f99285712f484f2d4c260c2cd27371c6",
+        "member": "assets/bin/Data/5f3f3cb8099b4447081025fc4c9f8f7e"
+      },
+      "ios": {
+        "path_id": 187,
+        "relative_offset": 629224,
+        "bytes": 156,
+        "object_sha256": "60170f5249a3fbbd68fa8cd2a632b608a44c13eaf63fa6eab8464904c1617ce5",
+        "width": 256,
+        "height": 64,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 33650832,
+          "size": 7568
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_success",
+      "png_bytes": 15812,
+      "png_sha256": "e313b18ce5cc1f42cf58454627fb9697ec12748168ab5a8aba183aa3b905fd1a",
+      "png_size": [
+        1024,
+        256
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 117780,
+        "object_sha256": "a523d1b3f264b2e340e447afa86bf2a6eb67c3c47b769be6f73e26d06c4b6a14",
+        "width": 1024,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 117924,
+        "asset_sha256": "5fbb1994cbd1b42e21bc22cd7d9ce145a6b761bb6bfc8d5d5c87181b4bbe09af",
+        "member": "assets/bin/Data/a256fed8141f74ed4aca85091876d60e"
+      },
+      "ios": {
+        "path_id": 229,
+        "relative_offset": 635808,
+        "bytes": 156,
+        "object_sha256": "0df8502ad96350c743e3bdaa16d1faaca3e11ab9e7fcd879b99650a54cb315b6",
+        "width": 1024,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 37691424,
+          "size": 117648
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    },
+    {
+      "name": "tex_text_update",
+      "png_bytes": 9948,
+      "png_sha256": "e97011dd0c1e479a0e2da38dee11986acec036e6d99f841cb639eecc6cdc9c4d",
+      "png_size": [
+        512,
+        256
+      ],
+      "png_color_type": 6,
+      "android": {
+        "path_id": 1,
+        "relative_offset": 0,
+        "bytes": 59300,
+        "object_sha256": "93ea50fcc6734d5ce04be5691cd3bbd7baa025a12f1dc1ade4028f62693222de",
+        "width": 512,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "",
+          "offset": 0,
+          "size": 0
+        },
+        "asset_data_offset": 144,
+        "asset_bytes": 59444,
+        "asset_sha256": "2bfa123a8ae76af0a37f4a5d3474d2980a2a3e33e6619f41ac512a2308b1508c",
+        "member": "assets/bin/Data/c4addd9546bcf44d7b3ca108a3889333"
+      },
+      "ios": {
+        "path_id": 254,
+        "relative_offset": 639696,
+        "bytes": 156,
+        "object_sha256": "d42045566bcf1eee3faca17acbfca1ddf05a8d169cb5c1e2b283fdd36ca830aa",
+        "width": 512,
+        "height": 256,
+        "format": 50,
+        "mips": 1,
+        "stream_data": {
+          "path": "resources.assets.resS",
+          "offset": 42364256,
+          "size": 59168
+        },
+        "asset_data_offset": 10240528,
+        "member": "Payload/IDOLY PRIDE.app/Data/resources.assets"
+      }
+    }
+  ]
+}

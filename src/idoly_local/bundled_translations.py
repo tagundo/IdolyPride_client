@@ -299,7 +299,7 @@ def validate_translation_bundle(source, *, expected_sha256, expected_bytes, plat
     with _bundle(source, expected_sha256, expected_bytes, platform) as (archive, index, raw):
         for name, record in index["files"].items():
             _verify_file(archive.open("translations/" + name), record)
-        coverage, sources = {}, {}
+        coverage, sources, image_coverage, image_sources = {}, {}, {}, {}
         for name, record in index["files"].items():
             if len(PurePosixPath(name).parts) != 3 or not name.endswith("/manifest.json"):
                 continue
@@ -313,7 +313,7 @@ def validate_translation_bundle(source, *, expected_sha256, expected_bytes, plat
             language = PurePosixPath(name).parts[0]
             counts = report.get("coverage") if isinstance(report, dict) else None
             source_info = report.get("source") if isinstance(report, dict) else None
-            if (not isinstance(report, dict) or type(report.get("schema")) is not int or report["schema"] != 1
+            if (not isinstance(report, dict) or type(report.get("schema")) is not int or report["schema"] not in (1, 2)
                     or report.get("language") != language
                     or not isinstance(counts, dict)
                     or not {"adv_resources", "translated", "missing", "unchanged_original"}.issubset(counts)
@@ -324,10 +324,24 @@ def validate_translation_bundle(source, *, expected_sha256, expected_bytes, plat
                     or not re.fullmatch(r"[0-9a-f]{40}", source_info["revision"])):
                 raise ValueError("Prepared resource coverage/source identity differs")
             coverage[language], sources[language] = counts, source_info
+            if report["schema"] == 2:
+                images, image_source = report.get("image_coverage"), report.get("image_source")
+                changes = report.get("changed_images")
+                if (not isinstance(images, dict)
+                        or set(images) != {"candidates", "translated", "missing", "unchanged_original"}
+                        or any(type(count) is not int or count < 0 for count in images.values())
+                        or images["candidates"] != images["translated"] + images["missing"] + images["unchanged_original"]
+                        or not isinstance(changes, list) or len(changes) != images["translated"]
+                        or not isinstance(image_source, dict) or not isinstance(image_source.get("repository"), str)
+                        or not image_source["repository"] or not isinstance(image_source.get("revision"), str)
+                        or not re.fullmatch(r"[0-9a-f]{40}", image_source["revision"])):
+                    raise ValueError("Prepared image coverage/source identity differs")
+                image_coverage[language], image_sources[language] = images, image_source
         return {"schema": 1, "platform": platform, "version": index["version"],
                 "sha256": expected_sha256, "bytes": expected_bytes,
                 "manifest_sha256": hashlib.sha256(raw).hexdigest(), "files": len(index["files"]),
-                "coverage": coverage, "sources": sources}
+                "coverage": coverage, "sources": sources,
+                "image_coverage": image_coverage, "image_sources": image_sources}
 
 
 def _write_json(path, value):

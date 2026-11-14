@@ -217,19 +217,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
         replayNotice.setPadding(0, dp(6), 0, dp(8));
         body.addView(replayNotice);
-        Button launch = button(R.string.launch_client);
+        Button launch = button(R.string.launch_diagnostic_client);
         body.addView(launch, new LinearLayout.LayoutParams(-1, -2));
-        LinearLayout diagnosticControls = new LinearLayout(this);
-        diagnosticControls.setOrientation(LinearLayout.HORIZONTAL);
-        Button diagnosticLaunch = button(R.string.launch_diagnostic_client);
         export = button(R.string.export_diagnostics);
-        LinearLayout.LayoutParams diagnosticHalf = new LinearLayout.LayoutParams(0, -2, 1);
-        diagnosticHalf.setMargins(0, 0, dp(4), 0);
-        diagnosticControls.addView(diagnosticLaunch, diagnosticHalf);
-        LinearLayout.LayoutParams exportHalf = new LinearLayout.LayoutParams(0, -2, 1);
-        exportHalf.setMargins(dp(4), 0, 0, 0);
-        diagnosticControls.addView(export, exportHalf);
-        body.addView(diagnosticControls);
+        body.addView(export, new LinearLayout.LayoutParams(-1, -2));
         body.addView(text(R.string.game_state_title, 15, Color.WHITE));
         gameStatus = text(R.string.game_state_waiting, 13, Color.rgb(192, 212, 222));
         gameStatus.setTextIsSelectable(true);
@@ -288,9 +279,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
         start.setOnClickListener(view -> requestServerStart());
         stop.setOnClickListener(view -> startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP)));
-        launch.setOnClickListener(view -> launchClient(R.string.client_missing,
-                "game.qualiarts.idolypride.local.resources", "game.qualiarts.idolypride.local"));
-        diagnosticLaunch.setOnClickListener(view -> launchClient(R.string.diagnostic_client_missing,
+        launch.setOnClickListener(view -> launchClient(R.string.diagnostic_client_missing,
                 "game.qualiarts.idolypride.local.diagnostics"));
         export.setOnClickListener(view -> {
             Intent destination = new Intent(Intent.ACTION_CREATE_DOCUMENT)
@@ -767,7 +756,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         settings.addView(clientNotice);
         Button launchPresentation = button(R.string.presentation_launch_button);
         launchPresentation.setOnClickListener(view -> launchClient(R.string.presentation_launch_missing,
-                "game.qualiarts.idolypride.local.diagnostics", "game.qualiarts.idolypride.local.resources"));
+                "game.qualiarts.idolypride.local.diagnostics"));
         settings.addView(launchPresentation, new LinearLayout.LayoutParams(-1, -2));
         customGraphics = new CheckBox(this);
         customGraphics.setText(R.string.presentation_custom_graphics);

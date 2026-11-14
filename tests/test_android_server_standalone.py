@@ -67,3 +67,18 @@ def test_graphics_and_playback_controls_remain_without_any_apk_installation_path
     assert not any(name.startswith("presentation_install_") for name in strings)
     # All current Java string references must resolve after deleting old install UI.
     assert set(re.findall(r"R\.string\.([A-Za-z0-9_]+)", java_sources)) <= strings
+
+
+def test_current_client_is_the_only_launcher_target_and_keeps_diagnostics_export():
+    activity = (JAVA / "MainActivity.java").read_text()
+    resources = ET.parse(MAIN / "res/values/strings.xml").getroot()
+    labels = {node.get("name"): node.text for node in resources.findall("string")}
+    routes = re.findall(r"launchClient\(R\.string\.[A-Za-z0-9_]+,([^)]*)\)", activity)
+    assert len(routes) == 2  # Main action and the graphics settings shortcut.
+    assert all(re.findall(r'"([^"]+)"', route) == [
+        "game.qualiarts.idolypride.local.diagnostics"] for route in routes)
+    assert activity.count("button(R.string.launch_diagnostic_client)") == 1
+    assert "button(R.string.launch_client)" not in activity
+    assert labels["launch_diagnostic_client"] == labels["presentation_launch_button"] == "아이프라 실행"
+    assert "export = button(R.string.export_diagnostics)" in activity
+    assert '"IdolyPride-diagnostics.json"' in activity

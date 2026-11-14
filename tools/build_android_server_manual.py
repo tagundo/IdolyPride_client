@@ -35,7 +35,7 @@ else:
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
-VERSION, VERSION_CODE = "0.3.29", 47
+VERSION, VERSION_CODE = "0.3.31", 48
 CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 CHAQUOPY_SHA256 = "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b"
 PUBLIC_INPUT_HASHES = {
@@ -89,7 +89,7 @@ SERVER_PERMISSIONS = frozenset("android.permission." + name for name in
 FORBIDDEN_INSTALLER_DEX_TOKENS = (b"PresentationAddonInstaller", b"PresentationInstallActivity",
     b"PresentationStorage", b"Landroid/content/pm/PackageInstaller", b"REQUEST_INSTALL_PACKAGES")
 PAYLOAD_MANIFEST = "data/payload-manifest.json"
-PAYLOAD_INVENTORY = "tools/server_payload_v0325.json"
+PAYLOAD_INVENTORY = "tools/server_payload_v0331.json"
 SERVER_JSON_ADDITIONS = [{"path": "data/master-json/HomeTalk.json", "bytes": 1068215,
                           "sha256": ADDED_JSON_SHA256["HomeTalk"], "rows": 559}]
 
@@ -113,8 +113,8 @@ MAX_APK = 100 * MIB
 MAX_APK_STAGING = 200 * MIB
 MAX_PAYLOAD = 256 * MIB
 MAX_PAYLOAD_MEMBERS = 1024
-MAX_SERVER_APK = 320 * MIB
-MAX_SERVER_EXPANDED = 320 * MIB
+MAX_SERVER_APK = 384 * MIB
+MAX_SERVER_EXPANDED = 384 * MIB
 MAX_TRANSLATIONS = translation_package.MAX_BUNDLE
 MAX_DEX, MAX_JSON, META_LIMIT = MIB, 16 * MIB, 256 * 1024
 MIN_HEADROOM, MIN_ROOT_FREE = 1024 * MIB, 150 * MIB
@@ -689,7 +689,7 @@ def load_payload_inventory(path=None):
     if not _server_json_additions_match(value["server_json_additions"]):
         raise ValueError("Versioned HomeTalk JSON inventory differs")
     additions, ios = value["additions"], value["ios_public_files"]
-    if not isinstance(additions, list) or len(additions) != 260 or not isinstance(ios, list) or len(ios) != 2:
+    if not isinstance(additions, list) or len(additions) != 262 or not isinstance(ios, list) or len(ios) != 2:
         raise ValueError("Versioned public catalog inventory count differs")
     metadata = {"data/original-master/" + name for name in ("master-sort.json", "media-master-sort.json")}
     metadata.update("data/original-master/languages/" + locale + "/" + name
@@ -1072,9 +1072,9 @@ def build(args):
         run([sdk / "zipalign", "-f", "4", unsigned, aligned])
         if not 0 < aligned.stat().st_size <= maximum:
             raise ValueError("Aligned server APK exceeded its calculated capacity")
+        unsigned.unlink()
         cache.completed_apk("aligned.apk")
         run([sdk / "zipalign", "-c", "4", aligned])
-        unsigned.unlink()
         cache.advise()
         _allocation_guard(root, output.parent, maximum + MIB)
         env["IDOLY_MANUAL_SERVER_PASSWORD"] = read_password(password_file)
@@ -1088,6 +1088,7 @@ def build(args):
             env.pop("IDOLY_MANUAL_SERVER_PASSWORD", None)
         if not 0 < signed.stat().st_size <= maximum:
             raise ValueError("Signed server APK exceeded its calculated capacity")
+        aligned.unlink()
         cache.completed_apk("signed.apk")
         signature = run([*signer, "verify", "--verbose", "--print-certs", signed]).decode("utf-8")
         if ("Signer #1 certificate SHA-256 digest: " + CERTIFICATE not in signature
@@ -1110,7 +1111,6 @@ def build(args):
         postflight = _resource_guard(root)
         if postflight["oom_kill"] != preflight["oom_kill"]:
             raise ValueError("An OOM occurred during the build; candidate not published")
-        aligned.unlink()
         report = {"schema": 1, "build_method": "cached manual aapt2/javac/D8; no Gradle, Go or downloads",
                   "source_commit": args.source_commit, "epoch": args.epoch, "version_name": VERSION,
                   "version_code": VERSION_CODE, "baseline_sha256": pybundle.BASELINE_SHA256,

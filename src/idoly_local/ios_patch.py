@@ -271,6 +271,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
                        ui_language: str = "ja",
                        ui_csv_file: Path | None = None,
                        ui_proof_file: Path | None = None,
+                       image_dir: Path | None = None,
                        bundle_id: str = DEFAULT_BUNDLE_ID,
                        bootstrap: bool = True,
                        profile: IOSProfile = PROFILE_6_1_1) -> dict:
@@ -357,7 +358,15 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         from .static_ui_images import ios_patches as static_image_patches
         image_replacements, image_appends, image_report = static_image_patches(archive,
             language=ui_language,
-            image_dir=Path(__file__).resolve().parents[2] / "client-presentation/images/ko")
+            image_dir=image_dir or Path(__file__).resolve().parents[2] / "client-presentation/images/ko")
+        from .static_ui_textures import ios_patches as static_texture_patches
+        texture_replacements, texture_report = static_texture_patches(archive,
+            language=ui_language,
+            image_dir=image_dir or Path(__file__).resolve().parents[2] / "client-presentation/images/ko")
+        if image_replacements.keys() & texture_replacements.keys():
+            raise ValueError("Sprite and direct texture replacements overlap")
+        image_replacements.update(texture_replacements)
+        image_report["direct_textures"] = texture_report
         gc.collect()
         font_name = app + "Data/sharedassets0.assets"
         ui_name = app + "Data/resources.assets"
@@ -426,7 +435,7 @@ def package_ios_client(source: Path, output: Path, endpoint: str = DEFAULT_ENDPO
         info["CFBundleIdentifier"] = bundle_id
         info["CFBundleDisplayName"] = "아이프라 로컬"
         info["CFBundleName"] = "IdolyPrideLocal"
-        info["CFBundleVersion"] = profile.game_build + (".9006" if font_file is not None else ".9004")
+        info["CFBundleVersion"] = profile.game_build + (".9007" if font_file is not None else ".9004")
         # The local login does not use the original federated-login callbacks.
         # Register one isolated scheme so both apps can coexist without stealing
         # the original game's deep links or Google/Twitter callback URLs.

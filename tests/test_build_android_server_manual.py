@@ -63,8 +63,8 @@ def manifest(raw=b""):
 
 def test_generated_manifest_preserves_source_policy_and_required_merged_flags():
     root = ET.fromstring(tool.manifest_xml(manifest()))
-    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "47",
-                           tool.ANDROID + "versionName": "0.3.29"}
+    assert root.attrib == {"package": tool.PACKAGE, tool.ANDROID + "versionCode": "48",
+                           tool.ANDROID + "versionName": "0.3.31"}
     assert root.find("uses-sdk").attrib == {tool.ANDROID + "minSdkVersion": "26",
                                            tool.ANDROID + "targetSdkVersion": "34"}
     app = root.find("application")
@@ -120,7 +120,7 @@ def test_release_component_export_policy_is_fixed(name, old, new):
 
 def test_build_config_binds_new_version_and_exact_payload_hash():
     raw = tool.build_config("a" * 64).decode()
-    assert 'VERSION_CODE = 47;' in raw and 'VERSION_NAME = "0.3.29";' in raw
+    assert 'VERSION_CODE = 48;' in raw and 'VERSION_NAME = "0.3.31";' in raw
     assert 'DEBUG = Boolean.parseBoolean("false");' in raw and 'BUILD_TYPE = "release";' in raw
     assert 'SERVER_DATA_SHA256 = "' + "a" * 64 + '";' in raw
     with pytest.raises(ValueError):
@@ -129,7 +129,7 @@ def test_build_config_binds_new_version_and_exact_payload_hash():
 
 def test_frozen_source_ignores_worktree_and_requires_exact_inventory(tmp_path, monkeypatch):
     expected = {name: b"committed public source" for name in tool.SOURCE_FILES}
-    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("47")\ngradleProperty("serverVersionName").orElse("0.3.29")'
+    expected[tool.GRADLE] = b'gradleProperty("serverVersionCode").orElse("48")\ngradleProperty("serverVersionName").orElse("0.3.31")'
     names = sorted(expected)
     listing = b"\0".join(b"100644 blob " + f"{index + 1:040x}".encode() + b"\t" + name.encode()
                            for index, name in enumerate(names)) + b"\0"
@@ -163,10 +163,10 @@ def test_executing_builder_and_compiler_helper_must_match_the_same_frozen_commit
 
 def test_versioned_catalog_inventory_keeps_exact_source_and_platform_boundaries():
     value = tool.load_payload_inventory()
-    assert len(value["additions"]) == 260 and len(value["ios_public_files"]) == 2
+    assert len(value["additions"]) == 262 and len(value["ios_public_files"]) == 2
     assert value["base_payload"] == tool.BASE_PUBLIC_PAYLOAD
     assert value["prebuilt_catalogs"]["device_verified"] is False
-    assert len({row["path"] for row in value["additions"] + value["ios_public_files"]}) == 262
+    assert len({row["path"] for row in value["additions"] + value["ios_public_files"]}) == 264
 
 
 @pytest.mark.parametrize("change", ["base", "duplicate", "private", "size", "digest", "ios", "extra", "device"])
@@ -245,10 +245,10 @@ def public_payload(files):
 @pytest.fixture
 def payload_case(tmp_path, monkeypatch):
     from test_media_master_build import original_tag, original_rows, media_tag
-    old = {f"data/master-json/Table{index:02}.json": b'[{"id":"public"}]' for index in range(37)}
+    old = {f"data/master-json/Table{index:02}.json": b'[{"id":"public"}]' for index in range(36)}
     rows = original_rows()
     old.update({"data/master-json/" + table + ".json": json.dumps(rows[table]).encode()
-                for table in ("Costume", "Hair", "EventStory")})
+                for table in ("Costume", "Hair", "EventStory", "Setting")})
     old["data/protocol/idolypride-6.1.1.pb"] = b"synthetic public descriptor"
     old["data/master-json/!version.txt"] = b"synthetic-public"
     tag = original_tag()
@@ -487,7 +487,7 @@ def test_gradle_python_exclusions_match_the_manual_server_dependency_boundary():
     gradle = (Path(tool.__file__).resolve().parents[1] / tool.GRADLE).read_text()
     excluded_paths = re.findall(r'"(idoly_local/[^"\n]+\.py)"', gradle)
     expected = {name.replace(".", "/") + ".py" for name in tool.pybundle.ANDROID_EXCLUDED_MODULES}
-    assert len(excluded_paths) == len(expected) == 32
+    assert len(excluded_paths) == len(expected) == 39
     assert set(excluded_paths) == expected
 
 
@@ -519,7 +519,7 @@ def test_unapproved_embedded_apk_or_presentation_asset_in_baseline_is_rejected(t
 
 
 def linked_identity():
-    badging = (f"package: name='{tool.PACKAGE}' versionCode='47' versionName='0.3.29'\n"
+    badging = (f"package: name='{tool.PACKAGE}' versionCode='48' versionName='0.3.31'\n"
                "sdkVersion:'26'\ntargetSdkVersion:'34'\nnative-code: 'arm64-v8a'\n"
                + "".join("uses-permission: name='" + name + "'\n" for name in sorted(tool.SERVER_PERMISSIONS)))
     manifest_dump = ("A: android:extractNativeLibs(0x1)=true\nA: android:debuggable(0x2)=false\n"
@@ -531,7 +531,7 @@ def test_linked_identity_requires_release_and_no_install_permission_or_callback(
     badging, manifest_dump = linked_identity()
     tool._identity(badging, manifest_dump)
     with pytest.raises(ValueError, match="identity"):
-        tool._identity(badging.replace("versionCode='47' versionName='0.3.29'",
+        tool._identity(badging.replace("versionCode='48' versionName='0.3.31'",
                                       "versionCode='43' versionName='0.3.24'"), manifest_dump)
     with pytest.raises(ValueError, match="identity"):
         tool._identity(badging, manifest_dump.replace("debuggable(0x2)=false", "debuggable(0x2)=true"))

@@ -31,11 +31,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from certificate_bundle import install_certificate_bundle
 from payload import translation_bundle_input
 APP = "IdolyPrideLocalServer"
-VERSION = "0.3.29"
-BUILD_NUMBER = "47"
+VERSION = "0.3.31"
+BUILD_NUMBER = "48"
 RUNTIME_SHA = "b661664a8ca99403ee717f4df08056079df9d9bcd1a6b90f82c9a9f7f8a1e25d"
-PAYLOAD_SHA = "c94cd2ee7e722e6df67f02f31868422ff5d3bf1657c64a05a61b5059572475d8"
-PAYLOAD_BYTES = 191305222
+PAYLOAD_SHA = "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"
+PAYLOAD_BYTES = 191343014
 SIGNER_SHA = "dab9a7465f96aba3c81e793775510f745b91a46b6418e89f7317b5d8fc7bcea2"
 CGROUP = Path("/sys/fs/cgroup")
 
