@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from http.client import HTTPConnection, HTTPException
 import json
 import math
 import os
@@ -23,7 +24,7 @@ import sys
 import tempfile
 import time
 import uuid
-from zipfile import ZipFile
+from zipfile import BadZipFile, ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
@@ -38,6 +39,9 @@ MAX_RESPONSE = 4 * 1024 * 1024
 MAX_COMMAND_OUTPUT = 2 * 1024 * 1024
 MAX_TOOL_DETAIL = 8 * 1024
 RPC_PATHS = ("/api.System/Check", "/api.Auth/Login", "/api.Home/Enter")
+MASTER_RPC_PATH = "/api.Master/Get"
+MASTER_ORIGIN = "http://127.0.0.1:8080"
+MAX_MASTER_FILE = 64 * 1024 * 1024
 # A well-formed unknown protobuf varint makes empty requests exercise AES too.
 PUBLIC_PROBE_FIELD = b"\xc0\xa3\x09\x01"  # field 19000, wire type 0, value 1
 LAUNCHER_FAILURE_CODES = frozenset((
@@ -261,7 +265,7 @@ def load_schema(app):
         target = Path(directory) / "public.pb"
         target.write_bytes(raw)
         schema = Schema.from_descriptor_set(target)
-    for path in RPC_PATHS:
+    for path in (*RPC_PATHS, MASTER_RPC_PATH):
         schema.method(path)
     return schema, hashlib.sha256(raw).hexdigest()
 
@@ -852,7 +856,7 @@ def unary_h2(path, request, *, token=None, port=50051, timeout=15):
     from h2.events import (ConnectionTerminated, DataReceived, ResponseReceived,
                            StreamEnded, StreamReset, TrailersReceived)
     from idoly_local import codec
-    require(path in RPC_PATHS and type(port) is int and 0 < port <= 65535,
+    require(path in (*RPC_PATHS, MASTER_RPC_PATH) and type(port) is int and 0 < port <= 65535,
             "invalid_probe_rpc")
     require(type(request) is bytes and len(request) <= MAX_JSON, "rpc_request_bound")
     encrypted = codec.encode(request + PUBLIC_PROBE_FIELD)
@@ -937,6 +941,118 @@ def probe_rpcs(schema, *, port=50051, timeout=15):
     return rows
 
 
+def validate_master_file_report(value):
+    """Validate and project only the bounded public master-file transfer proof."""
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1,
+            "master_file_schema_differs")
+    for key, path in (("auth_rpc", RPC_PATHS[1]), ("master_rpc", MASTER_RPC_PATH)):
+        row = value.get(key)
+        require(type(row) is dict and row.get("path") == path
+                and type(row.get("grpc_status")) is int and row["grpc_status"] == 0
+                and row.get("request_encrypted") is True and row.get("response_encrypted") is True,
+                "master_file_rpc_failed")
+    size, count = value.get("file_bytes"), value.get("sample_bytes")
+    require(value.get("transport") == "http.client" and value.get("origin") == MASTER_ORIGIN
+            and value.get("expected_source") == "bundled-master-prefix"
+            and type(size) is int and 0 < size <= MAX_MASTER_FILE
+            and type(count) is int and count == min(64, size)
+            and type(value.get("path_sha256")) is str and re.fullmatch(r"[0-9a-f]{64}", value["path_sha256"]),
+            "master_file_metadata_failed")
+    require(type(value.get("head_status")) is int and value["head_status"] == 200
+            and type(value.get("head_content_length")) is int and value["head_content_length"] == size,
+            "master_file_head_failed")
+    require(type(value.get("range_status")) is int and value["range_status"] == 206
+            and type(value.get("range_content_length")) is int and value["range_content_length"] == count
+            and value.get("content_range") == f"bytes 0-{count - 1}/{size}",
+            "master_file_range_failed")
+    require(all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}", value[key])
+                for key in ("expected_sample_sha256", "received_sample_sha256"))
+            and value["expected_sample_sha256"] == value["received_sample_sha256"]
+            and value.get("sample_matches_bundle") is True, "master_file_sample_differs")
+    result = {key:value[key] for key in ("schema", "transport", "origin", "expected_source", "path_sha256",
+        "file_bytes", "sample_bytes", "head_status", "head_content_length", "range_status",
+        "range_content_length", "content_range", "expected_sample_sha256", "received_sample_sha256",
+        "sample_matches_bundle")}
+    for key in ("auth_rpc", "master_rpc"):
+        result[key] = {field:value[key][field] for field in
+                       ("path", "grpc_status", "request_encrypted", "response_encrypted")}
+    return result
+
+
+def _master_http(method, path, count, timeout):
+    # The published URL is validated separately. Never pass it to a redirecting
+    # opener, environment proxy, or arbitrary network authority.
+    connection = HTTPConnection("127.0.0.1", 8080, timeout=timeout)
+    try:
+        headers = {"Connection":"close"}
+        if method == "GET": headers["Range"] = f"bytes=0-{count - 1}"
+        connection.request(method, path, headers=headers)
+        response = connection.getresponse()
+        require(response.getheader("Content-Type") == "application/octet-stream",
+                "master_file_head_failed" if method == "HEAD" else "master_file_range_failed")
+        length = response.getheader("Content-Length")
+        require(type(length) is str and bool(re.fullmatch(r"[0-9]{1,10}", length)),
+                "master_file_head_failed" if method == "HEAD" else "master_file_range_failed")
+        body = response.read(1 if method == "HEAD" else count + 1)
+        return response.status, int(length), response.getheader("Content-Range"), body
+    except (OSError, HTTPException):
+        raise ProbeError("master_head_transport_failed" if method == "HEAD" else "master_range_transport_failed") from None
+    finally:
+        connection.close()
+
+
+def probe_master_file(schema, app, *, port=50051, timeout=15):
+    """Authenticate, obtain one published master, and read its real file route."""
+    require(type(timeout) in (int, float) and 0 < timeout <= 15, "invalid_master_probe_timeout")
+    deadline = time.monotonic() + timeout
+    def remaining():
+        left = deadline - time.monotonic()
+        require(left > 0, "master_probe_deadline_exceeded")
+        return left
+    request = schema.request_type(RPC_PATHS[1])().SerializeToString()
+    plain, auth = unary_h2(RPC_PATHS[1], request, port=port, timeout=remaining())
+    login = schema.response_type(RPC_PATHS[1]).FromString(plain)
+    require(bool(login.gameAuthToken) and bool(login.userPublic.serverUserId)
+            and bool(login.userPublic.publicUserId), "fresh_local_login_failed")
+    request = schema.request_type(MASTER_RPC_PATH)().SerializeToString()
+    plain, master = unary_h2(MASTER_RPC_PATH, request, token=login.gameAuthToken, port=port, timeout=remaining())
+    catalog = schema.response_type(MASTER_RPC_PATH).FromString(plain)
+    packs = catalog.masterTag.masterTagPacks
+    require(0 < len(packs) <= 4096, "master_catalog_invalid")
+    pack = packs[0]
+    name, size = pack.fileName, pack.fileSize
+    require(type(name) is str and bool(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,255}", name))
+            and type(size) is int and 0 < size <= MAX_MASTER_FILE, "master_catalog_invalid")
+    path = "/master/" + name
+    require(pack.downloadUrl == MASTER_ORIGIN + path, "master_file_url_invalid")
+    archive_path = Path(app) / "LocalServer" / "ServerData.zip"
+    require(archive_path.is_file() and not archive_path.is_symlink(), "master_bundle_file_invalid")
+    try:
+        with ZipFile(archive_path) as archive:
+            entries = [item for item in archive.infolist()
+                       if item.filename == "data/original-master/assets/master/" + name]
+            require(len(entries) == 1 and not entries[0].is_dir() and entries[0].file_size == size
+                    and not stat.S_ISLNK(entries[0].external_attr >> 16), "master_bundle_file_invalid")
+            with archive.open(entries[0]) as incoming:
+                expected = incoming.read(min(64, size))
+        require(len(expected) == min(64, size), "master_bundle_file_invalid")
+    except (OSError, BadZipFile, RuntimeError):
+        raise ProbeError("master_bundle_read_failed") from None
+    head_status, head_length, _unused, head_body = _master_http("HEAD", path, len(expected), remaining())
+    require(head_status == 200 and head_length == size and head_body == b"", "master_file_head_failed")
+    status, length, content_range, received = _master_http("GET", path, len(expected), remaining())
+    require(status == 206 and length == len(expected) and content_range == f"bytes 0-{len(expected)-1}/{size}"
+            and len(received) == len(expected), "master_file_range_failed")
+    require(received == expected, "master_file_sample_differs")
+    return validate_master_file_report({"schema":1,"transport":"http.client","origin":MASTER_ORIGIN,
+        "expected_source":"bundled-master-prefix","path_sha256":hashlib.sha256(path.encode("ascii")).hexdigest(),
+        "file_bytes":size,"sample_bytes":len(expected),"head_status":head_status,"head_content_length":head_length,
+        "range_status":status,"range_content_length":length,"content_range":content_range,
+        "expected_sample_sha256":hashlib.sha256(expected).hexdigest(),
+        "received_sample_sha256":hashlib.sha256(received).hexdigest(),"sample_matches_bundle":True,
+        "auth_rpc":auth,"master_rpc":master})
+
+
 def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
     audit = Path(audit)
     require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
@@ -1015,6 +1131,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
         report["host_asset_loopback_connected"] = True
         stage = "encrypted_rpc"
         report["rpcs"] = probe_rpcs(schema, timeout=min(15, remaining()))
+        stage = "master_file"
+        report["master_file"] = probe_master_file(schema, app, timeout=min(15, remaining()))
         report["status"] = "PASS"
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage,

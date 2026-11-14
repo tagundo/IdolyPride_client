@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import threading
 import time
+from types import MappingProxyType
 from urllib.parse import quote, unquote, urlsplit
 
 from google.protobuf.json_format import ParseDict, ParseError
@@ -23,6 +24,11 @@ _RUNTIME_DIAGNOSTICS_PATH = "/diagnostics/runtime"
 _MAX_RUNTIME_DIAGNOSTICS_BYTES = 1024 * 1024
 _HTTP_METHODS = frozenset(("GET", "HEAD", "POST"))
 _MAX_HTTP_COUNTER = 2**53 - 1
+# guess_type() lazily reads host MIME databases, which an iOS app running
+# through PlayCover may stat but cannot open. Keep a private, immutable table;
+# serving an archived file must never initialize or mutate that global database.
+_STATIC_MIME_TYPES = MappingProxyType({**mimetypes.types_map,
+    ".db": "application/octet-stream", ".pack": "application/octet-stream"})
 
 
 def _public_http_path(target):
@@ -429,8 +435,8 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                     status = 206
                 length = max(0, end - start + 1)
                 self.send_response(status)
-                self.send_header("Content-Type", mimetypes.guess_type(source.name)[0]
-                                 or "application/octet-stream")
+                self.send_header("Content-Type", _STATIC_MIME_TYPES.get(
+                    source.suffix.lower(), "application/octet-stream"))
                 self.send_header("Content-Length", str(length))
                 self.send_header("Accept-Ranges", "bytes")
                 self.send_header("Last-Modified", self.date_time_string(info.st_mtime))

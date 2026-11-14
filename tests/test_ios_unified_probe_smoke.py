@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import plistlib
@@ -24,6 +25,22 @@ spec.loader.exec_module(probe)
 CREATED = "00000000-0000-4000-8000-000000000123"
 DEVICE = "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-18-5"
+MASTER_BYTES = bytes(range(128))
+MASTER_MEMBER = "data/original-master/assets/master/fixture.db"
+
+
+def master_file_report():
+    digest = hashlib.sha256(MASTER_BYTES[:64]).hexdigest()
+    return {"schema":1,"transport":"http.client","origin":"http://127.0.0.1:8080",
+            "expected_source":"bundled-master-prefix","path_sha256":hashlib.sha256(b"/master/fixture.db").hexdigest(),
+            "file_bytes":128,"head_status":200,"head_content_length":128,
+            "range_status":206,"range_content_length":64,"sample_bytes":64,
+            "content_range":"bytes 0-63/128","expected_sample_sha256":digest,
+            "received_sample_sha256":digest,"sample_matches_bundle":True,
+            "auth_rpc":{"path":"/api.Auth/Login","grpc_status":0,
+                "request_encrypted":True,"response_encrypted":True},
+            "master_rpc":{"path":"/api.Master/Get","grpc_status":0,
+                "request_encrypted":True,"response_encrypted":True}}
 
 
 def native_report():
@@ -676,9 +693,19 @@ def public_descriptor():
     login.field.add(name="userPublic", number=2, type=11, type_name=".api.UserPublic")
     home = file.message_type.add(name="HomeResponse")
     home.field.add(name="currentMainAreaId", number=1, type=9)
+    pack = file.message_type.add(name="MasterTagPack")
+    pack.field.add(name="fileName", number=1, type=9)
+    pack.field.add(name="fileSize", number=2, type=3)
+    pack.field.add(name="downloadUrl", number=3, type=9)
+    tag = file.message_type.add(name="MasterTag")
+    tag.field.add(name="masterTagPacks", number=1, type=11, label=3, type_name=".api.MasterTagPack")
+    tag.field.add(name="version", number=2, type=9)
+    master = file.message_type.add(name="MasterResponse")
+    master.field.add(name="masterTag", number=1, type=11, type_name=".api.MasterTag")
     for service, method, output in (("System", "Check", "SystemCheckResponse"),
                                     ("Auth", "Login", "LoginResponse"),
-                                    ("Home", "Enter", "HomeResponse")):
+                                    ("Home", "Enter", "HomeResponse"),
+                                    ("Master", "Get", "MasterResponse")):
         file.service.add(name=service).method.add(name=method, input_type=".api.Empty", output_type=".api." + output)
     descriptors = descriptor_pb2.FileDescriptorSet()
     descriptors.file.add().CopyFrom(file)
@@ -695,6 +722,7 @@ def app(tmp_path):
         # Match the distributed ServerData archive, independently of the
         # probe's lookup constant (installed core paths omit the data/ root).
         archive.writestr("data/protocol/idolypride-6.1.1.pb", public_descriptor())
+        archive.writestr(MASTER_MEMBER, MASTER_BYTES)
     return app
 
 
@@ -792,7 +820,8 @@ def test_fresh_simulator_is_only_mutation_target_and_cleanup_runs(app, tmp_path)
     with mock.patch.object(probe.sys, "platform", "darwin"), \
             mock.patch.object(probe, "_simctl", controller), \
             mock.patch.object(probe.socket, "create_connection") as socket_call, \
-            mock.patch.object(probe, "probe_rpcs", return_value=[{"path": path} for path in probe.RPC_PATHS]):
+            mock.patch.object(probe, "probe_rpcs", return_value=[{"path": path} for path in probe.RPC_PATHS]), \
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()):
         result = probe.run_probe(app, audit)
     assert result["status"] == "PASS"
     assert result["fresh_local_state_before_launch"] is True
@@ -833,7 +862,8 @@ def test_launch_budget_remains_clamped_to_original_overall_deadline(app, tmp_pat
             mock.patch.object(probe.time, "monotonic", side_effect=lambda: clock["now"]), \
             mock.patch.object(probe, "_simctl", command), \
             mock.patch.object(probe.socket, "create_connection"), \
-            mock.patch.object(probe, "probe_rpcs", return_value=[]):
+            mock.patch.object(probe, "probe_rpcs", return_value=[]), \
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()):
         result = probe.run_probe(app, tmp_path / "audit.json", timeout=90)
     assert result["status"] == "PASS"
     assert controller.timeouts[5] == 90.0
@@ -887,7 +917,8 @@ def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_rel
     rows = [{"path": path} for path in probe.RPC_PATHS]
     with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command), \
             mock.patch.object(probe.socket, "create_connection") as listener, \
-            mock.patch.object(probe, "probe_rpcs", return_value=rows) as rpc:
+            mock.patch.object(probe, "probe_rpcs", return_value=rows) as rpc, \
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()) as master:
         result = probe.run_probe(app, tmp_path / "failure.json")
     assert result["status"] == "PASS"
     assert result["launch_ack_timeout"] is True
@@ -898,6 +929,8 @@ def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_rel
     assert result["rpcs"] == rows
     listener.assert_called_once()
     rpc.assert_called_once()
+    master.assert_called_once()
+    assert result["master_file"] == master_file_report()
     assert [call[0] for call in controller.calls].count("launch") == 1
     assert result["cleanup"] == {"shutdown": True, "delete": True}
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
@@ -967,7 +1000,8 @@ def test_shutdown_failure_does_not_skip_delete_or_claim_success(app, tmp_path):
     with mock.patch.object(probe.sys, "platform", "darwin"), \
             mock.patch.object(probe, "_simctl", controller), \
             mock.patch.object(probe.socket, "create_connection"), \
-            mock.patch.object(probe, "probe_rpcs", return_value=[]):
+            mock.patch.object(probe, "probe_rpcs", return_value=[]), \
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()):
         result = probe.run_probe(app, tmp_path / "failure.json")
     assert result["status"] == "FAIL" and result["cleanup_complete"] is False
     assert controller.calls[-1] == ("delete", CREATED)
@@ -1490,6 +1524,239 @@ def test_login_without_fresh_identity_token_never_reaches_home(app):
     finally:
         server.stop()
     assert application.calls == list(probe.RPC_PATHS[:2])
+
+
+class MasterHTTPResponse:
+    def __init__(self, status, headers, body=b""):
+        self.status, self.headers, self.body = status, headers, body
+
+    def getheader(self, key, default=None):
+        return next((value for name,value in self.headers.items() if name.lower() == key.lower()), default)
+
+    def read(self, amount=None):
+        content = self.body if amount is None else self.body[:amount]
+        self.body = self.body[len(content):]
+        return content
+
+    def close(self):
+        pass
+
+
+class MasterHTTPFixture:
+    """Controlled HTTP transport: never opens a listener or follows URLs."""
+    def __init__(self, *, head_status=200, head_length="128", range_status=206,
+                 range_length="64", content_range="bytes 0-63/128", body=MASTER_BYTES[:64],
+                 head_type="application/octet-stream", range_type="application/octet-stream"):
+        self.options = head_status, head_length, range_status, range_length, content_range, body, head_type, range_type
+        self.connections, self.requests = [], []
+
+    def __call__(self, host, port=None, *, timeout=None):
+        self.connections.append((host,port,timeout))
+        fixture = self
+        class Connection:
+            def request(self, method, path, body=None, headers=None):
+                self.method = method
+                fixture.requests.append((method,path,dict(headers or {})))
+
+            def getresponse(self):
+                hs, hl, rs, rl, cr, body, ht, rt = fixture.options
+                headers = {"Content-Length":hl if self.method == "HEAD" else rl}
+                content_type = ht if self.method == "HEAD" else rt
+                if content_type is not None:
+                    headers["Content-Type"] = content_type
+                if self.method != "HEAD":
+                    headers["Content-Range"] = cr
+                return MasterHTTPResponse(hs if self.method == "HEAD" else rs,headers,
+                                          b"" if self.method == "HEAD" else body)
+
+            def close(self):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                self.close()
+        return Connection()
+
+
+def master_unary(schema, *, url="http://127.0.0.1:8080/master/fixture.db", size=128, name="fixture.db"):
+    def unary(path, request, *, token=None, port=50051, timeout=15):
+        assert port == 50051 and 0 < timeout <= 15
+        schema.request_type(path).FromString(request)
+        result = schema.response_type(path)()
+        if path == "/api.Auth/Login":
+            assert token is None
+            result.gameAuthToken = "never-export-master-token"
+            result.userPublic.serverUserId = "public-fixture-server"
+            result.userPublic.publicUserId = "public-fixture-user"
+        else:
+            assert path == "/api.Master/Get" and token == "never-export-master-token"
+            result.masterTag.masterTagPacks.add(fileName=name,fileSize=size,downloadUrl=url)
+        return result.SerializeToString(), {"path":path,"grpc_status":0,
+            "request_encrypted":True,"response_encrypted":True,"private_token":"never-export-master-token"}
+    return unary
+
+
+def test_master_file_gate_authenticates_catalog_and_compares_bundled_prefix_over_loopback(app):
+    schema, _ = probe.load_schema(app)
+    http = MasterHTTPFixture()
+    with mock.patch.object(probe,"unary_h2",side_effect=master_unary(schema)) as unary, \
+            mock.patch.object(probe,"HTTPConnection",side_effect=http):
+        result = probe.probe_master_file(schema,app,timeout=3)
+    assert result == master_file_report()
+    assert [call.args[0] for call in unary.call_args_list] == ["/api.Auth/Login","/api.Master/Get"]
+    assert len(http.connections) >= 1
+    assert all(host == "127.0.0.1" and port == 8080 and 0 < timeout <= 3
+               for host,port,timeout in http.connections)
+    assert [row[:2] for row in http.requests] == [("HEAD","/master/fixture.db"),("GET","/master/fixture.db")]
+    assert {key.lower():value for key,value in http.requests[1][2].items()}["range"] == "bytes=0-63"
+    assert "never-export-master-token" not in json.dumps(result)
+
+
+def test_master_file_uses_real_encrypted_h2_auth_and_authenticated_master_catalog(app):
+    schema, _ = probe.load_schema(app)
+    class MasterApplication(FixtureApplication):
+        def handle(self, path, encrypted, context):
+            if path != "/api.Master/Get":
+                return super().handle(path,encrypted,context)
+            assert codec.decode(encrypted) == probe.PUBLIC_PROBE_FIELD
+            if dict(context.invocation_metadata()).get("x-auth-token") != "portable-test-local-token":
+                context.abort(RpcCode.UNAUTHENTICATED,"fixture token required")
+            self.calls.append(path)
+            result = self.schema.response_type(path)()
+            result.masterTag.masterTagPacks.add(fileName="fixture.db",fileSize=128,
+                downloadUrl="http://127.0.0.1:8080/master/fixture.db")
+            return result.SerializeToString()
+    application = MasterApplication(schema)
+    server = create_server(application,port=0).start()
+    try:
+        with mock.patch.object(probe,"HTTPConnection",side_effect=MasterHTTPFixture()):
+            result = probe.probe_master_file(schema,app,port=server.port,timeout=3)
+    finally:
+        server.stop()
+    assert application.calls == ["/api.Auth/Login","/api.Master/Get"]
+    assert result == master_file_report()
+    assert "portable-test-local-token" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("url", (
+    "https://127.0.0.1:8080/master/fixture.db","http://example.invalid:8080/master/fixture.db",
+    "http://127.0.0.1:8081/master/fixture.db","http://localhost:8080/master/fixture.db",
+    "http://user:secret@127.0.0.1:8080/master/fixture.db","http://127.0.0.1:8080/master/fixture.db?x=1",
+    "http://127.0.0.1:8080/master/fixture.db#x","http://127.0.0.1:8080/master/../fixture.db",
+    "http://127.0.0.1:8080/master/%66ixture.db","http://127.0.0.1:8080/master/한글.db"))
+def test_master_file_rejects_noncanonical_or_nonloopback_url_before_http(app, url):
+    schema, _ = probe.load_schema(app)
+    with mock.patch.object(probe,"unary_h2",side_effect=master_unary(schema,url=url)), \
+            mock.patch.object(probe,"HTTPConnection") as http, pytest.raises(probe.ProbeError):
+        probe.probe_master_file(schema,app,timeout=3)
+    http.assert_not_called()
+
+
+def test_master_file_missing_bundled_member_is_rejected_before_http(app):
+    schema, _ = probe.load_schema(app)
+    with ZipFile(app/"LocalServer/ServerData.zip","w") as archive:
+        archive.writestr("data/protocol/idolypride-6.1.1.pb",public_descriptor())
+    with mock.patch.object(probe,"unary_h2",side_effect=master_unary(schema)), \
+            mock.patch.object(probe,"HTTPConnection") as http, pytest.raises(probe.ProbeError):
+        probe.probe_master_file(schema,app,timeout=3)
+    http.assert_not_called()
+
+
+@pytest.mark.parametrize("options", (
+    {"head_status":302},{"head_length":"127"},{"head_length":"not-a-length"},
+    {"range_status":200},{"range_length":"63"},{"content_range":"bytes 1-64/128"},
+    {"body":b"wrong"*13},{"body":MASTER_BYTES[:63]},
+))
+def test_master_file_rejects_redirects_wrong_lengths_ranges_and_content(app, options):
+    schema, _ = probe.load_schema(app)
+    with mock.patch.object(probe,"unary_h2",side_effect=master_unary(schema)), \
+            mock.patch.object(probe,"HTTPConnection",side_effect=MasterHTTPFixture(**options)), \
+            pytest.raises(probe.ProbeError):
+        probe.probe_master_file(schema,app,timeout=3)
+
+
+def test_master_file_equal_length_wrong_sample_fails_bundle_hash_comparison(app):
+    schema, _ = probe.load_schema(app)
+    with mock.patch.object(probe,"unary_h2",side_effect=master_unary(schema)), \
+            mock.patch.object(probe,"HTTPConnection",side_effect=MasterHTTPFixture(body=b"x"*64)), \
+            pytest.raises(probe.ProbeError,match="^master_file_sample_differs$"):
+        probe.probe_master_file(schema,app,timeout=3)
+
+
+@pytest.mark.parametrize("field,value", (("head_type",None),("head_type","text/plain"),
+    ("range_type",None),("range_type","text/html")))
+def test_master_file_requires_binary_mime_on_both_head_and_range(app, field, value):
+    schema, _ = probe.load_schema(app)
+    with mock.patch.object(probe,"unary_h2",side_effect=master_unary(schema)), \
+            mock.patch.object(probe,"HTTPConnection",side_effect=MasterHTTPFixture(**{field:value})), \
+            pytest.raises(probe.ProbeError):
+        probe.probe_master_file(schema,app,timeout=3)
+
+
+def test_master_file_gate_uses_first_published_pack_without_language_preference(app):
+    schema, _ = probe.load_schema(app)
+    first = master_unary(schema)
+    def catalog(path,request,**kwargs):
+        plain,row = first(path,request,**kwargs)
+        if path == "/api.Master/Get":
+            message = schema.response_type(path).FromString(plain)
+            message.masterTag.masterTagPacks.add(fileName="local-language-ko-ExtraStory.db",fileSize=128,
+                downloadUrl="https://must-never-request.invalid/master/another.db")
+            plain = message.SerializeToString()
+        return plain,row
+    with mock.patch.object(probe,"unary_h2",side_effect=catalog), \
+            mock.patch.object(probe,"HTTPConnection",side_effect=MasterHTTPFixture()):
+        assert probe.probe_master_file(schema,app,timeout=3) == master_file_report()
+
+
+@pytest.mark.parametrize("field,value", (
+    ("schema",True),("transport","requests"),("origin","http://localhost:8080"),
+    ("expected_source","remote"),("path_sha256","A"*64),("file_bytes",True),
+    ("file_bytes",0),("file_bytes",64*1024*1024+1),("head_status",True),
+    ("head_status",302),("head_content_length",127),("range_status",200),
+    ("range_content_length",63),("sample_bytes",True),("sample_bytes",63),
+    ("content_range","bytes 0-63/129"),("expected_sample_sha256","z"*64),
+    ("received_sample_sha256","0"*64),("sample_matches_bundle",1),
+))
+def test_master_file_report_requires_strict_complete_http_and_bundle_evidence(field, value):
+    report = master_file_report()
+    report[field] = value
+    with pytest.raises(probe.ProbeError):
+        probe.validate_master_file_report(report)
+
+
+@pytest.mark.parametrize("kind,field,value", (
+    ("auth_rpc","path","/api.Home/Enter"),("master_rpc","path","/api.Home/Enter"),
+    ("auth_rpc","grpc_status",False),("master_rpc","grpc_status",1),
+    ("auth_rpc","request_encrypted",1),("master_rpc","response_encrypted",False),
+))
+def test_master_file_report_requires_encrypted_authenticated_catalog_rpc_evidence(kind, field, value):
+    report = master_file_report()
+    report[kind][field] = value
+    with pytest.raises(probe.ProbeError):
+        probe.validate_master_file_report(report)
+
+
+def test_master_file_audit_projects_fixed_metadata_and_drops_urls_tokens_and_body():
+    report = master_file_report()
+    report.update(downloadUrl="never-export",body="never-export",token="never-export")
+    report["auth_rpc"].update(token="never-export",response_body="never-export")
+    result = probe.validate_master_file_report(report)
+    assert result == master_file_report()
+    assert "never-export" not in json.dumps(result)
+
+
+def test_master_file_failure_cannot_claim_pass_after_native_and_rpc_success(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"master-failure-container")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]), \
+            mock.patch.object(probe,"probe_master_file",side_effect=probe.ProbeError("master_file_sample_differs")):
+        result = probe.run_probe(app,tmp_path/"master-failure.json")
+    assert result["status"] == "FAIL" and result["failed_stage"] == "master_file"
+    assert result["error"] == "master_file_sample_differs"
+    assert result["cleanup"] == {"shutdown":True,"delete":True}
 
 
 def test_cold_boot_retries_bounded_observer_for_only_the_created_uuid(monkeypatch):
