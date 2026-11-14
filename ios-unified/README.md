@@ -1,10 +1,12 @@
 # iPhone·iPad 통합 IPA
 
-빌드 `156.9105` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
+빌드 `156.9107` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-5fc643b49b4fbcdbb947b495658f7b011a4c21d1)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-b05f54052bb9fc439f2e1c592c61dbd88563933a)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
 
-156.9105는 Mac에서 보고된 키보드 중복 초기화를 처리합니다. 156.9104의 공개 입력란 조회 차단을 제거하고, 초기화 전에 이미 생성된 키보드와 입력란을 재사용합니다. 실제 Mac Foundation에서 미생성·기생성 상태를 각각 검사했고, Simulator에서는 미리 만든 입력란을 게임 초기화 후에도 그대로 유지하는 검사를 통과했습니다. 실제 PlayCover 전체 게임 실행은 별도 확인 대상입니다.
+156.9107은 PlayCover에서 파일 다운로드가 끊기던 서버 오류를 수정합니다. 파일 형식을 판별하는 Python 코드가 `/etc/apache2/mime.types`를 읽다가 샌드박스의 `PermissionError`를 내고 응답 헤더 전송 전에 종료됐습니다. 정적 파일은 내장된 형식 표로 처리하며 시스템 MIME 파일에 접근하지 않습니다. 같은 권한 거부 조건과 실제 마스터 파일의 HEAD·부분 전송을 검사합니다.
+
+상단 서버 상태와 버튼도 창 크기에 맞춰 확대하고, 진단에 **진단 전체 복사** 버튼을 추가했습니다. 게임 시작 전에는 앱 내부에서 로컬 HTTP 연결을 확인하고, 진단에 HEAD·404를 포함한 요청 기록과 최근 실패 경로를 보관합니다. 기존 키보드 재사용·언어 선택·메뉴를 닫은 뒤 서버 유지 동작을 함께 검사합니다.
 
 ## 실행과 설정
 
@@ -16,7 +18,7 @@
 
 **서버 화면 언어**와 **게임 언어**는 별개입니다. 서버 화면은 기기 언어를 기본으로 일본어·한국어·영어를 지원합니다. 게임 시작 전에 게임 언어를 선택하고 저장하면 **게임 시작** 때 해당 언어 데이터를 준비합니다. 게임에 진입한 뒤 바꾼 게임 언어는 다음 앱 실행부터 적용됩니다. 번역이 없는 문구와 번역 이미지가 없는 항목은 원본으로 표시합니다.
 
-해금 모드·그래픽·화면 확장·촬영 옵션, 리소스 다운로드와 ZIP 가져오기·내보내기를 사용할 수 있습니다. 다운로드 리소스는 앱의 `Documents/IdolyPride`에 보관하며 iOS ‘파일’ 앱으로 접근합니다. 계정·설정과 준비한 언어 데이터는 `Library/Application Support/IdolyPrideLocal`에 보관합니다.
+해금 모드·그래픽·화면 확장·촬영 옵션, 리소스 다운로드와 ZIP 가져오기·내보내기를 사용할 수 있습니다. 진단 복사는 표시된 내용을 복사하며, UTF-8 32KiB를 넘으면 생략 표시를 함께 보여 줍니다. 다운로드 리소스는 앱의 `Documents/IdolyPride`에 보관하며 iOS ‘파일’ 앱으로 접근합니다. 계정·설정과 준비한 언어 데이터는 `Library/Application Support/IdolyPrideLocal`에 보관합니다.
 
 ## 언어 데이터와 서버 구조
 
@@ -30,10 +32,10 @@
 
 1. `fetch_inputs.py`가 고정된 SHA-256으로 원본·한국어 IPA, 서버·번역 데이터, 영어 UI 입력, BeeWare iOS Python과 순수 Python 의존성을 검증합니다.
 2. `tools/build_ios_client_languages.py`가 일본어·영어 Data와 언어별 매니페스트를 생성합니다. 한국어 파일과 공통 Data는 검증된 기존 한국어 앱을 사용합니다.
-3. `native/test_client_data.py`와 `native/test_mac_menu.py`가 실제 macOS Foundation 번들 선택 및 AppKit 메뉴·단축키를 검사합니다. `prepare_runtime.py`는 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다.
+3. `native/test_client_data.py`, `native/test_keyboard_lifecycle.py`, `native/test_local_http.py`와 `native/test_mac_menu.py`가 실제 macOS Foundation의 번들 선택·키보드 재사용·로컬 HTTP 및 AppKit 메뉴·단축키를 검사합니다. `prepare_runtime.py`는 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다.
 4. `native/build_native.py`가 실제 Apple SDK로 서버 프레임워크를 빌드합니다. 검증된 Unity 초기화 진입점과 데이터 번들 선택 경로를 사용합니다. `patch_load.py`와 `package_unified.py`는 기존 게임 코드·SDK 바이트를 보존하고 필요한 로드 명령·앱 정보·추가 파일을 구성합니다.
 5. `verify_client_languages.py`가 준비된 실제 Data로 일본어·한국어·영어 번들을 각각 재구성하고 다시 호출해 검증된 캐시 재사용을 확인합니다.
-6. 새 Simulator용 프레임워크·검사용 앱에서 서버 시작·게임 진입·설정 메뉴 닫기 후 서버 유지, 설정 화면 배치, 모서리 제스처 등록, CommonCrypto AES와 실제 암호화 RPC를 검사합니다. 원본 게임 실행 파일과 기존 Simulator·사용자 데이터는 사용하지 않습니다.
+6. 새 Simulator용 프레임워크·검사용 앱에서 서버 시작·게임 진입·설정 메뉴 닫기 후 서버 유지, 창 크기별 네이티브 헤더와 설정 화면 배치, 진단 복사·클립보드 정리, 모서리 제스처 등록, CommonCrypto AES와 실제 암호화 RPC를 검사합니다. 암호화된 마스터 목록의 URL을 확인하고 서버에서 HEAD와 64바이트 부분 요청을 수행해 응답 크기·내용을 포함된 원본 파일과 대조합니다. 원본 게임 실행 파일과 기존 Simulator·사용자 데이터는 사용하지 않습니다.
 
 산출물에는 IPA와 SHA-256, 프레임워크·원본 보존 검사, 언어 데이터 검사 및 Simulator 결과를 함께 보관합니다. 자세한 경계는 [CONTRACT.md](CONTRACT.md)에 정리했습니다.
 
