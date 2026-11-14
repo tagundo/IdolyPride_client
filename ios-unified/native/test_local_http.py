@@ -47,6 +47,12 @@ def loopback(mode, *, redirect_port=None):
 
         def do_GET(self):
             observations["requests"].append(self.path)
+            if mode == "timeout":
+                # Send no response bytes: Foundation may defer delivering
+                # response headers when a body stalls. This fixture tests a
+                # timeout before headers, so the expected HTTP status is zero.
+                observations["release"].wait(5)
+                return
             if mode == "redirect":
                 self.send_response(302)
                 self.send_header("Location", f"http://127.0.0.1:{redirect_port}/redirect-target")
@@ -59,16 +65,11 @@ def loopback(mode, *, redirect_port=None):
                 raw = b"[]"
             if mode == "oversized":
                 raw = b" " * (MAX_BODY + 1)
-            if mode == "timeout":
-                raw = b"{}"
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             if mode != "oversized":
                 self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
-            if mode == "timeout":
-                observations["release"].wait(5)
-                return
             try:
                 self.wfile.write(raw)
             except (BrokenPipeError, ConnectionResetError):
@@ -145,7 +146,8 @@ def main():
                     host.require(readiness.get("error_code") == expected and readiness.get("ok") is (mode == "json")
                                  and readiness.get("body_is_json") is (mode == "json")
                                  and observations["requests"] == ["/client/playback"], "local_http_response_case_failed")
-                    host.require(readiness.get("http_status") == (404 if mode == "not_found" else 200),
+                    host.require(readiness.get("http_status") == (0 if mode == "timeout" else
+                                 404 if mode == "not_found" else 200),
                                  "local_http_status_not_preserved")
                     report["runs"].append({"fixture": mode, **result})
             with loopback("json") as (target_port, target):
