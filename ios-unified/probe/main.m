@@ -75,17 +75,20 @@ static NSArray<UIBarButtonItem *> *ProbeVisibleLaunchButtons(void) {
 }
 
 static NSDictionary *ProbeCornerGesture(UIWindow *window) {
-    NSUInteger oneFinger = 0, threeFinger = 0;
+    NSUInteger matching = 0, oneFinger = 0, threeFinger = 0;
     UILongPressGestureRecognizer *corner = nil;
     for (UIGestureRecognizer *recognizer in window.gestureRecognizers) {
+        if (![recognizer.name isEqualToString:@"idoly.server-menu-corner"]) continue;
+        ++matching;
         if (![recognizer isKindOfClass:UILongPressGestureRecognizer.class]) continue;
         UILongPressGestureRecognizer *hold = (UILongPressGestureRecognizer *)recognizer;
         if (hold.numberOfTouchesRequired == 1) { ++oneFinger; corner = hold; }
         if (hold.numberOfTouchesRequired == 3) ++threeFinger;
     }
-    return @{@"game_window_key":@(window.isKeyWindow), @"one_finger_count":@(oneFinger),
+    return @{@"game_window_key":@(window.isKeyWindow), @"matching_count":@(matching),
+        @"recognizer_name":corner.name ?: (id)NSNull.null, @"one_finger_count":@(oneFinger),
         @"three_finger_count":@(threeFinger), @"minimum_press_seconds":@(corner.minimumPressDuration),
-        @"allowable_movement_points":@(corner.allowableMovement), @"delegate_present":@(corner.delegate != nil),
+        @"allowable_movement_points":@(corner.allowableMovement), @"delegate_present":@((BOOL)(corner.delegate != nil)),
         @"delays_touches_began":@(corner.delaysTouchesBegan), @"delays_touches_ended":@(corner.delaysTouchesEnded),
         @"cancels_touches_in_view":@(corner.cancelsTouchesInView)};
 }

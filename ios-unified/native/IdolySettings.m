@@ -446,6 +446,7 @@ BOOL IDNativeLauncherVisible(void) {
     static const void *key = &key;
     if (objc_getAssociatedObject(window,key)) return;
     UILongPressGestureRecognizer *gesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(open:)];
+    gesture.name = @"idoly.server-menu-corner";
     gesture.numberOfTouchesRequired = 1; gesture.minimumPressDuration = 3.0;
     gesture.allowableMovement = 12.0; gesture.delegate = self;
     // Short taps and normal drags go straight to Unity. Only a recognized hold

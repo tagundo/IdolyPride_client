@@ -280,6 +280,8 @@ def validate_report(value):
             and launcher.get("forwarded_after_button") is True, "explicit_launch_action_failed")
     corner = value.get("corner_gesture")
     require(type(corner) is dict and corner.get("game_window_key") is True
+            and type(corner.get("matching_count")) is int and corner["matching_count"] == 1
+            and corner.get("recognizer_name") == "idoly.server-menu-corner"
             and type(corner.get("one_finger_count")) is int and corner["one_finger_count"] == 1
             and type(corner.get("three_finger_count")) is int and corner["three_finger_count"] == 0
             and type(corner.get("minimum_press_seconds")) in (int, float) and corner["minimum_press_seconds"] == 3.0
@@ -322,7 +324,7 @@ def validate_report(value):
                 "ready_button_enabled", "ready_button_title", "button_action_dispatched",
                 "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button")},
             "corner_gesture": {key: corner[key] for key in (
-                "game_window_key", "one_finger_count", "three_finger_count", "minimum_press_seconds",
+                "game_window_key", "matching_count", "recognizer_name", "one_finger_count", "three_finger_count", "minimum_press_seconds",
                 "allowable_movement_points", "delegate_present", "delays_touches_began",
                 "delays_touches_ended", "cancels_touches_in_view")},
             "server_status": {key: status[key] for key in
@@ -351,6 +353,9 @@ def wait_report(container, remaining):
                     error.native_crypto = {k: v for k, v in crypto.items()
                                            if k in ("ok", "nist_encrypt", "nist_decrypt", "invalid_iv_rejected", "worker_main_thread")
                                            and type(v) in (bool, int)}
+                corner = corner_observation(observed.get("corner_gesture"))
+                if corner:
+                    error.native_corner = corner
                 raise
         except FileNotFoundError:
             pass
@@ -381,6 +386,26 @@ def wait_report(container, remaining):
             if str(error) != "file_changed_while_opening" or getattr(error, "regular_replacement", False) is not True:
                 raise
         time.sleep(min(0.25, remaining()))
+
+
+def corner_observation(value):
+    """Retain only bounded scalar recognizer diagnostics, never arbitrary names."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    for key in ("game_window_key", "delegate_present", "delays_touches_began",
+                "delays_touches_ended", "cancels_touches_in_view"):
+        if type(value.get(key)) in (bool, int) and value[key] in (False, True, 0, 1):
+            clean[key] = value[key]
+    for key in ("matching_count", "one_finger_count", "three_finger_count"):
+        if type(value.get(key)) is int and 0 <= value[key] <= 4096:
+            clean[key] = value[key]
+    for key in ("minimum_press_seconds", "allowable_movement_points"):
+        if type(value.get(key)) in (int, float) and 0 <= value[key] <= 1000000:
+            clean[key] = value[key]
+    name = value.get("recognizer_name")
+    clean["recognizer_name"] = name if name is None or name == "idoly.server-menu-corner" else "unexpected_name"
+    return clean
 
 
 def failure_checkpoint(container):
@@ -435,6 +460,8 @@ def failure_checkpoint(container):
             status.update({key: item for key, item in scalars(observed).items() if key == "original_called"})
             result.update({source + "_" + key: item for key, item in status.items()})
             if source == "report":
+                corner = corner_observation(observed.get("corner_gesture"))
+                result.update({"corner_" + key: item for key, item in corner.items()})
                 try:
                     validate_report(observed)
                     result["report_valid"] = True
@@ -622,6 +649,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             report["native_startup_error"] = error.native_detail
         if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
             report["native_crypto_observed"] = error.native_crypto
+        if isinstance(error, ProbeError) and type(getattr(error, "native_corner", None)) is dict:
+            report["native_corner_observed"] = error.native_corner
         if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
             report["simctl_failure"] = error.tool_detail
     finally:

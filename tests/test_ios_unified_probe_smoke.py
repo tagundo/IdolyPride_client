@@ -44,7 +44,8 @@ def native_report():
                 "ready_button_enabled": True, "ready_button_title": "게임 시작",
                 "button_action_dispatched": True, "button_dispatch_count": 1,
                 "duplicate_launch_called": True, "forwarded_after_button": True},
-            "corner_gesture": {"game_window_key": True, "one_finger_count": 1, "three_finger_count": 0,
+            "corner_gesture": {"game_window_key": True, "matching_count": 1,
+                "recognizer_name": "idoly.server-menu-corner", "one_finger_count": 1, "three_finger_count": 0,
                 "minimum_press_seconds": 3.0, "allowable_movement_points": 12.0, "delegate_present": True,
                 "delays_touches_began": False, "delays_touches_ended": False, "cancels_touches_in_view": True},
             "ports": {"grpc": 50051, "assets": 8080,
@@ -410,7 +411,7 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert result["status_phase"] == 2 and result["status_original_called"] == 0
     assert result["report_phase"] == 4 and result["report_original_called"] == 1
     assert result["report_valid"] is True
-    assert all(type(value) in (str, int, bool) for value in result.values())
+    assert all(type(value) in (str, int, bool, float, type(None)) for value in result.values())
     assert "must not retain" not in json.dumps(result)
 
 
@@ -536,7 +537,9 @@ def test_launcher_evidence_is_required_and_only_checked_fields_are_audited():
 @pytest.mark.parametrize("field,value", (("game_window_key", False), ("one_finger_count", 0),
         ("one_finger_count", 2), ("one_finger_count", True), ("three_finger_count", 1),
         ("three_finger_count", False), ("minimum_press_seconds", 0.6), ("minimum_press_seconds", True),
-        ("allowable_movement_points", 100), ("delegate_present", False),
+        ("matching_count", 0), ("matching_count", 2), ("matching_count", True),
+        ("recognizer_name", "unrelated-system-hold"), ("recognizer_name", None),
+        ("allowable_movement_points", 100), ("delegate_present", False), ("delegate_present", 1),
         ("delays_touches_began", True), ("delays_touches_ended", True), ("cancels_touches_in_view", False)))
 def test_actual_game_window_has_one_configured_corner_hold_and_no_three_finger_hold(field, value):
     report = native_report()
@@ -553,6 +556,36 @@ def test_corner_gesture_evidence_is_required_and_drops_unchecked_details():
     report = native_report()
     report["corner_gesture"]["unchecked"] = "not copied"
     assert "unchecked" not in probe.validate_report(report)["corner_gesture"]
+
+
+def test_corner_failure_audit_preserves_numeric_boolean_mismatch_without_private_fields(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    broken = native_report()
+    # C comparison expressions box as int, unlike an explicit Objective-C
+    # BOOL. Keep this actual mismatch visible while still rejecting it.
+    broken["corner_gesture"]["delegate_present"] = 1
+    broken["corner_gesture"]["private_text"] = "must not retain"
+    with mock.patch.object(probe.sys, "platform", "darwin"), \
+            mock.patch.object(probe, "_simctl", controller), \
+            mock.patch(__name__ + ".native_report", return_value=broken), \
+            mock.patch.object(probe, "probe_rpcs") as rpc:
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["error"] == "corner_gesture_configuration_failed"
+    assert type(result["native_corner_observed"]["delegate_present"]) is int
+    assert result["native_corner_observed"]["delegate_present"] == 1
+    assert result["native_checkpoint"]["corner_delegate_present"] == 1
+    assert result["native_corner_observed"]["matching_count"] == 1
+    assert "must not retain" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_corner_diagnostics_keep_only_bounded_scalars_and_redact_unexpected_names():
+    observed = probe.corner_observation({"recognizer_name": "private arbitrary gesture name",
+        "matching_count": 2, "one_finger_count": 100000, "three_finger_count": [1],
+        "minimum_press_seconds": float("nan"), "allowable_movement_points": 12.0,
+        "game_window_key": "private", "delegate_present": 1, "unknown": "private"})
+    assert observed == {"recognizer_name": "unexpected_name", "matching_count": 2,
+        "allowable_movement_points": 12.0, "delegate_present": 1}
 
 
 def test_control_bridge_must_report_real_python_host_readiness_and_fixed_listeners():
