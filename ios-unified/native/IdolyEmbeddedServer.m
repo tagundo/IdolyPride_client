@@ -242,6 +242,7 @@ static void beginServer(void) {
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (good && IDGateSucceeded(&gate)) {
+                lastError = nil; IDNativeDismissFailure();
                 IDNativeSetServerReady(YES, @"서버 실행 중");
             } else if (!good && IDGateFailedAttempt(&gate)) {
                 lastError = error ?: @"서버 시작 실패";
