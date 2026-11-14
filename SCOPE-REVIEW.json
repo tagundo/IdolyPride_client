@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "status": "PASS_V0331_FOUR_ARTIFACT_SCOPE",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "source_epoch": 1794639084,
+  "version": "0.3.31",
+  "server_rebuilt": true,
+  "artifact_count": 4,
+  "physical_device_playback_verified": false,
+  "all_translation_complete": false,
+  "historical_user_acceptance_rebound": false,
+  "final_operator_sha256": "96f7a8a495fd06a1577ea69e484b2997c8a41445754d31241958965ffe412c5e",
+  "publication_contract_bindings": {
+    "server-android": {
+      "path": "/dev/shm/idoly-v0331-work/release-preparation-r2/contracts-ready/server-android-ready.json",
+      "bytes": 6024,
+      "sha256": "52034869438cb191d2f277681163d064f25009d4d3894f056768a1ae35cf0c81"
+    },
+    "server-macos": {
+      "path": "/dev/shm/idoly-v0331-work/release-preparation-r2/contracts-ready/server-macos-ready.json",
+      "bytes": 6119,
+      "sha256": "67cf52493577466bb02e066d01e43cb8aa702141ede6593bdf1907dfe89c7707"
+    },
+    "client-android-ko": {
+      "path": "/dev/shm/idoly-v0331-work/release-preparation-r2/contracts-ready/client-android-ko-ready.json",
+      "bytes": 6243,
+      "sha256": "32c044d12fb2a54e39cfe0be4b4ac3f22e38335ab68ece9c52208a551cfa94b0"
+    },
+    "client-macos-ko": {
+      "path": "/dev/shm/idoly-v0331-work/release-preparation-r2/contracts-ready/client-macos-ko-ready.json",
+      "bytes": 6158,
+      "sha256": "0ef5ab81dbc68cb3d42e46b94800641b78be70ff91ab53af9fe4c5f08b0c411f"
+    }
+  }
+}

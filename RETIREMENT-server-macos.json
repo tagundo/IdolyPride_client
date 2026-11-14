@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "kind": "server-macos",
+  "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+  "bytes": 330787485,
+  "sha256": "f40a393ad766ac36035332ba741236eea00da9ba9310d401613f10566037043d",
+  "published_commit": "d7afd33f866ffe3b0494f984d53e9b19fd7533ad",
+  "published_branch": "downloads/local-v0.3.31-server-macos-source-cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_verified": true,
+  "anonymous_full_HTTP200_verified": false,
+  "actual_attachment_filename": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+  "final_local_SHA_verified": true,
+  "all_visible_handles_closed_before_retirement": true,
+  "only_owned_derived_artifact_retired": true,
+  "publication_manifest_sha256": "714915fe00e787e976940245a564fa96f4e79a65e31654c3853b3fc6a22e8b67",
+  "independent_QA_sha256": "bad988e10813fc9556bab968c95630759f618d80e97ae2d5e1b9b83a818789cf",
+  "producer_receipt_sha256": "36336eca2a54fe73a3dd90fcb9851c4c6a23336783f8d6c643d9e3a982c33ef7",
+  "provenance_sha256": "9286ee0c3eda0437e04d237029509ed9f9933e5ed7733b37e965903b92db1b0a",
+  "native_and_feature_retained": true,
+  "private_grant_mode": "0600",
+  "actual_device_execution_verified": false,
+  "auxiliary_retirement_sha256": "d5e9c5eeef3e9644c88cc57997f84fb0edb3cc4536b91405bd6352f8266253e1",
+  "resource_budget_after": {
+    "direct_headroom": 1582542848,
+    "root_free": 162537472,
+    "tmpfs_free": 8581902336,
+    "oom_kill": 2
+  }
+}

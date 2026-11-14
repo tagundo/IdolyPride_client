@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "HTTP_status": 206,
+  "Content_Range": "bytes 0-4095/330787485",
+  "actual_attachment_filename": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+  "Content_Disposition": "attachment; filename=\"IdolyPride-Local-Server-macOS-arm64.app.zip\"",
+  "prefix_bytes": 4096,
+  "prefix_sha256": "8455440ed5c125e73ad71e7e702c61e97a9a2ff9f10681fe8003ac9a4ec9fc94",
+  "local_prefix_sha256": "8455440ed5c125e73ad71e7e702c61e97a9a2ff9f10681fe8003ac9a4ec9fc94",
+  "no_authentication_headers_sent": true,
+  "complete_remote_SHA256_already_verified": true,
+  "anonymous_full_HTTP200_verified": false
+}

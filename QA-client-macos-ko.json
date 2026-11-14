@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "source_epoch": 1794639084,
+  "kind": "client-macos-ko",
+  "sha256": "d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1",
+  "bytes": 150132823,
+  "device_execution_verified": false,
+  "actual_review": {
+    "path": "/dev/shm/idoly-v0331-work/client-preparation/qa-ios-ko-final-r2/independent-full-client-review.json",
+    "bytes": 422827,
+    "sha256": "35b9e93bcbaac735a8dd40e355784ff1c5acdd79233d7e2679ab9b34f00adca7"
+  },
+  "actual_payload_read_or_hashed_by_materializer": false
+}

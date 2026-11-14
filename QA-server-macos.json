@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "source_epoch": 1794639084,
+  "kind": "server-macos",
+  "sha256": "f40a393ad766ac36035332ba741236eea00da9ba9310d401613f10566037043d",
+  "bytes": 330787485,
+  "device_execution_verified": false,
+  "actual_review": {
+    "path": "/dev/shm/idoly-v0331-work/server-preparation/qa-results/macos/independent-mac-app-review.json",
+    "bytes": 107733,
+    "sha256": "261ff573a7fb1a95c30ae39814fef1832934bc7fb618105d7654086dd362d123"
+  },
+  "actual_payload_read_or_hashed_by_materializer": false
+}

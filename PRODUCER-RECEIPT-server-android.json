@@ -1,0 +1,355 @@
+{
+  "schema": 1,
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "epoch": 1794639084,
+  "status": "PASS",
+  "stages": [
+    {
+      "stage": "aapt2-compile",
+      "seconds": 0.041240531019866467,
+      "before": {
+        "memory_current": 15840411648,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1339457536,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1607892992
+      },
+      "after": {
+        "memory_current": 15740702720,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1439166464,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1707601920
+      }
+    },
+    {
+      "stage": "aapt2-link",
+      "seconds": 0.10483426303835586,
+      "before": {
+        "memory_current": 15740702720,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1439166464,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1707601920
+      },
+      "after": {
+        "memory_current": 15740952576,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1438916608,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1707352064
+      }
+    },
+    {
+      "stage": "javac",
+      "seconds": 3.354227859992534,
+      "before": {
+        "memory_current": 15740952576,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1438916608,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1707352064
+      },
+      "after": {
+        "memory_current": 15742119936,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1437749248,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1706184704
+      }
+    },
+    {
+      "stage": "D8",
+      "seconds": 4.0572918460238725,
+      "before": {
+        "memory_current": 15742119936,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1437749248,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1706184704
+      },
+      "after": {
+        "memory_current": 15742488576,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1437380608,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1705816064
+      }
+    },
+    {
+      "stage": "zipalign",
+      "seconds": 0.03835203999187797,
+      "before": {
+        "memory_current": 16077000704,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102868480,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1371303936
+      },
+      "after": {
+        "memory_current": 16077144064,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102725120,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1371160576
+      }
+    },
+    {
+      "stage": "python3.13",
+      "seconds": 1.4469147250056267,
+      "before": {
+        "memory_current": 16077119488,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102749696,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1371185152
+      },
+      "after": {
+        "memory_current": 16077316096,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102553088,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370988544
+      }
+    },
+    {
+      "stage": "signer-verify",
+      "seconds": 0.6597257040557452,
+      "before": {
+        "memory_current": 16077049856,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102819328,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1371254784
+      },
+      "after": {
+        "memory_current": 16077840384,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102028800,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370464256
+      }
+    },
+    {
+      "stage": "zipalign",
+      "seconds": 0.03841143997851759,
+      "before": {
+        "memory_current": 16077840384,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102028800,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370464256
+      },
+      "after": {
+        "memory_current": 16077717504,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102151680,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370587136
+      }
+    },
+    {
+      "stage": "aapt2-dump",
+      "seconds": 0.036681303987279534,
+      "before": {
+        "memory_current": 16077717504,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102151680,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370587136
+      },
+      "after": {
+        "memory_current": 16077713408,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102155776,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370591232
+      }
+    },
+    {
+      "stage": "aapt2-dump",
+      "seconds": 0.03396219800924882,
+      "before": {
+        "memory_current": 16077713408,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1102155776,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370591232
+      },
+      "after": {
+        "memory_current": 16077889536,
+        "memory_max": 17179869184,
+        "memory_direct_headroom": 1101979648,
+        "memory_clean_inactive_credit": 268435456,
+        "memory_effective_headroom": 1370415104
+      }
+    }
+  ],
+  "vm_actions": false,
+  "payload": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+  "payload_sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223",
+  "payload_bytes": 191343014,
+  "translations": {
+    "included": true,
+    "schema": 1,
+    "platform": "android",
+    "version": "0.3.31",
+    "sha256": "22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec",
+    "bytes": 125709184,
+    "manifest_sha256": "4022101dc6731396c9c48a4ab09c4ba490db98d8ae53971ab1b8a39471393c5c",
+    "files": 6,
+    "coverage": {
+      "en": {
+        "adv_resources": 3492,
+        "missing": 1,
+        "translated": 3093,
+        "unchanged_original": 398
+      },
+      "ko": {
+        "adv_resources": 3492,
+        "missing": 401,
+        "translated": 3091,
+        "unchanged_original": 0
+      }
+    },
+    "sources": {
+      "en": {
+        "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+        "data_terms": "NOASSERTION",
+        "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+        "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+      },
+      "ko": {
+        "data_terms": "NOASSERTION",
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+      }
+    },
+    "image_coverage": {
+      "ko": {
+        "candidates": 667,
+        "missing": 0,
+        "translated": 667,
+        "unchanged_original": 0
+      }
+    },
+    "image_sources": {
+      "ko": {
+        "input_catalog_sha256": "2bf957f0f19b0ccd869edfef2e413d6fb622bbd801473574a2b4607941799513",
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "cf8754daa404cf353d1235cebbeef9d0e0bd0a8d"
+      }
+    }
+  },
+  "frozen_Java_source_roster": [
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/CryptoBridge.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/LibrarySettings.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/PlaybackSettings.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/PlaybackStorage.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/PresentationSettings.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/RenderingExperiment.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ResourceTransfers.java",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ServerService.java"
+  ],
+  "frozen_runtime_PYC_roster": [
+    "android_server_runtime.pyc",
+    "idoly_local/__init__.pyc",
+    "idoly_local/app_runtime.pyc",
+    "idoly_local/appearance.pyc",
+    "idoly_local/application.pyc",
+    "idoly_local/assets.pyc",
+    "idoly_local/bundled_translations.pyc",
+    "idoly_local/card_level_missions.pyc",
+    "idoly_local/card_progression.pyc",
+    "idoly_local/catalog.pyc",
+    "idoly_local/codec.pyc",
+    "idoly_local/company.pyc",
+    "idoly_local/diagnostics.pyc",
+    "idoly_local/dream.pyc",
+    "idoly_local/dream_capture.pyc",
+    "idoly_local/excursion.pyc",
+    "idoly_local/gameplay.pyc",
+    "idoly_local/h2_server.pyc",
+    "idoly_local/home_talk.pyc",
+    "idoly_local/initial_inventory.pyc",
+    "idoly_local/language_settings.pyc",
+    "idoly_local/lessons.pyc",
+    "idoly_local/live_accessories.pyc",
+    "idoly_local/live_assets.pyc",
+    "idoly_local/live_engine.pyc",
+    "idoly_local/live_input.pyc",
+    "idoly_local/live_rejection_diagnostics.pyc",
+    "idoly_local/main_live.pyc",
+    "idoly_local/master_sort.pyc",
+    "idoly_local/media_access.pyc",
+    "idoly_local/media_outfit_policy.pyc",
+    "idoly_local/media_panorama.pyc",
+    "idoly_local/media_profile.pyc",
+    "idoly_local/media_runtime.pyc",
+    "idoly_local/media_scenes.pyc",
+    "idoly_local/media_settings.pyc",
+    "idoly_local/media_stories.pyc",
+    "idoly_local/octo_cache.pyc",
+    "idoly_local/octo_http.pyc",
+    "idoly_local/octo_manifest.pyc",
+    "idoly_local/octo_runtime.pyc",
+    "idoly_local/panorama_rules.pyc",
+    "idoly_local/photo_names.pyc",
+    "idoly_local/photo_shooting.pyc",
+    "idoly_local/playback.pyc",
+    "idoly_local/presentation.pyc",
+    "idoly_local/profile_favorites.pyc",
+    "idoly_local/profile_layout.pyc",
+    "idoly_local/profile_messages.pyc",
+    "idoly_local/profile_names.pyc",
+    "idoly_local/profile_top.pyc",
+    "idoly_local/pvp.pyc",
+    "idoly_local/quest.pyc",
+    "idoly_local/render_probe.pyc",
+    "idoly_local/resource_archive.pyc",
+    "idoly_local/resource_library.pyc",
+    "idoly_local/resource_routes.pyc",
+    "idoly_local/resource_translation.pyc",
+    "idoly_local/resource_translation_runtime.pyc",
+    "idoly_local/rpc.pyc",
+    "idoly_local/schema.pyc",
+    "idoly_local/social.pyc",
+    "idoly_local/state.pyc",
+    "idoly_local/story_catalog.pyc",
+    "idoly_local/story_read_rules.pyc",
+    "idoly_local/story_reads.pyc",
+    "idoly_local/tutorial_messages.pyc",
+    "idoly_local/tutorial_progression.pyc",
+    "idoly_local/tutorial_replay.pyc",
+    "idoly_local/wardrobe_diagnostics.pyc"
+  ],
+  "client_packaging_by_this_server_wrapper": false,
+  "oom_kill_before": 2,
+  "before": {
+    "memory_current": 15730569216,
+    "memory_max": 17179869184,
+    "memory_direct_headroom": 1449299968,
+    "memory_clean_inactive_credit": 268435456,
+    "memory_effective_headroom": 1717735424,
+    "oom_kill": "2"
+  },
+  "apk_sha256": "303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc",
+  "apk_bytes": 332386192,
+  "PYC_modules": 70,
+  "Java_source_count": 9,
+  "own_DEX_class_count": 70,
+  "durable_provenance": "/dev/shm/idoly-v0331-work/server-preparation/delivery/IdolyPride-Local-Server-Android.provenance.json",
+  "seconds": 18.463242379017174,
+  "after": {
+    "memory_current": 16075440128,
+    "memory_max": 17179869184,
+    "memory_direct_headroom": 1104429056,
+    "memory_clean_inactive_credit": 268435456,
+    "memory_effective_headroom": 1372864512
+  },
+  "child_peak_rss_kib": 145492,
+  "self_peak_rss_kib": 120464,
+  "oom_events": "low 0\nhigh 0\nmax 282062\noom 6\noom_kill 2\noom_group_kill 0",
+  "oom_kill_after": 2
+}

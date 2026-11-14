@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "kind": "client-android-ko",
+  "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+  "bytes": 165128829,
+  "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
+  "published_commit": "3b2c73b51931bb7be031c37c9d55297505fb88e1",
+  "published_branch": "downloads/local-v0.3.31-client-android-ko-source-cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "complete_remote_SHA_verified": true,
+  "anonymous_prefix_verified": true,
+  "anonymous_full_HTTP200_verified": true,
+  "actual_attachment_filename": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+  "final_local_SHA_verified": true,
+  "all_visible_handles_closed_before_retirement": true,
+  "only_owned_derived_artifact_retired": true,
+  "publication_manifest_sha256": "7d687c8cd5786f5e915aed476f43d8432193b20223a7ff510bab43a68c2d55f6",
+  "independent_QA_sha256": "3cc02c548be45217f80d64665216cb5ace279bec0d457d0c5b790fcc806ce13c",
+  "producer_receipt_sha256": "cff4154d05d1190f0a79d1b38e4411f57dab4a1299a41ac80c2bd3701e104d37",
+  "provenance_sha256": "1bdc1df8e9c9930b24ce4f0a9a05f4d89bb9175421d7e2bdae676120ab655073",
+  "native_and_feature_retained": true,
+  "private_grant_mode": "0600",
+  "actual_device_execution_verified": false,
+  "resource_budget_after": {
+    "direct_headroom": 1353920512,
+    "root_free": 162537472,
+    "tmpfs_free": 8549920768,
+    "oom_kill": 2
+  }
+}

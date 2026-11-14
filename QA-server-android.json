@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "source_epoch": 1794639084,
+  "kind": "server-android",
+  "sha256": "303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc",
+  "bytes": 332386192,
+  "device_execution_verified": false,
+  "actual_review": {
+    "path": "/dev/shm/idoly-v0331-work/server-preparation/qa-results/android/independent-server-binary-review.json",
+    "bytes": 69118,
+    "sha256": "c67eb525c8a489a183026c4566c72ea7ef29735255309eeecf37fe2372dafe56"
+  },
+  "actual_payload_read_or_hashed_by_materializer": false
+}

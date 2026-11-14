@@ -1,0 +1,37 @@
+{
+  "schema": 1,
+  "status": "PASS_SERVER_AUXILIARIES_RETIRED",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "kind": "server-android",
+  "name": "IdolyPride-Local-Server-Android.apk",
+  "bytes": 332386192,
+  "sha256": "303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc",
+  "publication_commit": "f6212ab1b7b8c9112e041b88a2e19537aef0eb58",
+  "publication_receipt_sha256": "77e6bd11cca6bae10c00cfc327faae4d68de0ebfb998148f6e91cfdcf7ba1b8a",
+  "actual_QA_sha256": "c67eb525c8a489a183026c4566c72ea7ef29735255309eeecf37fe2372dafe56",
+  "translation_input": {
+    "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+    "bytes": 125709184,
+    "sha256": "22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec",
+    "embedded_member": "assets/bundledTranslations.zip",
+    "embedded_sha256": "22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec",
+    "whole_member_SHA_and_CRC_verified": true,
+    "retired": true
+  },
+  "protected_payload": {
+    "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+    "bytes": 191343014,
+    "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223",
+    "preserved": true,
+    "same_inode_and_content": true
+  },
+  "app_stage": null,
+  "only_new_task_owned_outputs": true,
+  "VM_user_data_originals_and_backups_untouched": true,
+  "budget": {
+    "direct_headroom": 1131147264,
+    "root_free": 162537472,
+    "tmpfs_free": 8145444864,
+    "oom_kill": 2
+  }
+}

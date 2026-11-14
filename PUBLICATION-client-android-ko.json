@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "branch": "downloads/local-v0.3.31-client-android-ko-source-cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "published": true,
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
+      "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
+      "bytes": 165128829,
+      "stage": "verified",
+      "complete_download_verified": true
+    }
+  ],
+  "commit": "3b2c73b51931bb7be031c37c9d55297505fb88e1",
+  "tree": "500d5c4ab0d81e68c4391080f7be965d9504de25"
+}

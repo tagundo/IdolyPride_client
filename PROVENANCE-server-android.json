@@ -1,0 +1,1825 @@
+{
+  "schema": 1,
+  "build_method": "cached manual aapt2/javac/D8; no Gradle, Go or downloads",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "epoch": 1794639084,
+  "version_name": "0.3.31",
+  "version_code": 48,
+  "baseline_sha256": "4b5783ec12e8aedda706224c75a1f332859bdc7bf6731c87916e39db2522148a",
+  "apk_sha256": "303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc",
+  "apk_bytes": 332386192,
+  "signer_sha256": "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51",
+  "signature_v2_only": true,
+  "aligned": true,
+  "payload": {
+    "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223",
+    "bytes": 191343014,
+    "tables": {
+      "Character": 56,
+      "CharacterActivityLevel": 60,
+      "Costume": 994,
+      "Hair": 1186,
+      "Card": 503,
+      "Area": 222,
+      "AreaGroup": 6,
+      "Quest": 6008,
+      "Setting": 1,
+      "Tutorial": 46,
+      "CardParameter": 780,
+      "CardRarity": 10,
+      "Accessory": 624,
+      "HierarchyDetailGrade": 15,
+      "HierarchyGrade": 7,
+      "Reward": 35091,
+      "Item": 1584,
+      "CardLevelRelease": 8,
+      "Skill": 2079,
+      "Music": 129,
+      "MusicChartPattern": 33174,
+      "Emblem": 1262,
+      "SkillEfficacy": 11750,
+      "SkillTrigger": 145,
+      "SkillTarget": 79,
+      "Stage": 93,
+      "ManagerLevel": 300,
+      "CardLevel": 230,
+      "Consumption": 708,
+      "Message": 1853,
+      "MessageGroup": 45,
+      "EventStory": 59,
+      "ExtraStoryPart": 17,
+      "ExtraStory": 69,
+      "Story": 3277,
+      "QuestPressure": 6,
+      "QuestAudienceAdvantage": 1000,
+      "ComboAdvantage": 7,
+      "QuestStaminaConsumption": 19,
+      "Mission": 7087,
+      "StoryPart": 10,
+      "PhotoActivity": 29,
+      "PhotoQuestMusic": 94,
+      "PhotoQuestStage": 17,
+      "PhotoExpression": 26,
+      "CompanyGrade": 55,
+      "CompanyTrustLevel": 50,
+      "CompanyEnjoyCharacterLevel": 60,
+      "CompanyEnjoyCharacterLevelSetting": 1200,
+      "PhotoPose": 146,
+      "PhotoPoseMotion": 1596,
+      "ExcursionPlace": 4,
+      "ExcursionPlaceSetting": 80,
+      "ExcursionGazeReaction": 420,
+      "HomeTalk": 559
+    },
+    "members": 555,
+    "media_master_overlay": {
+      "policy": "media-outfits-v3",
+      "version": "local-media-outfits-v1-60b6ce402f27c07fc7cad09d4f1984cff619c095f93279204818e1eaab804ed2",
+      "tables": [
+        "PhotoActivity",
+        "PhotoExpression",
+        "Costume",
+        "Hair",
+        "PhotoQuestMusic",
+        "PhotoQuestStage",
+        "EventStory",
+        "Setting"
+      ],
+      "costume_types": 19,
+      "original_pack_count": 202,
+      "replaced_pack_count": 8
+    },
+    "directory": {
+      "members": 555,
+      "central_directory_bytes": 73961
+    },
+    "prebuilt_catalogs": {
+      "schema": 1,
+      "policy": "precomputed-language-sort-v1",
+      "base_payload": {
+        "bytes": 84637208,
+        "sha256": "27522b394b021a4df002a4e34f20e89b5407be7b145aeecce45f5023b5227522"
+      },
+      "component_commit": "0462fc4672aacd8df42430fce910d0e072daa4b9",
+      "component_sources": {
+        "src/idoly_local/master_translation_build.py": "56287a499c25f524d2ad5b5187503fa23fb89ab706e45c27b59fafa126a15313",
+        "src/idoly_local/master_sort_build.py": "d3375426141dc9a636b72729467a4644b9b0cbafba1bd43b5b27aac389bf19b5",
+        "src/idoly_local/master_sort.py": "4e00ba2b6f5ee7dbd547747d3af7386d107b7f9b784d1fde2f7f73cd5e71427e",
+        "src/idoly_local/master_build.py": "9ae4b0d259f320458ef2a50ad54a193401fa8747524e7a57e1ae51dd4974e74d",
+        "src/idoly_local/media_master_build.py": "c5ccf938697ce5dadb135d7053c29495eaf03b57b0edc20db471158d49ffc794",
+        "src/idoly_local/media_outfit_policy.py": "4d530871be97b753ccb8aa282ff5364754333bbd68cee29cadbd0b93d2312f2c",
+        "src/idoly_local/language_settings.py": "b6ca20a555bc2910ea5f03232dfc03c9b99c818c851affd7a80e8bbd6023f341",
+        "src/idoly_local/media_profile.py": "06914e9ddff360009a42f7261bee5559e60ba817a70cd80ce02134cd15a50a39"
+      },
+      "catalog_inventory_sha256": "9949ac6008cf0708a7b56c50b892127c5d8cfdb4211a06800aff0e8f33196964",
+      "added_members": 262,
+      "sources": {
+        "ko": {
+          "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+          "revision": "cf8754daa404cf353d1235cebbeef9d0e0bd0a8d",
+          "license": "NOASSERTION",
+          "license_note": "No root LICENSE in this pinned upstream data repository; Hoshimi-localify module GPL-3.0 is separate."
+        },
+        "en": {
+          "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+          "revision": "aa0993d34843bd8fad503a84ee75392ec6058246",
+          "license": "NOASSERTION",
+          "license_note": "No root LICENSE file is present in this pinned sanitized data feed; HoshimiLocalify-en module is separately GPL-3.0."
+        }
+      },
+      "coverage": {
+        "ko-normal": {
+          "version": "local-language-ko-da12150e7e8eb2dd4af266f8eb605f668a99d73b8ac097a9603429a5f8e9c960",
+          "source_tables": 90,
+          "translated_tables": 89,
+          "changed_fields": 229844,
+          "unsupported_tables": [
+            "Tutorial"
+          ]
+        },
+        "ko-media": {
+          "version": "local-language-ko-1a6ece8dd5ea96baa6eb52d8969082038310335430169780a3379e8d80b99c89",
+          "source_tables": 90,
+          "translated_tables": 89,
+          "changed_fields": 229845,
+          "unsupported_tables": [
+            "Tutorial"
+          ]
+        },
+        "en-normal": {
+          "version": "local-language-en-b3d46cb867339fda7bb14e9d7ffc07520d266121bd5d67cf50a0e8d779f420eb",
+          "source_tables": 90,
+          "translated_tables": 89,
+          "changed_fields": 232389,
+          "unsupported_tables": [
+            "Tutorial"
+          ]
+        },
+        "en-media": {
+          "version": "local-language-en-4036548401a03ace4b6dc7dbf8e937331dda535cac93af2952871d60b2cc76f4",
+          "source_tables": 90,
+          "translated_tables": 89,
+          "changed_fields": 232390,
+          "unsupported_tables": [
+            "Tutorial"
+          ]
+        }
+      },
+      "sorts": {
+        "sort-ja-normal": {
+          "packs": 9,
+          "roundtrip_verified": true
+        },
+        "sort-ja-media": {
+          "packs": 9,
+          "roundtrip_verified": true
+        },
+        "sort-ko-normal": {
+          "packs": 9,
+          "roundtrip_verified": true
+        },
+        "sort-ko-media": {
+          "packs": 9,
+          "roundtrip_verified": true
+        },
+        "sort-en-normal": {
+          "packs": 9,
+          "roundtrip_verified": true
+        },
+        "sort-en-media": {
+          "packs": 9,
+          "roundtrip_verified": true
+        }
+      },
+      "ios_catalog_identity": {
+        "schema": 1,
+        "application_id": 212,
+        "application_version": 105051,
+        "revision": 1159,
+        "manifest_sha256": "b431d531ef393ff1807229bbee4bbe75d4c9821007329f91e4822527d9844e9b"
+      },
+      "device_verified": false,
+      "scope": [
+        "Master text and precomputed per-table sort variants",
+        "Missing/unsupported translation falls back to Japanese",
+        "ADV dialogue, voice, subtitles and asset-localized UI are outside this master catalog",
+        "Event-story gallery visibility restored; ordinary catalogs remain byte-identical",
+        "Gallery-only audience minimum covers Mana/collaborator fan-derived fallback; original Setting and ordinary catalogs byte-identical"
+      ]
+    }
+  },
+  "translations": {
+    "included": true,
+    "schema": 1,
+    "platform": "android",
+    "version": "0.3.31",
+    "sha256": "22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec",
+    "bytes": 125709184,
+    "manifest_sha256": "4022101dc6731396c9c48a4ab09c4ba490db98d8ae53971ab1b8a39471393c5c",
+    "files": 6,
+    "coverage": {
+      "en": {
+        "adv_resources": 3492,
+        "missing": 1,
+        "translated": 3093,
+        "unchanged_original": 398
+      },
+      "ko": {
+        "adv_resources": 3492,
+        "missing": 401,
+        "translated": 3091,
+        "unchanged_original": 0
+      }
+    },
+    "sources": {
+      "en": {
+        "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+        "data_terms": "NOASSERTION",
+        "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+        "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+      },
+      "ko": {
+        "data_terms": "NOASSERTION",
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+      }
+    },
+    "image_coverage": {
+      "ko": {
+        "candidates": 667,
+        "missing": 0,
+        "translated": 667,
+        "unchanged_original": 0
+      }
+    },
+    "image_sources": {
+      "ko": {
+        "input_catalog_sha256": "2bf957f0f19b0ccd869edfef2e413d6fb622bbd801473574a2b4607941799513",
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "cf8754daa404cf353d1235cebbeef9d0e0bd0a8d"
+      }
+    }
+  },
+  "chaquopy_jar_sha256": "04eed6260e65634ac1c2031d2ca8fdf90d58da226b2f070132a66c6e3af9e39b",
+  "client_distribution": "separate_apk_only",
+  "debuggable": false,
+  "generated_r_sha256": "2ceafbe010e7ce674376dd66ecede09a4ef7a1448caeea904f56fc8a56669ee2",
+  "build_config_sha256": "177ff295439f4837d44f814252005cc90ad092625f82022f6c869e5362abcd01",
+  "public_source_sha256": {
+    "android-server/app/build.gradle.kts": "46be96663a76ba961bfe21921626f17a066b045f3a6dc20aca3085dc32b18ba1",
+    "android-server/app/src/main/AndroidManifest.xml": "4cde1a33445f25fec576102ff77e9f012ee2b9bcbf43fd8129e6ce14992116b7",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/CryptoBridge.java": "2243b99c5aac7dd303e1ce920d6e88aa8a4f96b467668dc7fcadef7793531b4a",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/LibrarySettings.java": "369aac5c3a27692779f384e1850faba9d1d1a111f432f8c7fd992bfea8ddcfbf",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java": "e2c396d9ff1cd106ee3a470a4b5ef2f0937b07a28368a1cc43378b24b1740a2c",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/PlaybackSettings.java": "3e657edbd67bbd2776af996651f00b463308e3efbef695327dae56919b793bdd",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/PlaybackStorage.java": "1d86eccfec291e303ad6f2220bdb1d3271dd9814529c5c58ed9576cd0b890530",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/PresentationSettings.java": "f53eec13feb27c71e615110fa8b2b3557f198d5c6d6579b3f537c5c57ad285e8",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/RenderingExperiment.java": "045d34d60d0c18656375a3831f87714403dd3357701ce143bb0e2c4bf30a086a",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ResourceTransfers.java": "5b451fbda4b9dcebf0bbb2dfb6066c81c2a7ef670afe3788c60d85b6fb8d95d0",
+    "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ServerService.java": "f37a5ebd50636c502c2c59ad32f6ee570d33efc300246ca12dc32084806aa195",
+    "android-server/app/src/main/res/drawable/ic_server.xml": "132574a6ec7208f5dc88ae6f748c3f3d4f4c357279431dd386d2b4f49a9f776e",
+    "android-server/app/src/main/res/values/strings.xml": "8ae6cfcf54cdc632ecab670382ede764b5bf86f937d4332f5bf14a453aa0ce62"
+  },
+  "builder_source_sha256": {
+    "tools/build_android_server_manual.py": "be90c8c741f9afc6ae340ebfd13bae3006287beb2d774134848c46ef253cf74b",
+    "tools/repack_android_server_python.py": "a64ba21caa063889a25f0118f04c3409f57b34e480ecd3c06eb6dff7563d16ef",
+    "tools/sign_apk_v2_in_place.py": "95e5bfca6b4a99fc04373c034939d45005d15247a7b3a7ddbd506f016aec2a18",
+    "tools/server_payload_v0331.json": "1543b261fb3a3f4da401a1b0bfb9e7f7b3d1e52ef2e74187535edc3bc696632f",
+    "src/idoly_local/media_master_build.py": "c5ccf938697ce5dadb135d7053c29495eaf03b57b0edc20db471158d49ffc794",
+    "src/idoly_local/media_outfit_policy.py": "4d530871be97b753ccb8aa282ff5364754333bbd68cee29cadbd0b93d2312f2c",
+    "src/idoly_local/bundled_translations.py": "726c8e8e9e393727255778ce3412ca3084b9ca939f7de826192bc73016566fa3"
+  },
+  "modules": [
+    {
+      "source": "android-server/app/src/main/python/android_server_runtime.py",
+      "source_sha256": "0309899dab9dbf0eb757d1e9cecee65e41f86f165c331ddf176a05dcd4a80600",
+      "member": "android_server_runtime.pyc",
+      "pyc_sha256": "e1e0b7e76334805d8d735364d8994b41930f8e2c9a166a38e6670f1d3bb3d5b1",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/__init__.py",
+      "source_sha256": "6b16343f1ac84d6ebffe256ca656b5cdd05f7004c8e0c264d3c01f93b22453e5",
+      "member": "idoly_local/__init__.pyc",
+      "pyc_sha256": "7bec5cc13855682e91b3ce0df1a6712033a8849afe4bc448a9df8f7056ea0246",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/app_runtime.py",
+      "source_sha256": "92abb06c356ed03bd20b151238bc148b7c24f6fc95e75dd983a660cf728a14f7",
+      "member": "idoly_local/app_runtime.pyc",
+      "pyc_sha256": "2bd82777d068f4551b7ccfc91aacda8e9b4ba6106ae57ad9cbb82aa2040b2bc2",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/appearance.py",
+      "source_sha256": "3b049bc358606985a93fc524bdbfa9e9b466c96f24773ab872836578a5dd50f8",
+      "member": "idoly_local/appearance.pyc",
+      "pyc_sha256": "07f9b7a45bc5b9c72b71be7884cb33c534bdf11ec4839925d94412fd0db06716",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/application.py",
+      "source_sha256": "bbb2959567c135848667610dca6648283642fd6c3ba59dfbd1f25957ad212a0e",
+      "member": "idoly_local/application.pyc",
+      "pyc_sha256": "2cdec048d22a11da6855663bafce044fcaf32595b9fa814fb5eb1da6f24bb2b1",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/assets.py",
+      "source_sha256": "b529e42420f589cd995128e24e1f2abba711c2ba15cb8d6724f1aae2c9f5bde3",
+      "member": "idoly_local/assets.pyc",
+      "pyc_sha256": "73b3150620decb04e6b955439e0e3e96742a1380ea89ff88f3f1f64adc40b3ed",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/bundled_translations.py",
+      "source_sha256": "726c8e8e9e393727255778ce3412ca3084b9ca939f7de826192bc73016566fa3",
+      "member": "idoly_local/bundled_translations.pyc",
+      "pyc_sha256": "57fc69b565b42d84802e2ed891d408b65e416ac43e3cea0d1535664582c0194b",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/card_level_missions.py",
+      "source_sha256": "8a32849ce89f4194645e331b0696cba52c7b30b93b44dbe2dc9398c4a5e6ba0f",
+      "member": "idoly_local/card_level_missions.pyc",
+      "pyc_sha256": "accacdffbe1791081916c437cc83706cf289d134c85904993338ac5517a3962d",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/card_progression.py",
+      "source_sha256": "d0a9df31ac7bcd72066f29c1ada727a6c04553dd579a13ea384b4e10023c9e34",
+      "member": "idoly_local/card_progression.pyc",
+      "pyc_sha256": "b581c57186b1621710aff26fcb4a9a32d043a45020e46024c13930b55d0eacb8",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/catalog.py",
+      "source_sha256": "222e2e6ce85a82c42eeef34c9e7e8b63115ddc8ca4e6f5e63269affa9e8cd7a8",
+      "member": "idoly_local/catalog.pyc",
+      "pyc_sha256": "d46661b21985040464f6bb4163ba894038c584ddbe109faf508517f8b063a85b",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/codec.py",
+      "source_sha256": "d47e869ad2cce937ce0b1d6e219022be29ff7da2216e0688d80bb3e9fade2ec0",
+      "member": "idoly_local/codec.pyc",
+      "pyc_sha256": "63163261d9e43b57868c249a497300ab1d696a567d82e072d7c02da9551b8c36",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/company.py",
+      "source_sha256": "822d8f29403e7bd6ff529d9e866bb36a0a056448ce1b090c33846ed5b748c656",
+      "member": "idoly_local/company.pyc",
+      "pyc_sha256": "1328057b7454749595185865c2f873d8d39277f85a4330103b0e0ce84d5d53ea",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/diagnostics.py",
+      "source_sha256": "fe53c3980144541a550dfd01a2bc1ca4e170ac333b776fd6989850f9ca93882f",
+      "member": "idoly_local/diagnostics.pyc",
+      "pyc_sha256": "2bde460e37648b76cfc9f48f6c97c0ea888cb1bc3b2a48a9bd7eb73a898f46d4",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/dream.py",
+      "source_sha256": "4968bedffcbfdce9b3477c48aeff7f2804afdedf5601811e1a3b0a03fef1492a",
+      "member": "idoly_local/dream.pyc",
+      "pyc_sha256": "fed5027494248492d603e3c5ee555d9dff47e89098e2eddb47dfe309df9956ac",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/dream_capture.py",
+      "source_sha256": "c555ed5efb34e2ceddc830bfecb6cfc523d54f7f4e5991fbc51c90aa5f198b49",
+      "member": "idoly_local/dream_capture.pyc",
+      "pyc_sha256": "7becc00f635981f54e446168e2276cc3687e8b295b3620121200e19ab312d619",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/excursion.py",
+      "source_sha256": "4e79b0251a961a2f8b311ce70fdff84f02a34a06e80d646fc0324d90bb2a0285",
+      "member": "idoly_local/excursion.pyc",
+      "pyc_sha256": "914f44317aa69c1b84024a05f5d8a8d944af5a1c82707540e38ef1fdbbfba73a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/gameplay.py",
+      "source_sha256": "4e6013e88b599433d8b0558c482aa3fccbaa1d9a81847a7525fb9598fcdf8bc1",
+      "member": "idoly_local/gameplay.pyc",
+      "pyc_sha256": "402e2283d637fc17652b88ea5e9e4db5257578f6cb52369f9870790cbe52fd5a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/h2_server.py",
+      "source_sha256": "5d9cb2f36771ba9ffbf8dcd842b5475b9916d5a914c39a08f9a7e6a12e603291",
+      "member": "idoly_local/h2_server.pyc",
+      "pyc_sha256": "d8eeff52b81a7dbedc7e3c450b45781f485e1b59fc6e0cb76d11b888650d3c9e",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/home_talk.py",
+      "source_sha256": "5576aa22670ea55aca417dfcd30bc558ac451675b596018997002217a895c56f",
+      "member": "idoly_local/home_talk.pyc",
+      "pyc_sha256": "383d62a89a4ea23c886f9846631527a7b8e42406f07f3e2a55ede9fea67db026",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/initial_inventory.py",
+      "source_sha256": "4c9f16403a98c524aadc9ee62549513c90f53cd696a1f9656e38e03d9b69e4b6",
+      "member": "idoly_local/initial_inventory.pyc",
+      "pyc_sha256": "7617df15008ef4a763f58c28e3b0dd641fc5e4d552b2c2c5a981ecfe16b9a42d",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/language_settings.py",
+      "source_sha256": "b6ca20a555bc2910ea5f03232dfc03c9b99c818c851affd7a80e8bbd6023f341",
+      "member": "idoly_local/language_settings.pyc",
+      "pyc_sha256": "b906f71aa8ffb67b32bc8b6c9368507ba406d390cb2072ab675dd3bb34314370",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/lessons.py",
+      "source_sha256": "3f004499fafba232af726205ab454a1ebcbd400dd6fa5e4446b0ff551b7d001a",
+      "member": "idoly_local/lessons.pyc",
+      "pyc_sha256": "ab74d21478ad9149de9f03e14a7f18c28238ad4790ea576aaaa5746f80fee3b0",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/live_accessories.py",
+      "source_sha256": "2cea59894562f1c9891a728d1991ff347739dc35dc0724d7d6732e6e9b1e1304",
+      "member": "idoly_local/live_accessories.pyc",
+      "pyc_sha256": "78e45bf73cecd6b125b180db40bda023ef234734e4dcf3f8aadb96d9c2fb577a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/live_assets.py",
+      "source_sha256": "9d3265c2443ac1826df3ea8ce554c0e5fad80489e523a64d88983273c1a6246e",
+      "member": "idoly_local/live_assets.pyc",
+      "pyc_sha256": "40ad4ef0f7b7801689025ae4ae83b0fb5a10578fa6813ad0e8af35fb185546ef",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/live_engine.py",
+      "source_sha256": "95bb3cec45535f5b3d9e59c835f0a016d52858047e23b9d3e2e24f43fe7a866d",
+      "member": "idoly_local/live_engine.pyc",
+      "pyc_sha256": "25ea1d23458aa27402daca6ca7be086018554ed9da38c72c48370fb50e1b07ed",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/live_input.py",
+      "source_sha256": "5b00b4867a9a62fe5761550c6ccb572d4e0eef0abfca39b8136ef0f4482633cd",
+      "member": "idoly_local/live_input.pyc",
+      "pyc_sha256": "1fd0e2e9d3a570fc45a9b488a0d14492edf5845a3caf40c797473dd3571c8928",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/live_rejection_diagnostics.py",
+      "source_sha256": "efb48a7093104cc00a58753def989d28eff226dd6d09cd53d972041f37265f90",
+      "member": "idoly_local/live_rejection_diagnostics.pyc",
+      "pyc_sha256": "a6390c94be1bb61b56586ccdd7787a969b8ac5e498b8a55bbbaafa51c6e72e0f",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/main_live.py",
+      "source_sha256": "85f836bfd4623921a986cbb23f65bbd8dcc4e1e078622e82fba0bea6953722a0",
+      "member": "idoly_local/main_live.pyc",
+      "pyc_sha256": "fac26c41d2e0976f25ea0b43de5576715eb08a13aa574eb5bb777cfa13a07ce1",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/master_sort.py",
+      "source_sha256": "4e00ba2b6f5ee7dbd547747d3af7386d107b7f9b784d1fde2f7f73cd5e71427e",
+      "member": "idoly_local/master_sort.pyc",
+      "pyc_sha256": "751abc47b73b3fe01c189b6fb8fe45db317e506515899fe369e24292a78d112e",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_access.py",
+      "source_sha256": "b3263a240fb19165321f99e67e45cff48882338769b1e7431ad1d8b132239dff",
+      "member": "idoly_local/media_access.pyc",
+      "pyc_sha256": "d5ff1afffe41063bcf40da132601a8c11948c5b32b2a9aa882c21734d8979a7e",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_outfit_policy.py",
+      "source_sha256": "4d530871be97b753ccb8aa282ff5364754333bbd68cee29cadbd0b93d2312f2c",
+      "member": "idoly_local/media_outfit_policy.pyc",
+      "pyc_sha256": "7e589705aaaba766914cd56f15961e3a114c292104b3476528ef41969a933869",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_panorama.py",
+      "source_sha256": "02695bb35fb91f9bdecbd07b1fc3f866b3e99e0c7f5c6d1ba59386dd92aab7b6",
+      "member": "idoly_local/media_panorama.pyc",
+      "pyc_sha256": "93fe0c17a10dcd4f134a174a10a838e1de8ee4e9b8720dd9d589bc4ece1a1314",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_profile.py",
+      "source_sha256": "06914e9ddff360009a42f7261bee5559e60ba817a70cd80ce02134cd15a50a39",
+      "member": "idoly_local/media_profile.pyc",
+      "pyc_sha256": "677d2961f8e902339b2d4f3ab1c6a48c29c31eee8281f89cddc61b22777563c1",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_runtime.py",
+      "source_sha256": "41bade0b8f356e434afc6caccb135ce3a077b7a16400ca49e9274ae2933ea537",
+      "member": "idoly_local/media_runtime.pyc",
+      "pyc_sha256": "14ee08b5f6b40e33546981b689ad161361a6fb566bcba4dc32f3ac85f94d1f81",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_scenes.py",
+      "source_sha256": "11b89230222ace0aa939d32e323d4f3e5b86f2569c5c7f09c7396c699aedefc5",
+      "member": "idoly_local/media_scenes.pyc",
+      "pyc_sha256": "ecb2572e31d138b7549d143c06055c6034948d928ccb2b6731d541aebe32de59",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_settings.py",
+      "source_sha256": "986675598172cdd02f1d9fa17cebd06177cfaf3b703b5b3902bd5c31c6619134",
+      "member": "idoly_local/media_settings.pyc",
+      "pyc_sha256": "f6aaae426444a58dab88ca56f27a2c88bf60bdaa19a41dc4cd01c7110c37d739",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/media_stories.py",
+      "source_sha256": "371f681c39da72a56afe5b8e51a81c7ae7efb6de4c83315164ed79c032da6629",
+      "member": "idoly_local/media_stories.pyc",
+      "pyc_sha256": "835afa275fd7915b075dea025f3959d7e9f05d883f6c65dd99b2417427f4e3a8",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/octo_cache.py",
+      "source_sha256": "7bde0250c75a513ce8aa7f2a9277c595563d6d3f977fdc10237ab8b13bbe9b6a",
+      "member": "idoly_local/octo_cache.pyc",
+      "pyc_sha256": "963bb519fed98ac59606fc78a26c7029a9fbb47c7b71d044611d514ac7c42b25",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/octo_http.py",
+      "source_sha256": "b6eb46f24d40ebdff1982bc81f434d0af18b871403aea45f0edad8d69e9adbfa",
+      "member": "idoly_local/octo_http.pyc",
+      "pyc_sha256": "a9ee21664bb56e1af2f07d827193c8944126848a5b1bdefebd75fb8ad4c66640",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/octo_manifest.py",
+      "source_sha256": "2292e8d5b606c376ddfdddb7f32cecf89ba5c331f846bb04f3a16f0f423f0531",
+      "member": "idoly_local/octo_manifest.pyc",
+      "pyc_sha256": "bb8794d5a01bf2e0e4b705fe44e187af3cbdd21d4fc6db5deeab48bcb1fa13a3",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/octo_runtime.py",
+      "source_sha256": "0b06c4bcfb997dc78af3497f92ecfa6bec6445a20af818372bb745334e37e4ec",
+      "member": "idoly_local/octo_runtime.pyc",
+      "pyc_sha256": "e641361bc413b305d99b2c8d73c2f145843cc056e1b58dd99bed54b6cc49031e",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/panorama_rules.py",
+      "source_sha256": "686f80e221bc6a43d2e4f58092211e68fd1b9cabb59378569e3711453348e64a",
+      "member": "idoly_local/panorama_rules.pyc",
+      "pyc_sha256": "6414d95be08905fa7cb9d4b37709c714744a4225b5131fda84768e4184e8963c",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/photo_names.py",
+      "source_sha256": "4f70245562531f59d5c638a1f1e783c93ae6e007fe39f441e8cdf9665ed69fc0",
+      "member": "idoly_local/photo_names.pyc",
+      "pyc_sha256": "cc36c521691886db6e76bb3a7e54137a539abec3d37723a4be9f1966995cc052",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/photo_shooting.py",
+      "source_sha256": "0efa5fb130a4ef4df6e4117d34dd04d43369a2b68c8403d1fe5bd6661b14a7fa",
+      "member": "idoly_local/photo_shooting.pyc",
+      "pyc_sha256": "b871b5f59d6fcb401c5bc0cd39595528bfb7ef200100ceb1ecebf1423863a611",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/playback.py",
+      "source_sha256": "019c578294e1cce976922076738fe27349e42b42b26b246615b079fa6d25e6ee",
+      "member": "idoly_local/playback.pyc",
+      "pyc_sha256": "df0fd9fe02273fc9cc6cde6d7fd0fe89bda74766f693961d3ecd79471c94a199",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/presentation.py",
+      "source_sha256": "fae6ba11f0960c0492918850cc35c8ff5710ff30fa8043279385bfc05b4f2771",
+      "member": "idoly_local/presentation.pyc",
+      "pyc_sha256": "3711477b36ea93cfcd3f43ffd8ac7cab201269c7454b16d758f8c1ee0b3b3c9a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/profile_favorites.py",
+      "source_sha256": "27b530dd83f61b2df08a2dd15d4d82541c245377f8533795f8fcc9a4708cde69",
+      "member": "idoly_local/profile_favorites.pyc",
+      "pyc_sha256": "203b5a582839ecffe72c6ed7f368a13031c434bfe885c3439d8034788a59e8e1",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/profile_layout.py",
+      "source_sha256": "63195f6632521d01bd5321ce6b6945065e4b97235fae73e2df41885b0060b0b3",
+      "member": "idoly_local/profile_layout.pyc",
+      "pyc_sha256": "ae9e075f258da7cc263da050c268cd6a56fdd0d587a89d6cddc08c448c5de90e",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/profile_messages.py",
+      "source_sha256": "6e8ebd56365066b6126e26e94d6af8e201572b87d553ddabc2d3599ff76be951",
+      "member": "idoly_local/profile_messages.pyc",
+      "pyc_sha256": "974864086e00abe6cf3c50d546ca9f588b196c4ecd34e62c16953a881afc26c7",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/profile_names.py",
+      "source_sha256": "672bafa73be3c2ca6a2635a5910f2769d56df7a08b9194181b0ac6ebe8435171",
+      "member": "idoly_local/profile_names.pyc",
+      "pyc_sha256": "0dcb4c617173f30b83109fe5f4f23245dbd9ec963c03b4558105906cf74e8a6e",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/profile_top.py",
+      "source_sha256": "4952714d424e653c06b659e064556fedb5b742d8b9c7ea37f9461c466c7285dd",
+      "member": "idoly_local/profile_top.pyc",
+      "pyc_sha256": "fbd994c7b6e10ffad7d4844332c939317be103a3ac4dddc715c6adfde3c99893",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/pvp.py",
+      "source_sha256": "fb446a802c3056e19dd6bb6883c98731e1949edc9272985aaf1258850dc74d38",
+      "member": "idoly_local/pvp.pyc",
+      "pyc_sha256": "d890928993e0f54fa7adf71c93be91b6b7cefc3bad4cd3e2f9b7907eded2de1a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/quest.py",
+      "source_sha256": "b1ce050de6648b56d539a32fdef75613801fe06037fa77874a9c3ed9837d5636",
+      "member": "idoly_local/quest.pyc",
+      "pyc_sha256": "3bc4731747d08617fd5ab8df48d4419604f136875980e2457c3c393a24aa8443",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/render_probe.py",
+      "source_sha256": "79a3865d2ccb70adcd6a4097a663d375fede763e4e094d6cf9f0bcc8a53d0a97",
+      "member": "idoly_local/render_probe.pyc",
+      "pyc_sha256": "6c59b91bc7aeac7736577710d6c04c8b01c6726f4882edc572aeebe446c98824",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/resource_archive.py",
+      "source_sha256": "b3390935d8a071273b769cc42115ac3263e5ffc62247e974b47e5bc2f9b33cbe",
+      "member": "idoly_local/resource_archive.pyc",
+      "pyc_sha256": "51872225a514e7070199844ea836ca38bafab8bf21a6e7f8ed6ce39c777b4536",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/resource_library.py",
+      "source_sha256": "b99b097a0a0cbc7ca85ff56ec776553633b08413a3bc59552a107d3fdee7fb82",
+      "member": "idoly_local/resource_library.pyc",
+      "pyc_sha256": "37284fb6a29e8d813c6d661a4a6c825bf0db153655629986ef5f429a2ac422c0",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/resource_routes.py",
+      "source_sha256": "153f4833ce93795aaddbbc0a3fde3115366ad7b9d0129b81250b208690c87071",
+      "member": "idoly_local/resource_routes.pyc",
+      "pyc_sha256": "8004ec2f4777e1c706b0a5b03173b112fb424d3d5a707e9d78032c8d0257cd53",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/resource_translation.py",
+      "source_sha256": "ce577c02ce701a2c383aee57e2a27a2686b9718ddfbc70bd41bf61181094a52e",
+      "member": "idoly_local/resource_translation.pyc",
+      "pyc_sha256": "8287841edc7cf17c056df5a20697e577d6919b6e85256bcb7da16eaaabf348df",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/resource_translation_runtime.py",
+      "source_sha256": "8153d442fc20b23d864100b71c099c54460e0de5841b7028f5fbf5a66c1b065f",
+      "member": "idoly_local/resource_translation_runtime.pyc",
+      "pyc_sha256": "e21af916567daed8986e1b1bb2cdc2077b62431682cb78f4205fbe3eb59d2b97",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/rpc.py",
+      "source_sha256": "533cee4b1b46b6f5e6a0cc2447eca9bae1b19be1c4f98846b8a8009962d99861",
+      "member": "idoly_local/rpc.pyc",
+      "pyc_sha256": "13c85f86c5c3f7939a49463a46a374480863e391650a0023e61d5113eb0ae76d",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/schema.py",
+      "source_sha256": "aba598dbc17ee70b4704b68ad6115b5fde4bd5e6523559c724e562b4bcfbdc56",
+      "member": "idoly_local/schema.pyc",
+      "pyc_sha256": "c2e6f5a1e0c24742d597d4191189d802a4d53237152e98b1cb814b2d1f03fdfb",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/social.py",
+      "source_sha256": "3f4f75f8415eed86aaad78aef2242ef0fb2b7340c81d693f5c0974fad6fcd198",
+      "member": "idoly_local/social.pyc",
+      "pyc_sha256": "44f214728a7801db62103c793993c173375dcb65d692f6b110744556053067d6",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/state.py",
+      "source_sha256": "74e275cee4ee0be6f4f1d577ed896c7f86a6fe731cacc1f995678b9bfe0c2646",
+      "member": "idoly_local/state.pyc",
+      "pyc_sha256": "c81d908634a1c7e4934b32e85a2f8404e66e3073b4b9c807f2cf48c29500a08a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/story_catalog.py",
+      "source_sha256": "847829199b5977d0e87830460ae3a57aea4d96840532b8c7d17383fe16bd2773",
+      "member": "idoly_local/story_catalog.pyc",
+      "pyc_sha256": "adcf815f3eabdbc16012b929d840fee418034870a1803a9085dbe2a977de2133",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/story_read_rules.py",
+      "source_sha256": "691f46e5f0ad77885062d2a3c266d1e7180623cdb59fbd78b347875d8830cd06",
+      "member": "idoly_local/story_read_rules.pyc",
+      "pyc_sha256": "d5dcc5604128e1c8b11ecc42b19640c3a108fb32aed125dff911aaaa31750110",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/story_reads.py",
+      "source_sha256": "26b5b9f236cffd6ed6f6e0a93df455150df625b62f8d32c5e9b9e651a8ccbf29",
+      "member": "idoly_local/story_reads.pyc",
+      "pyc_sha256": "36efd0ae401d9ee61ead726d58cd4882eafc80fa83e9a7edfef7413e8c53593a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/tutorial_messages.py",
+      "source_sha256": "69eb924486dd49713744708ba68ccb0a4622788440a43bf7e658edff28807a41",
+      "member": "idoly_local/tutorial_messages.pyc",
+      "pyc_sha256": "5e826662008dda570c1ce30850d55195abf6dd195bfc6bdbafc2d1ce2a0f1721",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/tutorial_progression.py",
+      "source_sha256": "8a161d0b6d40d86b0497270275bbbeea594dbf55285beb48032de221aea7dfd7",
+      "member": "idoly_local/tutorial_progression.pyc",
+      "pyc_sha256": "34c7251340d313b0476bd73e31505208880d5dfcfbf0f60717cf4f547b6faaea",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/tutorial_replay.py",
+      "source_sha256": "0df1a8b791e8680c99be96d42995179d7421bbdcdcc751a7da3d707fa9ecb0a6",
+      "member": "idoly_local/tutorial_replay.pyc",
+      "pyc_sha256": "a00b072299ae2d5b43a99f1479e42bb8d4d4e6a38dcbaa5068c0f1bc622e675a",
+      "code_object_matches_source": true
+    },
+    {
+      "source": "src/idoly_local/wardrobe_diagnostics.py",
+      "source_sha256": "5b1a9fe981a86978148634243b344a9f9ea9c621aacf14dabca551f44f797ce9",
+      "member": "idoly_local/wardrobe_diagnostics.pyc",
+      "pyc_sha256": "cce7854500dc28864ee778a8ce64e62558a1afd6273f5be6f7c4d591e8186003",
+      "code_object_matches_source": true
+    }
+  ],
+  "app_imy_sha1": "9521c11c7c74604b442a190c306ffaa634b3045a",
+  "audit": {
+    "changed_apk_members": [
+      "AndroidManifest.xml",
+      "assets/ServerData.zip",
+      "assets/chaquopy/app.imy",
+      "assets/chaquopy/build.json",
+      "classes2.dex",
+      "res/drawable/ic_server.xml",
+      "resources.arsc"
+    ],
+    "added_apk_members": [
+      "assets/bundledTranslations.zip"
+    ],
+    "removed_apk_members": [
+      "classes3.dex"
+    ],
+    "own_dex_classes": [
+      "Lgame/qualiarts/idolypride/localserver/BuildConfig;",
+      "Lgame/qualiarts/idolypride/localserver/CryptoBridge;",
+      "Lgame/qualiarts/idolypride/localserver/LibrarySettings$Loaded;",
+      "Lgame/qualiarts/idolypride/localserver/LibrarySettings$Reader;",
+      "Lgame/qualiarts/idolypride/localserver/LibrarySettings;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda0;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda10;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda11;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda12;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda13;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda14;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda15;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda16;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda17;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda18;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda19;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda1;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda20;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda2;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda3;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda4;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda5;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda6;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda7;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda8;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$$ExternalSyntheticLambda9;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$1;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$2;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$3;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$4;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$5;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity$6;",
+      "Lgame/qualiarts/idolypride/localserver/MainActivity;",
+      "Lgame/qualiarts/idolypride/localserver/PlaybackSettings$Reader;",
+      "Lgame/qualiarts/idolypride/localserver/PlaybackSettings;",
+      "Lgame/qualiarts/idolypride/localserver/PlaybackStorage$Loaded;",
+      "Lgame/qualiarts/idolypride/localserver/PlaybackStorage;",
+      "Lgame/qualiarts/idolypride/localserver/PresentationSettings$Loaded;",
+      "Lgame/qualiarts/idolypride/localserver/PresentationSettings;",
+      "Lgame/qualiarts/idolypride/localserver/R$array;",
+      "Lgame/qualiarts/idolypride/localserver/R$drawable;",
+      "Lgame/qualiarts/idolypride/localserver/R$string;",
+      "Lgame/qualiarts/idolypride/localserver/R;",
+      "Lgame/qualiarts/idolypride/localserver/RenderingExperiment;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$$ExternalSyntheticLambda0;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$$ExternalSyntheticLambda1;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$$ExternalSyntheticLambda2;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$$ExternalSyntheticLambda3;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$$ExternalSyntheticLambda4;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$$ExternalSyntheticLambda5;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$Failure;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$Snapshot;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$Tail-IA;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$Tail;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers$Work;",
+      "Lgame/qualiarts/idolypride/localserver/ResourceTransfers;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda0;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda10;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda1;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda2;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda3;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda4;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda5;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda6;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda7;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda8;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$$ExternalSyntheticLambda9;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$LogCallback;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService$Observer;",
+      "Lgame/qualiarts/idolypride/localserver/ServerService;"
+    ],
+    "client_installer_code_absent": true,
+    "embedded_client_apks_absent": true,
+    "dependency_dex_classes": [
+      "Lcom/chaquo/python/DynamicProxy;",
+      "Lcom/chaquo/python/GenericPlatform;",
+      "Lcom/chaquo/python/Kwarg;",
+      "Lcom/chaquo/python/MethodCache;",
+      "Lcom/chaquo/python/PyCtorMarker;",
+      "Lcom/chaquo/python/PyException;",
+      "Lcom/chaquo/python/PyInvocationHandler;",
+      "Lcom/chaquo/python/PyIterator;",
+      "Lcom/chaquo/python/PyList;",
+      "Lcom/chaquo/python/PyMap$1$1$1;",
+      "Lcom/chaquo/python/PyMap$1$1;",
+      "Lcom/chaquo/python/PyMap$1;",
+      "Lcom/chaquo/python/PyMap;",
+      "Lcom/chaquo/python/PyObject$1$1$1;",
+      "Lcom/chaquo/python/PyObject$1$1;",
+      "Lcom/chaquo/python/PyObject$1;",
+      "Lcom/chaquo/python/PyObject;",
+      "Lcom/chaquo/python/PyProxy;",
+      "Lcom/chaquo/python/PySet$1;",
+      "Lcom/chaquo/python/PySet;",
+      "Lcom/chaquo/python/Python$Platform;",
+      "Lcom/chaquo/python/Python;",
+      "Lcom/chaquo/python/Reflector;",
+      "Lcom/chaquo/python/StaticProxy;",
+      "Lcom/chaquo/python/android/AndroidPlatform;",
+      "Lcom/chaquo/python/android/PyApplication;",
+      "Lcom/chaquo/python/internal/Common;"
+    ],
+    "native_elf_load_alignments": {
+      "lib/arm64-v8a/libsqlite3_python.so": [
+        16384,
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libssl_chaquopy.so": [
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libidoly_live.so": [
+        16384,
+        16384,
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libchaquopy_java.so": [
+        16384,
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libpython3.13.so": [
+        16384,
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libcrypto_chaquopy.so": [
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libcrypto_python.so": [
+        16384,
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libssl_python.so": [
+        16384,
+        16384,
+        16384
+      ],
+      "lib/arm64-v8a/libsqlite3_chaquopy.so": [
+        16384,
+        16384
+      ]
+    },
+    "all_other_member_bytes_and_metadata_preserved": true
+  },
+  "tool_sha256": {
+    "/workspace/.setup/android-sdk/platforms/android-34/android.jar": "6cea1df3efb77103ac3e2beb9bf4718964b0e0869ab16d39d29d5cbae1c147ad",
+    "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar": "d43c8a94c9b1f1da1a7cc49c32b81e8cee1708b37ee8b530a81a0688222b42c0",
+    "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar": "eefdd6aed9db9fb849e4c98a50d8741e19d1b674ba6547220bcb9c3ed152123a",
+    "/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64/bin/java": "1a7e0b17c39003c75b457d686775ccb032e56fa9c8afe3c492d8eb3715e8951a",
+    "/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64/bin/javac": "fc2bbab968e8ff4cb18db0332a3e6a2b4b1e259574f40e7c450525769393dd0c",
+    "/workspace/.setup/jdk-system/usr/lib/jvm/java-21-openjdk-amd64/bin/keytool": "b72b222f4eabfa41d7aa248e46fba275d91c7540b2f17f4e923b6261edcff418",
+    "/workspace/.setup/android-sdk/build-tools/34.0.0/aapt2": "760aa057e89e3940c3e944e6bec61eda864ade42fd9c0a3113735e329657705f",
+    "/workspace/.setup/android-sdk/build-tools/34.0.0/zipalign": "f3d6af57b3fed5759de2b6dd9c8cc8ecd16d4b35a2c363d7250a7bb0cd97a089",
+    "/usr/bin/python3.13": "889c603f0d17cb54060951bcf4c4f9b8c9ebd9e52b392c70209bbb9755d797d9",
+    "/workspace/IdolyPride_client/tools/sign_apk_v2_in_place.py": "95e5bfca6b4a99fc04373c034939d45005d15247a7b3a7ddbd506f016aec2a18"
+  },
+  "public_cache_advice": [
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-unsigned.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/unsigned.apk",
+      "bytes": 332384196,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-unsigned.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/unsigned.apk",
+      "bytes": 332384196,
+      "result": "advised"
+    },
+    {
+      "role": "own-aligned.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/aligned.apk",
+      "bytes": 332384196,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-aligned.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/aligned.apk",
+      "bytes": 332384196,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-aligned.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/aligned.apk",
+      "bytes": 332384196,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-signed.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/signed.apk",
+      "bytes": 332386192,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-signed.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/signed.apk",
+      "bytes": 332386192,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-signed.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/signed.apk",
+      "bytes": 332386192,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-signed.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/signed.apk",
+      "bytes": 332386192,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-signed.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/signed.apk",
+      "bytes": 332386192,
+      "result": "advised"
+    },
+    {
+      "role": "baseline",
+      "path": "/workspace/shared/artifacts/native-v0.3.4-resource-candidate/IdolyPride-Local-Server-Android.apk",
+      "bytes": 99842354,
+      "result": "advised"
+    },
+    {
+      "role": "android-jar",
+      "path": "/workspace/.setup/android-sdk/platforms/android-34/android.jar",
+      "bytes": 26361808,
+      "result": "advised"
+    },
+    {
+      "role": "d8-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/d8.jar",
+      "bytes": 14929869,
+      "result": "advised"
+    },
+    {
+      "role": "signer-jar",
+      "path": "/workspace/.setup/android-sdk/build-tools/34.0.0/lib/apksigner.jar",
+      "bytes": 1034092,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/workspace/shared/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "chaquopy-jar",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/chaquopy_java-17.0.0.jar",
+      "bytes": 33648,
+      "result": "advised"
+    },
+    {
+      "role": "validated-payload",
+      "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+      "bytes": 191343014,
+      "result": "advised"
+    },
+    {
+      "role": "validated-translations",
+      "path": "/dev/shm/idoly-v0331-work/recovered-translations/android/IdolyPride-Translations-v0.3.31.zip",
+      "bytes": 125709184,
+      "result": "advised"
+    },
+    {
+      "role": "own-signed.apk",
+      "path": "/dev/shm/idoly-v0331-work/server-preparation/delivery/.manual-server-hl2ocxmz/signed.apk",
+      "bytes": 332386192,
+      "result": "advised"
+    }
+  ],
+  "java_flags": [
+    "-Xmx128m",
+    "-XX:MaxMetaspaceSize=128m",
+    "-XX:ReservedCodeCacheSize=32m",
+    "-XX:+UseSerialGC",
+    "-XX:ActiveProcessorCount=1"
+  ],
+  "preflight": {
+    "memory_current": 15730520064,
+    "memory_max": 17179869184,
+    "memory_direct_headroom": 1449349120,
+    "memory_clean_inactive_credit": 268435456,
+    "memory_effective_headroom": 1717784576,
+    "oom_kill": "2",
+    "clean_credit_applied_to_guard": false
+  },
+  "postflight": {
+    "memory_current": 16077422592,
+    "memory_max": 17179869184,
+    "memory_direct_headroom": 1102446592,
+    "memory_clean_inactive_credit": 268435456,
+    "memory_effective_headroom": 1370882048,
+    "oom_kill": "2",
+    "clean_credit_applied_to_guard": false
+  },
+  "server_memory_profile": {
+    "entry_direct_bytes": 1073741824,
+    "ongoing_direct_bytes": 536870912,
+    "clean_credit_applied": false
+  },
+  "capacity": {
+    "planned": {
+      "schema": 1,
+      "policy": "server-library-single-apk-v2",
+      "payload_bytes": 191343014,
+      "apk_bytes": 362807296,
+      "expanded_bytes": 360719838,
+      "full_apk_copies": 1,
+      "staging_bytes": 371195904
+    },
+    "actual": {
+      "schema": 1,
+      "policy": "server-library-single-apk-v2",
+      "payload_bytes": 191343014,
+      "apk_bytes": 350224384,
+      "expanded_bytes": 348781779,
+      "full_apk_copies": 1,
+      "staging_bytes": 358612992
+    },
+    "preflight": {
+      "memory_current": 15731355648,
+      "memory_max": 17179869184,
+      "memory_direct_headroom": 1448513536,
+      "memory_clean_inactive_credit": 268435456,
+      "memory_effective_headroom": 1716948992,
+      "oom_kill": "2",
+      "clean_credit_applied_to_guard": false,
+      "future_staging_bytes": 371195904,
+      "future_tmpfs_bytes": 371195904,
+      "projected_direct_headroom": 1077317632,
+      "ongoing_direct_floor": 536870912
+    }
+  },
+  "seconds": 17.321090215991717,
+  "child_peak_rss_kib": 145492,
+  "self_peak_rss_kib": 120464,
+  "installed": false,
+  "gameplay_verified": false
+}

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "status": "PASS",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "source_epoch": 1794639084,
+  "kind": "client-android-ko",
+  "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
+  "bytes": 165128829,
+  "device_execution_verified": false,
+  "actual_review": {
+    "path": "/dev/shm/idoly-v0331-work/client-preparation/qa-android-ko-final-r2/independent-full-client-review.json",
+    "bytes": 1335962,
+    "sha256": "1ab112c7064fc7e5f39213eb31333d932f95aba1ffea6499e6d6c06cb49bf800"
+  },
+  "actual_payload_read_or_hashed_by_materializer": false
+}

@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "status": "PASS_SERVER_AUXILIARIES_RETIRED",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "kind": "server-macos",
+  "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+  "bytes": 330787485,
+  "sha256": "f40a393ad766ac36035332ba741236eea00da9ba9310d401613f10566037043d",
+  "publication_commit": "d7afd33f866ffe3b0494f984d53e9b19fd7533ad",
+  "publication_receipt_sha256": "2ff25397ee0f62309bd838d3801debf596fc0f17d11c7f98e9c9311615e4ae7d",
+  "actual_QA_sha256": "261ff573a7fb1a95c30ae39814fef1832934bc7fb618105d7654086dd362d123",
+  "translation_input": {
+    "path": "/dev/shm/idoly-v0331-work/recovered-translations/ios/IdolyPride-Translations-v0.3.31.zip",
+    "bytes": 125717042,
+    "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72",
+    "embedded_member": "Contents/Resources/bundledTranslations.zip",
+    "embedded_sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72",
+    "whole_member_SHA_and_CRC_verified": true,
+    "retired": true
+  },
+  "protected_payload": {
+    "path": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+    "bytes": 191343014,
+    "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223",
+    "preserved": true,
+    "same_inode_and_content": true
+  },
+  "app_stage": {
+    "path": "/dev/shm/idoly-v0331-work/server-preparation/mac-production/IdolyPrideLocalServer.app",
+    "regular_files": 552,
+    "symlinks": 4,
+    "inventory_sha256": "c35967db13ce97870364da60214c272c7c1f65a894db916e9e36fed7579c2b32",
+    "all_sealed_SHA_verified": true,
+    "shared_Data31_inode_detected": true,
+    "retired": true
+  },
+  "only_new_task_owned_outputs": true,
+  "VM_user_data_originals_and_backups_untouched": true,
+  "budget": {
+    "direct_headroom": 1251753984,
+    "root_free": 162537472,
+    "tmpfs_free": 8251117568,
+    "oom_kill": 2
+  }
+}

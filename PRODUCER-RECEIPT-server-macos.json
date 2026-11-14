@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "status": "PRODUCER_PASS_AWAIT_INDEPENDENT_QA",
+  "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+  "source_date_epoch": 1794639084,
+  "payload": "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+  "payload_bytes": 191343014,
+  "payload_sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223",
+  "payload_members": 555,
+  "translations": {
+    "included": true,
+    "schema": 1,
+    "platform": "ios",
+    "version": "0.3.31",
+    "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72",
+    "bytes": 125717042,
+    "manifest_sha256": "6ce312fd735e15681c40232d0437c864d3e6f9116b56dd59c50c881ac9f4deec",
+    "files": 6,
+    "coverage": {
+      "en": {
+        "adv_resources": 3492,
+        "missing": 1,
+        "translated": 3093,
+        "unchanged_original": 398
+      },
+      "ko": {
+        "adv_resources": 3492,
+        "missing": 401,
+        "translated": 3091,
+        "unchanged_original": 0
+      }
+    },
+    "sources": {
+      "en": {
+        "archive_sha256": "17293b68abb5713bede02b731056cb22965988876d73cb07be105fafb1b77849",
+        "data_terms": "NOASSERTION",
+        "repository": "https://github.com/Project-Hoshimi/ipr-translation-data-en",
+        "revision": "aa0993d34843bd8fad503a84ee75392ec6058246"
+      },
+      "ko": {
+        "data_terms": "NOASSERTION",
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "f6e5689bcd6878d962996edfd390c1442b926c0f"
+      }
+    },
+    "image_coverage": {
+      "ko": {
+        "candidates": 667,
+        "missing": 0,
+        "translated": 667,
+        "unchanged_original": 0
+      }
+    },
+    "image_sources": {
+      "ko": {
+        "input_catalog_sha256": "2bf957f0f19b0ccd869edfef2e413d6fb622bbd801473574a2b4607941799513",
+        "repository": "https://github.com/CyleAR/ipr-translation-data-ko",
+        "revision": "cf8754daa404cf353d1235cebbeef9d0e0bd0a8d"
+      }
+    },
+    "installation": "hardlink"
+  },
+  "command": [
+    "/workspace/IdolyPride_client/.venv/bin/python",
+    "macos-server/cross/build_app.py",
+    "--runtime",
+    "/workspace/shared/artifacts/native-candidate-42889776755/unpacked/dist/IdolyPride-Local-Server-macOS-arm64.app.zip",
+    "--payload",
+    "/dev/shm/idoly-v0331-work/glowstick/IdolyPride-ServerData-v0.3.31.zip",
+    "--llvm",
+    "/workspace/.setup/android-sdk/ndk/26.3.11579264/toolchains/llvm/prebuilt/linux-x86_64/bin",
+    "--rcodesign",
+    "/workspace/shared/artifacts/mac-cross-server-tools/rcodesign",
+    "--app",
+    "/dev/shm/idoly-v0331-work/server-preparation/mac-production/IdolyPrideLocalServer.app",
+    "--archive",
+    "/dev/shm/idoly-v0331-work/server-preparation/delivery/IdolyPride-Local-Server-macOS-arm64.app.zip",
+    "--evidence",
+    "/dev/shm/idoly-v0331-work/server-preparation/mac-build-evidence",
+    "--source-commit",
+    "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
+    "--translations",
+    "/dev/shm/idoly-v0331-work/recovered-translations/ios/IdolyPride-Translations-v0.3.31.zip",
+    "--translations-sha256",
+    "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72",
+    "--translations-bytes",
+    "125717042"
+  ],
+  "before": {
+    "current": 15723999232,
+    "max": 17179869184,
+    "direct_headroom": 1455869952,
+    "oom_kill": 2,
+    "root_free": 162537472,
+    "tmpfs_free": 8456761344
+  },
+  "actual_Mac_execution": false,
+  "actual_gameplay_verified": false,
+  "vm_actions": 0,
+  "returncode": 0,
+  "app": "/dev/shm/idoly-v0331-work/server-preparation/mac-production/IdolyPrideLocalServer.app",
+  "archive": "/dev/shm/idoly-v0331-work/server-preparation/delivery/IdolyPride-Local-Server-macOS-arm64.app.zip",
+  "app_regular_bytes": 362504285,
+  "archive_bytes": 330787485,
+  "archive_sha256": "f40a393ad766ac36035332ba741236eea00da9ba9310d401613f10566037043d",
+  "executable_bytes": 158240,
+  "executable_sha256": "baebac5600a6957dae3bab8041c352b0cef774f2536a5b11dc39172c2281e6a6",
+  "payload_installation": "hardlink",
+  "runtime_immutable_after_signing": true,
+  "source_file_count": 129,
+  "packaged_python_count": 111,
+  "runtime_file_count": 425,
+  "sealed_resource_count": 549,
+  "app_stage_retained_for_independent_QA": true,
+  "seconds": 14.570807762036566,
+  "after": {
+    "current": 16103309312,
+    "max": 17179869184,
+    "direct_headroom": 1076559872,
+    "oom_kill": 2,
+    "root_free": 162537472,
+    "tmpfs_free": 8079077376
+  },
+  "child_peak_RSS_KiB": 53588,
+  "all_own_child_processes_and_archive_handles_closed": true
+}
