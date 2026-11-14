@@ -173,7 +173,7 @@ NSDictionary *IDLocalHTTPReadiness(NSUInteger port, NSTimeInterval timeout) {
         id value = [NSJSONSerialization JSONObjectWithData:body options:0 error:NULL];
         BOOL dictionary = [value isKindOfClass:NSDictionary.class];
         result[@"body_is_json"] = @(dictionary);
-        result[@"ok"] = @(dictionary && [result[@"http_status"] isEqual:@200]);
+        result[@"ok"] = dictionary && [result[@"http_status"] isEqual:@200] ? @YES : @NO;
         if (!dictionary) result[@"error_code"] = @"invalid_json";
     }
     return result;
