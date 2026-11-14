@@ -85,3 +85,21 @@ def test_virtual_reader_does_not_accept_unbounded_or_unrelated_objects():
                                (b"a", 114, 9), (b"a", 213, 99)]:
         with pytest.raises(ValueError, match="Unsupported virtual"):
             images._mini_asset(raw, cls, platform)
+
+
+def test_static_texture_discards_cpu_copy_and_preserves_exact_rgba_pixels():
+    pytest.importorskip("UnityPy")
+    from zipfile import ZipFile
+    stock = ROOT / 'data/clients/Game-r2-pinned.apk'
+    if not stock.is_file():
+        pytest.skip('Pinned original font-schema fixture is not cached')
+    entry = images.PROFILES[0]
+    with ZipFile(stock) as archive:
+        template = images._texture_template(archive, 'android')
+    canvas = images._canvas(images._png(INPUTS, entry), entry)
+    raw = images._texture(template, canvas, entry['name'], 13)
+    _, reader = images._mini_asset(raw, 28, 13)
+    texture = reader.read()
+    assert not texture.m_IsReadable and not texture.m_StreamingMipmaps
+    assert texture.m_MipCount == 1 and texture.m_CompleteImageSize == 152 * 72 * 4
+    assert texture.image.tobytes() == canvas.tobytes()

@@ -237,6 +237,7 @@ def _texture(raw, canvas, name, platform):
     texture = reader.read()
     texture.m_Name = "Idoly-Korean-" + name
     texture.set_image(canvas, target_format=4, mipmap_count=1)
+    texture.m_IsReadable = False  # Static UI needs no retained CPU pixel copy.
     texture.m_ColorSpace = 1
     texture.m_TextureSettings.m_FilterMode = 1
     texture.m_TextureSettings.m_WrapU = texture.m_TextureSettings.m_WrapV = texture.m_TextureSettings.m_WrapW = 1
