@@ -490,6 +490,165 @@ def test_polling_has_a_deadline_without_native_report(tmp_path):
         probe.wait_report(tmp_path, remaining)
 
 
+def test_atomic_status_replacement_between_lstat_and_open_retries_then_accepts_final_report(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    waiting = documents / "embedded-probe-status.json"
+    waiting.write_text(json.dumps({"server_status": {"phase": 1, "error": None}}))
+    replacement = documents / "atomic-checkpoint.json"
+    replacement.write_text(json.dumps({"server_status": {"phase": 2, "error": None}}))
+    original_open = probe.os.open
+    replacements = []
+
+    def opening(path, flags, *args, **kwargs):
+        if Path(path) == waiting and not replacements:
+            replacements.append(True)
+            replacement.replace(waiting)
+        return original_open(path, flags, *args, **kwargs)
+
+    def after_retry(delay):
+        assert 0 < delay <= 0.25
+        (documents / "embedded-probe.json").write_text(json.dumps(native_report()))
+
+    with mock.patch.object(probe.os, "open", opening), \
+            mock.patch.object(probe.time, "sleep", side_effect=after_retry) as sleep:
+        result = probe.wait_report(tmp_path, lambda: 5)
+    assert result["original_called"] == 1
+    assert replacements == [True]
+    sleep.assert_called_once()
+
+
+def test_final_report_replacement_between_lstat_and_open_still_fails(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    final = documents / "embedded-probe.json"
+    final.write_text(json.dumps(native_report()))
+    replacement = documents / "replacement-final.json"
+    replacement.write_text(json.dumps(native_report()))
+    original_open = probe.os.open
+
+    def opening(path, flags, *args, **kwargs):
+        if Path(path) == final:
+            replacement.replace(final)
+        return original_open(path, flags, *args, **kwargs)
+
+    with mock.patch.object(probe.os, "open", opening), mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(probe.ProbeError, match="^file_changed_while_opening$"):
+        probe.wait_report(tmp_path, lambda: 5)
+    sleep.assert_not_called()
+
+
+def test_status_in_place_mutation_between_lstat_and_open_is_not_retried(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    waiting = documents / "embedded-probe-status.json"
+    raw = json.dumps({"server_status": {"phase": 2, "error": None}})
+    waiting.write_text(raw)
+    original_open = probe.os.open
+
+    def opening(path, flags, *args, **kwargs):
+        if Path(path) == waiting:
+            waiting.write_text(raw + " ")  # Same inode, changed size/mtime.
+        return original_open(path, flags, *args, **kwargs)
+
+    with mock.patch.object(probe.os, "open", opening), mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(probe.ProbeError, match="^file_changed_while_opening$") as raised:
+        probe.wait_report(tmp_path, lambda: 5)
+    assert not hasattr(raised.value, "regular_replacement")
+    sleep.assert_not_called()
+
+
+def test_status_open_inode_mutation_during_read_is_not_retried(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    waiting = documents / "embedded-probe-status.json"
+    raw = json.dumps({"server_status": {"phase": 2, "error": None}})
+    waiting.write_text(raw)
+    original_fstat = probe.os.fstat
+    observations = []
+
+    def inspect(fd):
+        observations.append(fd)
+        if len(observations) == 2:
+            waiting.write_text(raw + " ")
+        return original_fstat(fd)
+
+    with mock.patch.object(probe.os, "fstat", inspect), mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(probe.ProbeError, match="^file_changed_while_reading$"):
+        probe.wait_report(tmp_path, lambda: 5)
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize("unsafe", ("oversize", "symlink", "empty"))
+def test_status_replacement_must_still_be_regular_nonempty_bounded_and_nofollow(tmp_path, unsafe):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    waiting = documents / "embedded-probe-status.json"
+    waiting.write_text(json.dumps({"server_status": {"phase": 2, "error": None}}))
+    replacement = documents / "replacement.json"
+    if unsafe == "symlink":
+        target = documents / "not-a-checkpoint.json"
+        target.write_text("{}")
+        replacement.symlink_to(target)
+    else:
+        replacement.write_bytes(b"x" * (probe.MAX_JSON + 1) if unsafe == "oversize" else b"")
+    original_open = probe.os.open
+
+    def opening(path, flags, *args, **kwargs):
+        if Path(path) == waiting:
+            replacement.replace(waiting)
+        return original_open(path, flags, *args, **kwargs)
+
+    expected = OSError if unsafe == "symlink" else probe.ProbeError
+    with mock.patch.object(probe.os, "open", opening), mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(expected):
+        probe.wait_report(tmp_path, lambda: 5)
+    sleep.assert_not_called()
+
+
+def test_replaced_status_invalid_json_is_fatal_on_next_bounded_read(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    waiting = documents / "embedded-probe-status.json"
+    waiting.write_text(json.dumps({"server_status": {"phase": 2, "error": None}}))
+    replacement = documents / "replacement.json"
+    replacement.write_text("invalid JSON")
+    original_open = probe.os.open
+
+    def opening(path, flags, *args, **kwargs):
+        if Path(path) == waiting and replacement.exists():
+            replacement.replace(waiting)
+        return original_open(path, flags, *args, **kwargs)
+
+    with mock.patch.object(probe.os, "open", opening), mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(probe.ProbeError, match="^invalid_json$"):
+        probe.wait_report(tmp_path, lambda: 5)
+    sleep.assert_called_once()
+
+
+def test_repeated_atomic_checkpoint_replacement_keeps_original_deadline(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    waiting = documents / "embedded-probe-status.json"
+    raw = json.dumps({"server_status": {"phase": 2, "error": None}})
+    waiting.write_text(raw)
+    original_open = probe.os.open
+
+    def opening(path, flags, *args, **kwargs):
+        if Path(path) == waiting:
+            replacement = documents / "next-checkpoint.json"
+            replacement.write_text(raw)
+            replacement.replace(waiting)
+        return original_open(path, flags, *args, **kwargs)
+
+    remaining = mock.Mock(side_effect=[5, 5, 5, probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.os, "open", opening), mock.patch.object(probe.time, "sleep") as sleep, \
+            pytest.raises(probe.ProbeError, match="^probe_deadline_exceeded$"):
+        probe.wait_report(tmp_path, remaining)
+    assert remaining.call_count == 4
+    sleep.assert_called_once_with(0.25)
+
+
 @pytest.mark.parametrize("failure", sorted(probe.LAUNCHER_FAILURE_CODES))
 def test_missing_button_or_explicit_action_fails_immediately_instead_of_waiting(tmp_path, failure):
     documents = tmp_path / "Documents"

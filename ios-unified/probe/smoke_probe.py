@@ -66,8 +66,13 @@ def read_bounded(path, maximum):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
         opened = os.fstat(fd)
-        require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
-                == (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns),
+        require(stat.S_ISREG(opened.st_mode) and 0 < opened.st_size <= maximum,
+                "invalid_bounded_file")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            error = ProbeError("file_changed_while_opening")
+            error.regular_replacement = True
+            raise error
+        require((before.st_size, before.st_mtime_ns) == (opened.st_size, opened.st_mtime_ns),
                 "file_changed_while_opening")
         with os.fdopen(fd, "rb", closefd=False) as incoming:
             raw = incoming.read(maximum + 1)
@@ -359,6 +364,12 @@ def wait_report(container, remaining):
                 raise error
         except FileNotFoundError:
             pass
+        except ProbeError as error:
+            # NSDataWritingAtomic replaces this recurring checkpoint. Retry
+            # only a verified regular, bounded inode replacement; in-place
+            # mutation and all final-report checks remain strict.
+            if str(error) != "file_changed_while_opening" or getattr(error, "regular_replacement", False) is not True:
+                raise
         time.sleep(min(0.25, remaining()))
 
 
