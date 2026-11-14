@@ -267,7 +267,7 @@ def test_other_simulator_commands_do_not_contribute_host_cli_context(action):
     assert not hasattr(raised.value, "tool_detail")
 
 
-def test_launch_failure_audits_cli_context_and_still_cleans_only_owned_simulator(app, tmp_path):
+def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_relaunch(app, tmp_path):
     controller = FakeSimctl(tmp_path / "container")
 
     def command(arguments, timeout):
@@ -276,14 +276,69 @@ def test_launch_failure_audits_cli_context_and_still_cleans_only_owned_simulator
             raise probe._simctl_error("simctl_timeout", arguments, b"probe-start-output", b"probe-start-error")
         return controller(arguments, timeout)
 
-    with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command):
+    rows = [{"path": path} for path in probe.RPC_PATHS]
+    with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command), \
+            mock.patch.object(probe.socket, "create_connection") as listener, \
+            mock.patch.object(probe, "probe_rpcs", return_value=rows) as rpc:
         result = probe.run_probe(app, tmp_path / "failure.json")
-    assert result["error"] == "simctl_timeout"
-    assert result["failed_stage"] == "app_launch"
-    assert result["simctl_failure"] == {"action": "launch", "stdout": "probe-start-output",
+    assert result["status"] == "PASS"
+    assert result["launch_ack_timeout"] is True
+    assert result["launch_ack_diagnostic"] == {"action": "launch", "stdout": "probe-start-output",
         "stderr": "probe-start-error", "stdout_truncated": False, "stderr_truncated": False}
+    assert result["launch_ack_checkpoint"]["report_valid"] is True
+    assert result["native_probe"]["launcher"]["button_dispatch_count"] == 1
+    assert result["rpcs"] == rows
+    listener.assert_called_once()
+    rpc.assert_called_once()
+    assert [call[0] for call in controller.calls].count("launch") == 1
     assert result["cleanup"] == {"shutdown": True, "delete": True}
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
+
+
+def test_launch_ack_timeout_without_report_still_expires_under_original_deadline(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    clock = {"now": 0.0}
+
+    def command(arguments, timeout):
+        result = controller(arguments, timeout)
+        if arguments[0] == "launch":
+            (controller.container / "Documents/embedded-probe.json").unlink()
+            clock["now"] = 90.0
+            raise probe._simctl_error("simctl_timeout", arguments)
+        return result
+
+    with mock.patch.object(probe.sys, "platform", "darwin"), \
+            mock.patch.object(probe.time, "monotonic", side_effect=lambda: clock["now"]), \
+            mock.patch.object(probe, "_simctl", command), mock.patch.object(probe, "probe_rpcs") as rpc:
+        result = probe.run_probe(app, tmp_path / "failure.json", timeout=90)
+    assert result["status"] == "FAIL"
+    assert result["error"] == "probe_deadline_exceeded"
+    assert result["failed_stage"] == "startup_gate_report"
+    assert result["launch_ack_timeout"] is True
+    assert result["native_checkpoint"]["report_available"] is False
+    assert [call[0] for call in controller.calls].count("launch") == 1
+    assert result["cleanup"] == {"shutdown": True, "delete": True}
+    rpc.assert_not_called()
+
+
+def test_launch_os_rejection_is_still_fatal_even_if_a_report_exists(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+
+    def command(arguments, timeout):
+        result = controller(arguments, timeout)
+        if arguments[0] == "launch":
+            raise probe._simctl_error("simctl_failed", arguments, stderr=b"public install rejection")
+        return result
+
+    with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command), \
+            mock.patch.object(probe, "probe_rpcs") as rpc:
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["status"] == "FAIL"
+    assert result["error"] == "simctl_failed" and result["failed_stage"] == "app_launch"
+    assert result["launch_ack_timeout"] is False
+    assert result["native_checkpoint"]["report_valid"] is True
+    assert result["simctl_failure"]["stderr"] == "public install rejection"
+    rpc.assert_not_called()
 
 
 def test_startup_failure_is_immediate_and_still_deletes_simulator(app, tmp_path):
@@ -294,6 +349,7 @@ def test_startup_failure_is_immediate_and_still_deletes_simulator(app, tmp_path)
     assert result["error"] == "native_startup_failed"
     assert result["native_startup_error"] == "native-startup-fixture"
     assert result["failed_stage"] == "startup_gate_report"
+    assert result["native_checkpoint"]["status_phase"] == 3
     assert result["cleanup"]["delete"] is True
     rpc.assert_not_called()
 
@@ -308,6 +364,7 @@ def test_shutdown_failure_does_not_skip_delete_or_claim_success(app, tmp_path):
     assert result["status"] == "FAIL" and result["cleanup_complete"] is False
     assert controller.calls[-1] == ("delete", CREATED)
     assert result["cleanup"]["delete"] is True
+    assert result["native_checkpoint"]["report_valid"] is True
 
 
 def test_existing_database_in_new_container_is_rejected_before_launch(app, tmp_path):
@@ -320,6 +377,72 @@ def test_existing_database_in_new_container_is_rejected_before_launch(app, tmp_p
     assert result["error"] == "preexisting_probe_state_rejected"
     assert "launch" not in [call[0] for call in controller.calls]
     assert state.read_bytes() == b"test-only-preexisting-state"
+
+
+def test_preexisting_checkpoint_is_rejected_before_launch_or_native_observation(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    checkpoint = controller.container / "Documents/embedded-probe-checkpoint.json"
+    checkpoint.parent.mkdir()
+    checkpoint.write_text('{"schema":1,"stage":"report_written"}')
+    with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", controller):
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["error"] == "preexisting_probe_state_rejected"
+    assert "launch" not in [call[0] for call in controller.calls]
+    assert result["native_checkpoint"] == {"stage": "not_observed", "container_available": False}
+
+
+def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fields(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    (documents / "embedded-probe-checkpoint.json").write_text(json.dumps({
+        "schema": 1, "stage": "crypto_received", "phase": 4, "original_called": 1,
+        "application_state": 0, "launch_requested": True, "launch_prepared": True,
+        "launcher_visible": False, "private_text": "must not retain checkpoint payload"}))
+    (documents / "embedded-probe-status.json").write_text(json.dumps({
+        "original_called": 0, "server_status": {"phase": 2, "launch_requested": False,
+        "error": "must not retain raw server error"}, "probe_error": "must not retain unknown text"}))
+    raw_report = native_report()
+    raw_report["unknown_private_text"] = "must not retain report payload"
+    (documents / "embedded-probe.json").write_text(json.dumps(raw_report))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["stage"] == "crypto_received" and result["phase"] == 4
+    assert result["original_called"] == 1 and result["application_state"] == 0
+    assert result["status_phase"] == 2 and result["status_original_called"] == 0
+    assert result["report_phase"] == 4 and result["report_original_called"] == 1
+    assert result["report_valid"] is True
+    assert all(type(value) in (str, int, bool) for value in result.values())
+    assert "must not retain" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("stage", ("private arbitrary message", ["status_received"], None))
+def test_failure_checkpoint_rejects_unknown_or_nonscalar_stages(tmp_path, stage):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    (documents / "embedded-probe-checkpoint.json").write_text(json.dumps({
+        "schema": 1, "stage": stage, "phase": 4, "private": "discard"}))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["stage"] == "not_observed"
+    assert result["checkpoint_read_error"] == "invalid_checkpoint_stage"
+    assert "phase" not in result
+    assert "private" not in json.dumps(result)
+
+
+def test_failure_checkpoint_drops_bad_scalar_types_and_keeps_read_errors_public(tmp_path):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    (documents / "embedded-probe-checkpoint.json").write_text(json.dumps({
+        "schema": 1, "stage": "status_received", "phase": True, "original_called": 9999,
+        "application_state": 3, "launch_requested": 1, "launch_prepared": "private text"}))
+    (documents / "embedded-probe-status.json").write_text("invalid private JSON text")
+    outside = tmp_path / "unrelated-private-report.json"
+    outside.write_text('{"private":"never follow"}')
+    (documents / "embedded-probe.json").symlink_to(outside)
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["stage"] == "status_received"
+    assert not {"phase", "original_called", "application_state", "launch_requested", "launch_prepared"} & result.keys()
+    assert result["status_read_error"] == "invalid_json"
+    assert result["report_read_error"] == "invalid_bounded_file"
+    assert "private" not in json.dumps(result)
 
 
 @pytest.mark.parametrize("field,value", (("original_called", True), ("original_called", 2),

@@ -47,6 +47,16 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "ready_launch_button_title_differs", "ready_launch_action_missing",
     "ready_launch_action_not_dispatched",
 ))
+NATIVE_CHECKPOINT_STAGES = frozenset((
+    "delegate_entered", "window_ready", "server_starting", "server_ready",
+    "unity_requests_captured", "premature_launch_checked", "launch_action_requested",
+    "launch_action_dispatched", "unity_forwarded", "status_received", "crypto_received",
+    "loopback_checked", "report_written",
+))
+CHECKPOINT_READ_CODES = frozenset((
+    "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
+    "json_size_bound", "duplicate_json_key", "nonfinite_json", "invalid_json", "json_object_required",
+))
 
 
 class ProbeError(ValueError):
@@ -373,6 +383,66 @@ def wait_report(container, remaining):
         time.sleep(min(0.25, remaining()))
 
 
+def failure_checkpoint(container):
+    """Read only fixed scalar progress from this invocation's fresh container."""
+    result = {"stage": "not_observed", "container_available": container is not None}
+    if container is None:
+        return result
+    documents = Path(container) / "Documents"
+
+    def scalars(value):
+        if type(value) is not dict:
+            return {}
+        clean = {}
+        phase = value.get("phase")
+        if type(phase) is int and 0 <= phase <= 4:
+            clean["phase"] = phase
+        application_state = value.get("application_state")
+        if type(application_state) is int and 0 <= application_state <= 2:
+            clean["application_state"] = application_state
+        count = value.get("original_called")
+        if type(count) is int and 0 <= count <= 16:
+            clean["original_called"] = count
+        for key in ("launch_requested", "launch_prepared", "launcher_visible"):
+            if type(value.get(key)) is bool:
+                clean[key] = value[key]
+        return clean
+
+    for source, name in (("checkpoint", "embedded-probe-checkpoint.json"),
+                         ("status", "embedded-probe-status.json"), ("report", "embedded-probe.json")):
+        result[source + "_available"] = False
+        try:
+            observed = parse_json(read_bounded(documents / name, MAX_JSON))
+        except FileNotFoundError:
+            continue
+        except ProbeError as error:
+            code = str(error)
+            result[source + "_read_error"] = code if code in CHECKPOINT_READ_CODES else "invalid_checkpoint"
+            continue
+        except OSError:
+            result[source + "_read_error"] = "unreadable_checkpoint"
+            continue
+        result[source + "_available"] = True
+        if source == "checkpoint":
+            stage = observed.get("stage")
+            if type(observed.get("schema")) is int and observed["schema"] == 1 \
+                    and type(stage) is str and stage in NATIVE_CHECKPOINT_STAGES:
+                result.update(scalars(observed), stage=stage)
+            else:
+                result["checkpoint_read_error"] = "invalid_checkpoint_stage"
+        else:
+            status = scalars(observed.get("server_status"))
+            status.update({key: item for key, item in scalars(observed).items() if key == "original_called"})
+            result.update({source + "_" + key: item for key, item in status.items()})
+            if source == "report":
+                try:
+                    validate_report(observed)
+                    result["report_valid"] = True
+                except ProbeError:
+                    result["report_valid"] = False
+    return result
+
+
 def unary_h2(path, request, *, token=None, port=50051, timeout=15):
     """One real encrypted unary h2c RPC, restricted to IPv4 loopback."""
     from h2.config import H2Configuration
@@ -470,8 +540,10 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
     require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
     report = {"schema": 1, "status": "FAIL", "execution": "ios_simulator",
               "gameplay_tested": False, "device_tested": False, "playcover_tested": False,
-              "simulator_created": False, "cleanup": {"shutdown": False, "delete": False}}
+              "simulator_created": False, "launch_ack_timeout": False,
+              "cleanup": {"shutdown": False, "delete": False}}
     created = None
+    container = None
     start = time.monotonic()
     stage = "platform"
     def remaining(cap=60):
@@ -509,17 +581,30 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
         report["app_install_seconds"] = round(time.monotonic() - stage_start, 3)
         stage = "fresh_container"
         raw = _simctl(["get_app_container", created, BUNDLE_ID, "data"], remaining())
-        container = Path(raw.decode("utf-8").strip())
-        require(container.is_absolute() and container.is_dir() and not container.is_symlink(),
+        candidate = Path(raw.decode("utf-8").strip())
+        require(candidate.is_absolute() and candidate.is_dir() and not candidate.is_symlink(),
                 "invalid_fresh_app_container")
         for relative in ("Library/Application Support/IdolyPrideLocal/state.db",
                          "Library/Application Support/IdolyPrideLocal/media-state.db",
-                         "Documents/embedded-probe.json", "Documents/embedded-probe-status.json"):
-            path = container / relative
+                         "Documents/embedded-probe.json", "Documents/embedded-probe-status.json",
+                         "Documents/embedded-probe-checkpoint.json"):
+            path = candidate / relative
             require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
+        container = candidate
         report["fresh_local_state_before_launch"] = True
         stage = "app_launch"
-        _simctl(["launch", created, BUNDLE_ID], remaining(180))
+        try:
+            _simctl(["launch", created, BUNDLE_ID], remaining(180))
+        except ProbeError as error:
+            if str(error) != "simctl_timeout":
+                raise
+            # A launch acknowledgement can time out while the app keeps
+            # running. Do not launch twice: the full native/RPC report must
+            # still pass under the original overall deadline.
+            report["launch_ack_timeout"] = True
+            if type(getattr(error, "tool_detail", None)) is dict:
+                report["launch_ack_diagnostic"] = error.tool_detail
+            report["launch_ack_checkpoint"] = failure_checkpoint(container)
         stage = "startup_gate_report"
         report["native_probe"] = wait_report(container, remaining)
         stage = "asset_listener"
@@ -532,6 +617,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
+        report["native_checkpoint"] = failure_checkpoint(container)
         if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
             report["native_startup_error"] = error.native_detail
         if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
@@ -539,6 +625,9 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
         if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
             report["simctl_failure"] = error.tool_detail
     finally:
+        # Capture before deleting the owned container, including when an
+        # otherwise passing run subsequently encounters a cleanup failure.
+        checkpoint = report.get("native_checkpoint") or failure_checkpoint(container)
         if created is not None:
             for action in ("shutdown", "delete"):
                 try:
@@ -548,6 +637,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
                     report["cleanup"][action + "_error"] = type(error).__name__
             if not all(report["cleanup"][key] for key in ("shutdown", "delete")):
                 report.update(status="FAIL", cleanup_complete=False)
+                report["native_checkpoint"] = checkpoint
         report["seconds"] = round(time.monotonic() - start, 3)
         write_audit(audit, report)
     return report

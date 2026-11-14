@@ -152,11 +152,22 @@ static NSDictionary *ProbeCrypto(void) {
 @property(nonatomic) BOOL launchDispatched;
 - (void)startUnity:(UIApplication *)application;
 - (void)probeLauncher:(NSDictionary *)status;
+- (void)recordCheckpoint:(NSString *)stage;
 @end
 
 @implementation UnityAppController
+- (void)recordCheckpoint:(NSString *)stage {
+    NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
+    ProbeWrite(@"embedded-probe-checkpoint.json", @{@"schema":@1, @"stage":stage,
+        @"original_called":@(self.originalCount), @"phase":ProbeScalar(status, @"phase"),
+        @"application_state":@(UIApplication.sharedApplication.applicationState),
+        @"launch_requested":ProbeScalar(status, @"launch_requested"),
+        @"launch_prepared":ProbeScalar(status, @"launch_prepared"),
+        @"launcher_visible":ProbeScalar(status, @"launcher_visible")});
+}
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)options;
+    [self recordCheckpoint:@"delegate_entered"];
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UIViewController *screen = [UIViewController new]; screen.view.backgroundColor = UIColor.systemBackgroundColor;
     self.label = [[UILabel alloc] initWithFrame:screen.view.bounds];
@@ -165,9 +176,11 @@ static NSDictionary *ProbeCrypto(void) {
     self.label.text = @"Embedded server probe: waiting for READY";
     [screen.view addSubview:self.label]; self.window.rootViewController = screen; [self.window makeKeyAndVisible];
     self.launcherProbe = [NSMutableDictionary dictionary];
+    [self recordCheckpoint:@"window_ready"];
     self.waitingTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         (void)timer;
         NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
+        [self recordCheckpoint:[status[@"phase"] isEqual:@2] ? @"server_ready" : @"server_starting"];
         [self probeLauncher:status];
         ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
             @"original_called":@(self.originalCount),
@@ -176,6 +189,7 @@ static NSDictionary *ProbeCrypto(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         // Two requests also exercise the gate's exactly-once forwarding policy.
         [self startUnity:application]; [self startUnity:application];
+        [self recordCheckpoint:@"unity_requests_captured"];
         IdolyEmbeddedServerLaunchGame();
         NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
         self.launcherProbe[@"premature_phase"] = ProbeScalar(status, @"phase");
@@ -185,6 +199,7 @@ static NSDictionary *ProbeCrypto(void) {
                 || ![status[@"launch_requested"] isEqual:@NO]) {
             self.probeError = @"premature_launch_not_ignored";
         }
+        [self recordCheckpoint:@"premature_launch_checked"];
     });
     return YES;
 }
@@ -229,8 +244,10 @@ static NSDictionary *ProbeCrypto(void) {
     if (now - self.readySince < 1.0) return;
     self.launchDispatched = YES;
     self.launcherProbe[@"button_dispatch_count"] = @1;
+    [self recordCheckpoint:@"launch_action_requested"];
     BOOL dispatched = [UIApplication.sharedApplication sendAction:item.action to:item.target from:item forEvent:nil];
     self.launcherProbe[@"button_action_dispatched"] = @(dispatched);
+    [self recordCheckpoint:@"launch_action_dispatched"];
     if (!dispatched) { self.probeError = @"ready_launch_action_not_dispatched"; return; }
     // Repeated clicks must not forward Unity a second time.
     IdolyEmbeddedServerLaunchGame();
@@ -241,15 +258,18 @@ static NSDictionary *ProbeCrypto(void) {
 - (void)startUnity:(UIApplication *)application {
     ++self.originalCount;
     self.launcherProbe[@"forwarded_after_button"] = @(self.launchDispatched);
+    [self recordCheckpoint:@"unity_forwarded"];
     if (self.reportScheduled) return;
     self.reportScheduled = YES; [self.waitingTimer invalidate]; self.waitingTimer = nil;
     BOOL originalOnMain = NSThread.isMainThread;
     BOOL argumentMatches = application == UIApplication.sharedApplication;
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
     IdolyEmbeddedServerCommand(@"{\"id\":1,\"action\":\"status\"}", ^(NSString *reply) {
+        [self recordCheckpoint:@"status_received"];
         BOOL completionOnMain = NSThread.isMainThread;
         NSDictionary *hostStatus = ProbeHostStatus(reply);
         IdolyEmbeddedServerCryptoSelfTest(^(NSString *cryptoReply) {
+            [self recordCheckpoint:@"crypto_received"];
             BOOL cryptoCompletionOnMain = NSThread.isMainThread;
             NSDictionary *nativeCrypto = ProbeObject(cryptoReply);
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -257,6 +277,7 @@ static NSDictionary *ProbeCrypto(void) {
                     @"grpc_connect":@(ProbePort(50051)), @"assets_connect":@(ProbePort(8080))};
                 NSDictionary *crypto = ProbeCrypto();
                 dispatch_async(dispatch_get_main_queue(), ^{
+                    [self recordCheckpoint:@"loopback_checked"];
                     NSDictionary *report = @{@"schema":@1, @"original_called":@(self.originalCount),
                         @"main_thread":@(originalOnMain), @"application_argument_matches":@(argumentMatches),
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
@@ -265,6 +286,7 @@ static NSDictionary *ProbeCrypto(void) {
                         @"crypto_completion_main_thread":@(cryptoCompletionOnMain), @"native_crypto":nativeCrypto,
                         @"host_status":hostStatus, @"ports":ports, @"commoncrypto":crypto};
                     BOOL written = ProbeWrite(@"embedded-probe.json", report);
+                    if (written) [self recordCheckpoint:@"report_written"];
                     if (!written) NSLog(@"Embedded server probe report write failed");
                     self.label.text = written ? @"Embedded server probe: original Unity start forwarded"
                                               : @"Embedded server probe: report write failed";
