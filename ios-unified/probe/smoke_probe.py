@@ -54,6 +54,8 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_before_capture_failed", "keyboard_before_launch_failed",
     "keyboard_during_init_failed", "keyboard_after_init_failed",
     "keyboard_precreated_instance_not_reused",
+    "native_header_layout_failed", "native_header_restore_failed",
+    "settings_diagnostics_copy_failed",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
@@ -63,11 +65,22 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "settings_return_observed", "settings_return_timeout", "settings_menu_dismissed",
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
+    "native_header_checked",
+    "settings_diagnostics_copied",
 ))
 KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
 KEYBOARD_BOOL_FIELDS = ("ready", "returned_nil", "returned_initialized_field", "returned_same_field")
 KEYBOARD_INT_FIELDS = ("phase", "original_calls", "field_creation_count")
 KEYBOARD_LIFECYCLE_COUNTERS = ("initialize_calls", "original_initialize_calls", "reused_existing_calls")
+HEADER_PHASES = ("current", "wide", "ultrawide", "restored")
+HEADER_BOOL_FIELDS = ("header_found", "actions_found", "title_found", "status_found", "hint_found",
+                      "nav_bar_hidden", "header_inside", "controls_inside", "row_no_overlap", "button_titles_fit")
+HEADER_FONT_FIELDS = ("button_min_font", "title_font", "status_font", "hint_font")
+HEADER_NUMBER_FIELDS = ("root_width", "root_height", "header_width", "header_height", "actions_width",
+                        "min_button_height", *HEADER_FONT_FIELDS)
+HTTP_READINESS_URL = "http://127.0.0.1:8080/client/playback"
+DIAGNOSTICS_COPY_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "completed",
+                                "feedback_success", "pasteboard_matches", "clipboard_seeded", "clipboard_cleared")
 CHECKPOINT_READ_CODES = frozenset((
     "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
     "json_size_bound", "duplicate_json_key", "nonfinite_json", "invalid_json", "json_object_required",
@@ -269,6 +282,42 @@ def validate_report(value):
             and all(type(status.get(key)) is int and status[key] == 1
                     for key in ("captured", "forwarded", "attempts")),
             "embedded_server_not_ready")
+    http = status.get("http_readiness")
+    require(type(http) is dict and type(http.get("schema")) is int and http["schema"] == 1
+            and http.get("ok") is True and http.get("transport") == "NSURLSession"
+            and http.get("url") == HTTP_READINESS_URL
+            and type(http.get("http_status")) is int and http["http_status"] == 200
+            and http.get("error_code") == "none" and http.get("body_is_json") is True
+            and type(http.get("received_bytes")) is int and 1 <= http["received_bytes"] <= 16384
+            and http.get("worker_main_thread") is False
+            and ("ns_error_domain" not in http or type(http["ns_error_domain"]) is str and http["ns_error_domain"] == "")
+            and ("ns_error_code" not in http or type(http["ns_error_code"]) is int and http["ns_error_code"] == 0),
+            "native_http_readiness_failed")
+    header = value.get("native_header")
+    require(type(header) is dict and header.get("owned_root_only") is True, "native_header_layout_failed")
+    require(header.get("restore_succeeded") is True, "native_header_restore_failed")
+    for name in HEADER_PHASES:
+        sample = header.get(name)
+        require(type(sample) is dict and all(sample.get(key) is True for key in HEADER_BOOL_FIELDS)
+                and type(sample.get("button_count")) is int and sample["button_count"] == 2
+                and all(type(sample.get(key)) in (int, float) and 0 < sample[key] <= 16384
+                        and math.isfinite(sample[key]) for key in HEADER_NUMBER_FIELDS), "native_header_layout_failed")
+        require(sample["header_width"] <= sample["root_width"]
+                and sample["actions_width"] <= sample["header_width"]
+                and sample["header_height"] <= sample["root_height"]
+                and sample["min_button_height"] >= 44, "native_header_layout_failed")
+        if name in ("current", "restored"):
+            require(all(sample[key] >= floor for key, floor in zip(HEADER_FONT_FIELDS, (16, 20, 16, 12))),
+                    "native_header_layout_failed")
+    current, wide, ultra, restored = (header[name] for name in HEADER_PHASES)
+    require(wide["root_width"] == 1920 and wide["root_height"] == 1080
+            and wide["button_min_font"] >= 20 and wide["status_font"] >= 20
+            and ultra["root_width"] == 3840 and ultra["root_height"] == 2160
+            and ultra["button_min_font"] >= 40 and ultra["status_font"] >= 40
+            and all(wide[key] > current[key] and ultra[key] > wide[key] for key in HEADER_FONT_FIELDS),
+            "native_header_layout_failed")
+    require(all(abs(restored[key] - current[key]) <= 0.1
+                for key in ("root_width", "root_height", *HEADER_FONT_FIELDS)), "native_header_restore_failed")
     expected_lifecycle = {"installed":True, "strategy":"reuse-existing", "initialize_calls":1,
                           "original_initialize_calls":0, "reused_existing_calls":1}
     lifecycle = status.get("keyboard_lifecycle")
@@ -337,8 +386,10 @@ def validate_report(value):
             "unity_started_before_launch_button")
     require(launcher.get("ready_launcher_visible") is True and launcher.get("ready_button_found") is True
             and launcher.get("ready_button_enabled") is True
+            and launcher.get("ready_button_kind") == "UIButton"
             and launcher.get("ready_button_title") in ("게임 시작", "ゲーム開始", "Start Game"), "ready_launch_control_failed")
     require(launcher.get("button_action_dispatched") is True
+            and launcher.get("button_control_event") == "touch-up-inside"
             and type(launcher.get("button_dispatch_count")) is int and launcher["button_dispatch_count"] == 1
             and launcher.get("duplicate_launch_called") is True
             and launcher.get("forwarded_after_button") is True, "explicit_launch_action_failed")
@@ -381,6 +432,12 @@ def validate_report(value):
         "server_control_found", "server_control_disabled_while_running",
         "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
         "grpc_connected_after_close", "assets_connected_after_close")), "settings_menu_lifetime_failed")
+    require(menu.get("return_button_kind") == "UIButton" and menu.get("server_button_kind") == "UIButton"
+            and menu.get("return_control_event") == "touch-up-inside", "settings_menu_lifetime_failed")
+    copied = menu.get("diagnostics_copy")
+    require(type(copied) is dict and all(copied.get(key) is True for key in DIAGNOSTICS_COPY_BOOL_FIELDS)
+            and copied.get("timed_out") is False and type(copied.get("text_bytes")) is int
+            and 1 <= copied["text_bytes"] <= 32768, "settings_diagnostics_copy_failed")
     width, window_width = menu.get("frame_width"), menu.get("window_width")
     require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
             and abs(width - window_width) <= 2, "settings_menu_width_failed")
@@ -413,6 +470,7 @@ def validate_report(value):
             "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
                               "invalid_iv_rejected": True, "worker_main_thread": False},
             "keyboard": keyboard_observation(keyboard),
+            "native_header": header_observation(header),
             "early_status": {key: early[key] for key in (
                 "id", "ok", "state", "running", "phase", "captured", "completion_main_thread")},
             "launcher": {key: launcher[key] for key in (
@@ -420,8 +478,8 @@ def validate_report(value):
                 "server_ready_before_capture", "uncaptured_original_called", "uncaptured_attempts", "capture_after_ready_once",
                 "ready_phase", "ready_original_called", "ready_launch_requested", "ready_launch_prepared",
                 "ready_observations", "ready_wait_seconds", "ready_launcher_visible", "ready_button_found",
-                "ready_button_enabled", "ready_button_title", "button_action_dispatched",
-                "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button")},
+                "ready_button_enabled", "ready_button_title", "ready_button_kind", "button_action_dispatched",
+                "button_control_event", "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button")},
             "corner_gesture": {key: corner[key] for key in (
                 "game_window_key", "matching_count", "recognizer_name", "one_finger_count", "three_finger_count", "minimum_press_seconds",
                 "allowable_movement_points", "delegate_present", "delays_touches_began",
@@ -430,13 +488,15 @@ def validate_report(value):
                 ("schema", "phase", "hook_installed", "python_initialized", "captured", "forwarded", "attempts",
                  "launch_requested", "launch_prepared", "launcher_visible")},
                  "keyboard_lifecycle":keyboard_lifecycle_observation(lifecycle), "keyboard_ready":True,
+                 "http_readiness":http_readiness_observation(http),
                  "client_data":{key: data[key] for key in ("selected", "language", "bundle_identifier")}},
             "menu_lifetime": {**{key: menu[key] for key in (
                 "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
                 "server_control_found", "server_control_disabled_while_running",
+                "return_button_kind", "server_button_kind", "return_control_event",
                 "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
                 "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
-                "dismiss_observation":dismissal,
+                "dismiss_observation":dismissal, "diagnostics_copy":diagnostics_copy_observation(copied),
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count")},
@@ -452,12 +512,21 @@ def wait_report(container, remaining):
     documents = Path(container) / "Documents"
     final, waiting = documents / "embedded-probe.json", documents / "embedded-probe-status.json"
     last_keyboard = {}
+    last_header = {}
+    last_http = {}
+    last_copy = {}
     def checked_remaining():
         try:
             return remaining()
         except ProbeError as error:
             if last_keyboard:
                 error.native_keyboard = dict(last_keyboard)
+            if last_header:
+                error.native_header = dict(last_header)
+            if last_http:
+                error.native_http = dict(last_http)
+            if last_copy:
+                error.native_diagnostics_copy = dict(last_copy)
             raise
     while True:
         checked_remaining()
@@ -479,6 +548,16 @@ def wait_report(container, remaining):
                 keyboard = keyboard_observation(observed.get("keyboard"))
                 if keyboard:
                     error.native_keyboard = keyboard
+                header = header_observation(observed.get("native_header"))
+                if header:
+                    error.native_header = header
+                observed_status = observed.get("server_status")
+                http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
+                if http:
+                    error.native_http = http
+                copied = diagnostics_copy_from_observation(observed)
+                if copied:
+                    error.native_diagnostics_copy = copied
                 raise
         except FileNotFoundError:
             pass
@@ -486,6 +565,15 @@ def wait_report(container, remaining):
         try:
             waiting_value = parse_json(read_bounded(waiting, MAX_JSON))
             last_keyboard.update(keyboard_observation(waiting_value.get("keyboard")))
+            last_header.update(header_observation(waiting_value.get("native_header")))
+            observed_status = waiting_value.get("server_status")
+            if type(observed_status) is dict and type(observed_status.get("http_readiness")) is dict:
+                last_http.clear()
+                last_http.update(http_readiness_observation(observed_status.get("http_readiness")))
+            copied = diagnostics_copy_from_observation(waiting_value)
+            if copied:
+                last_copy.clear()
+                last_copy.update(copied)
             failure = waiting_value.get("probe_error")
             if failure is not None:
                 require(type(failure) is str and failure in LAUNCHER_FAILURE_CODES,
@@ -520,8 +608,84 @@ def wait_report(container, remaining):
                     keyboard = keyboard_observation(waiting_value.get("keyboard"))
                     if keyboard:
                         error.native_keyboard = keyboard
+                    header = header_observation(waiting_value.get("native_header"))
+                    if header:
+                        error.native_header = header
+                    observed_status = waiting_value.get("server_status")
+                    http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
+                    if http:
+                        error.native_http = http
+                    copied = diagnostics_copy_from_observation(waiting_value)
+                    if copied:
+                        error.native_diagnostics_copy = copied
                 raise
         time.sleep(min(0.25, checked_remaining()))
+
+
+def diagnostics_copy_observation(value):
+    """Export copy-flow flags and size; never clipboard or diagnostic text."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in (*DIAGNOSTICS_COPY_BOOL_FIELDS, "timed_out")
+             if type(value.get(key)) is bool}
+    count = value.get("text_bytes")
+    if type(count) is int and 0 <= count <= 32768:
+        clean["text_bytes"] = count
+    return clean
+
+
+def diagnostics_copy_from_observation(value):
+    if type(value) is not dict:
+        return {}
+    raw = value.get("diagnostics_copy")
+    if type(raw) is not dict and type(value.get("menu_lifetime")) is dict:
+        raw = value["menu_lifetime"].get("diagnostics_copy")
+    return diagnostics_copy_observation(raw)
+
+
+def header_observation(value):
+    """Project fixed header phases and finite geometry/font scalars only."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in ("restore_succeeded", "owned_root_only") if type(value.get(key)) is bool}
+    for name in HEADER_PHASES:
+        sample = value.get(name)
+        if type(sample) is not dict:
+            continue
+        metrics = {key:sample[key] for key in HEADER_BOOL_FIELDS if type(sample.get(key)) is bool}
+        count = sample.get("button_count")
+        if type(count) is int and 0 <= count <= 16:
+            metrics["button_count"] = count
+        for key in HEADER_NUMBER_FIELDS:
+            number = sample.get(key)
+            if type(number) in (int, float) and 0 <= number <= 16384 and math.isfinite(number):
+                metrics[key] = number
+        if metrics:
+            clean[name] = metrics
+    return clean
+
+
+def http_readiness_observation(value):
+    """Keep only loopback NSURLSession evidence and fixed, public error labels."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    if type(value.get("schema")) is int and value["schema"] == 1:
+        clean["schema"] = 1
+    for key in ("ok", "body_is_json", "worker_main_thread"):
+        if type(value.get(key)) is bool:
+            clean[key] = value[key]
+    for key, maximum in (("http_status",599), ("received_bytes",16384)):
+        number = value.get(key)
+        if type(number) is int and 0 <= number <= maximum:
+            clean[key] = number
+    for key, expected in (("transport","NSURLSession"), ("url",HTTP_READINESS_URL),
+                          ("error_code","none"), ("ns_error_domain","")):
+        if type(value.get(key)) is str and value[key] == expected:
+            clean[key] = value[key]
+    if type(value.get("ns_error_code")) is int and value["ns_error_code"] == 0:
+        clean["ns_error_code"] = 0
+    return clean
 
 
 def keyboard_lifecycle_observation(value):
@@ -626,6 +790,9 @@ def failure_checkpoint(container):
         lifecycle = keyboard_lifecycle_observation(value.get("keyboard_lifecycle"))
         if lifecycle:
             clean["keyboard_lifecycle"] = lifecycle
+        http = http_readiness_observation(value.get("http_readiness"))
+        if http:
+            clean["http_readiness"] = http
         return clean
 
     for source, name in (("checkpoint", "embedded-probe-checkpoint.json"),
@@ -649,6 +816,12 @@ def failure_checkpoint(container):
         keyboard = keyboard_observation(observed.get("keyboard"))
         if keyboard:
             result.setdefault("keyboard", {}).update(keyboard)
+        header = header_observation(observed.get("native_header"))
+        if header:
+            result.setdefault("native_header", {}).update(header)
+        copied = diagnostics_copy_from_observation(observed)
+        if copied:
+            result["diagnostics_copy"] = copied
         if source == "checkpoint":
             stage = observed.get("stage")
             if type(observed.get("schema")) is int and observed["schema"] == 1 \
@@ -856,6 +1029,12 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             report["native_menu_close_observed"] = error.native_menu
         if isinstance(error, ProbeError) and type(getattr(error, "native_keyboard", None)) is dict and error.native_keyboard:
             report["native_keyboard_observed"] = keyboard_observation(error.native_keyboard)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_header", None)) is dict and error.native_header:
+            report["native_header_observed"] = header_observation(error.native_header)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_http", None)) is dict and error.native_http:
+            report["native_http_readiness_observed"] = http_readiness_observation(error.native_http)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_diagnostics_copy", None)) is dict and error.native_diagnostics_copy:
+            report["native_diagnostics_copy_observed"] = diagnostics_copy_observation(error.native_diagnostics_copy)
         if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
             report["simctl_failure"] = error.tool_detail
     finally:

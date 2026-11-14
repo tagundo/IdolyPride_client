@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
+import itertools
 import json
 import logging
 import mimetypes
 import os
 from pathlib import Path
 import re
+import threading
 import time
 from urllib.parse import quote, unquote, urlsplit
 
@@ -19,6 +21,20 @@ _LOG = logging.getLogger(__name__)
 _RANGE = re.compile(r"bytes=(\d*)-(\d*)\Z")
 _RUNTIME_DIAGNOSTICS_PATH = "/diagnostics/runtime"
 _MAX_RUNTIME_DIAGNOSTICS_BYTES = 1024 * 1024
+_HTTP_METHODS = frozenset(("GET", "HEAD", "POST"))
+_MAX_HTTP_COUNTER = 2**53 - 1
+
+
+def _public_http_path(target):
+    """Keep only a bounded path, never URL authority, query or fragment."""
+    if not isinstance(target, str):
+        return "/<invalid-path>"
+    try:
+        path = urlsplit(target).path
+    except ValueError:
+        return "/<invalid-path>"
+    return "".join("_" if ord(char) < 32 or ord(char) == 127 else char
+                   for char in path[:256])
 
 
 def _render_probe_route(path):
@@ -104,7 +120,7 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                         transfer_callback=None, octo=None,
                         runtime_status_callback=None, presentation=None, playback=None,
                         render_probe=None, media_settings=None, resource_library=None,
-                        wardrobe_probe=None) -> ThreadingHTTPServer:
+                        wardrobe_probe=None, http_request_callback=None) -> ThreadingHTTPServer:
     """Create a bound server; caller owns serve_forever/shutdown/server_close.
 
     Files live under the explicit root. Directory listings and paths resolving
@@ -116,15 +132,85 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
     ``runtime_status_callback`` optionally exposes a safe snapshot over the
     loopback-only GET endpoint ``/diagnostics/runtime``. It receives no input;
     its JSON response is limited to 1 MiB and never cached.
+    ``http_request_callback`` observes recognized GET/HEAD/POST arrivals and
+    their response/final status, including failed routes and HEAD. Events keep
+    only a bounded path and scalars; no headers, query, body or byte progress.
     """
     if runtime_status_callback is not None and not callable(runtime_status_callback):
         raise ValueError("Runtime status callback must be callable")
+    if http_request_callback is not None and not callable(http_request_callback):
+        raise ValueError("HTTP request callback must be callable")
     directory = Path(root).resolve()
     if not directory.is_dir():
         raise ValueError("Asset root must be an existing directory")
+    request_ids = itertools.count(1)
+    request_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "IdolyLocalAssets/0.1"
+
+        def _http_event(self, phase):
+            observation = self._http_observation
+            if observation is None:
+                return
+            row = {key: observation[key] for key in ("request_id", "method", "path", "http_status")}
+            row.update(phase=phase, elapsed_ms=min(_MAX_HTTP_COUNTER,
+                max(0, int((time.monotonic() - observation["started"]) * 1000))))
+            try:
+                http_request_callback(row)
+            except Exception:
+                pass  # Diagnostics cannot affect delivery or connection cleanup.
+
+        def _begin_http_observation(self):
+            if (http_request_callback is None or self._http_observation is not None
+                    or getattr(self, "command", None) not in _HTTP_METHODS):
+                return
+            with request_lock:
+                request_id = next(request_ids)
+            self._http_observation = {"request_id": request_id, "method": self.command,
+                "path": _public_http_path(getattr(self, "path", None)), "http_status": 0,
+                "started": time.monotonic(), "response_observed": False}
+            self._http_event("received")
+            # parse_request can send an error before returning False. It still
+            # belongs to this known GET/HEAD/POST request, without its headers.
+            if self._http_response_status:
+                self._http_observation["http_status"] = self._http_response_status
+                self._http_observation["response_observed"] = True
+                self._http_event("responding")
+
+        def parse_request(self):
+            try:
+                return super().parse_request()
+            finally:
+                self._begin_http_observation()
+
+        def send_response(self, code, message=None):
+            super().send_response(code, message)
+            if isinstance(code, int) and not isinstance(code, bool) and 200 <= code <= 599:
+                code = int(code)
+                self._http_response_status = code
+                observation = self._http_observation
+                if observation is not None:
+                    observation["http_status"] = code
+                    if not observation["response_observed"]:
+                        observation["response_observed"] = True
+                        self._http_event("responding")
+
+        def handle_one_request(self):
+            self._http_observation = None
+            self._http_response_status = 0
+            self._http_observation_failed = False
+            try:
+                return super().handle_one_request()
+            except BaseException:
+                self._http_observation_failed = True
+                raise
+            finally:
+                if self._http_observation is not None:
+                    status = self._http_observation["http_status"]
+                    self._http_event("failed" if self._http_observation_failed or status == 0 or status >= 400
+                                     else "completed")
+                    self._http_observation = None
 
         def log_message(self, _format, *args):
             _LOG.info("%s %r", self.command, urlsplit(self.path).path)
@@ -368,6 +454,7 @@ def create_asset_server(host: str, port: int, root: Path, *, diagnostics=None,
                                 self._transfer(path, "progress", sent, length, status)
                                 last_update = time.monotonic()
                     except OSError:
+                        self._http_observation_failed = True
                         self._transfer(path, "failed", sent, length, status)
                         return
                     self._transfer(path, "completed", sent, length, status)

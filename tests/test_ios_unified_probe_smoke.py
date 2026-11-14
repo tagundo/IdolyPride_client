@@ -38,6 +38,10 @@ def native_report():
                               "keyboard_ready": True,
                               "keyboard_lifecycle":{"installed":True,"strategy":"reuse-existing",
                                   "initialize_calls":1,"original_initialize_calls":0,"reused_existing_calls":1},
+                              "http_readiness":{"schema":1,"ok":True,"transport":"NSURLSession",
+                                  "url":"http://127.0.0.1:8080/client/playback","http_status":200,
+                                  "error_code":"none","body_is_json":True,"received_bytes":128,
+                                  "worker_main_thread":False,"ns_error_domain":"","ns_error_code":0},
                               "launch_requested": True, "launch_prepared": True, "launcher_visible": False,
                               "client_data": {"selected": True, "language": "ko", "bundle_identifier": "local.idoly.client-data"}},
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
@@ -46,6 +50,7 @@ def native_report():
                 "ready_observations": 5, "ready_wait_seconds": 1.003,
                 "ready_launcher_visible": True, "ready_button_found": True,
                 "ready_button_enabled": True, "ready_button_title": "게임 시작",
+                "ready_button_kind":"UIButton","button_control_event":"touch-up-inside",
                 "button_action_dispatched": True, "button_dispatch_count": 1,
                 "duplicate_launch_called": True, "forwarded_after_button": True},
             "corner_gesture": {"game_window_key": True, "matching_count": 1,
@@ -84,9 +89,24 @@ def native_report():
                               "phase":1,"captured":0,"completion_main_thread":True}
     report["launcher"].update(premature_captured=0,server_ready_before_capture=True,
         uncaptured_original_called=0,uncaptured_attempts=1,capture_after_ready_once=True)
+    def header_sample(width, height, fonts):
+        return {"header_found":True,"actions_found":True,"title_found":True,"status_found":True,
+                "hint_found":True,"nav_bar_hidden":True,"header_inside":True,"controls_inside":True,
+                "row_no_overlap":True,"button_titles_fit":True,"button_count":2,
+                "root_width":width,"root_height":height,"header_width":width,"header_height":160,
+                "actions_width":width-32,"min_button_height":48,"button_min_font":fonts[0],
+                "title_font":fonts[1],"status_font":fonts[2],"hint_font":fonts[3]}
+    current = header_sample(393,852,(18,24,18,13))
+    report["native_header"] = {"restore_succeeded":True,"owned_root_only":True,"current":current,
+        "wide":header_sample(1920,1080,(26,34,26,19)),
+        "ultrawide":header_sample(3840,2160,(52,68,52,38)),"restored":dict(current)}
     report["menu_lifetime"] = {"opened_via_owned_menu_target":True,"full_screen":True,
         "frame_width_matches":True,"frame_width":393.0,"window_width":393.0,"return_button_found":True,
         "server_control_found":True,"server_control_disabled_while_running":True,
+        "return_button_kind":"UIButton","server_button_kind":"UIButton","return_control_event":"touch-up-inside",
+        "diagnostics_copy":{"button_found":True,"enabled_before":True,"click_dispatched":True,
+            "completed":True,"feedback_success":True,"pasteboard_matches":True,"clipboard_seeded":True,
+            "clipboard_cleared":True,"timed_out":False,"text_bytes":1024},
         "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
         "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
             "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":True,
@@ -99,6 +119,262 @@ def native_report():
                "last_error":None,"runtime":{"running":True,"grpc_address":"127.0.0.1:50051",
                                               "asset_url":"http://127.0.0.1:8080"}}}}
     return report
+
+
+@pytest.mark.parametrize("phase,key,value", (
+    ("current","header_found",False),("current","actions_found",1),("current","nav_bar_hidden",False),
+    ("current","button_count",True),("current","button_count",1),("current","root_width",True),
+    ("current","root_height",float("inf")),("current","header_width",394),
+    ("current","actions_width",394),("current","header_height",853),("current","min_button_height",43),
+    ("current","button_min_font",15),("current","title_font",19),("current","status_font",15),
+    ("current","hint_font",11),("current","button_min_font",float("nan")),
+    ("wide","root_width",1919),("wide","root_height",1079),("wide","row_no_overlap",False),
+    ("wide","button_min_font",19),("wide","title_font",24),
+    ("ultrawide","root_width",3839),("ultrawide","root_height",2159),
+    ("ultrawide","button_min_font",39),("ultrawide","status_font",39),
+    ("ultrawide","hint_font",19),("ultrawide","button_titles_fit",False),
+    ("restored","root_width",393.2),("restored","title_font",24.2),
+))
+def test_native_header_has_visible_usable_scaled_controls_and_restores_owned_root(phase, key, value):
+    observed = native_report()
+    observed["native_header"][phase][key] = value
+    code = "native_header_restore_failed" if phase == "restored" else "native_header_layout_failed"
+    with pytest.raises(probe.ProbeError, match="^" + code + "$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("key,value,code", (("owned_root_only",False,"native_header_layout_failed"),
+    ("owned_root_only",1,"native_header_layout_failed"),("restore_succeeded",False,"native_header_restore_failed"),
+    ("restore_succeeded",1,"native_header_restore_failed")))
+def test_native_header_requires_safe_root_scope_and_successful_restore(key, value, code):
+    observed = native_report()
+    observed["native_header"][key] = value
+    with pytest.raises(probe.ProbeError, match=code):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("group,key,value,code", (
+    ("launcher","ready_button_kind","UIBarButtonItem","ready_launch_control_failed"),
+    ("launcher","button_control_event","primary-action-triggered","explicit_launch_action_failed"),
+    ("menu_lifetime","return_button_kind","UIBarButtonItem","settings_menu_lifetime_failed"),
+    ("menu_lifetime","server_button_kind","UIView","settings_menu_lifetime_failed"),
+    ("menu_lifetime","return_control_event","unknown","settings_menu_lifetime_failed"),
+))
+def test_native_actions_require_real_button_controls_and_touch_up_inside(group, key, value, code):
+    observed = native_report()
+    observed[group][key] = value
+    with pytest.raises(probe.ProbeError, match=code):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("key,value", (("schema",True),("ok",False),("ok",1),("transport","socket"),
+    ("url","https://private.example/secret"),("http_status",503),("http_status",200.0),
+    ("error_code","unknown private failure"),("body_is_json",False),("body_is_json",1),
+    ("received_bytes",0),("received_bytes",16385),("received_bytes",True),
+    ("worker_main_thread",True),("worker_main_thread",0),("ns_error_domain","private domain"),
+    ("ns_error_code",False),("ns_error_code",1)))
+def test_native_preflight_requires_real_loopback_urlsession_json_success(key, value):
+    observed = native_report()
+    observed["server_status"]["http_readiness"][key] = value
+    with pytest.raises(probe.ProbeError, match="^native_http_readiness_failed$"):
+        probe.validate_report(observed)
+
+
+def test_validated_native_layout_and_http_discard_unknown_payloads_and_accept_absent_optional_error_fields():
+    observed = native_report()
+    observed["native_header"]["private_phase"] = {"secret":"never-copy"}
+    observed["native_header"]["current"]["private_text"] = "never-copy"
+    http = observed["server_status"]["http_readiness"]
+    http["private_field"] = "never-copy"
+    del http["ns_error_domain"], http["ns_error_code"]
+    result = probe.validate_report(observed)
+    assert result["native_header"]["ultrawide"]["button_min_font"] > result["native_header"]["wide"]["button_min_font"]
+    assert result["server_status"]["http_readiness"]["url"] == "http://127.0.0.1:8080/client/playback"
+    assert "never-copy" not in json.dumps(result)
+
+
+def test_native_header_and_http_failure_projections_keep_only_known_bounded_fields():
+    header = probe.header_observation({"restore_succeeded":False,"owned_root_only":1,
+        "current":{"header_found":False,"actions_found":1,"root_width":True,"root_height":float("nan"),
+                   "header_width":-1,"actions_width":0,"button_min_font":20000,"button_count":17,
+                   "private_text":"never-copy"},"private_phase":{"secret":"never-copy"}})
+    assert header == {"restore_succeeded":False,"current":{"header_found":False,"actions_width":0}}
+    http = probe.http_readiness_observation({"schema":True,"ok":False,"transport":"NSURLSession",
+        "url":"https://private.example/never-copy","http_status":503,"received_bytes":True,
+        "body_is_json":False,"worker_main_thread":False,"error_code":"never-copy",
+        "ns_error_domain":"never-copy","ns_error_code":True,"private_field":"never-copy"})
+    assert http == {"ok":False,"transport":"NSURLSession","http_status":503,
+                    "body_is_json":False,"worker_main_thread":False}
+    assert "never-copy" not in json.dumps((header,http))
+
+
+@pytest.mark.parametrize("source,filename", (("checkpoint","embedded-probe-checkpoint.json"),
+    ("status","embedded-probe-status.json"),("report","embedded-probe.json")))
+def test_native_header_checkpoints_project_before_cleanup(tmp_path, source, filename):
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    observed = native_report() if source == "report" else {
+        "schema":1,"stage":"native_header_checked","native_header":native_report()["native_header"],
+        "server_status":{"phase":2,"http_readiness":native_report()["server_status"]["http_readiness"]}}
+    observed["native_header"]["restore_succeeded"] = False
+    observed["native_header"]["current"]["private_text"] = "never-copy"
+    (documents / filename).write_text(json.dumps(observed))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["native_header"]["restore_succeeded"] is False
+    if source == "checkpoint": assert result["stage"] == "native_header_checked"
+    assert "never-copy" not in json.dumps(result)
+
+
+def test_final_header_failure_audit_retains_safe_observations_and_rejects_before_rpc(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container")
+    observed = native_report()
+    observed["native_header"]["wide"]["row_no_overlap"] = False
+    observed["native_header"]["private_phase"] = {"secret":"never-copy"}
+    with mock.patch.object(probe.sys,"platform","darwin"), mock.patch.object(probe,"_simctl",controller), \
+            mock.patch(__name__+".native_report",return_value=observed), mock.patch.object(probe,"probe_rpcs") as rpc:
+        result = probe.run_probe(app,tmp_path/"header-failure.json")
+    assert result["error"] == "native_header_layout_failed"
+    assert result["native_header_observed"]["wide"]["row_no_overlap"] is False
+    assert result["native_http_readiness_observed"]["ok"] is True
+    assert "never-copy" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_waiting_header_failure_retains_only_safe_header_and_http_fields(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"container")
+    def simctl(arguments, timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch":
+            documents = controller.container/"Documents"
+            (documents/"embedded-probe.json").unlink()
+            observed = {"server_status":{"phase":2,"error":None,
+                            "http_readiness":native_report()["server_status"]["http_readiness"]},
+                        "probe_error":"native_header_restore_failed","native_header":native_report()["native_header"]}
+            observed["native_header"]["restore_succeeded"] = False
+            observed["native_header"]["current"]["private_text"] = "never-copy"
+            (documents/"embedded-probe-status.json").write_text(json.dumps(observed))
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"), mock.patch.object(probe,"_simctl",simctl):
+        result = probe.run_probe(app,tmp_path/"header-wait-failure.json")
+    assert result["error"] == "native_header_restore_failed"
+    assert result["native_header_observed"]["restore_succeeded"] is False
+    assert result["native_http_readiness_observed"]["transport"] == "NSURLSession"
+    assert "never-copy" not in json.dumps(result)
+
+
+def test_http_deadline_snapshot_does_not_retain_stale_success_error_label(tmp_path):
+    documents = tmp_path/"Documents"
+    documents.mkdir()
+    waiting = documents/"embedded-probe-status.json"
+    observed = {"server_status":{"phase":2,"error":None,
+        "http_readiness":native_report()["server_status"]["http_readiness"]}}
+    waiting.write_text(json.dumps(observed))
+    def replace_with_failure(_seconds):
+        observed["server_status"]["http_readiness"].update(ok=False,http_status=503,error_code="never-copy")
+        waiting.write_text(json.dumps(observed))
+    remaining = mock.Mock(side_effect=[1,1,1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep",side_effect=replace_with_failure), pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path,remaining)
+    assert caught.value.native_http["ok"] is False
+    assert caught.value.native_http["http_status"] == 503
+    assert "error_code" not in caught.value.native_http
+    assert "never-copy" not in json.dumps(caught.value.native_http)
+
+
+@pytest.mark.parametrize("field,value", [(key, value) for key in (
+    "button_found","enabled_before","click_dispatched","completed","feedback_success",
+    "pasteboard_matches","clipboard_seeded","clipboard_cleared") for value in (False,1)] + [
+    ("timed_out",True),("timed_out",0),("text_bytes",0),("text_bytes",32769),
+    ("text_bytes",True),("text_bytes",-1),("text_bytes","1024")])
+def test_diagnostics_copy_requires_actual_success_and_owned_clipboard_cleanup(field, value):
+    observed = native_report()
+    observed["menu_lifetime"]["diagnostics_copy"][field] = value
+    with pytest.raises(probe.ProbeError, match="^settings_diagnostics_copy_failed$"):
+        probe.validate_report(observed)
+
+
+def test_diagnostics_copy_audit_discards_all_copied_text_and_keeps_only_flags_and_size():
+    observed = native_report()
+    observed["menu_lifetime"]["diagnostics_copy"].update(
+        clipboard_text="DONT-COPY",diagnostic_text="DONT-COPY",text_bytes=32768)
+    result = probe.validate_report(observed)
+    copied = result["menu_lifetime"]["diagnostics_copy"]
+    assert copied["text_bytes"] == 32768 and copied["pasteboard_matches"] is True
+    assert copied["clipboard_seeded"] is True and copied["clipboard_cleared"] is True
+    assert "DONT-COPY" not in json.dumps(result)
+    assert probe.diagnostics_copy_observation({"completed":1,"timed_out":False,
+        "text_bytes":True,"clipboard_text":"DONT-COPY"}) == {"timed_out":False}
+
+
+@pytest.mark.parametrize("source,filename", (("checkpoint","embedded-probe-checkpoint.json"),
+    ("status","embedded-probe-status.json"),("report","embedded-probe.json")))
+def test_diagnostics_copy_checkpoint_projection_never_exports_clipboard_contents(tmp_path, source, filename):
+    documents = tmp_path/"Documents"
+    documents.mkdir()
+    copied = native_report()["menu_lifetime"]["diagnostics_copy"]
+    copied.update(completed=False,clipboard_text="DONT-COPY")
+    observed = native_report() if source == "report" else {
+        "schema":1,"stage":"settings_diagnostics_copied","diagnostics_copy":copied,
+        "server_status":{"phase":4,"error":None}}
+    if source == "report": observed["menu_lifetime"]["diagnostics_copy"] = copied
+    (documents/filename).write_text(json.dumps(observed))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["diagnostics_copy"]["completed"] is False
+    if source == "checkpoint": assert result["stage"] == "settings_diagnostics_copied"
+    assert "DONT-COPY" not in json.dumps(result)
+
+
+def test_diagnostics_copy_final_failure_audit_retains_safe_actual_flow_flags(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"container")
+    observed = native_report()
+    observed["menu_lifetime"]["diagnostics_copy"].update(pasteboard_matches=False,clipboard_text="DONT-COPY")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch(__name__+".native_report",return_value=observed),mock.patch.object(probe,"probe_rpcs") as rpc:
+        result = probe.run_probe(app,tmp_path/"copy-failure.json")
+    assert result["error"] == "settings_diagnostics_copy_failed"
+    assert result["native_diagnostics_copy_observed"]["pasteboard_matches"] is False
+    assert result["native_checkpoint"]["diagnostics_copy"]["pasteboard_matches"] is False
+    assert "DONT-COPY" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_diagnostics_copy_waiting_failure_preserves_only_safe_size_and_flags(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"container")
+    def simctl(arguments,timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch":
+            documents = controller.container/"Documents"
+            (documents/"embedded-probe.json").unlink()
+            copied = native_report()["menu_lifetime"]["diagnostics_copy"]
+            copied.update(timed_out=True,completed=False,clipboard_text="DONT-COPY")
+            observed = {"server_status":{"phase":4,"error":None},
+                "probe_error":"settings_diagnostics_copy_failed","diagnostics_copy":copied}
+            (documents/"embedded-probe-status.json").write_text(json.dumps(observed))
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",simctl):
+        result = probe.run_probe(app,tmp_path/"copy-wait-failure.json")
+    assert result["error"] == "settings_diagnostics_copy_failed"
+    assert result["native_diagnostics_copy_observed"]["timed_out"] is True
+    assert result["native_diagnostics_copy_observed"]["completed"] is False
+    assert "DONT-COPY" not in json.dumps(result)
+
+
+def test_diagnostics_copy_deadline_snapshot_preserves_only_latest_safe_flags(tmp_path):
+    documents = tmp_path/"Documents"
+    documents.mkdir()
+    waiting = documents/"embedded-probe-status.json"
+    copied = native_report()["menu_lifetime"]["diagnostics_copy"]
+    observed = {"server_status":{"phase":4,"error":None},"diagnostics_copy":copied}
+    waiting.write_text(json.dumps(observed))
+    def replace_with_pending(_seconds):
+        copied.update(completed=False,clipboard_cleared=False,clipboard_text="DONT-COPY")
+        waiting.write_text(json.dumps(observed))
+    remaining = mock.Mock(side_effect=[1,1,1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep",side_effect=replace_with_pending), pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path,remaining)
+    assert caught.value.native_diagnostics_copy["completed"] is False
+    assert caught.value.native_diagnostics_copy["clipboard_cleared"] is False
+    assert "DONT-COPY" not in json.dumps(caught.value.native_diagnostics_copy)
 
 
 @pytest.mark.parametrize("phase,field,replacement", (
@@ -724,9 +1000,13 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert result["report_phase"] == 4 and result["report_original_called"] == 1
     assert result["report_valid"] is True
     assert all(type(value) in (str, int, bool, float, type(None))
-               for key, value in result.items() if key not in ("keyboard", "report_keyboard_lifecycle"))
+               for key, value in result.items() if key not in (
+                   "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
+    assert result["native_header"] == raw_report["native_header"]
+    assert result["report_http_readiness"] == raw_report["server_status"]["http_readiness"]
+    assert result["diagnostics_copy"] == raw_report["menu_lifetime"]["diagnostics_copy"]
     assert "must not retain" not in json.dumps(result)
 
 

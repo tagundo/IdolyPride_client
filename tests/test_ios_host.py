@@ -100,6 +100,47 @@ def command(h, action, **fields):
     return json.loads(h.subject.command(json.dumps({"id": 7, "action": action, **fields})))
 
 
+def test_oversized_snapshot_retains_bounded_http_and_both_transfer_observations(harness, monkeypatch):
+    h = harness
+    start(h)
+    observed = h.runtimes[0].status()
+    observed["unrelated_large_history"] = "x" * (host.MAX_JSON_BYTES * 2)
+    observed["language"] = {"settings": {"schema": 1, "language": "ko"},
+                            "public_report": "x" * (host.MAX_JSON_BYTES * 2)}
+    observed["asset_transfer"] = {"completed_requests": 2, "failed_requests": 1,
+        "http_status": 404, "path": "/master/file.db?query-secret", "session_bytes_sent": 12}
+    observed["resource_transfer"] = {"session_http_requests": 4, "session_http_failures": 1,
+        "last_failed_request": {"request_id": 4, "kind": "manifest", "http_status": 404,
+                                "error_code": "octo_not_found", "phase": "failed"},
+        "recent_requests": [{"object_name": "x" * 4000, "http_status": 200}] * 30}
+    observed["http_requests"] = {"total_requests": 7, "active_requests": 0,
+        "completed_requests": 5, "failed_requests": 2,
+        "last_request": {"request_id": 7, "method": "HEAD", "path": "/missing?query-secret",
+                         "http_status": 404, "phase": "failed", "elapsed_ms": 1},
+        "last_failed_request": {"request_id": 1, "method": "GET", "path": "/early-missing?query-secret",
+                                "http_status": 404, "phase": "failed", "elapsed_ms": 1},
+        "recent_requests": [{"request_id": 7, "method": "HEAD", "path": "/missing",
+                             "http_status": 404, "phase": "failed", "elapsed_ms": 1}] * 30}
+    monkeypatch.setattr(h.runtimes[0], "status", lambda: observed)
+    result = json.loads(h.subject.command('{"id":1,"action":"status"}'))
+    assert result["ok"] is True
+    status = result["result"]
+    assert status["diagnostics_truncated"] is True
+    runtime = status["runtime"]
+    assert runtime["language"]["settings"]["language"] == "ko"
+    assert "public_report" not in runtime["language"]
+    assert runtime["asset_transfer"]["failed_requests"] == 1
+    assert runtime["asset_transfer"]["path"] == "/master/file.db"
+    assert runtime["resource_transfer"]["last_failed_request"]["http_status"] == 404
+    assert len(runtime["resource_transfer"]["recent_requests"]) == 3
+    assert runtime["http_requests"]["total_requests"] == 7
+    assert runtime["http_requests"]["last_request"]["path"] == "/missing"
+    assert runtime["http_requests"]["last_failed_request"]["path"] == "/early-missing"
+    assert len(runtime["http_requests"]["recent_requests"]) == 10
+    assert "query-secret" not in json.dumps(result)
+    assert len(h.subject.command('{"id":1,"action":"status"}').encode()) <= host.MAX_JSON_BYTES
+
+
 def test_fresh_defaults_native_adapters_and_both_listeners_ready(harness):
     h = harness; result = start(h)
     assert result["state"] == "ready" and result["running"]

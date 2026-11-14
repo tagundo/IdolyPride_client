@@ -21,6 +21,7 @@ static NSString *serverReadyStatus;
 static NSString *interfaceLanguage = @"system";
 static NSInteger interfaceLanguageIndex = -1;
 static const NSUInteger maxJSON = 65536;
+static const NSUInteger maxDiagnosticCopy = 32768;
 
 static NSInteger resolvedInterfaceLanguage(void) {
     NSString *language = [interfaceLanguage isEqualToString:@"system"]
@@ -51,6 +52,7 @@ static NSString *localized(NSString *source) {
         @"서버를 시작하지 못했습니다":@[@"サーバーを開始できませんでした", @"The server could not start"],
         @"서버 시작 실패":@[@"サーバーの開始に失敗しました", @"Server startup failed"],
         @"서버 연결 확인 실패":@[@"サーバー接続を確認できませんでした", @"Server connection check failed"],
+        @"내장 리소스 서버에 연결하지 못했습니다. 진단에서 HTTP 연결 상태를 확인해 주세요.":@[@"内蔵リソースサーバーに接続できませんでした。診断でHTTP接続の状態を確認してください。", @"The embedded resource server could not be reached. Check the HTTP connection status in Diagnostics."],
         @"게임 시작을 준비하고 있습니다…":@[@"ゲームの開始を準備しています…", @"Preparing to start the game…"],
         @"게임 데이터와 선택한 언어를 준비하고 있습니다…":@[@"ゲームデータと選択した言語を準備しています…", @"Preparing game data and the selected language…"],
         @"게임 시작 준비 실패":@[@"ゲームの開始準備に失敗しました", @"Game preparation failed"],
@@ -81,6 +83,7 @@ static NSString *localized(NSString *source) {
         @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 서버 메뉴가 다시 열립니다.":@[@"準備ができたら右上の「ゲーム開始」を押してください。ゲーム中は画面右上の隅を指1本で2秒間押すと、サーバーメニューを再び開けます。", @"When ready, select Start Game at the top right. During play, hold the screen's upper-right corner with one finger for 2 seconds to reopen this menu."],
         @"이 메뉴를 닫아도 서버는 계속 실행됩니다.":@[@"このメニューを閉じてもサーバーは動作し続けます。", @"Closing this menu keeps the server running."],
         @"요청이 너무 큽니다.":@[@"リクエストが大きすぎます。", @"The request is too large."],
+        @"진단 내용을 복사하지 못했습니다.":@[@"診断情報をコピーできませんでした。", @"The diagnostic text could not be copied."],
         @"허용되지 않은 서버 요청입니다.":@[@"許可されていないサーバーリクエストです。", @"This server request is not allowed."],
         @"이미 파일을 선택하고 있습니다.":@[@"すでにファイルを選択中です。", @"A file selection is already open."],
         @"파일 선택을 취소했습니다.":@[@"ファイル選択をキャンセルしました。", @"File selection was cancelled."],
@@ -145,13 +148,20 @@ static NSString *encode(id object) {
 @property (nonatomic) BOOL pendingExport;
 @property (nonatomic,copy) NSString *lastExportPath;
 @property (nonatomic) BOOL launcherMode;
+@property (nonatomic,strong) UIStackView *nativeHeader;
+@property (nonatomic,strong) UIStackView *actionRow;
+@property (nonatomic,strong) UILabel *nativeTitle;
 @property (nonatomic,strong) UILabel *launcherStatus;
 @property (nonatomic,strong) UILabel *launcherHint;
 @property (nonatomic,strong) NSLayoutConstraint *headerTopConstraint;
+@property (nonatomic,strong) NSLayoutConstraint *headerLeadingConstraint;
+@property (nonatomic,strong) NSLayoutConstraint *headerTrailingConstraint;
+@property (nonatomic,strong) NSLayoutConstraint *actionHeightConstraint;
 @property (nonatomic,strong) NSLayoutConstraint *webTopConstraint;
 @property (nonatomic) CGSize lastLayoutSize;
-@property (nonatomic,strong) UIBarButtonItem *serverStartButton;
-@property (nonatomic,strong) UIBarButtonItem *gameStartButton;
+@property (nonatomic,strong) UIButton *serverStartButton;
+@property (nonatomic,strong) UIButton *gameStartButton;
+@property (nonatomic,strong) UIButton *returnButton;
 - (void)event:(NSString *)json;
 - (void)releaseWeb;
 - (void)exportPath:(NSString *)path;
@@ -162,6 +172,7 @@ static NSString *encode(id object) {
 - (void)updateServerReady;
 - (void)updateLocalizedText;
 - (void)updateCompactLayout;
+- (UIButton *)headerButton:(NSString *)identifier action:(SEL)action primary:(BOOL)primary;
 - (void)dispatchRequest:(NSDictionary *)request;
 - (void)sendRequest:(NSDictionary *)request;
 - (void)sendReply:(NSNumber *)identifier json:(NSString *)json;
@@ -175,21 +186,13 @@ static __weak IDSettingsController *launcherController;
     [super viewDidLoad];
     self.title = localized(self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
     self.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.navigationItem.largeTitleDisplayMode = UINavigationItemLargeTitleDisplayModeNever;
-    _serverStartButton = [[UIBarButtonItem alloc] initWithTitle:localized(@"서버 시작") style:UIBarButtonItemStylePlain
-        target:self action:@selector(startServer)];
-    _serverStartButton.accessibilityIdentifier = @"idoly.server-start";
-    self.navigationItem.leftBarButtonItem = _serverStartButton;
+    [self.navigationController setNavigationBarHidden:YES animated:NO];
+    _serverStartButton = [self headerButton:@"idoly.server-start" action:@selector(startServer) primary:NO];
     if (self.launcherMode) {
-        _gameStartButton = [[UIBarButtonItem alloc] initWithTitle:localized(@"게임 시작") style:UIBarButtonItemStyleDone
-            target:self action:@selector(startGame)];
-        _gameStartButton.accessibilityIdentifier = @"idoly.game-start";
+        _gameStartButton = [self headerButton:@"idoly.game-start" action:@selector(startGame) primary:YES];
         _gameStartButton.enabled = NO;
-        self.navigationItem.rightBarButtonItem = _gameStartButton;
     } else {
-        self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:localized(@"게임으로 돌아가기")
-            style:UIBarButtonItemStyleDone target:self action:@selector(closeSettings)];
-        self.navigationItem.rightBarButtonItem.accessibilityIdentifier = @"idoly.server-close";
+        _returnButton = [self headerButton:@"idoly.server-close" action:@selector(closeSettings) primary:YES];
     }
     _page = [NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"LocalServer/settings/index.html"];
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
@@ -199,26 +202,41 @@ static __weak IDSettingsController *launcherController;
     _web.translatesAutoresizingMaskIntoConstraints = NO;
     _web.navigationDelegate = self; [self.view addSubview:_web];
     UILayoutGuide *safe = self.view.safeAreaLayoutGuide;
+    _nativeTitle = [UILabel new];
+    _nativeTitle.numberOfLines = 0;
+    _nativeTitle.accessibilityIdentifier = @"idoly.native-title";
+    _nativeTitle.accessibilityTraits |= UIAccessibilityTraitHeader;
+    _actionRow = [[UIStackView alloc] initWithArrangedSubviews:@[_serverStartButton, _gameStartButton ?: _returnButton]];
+    _actionRow.axis = UILayoutConstraintAxisHorizontal;
+    _actionRow.distribution = UIStackViewDistributionFillEqually;
+    _actionRow.alignment = UIStackViewAlignmentFill;
+    _actionRow.accessibilityIdentifier = @"idoly.native-actions";
+    _actionHeightConstraint = [_actionRow.heightAnchor constraintEqualToConstant:44];
     _launcherStatus = [UILabel new];
-    _launcherStatus.font = [UIFont preferredFontForTextStyle:UIFontTextStyleHeadline];
-    _launcherStatus.adjustsFontForContentSizeCategory = YES;
     _launcherStatus.numberOfLines = 0;
     _launcherStatus.accessibilityIdentifier = @"idoly.server-status";
     _launcherStatus.accessibilityTraits |= UIAccessibilityTraitUpdatesFrequently;
     _launcherHint = [UILabel new];
-    _launcherHint.font = [UIFont preferredFontForTextStyle:UIFontTextStyleFootnote];
-    _launcherHint.adjustsFontForContentSizeCategory = YES;
     _launcherHint.textColor = UIColor.secondaryLabelColor; _launcherHint.numberOfLines = 0;
-    UIStackView *header = [[UIStackView alloc] initWithArrangedSubviews:@[_launcherStatus, _launcherHint]];
-    header.axis = UILayoutConstraintAxisVertical; header.spacing = 6;
-    header.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.view addSubview:header];
-    _headerTopConstraint = [header.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12];
-    _webTopConstraint = [_web.topAnchor constraintEqualToAnchor:header.bottomAnchor constant:12];
+    _launcherHint.accessibilityIdentifier = @"idoly.server-hint";
+    for (UILabel *label in @[_nativeTitle, _launcherStatus, _launcherHint]) {
+        label.adjustsFontForContentSizeCategory = YES;
+        [label setContentCompressionResistancePriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisVertical];
+    }
+    _nativeHeader = [[UIStackView alloc] initWithArrangedSubviews:@[_nativeTitle, _actionRow, _launcherStatus, _launcherHint]];
+    _nativeHeader.axis = UILayoutConstraintAxisVertical;
+    _nativeHeader.translatesAutoresizingMaskIntoConstraints = NO;
+    _nativeHeader.accessibilityIdentifier = @"idoly.native-header";
+    [self.view addSubview:_nativeHeader];
+    _headerTopConstraint = [_nativeHeader.topAnchor constraintEqualToAnchor:safe.topAnchor constant:12];
+    _headerLeadingConstraint = [_nativeHeader.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16];
+    _headerTrailingConstraint = [_nativeHeader.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16];
+    _webTopConstraint = [_web.topAnchor constraintEqualToAnchor:_nativeHeader.bottomAnchor constant:12];
     [NSLayoutConstraint activateConstraints:@[
         _headerTopConstraint,
-        [header.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:16],
-        [header.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-16],
+        _headerLeadingConstraint,
+        _headerTrailingConstraint,
+        _actionHeightConstraint,
         _webTopConstraint,
         [_web.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor],
         [_web.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor],
@@ -227,42 +245,106 @@ static __weak IDSettingsController *launcherController;
     [self updateCompactLayout];
     [_web loadFileURL:_page allowingReadAccessToURL:_page.URLByDeletingLastPathComponent];
 }
+- (UIButton *)headerButton:(NSString *)identifier action:(SEL)action primary:(BOOL)primary {
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
+    button.accessibilityIdentifier = identifier;
+    button.titleLabel.numberOfLines = 0;
+    button.titleLabel.lineBreakMode = NSLineBreakByWordWrapping;
+    button.titleLabel.textAlignment = NSTextAlignmentCenter;
+    button.titleLabel.adjustsFontForContentSizeCategory = YES;
+    button.backgroundColor = primary ? UIColor.systemBlueColor : UIColor.secondarySystemBackgroundColor;
+    [button setTitleColor:primary ? UIColor.whiteColor : UIColor.systemBlueColor forState:UIControlStateNormal];
+    [button setTitleColor:UIColor.secondaryLabelColor forState:UIControlStateDisabled];
+    [button addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+    return button;
+}
 - (void)updateServerReady {
     _gameStartButton.enabled = serverReady && !serverBusy && gameStartAvailable;
     _serverStartButton.enabled = !serverReady && !serverBusy;
-    _serverStartButton.title = localized(serverReady ? @"서버 실행 중" : serverBusy ? @"서버 준비 중"
-        : serverAttempted ? @"다시 시도" : @"서버 시작");
+    [_serverStartButton setTitle:localized(serverReady ? @"서버 실행 중" : serverBusy ? @"서버 준비 중"
+        : serverAttempted ? @"다시 시도" : @"서버 시작") forState:UIControlStateNormal];
+    _serverStartButton.alpha = _serverStartButton.enabled ? 1.0 : 0.65;
+    _gameStartButton.alpha = _gameStartButton.enabled ? 1.0 : 0.65;
     _launcherStatus.text = localized(serverReadyStatus.length ? serverReadyStatus
         : (serverReady ? @"서버가 준비되었습니다." : serverBusy ? @"서버를 준비하고 있습니다…"
             : @"서버가 실행 중이 아닙니다. ‘서버 시작’을 눌러 주세요."));
     BOOL healthyStatus = serverReady && (!serverReadyStatus.length || [serverReadyStatus isEqualToString:@"서버 실행 중"]
         || [serverReadyStatus isEqualToString:@"서버가 준비되었습니다."]);
     _launcherStatus.textColor = healthyStatus ? UIColor.systemGreenColor : UIColor.labelColor;
+    _lastLayoutSize = CGSizeMake(-1, -1);
+    [self updateCompactLayout];
 }
 - (void)updateLocalizedText {
-    _gameStartButton.title = localized(@"게임 시작");
-    if (!self.launcherMode) self.navigationItem.rightBarButtonItem.title = localized(@"게임으로 돌아가기");
+    [_gameStartButton setTitle:localized(@"게임 시작") forState:UIControlStateNormal];
+    [_returnButton setTitle:localized(@"게임으로 돌아가기") forState:UIControlStateNormal];
     _launcherHint.text = localized(self.launcherMode
         ? @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 서버 메뉴가 다시 열립니다."
         : @"이 메뉴를 닫아도 서버는 계속 실행됩니다.");
-    self.title = localized(self.view.bounds.size.width < 420 ? @"서버"
-        : self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
     [self updateServerReady];
 }
 - (void)updateCompactLayout {
     CGSize size = self.view.bounds.size;
     if (CGSizeEqualToSize(size, _lastLayoutSize)) return;
     _lastLayoutSize = size;
-    // UIKit layout/resize events only. No game-frame observer or timer exists.
-    BOOL compact = size.height < 540;
+    // Match the web's clamp(16px, 1.05vmax, 64px). The complete native header,
+    // including its row height, grows with virtual PlayCover game coordinates.
+    // This runs only on UIKit layout/state/language events, never game frames.
+    CGFloat base = MIN(64.0, MAX(16.0, MAX(size.width, size.height) * 0.0105));
+    CGFloat scale = base / 16.0;
+    BOOL compact = size.height < 540 * scale;
+    _nativeTitle.hidden = compact;
     _launcherHint.hidden = compact;
-    _headerTopConstraint.constant = compact ? 6 : 12;
-    _webTopConstraint.constant = compact ? 6 : 12;
-    self.title = localized(size.width < 420 ? @"서버" : self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
+    _nativeHeader.spacing = 6 * scale;
+    _actionRow.spacing = 12 * scale;
+    _headerTopConstraint.constant = (compact ? 6 : 12) * scale;
+    _headerLeadingConstraint.constant = 16 * scale;
+    _headerTrailingConstraint.constant = -16 * scale;
+    _webTopConstraint.constant = (compact ? 6 : 12) * scale;
+    _nativeTitle.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleTitle2]
+        scaledFontForFont:[UIFont systemFontOfSize:22 * scale weight:UIFontWeightBold]];
+    _launcherStatus.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline]
+        scaledFontForFont:[UIFont systemFontOfSize:17 * scale weight:UIFontWeightSemibold]];
+    _launcherHint.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleFootnote]
+        scaledFontForFont:[UIFont systemFontOfSize:13 * scale]];
+    UIFont *buttonFont = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline]
+        scaledFontForFont:[UIFont systemFontOfSize:17 * scale weight:UIFontWeightSemibold]];
+    CGFloat usableWidth = MAX(1, size.width - self.view.safeAreaInsets.left - self.view.safeAreaInsets.right - 32 * scale);
+    CGFloat textWidth = MAX(1, (usableWidth - _actionRow.spacing) / 2 - 32 * scale);
+    CGFloat rowHeight = 44 * scale;
+    for (UIButton *button in @[_serverStartButton, _gameStartButton ?: _returnButton]) {
+        button.titleLabel.font = buttonFont;
+        button.contentEdgeInsets = UIEdgeInsetsMake(10 * scale, 16 * scale, 10 * scale, 16 * scale);
+        NSString *titleText = [button titleForState:UIControlStateNormal] ?: @"";
+        CGRect title = [titleText boundingRectWithSize:CGSizeMake(textWidth, CGFLOAT_MAX)
+            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+            attributes:@{NSFontAttributeName:buttonFont} context:nil];
+        rowHeight = MAX(rowHeight, ceil(title.size.height) + 20 * scale);
+    }
+    _actionHeightConstraint.constant = rowHeight;
+    self.title = localized(self.launcherMode ? @"아이프라 서버" : @"아이프라 서버 설정");
+    _nativeTitle.text = self.title;
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self.navigationController setNavigationBarHidden:YES animated:NO];
 }
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     [self updateCompactLayout];
+}
+- (void)viewSafeAreaInsetsDidChange {
+    [super viewSafeAreaInsetsDidChange];
+    if (!self.isViewLoaded || !_nativeHeader) return;
+    _lastLayoutSize = CGSizeMake(-1, -1);
+    [self updateCompactLayout];
+}
+- (void)traitCollectionDidChange:(UITraitCollection *)previousTraitCollection {
+    [super traitCollectionDidChange:previousTraitCollection];
+    if (!self.isViewLoaded || !_nativeHeader) return;
+    if (![previousTraitCollection.preferredContentSizeCategory isEqualToString:self.traitCollection.preferredContentSizeCategory]) {
+        _lastLayoutSize = CGSizeMake(-1, -1);
+        [self updateCompactLayout];
+    }
 }
 - (void)startServer {
     if (serverReady || serverBusy) return;
@@ -318,6 +400,26 @@ static __weak IDSettingsController *launcherController;
         @"error":@{@"code":@"native_files", @"message":localized(message)}})];
 }
 - (void)dispatchRequest:(NSDictionary *)request {
+    if ([request[@"action"] isEqual:@"diagnostics_copy"]) {
+        // Explicit click in the trusted bundled page only. This action stays
+        // available when Python/server startup is not ready or has failed.
+        NSNumber *identifier = request[@"id"];
+        NSString *text = request[@"text"];
+        if (request.count != 3 || ![text isKindOfClass:NSString.class]) {
+            [self localFailure:identifier message:@"허용되지 않은 서버 요청입니다."]; return;
+        }
+        NSData *bytes = text.length <= maxDiagnosticCopy ? [text dataUsingEncoding:NSUTF8StringEncoding] : nil;
+        if (!bytes || bytes.length > maxDiagnosticCopy) {
+            [self localFailure:identifier message:@"요청이 너무 큽니다."]; return;
+        }
+        NSCAssert(NSThread.isMainThread, @"Explicit clipboard actions belong to the main thread");
+        @try { UIPasteboard.generalPasteboard.string = text; }
+        @catch (NSException *exception) {
+            (void)exception; [self localFailure:identifier message:@"진단 내용을 복사하지 못했습니다."]; return;
+        }
+        [self sendReply:identifier json:encode(@{@"id":identifier, @"ok":@YES, @"result":@{@"copied":@YES}})];
+        return;
+    }
     if (![request[@"action"] isEqual:@"resources_export"]) { [self sendRequest:request]; return; }
     // A completed export may outlive its closed settings page. Before the next
     // explicit export, retire only our own completed temporary ZIP namespace.
@@ -395,7 +497,11 @@ static __weak IDSettingsController *launcherController;
     NSDictionary *request = message.body; NSNumber *identifier = request[@"id"]; NSString *action = request[@"action"];
     if (![identifier isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)identifier) == CFBooleanGetTypeID()
         || identifier.doubleValue != identifier.longLongValue || identifier.longLongValue < 1 || identifier.longLongValue > INT32_MAX
-        || ![action isKindOfClass:NSString.class] || !encode(request)) return;
+        || ![action isKindOfClass:NSString.class]) return;
+    // Validate the clipboard payload itself, before JSON expansion or Python
+    // gating; escaped text can exceed the ordinary host-envelope byte budget.
+    if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
+    if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
     NSSet *actions = [NSSet setWithArray:@[@"status",@"save_options",@"save_presentation",@"save_playback",@"save_media",
         @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export"]];
     if (![actions containsObject:action] || request[@"path"] || request[@"output_path"]) {

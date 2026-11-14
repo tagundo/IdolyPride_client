@@ -224,7 +224,13 @@ class EmbeddedRuntimeTests(unittest.TestCase):
                 body = response.read()
                 self.assertEqual(int(response.headers["Content-Length"]), len(body))
         observed = json.loads(body)
-        self.assertEqual(observed, runtime.diagnostics_snapshot())
+        # Serving this endpoint itself updates HTTP observations after the
+        # snapshot body has been encoded. Compare the otherwise stable fields.
+        current = runtime.diagnostics_snapshot()
+        observed_http = observed["runtime"].pop("http_requests")
+        current["runtime"].pop("http_requests")
+        self.assertEqual(observed, current)
+        self.assertEqual(observed_http["last_request"]["path"], "/diagnostics/runtime")
         self.assertTrue(observed["runtime"]["running"])
         self.assertIn("RPC /api.Deck/Save -> UNIMPLEMENTED", observed["runtime"]["logs"])
         self.assertTrue(any("/api.System/Check -> OK" in line for line in observed["runtime"]["logs"]))

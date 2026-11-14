@@ -48,39 +48,159 @@ static BOOL ProbeWrite(NSString *name, NSDictionary *value) {
     return [raw writeToURL:[documents URLByAppendingPathComponent:name] options:NSDataWritingAtomic error:nil];
 }
 
-static void ProbeFindButtons(UIViewController *screen, NSString *identifier, NSMutableArray<UIBarButtonItem *> *items) {
-    if (!screen) return;
-    if ([screen isKindOfClass:UINavigationController.class]) {
-        UINavigationController *navigation = (UINavigationController *)screen;
-        UINavigationItem *bar = navigation.topViewController.navigationItem;
-        NSMutableOrderedSet<UIBarButtonItem *> *buttons = [NSMutableOrderedSet orderedSet];
-        if (bar.leftBarButtonItem) [buttons addObject:bar.leftBarButtonItem];
-        if (bar.rightBarButtonItem) [buttons addObject:bar.rightBarButtonItem];
-        if (bar.leftBarButtonItems) [buttons addObjectsFromArray:bar.leftBarButtonItems];
-        if (bar.rightBarButtonItems) [buttons addObjectsFromArray:bar.rightBarButtonItems];
-        for (UIBarButtonItem *item in buttons) {
-            if ([item.accessibilityIdentifier isEqualToString:identifier]
-                    && navigation.topViewController.viewIfLoaded.window && ![items containsObject:item]) {
-                [items addObject:item];
-            }
-        }
-    }
-    for (UIViewController *child in screen.childViewControllers) ProbeFindButtons(child, identifier, items);
-    ProbeFindButtons(screen.presentedViewController, identifier, items);
+static void ProbeFindButtonsBounded(UIView *view, NSString *identifier, NSMutableArray<UIButton *> *items,
+                                    NSUInteger *remaining) {
+    if (!view || !*remaining || view.hidden || view.alpha <= 0) return;
+    --(*remaining);
+    if ([view isKindOfClass:UIButton.class] && [view.accessibilityIdentifier isEqualToString:identifier]
+            && view.window && ![items containsObject:(UIButton *)view]) [items addObject:(UIButton *)view];
+    for (UIView *child in view.subviews) ProbeFindButtonsBounded(child, identifier, items, remaining);
 }
 
-static NSArray<UIBarButtonItem *> *ProbeVisibleLaunchButtons(void) {
+static void ProbeFindButtons(UIView *view, NSString *identifier, NSMutableArray<UIButton *> *items) {
+    NSUInteger remaining = 2048;
+    ProbeFindButtonsBounded(view, identifier, items, &remaining);
+}
+
+static UIView *ProbeFindIdentifiedView(UIView *view, NSString *identifier, NSUInteger *remaining) {
+    if (!view || !*remaining) return nil;
+    --(*remaining);
+    if ([view.accessibilityIdentifier isEqualToString:identifier]) return view;
+    for (UIView *child in view.subviews) {
+        UIView *found = ProbeFindIdentifiedView(child, identifier, remaining);
+        if (found) return found;
+    }
+    return nil;
+}
+
+static UIView *ProbeHeaderView(UIView *view, NSString *identifier) {
+    NSUInteger remaining = 2048;
+    return ProbeFindIdentifiedView(view, identifier, &remaining);
+}
+
+static UIViewController *ProbeButtonOwner(UIButton *button) {
+    for (id target in button.allTargets) {
+        if ([target isKindOfClass:UIViewController.class]
+                && [NSStringFromClass([target class]) isEqualToString:@"IDSettingsController"]) return target;
+    }
+    return nil;
+}
+
+static BOOL ProbeButtonHasTouchAction(UIButton *button) {
+    UIViewController *owner = ProbeButtonOwner(button);
+    return owner && [button actionsForTarget:owner forControlEvent:UIControlEventTouchUpInside].count == 1;
+}
+
+static BOOL ProbeDispatchButton(UIButton *button) {
+    if (!button.enabled || !button.userInteractionEnabled || !button.window || !ProbeButtonHasTouchAction(button)) return NO;
+    // Exercise the actual UIControl registration, rather than calling the
+    // controller's selector directly. Subsequent state checks prove its effect.
+    [button sendActionsForControlEvents:UIControlEventTouchUpInside];
+    return YES;
+}
+
+static NSArray<UIButton *> *ProbeVisibleLaunchButtons(void) {
     NSMutableOrderedSet<UIWindow *> *windows = [NSMutableOrderedSet orderedSetWithArray:UIApplication.sharedApplication.windows];
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if ([scene isKindOfClass:UIWindowScene.class]) {
             [windows addObjectsFromArray:((UIWindowScene *)scene).windows];
         }
     }
-    NSMutableArray<UIBarButtonItem *> *items = [NSMutableArray array];
+    NSMutableArray<UIButton *> *items = [NSMutableArray array];
     for (UIWindow *window in windows) {
-        if (!window.hidden && window.alpha > 0) ProbeFindButtons(window.rootViewController, @"idoly.game-start", items);
+        if (!window.hidden && window.alpha > 0) ProbeFindButtons(window, @"idoly.game-start", items);
     }
     return items;
+}
+
+static void ProbeLayoutOwnedRoot(UIViewController *owner, UIView *root) {
+    // Font changes made in viewDidLayoutSubviews need a subsequent constraint
+    // pass. Bound those synchronous passes; do not change a Simulator window.
+    for (NSUInteger index = 0; index < 3; ++index) {
+        [root setNeedsLayout]; [root layoutIfNeeded];
+        [owner.view setNeedsLayout]; [owner.view layoutIfNeeded];
+    }
+}
+
+static NSDictionary *ProbeHeaderMetrics(UIViewController *owner) {
+    UIView *root = owner.view;
+    UIView *header = ProbeHeaderView(root,@"idoly.native-header");
+    UIView *actions = ProbeHeaderView(root,@"idoly.native-actions");
+    UILabel *title = (UILabel *)ProbeHeaderView(root,@"idoly.native-title");
+    UILabel *status = (UILabel *)ProbeHeaderView(root,@"idoly.server-status");
+    UILabel *hint = (UILabel *)ProbeHeaderView(root,@"idoly.server-hint");
+    BOOL titleFound = [title isKindOfClass:UILabel.class] && !title.hidden && title.text.length > 0;
+    BOOL statusFound = [status isKindOfClass:UILabel.class] && !status.hidden && status.text.length > 0;
+    BOOL hintFound = [hint isKindOfClass:UILabel.class] && !hint.hidden && hint.text.length > 0;
+    NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
+    ProbeFindButtons(header,@"idoly.server-start",buttons);
+    ProbeFindButtons(header,@"idoly.game-start",buttons);
+    ProbeFindButtons(header,@"idoly.server-close",buttons);
+    CGFloat minimumFont = CGFLOAT_MAX, minimumHeight = CGFLOAT_MAX;
+    BOOL controlsInside = buttons.count == 2, titlesFit = buttons.count == 2, rowNoOverlap = buttons.count == 2;
+    CGRect previous = CGRectNull;
+    for (UIButton *button in buttons) {
+        CGFloat font = button.titleLabel.font.pointSize;
+        minimumFont = MIN(minimumFont,font); minimumHeight = MIN(minimumHeight,CGRectGetHeight(button.bounds));
+        CGRect frame = [button convertRect:button.bounds toView:actions];
+        controlsInside = controlsInside && CGRectContainsRect(CGRectInset(actions.bounds,-1,-1),frame);
+        if (!CGRectIsNull(previous) && CGRectIntersectsRect(CGRectInset(previous,0.5,0.5),CGRectInset(frame,0.5,0.5))) rowNoOverlap = NO;
+        previous = frame;
+        UIEdgeInsets insets = button.contentEdgeInsets;
+        CGFloat width = MAX(0,CGRectGetWidth(button.bounds)-insets.left-insets.right);
+        CGFloat height = MAX(0,CGRectGetHeight(button.bounds)-insets.top-insets.bottom);
+        NSString *text = [button titleForState:UIControlStateNormal] ?: @"";
+        CGRect needed = [text boundingRectWithSize:CGSizeMake(width,CGFLOAT_MAX)
+            options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingUsesFontLeading
+            attributes:@{NSFontAttributeName:button.titleLabel.font} context:nil];
+        titlesFit = titlesFit && text.length > 0 && width > 0 && ceil(needed.size.width) <= width+1
+            && ceil(needed.size.height) <= height+1;
+    }
+    CGRect headerFrame = header ? [header convertRect:header.bounds toView:root] : CGRectZero;
+    BOOL headerInside = header && CGRectContainsRect(CGRectInset(root.bounds,-1,-1),headerFrame);
+    BOOL headerFound = [header isKindOfClass:UIStackView.class] && header.window != nil;
+    BOOL actionsFound = [actions isKindOfClass:UIStackView.class] && actions.window != nil;
+    BOOL navHidden = owner.navigationController && owner.navigationController.navigationBarHidden;
+    return @{@"header_found":@(headerFound),@"actions_found":@(actionsFound),@"title_found":@(titleFound),
+        @"status_found":@(statusFound),@"hint_found":@(hintFound),@"nav_bar_hidden":@(navHidden),
+        @"header_inside":@(headerInside),@"controls_inside":@(controlsInside),@"row_no_overlap":@(rowNoOverlap),
+        @"button_titles_fit":@(titlesFit),@"button_count":@(buttons.count),
+        @"root_width":@(CGRectGetWidth(root.bounds)),@"root_height":@(CGRectGetHeight(root.bounds)),
+        @"header_width":@(CGRectGetWidth(header.bounds)),@"header_height":@(CGRectGetHeight(header.bounds)),
+        @"actions_width":@(CGRectGetWidth(actions.bounds)),@"min_button_height":@(buttons.count ? minimumHeight : 0),
+        @"button_min_font":@(buttons.count ? minimumFont : 0),@"title_font":@(titleFound ? title.font.pointSize : 0),
+        @"status_font":@(statusFound ? status.font.pointSize : 0),@"hint_font":@(hintFound ? hint.font.pointSize : 0)};
+}
+
+static NSDictionary *ProbeHeaderLayouts(UIButton *button) {
+    UIViewController *owner = ProbeButtonOwner(button);
+    UIView *root = owner.navigationController.view;
+    BOOL owned = owner && root && root.window == button.window && owner.navigationController.topViewController == owner;
+    if (!owned) return @{@"owned_root_only":@NO,@"restore_succeeded":@NO};
+    CGRect savedFrame = root.frame, savedBounds = root.bounds;
+    CGRect savedOwnerFrame = owner.view.frame, savedOwnerBounds = owner.view.bounds;
+    NSMutableDictionary *result = [NSMutableDictionary dictionaryWithDictionary:@{@"owned_root_only":@YES}];
+    ProbeLayoutOwnedRoot(owner,root); result[@"current"] = ProbeHeaderMetrics(owner);
+    @try {
+        NSArray<NSString *> *names = @[@"wide",@"ultrawide"];
+        NSArray<NSValue *> *sizes = @[[NSValue valueWithCGSize:CGSizeMake(1920,1080)],
+                                      [NSValue valueWithCGSize:CGSizeMake(3840,2160)]];
+        for (NSUInteger index=0; index<names.count; ++index) {
+            CGSize size = sizes[index].CGSizeValue;
+            root.frame = CGRectMake(savedFrame.origin.x,savedFrame.origin.y,size.width,size.height);
+            root.bounds = CGRectMake(0,0,size.width,size.height);
+            owner.view.frame = root.bounds; owner.view.bounds = root.bounds;
+            ProbeLayoutOwnedRoot(owner,root); result[names[index]] = ProbeHeaderMetrics(owner);
+        }
+    } @finally {
+        root.frame = savedFrame; root.bounds = savedBounds;
+        owner.view.frame = savedOwnerFrame; owner.view.bounds = savedOwnerBounds;
+        ProbeLayoutOwnedRoot(owner,root);
+    }
+    BOOL restored = CGRectEqualToRect(root.frame,savedFrame) && CGRectEqualToRect(root.bounds,savedBounds)
+        && CGRectEqualToRect(owner.view.frame,savedOwnerFrame) && CGRectEqualToRect(owner.view.bounds,savedOwnerBounds);
+    result[@"restore_succeeded"] = @(restored); result[@"restored"] = ProbeHeaderMetrics(owner);
+    return result;
 }
 
 static NSDictionary *ProbeCornerGesture(UIWindow *window) {
@@ -172,6 +292,72 @@ static void ProbeSettingsDOM(WKWebView *web, void (^completion)(NSDictionary *))
         finish(metrics);
     });
     ProbeSettingsDOMAttempt(web, state, finish);
+}
+
+static void ProbeDiagnosticsCopyAttempt(WKWebView *__weak weakWeb, NSMutableDictionary *state,
+                                        void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    WKWebView *web = weakWeb;
+    if (!web) { finish(); return; }
+    NSString *script = @"(() => { const f=document.getElementById('diagnostics-copy-feedback');"
+        "return {completed:!!f&&!f.hidden,success:!!f&&!f.hidden&&f.dataset.error==='false'}; })()";
+    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
+        if ([state[@"finished"] boolValue]) return;
+        NSMutableDictionary *metrics = state[@"metrics"];
+        if (!error && [value isKindOfClass:NSDictionary.class] && [value[@"completed"] isEqual:@YES]) {
+            BOOL success = [value[@"success"] isEqual:@YES];
+            metrics[@"completed"] = @YES; metrics[@"feedback_success"] = @(success);
+            // The test seeded this clipboard before clicking. Read only the
+            // value resulting from our own request, never an earlier clipboard.
+            NSString *expected = state[@"expected"];
+            BOOL matches = success && expected && [UIPasteboard.generalPasteboard.string isEqualToString:expected];
+            metrics[@"pasteboard_matches"] = @(matches); finish(); return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(), ^{
+            ProbeDiagnosticsCopyAttempt(weakWeb,state,finish);
+        });
+    }];
+}
+
+static void ProbeDiagnosticsCopy(WKWebView *web,void (^completion)(NSDictionary *)) {
+    NSCAssert(NSThread.isMainThread,@"Clipboard probe belongs on main thread");
+    NSMutableDictionary *metrics = [@{@"button_found":@NO,@"enabled_before":@NO,@"click_dispatched":@NO,
+        @"completed":@NO,@"feedback_success":@NO,@"pasteboard_matches":@NO,@"clipboard_seeded":@NO,
+        @"clipboard_cleared":@NO,@"timed_out":@NO,@"text_bytes":@0} mutableCopy];
+    NSMutableDictionary *state = [@{@"finished":@NO,@"metrics":metrics} mutableCopy];
+    UIPasteboard.generalPasteboard.string = @"Idoly disposable probe clipboard marker";
+    BOOL seeded = [UIPasteboard.generalPasteboard.string isEqualToString:@"Idoly disposable probe clipboard marker"];
+    metrics[@"clipboard_seeded"] = @(seeded);
+    void (^finish)(void) = ^{
+        if ([state[@"finished"] boolValue]) return;
+        state[@"finished"] = @YES;
+        UIPasteboard.generalPasteboard.string = @"";
+        BOOL cleared = UIPasteboard.generalPasteboard.string.length == 0;
+        metrics[@"clipboard_cleared"] = @(cleared);
+        completion(metrics.copy);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,10*NSEC_PER_SEC),dispatch_get_main_queue(), ^{
+        if ([state[@"finished"] boolValue]) return;
+        metrics[@"timed_out"] = @YES; finish();
+    });
+    if (!web || !seeded) { finish(); return; }
+    // Snapshot and click in the same JavaScript turn: a diagnostics refresh
+    // cannot change the text between the expected value and the real handler.
+    NSString *script = @"(() => { const b=document.getElementById('diagnostics-copy'),"
+        "p=document.getElementById('diagnostics'); const t=p?p.textContent:'';"
+        "const r=b?b.getBoundingClientRect():null; const e=!!r&&r.width>0&&r.height>0&&!b.hidden&&!b.disabled&&!!t; if(e)b.click();"
+        "return {button_found:!!b,enabled_before:e,click_dispatched:e,text:t}; })()";
+    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
+        if ([state[@"finished"] boolValue]) return;
+        if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
+        for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched"])
+            metrics[key] = @((BOOL)[value[key] isEqual:@YES]);
+        NSString *text = [value[@"text"] isKindOfClass:NSString.class] ? value[@"text"] : nil;
+        NSUInteger count = [text lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
+        if (!count || count > 32768 || ![metrics[@"click_dispatched"] isEqual:@YES]) { finish(); return; }
+        state[@"expected"] = text; metrics[@"text_bytes"] = @(count);
+        ProbeDiagnosticsCopyAttempt(web,state,finish);
+    }];
 }
 
 static BOOL ProbePort(uint16_t port) {
@@ -316,6 +502,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *earlyStatus;
 @property(nonatomic, strong) NSDictionary *menuCloseObservation;
 @property(nonatomic, strong) NSMutableDictionary *keyboardProbe;
+@property(nonatomic, strong) NSDictionary *nativeHeaderProbe;
+@property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
 - (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
@@ -334,7 +522,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
-        @"keyboard":self.keyboardProbe.copy ?: @{}});
+        @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}});
 }
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
@@ -346,7 +535,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"launcher_visible":ProbeScalar(status, @"launcher_visible"),
         @"keyboard_lifecycle":ProbeKeyboardLifecycle(status),
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
-        @"menu_close":self.menuCloseObservation ?: @{}, @"keyboard":self.keyboardProbe.copy ?: @{}});
+        @"menu_close":self.menuCloseObservation ?: @{}, @"keyboard":self.keyboardProbe.copy ?: @{},
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}});
 }
 - (BOOL)observeKeyboard:(NSString *)name phase:(NSUInteger)phase ready:(BOOL)ready calls:(NSUInteger)calls failure:(NSString *)code {
     NSDictionary *value = ProbeKeyboardObservation();
@@ -386,7 +576,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
             @"original_called":@(self.originalCount),
             @"server_status":status, @"probe_error":self.probeError ?: NSNull.null,
-            @"keyboard":self.keyboardProbe.copy});
+            @"keyboard":self.keyboardProbe.copy, @"native_header":self.nativeHeaderProbe ?: @{}});
     }];
     dispatch_async(dispatch_get_main_queue(), ^{
         // The process-owned server must start before Unity reaches its hook.
@@ -456,17 +646,18 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     if (![status[@"launch_requested"] isEqual:@NO] || ![status[@"launch_prepared"] isEqual:@NO]) {
         self.probeError = @"ready_launcher_flags_differ"; return;
     }
-    NSArray<UIBarButtonItem *> *items = ProbeVisibleLaunchButtons();
+    NSArray<UIButton *> *items = ProbeVisibleLaunchButtons();
     if (items.count != 1) {
         self.probeError = items.count ? @"ready_launch_button_ambiguous" : @"ready_launch_button_missing";
         return;
     }
-    UIBarButtonItem *item = items.firstObject;
+    UIButton *item = items.firstObject;
     if (!item.enabled) { self.probeError = @"ready_launch_button_disabled"; return; }
-    if (![@[@"게임 시작", @"ゲーム開始", @"Start Game"] containsObject:item.title]) {
+    NSString *buttonTitle = [item titleForState:UIControlStateNormal];
+    if (![@[@"게임 시작", @"ゲーム開始", @"Start Game"] containsObject:buttonTitle]) {
         self.probeError = @"ready_launch_button_title_differs"; return;
     }
-    if (!item.target || !item.action) { self.probeError = @"ready_launch_action_missing"; return; }
+    if (!ProbeButtonHasTouchAction(item)) { self.probeError = @"ready_launch_action_missing"; return; }
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (self.readySince == 0) self.readySince = now;
     NSUInteger observations = [self.launcherProbe[@"ready_observations"] unsignedIntegerValue] + 1;
@@ -474,18 +665,38 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"ready_original_called":@(self.originalCount), @"ready_launch_requested":@NO,
         @"ready_launch_prepared":@NO, @"ready_launcher_visible":@YES,
         @"ready_button_found":@YES, @"ready_button_enabled":@(item.enabled),
-        @"ready_button_title":item.title, @"ready_observations":@(observations),
+        @"ready_button_title":buttonTitle, @"ready_button_kind":@"UIButton", @"ready_observations":@(observations),
         @"ready_wait_seconds":@(now - self.readySince)}];
     // Remain Ready for a full second without forwarding Unity. This proves
     // readiness alone does not enter the game, before invoking the real UI.
     if (now - self.readySince < 1.0) return;
+    if (!self.nativeHeaderProbe) {
+        self.nativeHeaderProbe = ProbeHeaderLayouts(item);
+        if (![self.nativeHeaderProbe[@"restore_succeeded"] isEqual:@YES]) {
+            [self failProbe:@"native_header_restore_failed"]; return;
+        }
+        for (NSString *name in @[@"current",@"wide",@"ultrawide",@"restored"]) {
+            NSDictionary *metrics = self.nativeHeaderProbe[name];
+            BOOL good = [metrics[@"button_count"] isEqual:@2];
+            for (NSString *key in @[@"header_found",@"actions_found",@"title_found",@"status_found",@"hint_found",
+                    @"nav_bar_hidden",@"header_inside",@"controls_inside",@"row_no_overlap",@"button_titles_fit"])
+                good = good && [metrics[key] isEqual:@YES];
+            CGFloat minimum = [name isEqual:@"ultrawide"] ? 40 : [name isEqual:@"wide"] ? 20 : 16;
+            good = good && [metrics[@"button_min_font"] doubleValue] >= minimum
+                && [metrics[@"status_font"] doubleValue] >= minimum && [metrics[@"title_font"] doubleValue] >= 20
+                && [metrics[@"hint_font"] doubleValue] >= 12 && [metrics[@"min_button_height"] doubleValue] >= 44;
+            if (!good) { [self failProbe:@"native_header_layout_failed"]; return; }
+        }
+        [self recordCheckpoint:@"native_header_checked"];
+    }
     if (![self observeKeyboard:@"before_launch" phase:2 ready:NO calls:2 failure:@"keyboard_before_launch_failed"]) return;
     [self recordCheckpoint:@"keyboard_before_launch_checked"];
     self.launchDispatched = YES;
     self.launcherProbe[@"button_dispatch_count"] = @1;
     [self recordCheckpoint:@"launch_action_requested"];
-    BOOL dispatched = [UIApplication.sharedApplication sendAction:item.action to:item.target from:item forEvent:nil];
+    BOOL dispatched = ProbeDispatchButton(item);
     self.launcherProbe[@"button_action_dispatched"] = @(dispatched);
+    self.launcherProbe[@"button_control_event"] = @"touch-up-inside";
     [self recordCheckpoint:@"launch_action_dispatched"];
     if (!dispatched) { self.probeError = @"ready_launch_action_not_dispatched"; return; }
     // Repeated clicks must not forward Unity a second time.
@@ -541,6 +752,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
                         @"launcher":self.launcherProbe.copy,
                         @"keyboard":self.keyboardProbe.copy,
+                        @"native_header":self.nativeHeaderProbe ?: @{},
                         @"early_status":self.earlyStatus ?: @{},
                         @"corner_gesture":ProbeCornerGesture(self.window),
                         @"crypto_completion_main_thread":@(cryptoCompletionOnMain), @"native_crypto":nativeCrypto,
@@ -575,24 +787,26 @@ static NSDictionary *ProbeKeyboardObservation(void) {
             [self failProbe:@"settings_menu_not_presented"]; return;
         }
         UINavigationController *navigation = (UINavigationController *)presented;
-        NSMutableArray<UIBarButtonItem *> *buttons = [NSMutableArray array];
-        ProbeFindButtons(navigation, @"idoly.server-close", buttons);
-        NSMutableArray<UIBarButtonItem *> *serverButtons = [NSMutableArray array];
-        ProbeFindButtons(navigation, @"idoly.server-start", serverButtons);
+        NSMutableArray<UIButton *> *buttons = [NSMutableArray array];
+        ProbeFindButtons(navigation.view, @"idoly.server-close", buttons);
+        NSMutableArray<UIButton *> *serverButtons = [NSMutableArray array];
+        ProbeFindButtons(navigation.view, @"idoly.server-start", serverButtons);
         CGFloat width = CGRectGetWidth(navigation.view.bounds), windowWidth = CGRectGetWidth(self.window.bounds);
         BOOL fullScreen = navigation.modalPresentationStyle == UIModalPresentationFullScreen;
         BOOL widthMatches = width > 0 && windowWidth > 0 && fabs(width - windowWidth) <= 2.0;
-        if (buttons.count != 1 || !buttons.firstObject.target || !buttons.firstObject.action
+        if (buttons.count != 1 || !ProbeButtonHasTouchAction(buttons.firstObject)
                 || !buttons.firstObject.enabled || serverButtons.count != 1 || serverButtons.firstObject.enabled
                 || !fullScreen || !widthMatches) {
             [self failProbe:@"settings_menu_controls_or_layout_failed"]; return;
         }
-        UIBarButtonItem *close = buttons.firstObject;
+        UIButton *close = buttons.firstObject;
         NSMutableDictionary *menu = [@{@"opened_via_owned_menu_target":@YES,
             @"full_screen":@(fullScreen), @"frame_width_matches":@(widthMatches),
             @"frame_width":@(width), @"window_width":@(windowWidth), @"return_button_found":@YES,
+            @"return_button_kind":@"UIButton", @"server_button_kind":@"UIButton",
             @"server_control_found":@YES, @"server_control_disabled_while_running":@YES} mutableCopy];
-        ProbeSettingsDOM(ProbeFindSettingsWeb(navigation.topViewController.view), ^(NSDictionary *metrics) {
+        WKWebView *web = ProbeFindSettingsWeb(navigation.topViewController.view);
+        ProbeSettingsDOM(web, ^(NSDictionary *metrics) {
             menu[@"web"] = metrics;
             if (![metrics[@"web_found"] isEqual:@YES] || ![metrics[@"ready"] isEqual:@YES]
                     || ![metrics[@"evaluation_succeeded"] isEqual:@YES]
@@ -600,12 +814,24 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                     || ![metrics[@"no_horizontal_overflow"] isEqual:@YES]) {
                 [self failProbe:@"settings_web_readiness_or_layout_failed"]; return;
             }
-            BOOL closed = [UIApplication.sharedApplication sendAction:close.action to:close.target from:close forEvent:nil];
-            menu[@"return_action_dispatched"] = @(closed);
-            if (!closed) { [self failProbe:@"settings_return_action_failed"]; return; }
-            [self recordCheckpoint:@"settings_return_requested"];
-            [self observeMenuDismissal:navigation report:report menu:menu
-                              started:NSProcessInfo.processInfo.systemUptime observations:0];
+            ProbeDiagnosticsCopy(web, ^(NSDictionary *copyMetrics) {
+                self.diagnosticsCopyObservation = copyMetrics;
+                menu[@"diagnostics_copy"] = copyMetrics;
+                BOOL copied = [copyMetrics[@"timed_out"] isEqual:@NO]
+                    && [copyMetrics[@"text_bytes"] unsignedIntegerValue] > 0;
+                for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"completed",
+                        @"feedback_success",@"pasteboard_matches",@"clipboard_seeded",@"clipboard_cleared"])
+                    copied = copied && [copyMetrics[key] isEqual:@YES];
+                if (!copied) { [self failProbe:@"settings_diagnostics_copy_failed"]; return; }
+                [self recordCheckpoint:@"settings_diagnostics_copied"];
+                BOOL closed = ProbeDispatchButton(close);
+                menu[@"return_action_dispatched"] = @(closed);
+                menu[@"return_control_event"] = @"touch-up-inside";
+                if (!closed) { [self failProbe:@"settings_return_action_failed"]; return; }
+                [self recordCheckpoint:@"settings_return_requested"];
+                [self observeMenuDismissal:navigation report:report menu:menu
+                                  started:NSProcessInfo.processInfo.systemUptime observations:0];
+            });
         });
     });
 }

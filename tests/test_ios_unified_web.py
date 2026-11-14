@@ -82,7 +82,8 @@ def run_js(body: str) -> None:
     if NODE is None:
         pytest.skip("Node.js is required for the bundled JavaScript behavior checks")
     program = "const WEB = " + json.dumps(str(WEB)) + ";\n" + HARNESS
-    program += "\n(async () => {\n" + body + "\n})().catch(error => { console.error(error); process.exitCode = 1; });\n"
+    program += "\nlet bodyCompleted = false;\nprocess.on('beforeExit', () => { if (!bodyCompleted) { console.error('Async test body did not complete'); process.exitCode = 1; } });\n"
+    program += "(async () => {\n" + body + "\n})().then(() => { bodyCompleted = true; }, error => { bodyCompleted = true; console.error(error); process.exitCode = 1; });\n"
     subprocess.run([NODE, "--unhandled-rejections=strict", "-e", program], check=True, timeout=15, capture_output=True, text=True)
 
 
@@ -509,5 +510,126 @@ env.scope.idolyServerEvent({event: 'error', status: {state: 'failed', running: f
 assert.equal(env.elements.get('server-summary').textContent, 'The native startup error remains readable');
 assert.equal(env.elements.get('interface_language').value, 'ja');
 assert.equal(env.elements.get('resources-download').disabled, true);
+app.dispose();
+""")
+
+
+def test_diagnostics_copy_sends_exact_visible_text_before_server_ready() -> None:
+    run_js(r"""
+const env = environment();
+env.scope.navigator = {language:'en-US'};
+Object.defineProperty(env.scope.navigator, 'clipboard', {get() { throw new Error('Browser clipboard must not be used'); }});
+const visible = 'Native startup\n한글・日本語 😀\n<img src=x onerror=malicious>';
+env.elements.get('diagnostics').textContent = visible;
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+assert.equal(env.elements.get('diagnostics-copy').disabled, false);
+assert.equal(env.elements.get('options-fields').disabled, true);
+env.elements.get('diagnostics-copy').fire('click');
+const copy = env.posted.at(-1);
+assert.deepEqual(copy, {id:copy.id, action:'diagnostics_copy', text:visible});
+assert.equal(env.elements.get('diagnostics-copy').disabled, true);
+env.elements.get('diagnostics-copy').fire('click');
+assert.equal(env.posted.length, 2, 'Status and one explicit copy only');
+env.respond(copy, {copied:true}); await flush();
+assert.equal(env.elements.get('diagnostics-copy-feedback').textContent, 'Diagnostics copied.');
+assert.equal(env.elements.get('diagnostics-copy-feedback').hidden, false);
+assert.equal(env.elements.get('diagnostics-copy-feedback').dataset.error, 'false');
+assert.equal(env.elements.get('diagnostics-copy').disabled, false);
+assert.equal(env.elements.get('options-fields').disabled, true);
+app.dispose();
+""")
+
+
+@pytest.mark.parametrize('language', ['ko', 'ja', 'en'])
+def test_diagnostics_copy_failure_feedback_is_localized_and_retryable(language) -> None:
+    run_js("const language = " + json.dumps(language) + r""";
+const env = environment(); env.scope.navigator = {language};
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+env.respond(env.posted[0], {state:'failed', running:false, options:{}, runtime:{}, last_error:{message:'Startup failed'}});
+await flush();
+const text = env.elements.get('diagnostics').textContent;
+assert.ok(text.length > 0);
+assert.equal(env.elements.get('diagnostics-copy').disabled, false);
+env.elements.get('diagnostics-copy').fire('click');
+let copy = env.posted.at(-1);
+env.scope.idolyServerReply(copy.id, {id:copy.id, ok:false, error:{message:'native failure stays out of the localized copy feedback'}});
+await flush();
+assert.equal(env.elements.get('diagnostics-copy-feedback').textContent,
+  api.translateUI('진단을 복사하지 못했습니다. 다시 시도해 주세요.', language));
+assert.equal(env.elements.get('diagnostics-copy-feedback').dataset.error, 'true');
+assert.equal(env.elements.get('diagnostics-copy').disabled, false);
+env.elements.get('diagnostics-copy').fire('click');
+copy = env.posted.at(-1); env.respond(copy, {copied:true}); await flush();
+assert.equal(env.elements.get('diagnostics-copy-feedback').textContent, api.translateUI('진단을 복사했습니다.', language));
+assert.equal(env.elements.get('diagnostics-copy-feedback').dataset.error, 'false');
+assert.equal(env.elements.get('diagnostics').textContent, text);
+app.dispose();
+""")
+
+
+def test_diagnostics_copy_contract_uses_utf8_byte_limit_and_no_extra_keys() -> None:
+    run_js(r"""
+const env = environment(); const bridge = api.createBridge(env.scope, env.timers);
+for (const payload of [{text:'가'.repeat(10923)}, {text:'😀'.repeat(8193)}, {text:'\ud800'},
+  {text:'ok',path:'/private'}, {text:12}, {text:'\0'.repeat(32768)}]) await assert.rejects(bridge.request('diagnostics_copy',payload));
+assert.equal(env.posted.length, 0);
+for (const text of ['가'.repeat(10922)+'ab', '😀'.repeat(8192)]) {
+  assert.equal(Buffer.byteLength(text,'utf8'), 32768);
+  const pending = bridge.request('diagnostics_copy',{text});
+  const copy = env.posted.at(-1); assert.equal(copy.text,text);
+  env.respond(copy,{copied:true}); await pending;
+}
+bridge.dispose();
+""")
+
+
+def test_diagnostics_keeps_http_readiness_transfers_and_bounds_every_visible_copy_byte() -> None:
+    run_js(r"""
+const env = environment(); const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const ready = status();
+ready.native = {schema:1, http_readiness:{schema:1,ok:false,transport:'NSURLSession',http_status:0,error_code:'waiting',body_is_json:false,received_bytes:0,worker_main_thread:false}};
+ready.runtime.http_requests = {total_requests:8,active_requests:1,completed_requests:6,failed_requests:1,
+  last_request:{request_id:8,method:'GET',path:'/client/playback',http_status:200,phase:'completed',elapsed_ms:3},recent_requests:[]};
+ready.runtime.resource_transfer = {requests:4};
+ready.runtime.asset_transfer = {requests:5};
+ready.runtime.logs = Array.from({length:40}, (_,index)=>'行'+index+'😀한글'.repeat(230));
+env.respond(env.posted[0],ready);await flush();
+const text = env.elements.get('diagnostics').textContent;
+assert.ok(Buffer.byteLength(text,'utf8') <= 32768);
+assert.equal(Buffer.from(text,'utf8').toString('utf8'),text,'No broken surrogate pair at the display limit');
+assert.ok(text.includes('http_readiness') && text.includes('NSURLSession'));
+assert.ok(text.includes('http_requests') && text.includes('/client/playback'));
+assert.ok(text.includes('resource_transfer') && text.includes('asset_transfer'));
+assert.ok(text.includes('… 표시 한도로 나머지 진단은 생략했습니다.'));
+env.elements.get('diagnostics-copy').fire('click');
+const copy = env.posted.at(-1);
+assert.equal(copy.action,'diagnostics_copy');assert.equal(copy.text,text);
+assert.ok(Buffer.byteLength(JSON.stringify(copy),'utf8') < 65536);
+env.respond(copy,{copied:true});await flush();
+app.dispose();
+""")
+
+
+def test_diagnostic_display_is_copyable_even_with_many_escaped_control_characters() -> None:
+    run_js(r"""
+const env=environment();const app=api.createSettingsApp(env.scope,env.document,env.timers);
+const ready=status();ready.runtime.logs=Array.from({length:40},()=>String.fromCharCode(0).repeat(1000));
+env.respond(env.posted[0],ready);await flush();
+const text=env.elements.get('diagnostics').textContent;
+assert.ok(Buffer.byteLength(text,'utf8')<=32768);
+env.elements.get('diagnostics-copy').fire('click');
+const copy=env.posted.at(-1);
+assert.equal(copy.action,'diagnostics_copy');assert.equal(copy.text,text);
+assert.ok(Buffer.byteLength(JSON.stringify(copy),'utf8')<65536);
+env.respond(copy,{copied:true});await flush();app.dispose();
+""")
+
+
+def test_empty_diagnostics_copy_is_disabled_without_changing_other_controls() -> None:
+    run_js(r"""
+const env=environment();const app=api.createSettingsApp(env.scope,env.document,env.timers);
+assert.equal(env.elements.get('diagnostics').textContent,'');
+assert.equal(env.elements.get('diagnostics-copy').disabled,true);
+env.elements.get('diagnostics-copy').fire('click');assert.equal(env.posted.length,1);
 app.dispose();
 """)

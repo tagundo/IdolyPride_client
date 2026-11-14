@@ -3,6 +3,7 @@
 #import "IdolyHTTP.h"
 #import "IdolyClientData.h"
 #import "IdolyKeyboardLifecycle.h"
+#import "IdolyLocalHTTP.h"
 #import "GatePolicy.h"
 #if !IDOLY_SMOKE_SIMULATOR
 #import "UnityStartupProfile.h"
@@ -29,6 +30,7 @@ static const void *keyboardSingletonSlot;
 static id savedController, savedApplication;
 static SEL startSelector;
 static NSString *hookError, *lastError, *lastGameError, *dataDirectory;
+static NSDictionary *lastHTTPReadiness;
 static BOOL recovering;
 static BOOL hookInstalled;
 static atomic_bool pythonReady;
@@ -503,6 +505,7 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
     __block NSString *result;
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled),
         @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
+        @"http_readiness":lastHTTPReadiness ?: (id)NSNull.null,
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),
         @"launch_requested":@((BOOL)gate.launch_requested), @"launch_prepared":@((BOOL)gate.launch_prepared),
@@ -526,7 +529,7 @@ void IdolyEmbeddedServerRetry(void) {
 void IdolyEmbeddedServerLaunchGame(void) {
     void (^request)(void) = ^{
         if (!worker || !atomic_load(&pythonReady) || !IDGateRequestLaunch(&gate)) return;
-        lastGameError = nil;
+        lastGameError = nil; lastHTTPReadiness = nil;
         IDNativeSetServerState(YES, YES, @"게임 데이터와 선택한 언어를 준비하고 있습니다…");
         [worker enqueue:^{
             // Prepare the selected immutable data before Unity initializes.
@@ -541,7 +544,16 @@ void IdolyEmbeddedServerLaunchGame(void) {
                 id observed = health ? [NSJSONSerialization JSONObjectWithData:[health dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] : nil;
                 serving = !healthError && [observed isKindOfClass:NSDictionary.class] && [observed[@"running"] isEqual:@YES];
             }
+            // callHost has released the GIL. Perform an actual app-side HTTP
+            // GET while the serving Python thread can answer it; listener
+            // ownership or the native command bridge alone is not this check.
+            NSDictionary *httpReadiness = ready ? IDLocalHTTPReadiness(8080, 8.0) : nil;
+            if (ready && ![httpReadiness[@"ok"] isEqual:@YES]) {
+                ready = NO;
+                error = @"내장 리소스 서버에 연결하지 못했습니다. 진단에서 HTTP 연결 상태를 확인해 주세요.";
+            }
             dispatch_async(dispatch_get_main_queue(), ^{
+                lastHTTPReadiness = httpReadiness;
                 NSString *selectionError = nil;
                 id effective = ready ? status[@"effective_options"] : nil;
                 NSString *language = [effective isKindOfClass:NSDictionary.class]

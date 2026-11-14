@@ -10,6 +10,8 @@ from copy import deepcopy
 from pathlib import Path
 import threading
 
+_HTTP_COUNTER_LIMIT = 2**53 - 1
+
 
 class _StartupSettings:
     def __init__(self, value):
@@ -59,6 +61,11 @@ class Runtime:
                                  "total_bytes": 0, "status": "idle", "http_status": 0,
                                  "completed_requests": 0, "failed_requests": 0,
                                  "session_bytes_sent": 0}
+        self._http_lock = threading.Lock()
+        self._http_status = {"total_requests": 0, "active_requests": 0,
+                             "completed_requests": 0, "failed_requests": 0,
+                             "last_request": None, "last_failed_request": None}
+        self._http_recent = deque(maxlen=10)
 
     def _log(self, message):
         # Transport logging contains method paths and fixed diagnostic messages,
@@ -92,6 +99,12 @@ class Runtime:
         result["client_diagnostics"] = {key: value for key, value in diagnostics.items() if key != "events"}
         with self._transfer_lock:
             result["asset_transfer"] = dict(self._transfer_status)
+        with self._http_lock:
+            result["http_requests"] = {**self._http_status,
+                "last_request": None if self._http_status["last_request"] is None else dict(self._http_status["last_request"]),
+                "last_failed_request": (None if self._http_status["last_failed_request"] is None
+                                        else dict(self._http_status["last_failed_request"])),
+                "recent_requests": [dict(row) for row in self._http_recent]}
         if self._resources is not None:
             result["resource_transfer"] = self._resources.status()
         if self._presentation is not None:
@@ -122,6 +135,34 @@ class Runtime:
         """Export only safe runtime observations, never profiles or credentials."""
         return {"schema": 1, "runtime": self.status(),
                 "client_diagnostics": self._diagnostics.status()}
+
+    def _observe_http_request(self, event):
+        """Thin HTTP observations; independent of file/resource byte transfers."""
+        if not isinstance(event, dict):
+            return
+        phase, method, status = event.get("phase"), event.get("method"), event.get("http_status")
+        identity, elapsed = event.get("request_id"), event.get("elapsed_ms")
+        if (phase not in ("received", "responding", "completed", "failed")
+                or method not in ("GET", "HEAD", "POST")
+                or type(status) is not int or status != 0 and not 100 <= status <= 599
+                or type(identity) is not int or not 1 <= identity <= _HTTP_COUNTER_LIMIT
+                or type(elapsed) is not int or not 0 <= elapsed <= _HTTP_COUNTER_LIMIT):
+            return
+        from .assets import _public_http_path
+        row = {"request_id": identity, "method": method, "path": _public_http_path(event.get("path")),
+               "http_status": status, "phase": phase, "elapsed_ms": elapsed}
+        with self._http_lock:
+            if phase == "received":
+                for key in ("total_requests", "active_requests"):
+                    self._http_status[key] = min(_HTTP_COUNTER_LIMIT, self._http_status[key] + 1)
+            elif phase in ("completed", "failed"):
+                self._http_status["active_requests"] = max(0, self._http_status["active_requests"] - 1)
+                key = "completed_requests" if phase == "completed" else "failed_requests"
+                self._http_status[key] = min(_HTTP_COUNTER_LIMIT, self._http_status[key] + 1)
+                self._http_recent.append(row)
+                if phase == "failed":
+                    self._http_status["last_failed_request"] = row
+            self._http_status["last_request"] = row
 
     def _observe_transfer(self, event):
         with self._transfer_lock:
@@ -306,7 +347,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                                              presentation=runtime._presentation, playback=runtime._playback,
                                              render_probe=runtime._render_probe,
                                              media_settings=runtime._active_media,
-                                             wardrobe_probe=runtime._wardrobe_probe)
+                                             wardrobe_probe=runtime._wardrobe_probe,
+                                             http_request_callback=runtime._observe_http_request)
         bound_asset_host, bound_asset_port = runtime._asset.server_address[:2]
         # The two apps serve on their own loopback interface. A wildcard bind,
         # if selected for diagnostics, must still advertise a concrete address.

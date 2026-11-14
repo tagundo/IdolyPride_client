@@ -121,6 +121,62 @@ def _directory(value, *, create=False):
     return path.resolve(strict=True)
 
 
+_HTTP_ROW_KEYS = ("request_id", "method", "path", "http_status", "phase", "elapsed_ms")
+_RESOURCE_ROW_KEYS = ("request_id", "method", "kind", "route_fingerprint", "phase", "http_status",
+    "cache_result", "object_name", "cache_key", "error_code", "cause_code", "application_version",
+    "requested_revision", "served_revision", "response_mode", "elapsed_ms")
+
+
+def _thin_observation(value, keys):
+    """Keep bounded public scalars when the complete runtime snapshot is large."""
+    if not isinstance(value, dict):
+        return None
+    result = {}
+    for key in keys:
+        item = value.get(key)
+        if key not in value:
+            continue
+        if item is None or type(item) is bool:
+            result[key] = item
+        elif type(item) is int:
+            result[key] = min(2**53 - 1, max(0, item))
+        elif isinstance(item, str):
+            if key == "path":
+                from .assets import _public_http_path
+                result[key] = _public_http_path(item)
+            else:
+                result[key] = "".join("_" if ord(c) < 32 or ord(c) == 127 else c for c in item[:256])
+        if key in result and len(_json(result).encode("utf-8")) > 2048:
+            del result[key]
+    return result
+
+
+def _thin_transfers(runtime):
+    asset = _thin_observation(runtime.get("asset_transfer"), ("active_requests", "path", "sent_bytes",
+        "total_bytes", "status", "http_status", "completed_requests", "failed_requests", "session_bytes_sent"))
+    resource = _thin_observation(runtime.get("resource_transfer"), ("available", "allow_downloads", "status",
+        "active_requests", "session_received_bytes", "session_verified_files", "session_served_bytes",
+        "session_manifest_bytes", "last_received_bytes", "last_total_bytes", "session_http_requests",
+        "session_http_failures", "session_cache_hits", "session_cache_misses", "measurement_limited"))
+    http = _thin_observation(runtime.get("http_requests"), ("total_requests", "active_requests",
+        "completed_requests", "failed_requests"))
+    for name, target, row_keys, histories, count in (
+            ("resource_transfer", resource, _RESOURCE_ROW_KEYS, ("recent_requests", "active_http_requests"), 3),
+            ("http_requests", http, _HTTP_ROW_KEYS, ("recent_requests",), 10)):
+        source = runtime.get(name)
+        if target is None or not isinstance(source, dict):
+            continue
+        for key in ("last_request", "last_failed_request"):
+            if key in source:
+                target[key] = _thin_observation(source[key], row_keys)
+        for key in histories:
+            if isinstance(source.get(key), list):
+                target[key] = [row for item in source[key][-count:]
+                               if (row := _thin_observation(item, row_keys)) is not None]
+    return {key: value for key, value in (("asset_transfer", asset), ("resource_transfer", resource),
+                                         ("http_requests", http)) if key in runtime}
+
+
 class _LimitedOutput:
     def __init__(self, stream, maximum):
         self.stream, self.maximum = stream, maximum
@@ -237,9 +293,27 @@ class _Host:
         try:
             _json(result)
         except ValueError:
-            result["runtime"] = {k: v for k, v in observed.items() if k in (
-                "running", "grpc_address", "asset_url", "presentation", "playback", "media_options", "language")}
+            result["runtime"] = _thin_observation(observed, ("running", "grpc_address", "asset_url")) or {}
+            result["runtime"].update(_thin_transfers(observed))
             result["diagnostics_truncated"] = True
+            # Retaining an unbounded language/renderer report here would make
+            # the fallback overflow too, hiding the counters again. Prefer the
+            # complete field when it fits, then its validated control settings.
+            for key in ("presentation", "playback", "media_options", "language"):
+                if key not in observed:
+                    continue
+                value = observed[key]
+                settings = ({k: v for k, v in value.items() if k in (
+                    "settings", "effective_settings", "invalid_settings_file", "effective_language")}
+                    if isinstance(value, dict) else {})
+                for candidate in (value, settings):
+                    result["runtime"][key] = candidate
+                    try:
+                        _json(result)
+                    except (ValueError, TypeError, RecursionError):
+                        del result["runtime"][key]
+                    else:
+                        break
         return result
 
     def start(self, bundle_dir, data_dir, resource_dir, *, ports=None):

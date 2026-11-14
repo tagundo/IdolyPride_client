@@ -3,6 +3,8 @@
 
   const MAX_ID = 2147483647;
   const MAX_PENDING = 16;
+  const MAX_DIAGNOSTIC_BYTES = 32768;
+  const MAX_DIAGNOSTIC_WIRE_BYTES = 65000;
   const ACTIVE_JOBS = new Set(["preparing", "running", "export_ready", "cancelling"]);
   const LANGUAGES = {ko: "한국어", ja: "日本語", en: "English"};
   const INTERFACE_LANGUAGES = ["system", "ko", "ja", "en"];
@@ -203,7 +205,11 @@
     "게임 시작 전의 변경은 ‘게임 시작’ 때 적용됩니다. 게임 시작 후의 감상 모드·언어 변경은 다음 앱 실행부터 적용됩니다.": "Changes saved before starting the game apply when you choose Start Game. Viewing mode and game language changed during gameplay apply next time you open the app.",
     "게임 시작 전에 저장하면 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.": "Save before starting the game to use the selected language. Language changes made after the game starts apply when you reopen the app. Missing translations and untranslated images keep the original content.",
     "설정 저장": "Save settings",
-    "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다.": "Saved. Before gameplay, changes apply when you choose Start Game. If the game has already started, they apply next time you open the app."
+    "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다.": "Saved. Before gameplay, changes apply when you choose Start Game. If the game has already started, they apply next time you open the app.",
+    "진단 전체 복사": "Copy all diagnostics",
+    "진단을 복사했습니다.": "Diagnostics copied.",
+    "진단을 복사하지 못했습니다. 다시 시도해 주세요.": "Could not copy diagnostics. Please try again.",
+    "… 표시 한도로 나머지 진단은 생략했습니다.": "… Remaining diagnostics omitted at the display limit."
   },
   "ja": {
     "IDOLY PRIDE 로컬 설정": "IDOLY PRIDE ローカル設定",
@@ -399,7 +405,11 @@
     "게임 시작 전의 변경은 ‘게임 시작’ 때 적용됩니다. 게임 시작 후의 감상 모드·언어 변경은 다음 앱 실행부터 적용됩니다.": "ゲーム開始前の変更は「ゲーム開始」時に適用されます。ゲーム開始後の鑑賞モード・言語の変更は次回のアプリ起動時に適用されます。",
     "게임 시작 전에 저장하면 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.": "ゲーム開始前に保存すると、選択した言語で開始します。ゲーム開始後に変更した言語は、アプリの再起動後に適用されます。翻訳のない文章・画像は原文のまま表示されます。",
     "설정 저장": "設定を保存",
-    "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다.": "保存しました。ゲーム開始前なら「ゲーム開始」時に適用されます。すでにゲームを開始している場合は、次回のアプリ起動時に適用されます。"
+    "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다.": "保存しました。ゲーム開始前なら「ゲーム開始」時に適用されます。すでにゲームを開始している場合は、次回のアプリ起動時に適用されます。",
+    "진단 전체 복사": "診断をすべてコピー",
+    "진단을 복사했습니다.": "診断をコピーしました。",
+    "진단을 복사하지 못했습니다. 다시 시도해 주세요.": "診断をコピーできませんでした。もう一度お試しください。",
+    "… 표시 한도로 나머지 진단은 생략했습니다.": "… 表示上限に達したため、残りの診断を省略しました。"
   }
 };
   function resolveInterfaceLanguage(value, navigator = {}) {
@@ -429,8 +439,41 @@
     catch (_) { return false; }
   };
 
+  function utf8Length(value) {
+    let bytes = 0;
+    for (const point of value) {
+      const code = point.codePointAt(0);
+      if (code >= 0xD800 && code <= 0xDFFF) return Infinity;
+      bytes += code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+    }
+    return bytes;
+  }
+  function diagnosticSlice(value, byteLimit, wireLimit) {
+    let text = "", bytes = 0, wire = 0;
+    for (let point of value) {
+      let code = point.codePointAt(0);
+      if (code >= 0xD800 && code <= 0xDFFF) { point = "\uFFFD"; code = 0xFFFD; }
+      const size = code < 0x80 ? 1 : code < 0x800 ? 2 : code < 0x10000 ? 3 : 4;
+      const escaped = code === 0x22 || code === 0x5C ? 2
+        : code < 0x20 ? ([8, 9, 10, 12, 13].includes(code) ? 2 : 6) : size;
+      if (bytes + size > byteLimit || wire + escaped > wireLimit) return {text, truncated: true};
+      text += point; bytes += size; wire += escaped;
+    }
+    return {text, truncated: false};
+  }
+  function boundedDiagnostics(value, suffix) {
+    const full = diagnosticSlice(value, MAX_DIAGNOSTIC_BYTES, MAX_DIAGNOSTIC_WIRE_BYTES);
+    if (!full.truncated) return full.text;
+    const marker = "\n" + suffix;
+    const markerWire = utf8Length(JSON.stringify(marker)) - 2;
+    return diagnosticSlice(value, MAX_DIAGNOSTIC_BYTES - utf8Length(marker), MAX_DIAGNOSTIC_WIRE_BYTES - markerWire).text + marker;
+  }
+
   function validRequest(action, payload) {
     if (action === "status") return exact(payload, []);
+    if (action === "diagnostics_copy") return exact(payload, ["text"]) && typeof payload.text === "string"
+      && payload.text.length <= MAX_DIAGNOSTIC_BYTES && utf8Length(payload.text) <= MAX_DIAGNOSTIC_BYTES
+      && utf8Length(JSON.stringify(payload)) <= MAX_DIAGNOSTIC_WIRE_BYTES + 16;
     if (action === "save_options") return exact(payload, ["media_mode", "download_missing_resources", "language", "interface_language"]) && validOptions(payload);
     if (action === "save_presentation") return exact(payload, ["settings"]) && validPresentation(payload.settings);
     if (action === "save_playback") return exact(payload, ["settings"]) && validPlayback(payload.settings);
@@ -475,7 +518,7 @@
     scope.idolyServerEvent = event;
     return {
       request(action, payload = {}) {
-        if (!validRequest(action, payload) || !boundedJSON(payload, 16384)) return Promise.reject(new Error("허용되지 않은 설정 요청입니다."));
+        if (!validRequest(action, payload) || !boundedJSON(payload, action === "diagnostics_copy" ? MAX_DIAGNOSTIC_WIRE_BYTES + 16 : 16384)) return Promise.reject(new Error("허용되지 않은 설정 요청입니다."));
         if (!active || disposed) return Promise.reject(new Error("설정 화면이 닫혀 있습니다."));
         const handler = scope.webkit && scope.webkit.messageHandlers && scope.webkit.messageHandlers.idolyServer;
         if (!handler || typeof handler.postMessage !== "function") return Promise.reject(new Error("앱 안에서 설정 화면을 열어 주세요."));
@@ -555,6 +598,7 @@
       for (const entry of staticText) entry.node.nodeValue = entry.before + t(entry.source) + entry.after;
       for (const entry of staticAttributes) entry.node.setAttribute("aria-label", t(entry.source));
       if (messageSource) text("message", messageSource);
+      if (copyFeedbackSource) text("diagnostics-copy-feedback", copyFeedbackSource);
     }
     function syncPreset(key) {
       const presets = key === "render_scale" ? SCALE_PRESETS : BUFFER_PRESETS;
@@ -575,6 +619,8 @@
     let mutationVersion = 0;
     let visibilityVersion = 0;
     let resourcePending = false;
+    let copyPending = false;
+    let copyFeedbackSource = "";
     let job = null;
     const logs = [];
     let messageSource = "";
@@ -584,6 +630,31 @@
       text("message", messageSource);
       el("message").hidden = !value;
       el("message").dataset.error = String(error);
+    }
+    function updateCopyButton() {
+      el("diagnostics-copy").disabled = copyPending || !el("diagnostics").textContent;
+    }
+    function copyFeedback(value, error = false) {
+      copyFeedbackSource = value;
+      text("diagnostics-copy-feedback", value);
+      el("diagnostics-copy-feedback").hidden = !value;
+      el("diagnostics-copy-feedback").dataset.error = String(error);
+    }
+    async function copyDiagnostics() {
+      if (!visible || disposed || copyPending || !el("diagnostics").textContent) return;
+      const value = el("diagnostics").textContent;
+      copyPending = true; updateCopyButton(); copyFeedback("");
+      try {
+        const result = await bridge.request("diagnostics_copy", {text: value});
+        if (!visible || disposed) return;
+        if (result.copied === true) copyFeedback("진단을 복사했습니다.");
+        else copyFeedback("진단을 복사하지 못했습니다. 다시 시도해 주세요.", true);
+      } catch (_) {
+        if (visible && !disposed) copyFeedback("진단을 복사하지 못했습니다. 다시 시도해 주세요.", true);
+      } finally {
+        copyPending = false;
+        if (!disposed) updateCopyButton();
+      }
     }
     function updateForm(name, settings) {
       const form = forms[name];
@@ -667,13 +738,14 @@
           "schema", "phase", "captured", "forwarded", "attempts", "hook_installed",
           "python_initialized", "launch_requested", "launch_prepared", "launcher_visible",
           "keyboard_lifecycle", "keyboard_ready",
-          "game_hook_error", "error", "game_error", "client_data"
+          "game_hook_error", "error", "game_error", "client_data", "http_readiness"
         ].filter(key => Object.prototype.hasOwnProperty.call(snapshot.native, key)).map(key => [key, snapshot.native[key]])) : null,
+        http_requests: runtime.http_requests || null,
+        resource_transfer: runtime.resource_transfer || null,
+        asset_transfer: runtime.asset_transfer || null,
         game: diagnostic,
         presentation: object(runtime.presentation) ? runtime.presentation.client || null : null,
         playback: object(runtime.playback) ? runtime.playback.client || null : null,
-        resource_transfer: runtime.resource_transfer || null,
-        asset_transfer: runtime.asset_transfer || null,
         resource_operation: object(snapshot.resource_operation) ? {
           accepted: snapshot.resource_operation.accepted,
           ready: snapshot.resource_operation.ready,
@@ -681,10 +753,11 @@
         } : null
       };
       // Never interpolate server strings as markup, URLs or executable code.
-      let detail = JSON.stringify(details, null, 2).slice(0, 24000);
+      let detail = JSON.stringify(details, null, 2);
       const recent = (Array.isArray(runtime.logs) ? runtime.logs.filter(line => typeof line === "string").slice(-40).map(line => plain(line, 1000)) : []).concat(logs).slice(-50);
       if (recent.length) detail += "\n\n최근 기록\n" + recent.join("\n");
-      text("diagnostics", detail, false);
+      text("diagnostics", boundedDiagnostics(detail, t("… 표시 한도로 나머지 진단은 생략했습니다.")), false);
+      updateCopyButton();
     }
     function renderStatus(value) {
       if (!object(value) || !object(value.options)) return false;
@@ -818,6 +891,8 @@
       el(key).addEventListener("input", () => { syncPreset(key); forms.presentation.dirty = true; });
     }
     applyInterfaceLanguage(interfaceChoice);
+    updateCopyButton();
+    el("diagnostics-copy").addEventListener("click", copyDiagnostics);
     el("refresh").addEventListener("click", () => { message(""); refresh(); });
     for (const action of ["preview", "download", "import", "export", "cancel"]) el("resources-" + action).addEventListener("click", () => resource(action));
     bridge.subscribe(event => {
