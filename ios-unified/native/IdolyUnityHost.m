@@ -18,7 +18,6 @@
 #include <mach-o/loader.h>
 #include <mach/vm_prot.h>
 #include <mach/mach.h>
-#include <mach/mach_vm.h>
 #endif
 
 @interface IDUnityHostDelegate : NSObject <UIApplicationDelegate>
@@ -176,20 +175,21 @@ static NSString *ReadRoot(const char *pointer) {
     if (!count || count == sizeof bytes) return nil;
     memcpy(bytes, pointer, count);
 #else
-    mach_vm_address_t address = (mach_vm_address_t)pointer, region = address;
-    mach_vm_size_t size = 0;
+    _Static_assert(sizeof(vm_address_t) == sizeof(uintptr_t), "Public VM addresses must preserve the audited pointer ABI");
+    vm_address_t address = (vm_address_t)pointer, region = address;
+    vm_size_t size = 0;
     vm_region_basic_info_data_64_t info;
     mach_msg_type_number_t infoCount = VM_REGION_BASIC_INFO_COUNT_64;
     mach_port_t object = MACH_PORT_NULL;
-    kern_return_t status = mach_vm_region(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64,
+    kern_return_t status = vm_region_64(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64,
         (vm_region_info_t)&info, &infoCount, &object);
     if (object != MACH_PORT_NULL) mach_port_deallocate(mach_task_self(), object);
     if (status != KERN_SUCCESS || region > address || !(info.protection & VM_PROT_READ)
             || size <= address - region) return nil;
-    size_t available = (size_t)MIN((mach_vm_size_t)sizeof bytes, size - (address - region));
-    mach_vm_size_t copied = 0;
-    if (mach_vm_read_overwrite(mach_task_self(), address, available,
-            (mach_vm_address_t)bytes, &copied) != KERN_SUCCESS || copied != available) return nil;
+    size_t available = (size_t)MIN((vm_size_t)sizeof bytes, size - (address - region));
+    vm_size_t copied = 0;
+    if (vm_read_overwrite(mach_task_self(), address, available,
+            (vm_address_t)bytes, &copied) != KERN_SUCCESS || copied != available) return nil;
     const char *end = memchr(bytes, 0, available);
     if (!end || end == bytes) return nil;
     size_t count = (size_t)(end - bytes);
