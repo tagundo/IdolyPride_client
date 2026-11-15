@@ -11,8 +11,8 @@ static inline int IDCornerContainsPoint(double safeX, double safeY,
     if (!isfinite(safeX) || !isfinite(safeY) || !isfinite(safeWidth)
         || !isfinite(safeHeight) || !isfinite(touchX) || !isfinite(touchY)
         || safeWidth <= 0 || safeHeight <= 0) return 0;
-    double width = safeWidth < 64 ? safeWidth : 64;
-    double height = safeHeight < 64 ? safeHeight : 64;
+    double width = safeWidth < 128 ? safeWidth : 128;
+    double height = safeHeight < 128 ? safeHeight : 128;
     double right = safeX + safeWidth;
     return touchX >= right - width && touchX <= right
         && touchY >= safeY && touchY <= safeY + height;

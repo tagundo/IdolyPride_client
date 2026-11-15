@@ -128,6 +128,23 @@ def _batch(raw):
     return [_event(value) for value in events]
 
 
+_INFRASTRUCTURE_FRAMES = (
+    "System.", "Cysharp.Threading.Tasks.", "UnityEngine.", "Unity.",
+    "Google.Protobuf.", "Grpc.",
+)
+
+
+def _exception_location(frames):
+    if not frames:
+        return ""
+    first = frames[0]
+    if first.startswith(_INFRASTRUCTURE_FRAMES):
+        for frame in frames[1:MAX_FRAMES]:
+            if not frame.startswith(_INFRASTRUCTURE_FRAMES):
+                return frame + " [" + first + "]"
+    return first
+
+
 def _summary(event):
     if event["kind"] == "network":
         return None
@@ -135,7 +152,7 @@ def _summary(event):
         return _STATUS[event["code"]][1]
     text = "게임 예외: " + event["type"]
     if event["frames"]:
-        text += " @ " + event["frames"][0]
+        text += " @ " + _exception_location(event["frames"])
     return text
 
 

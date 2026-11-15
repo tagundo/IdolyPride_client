@@ -27,7 +27,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD, IPA_VERSION = "0.3.32", 49, "156.9112"
+VERSION, BUILD, IPA_VERSION = "0.3.33", 50, "156.9113"
 TAG = "local-server-v" + VERSION
 BASELINE = "50e349f4db6db0d3122bdc09c3b06307145f814f"
 MIB, CHUNK = 1024 * 1024, 128 * 1024
@@ -507,7 +507,7 @@ class GitHub:
     def publish(self, source, body):
         self.require_fresh()
         created = self.api("/releases", method="POST", body={
-            "tag_name": TAG, "target_commitish": source, "name": "아이프라 로컬 v" + VERSION + " · 최적화",
+            "tag_name": TAG, "target_commitish": source, "name": "아이프라 로컬 v" + VERSION + " · 서버 기록·프로필 복구",
             "body": body, "draft": True, "prerelease": True, "make_latest": "false"})
         need(type(created) is dict and type(created.get("id")) is int and created["id"] > 0
              and created.get("tag_name") == TAG and created.get("draft") is True
@@ -541,7 +541,9 @@ class GitHub:
 def release_body(source, run, publication, artifacts, metrics):
     lines = ["# 아이프라 로컬 v" + VERSION, "",
              "Android 서버 APK, iPhone·iPad 통합 IPA, Apple Silicon Mac 서버 앱을 같은 소스로 제작했습니다.",
-             "상태 갱신 시 버려지던 전체 진단 기록 복사, 언어 검사 객체의 중복 보유와 리소스 지문 계산의 임시 메모리를 줄였습니다.",
+             "Android 서버에 화면에 표시된 서버 기록을 텍스트로 내보내는 버튼을 추가했습니다. 프레임워크 예외에는 다음 호출 위치도 표시합니다.",
+             "보유한 칭호의 프로필 적용을 복구하고, 통합 IPA의 오른쪽 위 2초 길게 누르기 영역을 128×128 포인트로 넓혔습니다.",
+             "개별 Where 예외의 원인 해결 여부는 재현 기록으로 확인해야 합니다. NPC의 MV 출연은 별도 조사 단계입니다.",
              "계정·설정·받은 리소스는 기존 저장소를 유지합니다. 실제 게임 FPS 향상을 측정한 릴리즈는 아닙니다.", "",
              "| 파일 | 용도 | 다운로드 |", "| --- | --- | --- |"]
     kinds = {APK: "Android ARM64 서버", IPA: "iPhone·iPad 통합 서버·게임", MAC: "Apple Silicon Mac 서버"}

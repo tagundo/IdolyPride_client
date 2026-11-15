@@ -24,6 +24,9 @@
     <string name="launch_diagnostic_client">아이프라 실행</string>
     <string name="diagnostic_client_missing">아이프라 로컬 클라이언트 APK를 먼저 설치해 주세요.</string>
     <string name="export_diagnostics">진단 기록 내보내기</string>
+    <string name="export_server_logs">서버 기록 내보내기</string>
+    <string name="server_logs_export_saved">서버 기록을 저장했습니다.</string>
+    <string name="server_logs_export_failed">서버 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
     <string name="export_saved">진단 기록을 저장했습니다.</string>
     <string name="export_failed">진단 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
     <string name="export_picker_failed">파일 저장 화면을 열지 못했습니다.</string>

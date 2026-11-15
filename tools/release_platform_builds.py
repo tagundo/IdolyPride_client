@@ -22,7 +22,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD_NUMBER = "0.3.32",49
+VERSION, BUILD_NUMBER = "0.3.33",50
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"
@@ -379,7 +379,7 @@ def verify_ios(inputs,work,output,source,pins,guard):
     helper=module("release_unified_delivery",ROOT/"ios-unified/delivery.py")
     manifest,_owned=helper.verify_members(inputs,output,source,int(os.environ["GITHUB_RUN_ID"]),0,guard)
     report={"schema":1,"status":"PASS","platform":"ios-unified","source_commit":source,
-            "run_id":int(os.environ["GITHUB_RUN_ID"]),"version":"156.9112","source_sha256":pins,
+            "run_id":int(os.environ["GITHUB_RUN_ID"]),"version":"156.9113","source_sha256":pins,
             "binary":{key:manifest["artifacts"][0][key] for key in ("name","bytes","sha256")},
             "validation":{"all_existing_unified_delivery_gates":True,"artifact_api_digest_required_before_publication":True},
             "execution":{"actual_iOS_Simulator_execution":True,"physical_PlayCover_execution":False,"physical_iPhone_iPad_execution":False}}

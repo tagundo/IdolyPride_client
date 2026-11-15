@@ -356,6 +356,35 @@ public final class ServerService extends Service {
         writeExport(application, destination, lastDiagnostics);
     }
 
+    /** Export only the displayed immutable snapshot using the existing document worker. */
+    public static void exportServerLogs(Context context, Uri destination, String snapshot) {
+        Context application = context.getApplicationContext();
+        if (destination == null || snapshot == null) {
+            MAIN.post(() -> Toast.makeText(application, R.string.server_logs_export_failed, Toast.LENGTH_LONG).show());
+            return;
+        }
+        if (!EXPORT_BUSY.compareAndSet(false, true)) return;
+        dispatch();
+        EXPORT_IO.execute(() -> {
+            boolean success = false;
+            try {
+                try (OutputStream stream = application.getContentResolver().openOutputStream(destination, "wt")) {
+                    if (stream == null) throw new IOException("Document is unavailable");
+                    stream.write(snapshot.getBytes(StandardCharsets.UTF_8));
+                }
+                success = true;
+            } catch (Exception error) {
+                Log.w("IdolyLocalServer", "Server record export failed: " + error.getClass().getSimpleName());
+            } finally {
+                EXPORT_BUSY.set(false);
+                boolean saved = success;
+                MAIN.post(() -> Toast.makeText(application, saved ? R.string.server_logs_export_saved
+                        : R.string.server_logs_export_failed, Toast.LENGTH_LONG).show());
+                dispatch();
+            }
+        });
+    }
+
     private static void writeExport(Context context, Uri destination, String snapshot) {
         final String details = runtimeDetails;
         final List<String> lines;

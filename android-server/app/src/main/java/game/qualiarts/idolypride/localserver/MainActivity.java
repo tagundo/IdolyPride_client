@@ -57,6 +57,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private TextView resourceServed;
     private ProgressBar transferProgress;
     private Button export;
+    private Button exportServerLogs;
+    private String pendingServerLogSnapshot;
+    private static final int EXPORT_SERVER_LOGS = 50055;
     private static final int EXPORT_DIAGNOSTICS = 50052;
     private static final int EXPORT_RESOURCES = 50053, IMPORT_RESOURCES = 50054;
     private Button start;
@@ -127,6 +130,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Object retained = getLastNonConfigurationInstance();
+        if (retained instanceof String) pendingServerLogSnapshot = (String) retained;
         if (savedInstanceState != null) {
             pendingResourcePlatform = savedInstanceState.getString("resource_platform");
             retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
@@ -263,6 +268,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         note.setPadding(0, dp(8), 0, dp(14));
         body.addView(note);
         body.addView(text(R.string.server_logs, 16, Color.WHITE));
+        exportServerLogs = button(R.string.export_server_logs);
+        body.addView(exportServerLogs, new LinearLayout.LayoutParams(-1, -2));
         logs = text(R.string.waiting_logs, 12, Color.rgb(192, 212, 222));
         logs.setTypeface(Typeface.MONOSPACE);
         logs.setTextIsSelectable(true);
@@ -281,6 +288,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         stop.setOnClickListener(view -> startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP)));
         launch.setOnClickListener(view -> launchClient(R.string.diagnostic_client_missing,
                 "game.qualiarts.idolypride.local.diagnostics"));
+        exportServerLogs.setOnClickListener(view -> requestServerLogExport());
         export.setOnClickListener(view -> {
             Intent destination = new Intent(Intent.ACTION_CREATE_DOCUMENT)
                     .addCategory(Intent.CATEGORY_OPENABLE)
@@ -295,6 +303,34 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 50051);
         }
+    }
+
+    private void requestServerLogExport() {
+        // Freeze exactly the bounded text on screen before the picker can pause us.
+        pendingServerLogSnapshot = logs.getText().toString();
+        Intent destination = new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .addCategory(Intent.CATEGORY_OPENABLE)
+                .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_TITLE, "IdolyPride-server-records.txt");
+        try {
+            startActivityForResult(destination, EXPORT_SERVER_LOGS);
+        } catch (RuntimeException error) {
+            pendingServerLogSnapshot = null;
+            Toast.makeText(this, R.string.export_picker_failed, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    // Retain at most the existing bounded snapshot without placing it in a Bundle.
+    @Override public Object onRetainNonConfigurationInstance() {
+        return pendingServerLogSnapshot;
+    }
+
+    private void finishServerLogExport(int resultCode, Intent data) {
+        String snapshot = pendingServerLogSnapshot;
+        pendingServerLogSnapshot = null;
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+        ServerService.exportServerLogs(getApplicationContext(), data.getData(), snapshot);
     }
 
     private static int optionIndex(String[] values, String selected) {
@@ -947,6 +983,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_SERVER_LOGS) {
+            finishServerLogExport(resultCode, data);
+            return;
+        }
         if (requestCode == EXPORT_RESOURCES || requestCode == IMPORT_RESOURCES) {
             if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
             String platform = ResourceTransfers.platform(pendingResourcePlatform) ? pendingResourcePlatform : selectedResourcePlatform();
@@ -995,6 +1035,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         resourceStorage.setEnabled(!running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
+        exportServerLogs.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);
         String currentLogs = lines.isEmpty() ? getString(R.string.waiting_logs) : String.join("\n", lines);
         if (!currentLogs.contentEquals(logs.getText())) {
@@ -1003,6 +1044,25 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (follow) logScroll.post(() -> logScroll.fullScroll(View.FOCUS_DOWN));
         }
     }
+    private static boolean infrastructureExceptionFrame(String frame) {
+        return frame.startsWith("System.") || frame.startsWith("Cysharp.Threading.Tasks.")
+                || frame.startsWith("UnityEngine.") || frame.startsWith("Unity.")
+                || frame.startsWith("Google.Protobuf.") || frame.startsWith("Grpc.");
+    }
+
+    private static String exceptionFrameSummary(org.json.JSONArray frames) {
+        if (frames == null || frames.length() == 0) return "";
+        String first = frames.optString(0, "");
+        if (infrastructureExceptionFrame(first)) {
+            for (int index = 1; index < Math.min(frames.length(), 16); index++) {
+                String candidate = frames.optString(index, "");
+                if (!candidate.isEmpty() && !infrastructureExceptionFrame(candidate))
+                    return candidate + " [" + first + "]";
+            }
+        }
+        return first;
+    }
+
     private void updateDiagnostics(String serialized) {
         JSONObject details;
         try { details = new JSONObject(serialized); }
@@ -1033,7 +1093,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (exception != null) {
             String identity = exception.optString("type", "");
             org.json.JSONArray frames = exception.optJSONArray("frames");
-            if (frames != null && frames.length() > 0) identity += " @ " + frames.optString(0, "");
+            if (frames != null && frames.length() > 0) identity += " @ " + exceptionFrameSummary(frames);
             setTextIfChanged(lastException, getString(R.string.latest_game_exception, identity));
             lastException.setVisibility(View.VISIBLE);
         } else {

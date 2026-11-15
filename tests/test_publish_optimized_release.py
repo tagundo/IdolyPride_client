@@ -230,7 +230,7 @@ def test_new_release_promotes_only_source_bound_owned_draft():
     assert github.owned_release_id == 77
     assert [body for _path, method, body in github.calls if method == "POST"] == [{
         "tag_name": publisher.TAG, "target_commitish": SOURCE,
-        "name": "아이프라 로컬 v"+publisher.VERSION+" · 최적화", "body": "release",
+        "name": "아이프라 로컬 v"+publisher.VERSION+" · 서버 기록·프로필 복구", "body": "release",
         "draft": True, "prerelease": True, "make_latest": "false"}]
 
 
