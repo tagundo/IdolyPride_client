@@ -42,6 +42,9 @@ RPC_PATHS = ("/api.System/Check", "/api.Auth/Login", "/api.Home/Enter")
 MASTER_RPC_PATH = "/api.Master/Get"
 MASTER_ORIGIN = "http://127.0.0.1:8080"
 MAX_MASTER_FILE = 64 * 1024 * 1024
+MAX_SDK_BYTES = 16 * 1024 * 1024
+SDK_MANIFEST_PATH = "/v2/pub/a/212/v/105051/list/0"
+SDK_URL_FORMAT = MASTER_ORIGIN + "/octo/{v}/{type}/{o}/{g}"
 # A well-formed unknown protobuf varint makes empty requests exercise AES too.
 PUBLIC_PROBE_FIELD = b"\xc0\xa3\x09\x01"  # field 19000, wire type 0, value 1
 LAUNCHER_FAILURE_CODES = frozenset((
@@ -1053,6 +1056,147 @@ def probe_master_file(schema, app, *, port=50051, timeout=15):
         "auth_rpc":auth,"master_rpc":master})
 
 
+def validate_sdk_resource_report(value):
+    """Project public SDK wire-identity and one complete translated-file proof."""
+    require(type(value) is dict, "sdk_resource_schema_differs")
+    fixed = {"schema":1,"transport":"http.client","origin":MASTER_ORIGIN,"application_id":212,
+        "application_version":105051,"manifest_path":SDK_MANIFEST_PATH,"manifest_http_status":200,
+        "manifest_encrypted":True,"manifest_decrypted":True,"wire_rowset_matches_original":True,
+        "all_active_object_names_six_base62":True,"selection":"smallest-translated-image",
+        "selected_kind":"assetbundle","object_http_status":200,"object_mime":"application/octet-stream",
+        "etag_matches_md5":True}
+    require(all(type(value.get(key)) is type(expected) and value[key] == expected
+                for key, expected in fixed.items()), "sdk_resource_metadata_failed")
+    bounds = {"manifest_ciphertext_bytes":(32,MAX_SDK_BYTES+32),"manifest_plaintext_bytes":(1,MAX_SDK_BYTES),
+        "manifest_rows":(2,100000),"active_rows":(1,100000),"translated_image_count":(1,100000),
+        "object_bytes":(1,MAX_SDK_BYTES),"received_bytes":(1,MAX_SDK_BYTES),
+        "original_revision":(1,2**31-1),"manifest_revision":(1,2**31-1)}
+    require(all(type(value.get(key)) is int and low <= value[key] <= high
+                for key, (low,high) in bounds.items())
+            and (value["manifest_ciphertext_bytes"]-16) % 16 == 0
+            and value["active_rows"] <= value["manifest_rows"]
+            and value["translated_image_count"] <= value["active_rows"]
+            and value["manifest_revision"] > value["original_revision"], "sdk_resource_manifest_failed")
+    require(all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}",value[key])
+                for key in ("original_manifest_sha256","object_path_sha256")), "sdk_resource_metadata_failed")
+    require(value["received_bytes"] == value["object_bytes"]
+            and all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{32}",value[key])
+                    for key in ("expected_md5","received_md5"))
+            and value["expected_md5"] == value["received_md5"], "sdk_resource_digest_failed")
+    return {key:value[key] for key in (*fixed,*bounds,"original_manifest_sha256","object_path_sha256",
+                                      "expected_md5","received_md5")}
+
+
+def _sdk_source(app):
+    from idoly_local.octo_manifest import Database
+    with ZipFile(Path(app)/"LocalServer"/"ServerData.zip") as archive:
+        result = {}
+        for name, maximum in (("settings.json",MAX_JSON),("manifest.pb",MAX_SDK_BYTES)):
+            entries = [entry for entry in archive.infolist()
+                       if entry.filename == "data/public-octo-ios/"+name]
+            require(len(entries) == 1 and not entries[0].is_dir() and 0 < entries[0].file_size <= maximum
+                    and not stat.S_ISLNK(entries[0].external_attr >> 16), "sdk_archive_invalid")
+            with archive.open(entries[0]) as incoming: raw = incoming.read(maximum+1)
+            require(len(raw) == entries[0].file_size, "sdk_archive_invalid")
+            result[name] = raw
+    settings = parse_json(result["settings.json"])
+    require(all(type(settings.get(key)) is int and settings[key] == expected
+                for key,expected in (("schema",1),("application_id",212),("application_version",105051)))
+            and all(type(settings.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}",settings[key])
+                    for key in ("manifest_sha256","aes_key_hex"))
+            and type(settings.get("client_key")) is str and 1 <= len(settings["client_key"]) <= 256
+            and settings["client_key"].isascii() and all(33 <= ord(c) <= 126 for c in settings["client_key"]),
+            "sdk_settings_invalid")
+    require(hashlib.sha256(result["manifest.pb"]).hexdigest() == settings["manifest_sha256"],
+            "sdk_archive_digest_failed")
+    original = Database.FromString(result["manifest.pb"])
+    require(type(settings.get("revision")) is int and original.revision == settings["revision"]
+            and original.revision > 0 and original.assetBundleList and original.resourceList, "sdk_archive_invalid")
+    return settings, original
+
+
+def probe_sdk_resource(app, *, timeout=30):
+    """Check the real SDK-facing catalog and stream one prepared image locally."""
+    from idoly_local.octo_manifest import Database, decrypt_manifest
+    from idoly_local.octo_runtime import _desktop_aes_backend
+    require(type(timeout) in (int,float) and 0 < timeout <= 30, "invalid_sdk_probe_timeout")
+    deadline = time.monotonic()+timeout
+    def remaining():
+        left = deadline-time.monotonic()
+        require(left > 0, "sdk_probe_deadline_exceeded")
+        return left
+    settings, original = _sdk_source(app)
+    connection = HTTPConnection("127.0.0.1",8080,timeout=remaining())
+    try:
+        connection.request("GET",SDK_MANIFEST_PATH,headers={"Connection":"close",
+            "Accept":"application/x-protobuf,x-octo-app/212","X-OCTO-KEY":settings["client_key"]})
+        response = connection.getresponse()
+        length = response.getheader("Content-Length")
+        require(response.status == 200 and response.getheader("Content-Type") == "application/x-protobuf"
+                and type(length) is str and re.fullmatch(r"[0-9]{1,9}",length)
+                and 32 <= int(length) <= MAX_SDK_BYTES+32, "sdk_manifest_http_failed")
+        encrypted = response.read(MAX_SDK_BYTES+33)
+        require(len(encrypted) == int(length), "sdk_manifest_http_failed")
+    except (OSError,HTTPException):
+        raise ProbeError("sdk_manifest_transport_failed") from None
+    finally: connection.close()
+    try:
+        plain = decrypt_manifest(encrypted,aes_key=bytes.fromhex(settings["aes_key_hex"]),
+                                 aes_cbc=_desktop_aes_backend())
+        wire = Database.FromString(plain)
+    except Exception:
+        raise ProbeError("sdk_manifest_decryption_failed") from None
+    require(wire.urlFormat == SDK_URL_FORMAT and wire.revision > original.revision, "sdk_manifest_invalid")
+    originals = {(kind,row.id):row for kind,rows in (("assetbundle",original.assetBundleList),
+                  ("resources",original.resourceList)) for row in rows}
+    rows = [(kind,row) for kind,group in (("assetbundle",wire.assetBundleList),("resources",wire.resourceList))
+            for row in group]
+    require(2 <= len(rows) <= 100000 and len(originals) == len(rows)
+            and {(kind,row.id) for kind,row in rows} == set(originals), "sdk_manifest_rowset_failed")
+    active = [(kind,row) for kind,row in rows if row.state != 4]
+    require(active and all(row.state in (1,2,3) and re.fullmatch(r"[A-Za-z0-9]{6}",row.objectName)
+            and 0 < row.size <= 2**31-1 and 0 < row.uploadVersionId <= 2**31-1
+            and 0 < row.generation <= 2**64-1 and re.fullmatch(r"[0-9a-fA-F]{32}",row.md5)
+            for kind,row in active), "sdk_wire_identity_failed")
+    changed = [row for kind,row in active if kind == "assetbundle"
+        and row.md5.lower() != originals[(kind,row.id)].md5.lower()
+        and row.generation != originals[(kind,row.id)].generation]
+    candidates = [row for row in changed if row.size <= MAX_SDK_BYTES]
+    require(candidates, "sdk_translated_image_missing")
+    selected = min(candidates,key=lambda row:(row.size,row.id))
+    path = f"/octo/{selected.uploadVersionId}/assetbundle/{selected.objectName}/{selected.generation}"
+    expected_md5 = selected.md5.lower()
+    connection = HTTPConnection("127.0.0.1",8080,timeout=remaining())
+    digest, received = hashlib.md5(), 0
+    try:
+        connection.request("GET",path,headers={"Connection":"close"})
+        response = connection.getresponse()
+        require(response.status == 200 and response.getheader("Content-Type") == "application/octet-stream"
+                and response.getheader("Content-Length") == str(selected.size)
+                and response.getheader("ETag") == '"'+expected_md5+'"', "sdk_object_http_failed")
+        while True:
+            block = response.read(min(64*1024,selected.size-received+1))
+            if not block: break
+            received += len(block)
+            require(received <= selected.size, "sdk_object_size_failed")
+            digest.update(block); remaining()
+    except (OSError,HTTPException):
+        raise ProbeError("sdk_object_transport_failed") from None
+    finally: connection.close()
+    require(received == selected.size and digest.hexdigest() == expected_md5, "sdk_object_digest_failed")
+    return validate_sdk_resource_report({"schema":1,"transport":"http.client","origin":MASTER_ORIGIN,
+        "application_id":212,"application_version":105051,"manifest_path":SDK_MANIFEST_PATH,
+        "manifest_http_status":200,"manifest_encrypted":True,"manifest_decrypted":True,
+        "manifest_ciphertext_bytes":len(encrypted),"manifest_plaintext_bytes":len(plain),
+        "original_manifest_sha256":settings["manifest_sha256"],"manifest_rows":len(rows),"active_rows":len(active),
+        "wire_rowset_matches_original":True,"all_active_object_names_six_base62":True,
+        "translated_image_count":len(changed),"selection":"smallest-translated-image","selected_kind":"assetbundle",
+        "object_path_sha256":hashlib.sha256(path.encode("ascii")).hexdigest(),"object_http_status":200,
+        "object_mime":"application/octet-stream","object_bytes":selected.size,"received_bytes":received,
+        "expected_md5":expected_md5,"received_md5":digest.hexdigest(),"etag_matches_md5":True,
+        "original_revision":original.revision,"manifest_revision":wire.revision})
+
+
 def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
     audit = Path(audit)
     require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
@@ -1133,6 +1277,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
         report["rpcs"] = probe_rpcs(schema, timeout=min(15, remaining()))
         stage = "master_file"
         report["master_file"] = probe_master_file(schema, app, timeout=min(15, remaining()))
+        stage = "sdk_resource"
+        report["sdk_resource"] = probe_sdk_resource(app, timeout=min(30, remaining()))
         report["status"] = "PASS"
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage,

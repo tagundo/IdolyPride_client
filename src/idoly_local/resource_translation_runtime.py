@@ -55,19 +55,29 @@ def _state(path):
     return value
 
 
-def pin_manifest_revision(raw, state_path, *, language, preserve_original=False):
+def pin_manifest_revision(raw, state_path, *, language, preserve_original=False,
+                          sdk_identity_compat=False):
     """Return (complete manifest, accepts older revisions), with atomic state."""
     if language not in ("ja", "ko", "en"):
         raise ValueError("Unknown resource language")
+    if type(sdk_identity_compat) is not bool:
+        raise ValueError("SDK identity compatibility must be a boolean")
     database = Database.FromString(raw)
-    fingerprint = hashlib.sha256(language.encode("ascii") + b"\0" + raw).hexdigest()
+    identity = language.encode("ascii") + b"\0" + raw
+    if sdk_identity_compat:
+        # A cached revision from the old, overlong SDK object names must receive
+        # a complete update once, even though the packaged resource bytes match.
+        identity = b"octo-sdk-six-byte-object-name-v1\0" + identity
+    fingerprint = hashlib.sha256(identity).hexdigest()
+    minimum_revision = database.revision + int(sdk_identity_compat)
     state_path = Path(state_path)
     with _LOCK:
         previous = _state(state_path)
-        if previous is None and preserve_original:
+        if previous is None and preserve_original and not sdk_identity_compat:
             return raw, False
-        revision = (previous["revision"] if previous and previous["fingerprint"] == fingerprint
-                    else max(database.revision, previous["revision"] + 1 if previous else database.revision))
+        revision = (max(minimum_revision, previous["revision"])
+                    if previous and previous["fingerprint"] == fingerprint
+                    else max(minimum_revision, previous["revision"] + 1 if previous else minimum_revision))
         if revision > 2**31 - 1:
             raise ValueError("Resource language revision is exhausted")
         state = {"schema": 1, "fingerprint": fingerprint, "revision": revision}
@@ -105,7 +115,8 @@ def select_resource_translation(original, data_dir, cache_root, *, language, pla
     try:
         raw, compatible = pin_manifest_revision(raw,
             Path(data_dir) / ("client-resource-revision-" + platform + ".json"),
-            language=language, preserve_original=layer is None)
+            language=language, preserve_original=layer is None,
+            sdk_identity_compat=layer is not None)
         return raw, layer, compatible
     except BaseException:
         if layer is not None:

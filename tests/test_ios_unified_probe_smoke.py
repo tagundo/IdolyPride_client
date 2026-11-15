@@ -14,6 +14,8 @@ import pytest
 
 from idoly_local import codec
 from idoly_local.h2_server import create_server
+from idoly_local.octo_manifest import Database
+from idoly_local.octo_runtime import _desktop_aes_backend
 from idoly_local.rpc import RpcCode
 
 
@@ -27,6 +29,57 @@ DEVICE = "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-18-5"
 MASTER_BYTES = bytes(range(128))
 MASTER_MEMBER = "data/original-master/assets/master/fixture.db"
+SDK_SETTINGS_MEMBER = "data/public-octo-ios/settings.json"
+SDK_MANIFEST_MEMBER = "data/public-octo-ios/manifest.pb"
+SDK_PATH = "/v2/pub/a/212/v/105051/list/0"
+SDK_KEY = hashlib.sha256(b"portable-public-sdk-fixture").digest()
+SDK_OBJECT = b"public translated SDK image fixture"
+SDK_OBJECT_PATH = "/octo/101050/assetbundle/Ab12Z9/12346"
+
+
+def sdk_fixture():
+    original = Database(revision=1159,urlFormat="https://original.invalid/{v}/{type}/{o}/{g}")
+    original.assetBundleList.add(id=1,name="public-ui-image",size=12,state=1,
+        md5=hashlib.md5(b"original-img").hexdigest(),objectName="Or1gA1",generation=12345,uploadVersionId=101050)
+    original.resourceList.add(id=1,name="public-resource",size=8,state=1,
+        md5=hashlib.md5(b"resource").hexdigest(),objectName="Res001",generation=12345,uploadVersionId=101050)
+    raw = original.SerializeToString()
+    settings = {"schema":1,"application_id":212,"application_version":105051,"revision":1159,
+        "manifest_sha256":hashlib.sha256(raw).hexdigest(),"aes_key_hex":SDK_KEY.hex(),
+        "client_key":"public-sdk-fixture-key"}
+    wire = Database.FromString(raw)
+    wire.revision = 1160
+    wire.urlFormat = "http://127.0.0.1:8080/octo/{v}/{type}/{o}/{g}"
+    wire.assetBundleList[0].objectName = "Ab12Z9"
+    wire.assetBundleList[0].generation = 12346
+    wire.assetBundleList[0].md5 = hashlib.md5(SDK_OBJECT).hexdigest()
+    wire.assetBundleList[0].size = len(SDK_OBJECT)
+    return settings,raw,wire
+
+
+def encrypted_sdk_manifest(database):
+    plain = database.SerializeToString()
+    padding = 16-len(plain)%16
+    iv = bytes(range(16))
+    return iv+_desktop_aes_backend()(True,SDK_KEY,iv,plain+bytes([padding])*padding)
+
+
+def sdk_resource_report():
+    settings,_,wire = sdk_fixture()
+    digest = hashlib.md5(SDK_OBJECT).hexdigest()
+    return {"schema":1,"transport":"http.client","origin":"http://127.0.0.1:8080",
+        "application_id":212,"application_version":105051,"manifest_path":SDK_PATH,
+        "manifest_http_status":200,"manifest_encrypted":True,"manifest_decrypted":True,
+        "manifest_ciphertext_bytes":len(encrypted_sdk_manifest(wire)),
+        "manifest_plaintext_bytes":len(wire.SerializeToString()),
+        "original_manifest_sha256":settings["manifest_sha256"],"manifest_rows":2,"active_rows":2,
+        "wire_rowset_matches_original":True,"all_active_object_names_six_base62":True,
+        "translated_image_count":1,"selection":"smallest-translated-image","selected_kind":"assetbundle",
+        "object_path_sha256":hashlib.sha256(SDK_OBJECT_PATH.encode()).hexdigest(),
+        "object_http_status":200,"object_mime":"application/octet-stream",
+        "object_bytes":len(SDK_OBJECT),"received_bytes":len(SDK_OBJECT),
+        "expected_md5":digest,"received_md5":digest,"etag_matches_md5":True,
+        "original_revision":1159,"manifest_revision":1160}
 
 
 def master_file_report():
@@ -723,6 +776,9 @@ def app(tmp_path):
         # probe's lookup constant (installed core paths omit the data/ root).
         archive.writestr("data/protocol/idolypride-6.1.1.pb", public_descriptor())
         archive.writestr(MASTER_MEMBER, MASTER_BYTES)
+        settings,original,_ = sdk_fixture()
+        archive.writestr(SDK_SETTINGS_MEMBER,json.dumps(settings))
+        archive.writestr(SDK_MANIFEST_MEMBER,original)
     return app
 
 
@@ -821,7 +877,8 @@ def test_fresh_simulator_is_only_mutation_target_and_cleanup_runs(app, tmp_path)
             mock.patch.object(probe, "_simctl", controller), \
             mock.patch.object(probe.socket, "create_connection") as socket_call, \
             mock.patch.object(probe, "probe_rpcs", return_value=[{"path": path} for path in probe.RPC_PATHS]), \
-            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()):
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()), \
+            mock.patch.object(probe, "probe_sdk_resource", return_value=sdk_resource_report()):
         result = probe.run_probe(app, audit)
     assert result["status"] == "PASS"
     assert result["fresh_local_state_before_launch"] is True
@@ -863,7 +920,8 @@ def test_launch_budget_remains_clamped_to_original_overall_deadline(app, tmp_pat
             mock.patch.object(probe, "_simctl", command), \
             mock.patch.object(probe.socket, "create_connection"), \
             mock.patch.object(probe, "probe_rpcs", return_value=[]), \
-            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()):
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()), \
+            mock.patch.object(probe, "probe_sdk_resource", return_value=sdk_resource_report()):
         result = probe.run_probe(app, tmp_path / "audit.json", timeout=90)
     assert result["status"] == "PASS"
     assert controller.timeouts[5] == 90.0
@@ -918,7 +976,8 @@ def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_rel
     with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command), \
             mock.patch.object(probe.socket, "create_connection") as listener, \
             mock.patch.object(probe, "probe_rpcs", return_value=rows) as rpc, \
-            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()) as master:
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()) as master, \
+            mock.patch.object(probe, "probe_sdk_resource", return_value=sdk_resource_report()) as sdk:
         result = probe.run_probe(app, tmp_path / "failure.json")
     assert result["status"] == "PASS"
     assert result["launch_ack_timeout"] is True
@@ -930,7 +989,9 @@ def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_rel
     listener.assert_called_once()
     rpc.assert_called_once()
     master.assert_called_once()
+    sdk.assert_called_once()
     assert result["master_file"] == master_file_report()
+    assert result["sdk_resource"] == sdk_resource_report()
     assert [call[0] for call in controller.calls].count("launch") == 1
     assert result["cleanup"] == {"shutdown": True, "delete": True}
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
@@ -1001,7 +1062,8 @@ def test_shutdown_failure_does_not_skip_delete_or_claim_success(app, tmp_path):
             mock.patch.object(probe, "_simctl", controller), \
             mock.patch.object(probe.socket, "create_connection"), \
             mock.patch.object(probe, "probe_rpcs", return_value=[]), \
-            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()):
+            mock.patch.object(probe, "probe_master_file", return_value=master_file_report()), \
+            mock.patch.object(probe, "probe_sdk_resource", return_value=sdk_resource_report()):
         result = probe.run_probe(app, tmp_path / "failure.json")
     assert result["status"] == "FAIL" and result["cleanup_complete"] is False
     assert controller.calls[-1] == ("delete", CREATED)
@@ -1756,6 +1818,173 @@ def test_master_file_failure_cannot_claim_pass_after_native_and_rpc_success(app,
         result = probe.run_probe(app,tmp_path/"master-failure.json")
     assert result["status"] == "FAIL" and result["failed_stage"] == "master_file"
     assert result["error"] == "master_file_sample_differs"
+    assert result["cleanup"] == {"shutdown":True,"delete":True}
+
+
+class SDKHTTPFixture:
+    """Encrypted public manifest and streamed object through a fake fixed peer."""
+    def __init__(self, *, wire=None, manifest=None, body=SDK_OBJECT, object_status=200,
+                 object_mime="application/octet-stream", object_length=None, etag=None):
+        self.manifest = encrypted_sdk_manifest(sdk_fixture()[2] if wire is None else wire) if manifest is None else manifest
+        self.body, self.object_status, self.object_mime = body, object_status, object_mime
+        self.object_length = str(len(body)) if object_length is None else object_length
+        self.etag = '"'+hashlib.md5(SDK_OBJECT).hexdigest()+'"' if etag is None else etag
+        self.connections, self.requests, self.object_reads = [], [], []
+
+    def __call__(self, host, port=None, *, timeout=None):
+        self.connections.append((host,port,timeout))
+        fixture = self
+        class Connection:
+            def request(self, method, path, body=None, headers=None):
+                self.path = path
+                fixture.requests.append((method,path,dict(headers or {})))
+
+            def getresponse(self):
+                if self.path == SDK_PATH:
+                    return MasterHTTPResponse(200,{"Content-Length":str(len(fixture.manifest)),
+                        "Content-Type":"application/x-protobuf"},fixture.manifest)
+                response = MasterHTTPResponse(fixture.object_status,{"Content-Length":fixture.object_length,
+                    "Content-Type":fixture.object_mime,"ETag":fixture.etag},fixture.body)
+                original_read = response.read
+                def read(amount=None):
+                    fixture.object_reads.append(amount)
+                    return original_read(amount)
+                response.read = read
+                return response
+
+            def close(self):
+                pass
+        return Connection()
+
+
+def rewrite_sdk_settings(app, change):
+    path = app/"LocalServer/ServerData.zip"
+    with ZipFile(path) as archive:
+        entries = {item.filename:archive.read(item) for item in archive.infolist()}
+    settings = json.loads(entries[SDK_SETTINGS_MEMBER])
+    settings.update(change)
+    entries[SDK_SETTINGS_MEMBER] = json.dumps(settings).encode()
+    with ZipFile(path,"w") as archive:
+        for name,content in entries.items():
+            archive.writestr(name,content)
+
+
+@pytest.mark.parametrize("budget", (3,30))
+def test_sdk_resource_decrypts_complete_catalog_and_streams_translated_image_from_fixed_peer(app, budget):
+    http = SDKHTTPFixture()
+    with mock.patch.object(probe,"HTTPConnection",side_effect=http):
+        result = probe.probe_sdk_resource(app,timeout=budget)
+    assert result == sdk_resource_report()
+    assert [row[:2] for row in http.requests] == [("GET",SDK_PATH),("GET",SDK_OBJECT_PATH)]
+    headers = {key.lower():value for key,value in http.requests[0][2].items()}
+    assert headers["accept"] == "application/x-protobuf,x-octo-app/212"
+    assert headers["x-octo-key"] == "public-sdk-fixture-key"
+    assert all(host == "127.0.0.1" and port == 8080 and 0 < timeout <= budget
+               for host,port,timeout in http.connections)
+    assert http.object_reads and all(type(size) is int and 0 < size <= 65536 for size in http.object_reads)
+    assert "public-sdk-fixture-key" not in json.dumps(result)
+    assert SDK_KEY.hex() not in json.dumps(result)
+
+
+def test_sdk_resource_rejects_budget_over_thirty_seconds_before_source_or_network(app):
+    with mock.patch.object(probe,"_sdk_source") as source,mock.patch.object(probe,"HTTPConnection") as http, \
+            pytest.raises(probe.ProbeError,match="^invalid_sdk_probe_timeout$"):
+        probe.probe_sdk_resource(app,timeout=31)
+    source.assert_not_called()
+    http.assert_not_called()
+
+
+@pytest.mark.parametrize("name", ("v7"+"a"*48,"Ab\0Z91","Ab_2Z9","한글Ab12","../bad"))
+def test_sdk_resource_rejects_non_six_base62_active_names_before_object_fetch(app, name):
+    wire = sdk_fixture()[2]
+    wire.assetBundleList[0].objectName = name
+    http = SDKHTTPFixture(wire=wire)
+    with mock.patch.object(probe,"HTTPConnection",side_effect=http),pytest.raises(probe.ProbeError):
+        probe.probe_sdk_resource(app,timeout=3)
+    assert [row[1] for row in http.requests] == [SDK_PATH]
+
+
+@pytest.mark.parametrize("mutation", ("row_missing","row_added","duplicate_id","foreign_url",
+    "same_revision","unchanged_md5","unchanged_generation"))
+def test_sdk_resource_rejects_incomplete_or_untranslated_catalog_before_object_fetch(app, mutation):
+    _,raw,wire = sdk_fixture()
+    original = Database.FromString(raw)
+    if mutation == "row_missing":
+        del wire.resourceList[:]
+    elif mutation == "row_added":
+        wire.resourceList.add().CopyFrom(wire.resourceList[0])
+        wire.resourceList[-1].id = 2
+    elif mutation == "duplicate_id":
+        wire.resourceList.add().CopyFrom(wire.resourceList[0])
+    elif mutation == "foreign_url":
+        wire.urlFormat = "https://must-never-fetch.invalid/{v}/{type}/{o}/{g}"
+    elif mutation == "same_revision":
+        wire.revision = original.revision
+    elif mutation == "unchanged_md5":
+        wire.assetBundleList[0].md5 = original.assetBundleList[0].md5
+    else:
+        wire.assetBundleList[0].generation = original.assetBundleList[0].generation
+    http = SDKHTTPFixture(wire=wire)
+    with mock.patch.object(probe,"HTTPConnection",side_effect=http),pytest.raises(probe.ProbeError):
+        probe.probe_sdk_resource(app,timeout=3)
+    assert [row[1] for row in http.requests] == [SDK_PATH]
+
+
+@pytest.mark.parametrize("options", ({"body":b"x"*len(SDK_OBJECT)},
+    {"body":SDK_OBJECT[:-1],"object_length":str(len(SDK_OBJECT))},
+    {"object_status":302},{"object_mime":"text/html"},{"etag":'"'+'0'*32+'"'},
+    {"manifest":b"truncated-encrypted-manifest"}))
+def test_sdk_resource_rejects_wrong_hash_truncation_redirect_mime_etag_or_ciphertext(app, options):
+    with mock.patch.object(probe,"HTTPConnection",side_effect=SDKHTTPFixture(**options)), \
+            pytest.raises(probe.ProbeError):
+        probe.probe_sdk_resource(app,timeout=3)
+
+
+@pytest.mark.parametrize("change", ({"schema":True},{"application_version":205051},
+    {"manifest_sha256":"0"*64},{"aes_key_hex":"not-a-key"},
+    {"client_key":"must-not-export\nsecret"}))
+def test_sdk_resource_rejects_bad_archive_settings_before_http_without_exposing_keys(app, change):
+    rewrite_sdk_settings(app,change)
+    with mock.patch.object(probe,"HTTPConnection") as http,pytest.raises(probe.ProbeError) as caught:
+        probe.probe_sdk_resource(app,timeout=3)
+    http.assert_not_called()
+    assert "must-not-export" not in str(caught.value) and SDK_KEY.hex() not in str(caught.value)
+
+
+@pytest.mark.parametrize("field,value", (
+    ("schema",True),("application_id",True),("application_version",205051),
+    ("origin","https://private.invalid"),("manifest_path","/list/another"),
+    ("manifest_encrypted",1),("manifest_decrypted",False),("manifest_ciphertext_bytes",33),
+    ("manifest_rows",True),("active_rows",3),("translated_image_count",0),
+    ("all_active_object_names_six_base62",1),("received_bytes",0),
+    ("expected_md5","z"*32),("received_md5","0"*32),("etag_matches_md5",1),
+    ("manifest_revision",1159),("object_mime","text/plain"),
+))
+def test_sdk_resource_report_requires_strict_crypto_catalog_and_object_evidence(field, value):
+    report = sdk_resource_report()
+    report[field] = value
+    with pytest.raises(probe.ProbeError):
+        probe.validate_sdk_resource_report(report)
+
+
+def test_sdk_resource_report_drops_secret_keys_raw_names_urls_and_object_body():
+    report = sdk_resource_report()
+    report.update(aes_key_hex="never-export",client_key="never-export",body="never-export",
+        object_name="never-export",download_url="never-export")
+    result = probe.validate_sdk_resource_report(report)
+    assert result == sdk_resource_report()
+    assert "never-export" not in json.dumps(result)
+
+
+def test_sdk_resource_failure_prevents_pass_after_unchanged_rpc_and_master_gates(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"sdk-failure-container")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]), \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
+            mock.patch.object(probe,"probe_sdk_resource",side_effect=probe.ProbeError("sdk_resource_sample_differs")):
+        result = probe.run_probe(app,tmp_path/"sdk-failure.json")
+    assert result["status"] == "FAIL" and result["failed_stage"] == "sdk_resource"
+    assert result["error"] == "sdk_resource_sample_differs"
     assert result["cleanup"] == {"shutdown":True,"delete":True}
 
 

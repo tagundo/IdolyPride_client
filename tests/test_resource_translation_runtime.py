@@ -22,8 +22,9 @@ KEY = b"a" * 32
 
 def database():
     result = Database(revision=1087, urlFormat=URL)
-    for rows, name in ((result.assetBundleList, "stage"), (result.resourceList, "adv_bond_ai_01_01.txt")):
-        rows.add(id=1, name=name, objectName="original_" + str(len(name)), size=3,
+    for number, (rows, name) in enumerate(((result.assetBundleList, "stage"),
+                                          (result.resourceList, "adv_bond_ai_01_01.txt")), 1):
+        rows.add(id=1, name=name, objectName=f"Obj{number:03}", size=3,
                  md5=hashlib.md5(b"old").hexdigest(), generation=1, uploadVersionId=202050, state=3)
     return result
 
@@ -53,6 +54,48 @@ def test_ja_ko_en_ja_switches_advance_and_restarts_reuse_the_same_sdk_revision(t
         assert complete.revision == parsed.revision and len(complete.resourceList) == 1
     assert all(a < b for a, b in zip(revisions, revisions[1:]))
     assert database().SerializeToString() == original
+
+
+def test_sdk_wire_fix_updates_an_existing_broken_revision_once_and_survives_restart(tmp_path):
+    original = database(); original.revision = 1161
+    raw = original.SerializeToString(); state = tmp_path / "revision.json"
+    old, _ = pin_manifest_revision(raw, state, language="ko")
+    assert Database.FromString(old).revision == 1161
+    fixed, compatible = pin_manifest_revision(raw, state, language="ko", sdk_identity_compat=True)
+    assert compatible and Database.FromString(fixed).revision == 1162
+    persisted = state.read_bytes()
+    restarted, _ = pin_manifest_revision(raw, state, language="ko", sdk_identity_compat=True)
+    assert restarted == fixed and state.read_bytes() == persisted
+    # A client with the broken revision gets all corrected rows; after storing
+    # it, subsequent checks receive the ordinary empty same-revision delta.
+    server = OctoManifest(fixed, aes_key=KEY, client_key="synthetic", base_url="http://127.0.0.1:8080",
+        aes_cbc=aes, allow_previous_revisions=True)
+    headers = {"Accept": "application/x-protobuf,x-octo-app/212", "X-OCTO-KEY": "synthetic"}
+    def response(revision):
+        wire = server.manifest_response(f"/v2/pub/a/212/v/205051/list/{revision}", headers)
+        return Database.FromString(decrypt_manifest(wire, aes_key=KEY, aes_cbc=aes))
+    updated, unchanged = response(1161), response(1162)
+    assert updated.revision == 1162 and len(updated.assetBundleList) == len(updated.resourceList) == 1
+    assert all(len(row.objectName) == 6 for rows in (updated.assetBundleList, updated.resourceList) for row in rows)
+    assert not unchanged.assetBundleList and not unchanged.resourceList
+    fresh, _ = pin_manifest_revision(raw, tmp_path / "fresh.json", language="ko", sdk_identity_compat=True)
+    assert Database.FromString(fresh).revision == 1162
+    revisions = [1162]
+    for language in ("en", "ja", "ko"):
+        selected, _ = pin_manifest_revision(raw, state, language=language, sdk_identity_compat=language != "ja")
+        revisions.append(Database.FromString(selected).revision)
+        same, _ = pin_manifest_revision(raw, state, language=language, sdk_identity_compat=language != "ja")
+        assert same == selected
+    assert revisions == [1162, 1163, 1164, 1165]
+    assert original.SerializeToString() == raw
+
+
+@pytest.mark.parametrize("flag", [None, 1, "true"])
+def test_sdk_identity_revision_flag_is_an_explicit_boolean(tmp_path, flag):
+    with pytest.raises(ValueError, match="boolean"):
+        pin_manifest_revision(database().SerializeToString(), tmp_path / "revision.json",
+            language="ko", sdk_identity_compat=flag)
+    assert not (tmp_path / "revision.json").exists()
 
 
 def test_compressed_translation_seed_works_offline_through_existing_checksum_cache(tmp_path):
@@ -116,12 +159,14 @@ def test_gateway_factory_uses_selected_downloads_language_data_and_restores_japa
     with gateway.cache.open_verified(record) as stream:
         assert stream.read() == body
     assert gateway.translation_layer is not None and not calls
-    previous_revision = gateway.manifest.revision; gateway.close()
+    previous_revision = gateway.manifest.revision
+    assert previous_revision == 1089  # Prepared1088 must supersede a broken cached1088.
+    gateway.close()
     japanese, _ = create_octo_gateway(private, "http://127.0.0.1:8080", aes_cbc=aes,
         resource_cache_dir=public, language="ja", allow_downloads=False)
     restored = next(value for value in japanese.manifest.objects.values() if value.kind == "resources")
     assert japanese.manifest.revision > previous_revision
-    assert restored.object_name.startswith("original_") and japanese.translation_layer is None
+    assert restored.object_name == original_name and japanese.translation_layer is None
     with pytest.raises(OctoRequestError) as mixed_failure:
         japanese.manifest.lookup_object(mixed_path)
     assert getattr(mixed_failure.value, "status", None) == 404
@@ -183,7 +228,8 @@ def test_bulk_library_keeps_original_catalog_while_game_uses_selected_language(t
         library.catalog_summary(platform)
         catalog = library._catalogs[platform]
         assert catalog.manifest.revision == revision and catalog.raw == raw
-        assert all(record.object_name.startswith("original_") for record in catalog.records)
+        assert all(record.object_name.startswith("Obj") and len(record.object_name) == 6
+                   for record in catalog.records)
         library.start_download(platform, parallelism=1)
         deadline = time.monotonic() + 2
         while (job := library.status()["job"])["state"] not in {"completed", "partial", "failed", "cancelled"}:

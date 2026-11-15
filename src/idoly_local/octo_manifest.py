@@ -27,6 +27,7 @@ _OBJECT = re.compile(r"/octo/([1-9][0-9]{0,9})/(assetbundle|resources)/"
                      r"([A-Za-z0-9_-]{1,128})/([1-9][0-9]{0,19})\Z")
 _ORIGIN = re.compile(r"http://127\.0\.0\.1(?::([1-9][0-9]{0,4}))?/?\Z")
 _OBJECT_NAME = re.compile(r"[A-Za-z0-9_-]{1,128}\Z")
+_SDK_OBJECT_NAME = re.compile(r"[A-Za-z0-9]{6}\Z")
 _MD5 = re.compile(r"[0-9a-fA-F]{32}\Z")
 _UPSTREAM_FORMAT = ("https://d2ilil7yh5oi1v.cloudfront.net/"
                     "solis-{v}-{type}/{o}?generation={g}&alt=media")
@@ -265,7 +266,6 @@ class OctoManifest:
                 records[record.identity] = record
         self.revision = database.revision
         self.local_url_format = local_url_format
-        self._full = rewritten_wire
         self._unchanged = Database(revision=self.revision, urlFormat=self.local_url_format).SerializeToString(
             deterministic=True)
         self.objects = MappingProxyType(records)
@@ -281,7 +281,7 @@ class OctoManifest:
                 if (not isinstance(identity, tuple) or len(identity) != 4
                         or identity[0] not in ("resources", "assetbundle")
                         or type(identity[1]) is not int or not 1 <= identity[1] <= 2**31-1
-                        or not isinstance(identity[2], str) or not _OBJECT_NAME.fullmatch(identity[2])
+                        or not isinstance(identity[2], str) or not _SDK_OBJECT_NAME.fullmatch(identity[2])
                         or type(identity[3]) is not int or not 1 <= identity[3] <= 2**64-1
                         or type(target) is not OctoObject or target.kind != identity[0]
                         or not isinstance(target.object_name, str)
@@ -292,6 +292,30 @@ class OctoManifest:
                     raise OctoManifestError("Invalid prepared language object alias")
                 aliases[identity] = records[target.identity]
         self._object_aliases = MappingProxyType(aliases)
+        # The SDK stores an ObjectName in exactly six ASCII bytes. Prepared
+        # objects retain their private long identities for verified-cache/ZIP
+        # reuse, but their client-facing rows must use the original SDK name.
+        sdk_names = {}
+        for identity, target in aliases.items():
+            if target.identity in sdk_names:
+                raise OctoManifestError("Prepared language object has ambiguous SDK aliases")
+            sdk_names[target.identity] = identity[2]
+        prepared = {identity for identity, record in records.items()
+                    if record.object_name.startswith(("local_ko_", "local_en_"))}
+        if set(sdk_names) != prepared:
+            raise OctoManifestError("Prepared language object requires one SDK alias")
+        if sdk_names:
+            for kind, rows in (("assetbundle", database.assetBundleList),
+                               ("resources", database.resourceList)):
+                for row in rows:
+                    identity = kind, row.uploadVersionId, row.objectName, row.generation
+                    if identity in sdk_names:
+                        row.objectName = sdk_names[identity]
+            self._full = _rewrite_url_field(database.SerializeToString(deterministic=True), local_url_format)
+        else:
+            # Preserve the original protobuf wire bytes, including field order
+            # and unknown fields, when no prepared objects need projection.
+            self._full = rewritten_wire
 
     def manifest_response(self, path: str, headers: Mapping[str, str]) -> bytes:
         """Return a full revision0 or same-revision delta in the original envelope.
