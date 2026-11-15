@@ -1,8 +1,10 @@
 # iPhone·iPad 통합 IPA
 
-빌드 `156.9107` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
+빌드 `156.9108` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/tree/downloads/ios-unified-prototype-source-b05f54052bb9fc439f2e1c592c61dbd88563933a)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/ios-unified-prototype-source-3fd0287e2d0013a7f4f6d3ad2e5f64f5493f6565/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+
+156.9108은 마스터 다운로드 이후 빈 에셋 파일명으로 요청해 E206이 발생하던 오류를 수정합니다. 번역 리소스의 내부 캐시 식별자는 유지하고, 게임의 Octo SDK에 전달하는 파일명만 원본과 같은 6글자 형식으로 제공합니다. 목록 리비전을 한 번 올려 기존 클라이언트의 잘못된 메타데이터를 갱신하며, 이미 받은 리소스·계정은 재사용합니다. 실제 iOS 런타임에서 암호화된 목록의 54,442개 항목과 번역 이미지의 전체 전송·MD5·길이·ETag를 검사합니다.
 
 156.9107은 PlayCover에서 파일 다운로드가 끊기던 서버 오류를 수정합니다. 파일 형식을 판별하는 Python 코드가 `/etc/apache2/mime.types`를 읽다가 샌드박스의 `PermissionError`를 내고 응답 헤더 전송 전에 종료됐습니다. 정적 파일은 내장된 형식 표로 처리하며 시스템 MIME 파일에 접근하지 않습니다. 같은 권한 거부 조건과 실제 마스터 파일의 HEAD·부분 전송을 검사합니다.
 
@@ -35,7 +37,7 @@
 3. `native/test_client_data.py`, `native/test_keyboard_lifecycle.py`, `native/test_local_http.py`와 `native/test_mac_menu.py`가 실제 macOS Foundation의 번들 선택·키보드 재사용·로컬 HTTP 및 AppKit 메뉴·단축키를 검사합니다. `prepare_runtime.py`는 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다.
 4. `native/build_native.py`가 실제 Apple SDK로 서버 프레임워크를 빌드합니다. 검증된 Unity 초기화 진입점과 데이터 번들 선택 경로를 사용합니다. `patch_load.py`와 `package_unified.py`는 기존 게임 코드·SDK 바이트를 보존하고 필요한 로드 명령·앱 정보·추가 파일을 구성합니다.
 5. `verify_client_languages.py`가 준비된 실제 Data로 일본어·한국어·영어 번들을 각각 재구성하고 다시 호출해 검증된 캐시 재사용을 확인합니다.
-6. 새 Simulator용 프레임워크·검사용 앱에서 서버 시작·게임 진입·설정 메뉴 닫기 후 서버 유지, 창 크기별 네이티브 헤더와 설정 화면 배치, 진단 복사·클립보드 정리, 모서리 제스처 등록, CommonCrypto AES와 실제 암호화 RPC를 검사합니다. 암호화된 마스터 목록의 URL을 확인하고 서버에서 HEAD와 64바이트 부분 요청을 수행해 응답 크기·내용을 포함된 원본 파일과 대조합니다. 원본 게임 실행 파일과 기존 Simulator·사용자 데이터는 사용하지 않습니다.
+6. 새 Simulator용 프레임워크·검사용 앱에서 서버 시작·게임 진입·설정 메뉴 닫기 후 서버 유지, 창 크기별 네이티브 헤더와 설정 화면 배치, 진단 복사·클립보드 정리, 모서리 제스처 등록, CommonCrypto AES와 실제 암호화 RPC를 검사합니다. 암호화된 마스터 목록의 URL을 확인하고 서버에서 HEAD와 64바이트 부분 요청을 수행해 응답 크기·내용을 포함된 원본 파일과 대조합니다. 별도로 실제 서버의 암호화된 Octo 목록을 해독하고 원본 전체 항목·6글자 파일명을 검사한 뒤, 번역 이미지 한 개의 전체 응답을 해당 목록의 MD5·길이·ETag와 대조합니다. 원본 게임 실행 파일과 기존 Simulator·사용자 데이터는 사용하지 않습니다.
 
 산출물에는 IPA와 SHA-256, 프레임워크·원본 보존 검사, 언어 데이터 검사 및 Simulator 결과를 함께 보관합니다. 자세한 경계는 [CONTRACT.md](CONTRACT.md)에 정리했습니다.
 
