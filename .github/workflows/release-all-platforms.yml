@@ -40,18 +40,32 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.13.5'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare pinned Java harness Android tools
+        run: sdkmanager 'build-tools;34.0.0' 'platforms;android-34'
       - name: Install exact locked verification dependencies
         run: uv sync --locked --all-extras --python 3.13
+      - name: Prepare the SHA-pinned public protocol descriptor
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROTOCOL_PAYLOAD: ${{ runner.temp }}/idoly-public-protocol-payload.zip
+        run: |
+          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 --header 'Accept: application/octet-stream' > "$PROTOCOL_PAYLOAD"
+          uv run --locked python macos-preserver/extract_descriptor.py --payload "$PROTOCOL_PAYLOAD" --output data/protocol/idolypride-6.1.1.pb
+          rm "$PROTOCOL_PAYLOAD"
       - name: Run shared server and portable platform regressions
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/idoly-portable"
-          uv run --locked --all-extras pytest -q tests android-server/ci android-diagnostics/tests macos-server/tests \
+          uv run --locked --all-extras python -m pytest -q \
             --junitxml="$RUNNER_TEMP/idoly-portable/tests.xml" \
             | tee "$RUNNER_TEMP/idoly-portable/tests.txt"
           uv run --locked python -m compileall -q src tools android-server/app/src/main/python macos-server
@@ -261,6 +275,9 @@ jobs:
           test "$(uname -m)" = arm64
           uv sync --locked --python 3.12
           uv pip install --python .venv/bin/python -r macos-server/requirements-build.txt
+          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 --header 'Accept: application/octet-stream' > "$RUNNER_TEMP/idoly-mac-protocol.zip"
+          uv run --locked python macos-preserver/extract_descriptor.py --payload "$RUNNER_TEMP/idoly-mac-protocol.zip" --output data/protocol/idolypride-6.1.1.pb
+          rm "$RUNNER_TEMP/idoly-mac-protocol.zip"
           uv run --locked python -m pytest -q macos-server/tests
       - name: Build and exercise relocated native SwiftUI server
         run: >-
@@ -358,6 +375,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
           lfs: false
       - uses: actions/setup-python@v5

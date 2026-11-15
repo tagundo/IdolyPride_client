@@ -4,6 +4,8 @@ import resource
 import shutil
 import subprocess
 
+import sys
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,6 +18,7 @@ def bounded():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 def test_display_distinguishes_local_cdn_waiting_failure_and_unknown(tmp_path):
     compiler = shutil.which("cc")
     if compiler is None:
@@ -47,6 +50,7 @@ def test_both_actual_uis_use_cached_status_safe_fields_and_typed_counters():
     assert 'request["path"]' not in swift and 'id_item(value,"path")' not in cocoa
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 def test_actual_cocoa_display_compiles_with_all_existing_controls():
     compiler = shutil.which("cc")
     if compiler is None:

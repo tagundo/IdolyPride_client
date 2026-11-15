@@ -5,6 +5,8 @@ import resource
 import shutil
 import subprocess
 
+import sys
+
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,6 +15,7 @@ def bounded():
     resource.setrlimit(resource.RLIMIT_AS, (128 * 1024 * 1024,) * 2)
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 def test_location_guard_utf8_json_and_atomic_command_boundaries(tmp_path):
     compiler = shutil.which("cc")
     if compiler is None:
@@ -52,6 +55,7 @@ def test_both_mac_uis_bind_the_chosen_root_and_preserve_the_export_root():
     assert 'self.canChangeResourceLocation' in swift.split('var resourceLocationBinding:', 1)[1].split('private func externalResourceDirectory()', 1)[0]
 
 
+@pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 def test_actual_cross_cocoa_source_still_compiles():
     compiler = shutil.which("cc")
     if compiler is None:

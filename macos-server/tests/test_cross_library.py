@@ -3,7 +3,11 @@ import json
 import resource
 import shutil
 import subprocess
+import sys
+
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 
 from idoly_local.media_settings import decode_settings
 from idoly_local.language_settings import validate_settings as validate_language

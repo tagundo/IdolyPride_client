@@ -18,11 +18,20 @@ tool=importlib.util.module_from_spec(SPEC);SPEC.loader.exec_module(tool)
 
 def test_provider_addition_preserves_original_flags_components_and_identity(tmp_path):
     p=tmp_path/"AndroidManifest.xml"
-    p.write_text('<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="'+tool.PACKAGE+'" android:versionCode="414"><uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36"/><uses-permission android:name="android.permission.INTERNET"/><application android:debuggable="false" android:extractNativeLibs="true" android:name="OriginalApplication"><activity android:name="OriginalActivity" android:exported="true"/></application></manifest>')
+    p.write_text('<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="'+tool.PACKAGE+'" android:versionCode="414"><uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36"/><uses-permission android:name="android.permission.INTERNET"/><application android:label="'+tool.BASE_CLIENT_LABEL+'" android:debuggable="false" android:extractNativeLibs="true" android:name="OriginalApplication"><activity android:name="OriginalActivity" android:exported="true"/></application></manifest>')
     original=tool.xml_shape(ET.parse(p).getroot());tool.add_provider(p)
     root=ET.parse(p).getroot();app=root.find('application');provider=app[-1]
     assert provider.attrib=={tool.ANDROID+'name':tool.PROVIDER,tool.ANDROID+'authorities':tool.AUTHORITY,tool.ANDROID+'exported':'false',tool.ANDROID+'initOrder':'1'}
-    app.remove(provider);assert tool.xml_shape(root)==original
+    assert app.get(tool.ANDROID+'label') == tool.CLIENT_LABEL
+    assert len([child for child in app if child.get(tool.ANDROID+'name') == tool.PROVIDER]) == 1
+    app.remove(provider)
+    app.set(tool.ANDROID+'label', tool.BASE_CLIENT_LABEL)
+    assert tool.xml_shape(root)==original
+    # Model a pinned base that already contains the provider to preserve the
+    # duplicate-insertion gate independently of the authorized label rename.
+    duplicate = ET.parse(p)
+    duplicate.getroot().find('application').set(tool.ANDROID+'label', tool.BASE_CLIENT_LABEL)
+    duplicate.write(p, encoding='utf-8', xml_declaration=True)
     with pytest.raises(ValueError,match='already'):tool.add_provider(p)
 
 
@@ -86,11 +95,13 @@ def test_public_cache_preserves_bytes_modes_times_and_rejects_links(tmp_path):
 
 
 def test_compiled_tree_compares_typed_attributes_not_source_lines():
-    old='  E: manifest (line=1)\n    A: package="'+tool.PACKAGE+'"\n    E: application (line=2)\n      A: http://schemas.android.com/apk/res/android:debuggable(0x1)=false\n'
+    old='  E: manifest (line=1)\n    A: package="'+tool.PACKAGE+'"\n    E: application (line=2)\n      A: http://schemas.android.com/apk/res/android:label(0x01010001)="'+tool.BASE_CLIENT_LABEL+'" (Raw: "'+tool.BASE_CLIENT_LABEL+'")\n      A: http://schemas.android.com/apk/res/android:debuggable(0x1)=false\n'
     provider='      E: provider (line=3)\n        A: http://schemas.android.com/apk/res/android:name(0x1)="'+tool.PROVIDER+'"\n        A: http://schemas.android.com/apk/res/android:authorities(0x2)="'+tool.AUTHORITY+'"\n        A: http://schemas.android.com/apk/res/android:exported(0x3)=false\n        A: http://schemas.android.com/apk/res/android:initOrder(0x4)=1\n'
-    assert tool.compiled_tree(old)==tool.compiled_tree(old.replace('line=1','line=99')+provider,remove_provider=True)
+    updated = old.replace(tool.BASE_CLIENT_LABEL, tool.CLIENT_LABEL).replace('line=1', 'line=99')
+    assert tool.compiled_tree(old)==tool.compiled_tree(updated+provider,remove_provider=True)
     assert tool.compiled_tree(old)!=tool.compiled_tree(old.replace('=false','=true'))
-    with pytest.raises(ValueError):tool.compiled_tree(old+provider.replace('exported(0x3)=false','exported(0x3)=true'),remove_provider=True)
+    with pytest.raises(ValueError):tool.compiled_tree(updated+provider.replace('exported(0x3)=false','exported(0x3)=true'),remove_provider=True)
+    with pytest.raises(ValueError,match='display name'):tool.compiled_tree(old+provider,remove_provider=True)
 
 
 def test_standalone_marker_has_only_public_compatibility_fields():

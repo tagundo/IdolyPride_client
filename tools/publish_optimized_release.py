@@ -712,6 +712,15 @@ def main(argv=None):
     except BaseException as error:
         state.update(status="FAIL", error_type=type(error).__name__, resources=guard.report())
         if "github" in locals() and github.owned_release_id is not None:
+            if github.rollback_draft_restored is None:
+                # A failure writing the final small receipt is also fail-closed.
+                try:
+                    restored = github.api("/releases/" + str(github.owned_release_id),
+                                          method="PATCH", body={"draft": True})
+                    github.rollback_draft_restored = (restored.get("id") == github.owned_release_id
+                                                       and restored.get("draft") is True)
+                except BaseException:
+                    github.rollback_draft_restored = False
             state["owned_release_id"] = github.owned_release_id
             state["rollback_draft_restored"] = github.rollback_draft_restored
             state["release_published"] = False if github.rollback_draft_restored is True else None

@@ -3,7 +3,11 @@ import resource
 import shutil
 import subprocess
 
+import sys
+
 import pytest
+
+pytestmark = pytest.mark.skipif(sys.platform != "linux", reason='SDK-free C cross contracts require the Linux host toolchain and resource limits')
 
 
 def test_shutdown_deadlines_owned_child_and_saturated_pipe(tmp_path):
