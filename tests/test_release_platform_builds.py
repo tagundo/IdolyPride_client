@@ -156,7 +156,7 @@ def reference_payload(monkeypatch,tmp_path,*,missing=None,extra=None):
     files={"data/"+name:("fixture "+name).encode() for name in builds.QA_REFERENCE_FILES}
     files.update({"data/master-json/Setting.json":b"[]",
                   "data/public-fixtures/manifest.json":b"{}",
-                  "data/public-fixtures/responses/public-sample.pb":b"public fixture",
+                  "data/public-fixtures/responses/public-sample.pb":b"",
                   "data/original-master/unneeded.bin":b"not a host QA reference"})
     if missing is not None:files.pop("data/"+missing)
     if extra is not None:files[extra]=b"unsafe"
@@ -172,11 +172,16 @@ def test_pinned_qa_payload_extracts_complete_story_tutorial_and_master_reference
     destination=tmp_path/"references"
     builds.extract_qa_references(payload,destination,Guard())
     actual={str(path.relative_to(destination)):path.read_bytes() for path in destination.rglob("*") if path.is_file()}
-    expected={name.removeprefix("data/"):raw for name,raw in files.items() if not name.startswith("data/original-master/")}
+    expected={name.removeprefix("data/"):raw for name,raw in files.items()
+              if not name.startswith(("data/original-master/","data/public-fixtures/"))}
     assert actual==expected
     assert builds.QA_REFERENCE_FILES<=actual.keys()
     assert "public-story/manifest.json" in actual and "public-story/story-list-event.pb" in actual
-    assert "public-story/story-list-extra.pb" in actual and "public-fixtures/responses/public-sample.pb" in actual
+    assert "public-story/story-list-extra.pb" in actual
+    # Valid protobuf public responses can be empty. They are runtime fixtures,
+    # not host inputs for these QA helpers, and must not trip selected-ref bounds.
+    assert files["data/public-fixtures/responses/public-sample.pb"] == b""
+    assert not (destination/"public-fixtures").exists()
 
 
 @pytest.mark.parametrize("missing",sorted(builds.QA_REFERENCE_FILES))
@@ -186,7 +191,7 @@ def test_incomplete_host_qa_reference_roster_is_rejected_before_emulator(monkeyp
         builds.extract_qa_references(payload,tmp_path/"references",Guard())
 
 
-@pytest.mark.parametrize("extra",["data/public-story/../escape.pb","data/public-fixtures/../../escape.pb"])
+@pytest.mark.parametrize("extra",["data/public-story/../escape.pb","data/public-tutorial/../../escape.pb"])
 def test_public_reference_prefix_does_not_allow_path_escape(monkeypatch,tmp_path,extra):
     payload,_files=reference_payload(monkeypatch,tmp_path,extra=extra)
     with pytest.raises(builds.BuildError,match="QA_reference_path_invalid"):

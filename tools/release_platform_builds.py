@@ -243,7 +243,7 @@ def base_report(kind,source,pins,inputs):
         "execution":{"actual_macos_execution":kind=="macos","actual_android_arm64_execution":False,
                      "physical_PlayCover_execution":False}}
 
-QA_REFERENCE_PREFIXES = ("data/master-json/","data/public-tutorial/","data/public-story/","data/public-fixtures/")
+QA_REFERENCE_PREFIXES = ("data/master-json/","data/public-tutorial/","data/public-story/")
 QA_REFERENCE_FILES = frozenset(("protocol/idolypride-6.1.1.pb","master-json/!version.txt",
     "public-tutorial/manifest.json","public-tutorial/tutorial-short.pb","public-tutorial/tutorial-full.pb",
     "public-story/manifest.json","public-story/story-list-event.pb","public-story/story-list-extra.pb"))

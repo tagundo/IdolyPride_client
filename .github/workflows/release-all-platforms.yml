@@ -247,7 +247,10 @@ jobs:
           name: optimized-release-android-diagnostics-${{ github.sha }}
           path: |
             ${{ runner.temp }}/idoly-android-work/**/*.json
-            ${{ runner.temp }}/idoly-android-qa/**/*.json
+            ${{ runner.temp }}/idoly-android-build/build-failure.json
+            ${{ runner.temp }}/idoly-android-final/build-failure.json
+            ${{ runner.temp }}/idoly-android-qa/emulator-QA.log
+            ${{ runner.temp }}/idoly-android-qa/qa/*.json
             ${{ runner.temp }}/idoly-android-qa/qa/*.xml
             ${{ runner.temp }}/idoly-android-qa/qa/*logcat.txt
           if-no-files-found: warn
