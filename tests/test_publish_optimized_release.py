@@ -220,11 +220,13 @@ def asset_metadata(wanted, index):
 
 
 class FakeGitHub(publisher.GitHub):
-    def __init__(self, *, existing=False, bad_tag=False, readback_failure=None, bad_inventory=False):
+    def __init__(self, *, existing=False, bad_tag=False, readback_failure=None, bad_inventory=False,
+                 temporary_urls=False, final_temporary_urls=False):
         super().__init__("test-token", None)
         self.calls, self.existing, self.bad_tag = [], existing, bad_tag
         self.readback_failure, self.bad_inventory = readback_failure, bad_inventory
         self.uploaded, self.events = [], []
+        self.temporary_urls, self.final_temporary_urls = temporary_urls, final_temporary_urls
 
     def api(self, path, *, method="GET", body=None, absent=False):
         self.calls.append((path, method, body))
@@ -242,7 +244,11 @@ class FakeGitHub(publisher.GitHub):
         if method == "PATCH" and body["draft"] is True:
             return {"id": 77, "draft": True}
         if method == "PATCH":
+            assert body == {"draft": False, "tag_name": publisher.TAG, "target_commitish": SOURCE}
             self.events.append("promote")
+            if not self.final_temporary_urls:
+                for asset in self.uploaded:
+                    asset["browser_download_url"] = publisher.asset_download_url(asset["name"])
             return {"id": 77, "tag_name": publisher.TAG, "draft": False, "prerelease": True,
                     "target_commitish": SOURCE, "published_at": "2026-11-15T00:00:00Z",
                     "html_url": "https://github.com/"+publisher.REPO+"/releases/tag/"+publisher.TAG}
@@ -251,6 +257,9 @@ class FakeGitHub(publisher.GitHub):
     def upload_asset(self, release_id, wanted):
         assert release_id == 77
         row = asset_metadata(wanted, len(self.uploaded))
+        if self.temporary_urls:
+            row["browser_download_url"] = ("https://github.com/"+publisher.REPO
+                +"/releases/download/untagged-19a339c5b788cf8128b3/"+wanted["name"])
         self.uploaded.append(row)
         self.events.append("upload")
         return row
@@ -284,7 +293,8 @@ def test_new_release_promotes_only_after_all_full_API_readbacks(release_binaries
     assert result["draft"] is False and result["prerelease"] is True
     assert github.owned_release_id == 77
     assert github.events == ["upload", "readback"]*len(release_binaries) + ["latest_gates", "promote"]
-    assert len(saved) == len(github.asset_receipts) == len(release_binaries)
+    assert len(saved) == len(release_binaries) + 1
+    assert len(github.asset_receipts) == len(release_binaries)
     assert all(row["full_API_download_SHA256_verified"] is True for row in github.asset_receipts)
     assert [body for _path, method, body in github.calls if method == "POST"] == [{
         "tag_name": publisher.TAG, "target_commitish": SOURCE,
@@ -304,7 +314,7 @@ def test_incomplete_asset_readbacks_or_gates_never_publish(failure, release_bina
                        save_assets=(lambda rows:fail()) if failure == "proof_write" else None)
     assert "promote" not in github.events
     assert github.rollback_draft_restored is True
-    assert not any(method == "PATCH" and body == {"draft": False} for _path, method, body in github.calls)
+    assert not any(method == "PATCH" and body.get("draft") is False for _path, method, body in github.calls)
 
 
 def test_failed_promotion_verification_restores_only_just_created_draft(release_binaries):
@@ -446,7 +456,9 @@ def test_upload_streams_only_verified_owned_file_with_exact_length(release_binar
             response = io.BytesIO(json.dumps(asset_metadata(wanted, 0)).encode())
             response.status, response.headers = 201, {}
             return response
-    result = publisher.GitHub("test-token", Opener()).upload_asset(77, wanted)
+    github = publisher.GitHub("test-token", Opener())
+    github.owned_release_id = 77
+    result = github.upload_asset(77, wanted)
     assert result["name"] == wanted["name"]
 
 
@@ -700,3 +712,69 @@ def test_client_artifact_safe_inventory_requires_both_APKs_and_all_raw_provenanc
             publisher.generic_members(Archive(), "android-clients")
     else:
         assert set(publisher.generic_members(Archive(), "android-clients")) == names
+
+
+def temporary_asset_url(name):
+    return ("https://github.com/" + publisher.REPO
+            + "/releases/download/untagged-19a339c5b788cf8128b3/" + name)
+
+
+def test_github_draft_temporary_url_is_accepted_only_before_promotion(release_binaries):
+    wanted = release_binaries[0]
+    asset = asset_metadata(wanted, 0)
+    asset["browser_download_url"] = temporary_asset_url(wanted["name"])
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_release_asset(asset, wanted)
+    assert publisher.validate_release_asset(asset, wanted, allow_draft_url=True) == asset
+
+
+@pytest.mark.parametrize("case", ["repository", "file", "http", "query", "fragment", "short_tag",
+                                 "uppercase_tag", "arbitrary_tag"])
+def test_draft_URL_exception_is_limited_to_exact_repo_name_and_temporary_tag(case, release_binaries):
+    wanted = release_binaries[0]
+    asset = asset_metadata(wanted, 0)
+    url = temporary_asset_url(wanted["name"])
+    if case == "repository": url = url.replace(publisher.REPO, "another/repository")
+    elif case == "file": url += ".other"
+    elif case == "http": url = url.replace("https:", "http:")
+    elif case == "query": url += "?download=1"
+    elif case == "fragment": url += "#file"
+    elif case == "short_tag": url = url.replace("19a339c5b788cf8128b3", "abc")
+    elif case == "uppercase_tag": url = url.replace("19a339c5b788cf8128b3", "19A339C5B788CF8128B3")
+    else: url = url.replace("untagged-19a339c5b788cf8128b3", "other-release")
+    asset["browser_download_url"] = url
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_release_asset(asset, wanted, allow_draft_url=True)
+
+
+def test_draft_temporary_urls_keep_all_readbacks_then_update_final_canonical_receipts(release_binaries):
+    github, snapshots = FakeGitHub(temporary_urls=True), []
+    result = github.publish(SOURCE, "release", release_binaries, TinyGuard(),
+                            save_assets=lambda rows:snapshots.append(deepcopy(rows)))
+    assert result["draft"] is False
+    assert github.events == ["upload", "readback"]*len(release_binaries) + ["promote"]
+    assert len(github.asset_receipts) == len(publisher.EXPECTED_RELEASE_ASSETS)
+    assert all(row["full_API_download_SHA256_verified"] is True for row in github.asset_receipts)
+    assert all(row["download_url"] == publisher.asset_download_url(row["name"]) for row in github.asset_receipts)
+    assert "untagged-" in snapshots[0][0]["download_url"]
+    assert all(row["download_url"] == publisher.asset_download_url(row["name"]) for row in snapshots[-1])
+    assert ("/releases/77", "PATCH", {"draft": False, "tag_name": publisher.TAG,
+                                     "target_commitish": SOURCE}) in github.calls
+
+
+def test_published_inventory_cannot_keep_draft_URLs(release_binaries):
+    github = FakeGitHub(temporary_urls=True, final_temporary_urls=True)
+    with pytest.raises(publisher.ReleaseError):
+        github.publish(SOURCE, "release", release_binaries, TinyGuard())
+    assert github.events.count("readback") == len(release_binaries)
+    assert "promote" in github.events and github.rollback_draft_restored is True
+    assert github.calls[-1] == ("/releases/77", "PATCH", {"draft": True})
+
+
+def test_asset_upload_requires_the_new_owned_release(release_binaries):
+    github = publisher.GitHub("test-token", None)
+    with pytest.raises(publisher.ReleaseError, match="owned_draft_asset_upload_required"):
+        github.upload_asset(77, release_binaries[0])
+    github.owned_release_id = 77
+    with pytest.raises(publisher.ReleaseError, match="owned_draft_asset_upload_required"):
+        github.upload_asset(78, release_binaries[0])

@@ -627,17 +627,25 @@ def verify_binary_stream(response, wanted, guard, outgoing=None):
     need(prefix == b"PK\x03\x04", "binary_zip_prefix_differs")
 
 
-def validate_release_asset(asset, wanted):
+def validate_release_asset(asset, wanted, *, allow_draft_url=False):
+    need(type(allow_draft_url) is bool, "release_asset_phase_invalid")
+    url = asset.get("browser_download_url") if type(asset) is dict else None
+    # GitHub assigns an untagged URL while a new release is still a draft.
+    # Only this exact temporary form is accepted before promotion; final
+    # inventory verification always requires the canonical release tag.
+    temporary = (allow_draft_url and type(url) is str and re.fullmatch(
+        re.escape("https://github.com/" + REPO + "/releases/download/")
+        + r"untagged-[0-9a-f]{20}/" + re.escape(wanted["name"]), url) is not None)
     need(type(asset) is dict and type(asset.get("id")) is int and asset["id"] > 0
          and asset.get("name") == wanted["name"] and asset.get("state") == "uploaded"
          and type(asset.get("size")) is int and asset["size"] == wanted["bytes"]
          and asset.get("digest") == "sha256:" + wanted["sha256"]
-         and asset.get("browser_download_url") == asset_download_url(wanted["name"]),
+         and (url == asset_download_url(wanted["name"]) or temporary),
          "release_asset_identity_differs")
     return asset
 
 
-def validate_release_inventory(assets, binaries, receipts):
+def validate_release_inventory(assets, binaries, receipts, *, allow_draft_urls=False):
     names = EXPECTED_RELEASE_ASSETS
     need(type(assets) is list and len(assets) == len(binaries) == len(receipts) == len(names)
          and all(type(row) is dict for row in assets)
@@ -646,7 +654,8 @@ def validate_release_inventory(assets, binaries, receipts):
          and {row.get("id") for row in assets} == {row["id"] for row in receipts},
          "release_asset_inventory_differs")
     for wanted in binaries:
-        validate_release_asset(next(row for row in assets if row["name"] == wanted["name"]), wanted)
+        validate_release_asset(next(row for row in assets if row["name"] == wanted["name"]), wanted,
+                               allow_draft_url=allow_draft_urls)
 
 
 class GitHub:
@@ -782,6 +791,8 @@ class GitHub:
              and not any(row.get("tag_name") == TAG for row in releases), "release_already_exists")
 
     def upload_asset(self, release_id, wanted):
+        need(type(release_id) is int and release_id == self.owned_release_id,
+             "owned_draft_asset_upload_required")
         path = verified_file(Path(wanted["path"]).parent, {key: wanted[key] for key in ("name", "bytes", "sha256")})
         with path.open("rb") as incoming:
             request = Request("https://uploads.github.com/repos/" + REPO + "/releases/" + str(release_id)
@@ -797,7 +808,7 @@ class GitHub:
             with response:
                 raw = response.read(MIB + 1)
                 need(response.status == 201 and len(raw) <= MIB, "release_asset_upload_response_bound")
-        return validate_release_asset(decode(raw), wanted)
+        return validate_release_asset(decode(raw), wanted, allow_draft_url=True)
 
     def verify_asset(self, asset, wanted, guard):
         url = "https://api.github.com/repos/" + REPO + "/releases/assets/" + str(asset["id"])
@@ -824,7 +835,7 @@ class GitHub:
             for row in binaries:
                 guard.check()
                 asset = self.upload_asset(created["id"], row)
-                validate_release_asset(asset, row)
+                validate_release_asset(asset, row, allow_draft_url=True)
                 self.verify_asset(asset, row, guard)
                 self.asset_receipts.append({"id": asset["id"], "name": row["name"], "bytes": row["bytes"],
                     "sha256": row["sha256"], "API_digest": asset["digest"],
@@ -832,11 +843,12 @@ class GitHub:
                 if save_assets is not None:
                     save_assets(self.asset_receipts)
             validate_release_inventory(self.api("/releases/" + str(created["id"]) + "/assets?per_page=100"),
-                                       binaries, self.asset_receipts)
+                                       binaries, self.asset_receipts, allow_draft_urls=True)
             if before_promote is not None:
                 before_promote()
             guard.check()
-            result = self.api("/releases/" + str(created["id"]), method="PATCH", body={"draft": False})
+            result = self.api("/releases/" + str(created["id"]), method="PATCH",
+                              body={"draft": False, "tag_name": TAG, "target_commitish": source})
             need(result.get("id") == created["id"] and result.get("tag_name") == TAG
                  and result.get("draft") is False and result.get("prerelease") is True
                  and result.get("target_commitish") == source
@@ -846,8 +858,13 @@ class GitHub:
             tag = self.api("/git/ref/tags/" + TAG)
             need(tag.get("object", {}).get("type") == "commit"
                  and tag["object"].get("sha") == source, "published_tag_source_differs")
-            validate_release_inventory(self.api("/releases/" + str(created["id"]) + "/assets?per_page=100"),
-                                       binaries, self.asset_receipts)
+            final_assets = self.api("/releases/" + str(created["id"]) + "/assets?per_page=100")
+            validate_release_inventory(final_assets, binaries, self.asset_receipts)
+            final_by_id = {asset["id"]: asset for asset in final_assets}
+            for receipt in self.asset_receipts:
+                receipt["download_url"] = final_by_id[receipt["id"]]["browser_download_url"]
+            if save_assets is not None:
+                save_assets(self.asset_receipts)
             return {key: result[key] for key in ("id", "tag_name", "html_url", "published_at", "draft", "prerelease")}
         except BaseException:
             # Restore only this call's validated newly-created release.
