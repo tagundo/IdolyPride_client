@@ -222,14 +222,15 @@ def test_snapshot_protected_state_or_cached_receipt_damage_cannot_produce_succes
     capture = device.capture
 
     def corrupt(stage):
-        capture(stage)
+        captured = capture(stage)
         if stage != "53-main-live-cached":
-            return
+            return captured
         if damage == "snapshot": final.balance.freeBalance += 50
         elif damage == "unknown": final.DiscardUnknownFields()
         elif damage == "clock": clock[0] = (b"changed lesson clock", clock[0][1])
         elif damage == "cached-seed-time-response": attempts[0] = ("different seed/time/response",)
         else: preserved[damage] = "changed"
+        return captured
 
     monkeypatch.setattr(device, "capture", corrupt)
     with pytest.raises(RuntimeError):
