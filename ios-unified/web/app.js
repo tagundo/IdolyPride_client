@@ -12,6 +12,15 @@
   const BUFFER_PRESETS = [720, 1080, 1440, 1920, 2560, 3840, 4096];
   const UI_TRANSLATIONS = {
   "en": {
+    "ZIP 선택 대기": "Waiting for ZIP selection",
+    "ZIP 복사 중": "Copying ZIP",
+    "ZIP 검증 준비": "Preparing ZIP validation",
+    "파일 앱에서 ZIP을 선택해 주세요.": "Choose a ZIP in the Files app.",
+    "선택한 ZIP을 준비하고 있습니다. 파일 제공자의 다운로드가 필요할 수 있습니다.": "Preparing the selected ZIP. The file provider may need to download it first.",
+    "ZIP을 앱 보관 폴더로 복사하고 있습니다.": "Copying the ZIP into app storage.",
+    "복사를 마쳤습니다. ZIP 목록과 내용을 검증하고 있습니다.": "Copy complete. Validating the ZIP catalog and contents.",
+    "ZIP 가져오기를 마치지 못했습니다.": "Could not finish importing the ZIP.",
+    "리소스 작업 진행률": "Resource task progress",
     "IDOLY PRIDE 로컬 설정": "IDOLY PRIDE Local Settings",
     "서버 설정": "Server settings",
     "새로고침": "Refresh",
@@ -214,6 +223,15 @@
     "… 표시 한도로 나머지 진단은 생략했습니다.": "… Remaining diagnostics omitted at the display limit."
   },
   "ja": {
+    "ZIP 선택 대기": "ZIP選択待ち",
+    "ZIP 복사 중": "ZIPをコピー中",
+    "ZIP 검증 준비": "ZIP検証を準備中",
+    "파일 앱에서 ZIP을 선택해 주세요.": "ファイルアプリでZIPを選択してください。",
+    "선택한 ZIP을 준비하고 있습니다. 파일 제공자의 다운로드가 필요할 수 있습니다.": "選択したZIPを準備しています。ファイル提供元によるダウンロードが必要な場合があります。",
+    "ZIP을 앱 보관 폴더로 복사하고 있습니다.": "ZIPをアプリの保管フォルダにコピーしています。",
+    "복사를 마쳤습니다. ZIP 목록과 내용을 검증하고 있습니다.": "コピーが完了しました。ZIPの一覧と内容を検証しています。",
+    "ZIP 가져오기를 마치지 못했습니다.": "ZIPの取り込みを完了できませんでした。",
+    "리소스 작업 진행률": "リソース作業の進捗",
     "IDOLY PRIDE 로컬 설정": "IDOLY PRIDE ローカル設定",
     "서버 설정": "サーバー設定",
     "새로고침": "更新",
@@ -490,6 +508,15 @@
     return false;
   }
 
+  function validImportProgress(value) {
+    return object(value) && value.event === "resource_import_progress"
+      && Number.isInteger(value.request_id) && value.request_id >= 1 && value.request_id <= MAX_ID
+      && ["selecting", "preparing", "copying", "queued", "failed"].includes(value.stage)
+      && Number.isSafeInteger(value.copied_bytes) && value.copied_bytes >= 0
+      && Number.isSafeInteger(value.total_bytes) && value.total_bytes >= 0
+      && (value.total_bytes === 0 || value.copied_bytes <= value.total_bytes);
+  }
+
   // The only transport is the native handler. IDs are never reused in a page,
   // so a reply arriving after hide, timeout or a later request cannot own it.
   function createBridge(scope, timers = scope) {
@@ -516,8 +543,26 @@
       if (envelope.ok) item.resolve(envelope.result);
       else item.reject(new Error(plain(envelope.error && envelope.error.message, 300) || "요청을 처리하지 못했습니다."));
     }
+    function armTimeout(id, item) {
+      timers.clearTimeout(item.timer);
+      item.timer = timers.setTimeout(() => {
+        if (pending.get(id) !== item) return;
+        pending.delete(id);
+        item.reject(new Error("응답이 지연되었습니다. 새로고침 후 상태를 확인해 주세요."));
+      }, item.timeout);
+    }
     function event(value) {
       if (!active || disposed || !object(value) || !boundedJSON(value, 524288)) return;
+      if (value.event === "resource_import_progress") {
+        const item = pending.get(value.request_id);
+        if (!validImportProgress(value) || !item || item.action !== "resources_import") return;
+        const order = {selecting: -1, preparing: 0, copying: 1, queued: 2, failed: 3};
+        if (item.importStage !== null && (order[value.stage] < order[item.importStage] || value.copied_bytes < item.importCopied)) return;
+        // Extend only this import's inactivity deadline when real work advances.
+        // Repeated heartbeats and unrelated/stale IDs cannot keep it alive.
+        if (item.importStage !== value.stage || value.copied_bytes > item.importCopied) armTimeout(value.request_id, item);
+        item.importStage = value.stage; item.importCopied = value.copied_bytes;
+      }
       for (const listener of listeners) listener(value);
     }
     scope.idolyServerReply = reply;
@@ -532,15 +577,12 @@
         const id = nextID++;
         return new Promise((resolve, reject) => {
           const timeout = ["resources_import", "resources_export"].includes(action) ? 120000 : 20000;
-          const timer = timers.setTimeout(() => {
-            pending.delete(id);
-            reject(new Error("응답이 지연되었습니다. 새로고침 후 상태를 확인해 주세요."));
-          }, timeout);
-          pending.set(id, {resolve, reject, timer});
+          const item = {resolve, reject, timer: null, timeout, action, importStage: null, importCopied: -1};
+          pending.set(id, item); armTimeout(id, item);
           try { handler.postMessage({id, action, ...payload}); }
           catch (_) {
             pending.delete(id);
-            timers.clearTimeout(timer);
+            timers.clearTimeout(item.timer);
             reject(new Error("앱에 요청을 전달하지 못했습니다."));
           }
         });
@@ -627,6 +669,8 @@
     let mutationVersion = 0;
     let visibilityVersion = 0;
     let resourcePending = false;
+    let importProgress = null;
+    let latestImportRequestID = 0;
     let copyPending = false;
     let copyFeedbackSource = "";
     let job = null;
@@ -700,22 +744,59 @@
     function schedulePoll() {
       stopPolling();
       if (!visible || disposed) return;
-      pollTimer = timers.setTimeout(() => { pollTimer = null; refresh(); }, job && ACTIVE_JOBS.has(job.state) ? 1000 : 4000);
+      pollTimer = timers.setTimeout(() => { pollTimer = null; refresh(); }, (job && ACTIVE_JOBS.has(job.state)) || (importProgress && importProgress.stage === "queued") ? 1000 : 4000);
+    }
+    function observeImportProgress(value) {
+      if (!validImportProgress(value)) return;
+      latestImportRequestID = Math.max(latestImportRequestID, value.request_id);
+      if (!importProgress || (importProgress.request_id === null
+          ? value.request_id <= importProgress.previous_request_id
+          : value.request_id !== importProgress.request_id)) return;
+      const order = {selecting: 0, preparing: 1, copying: 2, queued: 3, completed: 4, failed: 4};
+      if (order[value.stage] < order[importProgress.stage] || value.copied_bytes < importProgress.copied_bytes) return;
+      const advanced = value.stage !== importProgress.stage || value.copied_bytes > importProgress.copied_bytes;
+      importProgress = {...importProgress, request_id: value.request_id, stage: value.stage,
+        copied_bytes: value.copied_bytes, total_bytes: value.total_bytes};
+      if (advanced && messageSource === "응답이 지연되었습니다. 새로고침 후 상태를 확인해 주세요.") message("");
     }
     function renderResources(runtime) {
       const library = object(runtime.resource_library) ? runtime.resource_library : {};
-      job = object(library.job) ? library.job : null;
-      const archivePending = object(snapshot.resource_operation) && snapshot.resource_operation.accepted === true && snapshot.resource_operation.ready === false;
+      const latestJob = object(library.job) ? library.job : null;
+      const currentImport = importProgress && latestJob && latestJob.action === "import" && typeof latestJob.job_id === "string" && latestJob.job_id !== importProgress.previous_job_id;
+      job = importProgress ? (importProgress.result_job || (currentImport ? latestJob : null)) : latestJob;
+      if (importProgress && importProgress.accepted && object(snapshot.resource_operation)
+          && snapshot.resource_operation !== importProgress.previous_operation) {
+        if (snapshot.resource_operation.accepted === false) importProgress.stage = "failed";
+        else if (snapshot.resource_operation.ready === true && currentImport) importProgress.stage = "completed";
+      }
+      const importStage = importProgress && importProgress.stage;
+      const copyingImport = ["selecting", "preparing", "copying"].includes(importStage);
+      const waitingImport = importStage === "queued" && !currentImport && !importProgress.result_job;
+      const archivePending = !["completed", "failed"].includes(importStage) && object(snapshot.resource_operation) && snapshot.resource_operation.accepted === true && snapshot.resource_operation.ready === false;
       const activeJob = Boolean(job && ACTIVE_JOBS.has(job.state));
-      const busy = activeJob || archivePending;
+      const busy = activeJob || archivePending || copyingImport || waitingImport;
       const ready = Boolean(snapshot && snapshot.running && snapshot.state === "ready");
       for (const action of ["preview", "download", "import", "export"]) el("resources-" + action).disabled = !ready || busy || resourcePending;
       el("parallelism").disabled = busy || resourcePending || !ready;
       el("resources-cancel").disabled = !ready || !activeJob || resourcePending || !/^[A-Za-z0-9_-]{1,64}$/.test(job.job_id || "");
       const states = {preparing: "준비", running: "진행 중", export_ready: "내보내기 준비", cancelling: "취소 중", completed: "완료", partial: "일부 완료", failed: "실패", cancelled: "취소됨"};
-      text("resource-state", archivePending && !activeJob ? "ZIP 준비 중" : job ? states[job.state] || "확인 중" : "대기");
+      if (copyingImport || waitingImport || (importProgress && !job && ["failed", "completed"].includes(importStage))) {
+        const labels = {selecting: "ZIP 선택 대기", preparing: "ZIP 준비 중", copying: "ZIP 복사 중", queued: "ZIP 검증 준비", failed: "실패", completed: "완료"};
+        text("resource-state", labels[importStage] || "확인 중");
+        const total = importProgress.total_bytes || 0, copied = importProgress.copied_bytes || 0;
+        const progress = el("resource-progress");
+        progress.hidden = importStage === "selecting" || importStage === "failed";
+        progress.max = Math.max(1, total);
+        if (total > 0 && importStage === "copying") progress.value = Math.min(copied, total);
+        else if (importStage === "completed") { progress.max = 1; progress.value = 1; }
+        else progress.removeAttribute("value");
+        text("resource-summary", {selecting: "파일 앱에서 ZIP을 선택해 주세요.", preparing: "선택한 ZIP을 준비하고 있습니다. 파일 제공자의 다운로드가 필요할 수 있습니다.", copying: "ZIP을 앱 보관 폴더로 복사하고 있습니다.", queued: "복사를 마쳤습니다. ZIP 목록과 내용을 검증하고 있습니다.", failed: "ZIP 가져오기를 마치지 못했습니다.", completed: "ZIP 가져오기를 마쳤습니다."}[importStage]);
+        text("resource-detail", importStage === "copying" ? formatBytes(copied) + (total > 0 ? " / " + formatBytes(total) + " · " + Math.floor(100 * copied / total) + "%" : "") : "");
+        return;
+      }
+      text("resource-state", importStage === "failed" ? "실패" : archivePending && !activeJob ? "ZIP 준비 중" : job ? states[job.state] || "확인 중" : "대기");
       el("resource-progress").hidden = !job;
-      if (job) {
+      if (job && !(archivePending && !activeJob && !currentImport)) {
         const total = count(job.total_files);
         const checked = count(job.verified_files);
         el("resource-progress").max = Math.max(1, total);
@@ -767,6 +848,19 @@
       if (!object(value) || !object(value.options)) return false;
       const runtime = object(value.runtime) ? value.runtime : {};
       snapshot = {...value, runtime};
+      if (object(value.native) && Object.prototype.hasOwnProperty.call(value.native, "resource_import_progress")) {
+        const nativeProgress = value.native.resource_import_progress;
+        if (nativeProgress === null && !resourcePending && importProgress) {
+          if (["selecting", "preparing", "copying"].includes(importProgress.stage)) importProgress = null;
+          else if (importProgress.stage === "queued" && object(value.resource_operation)) {
+            // A background transition can reject the initial archive reply and
+            // miss its result event. Recover the terminal state from this poll.
+            if (value.resource_operation.accepted === false) {
+              importProgress.stage = "failed"; importProgress.accepted = false;
+            } else if (value.resource_operation.ready === true) importProgress.stage = "completed";
+          }
+        } else observeImportProgress(nativeProgress);
+      }
       if (validOptions(value.options)) {
         const configuredInterface = choice(value.options.interface_language, INTERFACE_LANGUAGES) ? value.options.interface_language : "system";
         // Once selected here, an older status/event/options-save reply cannot
@@ -866,15 +960,31 @@
       if (!visible || disposed || resourcePending || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
       const payload = action === "cancel" ? {job_id: job && job.job_id} : action === "download" ? {parallelism: Number(el("parallelism").value)} : {};
       resourcePending = true;
+      if (action === "import") importProgress = {stage: "selecting", request_id: null, copied_bytes: 0, total_bytes: 0, previous_job_id: job && job.job_id, previous_operation: snapshot.resource_operation, previous_request_id: latestImportRequestID, accepted: false};
+      else if (action !== "cancel") importProgress = null;
       mutationVersion++;
       const visibility = visibilityVersion;
       if (snapshot) renderResources(snapshot.runtime);
       try {
         const result = await bridge.request("resources_" + action, payload);
         if (!visible || disposed || visibility !== visibilityVersion) return;
-        message(result.cancelled === true ? "파일 선택을 취소했습니다." : {preview: "리소스 목록을 확인했습니다.", download: "리소스 받기를 시작했습니다.", cancel: "작업 취소를 요청했습니다.", import: "ZIP 가져오기를 시작했습니다. 진행 상태를 확인해 주세요.", export: result.ready === true ? "ZIP을 준비했습니다. 파일 앱에서 저장해 주세요." : "ZIP을 준비하고 있습니다. 완료되면 파일 앱에서 저장할 수 있습니다."}[action]);
+        if (action === "import" && importProgress) {
+          if (result.cancelled === true) importProgress = null;
+          else if (result.accepted === true) {
+            importProgress.accepted = true;
+            if (!["completed", "failed"].includes(importProgress.stage)) importProgress.stage = result.ready === true ? "completed" : "queued";
+          }
+        }
+        message(action === "import" && importProgress && importProgress.stage === "completed" ? "ZIP 가져오기를 마쳤습니다." : result.cancelled === true ? "파일 선택을 취소했습니다." : {preview: "리소스 목록을 확인했습니다.", download: "리소스 받기를 시작했습니다.", cancel: "작업 취소를 요청했습니다.", import: "ZIP 가져오기를 시작했습니다. 진행 상태를 확인해 주세요.", export: result.ready === true ? "ZIP을 준비했습니다. 파일 앱에서 저장해 주세요." : "ZIP을 준비하고 있습니다. 완료되면 파일 앱에서 저장할 수 있습니다."}[action]);
       } catch (error) {
-        if (visible && !disposed && visibility === visibilityVersion) message(error.message, true);
+        if (visible && !disposed && visibility === visibilityVersion) {
+          if (action === "import" && importProgress
+              && error.message !== "응답이 지연되었습니다. 새로고침 후 상태를 확인해 주세요.") {
+            if (importProgress.stage === "selecting") importProgress = null;
+            else { importProgress.stage = "failed"; importProgress.accepted = false; }
+          }
+          message(error.message, true);
+        }
       } finally {
         resourcePending = false;
         if (!disposed && snapshot) renderResources(snapshot.runtime);
@@ -921,6 +1031,10 @@
     el("refresh").addEventListener("click", () => { message(""); refresh(); });
     for (const action of ["preview", "download", "import", "export", "cancel"]) el("resources-" + action).addEventListener("click", () => resource(action));
     bridge.subscribe(event => {
+      if (event.event === "resource_import_progress") {
+        observeImportProgress(event);
+        if (snapshot) renderResources(snapshot.runtime);
+      }
       if (object(event.status) && ["ready", "status", "error", "closed"].includes(event.event)) renderStatus(event.status);
       if (event.event === "log" && typeof event.message === "string") {
         logs.push(plain(event.message, 1000));
@@ -928,6 +1042,16 @@
         if (snapshot) renderDiagnostics(snapshot.runtime);
       }
       if (["resource_result", "resource_error"].includes(event.event)) {
+        if (importProgress && (["queued", "completed"].includes(importProgress.stage)
+            || (object(event.job) && event.job.action === "import" && typeof event.job.job_id === "string"
+              && event.job.job_id !== importProgress.previous_job_id))) {
+          if (event.accepted === false || event.event === "resource_error") importProgress.stage = "failed";
+          else if (event.ready === true && !event.output_path) {
+            importProgress.stage = "completed";
+            if (object(event.job) && event.job.action === "import") importProgress.result_job = event.job;
+          }
+          if (snapshot) renderResources(snapshot.runtime);
+        }
         if (event.accepted === false || event.event === "resource_error") message("ZIP 작업을 마치지 못했습니다. 확인된 파일과 기존 보관 자료는 유지됩니다.", true);
         else if (event.ready === true) message(event.output_path ? "ZIP을 준비했습니다. 파일 앱에서 저장해 주세요." : "ZIP 가져오기를 마쳤습니다.");
         else if (event.message) message(event.message);

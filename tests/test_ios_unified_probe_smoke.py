@@ -202,6 +202,11 @@ def native_report(language="ko", run_index=None):
         "diagnostics_copy":{"button_found":True,"enabled_before":True,"click_dispatched":True,
             "completed":True,"feedback_success":True,"pasteboard_matches":True,"clipboard_seeded":True,
             "clipboard_cleared":True,"timed_out":False,"text_bytes":1024},
+        "zip_import_picker":{"scope":"stock-simulator","cancel_trigger":"delegate-callback",
+            "timed_out":False,"observations":8,"elapsed_seconds":0.8,
+            "grpc_connected_after_cancel":True,"assets_connected_after_cancel":True,
+            "passes":[{**{key:True for key in probe.ZIP_IMPORT_PASS_BOOL_FIELDS},"document_picker_mode":0}
+                      for _ in range(2)]},
         "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
         "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
             "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":True,
@@ -1003,6 +1008,62 @@ def test_diagnostics_copy_requires_actual_success_and_owned_clipboard_cleanup(fi
     observed["menu_lifetime"]["diagnostics_copy"][field] = value
     with pytest.raises(probe.ProbeError, match="^settings_diagnostics_copy_failed$"):
         probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("pass_index,field,value", [
+    (index,key,value) for index in (0,1) for key in probe.ZIP_IMPORT_PASS_BOOL_FIELDS for value in (False,1)
+] + [(index,"document_picker_mode",value) for index in (0,1) for value in (1,True,"0",None)])
+def test_zip_import_requires_import_mode_and_each_actual_cancel_recovery_pass(pass_index, field, value):
+    observed = native_report()
+    observed["menu_lifetime"]["zip_import_picker"]["passes"][pass_index][field] = value
+    with pytest.raises(probe.ProbeError, match="^settings_zip_import_picker_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("field,value", [("scope","livecontainer"),("cancel_trigger","user-tap"),
+    ("timed_out",True),("timed_out",0),("observations",True),("observations",0),("observations",201),
+    ("elapsed_seconds",True),("elapsed_seconds",float("nan")),("elapsed_seconds",61),
+    ("passes",[]),("passes",[{}]),("passes",[{}, {}, {}]),("passes",None),
+    *[(key,value) for key in probe.ZIP_IMPORT_SERVER_FLAGS for value in (False,1)]])
+def test_zip_import_rejects_incomplete_reentry_and_missing_server_survival(field, value):
+    observed = native_report()
+    observed["menu_lifetime"]["zip_import_picker"][field] = value
+    with pytest.raises(probe.ProbeError, match="^settings_zip_import_picker_failed$"):
+        probe.validate_report(observed)
+
+
+def test_zip_import_audit_contains_only_bounded_contract_metrics():
+    observed = native_report()
+    zipped = observed["menu_lifetime"]["zip_import_picker"]
+    zipped.update(filename="DO-NOT-EXPORT",provider="DO-NOT-EXPORT")
+    zipped["passes"][0]["url"] = "DO-NOT-EXPORT"
+    result = probe.validate_report(observed)
+    clean = result["menu_lifetime"]["zip_import_picker"]
+    assert clean["scope"] == "stock-simulator" and clean["cancel_trigger"] == "delegate-callback"
+    assert len(clean["passes"]) == 2 and clean["passes"][1]["button_restored"] is True
+    assert "DO-NOT-EXPORT" not in json.dumps(result)
+    assert probe.zip_import_observation({"timed_out":False,"observations":True,
+        "elapsed_seconds":float("inf"),"passes":[{"document_picker_mode":True,"button_restored":1}]}) == {
+            "timed_out":False,"passes":[{}]}
+
+
+@pytest.mark.parametrize("source,filename", (("checkpoint","embedded-probe-checkpoint.json"),
+    ("status","embedded-probe-status.json"),("report","embedded-probe.json")))
+def test_zip_import_checkpoint_preserves_safe_cancel_evidence(tmp_path, source, filename):
+    documents = tmp_path/"Documents"
+    documents.mkdir()
+    observed = native_report()
+    zipped = observed["menu_lifetime"]["zip_import_picker"]
+    zipped["passes"][1].update(button_restored=False,filename="DO-NOT-EXPORT")
+    if source != "report":
+        observed = {"schema":1,"stage":"settings_zip_import_cancelled","zip_import_picker":zipped,
+                    "probe_error":"settings_zip_import_picker_failed"}
+    (documents/filename).write_text(json.dumps(observed))
+    clean = probe.failure_checkpoint(tmp_path)
+    assert clean["zip_import_picker"]["passes"][1]["button_restored"] is False
+    if source == "checkpoint":
+        assert clean["stage"] == "settings_zip_import_cancelled"
+    assert "DO-NOT-EXPORT" not in json.dumps(clean)
 
 
 def test_diagnostics_copy_audit_discards_all_copied_text_and_keeps_only_flags_and_size():
@@ -1904,12 +1965,13 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web"))
+                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]
     assert result["report_http_readiness"] == raw_report["server_status"]["http_readiness"]
     assert result["diagnostics_copy"] == raw_report["menu_lifetime"]["diagnostics_copy"]
+    assert result["zip_import_picker"] == raw_report["menu_lifetime"]["zip_import_picker"]
     assert result["octo_budget"] == raw_report["server_status"]["octo_budget"]
     assert result["octo_budget_probe"] == raw_report["octo_budget_probe"]
     assert "must not retain" not in json.dumps(result)

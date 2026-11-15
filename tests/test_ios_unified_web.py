@@ -31,6 +31,7 @@ class Element extends Target {
     this.type = (tag.match(/\btype="([^"]+)"/) || [,''])[1];
   }
   set innerHTML(_) { throw new Error('Untrusted data reached an HTML sink'); }
+  removeAttribute(name) { delete this[name]; }
 }
 function environment(hidden = false) {
   const scope = new Target();
@@ -834,4 +835,214 @@ assert.equal(copied.native.unity_host.first_warmup_verified, true);
 assert.deepEqual(copied.native.octo_budget, ready.native.octo_budget);
 assert.equal(copy.text.includes('must-not-be-copied'), false);
 env.respond(copy, {copied: true}); await flush(); app.dispose();
+""")
+
+
+def test_import_progress_advances_only_its_matching_request_inactivity_deadline() -> None:
+    run_js(r"""
+const env = environment(); const bridge = api.createBridge(env.scope, env.timers);
+const seen = []; bridge.subscribe(value => seen.push(value));
+const request = bridge.request('resources_import').catch(error => error.message);
+const id = env.posted.at(-1).id;
+await env.tick(100000);
+const progress = {event:'resource_import_progress',request_id:id,stage:'copying',copied_bytes:25,total_bytes:100};
+env.scope.idolyServerEvent(progress);
+await env.tick(100000);
+assert.equal(seen.length,1,'A live copy can pass the old two-minute total deadline');
+for (const invalid of [
+  {...progress,request_id:id+1,copied_bytes:50},
+  {...progress,copied_bytes:NaN},
+  {...progress,copied_bytes:101},
+  {...progress,stage:'preparing',copied_bytes:0},
+  {...progress,copied_bytes:24}
+]) env.scope.idolyServerEvent(invalid);
+assert.equal(seen.length,1,'Wrong IDs, invalid counts and regressions are ignored');
+env.scope.idolyServerEvent(progress);
+await env.tick(20001);
+assert.match(await request,/지연/,'An unchanged heartbeat cannot defer inactivity forever');
+env.scope.idolyServerEvent({...progress,copied_bytes:75});
+assert.equal(seen.length,2,'An expired request cannot emit progress');
+bridge.dispose(); assert.equal(env.tasks.size,0);
+""")
+
+
+def test_import_copy_progress_overrides_old_jobs_then_hands_off_to_current_validation() -> None:
+    run_js(r"""
+const env = environment(); const app = api.createSettingsApp(env.scope,env.document,env.timers);
+const old = status();
+old.resource_operation={accepted:false,ready:false,error:{code:'previous_archive_failed'}};
+old.runtime.resource_library.job={job_id:'previous-import',action:'import',state:'completed',total_files:9,verified_files:9};
+env.respond(env.posted[0],old); await flush();
+env.elements.get('resources-import').fire('click');
+const request=env.posted.at(-1);
+assert.match(env.elements.get('resource-state').textContent,/선택 대기/);
+assert.equal(env.elements.get('resource-progress').hidden,true,'Do not invent a percentage before selection');
+const progress=(stage,copied,total)=>env.scope.idolyServerEvent({event:'resource_import_progress',request_id:request.id,stage,copied_bytes:copied,total_bytes:total});
+progress('preparing',0,0);
+assert.match(env.elements.get('resource-summary').textContent,/제공자/);
+assert.equal(env.elements.get('resource-progress').value,undefined,'Unknown total is indeterminate');
+progress('copying',25,100);
+assert.equal(env.elements.get('resource-progress').value,25);
+assert.equal(env.elements.get('resource-progress').max,100);
+assert.match(env.elements.get('resource-detail').textContent,/25 B \/ 100 B · 25%/);
+env.scope.idolyServerEvent({event:'status',status:old});
+assert.match(env.elements.get('resource-state').textContent,/복사 중/,'An earlier completed job cannot conceal the native copy');
+progress('queued',100,100);
+env.respond(request,{accepted:true,ready:false,job:null}); await flush();
+assert.match(env.elements.get('resource-summary').textContent,/목록과 내용을 검증/);
+assert.equal(env.elements.get('resource-progress').value,undefined);
+assert.equal(env.elements.get('resources-import').disabled,true);
+const preparing=status(); preparing.resource_operation={accepted:true,ready:false,job:null};
+env.respond(env.posted.at(-1),preparing); await flush();
+const running=status(); running.resource_operation={accepted:true,ready:false,job:null};
+running.runtime.resource_library.job={job_id:'new-import',action:'import',state:'running',total_files:4,verified_files:2,total_bytes:800,verified_bytes:400,imported_files:2,phase_active_files:{checking:1}};
+env.scope.idolyServerEvent({event:'status',status:running});
+assert.equal(env.elements.get('resource-progress').value,2);
+assert.equal(env.elements.get('resource-progress').max,4);
+assert.match(env.elements.get('resource-summary').textContent,/2\/4/);
+assert.equal(env.elements.get('resources-cancel').disabled,false);
+const completed={...running.runtime.resource_library.job,state:'completed',verified_files:4,verified_bytes:800,imported_files:4};
+env.scope.idolyServerEvent({event:'resource_result',accepted:true,ready:true,output_path:null,job:completed});
+assert.equal(env.elements.get('resource-state').textContent,'완료');
+assert.match(env.elements.get('message').textContent,/가져오기를 마쳤/);
+assert.equal(env.elements.get('resource-progress').value,4);
+app.dispose();
+""")
+
+
+def test_import_cancel_and_copy_failure_clear_busy_controls_and_reject_stale_progress() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('resources-import').fire('click');
+const cancelled=env.posted.at(-1);
+env.scope.idolyServerReply(cancelled.id,{id:cancelled.id,ok:false,error:{message:'파일 선택을 취소했습니다.'}});
+await flush(); env.respond(env.posted.at(-1),status()); await flush();
+assert.equal(env.elements.get('resources-import').disabled,false);
+assert.equal(env.elements.get('resource-progress').hidden,true);
+env.elements.get('resources-import').fire('click'); const failed=env.posted.at(-1);
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:cancelled.id,stage:'copying',copied_bytes:25,total_bytes:100});
+assert.match(env.elements.get('resource-state').textContent,/선택 대기/);
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:failed.id,stage:'copying',copied_bytes:25,total_bytes:100});
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:failed.id,stage:'failed',copied_bytes:25,total_bytes:100});
+env.scope.idolyServerReply(failed.id,{id:failed.id,ok:false,error:{message:'ZIP 파일을 앱 보관 폴더로 가져오지 못했습니다.'}});
+await flush(); env.respond(env.posted.at(-1),status()); await flush();
+assert.equal(env.elements.get('resource-state').textContent,'실패');
+assert.match(env.elements.get('resource-summary').textContent,/마치지 못/);
+assert.equal(env.elements.get('message').dataset.error,'true');
+assert.equal(env.elements.get('resources-import').disabled,false);
+app.dispose();
+""")
+
+
+@pytest.mark.parametrize("language,copy_label,preparing_label", [
+    ("ko","ZIP 복사 중","ZIP 검증 준비"),
+    ("ja","ZIPをコピー中","ZIP検証を準備中"),
+    ("en","Copying ZIP","Preparing ZIP validation"),
+])
+def test_import_stage_labels_follow_server_interface_language(language,copy_label,preparing_label) -> None:
+    run_js("const LANGUAGE="+json.dumps(language)+"; const COPY="+json.dumps(copy_label)+"; const PREPARING="+json.dumps(preparing_label)+";\n"+r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+const ready=status(); ready.options.interface_language=LANGUAGE;
+env.respond(env.posted[0],ready); await flush();
+env.elements.get('resources-import').fire('click'); const id=env.posted.at(-1).id;
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:id,stage:'copying',copied_bytes:50,total_bytes:100});
+assert.equal(env.elements.get('resource-state').textContent,COPY);
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:id,stage:'queued',copied_bytes:100,total_bytes:100});
+assert.equal(env.elements.get('resource-state').textContent,PREPARING);
+app.dispose();
+""")
+
+
+def test_import_progress_recovers_after_background_and_does_not_adopt_an_older_zip() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+const old=status();
+old.native={resource_import_progress:{event:'resource_import_progress',request_id:1,stage:'queued',copied_bytes:100,total_bytes:100}};
+env.respond(env.posted[0],old); await flush();
+env.elements.get('resources-import').fire('click'); const id=env.posted.at(-1).id;
+assert.ok(id>1);
+env.scope.idolyServerEvent({event:'status',status:old});
+assert.match(env.elements.get('resource-state').textContent,/선택 대기/);
+await env.visibility(true);
+await env.visibility(false);
+const selecting=status();
+selecting.native={resource_import_progress:{event:'resource_import_progress',request_id:id,stage:'selecting',copied_bytes:0,total_bytes:0}};
+env.respond(env.posted.at(-1),selecting); await flush();
+assert.match(env.elements.get('resource-state').textContent,/선택 대기/);
+assert.equal(env.elements.get('resources-import').disabled,true,'The native picker still owns the operation');
+const copying=status();
+copying.native={resource_import_progress:{event:'resource_import_progress',request_id:id,stage:'copying',copied_bytes:60,total_bytes:100}};
+env.scope.idolyServerEvent({event:'status',status:copying});
+assert.match(env.elements.get('resource-detail').textContent,/60%/);
+const cancelled=status(); cancelled.native={resource_import_progress:null};
+env.scope.idolyServerEvent({event:'status',status:cancelled});
+assert.equal(env.elements.get('resources-import').disabled,false,'Native cancellation after background clears the busy display');
+assert.equal(env.elements.get('resource-progress').hidden,true);
+app.dispose();
+""")
+
+
+def test_import_late_backend_failure_displays_failed_and_reenables_import() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('resources-import').fire('click'); const request=env.posted.at(-1);
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:request.id,stage:'queued',copied_bytes:100,total_bytes:100});
+env.respond(request,{accepted:true,ready:false,job:null}); await flush();
+const working=status(); working.resource_operation={accepted:true,ready:false,job:null};
+env.respond(env.posted.at(-1),working); await flush();
+assert.equal(env.elements.get('resources-import').disabled,true);
+env.scope.idolyServerEvent({event:'resource_result',accepted:false,ready:false,error:{code:'archive_failed'}});
+const failed=status(); failed.native={resource_import_progress:null};
+failed.resource_operation={accepted:false,ready:false,error:{code:'archive_failed'}};
+env.respond(env.posted.at(-1),failed); await flush();
+assert.equal(env.elements.get('resource-state').textContent,'실패');
+assert.equal(env.elements.get('message').dataset.error,'true');
+assert.equal(env.elements.get('resources-import').disabled,false);
+app.dispose();
+""")
+
+
+def test_timed_out_copy_still_recovers_observed_native_progress_instead_of_claiming_failure() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('resources-import').fire('click'); const id=env.posted.at(-1).id;
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:id,stage:'copying',copied_bytes:25,total_bytes:100});
+await env.tick(120001);
+assert.match(env.elements.get('message').textContent,/지연/);
+assert.match(env.elements.get('resource-state').textContent,/복사 중/,'A lost reply is not evidence the native copy failed');
+const recovered=status();
+recovered.native={resource_import_progress:{event:'resource_import_progress',request_id:id,stage:'copying',copied_bytes:75,total_bytes:100}};
+env.respond(env.posted.at(-1),recovered); await flush();
+assert.match(env.elements.get('resource-detail').textContent,/75%/);
+assert.equal(env.elements.get('message').hidden,true,'Observed resumed work clears the old delay notice');
+assert.equal(env.elements.get('resources-import').disabled,true);
+app.dispose();
+""")
+
+
+@pytest.mark.parametrize("accepted,ready,label", [
+    (False,False,"실패"),
+    (True,True,"완료"),
+])
+def test_import_recovers_terminal_archive_state_after_missing_initial_reply_while_hidden(accepted,ready,label) -> None:
+    run_js("const ACCEPTED="+json.dumps(accepted)+"; const READY="+json.dumps(ready)+"; const LABEL="+json.dumps(label)+";\n"+r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('resources-import').fire('click'); const id=env.posted.at(-1).id;
+env.scope.idolyServerEvent({event:'resource_import_progress',request_id:id,stage:'queued',copied_bytes:100,total_bytes:100});
+await env.visibility(true);
+// The command reply and backend result event were lost while the page was hidden.
+env.scope.idolyServerReply(id,{id,ok:true,result:{accepted:true,ready:false,job:null}});
+env.scope.idolyServerEvent({event:'resource_result',accepted:ACCEPTED,ready:READY,output_path:null});
+await env.visibility(false);
+const terminal=status(); terminal.native={resource_import_progress:null};
+terminal.resource_operation={accepted:ACCEPTED,ready:READY,job:null};
+env.respond(env.posted.at(-1),terminal); await flush();
+assert.equal(env.elements.get('resource-state').textContent,LABEL);
+assert.equal(env.elements.get('resources-import').disabled,false,'A missed initial reply must not leave an eternal queued state');
+assert.match(env.elements.get('resource-summary').textContent,ACCEPTED ? /마쳤/ : /마치지 못/);
+app.dispose();
 """)

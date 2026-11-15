@@ -586,6 +586,97 @@ static BOOL ProbePort(uint16_t port) {
     close(descriptor); return ready;
 }
 
+// Exercise the shipping WK action and public UIKit picker contract on stock
+// Simulator. Cancellation is a delegate callback plus programmatic dismissal;
+// this does not simulate a Files row tap or LiveContainer's provider/hooks.
+static void ProbeZIPImportBegin(WKWebView *__weak web, UIViewController *__weak presenter,
+                                NSMutableDictionary *state, void (^finish)(void));
+static void ProbeZIPImportObserve(WKWebView *__weak weakWeb, UIViewController *__weak weakPresenter,
+                                  NSMutableDictionary *state, void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    WKWebView *web=weakWeb; UIViewController *presenter=weakPresenter;
+    if (!web || !presenter) { finish(); return; }
+    state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
+    NSMutableDictionary *pass=[state[@"passes"] lastObject];
+    UIDocumentPickerViewController *picker=state[@"picker"];
+    if (!picker) {
+        UIViewController *shown=presenter.presentedViewController;
+        if ([shown isKindOfClass:UIDocumentPickerViewController.class]
+                && shown.viewIfLoaded.window && !shown.isBeingPresented) {
+            picker=(UIDocumentPickerViewController *)shown; state[@"picker"]=picker;
+            pass[@"picker_presented"]=@YES; pass[@"document_picker_mode"]=@(picker.documentPickerMode);
+            pass[@"single_selection"]=@(!picker.allowsMultipleSelection);
+            pass[@"delegate_is_settings"]=@(picker.delegate==presenter);
+            if (![picker.delegate respondsToSelector:@selector(documentPickerWasCancelled:)]) { finish(); return; }
+            [picker.delegate documentPickerWasCancelled:picker]; pass[@"cancel_delegate_invoked"]=@YES;
+            [picker dismissViewControllerAnimated:NO completion:nil]; pass[@"dismissed_programmatically"]=@YES;
+        }
+    } else if (!presenter.presentedViewController && !picker.viewIfLoaded.window) {
+        pass[@"picker_detached"]=@YES;
+        [web evaluateJavaScript:@"(() => {const b=document.getElementById('resources-import');return !!b&&!b.disabled;})()"
+            completionHandler:^(id value,NSError *error) {
+                if ([state[@"finished"] boolValue]) return;
+                if (!error && [value isEqual:@YES]) {
+                    pass[@"button_restored"]=@YES;
+                    if ([state[@"passes"] count]==1) {
+                        [state removeObjectForKey:@"picker"];
+                        ProbeZIPImportBegin(weakWeb,weakPresenter,state,finish);
+                    } else dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                        BOOL grpc=ProbePort(50051), assets=ProbePort(8080);
+                        dispatch_async(dispatch_get_main_queue(),^{
+                            if ([state[@"finished"] boolValue]) return;
+                            state[@"metrics"][@"grpc_connected_after_cancel"]=@(grpc);
+                            state[@"metrics"][@"assets_connected_after_cancel"]=@(assets);
+                            finish();
+                        });
+                    });
+                } else dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+                    ProbeZIPImportObserve(weakWeb,weakPresenter,state,finish);
+                });
+            }];
+        return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+        ProbeZIPImportObserve(weakWeb,weakPresenter,state,finish);
+    });
+}
+static void ProbeZIPImportBegin(WKWebView *__weak weakWeb, UIViewController *__weak weakPresenter,
+                                NSMutableDictionary *state, void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    WKWebView *web=weakWeb; UIViewController *presenter=weakPresenter;
+    if (!web || !presenter || presenter.presentedViewController) { finish(); return; }
+    NSMutableDictionary *pass=[NSMutableDictionary dictionary]; [state[@"passes"] addObject:pass];
+    NSString *script=@"(() => {const b=document.getElementById('resources-import');const e=!!b&&!b.disabled;"
+        "if(e)b.click();return {button_found:!!b,enabled_before:e,click_dispatched:e,button_disabled_while_pending:!!b&&b.disabled};})()";
+    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
+        if ([state[@"finished"] boolValue]) return;
+        if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
+        for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"button_disabled_while_pending"])
+            pass[key]=@([value[key] isEqual:@YES]);
+        if (![pass[@"click_dispatched"] isEqual:@YES]) { finish(); return; }
+        ProbeZIPImportObserve(weakWeb,weakPresenter,state,finish);
+    }];
+}
+static void ProbeZIPImportPicker(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+    NSCAssert(NSThread.isMainThread,@"ZIP picker probe belongs on main thread");
+    NSMutableArray *passes=[NSMutableArray array];
+    NSMutableDictionary *metrics=[@{@"scope":@"stock-simulator",@"cancel_trigger":@"delegate-callback",
+        @"timed_out":@NO,@"passes":passes} mutableCopy];
+    NSMutableDictionary *state=[@{@"finished":@NO,@"observations":@0,@"passes":passes,@"metrics":metrics} mutableCopy];
+    NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
+    void (^finish)(void)=^{
+        if ([state[@"finished"] boolValue]) return;
+        state[@"finished"]=@YES; metrics[@"observations"]=state[@"observations"];
+        metrics[@"elapsed_seconds"]=@(MAX(0.0,MIN(600.0,NSProcessInfo.processInfo.systemUptime-started)));
+        completion(metrics.copy);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if ([state[@"finished"] boolValue]) return;
+        metrics[@"timed_out"]=@YES; finish();
+    });
+    ProbeZIPImportBegin(web,presenter,state,finish);
+}
+
 static BOOL ProbeAES(const unsigned char *key, size_t keySize, const unsigned char *expected) {
     const unsigned char iv[16] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
                                   0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f};
@@ -745,6 +836,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSMutableDictionary *keyboardProbe;
 @property(nonatomic, strong) NSDictionary *nativeHeaderProbe;
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
+@property(nonatomic, strong) NSDictionary *zipImportObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
 @property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
 @property(nonatomic,strong) NSMutableArray *interfaceLanguageCycle;
@@ -779,7 +871,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
@@ -795,7 +887,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{},
-        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{},
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
@@ -1252,6 +1344,20 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                     copied = copied && [copyMetrics[key] isEqual:@YES];
                 if (!copied) { [self failProbe:@"settings_diagnostics_copy_failed"]; return; }
                 [self recordCheckpoint:@"settings_diagnostics_copied"];
+                ProbeZIPImportPicker(web,navigation.topViewController,^(NSDictionary *zipMetrics) {
+                self.zipImportObservation=zipMetrics; menu[@"zip_import_picker"]=zipMetrics;
+                BOOL zipOK=[zipMetrics[@"timed_out"] isEqual:@NO] && [zipMetrics[@"passes"] count]==2
+                    && [zipMetrics[@"grpc_connected_after_cancel"] isEqual:@YES]
+                    && [zipMetrics[@"assets_connected_after_cancel"] isEqual:@YES];
+                for (NSDictionary *pass in zipMetrics[@"passes"]) {
+                    zipOK=zipOK && [pass[@"document_picker_mode"] isEqual:@(UIDocumentPickerModeImport)];
+                    for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"button_disabled_while_pending",
+                            @"picker_presented",@"single_selection",@"delegate_is_settings",@"cancel_delegate_invoked",
+                            @"dismissed_programmatically",@"picker_detached",@"button_restored"])
+                        zipOK=zipOK && [pass[key] isEqual:@YES];
+                }
+                if (!zipOK) { [self failProbe:@"settings_zip_import_picker_failed"]; return; }
+                [self recordCheckpoint:@"settings_zip_import_cancelled"];
                 [self saveNextLanguage:web completion:^(BOOL saved){
                 if (!saved) { [self failProbe:@"language_save_failed"]; return; }
                 BOOL closed = ProbeDispatchButton(close);
@@ -1262,6 +1368,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 [self observeMenuDismissal:navigation report:report menu:menu
                                   started:NSProcessInfo.processInfo.systemUptime observations:0];
                 }];
+                });
             });
         });
     });

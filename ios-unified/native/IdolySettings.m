@@ -158,6 +158,7 @@ static NSString *encode(id object) {
 @property (nonatomic,strong) WKWebView *web;
 @property (nonatomic,strong) NSURL *page;
 @property (nonatomic,copy) NSDictionary *pendingImport;
+@property (nonatomic,copy) NSDictionary *importProgress;
 @property (nonatomic) BOOL pendingExport;
 @property (nonatomic,copy) NSString *lastExportPath;
 @property (nonatomic) BOOL launcherMode;
@@ -405,6 +406,11 @@ static __weak IDSettingsController *launcherController;
     if ([value isKindOfClass:NSDictionary.class] && [value[@"error"] isKindOfClass:NSMutableDictionary.class]
             && [value[@"error"][@"message"] isKindOfClass:NSString.class])
         value[@"error"][@"message"] = localized(value[@"error"][@"message"]);
+    // A foreground status refresh restores copy progress after bridge suspend.
+    if ([value isKindOfClass:NSDictionary.class]
+            && [value[@"result"] isKindOfClass:NSMutableDictionary.class]
+            && [value[@"result"][@"native"] isKindOfClass:NSMutableDictionary.class])
+        value[@"result"][@"native"][@"resource_import_progress"] = _importProgress ?: (id)NSNull.null;
     NSString *array = value ? encode(@[identifier, value]) : nil;
     if (array) [_web evaluateJavaScript:[@"window.idolyServerReply.apply(null," stringByAppendingFormat:@"%@)",array] completionHandler:nil];
 }
@@ -472,6 +478,17 @@ static __weak IDSettingsController *launcherController;
     IdolyEmbeddedServerCommand(raw, ^(NSString *reply) {
         IDSettingsController *strongSelf = weakSelf;
         if (!strongSelf) return;
+        if ([request[@"action"] isEqual:@"resources_import"]
+                && [strongSelf.importProgress[@"request_id"] isEqual:identifier]) {
+            NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary *value = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+            BOOL accepted = [value isKindOfClass:NSDictionary.class] && [value[@"ok"] isEqual:@YES]
+                && [value[@"result"] isKindOfClass:NSDictionary.class] && [value[@"result"][@"accepted"] isEqual:@YES];
+            if (!accepted) {
+                NSMutableDictionary *failed = strongSelf.importProgress.mutableCopy;
+                failed[@"stage"] = @"failed"; [strongSelf event:encode(failed)];
+            }
+        }
         [strongSelf sendReply:identifier json:reply];
         if ([request[@"action"] isEqual:@"resources_export"]) {
             NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
@@ -523,8 +540,12 @@ static __weak IDSettingsController *launcherController;
     if ([action isEqual:@"resources_import"]) {
         if (_pendingImport) { [self localFailure:identifier message:@"이미 파일을 선택하고 있습니다."]; return; }
         _pendingImport = request;
+        _importProgress = @{@"event":@"resource_import_progress", @"request_id":identifier,
+            @"stage":@"selecting", @"copied_bytes":@0, @"total_bytes":@0};
+        // We consume a private copy of the ZIP, never edit the provider's file.
+        // Import also asks container hosts for a copy instead of in-place access.
         UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
-            initWithDocumentTypes:@[@"public.zip-archive"] inMode:UIDocumentPickerModeOpen];
+            initWithDocumentTypes:@[@"public.zip-archive"] inMode:UIDocumentPickerModeImport];
         picker.allowsMultipleSelection = NO; picker.delegate = self;
         [self presentViewController:picker animated:YES completion:nil];
     } else [self dispatchRequest:request];
@@ -532,7 +553,7 @@ static __weak IDSettingsController *launcherController;
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     (void)controller;
     if (_pendingImport) [self localFailure:_pendingImport[@"id"] message:@"파일 선택을 취소했습니다."];
-    _pendingImport = nil;
+    _pendingImport = nil; _importProgress = nil;
     [self retireExport];
 }
 - (void)retireExport {
@@ -545,16 +566,25 @@ static __weak IDSettingsController *launcherController;
 }
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     (void)controller;
-    NSDictionary *request = _pendingImport; _pendingImport = nil;
+    NSDictionary *request = _pendingImport;
     if (!request) { [self retireExport]; return; } // Export picker completion.
     NSURL *source = urls.count == 1 ? urls[0] : nil;
     NSString *data = IDNativeDataDirectory();
     if (!source.isFileURL || !data || ![source.pathExtension.lowercaseString isEqual:@"zip"]) {
+        _pendingImport = nil; _importProgress = nil;
         [self localFailure:request[@"id"] message:@"ZIP 파일을 선택해 주세요."]; return;
     }
     __weak typeof(self) weakSelf = self;
+    void (^progress)(NSString *, uint64_t, uint64_t) = ^(NSString *stage, uint64_t copied, uint64_t total) {
+        // Only bounded counters cross the bridge; provider paths stay native.
+        NSString *json = encode(@{@"event":@"resource_import_progress", @"request_id":request[@"id"],
+            @"stage":stage, @"copied_bytes":@(copied), @"total_bytes":@(total)});
+        dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf event:json]; });
+    };
+    progress(@"preparing", 0, 0);
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
         BOOL scoped = [source startAccessingSecurityScopedResource];
+        __block uint64_t copied = 0, total = 0;
         NSURL *directory = [NSURL fileURLWithPath:[data stringByAppendingPathComponent:@"imports"] isDirectory:YES];
         NSURL *destination = [directory URLByAppendingPathComponent:[NSUUID.UUID.UUIDString stringByAppendingString:@".zip"]];
         __block NSError *failure = nil;
@@ -565,6 +595,11 @@ static __weak IDSettingsController *launcherController;
             NSError *coordinationError = nil;
             __block NSError *copyError = nil;
             [coordinator coordinateReadingItemAtURL:source options:0 error:&coordinationError byAccessor:^(NSURL *readURL) {
+                NSNumber *fileSize = nil;
+                if ([readURL getResourceValue:&fileSize forKey:NSURLFileSizeKey error:NULL]
+                        && fileSize.longLongValue > 0) total = fileSize.unsignedLongLongValue;
+                progress(@"copying", 0, total);
+                NSTimeInterval lastProgress = NSProcessInfo.processInfo.systemUptime;
                 NSInputStream *in = [NSInputStream inputStreamWithURL:readURL];
                 NSOutputStream *out = [NSOutputStream outputStreamWithURL:destination append:NO];
                 [in open]; [out open]; uint8_t buffer[65536]; NSInteger size;
@@ -575,8 +610,13 @@ static __weak IDSettingsController *launcherController;
                         NSInteger n = [out write:buffer+used maxLength:(NSUInteger)(size-used)];
                         if (n <= 0) { copyError = out.streamError ?: [NSError errorWithDomain:@"IdolyImport" code:1 userInfo:nil]; break; }
                         used += n;
+                        copied += (uint64_t)n;
                     }
                     if (copyError) break;
+                    NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+                    if (now - lastProgress >= 0.25) {
+                        progress(@"copying", copied, total); lastProgress = now;
+                    }
                 }
                 if (size < 0) copyError = in.streamError ?: [NSError errorWithDomain:@"IdolyImport" code:2 userInfo:nil];
                 [in close]; [out close];
@@ -594,15 +634,27 @@ static __weak IDSettingsController *launcherController;
                 });
                 return;
             }
+            strongSelf->_pendingImport = nil;
+            // Queue the last progress event before the reply/backend handoff.
+            NSString *json = encode(@{@"event":@"resource_import_progress", @"request_id":request[@"id"],
+                @"stage":failure ? @"failed" : @"queued", @"copied_bytes":@(copied), @"total_bytes":@(total)});
+            [strongSelf event:json];
             if (failure) [strongSelf localFailure:request[@"id"] message:@"ZIP 파일을 앱 보관 폴더로 가져오지 못했습니다."];
             else { NSMutableDictionary *approved = request.mutableCopy; approved[@"path"] = destination.path; [strongSelf dispatchRequest:approved]; }
         });
     });
 }
 - (void)event:(NSString *)json {
-    if (!_web || !atomic_load(&settingsVisible)) return;
     NSData *bytes = [json dataUsingEncoding:NSUTF8StringEncoding];
     id object = bytes && bytes.length <= maxJSON ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+    if ([object isKindOfClass:NSDictionary.class]) {
+        if ([object[@"event"] isEqual:@"resource_import_progress"]) _importProgress = object;
+        else if ([_importProgress[@"stage"] isEqual:@"queued"]
+                && [object[@"event"] isEqual:@"resource_result"]
+                && ([object[@"ready"] isEqual:@YES] || [object[@"accepted"] isEqual:@NO]))
+            _importProgress = nil;
+    }
+    if (!_web || !atomic_load(&settingsVisible)) return;
     NSString *array = object ? encode(@[object]) : nil;
     if (array) [_web evaluateJavaScript:[@"window.idolyServerEvent.apply(null," stringByAppendingFormat:@"%@)",array] completionHandler:nil];
     if ([object isKindOfClass:NSDictionary.class] && [object[@"event"] isEqual:@"resource_result"]
@@ -752,7 +804,10 @@ void IDNativeInstallSettings(void) {
     });
 }
 void IDNativeEvent(NSString *json) {
-    if (!atomic_load(&settingsVisible)) return;
+    // ios_host._event puts "event" first with compact JSON separators. Preserve
+    // archive completion while hidden without queueing every background log.
+    // event: still parses the bounded JSON before retaining any status.
+    if (!atomic_load(&settingsVisible) && ![json hasPrefix:@"{\"event\":\"resource_result\","]) return;
     dispatch_async(dispatch_get_main_queue(), ^{ [settingsController event:json]; });
 }
 static UIAlertController *makeFailureAlert(NSString *message) {

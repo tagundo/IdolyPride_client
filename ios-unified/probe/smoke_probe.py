@@ -90,7 +90,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_during_init_failed", "keyboard_after_init_failed",
     "keyboard_precreated_instance_not_reused",
     "native_header_layout_failed", "native_header_restore_failed",
-    "settings_diagnostics_copy_failed",
+    "settings_diagnostics_copy_failed", "settings_zip_import_picker_failed",
     "host_constructor_not_installed", "host_hooks_registration_failed", "host_cold_start_failed",
     "unity_window_handoff_failed", "language_cache_identity_failed", "sigpipe_probe_failed",
     "sigpipe_before_server_failed", "sigpipe_before_game_failed",
@@ -107,7 +107,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
-    "settings_diagnostics_copied", "settings_web_observed",
+    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
@@ -124,6 +124,10 @@ HEADER_NUMBER_FIELDS = ("root_width", "root_height", "header_width", "header_hei
 HTTP_READINESS_URL = "http://127.0.0.1:8080/client/playback"
 DIAGNOSTICS_COPY_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "completed",
                                 "feedback_success", "pasteboard_matches", "clipboard_seeded", "clipboard_cleared")
+ZIP_IMPORT_PASS_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "button_disabled_while_pending",
+    "picker_presented", "single_selection", "delegate_is_settings", "cancel_delegate_invoked",
+    "dismissed_programmatically", "picker_detached", "button_restored")
+ZIP_IMPORT_SERVER_FLAGS = ("grpc_connected_after_cancel", "assets_connected_after_cancel")
 OCTO_BUDGET_SECONDS = ("original_seconds", "effective_seconds", "cache_wait_seconds")
 OCTO_BUDGET_PROBE_SECONDS = ("during_original_seconds", "first_queued_seconds", "last_snapshot")
 OCTO_BUDGET_PROBE_BOOLS = ("apis_registered", "prepared_without_managed_callbacks", "during_original_configured",
@@ -758,6 +762,17 @@ def validate_report(value):
     require(type(copied) is dict and all(copied.get(key) is True for key in DIAGNOSTICS_COPY_BOOL_FIELDS)
             and copied.get("timed_out") is False and type(copied.get("text_bytes")) is int
             and 1 <= copied["text_bytes"] <= 32768, "settings_diagnostics_copy_failed")
+    zipped = menu.get("zip_import_picker")
+    require(type(zipped) is dict and zipped.get("scope") == "stock-simulator"
+            and zipped.get("cancel_trigger") == "delegate-callback" and zipped.get("timed_out") is False
+            and all(zipped.get(key) is True for key in ZIP_IMPORT_SERVER_FLAGS)
+            and type(zipped.get("observations")) is int and 1 <= zipped["observations"] <= 200
+            and type(zipped.get("elapsed_seconds")) in (int, float)
+            and math.isfinite(zipped["elapsed_seconds"]) and 0 <= zipped["elapsed_seconds"] <= 60
+            and type(zipped.get("passes")) is list and len(zipped["passes"]) == 2
+            and all(type(sample) is dict and all(sample.get(key) is True for key in ZIP_IMPORT_PASS_BOOL_FIELDS)
+                    and type(sample.get("document_picker_mode")) is int and sample["document_picker_mode"] == 0
+                    for sample in zipped["passes"]), "settings_zip_import_picker_failed")
     width, window_width = menu.get("frame_width"), menu.get("window_width")
     require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
             and abs(width - window_width) <= 2, "settings_menu_width_failed")
@@ -823,6 +838,7 @@ def validate_report(value):
                 "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
                 "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
                 "dismiss_observation":dismissal, "diagnostics_copy":diagnostics_copy_observation(copied),
+                "zip_import_picker":zip_import_observation(zipped),
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count")},
@@ -1080,6 +1096,41 @@ def attach_octo_budget_observation(error, value):
         error.native_octo_budget_probe = policy_probe
 
 
+def zip_import_observation(value):
+    """Keep stock UIKit mode/cancel evidence; never filenames or provider data."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in (*ZIP_IMPORT_SERVER_FLAGS, "timed_out") if type(value.get(key)) is bool}
+    for key, expected in (("scope", "stock-simulator"), ("cancel_trigger", "delegate-callback")):
+        if value.get(key) == expected:
+            clean[key] = expected
+    observations, elapsed = value.get("observations"), value.get("elapsed_seconds")
+    if type(observations) is int and 0 <= observations <= 200:
+        clean["observations"] = observations
+    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 600:
+        clean["elapsed_seconds"] = elapsed
+    if type(value.get("passes")) is list:
+        clean["passes"] = []
+        for sample in value["passes"][:2]:
+            if type(sample) is not dict:
+                continue
+            observed = {key:sample[key] for key in ZIP_IMPORT_PASS_BOOL_FIELDS if type(sample.get(key)) is bool}
+            mode = sample.get("document_picker_mode")
+            if type(mode) is int and 0 <= mode <= 3:
+                observed["document_picker_mode"] = mode
+            clean["passes"].append(observed)
+    return clean
+
+
+def zip_import_from_observation(value):
+    if type(value) is not dict:
+        return {}
+    raw = value.get("zip_import_picker")
+    if type(raw) is not dict and type(value.get("menu_lifetime")) is dict:
+        raw = value["menu_lifetime"].get("zip_import_picker")
+    return zip_import_observation(raw)
+
+
 def diagnostics_copy_observation(value):
     """Export copy-flow flags and size; never clipboard or diagnostic text."""
     if type(value) is not dict:
@@ -1287,6 +1338,9 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
         copied = diagnostics_copy_from_observation(observed)
         if copied:
             result["diagnostics_copy"] = copied
+        zipped = zip_import_from_observation(observed)
+        if zipped:
+            result["zip_import_picker"] = zipped
         budget = octo_budget_from_observation(observed)
         if budget:
             result["octo_budget"] = budget

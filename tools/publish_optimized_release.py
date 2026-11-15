@@ -27,7 +27,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD, IPA_VERSION = "0.3.34", 51, "156.9114"
+VERSION, BUILD, IPA_VERSION = "0.3.34", 51, "156.9115"
 TAG = "local-server-v" + VERSION
 BASELINE = "50e349f4db6db0d3122bdc09c3b06307145f814f"
 MIB, CHUNK = 1024 * 1024, 128 * 1024
