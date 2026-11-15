@@ -635,8 +635,8 @@ static void ProbeZIPImportObserve(WKWebView *__weak weakWeb, UIViewController *_
                 && shown.viewIfLoaded.window && !shown.isBeingPresented) {
             picker=(UIDocumentPickerViewController *)shown; state[@"picker"]=picker;
             pass[@"picker_presented"]=@YES; pass[@"document_picker_mode"]=@(picker.documentPickerMode);
-            pass[@"single_selection"]=@(!picker.allowsMultipleSelection);
-            pass[@"delegate_is_settings"]=@(picker.delegate==(id)presenter);
+            pass[@"single_selection"]=@((BOOL)(!picker.allowsMultipleSelection));
+            pass[@"delegate_is_settings"]=@((BOOL)(picker.delegate==(id)presenter));
             if (![picker.delegate respondsToSelector:@selector(documentPickerWasCancelled:)]) { finish(); return; }
             [picker.delegate documentPickerWasCancelled:picker]; pass[@"cancel_delegate_invoked"]=@YES;
             [picker dismissViewControllerAnimated:NO completion:nil]; pass[@"dismissed_programmatically"]=@YES;
@@ -716,8 +716,8 @@ static void ProbeZIPRoundTripPicker(WKWebView *__weak weakWeb,UIViewController *
     if ([shown isKindOfClass:UIDocumentPickerViewController.class] && shown.viewIfLoaded.window && !shown.isBeingPresented) {
         UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
         NSMutableDictionary *metrics=state[@"metrics"];
-        metrics[@"picker_presented"]=@YES; metrics[@"picker_import_mode"]=@(picker.documentPickerMode==UIDocumentPickerModeImport);
-        metrics[@"picker_single_selection"]=@(!picker.allowsMultipleSelection);
+        metrics[@"picker_presented"]=@YES; metrics[@"picker_import_mode"]=@((BOOL)(picker.documentPickerMode==UIDocumentPickerModeImport));
+        metrics[@"picker_single_selection"]=@((BOOL)(!picker.allowsMultipleSelection));
         if (![picker.delegate respondsToSelector:@selector(documentPicker:didPickDocumentsAtURLs:)]) { finish(); return; }
         [picker.delegate documentPicker:picker didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:state[@"source"]]]];
         metrics[@"selection_delegate_invoked"]=@YES;
@@ -740,7 +740,7 @@ static void ProbeZIPRoundTripOpen(WKWebView *web,UIViewController *presenter,NSM
         "b.click();return {ready:true,button_disabled:b.disabled};})()";
     ProbePollLanguage(web,script,[state[@"deadline"] doubleValue],nil,^(NSDictionary *value){
         if ([state[@"finished"] boolValue]) return;
-        state[@"metrics"][@"wk_import_dispatched"]=@([value[@"ready"] isEqual:@YES] && [value[@"button_disabled"] isEqual:@YES]);
+        state[@"metrics"][@"wk_import_dispatched"]=@((BOOL)([value[@"ready"] isEqual:@YES] && [value[@"button_disabled"] isEqual:@YES]));
         if (![value[@"ready"] isEqual:@YES]) { finish(); return; }
         ProbeZIPRoundTripPicker(web,presenter,state,finish);
     });
@@ -775,8 +775,8 @@ static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__
         }
         if ([state[@"phase"] isEqual:@"import"] && [operation[@"ready"] isEqual:@YES] && [job[@"action"] isEqual:@"import"]) {
             metrics[@"backend_ready"]=@YES;
-            metrics[@"backend_success"]=@([operation[@"accepted"] isEqual:@YES] && [job[@"platform"] isEqual:@"ios"]
-                && [@[@"completed",@"partial"] containsObject:job[@"state"]] && [job[@"failed_files"] isEqual:@0]);
+            metrics[@"backend_success"]=@((BOOL)([operation[@"accepted"] isEqual:@YES] && [job[@"platform"] isEqual:@"ios"]
+                && [@[@"completed",@"partial"] containsObject:job[@"state"]] && [job[@"failed_files"] isEqual:@0]));
             metrics[@"imported_files"]=job[@"imported_files"] ?: @0; metrics[@"failed_files"]=job[@"failed_files"] ?: @(-1);
             NSNumber *requests=status[@"runtime"][@"resource_transfer"][@"session_http_requests"];
             metrics[@"upstream_requests_unchanged"]=@([requests isEqual:state[@"upstream_requests"]]);
@@ -791,7 +791,7 @@ static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__
                 metrics[@"copied_bytes"]=value[@"copied_bytes"] ?: @0; metrics[@"total_bytes"]=value[@"total_bytes"] ?: @0;
                 metrics[@"dom_completed"]=@([value[@"ready"] isEqual:@YES]);
                 metrics[@"button_restored"]=@([value[@"button_restored"] isEqual:@YES]);
-                metrics[@"picker_detached"]=@(weakPresenter.presentedViewController==nil);
+                metrics[@"picker_detached"]=@((BOOL)(weakPresenter.presentedViewController==nil));
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
                     NSString *imports=state[@"imports"], *copyPath=nil;
                     for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:imports error:NULL])
@@ -802,11 +802,11 @@ static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__
                     dispatch_async(dispatch_get_main_queue(),^{
                         if ([state[@"finished"] boolValue]) return;
                         NSDictionary *original=state[@"source_hash"];
-                        metrics[@"owned_copy_found"]=@(copied[@"sha256"]!=nil);
-                        metrics[@"copy_source_distinct"]=@(copied[@"identity"] && ![copied[@"identity"] isEqual:original[@"identity"]]);
-                        metrics[@"source_preserved"]=@([source[@"sha256"] isEqual:original[@"sha256"]] && [source[@"bytes"] isEqual:original[@"bytes"]]);
-                        metrics[@"copy_bytes_match"]=@([copied[@"bytes"] isEqual:original[@"bytes"]]
-                            && [metrics[@"copied_bytes"] isEqual:original[@"bytes"]] && [metrics[@"total_bytes"] isEqual:original[@"bytes"]]);
+                        metrics[@"owned_copy_found"]=@((BOOL)(copied[@"sha256"]!=nil));
+                        metrics[@"copy_source_distinct"]=@((BOOL)(copied[@"identity"] && ![copied[@"identity"] isEqual:original[@"identity"]]));
+                        metrics[@"source_preserved"]=@((BOOL)([source[@"sha256"] isEqual:original[@"sha256"]] && [source[@"bytes"] isEqual:original[@"bytes"]]));
+                        metrics[@"copy_bytes_match"]=@((BOOL)([copied[@"bytes"] isEqual:original[@"bytes"]]
+                            && [metrics[@"copied_bytes"] isEqual:original[@"bytes"]] && [metrics[@"total_bytes"] isEqual:original[@"bytes"]]));
                         metrics[@"source_copy_sha256_match"]=@([copied[@"sha256"] isEqual:original[@"sha256"]]);
                         metrics[@"copied_sha256"]=copied[@"sha256"] ?: @""; finish();
                     });
@@ -840,7 +840,7 @@ static void ProbeZIPRoundTrip(WKWebView *web,UIViewController *presenter,void (^
         IdolyEmbeddedServerCommand(@"{\"id\":7301,\"action\":\"resources_export\"}",^(NSString *exportReply){
             if ([state[@"finished"] boolValue]) return;
             NSDictionary *value=ProbeObject(exportReply);
-            metrics[@"export_accepted"]=@([value[@"ok"] isEqual:@YES] && [value[@"result"][@"accepted"] isEqual:@YES]);
+            metrics[@"export_accepted"]=@((BOOL)([value[@"ok"] isEqual:@YES] && [value[@"result"][@"accepted"] isEqual:@YES]));
             if (![metrics[@"export_accepted"] isEqual:@YES]) { finish(); return; }
             ProbeZIPRoundTripPoll(web,presenter,state,finish);
         });
@@ -1380,7 +1380,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
             BOOL stillCold=ProbePreRuntime() && self.originalCount==0 && [UnityFramework getInstance].probeRunCount==0
                 && [pending[@"phase"] isEqual:@2] && [pending[@"launch_requested"] isEqual:@NO];
             self.launcherProbe[@"cold_while_settings_flush_held"]=@(stillCold);
-            self.launcherProbe[@"game_button_disabled_during_flush"]=@(!item.enabled);
+            self.launcherProbe[@"game_button_disabled_during_flush"]=@((BOOL)(!item.enabled));
             self.launcherProbe[@"settings_flush_called_once"]=@([held[@"ready"] isEqual:@YES]);
             self.launcherProbe[@"unsolicited_settings_ack_ignored"]=@(stillCold);
             if (![held[@"ready"] isEqual:@YES] || !stillCold || item.enabled) { [self failProbe:@"launch_settings_barrier_failed"]; return; }

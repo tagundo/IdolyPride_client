@@ -729,6 +729,21 @@ def test_private_probe_cache_identity_file_must_be_absent_initially_and_is_never
     assert path.read_text() == "owned-existing-private-state"
 
 
+def test_native_boolean_observations_cast_c_logical_results_before_json_boxing():
+    source = (Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    # Objective-C C operators yield int. NSNumber(1) is not JSON true, even
+    # though isEqual:@YES accepts it; keep the strict Python bool gate.
+    for variable,key in (("pass","single_selection"),("pass","delegate_is_settings"),
+            ("metrics","picker_import_mode"),("metrics","picker_single_selection"),
+            ('state[@"metrics"]',"wk_import_dispatched"),("metrics","backend_success"),
+            ("metrics","picker_detached"),("metrics","owned_copy_found"),("metrics","copy_source_distinct"),
+            ("metrics","source_preserved"),("metrics","copy_bytes_match"),("metrics","export_accepted"),
+            ("self.launcherProbe","game_button_disabled_during_flush")):
+        anchor = variable+'[@"'+key+'"]='
+        assert source.count(anchor) == 1
+        assert source.split(anchor,1)[1].startswith('@((BOOL)('), key
+
+
 def test_settings_dom_waits_for_public_navigation_before_evaluation_with_same_deadline():
     source = (Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
     attempt = source.split("static void ProbeSettingsDOMAttempt(",1)[1].split("static void ProbeSettingsDOM(",1)[0]
