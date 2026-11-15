@@ -174,7 +174,7 @@ def test_failure_diagnostics_expose_only_fixed_phase_and_credential_free_codes(m
     tool.phase("input_font")
     result = tool.failure_report(ValueError(message))
     assert result == {"schema": 1, "status": "FAIL", "phase": "input_font",
-                      "error_type": "ValueError", "error_code": "unclassified"}
+                      "error_type": "ValueError", "file_role": "none", "error_code": "unclassified"}
     assert "do-not-print" not in str(result) and "Authorization" not in str(result)
 
 
@@ -195,3 +195,147 @@ def test_font_origin_is_public_upstream_with_exact_same_cached_blob_and_sha256()
         + "/packages/pretendard-jp/dist/public/static/PretendardJP-SemiBold.otf")
     assert tool.FONT_PUBLIC_COMMIT == "5c41199ea0024a9e0b2cb31735265056e5472d76"
     assert "tagundo/hoshimi-localify-ios" not in tool.URLS["font"]
+
+@pytest.mark.parametrize("filename,expected", (
+    ("/sys/fs/cgroup/memory.max", "cgroup_memory_max"),
+    ("/sys/fs/cgroup/memory.current", "cgroup_memory_current"),
+    ("/sys/fs/cgroup/memory.events", "cgroup_memory_events"),
+    ("/proc/meminfo", "proc_meminfo"),
+    ("/public/ndk/source.properties", "ndk_properties"),
+    ("/Users/private-name/signed-token-file", "unknown"),
+))
+def test_missing_file_diagnostics_use_only_fixed_role_without_raw_path(filename, expected):
+    tool.phase("native_resource")
+    result = tool.failure_report(FileNotFoundError(2, "missing", filename))
+    assert result["file_role"] == expected
+    assert result["phase"] == "native_resource" and result["error_code"] == "unclassified"
+    assert filename not in str(result) and "private-name" not in str(result)
+
+
+@pytest.fixture
+def hosted_resources(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    cg, proc = tmp_path / "cgroup", tmp_path / "proc"
+    cg.mkdir(); proc.mkdir()
+    (proc / "meminfo").write_text("MemTotal: 4096000 kB\nMemAvailable: 1048576 kB\n")
+    state = {"free": 150 * 1024**2, "budget_calls": 0,
+             "budget": {"memory_current": 1024**3, "memory_max": 2 * 1024**3,
+                        "memory_direct_headroom": 768 * 1024**2,
+                        "memory_clean_inactive_credit": 256 * 1024**2,
+                        "memory_effective_headroom": 1024**3}}
+    def budget():
+        state["budget_calls"] += 1
+        return dict(state["budget"])
+    def create():
+        return tool.HostedResourceGuard(budget, cgroup=cg, proc=proc,
+            disk_usage=lambda _root: SimpleNamespace(free=state["free"]))
+    return cg, proc, state, create
+
+
+@pytest.mark.parametrize("maximum", (None, "max"))
+def test_hosted_unlimited_runner_uses_memavailable_with_explicit_entry_and_stage_floors(hosted_resources, maximum):
+    cg, proc, state, create = hosted_resources
+    if maximum is not None:
+        (cg / "memory.max").write_text(maximum)
+    checked = create()
+    assert checked.entry["memory_direct_headroom"] == 1024**3
+    assert checked.entry["memory_max"] is None and checked.entry["oom_kill"] is None
+    assert checked.entry["oom_counter_supported"] is False and state["budget_calls"] == 0
+    (proc / "meminfo").write_text("MemAvailable: 524288 kB\n")
+    assert checked(Path("."))["memory_direct_headroom"] == 512 * 1024**2
+    (proc / "meminfo").write_text("MemAvailable: 524287 kB\n")
+    with pytest.raises(ValueError, match="hosted_memory_stage_floor"):
+        checked(Path("."))
+    assert checked.report()["oom_baseline"] is None
+    (proc / "meminfo").write_text("MemAvailable: 1048575 kB\n")
+    with pytest.raises(ValueError, match="hosted_memory_entry_floor"):
+        create()
+
+
+def test_hosted_finite_cgroup_keeps_existing_direct_and_effective_limits(hosted_resources):
+    cg, _proc, state, create = hosted_resources
+    (cg / "memory.max").write_text(str(2 * 1024**3))
+    checked = create()
+    assert checked.entry["memory_policy"] == "finite_cgroup" and state["budget_calls"] == 1
+    state["budget"]["memory_direct_headroom"] -= 1
+    with pytest.raises(ValueError, match="hosted_finite_cgroup_headroom_floor"):
+        checked(Path("."))
+    state["budget"]["memory_direct_headroom"] += 1
+    state["budget"]["memory_effective_headroom"] -= 1
+    with pytest.raises(ValueError, match="hosted_finite_cgroup_headroom_floor"):
+        checked(Path("."))
+
+
+def test_finite_cgroup_missing_current_is_not_host_memory_fallback(hosted_resources):
+    cg, proc, _state, _create = hosted_resources
+    (cg / "memory.max").write_text(str(2 * 1024**3))
+    def incomplete_budget():
+        return (cg / "memory.current").read_text()
+    with pytest.raises(FileNotFoundError) as error:
+        tool.HostedResourceGuard(incomplete_budget, cgroup=cg, proc=proc)
+    assert error.value.filename == str(cg / "memory.current")
+
+
+def test_hosted_guard_keeps_disk_reserve_and_oom_baseline(hosted_resources):
+    cg, _proc, state, create = hosted_resources
+    (cg / "memory.events").write_text("oom 0\noom_kill 2\n")
+    checked = create()
+    assert checked.entry["oom_counter_supported"] is True and checked.entry["oom_kill"] == 2
+    state["free"] -= 1
+    with pytest.raises(ValueError, match="hosted_disk_reserve_floor"):
+        checked(Path("."))
+    state["free"] += 1
+    (cg / "memory.events").write_text("oom 1\noom_kill 3\n")
+    with pytest.raises(ValueError, match="hosted_oom_baseline_changed"):
+        checked(Path("."))
+
+
+@pytest.mark.parametrize("change", ("events_appear", "events_disappear", "limit_changes"))
+def test_hosted_resource_policy_or_counter_support_cannot_change_during_build(hosted_resources, change):
+    cg, _proc, _state, create = hosted_resources
+    if change == "events_disappear":
+        (cg / "memory.events").write_text("oom_kill 0\n")
+    checked = create()
+    if change == "events_appear":
+        (cg / "memory.events").write_text("oom_kill 0\n")
+    elif change == "events_disappear":
+        (cg / "memory.events").unlink()
+    else:
+        (cg / "memory.max").write_text("max")
+    with pytest.raises(ValueError, match="hosted_(oom_counter_support|memory_policy)_changed"):
+        checked(Path("."))
+
+
+@pytest.mark.parametrize("filename,raw", (("memory.max", "invalid"), ("memory.max", "0"),
+    ("meminfo", "MemAvailable: -1 kB\n"),
+    ("meminfo", "MemAvailable: 1048576 kB\nMemAvailable: 1048576 kB\n"),
+    ("memory.events", "oom_kill 0\noom_kill 0\n")))
+def test_hosted_malformed_metadata_fails_closed(hosted_resources, filename, raw):
+    cg, proc, _state, create = hosted_resources
+    ((proc if filename == "meminfo" else cg) / filename).write_text(raw)
+    with pytest.raises(ValueError, match="hosted_.*malformed"):
+        create()
+
+
+def test_hosted_guard_excludes_another_active_java_build(hosted_resources):
+    _cg, proc, _state, create = hosted_resources
+    process = proc / "123"; process.mkdir()
+    (process / "comm").write_text("java\n")
+    (process / "status").write_text("State: S (sleeping)\n")
+    with pytest.raises(ValueError, match="hosted_other_java_process_active"):
+        create()
+    (process / "status").write_text("State: Z (zombie)\n")
+    assert create().samples == 1
+
+
+@pytest.mark.parametrize("environment", (None, "self-hosted", "local"))
+def test_hosted_policy_is_never_implicitly_selected_for_local_or_self_hosted_runner(monkeypatch, environment):
+    if environment is None:
+        monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("RUNNER_ENVIRONMENT", environment)
+    def untouched():
+        raise AssertionError("Local strict guard selection must not read a hosted budget")
+    assert tool.runner_resource_guard(SimpleNamespace(_memory_budget=untouched)) is None
+    with pytest.raises(ValueError, match="hosted_runner_required"):
+        tool.HostedResourceGuard(untouched)

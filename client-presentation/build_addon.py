@@ -474,7 +474,7 @@ def check_base_members(archive, profile):
         raise ValueError("Base already contains a conflicting presentation or ShadowHook library")
 
 
-def build(args):
+def build(args, *, resource_guard=None):
     os.umask(0o077)
     source_hashes = frozen_sources(args.source_commit)
     profile = PROFILES[args.profile]
@@ -494,11 +494,12 @@ def build(args):
     for name in ("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "CLASSPATH", "JAVA_OPTS", "GRADLE_OPTS"):
         env.pop(name, None)
     import build_android_server_manual as limits
-    preflight = limits._resource_guard(ROOT)
+    check_resources = limits._resource_guard if resource_guard is None else resource_guard
+    preflight = check_resources(ROOT)
     def run(command, environment=env, **kwargs):
-        before = limits._resource_guard(ROOT)
+        before = check_resources(ROOT)
         result = _run(command, environment, **kwargs)
-        after = limits._resource_guard(ROOT)
+        after = check_resources(ROOT)
         if before["oom_kill"] != preflight["oom_kill"] or after["oom_kill"] != preflight["oom_kill"]:
             raise ValueError("OOM counter changed during feature packaging")
         return result
@@ -586,7 +587,7 @@ def build(args):
                   "base_unchanged": True, "signature_and_alignment_verified": True, "installed": False,
                   "seconds": round(time.monotonic() - started, 3),
                   "child_peak_rss_kib": resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss,
-                  "preflight": preflight, "postflight": limits._resource_guard(ROOT)}
+                  "preflight": preflight, "postflight": check_resources(ROOT)}
         staged = work / "provenance.json"; staged.write_text(json.dumps(report, indent=2) + "\n")
         os.link(staged, receipt)
         try: os.link(signed, output)

@@ -278,3 +278,75 @@ def test_resource_transport_helpers_are_frozen_for_both_build_barriers():
         'src/idoly_local/unity_http.py', 'src/idoly_local/unity_cache.py',
         'src/idoly_local/story_loading_prefab.py')
     assert PATH.read_text().count('extra=(*TRANSPORT_SOURCES, *STATIC_UI_SOURCES,') == 2
+
+
+
+def test_hosted_disk_staging_uses_two_bounded_apks_on_disk_and_preserves_reserve(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    required = 2 * tool.MAX_APK + 32 * 1024**2 + tool.limits.MIN_ROOT_FREE
+    free = required
+    monkeypatch.setattr(tool.shutil, "disk_usage", lambda _p: SimpleNamespace(free=free))
+    result = tool.staging_placement(tmp_path, tmp_path, tmp_path, hosted_disk_staging=True)
+    assert result == {"all_tmpfs": False, "hosted_disk_staging": True, "max_full_apks": 2,
+                      "ram_required_bytes": 0, "disk_required_bytes": required}
+    free -= 1
+    with pytest.raises(ValueError, match="preserving reserves"):
+        tool.staging_placement(tmp_path, tmp_path, tmp_path, hosted_disk_staging=True)
+
+
+@pytest.mark.parametrize("environment", (None, "self-hosted"))
+def test_hosted_disk_staging_cannot_replace_default_local_policy(tmp_path, monkeypatch, environment):
+    if environment is None:
+        monkeypatch.delenv("RUNNER_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("RUNNER_ENVIRONMENT", environment)
+    with pytest.raises(ValueError, match="explicit GitHub-hosted"):
+        tool.staging_placement(tmp_path, tmp_path, tmp_path, hosted_disk_staging=True)
+    with pytest.raises(ValueError, match="approved RAM"):
+        tool.staging_placement(tmp_path, tmp_path, tmp_path)
+
+
+def test_hosted_disk_staging_rejects_mixed_modes_and_a_different_staging_directory(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "github-hosted")
+    other = tmp_path / "other"; other.mkdir()
+    with pytest.raises(ValueError, match="explicit GitHub-hosted"):
+        tool.staging_placement(tmp_path, tmp_path, tmp_path, all_tmpfs=True, hosted_disk_staging=True)
+    with pytest.raises(ValueError, match="output-parent"):
+        tool.staging_placement(tmp_path, tmp_path, other, hosted_disk_staging=True)
+
+
+@pytest.mark.parametrize("explicit", (True, False))
+def test_full_client_resource_callback_preserves_default_and_runs_before_sdk(tmp_path, monkeypatch, explicit):
+    import os
+    from types import SimpleNamespace
+    source, feature = tmp_path / "base.apk", tmp_path / "feature.apk"
+    source.write_bytes(b"stable base fixture"); feature.write_bytes(b"stable feature fixture")
+    monkeypatch.setattr(tool, "BASE_BYTES", source.stat().st_size)
+    monkeypatch.setattr(tool.addon, "frozen_sources", lambda *_, **__: {})
+    monkeypatch.setattr(tool.addon, "verified_feature", lambda *_: {
+        "base_apk_sha256": tool.BASE_SHA256, "addon_apk_sha256": "0" * 64, "native_input": {}})
+    class FixtureCache:
+        files = ()
+        def register(self, *_):
+            pass
+    monkeypatch.setattr(tool, "PublicCache", FixtureCache)
+    monkeypatch.setattr(tool, "staging_placement", lambda *_, **__: {})
+    class StopAtGuard(Exception):
+        pass
+    calls = []
+    def strict(root):
+        calls.append(("strict", root)); raise StopAtGuard()
+    def selected(root):
+        calls.append(("selected", root)); raise StopAtGuard()
+    monkeypatch.setattr(tool.limits, "_resource_guard", strict)
+    args = SimpleNamespace(source=source, feature_apk=feature, output=tmp_path / "output.apk",
+        source_commit="1" * 40, font_file=tmp_path / "font.otf", build_tools=tmp_path,
+        jdk_bin=tmp_path, apkeditor=tmp_path / "editor.jar", ram_directory=tmp_path)
+    old_umask = os.umask(0o077)
+    try:
+        with pytest.raises(StopAtGuard):
+            tool.build(args, **({"resource_guard": selected} if explicit else {}))
+    finally:
+        os.umask(old_umask)
+    assert calls == [("selected" if explicit else "strict", tool.ROOT)]
