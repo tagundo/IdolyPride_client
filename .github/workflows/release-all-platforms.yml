@@ -1,4 +1,4 @@
-name: Verify and release ZIP progress and launcher usability v0.3.35
+name: Verify and release launcher and multilingual clients v0.3.35
 
 on:
   workflow_dispatch:
@@ -340,6 +340,18 @@ jobs:
           path: ${{ runner.temp }}/idoly-android-final
           if-no-files-found: error
           compression-level: 0
+          retention-days: 14
+      - name: Retain small Android launcher visual evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: optimized-release-android-ui-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/idoly-android-qa/qa/02-running.png
+            ${{ runner.temp }}/idoly-android-qa/qa/02-running.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.png
+            ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.xml
+          if-no-files-found: warn
           retention-days: 14
       - uses: actions/upload-artifact@v4
         if: failure()
