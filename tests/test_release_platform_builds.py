@@ -150,3 +150,45 @@ def test_build_cli_refuses_local_execution_before_any_tool(monkeypatch,tmp_path)
     monkeypatch.setattr(builds,"source_binding",forbidden)
     with pytest.raises(builds.BuildError,match="owned_Actions"):
         builds.main()
+
+
+def reference_payload(monkeypatch,tmp_path,*,missing=None,extra=None):
+    files={"data/"+name:("fixture "+name).encode() for name in builds.QA_REFERENCE_FILES}
+    files.update({"data/master-json/Setting.json":b"[]",
+                  "data/public-fixtures/manifest.json":b"{}",
+                  "data/public-fixtures/responses/public-sample.pb":b"public fixture",
+                  "data/original-master/unneeded.bin":b"not a host QA reference"})
+    if missing is not None:files.pop("data/"+missing)
+    if extra is not None:files[extra]=b"unsafe"
+    path=tmp_path/"ServerData.zip"
+    with ZipFile(path,"w") as archive:
+        for name,raw in files.items():archive.writestr(name,raw)
+    monkeypatch.setattr(builds,"SERVER_DATA",{"bytes":path.stat().st_size,"sha256":hashlib.sha256(path.read_bytes()).hexdigest()})
+    return path,files
+
+
+def test_pinned_qa_payload_extracts_complete_story_tutorial_and_master_references(monkeypatch,tmp_path):
+    payload,files=reference_payload(monkeypatch,tmp_path)
+    destination=tmp_path/"references"
+    builds.extract_qa_references(payload,destination,Guard())
+    actual={str(path.relative_to(destination)):path.read_bytes() for path in destination.rglob("*") if path.is_file()}
+    expected={name.removeprefix("data/"):raw for name,raw in files.items() if not name.startswith("data/original-master/")}
+    assert actual==expected
+    assert builds.QA_REFERENCE_FILES<=actual.keys()
+    assert "public-story/manifest.json" in actual and "public-story/story-list-event.pb" in actual
+    assert "public-story/story-list-extra.pb" in actual and "public-fixtures/responses/public-sample.pb" in actual
+
+
+@pytest.mark.parametrize("missing",sorted(builds.QA_REFERENCE_FILES))
+def test_incomplete_host_qa_reference_roster_is_rejected_before_emulator(monkeypatch,tmp_path,missing):
+    payload,_files=reference_payload(monkeypatch,tmp_path,missing=missing)
+    with pytest.raises(builds.BuildError,match="QA_references_missing"):
+        builds.extract_qa_references(payload,tmp_path/"references",Guard())
+
+
+@pytest.mark.parametrize("extra",["data/public-story/../escape.pb","data/public-fixtures/../../escape.pb"])
+def test_public_reference_prefix_does_not_allow_path_escape(monkeypatch,tmp_path,extra):
+    payload,_files=reference_payload(monkeypatch,tmp_path,extra=extra)
+    with pytest.raises(builds.BuildError,match="QA_reference_path_invalid"):
+        builds.extract_qa_references(payload,tmp_path/"references",Guard())
+    assert not (tmp_path/"escape.pb").exists()

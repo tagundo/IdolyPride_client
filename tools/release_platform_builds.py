@@ -243,14 +243,19 @@ def base_report(kind,source,pins,inputs):
         "execution":{"actual_macos_execution":kind=="macos","actual_android_arm64_execution":False,
                      "physical_PlayCover_execution":False}}
 
+QA_REFERENCE_PREFIXES = ("data/master-json/","data/public-tutorial/","data/public-story/","data/public-fixtures/")
+QA_REFERENCE_FILES = frozenset(("protocol/idolypride-6.1.1.pb","master-json/!version.txt",
+    "public-tutorial/manifest.json","public-tutorial/tutorial-short.pb","public-tutorial/tutorial-full.pb",
+    "public-story/manifest.json","public-story/story-list-event.pb","public-story/story-list-extra.pb"))
+
 def extract_qa_references(payload,destination,guard):
     need(payload.stat().st_size==SERVER_DATA["bytes"] and sha(payload)==SERVER_DATA["sha256"],"QA_payload_pin_differs")
     destination.mkdir(mode=0o700)
-    total=0
+    total=0;copied=set()
     with ZipFile(payload) as archive:
         for info in archive.infolist():
             name=info.filename
-            if not (name=="data/protocol/idolypride-6.1.1.pb" or name.startswith("data/master-json/") or name.startswith("data/public-tutorial/")):continue
+            if not (name=="data/protocol/idolypride-6.1.1.pb" or name.startswith(QA_REFERENCE_PREFIXES)):continue
             path=PurePosixPath(name)
             need(not path.is_absolute() and ".." not in path.parts and "\\" not in name and "\0" not in name,"QA_reference_path_invalid")
             if info.is_dir():continue
@@ -263,8 +268,9 @@ def extract_qa_references(payload,destination,guard):
                     guard.check();count+=len(block);need(count<=info.file_size,"QA_reference_extent")
                     outgoing.write(block)
             need(count==info.file_size,"QA_reference_truncated")
-    need((destination/"protocol/idolypride-6.1.1.pb").is_file() and (destination/"master-json").is_dir()
-         and (destination/"public-tutorial").is_dir(),"QA_references_missing")
+            copied.add(str(PurePosixPath(*path.parts[1:])))
+    need(QA_REFERENCE_FILES<=copied and any(name.startswith("master-json/") and name.endswith(".json") for name in copied),
+         "QA_references_missing")
 
 def validate_android_qa(report):
     need(type(report) is dict and report.get("ok") is True and report.get("target")=="Android emulator"
