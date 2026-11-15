@@ -1,8 +1,10 @@
 # iPhone·iPad 통합 IPA
 
-빌드 `156.9108` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
+빌드 `156.9109` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/ios-unified-prototype-source-3fd0287e2d0013a7f4f6d3ad2e5f64f5493f6565/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/ios-unified-prototype-source-41f7f79d2023888e64323b721c959853f9863f1e/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+
+156.9109는 서버가 최초 리소스를 받아 검증하는 동안 게임의 10초 수신 대기 제한에 걸려 E209가 발생하는 경우를 수정합니다. 통합 앱의 로컬 연결을 확인하고 원본 SDK의 해당 설정을 서버 처리 한도에 맞춘 330초로 적용한 뒤 읽어서 확인합니다. 이미 검증된 파일과 계정은 유지합니다. 시뮬레이터에서 준비·초기화·첫 대기 작업의 순서와 적용값을 검사했으며, 새 IPA의 실제 PlayCover 실행은 재확인 대상입니다.
 
 156.9108은 마스터 다운로드 이후 빈 에셋 파일명으로 요청해 E206이 발생하던 오류를 수정합니다. 번역 리소스의 내부 캐시 식별자는 유지하고, 게임의 Octo SDK에 전달하는 파일명만 원본과 같은 6글자 형식으로 제공합니다. 목록 리비전을 한 번 올려 기존 클라이언트의 잘못된 메타데이터를 갱신하며, 이미 받은 리소스·계정은 재사용합니다. 실제 iOS 런타임에서 암호화된 목록의 54,442개 항목과 번역 이미지의 전체 전송·MD5·길이·ETag를 검사합니다.
 
@@ -34,7 +36,7 @@
 
 1. `fetch_inputs.py`가 고정된 SHA-256으로 원본·한국어 IPA, 서버·번역 데이터, 영어 UI 입력, BeeWare iOS Python과 순수 Python 의존성을 검증합니다.
 2. `tools/build_ios_client_languages.py`가 일본어·영어 Data와 언어별 매니페스트를 생성합니다. 한국어 파일과 공통 Data는 검증된 기존 한국어 앱을 사용합니다.
-3. `native/test_client_data.py`, `native/test_keyboard_lifecycle.py`, `native/test_local_http.py`와 `native/test_mac_menu.py`가 실제 macOS Foundation의 번들 선택·키보드 재사용·로컬 HTTP 및 AppKit 메뉴·단축키를 검사합니다. `prepare_runtime.py`는 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다.
+3. `native/test_client_data.py`, `native/test_keyboard_lifecycle.py`, `native/test_local_http.py`, `native/test_octo_budget.py`와 `native/test_mac_menu.py`가 실제 macOS Foundation의 번들 선택·키보드 재사용·로컬 HTTP·형식을 확인한 SDK 설정 및 AppKit 메뉴·단축키를 검사합니다. SDK 설정 검사는 검사용 IL2CPP API 표를 사용하며 실제 Unity 실행과 구분합니다. `prepare_runtime.py`는 실제 iOS 플랫폼을 확인하고 Python 확장 모듈을 서명 가능한 프레임워크로 변환합니다.
 4. `native/build_native.py`가 실제 Apple SDK로 서버 프레임워크를 빌드합니다. 검증된 Unity 초기화 진입점과 데이터 번들 선택 경로를 사용합니다. `patch_load.py`와 `package_unified.py`는 기존 게임 코드·SDK 바이트를 보존하고 필요한 로드 명령·앱 정보·추가 파일을 구성합니다.
 5. `verify_client_languages.py`가 준비된 실제 Data로 일본어·한국어·영어 번들을 각각 재구성하고 다시 호출해 검증된 캐시 재사용을 확인합니다.
 6. 새 Simulator용 프레임워크·검사용 앱에서 서버 시작·게임 진입·설정 메뉴 닫기 후 서버 유지, 창 크기별 네이티브 헤더와 설정 화면 배치, 진단 복사·클립보드 정리, 모서리 제스처 등록, CommonCrypto AES와 실제 암호화 RPC를 검사합니다. 암호화된 마스터 목록의 URL을 확인하고 서버에서 HEAD와 64바이트 부분 요청을 수행해 응답 크기·내용을 포함된 원본 파일과 대조합니다. 별도로 실제 서버의 암호화된 Octo 목록을 해독하고 원본 전체 항목·6글자 파일명을 검사한 뒤, 번역 이미지 한 개의 전체 응답을 해당 목록의 MD5·길이·ETag와 대조합니다. 원본 게임 실행 파일과 기존 Simulator·사용자 데이터는 사용하지 않습니다.
