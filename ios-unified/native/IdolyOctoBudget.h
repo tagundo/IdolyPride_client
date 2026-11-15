@@ -10,4 +10,12 @@ BOOL IDOctoBudgetConfigure(BOOL unifiedLoopbackAttested, NSString **error);
 NSDictionary *IDOctoBudgetInfo(void);
 NSString *IDOctoBudgetLastDiagnostic(void);
 
+#if IDOLY_SMOKE_SIMULATOR
+#include "OctoBudgetPolicy.h"
+// Explicit fixture injection exists only in the simulator smoke framework.
+// The complete table can be registered once, on main, before Prepare.
+__attribute__((visibility("default")))
+BOOL IDOctoBudgetRegisterSmokeAPIs(const IDOctoBudgetAPIs *apis);
+#endif
+
 #endif

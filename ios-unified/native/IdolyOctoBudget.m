@@ -2,11 +2,7 @@
 #include "OctoBudgetPolicy.h"
 #include <math.h>
 
-#if IDOLY_SMOKE_SIMULATOR
-// The device object has no reference to this simulator-only fixture provider.
-extern BOOL IDOctoBudgetSmokeAPIs(IDOctoBudgetAPIs *)
-    __attribute__((weak_import, visibility("default")));
-#else
+#if !IDOLY_SMOKE_SIMULATOR
 #include "OctoBudgetProfile.h"
 #include <dlfcn.h>
 #include <limits.h>
@@ -22,6 +18,21 @@ static IDOctoBudgetAPIs budgetAPIs;
 static BOOL budgetPrepared, budgetConfigured, budgetHasValues;
 static float budgetOriginal, budgetEffective;
 static NSString *budgetStatus = @"idle", *budgetError;
+
+#if IDOLY_SMOKE_SIMULATOR
+static IDOctoBudgetAPIs smokeAPIs;
+static BOOL smokeRegistered;
+
+BOOL IDOctoBudgetRegisterSmokeAPIs(const IDOctoBudgetAPIs *apis) {
+    if (!NSThread.isMainThread || !IDOctoBudgetAPIsComplete(apis)) return NO;
+    @synchronized (IDOctoBudgetState.class) {
+        if (smokeRegistered || budgetPrepared) return NO;
+        smokeAPIs = *apis;
+        smokeRegistered = YES;
+    }
+    return YES;
+}
+#endif
 
 static BOOL budgetFailure(NSString *code, NSString **error) {
     @synchronized (IDOctoBudgetState.class) {
@@ -144,8 +155,11 @@ BOOL IDOctoBudgetPrepare(NSString **error) {
     }
     IDOctoBudgetAPIs candidate = {0};
 #if IDOLY_SMOKE_SIMULATOR
-    BOOL valid = IDOctoBudgetSmokeAPIs && IDOctoBudgetSmokeAPIs(&candidate)
-        && IDOctoBudgetAPIsComplete(&candidate);
+    BOOL valid;
+    @synchronized (IDOctoBudgetState.class) {
+        candidate = smokeAPIs;
+        valid = smokeRegistered && IDOctoBudgetAPIsComplete(&candidate);
+    }
 #else
     BOOL valid = budgetResolveOriginalAPIs(&candidate);
 #endif

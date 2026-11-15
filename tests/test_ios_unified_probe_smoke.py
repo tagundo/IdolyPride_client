@@ -136,7 +136,7 @@ def native_report():
     report["server_status"]["octo_budget"] = {"schema":1,"status":"configured","prepared":True,
         "configured":True,"original_seconds":10,"effective_seconds":330,"cache_wait_seconds":300,
         "scope":"unified-loopback","error":None}
-    report["octo_budget_probe"] = {"prepared_without_managed_callbacks":True,
+    report["octo_budget_probe"] = {"apis_registered":True,"prepared_without_managed_callbacks":True,
         "during_original_seconds":10,"during_original_configured":False,"first_queued_seconds":330,
         "configured_before_first_queued_work":True,"queued_work_on_main_thread":True,
         "class_initialized":True,"initializations":1,"reads":2,"writes":1,
@@ -475,6 +475,8 @@ def test_diagnostics_copy_deadline_snapshot_preserves_only_latest_safe_flags(tmp
 
 
 @pytest.mark.parametrize("field,value,code", (
+    ("apis_registered",False,"octo_budget_registration_failed"),
+    ("apis_registered",1,"octo_budget_registration_failed"),
     ("prepared_without_managed_callbacks",False,"octo_budget_preinit_failed"),
     ("prepared_without_managed_callbacks",1,"octo_budget_preinit_failed"),
     ("during_original_seconds",330,"octo_budget_original_failed"),

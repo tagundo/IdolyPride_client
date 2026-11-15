@@ -12,15 +12,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #if IDOLY_SMOKE_SIMULATOR
+#import "../native/IdolyOctoBudget.h"
 #include "../native/tests/OctoBudgetFixture.h"
-
-// The weak provider is defined only by this disposable Simulator host. The
-// shipped device framework instead resolves its audited original IL2CPP APIs.
-__attribute__((visibility("default"))) BOOL IDOctoBudgetSmokeAPIs(IDOctoBudgetAPIs *apis) {
-    if (!apis) return NO;
-    *apis = IDOctoBudgetFixtureAPIs();
-    return YES;
-}
 #endif
 
 static NSDictionary *ProbeObject(NSString *text) {
@@ -624,10 +617,16 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)application; (void)options;
+    self.octoBudgetProbe = [NSMutableDictionary dictionary];
 #if IDOLY_SMOKE_SIMULATOR
     IDOctoBudgetFixtureReset();
+    // Pass an explicit, typed copy into the simulator framework. No reverse
+    // framework-to-executable import or managed callback is needed to prepare.
+    IDOctoBudgetAPIs apis = IDOctoBudgetFixtureAPIs();
+    BOOL registered = IDOctoBudgetRegisterSmokeAPIs(&apis);
+    self.octoBudgetProbe[@"apis_registered"] = @(registered);
+    if (!registered) { [self failProbe:@"octo_budget_registration_failed"]; return YES; }
 #endif
-    self.octoBudgetProbe = [NSMutableDictionary dictionary];
     [self recordCheckpoint:@"delegate_entered"];
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UIViewController *screen = [UIViewController new]; screen.view.backgroundColor = UIColor.systemBackgroundColor;

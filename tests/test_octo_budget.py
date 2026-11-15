@@ -105,7 +105,7 @@ def test_linux_runner_records_portable_success_without_claiming_foundation_execu
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="Foundation execution requires macOS/Xcode")
-def test_foundation_wrapper_uses_smoke_only_runtime_provider(tmp_path):
+def test_foundation_wrapper_uses_smoke_only_runtime_registration(tmp_path):
     architecture = {"aarch64": "arm64"}.get(platform.machine(), platform.machine())
     if architecture not in ("arm64", "x86_64"):
         pytest.skip("unsupported macOS test architecture")

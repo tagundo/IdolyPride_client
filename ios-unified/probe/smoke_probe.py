@@ -63,7 +63,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_precreated_instance_not_reused",
     "native_header_layout_failed", "native_header_restore_failed",
     "settings_diagnostics_copy_failed",
-    "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
+    "octo_budget_registration_failed", "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
@@ -92,7 +92,7 @@ DIAGNOSTICS_COPY_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatc
                                 "feedback_success", "pasteboard_matches", "clipboard_seeded", "clipboard_cleared")
 OCTO_BUDGET_SECONDS = ("original_seconds", "effective_seconds", "cache_wait_seconds")
 OCTO_BUDGET_PROBE_SECONDS = ("during_original_seconds", "first_queued_seconds", "last_snapshot")
-OCTO_BUDGET_PROBE_BOOLS = ("prepared_without_managed_callbacks", "during_original_configured",
+OCTO_BUDGET_PROBE_BOOLS = ("apis_registered", "prepared_without_managed_callbacks", "during_original_configured",
     "configured_before_first_queued_work", "queued_work_on_main_thread", "class_initialized")
 OCTO_BUDGET_PROBE_COUNTERS = ("initializations", "reads", "writes", "first_queued_snapshot_count",
                              "writes_before_initialization")
@@ -303,6 +303,7 @@ def validate_report(value):
     budget, budget_probe = status.get("octo_budget"), value.get("octo_budget_probe")
     require(type(budget_probe) is dict and budget_probe.get("prepared_without_managed_callbacks") is True,
             "octo_budget_preinit_failed")
+    require(budget_probe.get("apis_registered") is True, "octo_budget_registration_failed")
     require(type(budget_probe.get("during_original_seconds")) in (int,float)
             and math.isfinite(budget_probe["during_original_seconds"])
             and budget_probe["during_original_seconds"] == 10

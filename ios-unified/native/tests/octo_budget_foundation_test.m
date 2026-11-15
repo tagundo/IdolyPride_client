@@ -10,13 +10,6 @@
 #error The fake managed runtime must only compile in the explicit smoke build.
 #endif
 
-static BOOL providerIncomplete;
-BOOL IDOctoBudgetSmokeAPIs(IDOctoBudgetAPIs *apis) {
-    if (!apis) return NO;
-    *apis = IDOctoBudgetFixtureAPIs();
-    if (providerIncomplete) apis->field_static_set_value = NULL;
-    return YES;
-}
 static void Require(BOOL condition, const char *message) {
     if (!condition) { fprintf(stderr, "FAIL_OCTO_BUDGET: %s\n", message); exit(1); }
 }
@@ -31,6 +24,16 @@ int main(void) {
             && idle[@"original_seconds"] == NSNull.null && idle[@"effective_seconds"] == NSNull.null
             && [idle[@"cache_wait_seconds"] isEqual:@300] && [idle[@"scope"] isEqual:@"unified-loopback"]
             && idle[@"error"] == NSNull.null, "invalid_idle_info");
+        Require(!IDOctoBudgetRegisterSmokeAPIs(NULL) && [IDOctoBudgetInfo() isEqual:idle],
+            "null_registration_mutated_state");
+        IDOctoBudgetAPIs apis = IDOctoBudgetFixtureAPIs();
+        IDOctoBudgetAPIs incomplete = apis;
+        incomplete.field_static_set_value = NULL;
+        Require(!IDOctoBudgetRegisterSmokeAPIs(&incomplete) && [IDOctoBudgetInfo() isEqual:idle],
+            "incomplete_registration_mutated_state");
+        Require(!IDOctoBudgetPrepare(&error) && [error isEqual:@"api_origin_mismatch"]
+            && !id_octo_fixture.initialized && id_octo_fixture.writes == 0,
+            "unregistered_prepare_accepted");
         Require(!IDOctoBudgetConfigure(YES, &error) && [error isEqual:@"not_prepared"],
             "unprepared_configuration_accepted");
         Require(!IDOctoBudgetConfigure(NO, &error) && [error isEqual:@"unattested_loopback"]
@@ -39,16 +42,21 @@ int main(void) {
         dispatch_semaphore_t done = dispatch_semaphore_create(0);
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             NSString *threadError = nil;
-            wrongThreadRejected = !IDOctoBudgetPrepare(&threadError)
+            wrongThreadRejected = !IDOctoBudgetRegisterSmokeAPIs(&apis)
+                && !IDOctoBudgetPrepare(&threadError)
                 && [threadError isEqual:@"wrong_thread"];
             dispatch_semaphore_signal(done);
         });
         Require(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 5*NSEC_PER_SEC)) == 0
             && wrongThreadRejected, "wrong_thread_not_rejected");
-        providerIncomplete = YES;
         Require(!IDOctoBudgetPrepare(&error) && [error isEqual:@"api_origin_mismatch"]
             && id_octo_fixture.writes == 0, "incomplete_api_table_accepted");
-        providerIncomplete = NO;
+        Require(IDOctoBudgetRegisterSmokeAPIs(&apis), "valid_smoke_registration_failed");
+        NSDictionary *registered = IDOctoBudgetInfo();
+        Require(!IDOctoBudgetRegisterSmokeAPIs(&apis) && [IDOctoBudgetInfo() isEqual:registered],
+            "repeated_registration_accepted_or_mutated_state");
+        // The helper owns its immutable copy, rather than this caller's table.
+        apis.field_static_set_value = NULL;
         Require(IDOctoBudgetPrepare(&error) && !error, "smoke_prepare_failed");
         Require(!id_octo_fixture.initialized && id_octo_fixture.writes == 0,
             "prepare_touched_managed_runtime");
