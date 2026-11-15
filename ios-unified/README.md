@@ -1,8 +1,10 @@
 # iPhone·iPad 통합 IPA
 
-빌드 `156.9113` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
+빌드 `156.9114` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+
+156.9114는 공통 서버의 프로필·포토 편집 묶음을 포함합니다. 버디 카드·장식·배경·카드 이미지 선택과 보유 포토 잠금 전환을 복구하고, 기존 감상 계정의 장식 361종을 보완합니다. 미션·일일/콘테스트/타워는 실제 저장된 목록과 기록을 읽는 범위입니다. [v0.3.34 변경·검증 기록](../docs/releases/recovery-v0.3.34.md)을 참고하세요. 128×128 포인트의 2초 메뉴 제스처, 언어 전환·SIGPIPE 수정과 기존 최적화도 유지합니다.
 
 156.9113은 게임 중 서버 메뉴를 여는 오른쪽 위 영역을 64×64에서 **128×128 포인트**로 넓혔습니다. 작은 안전 영역은 화면 안으로 제한하며 **2초·한 손가락·이동 제한과 일반 터치 전달**은 유지합니다. 공통 서버에는 보유 칭호 적용 복구와 예외의 게임 호출 위치 표시를 포함합니다. [v0.3.33 변경·검증 기록](../docs/releases/recovery-v0.3.33.md)을 참고하세요. Enumerable.Where 개별 오류의 원인은 아직 확인되지 않았습니다.
 

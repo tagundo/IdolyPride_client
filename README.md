@@ -1,16 +1,16 @@
 # IDOLY PRIDE 로컬 서버와 통합 클라이언트
 
-**[최신 릴리즈 v0.3.33](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.33)** · [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-Android.apk) · [통합 IPA 156.9113](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa) · [Apple Silicon Mac 서버](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-macOS-arm64.app.zip) · [수정·측정·검증 기록](docs/releases/recovery-v0.3.33.md)
+**[최신 릴리즈 v0.3.34](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.34)** · [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-Local-Server-Android.apk) · [통합 IPA 156.9114](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-6.1.1-Unified-iOS.ipa) · [Apple Silicon Mac 서버](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-Local-Server-macOS-arm64.app.zip) · [수정·측정·검증 기록](docs/releases/recovery-v0.3.34.md)
 
-Android 서버에 화면에 표시된 기록을 텍스트로 저장하는 **서버 기록 내보내기**를 추가했습니다. 예외 표시에는 게임 호출 위치를 보강하고 보유 칭호의 프로필 적용을 복구했습니다. 통합 IPA의 오른쪽 위 2초 누르기 영역은 **128×128 포인트**로 넓혔습니다. Enumerable.Where 오류의 원인은 아직 확인되지 않았습니다. [NPC의 MV 출연 조사](docs/npc-mv-feasibility.md)는 실제 춤 검증 전 단계이며 이번 앱에 포함하지 않았습니다.
+프로필의 버디 카드·장식·배경과 카드 일러스트 선택, 보유 포토의 잠금/해제를 복구했습니다. 기존 전체 해금 감상 계정에도 실제 장식 **361종**의 누락분을 보완합니다. 미션·퀘스트는 저장된 목록과 기록을 읽는 범위를 확장하며, 미션 보상 수령·일일/타워 전투는 포함하지 않습니다.
 
 ## 앱으로 실행하기
 
 | 환경 | 받을 파일 | 실행 방법 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [서버 APK v0.3.33](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-Android.apk) + [한국어 게임 APK v0.3.31 재사용](https://github.com/tagundo/IdolyPride_client/raw/3b2c73b51931bb7be031c37c9d55297505fb88e1/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk) | 서버 앱에서 **서버 시작 → 아이프라 실행** |
-| iPhone·iPad | [서버·게임 통합 IPA 156.9113](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa) | 개인 서명 후 설치하고 서버 준비가 끝나면 **게임 시작** |
-| Apple Silicon Mac / PlayCover | [통합 IPA 156.9113](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa) 하나, 또는 [Mac 서버 v0.3.33](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-Local-Server-macOS-arm64.app.zip) + [별도 한국어 PlayCover IPA v0.3.31 재사용](https://github.com/tagundo/IdolyPride_client/raw/7fcc9f8661b5158cf66d93e9c307607db2c2ee43/IdolyPride-6.1.1-Local-PlayCover-ko.ipa) | 통합판은 **게임 시작**. 별도 서버는 **서버 시작 → PlayCover에서 열기** 후 PlayCover에서 **아이프라 로컬** 실행 |
+| Android ARM64, Android 9 이상 | [서버 APK v0.3.34](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-Local-Server-Android.apk) + [한국어 게임 APK v0.3.31 재사용](https://github.com/tagundo/IdolyPride_client/raw/3b2c73b51931bb7be031c37c9d55297505fb88e1/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk) | 서버 앱에서 **서버 시작 → 아이프라 실행** |
+| iPhone·iPad | [서버·게임 통합 IPA 156.9114](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-6.1.1-Unified-iOS.ipa) | 개인 서명 후 설치하고 서버 준비가 끝나면 **게임 시작** |
+| Apple Silicon Mac / PlayCover | [통합 IPA 156.9114](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-6.1.1-Unified-iOS.ipa) 하나, 또는 [Mac 서버 v0.3.34](https://github.com/tagundo/IdolyPride_client/raw/48ddc99687c608a1f7a0b2e586619a3f7927f57b/IdolyPride-Local-Server-macOS-arm64.app.zip) + [별도 한국어 PlayCover IPA v0.3.31 재사용](https://github.com/tagundo/IdolyPride_client/raw/7fcc9f8661b5158cf66d93e9c307607db2c2ee43/IdolyPride-6.1.1-Local-PlayCover-ko.ipa) | 통합판은 **게임 시작**. 별도 서버는 **서버 시작 → PlayCover에서 열기** 후 PlayCover에서 **아이프라 로컬** 실행 |
 
 별도 한국어 게임 APK와 PlayCover IPA는 검증된 기존 v0.3.31 파일이며 이번에 재제작하지 않았습니다. Mac 서버 ZIP은 풀어서 앱을 교체합니다. 같은 앱은 삭제·데이터 지우기 없이 업데이트하면 계정·설정·받은 리소스를 유지합니다. Android 서버는 같은 앱 식별자와 공개 개발 서명을 사용하고, 게임 APK는 기존 Diagnostics 앱 식별자를 유지하면서 **아이프라 로컬**로 표시합니다.
 
@@ -22,16 +22,20 @@ Android는 게임과 서버가 별도 앱입니다. 서버 앱의 **서버 기�
 
 Mac 별도 서버의 계정·설정은 `~/Library/Application Support/IdolyPrideLocal`, 통합판은 앱 컨테이너의 `Library/Application Support/IdolyPrideLocal`에 보관합니다. 선택한 리소스 보관 위치도 업데이트할 때 유지합니다. 게임 API는 `127.0.0.1:50051`, 파일 서버는 `127.0.0.1:8080`이며 같은 기기에서 연결합니다.
 
-검증은 전체 코드 검사, Android x86_64 에뮬레이터의 실제 서버 UI·암호화 RPC·업데이트 후 보존, 실제 Mac 앱의 시작·중지와 서명, Apple SDK 빌드와 iOS Simulator의 KO→EN→JA→EN→KO 재실행을 포함합니다. 이번 파일의 Android ARM64 실기기와 PlayCover·iPhone·iPad 실제 게임 재검증은 별도 대상입니다. [세부 검증과 해시](docs/releases/recovery-v0.3.33.md)
+검증은 전체 코드 검사, Android x86_64 에뮬레이터의 실제 서버 UI·암호화 RPC·업데이트 후 보존, 실제 Mac 앱의 시작·중지와 서명, Apple SDK 빌드와 iOS Simulator의 KO→EN→JA→EN→KO 재실행을 포함합니다. 이번 파일의 Android ARM64 실기기와 PlayCover·iPhone·iPad 실제 게임 재검증은 별도 대상입니다. [세부 검증과 해시](docs/releases/recovery-v0.3.34.md)
 
 [촬영·의상·리소스 보관 안내](docs/local-library-v0.3.19.md) · [번역 출처](docs/translation-catalog.md) · [감상 모드](docs/media-mode.md) · [기존 클라이언트 설치 안내](docs/client-setup.md)
 
+[프로필·포토 사용 흐름](docs/preference-support.md) · [미션·퀘스트 목록의 복구 범위](docs/menu-recovery-v0.3.34.md)
+
 ## 기능별 구현 기록
 
-아래 버전 표시는 각 기능을 추가할 당시의 기록입니다. 현재 배포 파일과 검증 범위는 위 v0.3.33 안내를 따릅니다.
+아래 버전 표시는 각 기능을 추가할 당시의 기록입니다. 현재 배포 파일과 검증 범위는 위 v0.3.34 안내를 따릅니다.
 
 | 기능 | 상태 |
 | --- | --- |
+| 프로필·카드·포토 설정 — v0.3.34 | 버디·장식·기본/사진/카드 배경·카드 이미지·보유 포토 잠금 전환; 원자적 저장·재시도 응답; 감상 계정 장식 361종 보완 |
+| 미션·퀘스트 읽기 — v0.3.34 | 저장된 일반 미션 세 탭과 일일·콘테스트·타워 목록/이력; 새 미션·수령·기간 리셋·해당 전투는 미구현 |
 | 6.1.1 protobuf·암호화 gRPC | 스키마 로딩, SolisClient 양방향 호환, 실제 localhost HTTP/2 교환 검증 |
 | `System.Check`, `System.GetMetadata`, `System.CheckApp`, `Auth.Login` | 로컬 응답·SQLite 프로필·세션 구현 |
 | `Refund.GetTerm` | 제목 화면에서 로그인 없이 조회; 로컬 환불 기간 비활성·유료 상점 닫힘 |
