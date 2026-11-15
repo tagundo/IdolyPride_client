@@ -7,6 +7,10 @@ on:
         description: Build an Actions-only integrated iPhone/iPad IPA and run a disposable iOS Simulator core probe
         type: boolean
         default: false
+      ios_publish:
+        description: After unified iOS verification, publish an immutable source download branch with full IPA readback
+        type: boolean
+        default: false
       artifact_only:
         description: Build Actions-only candidates for separate Android native runtime QA; leave the release draft untouched
         type: boolean
@@ -20,8 +24,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: native-server-apps-${{ inputs.ios_unified && 'ios-unified' || (inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0') }}
-  cancel-in-progress: true
+  group: native-server-apps-${{ inputs.ios_unified && (inputs.ios_publish && 'ios-unified-publication' || 'ios-unified') || (inputs.fixed_payload_patch && 'v0.3.2' || 'v0.3.0') }}
+  cancel-in-progress: ${{ !inputs.ios_publish }}
 
 env:
   GH_REPO: ${{ github.repository }}
@@ -1126,6 +1130,10 @@ jobs:
     if: ${{ inputs.ios_unified }}
     runs-on: macos-15
     timeout-minutes: 40
+    outputs:
+      source_sha: ${{ github.sha }}
+      artifact_id: ${{ steps.ios-artifact.outputs.artifact-id }}
+      artifact_sha256: ${{ steps.ios-artifact.outputs.artifact-digest }}
     # GitHub requires contents:write to read the pinned original IPA from its
     # unpublished input release. Only the fetch step receives GH_TOKEN; no
     # release or source mutation is performed by this job.
@@ -1171,11 +1179,58 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Upload the IPA after the Simulator core probe passes
+        id: ios-artifact
         uses: actions/upload-artifact@v4
         if: ${{ success() }}
         with:
           name: ios-unified-prototype-${{ github.sha }}
           path: ${{ runner.temp }}/idoly-unified-output
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  ios-publication:
+    needs: ios-unified
+    if: ${{ inputs.ios_unified && inputs.ios_publish && needs.ios-unified.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.ios-unified.outputs.source_sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.13.5"
+      - name: Install locked report-verification dependencies
+        run: uv sync --locked --python 3.13
+      - name: Verify exact build artifact and publish after full remote SHA readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDOLY_SOURCE: ${{ needs.ios-unified.outputs.source_sha }}
+          IDOLY_ARTIFACT: ${{ needs.ios-unified.outputs.artifact_id }}
+          IDOLY_ARTIFACT_SHA: ${{ needs.ios-unified.outputs.artifact_sha256 }}
+        run: >-
+          uv run --locked python -B ios-unified/delivery.py
+          --source-commit "$IDOLY_SOURCE"
+          --run-id "$GITHUB_RUN_ID"
+          --artifact-id "$IDOLY_ARTIFACT"
+          --artifact-sha256 "$IDOLY_ARTIFACT_SHA"
+          --work "$RUNNER_TEMP/idoly-verified-ios-delivery"
+          --publish
+      - name: Upload small publication proof without the IPA
+        uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: ios-unified-publication-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-verified-ios-delivery/proof
+          if-no-files-found: warn
           compression-level: 0
           retention-days: 14

@@ -4,6 +4,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -184,5 +185,92 @@ def test_linux_producer_cannot_claim_foundation_or_ctor_execution(tmp_path):
 @pytest.mark.skipif(sys.platform != "darwin", reason="actual dyld/Foundation execution requires macOS/Xcode")
 def test_actual_constructor_loaded_dylib_and_three_fresh_runtime_modes():
     report = runner.execute(NATIVE)
-    assert report["status"] == "PASS", report
+    if report["status"] != "PASS":
+        pytest.fail(json.dumps(report, indent=2, sort_keys=True), pytrace=False)
     assert runner.validate_report(report, NATIVE) is report
+
+
+def constructor_macho(tmp_path, *, legacy=False, offset=0x200, section_size=None, constructor_name=None):
+    """Small synthetic Mach-O image with one constructor and one code section."""
+    def section(name, segment_name, address, size, fileoff, alignment, flags):
+        return struct.pack("<16s16sQQIIIIIIII", name.encode(), segment_name.encode(),
+                           address, size, fileoff, alignment, 0, 0, flags, 0, 0, 0)
+
+    def segment(name, address, vmsize, fileoff, filesize, protection, sections):
+        return struct.pack("<II16sQQQQiiII", 0x19, 72 + 80 * len(sections), name.encode(),
+                           address, vmsize, fileoff, filesize, protection, protection,
+                           len(sections), 0) + b"".join(sections)
+
+    code = section("__text", "__TEXT", 0x200, 0x40, 0x200, 2, 0x80000400)
+    width = 8 if legacy else 4
+    constructor_size = width if section_size is None else section_size
+    name = constructor_name or ("__mod_init_func" if legacy else "__init_offsets")
+    if legacy:
+        constructors = section(name, "__DATA_CONST", 0x1000, constructor_size, 0x300, 3, 9)
+        commands = [
+            segment("__TEXT", 0, 0x1000, 0, 0x300, 5, [code]),
+            segment("__DATA_CONST", 0x1000, 0x1000, 0x300, 0x100, 3, [constructors]),
+        ]
+    else:
+        constructors = section(name, "__TEXT", 0x300, constructor_size, 0x300, 2, 0x16)
+        commands = [segment("__TEXT", 0, 0x1000, 0, 0x400, 5, [code, constructors])]
+    identifier = runner.INSTALL_NAME.encode() + b"\0"
+    command_size = (24 + len(identifier) + 7) & ~7
+    commands.append((struct.pack("<6I", 0xD, command_size, 24, 0, 0, 0) + identifier).ljust(command_size, b"\0"))
+    commands.append(struct.pack("<6I", 0x32, 24, 1, 13 << 16, 14 << 16, 0))
+    header = struct.pack("<8I", 0xFEEDFACF, 0x100000C, 0, 6, len(commands),
+                         sum(map(len, commands)), 0, 0)
+    image = bytearray((header + b"".join(commands)).ljust(0x400, b"\0"))
+    assert len(header) + sum(map(len, commands)) <= 0x200
+    image[0x200:0x204] = bytes.fromhex("c0035fd6")
+    entry = struct.pack("<Q" if legacy else "<I", offset)
+    image[0x300:0x300 + constructor_size] = entry.ljust(constructor_size, b"\0")[:constructor_size]
+    path = tmp_path / ("legacy.dylib" if legacy else "offsets.dylib")
+    path.write_bytes(image)
+    return path
+
+
+@pytest.mark.parametrize("legacy,section_type,width,name", [
+    (True, 9, 8, "__mod_init_func"), (False, 0x16, 4, "__init_offsets"),
+])
+def test_macho_parser_accepts_both_darwin_constructor_formats(tmp_path, legacy, section_type, width, name):
+    path = constructor_macho(tmp_path, legacy=legacy)
+    image = runner.inspect_image(path, "arm64")
+    assert image["constructor_section_present"] is True
+    assert image["install_name"] == runner.INSTALL_NAME
+    assert len(image["constructor_sections"]) == 1
+    row = image["constructor_sections"][0]
+    assert row["section"] == name and row["type"] == section_type
+    assert row["bytes"] == row["entry_bytes"] == width and row["entries"] == 1
+    assert isinstance(row["format"], str) and row["format"]
+    assert row["targets_verified"] is (not legacy)
+    assert image["build_versions"] == [{"command": "LC_BUILD_VERSION", "platform": 1, "minimum": 13 << 16,
+                                        "sdk": 14 << 16, "tools": []}]
+
+
+@pytest.mark.parametrize("offset", [0x202, 0x20, 0x300, 0x5000])
+def test_macho_offset_constructors_require_aligned_targets_inside_instruction_sections(tmp_path, offset):
+    path = constructor_macho(tmp_path, offset=offset)
+    with pytest.raises(ValueError):
+        runner.inspect_image(path, "arm64")
+
+
+@pytest.mark.parametrize("legacy,size", [(False, 6), (True, 12)])
+def test_macho_constructor_entry_size_must_match_its_format(tmp_path, legacy, size):
+    path = constructor_macho(tmp_path, legacy=legacy, section_size=size)
+    with pytest.raises(ValueError):
+        runner.inspect_image(path, "arm64")
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_macho_constructor_type_requires_its_exact_section_name(tmp_path, legacy):
+    path = constructor_macho(tmp_path, legacy=legacy, constructor_name="__wrong")
+    with pytest.raises(ValueError):
+        runner.inspect_image(path, "arm64")
+
+
+def test_macho_constructor_section_cannot_extend_past_the_file(tmp_path):
+    path = constructor_macho(tmp_path)
+    path.write_bytes(path.read_bytes()[:0x302])
+    with pytest.raises(ValueError):
+        runner.inspect_image(path, "arm64")

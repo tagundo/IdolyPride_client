@@ -125,7 +125,8 @@ def main():
         "--base-ipa", inputs / "base.ipa", "--output", prepared)
     run(python, "-B", HERE / "verify_client_languages.py", "--prepared-app", prepared,
         "--work", work / "client-language-check", "--report", output / "client-language-runtime-check.json")
-    run(python, "-B", HERE / "build_probe.py", "--prepared-app", prepared, "--output", probe, "--arch", arch)
+    run(python, "-B", HERE / "build_probe.py", "--prepared-app", prepared, "--output", probe, "--arch", arch,
+        "--report", output / "probe-build.json")
     run(python, "-B", HERE / "probe/smoke_probe.py", "--app", probe,
         "--runtime", selected_runtime, "--timeout", "600", "--audit", output / "simulator-smoke.json")
     # The device artifact and the disposable Simulator probe are deliberately

@@ -3,6 +3,9 @@
 #import <WebKit/WebKit.h>
 #import "IdolyEmbeddedServer.h"
 #import <CommonCrypto/CommonCryptor.h>
+#import <CommonCrypto/CommonDigest.h>
+#import "../native/IdolyUnityHost.h"
+#include <sys/stat.h>
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -15,6 +18,68 @@
 #import "../native/IdolyOctoBudget.h"
 #include "../native/tests/OctoBudgetFixture.h"
 #endif
+
+@class IDProbeCoordinator, UnityAppController;
+static IDProbeCoordinator *probeCoordinator;
+static NSString *probeExpectedLanguage, *probeBundleIdentifier, *probeCachedRoot;
+static NSDictionary *probeCanaryIndex;
+static NSMutableDictionary *probeHostProof;
+static UIWindow *probePlaceholderWindow;
+static __weak id probeHostDelegate;
+static BOOL probeRuntimeStarted;
+static unsigned probeOriginalRunMainCalls, probeUIKitMainCalls, probeOriginalWarmupCalls;
+static void ProbeBeforeHostReady(id application,id delegate);
+static const char *ProbeCachedBundleRoot(void) {
+    if (!probeCachedRoot) {
+        NSBundle *bundle = [NSBundle bundleWithIdentifier:probeBundleIdentifier ?: @"local.idoly.client-data"];
+        probeCachedRoot = [(bundle.bundlePath ?: NSBundle.mainBundle.bundlePath) copy];
+    }
+    return probeCachedRoot.fileSystemRepresentation;
+}
+static NSDictionary *ProbeResourceHash(NSString *path) {
+    int fd = open(path.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);
+    if (fd < 0) return @{};
+    struct stat before={0},after={0}; CC_SHA256_CTX hash; CC_SHA256_Init(&hash);
+    unsigned char buffer[65536],digest[CC_SHA256_DIGEST_LENGTH]; unsigned long long count=0;
+    BOOL good = fstat(fd,&before)==0 && S_ISREG(before.st_mode) && before.st_size>0 && before.st_size<=128*1024*1024;
+    while (good) {
+        ssize_t got=read(fd,buffer,sizeof buffer);
+        if (got<0) { good=NO; break; }
+        if (!got) break;
+        count+=(unsigned long long)got;
+        if (count>(unsigned long long)before.st_size) { good=NO; break; }
+        CC_SHA256_Update(&hash,buffer,(CC_LONG)got);
+    }
+    good=good && fstat(fd,&after)==0 && count==(unsigned long long)before.st_size && after.st_size==before.st_size;
+    close(fd); if (!good) return @{};
+    CC_SHA256_Final(digest,&hash); NSMutableString *hex=[NSMutableString stringWithCapacity:64];
+    for (NSUInteger index=0;index<sizeof digest;++index) [hex appendFormat:@"%02x",digest[index]];
+    return @{@"sha256":hex,@"bytes":@(count)};
+}
+static NSString *ProbeDataSHA(NSData *data) {
+    unsigned char bytes[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(data.bytes,(CC_LONG)data.length,bytes);
+    NSMutableString *hex=[NSMutableString stringWithCapacity:64];
+    for (NSUInteger index=0;index<sizeof bytes;++index) [hex appendFormat:@"%02x",bytes[index]];
+    return hex;
+}
+static void ProbeConsumeLanguageData(void) {
+    NSString *root=[NSString stringWithUTF8String:ProbeCachedBundleRoot()];
+    NSBundle *bundle=[NSBundle bundleWithPath:root];
+    NSString *language=[bundle.infoDictionary[@"IdolyClientLanguage"] isKindOfClass:NSString.class]
+        ? bundle.infoDictionary[@"IdolyClientLanguage"] : @"invalid";
+    NSDictionary *expected=probeCanaryIndex[@"languages"][probeExpectedLanguage];
+    NSMutableDictionary *canaries=[NSMutableDictionary dictionary]; BOOL match=[language isEqual:probeExpectedLanguage];
+    for (NSString *name in @[@"Data/resources.assets",@"Data/Managed/Metadata/global-metadata.dat"]) {
+        NSDictionary *wanted=expected[name],*actual=ProbeResourceHash([root stringByAppendingPathComponent:name]);
+        BOOL same=[wanted[@"sha256"] isEqual:actual[@"sha256"]] && [wanted[@"bytes"] isEqual:actual[@"bytes"]];
+        match=match && same;
+        canaries[name]=@{@"expected_sha256":wanted[@"sha256"] ?: @"",@"actual_sha256":actual[@"sha256"] ?: @"",
+            @"expected_bytes":wanted[@"bytes"] ?: @0,@"actual_bytes":actual[@"bytes"] ?: @0};
+    }
+    probeHostProof[@"consumed_bundle_language"]=language;
+    probeHostProof[@"canaries_match"]=@(match);
+    probeHostProof[@"canaries"]=canaries;
+}
 
 static NSDictionary *ProbeObject(NSString *text) {
     NSData *raw = [text dataUsingEncoding:NSUTF8StringEncoding];
@@ -43,6 +108,9 @@ static NSDictionary *ProbeHostStatus(NSString *reply) {
 }
 
 static BOOL ProbeWrite(NSString *name, NSDictionary *value) {
+    if (probeExpectedLanguage && ![probeExpectedLanguage isEqual:@"ko"] && [name hasPrefix:@"embedded-probe"])
+        name = [[@"embedded-language-" stringByAppendingString:probeExpectedLanguage]
+            stringByAppendingString:[name substringFromIndex:@"embedded-probe".length]];
     NSData *raw = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:nil];
     if (!raw || raw.length > 65536) return NO;
     NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
@@ -364,6 +432,36 @@ static void ProbeDiagnosticsCopy(WKWebView *web,void (^completion)(NSDictionary 
     }];
 }
 
+static NSString *const ProbeReplyHook =
+    @"if(!window.__idolyProbeHook){const old=window.idolyServerReply;"
+     "window.idolyServerReply=function(id,envelope){let v=envelope;try{if(typeof v==='string')v=JSON.parse(v);}catch(e){}"
+     "if(v&&v.id===id&&v.ok===true&&v.result){if(typeof v.result.interface_language==='string')"
+     "window.__idolyProbeInterfaceAck={id:v.id,language:v.result.interface_language};"
+     "if(v.result.options)window.__idolyProbeGameAck={id:v.id,language:v.result.options.language,"
+     "effective:v.result.effective_options?v.result.effective_options.language:null};}"
+     "return old.apply(this,arguments);};window.__idolyProbeHook=true;}";
+static void ProbePollLanguage(WKWebView *__weak weakWeb,NSString *script,NSTimeInterval deadline,
+                             BOOL (^nativeReady)(void),void (^completion)(NSDictionary *)) {
+    WKWebView *web=weakWeb;
+    if (!web || NSProcessInfo.processInfo.systemUptime>=deadline) { completion(@{}); return; }
+    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
+        if (!error && [value isKindOfClass:NSDictionary.class] && [value[@"ready"] isEqual:@YES]
+                && (!nativeReady || nativeReady())) { completion(value); return; }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+            ProbePollLanguage(weakWeb,script,deadline,nativeReady,completion);
+        });
+    }];
+}
+static NSString *ProbeChromeTitle(NSString *language) {
+    return [language isEqual:@"ja"] ? @"アイプラサーバー" : [language isEqual:@"en"] ? @"Idoly Server" : @"아이프라 서버";
+}
+static NSString *ProbeChromeStart(NSString *language) {
+    return [language isEqual:@"ja"] ? @"ゲーム開始" : [language isEqual:@"en"] ? @"Start Game" : @"게임 시작";
+}
+static NSString *ProbeChromeReady(NSString *language) {
+    return [language isEqual:@"ja"] ? @"サーバー稼働中" : [language isEqual:@"en"] ? @"Server Running" : @"서버 실행 중";
+}
+
 static BOOL ProbePort(uint16_t port) {
     int descriptor = socket(AF_INET, SOCK_STREAM, 0);
     if (descriptor < 0) return NO;
@@ -447,28 +545,62 @@ static KeyboardDelegate *probeKeyboardInstance;
 + (instancetype)idolyCurrentInstance { return probeKeyboardInstance; }
 @end
 
-@interface UnityFramework : NSObject
+@interface UnityAppController : UIResponder <UIApplicationDelegate>
+@property(nonatomic,strong) UIWindow *window;
+- (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
+@end
+@interface UnityFramework : NSObject {
+    unsigned _runCount;
+}
+@property(nonatomic,strong) UnityAppController *controller;
 + (instancetype)getInstance;
 - (void)setDataBundleId:(const char *)identifier;
 - (UITextField *)keyboardTextField;
+- (void)runUIApplicationMainWithArgc:(int)argc argv:(char **)argv;
+- (void)runEmbeddedWithArgc:(int)argc argv:(char **)argv appLaunchOpts:(NSDictionary *)options;
+- (void)frameworkWarmup:(int)argc argv:(char **)argv;
+- (id)appController;
+- (unsigned)probeRunCount;
 @end
 @implementation UnityFramework
 + (instancetype)getInstance {
     static UnityFramework *instance; static dispatch_once_t once;
-    dispatch_once(&once, ^{ instance = [UnityFramework new]; }); return instance;
+    dispatch_once(&once,^{instance=[UnityFramework new];}); return instance;
 }
 - (void)setDataBundleId:(const char *)identifier {
-    NSString *name = identifier ? [NSString stringWithUTF8String:identifier] : nil;
-    NSCAssert([name isEqualToString:@"local.idoly.client-data"], @"Unexpected data bundle");
-    NSBundle *bundle = [NSBundle bundleWithIdentifier:name];
-    NSCAssert(bundle && [NSFileManager.defaultManager fileExistsAtPath:
-        [bundle.bundlePath stringByAppendingPathComponent:@"Data/Managed/Metadata/global-metadata.dat"]], @"Prepared language data missing");
+    probeBundleIdentifier=identifier ? [NSString stringWithUTF8String:identifier] : nil;
+    NSCAssert([probeBundleIdentifier isEqual:@"local.idoly.client-data"],@"Unexpected data bundle");
 }
-- (UITextField *)keyboardTextField {
-    ++probeKeyboardGetterCalls;
-    return [KeyboardDelegate Instance].field;
+- (UITextField *)keyboardTextField { ++probeKeyboardGetterCalls; return [KeyboardDelegate Instance].field; }
+- (void)frameworkWarmup:(int)argc argv:(char **)argv {
+    (void)argc;(void)argv; ++probeOriginalWarmupCalls; probeRuntimeStarted=YES;
+    ProbeConsumeLanguageData();
 }
+- (void)runUIApplicationMainWithArgc:(int)argc argv:(char **)argv {
+    ++probeOriginalRunMainCalls;
+    [self frameworkWarmup:argc argv:argv];
+    UIApplicationMain(argc,argv,nil,NSStringFromClass(UnityAppController.class));
+}
+- (void)runEmbeddedWithArgc:(int)argc argv:(char **)argv appLaunchOpts:(NSDictionary *)options {
+    [self frameworkWarmup:argc argv:argv];
+    self.controller=[UnityAppController new];
+    [self.controller application:UIApplication.sharedApplication didFinishLaunchingWithOptions:options];
+    if ([self.controller respondsToSelector:@selector(applicationWillEnterForeground:)])
+        [self.controller applicationWillEnterForeground:UIApplication.sharedApplication];
+    if ([self.controller respondsToSelector:@selector(applicationDidBecomeActive:)])
+        [self.controller applicationDidBecomeActive:UIApplication.sharedApplication];
+    ++_runCount;
+}
+- (id)appController { return self.controller; }
+- (unsigned)probeRunCount { return _runCount; }
 @end
+static int ProbeUIKitMain(int argc,char **argv,NSString *principal,NSString *delegate) {
+    ++probeUIKitMainCalls;
+    return UIApplicationMain(argc,argv,principal,delegate);
+}
+static BOOL ProbePreRuntime(void) { return !probeRuntimeStarted && [UnityFramework getInstance].probeRunCount==0; }
+static unsigned ProbeRunCount(id framework) { return [(UnityFramework *)framework probeRunCount]; }
+static id ProbeAppController(id framework) { return [(UnityFramework *)framework appController]; }
 
 static NSDictionary *ProbeKeyboardLifecycle(NSDictionary *status) {
     NSDictionary *value = [status[@"keyboard_lifecycle"] isKindOfClass:NSDictionary.class]
@@ -492,7 +624,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"field_creation_count":@(probeKeyboardCreations), @"lifecycle":ProbeKeyboardLifecycle(status)};
 }
 
-@interface UnityAppController : UIResponder <UIApplicationDelegate>
+@interface IDProbeCoordinator : NSObject
 @property(nonatomic, strong) UIWindow *window;
 @property(nonatomic, strong) UILabel *label;
 @property(nonatomic, strong) NSTimer *waitingTimer;
@@ -510,7 +642,12 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
 @property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
-- (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
+@property(nonatomic,strong) NSMutableArray *interfaceLanguageCycle;
+@property(nonatomic,strong) NSDictionary *languageSave;
+@property(nonatomic) BOOL interfaceChecked;
+@property(nonatomic) BOOL interfaceInFlight;
+- (void)startWithApplication:(UIApplication *)application hostDelegate:(id)hostDelegate;
+- (void)originalUnityInitialized:(UIApplication *)application controller:(UnityAppController *)controller;
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
 - (void)failProbe:(NSString *)code;
@@ -519,19 +656,24 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 - (BOOL)observeOctoBudgetBeforeOriginal;
 - (BOOL)observeOctoBudgetFirstQueuedWork;
 - (void)probeMenuAfterLaunch:(NSMutableDictionary *)report;
+- (void)checkInterfaceWithButton:(UIButton *)button;
+- (void)interfaceStep:(NSUInteger)step web:(WKWebView *)web button:(UIButton *)button;
+- (void)saveNextLanguage:(WKWebView *)web completion:(void (^)(BOOL))completion;
 - (void)observeMenuDismissal:(UINavigationController *)navigation report:(NSMutableDictionary *)report
                        menu:(NSMutableDictionary *)menu started:(NSTimeInterval)started observations:(NSUInteger)observations;
 - (void)finishReport:(NSDictionary *)report;
 @end
 
-@implementation UnityAppController
+@implementation IDProbeCoordinator
 - (void)failProbe:(NSString *)code {
     self.probeError = code;
     ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{}});
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"unity_host_probe":probeHostProof.copy ?: @{},
+        @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
@@ -545,7 +687,9 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"keyboard":self.keyboardProbe.copy ?: @{},
         @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{},
-        @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{}});
+        @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
+        @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
 - (BOOL)observeOctoBudgetBeforeOriginal {
 #if IDOLY_SMOKE_SIMULATOR
@@ -615,28 +759,16 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     if (!correct) [self failProbe:code];
     return correct;
 }
-- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
-    (void)application; (void)options;
-    self.octoBudgetProbe = [NSMutableDictionary dictionary];
-#if IDOLY_SMOKE_SIMULATOR
-    IDOctoBudgetFixtureReset();
-    // Pass an explicit, typed copy into the simulator framework. No reverse
-    // framework-to-executable import or managed callback is needed to prepare.
-    IDOctoBudgetAPIs apis = IDOctoBudgetFixtureAPIs();
-    BOOL registered = IDOctoBudgetRegisterSmokeAPIs(&apis);
-    self.octoBudgetProbe[@"apis_registered"] = @(registered);
-    if (!registered) { [self failProbe:@"octo_budget_registration_failed"]; return YES; }
-#endif
-    [self recordCheckpoint:@"delegate_entered"];
-    self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    UIViewController *screen = [UIViewController new]; screen.view.backgroundColor = UIColor.systemBackgroundColor;
-    self.label = [[UILabel alloc] initWithFrame:screen.view.bounds];
-    self.label.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    self.label.textAlignment = NSTextAlignmentCenter; self.label.numberOfLines = 0;
-    self.label.text = @"Embedded server probe: waiting for READY";
-    [screen.view addSubview:self.label]; self.window.rootViewController = screen; [self.window makeKeyAndVisible];
-    self.launcherProbe = [NSMutableDictionary dictionary];
-    self.keyboardProbe = [NSMutableDictionary dictionary];
+- (void)startWithApplication:(UIApplication *)application hostDelegate:(id)hostDelegate {
+    (void)application;
+    self.octoBudgetProbe=[NSMutableDictionary dictionaryWithDictionary:@{@"apis_registered":@YES}];
+    self.window=[(id<UIApplicationDelegate>)hostDelegate window];
+    probePlaceholderWindow=self.window; probeHostDelegate=hostDelegate;
+    probeHostProof[@"host_delegate_owned"]=@((BOOL)(UIApplication.sharedApplication.delegate==hostDelegate
+        && [NSStringFromClass([hostDelegate class]) isEqual:@"IDUnityHostDelegate"]));
+    self.launcherProbe=[NSMutableDictionary dictionaryWithDictionary:@{@"startup_evidence_version":@2}];
+    self.keyboardProbe=[NSMutableDictionary dictionary];
+    [self recordCheckpoint:@"host_ready"];
     [self recordCheckpoint:@"window_ready"];
     self.waitingTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         (void)timer;
@@ -658,7 +790,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         self.launcherProbe[@"premature_original_called"] = @(self.originalCount);
         self.launcherProbe[@"premature_launch_requested"] = ProbeScalar(status, @"launch_requested");
         self.launcherProbe[@"premature_captured"] = ProbeScalar(status, @"captured");
-        if (![status[@"phase"] isEqual:@1] || ![status[@"captured"] isEqual:@0] || self.originalCount != 0
+        if (![status[@"phase"] isEqual:@1] || ![status[@"captured"] isEqual:@1] || self.originalCount != 0
                 || ![status[@"launch_requested"] isEqual:@NO]) {
             self.probeError = @"premature_launch_not_ignored";
         }
@@ -672,14 +804,85 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 @"completion_main_thread":@(NSThread.isMainThread)};
             if (![value[@"id"] isEqual:@2718] || ![value[@"ok"] isEqual:@YES]
                     || ![result[@"state"] isEqual:@"starting"] || ![result[@"running"] isEqual:@NO]
-                    || ![native[@"phase"] isEqual:@1] || ![native[@"captured"] isEqual:@0]
+                    || ![native[@"phase"] isEqual:@1] || ![native[@"captured"] isEqual:@1]
                     || !NSThread.isMainThread) [self failProbe:@"early_status_correlation_failed"];
         });
         [self recordCheckpoint:@"premature_launch_checked"];
     });
-    return YES;
 }
 
+
+- (void)checkInterfaceWithButton:(UIButton *)button {
+    if (self.interfaceInFlight) return;
+    self.interfaceInFlight=YES; self.interfaceLanguageCycle=[NSMutableArray array];
+    WKWebView *web=ProbeFindSettingsWeb(ProbeButtonOwner(button).view);
+    ProbeSettingsDOM(web,^(NSDictionary *metrics){
+        if (![metrics[@"ready"] isEqual:@YES]) { [self failProbe:@"language_interface_cycle_failed"]; return; }
+        [self interfaceStep:0 web:web button:button];
+    });
+}
+- (void)interfaceStep:(NSUInteger)step web:(WKWebView *)web button:(UIButton *)button {
+    if (step==3) { self.interfaceChecked=YES; self.interfaceInFlight=NO;
+        [self recordCheckpoint:@"interface_language_cycle_checked"]; return; }
+    NSString *language=@[@"ja",@"en",@"ko"][step];
+    NSString *setup=[ProbeReplyHook stringByAppendingFormat:
+        @"window.__idolyProbeInterfaceAck=null;(()=>{const s=document.getElementById('interface_language');"
+         "if(!s)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",language];
+    [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
+        if(error || ![value isEqual:@YES]) { [self failProbe:@"language_interface_cycle_failed"]; return; }
+        NSString *poll=[NSString stringWithFormat:
+            @"(()=>{const a=window.__idolyProbeInterfaceAck,s=document.getElementById('language');"
+             "return {ready:!!a&&a.language==='%@'&&document.documentElement.lang==='%@'&&!!s&&s.value==='%@',"
+             "ack_id:a?a.id:0};})()",language,language,probeExpectedLanguage];
+        BOOL (^chrome)(void)=^{
+            UIView *view=ProbeButtonOwner(button).view;
+            UILabel *title=(UILabel *)ProbeHeaderView(view,@"idoly.native-title");
+            UILabel *status=(UILabel *)ProbeHeaderView(view,@"idoly.server-status");
+            UIButton *server=(UIButton *)ProbeHeaderView(view,@"idoly.server-start");
+            return [title isKindOfClass:UILabel.class] && [title.text isEqual:ProbeChromeTitle(language)]
+                && [[button titleForState:UIControlStateNormal] isEqual:ProbeChromeStart(language)]
+                && [status isKindOfClass:UILabel.class] && [status.text isEqual:ProbeChromeReady(language)]
+                && [server isKindOfClass:UIButton.class]
+                && [[server titleForState:UIControlStateNormal] isEqual:ProbeChromeReady(language)];
+        };
+        ProbePollLanguage(web,poll,NSProcessInfo.processInfo.systemUptime+10,chrome,^(NSDictionary *ack){
+            if (![ack[@"ready"] isEqual:@YES]) { [self failProbe:@"language_interface_cycle_failed"]; return; }
+            NSString *request=[NSString stringWithFormat:@"{\"id\":%lu,\"action\":\"status\"}",(unsigned long)(800+step)];
+            IdolyEmbeddedServerCommand(request,^(NSString *reply){
+                NSDictionary *status=ProbeObject(reply),*result=status[@"result"];
+                BOOL unchanged=[status[@"ok"] isEqual:@YES] && [result[@"options"][@"language"] isEqual:probeExpectedLanguage];
+                [self.interfaceLanguageCycle addObject:@{@"language":language,@"ack_id":ack[@"ack_id"] ?: @0,
+                    @"acknowledged":@YES,@"dom_language_matches":@YES,@"native_title_matches":@YES,
+                    @"native_game_button_matches":@YES,@"native_status_label_matches":@YES,
+                    @"native_server_button_matches":@YES,@"game_select_unchanged":@YES,
+                    @"persisted_game_language_unchanged":@(unchanged)}];
+                if (!unchanged) { [self failProbe:@"language_interface_cycle_failed"]; return; }
+                [self interfaceStep:step+1 web:web button:button];
+            });
+        });
+    }];
+}
+- (void)saveNextLanguage:(WKWebView *)web completion:(void (^)(BOOL))completion {
+    NSString *next=[probeExpectedLanguage isEqual:@"ko"] ? @"en" : @"ja";
+    NSString *setup=[ProbeReplyHook stringByAppendingFormat:
+        @"window.__idolyProbeGameAck=null;(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form');"
+         "if(!s||!f)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));f.requestSubmit();return true;})()",next];
+    [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
+        if(error || ![value isEqual:@YES]) { completion(NO); return; }
+        NSString *poll=[NSString stringWithFormat:
+            @"(()=>{const a=window.__idolyProbeGameAck,f=document.getElementById('options-fields'),m=document.getElementById('message');"
+             "return {ready:!!a&&a.language==='%@'&&a.effective==='%@'&&!!f&&!f.disabled&&!!m&&!m.hidden&&m.dataset.error==='false',"
+             "ack_id:a?a.id:0};})()",next,probeExpectedLanguage];
+        ProbePollLanguage(web,poll,NSProcessInfo.processInfo.systemUptime+15,nil,^(NSDictionary *ack){
+            BOOL saved=[ack[@"ready"] isEqual:@YES];
+            self.languageSave=@{@"current_language":probeExpectedLanguage,@"next_language":next,
+                @"ack_id":ack[@"ack_id"] ?: @0,@"acknowledged":@(saved),@"persisted_language":next,
+                @"effective_language":probeExpectedLanguage,@"options_fields_reenabled":@(saved),@"message_success":@(saved)};
+            if (saved) [self recordCheckpoint:@"language_saved"];
+            completion(saved);
+        });
+    }];
+}
 - (void)probeLauncher:(NSDictionary *)status {
     if (self.probeError || self.launchDispatched || self.reportScheduled) return;
     if (![status[@"phase"] isEqual:@2]) {
@@ -688,25 +891,22 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     }
     if (!self.captureDispatched) {
         if (!self.earlyStatus) return;
-        if (![status[@"captured"] isEqual:@0] || ![status[@"attempts"] isEqual:@1] || self.originalCount != 0) {
-            [self failProbe:@"server_not_ready_before_capture"]; return;
+        BOOL cold=ProbePreRuntime() && [UnityFramework getInstance].probeRunCount==0 && probeOriginalWarmupCalls==0
+            && [UnityFramework getInstance].controller==nil;
+        probeHostProof[@"cold_before_game_start"]=@(cold);
+        probeHostProof[@"runtime_count_before_game_start"]=@([UnityFramework getInstance].probeRunCount);
+        probeHostProof[@"warmup_count_before_game_start"]=@(probeOriginalWarmupCalls);
+        if (![status[@"captured"] isEqual:@1] || ![status[@"attempts"] isEqual:@1] || self.originalCount || !cold) {
+            [self failProbe:@"host_cold_start_failed"]; return;
         }
-        self.launcherProbe[@"server_ready_before_capture"] = @YES;
-        self.launcherProbe[@"uncaptured_original_called"] = @(self.originalCount);
-        self.launcherProbe[@"uncaptured_attempts"] = ProbeScalar(status,@"attempts");
+        self.launcherProbe[@"server_ready_before_runtime"]=@YES;
+        self.launcherProbe[@"cold_original_called"]=@(self.originalCount);
+        self.launcherProbe[@"cold_attempts"]=ProbeScalar(status,@"attempts");
+        self.launcherProbe[@"host_capture_once"]=@YES;
         if (![self observeKeyboard:@"before_capture" phase:2 ready:NO calls:1 failure:@"keyboard_before_capture_failed"]) return;
-        [self recordCheckpoint:@"keyboard_before_capture_checked"];
-        self.captureDispatched = YES;
-        [self initUnityWithApplication:UIApplication.sharedApplication];
-        [self initUnityWithApplication:UIApplication.sharedApplication];
-        NSDictionary *captured = ProbeObject(IdolyEmbeddedServerStatusJSON());
-        if (![captured[@"captured"] isEqual:@1] || ![captured[@"phase"] isEqual:@2]
-                || ![captured[@"attempts"] isEqual:@1] || self.originalCount != 0) {
-            [self failProbe:@"ready_capture_restarted_server"]; return;
-        }
-        self.launcherProbe[@"capture_after_ready_once"] = @YES;
-        [self recordCheckpoint:@"unity_requests_captured"];
-        return; // Observe the newly presented launcher on the next UIKit tick.
+        self.captureDispatched=YES;
+        [self recordCheckpoint:@"host_entry_captured"];
+        return;
     }
     if (self.originalCount != 0) {
         self.probeError = @"unity_started_before_launch_button"; return;
@@ -732,7 +932,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
     if (self.readySince == 0) self.readySince = now;
     NSUInteger observations = [self.launcherProbe[@"ready_observations"] unsignedIntegerValue] + 1;
-    [self.launcherProbe addEntriesFromDictionary:@{@"ready_phase":@2,
+    [self.launcherProbe addEntriesFromDictionary:@{@"ready_phase":@2, @"ready_captured":ProbeScalar(status,@"captured"),
         @"ready_original_called":@(self.originalCount), @"ready_launch_requested":@NO,
         @"ready_launch_prepared":@NO, @"ready_launcher_visible":@YES,
         @"ready_button_found":@YES, @"ready_button_enabled":@(item.enabled),
@@ -760,6 +960,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         }
         [self recordCheckpoint:@"native_header_checked"];
     }
+    if (!self.interfaceChecked) { [self checkInterfaceWithButton:item]; return; }
     if (![self observeKeyboard:@"before_launch" phase:2 ready:NO calls:2 failure:@"keyboard_before_launch_failed"]) return;
     [self recordCheckpoint:@"keyboard_before_launch_checked"];
     self.launchDispatched = YES;
@@ -776,7 +977,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 
 // Exact Unity ABI: void return, instance receiver, selector, one object argument.
-- (void)initUnityWithApplication:(UIApplication *)application {
+- (void)originalUnityInitialized:(UIApplication *)application controller:(UnityAppController *)controller {
+    self.window=controller.window;
     ++self.originalCount;
     if (![self observeOctoBudgetBeforeOriginal]) return;
     self.launcherProbe[@"forwarded_after_button"] = @(self.launchDispatched);
@@ -802,6 +1004,16 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     });
 }
 - (void)probeAfterOriginalReturnedOnMain:(BOOL)originalOnMain applicationMatches:(BOOL)argumentMatches {
+    probeHostProof[@"original_run_main_calls"]=@(probeOriginalRunMainCalls);
+    probeHostProof[@"application_main_adapter_calls"]=@(probeUIKitMainCalls);
+    BOOL distinct=self.window && self.window!=probePlaceholderWindow;
+    BOOL key=self.window.isKeyWindow && !self.window.hidden;
+    BOOL adopted=[(id<UIApplicationDelegate>)probeHostDelegate window]==self.window;
+    probeHostProof[@"game_window_distinct"]=@(distinct); probeHostProof[@"game_window_key"]=@(key);
+    probeHostProof[@"host_delegate_window_is_game"]=@(adopted);
+    probeHostProof[@"placeholder_hidden"]=@((BOOL)probePlaceholderWindow.hidden);
+    if (!distinct || !key || !adopted || !probePlaceholderWindow.hidden) { [self failProbe:@"unity_window_handoff_failed"]; return; }
+    if (![probeHostProof[@"canaries_match"] isEqual:@YES]) { [self failProbe:@"language_canaries_mismatch"]; return; }
     if (![self observeOctoBudgetFirstQueuedWork]) return;
     if (![self observeKeyboard:@"after_init" phase:4 ready:YES calls:4 failure:@"keyboard_after_init_failed"]) return;
     [self recordCheckpoint:@"keyboard_after_init_checked"];
@@ -824,6 +1036,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                         @"main_thread":@(originalOnMain), @"application_argument_matches":@(argumentMatches),
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
                         @"launcher":self.launcherProbe.copy,
+                        @"unity_host_probe":probeHostProof.copy,
                         @"keyboard":self.keyboardProbe.copy,
                         @"octo_budget_probe":self.octoBudgetProbe.copy,
                         @"native_header":self.nativeHeaderProbe ?: @{},
@@ -838,7 +1051,11 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     });
 }
 - (void)finishReport:(NSDictionary *)report {
-    BOOL written = ProbeWrite(@"embedded-probe.json", report);
+    NSMutableDictionary *complete=[report mutableCopy];
+    complete[@"unity_host_probe"]=probeHostProof.copy;
+    complete[@"interface_language_cycle"]=self.interfaceLanguageCycle.copy ?: @[];
+    complete[@"language_save"]=self.languageSave ?: @{};
+    BOOL written = ProbeWrite(@"embedded-probe.json", complete);
     if (!written) { [self failProbe:@"final_report_write_failed"]; return; }
     [self recordCheckpoint:@"report_written"];
     self.label.text = @"Embedded server probe: startup, menu close and listeners verified";
@@ -898,6 +1115,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                     copied = copied && [copyMetrics[key] isEqual:@YES];
                 if (!copied) { [self failProbe:@"settings_diagnostics_copy_failed"]; return; }
                 [self recordCheckpoint:@"settings_diagnostics_copied"];
+                [self saveNextLanguage:web completion:^(BOOL saved){
+                if (!saved) { [self failProbe:@"language_save_failed"]; return; }
                 BOOL closed = ProbeDispatchButton(close);
                 menu[@"return_action_dispatched"] = @(closed);
                 menu[@"return_control_event"] = @"touch-up-inside";
@@ -905,6 +1124,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 [self recordCheckpoint:@"settings_return_requested"];
                 [self observeMenuDismissal:navigation report:report menu:menu
                                   started:NSProcessInfo.processInfo.systemUptime observations:0];
+                }];
             });
         });
     });
@@ -950,6 +1170,48 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 @end
 
-int main(int argc, char *argv[]) {
-    @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(UnityAppController.class)); }
+@implementation UnityAppController
+- (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
+    (void)options; [self initUnityWithApplication:application]; return YES;
+}
+- (void)initUnityWithApplication:(UIApplication *)application {
+    self.window=[[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
+    UIViewController *screen=[UIViewController new]; screen.view.backgroundColor=UIColor.systemBackgroundColor;
+    self.window.rootViewController=screen; [self.window makeKeyAndVisible];
+    [probeCoordinator originalUnityInitialized:application controller:self];
+}
+- (void)applicationWillEnterForeground:(UIApplication *)application { (void)application; }
+- (void)applicationDidBecomeActive:(UIApplication *)application { (void)application; }
+@end
+static void ProbeBeforeHostReady(id application,id delegate) {
+    probeCoordinator=[IDProbeCoordinator new];
+    [probeCoordinator startWithApplication:application hostDelegate:delegate];
+}
+int main(int argc,char *argv[]) {
+    @autoreleasepool {
+        probeExpectedLanguage=@"ko";
+        for (int index=1;index<argc;++index) {
+            NSString *arg=[NSString stringWithUTF8String:argv[index]];
+            if ([arg hasPrefix:@"--idoly-probe-language="]) probeExpectedLanguage=[arg substringFromIndex:@"--idoly-probe-language=".length];
+        }
+        if (![@[@"ko",@"en",@"ja"] containsObject:probeExpectedLanguage]) return 2;
+        NSDictionary *entry=IDUnityHostInfo();
+        probeHostProof=[NSMutableDictionary dictionaryWithDictionary:@{@"schema":@1,@"expected_language":probeExpectedLanguage,
+            @"constructor_installed_before_c_main":@((BOOL)[entry[@"installed"] isEqual:@YES])}];
+        NSURL *source=[NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"probe-language-canaries.json"];
+        NSData *raw=[NSData dataWithContentsOfURL:source options:NSDataReadingMappedIfSafe error:nil];
+        if (!raw || !raw.length || raw.length>65536) { ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"language_canaries_mismatch"}); return 2; }
+        probeCanaryIndex=[NSJSONSerialization JSONObjectWithData:raw options:0 error:nil];
+        if (![probeCanaryIndex isKindOfClass:NSDictionary.class] || ![probeCanaryIndex[@"languages"] isKindOfClass:NSDictionary.class]) return 2;
+        probeHostProof[@"canary_source_sha256"]=ProbeDataSHA(raw);
+        if (![entry[@"installed"] isEqual:@YES]) { ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"host_constructor_not_installed"}); return 2; }
+        IDOctoBudgetFixtureReset(); IDOctoBudgetAPIs budget=IDOctoBudgetFixtureAPIs();
+        if (!IDOctoBudgetRegisterSmokeAPIs(&budget)) { ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"octo_budget_registration_failed"}); return 2; }
+        IDUnityHostSmokeHooks hooks={ProbeUIKitMain,ProbePreRuntime,ProbeRunCount,ProbeCachedBundleRoot,ProbeAppController,ProbeBeforeHostReady};
+        BOOL registered=IDUnityHostRegisterSmokeHooks(&hooks);
+        probeHostProof[@"host_hooks_registered"]=@(registered);
+        if (!registered) { ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"host_hooks_registration_failed"}); return 2; }
+        [[UnityFramework getInstance] runUIApplicationMainWithArgc:argc argv:argv];
+        return 0;
+    }
 }

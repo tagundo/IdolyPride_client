@@ -96,7 +96,22 @@ def master_file_report():
                 "request_encrypted":True,"response_encrypted":True}}
 
 
-def native_report():
+def language_canaries():
+    return {"schema":1,"bundle_id":"local.idoly.client-data",
+        "client_archive_sha256":hashlib.sha256(b"public-fixture-archive").hexdigest(),
+        "client_manifest_sha256":hashlib.sha256(b"public-fixture-manifest").hexdigest(),
+        "descriptor_sha256":hashlib.sha256(public_descriptor()).hexdigest(),
+        "languages":{language:{path:{"bytes":len((language+path).encode()),
+            "sha256":hashlib.sha256((language+path).encode()).hexdigest()}
+            for path in ("Data/resources.assets","Data/Managed/Metadata/global-metadata.dat")}
+            for language in ("ko","en","ja")}}
+
+
+def language_canary_bytes():
+    return json.dumps(language_canaries(),sort_keys=True,separators=(",",":")).encode()+b"\n"
+
+
+def native_report(language="ko"):
     report = {"schema": 1, "original_called": 1, "main_thread": True,
             "application_argument_matches": True, "command_completion_main_thread": True,
             "crypto_completion_main_thread": True,
@@ -115,7 +130,7 @@ def native_report():
                               "launch_requested": True, "launch_prepared": True, "launcher_visible": False,
                               "client_data": {"selected": True, "language": "ko", "bundle_identifier": "local.idoly.client-data"}},
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
-                "premature_launch_requested": False, "ready_phase": 2, "ready_original_called": 0,
+                "premature_launch_requested": False, "ready_phase": 2, "ready_captured":1, "ready_original_called": 0,
                 "ready_launch_requested": False, "ready_launch_prepared": False,
                 "ready_observations": 5, "ready_wait_seconds": 1.003,
                 "ready_launcher_visible": True, "ready_button_found": True,
@@ -164,9 +179,9 @@ def native_report():
                           "original_initialize_calls":0,"reused_existing_calls":1}},
     }
     report["early_status"] = {"id":2718,"ok":True,"state":"starting","running":False,
-                              "phase":1,"captured":0,"completion_main_thread":True}
-    report["launcher"].update(premature_captured=0,server_ready_before_capture=True,
-        uncaptured_original_called=0,uncaptured_attempts=1,capture_after_ready_once=True)
+                              "phase":1,"captured":1,"completion_main_thread":True}
+    report["launcher"].update(startup_evidence_version=2,premature_captured=1,server_ready_before_runtime=True,
+        cold_original_called=0,cold_attempts=1,host_capture_once=True)
     def header_sample(width, height, fonts):
         return {"header_found":True,"actions_found":True,"title_found":True,"status_found":True,
                 "hint_found":True,"nav_bar_hidden":True,"header_inside":True,"controls_inside":True,
@@ -196,7 +211,290 @@ def native_report():
         "host_status_after_close":{"id":2,"ok":True,"result":{"state":"ready","running":True,
                "last_error":None,"runtime":{"running":True,"grpc_address":"127.0.0.1:50051",
                                               "asset_url":"http://127.0.0.1:8080"}}}}
+    report["server_status"]["client_data"]["language"] = language
+    report["server_status"]["unity_host"] = {"schema":1,"strategy":"unity-as-library",
+        "installed":True,"entry_captured":True,"host_ready":True,"started":True,"unity_window_bound":True,
+        "launching":False,"failed":False,"application_main_calls":1,"runtime_start_calls":1,"warmup_calls":1,
+        "bundle_match_before":True,"bundle_match_after":True,"first_warmup_bundle_match":True,
+        "consumed_bundle_language":language,"queued_events":0,"delivered_events":0,"lifecycle_forwarded":0,"error":None}
+    report["unity_host_probe"] = {"schema":1,"expected_language":language,
+        "constructor_installed_before_c_main":True,"host_hooks_registered":True,"application_main_adapter_calls":1,
+        "host_delegate_owned":True,"original_run_main_calls":0,"cold_before_game_start":True,
+        "runtime_count_before_game_start":0,"warmup_count_before_game_start":0,
+        "consumed_bundle_language":language,"canary_source_sha256":hashlib.sha256(language_canary_bytes()).hexdigest(),
+        "canaries_match":True,"game_window_distinct":True,"game_window_key":True,
+        "host_delegate_window_is_game":True,"placeholder_hidden":True,
+        "canaries":{path:{"expected_sha256":row["sha256"],"actual_sha256":row["sha256"],
+            "expected_bytes":row["bytes"],"actual_bytes":row["bytes"]}
+            for path,row in language_canaries()["languages"][language].items()}}
+    report["interface_language_cycle"] = [{"language":item,"ack_id":index+100,
+        "acknowledged":True,"dom_language_matches":True,"native_title_matches":True,
+        "native_game_button_matches":True,"native_status_label_matches":True,"native_server_button_matches":True,
+        "game_select_unchanged":True,"persisted_game_language_unchanged":True}
+        for index,item in enumerate(("ja","en","ko"))]
+    next_language = {"ko":"en","en":"ja","ja":"ja"}[language]
+    report["language_save"] = {"current_language":language,"next_language":next_language,"ack_id":200,
+        "acknowledged":True,"persisted_language":next_language,"effective_language":language,
+        "options_fields_reenabled":True,"message_success":True}
     return report
+
+
+@pytest.mark.parametrize("language", ("ko","en","ja"))
+def test_unity_library_host_consumes_selected_language_before_first_warmup(language):
+    native = native_report(language)
+    summary = probe.validate_language_relaunch_report(native,language)
+    assert summary["language"] == language
+    assert summary["unity_host"]["runtime_start_calls"] == 1
+    assert summary["unity_host_probe"]["warmup_count_before_game_start"] == 0
+    assert summary["unity_host_probe"]["original_run_main_calls"] == 0
+    assert summary["language_save"]["effective_language"] == language
+    assert summary["language_save"]["persisted_language"] == {"ko":"en","en":"ja","ja":"ja"}[language]
+    with pytest.raises(probe.ProbeError):
+        probe.validate_language_relaunch_report(native,"en" if language == "ko" else "ko")
+
+
+@pytest.mark.parametrize("key,value", (("installed",False),("entry_captured",1),("host_ready",False),
+    ("started",False),("unity_window_bound",False),("launching",True),("failed",True),
+    ("application_main_calls",True),("runtime_start_calls",2),("warmup_calls",0),
+    ("bundle_match_before",False),("bundle_match_after",False),("first_warmup_bundle_match",False),
+    ("consumed_bundle_language","en"),("queued_events",33),("delivered_events",True),
+    ("lifecycle_forwarded",-1),("error","must-not-export")))
+def test_unity_host_requires_exact_once_entry_runtime_warmup_and_game_window(key, value):
+    native = native_report()
+    native["server_status"]["unity_host"][key] = value
+    with pytest.raises(probe.ProbeError,match="unity_host_failed"):
+        probe.validate_report(native)
+
+
+@pytest.mark.parametrize("key,value", (("schema",True),("constructor_installed_before_c_main",False),
+    ("host_hooks_registered",False),("application_main_adapter_calls",0),("host_delegate_owned",False),
+    ("original_run_main_calls",1),("cold_before_game_start",False),("runtime_count_before_game_start",1),
+    ("warmup_count_before_game_start",True),("consumed_bundle_language","en"),
+    ("canary_source_sha256","not-a-sha"),("canaries_match",False),("game_window_distinct",False),
+    ("game_window_key",False),("host_delegate_window_is_game",False),("placeholder_hidden",False)))
+def test_unity_host_probe_rejects_late_selection_or_placeholder_runtime(key, value):
+    native = native_report()
+    native["unity_host_probe"][key] = value
+    with pytest.raises(probe.ProbeError,match="unity_host_probe_failed"):
+        probe.validate_report(native)
+
+
+@pytest.mark.parametrize("key,value", (("actual_sha256","0"*64),("expected_sha256","Z"*64),
+    ("actual_bytes",0),("actual_bytes",True),("expected_bytes",128*1024*1024+1)))
+def test_first_warmup_canary_requires_actual_exact_selected_resource_bytes(key, value):
+    native = native_report()
+    native["unity_host_probe"]["canaries"]["Data/resources.assets"][key] = value
+    with pytest.raises(probe.ProbeError,match="unity_host_probe_failed"):
+        probe.validate_report(native)
+
+
+@pytest.mark.parametrize("key,value", (("language","ko"),("ack_id",True),("ack_id",0),
+    ("acknowledged",False),("dom_language_matches",False),("native_title_matches",False),
+    ("native_game_button_matches",1),("native_status_label_matches",False),("native_server_button_matches",1),
+    ("game_select_unchanged",False),
+    ("persisted_game_language_unchanged",False)))
+def test_interface_cycle_requires_real_ack_chrome_and_unchanged_game_language(key, value):
+    native = native_report()
+    native["interface_language_cycle"][0][key] = value
+    with pytest.raises(probe.ProbeError,match="language_interface_cycle_failed"):
+        probe.validate_report(native)
+
+
+@pytest.mark.parametrize("key,value", (("current_language","en"),("next_language","ja"),
+    ("persisted_language","ko"),("effective_language","en"),("ack_id",False),
+    ("acknowledged",False),("options_fields_reenabled",False),("message_success",False)))
+def test_game_language_save_requires_persisted_next_but_unchanged_effective_language(key, value):
+    native = native_report()
+    native["language_save"][key] = value
+    with pytest.raises(probe.ProbeError,match="language_save_failed"):
+        probe.validate_report(native)
+
+
+def test_unity_host_error_key_and_canary_path_set_are_explicit_and_closed():
+    native = native_report()
+    del native["server_status"]["unity_host"]["error"]
+    with pytest.raises(probe.ProbeError,match="unity_host_failed"):
+        probe.validate_report(native)
+    native = native_report()
+    native["unity_host_probe"]["canaries"]["private/path"] = {"secret":"must-not-export"}
+    with pytest.raises(probe.ProbeError,match="unity_host_probe_failed"):
+        probe.validate_report(native)
+
+
+def test_language_matrix_requires_all_three_ordered_independent_process_summaries():
+    matrix = {"schema":1,"order":["ko","en","ja"],"preserved_app_container":True,
+        "reports":[probe.validate_language_relaunch_report(native_report(language),language)
+                   for language in ("ko","en","ja")]}
+    checked = probe.validate_language_matrix_report(matrix)
+    assert [row["language"] for row in checked["reports"]] == ["ko","en","ja"]
+    for mutation in ("missing_ja","wrong_order","reused_ko","container_reset","bool_schema"):
+        bad = json.loads(json.dumps(matrix))
+        if mutation == "missing_ja": bad["reports"].pop()
+        elif mutation == "wrong_order": bad["order"] = ["ko","ja","en"]
+        elif mutation == "reused_ko": bad["reports"][1] = bad["reports"][0]
+        elif mutation == "container_reset": bad["preserved_app_container"] = False
+        else: bad["schema"] = True
+        with pytest.raises(probe.ProbeError): probe.validate_language_matrix_report(bad)
+
+
+def test_language_canary_file_is_descriptor_bound_and_matches_consumed_bytes(app):
+    expected, digest = probe.load_language_canaries(app,hashlib.sha256(public_descriptor()).hexdigest())
+    assert digest == hashlib.sha256(language_canary_bytes()).hexdigest()
+    summary = probe.validate_language_relaunch_report(native_report("en"),"en")
+    probe.compare_language_canaries(summary,"en",expected,digest)
+    summary["unity_host_probe"]["canaries"]["Data/resources.assets"]["expected_sha256"] = "0"*64
+    with pytest.raises(probe.ProbeError,match="language_canaries_mismatch"):
+        probe.compare_language_canaries(summary,"en",expected,digest)
+    with pytest.raises(probe.ProbeError,match="language_canaries_invalid"):
+        probe.load_language_canaries(app,"0"*64)
+
+
+@pytest.mark.parametrize("mutation", ("missing_language","extra_path","bool_bytes","oversize","bad_hash"))
+def test_derived_language_canary_loader_rejects_unbounded_or_incomplete_records(app, mutation):
+    value = language_canaries()
+    if mutation == "missing_language": del value["languages"]["ja"]
+    elif mutation == "extra_path": value["languages"]["ko"]["private/path"] = {"bytes":1,"sha256":"0"*64}
+    elif mutation == "bool_bytes": value["languages"]["ko"]["Data/resources.assets"]["bytes"] = True
+    elif mutation == "oversize": value["languages"]["en"]["Data/resources.assets"]["bytes"] = 128*1024*1024+1
+    else: value["languages"]["ja"]["Data/resources.assets"]["sha256"] = "z"*64
+    (app/"probe-language-canaries.json").write_text(json.dumps(value))
+    with pytest.raises(probe.ProbeError,match="language_canaries_invalid"):
+        probe.load_language_canaries(app,hashlib.sha256(public_descriptor()).hexdigest())
+
+
+def test_language_audit_drops_unknown_errors_paths_and_payloads():
+    native = native_report()
+    native["server_status"]["unity_host"]["private_path"] = "must-not-export"
+    native["unity_host_probe"]["canaries"]["Data/resources.assets"]["private_payload"] = "must-not-export"
+    native["interface_language_cycle"][0]["private_text"] = "must-not-export"
+    native["language_save"]["private_text"] = "must-not-export"
+    assert "must-not-export" not in json.dumps(probe.validate_report(native))
+    native["server_status"]["unity_host"].update(error="must-not-export",runtime_start_calls=True)
+    native["unity_host_probe"]["canaries"]["private/path"] = {"secret":"must-not-export"}
+    observed = probe.language_observation(native)
+    assert "error" not in observed["unity_host"] and "runtime_start_calls" not in observed["unity_host"]
+    assert "must-not-export" not in json.dumps(observed) and "private/path" not in json.dumps(observed)
+
+
+@pytest.mark.parametrize("source", ("status","checkpoint","report"))
+def test_language_failure_projection_reads_only_expected_process_files(tmp_path, source):
+    documents = tmp_path/"Documents"; documents.mkdir()
+    native = native_report("en")
+    native["server_status"]["unity_host"]["error"] = "must-not-export"
+    native["unity_host_probe"].update(game_window_key=False,private="must-not-export")
+    final,status,checkpoint = probe.language_paths("en")
+    if source == "checkpoint":
+        value = {"schema":1,"stage":"host_ready","unity_host":native["server_status"]["unity_host"],
+            "unity_host_probe":native["unity_host_probe"],"language_save":native["language_save"]}
+    else: value = native
+    (documents/{"status":status,"checkpoint":checkpoint,"report":final}[source]).write_text(json.dumps(value))
+    (documents/"embedded-probe-status.json").write_text("must-not-read-stale-ko")
+    checked = probe.failure_checkpoint(tmp_path,"en")
+    assert checked["language_observation"]["unity_host_probe"]["game_window_key"] is False
+    assert "must-not-export" not in json.dumps(checked)
+    if source == "checkpoint": assert checked["stage"] == "host_ready"
+
+
+def test_language_relaunch_wait_never_accepts_old_ko_report(tmp_path):
+    documents = tmp_path/"Documents"; documents.mkdir()
+    (documents/"embedded-probe.json").write_text(json.dumps(native_report()))
+    remaining = mock.Mock(side_effect=[1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep"),pytest.raises(probe.ProbeError,match="probe_deadline_exceeded"):
+        probe.wait_report(tmp_path,remaining,expected_language="en")
+    (documents/"embedded-language-en.json").write_text(json.dumps(native_report()))
+    with pytest.raises(probe.ProbeError,match="language_relaunch_mismatch"):
+        probe.wait_report(tmp_path,lambda:1,expected_language="en")
+
+
+def test_language_waiting_failure_and_deadline_export_only_public_process_evidence(tmp_path):
+    documents = tmp_path/"Documents"; documents.mkdir()
+    value = {"server_status":{"phase":2,"error":None,"unity_host":{"started":False,"error":"must-not-export"}},
+        "unity_host_probe":{"game_window_key":False,"private":"must-not-export"},
+        "probe_error":"unity_window_handoff_failed"}
+    (documents/"embedded-language-en-status.json").write_text(json.dumps(value))
+    with pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path,lambda:1,expected_language="en")
+    assert caught.value.native_language["unity_host"]["started"] is False
+    assert "must-not-export" not in json.dumps(caught.value.native_language)
+    del value["probe_error"]
+    (documents/"embedded-language-en-status.json").write_text(json.dumps(value))
+    remaining = mock.Mock(side_effect=[1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep"),pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path,remaining,expected_language="en")
+    assert caught.value.native_language["unity_host_probe"]["game_window_key"] is False
+
+
+def test_three_cold_processes_preserve_container_and_run_external_ko_gates_once(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"matrix-container")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()) as master, \
+            mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()) as sdk:
+        result = probe.run_probe(app,tmp_path/"matrix.json")
+    assert result["status"] == "PASS"
+    assert result["language_matrix"]["order"] == ["ko","en","ja"]
+    assert result["language_matrix"]["preserved_app_container"] is True
+    assert [row[3] for row in controller.calls if row[0] == "launch"] == [
+        "--idoly-probe-language=ko","--idoly-probe-language=en","--idoly-probe-language=ja"]
+    assert [row[0] for row in controller.calls].count("install") == 1
+    assert [row for row in controller.calls if row[0] == "terminate"] == [
+        ("terminate",CREATED,probe.BUNDLE_ID),("terminate",CREATED,probe.BUNDLE_ID)]
+    rpc.assert_called_once();master.assert_called_once();sdk.assert_called_once()
+    assert all((controller.container/"Documents"/probe.language_paths(language)[0]).exists()
+               for language in ("ko","en","ja"))
+
+
+@pytest.mark.parametrize("failure", ("old_ko_report","native_aes_failure","canary_mismatch","preexisting_ja"))
+def test_relaunch_cannot_skip_native_crypto_canary_or_fresh_report_contract(app, tmp_path, failure):
+    controller = FakeSimctl(tmp_path/"matrix-failure-container")
+    def command(arguments,timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch" and arguments[-1] == "--idoly-probe-language=en":
+            path = controller.container/"Documents/embedded-language-en.json"
+            value = native_report("en")
+            if failure == "old_ko_report": value = native_report()
+            elif failure == "native_aes_failure": value["native_crypto"]["nist_decrypt"] = False
+            elif failure == "canary_mismatch":
+                value["unity_host_probe"]["canaries"]["Data/resources.assets"].update(
+                    expected_sha256="0"*64,actual_sha256="0"*64)
+            else: (controller.container/"Documents/embedded-language-ja.json").write_text("owned-stale-file")
+            path.write_text(json.dumps(value))
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
+            mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()):
+        result = probe.run_probe(app,tmp_path/"matrix-failure.json")
+    assert result["status"] == "FAIL" and result["cleanup"] == {"shutdown":True,"delete":True}
+    rpc.assert_called_once()
+    assert [row[0] for row in controller.calls].count("launch") == 2
+    if failure == "old_ko_report": assert result["error"] == "language_relaunch_mismatch"
+    elif failure == "native_aes_failure": assert result["error"] == "python_commoncrypto_bridge_failed"
+    elif failure == "canary_mismatch": assert result["error"] == "language_canaries_mismatch"
+    else:
+        assert result["error"] == "preexisting_language_report_rejected"
+        assert (controller.container/"Documents/embedded-language-ja.json").read_text() == "owned-stale-file"
+
+
+def test_language_relaunches_share_the_original_six_hundred_second_deadline(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"matrix-deadline-container")
+    clock = {"now":0.0}
+    def command(arguments,timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch" and arguments[-1] == "--idoly-probe-language=en":
+            clock["now"] = 600.0
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command), \
+            mock.patch.object(probe.time,"monotonic",side_effect=lambda:clock["now"]), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
+            mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()):
+        result = probe.run_probe(app,tmp_path/"matrix-deadline.json",timeout=600)
+    assert result["status"] == "FAIL" and result["error"] == "probe_deadline_exceeded"
+    assert result["failed_stage"] == "language_report_en"
+    assert [row[0] for row in controller.calls].count("launch") == 2
+    rpc.assert_called_once()
+    assert result["cleanup"] == {"shutdown":True,"delete":True}
 
 
 @pytest.mark.parametrize("phase,key,value", (
@@ -810,9 +1108,13 @@ def test_waiting_deadline_retains_only_previously_valid_keyboard_scalars(tmp_pat
 
 @pytest.mark.parametrize("path,replacement,code", [
     (("early_status", "id"), 2719, "early_status_correlation_failed"),
-    (("early_status", "captured"), 1, "early_status_correlation_failed"),
-    (("launcher", "server_ready_before_capture"), False, "server_not_ready_before_capture"),
-    (("launcher", "uncaptured_attempts"), 2, "server_not_ready_before_capture"),
+    (("early_status", "captured"), 0, "early_status_correlation_failed"),
+    (("launcher", "server_ready_before_runtime"), False, "server_not_ready_before_capture"),
+    (("launcher", "cold_attempts"), 2, "server_not_ready_before_capture"),
+    (("launcher", "startup_evidence_version"), True, "server_not_ready_before_capture"),
+    (("launcher", "premature_captured"), 0, "server_not_ready_before_capture"),
+    (("launcher", "ready_captured"), 0, "unity_started_before_launch_button"),
+    (("launcher", "ready_captured"), True, "unity_started_before_launch_button"),
     (("menu_lifetime", "dismissed"), False, "settings_menu_lifetime_failed"),
     (("menu_lifetime", "grpc_connected_after_close"), False, "settings_menu_lifetime_failed"),
     (("menu_lifetime", "host_status_after_close", "result", "running"), False, "server_stopped_after_menu_close"),
@@ -839,7 +1141,7 @@ def test_new_flow_audit_discards_unrecognized_native_values():
     observed["server_status"]["client_data"]["unrecognized_payload"] = "must-not-export"
     observed["menu_lifetime"]["unrecognized_payload"] = "must-not-export"
     result = probe.validate_report(observed)
-    assert result["launcher"]["server_ready_before_capture"] is True
+    assert result["launcher"]["server_ready_before_runtime"] is True
     assert result["early_status"]["id"] == 2718
     assert result["menu_lifetime"]["host_status_after_close"]["result"]["running"] is True
     assert "must-not-export" not in json.dumps(result)
@@ -930,6 +1232,7 @@ def app(tmp_path):
     (app / "LocalServer").mkdir(parents=True)
     (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": probe.BUNDLE_ID,
                                                    "CFBundleSupportedPlatforms": ["iPhoneSimulator"]}))
+    (app/"probe-language-canaries.json").write_bytes(language_canary_bytes())
     with ZipFile(app / "LocalServer/ServerData.zip", "w") as archive:
         # Match the distributed ServerData archive, independently of the
         # probe's lookup constant (installed core paths omit the data/ root).
@@ -971,13 +1274,16 @@ class FakeSimctl:
             assert arguments[2:] == [probe.BUNDLE_ID, "data"]
             return (str(self.container) + "\n").encode()
         if action == "launch":
+            language = arguments[3].split("=",1)[1] if len(arguments) == 4 else "ko"
+            assert language in ("ko","en","ja")
+            final_name,status_name,_checkpoint_name = probe.language_paths(language)
             documents = self.container / "Documents"
             documents.mkdir(exist_ok=True)
             if self.startup_failure:
                 value = {"server_status": {"phase": 3, "error": "native-startup-fixture"}}
-                (documents / "embedded-probe-status.json").write_text(json.dumps(value))
+                (documents / status_name).write_text(json.dumps(value))
             else:
-                (documents / "embedded-probe.json").write_text(json.dumps(native_report()))
+                (documents / final_name).write_text(json.dumps(native_report(language)))
         return b""
 
 
@@ -1046,7 +1352,7 @@ def test_fresh_simulator_is_only_mutation_target_and_cleanup_runs(app, tmp_path)
     assert result["native_probe"]["server_status"]["launcher_visible"] is False
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
     assert [call[0] for call in controller.calls] == ["list", "list", "create", "boot", "bootstatus", "install",
-                                                    "get_app_container", "launch", "shutdown", "delete"]
+                                                    "get_app_container", "launch", "terminate", "launch", "terminate", "launch", "shutdown", "delete"]
     socket_call.assert_called_once()
     assert socket_call.call_args.args[0] == ("127.0.0.1", 8080)
     assert 60 < controller.timeouts[7] <= 180  # Cold UIKit/WK startup has its own bounded budget.
@@ -1151,7 +1457,9 @@ def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_rel
     sdk.assert_called_once()
     assert result["master_file"] == master_file_report()
     assert result["sdk_resource"] == sdk_resource_report()
-    assert [call[0] for call in controller.calls].count("launch") == 1
+    assert [call[0] for call in controller.calls].count("launch") == 3
+    assert [call[3] for call in controller.calls if call[0] == "launch"] == [
+        "--idoly-probe-language=ko","--idoly-probe-language=en","--idoly-probe-language=ja"]
     assert result["cleanup"] == {"shutdown": True, "delete": True}
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
 
@@ -1276,7 +1584,7 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe"))
+                   "octo_budget", "octo_budget_probe", "language_observation"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]

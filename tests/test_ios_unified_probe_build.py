@@ -1,9 +1,12 @@
 """Portable probe packaging checks; these do not compile Apple/UIKit code."""
 import importlib.util
+import hashlib
+import json
 from pathlib import Path
 import plistlib
 import struct
 import sys
+from zipfile import ZipFile
 
 import pytest
 
@@ -153,3 +156,103 @@ def test_language_probe_rejects_missing_base_data_before_build(tmp_path):
     (app/'LocalServer/client-languages.zip').write_bytes(b'fixture')
     with pytest.raises(ValueError,match='requires the original nonexecutable Data tree'):
         builder.collect_layout(app)
+
+
+def language_probe_input(tmp_path, *, mutate=None, manifest_bytes=None):
+    """Small independently shaped prebuilt-client archive; no game executable."""
+    app = prepared(tmp_path)
+    paths = ("Data/resources.assets","Data/Managed/Metadata/global-metadata.dat")
+    payloads = {(language,path):(language+":"+path).encode()
+                for language in ("ko","en","ja") for path in paths}
+    manifest = {"schema":1,"policy":"ios-prebuilt-client-data-v1","bundle_id":"local.idoly.client-data",
+        "common":{"Data/boot.config":{"bytes":4,"sha256":hashlib.sha256(b"boot").hexdigest()}},
+        "languages":{},"source":{key:hashlib.sha256(key.encode()).hexdigest()
+            for key in ("stock_ipa_sha256","base_ipa_sha256","english_ui_sha256")}}
+    for language in ("ko","en","ja"):
+        manifest["languages"][language] = {}
+        for path in paths:
+            content = payloads[(language,path)]
+            row = {"bytes":len(content),"sha256":hashlib.sha256(content).hexdigest(),
+                   "source":"base" if language == "ko" else "archive"}
+            if language != "ko": row["member"] = language+"/"+path
+            manifest["languages"][language][path] = row
+            if language == "ko":
+                target = app/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(content)
+    (app/"Data/boot.config").write_bytes(b"boot")
+    if mutate is not None: mutate(manifest)
+    raw = json.dumps(manifest,sort_keys=True).encode() if manifest_bytes is None else manifest_bytes
+    package = app/"LocalServer/client-languages.zip"
+    with ZipFile(package,"w") as archive:
+        archive.writestr("manifest.json",raw)
+        for (language,path),content in payloads.items():
+            if language != "ko": archive.writestr(language+"/"+path,content)
+    package_sha = hashlib.sha256(package.read_bytes()).hexdigest()
+    pin = {"schema":1,"bytes":package.stat().st_size,"sha256":package_sha}
+    (app/"LocalServer/client-languages.json").write_text(json.dumps(pin))
+    with ZipFile(app/"LocalServer/ServerData.zip","w") as archive:
+        archive.writestr("data/protocol/idolypride-6.1.1.pb",b"public-protocol-fixture")
+    return app,{"LocalServer/client-languages.zip":package_sha},manifest,raw
+
+
+def test_legacy_portable_staging_has_no_derived_language_canaries(tmp_path):
+    app = prepared(tmp_path)
+    assert builder.derive_language_canaries(app,{}) is None
+    assert not (app/"probe-language-canaries.json").exists()
+
+
+def test_derive_language_canaries_uses_verified_copy_pin_and_only_two_fixed_overlay_records(tmp_path):
+    app,copied,manifest,raw = language_probe_input(tmp_path)
+    watched = ("LocalServer/client-languages.zip","LocalServer/client-languages.json",
+        "LocalServer/ServerData.zip","Data/resources.assets","Data/Managed/Metadata/global-metadata.dat")
+    before = {name:(app/name).read_bytes() for name in watched}
+    result = builder.derive_language_canaries(app,copied)
+    assert result == {"schema":1,"bundle_id":"local.idoly.client-data",
+        "client_archive_sha256":copied["LocalServer/client-languages.zip"],
+        "client_manifest_sha256":hashlib.sha256(raw).hexdigest(),
+        "descriptor_sha256":hashlib.sha256(b"public-protocol-fixture").hexdigest(),
+        "languages":{language:{path:{"bytes":row["bytes"],"sha256":row["sha256"]}
+            for path,row in manifest["languages"][language].items()} for language in ("ko","en","ja")}}
+    assert all(set(rows) == {"Data/resources.assets","Data/Managed/Metadata/global-metadata.dat"}
+               for rows in result["languages"].values())
+    assert all(set(row) == {"bytes","sha256"} for rows in result["languages"].values() for row in rows.values())
+    assert {name:(app/name).read_bytes() for name in watched} == before
+    assert not (app/"probe-language-canaries.json").exists()  # Caller writes the returned derived artifact.
+
+
+@pytest.mark.parametrize("mismatch", ("copied_sha","pin_size"))
+def test_derive_language_canaries_rejects_unverified_archive_descriptor_pin(tmp_path, mismatch):
+    app,copied,_,_ = language_probe_input(tmp_path)
+    if mismatch == "copied_sha": copied["LocalServer/client-languages.zip"] = "0"*64
+    else:
+        descriptor = app/"LocalServer/client-languages.json"
+        pin = json.loads(descriptor.read_text());pin["bytes"] += 1;descriptor.write_text(json.dumps(pin))
+    with pytest.raises(ValueError,match="copy pin differs"):
+        builder.derive_language_canaries(app,copied)
+    assert not (app/"probe-language-canaries.json").exists()
+
+
+def test_derive_language_canaries_requires_package_descriptor_file(tmp_path):
+    app,copied,_,_ = language_probe_input(tmp_path)
+    (app/"LocalServer/client-languages.json").unlink()
+    with pytest.raises(FileNotFoundError): builder.derive_language_canaries(app,copied)
+    assert not (app/"probe-language-canaries.json").exists()
+
+
+def test_derive_language_canaries_rejects_missing_fixed_overlay_record(tmp_path):
+    def missing(manifest): del manifest["languages"]["ko"]["Data/resources.assets"]
+    app,copied,_,_ = language_probe_input(tmp_path,mutate=missing)
+    with pytest.raises(ValueError,match="Missing client-data language files"):
+        builder.derive_language_canaries(app,copied)
+
+
+def test_derive_language_canaries_bounds_manifest_before_json_decode(tmp_path):
+    app,copied,_,_ = language_probe_input(tmp_path,manifest_bytes=b" "*(256*1024+1))
+    with pytest.raises(ValueError,match="manifest exceeds bound"):
+        builder.derive_language_canaries(app,copied)
+
+
+def test_derive_language_canaries_rejects_wrong_language_inventory(tmp_path):
+    def wrong(manifest): manifest["languages"]["fr"] = manifest["languages"].pop("ja")
+    app,copied,_,_ = language_probe_input(tmp_path,mutate=wrong)
+    with pytest.raises(ValueError,match="Invalid client-data inventory"):
+        builder.derive_language_canaries(app,copied)

@@ -7,6 +7,8 @@ Linux may validate paths/Mach-O inputs; Apple compilation/signing needs Xcode.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -15,6 +17,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+from zipfile import ZipFile
 
 from packaging_common import audit_frameworks, audit_macho, regular, require, safe_name, sha_file, stamp, stream_copy
 
@@ -109,6 +112,36 @@ def info_plist():
             "IdolyUnifiedLoopbackOrigin": "http://127.0.0.1:8080"}
 
 
+def derive_language_canaries(app, copied):
+    """Derive smoke-only expectations without changing any signed Data/ZIP."""
+    app = Path(app)
+    package = app / "LocalServer/client-languages.zip"
+    if not package.exists():
+        return None  # Portable legacy staging fixtures do not execute this probe.
+    descriptor = app / "LocalServer/client-languages.json"
+    require(regular(descriptor).st_size <= 256 * 1024, "Language descriptor exceeds bound")
+    pin = json.loads(descriptor.read_bytes())
+    require(pin.get("schema") == 1 and pin.get("sha256") == copied.get("LocalServer/client-languages.zip")
+            and pin.get("bytes") == regular(package).st_size, "Language package copy pin differs")
+    spec = importlib.util.spec_from_file_location("idoly_probe_client_data", HERE.parent / "src/idoly_local/ios_client_data.py")
+    validator = importlib.util.module_from_spec(spec); spec.loader.exec_module(validator)
+    with ZipFile(package) as archive:
+        info = archive.getinfo("manifest.json")
+        require(0 < info.file_size <= validator.MAX_MANIFEST, "Language manifest exceeds bound")
+        raw = archive.read(info)
+        manifest = validator.validate_manifest(json.loads(raw))
+    with ZipFile(app / "LocalServer/ServerData.zip") as archive:
+        info = archive.getinfo("data/protocol/idolypride-6.1.1.pb")
+        require(0 < info.file_size <= 16 * 1024 * 1024, "Protocol descriptor exceeds bound")
+        protocol_sha = hashlib.sha256(archive.read(info)).hexdigest()
+    paths = ("Data/resources.assets", "Data/Managed/Metadata/global-metadata.dat")
+    return {"schema":1,"bundle_id":"local.idoly.client-data", "client_archive_sha256":pin["sha256"],
+        "client_manifest_sha256":hashlib.sha256(raw).hexdigest(),"descriptor_sha256":protocol_sha,
+        "languages":{language:{name:{"bytes":manifest["languages"][language][name]["bytes"],
+            "sha256":manifest["languages"][language][name]["sha256"]} for name in paths}
+            for language in ("ko","en","ja")}}
+
+
 def build(prepared, output, *, arch, report_path=None):
     require(sys.platform == "darwin", "Actual Simulator probe compilation requires macOS/Xcode")
     files, total, framework_inputs = validate_inputs(prepared, output, arch)
@@ -124,7 +157,7 @@ def build(prepared, output, *, arch, report_path=None):
     compiler = subprocess.check_output([xcrun, "--sdk", "iphonesimulator", "--find", "clang"], text=True).strip()
     require(Path(sdk).is_dir() and Path(compiler).is_file(), "Simulator SDK/compiler unavailable")
     source_inputs = [HERE / "probe/main.m", HERE / "native/IdolyEmbeddedServer.h",
-                     HERE / "native/IdolyOctoBudget.h", HERE / "native/OctoBudgetPolicy.h",
+                     HERE / "native/IdolyOctoBudget.h", HERE / "native/IdolyUnityHost.h", HERE / "native/OctoBudgetPolicy.h",
                      HERE / "native/tests/OctoBudgetFixture.h", Path(__file__).resolve()]
     source_pins = {str(path.relative_to(HERE)): sha_file(path) for path in source_inputs}
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -141,6 +174,14 @@ def build(prepared, output, *, arch, report_path=None):
                 copied[relative] = stream_copy(incoming, outgoing, before.st_size)
             require(stamp(regular(source)) == stamp(before), "Prepared input changed while copying")
             target.chmod(0o755 if before.st_mode & 0o111 else 0o644)
+        canaries = derive_language_canaries(output, copied)
+        canary_sha = None
+        if canaries is not None:
+            encoded = (json.dumps(canaries, sort_keys=True, separators=(",", ":")) + "\n").encode()
+            require(len(encoded) <= 65536, "Derived language canaries exceed bound")
+            with (output / "probe-language-canaries.json").open("xb") as stream:
+                stream.write(encoded)
+            canary_sha = hashlib.sha256(encoded).hexdigest()
         with (output / "Info.plist").open("xb") as stream:
             plistlib.dump(info_plist(), stream, fmt=plistlib.FMT_BINARY)
         command = clang_command(compiler, sdk, output, arch)
@@ -161,7 +202,8 @@ def build(prepared, output, *, arch, report_path=None):
                   "executable": executable, "clang_command": command,
                   "original_game_executable_used_or_modified": False,
                   "original_game_Data_copied_as_nonexecutable": any(name.startswith("Data/") for name in copied),
-                  "phone_or_PlayCover_gameplay_verified": False}
+                  "phone_or_PlayCover_gameplay_verified": False,
+                  "generated_language_canaries_sha256": canary_sha}
         report_path.parent.mkdir(parents=True, exist_ok=True)
         with report_path.open("x") as stream:
             json.dump(result, stream, indent=2); stream.write("\n")

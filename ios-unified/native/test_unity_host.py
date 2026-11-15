@@ -166,28 +166,74 @@ def run(command, timeout=45):
 
 
 def inspect_image(path, architecture):
+    file_bytes = Path(path).stat().st_size
+    require(32 <= file_bytes <= 32 * 1024 * 1024, "unity_host_fixture_image_size_invalid")
     with Path(path).open("rb") as stream:
         header = stream.read(32)
         require(len(header) == 32, "unity_host_native_header_short")
         magic, cpu, _, filetype, count, length, _, _ = struct.unpack("<8I", header)
         require(magic == 0xFEEDFACF and cpu == {"arm64": 0x100000C, "x86_64": 0x1000007}[architecture]
-                and count <= 4096 and length <= 1024 * 1024, "unity_host_native_header_invalid")
+                and count <= 4096 and length <= 1024 * 1024
+                and length <= file_bytes - 32, "unity_host_native_header_invalid")
         commands = stream.read(length)
     require(len(commands) == length, "unity_host_native_commands_short")
-    offset, constructor, loads, install_name = 0, False, [], None
+    offset, loads, install_name = 0, [], None
+    candidates, instructions, versions = [], [], []
+    image_base = None
     for _ in range(count):
         require(offset + 8 <= len(commands), "unity_host_native_command_truncated")
         code, size = struct.unpack_from("<II", commands, offset)
         require(size >= 8 and offset + size <= len(commands), "unity_host_native_command_invalid")
         if code == 0x19:
             require(size >= 72, "unity_host_segment_invalid")
+            segment = commands[offset + 8:offset + 24].split(b"\0")[0].decode("ascii")
+            vmaddr, vmsize, fileoff, filesize = struct.unpack_from("<4Q", commands, offset + 24)
+            initprot = struct.unpack_from("<I", commands, offset + 60)[0]
             sections = struct.unpack_from("<I", commands, offset + 64)[0]
-            require(sections <= (size - 72) // 80, "unity_host_sections_invalid")
+            require(sections <= (size - 72) // 80 and fileoff <= file_bytes
+                    and filesize <= file_bytes - fileoff, "unity_host_sections_invalid")
+            if segment == "__TEXT":
+                require(image_base is None and fileoff == 0, "unity_host_text_base_invalid")
+                image_base = vmaddr
             for index in range(sections):
                 at = offset + 72 + 80 * index
+                name = commands[at:at + 16].split(b"\0")[0].decode("ascii")
+                section_segment = commands[at + 16:at + 32].split(b"\0")[0].decode("ascii")
+                address, size_in_bytes = struct.unpack_from("<2Q", commands, at + 32)
+                section_offset = struct.unpack_from("<I", commands, at + 48)[0]
                 flags = struct.unpack_from("<I", commands, at + 64)[0]
-                size_in_bytes = struct.unpack_from("<Q", commands, at + 40)[0]
-                constructor |= (flags & 0xFF) == 9 and size_in_bytes > 0
+                kind = flags & 0xFF
+                require(section_segment == segment and vmaddr <= address
+                        and address - vmaddr <= vmsize and size_in_bytes <= vmsize - (address - vmaddr),
+                        "unity_host_section_mapping_invalid")
+                if initprot & 4 and flags & 0x80000400 and size_in_bytes:
+                    instructions.append((address, address + size_in_bytes))
+                if kind in (9, 0x16) and size_in_bytes:
+                    width = 8 if kind == 9 else 4
+                    expected_name = "__mod_init_func" if kind == 9 else "__init_offsets"
+                    allowed = ("__DATA", "__DATA_CONST", "__AUTH_CONST") if kind == 9 else ("__TEXT",)
+                    require(segment in allowed and name == expected_name and size_in_bytes <= 65536
+                            and size_in_bytes % width == 0 and section_offset <= file_bytes
+                            and size_in_bytes <= file_bytes - section_offset,
+                            "unity_host_constructor_section_invalid")
+                    candidates.append({"segment": segment, "section": name, "flags": flags,
+                                       "type": kind, "bytes": size_in_bytes, "entry_bytes": width,
+                                       "entries": size_in_bytes // width,
+                                       "format": "pointers64" if kind == 9 else "offsets32",
+                                       "targets_verified": False, "file_offset": section_offset})
+        if code == 0x32:
+            require(size >= 24, "unity_host_build_version_invalid")
+            platform_id, minimum, sdk_version, tools = struct.unpack_from("<4I", commands, offset + 8)
+            require(tools <= 16 and 24 + 8 * tools <= size, "unity_host_build_tools_invalid")
+            versions.append({"command": "LC_BUILD_VERSION", "platform": platform_id,
+                             "minimum": minimum, "sdk": sdk_version,
+                             "tools": [dict(zip(("tool", "version"), struct.unpack_from(
+                                 "<2I", commands, offset + 24 + 8 * index))) for index in range(tools)]})
+        if code == 0x24:
+            require(size >= 16, "unity_host_minimum_version_invalid")
+            minimum, sdk_version = struct.unpack_from("<2I", commands, offset + 8)
+            versions.append({"command": "LC_VERSION_MIN_MACOSX", "platform": 1,
+                             "minimum": minimum, "sdk": sdk_version, "tools": []})
         if code in (0xC, 0xD, 0x80000018, 0x8000001F):
             require(size >= 24, "unity_host_dylib_command_invalid")
             start = struct.unpack_from("<I", commands, offset + 8)[0]
@@ -198,9 +244,29 @@ def inspect_image(path, architecture):
             else:
                 loads.append(name)
         offset += size
-    require(offset == len(commands), "unity_host_native_commands_size_invalid")
+    require(offset == len(commands) and image_base is not None, "unity_host_native_commands_size_invalid")
+    require(len(candidates) <= 64, "unity_host_constructor_section_count_invalid")
+    with Path(path).open("rb") as stream:
+        for row in candidates:
+            if row["type"] == 0x16:
+                # Modern Apple ld stores 32-bit image-relative function offsets,
+                # not dyld-rebased 64-bit pointers, in __TEXT,__init_offsets.
+                stream.seek(row["file_offset"])
+                values = stream.read(row["bytes"])
+                require(len(values) == row["bytes"] and instructions,
+                        "unity_host_constructor_offsets_truncated")
+                for (relative,) in struct.iter_unpack("<I", values):
+                    target = image_base + relative
+                    require((architecture != "arm64" or target % 4 == 0)
+                            and any(lo <= target < hi for lo, hi in instructions),
+                            "unity_host_constructor_offset_outside_code")
+                row["targets_verified"] = True
+            # Legacy pointer values may use chained rebases. Actual execution of
+            # the exact constructor before main remains mandatory in every mode.
+            row.pop("file_offset")
     return {"sha256": sha(path), "cpu": cpu, "filetype": filetype,
-            "constructor_section_present": bool(constructor), "install_name": install_name,
+            "constructor_section_present": bool(candidates), "constructor_sections": candidates,
+            "build_versions": versions, "install_name": install_name,
             "links_fixture_dylib": INSTALL_NAME in loads}
 
 
@@ -256,8 +322,12 @@ def execute(native_dir):
                           actual_dylib_constructor_execution=True)
             validate_report(report, native_dir)
     except subprocess.CalledProcessError as error:
+        command = error.cmd if isinstance(error.cmd, (list, tuple)) else []
         report.update(status="FAIL", error="native_fixture_command_failed",
-                      diagnostic=(error.stderr or b"").decode("utf-8", errors="replace")[-8192:])
+                      failed_program=Path(str(command[0])).name if command else "unknown",
+                      returncode=error.returncode,
+                      diagnostic=(error.stderr or b"").decode("utf-8", errors="replace")[-8192:],
+                      diagnostic_stdout=(error.stdout or b"").decode("utf-8", errors="replace")[-8192:])
     except Exception as error:
         report.update(status="FAIL", error=str(error) if isinstance(error, ValueError) else type(error).__name__)
     return report
