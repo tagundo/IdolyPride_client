@@ -78,6 +78,8 @@ static NSString *localized(NSString *source) {
         @"서버가 준비되지 않았습니다.":@[@"サーバーの準備ができていません。", @"The server is not ready."],
         @"서버가 준비되지 않았습니다. 서버 시작 버튼을 눌러 주세요.":@[@"サーバーの準備ができていません。「サーバー開始」を押してください。", @"The server is not ready. Select Start Server."],
         @"서버와 게임의 언어 데이터가 일치하지 않습니다.":@[@"サーバーとゲームの言語データが一致しません。", @"The server and game language data do not match."],
+        @"게임 시작 경로와 언어 데이터를 확인하지 못했습니다. 앱을 완전히 종료한 뒤 다시 실행해 주세요.":@[@"ゲームの開始処理と言語データを確認できませんでした。アプリを完全に終了してから、もう一度起動してください。", @"The game startup path and language data could not be verified. Fully quit the app, then open it again."],
+        @"이 게임의 초기 시작 경로를 확인하지 못했습니다. 서버는 독립적으로 시작합니다.":@[@"このゲームの初期起動処理を確認できませんでした。サーバーは単独で開始します。", @"This game's initial startup path could not be verified. The server will start independently."],
         @"설정 요청 형식이 올바르지 않습니다.":@[@"設定リクエストの形式が正しくありません。", @"The settings request format is invalid."],
         @"서버 응답이 너무 큽니다.":@[@"サーバーの応答が大きすぎます。", @"The server response is too large."],
         @"로컬 서버 연결을 복구하지 못했습니다. 게임을 다시 열어 주세요.":@[@"ローカルサーバーへの接続を復旧できませんでした。ゲームを開き直してください。", @"The local server connection could not be restored. Please reopen the game."],
@@ -651,8 +653,13 @@ void IDNativeHideLauncher(void) {
     [launcherWindow.rootViewController dismissViewControllerAnimated:NO completion:nil];
     launcherWindow.hidden = YES; launcherWindow.rootViewController = nil;
     launcherController = nil; launcherWindow = nil;
-    UIWindow *restore = previousGameWindow ?: gameWindow(); previousGameWindow = nil;
-    [restore makeKeyWindow];
+    UIWindow *restore = previousGameWindow; previousGameWindow = nil;
+    // Embedded Unity may replace the startup placeholder while this launcher
+    // is visible. Never make a hidden, released or controller-less window key.
+    if (!restore || !gameWindowCandidate(restore) || restore.hidden || !restore.rootViewController)
+        restore = gameWindow();
+    if (restore && gameWindowCandidate(restore) && !restore.hidden && restore.rootViewController)
+        [restore makeKeyWindow];
 }
 BOOL IDNativeLauncherVisible(void) {
     NSCAssert(NSThread.isMainThread, @"Launcher inspection belongs to the main thread");

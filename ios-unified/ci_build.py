@@ -67,6 +67,7 @@ def main():
     run(python, "-B", HERE / "native/test_keyboard_lifecycle.py", "--report", output / "keyboard-lifecycle-native-test.json")
     run(python, "-B", HERE / "native/test_local_http.py", "--report", output / "local-http-native-test.json")
     run(python, "-B", HERE / "native/test_octo_budget.py", "--report", output / "octo-budget-native-test.json")
+    run(python, "-B", HERE / "native/test_unity_host.py", "--report", output / "unity-host-native-test.json")
     client_languages = work / "client-languages.zip"
     run(python, "-B", HERE.parent / "tools/build_ios_client_languages.py",
         "--stock-ipa", inputs / "stock.ipa", "--base-ipa", inputs / "base.ipa",

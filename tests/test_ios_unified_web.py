@@ -808,3 +808,30 @@ assert.equal(env.elements.get('diagnostics-copy').disabled,true);
 env.elements.get('diagnostics-copy').fire('click');assert.equal(env.posted.length,1);
 app.dispose();
 """)
+
+
+def test_diagnostic_copy_preserves_consumed_unity_language_and_scoped_octo_budget() -> None:
+    run_js(r"""
+const env = environment(); const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const ready = status();
+ready.native = {
+  unity_host: {consumed_bundle_language: 'ja', first_warmup_verified: true},
+  late_startup_calls: 2,
+  octo_budget: {applied: true, scoped_local_only: true, timeout_seconds: 330},
+  unrelated_private_field: 'must-not-be-copied'
+};
+env.respond(env.posted[0], ready); await flush();
+const visible = JSON.parse(env.elements.get('diagnostics').textContent);
+assert.deepEqual(visible.native.unity_host, ready.native.unity_host);
+assert.equal(visible.native.late_startup_calls, 2);
+assert.deepEqual(visible.native.octo_budget, ready.native.octo_budget);
+assert.equal(visible.native.unrelated_private_field, undefined);
+env.elements.get('diagnostics-copy').fire('click');
+const copy = env.posted.at(-1); assert.equal(copy.action, 'diagnostics_copy');
+const copied = JSON.parse(copy.text);
+assert.equal(copied.native.unity_host.consumed_bundle_language, 'ja');
+assert.equal(copied.native.unity_host.first_warmup_verified, true);
+assert.deepEqual(copied.native.octo_budget, ready.native.octo_budget);
+assert.equal(copy.text.includes('must-not-be-copied'), false);
+env.respond(copy, {copied: true}); await flush(); app.dispose();
+""")

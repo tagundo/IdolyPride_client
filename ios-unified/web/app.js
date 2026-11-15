@@ -741,7 +741,7 @@
         native: object(snapshot.native) ? Object.fromEntries([
           "schema", "phase", "captured", "forwarded", "attempts", "hook_installed",
           "python_initialized", "launch_requested", "launch_prepared", "launcher_visible",
-          "keyboard_lifecycle", "keyboard_ready",
+          "keyboard_lifecycle", "keyboard_ready", "unity_host", "late_startup_calls", "octo_budget",
           "game_hook_error", "error", "game_error", "client_data", "http_readiness"
         ].filter(key => Object.prototype.hasOwnProperty.call(snapshot.native, key)).map(key => [key, snapshot.native[key]])) : null,
         http_requests: runtime.http_requests || null,

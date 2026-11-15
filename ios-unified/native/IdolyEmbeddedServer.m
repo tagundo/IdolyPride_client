@@ -5,6 +5,7 @@
 #import "IdolyKeyboardLifecycle.h"
 #import "IdolyLocalHTTP.h"
 #import "IdolyOctoBudget.h"
+#import "IdolyUnityHost.h"
 #import "GatePolicy.h"
 #if !IDOLY_SMOKE_SIMULATOR
 #import "UnityStartupProfile.h"
@@ -28,8 +29,9 @@ static Class probeKeyboardClass;
 #else
 static const void *keyboardSingletonSlot;
 #endif
-static id savedController, savedApplication;
-static SEL startSelector;
+static NSString *selectedUnityBundleRoot;
+static BOOL earlyHostInstalled;
+static NSUInteger lateStartupCalls;
 static NSString *hookError, *lastError, *lastGameError, *dataDirectory;
 static NSDictionary *lastHTTPReadiness;
 static BOOL recovering;
@@ -245,22 +247,18 @@ static void forwardUnityIfVisible(void) {
     lastError = nil; lastGameError = nil; IDNativeDismissFailure();
     IDNativeSetServerState(YES, NO, @"서버 실행 중");
     IDNativeSetGameStartAvailable(NO);
-    IDNativeHideLauncher();
-    id controller = savedController, application = savedApplication;
-    savedController = nil; savedApplication = nil;
-    ((void (*)(id, SEL, id))originalStartUnity)(controller, startSelector, application);
+    NSString *hostFailure = nil;
+    if (!earlyHostInstalled || !IDUnityHostStartGame(selectedUnityBundleRoot, &hostFailure)
+            || lateStartupCalls == 0) {
+        lastGameError = @"게임 시작 경로와 언어 데이터를 확인하지 못했습니다. 앱을 완전히 종료한 뒤 다시 실행해 주세요.";
+        IDNativeShowLauncher();
+        IDNativeStartupFailure(lastGameError);
+        return;
+    }
     atomic_store(&unityKeyboardReady, true);
-    // The original initializer creates the IL2CPP runtime. Configure its named
-    // SDK field synchronously before queued main-thread network continuations.
-    // The package marker is emitted only for the audited unified loopback app;
-    // the app-side HTTP readiness check additionally confirms this listener.
-    id origin = NSBundle.mainBundle.infoDictionary[@"IdolyUnifiedLoopbackOrigin"];
-    BOOL loopbackAttested = [origin isKindOfClass:NSString.class]
-        && [origin isEqualToString:@"http://127.0.0.1:8080"]
-        && [lastHTTPReadiness[@"ok"] isEqual:@YES]
-        && [lastHTTPReadiness[@"url"] isEqualToString:@"http://127.0.0.1:8080/client/playback"];
-    if (!IDOctoBudgetConfigure(loopbackAttested, &budgetError)) {
-        lastGameError = budgetError ?: @"로컬 리소스 대기 설정을 적용하지 못했습니다.";
+    IDNativeHideLauncher();
+    if (![IDOctoBudgetInfo()[@"configured"] isEqual:@YES]) {
+        lastGameError = @"로컬 리소스 대기 설정을 적용하지 못했습니다.";
         IDNativeShowLauncher();
         IDNativeStartupFailure(lastGameError);
     }
@@ -332,18 +330,40 @@ static void recoverForeground(void) {
         });
     }];
 }
+static void unityHostReady(void) {
+    NSCAssert(NSThread.isMainThread, @"Native host readiness belongs to the main thread");
+    if (!IDGateCapture(&gate)) return;
+    IDNativeSetGameStartAvailable(earlyHostInstalled && hookInstalled);
+    IDNativeShowLauncher();
+    beginServer();
+}
 static void deferredStart(id self, SEL selector, id application) {
-    // Capture initialization before NoGraphics loads localized client data.
-    // Unexpected cross-thread calls
-    // are queued instead of touching Unity or waiting on the Python worker.
-    void (^capture)(void) = ^{
-        if (!IDGateCapture(&gate)) return;
-        savedController = self; savedApplication = application; startSelector = selector;
-        IDNativeSetGameStartAvailable(hookInstalled && gate.captured);
-        IDNativeShowLauncher();
-        beginServer();
-    };
-    if (NSThread.isMainThread) capture(); else dispatch_async(dispatch_get_main_queue(), capture);
+    NSCAssert(NSThread.isMainThread, @"Unity initialization belongs to the main thread");
+    NSDictionary *host = IDUnityHostInfo();
+    if (IDUnityHostIsLaunching() || [host[@"started"] isEqual:@YES]) {
+        if (IDUnityHostIsLaunching()) ++lateStartupCalls;
+        ((void (*)(id, SEL, id))originalStartUnity)(self, selector, application);
+        // Preserve the verified 156.9109 timing: configure immediately after
+        // Unity initialization, before Embedded's foreground/active callbacks.
+        if (IDUnityHostIsLaunching() && ![IDOctoBudgetInfo()[@"configured"] isEqual:@YES]) {
+            id origin = NSBundle.mainBundle.infoDictionary[@"IdolyUnifiedLoopbackOrigin"];
+            BOOL attested = [origin isKindOfClass:NSString.class]
+                && [origin isEqualToString:@"http://127.0.0.1:8080"]
+                && [lastHTTPReadiness[@"ok"] isEqual:@YES]
+                && [lastHTTPReadiness[@"url"] isEqualToString:@"http://127.0.0.1:8080/client/playback"];
+            NSString *budgetFailure = nil;
+            if (!IDOctoBudgetConfigure(attested, &budgetFailure))
+                lastGameError = @"로컬 리소스 대기 설정을 적용하지 못했습니다.";
+        }
+        return;
+    }
+    // A late-only gate cannot safely choose already consumed language data.
+    // Refuse this route while keeping independent server/settings access.
+    lastGameError = @"게임 시작 경로와 언어 데이터를 확인하지 못했습니다. 앱을 완전히 종료한 뒤 다시 실행해 주세요.";
+    IDNativeSetGameStartAvailable(NO);
+    IDNativeShowLauncher();
+    IDNativeStartupFailure(lastGameError);
+    beginServer();
 }
 static BOOL exactType(Method method, unsigned index, const char *expected) {
     char *type = method_copyArgumentType(method, index); BOOL matches = type && !strcmp(type, expected);
@@ -507,6 +527,7 @@ static BOOL selectClientData(NSDictionary *prepared, NSString *effectiveLanguage
     BOOL selected = IDClientDataSelectBundle([NSURL fileURLWithPath:path isDirectory:YES],
         [NSURL fileURLWithPath:root isDirectory:YES], framework, &nativeError);
     if (!selected) *error = nativeError.localizedDescription ?: @"게임 언어 데이터를 선택하지 못했습니다.";
+    else selectedUnityBundleRoot = path.stringByResolvingSymlinksInPath;
     return selected;
 }
 static void installGate(void) {
@@ -530,9 +551,10 @@ NSString *IDNativeDataDirectory(void) {
 }
 NSString *IdolyEmbeddedServerStatusJSON(void) {
     __block NSString *result;
-    void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled),
+    void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled && earlyHostInstalled),
         @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
-        @"octo_budget":IDOctoBudgetInfo(),
+        @"octo_budget":IDOctoBudgetInfo(), @"unity_host":IDUnityHostInfo(),
+        @"late_startup_calls":@(lateStartupCalls),
         @"http_readiness":lastHTTPReadiness ?: (id)NSNull.null,
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),
@@ -687,12 +709,17 @@ void IdolyEmbeddedServerCryptoSelfTest(void (^completion)(NSString *)) {
 __attribute__((constructor)) static void embeddedServerLoaded(void) {
     // The framework has a required dependency on the original presentation
     // dylib. Its constructor installs the early font gates before this runs.
-    // No interpreter, payload, disk I/O, UIKit UI, or waiting under dyld.
+    // No interpreter, payload reads, UIKit UI, or waiting under dyld.
+    // Foundation reads the small packaged attestation before entry interception.
+    NSString *earlyError = nil;
+    earlyHostInstalled = IDUnityHostInstall(unityHostReady, &earlyError);
     installGate();
+    if (!earlyHostInstalled)
+        hookError = @"이 게임의 초기 시작 경로를 확인하지 못했습니다. 서버는 독립적으로 시작합니다.";
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!worker) worker = [IDServerWorker new];
         IDNativeInstallSettings();
-        IDNativeSetGameStartAvailable(hookInstalled && gate.captured && !gate.forwarded);
+        IDNativeSetGameStartAvailable(earlyHostInstalled && hookInstalled && gate.captured && !gate.forwarded);
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
                 (void)note;
