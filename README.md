@@ -1,51 +1,32 @@
-# IDOLY PRIDE 로컬 서버 프로토타입
+# IDOLY PRIDE 로컬 서버와 통합 클라이언트
 
-**홈 촬영·이벤트 캐시 수정 v0.3.24:** [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/home-cache-v0.3.24/IdolyPride-Local-Server-Android.apk) · [Mac 서버 앱](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/home-cache-v0.3.24/IdolyPride-Local-Server-macOS-arm64.app.zip) · [릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.24). 기존 사용자는 **서버만 업데이트**합니다. 감상 모드에서 이벤트 메뉴가 닫혀 있고 포즈 캐릭터가 모두 `撮影NG`로 나오던 홈 초기 응답을 수정했습니다. Android 다운로드의 Java↔Python 호출을 줄이고, 수신량·평균 속도·검증 용량과 처리 단계를 표시합니다. [수정·검증 범위](docs/home-media-cache-v0.3.24.md). 실제 기기의 속도 개선량과 화면 동작은 아직 검증하지 않았습니다.
+**[최신 릴리즈 v0.3.32](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.32)** · [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-Local-Server-Android.apk) · [통합 IPA 156.9112](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-6.1.1-Unified-iOS.ipa) · [Apple Silicon Mac 서버](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-Local-Server-macOS-arm64.app.zip) · [수정·측정·검증 기록](docs/releases/optimization-v0.3.32.md)
 
-**[v0.3.19 앱 다운로드](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.19)** · [촬영·의상·번역·리소스 보관 안내](docs/local-library-v0.3.19.md)
-
-아이돌리 프라이드 Android·PlayCover 클라이언트를 위한 로컬 서버입니다. Android 서버 APK와 macOS 서버 앱을 설치해 버튼으로 실행하며 일반 사용자는 터미널·Python·Termux를 준비할 필요가 없습니다. 서버와 게임 클라이언트는 별도 파일로 배포합니다.
-
-v0.3.19는 Android 의상룸 표시 실패 후 종료 대기 경로, 일반 촬영 UI 초기 숨김, 영상 MV 숨김과 MV·의상 정렬 선택, 일본어·한국어·영어별 미리 만든 마스터 데이터, Downloads 직접 캐시와 전체 받기·ZIP 가져오기/내보내기를 추가합니다. 기본 저장 위치는 `Downloads/IdolyPride/`이며 `octo-cache`(Android), `octo-cache-ios`(iOS), `exports`(선택적 ZIP)로 나눕니다. 게임의 개별 요청과 전체 받기가 같은 캐시를 사용합니다. 계정·설정은 앱 데이터 폴더에 유지합니다.
-
-번역은 마스터 표시 텍스트 범위이며 ADV 대사·고정 UI·이미지의 전체 번역을 포함하지 않습니다. 한국어·영어 각각89개 테이블을 적용하고 누락 문구와 미지원 튜토리얼 규칙은 일본어를 유지합니다. 언어·정렬·보관 위치 변경 후 서버를 재시작하고 게임 타이틀에서 다시 로그인합니다. 자세한 출처는 [번역 데이터 안내](docs/translation-catalog.md)를 참고합니다.
-
-[감상 모드](docs/media-mode.md)는 일반 계정과 분리해 전체 해금 데이터를 준비하며 일반 획득 조건 확장은 이후 작업입니다. 사용자 Android 기기에서 홈·캐릭터·편성과 초기 튜토리얼 진행을 확인했습니다. v0.3.21의 Android 의상룸 복귀 지연 해결은 사용자가 확인했습니다. 최신 권한 화면·Mac GUI·FPS 변화는 아직 실기기 재검증 범위입니다. 통합 호스트 검사919개와 관련 하위 검사9개를 통과했고 플랫폼 제약으로4개를 건너뛰었습니다. 배포 파일의 실제 서명·원본 보존·전체 다운로드 해시는 별도로 검사합니다.
+서버 상태 조회에서 버려지던 전체 진단 기록 복사와 번역 자료 검증의 중복 메모리를 줄였습니다. 같은 소스로 세 플랫폼 파일을 제작하고 전체 검사·플랫폼 실행 검사·게시 파일 전체 SHA-256 검증을 통과했습니다. 실제 게임 FPS 개선량을 측정한 릴리즈는 아닙니다.
 
 ## 앱으로 실행하기
 
-아래 표에서 사용하는 기기의 **서버 앱과 로컬 게임 클라이언트**를 각각 받습니다. [v0.3.24 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.24)는 새 서버 두 앱과 검증된 기존 클라이언트를 함께 제공합니다. 이미 사용하는 클라이언트는 다시 설치할 필요가 없습니다. 공통 서버 데이터 v0.3.23을 그대로 사용하며 서버 앱에 포함됩니다. 첨부파일 업로드 인증 오류와 GitHub-hosted Actions의 계정 결제/사용 한도 차단으로 **Assets 대신 아래 개별 링크로 제공합니다.** 저장소는 비공개이므로 GitHub 링크는 접근 권한이 있는 계정으로 로그인해야 열 수 있습니다. 계정 정보나 기존 사용자의 저장 데이터는 배포 파일에 포함하지 않습니다.
-
-| 기기 | 서버 앱 | 게임 클라이언트 |
+| 환경 | 받을 파일 | 실행 방법 |
 | --- | --- | --- |
-| Android ARM64, Android 9 이상 | [Android 서버 APK v0.3.24](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/home-cache-v0.3.24/IdolyPride-Local-Server-Android.apk) | [연결용 클라이언트 APK v0.3.21 재사용](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/home-cache-v0.3.24/IdolyPride-Local-Graphics-Diagnostic-Android-arm64.apk) |
-| Apple Silicon Mac, macOS 13 이상 | [Mac 서버 앱 v0.3.24](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/home-cache-v0.3.24/IdolyPride-Local-Server-macOS-arm64.app.zip) | [PlayCover용 IPA v0.3.19 재사용](https://github.com/tagundo/IdolyPride_client/raw/refs/heads/downloads/home-cache-v0.3.24/IdolyPride-6.1.1-Local-PlayCover.ipa) |
+| Android ARM64, Android 9 이상 | [서버 APK v0.3.32](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-Local-Server-Android.apk) + [한국어 게임 APK v0.3.31 재사용](https://github.com/tagundo/IdolyPride_client/raw/3b2c73b51931bb7be031c37c9d55297505fb88e1/IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk) | 서버 앱에서 **서버 시작 → 아이프라 실행** |
+| iPhone·iPad | [서버·게임 통합 IPA 156.9112](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-6.1.1-Unified-iOS.ipa) | 개인 서명 후 설치하고 서버 준비가 끝나면 **게임 시작** |
+| Apple Silicon Mac / PlayCover | [통합 IPA 156.9112](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-6.1.1-Unified-iOS.ipa) 하나, 또는 [Mac 서버 v0.3.32](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-Local-Server-macOS-arm64.app.zip) + [별도 한국어 PlayCover IPA v0.3.31 재사용](https://github.com/tagundo/IdolyPride_client/raw/7fcc9f8661b5158cf66d93e9c307607db2c2ee43/IdolyPride-6.1.1-Local-PlayCover-ko.ipa) | 통합판은 **게임 시작**. 별도 서버는 **서버 시작 → PlayCover에서 열기** 후 PlayCover에서 **아이프라 로컬** 실행 |
 
-서버 APK는 클라이언트를 수정·설치하지 않으며 내장 게임 APK와 설치 권한을 포함하지 않습니다. **서버와 연결용 클라이언트를 각각 업데이트**합니다. Android에서는 **진단 게임 실행** 또는 **그래픽 지원 게임 실행**으로 이번 클라이언트를 엽니다. Play 프로텍트 판정과 실제 FPS 개선량은 실기기에서 확인하지 못했습니다. [권한·배포 변경](docs/android-distribution.md)을 참고합니다.
+별도 한국어 게임 APK와 PlayCover IPA는 검증된 기존 v0.3.31 파일이며 이번에 재제작하지 않았습니다. Mac 서버 ZIP은 풀어서 앱을 교체합니다. 같은 앱은 삭제·데이터 지우기 없이 업데이트하면 계정·설정·받은 리소스를 유지합니다. Android 서버는 같은 앱 식별자와 공개 개발 서명을 사용하고, 게임 APK는 기존 Diagnostics 앱 식별자를 유지하면서 **아이프라 로컬**로 표시합니다.
 
-기존 Mac 서버 앱 종료 수정과 **MV 진입·종료 시 화면 회전 대기** 옵션도 유지합니다. Mac과 스마트폰 모두 기본값은 켜짐이며 각 서버 앱에서 바꿀 수 있습니다. 다음 MV 진입·종료부터 사용합니다.
+**통합 IPA와 별도 PlayCover IPA는 같은 게임 앱 식별자를 쓰는 대안입니다.** 통합판은 서버를 포함하므로 별도 Mac 서버를 완전히 종료하고 사용합니다. 별도 서버 구성에서는 게임을 사용하는 동안 서버를 켜 둡니다. 두 구성의 서버 저장 위치가 달라 자동 계정 이전을 보장하지 않습니다.
 
-[라이브 촬영·360 LIVE 성능 조사](docs/mv-performance-audit.md)는 원본 Android·iOS의 렌더링 정책 차이, 공통 최적화 후보와 실기기 측정 도구를 정리합니다. 현재 결과는 정적 분석이며 실기기 병목이나 성능 개선을 확정한 결과는 아닙니다.
+통합 IPA는 앱을 열면 서버 메뉴를 먼저 표시합니다. 게임 중에는 오른쪽 위 안전 영역을 **2초간 길게 눌러** 서버 메뉴를 엽니다. Mac에서는 **로컬 서버 설정… / ⌘⇧,**도 지원합니다. 메뉴를 닫아도 서버는 유지됩니다. 서버 화면 언어는 즉시 바뀌며, 게임에 들어간 뒤 바꾼 게임 언어는 앱을 완전히 종료·재실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다. [통합 IPA 안내](ios-unified/README.md)
 
-[Android 멀티스레드 렌더링 조사](docs/android-multithreading.md)에는 원본 엔진의 worker 구현, 실제 시작 옵션의 우선순위와 `renderingThreadingMode` 관측 경로를 기록했습니다. 이번 조사는 배포 APK의 설정을 변경하지 않습니다.
+Mac 별도 서버의 계정·설정은 `~/Library/Application Support/IdolyPrideLocal`, 통합판은 앱 컨테이너의 `Library/Application Support/IdolyPrideLocal`에 보관합니다. 선택한 리소스 보관 위치도 업데이트할 때 유지합니다. 게임 API는 `127.0.0.1:50051`, 파일 서버는 `127.0.0.1:8080`이며 같은 기기에서 연결합니다.
 
-Android 멀티스레드 시작 실험과 실제 렌더 모드 관측도 유지합니다. 기본값은 꺼짐이며 [확인 순서](docs/android-mt-verification.md)를 따릅니다. CPU·GPU 시간과 실제 성능 향상은 미측정입니다.
+검증은 전체 코드 검사, Android x86_64 에뮬레이터의 실제 서버 UI·암호화 RPC·업데이트 후 보존, 실제 Mac 앱의 시작·중지와 서명, Apple SDK 빌드와 iOS Simulator의 KO→EN→JA→EN→KO 재실행을 포함합니다. 이번 파일의 Android ARM64 실기기와 PlayCover·iPhone·iPad 실제 게임 재검증은 별도 대상입니다. [세부 검증과 해시](docs/releases/optimization-v0.3.32.md)
 
-v0.3.2의 [파일 해시](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/SHA256SUMS), [Android 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-Android-QA.zip), [Mac 검사 기록](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.2/IdolyPride-Local-Server-macOS-QA.zip)도 같은 릴리스에서 받습니다.
+[촬영·의상·리소스 보관 안내](docs/local-library-v0.3.19.md) · [번역 출처](docs/translation-catalog.md) · [감상 모드](docs/media-mode.md) · [기존 클라이언트 설치 안내](docs/client-setup.md)
 
-1. 서버 앱과 해당 로컬 게임 클라이언트를 설치합니다. Mac에서는 ZIP을 풀어 서버 앱을 응용 프로그램 폴더로 옮깁니다.
-2. **아이프라 서버 / 아이프라 로컬 서버**에서 **서버 시작**을 누릅니다.
-3. 실행 중으로 바뀌면 **아이프라 로컬 실행 / 아이프라 열기**를 누릅니다. 게임을 사용하는 동안 서버를 켜 둡니다.
+## 기능별 구현 기록
 
-게임과 서버는 **같은 Android 또는 같은 Mac**에서 실행합니다. 기본 주소는 게임 API `127.0.0.1:50051`, 마스터 파일 `127.0.0.1:8080`입니다. 로컬 게임의 식별자는 `game.qualiarts.idolypride.local`, 이름은 **아이프라 로컬**이며 기존 공식 앱과 별도로 설치됩니다. 공식 계정이 자동으로 복원되지는 않습니다.
-
-Android 서버 앱은 동일한 공개 개발 서명을 재사용하므로 후속 APK를 업데이트 설치하면 DB를 유지합니다. **서버 앱 삭제·데이터 지우기는 로컬 프로필을 삭제합니다.** Mac 데이터는 `~/Library/Application Support/IdolyPrideLocal`에 보관하며 서버 앱의 **데이터 폴더**에서 열 수 있습니다. 자세한 설치·저장 위치·확인 범위는 [클라이언트 설치 안내](docs/client-setup.md)를 참고합니다.
-
-기존 공식 앱과 로컬 게임 앱을 삭제하지 않습니다. 이번 Android 클라이언트는 기존 **아이프라 진단**에 업데이트 설치합니다. 이전 연결판과 캐시는 앱 식별자에 따라 분리되며, 서버가 새 기본 보관 위치로 확인 후 복사한 원본 캐시는 다시 사용할 수 있습니다. [게임 리소스 안내](docs/resource-support.md)와 [최신 보관 위치 안내](docs/local-library-v0.3.19.md)를 참고합니다.
-
-Android에서는 위 연결용 클라이언트와 서버의 **진단 게임 실행**을 사용하면 Unity 예외·홈 단계·의상룸 표시 실패와 대기 해제 단계·전체 앱 통신량을 기록하고 **진단 기록 내보내기**로 저장할 수 있습니다. 앱 업데이트 뒤에는 게임을 강제 종료했다가 다시 열어 새 응답과 배치를 적용합니다. 마스터 파일 전송량과 전체 앱 통신량은 전체 3D 리소스 다운로드 완료율이 아닙니다.
-
-## 현재 범위
+아래 버전 표시는 각 기능을 추가할 당시의 기록입니다. 현재 배포 파일과 검증 범위는 위 v0.3.32 안내를 따릅니다.
 
 | 기능 | 상태 |
 | --- | --- |

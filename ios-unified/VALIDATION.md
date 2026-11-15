@@ -1,5 +1,18 @@
 # 검증 상태
 
+2026-11-15 통합 IPA `156.9112`와 서버 v0.3.32의 공통 최적화·빌드·실행·게시 검증을 통과했습니다. [세 플랫폼 상세 기록](../docs/releases/optimization-v0.3.32.md).
+
+- 빌드 소스: `7f4244f146a07c35cafcdacf1e5caef949cd1d1c`
+- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43710465014)
+- [검증된 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-6.1.1-Unified-iOS.ipa)
+- 게시 커밋: `5eb868ca2860ecaa092d70977eb1b0d7c92b2759`
+- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,694,288 bytes
+- SHA-256: `f0f30e6a2f92a0cc167dfac3e546f9f2859788128556d5bcc8e0f6712ee3c903`
+
+기존 156.9111의 SIGPIPE·언어 준비 순서 수정과 실제 Mac 검사, 새 Simulator의 다섯 번 KO→EN→JA→EN→KO 재실행 및 전체 리소스 해시 검사를 그대로 유지했습니다. 전체 서버 검사·실제 Android x86 서버·Mac SwiftUI 앱 검증과 공통 최적화 비교도 같은 소스에서 통과했습니다. 게시 IPA 전체 재다운로드 SHA-256과 인증 없는 64바이트 HTTP 206 응답을 확인했습니다. Simulator는 검사용 Unity 진입점을 사용하며 실제 PlayCover·iPhone·iPad 게임 실행과 FPS 재검증은 별도 대상입니다.
+
+## 이전 156.9111 검증 기록
+
 2026-11-15 빌드 `156.9111`의 Apple SDK 빌드, SIGPIPE 연결 중단 검사, 다섯 번의 언어 재실행 검사와 게시 파일 검증을 통과했습니다.
 
 - 빌드 소스: `7513c95b4de54ddf42b61da091c6fdb27d29fffc`

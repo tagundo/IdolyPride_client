@@ -1,8 +1,10 @@
 # iPhone·iPad 통합 IPA
 
-빌드 `156.9111` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
+빌드 `156.9112` 통합 IPA 시험판입니다. 로컬 서버와 일본어·한국어·영어 클라이언트 데이터를 하나의 `IdolyPride-6.1.1-Unified-iOS.ipa`에 넣습니다. iPhone·iPad를 우선하며, 기기 설치에는 개인 서명이 필요합니다.
 
-[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/c158b3356035edf6d82a272aac79fdfaa9345955/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+[검증된 통합 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/5eb868ca2860ecaa092d70977eb1b0d7c92b2759/IdolyPride-6.1.1-Unified-iOS.ipa)와 [검증 범위](VALIDATION.md)를 확인할 수 있습니다. 실제 macOS Foundation·AppKit, 세 언어의 Data 재구성·캐시 재사용, 새 iOS Simulator의 서버 선행 시작·게임 시작 버튼·설정 화면·메뉴 종료 후 서버 유지 검사를 통과했습니다.
+
+156.9112는 세 플랫폼 공통 서버 최적화를 포함합니다. 전체 진단 기록을 복사한 뒤 버리던 상태 조회를 요약 전용으로 바꾸고, 다음 언어 검증 전에 이전 검사 객체를 해제하며, 동일한 리소스 지문을 임시 결합 버퍼 없이 계산합니다. 번역 범위·캐시 리비전·내보낸 기록은 이전과 같습니다. [v0.3.32 측정·검증 기록](../docs/releases/optimization-v0.3.32.md)과 [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43710465014)을 참고하세요. 기존 SIGPIPE·언어 선택 수정과 다섯 번의 재실행 검사를 유지했습니다. 실제 게임 FPS와 기기 전체 시작 시간 개선을 뜻하지 않습니다.
 
 156.9111은 언어를 저장하고 다시 연 뒤 게임 시작 전 서버 메뉴에서 앱이 종료되던 SIGPIPE 오류를 수정합니다. 원본 Unity가 준비 단계에서 적용하던 신호 처리를 서버 시작 전에 먼저 적용하고, 현재 처리 상태를 다시 확인합니다. 실제 Mac의 새 프로세스에서 기본 신호 상태를 강제로 복원한 뒤 끊긴 소켓 쓰기가 EPIPE로 끝나고 프로세스가 살아 있는지 검사했습니다. 같은 Simulator 저장소에서 한국어→영어→일본어→영어→한국어로 다섯 번 종료·재실행하고, 돌아온 영어·한국어 파일의 동일성과 전체 해시를 확인했습니다. 자동화 검사와 게시 IPA 전체 SHA-256 검증을 통과했으며, 이 수정판의 실제 PlayCover·iPhone·iPad 재확인은 별도 대상입니다. 기존 계정·다운로드를 삭제하지 않고 업데이트한 뒤 앱을 완전히 종료·재실행하세요.
 
@@ -36,7 +38,7 @@
 
 ## 빌드와 검증
 
-`.github/workflows/build-server-apps.yml`의 `ios_unified=true`를 선택합니다. 기존 Android·Mac 릴리즈 작업과 별도로 Actions 후보 파일을 생성합니다. 선택적으로 `ios_publish=true`를 함께 지정하면 같은 소스·실행의 산출물과 전체 해시를 검증하고, 새 다운로드 브랜치에 게시한 IPA의 전체 재다운로드 해시까지 확인합니다.
+이번 세 플랫폼 릴리즈는 `.github/workflows/release-all-platforms.yml`에서 전체 회귀 검사와 성능 비교, Android·Mac·통합 IPA 실행 검사를 모두 통과해야 게시합니다. 기존 단독 IPA 후보 빌드는 `.github/workflows/build-server-apps.yml`의 `ios_unified=true`를 선택합니다. 기존 Android·Mac 릴리즈 작업과 별도로 Actions 후보 파일을 생성합니다. 선택적으로 `ios_publish=true`를 함께 지정하면 같은 소스·실행의 산출물과 전체 해시를 검증하고, 새 다운로드 브랜치에 게시한 IPA의 전체 재다운로드 해시까지 확인합니다.
 
 1. `fetch_inputs.py`가 고정된 SHA-256으로 원본·한국어 IPA, 서버·번역 데이터, 영어 UI 입력, BeeWare iOS Python과 순수 Python 의존성을 검증합니다.
 2. `tools/build_ios_client_languages.py`가 일본어·영어 Data와 언어별 매니페스트를 생성합니다. 한국어 파일과 공통 Data는 검증된 기존 한국어 앱을 사용합니다.
