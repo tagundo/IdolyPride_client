@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import time
+import weakref
 
 from Crypto.Cipher import AES
 import pytest
@@ -295,3 +296,190 @@ def test_installer_semantic_helper_validates_both_languages_closes_archives_and_
     with pytest.raises(ValueError, match="format"):
         validate_prepared_translations(tmp_path / "staged", private, platform="android")
     assert len(opened) == 2 and not list(private.glob("client-resource-revision-*.json"))
+
+
+def _prepared_lifetime_fixture(tmp_path, platform):
+    private = tmp_path / "private"
+    archive = private / ("public-octo-ios" if platform == "ios" else "public-octo")
+    archive.mkdir(parents=True)
+    original = database()
+    original.revision = 1159 if platform == "ios" else 1087
+    if platform == "ios":
+        for rows in (original.assetBundleList, original.resourceList):
+            for row in rows:
+                row.uploadVersionId = 102050
+    raw = original.SerializeToString()
+    settings = {"schema": 1, "application_id": 212,
+                "application_version": 105051 if platform == "ios" else 205051,
+                "revision": original.revision, "manifest_sha256": hashlib.sha256(raw).hexdigest(),
+                "aes_key_hex": KEY.hex(), "client_key": "synthetic"}
+    (archive / "manifest.pb").write_bytes(raw)
+    (archive / "settings.json").write_text(json.dumps(settings))
+    source = tmp_path / "lifetime-source"
+    source.mkdir()
+    (source / "adv_bond_ai_01_01.txt").write_text("prepared translation")
+    staged = tmp_path / "staged"
+    for language in ("ko", "en"):
+        build_resource_overlay(raw, source, staged / language / platform,
+            language=language, revision=original.revision + 1, source=SOURCE)
+    return private, staged, archive, raw
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+def test_previous_language_is_released_at_next_constructor_entry(tmp_path, monkeypatch, platform):
+    from idoly_local import resource_translation_runtime as runtime
+    private, staged, archive, raw = _prepared_lifetime_fixture(tmp_path, platform)
+    references, events = {}, []
+
+    class ObservedLayer(ResourceTranslation):
+        def __init__(self, *args, **kwargs):
+            language = kwargs["language"]
+            if language == "en":
+                # A close-order assertion alone misses retained manifest/report
+                # memory. There must be no strong owner at this exact boundary.
+                assert references["ko"]() is None
+                assert events == [("opened", "ko"), ("closed", "ko")]
+            super().__init__(*args, **kwargs)
+            references[language] = weakref.ref(self)
+            events.append(("opened", language))
+
+        def close(self):
+            opened_archive = self._archive
+            assert opened_archive is not None
+            super().close()
+            assert opened_archive.fp is None and self._archive is None
+            events.append(("closed", self.language))
+
+    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    coverage = validate_prepared_translations(staged, private, platform=platform)
+    expected = {"adv_resources": 1, "translated": 1, "missing": 0, "unchanged_original": 0}
+    assert coverage == {"ko": expected, "en": expected}
+    assert events == [("opened", "ko"), ("closed", "ko"), ("opened", "en"), ("closed", "en")]
+    assert set(references) == {"ko", "en"} and all(reference() is None for reference in references.values())
+    assert (archive / "manifest.pb").read_bytes() == raw
+    assert not list(private.glob("client-resource-revision-*.json"))
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+def test_next_constructor_failure_preserves_exception_after_releasing_previous_language(
+        tmp_path, monkeypatch, platform):
+    from idoly_local import resource_translation_runtime as runtime
+    private, staged, archive, raw = _prepared_lifetime_fixture(tmp_path, platform)
+    references, events = {}, []
+    failure = ValueError("second language constructor rejected")
+
+    class ObservedLayer(ResourceTranslation):
+        def __init__(self, *args, **kwargs):
+            language = kwargs["language"]
+            if language == "en":
+                assert references["ko"]() is None
+                assert events == [("opened", "ko"), ("closed", "ko")]
+                events.append(("rejected", "en"))
+                raise failure
+            super().__init__(*args, **kwargs)
+            references[language] = weakref.ref(self)
+            events.append(("opened", language))
+
+        def close(self):
+            opened_archive = self._archive
+            super().close()
+            assert opened_archive.fp is None
+            events.append(("closed", self.language))
+
+    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    with pytest.raises(ValueError) as caught:
+        validate_prepared_translations(staged, private, platform=platform)
+    assert caught.value is failure
+    assert references["ko"]() is None
+    assert events == [("opened", "ko"), ("closed", "ko"), ("rejected", "en")]
+    assert (archive / "manifest.pb").read_bytes() == raw
+    assert not list(private.glob("client-resource-revision-*.json"))
+
+
+@pytest.mark.parametrize("platform", ["android", "ios"])
+def test_coverage_copy_failure_still_closes_archive_and_releases_layer(tmp_path, monkeypatch, platform):
+    from idoly_local import resource_translation_runtime as runtime
+    private, staged, archive, raw = _prepared_lifetime_fixture(tmp_path, platform)
+    references, closed = [], []
+    failure = RuntimeError("coverage could not be copied")
+
+    class BadCoverage:
+        def __iter__(self):
+            raise failure
+
+    class ObservedLayer(ResourceTranslation):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            references.append(weakref.ref(self))
+            self.report = {"coverage": BadCoverage()}
+
+        def close(self):
+            opened_archive = self._archive
+            super().close()
+            closed.append((self.language, opened_archive.fp is None))
+
+    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    with pytest.raises(RuntimeError) as caught:
+        validate_prepared_translations(staged, private, platform=platform)
+    assert caught.value is failure
+    assert closed == [("ko", True)] and len(references) == 1 and references[0]() is None
+    assert (archive / "manifest.pb").read_bytes() == raw
+    assert not list(private.glob("client-resource-revision-*.json"))
+
+
+def _legacy_resource_fingerprint(raw, language, sdk_identity_compat):
+    identity = language.encode("ascii") + b"\0" + raw
+    if sdk_identity_compat:
+        identity = b"octo-sdk-six-byte-object-name-v1\0" + identity
+    return hashlib.sha256(identity).hexdigest()
+
+
+def _expected_complete_revision_snapshot(raw, revision):
+    expected = Database.FromString(raw)
+    expected.revision = revision
+    for rows in (expected.assetBundleList, expected.resourceList):
+        for row in rows:
+            if row.state != 4:
+                row.state = 2
+    return expected.SerializeToString(deterministic=True)
+
+
+@pytest.mark.parametrize("language", ["ja", "ko", "en"])
+@pytest.mark.parametrize("sdk_identity_compat", [False, True])
+@pytest.mark.parametrize("preserve_original", [False, True])
+def test_fresh_revision_fingerprint_matches_legacy_bytes_and_preserve_original_contract(
+        tmp_path, language, sdk_identity_compat, preserve_original):
+    # Include an unknown wire field so hashing must cover the original bytes,
+    # rather than a normalized/re-serialized protobuf representation.
+    raw = database().SerializeToString() + b"\x98\x06\x01"
+    state = tmp_path / "revision.json"
+    selected, compatible = pin_manifest_revision(raw, state, language=language,
+        sdk_identity_compat=sdk_identity_compat, preserve_original=preserve_original)
+    if preserve_original and not sdk_identity_compat:
+        assert selected == raw and compatible is False and not state.exists()
+    else:
+        revision = 1087 + int(sdk_identity_compat)
+        assert compatible is True
+        assert selected == _expected_complete_revision_snapshot(raw, revision)
+        assert json.loads(state.read_text()) == {
+            "schema": 1, "fingerprint": _legacy_resource_fingerprint(raw, language, sdk_identity_compat),
+            "revision": revision}
+
+
+@pytest.mark.parametrize("language", ["ja", "ko", "en"])
+@pytest.mark.parametrize("sdk_identity_compat", [False, True])
+@pytest.mark.parametrize("preserve_original", [False, True])
+def test_existing_legacy_fingerprint_reuses_revision_without_rewriting_state(
+        tmp_path, language, sdk_identity_compat, preserve_original):
+    raw = database().SerializeToString() + b"\x98\x06\x01"
+    state = tmp_path / "revision.json"
+    previous = {"schema": 1,
+                "fingerprint": _legacy_resource_fingerprint(raw, language, sdk_identity_compat),
+                "revision": 1199}
+    encoded = json.dumps(previous, indent=2).encode("ascii") + b"\n"
+    state.write_bytes(encoded)
+    selected, compatible = pin_manifest_revision(raw, state, language=language,
+        sdk_identity_compat=sdk_identity_compat, preserve_original=preserve_original)
+    assert compatible is True
+    assert selected == _expected_complete_revision_snapshot(raw, 1199)
+    assert state.read_bytes() == encoded

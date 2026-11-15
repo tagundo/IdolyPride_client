@@ -151,7 +151,7 @@ def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float =
 
 
 def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
-          live_engine_library: Path | None = None, *, build_number: str = "45", translations=None,
+          live_engine_library: Path | None = None, *, build_number: str = "49", translations=None,
           translations_sha256=None, translations_bytes=None):
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise ValueError("Build on an Apple Silicon macOS runner (macos-15, uname -m = arm64)")
@@ -327,8 +327,8 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="New IdolyPrideLocalServer.app path")
     parser.add_argument("--archive", required=True, type=Path, help="New deliverable .app.zip path")
     parser.add_argument("--evidence", required=True, type=Path)
-    parser.add_argument("--version", default="0.3.31")
-    parser.add_argument("--build-number", default="45")
+    parser.add_argument("--version", default="0.3.32")
+    parser.add_argument("--build-number", default="49")
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     parser.add_argument("--live-engine-library", type=Path,
                         help="Optional ARM64 macOS 13 libidoly_live.dylib; experimental engine remains off by default")

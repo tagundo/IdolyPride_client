@@ -385,5 +385,36 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertTrue(runtime.status()["running"])
 
 
+
+
+class RuntimeDiagnosticsPollingTests(unittest.TestCase):
+    def test_status_skips_history_and_explicit_export_copies_it_once(self):
+        from copy import deepcopy
+        runtime = app_runtime.Runtime("sandbox")
+        frames = ["Solis.Benchmark.Polling.Frame" + str(index) for index in range(16)]
+        event = {"kind": "exception", "type": "NullReferenceException", "frames": frames}
+        raw = json.dumps({"schema": 1, "source": "android-game", "events": [event]}).encode()
+        for _ in range(200):
+            runtime._diagnostics.receive(raw)
+        history_sizes = []
+        def observe(snapshot):
+            if "events" in snapshot:
+                history_sizes.append(len(snapshot["events"]))
+            return deepcopy(snapshot)
+        with mock.patch("idoly_local.diagnostics.deepcopy", side_effect=observe):
+            routine = runtime.status()
+            self.assertEqual(history_sizes, [])
+            self.assertNotIn("events", routine["client_diagnostics"])
+            exported = runtime.diagnostics_snapshot()
+            self.assertEqual(history_sizes, [200])
+        self.assertEqual(exported["runtime"], routine)
+        self.assertEqual(exported["client_diagnostics"]["stored_events"], 200)
+        self.assertEqual(exported["client_diagnostics"]["received_events"], 200)
+        self.assertEqual(len(exported["client_diagnostics"]["events"]), 200)
+        exported["client_diagnostics"]["events"][0]["frames"].clear()
+        exported["runtime"]["client_diagnostics"]["latest_exception"]["frames"].clear()
+        self.assertEqual(len(runtime.status()["client_diagnostics"]["latest_exception"]["frames"]), 16)
+
+
 if __name__ == "__main__":
     unittest.main()

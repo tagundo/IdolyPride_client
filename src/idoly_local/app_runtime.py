@@ -95,8 +95,7 @@ class Runtime:
             last_library_status = self._last_library_status
         with self._log_lock:
             result["logs"] = list(self._logs)
-        diagnostics = self._diagnostics.status()
-        result["client_diagnostics"] = {key: value for key, value in diagnostics.items() if key != "events"}
+        result["client_diagnostics"] = self._diagnostics.status(include_events=False)
         with self._transfer_lock:
             result["asset_transfer"] = dict(self._transfer_status)
         with self._http_lock:

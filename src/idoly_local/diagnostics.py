@@ -219,10 +219,17 @@ class ClientDiagnostics:
         with self._lock:
             return {"accepted": len(events), "summary": self._summary}
 
-    def status(self) -> dict:
-        """Return an independent, JSON-serializable snapshot of safe fields."""
+    def status(self, *, include_events=True) -> dict:
+        """Return detached observations, optionally including the event history.
+
+        Routine launcher polls need only current observations. Explicit exports
+        retain the full bounded history by default, without building and then
+        discarding that history during every status refresh.
+        """
+        if type(include_events) is not bool:
+            raise ValueError("Diagnostic history choice must be a boolean")
         with self._lock:
-            return deepcopy({
+            snapshot = {
                 "received_events": self._received,
                 "stored_events": len(self._events),
                 "summary": self._summary,
@@ -235,5 +242,7 @@ class ClientDiagnostics:
                 "network": self._network,
                 "network_unavailable": self._network_unavailable,
                 "native_probe_status": self._native_probe_status,
-                "events": list(self._events),
-            })
+            }
+            if include_events:
+                snapshot["events"] = list(self._events)
+            return deepcopy(snapshot)
