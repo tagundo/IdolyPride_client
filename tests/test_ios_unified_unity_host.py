@@ -25,8 +25,11 @@ def synthetic_run(mode):
         "actual_macos_foundation_execution": True, "actual_dylib_constructor_execution": True,
         "actualOriginalUnity": False, "physical_PlayCover_execution": False,
         "windows_or_simulators_created": False, "constructor_before_main": True,
+        "sigpipe_ignored_before_server": True, "sigpipe_plain_write_epipe": True,
+        "other_signal_handlers_preserved": True,
         "constructor": {"constructor_calls": 1, "ready_calls": 0 if pre else 1,
-                        "installed": True, "error": None},
+                        "installed": True, "error": None, "sigpipe_default_before_install": True,
+                        "sigpipe_ignored_after_install": True, "other_signal_handlers_preserved": True},
         "checks": dict.fromkeys(runner.MODE_CHECKS[mode], True),
         "counts": dict(zip(runner.COUNT_NAMES, runner.MODE_COUNTS[mode])),
         "canary": "fixture-en-data" if cold else None,
@@ -38,6 +41,7 @@ def synthetic_run(mode):
                  "runtime_start_calls": 1 if cold else 0, "warmup_calls": 1 if cold else 0,
                  "bundle_match_before": cold, "bundle_match_after": cold,
                  "first_warmup_bundle_match": cold, "unity_window_bound": cold,
+                 "sigpipe_ignored_before_server": True,
                  "consumed_bundle_language": "en" if cold else None,
                  "queued_events": 8 if mode == "stale-cache" else 0,
                  "delivered_events": 9 if cold else 0, "lifecycle_forwarded": 1 if cold else 0,
@@ -274,3 +278,27 @@ def test_macho_constructor_section_cannot_extend_past_the_file(tmp_path):
     path.write_bytes(path.read_bytes()[:0x302])
     with pytest.raises(ValueError):
         runner.inspect_image(path, "arm64")
+
+
+@pytest.mark.parametrize("mode", ["cold", "stale-cache", "pre-runtime"])
+@pytest.mark.parametrize("fault", [
+    "default_not_forced", "ignore_not_installed", "other_signal_changed",
+    "handler_not_ignored_before_server", "plain_write_not_epipe", "missing_epipe_count",
+])
+def test_every_fresh_mode_requires_process_sigpipe_ignore_and_plain_epipe_proof(mode, fault):
+    report = synthetic_report()
+    result = next(row for row in report["runs"] if row["mode"] == mode)
+    if fault == "default_not_forced":
+        result["constructor"]["sigpipe_default_before_install"] = False
+    elif fault == "ignore_not_installed":
+        result["constructor"]["sigpipe_ignored_after_install"] = False
+    elif fault == "other_signal_changed":
+        result["constructor"]["other_signal_handlers_preserved"] = False
+    elif fault == "handler_not_ignored_before_server":
+        result["host"]["sigpipe_ignored_before_server"] = False
+    elif fault == "plain_write_not_epipe":
+        result["sigpipe_plain_write_epipe"] = False
+    else:
+        result["counts"]["sigpipe_epipe_writes"] = 0
+    with pytest.raises(ValueError):
+        runner.validate_report(report, NATIVE)

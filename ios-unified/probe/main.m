@@ -10,6 +10,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <math.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -22,6 +23,7 @@
 @class IDProbeCoordinator, UnityAppController;
 static IDProbeCoordinator *probeCoordinator;
 static NSString *probeExpectedLanguage, *probeBundleIdentifier, *probeCachedRoot;
+static NSUInteger probeRunIndex;
 static NSDictionary *probeCanaryIndex;
 static NSMutableDictionary *probeHostProof;
 static UIWindow *probePlaceholderWindow;
@@ -29,6 +31,30 @@ static __weak id probeHostDelegate;
 static BOOL probeRuntimeStarted;
 static unsigned probeOriginalRunMainCalls, probeUIKitMainCalls, probeOriginalWarmupCalls;
 static void ProbeBeforeHostReady(id application,id delegate);
+static NSDictionary *ProbeSignalObservation(void) {
+    struct sigaction action={0}; BOOL readPolicy=sigaction(SIGPIPE,NULL,&action)==0;
+    BOOL ignored=readPolicy && action.sa_handler==SIG_IGN;
+    int pair[2]={-1,-1}; BOOL created=ignored && socketpair(AF_UNIX,SOCK_STREAM,0,pair)==0;
+    BOOL peerClosed=created && close(pair[1])==0;
+    if (peerClosed) pair[1]=-1;
+    BOOL epiped=NO,survived=NO;
+    if (peerClosed) {
+        unsigned char byte=0; errno=0;
+        ssize_t result=write(pair[0],&byte,1); int observedErrno=errno;
+        survived=YES; epiped=result==-1 && observedErrno==EPIPE;
+    }
+    if (pair[0]>=0) close(pair[0]);
+    if (pair[1]>=0) close(pair[1]);
+    return @{@"schema":@1,@"sigaction_read":@(readPolicy),@"sigpipe_ignored":@(ignored),
+        @"socketpair_created":@(created),@"peer_closed":@(peerClosed),@"write_epipe":@(epiped),
+        @"process_survived":@(survived),@"main_thread":@(NSThread.isMainThread)};
+}
+static BOOL ProbeSignalValid(NSDictionary *value,BOOL mainThread) {
+    for (NSString *key in @[@"sigaction_read",@"sigpipe_ignored",@"socketpair_created",
+            @"peer_closed",@"write_epipe",@"process_survived"])
+        if (![value[key] isEqual:@YES]) return NO;
+    return [value[@"main_thread"] isEqual:@(mainThread)];
+}
 static const char *ProbeCachedBundleRoot(void) {
     if (!probeCachedRoot) {
         NSBundle *bundle = [NSBundle bundleWithIdentifier:probeBundleIdentifier ?: @"local.idoly.client-data"];
@@ -54,7 +80,71 @@ static NSDictionary *ProbeResourceHash(NSString *path) {
     close(fd); if (!good) return @{};
     CC_SHA256_Final(digest,&hash); NSMutableString *hex=[NSMutableString stringWithCapacity:64];
     for (NSUInteger index=0;index<sizeof digest;++index) [hex appendFormat:@"%02x",digest[index]];
-    return @{@"sha256":hex,@"bytes":@(count)};
+    return @{@"sha256":hex,@"bytes":@(count),@"identity":@[@(before.st_dev),@(before.st_ino),
+        @(before.st_size),@(before.st_mtimespec.tv_sec),@(before.st_mtimespec.tv_nsec)]};
+}
+static NSArray<NSString *> *ProbeRunLanguages(void) { return @[@"ko",@"en",@"ja",@"en",@"ko"]; }
+static NSString *ProbeNextLanguage(void) { return @[@"en",@"ja",@"en",@"ko",@"ko"][probeRunIndex]; }
+static NSString *ProbeReportStem(void) {
+    return @[@"embedded-probe",@"embedded-language-en",@"embedded-language-ja",
+        @"embedded-language-en-return",@"embedded-language-ko-return"][probeRunIndex];
+}
+static BOOL ProbeRememberCacheIdentity(NSArray *identities) {
+    BOOL returning=probeRunIndex>=3;
+    probeHostProof[@"cache_return"]=@(returning);
+    probeHostProof[@"cache_identity_recorded"]=@NO;
+    probeHostProof[@"cache_files_same_identity"]=returning ? @NO : (id)NSNull.null;
+    NSURL *documents=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
+        inDomains:NSUserDomainMask].firstObject;
+    NSURL *file=[documents URLByAppendingPathComponent:@"probe-cache-identities.json"];
+    struct stat info={0}; int exists=file ? lstat(file.path.fileSystemRepresentation,&info) : -1;
+    NSMutableDictionary *state;
+    if (probeRunIndex==0) {
+        if (!file || exists==0 || errno!=ENOENT) return NO;
+        state=[@{@"schema":@1,@"next_run":@0,@"languages":@{}} mutableCopy];
+    } else {
+        if (exists!=0 || !S_ISREG(info.st_mode) || info.st_size<=0 || info.st_size>8192) return NO;
+        int fd=open(file.path.fileSystemRepresentation,O_RDONLY|O_NOFOLLOW);
+        if (fd<0) return NO;
+        unsigned char bytes[8193]; size_t count=0; BOOL readable=YES;
+        while (count<sizeof bytes) {
+            ssize_t got=read(fd,bytes+count,sizeof bytes-count);
+            if (got<0) { readable=NO; break; }
+            if (!got) break;
+            count+=(size_t)got;
+        }
+        close(fd);
+        if (!readable || count!=(size_t)info.st_size || count>8192) return NO;
+        id parsed=[NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:bytes length:count]
+            options:NSJSONReadingMutableContainers error:nil];
+        if (![parsed isKindOfClass:NSMutableDictionary.class]) return NO;
+        state=parsed;
+    }
+    NSDictionary *old=state[@"languages"];
+    NSSet *keys=probeRunIndex==0 ? [NSSet set] : probeRunIndex==1 ? [NSSet setWithArray:@[@"ko"]]
+        : probeRunIndex==2 ? [NSSet setWithArray:@[@"ko",@"en"]] : [NSSet setWithArray:@[@"ko",@"en",@"ja"]];
+    if (state.count!=3 || ![state[@"schema"] isEqual:@1] || ![state[@"next_run"] isEqual:@(probeRunIndex)]
+            || ![old isKindOfClass:NSDictionary.class] || ![[NSSet setWithArray:old.allKeys] isEqual:keys]
+            || identities.count!=2) return NO;
+    for (NSArray *pair in [old.allValues arrayByAddingObject:identities]) {
+        if (![pair isKindOfClass:NSArray.class] || pair.count!=2) return NO;
+        for (NSArray *identity in pair) {
+            if (![identity isKindOfClass:NSArray.class] || identity.count!=5) return NO;
+            for (NSNumber *number in identity)
+                if (![number isKindOfClass:NSNumber.class]
+                        || CFGetTypeID((__bridge CFTypeRef)number)==CFBooleanGetTypeID()
+                        || CFNumberIsFloatType((__bridge CFNumberRef)number)) return NO;
+        }
+    }
+    if (returning && ![old[probeExpectedLanguage] isEqual:identities]) return NO;
+    if (!returning && old[probeExpectedLanguage]) return NO;
+    NSMutableDictionary *languages=[old mutableCopy]; languages[probeExpectedLanguage]=identities;
+    state[@"languages"]=languages; state[@"next_run"]=@(probeRunIndex+1);
+    NSData *raw=[NSJSONSerialization dataWithJSONObject:state options:NSJSONWritingSortedKeys error:nil];
+    if (!raw || raw.length>8192 || ![raw writeToURL:file options:NSDataWritingAtomic error:nil]) return NO;
+    probeHostProof[@"cache_identity_recorded"]=@YES;
+    if (returning) probeHostProof[@"cache_files_same_identity"]=@YES;
+    return YES;
 }
 static NSString *ProbeDataSHA(NSData *data) {
     unsigned char bytes[CC_SHA256_DIGEST_LENGTH]; CC_SHA256(data.bytes,(CC_LONG)data.length,bytes);
@@ -68,17 +158,20 @@ static void ProbeConsumeLanguageData(void) {
     NSString *language=[bundle.infoDictionary[@"IdolyClientLanguage"] isKindOfClass:NSString.class]
         ? bundle.infoDictionary[@"IdolyClientLanguage"] : @"invalid";
     NSDictionary *expected=probeCanaryIndex[@"languages"][probeExpectedLanguage];
-    NSMutableDictionary *canaries=[NSMutableDictionary dictionary]; BOOL match=[language isEqual:probeExpectedLanguage];
+    NSMutableDictionary *canaries=[NSMutableDictionary dictionary];
+    NSMutableArray *identities=[NSMutableArray array]; BOOL match=[language isEqual:probeExpectedLanguage];
     for (NSString *name in @[@"Data/resources.assets",@"Data/Managed/Metadata/global-metadata.dat"]) {
         NSDictionary *wanted=expected[name],*actual=ProbeResourceHash([root stringByAppendingPathComponent:name]);
         BOOL same=[wanted[@"sha256"] isEqual:actual[@"sha256"]] && [wanted[@"bytes"] isEqual:actual[@"bytes"]];
         match=match && same;
+        if ([actual[@"identity"] isKindOfClass:NSArray.class]) [identities addObject:actual[@"identity"]];
         canaries[name]=@{@"expected_sha256":wanted[@"sha256"] ?: @"",@"actual_sha256":actual[@"sha256"] ?: @"",
             @"expected_bytes":wanted[@"bytes"] ?: @0,@"actual_bytes":actual[@"bytes"] ?: @0};
     }
     probeHostProof[@"consumed_bundle_language"]=language;
     probeHostProof[@"canaries_match"]=@(match);
     probeHostProof[@"canaries"]=canaries;
+    if (!match || !ProbeRememberCacheIdentity(identities)) probeHostProof[@"cache_identity_recorded"]=@NO;
 }
 
 static NSDictionary *ProbeObject(NSString *text) {
@@ -108,9 +201,8 @@ static NSDictionary *ProbeHostStatus(NSString *reply) {
 }
 
 static BOOL ProbeWrite(NSString *name, NSDictionary *value) {
-    if (probeExpectedLanguage && ![probeExpectedLanguage isEqual:@"ko"] && [name hasPrefix:@"embedded-probe"])
-        name = [[@"embedded-language-" stringByAppendingString:probeExpectedLanguage]
-            stringByAppendingString:[name substringFromIndex:@"embedded-probe".length]];
+    if ([name hasPrefix:@"embedded-probe"])
+        name = [ProbeReportStem() stringByAppendingString:[name substringFromIndex:@"embedded-probe".length]];
     NSData *raw = [NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:nil];
     if (!raw || raw.length > 65536) return NO;
     NSURL *documents = [NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory
@@ -646,6 +738,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic,strong) NSDictionary *languageSave;
 @property(nonatomic) BOOL interfaceChecked;
 @property(nonatomic) BOOL interfaceInFlight;
+@property(nonatomic) BOOL signalChecked;
+@property(nonatomic) BOOL signalInFlight;
 - (void)startWithApplication:(UIApplication *)application hostDelegate:(id)hostDelegate;
 - (void)originalUnityInitialized:(UIApplication *)application controller:(UnityAppController *)controller;
 - (void)probeLauncher:(NSDictionary *)status;
@@ -863,7 +957,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     }];
 }
 - (void)saveNextLanguage:(WKWebView *)web completion:(void (^)(BOOL))completion {
-    NSString *next=[probeExpectedLanguage isEqual:@"ko"] ? @"en" : @"ja";
+    NSString *next=ProbeNextLanguage();
     NSString *setup=[ProbeReplyHook stringByAppendingFormat:
         @"window.__idolyProbeGameAck=null;(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form');"
          "if(!s||!f)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));f.requestSubmit();return true;})()",next];
@@ -938,9 +1032,9 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"ready_button_found":@YES, @"ready_button_enabled":@(item.enabled),
         @"ready_button_title":buttonTitle, @"ready_button_kind":@"UIButton", @"ready_observations":@(observations),
         @"ready_wait_seconds":@(now - self.readySince)}];
-    // Remain Ready for a full second without forwarding Unity. This proves
-    // readiness alone does not enter the game, before invoking the real UI.
-    if (now - self.readySince < 1.0) return;
+    // Observe the healthy server menu for five seconds without entering
+    // Unity, including on both returns to previously prepared language data.
+    if (now - self.readySince < 5.0) return;
     if (!self.nativeHeaderProbe) {
         self.nativeHeaderProbe = ProbeHeaderLayouts(item);
         if (![self.nativeHeaderProbe[@"restore_succeeded"] isEqual:@YES]) {
@@ -961,6 +1055,28 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         [self recordCheckpoint:@"native_header_checked"];
     }
     if (!self.interfaceChecked) { [self checkInterfaceWithButton:item]; return; }
+    if (!self.signalChecked) {
+        if (self.signalInFlight) return;
+        self.signalInFlight=YES;
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+            NSDictionary *proof=ProbeSignalObservation();
+            dispatch_async(dispatch_get_main_queue(),^{
+                NSMutableDictionary *signals=[probeHostProof[@"sigpipe"] mutableCopy];
+                signals[@"before_game_worker"]=proof; probeHostProof[@"sigpipe"]=signals;
+                self.signalChecked=ProbeSignalValid(proof,NO); self.signalInFlight=NO;
+                if (!self.signalChecked) { [self failProbe:@"sigpipe_before_game_failed"]; return; }
+                [self recordCheckpoint:@"sigpipe_before_game_checked"];
+            });
+        });
+        return;
+    }
+    BOOL healthy=[status[@"phase"] isEqual:@2] && [status[@"python_initialized"] isEqual:@YES]
+        && status[@"error"]==NSNull.null && [status[@"attempts"] isEqual:@1];
+    BOOL cold=ProbePreRuntime() && [UnityFramework getInstance].probeRunCount==0
+        && probeOriginalWarmupCalls==0 && [UnityFramework getInstance].controller==nil;
+    probeHostProof[@"prelaunch_server_healthy"]=@(healthy);
+    probeHostProof[@"prelaunch_runtime_cold"]=@(cold);
+    if (!healthy || !cold) { [self failProbe:@"host_cold_start_failed"]; return; }
     if (![self observeKeyboard:@"before_launch" phase:2 ready:NO calls:2 failure:@"keyboard_before_launch_failed"]) return;
     [self recordCheckpoint:@"keyboard_before_launch_checked"];
     self.launchDispatched = YES;
@@ -1014,6 +1130,10 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     probeHostProof[@"placeholder_hidden"]=@((BOOL)probePlaceholderWindow.hidden);
     if (!distinct || !key || !adopted || !probePlaceholderWindow.hidden) { [self failProbe:@"unity_window_handoff_failed"]; return; }
     if (![probeHostProof[@"canaries_match"] isEqual:@YES]) { [self failProbe:@"language_canaries_mismatch"]; return; }
+    if (![probeHostProof[@"cache_identity_recorded"] isEqual:@YES]
+            || (probeRunIndex>=3 && ![probeHostProof[@"cache_files_same_identity"] isEqual:@YES])) {
+        [self failProbe:@"language_cache_identity_failed"]; return;
+    }
     if (![self observeOctoBudgetFirstQueuedWork]) return;
     if (![self observeKeyboard:@"after_init" phase:4 ready:YES calls:4 failure:@"keyboard_after_init_failed"]) return;
     [self recordCheckpoint:@"keyboard_after_init_checked"];
@@ -1189,15 +1309,31 @@ static void ProbeBeforeHostReady(id application,id delegate) {
 }
 int main(int argc,char *argv[]) {
     @autoreleasepool {
-        probeExpectedLanguage=@"ko";
+        probeExpectedLanguage=@"ko"; BOOL explicitRun=NO;
         for (int index=1;index<argc;++index) {
             NSString *arg=[NSString stringWithUTF8String:argv[index]];
             if ([arg hasPrefix:@"--idoly-probe-language="]) probeExpectedLanguage=[arg substringFromIndex:@"--idoly-probe-language=".length];
+            if ([arg hasPrefix:@"--idoly-probe-run-index="]) {
+                NSString *number=[arg substringFromIndex:@"--idoly-probe-run-index=".length];
+                if (number.length!=1 || [number characterAtIndex:0]<'0' || [number characterAtIndex:0]>'4') return 2;
+                probeRunIndex=(NSUInteger)([number characterAtIndex:0]-'0'); explicitRun=YES;
+            }
         }
         if (![@[@"ko",@"en",@"ja"] containsObject:probeExpectedLanguage]) return 2;
+        if (!explicitRun) probeRunIndex=[ProbeRunLanguages() indexOfObject:probeExpectedLanguage];
+        if (![ProbeRunLanguages()[probeRunIndex] isEqual:probeExpectedLanguage]) return 2;
         NSDictionary *entry=IDUnityHostInfo();
         probeHostProof=[NSMutableDictionary dictionaryWithDictionary:@{@"schema":@1,@"expected_language":probeExpectedLanguage,
+            @"run_index":@(probeRunIndex),@"cache_return":@((BOOL)(probeRunIndex>=3)),
             @"constructor_installed_before_c_main":@((BOOL)[entry[@"installed"] isEqual:@YES])}];
+        ProbeWrite(@"embedded-probe-checkpoint.json",@{@"schema":@1,@"stage":@"c_main_entered",
+            @"unity_host_probe":probeHostProof.copy});
+        NSDictionary *signalProof=ProbeSignalObservation();
+        probeHostProof[@"sigpipe"]=@{@"before_server":signalProof};
+        if (!ProbeSignalValid(signalProof,YES)) {
+            ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"sigpipe_before_server_failed",
+                @"unity_host_probe":probeHostProof.copy}); return 2;
+        }
         NSURL *source=[NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"probe-language-canaries.json"];
         NSData *raw=[NSData dataWithContentsOfURL:source options:NSDataReadingMappedIfSafe error:nil];
         if (!raw || !raw.length || raw.length>65536) { ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"language_canaries_mismatch"}); return 2; }
@@ -1211,6 +1347,8 @@ int main(int argc,char *argv[]) {
         BOOL registered=IDUnityHostRegisterSmokeHooks(&hooks);
         probeHostProof[@"host_hooks_registered"]=@(registered);
         if (!registered) { ProbeWrite(@"embedded-probe-status.json",@{@"probe_error":@"host_hooks_registration_failed"}); return 2; }
+        ProbeWrite(@"embedded-probe-checkpoint.json",@{@"schema":@1,@"stage":@"host_hooks_registered",
+            @"unity_host_probe":probeHostProof.copy});
         [[UnityFramework getInstance] runUIApplicationMainWithArgc:argc argv:argv];
         return 0;
     }

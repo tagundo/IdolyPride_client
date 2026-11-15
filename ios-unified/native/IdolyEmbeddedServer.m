@@ -267,6 +267,15 @@ static void beginServer(void) {
     NSCAssert([NSThread isMainThread], @"Gate state belongs to main thread");
     if (!IDGateBegin(&gate)) return;
     lastError = nil; lastGameError = nil; IDNativeDismissFailure();
+    // HTTP can write to a disconnected client before Unity's delayed warmup.
+    // Keep its original SIGPIPE policy ready before starting any Python work.
+    if (![IDUnityHostInfo()[@"sigpipe_ignored_before_server"] isEqual:@YES]) {
+        lastError = @"서버 연결 보호를 준비하지 못했습니다. 앱을 다시 실행해 주세요.";
+        IDGateFailedAttempt(&gate);
+        IDNativeSetServerState(NO, NO, @"서버를 시작하지 못했습니다");
+        IDNativeStartupFailure(lastError);
+        return;
+    }
     IDNativeSetServerState(NO, YES, @"서버를 준비하고 있습니다…");
     if (!worker) worker = [IDServerWorker new];
     NSUInteger startupInterfaceRevision = interfaceSelectionRevision;

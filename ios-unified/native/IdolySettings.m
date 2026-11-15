@@ -60,6 +60,7 @@ static NSString *localized(NSString *source) {
         @"서버를 준비하고 있습니다…":@[@"サーバーを準備しています…", @"Preparing the server…"],
         @"서버가 실행 중이 아닙니다. ‘서버 시작’을 눌러 주세요.":@[@"サーバーは停止中です。「サーバー開始」を押してください。", @"The server is stopped. Select Start Server."],
         @"서버를 시작하지 못했습니다":@[@"サーバーを開始できませんでした", @"The server could not start"],
+        @"서버 연결 보호를 준비하지 못했습니다. 앱을 다시 실행해 주세요.":@[@"サーバー接続の保護を準備できませんでした。アプリを起動し直してください。", @"The server connection protection could not be prepared. Please reopen the app."],
         @"서버 시작 실패":@[@"サーバーの開始に失敗しました", @"Server startup failed"],
         @"서버 연결 확인 실패":@[@"サーバー接続を確認できませんでした", @"Server connection check failed"],
         @"내장 리소스 서버에 연결하지 못했습니다. 진단에서 HTTP 연결 상태를 확인해 주세요.":@[@"内蔵リソースサーバーに接続できませんでした。診断でHTTP接続の状態を確認してください。", @"The embedded resource server could not be reached. Check the HTTP connection status in Diagnostics."],

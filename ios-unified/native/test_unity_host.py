@@ -23,7 +23,9 @@ SOURCES = (
     "tests/unity_host_foundation_test.m", "test_unity_host.py", "../../tests/test_ios_unified_unity_host.py",
 )
 COMMON_CHECKS = ("constructor_before_main", "registration_after_constructor", "smoke_table_copy",
-                 "main_entry_intercepted", "start_before_capture_rejected")
+                 "main_entry_intercepted", "start_before_capture_rejected",
+                 "sigpipe_default_before_install", "sigpipe_ignored_before_server",
+                 "plain_closed_socket_epipe", "other_signal_handlers_preserved")
 MODE_CHECKS = {
     "cold": COMMON_CHECKS + (
         "selected_bundle_before_warmup", "first_warmup_canary_en", "single_embedded_start",
@@ -37,11 +39,12 @@ MODE_CHECKS = {
                                   "runtime_not_started"),
 }
 COUNT_NAMES = ("original_run_main", "application_main", "original_embedded", "original_warmup",
-               "run_count", "canary_reads", "setter_calls", "ready_observer", "restorations", "windows")
+               "run_count", "canary_reads", "setter_calls", "ready_observer", "restorations", "windows",
+               "sigpipe_epipe_writes")
 MODE_COUNTS = {
-    "cold": (0, 1, 1, 1, 1, 1, 1, 1, 4, 2),
-    "stale-cache": (0, 1, 0, 0, 0, 0, 1, 1, 0, 1),
-    "pre-runtime": (0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    "cold": (0, 1, 1, 1, 1, 1, 1, 1, 4, 2, 1),
+    "stale-cache": (0, 1, 0, 0, 0, 0, 1, 1, 0, 1, 1),
+    "pre-runtime": (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1),
 }
 
 
@@ -78,7 +81,8 @@ def validate_run(result):
     mode = result.get("mode")
     require(mode in MODE_CHECKS, "unity_host_mode_invalid")
     for key in ("actual_macos_foundation_execution", "actual_dylib_constructor_execution",
-                "constructor_before_main"):
+                "constructor_before_main", "sigpipe_ignored_before_server",
+                "sigpipe_plain_write_epipe", "other_signal_handlers_preserved"):
         require(result.get(key) is True, "unity_host_run_true_required: " + key)
     for key in ("actualOriginalUnity", "physical_PlayCover_execution", "windows_or_simulators_created"):
         require(result.get(key) is False, "unity_host_run_false_required: " + key)
@@ -93,14 +97,19 @@ def validate_run(result):
     require(type(constructor) is dict and integer(constructor.get("constructor_calls"), 1)
             and integer(constructor.get("ready_calls"), 0 if mode == "pre-runtime" else 1)
             and constructor.get("installed") is True and "error" in constructor
-            and constructor["error"] is None, "unity_host_constructor_evidence_invalid")
+            and constructor["error"] is None
+            and constructor.get("sigpipe_default_before_install") is True
+            and constructor.get("sigpipe_ignored_after_install") is True
+            and constructor.get("other_signal_handlers_preserved") is True,
+            "unity_host_constructor_evidence_invalid")
     host = result.get("host")
     require(type(host) is dict and integer(host.get("schema"), 1)
             and host.get("strategy") == "unity-as-library", "unity_host_state_missing")
     flags = {"installed": True, "entry_captured": True, "host_ready": mode != "pre-runtime",
              "launching": False, "started": mode == "cold", "failed": mode == "pre-runtime",
              "bundle_match_before": mode == "cold", "bundle_match_after": mode == "cold",
-             "first_warmup_bundle_match": mode == "cold", "unity_window_bound": mode == "cold"}
+             "first_warmup_bundle_match": mode == "cold", "unity_window_bound": mode == "cold",
+             "sigpipe_ignored_before_server": True}
     for key, expected in flags.items():
         require(host.get(key) is expected, "unity_host_state_flag_invalid: " + key)
     counters = {"application_main_calls": 0 if mode == "pre-runtime" else 1,

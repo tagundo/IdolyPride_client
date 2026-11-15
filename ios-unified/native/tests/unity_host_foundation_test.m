@@ -7,6 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#include <errno.h>
 
 #if !IDOLY_SMOKE_SIMULATOR || !IDOLY_UNITY_HOST_FOUNDATION_TESTING
 #error This fixture requires the explicit Foundation-only smoke configuration.
@@ -34,6 +38,7 @@ static void Require(BOOL condition, const char *message) {
 }
 static BOOL runtimeInitialized;
 static unsigned adapterMainCalls, originalMainCalls, embeddedCalls, originalWarmups;
+static unsigned sigpipeEpipeWrites;
 static unsigned readyObserverCalls, canaryReads, setterCalls, restorationCalls, cachedRootReads;
 static NSString *cachedRoot, *warmupCanary;
 static UIApplication *fixtureApplication;
@@ -205,6 +210,23 @@ int main(int argc, char **argv) {
         NSDictionary *constructor = [IDUnityHostFixtureConstructor fixtureInfo];
         Require([constructor[@"constructor_calls"] isEqual:@1] && [constructor[@"installed"] isEqual:@YES]
             && [constructor[@"ready_calls"] isEqual:@0], "constructor_visibility_invalid");
+        Require([constructor[@"sigpipe_default_before_install"] isEqual:@YES]
+            && [constructor[@"sigpipe_ignored_after_install"] isEqual:@YES]
+            && [constructor[@"other_signal_handlers_preserved"] isEqual:@YES],
+            "constructor_sigpipe_proof_missing");
+        struct sigaction pipeAction;
+        Require(sigaction(SIGPIPE, NULL, &pipeAction) == 0 && pipeAction.sa_handler == SIG_IGN
+            && [IDUnityHostInfo()[@"sigpipe_ignored_before_server"] isEqual:@YES],
+            "sigpipe_not_ignored_before_server");
+        int descriptors[2];
+        Require(socketpair(AF_UNIX, SOCK_STREAM, 0, descriptors) == 0, "plain_socketpair_failed");
+        Require(close(descriptors[1]) == 0, "peer_socket_close_failed");
+        errno = 0;
+        ssize_t written = write(descriptors[0], "x", 1);
+        int writeError = errno;
+        close(descriptors[0]);
+        Require(written == -1 && writeError == EPIPE, "plain_closed_socket_did_not_return_epipe");
+        ++sigpipeEpipeWrites;
         NSString *mode = argc == 2 ? [NSString stringWithUTF8String:argv[1]] : nil;
         Require([@[@"--cold", @"--stale-cache", @"--pre-runtime"] containsObject:mode], "invalid_mode");
         lifecycle = [NSMutableArray new]; events = [NSMutableArray new];
@@ -248,7 +270,9 @@ int main(int argc, char **argv) {
         NSURL *temporary = nil;
         NSMutableDictionary *checks = [@{@"constructor_before_main":@YES,
             @"registration_after_constructor":@YES, @"smoke_table_copy":@YES,
-            @"main_entry_intercepted":@YES, @"start_before_capture_rejected":@YES} mutableCopy];
+            @"main_entry_intercepted":@YES, @"start_before_capture_rejected":@YES,
+            @"sigpipe_default_before_install":@YES, @"sigpipe_ignored_before_server":@YES,
+            @"plain_closed_socket_epipe":@YES, @"other_signal_handlers_preserved":@YES} mutableCopy];
         NSArray *embeddedLifecycle = @[];
         if (preRuntime) {
             NSDictionary *info = IDUnityHostInfo();
@@ -322,14 +346,17 @@ int main(int argc, char **argv) {
             @"mode":[mode substringFromIndex:2], @"actual_macos_foundation_execution":@YES,
             @"actual_dylib_constructor_execution":@YES, @"actualOriginalUnity":@NO,
             @"physical_PlayCover_execution":@NO, @"windows_or_simulators_created":@NO,
-            @"constructor_before_main":@YES, @"constructor":[IDUnityHostFixtureConstructor fixtureInfo],
+            @"constructor_before_main":@YES, @"sigpipe_ignored_before_server":@YES,
+            @"sigpipe_plain_write_epipe":@YES, @"other_signal_handlers_preserved":@YES,
+            @"constructor":[IDUnityHostFixtureConstructor fixtureInfo],
             @"host":IDUnityHostInfo(), @"checks":checks, @"embedded_lifecycle":embeddedLifecycle,
             @"events":[events copy], @"canary":warmupCanary ?: NSNull.null,
             @"counts":@{@"original_run_main":@(originalMainCalls), @"application_main":@(adapterMainCalls),
                 @"original_embedded":@(embeddedCalls), @"original_warmup":@(originalWarmups),
                 @"run_count":@(framework.fixtureRunCount), @"canary_reads":@(canaryReads),
                 @"setter_calls":@(setterCalls), @"ready_observer":@(readyObserverCalls),
-                @"restorations":@(restorationCalls), @"windows":@([UIWindow fixtureWindowCreations])}};
+                @"restorations":@(restorationCalls), @"windows":@([UIWindow fixtureWindowCreations]),
+                @"sigpipe_epipe_writes":@(sigpipeEpipeWrites)}};
         NSData *json = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingSortedKeys error:NULL];
         Require(json != nil, "fixture_json_serialization_failed");
         fwrite(json.bytes, 1, json.length, stdout); fputc('\n', stdout);

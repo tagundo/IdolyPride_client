@@ -263,12 +263,12 @@ def test_generated_canary_digest_binds_every_language(monkeypatch,tmp_path,chang
         def validate_report(value,native_dir):assert value == report
     class Probe:
         @staticmethod
-        def validate_language_matrix_report(value):assert len(value["reports"]) == 3
+        def validate_language_matrix_report(value):assert len(value["reports"]) == 5
     monkeypatch.setattr(delivery,"load_module",lambda *args:Host)
-    smoke = {"native_probe":{"server_status":{"unity_host":{"unity_window_bound":True}},
+    smoke = {"native_probe":{"server_status":{"unity_host":{"unity_window_bound":True,"sigpipe_ignored_before_server":True}},
              "unity_host_probe":{"canary_source_sha256":digest}},
-             "language_matrix":{"reports":[{"unity_host_probe":{"canary_source_sha256":digest}} for _ in range(3)]}}
-    for code,row in zip(("ko","en","ja"),smoke["language_matrix"]["reports"]):row["language"] = code
+             "language_matrix":{"reports":[{"unity_host":{"sigpipe_ignored_before_server":True},"unity_host_probe":{"canary_source_sha256":digest}} for _ in range(5)]}}
+    for code,row in zip(("ko","en","ja","en","ko"),smoke["language_matrix"]["reports"]):row["language"] = code
     for host in [smoke["native_probe"]["unity_host_probe"],*(row["unity_host_probe"] for row in smoke["language_matrix"]["reports"])]:
         host["canaries"] = {path:{"expected_sha256":"e"*64,"actual_sha256":"e"*64,"expected_bytes":17,"actual_bytes":17} for path in paths}
     if changed:smoke["language_matrix"]["reports"][1]["unity_host_probe"]["canary_source_sha256"] = "f"*64
@@ -354,3 +354,11 @@ def test_file_reference_mode_cannot_download_a_large_artifact(monkeypatch,tmp_pa
         delivery.download_verified_url({"archive_bytes":delivery.MAX_PROOF+delivery.MIB+1,"archive_sha256":DIGEST},
             "https://sdmntprkoreacentral.oaiusercontent.com/files/file_test/raw",tmp_path/"proof.zip",None,
             allow_file_reference=True)
+
+
+@pytest.mark.parametrize("ignored",[False,None,1,"true"])
+def test_startup_sigpipe_policy_requires_actual_boolean_true(tmp_path,ignored):
+    smoke = {"native_probe":{"server_status":{"unity_host":{"unity_window_bound":True,
+        "sigpipe_ignored_before_server":ignored}}}}
+    with pytest.raises(delivery.DeliveryError,match="sigpipe_not_ignored_before_server"):
+        delivery.verify_language_proofs(smoke,tmp_path,None,None,None,None)

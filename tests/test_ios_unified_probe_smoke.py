@@ -111,7 +111,9 @@ def language_canary_bytes():
     return json.dumps(language_canaries(),sort_keys=True,separators=(",",":")).encode()+b"\n"
 
 
-def native_report(language="ko"):
+def native_report(language="ko", run_index=None):
+    if run_index is None: run_index = ("ko","en","ja","en","ko").index(language)
+    assert ("ko","en","ja","en","ko")[run_index] == language
     report = {"schema": 1, "original_called": 1, "main_thread": True,
             "application_argument_matches": True, "command_completion_main_thread": True,
             "crypto_completion_main_thread": True,
@@ -132,7 +134,7 @@ def native_report(language="ko"):
             "launcher": {"premature_phase": 1, "premature_original_called": 0,
                 "premature_launch_requested": False, "ready_phase": 2, "ready_captured":1, "ready_original_called": 0,
                 "ready_launch_requested": False, "ready_launch_prepared": False,
-                "ready_observations": 5, "ready_wait_seconds": 1.003,
+                "ready_observations": 5, "ready_wait_seconds": 5.25,
                 "ready_launcher_visible": True, "ready_button_found": True,
                 "ready_button_enabled": True, "ready_button_title": "게임 시작",
                 "ready_button_kind":"UIButton","button_control_event":"touch-up-inside",
@@ -216,8 +218,15 @@ def native_report(language="ko"):
         "installed":True,"entry_captured":True,"host_ready":True,"started":True,"unity_window_bound":True,
         "launching":False,"failed":False,"application_main_calls":1,"runtime_start_calls":1,"warmup_calls":1,
         "bundle_match_before":True,"bundle_match_after":True,"first_warmup_bundle_match":True,
+        "sigpipe_ignored_before_server":True,
         "consumed_bundle_language":language,"queued_events":0,"delivered_events":0,"lifecycle_forwarded":0,"error":None}
-    report["unity_host_probe"] = {"schema":1,"expected_language":language,
+    report["unity_host_probe"] = {"schema":1,"expected_language":language,"run_index":run_index,
+        "prelaunch_server_healthy":True,"prelaunch_runtime_cold":True,
+        "cache_return":run_index >= 3,"cache_identity_recorded":True,
+        "cache_files_same_identity":True if run_index >= 3 else None,
+        "sigpipe":{phase:{"schema":1,"sigaction_read":True,"sigpipe_ignored":True,"socketpair_created":True,
+            "peer_closed":True,"write_epipe":True,"process_survived":True,"main_thread":phase == "before_server"}
+            for phase in ("before_server","before_game_worker")},
         "constructor_installed_before_c_main":True,"host_hooks_registered":True,"application_main_adapter_calls":1,
         "host_delegate_owned":True,"original_run_main_calls":0,"cold_before_game_start":True,
         "runtime_count_before_game_start":0,"warmup_count_before_game_start":0,
@@ -232,7 +241,7 @@ def native_report(language="ko"):
         "native_game_button_matches":True,"native_status_label_matches":True,"native_server_button_matches":True,
         "game_select_unchanged":True,"persisted_game_language_unchanged":True}
         for index,item in enumerate(("ja","en","ko"))]
-    next_language = {"ko":"en","en":"ja","ja":"ja"}[language]
+    next_language = ("en","ja","en","ko","ko")[run_index]
     report["language_save"] = {"current_language":language,"next_language":next_language,"ack_id":200,
         "acknowledged":True,"persisted_language":next_language,"effective_language":language,
         "options_fields_reenabled":True,"message_success":True}
@@ -248,7 +257,7 @@ def test_unity_library_host_consumes_selected_language_before_first_warmup(langu
     assert summary["unity_host_probe"]["warmup_count_before_game_start"] == 0
     assert summary["unity_host_probe"]["original_run_main_calls"] == 0
     assert summary["language_save"]["effective_language"] == language
-    assert summary["language_save"]["persisted_language"] == {"ko":"en","en":"ja","ja":"ja"}[language]
+    assert summary["language_save"]["persisted_language"] == {"ko":"en","en":"ja","ja":"en"}[language]
     with pytest.raises(probe.ProbeError):
         probe.validate_language_relaunch_report(native,"en" if language == "ko" else "ko")
 
@@ -258,7 +267,7 @@ def test_unity_library_host_consumes_selected_language_before_first_warmup(langu
     ("application_main_calls",True),("runtime_start_calls",2),("warmup_calls",0),
     ("bundle_match_before",False),("bundle_match_after",False),("first_warmup_bundle_match",False),
     ("consumed_bundle_language","en"),("queued_events",33),("delivered_events",True),
-    ("lifecycle_forwarded",-1),("error","must-not-export")))
+    ("lifecycle_forwarded",-1),("sigpipe_ignored_before_server",False),("error","must-not-export")))
 def test_unity_host_requires_exact_once_entry_runtime_warmup_and_game_window(key, value):
     native = native_report()
     native["server_status"]["unity_host"][key] = value
@@ -271,7 +280,8 @@ def test_unity_host_requires_exact_once_entry_runtime_warmup_and_game_window(key
     ("original_run_main_calls",1),("cold_before_game_start",False),("runtime_count_before_game_start",1),
     ("warmup_count_before_game_start",True),("consumed_bundle_language","en"),
     ("canary_source_sha256","not-a-sha"),("canaries_match",False),("game_window_distinct",False),
-    ("game_window_key",False),("host_delegate_window_is_game",False),("placeholder_hidden",False)))
+    ("game_window_key",False),("host_delegate_window_is_game",False),("placeholder_hidden",False),
+    ("prelaunch_server_healthy",False),("prelaunch_runtime_cold",False)))
 def test_unity_host_probe_rejects_late_selection_or_placeholder_runtime(key, value):
     native = native_report()
     native["unity_host_probe"][key] = value
@@ -321,19 +331,21 @@ def test_unity_host_error_key_and_canary_path_set_are_explicit_and_closed():
         probe.validate_report(native)
 
 
-def test_language_matrix_requires_all_three_ordered_independent_process_summaries():
-    matrix = {"schema":1,"order":["ko","en","ja"],"preserved_app_container":True,
-        "reports":[probe.validate_language_relaunch_report(native_report(language),language)
-                   for language in ("ko","en","ja")]}
+def test_language_matrix_requires_five_ordered_cold_processes_including_en_and_ko_returns():
+    matrix = {"schema":2,"order":["ko","en","ja","en","ko"],"preserved_app_container":True,
+        "reports":[probe.validate_language_relaunch_report(native_report(language,index),language,run_index=index)
+                   for index,language in enumerate(("ko","en","ja","en","ko"))]}
     checked = probe.validate_language_matrix_report(matrix)
-    assert [row["language"] for row in checked["reports"]] == ["ko","en","ja"]
-    for mutation in ("missing_ja","wrong_order","reused_ko","container_reset","bool_schema"):
+    assert [row["run_index"] for row in checked["reports"]] == [0,1,2,3,4]
+    assert [row["language"] for row in checked["reports"]] == ["ko","en","ja","en","ko"]
+    for mutation in ("missing_return","wrong_order","reused_ko","reused_first_en","container_reset","old_schema"):
         bad = json.loads(json.dumps(matrix))
-        if mutation == "missing_ja": bad["reports"].pop()
-        elif mutation == "wrong_order": bad["order"] = ["ko","ja","en"]
-        elif mutation == "reused_ko": bad["reports"][1] = bad["reports"][0]
+        if mutation == "missing_return": bad["reports"].pop()
+        elif mutation == "wrong_order": bad["order"] = ["ko","en","ja","ko","en"]
+        elif mutation == "reused_ko": bad["reports"][4] = bad["reports"][0]
+        elif mutation == "reused_first_en": bad["reports"][3] = bad["reports"][1]
         elif mutation == "container_reset": bad["preserved_app_container"] = False
-        else: bad["schema"] = True
+        else: bad["schema"] = 1
         with pytest.raises(probe.ProbeError): probe.validate_language_matrix_report(bad)
 
 
@@ -424,7 +436,7 @@ def test_language_waiting_failure_and_deadline_export_only_public_process_eviden
     assert caught.value.native_language["unity_host_probe"]["game_window_key"] is False
 
 
-def test_three_cold_processes_preserve_container_and_run_external_ko_gates_once(app, tmp_path):
+def test_five_cold_processes_preserve_container_and_run_external_ko_gates_once(app, tmp_path):
     controller = FakeSimctl(tmp_path/"matrix-container")
     with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
             mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
@@ -432,16 +444,22 @@ def test_three_cold_processes_preserve_container_and_run_external_ko_gates_once(
             mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()) as sdk:
         result = probe.run_probe(app,tmp_path/"matrix.json")
     assert result["status"] == "PASS"
-    assert result["language_matrix"]["order"] == ["ko","en","ja"]
+    assert result["language_matrix"]["schema"] == 2
+    assert result["language_matrix"]["order"] == ["ko","en","ja","en","ko"]
     assert result["language_matrix"]["preserved_app_container"] is True
     assert [row[3] for row in controller.calls if row[0] == "launch"] == [
-        "--idoly-probe-language=ko","--idoly-probe-language=en","--idoly-probe-language=ja"]
+        "--idoly-probe-language=ko","--idoly-probe-language=en","--idoly-probe-language=ja",
+        "--idoly-probe-language=en","--idoly-probe-language=ko"]
     assert [row[0] for row in controller.calls].count("install") == 1
+    assert [row[4] for row in controller.calls if row[0] == "launch"] == [
+        "--idoly-probe-run-index="+str(index) for index in range(5)]
+    launch_budgets = [budget for row,budget in zip(controller.calls,controller.timeouts) if row[0] == "launch"]
+    assert len(launch_budgets) == 5 and all(0 < value <= 30 for value in launch_budgets[1:])
     assert [row for row in controller.calls if row[0] == "terminate"] == [
-        ("terminate",CREATED,probe.BUNDLE_ID),("terminate",CREATED,probe.BUNDLE_ID)]
+        ("terminate",CREATED,probe.BUNDLE_ID)]*4
     rpc.assert_called_once();master.assert_called_once();sdk.assert_called_once()
-    assert all((controller.container/"Documents"/probe.language_paths(language)[0]).exists()
-               for language in ("ko","en","ja"))
+    assert all((controller.container/"Documents"/probe.language_paths(language,index)[0]).exists()
+               for index,language in enumerate(("ko","en","ja","en","ko")))
 
 
 @pytest.mark.parametrize("failure", ("old_ko_report","native_aes_failure","canary_mismatch","preexisting_ja"))
@@ -449,7 +467,7 @@ def test_relaunch_cannot_skip_native_crypto_canary_or_fresh_report_contract(app,
     controller = FakeSimctl(tmp_path/"matrix-failure-container")
     def command(arguments,timeout):
         result = controller(arguments,timeout)
-        if arguments[0] == "launch" and arguments[-1] == "--idoly-probe-language=en":
+        if arguments[0] == "launch" and arguments[3] == "--idoly-probe-language=en":
             path = controller.container/"Documents/embedded-language-en.json"
             value = native_report("en")
             if failure == "old_ko_report": value = native_report()
@@ -481,7 +499,7 @@ def test_language_relaunches_share_the_original_six_hundred_second_deadline(app,
     clock = {"now":0.0}
     def command(arguments,timeout):
         result = controller(arguments,timeout)
-        if arguments[0] == "launch" and arguments[-1] == "--idoly-probe-language=en":
+        if arguments[0] == "launch" and arguments[3] == "--idoly-probe-language=en":
             clock["now"] = 600.0
         return result
     with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command), \
@@ -573,6 +591,129 @@ def test_server_gate_waiting_probe_failure_and_deadline_keep_only_fixed_scalar_o
     assert type(caught.value.native_server_gate["hook_installed"]) is int
     assert caught.value.native_server_gate["error"] is None
     assert "never-export-gate" not in json.dumps(caught.value.native_server_gate)
+
+
+@pytest.mark.parametrize("run_index,language", enumerate(("ko","en","ja","en","ko")))
+def test_five_run_cache_proof_distinguishes_first_visit_from_actual_return(run_index, language):
+    native = native_report(language,run_index)
+    checked = probe.validate_language_relaunch_report(native,language,run_index=run_index)
+    observed = checked["unity_host_probe"]
+    assert checked["run_index"] == run_index and observed["run_index"] == run_index
+    assert observed["cache_return"] is (run_index >= 3)
+    assert observed["cache_identity_recorded"] is True
+    assert observed["cache_files_same_identity"] is (True if run_index >= 3 else None)
+    assert observed["prelaunch_server_healthy"] is True and observed["prelaunch_runtime_cold"] is True
+    assert checked["language_save"]["next_language"] == ("en","ja","en","ko","ko")[run_index]
+
+
+@pytest.mark.parametrize("key,value", (("cache_return",False),("cache_return",1),
+    ("cache_identity_recorded",False),("cache_identity_recorded",1),
+    ("cache_files_same_identity",False),("cache_files_same_identity",None),("cache_files_same_identity",1)))
+def test_return_run_requires_real_existing_cache_identity_comparison(key, value):
+    native = native_report("ko",4)
+    native["unity_host_probe"][key] = value
+    with pytest.raises(probe.ProbeError,match="language_cache_identity_failed"):
+        probe.validate_language_relaunch_report(native,"ko",run_index=4)
+
+
+def test_first_visit_must_not_claim_cache_identity_comparison_before_baseline_exists():
+    native = native_report()
+    native["unity_host_probe"]["cache_files_same_identity"] = True
+    with pytest.raises(probe.ProbeError,match="language_cache_identity_failed"):
+        probe.validate_report(native)
+    observed = probe.unity_host_probe_observation({"run_index":True,"cache_return":1,
+        "cache_identity_recorded":False,"cache_files_same_identity":None,"private_inodes":[1,2,3]})
+    assert observed == {"cache_identity_recorded":False,"cache_files_same_identity":None}
+
+
+def test_run_specific_fixed_paths_preserve_old_reports_and_bind_language_index_pair():
+    stems = ("embedded-probe","embedded-language-en","embedded-language-ja",
+        "embedded-language-en-return","embedded-language-ko-return")
+    all_paths = []
+    for run_index,(language,stem) in enumerate(zip(("ko","en","ja","en","ko"),stems)):
+        paths = probe.language_paths(language,run_index)
+        assert paths == tuple(stem+suffix+".json" for suffix in ("","-status","-checkpoint"))
+        all_paths.extend(paths)
+    assert len(set(all_paths)) == 15
+    assert probe.language_paths("en") == probe.language_paths("en",1)
+    for language,index in (("ko",True),("ko",-1),("ko",5),("en",4),("ja",3)):
+        with pytest.raises(probe.ProbeError,match="language_relaunch_mismatch"):
+            probe.language_paths(language,index)
+
+
+@pytest.mark.parametrize("failure", ("stale_first_en","cache_identity","warm_runtime","changed_canary"))
+def test_actual_return_cannot_reuse_first_en_or_skip_identity_cold_runtime_and_canary_gates(app, tmp_path, failure):
+    controller = FakeSimctl(tmp_path/"return-failure-container")
+    def command(arguments,timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch" and arguments[-1] == "--idoly-probe-run-index=3":
+            native = native_report("en",3)
+            if failure == "stale_first_en": native = native_report("en",1)
+            elif failure == "cache_identity": native["unity_host_probe"]["cache_files_same_identity"] = False
+            elif failure == "warm_runtime": native["unity_host_probe"]["prelaunch_runtime_cold"] = False
+            else:
+                native["unity_host_probe"]["canaries"]["Data/resources.assets"].update(
+                    expected_sha256="0"*64,actual_sha256="0"*64)
+            (controller.container/"Documents/embedded-language-en-return.json").write_text(json.dumps(native))
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
+            mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()):
+        result = probe.run_probe(app,tmp_path/"return-failure.json")
+    assert result["status"] == "FAIL" and result["failed_run_index"] == 3
+    assert result["cleanup"] == {"shutdown":True,"delete":True}
+    assert [row[0] for row in controller.calls].count("launch") == 4
+    assert (controller.container/"Documents/embedded-language-en.json").exists()
+    assert (controller.container/"Documents/embedded-language-ja.json").exists()
+    assert result["native_checkpoint"]["report_available"] is True
+    rpc.assert_called_once()
+    expected = {"stale_first_en":"language_relaunch_mismatch","cache_identity":"language_cache_identity_failed",
+        "warm_runtime":"unity_host_probe_failed","changed_canary":"language_canaries_mismatch"}[failure]
+    assert result["error"] == expected
+
+
+def test_private_probe_cache_identity_file_must_be_absent_initially_and_is_never_deleted(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"preexisting-cache-identity-container")
+    path = controller.container/"Documents/probe-cache-identities.json"
+    path.parent.mkdir();path.write_text("owned-existing-private-state")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller):
+        result = probe.run_probe(app,tmp_path/"cache-identity-failure.json")
+    assert result["error"] == "preexisting_probe_state_rejected"
+    assert not any(row[0] == "launch" for row in controller.calls)
+    assert path.read_text() == "owned-existing-private-state"
+
+
+@pytest.mark.parametrize("phase,key,value", (
+    ("before_server","sigaction_read",False),("before_server","sigpipe_ignored",False),
+    ("before_server","write_epipe",False),("before_server","process_survived",False),
+    ("before_game_worker","socketpair_created",False),("before_game_worker","peer_closed",False),
+    ("before_game_worker","write_epipe",1),("before_server","main_thread",False),
+    ("before_game_worker","main_thread",True),("before_server","schema",True)))
+def test_sigpipe_proof_requires_actual_survived_epipe_on_main_and_ready_worker(phase, key, value):
+    native = native_report()
+    native["unity_host_probe"]["sigpipe"][phase][key] = value
+    with pytest.raises(probe.ProbeError,match="sigpipe_probe_failed"):
+        probe.validate_report(native)
+
+
+def test_sigpipe_failure_projection_is_partial_bounded_and_never_exports_raw_signal_state():
+    native = native_report("ko",4)
+    native["unity_host_probe"]["sigpipe"]["before_server"].update(raw_mask="never-export-sigpipe")
+    checked = probe.validate_language_relaunch_report(native,"ko",run_index=4)
+    assert "never-export-sigpipe" not in json.dumps(checked)
+    pipe = checked["unity_host_probe"]["sigpipe"]
+    assert pipe["before_server"]["main_thread"] is True
+    assert pipe["before_game_worker"]["main_thread"] is False
+    assert pipe["before_server"]["write_epipe"] is True
+    assert probe.unity_host_observation({"error":"sigpipe_guard_failed","private_signal":"never-export-sigpipe"}) == {
+        "error":"sigpipe_guard_failed"}
+    assert probe.sigpipe_observation({"before_server":{"schema":True,"sigaction_read":1,
+        "process_survived":False,"raw_signal":"never-export-sigpipe"},
+        "unknown_phase":{"raw_signal":"never-export-sigpipe"}}) == {"before_server":{"process_survived":False}}
+    del native["unity_host_probe"]["sigpipe"]["before_game_worker"]
+    with pytest.raises(probe.ProbeError,match="sigpipe_probe_failed"):
+        probe.validate_report(native)
 
 
 @pytest.mark.parametrize("phase,key,value", (
@@ -1352,16 +1493,17 @@ class FakeSimctl:
             assert arguments[2:] == [probe.BUNDLE_ID, "data"]
             return (str(self.container) + "\n").encode()
         if action == "launch":
-            language = arguments[3].split("=",1)[1] if len(arguments) == 4 else "ko"
+            language = arguments[3].split("=",1)[1] if len(arguments) >= 4 else "ko"
+            run_index = int(arguments[4].split("=",1)[1]) if len(arguments) >= 5 else None
             assert language in ("ko","en","ja")
-            final_name,status_name,_checkpoint_name = probe.language_paths(language)
+            final_name,status_name,_checkpoint_name = probe.language_paths(language,run_index)
             documents = self.container / "Documents"
             documents.mkdir(exist_ok=True)
             if self.startup_failure:
                 value = {"server_status": {"phase": 3, "error": "native-startup-fixture"}}
                 (documents / status_name).write_text(json.dumps(value))
             else:
-                (documents / final_name).write_text(json.dumps(native_report(language)))
+                (documents / final_name).write_text(json.dumps(native_report(language,run_index)))
         return b""
 
 
@@ -1430,7 +1572,8 @@ def test_fresh_simulator_is_only_mutation_target_and_cleanup_runs(app, tmp_path)
     assert result["native_probe"]["server_status"]["launcher_visible"] is False
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
     assert [call[0] for call in controller.calls] == ["list", "list", "create", "boot", "bootstatus", "install",
-                                                    "get_app_container", "launch", "terminate", "launch", "terminate", "launch", "shutdown", "delete"]
+                                                    "get_app_container", "launch", "terminate", "launch", "terminate", "launch",
+                                                    "terminate", "launch", "terminate", "launch", "shutdown", "delete"]
     socket_call.assert_called_once()
     assert socket_call.call_args.args[0] == ("127.0.0.1", 8080)
     assert 60 < controller.timeouts[7] <= 180  # Cold UIKit/WK startup has its own bounded budget.
@@ -1535,9 +1678,10 @@ def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_rel
     sdk.assert_called_once()
     assert result["master_file"] == master_file_report()
     assert result["sdk_resource"] == sdk_resource_report()
-    assert [call[0] for call in controller.calls].count("launch") == 3
+    assert [call[0] for call in controller.calls].count("launch") == 5
     assert [call[3] for call in controller.calls if call[0] == "launch"] == [
-        "--idoly-probe-language=ko","--idoly-probe-language=en","--idoly-probe-language=ja"]
+        "--idoly-probe-language=ko","--idoly-probe-language=en","--idoly-probe-language=ja",
+        "--idoly-probe-language=en","--idoly-probe-language=ko"]
     assert result["cleanup"] == {"shutdown": True, "delete": True}
     assert controller.calls[-2:] == [("shutdown", CREATED), ("delete", CREATED)]
 
@@ -1750,7 +1894,7 @@ def test_launch_before_ready_must_be_ignored(field, value):
 @pytest.mark.parametrize("field,value", (("ready_phase", 4), ("ready_original_called", 1),
         ("ready_launch_requested", True), ("ready_launch_prepared", True),
         ("ready_observations", 1), ("ready_observations", True),
-        ("ready_wait_seconds", 0.99), ("ready_wait_seconds", True),
+        ("ready_wait_seconds", 0.99), ("ready_wait_seconds", 4.99), ("ready_wait_seconds", True),
         ("ready_wait_seconds", float("nan")), ("ready_wait_seconds", float("inf"))))
 def test_ready_must_remain_idle_for_observation_before_explicit_click(field, value):
     report = native_report()
@@ -1789,7 +1933,7 @@ def test_launcher_evidence_is_required_and_only_checked_fields_are_audited():
     report["launcher"]["unexpected_private_text"] = "must not enter audit"
     checked = probe.validate_report(report)
     assert "unexpected_private_text" not in checked["launcher"]
-    assert checked["launcher"]["ready_wait_seconds"] >= 1.0
+    assert checked["launcher"]["ready_wait_seconds"] >= 5.0
 
 
 @pytest.mark.parametrize("field,value", (("game_window_key", False), ("one_finger_count", 0),

@@ -46,12 +46,13 @@ MAX_SDK_BYTES = 16 * 1024 * 1024
 SDK_MANIFEST_PATH = "/v2/pub/a/212/v/105051/list/0"
 SDK_URL_FORMAT = MASTER_ORIGIN + "/octo/{v}/{type}/{o}/{g}"
 LANGUAGE_ORDER = ("ko", "en", "ja")
+MATRIX_LANGUAGES = ("ko", "en", "ja", "en", "ko")
 CANARY_PATHS = ("Data/resources.assets", "Data/Managed/Metadata/global-metadata.dat")
 MAX_CANARY_BYTES = 128 * 1024 * 1024
 HOST_TRUE_FIELDS = ("installed", "entry_captured", "host_ready", "started", "unity_window_bound",
-    "bundle_match_before", "bundle_match_after", "first_warmup_bundle_match")
+    "bundle_match_before", "bundle_match_after", "first_warmup_bundle_match", "sigpipe_ignored_before_server")
 HOST_FALSE_FIELDS = ("launching", "failed")
-UNITY_HOST_ERROR_CODES = frozenset(("warmup_order_or_bundle_mismatch", "entry_capture_rejected",
+UNITY_HOST_ERROR_CODES = frozenset(("sigpipe_guard_failed", "warmup_order_or_bundle_mismatch", "entry_capture_rejected",
     "smoke_hooks_missing", "runtime_initialized_before_host", "host_main_repeated", "host_application_main_failed",
     "install_rejected", "unattested_unified_host", "framework_entry_abi_mismatch", "framework_entry_origin_mismatch",
     "start_rejected", "selected_bundle_mismatch", "runtime_initialized_before_selection", "cached_bundle_root_mismatch",
@@ -60,13 +61,15 @@ HOST_ONCE_FIELDS = ("application_main_calls", "runtime_start_calls", "warmup_cal
 HOST_EVENT_FIELDS = ("queued_events", "delivered_events", "lifecycle_forwarded")
 HOST_PROBE_TRUE_FIELDS = ("constructor_installed_before_c_main", "host_hooks_registered", "host_delegate_owned",
     "cold_before_game_start", "canaries_match", "game_window_distinct", "game_window_key",
-    "host_delegate_window_is_game", "placeholder_hidden")
+    "host_delegate_window_is_game", "placeholder_hidden", "prelaunch_server_healthy", "prelaunch_runtime_cold")
 HOST_PROBE_COUNTS = ("application_main_adapter_calls", "original_run_main_calls",
     "runtime_count_before_game_start", "warmup_count_before_game_start")
 LANGUAGE_CYCLE_FLAGS = ("acknowledged", "dom_language_matches", "native_title_matches",
     "native_game_button_matches", "native_status_label_matches", "native_server_button_matches",
     "game_select_unchanged", "persisted_game_language_unchanged")
 LANGUAGE_SAVE_FLAGS = ("acknowledged", "options_fields_reenabled", "message_success")
+SIGPIPE_PHASES = ("before_server", "before_game_worker")
+SIGPIPE_FLAGS = ("sigaction_read", "sigpipe_ignored", "socketpair_created", "peer_closed", "write_epipe", "process_survived")
 # A well-formed unknown protobuf varint makes empty requests exercise AES too.
 PUBLIC_PROBE_FIELD = b"\xc0\xa3\x09\x01"  # field 19000, wire type 0, value 1
 LAUNCHER_FAILURE_CODES = frozenset((
@@ -86,7 +89,8 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "native_header_layout_failed", "native_header_restore_failed",
     "settings_diagnostics_copy_failed",
     "host_constructor_not_installed", "host_hooks_registration_failed", "host_cold_start_failed",
-    "unity_window_handoff_failed",
+    "unity_window_handoff_failed", "language_cache_identity_failed", "sigpipe_probe_failed",
+    "sigpipe_before_server_failed", "sigpipe_before_game_failed",
     "unity_host_failed", "unity_host_probe_failed", "language_interface_cycle_failed", "language_save_failed",
     "language_canaries_invalid", "language_canaries_mismatch", "language_matrix_failed", "language_relaunch_mismatch",
     "octo_budget_registration_failed", "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
@@ -101,7 +105,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
     "settings_diagnostics_copied",
-    "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
+    "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
 KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
@@ -311,9 +315,13 @@ def load_schema(app):
     return schema, hashlib.sha256(raw).hexdigest()
 
 
-def language_paths(language):
+def language_paths(language, run_index=None):
     require(type(language) is str and language in LANGUAGE_ORDER, "language_relaunch_mismatch")
-    stem = "embedded-probe" if language == "ko" else "embedded-language-" + language
+    if run_index is None: run_index = MATRIX_LANGUAGES.index(language)
+    require(type(run_index) is int and 0 <= run_index < len(MATRIX_LANGUAGES)
+            and MATRIX_LANGUAGES[run_index] == language, "language_relaunch_mismatch")
+    stem = ("embedded-probe", "embedded-language-en", "embedded-language-ja",
+            "embedded-language-en-return", "embedded-language-ko-return")[run_index]
     return tuple(stem + suffix + ".json" for suffix in ("", "-status", "-checkpoint"))
 
 
@@ -321,8 +329,11 @@ def _hex_digest(value):
     return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
 
-def _validate_language_evidence(host, probe, cycle, saved, language):
+def _validate_language_evidence(host, probe, cycle, saved, language, run_index=None):
     require(type(language) is str and language in LANGUAGE_ORDER, "language_relaunch_mismatch")
+    if run_index is None: run_index = MATRIX_LANGUAGES.index(language)
+    require(type(run_index) is int and 0 <= run_index < len(MATRIX_LANGUAGES)
+            and MATRIX_LANGUAGES[run_index] == language, "language_relaunch_mismatch")
     require(type(host) is dict and type(host.get("schema")) is int and host["schema"] == 1
             and host.get("strategy") == "unity-as-library"
             and all(host.get(key) is True for key in HOST_TRUE_FIELDS)
@@ -332,12 +343,24 @@ def _validate_language_evidence(host, probe, cycle, saved, language):
             and host.get("consumed_bundle_language") == language
             and "error" in host and host["error"] is None, "unity_host_failed")
     require(type(probe) is dict and type(probe.get("schema")) is int and probe["schema"] == 1
+            and type(probe.get("run_index")) is int and probe["run_index"] == run_index
             and probe.get("expected_language") == language and probe.get("consumed_bundle_language") == language
             and all(probe.get(key) is True for key in HOST_PROBE_TRUE_FIELDS)
             and all(type(probe.get(key)) is int and probe[key] == wanted for key,wanted in
                 (("application_main_adapter_calls",1),("original_run_main_calls",0),
                  ("runtime_count_before_game_start",0),("warmup_count_before_game_start",0)))
             and _hex_digest(probe.get("canary_source_sha256")), "unity_host_probe_failed")
+    sigpipe = probe.get("sigpipe")
+    require(type(sigpipe) is dict and set(sigpipe) == set(SIGPIPE_PHASES), "sigpipe_probe_failed")
+    for phase in SIGPIPE_PHASES:
+        sample = sigpipe[phase]
+        require(type(sample) is dict and type(sample.get("schema")) is int and sample["schema"] == 1
+                and all(sample.get(key) is True for key in SIGPIPE_FLAGS)
+                and sample.get("main_thread") is (phase == "before_server"), "sigpipe_probe_failed")
+    require(probe.get("cache_return") is (run_index >= 3) and probe.get("cache_identity_recorded") is True
+            and "cache_files_same_identity" in probe
+            and probe["cache_files_same_identity"] is (True if run_index >= 3 else None),
+            "language_cache_identity_failed")
     canaries = probe.get("canaries")
     require(type(canaries) is dict and set(canaries) == set(CANARY_PATHS), "unity_host_probe_failed")
     for path in CANARY_PATHS:
@@ -352,33 +375,34 @@ def _validate_language_evidence(host, probe, cycle, saved, language):
         require(type(row) is dict and row.get("language") == wanted
                 and type(row.get("ack_id")) is int and 1 <= row["ack_id"] <= 2**31-1
                 and all(row.get(key) is True for key in LANGUAGE_CYCLE_FLAGS), "language_interface_cycle_failed")
-    next_language = {"ko":"en","en":"ja","ja":"ja"}[language]
+    next_language = ("en","ja","en","ko","ko")[run_index]
     require(type(saved) is dict and saved.get("current_language") == language
             and saved.get("next_language") == next_language and saved.get("persisted_language") == next_language
             and saved.get("effective_language") == language
             and type(saved.get("ack_id")) is int and 1 <= saved["ack_id"] <= 2**31-1
             and all(saved.get(key) is True for key in LANGUAGE_SAVE_FLAGS), "language_save_failed")
-    return {"language":language,"unity_host":unity_host_observation(host),
+    return {"language":language,"run_index":run_index,"unity_host":unity_host_observation(host),
         "unity_host_probe":unity_host_probe_observation(probe),
         "interface_language_cycle":interface_language_observation(cycle),"language_save":language_save_observation(saved)}
 
 
-def validate_language_relaunch_report(native, expected_language):
+def validate_language_relaunch_report(native, expected_language, *, run_index=None):
     checked = validate_report(native)
     return _validate_language_evidence(checked["server_status"]["unity_host"], checked["unity_host_probe"],
-        checked["interface_language_cycle"], checked["language_save"], expected_language)
+        checked["interface_language_cycle"], checked["language_save"], expected_language, run_index)
 
 
 def validate_language_matrix_report(value):
-    require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1
-            and value.get("order") == list(LANGUAGE_ORDER) and value.get("preserved_app_container") is True
-            and type(value.get("reports")) is list and len(value["reports"]) == 3, "language_matrix_failed")
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 2
+            and value.get("order") == list(MATRIX_LANGUAGES) and value.get("preserved_app_container") is True
+            and type(value.get("reports")) is list and len(value["reports"]) == 5, "language_matrix_failed")
     reports = []
-    for row,language in zip(value["reports"],LANGUAGE_ORDER):
-        require(type(row) is dict and row.get("language") == language, "language_matrix_failed")
+    for run_index,(row,language) in enumerate(zip(value["reports"],MATRIX_LANGUAGES)):
+        require(type(row) is dict and row.get("language") == language
+                and type(row.get("run_index")) is int and row["run_index"] == run_index, "language_matrix_failed")
         reports.append(_validate_language_evidence(row.get("unity_host"),row.get("unity_host_probe"),
-            row.get("interface_language_cycle"),row.get("language_save"),language))
-    return {"schema":1,"order":list(LANGUAGE_ORDER),"preserved_app_container":True,"reports":reports}
+            row.get("interface_language_cycle"),row.get("language_save"),language,run_index))
+    return {"schema":2,"order":list(MATRIX_LANGUAGES),"preserved_app_container":True,"reports":reports}
 
 
 def load_language_canaries(app, descriptor_sha256):
@@ -431,15 +455,35 @@ def unity_host_observation(value):
     return clean
 
 
+def sigpipe_observation(value):
+    if type(value) is not dict: return {}
+    clean = {}
+    for phase in SIGPIPE_PHASES:
+        row = value.get(phase)
+        if type(row) is not dict: continue
+        sample = {key:row[key] for key in (*SIGPIPE_FLAGS,"main_thread") if type(row.get(key)) is bool}
+        if type(row.get("schema")) is int and row["schema"] == 1: sample["schema"] = 1
+        if sample: clean[phase] = sample
+    return clean
+
+
 def unity_host_probe_observation(value):
     if type(value) is not dict: return {}
     clean = {key:value[key] for key in HOST_PROBE_TRUE_FIELDS if type(value.get(key)) is bool}
     for key in HOST_PROBE_COUNTS:
         if type(value.get(key)) is int and 0 <= value[key] <= 32: clean[key] = value[key]
+    if type(value.get("run_index")) is int and 0 <= value["run_index"] <= 4: clean["run_index"] = value["run_index"]
+    for key in ("cache_return", "cache_identity_recorded"):
+        if type(value.get(key)) is bool: clean[key] = value[key]
+    if "cache_files_same_identity" in value and (type(value["cache_files_same_identity"]) is bool
+            or value["cache_files_same_identity"] is None):
+        clean["cache_files_same_identity"] = value["cache_files_same_identity"]
     if type(value.get("schema")) is int and value["schema"] == 1: clean["schema"] = 1
     for key in ("expected_language","consumed_bundle_language"):
         if value.get(key) in LANGUAGE_ORDER: clean[key] = value[key]
     if _hex_digest(value.get("canary_source_sha256")): clean["canary_source_sha256"] = value["canary_source_sha256"]
+    pipe = sigpipe_observation(value.get("sigpipe"))
+    if pipe: clean["sigpipe"] = pipe
     raw = value.get("canaries")
     if type(raw) is dict:
         rows = {}
@@ -621,7 +665,8 @@ def validate_report(value):
     host_probe = value.get("unity_host_probe")
     expected_language = host_probe.get("expected_language") if type(host_probe) is dict else None
     language_summary = _validate_language_evidence(status.get("unity_host"), host_probe,
-        value.get("interface_language_cycle"), value.get("language_save"), expected_language)
+        value.get("interface_language_cycle"), value.get("language_save"), expected_language,
+        host_probe.get("run_index") if type(host_probe) is dict else None)
     data = status.get("client_data")
     require(type(data) is dict and data.get("selected") is True
             and data.get("language") == expected_language
@@ -654,7 +699,7 @@ def validate_report(value):
             and launcher.get("ready_launch_prepared") is False
             and type(launcher.get("ready_observations")) is int and launcher["ready_observations"] >= 2
             and type(launcher.get("ready_wait_seconds")) in (int, float)
-            and 1.0 <= launcher["ready_wait_seconds"] <= 60.0,
+            and 5.0 <= launcher["ready_wait_seconds"] <= 60.0,
             "unity_started_before_launch_button")
     require(launcher.get("ready_launcher_visible") is True and launcher.get("ready_button_found") is True
             and launcher.get("ready_button_enabled") is True
@@ -786,9 +831,9 @@ def validate_report(value):
                 "runtime": {key: runtime[key] for key in ("running", "grpc_address", "asset_url")}}}}
 
 
-def wait_report(container, remaining, *, expected_language="ko"):
+def wait_report(container, remaining, *, expected_language="ko", run_index=None):
     documents = Path(container) / "Documents"
-    final_name, waiting_name, _checkpoint_name = language_paths(expected_language)
+    final_name, waiting_name, _checkpoint_name = language_paths(expected_language,run_index)
     final, waiting = documents / final_name, documents / waiting_name
     last_keyboard = {}
     last_header = {}
@@ -825,8 +870,9 @@ def wait_report(container, remaining, *, expected_language="ko"):
             observed = parse_json(read_bounded(final, MAX_JSON))
             try:
                 checked = validate_report(observed)
-                require(checked["unity_host_probe"]["expected_language"] == expected_language,
-                        "language_relaunch_mismatch")
+                expected_index = MATRIX_LANGUAGES.index(expected_language) if run_index is None else run_index
+                require(checked["unity_host_probe"]["expected_language"] == expected_language
+                        and checked["unity_host_probe"]["run_index"] == expected_index, "language_relaunch_mismatch")
                 return checked
             except ProbeError as error:
                 crypto = observed.get("native_crypto")
@@ -1141,7 +1187,7 @@ def menu_close_observation(value):
     return clean
 
 
-def failure_checkpoint(container, expected_language="ko"):
+def failure_checkpoint(container, expected_language="ko", run_index=None):
     """Read only fixed scalar progress from this invocation's fresh container."""
     result = {"stage": "not_observed", "container_available": container is not None}
     if container is None:
@@ -1172,7 +1218,7 @@ def failure_checkpoint(container, expected_language="ko"):
             clean["http_readiness"] = http
         return clean
 
-    final_name, status_name, checkpoint_name = language_paths(expected_language)
+    final_name, status_name, checkpoint_name = language_paths(expected_language,run_index)
     for source, name in (("checkpoint", checkpoint_name), ("status", status_name), ("report", final_name)):
         result[source + "_available"] = False
         try:
@@ -1586,6 +1632,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
     created = None
     container = None
     current_language = "ko"
+    current_run_index = 0
     start = time.monotonic()
     stage = "platform"
     def remaining(cap=60):
@@ -1631,18 +1678,18 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
         for relative in ("Library/Application Support/IdolyPrideLocal/state.db",
                          "Library/Application Support/IdolyPrideLocal/media-state.db",
                          "Documents/embedded-probe.json", "Documents/embedded-probe-status.json",
-                         "Documents/embedded-probe-checkpoint.json"):
+                         "Documents/embedded-probe-checkpoint.json", "Documents/probe-cache-identities.json"):
             path = candidate / relative
             require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
-        for language in LANGUAGE_ORDER:
-            for name in language_paths(language):
+        for run_index,language in enumerate(MATRIX_LANGUAGES):
+            for name in language_paths(language,run_index):
                 path = candidate/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         container = candidate
         report["fresh_local_state_before_launch"] = True
         stage = "app_launch"
         try:
-            _simctl(["launch", created, BUNDLE_ID, "--idoly-probe-language=ko"], remaining(180))
+            _simctl(["launch", created, BUNDLE_ID, "--idoly-probe-language=ko", "--idoly-probe-run-index=0"], remaining(180))
         except ProbeError as error:
             if str(error) != "simctl_timeout":
                 raise
@@ -1654,8 +1701,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
                 report["launch_ack_diagnostic"] = error.tool_detail
             report["launch_ack_checkpoint"] = failure_checkpoint(container)
         stage = "startup_gate_report"
-        report["native_probe"] = wait_report(container, remaining, expected_language="ko")
-        summaries = [validate_language_relaunch_report(report["native_probe"],"ko")]
+        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0)
+        summaries = [validate_language_relaunch_report(report["native_probe"],"ko",run_index=0)]
         compare_language_canaries(summaries[0],"ko",canaries,report["language_canaries_sha256"])
         stage = "asset_listener"
         with socket.create_connection(("127.0.0.1", 8080), timeout=min(5, remaining())):
@@ -1667,32 +1714,34 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
         report["master_file"] = probe_master_file(schema, app, timeout=min(15, remaining()))
         stage = "sdk_resource"
         report["sdk_resource"] = probe_sdk_resource(app, timeout=min(30, remaining()))
-        for language in LANGUAGE_ORDER[1:]:
+        for run_index,language in enumerate(MATRIX_LANGUAGES[1:],1):
             stage = "language_terminate_" + language
             _simctl(["terminate",created,BUNDLE_ID],remaining(30))
-            for name in language_paths(language):
+            for name in language_paths(language,run_index):
                 path = container/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_language_report_rejected")
             current_language = language
+            current_run_index = run_index
             stage = "language_launch_" + language
             try:
-                _simctl(["launch",created,BUNDLE_ID,"--idoly-probe-language="+language],remaining(180))
+                _simctl(["launch",created,BUNDLE_ID,"--idoly-probe-language="+language,
+                    "--idoly-probe-run-index="+str(run_index)],remaining(30))
             except ProbeError as error:
                 if str(error) != "simctl_timeout": raise
                 report.setdefault("language_launch_ack_timeouts",[]).append(language)
             stage = "language_report_" + language
-            native = wait_report(container,remaining,expected_language=language)
-            summary = validate_language_relaunch_report(native,language)
+            native = wait_report(container,remaining,expected_language=language,run_index=run_index)
+            summary = validate_language_relaunch_report(native,language,run_index=run_index)
             compare_language_canaries(summary,language,canaries,report["language_canaries_sha256"])
             summaries.append(summary)
         stage = "language_matrix"
-        report["language_matrix"] = validate_language_matrix_report({"schema":1,"order":list(LANGUAGE_ORDER),
+        report["language_matrix"] = validate_language_matrix_report({"schema":2,"order":list(MATRIX_LANGUAGES),
             "preserved_app_container":True,"reports":summaries})
         report["status"] = "PASS"
     except BaseException as error:
-        report.update(status="FAIL", failed_stage=stage,
+        report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
-        report["native_checkpoint"] = failure_checkpoint(container,current_language)
+        report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index)
         if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
             report["native_startup_error"] = error.native_detail
         if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
@@ -1726,7 +1775,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
     finally:
         # Capture before deleting the owned container, including when an
         # otherwise passing run subsequently encounters a cleanup failure.
-        checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language)
+        checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index)
         if created is not None:
             for action in ("shutdown", "delete"):
                 try:

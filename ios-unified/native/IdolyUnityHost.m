@@ -7,6 +7,7 @@
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
+#include <signal.h>
 #import <dispatch/dispatch.h>
 #if IDOLY_UNITY_HOST_FOUNDATION_TESTING
 #import "tests/UnityHostFoundationUIKit.h"
@@ -35,6 +36,7 @@ static char **capturedArgv;
 static NSDictionary *launchOptions;
 static NSString *expectedRoot, *selectedLanguage, *hostError;
 static BOOL beforeMatch, afterMatch, firstWarmupMatch, unityWindowBound;
+static BOOL sigpipeIgnoredBeforeServer;
 static UIWindow *hostPlaceholderWindow;
 static unsigned warmupCalls, lifecycleCalls, deliveredEvents;
 static NSMutableArray *pendingEvents;
@@ -47,6 +49,11 @@ static const unsigned char *noGraphicsFlag, *graphicsFlag;
 static const char *(*originalBundleRoot)(void);
 #endif
 
+static BOOL HostSigpipeIgnored(void) {
+    struct sigaction action;
+    memset(&action, 0, sizeof action);
+    return sigaction(SIGPIPE, NULL, &action) == 0 && action.sa_handler == SIG_IGN;
+}
 static BOOL HostFail(NSString *code, NSString **error) {
     hostError = code;
     if (error) *error = code;
@@ -258,6 +265,12 @@ static void HostRunMain(id framework, SEL selector, int argc, char **argv) {
 BOOL IDUnityHostInstall(IDUnityHostReadyCallback callback, NSString **error) {
     if (error) *error = nil;
     if (!NSThread.isMainThread || !callback || host.installed) return HostFail(@"install_rejected", error);
+    // Original Unity frameworkWarmup ignores SIGPIPE before starting UIKit.
+    // The native host defers warmup, so preserve that process behavior before
+    // any Python/HTTP worker can write to a disconnected client.
+    if (signal(SIGPIPE, SIG_IGN) == SIG_ERR || !HostSigpipeIgnored())
+        return HostFail(@"sigpipe_guard_failed", error);
+    sigpipeIgnoredBeforeServer = YES;
 #if !IDOLY_SMOKE_SIMULATOR
     if (![NSBundle.mainBundle.infoDictionary[@"IdolyUnifiedLoopbackOrigin"] isEqual:@"http://127.0.0.1:8080"])
         return HostFail(@"unattested_unified_host", error);
@@ -458,7 +471,9 @@ NSDictionary *IDUnityHostInfo(void) {
         dispatch_sync(dispatch_get_main_queue(), ^{ info = IDUnityHostInfo(); });
         return info;
     }
+    BOOL pipeReady = sigpipeIgnoredBeforeServer && HostSigpipeIgnored();
     return @{@"schema":@1, @"strategy":@"unity-as-library", @"installed":@(host.installed),
+        @"sigpipe_ignored_before_server":@(pipeReady),
         @"entry_captured":@(host.captured), @"host_ready":@(host.host_ready), @"launching":@(host.launching),
         @"started":@(host.started), @"failed":@(host.failed),
         @"application_main_calls":@(host.application_main_calls), @"runtime_start_calls":@(host.runtime_start_calls),
