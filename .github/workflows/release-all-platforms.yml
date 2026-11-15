@@ -36,7 +36,7 @@ jobs:
           lfs: false
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.12'
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -51,7 +51,7 @@ jobs:
       - name: Prepare pinned Java harness Android tools
         run: sdkmanager 'build-tools;34.0.0' 'platforms;android-34'
       - name: Install exact locked verification dependencies
-        run: uv sync --locked --all-extras --python 3.13
+        run: uv sync --locked --all-extras --python 3.12
       - name: Prepare the SHA-pinned public protocol descriptor
         env:
           GH_TOKEN: ${{ github.token }}
@@ -219,7 +219,12 @@ jobs:
           api-level: 30
           arch: x86_64
           target: google_apis
-          profile: pixel_2
+          profile: pixel_4
+          cores: 2
+          ram-size: 4096M
+          disk-size: 4G
+          emulator-boot-timeout: 1200
+          disable-linux-hw-accel: false
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: >-
@@ -243,6 +248,8 @@ jobs:
           path: |
             ${{ runner.temp }}/idoly-android-work/**/*.json
             ${{ runner.temp }}/idoly-android-qa/**/*.json
+            ${{ runner.temp }}/idoly-android-qa/qa/*.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/*logcat.txt
           if-no-files-found: warn
           retention-days: 14
 

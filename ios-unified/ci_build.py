@@ -127,8 +127,10 @@ def main():
         "--work", work / "client-language-check", "--report", output / "client-language-runtime-check.json")
     run(python, "-B", HERE / "build_probe.py", "--prepared-app", prepared, "--output", probe, "--arch", arch,
         "--report", output / "probe-build.json")
+    # One deadline includes a cold Simulator boot/install and five full app
+    # processes. Each launch and functional check retains its own smaller cap.
     run(python, "-B", HERE / "probe/smoke_probe.py", "--app", probe,
-        "--runtime", selected_runtime, "--timeout", "600", "--audit", output / "simulator-smoke.json")
+        "--runtime", selected_runtime, "--timeout", "900", "--audit", output / "simulator-smoke.json")
     # The device artifact and the disposable Simulator probe are deliberately
     # separate: a successful core probe does not imply physical game playback.
     digest = hashlib.sha256()

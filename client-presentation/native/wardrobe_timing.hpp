@@ -84,7 +84,7 @@ private:
         if (current_serial_) return begin_locked(stage,at);
         if (generation_==UINT64_MAX) return {};
         const int64_t sequence=increment(state_.sequence);
-        state_={}; state_.room=room; state_.sequence=sequence;
+        state_=Snapshot{}; state_.room=room; state_.sequence=sequence;
         ++generation_; next_serial_=0; current_serial_=0;
         started_ms_=at; completed_ms_=-1; pending_=true;
         return begin_locked(stage,at);

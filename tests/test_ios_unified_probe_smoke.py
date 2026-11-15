@@ -494,25 +494,56 @@ def test_relaunch_cannot_skip_native_crypto_canary_or_fresh_report_contract(app,
         assert (controller.container/"Documents/embedded-language-ja.json").read_text() == "owned-stale-file"
 
 
-def test_language_relaunches_share_the_original_six_hundred_second_deadline(app, tmp_path):
+def test_language_relaunches_share_the_overall_nine_hundred_second_deadline(app, tmp_path):
     controller = FakeSimctl(tmp_path/"matrix-deadline-container")
     clock = {"now":0.0}
     def command(arguments,timeout):
         result = controller(arguments,timeout)
         if arguments[0] == "launch" and arguments[3] == "--idoly-probe-language=en":
-            clock["now"] = 600.0
+            clock["now"] = 900.0
         return result
     with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command), \
             mock.patch.object(probe.time,"monotonic",side_effect=lambda:clock["now"]), \
             mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
             mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
             mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()):
-        result = probe.run_probe(app,tmp_path/"matrix-deadline.json",timeout=600)
+        result = probe.run_probe(app,tmp_path/"matrix-deadline.json",timeout=900)
     assert result["status"] == "FAIL" and result["error"] == "probe_deadline_exceeded"
     assert result["failed_stage"] == "language_report_en"
     assert [row[0] for row in controller.calls].count("launch") == 2
     rpc.assert_called_once()
     assert result["cleanup"] == {"shutdown":True,"delete":True}
+
+
+
+def test_five_complete_cold_processes_can_use_the_bounded_budget_beyond_six_hundred_seconds(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"five-cold-budget-container")
+    clock = {"now":0.0}
+    def command(arguments,timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch":
+            run_index=int(arguments[-1].split("=")[1])
+            clock["now"]=(210.0,410.0,610.0,740.0,899.0)[run_index]
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command), \
+            mock.patch.object(probe.time,"monotonic",side_effect=lambda:clock["now"]), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]) as rpc, \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
+            mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()):
+        result=probe.run_probe(app,tmp_path/"five-cold-budget.json")
+    assert result["status"] == "PASS" and result["seconds"] == 899.0
+    assert result["language_matrix"]["order"] == ["ko","en","ja","en","ko"]
+    assert [row["run_index"] for row in result["language_matrix"]["reports"]] == list(range(5))
+    assert [row[0] for row in controller.calls].count("launch") == 5
+    assert result["cleanup"] == {"shutdown":True,"delete":True}
+    rpc.assert_called_once()
+
+
+def test_probe_rejects_overall_budget_above_nine_hundred_before_simulator_mutation(app, tmp_path):
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl") as simctl:
+        result=probe.run_probe(app,tmp_path/"invalid-budget.json",timeout=901)
+    assert result["status"] == "FAIL" and result["error"] == "invalid_probe_timeout"
+    simctl.assert_not_called()
 
 
 def test_server_gate_scalar_observation_preserves_native_bool_and_zero_one_integer_types():

@@ -1660,7 +1660,7 @@ def probe_sdk_resource(app, *, timeout=30):
         "original_revision":original.revision,"manifest_revision":wire.revision})
 
 
-def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
+def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
     audit = Path(audit)
     require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
     report = {"schema": 1, "status": "FAIL", "execution": "ios_simulator",
@@ -1679,7 +1679,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
         return min(cap, value)
     try:
         require(sys.platform == "darwin", "macos_required_no_simulator_execution")
-        require(type(timeout) in (int, float) and 5 <= timeout <= 600, "invalid_probe_timeout")
+        require(type(timeout) in (int, float) and 5 <= timeout <= 900, "invalid_probe_timeout")
         app = Path(app).resolve(strict=True)
         require(app.is_dir() and app.suffix == ".app", "simulator_app_required")
         info = plistlib.loads(read_bounded(app / "Info.plist", MAX_JSON))
@@ -1839,7 +1839,8 @@ def main(argv=None):
     parser.add_argument("--audit", type=Path, required=True)
     parser.add_argument("--device-type")
     parser.add_argument("--runtime")
-    parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--timeout", type=float, default=900,
+                        help="Shared deadline for boot, install and all five cold app processes (5..900 seconds)")
     args = parser.parse_args(argv)
     try:
         result = run_probe(args.app, args.audit, device_type=args.device_type,

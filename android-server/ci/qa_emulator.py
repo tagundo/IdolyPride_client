@@ -134,6 +134,22 @@ def bootstrap(schema, port):
     return check, login
 
 
+def complete_initial_storage_choice(qa):
+    """Use the app's existing private-storage action if its dialog is shown.
+
+    The fresh API-30 guest has no all-files special access. Ordinary install -g
+    does not grant it; observing the dialog is required before any extra touch.
+    QA.capture bounds malformed/idle retries, and QA.tap rechecks fresh UI.
+    """
+    hierarchy = qa.capture("01-storage-choice")
+    label = "앱 전용으로 시작"
+    if any(node.get("text") == label and node.get("enabled") == "true"
+           for node in hierarchy.iter("node")):
+        qa.tap(label, "01-storage-private-start")
+        return True
+    return False
+
+
 def wait_server(schema, port, expected=True, timeout=120):
     deadline = time.monotonic() + timeout
     next_progress = time.monotonic() + 15
@@ -1074,6 +1090,7 @@ def main():
         replays = {kind: load_tutorial_replay(schema, args.public_tutorial_dir, kind) for kind in TUTORIAL_REPLAYS}
         print("Starting the server through its native UI", flush=True)
         qa.tap("서버 시작", "01-start")
+        result["initial_storage_private_selected"] = complete_initial_storage_choice(qa)
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
         print("Native server ready; checking encrypted RPCs and HTTP files", flush=True)
         qa.capture("02-running")
