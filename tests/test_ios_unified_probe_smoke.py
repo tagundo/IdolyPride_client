@@ -1969,6 +1969,26 @@ def test_other_simulator_commands_do_not_contribute_host_cli_context(action):
     assert not hasattr(raised.value, "tool_detail")
 
 
+def test_compact_audit_preserves_every_nested_value_under_unchanged_encoded_bound(tmp_path):
+    report = {"schema":1,"status":"PASS","reports":[{"run_index":run_index,"checks":[
+        {"kind":"bounded-evidence","ok":True,"counter":index} for index in range(200)]} for run_index in range(5)]}
+    assert probe.MAX_JSON == 64*1024
+    assert len(json.dumps(report,indent=2,sort_keys=True).encode()) > probe.MAX_JSON
+    path = tmp_path/"compact-audit.json"
+    probe.write_audit(path,report)
+    raw = path.read_bytes()
+    assert len(raw) <= probe.MAX_JSON
+    assert raw == (json.dumps(report,separators=(",", ":"),sort_keys=True,allow_nan=False)+"\n").encode()
+    assert json.loads(raw) == report
+
+
+def test_compact_audit_rejects_actual_oversized_payload_before_creating_output(tmp_path):
+    path = tmp_path/"oversized-audit.json"
+    with pytest.raises(probe.ProbeError,match="^audit_size_bound$"):
+        probe.write_audit(path,{"data":"x"*probe.MAX_JSON})
+    assert not path.exists()
+
+
 def test_launch_ack_timeout_accepts_only_full_native_and_rpc_success_without_relaunch(app, tmp_path):
     controller = FakeSimctl(tmp_path / "container")
 

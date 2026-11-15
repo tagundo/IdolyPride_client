@@ -208,7 +208,7 @@ def parse_json(raw, maximum=MAX_JSON):
 
 
 def write_audit(path, report):
-    raw = (json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n").encode()
+    raw = (json.dumps(report, separators=(",", ":"), sort_keys=True, allow_nan=False) + "\n").encode()
     require(len(raw) <= MAX_JSON, "audit_size_bound")
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
