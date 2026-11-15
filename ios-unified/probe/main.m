@@ -834,7 +834,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
             @"(()=>{const a=window.__idolyProbeInterfaceAck,s=document.getElementById('language');"
              "return {ready:!!a&&a.language==='%@'&&document.documentElement.lang==='%@'&&!!s&&s.value==='%@',"
              "ack_id:a?a.id:0};})()",language,language,probeExpectedLanguage];
-        BOOL (^chrome)(void)=^{
+        BOOL (^chrome)(void)=^BOOL(void){
             UIView *view=ProbeButtonOwner(button).view;
             UILabel *title=(UILabel *)ProbeHeaderView(view,@"idoly.native-title");
             UILabel *status=(UILabel *)ProbeHeaderView(view,@"idoly.server-status");
