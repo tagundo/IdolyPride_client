@@ -423,12 +423,29 @@ static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictiona
     WKWebView *web = weakWeb;
     if (!web) { finish(@{@"web_found":@NO, @"timed_out":@NO}); return; }
     state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
+    double progress=web.estimatedProgress;
+    BOOL attached=web.window!=nil, fileURL=web.URL.isFileURL, loading=web.isLoading;
+    NSMutableDictionary *metrics=[@{@"web_found":@YES,@"timed_out":@NO,
+        @"navigation_loading":@(loading),@"navigation_file_url":@(fileURL),@"web_attached":@(attached),
+        @"navigation_progress":@(isfinite(progress) ? progress : -1),
+        @"evaluation_started":@NO,@"evaluation_completed":@NO} mutableCopy];
+    state[@"last"]=metrics;
+    // A new settings WK view navigates asynchronously. Do not enqueue a DOM
+    // evaluation across its initial file navigation/Page creation transition.
+    BOOL navigationReady=!loading && fileURL && attached && progress==1.0;
+    if (!navigationReady) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/20),dispatch_get_main_queue(),^{
+            ProbeSettingsDOMAttempt(weakWeb,state,finish);
+        });
+        return;
+    }
+    metrics[@"evaluation_started"]=@YES;
     [web evaluateJavaScript:ProbeSettingsDOMScript completionHandler:^(id value, NSError *error) {
         if ([state[@"finished"] boolValue]) return;
         BOOL wkError=error && [error.domain isEqual:WKErrorDomain];
-        NSMutableDictionary *metrics = [NSMutableDictionary dictionaryWithDictionary:
-            @{@"web_found":@YES, @"timed_out":@NO, @"evaluation_succeeded":@((BOOL)(!error && [value isKindOfClass:NSDictionary.class])),
-                @"error_is_wk_domain":@(wkError)}];
+        metrics[@"evaluation_completed"]=@YES;
+        metrics[@"evaluation_succeeded"]=@((BOOL)(!error && [value isKindOfClass:NSDictionary.class]));
+        metrics[@"error_is_wk_domain"]=@(wkError);
         if (!error || (error.code>=-100 && error.code<=100)) metrics[@"evaluation_error_code"]=@(error ? error.code : 0);
         if (!error && [value isKindOfClass:NSDictionary.class]) {
             for (NSString *key in @[@"ready", @"forms_present", @"scale_2_present", @"buffer_4096_present",

@@ -220,7 +220,9 @@ def native_report(language="ko", run_index=None):
         "status_completion_main_thread":True,"grpc_connected_after_close":True,"assets_connected_after_close":True,
         "web":{"web_found":True,"evaluation_succeeded":True,"ready":True,"forms_present":True,
                "scale_2_present":True,"buffer_4096_present":True,"no_horizontal_overflow":True,
-               "timed_out":False,"viewport_width":393,"content_width":393,"select_count":14},
+               "timed_out":False,"viewport_width":393,"content_width":393,"select_count":14,
+               "navigation_loading":False,"navigation_file_url":True,"web_attached":True,"navigation_progress":1,
+               "evaluation_started":True,"evaluation_completed":True},
         "host_status_after_close":{"id":2,"ok":True,"result":{"state":"ready","running":True,
                "last_error":None,"runtime":{"running":True,"grpc_address":"127.0.0.1:50051",
                                               "asset_url":"http://127.0.0.1:8080"}}}}
@@ -727,6 +729,43 @@ def test_private_probe_cache_identity_file_must_be_absent_initially_and_is_never
     assert path.read_text() == "owned-existing-private-state"
 
 
+def test_settings_dom_waits_for_public_navigation_before_evaluation_with_same_deadline():
+    source = (Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    attempt = source.split("static void ProbeSettingsDOMAttempt(",1)[1].split("static void ProbeSettingsDOM(",1)[0]
+    assert "web.estimatedProgress" in attempt and "web.URL.isFileURL" in attempt
+    assert "web.window!=nil" in attempt and "web.isLoading" in attempt
+    gate = attempt.index("if (!navigationReady)")
+    evaluation = attempt.index("[web evaluateJavaScript:ProbeSettingsDOMScript")
+    assert gate < evaluation and "return;" in attempt[gate:evaluation]
+    assert "NSEC_PER_SEC/20" in attempt[gate:evaluation]
+    deadline = source.split("static void ProbeSettingsDOM(",1)[1].split("static void ProbeDiagnosticsCopyAttempt(",1)[0]
+    assert "10 * NSEC_PER_SEC" in deadline
+
+
+@pytest.mark.parametrize("field,value", [("navigation_loading",True),("navigation_loading",0),
+    ("navigation_file_url",False),("web_attached",False),("evaluation_started",False),("evaluation_completed",False),
+    ("evaluation_completed",1),("navigation_progress",True),("navigation_progress",0.99),("navigation_progress",float("nan"))])
+def test_settings_dom_requires_completed_attached_file_navigation_and_evaluation(field, value):
+    observed = native_report()
+    observed["menu_lifetime"]["web"][field] = value
+    with pytest.raises(probe.ProbeError, match="^settings_web_readiness_or_layout_failed$"):
+        probe.validate_report(observed)
+
+
+def test_settings_dom_timeout_distinguishes_loading_from_unanswered_evaluation_without_urls():
+    waiting = probe.settings_web_observation({"navigation_loading":True,"navigation_progress":0.3,
+        "navigation_file_url":True,"web_attached":True,"evaluation_started":False,"evaluation_completed":False,
+        "observations":201,"timed_out":True,"url":"DO-NOT-EXPORT"})
+    assert waiting["navigation_progress"] == 0.3 and waiting["observations"] == 201
+    assert waiting["evaluation_started"] is False and waiting["evaluation_completed"] is False
+    unresponsive = probe.settings_web_observation({**waiting,"navigation_loading":False,"navigation_progress":1,
+        "evaluation_started":True,"evaluation_completed":False})
+    assert unresponsive["evaluation_started"] is True and unresponsive["evaluation_completed"] is False
+    assert "DO-NOT-EXPORT" not in json.dumps((waiting,unresponsive))
+    assert probe.settings_web_observation({"navigation_progress":True,"evaluation_started":1,
+        "observations":257,"url":"DO-NOT-EXPORT"}) == {}
+
+
 def test_settings_web_diagnostic_projection_keeps_only_bounded_scalar_metrics():
     observed = probe.settings_web_observation({"web_found":True,"ready":False,"document_complete":False,
         "options_fields_enabled":True,"presentation_fields_enabled":False,"bridge_reply_present":True,
@@ -736,7 +775,7 @@ def test_settings_web_diagnostic_projection_keeps_only_bounded_scalar_metrics():
     assert observed["ready"] is False and observed["evaluation_error_code"] == -100
     assert observed["observations"] == 128 and "never-export-web" not in json.dumps(observed)
     assert probe.settings_web_observation({"ready":1,"viewport_width":float("nan"),"content_width":16385,
-        "select_count":True,"observations":129,"elapsed_seconds":601,"evaluation_error_code":True,
+        "select_count":True,"observations":257,"elapsed_seconds":601,"evaluation_error_code":True,
         "timed_out":True,"raw":"never-export-web"}) == {"timed_out":True}
     assert probe.settings_web_from_observation({"menu_lifetime":{"web":{"ready":False,"select_count":0}}}) == {
         "ready":False,"select_count":0}

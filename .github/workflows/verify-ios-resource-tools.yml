@@ -1,0 +1,74 @@
+name: Verify unified iOS settings and resource tooling
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths: [.github/workflows/verify-ios-resource-tools.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-ios-resource-tools
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  IDOLY_RELEASE_VERSION: '0.3.35'
+  IDOLY_RELEASE_BUILD: '52'
+
+jobs:
+  ios-unified:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch SHA-pinned runtime, game and public server inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B ios-unified/fetch_inputs.py --output "$RUNNER_TEMP/idoly-unified-inputs"
+      - name: Install build verification dependencies
+        run: |
+          python3 -m pip install --disable-pip-version-check pytest==8.4.2 pycryptodome==3.23.0
+          python3 -m pip install --no-index "$RUNNER_TEMP"/idoly-unified-inputs/wheels/*.whl
+      - name: Verify host lifecycle, packaging, load gate and settings bridge
+        run: |
+          python3 -B -m pytest -q -p no:cacheprovider tests/test_ios_host.py tests/test_public_payload.py tests/test_ios_unified_*.py ios-unified/native/tests/test_build_native.py
+          python3 -B ios-unified/native/build_native.py --portable-tests
+      - name: Compile real Apple frameworks and run all five cold language launches
+        run: >-
+          python3 -B ios-unified/ci_build.py
+          --inputs "$RUNNER_TEMP/idoly-unified-inputs"
+          --work "$RUNNER_TEMP/idoly-unified-build"
+          --output "$RUNNER_TEMP/idoly-unified-output"
+          --source-commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: unified-tools-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-unified-output/*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: unified-tools-check-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-unified-output
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
