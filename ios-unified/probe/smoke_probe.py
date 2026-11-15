@@ -490,6 +490,25 @@ def language_observation(value):
     return clean
 
 
+
+def server_gate_observation(value):
+    """Preserve small gate scalar types while excluding raw native errors."""
+    if type(value) is not dict:
+        return {}
+    clean = {}
+    for key in ("hook_installed", "python_initialized"):
+        item = value.get(key)
+        if type(item) is bool or (type(item) is int and item in (0,1)):
+            clean[key] = item
+    for key in ("captured", "forwarded", "attempts"):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= 16:
+            clean[key] = item
+    if "error" in value:
+        clean["error"] = None if value["error"] is None else "non_null"
+    return clean
+
+
 def validate_report(value):
     require(type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1,
             "probe_schema_differs")
@@ -778,6 +797,7 @@ def wait_report(container, remaining, *, expected_language="ko"):
     last_budget = {}
     last_budget_probe = {}
     last_language = {}
+    last_server_gate = {}
     def checked_remaining():
         try:
             return remaining()
@@ -796,6 +816,8 @@ def wait_report(container, remaining, *, expected_language="ko"):
                 error.native_octo_budget_probe = dict(last_budget_probe)
             if last_language:
                 error.native_language = dict(last_language)
+            if last_server_gate:
+                error.native_server_gate = dict(last_server_gate)
             raise
     while True:
         checked_remaining()
@@ -824,6 +846,8 @@ def wait_report(container, remaining, *, expected_language="ko"):
                 if header:
                     error.native_header = header
                 observed_status = observed.get("server_status")
+                gate = server_gate_observation(observed_status)
+                if gate: error.native_server_gate = gate
                 http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
                 if http:
                     error.native_http = http
@@ -842,6 +866,9 @@ def wait_report(container, remaining, *, expected_language="ko"):
             last_keyboard.update(keyboard_observation(waiting_value.get("keyboard")))
             last_header.update(header_observation(waiting_value.get("native_header")))
             observed_status = waiting_value.get("server_status")
+            if type(observed_status) is dict:
+                last_server_gate.clear()
+                last_server_gate.update(server_gate_observation(observed_status))
             if type(observed_status) is dict and type(observed_status.get("http_readiness")) is dict:
                 last_http.clear()
                 last_http.update(http_readiness_observation(observed_status.get("http_readiness")))
@@ -901,6 +928,8 @@ def wait_report(container, remaining, *, expected_language="ko"):
                     if header:
                         error.native_header = header
                     observed_status = waiting_value.get("server_status")
+                    gate = server_gate_observation(observed_status)
+                    if gate: error.native_server_gate = gate
                     http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
                     if http:
                         error.native_http = http
@@ -1158,6 +1187,8 @@ def failure_checkpoint(container, expected_language="ko"):
             result[source + "_read_error"] = "unreadable_checkpoint"
             continue
         result[source + "_available"] = True
+        gate = server_gate_observation(observed.get("server_status") if type(observed.get("server_status")) is dict else observed)
+        if gate: result["server_gate"] = gate
         language = language_observation(observed)
         if language: result["language_observation"] = language
         menu = menu_close_observation(observed.get("menu_close"))
@@ -1682,6 +1713,10 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
             report["native_octo_budget_observed"] = octo_budget_observation(error.native_octo_budget)
         if isinstance(error, ProbeError) and type(getattr(error, "native_octo_budget_probe", None)) is dict and error.native_octo_budget_probe:
             report["native_octo_budget_probe_observed"] = octo_budget_probe_observation(error.native_octo_budget_probe)
+        gate = server_gate_observation(getattr(error,"native_server_gate",None))
+        if not gate:
+            gate = server_gate_observation(report["native_checkpoint"].get("server_gate"))
+        if gate: report["native_server_gate_observed"] = gate
         evidence = language_observation(getattr(error,"native_language",None))
         if not evidence:
             evidence = language_observation(report["native_checkpoint"].get("language_observation"))

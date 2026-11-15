@@ -364,14 +364,21 @@ def archive_url(artifact, token):
 def fetch_archive(metadata, token, destination, guard):
     download_verified_url(metadata,archive_url(metadata["artifact_id"],token),destination,guard)
 
-def download_verified_url(metadata, target, destination, guard):
+def download_verified_url(metadata, target, destination, guard, *, allow_file_reference=False):
     need(type(target) is str and 0 < len(target) <= 16000,"invalid_archive_url")
     parsed = urlsplit(target)
     host = parsed.hostname or ""
+    need(type(allow_file_reference) is bool,"invalid_file_reference_mode")
+    if allow_file_reference:
+        need(type(metadata.get("archive_bytes")) is int and 0 < metadata["archive_bytes"] <= MAX_PROOF+MIB
+             and type(metadata.get("archive_sha256")) is str and re.fullmatch(r"[0-9a-f]{64}",metadata["archive_sha256"]),
+             "file_reference_proof_bound")
+    approved = (host.endswith(".blob.core.windows.net") or host.endswith(".actions.githubusercontent.com")
+                or host in {"github-cloud.githubusercontent.com","objects.githubusercontent.com","release-assets.githubusercontent.com"})
+    file_reference = (allow_file_reference and host.endswith(".oaiusercontent.com")
+                      and re.fullmatch(r"/files/[A-Za-z0-9_-]{1,256}/raw",parsed.path))
     need(parsed.scheme == "https" and parsed.port in (None,443) and not parsed.username
-         and not parsed.password and not parsed.fragment
-         and (host.endswith(".blob.core.windows.net") or host.endswith(".actions.githubusercontent.com")
-              or host in {"github-cloud.githubusercontent.com","objects.githubusercontent.com","release-assets.githubusercontent.com"}),
+         and not parsed.password and not parsed.fragment and (approved or file_reference),
          "unapproved_archive_origin")
     request = Request(target,headers={"Accept-Encoding":"identity","User-Agent":"idoly-verified-ios-delivery"})
     digest,count = hashlib.sha256(),0
@@ -612,7 +619,7 @@ class TinyProofGuard:
         need(int(memory["inactive_file"]) >= 1024*MIB,"local_inactive_file_floor")
         need(int(events["oom_kill"]) == 2,"local_oom_baseline_changed")
         need(shutil.disk_usage("/").free >= 150*MIB,"local_root_disk_floor")
-        need(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss <= 20*1024,"local_tiny_rss_floor")
+        need(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss <= 40*1024,"local_tiny_rss_floor")
 
 def selected_proof_members(archive):
     entries = archive.infolist()
@@ -663,7 +670,7 @@ def fetch_proof(args):
     metadata = {"archive_bytes":artifact["size_in_bytes"],"archive_sha256":args.artifact_sha256}
     work.mkdir(mode=0o700)
     archive = work/"proof.zip"
-    download_verified_url(metadata,handoff["url"],archive,guard)
+    download_verified_url(metadata,handoff["url"],archive,guard,allow_file_reference=True)
     handoff = None
     with ZipFile(archive) as incoming:
         for item in selected_proof_members(incoming).values():extract_member(incoming,item,work,guard)

@@ -551,7 +551,7 @@ NSString *IDNativeDataDirectory(void) {
 }
 NSString *IdolyEmbeddedServerStatusJSON(void) {
     __block NSString *result;
-    void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled && earlyHostInstalled),
+    void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@((BOOL)(hookInstalled && earlyHostInstalled)),
         @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
         @"octo_budget":IDOctoBudgetInfo(), @"unity_host":IDUnityHostInfo(),
         @"late_startup_calls":@(lateStartupCalls),

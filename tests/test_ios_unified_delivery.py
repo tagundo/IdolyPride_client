@@ -302,3 +302,55 @@ def test_probe_build_source_set_and_bytes_are_pinned(monkeypatch,tmp_path,tamper
     if tamper == "none":delivery.validate_probe_build_sources({"source_sha256":pins})
     else:
         with pytest.raises(delivery.DeliveryError):delivery.validate_probe_build_sources({"source_sha256":pins})
+
+
+@pytest.mark.parametrize("allowed",[False,True])
+def test_fileservice_proof_handoff_is_explicit_and_never_sends_auth(monkeypatch,tmp_path,allowed):
+    import hashlib
+    import io
+    body = b"API-SHA-bound small proof"
+    class Response(io.BytesIO):
+        status = 200
+        headers = {"Content-Encoding":"identity"}
+    class Guard:
+        def check(self):pass
+    calls = []
+    def open_response(request,timeout):
+        calls.append(request.full_url)
+        assert request.get_header("Authorization") is None
+        assert set(name.lower() for name,_ in request.header_items()) <= {"accept-encoding","user-agent"}
+        return Response(body)
+    monkeypatch.setattr(delivery.OPENER,"open",open_response)
+    metadata = {"archive_bytes":len(body),"archive_sha256":hashlib.sha256(body).hexdigest()}
+    target = "https://sdmntprkoreacentral.oaiusercontent.com/files/file_test-123/raw?temporary=opaque"
+    if allowed:
+        delivery.download_verified_url(metadata,target,tmp_path/"proof.zip",Guard(),allow_file_reference=True)
+        assert (tmp_path/"proof.zip").read_bytes() == body and len(calls) == 1
+    else:
+        with pytest.raises(delivery.DeliveryError,match="unapproved_archive_origin"):
+            delivery.download_verified_url(metadata,target,tmp_path/"proof.zip",Guard())
+        assert calls == []
+
+
+@pytest.mark.parametrize("target",[
+    "http://sdmntprkoreacentral.oaiusercontent.com/files/file_test/raw",
+    "https://sdmntprkoreacentral.oaiusercontent.com/wrong/file_test/raw",
+    "https://sdmntprkoreacentral.oaiusercontent.com/files/file_test/other",
+    "https://user@sdmntprkoreacentral.oaiusercontent.com/files/file_test/raw",
+    "https://sdmntprkoreacentral.oaiusercontent.com.evil.example/files/file_test/raw",
+])
+def test_file_reference_handoff_rejects_wrong_origin_path_or_auth(monkeypatch,tmp_path,target):
+    def forbidden(*args,**kwargs):raise AssertionError("network must not start")
+    monkeypatch.setattr(delivery.OPENER,"open",forbidden)
+    with pytest.raises(delivery.DeliveryError,match="unapproved_archive_origin"):
+        delivery.download_verified_url({"archive_bytes":1,"archive_sha256":DIGEST},target,
+            tmp_path/"proof.zip",None,allow_file_reference=True)
+
+
+def test_file_reference_mode_cannot_download_a_large_artifact(monkeypatch,tmp_path):
+    def forbidden(*args,**kwargs):raise AssertionError("network must not start")
+    monkeypatch.setattr(delivery.OPENER,"open",forbidden)
+    with pytest.raises(delivery.DeliveryError,match="file_reference_proof_bound"):
+        delivery.download_verified_url({"archive_bytes":delivery.MAX_PROOF+delivery.MIB+1,"archive_sha256":DIGEST},
+            "https://sdmntprkoreacentral.oaiusercontent.com/files/file_test/raw",tmp_path/"proof.zip",None,
+            allow_file_reference=True)

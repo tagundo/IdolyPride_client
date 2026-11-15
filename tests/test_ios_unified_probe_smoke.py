@@ -497,6 +497,84 @@ def test_language_relaunches_share_the_original_six_hundred_second_deadline(app,
     assert result["cleanup"] == {"shutdown":True,"delete":True}
 
 
+def test_server_gate_scalar_observation_preserves_native_bool_and_zero_one_integer_types():
+    value = {"hook_installed":1,"python_initialized":False,"captured":0,"forwarded":16,"attempts":1,
+        "error":None,"private_path":"never-export-gate"}
+    result = probe.server_gate_observation(value)
+    assert result == {"hook_installed":1,"python_initialized":False,"captured":0,"forwarded":16,
+                      "attempts":1,"error":None}
+    assert type(result["hook_installed"]) is int and type(result["python_initialized"]) is bool
+    assert "never-export-gate" not in json.dumps(result)
+
+
+def test_server_gate_scalar_observation_drops_bad_types_and_counts_and_redacts_nonnull_errors():
+    result = probe.server_gate_observation({"hook_installed":"1","python_initialized":2,
+        "captured":True,"forwarded":17,"attempts":-1,"error":{"private":"never-export-gate"}})
+    assert result == {"error":"non_null"}
+    assert probe.server_gate_observation({}) == {}
+    assert probe.server_gate_observation({"error":None}) == {"error":None}
+    assert probe.server_gate_observation(None) == {}
+    assert "never-export-gate" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("flag", ("hook_installed","python_initialized"))
+def test_integer_native_ready_flag_still_fails_strict_validator_and_retains_actual_type_in_audit(app, tmp_path, flag):
+    native = native_report()
+    native["server_status"].update({flag:1,"private_path":"never-export-gate"})
+    with pytest.raises(probe.ProbeError,match="embedded_server_not_ready"):
+        probe.validate_report(native)
+    controller = FakeSimctl(tmp_path/"integer-gate-container")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch(__name__+".native_report",return_value=native),mock.patch.object(probe,"probe_rpcs") as rpc:
+        result = probe.run_probe(app,tmp_path/"integer-gate-failure.json")
+    assert result["error"] == "embedded_server_not_ready"
+    assert result["native_server_gate_observed"][flag] == 1
+    assert type(result["native_server_gate_observed"][flag]) is int
+    assert type(result["native_checkpoint"]["server_gate"][flag]) is int
+    assert result["native_server_gate_observed"]["error"] is None
+    assert "never-export-gate" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+@pytest.mark.parametrize("source,filename", (("checkpoint","embedded-probe-checkpoint.json"),
+    ("status","embedded-probe-status.json"),("report","embedded-probe.json")))
+def test_server_gate_failure_checkpoint_keeps_bounded_actual_types_and_redacts_errors(tmp_path, source, filename):
+    documents = tmp_path/"Documents";documents.mkdir()
+    native = native_report()
+    native["server_status"].update(hook_installed=1,error="never-export-gate",private="never-export-gate")
+    value = native if source == "report" else {"schema":1,"stage":"host_ready", "server_status":native["server_status"]}
+    (documents/filename).write_text(json.dumps(value))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["server_gate"]["hook_installed"] == 1
+    assert type(result["server_gate"]["hook_installed"]) is int
+    assert result["server_gate"]["error"] == "non_null"
+    assert "never-export-gate" not in json.dumps(result)
+    if source == "checkpoint": assert result["stage"] == "host_ready"
+
+
+def test_server_gate_waiting_probe_failure_and_deadline_keep_only_fixed_scalar_observations(tmp_path):
+    documents = tmp_path/"Documents";documents.mkdir()
+    path = documents/"embedded-probe-status.json"
+    value = {"server_status":{"phase":2,"hook_installed":1,"python_initialized":True,
+        "captured":1,"forwarded":0,"attempts":1,"error":None,"private":"never-export-gate"},
+        "probe_error":"host_cold_start_failed"}
+    path.write_text(json.dumps(value))
+    with pytest.raises(probe.ProbeError,match="host_cold_start_failed") as caught:
+        probe.wait_report(tmp_path,lambda:1)
+    assert type(caught.value.native_server_gate["hook_installed"]) is int
+    assert caught.value.native_server_gate["python_initialized"] is True
+    assert "never-export-gate" not in json.dumps(caught.value.native_server_gate)
+    del value["probe_error"]
+    path.write_text(json.dumps(value))
+    remaining = mock.Mock(side_effect=[1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep"),pytest.raises(probe.ProbeError,match="probe_deadline_exceeded") as caught:
+        probe.wait_report(tmp_path,remaining)
+    assert caught.value.native_server_gate["forwarded"] == 0
+    assert type(caught.value.native_server_gate["hook_installed"]) is int
+    assert caught.value.native_server_gate["error"] is None
+    assert "never-export-gate" not in json.dumps(caught.value.native_server_gate)
+
+
 @pytest.mark.parametrize("phase,key,value", (
     ("current","header_found",False),("current","actions_found",1),("current","nav_bar_hidden",False),
     ("current","button_count",True),("current","button_count",1),("current","root_width",True),
@@ -1584,7 +1662,7 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe", "language_observation"))
+                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]
