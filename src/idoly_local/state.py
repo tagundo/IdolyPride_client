@@ -52,6 +52,15 @@ class State:
                     response BLOB NOT NULL,
                     schema_sha256 TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS preference_receipts (
+                    profile TEXT NOT NULL REFERENCES profiles(name),
+                    path TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    request_sha256 TEXT NOT NULL,
+                    schema_sha256 TEXT NOT NULL,
+                    response BLOB NOT NULL,
+                    PRIMARY KEY(profile, path, request_id)
+                );
                 CREATE TABLE IF NOT EXISTS main_live_attempts (
                     profile TEXT NOT NULL REFERENCES profiles(name),
                     request_id TEXT NOT NULL,
@@ -143,6 +152,7 @@ class State:
             db.execute("DELETE FROM profile_lesson_progress WHERE profile=?", (profile,))
             # Request identities belong to this snapshot/account, not its name.
             db.execute("DELETE FROM main_live_attempts WHERE profile=?", (profile,))
+            db.execute("DELETE FROM preference_receipts WHERE profile=?", (profile,))
 
     def snapshot(self, profile: str) -> tuple[bytes, str] | None:
         with self.connect() as db:
@@ -225,6 +235,50 @@ class State:
             db.execute("INSERT INTO main_live_attempts VALUES (?,?,?,?,?,?,?,?,?,?)", (
                 profile, request_id, request_sha256, path, schema_sha256,
                 master_version, ruleset, str(seed), started_time, response))
+        return response
+
+    def mutate_preference_snapshot(self, profile: str, schema_sha256: str, request_id: str,
+                                   request_sha256: str, path: str, callback) -> bytes:
+        """Commit a toggle and its retry response in the same transaction.
+
+        The callback returns (snapshot_bytes, response_bytes). An exact retry
+        returns the original response without running the toggle, including
+        after another preference changed or the server restarted. Snapshot
+        replacement clears only this profile's receipts.
+        """
+        self.live_request_id(request_id)
+        if (not isinstance(request_sha256, str)
+                or re.fullmatch(r"[0-9a-f]{64}", request_sha256) is None
+                or not isinstance(schema_sha256, str) or not schema_sha256
+                or not isinstance(path, str)
+                or re.fullmatch(r"/api\.[A-Za-z][A-Za-z0-9]*/[A-Za-z][A-Za-z0-9]*", path) is None
+                or not callable(callback)):
+            raise ValueError("Preference request context and callback are required")
+        with self.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT response,schema_sha256 FROM snapshots WHERE profile=?",
+                             (profile,)).fetchone()
+            if row is None or row["schema_sha256"] != schema_sha256:
+                raise ValueError("Local profile has no snapshot for this schema")
+            old = db.execute(
+                "SELECT request_sha256,schema_sha256,response FROM preference_receipts "
+                "WHERE profile=? AND path=? AND request_id=?", (profile, path, request_id)).fetchone()
+            if old is not None:
+                if old["request_sha256"] != request_sha256:
+                    raise AttemptConflict("Preference request identity was reused for different input")
+                if old["schema_sha256"] != schema_sha256:
+                    raise ValueError("Cached preference response uses a different schema")
+                return bytes(old["response"])
+            original = bytes(row["response"])
+            result = callback(original)
+            if (not isinstance(result, tuple) or len(result) != 2
+                    or not all(isinstance(value, bytes) for value in result)):
+                raise ValueError("Preference mutation must return snapshot and response bytes")
+            payload, response = result
+            if payload != original:
+                db.execute("UPDATE snapshots SET response=? WHERE profile=?", (payload, profile))
+            db.execute("INSERT INTO preference_receipts VALUES (?,?,?,?,?,?)",
+                       (profile, path, request_id, request_sha256, schema_sha256, response))
         return response
 
     def mutate_lesson_snapshot(self, profile: str, schema_sha256: str, callback) -> tuple[bytes, bytes]:

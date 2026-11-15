@@ -70,6 +70,8 @@ class Application:
         from .profile_names import ProfileNames
         from .profile_messages import ProfileMessages
         from .profile_emblems import ProfileEmblems
+        from .profile_preferences import ProfilePreferences
+        from .photo_preferences import PhotoPreferences
         from .profile_favorites import ProfileFavorites
         from .profile_top import ProfileTop
         from .card_level_missions import CardLevelMissions
@@ -89,6 +91,8 @@ class Application:
         self.profile_names = ProfileNames(schema, state, profile)
         self.profile_messages = ProfileMessages(schema, state, profile)
         self.profile_emblems = ProfileEmblems(schema, state, profile, master_dir)
+        self.profile_preferences = ProfilePreferences(schema, state, profile, master_dir)
+        self.photo_preferences = PhotoPreferences(schema, state, profile)
         self.profile_favorites = ProfileFavorites(schema, state, profile, master_dir)
         self.dream = Dream(schema, state, profile, master_dir, catalog_path=dream_catalog_path)
         self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
@@ -249,6 +253,15 @@ class Application:
                 response = self.profile_names.handle(path, plain)
             if response is None:
                 response = self.profile_messages.handle(path, plain)
+            if response is None and path == "/api.Photo/SwitchLock":
+                request_ids = [value for key, value in context.invocation_metadata()
+                               if key == "x-app-request-id"]
+                if len(request_ids) != 1:
+                    raise RpcFailure(RpcCode.INVALID_ARGUMENT,
+                                     "One x-app-request-id is required for a photo toggle")
+                response = self.photo_preferences.handle(path, plain, request_id=request_ids[0])
+            if response is None:
+                response = self.profile_preferences.handle(path, plain)
             if response is None:
                 response = self.profile_emblems.handle(path, plain)
             if response is None:

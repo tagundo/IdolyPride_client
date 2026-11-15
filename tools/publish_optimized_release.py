@@ -27,7 +27,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD, IPA_VERSION = "0.3.33", 50, "156.9113"
+VERSION, BUILD, IPA_VERSION = "0.3.34", 51, "156.9114"
 TAG = "local-server-v" + VERSION
 BASELINE = "50e349f4db6db0d3122bdc09c3b06307145f814f"
 MIB, CHUNK = 1024 * 1024, 128 * 1024
@@ -316,13 +316,49 @@ def validate_platform(report, platform, source):
     return report
 
 
-def validate_portable(report, source):
+def validate_portable(report, source, directory):
     need(type(report) is dict and type(report.get("schema")) is int and report["schema"] == 1
          and report.get("status") == "PASS" and report.get("source_commit") == source,
          "portable_identity_differs")
     validation = report.get("validation", {})
     need(type(validation) is dict and validation.get("pytest_passed") is True
-         and validation.get("compileall_passed") is True, "portable_checks_not_passed")
+         and validation.get("compileall_passed") is True
+         and validation.get("actual_preference_master_contracts_passed") is True,
+         "portable_checks_not_passed")
+    contracts = report.get("preference_master_contracts")
+    need(type(contracts) is dict, "preference_contracts_missing")
+    pin(contracts.get("input"), DATA_PIN)
+    need(contracts.get("master_version") == "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60"
+         and contracts.get("selected_counts") == {"CardImage": 611, "Decoration": 361},
+         "preference_contract_catalog_differs")
+    for key, relative in (("module_sha256", "src/idoly_local/preference_master_data.py"),
+                          ("supplement_report_sha256", "docs/preference-master-data.json")):
+        path = ROOT / relative
+        need(path.is_file() and not path.is_symlink() and contracts.get(key) == digest(path),
+             "preference_contract_source_differs")
+    counts = contracts.get("tests")
+    need(type(counts) is dict and type(counts.get("count")) is int and counts["count"] >= 3
+         and all(type(counts.get(key)) is int and counts[key] == 0
+                 for key in ("failures", "errors", "skipped")),
+         "preference_contract_tests_not_passed")
+    record = contracts.get("junit")
+    need(type(record) is dict and record.get("name") == "preference-contracts.xml",
+         "preference_contract_junit_missing")
+    path = Path(directory) / record["name"]
+    need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= MAX_JSON
+         and record.get("bytes") == path.stat().st_size and record.get("sha256") == digest(path),
+         "preference_contract_junit_digest_differs")
+    import xml.etree.ElementTree as ET
+    try:
+        cases = ET.fromstring(path.read_bytes()).findall(".//testcase")
+    except ET.ParseError:
+        raise ReleaseError("preference_contract_junit_invalid") from None
+    names = {"test_generated_preference_supplement_matches_recorded_original_tables",
+             "test_actual_pinned_supplement_fallback_updates_owned_card_and_decoration",
+             "test_actual_pinned_media_inventory_includes_all_verified_decorations"}
+    need(len(cases) == counts["count"] and names <= {row.get("name") for row in cases}
+         and not any(row.find(tag) is not None for row in cases for tag in ("failure", "error", "skipped")),
+         "preference_contract_required_cases_not_passed")
 
 
 def validate_diagnostics_benchmark(report, source):
@@ -507,7 +543,7 @@ class GitHub:
     def publish(self, source, body):
         self.require_fresh()
         created = self.api("/releases", method="POST", body={
-            "tag_name": TAG, "target_commitish": source, "name": "아이프라 로컬 v" + VERSION + " · 서버 기록·프로필 복구",
+            "tag_name": TAG, "target_commitish": source, "name": "아이프라 로컬 v" + VERSION + " · 프로필·포토 편집과 목록 복구",
             "body": body, "draft": True, "prerelease": True, "make_latest": "false"})
         need(type(created) is dict and type(created.get("id")) is int and created["id"] > 0
              and created.get("tag_name") == TAG and created.get("draft") is True
@@ -541,8 +577,8 @@ class GitHub:
 def release_body(source, run, publication, artifacts, metrics):
     lines = ["# 아이프라 로컬 v" + VERSION, "",
              "Android 서버 APK, iPhone·iPad 통합 IPA, Apple Silicon Mac 서버 앱을 같은 소스로 제작했습니다.",
-             "Android 서버에 화면에 표시된 서버 기록을 텍스트로 내보내는 버튼을 추가했습니다. 프레임워크 예외에는 다음 호출 위치도 표시합니다.",
-             "보유한 칭호의 프로필 적용을 복구하고, 통합 IPA의 오른쪽 위 2초 길게 누르기 영역을 128×128 포인트로 넓혔습니다.",
+             "보유 버디 카드·프로필 장식·기본/포토/카드 배경·카드 이미지 선택과 포토 잠금/해제를 복구했습니다.",
+             "같은 포토 전환 요청은 재시도·재시작·동시 요청에도 한 번만 반영합니다. 저장된 일일·주간·일반 미션과 일일·콘테스트·타워의 목록/이력을 조회하며 새 미션·보상·일일/타워 전투는 생성하지 않습니다.",
              "개별 Where 예외의 원인 해결 여부는 재현 기록으로 확인해야 합니다. NPC의 MV 출연은 별도 조사 단계입니다.",
              "계정·설정·받은 리소스는 기존 저장소를 유지합니다. 실제 게임 FPS 향상을 측정한 릴리즈는 아닙니다.", "",
              "| 파일 | 용도 | 다운로드 |", "| --- | --- | --- |"]
@@ -573,7 +609,11 @@ def release_body(source, run, publication, artifacts, metrics):
 def copy_metadata(directories, output):
     inventory, total = {}, 0
     for role, directory in directories.items():
-        for path in sorted(directory.rglob("*.json")):
+        paths = list(directory.rglob("*.json"))
+        junit = directory / "preference-contracts.xml"
+        if role == "portable" and junit.exists():
+            paths.append(junit)
+        for path in sorted(paths):
             need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= MAX_JSON,
                  "proof_metadata_file_bound")
             total += path.stat().st_size
@@ -639,7 +679,7 @@ def main(argv=None):
                 inventory = extract_generic(archive, directory, role, guard)
             archive.unlink()
             directories[role], inventories[role] = directory, inventory
-        validate_portable(read_json(directories["portable"]/"portable-report.json"), args.source_commit)
+        validate_portable(read_json(directories["portable"]/"portable-report.json"), args.source_commit, directories["portable"])
         metrics = validate_performance(directories["performance"], args.source_commit)
         binaries = []
         for platform in ("android", "macos"):

@@ -1,9 +1,10 @@
-"""Track one evidenced normal card-level achievement, without claiming rewards.
+"""List persisted master-valid missions and track one card-level achievement.
 
 Original 6.1.1 captures show progress 1 -> 2 and 41 -> 42 alongside the
 corresponding owned-card enhancement. The native Mission.List consumer accepts
 a sparse list, but every returned currentThreshold must resolve exactly in the
-mission master. This module never constructs the full active mission catalog.
+mission master. List projects actual saved daily/weekly/normal memberships;
+it never constructs an active catalog, calculates new eligibility or pays rewards.
 
 At an unclaimed threshold this local implementation marks Progress as Clear;
 that is an explicit local ready-to-claim policy, not verified official boundary
@@ -12,6 +13,7 @@ behavior. No tier advances, claims, rewards or recurring missions are supplied.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from google.protobuf.message import DecodeError
 
@@ -26,7 +28,7 @@ _MAX_I64 = (1 << 63) - 1
 
 
 def _fail(reason):
-    raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local card-level mission: " + reason)
+    raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local mission: " + reason)
 
 
 def _number(value, label, *, positive=False):
@@ -151,8 +153,98 @@ def advance_mission(snapshot, catalog, now):
     return row
 
 
+def _resource_types(schema):
+    """Use the client enum for inline reward names, not guessed numeric types."""
+    enums = [enum for file in schema.files for enum in file.enum_types_by_name.values()
+             if enum.name == "ResourceType"]
+    if not enums:
+        # The original supported minimal schema predates reward enum exposure.
+        return {"stone": 15}
+    if len(enums) != 1:
+        _fail("ambiguous resource enum")
+    def snake(name):
+        name = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+        return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
+    return {snake(value.name): value.number for value in enums[0].values if value.number > 0}
+
+
+def _display_reward(catalog, key, resource_types):
+    """Require the same nonnull reward reference read by the native detail UI."""
+    if not isinstance(key, str) or not key:
+        _fail("saved mission has no display reward")
+    parts = key.split(";")
+    if parts[0] == "rd_auto":
+        if (len(parts) != 4 or parts[1].strip() not in resource_types
+                or _number(parts[3].strip(), "inline reward amount", positive=True) > (1 << 31) - 1):
+            _fail("saved mission has an invalid inline display reward")
+        return
+    reward = catalog.ids("Reward", required=True).get(key)
+    resources = reward.get("resources") if reward is not None else None
+    if not isinstance(resources, list) or not resources:
+        _fail("saved mission has an unresolved display reward")
+    valid_types = set(resource_types.values())
+    for resource in resources:
+        if (not isinstance(resource, dict) or type(resource.get("resourceType")) is not int
+                or resource["resourceType"] not in valid_types
+                or not isinstance(resource.get("resourceId", ""), str)
+                or _number(resource.get("amount"), "display reward amount", positive=True) > (1 << 31) - 1):
+            _fail("saved mission has an invalid display reward resource")
+
+
+def listed_missions(snapshot, catalog, schema):
+    """Return ordinary saved rows that the client can resolve; never repair a save.
+
+    Unknown historical identities remain byte-for-byte in the saved snapshot but
+    cannot be sent to the native consumer, whose Master.Mission lookup throws.
+    Any malformed known row fails the whole read before returning a partial list.
+    """
+    if "missions" not in snapshot.DESCRIPTOR.fields_by_name:
+        _fail("snapshot schema has no mission collection")
+    masters = catalog.ids("Mission", required=True)
+    seen, selected, resolved = set(), [], 0
+    resource_types = _resource_types(schema)
+    for row in snapshot.missions:
+        if not row.missionId or row.missionId in seen:
+            _fail("empty or duplicate saved mission identity")
+        seen.add(row.missionId)
+        master = masters.get(row.missionId)
+        if master is None:
+            continue
+        resolved += 1
+        # MissionTop sends every category-3 row straight to its Normal tab.
+        # Scoped event/company missions have separate screens; saved membership
+        # does not authorize moving them into the ordinary mission menu.
+        if (master.get("categoryType") not in (1, 2, 3)
+                or master.get("eventMissionId", "")
+                or master.get("companyEnjoyCharacterId", "")
+                or master.get("companyEnjoyCharacterMissionCategoryType", 0)
+                or master.get("companyTrustMissionCategoryType", 0)):
+            continue
+        progresses = master.get("progresses")
+        if not isinstance(progresses, list) or not progresses:
+            _fail("saved mission has no master thresholds")
+        thresholds = {}
+        for progress in progresses:
+            if not isinstance(progress, dict):
+                _fail("saved mission has an invalid master threshold")
+            threshold = _number(progress.get("threshold"), "master threshold", positive=True)
+            if threshold in thresholds:
+                _fail("saved mission has ambiguous master thresholds")
+            thresholds[threshold] = progress
+        if (row.currentThreshold not in thresholds or row.statusType not in (1, 2, 3, 4)
+                or row.progress < 0 or row.lastUpdateTime < 0
+                or row.missionId == MISSION_ID and row.statusType in (2, 3, 4)
+                and row.progress < row.currentThreshold):
+            _fail("invalid saved mission threshold, progress or status")
+        _display_reward(catalog, thresholds[row.currentThreshold].get("rewardSetId"), resource_types)
+        selected.append(row)
+    if snapshot.missions and not resolved:
+        _fail("no master-resolvable saved missions; no active catalog is synthesized")
+    return selected
+
+
 class CardLevelMissions:
-    """Read only the validated, persisted supported achievement subset."""
+    """Project ordinary saved missions; only card-level progress is advanced."""
     def __init__(self, schema, state, profile, master_dir: Path | None = None):
         self.schema, self.state, self.profile = schema, state, profile
         self.catalog = _Catalog(master_dir)
@@ -164,7 +256,6 @@ class CardLevelMissions:
             self.schema.request_type(path).FromString(plain)
         except (DecodeError, UnicodeError):
             raise RpcFailure(RpcCode.INVALID_ARGUMENT, "Malformed mission list request") from None
-        thresholds = mission_master(self.catalog)
         saved = self.state.snapshot(self.profile)
         if saved is None or saved[1] != self.schema.fingerprint:
             _fail("snapshot is absent or uses a different schema")
@@ -174,8 +265,9 @@ class CardLevelMissions:
             _fail("snapshot is malformed")
         if not snapshot.HasField("user"):
             _fail("snapshot has no user state")
-        row = saved_mission(snapshot, thresholds, required=True)
+        rows = listed_missions(snapshot, self.catalog, self.schema)
         result = self.schema.response_type(path)()
-        result.userMissions.add().CopyFrom(row)
+        for row in rows:
+            result.userMissions.add().CopyFrom(row)
         result.commonResponse.SetInParent()
         return result.SerializeToString()

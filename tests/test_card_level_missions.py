@@ -289,11 +289,10 @@ def test_list_preserves_each_valid_status_and_its_exact_current_threshold(missio
     assert dump(game[1]) == before
 
 
-@pytest.mark.parametrize("problem", ("missing-row", "duplicate-row", "unknown-threshold", "missing-snapshot", "wrong-schema", "malformed"))
+@pytest.mark.parametrize("problem", ("duplicate-row", "unknown-threshold", "missing-snapshot", "wrong-schema", "malformed"))
 def test_list_rejects_invalid_state_without_initialization(mission_game, problem):
     game = mission_game
-    if problem == "missing-row": change(game, lambda snapshot: snapshot.ClearField("missions"))
-    elif problem == "duplicate-row": change(game, lambda snapshot: snapshot.missions.add().CopyFrom(snapshot.missions[0]))
+    if problem == "duplicate-row": change(game, lambda snapshot: snapshot.missions.add().CopyFrom(snapshot.missions[0]))
     elif problem == "unknown-threshold": change(game, lambda snapshot: setattr(snapshot.missions[0], "currentThreshold", 0))
     else:
         with game[1].connect() as db:
