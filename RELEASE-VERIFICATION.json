@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "source_commit": "ce5b3551a059544a8b7ac3a985b577cc1f338c2e",
+  "artifacts": [
+    {
+      "name": "IdolyPride-Local-Server-Android.apk",
+      "bytes": 332303435,
+      "sha256": "0e46e8fa9c3b8217ca255354d8910441a981c476b760e8eda04436efcfc0ba5f"
+    },
+    {
+      "name": "IdolyPride-Local-Server-macOS-arm64.app.zip",
+      "bytes": 331119630,
+      "sha256": "cffbdf5d4c54dd7ffa9962e7ab6ef027e90ae3dcb8a9cea91afdaaddcf006be7"
+    },
+    {
+      "name": "IdolyPride-6.1.1-Unified-iOS.ipa",
+      "bytes": 525737381,
+      "sha256": "e9b40fdf699c5084cc1d429f6dec67c87ece5fba22a87cb867045f6294897893"
+    }
+  ],
+  "validation": {
+    "Actions_run": 43753600993,
+    "all_qa_passed": true,
+    "Android_ARM64_physical": "NOT_TESTED",
+    "PlayCover_and_iPhone_iPad": "NOT_TESTED"
+  }
+}
