@@ -1009,6 +1009,71 @@ def verify_main_live_database(qa, schema, receipt=None, *, expected_clock=None, 
             return clock, attempts
 
 
+def _qa_bounds(node):
+    match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+    if match:
+        left, top, right, bottom = map(int, match.groups())
+        if right > left and bottom > top:
+            return left, top, right, bottom
+    return None
+
+
+def _main_options_swipe(hierarchy):
+    views = [(node, _qa_bounds(node)) for node in hierarchy.iter("node")
+             if node.get("class") == "android.widget.ScrollView" and node.get("scrollable") == "true"]
+    views = [(node, bounds) for node, bounds in views if bounds is not None]
+    if not views:
+        raise RuntimeError("Main options ScrollView is not observable")
+    main, bounds = max(views, key=lambda item: (item[1][2]-item[1][0])*(item[1][3]-item[1][1]))
+    left, top, right, bottom = bounds
+    width, height = right-left, bottom-top
+    blocked = [_qa_bounds(node) for node in hierarchy.iter("node") if node is not main
+               and (node.get("scrollable") == "true" or node.get("class", "").endswith("Spinner"))]
+    for x in (left+max(1,width//20), right-max(1,width//20), left+width//2):
+        for start, end in ((2,8),(1,7),(3,9)):
+            first, last = top+max(1,height*start//10), top+height*end//10
+            if not (left < x < right and top < first < last < bottom):
+                continue
+            if any(box is not None and box[0] <= x < box[2] and box[1] <= first < box[3] for box in blocked):
+                continue
+            # A downward finger gesture returns toward the earlier options.
+            return x, first, x, last
+    raise RuntimeError("No safe observed main-options swipe start")
+
+
+def enable_main_live_through_ui(qa, *, max_scrolls=8):
+    """Find the actual checkbox through bounded, observed main-view scrolling."""
+    if type(max_scrolls) is not int or not 0 <= max_scrolls <= 8:
+        raise ValueError("Main-live UI scroll bound differs")
+    label = "첫 메인 라이브 실험 기능 사용"
+    for attempt in range(max_scrolls+1):
+        hierarchy = qa.capture("48-main-live-find-"+str(attempt))
+        matches = [node for node in hierarchy.iter("node") if node.get("text") == label
+                   and node.get("class") == "android.widget.CheckBox" and node.get("checkable") == "true"]
+        if len(matches) > 1:
+            raise RuntimeError("Main-live checkbox is ambiguous")
+        if matches:
+            node = matches[0]
+            if node.get("enabled") != "true":
+                time.sleep(.5)
+                continue
+            if node.get("checked") != "false" or _qa_bounds(node) is None:
+                raise RuntimeError("Main-live checkbox is not initially unchecked")
+            qa.tap(label, "48-main-live-opt-in")
+            for check in range(5):
+                observed = qa.capture("48-main-live-checked-"+str(check))
+                checked = [item for item in observed.iter("node") if item.get("text") == label
+                           and item.get("class") == "android.widget.CheckBox" and item.get("checkable") == "true"]
+                if len(checked) == 1 and checked[0].get("enabled") == "true" and checked[0].get("checked") == "true":
+                    return True
+                if check < 4:
+                    time.sleep(.5)
+            raise RuntimeError("Main-live checkbox did not become checked")
+        if attempt < max_scrolls:
+            qa.adb("shell", "input", "swipe", *map(str, _main_options_swipe(hierarchy)), "400")
+    raise RuntimeError("Enabled main-live checkbox not found within bounded observations")
+
+
 def exercise_main_live_checks(qa, schema, grpc_port, token, master_dir, startup_timeout, preserved):
     from idoly_local.main_live_qa import assert_main_live_retries, run_main_live_checks
     original_clock, existing_attempts = verify_main_live_database(qa, schema)
@@ -1030,7 +1095,7 @@ def exercise_main_live_checks(qa, schema, grpc_port, token, master_dir, startup_
         raise RuntimeError("Disabled main live changed the snapshot")
     qa.tap("서버 중지", "47-main-live-default-stop")
     wait_server(schema, grpc_port, expected=False, timeout=30)
-    qa.tap("첫 메인 라이브 실험 기능 사용", "48-main-live-opt-in")
+    enable_main_live_through_ui(qa)
     qa.tap("서버 시작", "49-main-live-enabled-start")
     wait_server(schema, grpc_port, timeout=startup_timeout)
     invoke = lambda path, request, identity: rpc(schema, grpc_port, path, token, request, request_id=identity)
