@@ -1,5 +1,26 @@
 # 검증 상태
 
+2026-11-15 통합 IPA **156.9115**와 서버 **v0.3.35 / build 52**의 여섯 QA 작업과 게시 검증을 통과했습니다. Android 서버·통합 IPA·Mac 서버와 한국어·일본어·영어 Android 게임·별도 한국어 PlayCover IPA **7개 파일**을 같은 [공개 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.35)에서 제공합니다. [전체 변경·검증·해시](../docs/releases/usability-v0.3.35.md).
+
+- 빌드 소스: `ce5b3551a059544a8b7ac3a985b577cc1f338c2e`
+- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43753600993)
+- [검증된 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/releases/download/local-server-v0.3.35/IdolyPride-6.1.1-Unified-iOS.ipa)
+- 게시 커밋: `6f1531033b3085ed5b0357261b6e09cf51c3293a`
+- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,737,381 bytes
+- SHA-256: `e9b40fdf699c5084cc1d429f6dec67c87ece5fba22a87cb867045f6294897893`
+
+전체 회귀 **7,654개·하위 375개**와 원본 마스터 필수 검사 **3개**가 통과했습니다. 환경별 검사 165개는 생략됐으며 필수 마스터 검사는 생략하지 않았습니다. Android 실제 x86_64 서버 UI·암호화 RPC·업데이트 보존, JA/EN APK의 패키지·서명·정렬·내장 UI 자료, 실제 Mac 앱의 시작·중지·서명과 Apple SDK 빌드를 확인했습니다.
+
+같은 새 Simulator 컨테이너에서 **KO→EN→JA→EN→KO** 다섯 번 완전히 종료·재실행했습니다. 실제 자동 저장 요청/응답과 독립 서버 저장값, 실패 재시도·게임 시작 전 저장 대기, 선택 언어·캐시 재사용·연결 중단 생존을 검사했습니다. 신뢰된 설정 창들은 메모리 전용 WebKit 저장소를 재사용하지만 각 창과 JavaScript 문서는 새로 생성되는지도 확인했습니다.
+
+ZIP 원본과 가져온 사본은 **5,842,291바이트**, 전체 SHA-256 `84f3ca5ddc6eea5722a942783af2316d59115354019572da22c2da9a4732632f`으로 일치했습니다. 실제 서버 내보내기→WK 요청→사본 복사→서버 처리→완료 UI와 버튼 복구를 관찰했습니다. **카탈로그만 들어 있는 ZIP으로, 내보내고 가져온 실제 리소스 오브젝트는 0개입니다.** Files 행을 탭하는 대신 공개 picker delegate callback을 사용했으므로 실제 리소스 오브젝트 이동이나 대용량 복원 성공을 뜻하지 않습니다.
+
+원본 Actions ZIP 전체 API SHA-256, 게시 세 파일의 전체 LFS 재다운로드 SHA-256과 **7개 Release Assets 각각의 전체 API 다운로드 SHA-256**을 검증했습니다. 작은 게시 증거 ZIP의 전체 SHA·내부 보고서 41개와 인증 없는 7개 다운로드의 64바이트 HTTP 206·전체 크기·ZIP 접두도 다시 확인했습니다. [게시·실제 저장값·검증 근거](../docs/releases/usability-v0.3.35-evidence.json).
+
+Simulator는 검사용 Unity 진입점과 실제 서버를 사용합니다. 실제 Android ARM64 게임, PlayCover·iPhone·iPad 게임, LiveContainer·SideStore의 Files 선택과 대용량 리소스 복원은 이번 자동 검증 범위에 포함되지 않습니다.
+
+## 이전 156.9114 검증 기록
+
 2026-11-15 통합 IPA **156.9114**와 서버 **v0.3.34 / build 51**의 공통 기능 복구·빌드·실행·게시 검증을 통과했습니다. [세 플랫폼 상세 기록](../docs/releases/recovery-v0.3.34.md).
 
 - 빌드 소스: `4bf0325d90ac36c9f3a5a9f10c55ef7d0e456118`
