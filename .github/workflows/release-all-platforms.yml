@@ -119,6 +119,13 @@ jobs:
           assert all(int(suite.get(key,'0')) == 0 for suite in root.iter('testsuite')
                      for key in ('failures','errors','skipped'))
           PY
+      - name: Prepare Swift system modules before bounded formatter checks
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          if command -v swiftc >/dev/null 2>&1; then
+            printf 'import Foundation\nimport CoreFoundation\n' | swiftc -typecheck -
+          fi
       - name: Run shared server and portable platform regressions
         shell: bash
         env:
@@ -340,6 +347,7 @@ jobs:
           name: optimized-release-android-diagnostics-${{ github.sha }}
           path: |
             ${{ runner.temp }}/idoly-android-work/**/*.json
+            ${{ runner.temp }}/idoly-android-work/gradle-*.log
             ${{ runner.temp }}/idoly-android-build/build-failure.json
             ${{ runner.temp }}/idoly-android-final/build-failure.json
             ${{ runner.temp }}/idoly-android-qa/emulator-QA.log

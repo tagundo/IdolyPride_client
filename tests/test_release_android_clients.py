@@ -167,3 +167,31 @@ def test_japanese_gate_cannot_relabel_translated_ui_as_original(packaged):
     proof["ui_translation"] = None
     with pytest.raises(ValueError, match="japanese_ui_not_original"):
         tool.verify_language(apk, proof, "ja", COMMIT, full)
+
+@pytest.mark.parametrize("message", ("https://signed.example/token?secret=do-not-print",
+    "Tool failed with request Authorization: private", "bad path /Users/private/name"))
+def test_failure_diagnostics_expose_only_fixed_phase_and_credential_free_codes(message):
+    tool.phase("input_font")
+    result = tool.failure_report(ValueError(message))
+    assert result == {"schema": 1, "status": "FAIL", "phase": "input_font",
+                      "error_type": "ValueError", "error_code": "unclassified"}
+    assert "do-not-print" not in str(result) and "Authorization" not in str(result)
+
+
+def test_fixed_build_failure_code_is_available_without_stack_or_url():
+    tool.phase("input_font")
+    result = tool.failure_report(ValueError("public_input_http_failure"))
+    assert result["error_code"] == "public_input_http_failure" and result["phase"] == "input_font"
+    with pytest.raises(ValueError, match="unknown_build_phase"):
+        tool.phase("https://private.example")
+
+def test_font_origin_is_public_upstream_with_exact_same_cached_blob_and_sha256():
+    import json
+    profile = json.loads((ROOT / "client-presentation/fonts/pretendard-jp-v1.json").read_text())
+    assert tool.FONT_GIT_BLOB == profile["cached_source"]["git_blob"] == "ab20ba021ecb09802976a8dcee3eaa4219bf55f7"
+    assert tool.INPUTS["font"] == {"bytes": profile["bytes"], "sha256": profile["sha256"]}
+    assert tool.URLS["font"] == (
+        "https://github.com/orioncactus/pretendard/raw/" + tool.FONT_PUBLIC_COMMIT
+        + "/packages/pretendard-jp/dist/public/static/PretendardJP-SemiBold.otf")
+    assert tool.FONT_PUBLIC_COMMIT == "5c41199ea0024a9e0b2cb31735265056e5472d76"
+    assert "tagundo/hoshimi-localify-ios" not in tool.URLS["font"]

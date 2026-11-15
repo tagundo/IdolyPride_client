@@ -182,7 +182,11 @@ def test_inactive_roster_keeps_identity_ownership_and_hair_guards(native_express
         assert error.value.code == code and dump(state) == before
     hair = master / "Hair.json"
     values = json.loads(hair.read_text())
-    next(row for row in values if row["id"] == "hair-b")["notWearableCostumeIds"] = ["cos-b"]
+    # An explicit whitelist match permits the outfit in the original
+    # compatibility rule, even when the blacklist also names it. Remove that
+    # inherited allowance so this fixture is unambiguously incompatible.
+    next(row for row in values if row["id"] == "hair-b").update(
+        wearableCostumeIds=[], notWearableCostumeIds=["cos-b"])
     hair.write_text(json.dumps(values))
     app.photo_shootings.catalog.loaded.pop("Hair", None)
     with pytest.raises(RpcFailure) as error:

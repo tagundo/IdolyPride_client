@@ -31,6 +31,8 @@ PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
 VERSION_CODE = 414
 CERTIFICATE = "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc"
 REPORT_NAME = "android-clients-report.json"
+FONT_PUBLIC_COMMIT = "5c41199ea0024a9e0b2cb31735265056e5472d76"
+FONT_GIT_BLOB = "ab20ba021ecb09802976a8dcee3eaa4219bf55f7"
 CLIENT_NAMES = {lang: "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-" + lang + ".apk"
                 for lang in LANGUAGES}
 INPUTS = {
@@ -44,7 +46,7 @@ INPUTS = {
 URLS = {
     "diagnostic_base": "https://github.com/tagundo/IdolyPride_client/releases/download/local-diagnostics-v0.2.1/IdolyPride-Local-Diagnostic-Android-arm64.apk",
     "apkeditor": "https://github.com/REAndroid/APKEditor/releases/download/V1.4.1/APKEditor-1.4.1.jar",
-    "font": "https://github.com/tagundo/hoshimi-localify-ios/raw/6e60a59f2d16a6c4cdee5815644c19604c51b69f/PretendardJP-SemiBold.otf",
+    "font": "https://github.com/orioncactus/pretendard/raw/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard-jp/dist/public/static/PretendardJP-SemiBold.otf",
     "shadowhook": "https://repo.maven.apache.org/maven2/com/bytedance/android/shadowhook/2.0.1/shadowhook-2.0.1.aar",
 }
 HOSTS = frozenset(("github.com", "raw.githubusercontent.com", "media.githubusercontent.com",
@@ -64,6 +66,25 @@ REQUIRED_SOURCES = (
     "src/idoly_local/font_assets.py", "src/idoly_local/static_ui_assets.py",
     "src/idoly_local/ui_display_literals.py", "src/idoly_local/story_loading_prefab.py",
     "ios-unified/client-language-inputs/en.csv", "ios-unified/client-language-inputs/en-report.json")
+
+
+PHASES = frozenset(("startup", "checkout", "directories", "input_diagnostic_base", "input_apkeditor",
+    "input_font", "input_shadowhook", "input_english_ui", "input_english_ui_proof", "sdk",
+    "native", "feature", "language_ja", "language_en", "verification", "final"))
+_PHASE = "startup"
+
+
+def phase(name):
+    global _PHASE
+    need(name in PHASES, "unknown_build_phase")
+    _PHASE = name
+
+
+def failure_report(error):
+    message = str(error)
+    return {"schema": 1, "status": "FAIL", "phase": _PHASE,
+            "error_type": type(error).__name__,
+            "error_code": message if re.fullmatch(r"[a-z0-9_]{1,96}", message) else "unclassified"}
 
 
 def need(value, code):
@@ -246,9 +267,11 @@ def verify_language(apk, proof, language, commit, full):
 
 
 def build(args):
+    phase("checkout")
     need(re.fullmatch(r"[0-9a-f]{40}", args.source_commit), "exact_source_commit_required")
     run_id = int(args.run_id or os.environ.get("GITHUB_RUN_ID", "0"))
     need(run_id > 0 and str(run_id) == os.environ.get("GITHUB_RUN_ID", str(run_id)), "exact_run_id_required")
+    phase("directories")
     work_arg, output_arg = Path(args.work).absolute(), Path(args.output).absolute()
     need(not work_arg.is_symlink() and not output_arg.is_symlink(), "non_symlink_remote_paths_required")
     work, output = work_arg.resolve(strict=False), output_arg.resolve(strict=False)
@@ -272,11 +295,14 @@ def build(args):
     work.mkdir(mode=0o700); output.mkdir(mode=0o700)
     inputs = {}
     for name, url in URLS.items():
+        phase("input_" + name)
         inputs[name] = work / (name + (".apk" if name == "diagnostic_base" else ".bin"))
         download(url, INPUTS[name], inputs[name], guard)
     for name, filename in (("english_ui", "en.csv"), ("english_ui_proof", "en-report.json")):
+        phase("input_" + name)
         inputs[name] = ROOT / "ios-unified/client-language-inputs" / filename
         verify_input(inputs[name], INPUTS[name])
+    phase("sdk")
     android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
     need(android_home is not None, "android_sdk_root_required")
     sdk_root = Path(android_home)
@@ -288,6 +314,7 @@ def build(args):
         (sdk / "lib/d8.jar", limits.PUBLIC_INPUT_HASHES["d8-jar"]),
         (sdk / "lib/apksigner.jar", limits.PUBLIC_INPUT_HASHES["signer-jar"])):
         need(sha(filename) == expected, "android_build_tool_input_differs")
+    phase("native")
     library, readelf = prepare_native(args, addon, limits, guard, work, inputs)
     password = work / "public-diagnostic-password"
     password.write_bytes(b"android"); password.chmod(0o600)
@@ -295,6 +322,7 @@ def build(args):
     common = dict(source_commit=args.source_commit, jdk_bin=jdk, build_tools=sdk,
                   keystore=key, password_file=password)
     feature = work / "diagnostics-feature.apk"
+    phase("feature")
     addon.build(SimpleNamespace(profile="diagnostics", base_apk=inputs["diagnostic_base"],
         native_library=library, output=feature, android_jar=android, shadowhook_aar=inputs["shadowhook"],
         readelf=readelf, **common))
@@ -307,6 +335,7 @@ def build(args):
     source_hashes = addon.frozen_sources(args.source_commit, extra=extra)
     binaries, packaging_evidence = [], {}
     for language in LANGUAGES:
+        phase("language_" + language)
         guard.check()
         apk = output / CLIENT_NAMES[language]
         proof = full.build(SimpleNamespace(source=inputs["diagnostic_base"], feature_apk=feature,
@@ -333,6 +362,7 @@ def build(args):
             "application_id": PACKAGE, "version_code": VERSION_CODE,
             "certificate_sha256": CERTIFICATE})
         packaging_evidence[language] = packaged
+    phase("verification")
     need(len({row["unity_cache_sha256"] for row in packaging_evidence.values()}) == 2, "locale_cache_guids_not_distinct")
     need(len({row["presentation_native_sha256"] for row in packaging_evidence.values()}) == 1, "locale_native_features_differ")
     for name, path in inputs.items():
@@ -352,8 +382,10 @@ def build(args):
         "report_files": {name: record(output / name) for name in reports},
         "input_provenance": {"diagnostic_base_release_asset": 728205797,
             "diagnostic_base_reused_immutable": True, "fresh_native_feature_for_current_source": True,
+            "font_public_commit": FONT_PUBLIC_COMMIT, "font_git_blob": FONT_GIT_BLOB,
             "package_variants_are_alternative_updates": True, "ko_client_reused_unchanged": True},
         "resources": guard.report()}
+    phase("final")
     write_json(output / REPORT_NAME, value)
     return value
 
@@ -370,7 +402,14 @@ def main(argv=None):
     try:
         result = build(args)
     except Exception as error:
-        print(json.dumps({"schema": 1, "status": "FAIL", "error_type": type(error).__name__}))
+        failure = failure_report(error)
+        if (_PHASE not in ("startup", "checkout", "directories")
+                and args.output.is_dir() and not args.output.is_symlink()):
+            try:
+                write_json(args.output / "android-client-failure.json", failure)
+            except OSError:
+                pass
+        print(json.dumps(failure))
         return 1
     print(json.dumps({"status": result["status"], "source_commit": result["source_commit"],
                       "binaries": result["binaries"]}))

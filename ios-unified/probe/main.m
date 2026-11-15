@@ -619,7 +619,7 @@ static void ProbeZIPImportObserve(WKWebView *__weak weakWeb, UIViewController *_
             picker=(UIDocumentPickerViewController *)shown; state[@"picker"]=picker;
             pass[@"picker_presented"]=@YES; pass[@"document_picker_mode"]=@(picker.documentPickerMode);
             pass[@"single_selection"]=@(!picker.allowsMultipleSelection);
-            pass[@"delegate_is_settings"]=@(picker.delegate==presenter);
+            pass[@"delegate_is_settings"]=@(picker.delegate==(id)presenter);
             if (![picker.delegate respondsToSelector:@selector(documentPickerWasCancelled:)]) { finish(); return; }
             [picker.delegate documentPickerWasCancelled:picker]; pass[@"cancel_delegate_invoked"]=@YES;
             [picker dismissViewControllerAnimated:NO completion:nil]; pass[@"dismissed_programmatically"]=@YES;
