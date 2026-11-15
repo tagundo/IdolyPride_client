@@ -68,6 +68,14 @@ int main(void) {
         Require(application.numberOfItems == before + 1, "duplicate_install_added_an_item");
         NSMenuItem *item = FindSettings(application, action);
         Require([item.title isEqualToString:@"로컬 서버 설정…"], "menu_title_differs");
+        IDMacSetSettingsMenuTitle(@"ローカルサーバー設定…");
+        Require([item.title isEqualToString:@"ローカルサーバー設定…"], "live_japanese_title_not_applied");
+        Require(IDMacInstallSettingsMenu(target, action) && FindSettings(application, action) == item
+                && application.numberOfItems == before + 1, "retitle_must_not_duplicate_menu_item");
+        IDMacSetSettingsMenuTitle(@"Local Server Settings…");
+        Require([item.title isEqualToString:@"Local Server Settings…"], "live_english_title_not_applied");
+        IDMacSetSettingsMenuTitle(@"");
+        Require([item.title isEqualToString:@"Local Server Settings…"], "empty_title_must_be_rejected");
         Require([item.keyEquivalent isEqualToString:@"<"], "menu_key_equivalent_differs");
         Require(item.keyEquivalentModifierMask == (NSEventModifierFlagCommand | NSEventModifierFlagShift),
                 "menu_modifier_mask_differs");
@@ -104,6 +112,7 @@ int main(void) {
         Require(IDMacInstallSettingsMenu(target, action), "replacement_repeat_install_failed");
         Require(replacement.numberOfItems == before + 1, "replacement_menu_not_idempotent");
         NSMenuItem *replacementItem = FindSettings(replacement, action);
+        Require([replacementItem.title isEqualToString:@"Local Server Settings…"], "rebuilt_menu_lost_interface_language");
         Require(replacementItem.target == target, "replacement_target_differs");
         NSUInteger beforeReplacementAction = target.calls;
         Require([NSApp sendAction:replacementItem.action to:replacementItem.target from:replacementItem],
@@ -114,12 +123,14 @@ int main(void) {
         __block BOOL offMainAccepted = YES;
         dispatch_semaphore_t complete = dispatch_semaphore_create(0);
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            IDMacSetSettingsMenuTitle(@"off-main-title");
             offMainAccepted = IDMacInstallSettingsMenu(target, action);
             dispatch_semaphore_signal(complete);
         });
         Require(dispatch_semaphore_wait(complete, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0,
                 "off_main_guard_blocked_on_main_thread");
         Require(!offMainAccepted, "off_main_install_must_be_rejected");
+        Require([replacementItem.title isEqualToString:@"Local Server Settings…"], "off_main_title_changed_the_menu");
         Require(replacement.numberOfItems == before + 1, "off_main_install_changed_the_menu");
 
         NSApp.mainMenu = previous;

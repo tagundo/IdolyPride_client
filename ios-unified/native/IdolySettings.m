@@ -38,6 +38,7 @@ static NSString *localized(NSString *source) {
     dispatch_once(&once, ^{ catalog = @{
         @"아이프라 서버":@[@"アイプラサーバー", @"Idoly Server"],
         @"아이프라 서버 설정":@[@"サーバー設定", @"Server Settings"],
+        @"로컬 서버 설정…":@[@"ローカルサーバー設定…", @"Local Server Settings…"],
         @"서버":@[@"サーバー", @"Server"],
         @"서버 시작":@[@"サーバー開始", @"Start Server"],
         @"게임 시작":@[@"ゲーム開始", @"Start Game"],
@@ -622,7 +623,10 @@ void IDNativeSetInterfaceLanguage(NSString *language) {
     NSInteger previous = interfaceLanguageIndex;
     interfaceLanguage = [language copy];
     interfaceLanguageIndex = resolvedInterfaceLanguage();
+    IDMacSetSettingsMenuTitle(localized(@"로컬 서버 설정…"));
     if (previous == interfaceLanguageIndex) return;
+    [launcherController updateLocalizedText];
+    if (settingsController != launcherController)
     [settingsController updateLocalizedText];
     refreshFailureAlert();
 }
@@ -696,6 +700,7 @@ BOOL IDNativeLauncherVisible(void) {
 - (void)attach {
     // The Mac menu can be created/replaced independently of the Unity window.
     // This is event-driven; it adds no overlay or per-frame polling.
+    IDMacSetSettingsMenuTitle(localized(@"로컬 서버 설정…"));
     IDMacInstallSettingsMenu(self, @selector(openMenu:));
     UIWindow *window = gameWindow(); if (!window || !window.rootViewController) return;
     static const void *key = &key;

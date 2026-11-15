@@ -2,6 +2,8 @@
 #import <TargetConditionals.h>
 #import <objc/runtime.h>
 
+static NSString *IDMacSettingsMenuTitle;
+
 #if !TARGET_OS_SIMULATOR
 // These are public AppKit selectors with their exact Objective-C ABI. Keeping
 // the declarations local lets the same source compile for the real iOS SDK;
@@ -27,10 +29,12 @@
 - (SEL)action;
 - (void)setAction:(SEL)action;
 - (void)setKeyEquivalentModifierMask:(NSUInteger)mask;
+- (void)setTitle:(NSString *)title;
 @end
 
 static const char IDMacSettingsMenuKey;
 static const NSInteger IDMacMaximumMenuItems = 512;
+static __weak id<IDMacMenuItemObject> IDMacInstalledSettingsItem;
 
 static BOOL IDMacUsableMenu(id menu, Class menuClass) {
     return menu && [menu isKindOfClass:menuClass]
@@ -47,9 +51,22 @@ static BOOL IDMacUsableItem(id item, Class itemClass) {
         && [item respondsToSelector:@selector(setTarget:)]
         && [item respondsToSelector:@selector(action)]
         && [item respondsToSelector:@selector(setAction:)]
-        && [item respondsToSelector:@selector(setKeyEquivalentModifierMask:)];
+        && [item respondsToSelector:@selector(setKeyEquivalentModifierMask:)]
+        && [item respondsToSelector:@selector(setTitle:)];
 }
 #endif
+
+void IDMacSetSettingsMenuTitle(NSString *title) {
+    if (!NSThread.isMainThread || ![title isKindOfClass:NSString.class]
+            || !title.length || title.length > 128) return;
+    IDMacSettingsMenuTitle = [title copy];
+#if !TARGET_OS_SIMULATOR
+    @try {
+        id<IDMacMenuItemObject> item = IDMacInstalledSettingsItem;
+        if ([item respondsToSelector:@selector(setTitle:)]) [item setTitle:IDMacSettingsMenuTitle];
+    } @catch (NSException *exception) { (void)exception; }
+#endif
+}
 
 BOOL IDMacInstallSettingsMenu(id target, SEL action) {
 #if TARGET_OS_SIMULATOR
@@ -87,6 +104,8 @@ BOOL IDMacInstallSettingsMenu(id target, SEL action) {
             if (index >= 0 && index < count && [menu itemAtIndex:index] == item) {
                 if ([item target] != target) [item setTarget:target];
                 if (!sel_isEqual([item action], action)) [item setAction:action];
+                [item setTitle:IDMacSettingsMenuTitle ?: @"로컬 서버 설정…"];
+                IDMacInstalledSettingsItem = item;
                 return YES;
             }
             // Reuse our item after a menu rebuild removed it. An item moved to
@@ -100,11 +119,12 @@ BOOL IDMacInstallSettingsMenu(id target, SEL action) {
             // AppKit compares charactersIgnoringModifiers, which preserves
             // Shift: the physical Shift-comma key produces the character '<'.
             item = [(id<IDMacMenuItemObject>)[itemClass alloc]
-                initWithTitle:@"로컬 서버 설정…" action:action keyEquivalent:@"<"];
+                initWithTitle:IDMacSettingsMenuTitle ?: @"로컬 서버 설정…" action:action keyEquivalent:@"<"];
             if (!IDMacUsableItem(item, itemClass)) return NO;
         }
         [item setTarget:target];
         [item setAction:action];
+        [item setTitle:IDMacSettingsMenuTitle ?: @"로컬 서버 설정…"];
         // NSEventModifierFlagCommand | NSEventModifierFlagShift, both NSUInteger.
         [item setKeyEquivalentModifierMask:((NSUInteger)1 << 20) | ((NSUInteger)1 << 17)];
         NSInteger index = count;
@@ -117,6 +137,7 @@ BOOL IDMacInstallSettingsMenu(id target, SEL action) {
         // notifications, and our own insertion must not create a duplicate.
         objc_setAssociatedObject(menu, &IDMacSettingsMenuKey, item, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         [menu insertItem:item atIndex:index];
+        IDMacInstalledSettingsItem = item;
         return YES;
     } @catch (NSException *exception) {
         // A PlayCover/menu lifecycle mismatch must not terminate the game.

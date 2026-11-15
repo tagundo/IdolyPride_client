@@ -99,6 +99,11 @@ for (const [action, payload] of [
   ['resources_download', {parallelism: 9}],
   ['resources_download', {parallelism: '4'}],
   ['resources_cancel', {job_id: '../other'}],
+  ['save_interface_language', {}],
+  ['save_interface_language', {interface_language: 'fr'}],
+  ['save_interface_language', {interface_language: true}],
+  ['save_interface_language', {interface_language: 'en', language: 'ja'}],
+  ['save_interface_language', {interface_language: 'en', media_mode: false}],
   ['save_playback', {settings: {schema: 1, revision: 0, wait_for_orientation: 'false'}}]
 ]) await assert.rejects(bridge.request(action, payload));
 assert.equal(env.posted.length, 0);
@@ -421,10 +426,16 @@ env.scope.navigator = {language: 'en-US'};
 const app = api.createSettingsApp(env.scope, env.document, env.timers);
 assert.equal(env.elements.get('interface_language').disabled, false);
 assert.equal(env.elements.get('interface_language').value, 'system');
+const initialStatus = env.posted[0];
 env.elements.get('interface_language').value = 'ja';
 env.elements.get('interface_language').fire('change');
-assert.equal(env.posted.length, 1, 'Choosing the interface language sends no unready host mutation');
-env.respond(env.posted[0], status());
+const interfaceRequest = env.posted.at(-1);
+assert.deepEqual(interfaceRequest, {id: interfaceRequest.id, action: 'save_interface_language', interface_language: 'ja'});
+assert.equal(env.posted.filter(request => request.action === 'save_options').length, 0);
+assert.equal(env.elements.get('interface_language').disabled, false);
+env.respond(interfaceRequest, {interface_language: 'ja'});
+await flush();
+env.respond(initialStatus, status());
 await flush();
 assert.equal(env.elements.get('interface_language').value, 'ja');
 assert.equal(env.elements.get('language').value, 'ko');
@@ -453,18 +464,179 @@ assert.equal(env.elements.get('interface_language').value, 'en');
 assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'en'));
 env.elements.get('render_scale').value = '1.875';
 env.elements.get('render_scale').fire('input');
+env.elements.get('media_mode').checked = false;
+env.elements.get('download_missing_resources').checked = false;
+env.elements.get('language').value = 'ja';
+env.elements.get('options-form').fire('change');
 env.elements.get('interface_language').value = 'ko';
 env.elements.get('interface_language').fire('change');
+const interfaceRequest = env.posted.at(-1);
+assert.deepEqual(interfaceRequest, {id: interfaceRequest.id, action: 'save_interface_language', interface_language: 'ko'});
 assert.equal(env.elements.get('render_scale').value, '1.875');
 assert.equal(env.elements.get('server-state').textContent, '실행 중');
-assert.equal(env.elements.get('language').value, 'ko');
-assert.equal(env.posted.length, 1, 'Local UI switches do not implicitly change game language or graphics');
+assert.equal(env.elements.get('language').value, 'ja');
+assert.equal(env.posted.filter(request => request.action === 'save_options').length, 0);
+env.respond(interfaceRequest, {interface_language: 'ko'}); await flush();
+await env.tick(4000);
+const poll = env.posted.at(-1); assert.equal(poll.action, 'status');
+env.respond(poll, ready); await flush();
+assert.equal(env.elements.get('interface_language').value, 'ko');
+assert.equal(env.elements.get('media_mode').checked, false);
+assert.equal(env.elements.get('download_missing_resources').checked, false);
+assert.equal(env.elements.get('language').value, 'ja');
+assert.equal(env.elements.get('render_scale').value, '1.875');
+env.elements.get('options-form').fire('submit');
+const options = env.posted.at(-1);
+assert.deepEqual(options, {id: options.id, action: 'save_options', media_mode: false,
+  download_missing_resources: false, language: 'ja', interface_language: 'ko'});
+const saved = status(); saved.options = {...options, schema: 1};
+delete saved.options.id; delete saved.options.action;
+env.respond(options, saved); await flush();
+assert.equal(env.elements.get('render_scale').value, '1.875');
+env.elements.get('presentation-form').fire('submit');
+const graphics = env.posted.at(-1);
+assert.equal(graphics.action, 'save_presentation');
+assert.equal(graphics.settings.render_scale, 1.875);
+env.respond(graphics, saved); await flush();
 app.dispose();
 assert.equal(api.resolveInterfaceLanguage('system', {languages: ['en-GB']}), 'en');
 assert.equal(api.resolveInterfaceLanguage('system', {language: 'ja_JP'}), 'ja');
 assert.equal(api.resolveInterfaceLanguage('system', {language: 'fr-FR'}), 'en');
 assert.equal(api.resolveInterfaceLanguage('ko', {language: 'en-US'}), 'ko');
 assert.equal(api.translateUI('<img src=x onerror=malicious>', 'ja'), '<img src=x onerror=malicious>');
+""")
+
+
+def test_interface_language_keeps_latest_choice_when_acknowledgements_and_status_arrive_out_of_order() -> None:
+    run_js(r"""
+const env = environment();
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const initial = status(); initial.options.interface_language = 'ko';
+env.respond(env.posted[0], initial); await flush();
+await env.tick(4000);
+const oldPoll = env.posted.at(-1); assert.equal(oldPoll.action, 'status');
+env.elements.get('interface_language').value = 'ja';
+env.elements.get('interface_language').fire('change');
+const japanese = env.posted.at(-1);
+env.elements.get('interface_language').value = 'en';
+env.elements.get('interface_language').fire('change');
+const english = env.posted.at(-1);
+assert.deepEqual(japanese, {id: japanese.id, action: 'save_interface_language', interface_language: 'ja'});
+assert.deepEqual(english, {id: english.id, action: 'save_interface_language', interface_language: 'en'});
+assert.notEqual(japanese.id, english.id);
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'en'));
+env.respond(english, {options: {...initial.options, interface_language: 'en'}}); await flush();
+env.respond(japanese, {interface_language: 'ja'}); await flush();
+env.respond(oldPoll, initial); await flush();
+env.scope.idolyServerEvent({event: 'status', status: initial});
+assert.equal(env.elements.get('interface_language').value, 'en');
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'en'));
+assert.equal(env.posted.filter(request => request.action === 'save_options').length, 0);
+app.dispose();
+""")
+
+
+def test_interface_language_survives_an_older_game_options_save_reply() -> None:
+    run_js(r"""
+const env = environment();
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const initial = status(); initial.options.interface_language = 'ko';
+env.respond(env.posted[0], initial); await flush();
+env.elements.get('language').value = 'ja';
+env.elements.get('options-form').fire('change');
+env.elements.get('options-form').fire('submit');
+const options = env.posted.at(-1); assert.equal(options.action, 'save_options');
+assert.equal(options.interface_language, 'ko');
+env.elements.get('interface_language').value = 'en';
+env.elements.get('interface_language').fire('change');
+const interfaceRequest = env.posted.at(-1);
+assert.equal(interfaceRequest.action, 'save_interface_language');
+env.respond(interfaceRequest, {interface_language: 'en'}); await flush();
+const saved = status(); saved.options = {...initial.options, language: 'ja'};
+env.respond(options, saved); await flush();
+assert.equal(env.elements.get('interface_language').value, 'en');
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'en'));
+assert.equal(env.elements.get('language').value, 'ja');
+env.elements.get('media_mode').checked = false;
+env.elements.get('options-form').fire('change');
+env.elements.get('options-form').fire('submit');
+const subsequent = env.posted.at(-1);
+assert.equal(subsequent.interface_language, 'en');
+assert.equal(subsequent.language, 'ja');
+assert.equal(subsequent.media_mode, false);
+app.dispose();
+""")
+
+
+def test_interface_language_failures_and_timeouts_do_not_revert_choice_or_dirty_game_options() -> None:
+    run_js(r"""
+const env = environment();
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const initial = status(); initial.options.interface_language = 'en';
+env.respond(env.posted[0], initial); await flush();
+env.elements.get('language').value = 'ja';
+env.elements.get('options-form').fire('change');
+env.elements.get('interface_language').value = 'ko';
+env.elements.get('interface_language').fire('change');
+const failed = env.posted.at(-1);
+env.scope.idolyServerReply(failed.id, {id: failed.id, ok: false, error: {message: 'Interface preference could not be saved'}});
+await flush();
+env.scope.idolyServerEvent({event: 'status', status: initial});
+assert.equal(env.elements.get('interface_language').value, 'ko');
+assert.equal(env.elements.get('language').value, 'ja');
+assert.equal(env.elements.get('server-state').textContent, '실행 중');
+env.elements.get('interface_language').value = 'ja';
+env.elements.get('interface_language').fire('change');
+const timedOut = env.posted.at(-1);
+await env.tick(20000);
+env.respond(timedOut, {interface_language: 'en'}); await flush();
+env.scope.idolyServerEvent({event: 'status', status: initial});
+assert.equal(env.elements.get('interface_language').value, 'ja');
+assert.equal(env.elements.get('language').value, 'ja');
+assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'ja'));
+assert.equal(env.posted.filter(request => request.action === 'save_options').length, 0);
+app.dispose();
+""")
+
+
+def test_interface_language_late_replies_cannot_repaint_hidden_or_disposed_page() -> None:
+    run_js(r"""
+const env = environment();
+const app = api.createSettingsApp(env.scope, env.document, env.timers);
+const initial = status(); initial.options.interface_language = 'en';
+env.respond(env.posted[0], initial); await flush();
+env.elements.get('language').value = 'ja';
+env.elements.get('options-form').fire('change');
+env.elements.get('interface_language').value = 'ja';
+env.elements.get('interface_language').fire('change');
+const hiddenRequest = env.posted.at(-1);
+await env.visibility(true);
+const hiddenState = ['interface_language', 'language', 'server-state', 'message'].map(id => {
+  const element = env.elements.get(id); return [element.value, element.textContent, element.hidden];
+});
+env.respond(hiddenRequest, {interface_language: 'ko'}); await flush();
+assert.deepEqual(['interface_language', 'language', 'server-state', 'message'].map(id => {
+  const element = env.elements.get(id); return [element.value, element.textContent, element.hidden];
+}), hiddenState);
+assert.equal(env.tasks.size, 0);
+await env.visibility(false);
+env.respond(env.posted.at(-1), initial); await flush();
+assert.equal(env.elements.get('interface_language').value, 'ja');
+assert.equal(env.elements.get('language').value, 'ja');
+env.elements.get('interface_language').value = 'ko';
+env.elements.get('interface_language').fire('change');
+const disposedRequest = env.posted.at(-1);
+const lateReply = env.scope.idolyServerReply;
+app.dispose();
+const count = env.posted.length;
+const before = env.elements.get('server-state').textContent;
+lateReply(disposedRequest.id, {id: disposedRequest.id, ok: true, result: {interface_language: 'en'}});
+await flush(); await env.tick(60000);
+assert.equal(env.elements.get('interface_language').value, 'ko');
+assert.equal(env.elements.get('server-state').textContent, before);
+assert.equal(env.elements.get('language').value, 'ja');
+assert.equal(env.posted.length, count);
+assert.equal(env.tasks.size, 0);
 """)
 
 
@@ -499,6 +671,9 @@ const env = environment(); env.scope.navigator = {language: 'en-US'};
 const app = api.createSettingsApp(env.scope, env.document, env.timers);
 env.elements.get('interface_language').value = 'ja';
 env.elements.get('interface_language').fire('change');
+const interfaceRequest = env.posted.at(-1);
+assert.deepEqual(interfaceRequest, {id: interfaceRequest.id, action: 'save_interface_language', interface_language: 'ja'});
+env.respond(interfaceRequest, {interface_language: 'ja'}); await flush();
 env.respond(env.posted[0], {state: 'starting', running: false, options: {}, runtime: {}, last_error: null});
 await flush();
 assert.equal(env.elements.get('interface_language').value, 'ja');

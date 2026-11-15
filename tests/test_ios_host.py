@@ -493,3 +493,56 @@ def test_data_only_failure_keeps_existing_server_available(harness, monkeypatch)
         h.subject.prepare_game_start()
     assert h.subject.readiness() == {"state": "ready", "running": True}
     assert h.runtimes[0].stops == 0
+
+
+def test_immediate_interface_language_preserves_pending_game_options(harness, monkeypatch):
+    h = harness
+    assert h.subject.start(h.bundle, h.data, h.resources)["running"]
+    assert command(h, "save_options", language="en", media_mode=False,
+                   download_missing_resources=False)["ok"]
+    before = h.subject.status()
+    language_file = (h.data / "client-language.json").read_bytes()
+    def forbidden():
+        raise AssertionError("Interface-only preferences do not require a running game server")
+    monkeypatch.setattr(h.subject, "_ready_runtime", forbidden)
+    for locale in ("ja", "en", "ko", "system"):
+        reply = command(h, "save_interface_language", interface_language=locale)
+        assert reply["ok"] and reply["result"] == {"interface_language": locale}
+        saved = json.loads((h.data / "ios-host.json").read_text())
+        assert saved == {**before["options"], "interface_language": locale}
+        assert h.subject.status()["effective_options"] == before["effective_options"]
+        assert h.subject.status()["restart_required"] is True
+        assert (h.data / "client-language.json").read_bytes() == language_file
+    assert len(h.runtimes) == 1 and h.runtimes[0].stops == 0
+
+
+def test_interface_language_can_be_saved_after_server_startup_failure(harness, monkeypatch):
+    h = harness
+    def failed_factory(*_args, **_kwargs):
+        raise RuntimeError("controlled startup failure")
+    monkeypatch.setattr(h.subject, "_factory", failed_factory)
+    assert h.subject.start(h.bundle, h.data, h.resources)["state"] == "failed"
+    reply = command(h, "save_interface_language", interface_language="ja")
+    assert reply["ok"] and reply["result"] == {"interface_language": "ja"}
+    assert h.subject.status()["state"] == "failed"
+    assert json.loads((h.data / "ios-host.json").read_text())["interface_language"] == "ja"
+
+
+@pytest.mark.parametrize("locale", [None, True, 1, "fr", [], {}, "ja\n"])
+def test_interface_only_command_rejects_invalid_language_without_writing(harness, locale):
+    h = harness
+    assert h.subject.start(h.bundle, h.data, h.resources)["running"]
+    path = h.data / "ios-host.json"
+    before = path.read_bytes()
+    assert not command(h, "save_interface_language", interface_language=locale)["ok"]
+    assert path.read_bytes() == before
+
+
+def test_interface_only_command_rejects_missing_or_game_fields(harness):
+    h = harness
+    assert h.subject.start(h.bundle, h.data, h.resources)["running"]
+    path = h.data / "ios-host.json"
+    before = path.read_bytes()
+    assert not command(h, "save_interface_language")["ok"]
+    assert not command(h, "save_interface_language", interface_language="ja", language="en")["ok"]
+    assert path.read_bytes() == before

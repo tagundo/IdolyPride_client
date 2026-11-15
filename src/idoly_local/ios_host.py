@@ -569,7 +569,8 @@ class _Host:
 
     def _dispatch(self, value):
         action = value.get("action")
-        fields = {"status": set(), "save_options": {"media_mode", "download_missing_resources", "language", "interface_language"},
+        fields = {"status": set(), "save_interface_language": {"interface_language"},
+            "save_options": {"media_mode", "download_missing_resources", "language", "interface_language"},
             "save_presentation": {"settings"}, "save_playback": {"settings"}, "save_media": {"settings"},
             "resources_preview": set(), "resources_download": {"parallelism"}, "resources_cancel": {"job_id"},
             "resources_import": {"path"}, "resources_export": set()}
@@ -577,6 +578,16 @@ class _Host:
             raise ValueError("Unknown command or fields")
         if action == "status":
             return self.status()
+        if action == "save_interface_language":
+            if (value.keys() != {"id", "action", "interface_language"}
+                    or value["interface_language"] not in ("system", "ko", "ja", "en")):
+                raise ValueError("Invalid interface language command")
+            if self._paths is None:
+                raise ValueError("Server preference storage is unavailable")
+            options = self._options()
+            options["interface_language"] = value["interface_language"]
+            _atomic_json(self._paths[1] / "ios-host.json", options)
+            return {"interface_language": options["interface_language"]}
         runtime = self._ready_runtime()
         if action == "save_options":
             options = self._options()

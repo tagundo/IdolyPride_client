@@ -33,6 +33,7 @@ static SEL startSelector;
 static NSString *hookError, *lastError, *lastGameError, *dataDirectory;
 static NSDictionary *lastHTTPReadiness;
 static BOOL recovering;
+static NSUInteger interfaceSelectionRevision;
 static BOOL hookInstalled;
 static atomic_bool pythonReady;
 static PyObject *hostModule;
@@ -270,6 +271,7 @@ static void beginServer(void) {
     lastError = nil; lastGameError = nil; IDNativeDismissFailure();
     IDNativeSetServerState(NO, YES, @"서버를 준비하고 있습니다…");
     if (!worker) worker = [IDServerWorker new];
+    NSUInteger startupInterfaceRevision = interfaceSelectionRevision;
     [worker enqueue:^{
         NSString *error = nil, *app = NSBundle.mainBundle.bundlePath;
         NSString *interfaceLanguage = @"system";
@@ -301,7 +303,8 @@ static void beginServer(void) {
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (good && IDGateSucceeded(&gate)) {
-                IDNativeSetInterfaceLanguage(interfaceLanguage);
+                if (interfaceSelectionRevision == startupInterfaceRevision)
+                    IDNativeSetInterfaceLanguage(interfaceLanguage);
                 lastError = nil; IDNativeDismissFailure();
                 IDNativeSetServerState(YES, NO, @"서버 실행 중");
             } else if (!good && IDGateFailedAttempt(&gate)) {
@@ -612,6 +615,15 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
         if (!raw || raw.length > IDJSONLimit || !object || !identifier) {
             completion(failure(@"invalid_request", @"설정 요청 형식이 올바르지 않습니다.")); return;
         }
+        if ([object[@"action"] isEqual:@"save_interface_language"]) {
+            id locale = object[@"interface_language"];
+            if (object.count != 3 || ![locale isKindOfClass:NSString.class]
+                    || ![@[@"system", @"ko", @"ja", @"en"] containsObject:locale]) {
+                completion(failure(@"invalid_request", @"설정 요청 형식이 올바르지 않습니다.")); return;
+            }
+            ++interfaceSelectionRevision;
+            IDNativeSetInterfaceLanguage(locale);
+        }
         if ([object[@"action"] isEqual:@"status"] && gate.phase != IDGateReady && gate.phase != IDGateRunning) {
             NSString *state = gate.phase == IDGateStarting ? @"starting" : gate.phase == IDGateFailed ? @"failed" : @"idle";
             NSDictionary *native = [NSJSONSerialization JSONObjectWithData:[IdolyEmbeddedServerStatusJSON() dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
@@ -619,7 +631,8 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
                 @"options":@{}, @"runtime":@{}, @"native":native ?: @{},
                 @"last_error":lastError ?: (id)NSNull.null, @"restart_required":@NO}})); return;
         }
-        if (!worker || !atomic_load(&pythonReady)) {
+        if (!worker || (!atomic_load(&pythonReady)
+                && ![object[@"action"] isEqual:@"save_interface_language"])) {
             completion(failure(@"not_ready", @"서버가 준비되지 않았습니다. 서버 시작 버튼을 눌러 주세요.")); return;
         }
         [worker enqueue:^{
@@ -629,9 +642,6 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
                 id parsed = [NSJSONSerialization JSONObjectWithData:[reply dataUsingEncoding:NSUTF8StringEncoding] options:NSJSONReadingMutableContainers error:NULL];
                 if ([parsed isKindOfClass:NSMutableDictionary.class] && [parsed[@"ok"] isEqual:@YES]
                         && [parsed[@"result"] isKindOfClass:NSMutableDictionary.class]) {
-                    id options = parsed[@"result"][@"options"];
-                    if ([options isKindOfClass:NSDictionary.class] && [options[@"interface_language"] isKindOfClass:NSString.class])
-                        IDNativeSetInterfaceLanguage(options[@"interface_language"]);
                     parsed[@"result"][@"native"] = [NSJSONSerialization JSONObjectWithData:[IdolyEmbeddedServerStatusJSON() dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] ?: @{};
                     completion(JSON(parsed) ?: failure(@"native_failure", @"서버 응답이 너무 큽니다."));
                 } else completion(reply);

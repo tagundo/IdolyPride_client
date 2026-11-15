@@ -186,6 +186,7 @@
     "4096 px (기본)": "4096 px (Default)",
     "직접 입력 값": "Custom value",
     "서버 화면 언어는 아래 설정 저장으로 보관됩니다.": "Save the settings below to keep the server interface language.",
+    "서버 화면 언어를 저장하지 못했습니다. 다시 선택해 주세요.": "The server interface language could not be saved. Please select it again.",
     "화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요.": "This changes the interface language only. Choose the game language separately.",
     "0.25배": "0.25×",
     "0.5배": "0.5×",
@@ -197,6 +198,7 @@
     "원본 유지 (-1)": "Keep original (-1)",
     "앱을 열면 이 서버 메뉴가 먼저 표시됩니다. 서버가 준비되면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 이 메뉴를 다시 엽니다. Mac에서는 앱 메뉴의 ‘로컬 서버 설정…’ 또는 ⌘⇧,도 사용할 수 있습니다.": "This server menu opens first. When the server is ready, choose Start Game at the top right. During gameplay, hold the upper-right corner with one finger for 2 seconds to reopen this menu. On Mac, you can also use Local Server Settings… in the app menu or ⌘⇧,.",
     "화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 아래 설정 저장으로 보관됩니다.": "This changes the interface language only. Choose the game language separately. Save the settings below to keep the server interface language.",
+    "화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 선택하면 바로 적용되고 저장됩니다.": "This changes the interface language only. Choose the game language separately. The server interface language is applied and saved immediately when selected.",
     "3D 렌더 배율 선택": "Choose 3D render scale",
     "3D 렌더 배율 직접 입력 값": "Custom 3D render scale",
     "렌더 버퍼 최대 크기 선택": "Choose maximum render buffer size",
@@ -386,6 +388,7 @@
     "4096 px (기본)": "4096 px（初期値）",
     "직접 입력 값": "直接入力値",
     "서버 화면 언어는 아래 설정 저장으로 보관됩니다.": "下の設定を保存すると、サーバー画面の言語も保存されます。",
+    "서버 화면 언어를 저장하지 못했습니다. 다시 선택해 주세요.": "サーバー画面の言語を保存できませんでした。もう一度選択してください。",
     "화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요.": "画面の言語のみを変更します。ゲームの言語は別に選択してください。",
     "0.25배": "0.25倍",
     "0.5배": "0.5倍",
@@ -397,6 +400,7 @@
     "원본 유지 (-1)": "元の設定を維持 (-1)",
     "앱을 열면 이 서버 메뉴가 먼저 표시됩니다. 서버가 준비되면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 이 메뉴를 다시 엽니다. Mac에서는 앱 메뉴의 ‘로컬 서버 설정…’ 또는 ⌘⇧,도 사용할 수 있습니다.": "アプリを開くと、最初にこのサーバーメニューが表示されます。サーバーの準備が完了したら、右上の「ゲーム開始」を押してください。ゲーム中は画面右上を指1本で2秒間長押しすると、このメニューを開けます。Macではアプリメニューの「ローカルサーバー設定…」または ⌘⇧, も使用できます。",
     "화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 아래 설정 저장으로 보관됩니다.": "画面の言語のみを変更します。ゲームの言語は別に選択してください。 下の設定を保存すると、サーバー画面の言語も保存されます。",
+    "화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 선택하면 바로 적용되고 저장됩니다.": "画面の言語のみを変更します。ゲームの言語は別に選択してください。サーバー画面の言語は選択するとすぐに適用・保存されます。",
     "3D 렌더 배율 선택": "3D描画倍率を選択",
     "3D 렌더 배율 직접 입력 값": "3D描画倍率の直接入力値",
     "렌더 버퍼 최대 크기 선택": "描画バッファの最大サイズを選択",
@@ -471,6 +475,8 @@
 
   function validRequest(action, payload) {
     if (action === "status") return exact(payload, []);
+    if (action === "save_interface_language") return exact(payload, ["interface_language"])
+      && choice(payload.interface_language, INTERFACE_LANGUAGES);
     if (action === "diagnostics_copy") return exact(payload, ["text"]) && typeof payload.text === "string"
       && payload.text.length <= MAX_DIAGNOSTIC_BYTES && utf8Length(payload.text) <= MAX_DIAGNOSTIC_BYTES
       && utf8Length(JSON.stringify(payload)) <= MAX_DIAGNOSTIC_WIRE_BYTES + 16;
@@ -570,6 +576,8 @@
     };
     let interfaceChoice = "system";
     let interfaceDirty = false;
+    let interfaceSelected = false;
+    let interfaceVersion = 0;
     let language = resolveInterfaceLanguage(interfaceChoice, scope.navigator);
     const t = value => translateUI(value, language);
     const text = (id, value, localize = true) => { el(id).textContent = localize ? t(value) : value; };
@@ -606,7 +614,7 @@
       el(key + "_preset").value = el(key).value.trim() && presets.includes(value) ? String(value) : "custom";
     }
     const forms = {
-      options: {fields: ["media_mode", "download_missing_resources", "language", "interface_language"], valid: validOptions},
+      options: {fields: ["media_mode", "download_missing_resources", "language"], valid: validOptions},
       presentation: {fields: ["custom_graphics", "quality", "target_fps", "render_scale", "max_buffer_pixel", "anti_aliasing", "shadow_resolution", "expand_photography"], valid: validPresentation},
       playback: {fields: ["wait_for_orientation"], valid: validPlayback},
       media: {fields: ["hide_video_mv", "mv_sort", "outfit_sort"], valid: validMedia}
@@ -667,13 +675,9 @@
       if (!form.dirty && !form.busy) {
         for (const key of form.fields) {
           const input = el(key);
-          if (key === "interface_language" && interfaceDirty) continue;
           if (input.type === "checkbox") input.checked = settings[key];
           else input.value = String(settings[key]);
         }
-      }
-      if (name === "options") {
-        if (interfaceDirty) form.dirty = true;
       }
       if (name === "presentation" && !form.dirty && !form.busy) for (const key of ["render_scale", "max_buffer_pixel"]) syncPreset(key);
       el(name + "-fields").disabled = Boolean(form.busy) || !snapshot.running || snapshot.state !== "ready";
@@ -681,7 +685,7 @@
     function settingsFromForm(name) {
       const form = forms[name];
       if (!form.value) throw new Error("설정을 먼저 불러와 주세요.");
-      const value = name === "options" ? {} : {...form.value};
+      const value = name === "options" ? {interface_language: interfaceChoice} : {...form.value};
       for (const key of form.fields) {
         const input = el(key);
         value[key] = input.type === "checkbox" ? input.checked : typeof form.value[key] === "number" ? (input.value.trim() === "" ? NaN : Number(input.value)) : input.value;
@@ -765,7 +769,9 @@
       snapshot = {...value, runtime};
       if (validOptions(value.options)) {
         const configuredInterface = choice(value.options.interface_language, INTERFACE_LANGUAGES) ? value.options.interface_language : "system";
-        if (!interfaceDirty && !forms.options.dirty && interfaceChoice !== configuredInterface) applyInterfaceLanguage(configuredInterface);
+        // Once selected here, an older status/event/options-save reply cannot
+        // take ownership of the visible interface language in this page.
+        if (!interfaceSelected && !interfaceDirty && interfaceChoice !== configuredInterface) applyInterfaceLanguage(configuredInterface);
       }
       const titles = {idle: "대기", starting: "준비 중", ready: "실행 중", failed: "시작 실패", closed: "종료됨"};
       text("server-state", titles[value.state] || "확인 중");
@@ -821,7 +827,6 @@
         if (!visible || disposed || visibility !== visibilityVersion) return;
         form.dirty = false;
         form.busy = false;
-        if (name === "options") interfaceDirty = false;
         if (!renderStatus(result)) { await refresh(); return; }
         message(name === "options" ? "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다." : name === "media" ? "저장했습니다. 다음 앱 실행부터 적용됩니다." : "설정을 저장했습니다. 게임 적용 상태를 확인해 주세요.");
       } catch (error) {
@@ -830,6 +835,31 @@
         form.busy = false;
         if (!disposed) el(name + "-fields").disabled = !form.value || !snapshot || !snapshot.running || snapshot.state !== "ready";
         schedulePoll();
+      }
+    }
+    async function saveInterfaceLanguage(value) {
+      if (!visible || disposed || !choice(value, INTERFACE_LANGUAGES)) return;
+      const version = ++interfaceVersion;
+      const visibility = visibilityVersion;
+      interfaceSelected = true;
+      interfaceDirty = true;
+      applyInterfaceLanguage(value);
+      if (snapshot) renderStatus(snapshot);
+      try {
+        // This action contains no game preferences and is available even while
+        // the server is idle, starting or failed. Native chrome changes on receipt.
+        const result = await bridge.request("save_interface_language", {interface_language: value});
+        if (!visible || disposed || visibility !== visibilityVersion || version !== interfaceVersion) return;
+        const acknowledged = result.interface_language || (object(result.options) && result.options.interface_language);
+        if (acknowledged !== value) throw new Error("서버 화면 언어를 저장하지 못했습니다. 다시 선택해 주세요.");
+        interfaceDirty = false;
+        if (snapshot) snapshot.options = {...snapshot.options, interface_language: value};
+        if (forms.options.value) forms.options.value.interface_language = value;
+      } catch (_) {
+        if (visible && !disposed && visibility === visibilityVersion && version === interfaceVersion)
+          message("서버 화면 언어를 저장하지 못했습니다. 다시 선택해 주세요.", true);
+      } finally {
+        if (!disposed) schedulePoll();
       }
     }
     async function resource(action) {
@@ -875,12 +905,7 @@
       el(name + "-form").addEventListener("change", () => { form.dirty = true; });
       el(name + "-form").addEventListener("submit", event => { event.preventDefault(); save(name); });
     }
-    el("interface_language").addEventListener("change", () => {
-      interfaceDirty = true;
-      if (forms.options.value) forms.options.dirty = true;
-      applyInterfaceLanguage(el("interface_language").value);
-      if (snapshot) renderStatus(snapshot);
-    });
+    el("interface_language").addEventListener("change", () => saveInterfaceLanguage(el("interface_language").value));
     for (const key of ["render_scale", "max_buffer_pixel"]) {
       el(key + "_preset").addEventListener("change", () => {
         const value = el(key + "_preset").value;
