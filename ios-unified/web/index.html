@@ -25,13 +25,14 @@
 
     <section aria-labelledby="options-heading">
       <h2 id="options-heading">감상 모드·게임 언어</h2>
-      <p class="hint">게임 시작 전에 저장하면 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.</p><p class="hint">화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 선택하면 바로 적용되고 저장됩니다.</p>
+      <p class="hint">설정은 자동으로 저장됩니다. 게임 시작 전에 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.</p><p class="hint">화면 언어만 바뀝니다. 게임 언어는 별도로 선택해 주세요. 서버 화면 언어는 선택하면 바로 적용되고 저장됩니다.</p>
       <form id="options-form">
         <fieldset id="options-fields" disabled>
           <label class="switch"><span>감상 모드 · 전체 해금</span><input id="media_mode" type="checkbox"></label>
           <label class="switch"><span>없는 리소스 자동 받기</span><input id="download_missing_resources" type="checkbox"></label>
           <label class="row"><span>게임 언어</span><select id="language"><option value="ko">한국어</option><option value="ja">日本語</option><option value="en">English</option></select></label>
-          <button type="submit">설정 저장</button>
+          <p id="options-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="options-save-retry" type="button" class="secondary" hidden>다시 시도</button>
         </fieldset>
       </form>
       <p id="effective-options" class="hint">현재 적용 값 확인 중</p>
@@ -52,7 +53,8 @@
           </div>
           <label class="switch"><span>촬영·360 화면 확장</span><input id="expand_photography" type="checkbox"></label>
           <p class="hint">화면 확장은 그래픽 설정과 독립적으로 적용됩니다. 목표 프레임 수는 실제 성능을 보장하지 않습니다.</p>
-          <button type="submit">그래픽 설정 저장</button>
+          <p id="presentation-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="presentation-save-retry" type="button" class="secondary" hidden>다시 시도</button>
         </fieldset>
       </form>
       <p id="graphics-detail" class="hint">게임 적용 상태 확인 중</p>
@@ -64,7 +66,8 @@
         <fieldset id="playback-fields" disabled>
           <label class="switch"><span>화면 회전 후 재생 시작</span><input id="wait_for_orientation" type="checkbox" checked></label>
           <p class="hint">기본값은 켜짐입니다. 화면이 가로 방향으로 바뀔 때까지 기다립니다.</p>
-          <button type="submit">재생 설정 저장</button>
+          <p id="playback-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="playback-save-retry" type="button" class="secondary" hidden>다시 시도</button>
         </fieldset>
       </form>
     </section>
@@ -76,7 +79,8 @@
           <label class="switch"><span>영상 MV 숨기기</span><input id="hide_video_mv" type="checkbox"></label>
           <label class="row"><span>MV 정렬</span><select id="mv_sort"><option value="recent">최신순</option><option value="old">오래된 순</option><option value="title">이름순</option><option value="id">ID순</option></select></label>
           <label class="row"><span>의상 정렬</span><select id="outfit_sort"><option value="original">원본</option><option value="recent">최신순</option><option value="old">오래된 순</option><option value="title">이름순</option><option value="id">ID순</option></select></label>
-          <button type="submit">목록 설정 저장</button>
+          <p id="media-save-feedback" class="hint save-feedback" role="status" aria-live="polite">변경하면 자동으로 저장됩니다.</p>
+          <button id="media-save-retry" type="button" class="secondary" hidden>다시 시도</button>
         </fieldset>
       </form>
       <p id="media-effective" class="hint">목록 설정은 다음 앱 실행부터 적용됩니다.</p>
@@ -91,7 +95,7 @@
       <p id="resource-summary" class="resource-text">서버 상태를 확인하고 있습니다.</p>
       <p id="resource-detail" class="hint"></p>
       <div class="actions"><button id="resources-import" type="button" class="secondary" disabled>ZIP 가져오기</button><button id="resources-export" type="button" class="secondary" disabled>ZIP 내보내기</button><button id="resources-cancel" type="button" class="secondary danger" disabled>작업 취소</button></div>
-      <p class="hint">파일 앱에서 ZIP을 선택하거나 저장합니다. 내보내기에는 현재 보관된 파일만 포함됩니다.</p>
+      <p class="hint">iOS 게임 리소스 ZIP을 선택하면 파일을 검증해 이 앱에 보관합니다. 완료 후 게임 시작을 누르세요. 직접 압축을 풀 필요는 없습니다. 내보내기에는 현재 보관된 파일만 포함됩니다.</p>
     </section>
 
     <section class="wide" aria-labelledby="diagnostics-heading">

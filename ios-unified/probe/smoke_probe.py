@@ -68,6 +68,8 @@ LANGUAGE_CYCLE_FLAGS = ("acknowledged", "dom_language_matches", "native_title_ma
     "native_game_button_matches", "native_status_label_matches", "native_server_button_matches",
     "game_select_unchanged", "persisted_game_language_unchanged")
 LANGUAGE_SAVE_FLAGS = ("acknowledged", "options_fields_reenabled", "message_success")
+LAUNCH_SETTINGS_FLAGS = ("cold_while_settings_flush_held", "game_button_disabled_during_flush",
+    "settings_flush_called_once", "unsolicited_settings_ack_ignored", "settings_flush_released_before_forward")
 SETTINGS_WEB_BOOL_FIELDS = ("web_found", "timed_out", "evaluation_succeeded", "ready", "forms_present",
     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "document_complete",
     "options_fields_enabled", "presentation_fields_enabled", "bridge_reply_present", "error_is_wk_domain")
@@ -81,7 +83,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "ready_launcher_flags_differ", "ready_launch_button_missing",
     "ready_launch_button_ambiguous", "ready_launch_button_disabled",
     "ready_launch_button_title_differs", "ready_launch_action_missing",
-    "ready_launch_action_not_dispatched",
+    "ready_launch_action_not_dispatched", "launch_settings_barrier_failed",
     "early_status_correlation_failed", "server_not_ready_before_capture", "ready_capture_restarted_server",
     "settings_menu_open_failed", "settings_menu_not_presented", "settings_menu_controls_or_layout_failed",
     "settings_web_readiness_or_layout_failed", "settings_return_action_failed", "settings_menu_not_dismissed",
@@ -90,7 +92,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_during_init_failed", "keyboard_after_init_failed",
     "keyboard_precreated_instance_not_reused",
     "native_header_layout_failed", "native_header_restore_failed",
-    "settings_diagnostics_copy_failed", "settings_zip_import_picker_failed",
+    "settings_diagnostics_copy_failed", "settings_zip_import_picker_failed", "settings_zip_roundtrip_failed",
     "host_constructor_not_installed", "host_hooks_registration_failed", "host_cold_start_failed",
     "unity_window_handoff_failed", "language_cache_identity_failed", "sigpipe_probe_failed",
     "sigpipe_before_server_failed", "sigpipe_before_game_failed",
@@ -107,7 +109,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
-    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled",
+    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_checked",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
@@ -128,6 +130,12 @@ ZIP_IMPORT_PASS_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatch
     "picker_presented", "single_selection", "delegate_is_settings", "cancel_delegate_invoked",
     "dismissed_programmatically", "picker_detached", "button_restored")
 ZIP_IMPORT_SERVER_FLAGS = ("grpc_connected_after_cancel", "assets_connected_after_cancel")
+ZIP_ROUNDTRIP_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
+    "picker_presented", "picker_import_mode", "picker_single_selection", "selection_delegate_invoked",
+    "dismissed_programmatically", "picker_detached", "import_reply_accepted", "native_copy_queued",
+    "copy_bytes_match", "owned_copy_found", "copy_source_distinct", "source_preserved", "source_copy_sha256_match",
+    "backend_ready", "backend_success", "dom_completed", "button_restored", "upstream_requests_unchanged")
+ZIP_ROUNDTRIP_COUNTS = ("source_bytes", "copied_bytes", "total_bytes", "exported_files", "imported_files", "failed_files")
 OCTO_BUDGET_SECONDS = ("original_seconds", "effective_seconds", "cache_wait_seconds")
 OCTO_BUDGET_PROBE_SECONDS = ("during_original_seconds", "first_queued_seconds", "last_snapshot")
 OCTO_BUDGET_PROBE_BOOLS = ("apis_registered", "prepared_without_managed_callbacks", "during_original_configured",
@@ -385,7 +393,7 @@ def _validate_language_evidence(host, probe, cycle, saved, language, run_index=N
     next_language = ("en","ja","en","ko","ko")[run_index]
     require(type(saved) is dict and saved.get("current_language") == language
             and saved.get("next_language") == next_language and saved.get("persisted_language") == next_language
-            and saved.get("effective_language") == language
+            and saved.get("effective_language") == language and saved.get("save_trigger") == "change-autosave"
             and type(saved.get("ack_id")) is int and 1 <= saved["ack_id"] <= 2**31-1
             and all(saved.get(key) is True for key in LANGUAGE_SAVE_FLAGS), "language_save_failed")
     return {"language":language,"run_index":run_index,"unity_host":unity_host_observation(host),
@@ -520,6 +528,7 @@ def interface_language_observation(value):
 def language_save_observation(value):
     if type(value) is not dict: return {}
     clean = {key:value[key] for key in LANGUAGE_SAVE_FLAGS if type(value.get(key)) is bool}
+    if value.get("save_trigger") == "change-autosave": clean["save_trigger"] = "change-autosave"
     for key in ("current_language","next_language","persisted_language","effective_language"):
         if value.get(key) in LANGUAGE_ORDER: clean[key] = value[key]
     if type(value.get("ack_id")) is int and 1 <= value["ack_id"] <= 2**31-1: clean["ack_id"] = value["ack_id"]
@@ -712,6 +721,7 @@ def validate_report(value):
             and launcher.get("ready_button_enabled") is True
             and launcher.get("ready_button_kind") == "UIButton"
             and launcher.get("ready_button_title") in ("게임 시작", "ゲーム開始", "Start Game"), "ready_launch_control_failed")
+    require(all(launcher.get(key) is True for key in LAUNCH_SETTINGS_FLAGS), "launch_settings_barrier_failed")
     require(launcher.get("button_action_dispatched") is True
             and launcher.get("button_control_event") == "touch-up-inside"
             and type(launcher.get("button_dispatch_count")) is int and launcher["button_dispatch_count"] == 1
@@ -773,6 +783,7 @@ def validate_report(value):
             and all(type(sample) is dict and all(sample.get(key) is True for key in ZIP_IMPORT_PASS_BOOL_FIELDS)
                     and type(sample.get("document_picker_mode")) is int and sample["document_picker_mode"] == 0
                     for sample in zipped["passes"]), "settings_zip_import_picker_failed")
+    roundtrip = validate_zip_roundtrip(menu.get("zip_roundtrip"), language_summary["run_index"])
     width, window_width = menu.get("frame_width"), menu.get("window_width")
     require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
             and abs(width - window_width) <= 2, "settings_menu_width_failed")
@@ -818,7 +829,7 @@ def validate_report(value):
                 "ready_phase", "ready_captured", "ready_original_called", "ready_launch_requested", "ready_launch_prepared",
                 "ready_observations", "ready_wait_seconds", "ready_launcher_visible", "ready_button_found",
                 "ready_button_enabled", "ready_button_title", "ready_button_kind", "button_action_dispatched",
-                "button_control_event", "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button")},
+                "button_control_event", "button_dispatch_count", "duplicate_launch_called", "forwarded_after_button", *LAUNCH_SETTINGS_FLAGS)},
             "corner_gesture": {key: corner[key] for key in (
                 "game_window_key", "matching_count", "recognizer_name", "one_finger_count", "three_finger_count", "minimum_press_seconds",
                 "allowable_movement_points", "delegate_present", "delays_touches_began",
@@ -838,7 +849,7 @@ def validate_report(value):
                 "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
                 "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
                 "dismiss_observation":dismissal, "diagnostics_copy":diagnostics_copy_observation(copied),
-                "zip_import_picker":zip_import_observation(zipped),
+                "zip_import_picker":zip_import_observation(zipped), "zip_roundtrip":roundtrip,
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count")},
@@ -1096,6 +1107,46 @@ def attach_octo_budget_observation(error, value):
         error.native_octo_budget_probe = policy_probe
 
 
+def zip_roundtrip_observation(value):
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in (*ZIP_ROUNDTRIP_FLAGS, "performed", "timed_out") if type(value.get(key)) is bool}
+    for key, expected in (("scope", "stock-simulator"), ("selection_trigger", "delegate-callback"),
+                          ("reason", "first-cold-run-only")):
+        if value.get(key) == expected:
+            clean[key] = expected
+    for key in ZIP_ROUNDTRIP_COUNTS:
+        if type(value.get(key)) is int and 0 <= value[key] <= 128*1024*1024:
+            clean[key] = value[key]
+    for key in ("source_sha256", "copied_sha256"):
+        if type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}", value[key]):
+            clean[key] = value[key]
+    seconds = value.get("elapsed_seconds")
+    if type(seconds) in (int,float) and math.isfinite(seconds) and 0 <= seconds <= 600:
+        clean["elapsed_seconds"] = seconds
+    return clean
+
+
+def validate_zip_roundtrip(value, run_index):
+    require(type(value) is dict, "settings_zip_roundtrip_failed")
+    if run_index != 0:
+        require(value == {"performed":False,"reason":"first-cold-run-only"}
+                and type(value.get("performed")) is bool, "settings_zip_roundtrip_failed")
+        return {"performed":False,"reason":"first-cold-run-only"}
+    require(value.get("performed") is True and value.get("scope") == "stock-simulator"
+            and value.get("selection_trigger") == "delegate-callback" and value.get("timed_out") is False
+            and all(value.get(key) is True for key in ZIP_ROUNDTRIP_FLAGS)
+            and all(type(value.get(key)) is int and 0 <= value[key] <= 128*1024*1024 for key in ZIP_ROUNDTRIP_COUNTS)
+            and value["source_bytes"] > 0 and value["source_bytes"] == value["copied_bytes"] == value["total_bytes"]
+            and value["failed_files"] == 0 and value["exported_files"] == value["imported_files"]
+            and all(type(value.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}",value[key])
+                    for key in ("source_sha256", "copied_sha256"))
+            and value["source_sha256"] == value["copied_sha256"]
+            and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
+            and 0 <= value["elapsed_seconds"] <= 120, "settings_zip_roundtrip_failed")
+    return zip_roundtrip_observation(value)
+
+
 def zip_import_observation(value):
     """Keep stock UIKit mode/cancel evidence; never filenames or provider data."""
     if type(value) is not dict:
@@ -1341,6 +1392,12 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
         zipped = zip_import_from_observation(observed)
         if zipped:
             result["zip_import_picker"] = zipped
+        roundtrip_raw = observed.get("zip_roundtrip")
+        if type(roundtrip_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
+            roundtrip_raw = observed["menu_lifetime"].get("zip_roundtrip")
+        roundtrip = zip_roundtrip_observation(roundtrip_raw)
+        if roundtrip:
+            result["zip_roundtrip"] = roundtrip
         budget = octo_budget_from_observation(observed)
         if budget:
             result["octo_budget"] = budget

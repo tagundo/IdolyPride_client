@@ -624,7 +624,12 @@ class _Host:
             if action == "resources_import":
                 path = Path(value.get("path", ""))
                 approved = self._paths[1] / "imports"
-                if not path.is_absolute() or path.suffix.lower() != ".zip" or path.parent != approved:
+                if not path.is_absolute() or path.suffix.lower() != ".zip":
+                    raise ValueError("Import path was not approved by the native host")
+                # Native container paths can retain ancestor aliases such as
+                # /var while startup canonicalizes data to /private/var. Resolve
+                # only the owned parent; never follow the selected file itself.
+                if _directory(path.parent) != approved:
                     raise ValueError("Import path was not approved by the native host")
                 directory = os.open(approved, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
                 try:

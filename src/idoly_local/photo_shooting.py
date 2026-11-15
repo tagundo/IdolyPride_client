@@ -40,6 +40,7 @@ _EXPRESSION_REJECTION_REASONS = {
     (RpcCode.INVALID_ARGUMENT, "Unknown local photo expression"): "expression_unknown",
     (RpcCode.INVALID_ARGUMENT, "Conflicting photo expression style selections"): "legacy_conflict",
     (RpcCode.INVALID_ARGUMENT, "The selected cast count exceeds this photo expression's capacity"): "cast_capacity",
+    (RpcCode.INVALID_ARGUMENT, "The photo expression roster must contain one to five characters"): "cast_capacity",
     (RpcCode.INVALID_ARGUMENT, "Matching nonempty photo character/style lists are required"): "style_shape",
     (RpcCode.INVALID_ARGUMENT, "Unknown photo character or outfit"): "style_unknown",
     (RpcCode.INVALID_ARGUMENT, "Photo character and outfit do not match"): "style_owner",
@@ -53,6 +54,7 @@ _EXPRESSION_REJECTION_REASONS = {
     (RpcCode.INVALID_ARGUMENT, "Malformed encrypted protobuf request"): "request_malformed",
 }
 RESERVED_IMAGE_COUNT = 20
+MAX_EXPRESSION_ROSTER = 5
 _MV_SCENE = object()
 
 
@@ -326,25 +328,29 @@ class PhotoShootings:
             return None
         _fail("Unsupported photo shooting action type", RpcCode.INVALID_ARGUMENT)
 
-    def _styles(self, request, snapshot, activity):
+    def _styles(self, request, snapshot, activity, *, active_count=None):
         characters, costumes, hairs = list(request.characterIds), list(request.costumeIds), list(request.hairIds)
         # A movie creates no 3D actors. The native caller constructs these
         # arrays from its current selection before branching to the empty MV
         # stage. Accept an entirely empty selection without inventing actors;
         # any supplied cast still passes every ordinary ownership/style check.
         if activity is _MV_SCENE and not characters and not costumes and not hairs:
-            return
+            return (), (), ()
         if (not characters or len(costumes) != len(characters)
                 or len(hairs) != len(characters)
                 or any(not value for value in [*characters, *costumes, *hairs])):
             _fail("Matching nonempty photo character/style lists are required", RpcCode.INVALID_ARGUMENT)
+        if active_count is None:
+            active_count = len(characters)
+        if type(active_count) is not int or not 0 < active_count <= len(characters):
+            _fail("The active photo character projection is malformed")
         character_master = self.catalog.ids("Character", required=True)
         costume_master = self.catalog.ids("Costume", required=True)
         hair_master = self.catalog.ids("Hair", required=True)
         owned_characters = _owned(snapshot.characters, "characterId")
         owned_costumes = _owned(snapshot.costumes, "costumeId")
         owned_hairs = _owned(snapshot.hairs, "hairId")
-        for character, costume, hair in zip(characters, costumes, hairs):
+        for index, (character, costume, hair) in enumerate(zip(characters, costumes, hairs)):
             definition, hair_definition = costume_master.get(costume), hair_master.get(hair)
             if character not in character_master or definition is None or hair_definition is None:
                 _fail("Unknown photo character or outfit", RpcCode.INVALID_ARGUMENT)
@@ -354,7 +360,7 @@ class PhotoShootings:
                 _fail("Photo character and outfit do not match", RpcCode.INVALID_ARGUMENT)
             if not _wearable(hair_definition, costume):
                 _fail("The photo hair cannot be worn with this costume", RpcCode.INVALID_ARGUMENT)
-            if activity is not None and activity is not _MV_SCENE:
+            if index < active_count and activity is not None and activity is not _MV_SCENE:
                 denied = activity.get("impossibleShootingCharacterIds", [])
                 allowed = activity.get("costumeTypeIds", [])
                 if not isinstance(denied, list) or not isinstance(allowed, list):
@@ -366,6 +372,7 @@ class PhotoShootings:
                 if (character in denied
                         or not self.media_mode and allowed and definition.get("costumeTypeId") not in allowed):
                     _fail("The photo activity does not allow this character or costume", RpcCode.INVALID_ARGUMENT)
+        return tuple(tuple(values[:active_count]) for values in (characters, costumes, hairs))
 
     def _expression(self, request, snapshot, access):
         if not request.photoExpressionId:
@@ -390,15 +397,15 @@ class PhotoShootings:
         elif any(legacy) and legacy != tuple(values[0] if values else ""
                                              for values in (characters, costumes, hairs)):
             _fail("Conflicting photo expression style selections", RpcCode.INVALID_ARGUMENT)
-        # The original confirm caller serializes only selected actorCostumes,
-        # taking at most the current display capacity; unfilled scene places
-        # are not request entries. Its pose model explicitly supports one
-        # selected actor even in a larger scene. These master amounts describe
-        # layout capacities, not a requirement to occupy every available place.
-        if not 0 < len(characters) <= max(amounts):
-            _fail("The selected cast count exceeds this photo expression's capacity", RpcCode.INVALID_ARGUMENT)
-        self._styles(SimpleNamespace(characterIds=characters, costumeIds=costumes, hairIds=hairs),
-                     snapshot, expression)
+        # The current client sends its retained roster, including greyed
+        # standby characters. Request Take(display capacity) is not a scene's
+        # active-cast count: a one-place scene can still send three styles.
+        # Validate every roster style, then apply scene restrictions only to
+        # the ordered prefix that this original layout can actively display.
+        if not 0 < len(characters) <= MAX_EXPRESSION_ROSTER:
+            _fail("The photo expression roster must contain one to five characters", RpcCode.INVALID_ARGUMENT)
+        return self._styles(SimpleNamespace(characterIds=characters, costumeIds=costumes, hairIds=hairs),
+                            snapshot, expression, active_count=min(len(characters), max(amounts)))
 
     def _urls(self, request, result, snapshot):
         if request.type not in (1, 2, 3):

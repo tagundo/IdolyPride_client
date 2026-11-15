@@ -37,6 +37,8 @@ p { line-height: 1.6; margin: .5rem 0; overflow-wrap: anywhere; }
 .message[data-error="true"] { color: var(--error); border-color: var(--error); }
 .copy-feedback { margin-top: -.35rem; }
 .copy-feedback[data-error="true"] { color: var(--error); }
+.save-feedback { min-height: 1.4em; }
+.save-feedback[data-state="failed"], .save-feedback[data-state="invalid"] { color: var(--error); }
 fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 label, .row { font-size: .9rem; }
 .row, .switch { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 3.5rem; border-bottom: 1px solid var(--line); }

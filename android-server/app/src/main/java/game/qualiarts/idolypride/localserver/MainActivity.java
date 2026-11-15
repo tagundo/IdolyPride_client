@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -57,9 +58,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private TextView resourceServed;
     private ProgressBar transferProgress;
     private Button export;
-    private Button exportServerLogs;
-    private String pendingServerLogSnapshot;
-    private static final int EXPORT_SERVER_LOGS = 50055;
     private static final int EXPORT_DIAGNOSTICS = 50052;
     private static final int EXPORT_RESOURCES = 50053, IMPORT_RESOURCES = 50054;
     private Button start;
@@ -110,12 +108,74 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
     };
 
+    private static final int PAGE_BACKGROUND = 0xfff3f5fc;
+    private static final int CARD_BACKGROUND = 0xffffffff;
+    private static final int STATUS_BACKGROUND = 0xffe9eefc;
+    private static final int CONTROL_BACKGROUND = 0xffe8edf7;
+    private static final int TEXT_PRIMARY = 0xff192337;
+    private static final int TEXT_MUTED = 0xff566478;
+    private static final int ACCENT = 0xff3454d1;
+    private static final int SUCCESS = 0xff157f3d;
+    private static final int WARNING = 0xffa34f0d;
+    private static final int[][] ENABLED_STATES = {{-android.R.attr.state_enabled}, {}};
+
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }
+
+    private TextView sectionTitle(int label) {
+        TextView title = text(label, 20, TEXT_PRIMARY);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        title.setPadding(0, 0, 0, dp(12));
+        if (Build.VERSION.SDK_INT >= 28) title.setAccessibilityHeading(true);
+        return title;
+    }
+
+    private LinearLayout card(LinearLayout parent, int title) {
+        LinearLayout result = new LinearLayout(this);
+        result.setOrientation(LinearLayout.VERTICAL);
+        result.setPadding(dp(16), dp(16), dp(16), dp(16));
+        GradientDrawable surface = new GradientDrawable();
+        surface.setColor(CARD_BACKGROUND);
+        surface.setCornerRadius(dp(16));
+        surface.setStroke(dp(1), 0xffdee4f0);
+        result.setBackground(surface);
+        LinearLayout.LayoutParams placement = new LinearLayout.LayoutParams(-1, -2);
+        placement.setMargins(0, 0, 0, dp(16));
+        parent.addView(result, placement);
+        if (title != 0) result.addView(sectionTitle(title));
+        return result;
+    }
+
+    private void primaryButton(Button control) {
+        control.setBackgroundTintList(new ColorStateList(ENABLED_STATES,
+                new int[]{CONTROL_BACKGROUND, ACCENT}));
+        control.setTextColor(new ColorStateList(ENABLED_STATES,
+                new int[]{TEXT_MUTED, 0xffffffff}));
+    }
+
+    private void readableControls(View root) {
+        if (root instanceof TextView) {
+            TextView label = (TextView) root;
+            float currentSp = label.getTextSize() / getResources().getDisplayMetrics().scaledDensity;
+            if (currentSp < 16) label.setTextSize(16);
+            label.setLineSpacing(dp(2), 1.1f);
+        }
+        if (root instanceof CheckBox) {
+            CheckBox control = (CheckBox) root;
+            control.setMinHeight(dp(48));
+            control.setButtonTintList(new ColorStateList(ENABLED_STATES,
+                    new int[]{TEXT_MUTED, ACCENT}));
+        }
+        if (root instanceof ViewGroup && !(root instanceof Spinner)) {
+            ViewGroup group = (ViewGroup) root;
+            for (int index = 0; index < group.getChildCount(); index++) readableControls(group.getChildAt(index));
+        }
+    }
 
     private TextView text(int resource, int size, int color) {
         TextView result = new TextView(this);
         result.setText(resource);
-        result.setTextSize(size);
+        result.setTextSize(Math.max(16, size));
+        result.setLineSpacing(dp(2), 1.1f);
         result.setTextColor(color);
         return result;
     }
@@ -124,47 +184,52 @@ public final class MainActivity extends Activity implements ServerService.Observ
         Button result = new Button(this);
         result.setText(label);
         result.setAllCaps(false);
+        result.setTextSize(16);
         result.setMinHeight(dp(52));
+        result.setPadding(dp(12), dp(8), dp(12), dp(8));
+        result.setBackgroundTintList(ColorStateList.valueOf(CONTROL_BACKGROUND));
+        result.setTextColor(new ColorStateList(ENABLED_STATES,
+                new int[]{TEXT_MUTED, TEXT_PRIMARY}));
         return result;
     }
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Object retained = getLastNonConfigurationInstance();
-        if (retained instanceof String) pendingServerLogSnapshot = (String) retained;
         if (savedInstanceState != null) {
             pendingResourcePlatform = savedInstanceState.getString("resource_platform");
             retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
         }
-        getWindow().setStatusBarColor(Color.rgb(19, 29, 36));
-        getWindow().setNavigationBarColor(Color.rgb(19, 29, 36));
+        getWindow().setStatusBarColor(PAGE_BACKGROUND);
+        getWindow().setNavigationBarColor(PAGE_BACKGROUND);
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        boolean compact = getResources().getConfiguration().screenHeightDp < 520;
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(20), dp(16), dp(20), dp(8));
-        content.setBackgroundColor(Color.rgb(19, 29, 36));
-        TextView heading = text(R.string.app_name, 25, Color.WHITE);
+        content.setPadding(dp(16), dp(compact ? 8 : 12), dp(16), dp(8));
+        content.setBackgroundColor(PAGE_BACKGROUND);
+        TextView heading = text(R.string.app_name, compact ? 20 : 25, TEXT_PRIMARY);
         heading.setText(getString(R.string.app_name) + "  " + BuildConfig.VERSION_NAME);
         heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         content.addView(heading);
-        TextView description = text(R.string.server_description, 13, Color.rgb(180, 199, 211));
-        description.setPadding(0, dp(4), 0, dp(10));
+        TextView description = text(R.string.server_description, 16, TEXT_MUTED);
+        description.setPadding(0, dp(4), 0, dp(8));
+        description.setVisibility(compact ? View.GONE : View.VISIBLE);
         content.addView(description);
 
-        status = text(R.string.status_stopped, 21, Color.WHITE);
+        status = text(R.string.status_stopped, 21, TEXT_PRIMARY);
         status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        status.setPadding(dp(14), dp(10), dp(14), dp(10));
+        status.setPadding(dp(14), dp(8), dp(14), dp(8));
         GradientDrawable background = new GradientDrawable();
-        background.setColor(Color.rgb(32, 48, 59));
+        background.setColor(STATUS_BACKGROUND);
         background.setCornerRadius(dp(12));
         status.setBackground(background);
         content.addView(status, new LinearLayout.LayoutParams(-1, -2));
-        TextView ports = text(R.string.server_ports, 13, Color.rgb(180, 199, 211));
-        ports.setPadding(0, dp(6), 0, dp(6));
-        content.addView(ports);
 
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         start = button(R.string.start_server);
+        primaryButton(start);
         stop = button(R.string.stop_server);
         LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -2, 1);
         half.setMargins(0, 0, dp(4), 0);
@@ -173,164 +238,178 @@ public final class MainActivity extends Activity implements ServerService.Observ
         otherHalf.setMargins(dp(4), 0, 0, 0);
         controls.addView(stop, otherHalf);
         content.addView(controls);
-        // Keep lifecycle controls visible while diagnostics and logs scroll.
+        Button launch = button(R.string.launch_diagnostic_client);
+        primaryButton(launch);
+        content.addView(launch, new LinearLayout.LayoutParams(-1, -2));
+
+        // The settings scroll independently; the single game action stays visible.
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(0, dp(12), 0, 0);
+        TextView automatic = text(R.string.settings_automatic_notice, 16, TEXT_MUTED);
+        automatic.setPadding(dp(2), 0, dp(2), dp(12));
+        body.addView(automatic);
+        LinearLayout modeCard = card(body, R.string.mode_section_title);
         mediaMode = new CheckBox(this);
         mediaMode.setText(R.string.media_mode);
-        mediaMode.setTextColor(Color.WHITE);
+        mediaMode.setTextColor(TEXT_PRIMARY);
         mediaMode.setTextSize(13);
         mediaMode.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(MEDIA_MODE, false));
         mediaMode.setOnCheckedChangeListener((button, enabled) ->
                 getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
                         .putBoolean(MEDIA_MODE, enabled).apply());
-        body.addView(mediaMode);
-        TextView mediaNotice = text(R.string.media_mode_notice, 12, Color.rgb(180, 199, 211));
+        modeCard.addView(mediaMode);
+        TextView mediaNotice = text(R.string.media_mode_notice, 12, TEXT_MUTED);
         mediaNotice.setPadding(0, 0, 0, dp(6));
-        body.addView(mediaNotice);
-        addResourceStorageControls(body);
-        addLibraryControls(body);
+        modeCard.addView(mediaNotice);
+        TextView note = text(R.string.first_launch_note, 13, TEXT_MUTED);
+        note.setPadding(0, dp(8), 0, dp(14));
+        modeCard.addView(note);
+
+        LinearLayout libraryCard = card(body, 0);
+        addLibraryControls(libraryCard);
+
+        LinearLayout experimentCard = card(body, R.string.experiment_section_title);
         experimentalMainLive = new CheckBox(this);
         experimentalMainLive.setText(R.string.experimental_main_live);
-        experimentalMainLive.setTextColor(Color.WHITE);
+        experimentalMainLive.setTextColor(TEXT_PRIMARY);
         experimentalMainLive.setTextSize(13);
         experimentalMainLive.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(EXPERIMENTAL_MAIN_LIVE, false));
         experimentalMainLive.setOnCheckedChangeListener((button, enabled) ->
                 getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
                         .putBoolean(EXPERIMENTAL_MAIN_LIVE, enabled).apply());
-        body.addView(experimentalMainLive);
-        TextView liveNotice = text(R.string.experimental_main_live_notice, 12, Color.rgb(180, 199, 211));
-        body.addView(liveNotice);
+        experimentCard.addView(experimentalMainLive);
+        TextView liveNotice = text(R.string.experimental_main_live_notice, 12, TEXT_MUTED);
+        experimentCard.addView(liveNotice);
+        TextView replayNotice = text(R.string.tutorial_replay_notice, 16, TEXT_MUTED);
+        replayNotice.setPadding(0, dp(6), 0, dp(8));
+        experimentCard.addView(replayNotice);
+        addRenderingExperiment(experimentCard);
+
+        LinearLayout graphicsCard = card(body, 0);
+        addPresentationControls(graphicsCard);
+        LinearLayout playbackCard = card(body, R.string.playback_section_title);
+        addPlaybackControls(playbackCard);
+
+        LinearLayout resourcesCard = card(body, R.string.resources_section_title);
+        addResourceStorageControls(resourcesCard);
         downloadMissingResources = new CheckBox(this);
         downloadMissingResources.setText(R.string.download_missing_resources);
-        downloadMissingResources.setTextColor(Color.WHITE);
+        downloadMissingResources.setTextColor(TEXT_PRIMARY);
         downloadMissingResources.setTextSize(13);
         downloadMissingResources.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(DOWNLOAD_MISSING_RESOURCES, true));
         downloadMissingResources.setOnCheckedChangeListener((button, enabled) ->
                 getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
                         .putBoolean(DOWNLOAD_MISSING_RESOURCES, enabled).apply());
-        body.addView(downloadMissingResources);
-        TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, Color.rgb(180, 199, 211));
+        resourcesCard.addView(downloadMissingResources);
+        TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, TEXT_MUTED);
         resourceNotice.setPadding(0, 0, 0, dp(6));
-        body.addView(resourceNotice);
-        addRenderingExperiment(body);
-        addPlaybackControls(body);
-        addPresentationControls(body);
-        TextView replayNotice = text(R.string.tutorial_replay_notice, 12, Color.rgb(180, 199, 211));
-        replayNotice.setPadding(0, dp(6), 0, dp(8));
-        body.addView(replayNotice);
-        Button launch = button(R.string.launch_diagnostic_client);
-        body.addView(launch, new LinearLayout.LayoutParams(-1, -2));
-        export = button(R.string.export_diagnostics);
-        body.addView(export, new LinearLayout.LayoutParams(-1, -2));
-        body.addView(text(R.string.game_state_title, 15, Color.WHITE));
-        gameStatus = text(R.string.game_state_waiting, 13, Color.rgb(192, 212, 222));
+        resourcesCard.addView(resourceNotice);
+        TextView resourceHeading = text(R.string.resource_transfer_title, 15, TEXT_PRIMARY);
+        resourceHeading.setPadding(0, dp(10), 0, dp(4));
+        resourcesCard.addView(resourceHeading);
+        resourceStatus = text(R.string.resource_transfer_waiting, 12, TEXT_MUTED);
+        resourceStatus.setTextIsSelectable(true);
+        resourcesCard.addView(resourceStatus);
+        resourceReceived = text(R.string.resource_transfer_waiting, 12, TEXT_MUTED);
+        resourceReceived.setTextIsSelectable(true);
+        resourceReceived.setVisibility(View.GONE);
+        resourcesCard.addView(resourceReceived);
+        resourceServed = text(R.string.resource_transfer_waiting, 12, TEXT_MUTED);
+        resourceServed.setTextIsSelectable(true);
+        resourceServed.setVisibility(View.GONE);
+        resourcesCard.addView(resourceServed);
+        addResourceLibraryControls(resourcesCard);
+
+        LinearLayout diagnosticsCard = card(body, R.string.diagnostics_section_title);
+        gameStatus = text(R.string.game_state_waiting, 13, TEXT_MUTED);
         gameStatus.setTextIsSelectable(true);
         gameStatus.setMaxLines(3);
         gameStatus.setEllipsize(TextUtils.TruncateAt.END);
         gameStatus.setPadding(0, dp(4), 0, dp(8));
-        body.addView(gameStatus);
-        lastException = text(R.string.game_state_waiting, 12, Color.rgb(255, 192, 154));
+        diagnosticsCard.addView(gameStatus);
+        lastException = text(R.string.game_state_waiting, 12, WARNING);
         lastException.setTextIsSelectable(true);
         lastException.setMaxLines(3);
         lastException.setEllipsize(TextUtils.TruncateAt.END);
         lastException.setVisibility(View.GONE);
-        body.addView(lastException);
-        networkStatus = text(R.string.game_network_waiting, 12, Color.rgb(160, 181, 194));
+        diagnosticsCard.addView(lastException);
+        export = button(R.string.export_diagnostics);
+        diagnosticsCard.addView(export, new LinearLayout.LayoutParams(-1, -2));
+        TextView exportNotice = text(R.string.diagnostics_export_notice, 16, TEXT_MUTED);
+        exportNotice.setPadding(0, dp(4), 0, dp(8));
+        diagnosticsCard.addView(exportNotice);
+        Button detailsHeading = button(R.string.diagnostics_details);
+        diagnosticsCard.addView(detailsHeading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout diagnosticDetails = new LinearLayout(this);
+        diagnosticDetails.setOrientation(LinearLayout.VERTICAL);
+        diagnosticDetails.setPadding(0, dp(8), 0, 0);
+        diagnosticDetails.setVisibility(View.GONE);
+        diagnosticsCard.addView(diagnosticDetails, new LinearLayout.LayoutParams(-1, -2));
+        detailsHeading.setOnClickListener(view -> {
+            boolean expanded = diagnosticDetails.getVisibility() != View.VISIBLE;
+            diagnosticDetails.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            detailsHeading.setText(expanded ? R.string.diagnostics_details_expanded : R.string.diagnostics_details);
+        });
+        TextView ports = text(R.string.server_ports, 16, TEXT_MUTED);
+        ports.setPadding(0, 0, 0, dp(8));
+        diagnosticDetails.addView(ports);
+        networkStatus = text(R.string.game_network_waiting, 12, TEXT_MUTED);
         networkStatus.setTextIsSelectable(true);
         networkStatus.setPadding(0, dp(4), 0, dp(8));
-        body.addView(networkStatus);
-        transferStatus = text(R.string.master_transfer_waiting, 12, Color.rgb(160, 181, 194));
-        body.addView(transferStatus);
+        diagnosticDetails.addView(networkStatus);
+        transferStatus = text(R.string.master_transfer_waiting, 12, TEXT_MUTED);
+        diagnosticDetails.addView(transferStatus);
         transferProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         transferProgress.setMax(1000);
         transferProgress.setVisibility(View.GONE);
-        body.addView(transferProgress, new LinearLayout.LayoutParams(-1, dp(12)));
-        TextView resourceHeading = text(R.string.resource_transfer_title, 15, Color.WHITE);
-        resourceHeading.setPadding(0, dp(10), 0, dp(4));
-        body.addView(resourceHeading);
-        resourceStatus = text(R.string.resource_transfer_waiting, 12, Color.rgb(192, 212, 222));
-        resourceStatus.setTextIsSelectable(true);
-        body.addView(resourceStatus);
-        resourceReceived = text(R.string.resource_transfer_waiting, 12, Color.rgb(160, 181, 194));
-        resourceReceived.setTextIsSelectable(true);
-        resourceReceived.setVisibility(View.GONE);
-        body.addView(resourceReceived);
-        resourceServed = text(R.string.resource_transfer_waiting, 12, Color.rgb(160, 181, 194));
-        resourceServed.setTextIsSelectable(true);
-        resourceServed.setVisibility(View.GONE);
-        body.addView(resourceServed);
-        addResourceLibraryControls(body);
-        TextView note = text(R.string.first_launch_note, 13, Color.rgb(160, 181, 194));
-        note.setPadding(0, dp(8), 0, dp(14));
-        body.addView(note);
-        body.addView(text(R.string.server_logs, 16, Color.WHITE));
-        exportServerLogs = button(R.string.export_server_logs);
-        body.addView(exportServerLogs, new LinearLayout.LayoutParams(-1, -2));
-        logs = text(R.string.waiting_logs, 12, Color.rgb(192, 212, 222));
+        diagnosticDetails.addView(transferProgress, new LinearLayout.LayoutParams(-1, dp(12)));
+        diagnosticDetails.addView(sectionTitle(R.string.server_logs));
+        logs = text(R.string.waiting_logs, 12, TEXT_MUTED);
         logs.setTypeface(Typeface.MONOSPACE);
         logs.setTextIsSelectable(true);
         logs.setPadding(0, dp(8), 0, dp(16));
         logScroll = new ScrollView(this);
         logScroll.addView(logs);
         logScroll.setNestedScrollingEnabled(true);
-        body.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(220)));
+        diagnosticDetails.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(220)));
         ScrollView detailsScroll = new ScrollView(this);
         detailsScroll.setFillViewport(true);
         detailsScroll.addView(body, new ScrollView.LayoutParams(-1, -2));
         content.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        readableControls(content);
         setContentView(content);
 
         start.setOnClickListener(view -> requestServerStart());
         stop.setOnClickListener(view -> startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP)));
         launch.setOnClickListener(view -> launchClient(R.string.diagnostic_client_missing,
                 "game.qualiarts.idolypride.local.diagnostics"));
-        exportServerLogs.setOnClickListener(view -> requestServerLogExport());
-        export.setOnClickListener(view -> {
-            Intent destination = new Intent(Intent.ACTION_CREATE_DOCUMENT)
-                    .addCategory(Intent.CATEGORY_OPENABLE)
-                    .setType("application/json")
-                    .putExtra(Intent.EXTRA_TITLE, "IdolyPride-diagnostics.json");
-            try {
-                startActivityForResult(destination, EXPORT_DIAGNOSTICS);
-            } catch (RuntimeException error) {
-                Toast.makeText(this, R.string.export_picker_failed, Toast.LENGTH_LONG).show();
-            }
-        });
+        export.setOnClickListener(view -> requestDiagnosticsExport());
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 50051);
         }
     }
 
-    private void requestServerLogExport() {
-        // Freeze exactly the bounded text on screen before the picker can pause us.
-        pendingServerLogSnapshot = logs.getText().toString();
+    private void requestDiagnosticsExport() {
         Intent destination = new Intent(Intent.ACTION_CREATE_DOCUMENT)
                 .addCategory(Intent.CATEGORY_OPENABLE)
                 .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                .setType("text/plain")
-                .putExtra(Intent.EXTRA_TITLE, "IdolyPride-server-records.txt");
+                .setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, "IdolyPride-diagnostics.json");
         try {
-            startActivityForResult(destination, EXPORT_SERVER_LOGS);
+            startActivityForResult(destination, EXPORT_DIAGNOSTICS);
         } catch (RuntimeException error) {
-            pendingServerLogSnapshot = null;
             Toast.makeText(this, R.string.export_picker_failed, Toast.LENGTH_LONG).show();
         }
     }
 
-    // Retain at most the existing bounded snapshot without placing it in a Bundle.
-    @Override public Object onRetainNonConfigurationInstance() {
-        return pendingServerLogSnapshot;
-    }
-
-    private void finishServerLogExport(int resultCode, Intent data) {
-        String snapshot = pendingServerLogSnapshot;
-        pendingServerLogSnapshot = null;
-        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
-        ServerService.exportServerLogs(getApplicationContext(), data.getData(), snapshot);
+    private void finishDiagnosticsExport(int resultCode, Intent data) {
+        if (resultCode != RESULT_OK || data == null) return;
+        Uri destination = data.getData();
+        if (destination != null) ServerService.exportDiagnostics(getApplicationContext(), destination);
     }
 
     private static int optionIndex(String[] values, String selected) {
@@ -343,7 +422,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void addResourceStorageControls(LinearLayout body) {
         resourceStorage = presentationSpinner(body, R.string.resource_storage, R.array.resource_storage_options);
         resourceStorage.setSelection(downloadsSelected() ? 0 : 1);
-        resourceStorageNotice = text(R.string.resource_storage_public_notice, 12, Color.rgb(180, 199, 211));
+        resourceStorageNotice = text(R.string.resource_storage_public_notice, 12, TEXT_MUTED);
         resourceStorageNotice.setPadding(0, 0, 0, dp(8)); body.addView(resourceStorageNotice);
         resourceStorage.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
@@ -406,13 +485,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         librarySettings = loaded.settings;
         libraryInvalidLanguage = loaded.invalidLanguage; libraryInvalidMedia = loaded.invalidMedia;
         libraryInvalid = libraryInvalidLanguage || libraryInvalidMedia;
-        body.addView(text(R.string.library_settings_title, 15, Color.WHITE));
+        body.addView(sectionTitle(R.string.library_settings_title));
         libraryLanguage = presentationSpinner(body, R.string.library_language, R.array.library_language_options);
         hideVideoMv = new CheckBox(this); hideVideoMv.setText(R.string.library_hide_video_mv);
-        hideVideoMv.setTextSize(13); hideVideoMv.setTextColor(Color.WHITE); body.addView(hideVideoMv);
+        hideVideoMv.setTextSize(13); hideVideoMv.setTextColor(TEXT_PRIMARY); body.addView(hideVideoMv);
         libraryMvSort = presentationSpinner(body, R.string.library_mv_sort, R.array.library_mv_sort_options);
         libraryOutfitSort = presentationSpinner(body, R.string.library_outfit_sort, R.array.library_outfit_sort_options);
-        libraryStatus = text(R.string.library_settings_notice, 12, Color.rgb(180, 199, 211));
+        libraryStatus = text(R.string.library_settings_notice, 12, TEXT_MUTED);
         libraryStatus.setTextIsSelectable(true); libraryStatus.setPadding(0, dp(4), 0, dp(8)); body.addView(libraryStatus);
         restoreLibraryControls();
         AdapterView.OnItemSelectedListener changed = new AdapterView.OnItemSelectedListener() {
@@ -461,14 +540,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (libraryStatus == null) return;
         setTextIfChanged(libraryStatus, getString(librarySaveFailed ? R.string.library_settings_failed
                 : libraryInvalid ? R.string.library_settings_invalid : R.string.library_settings_notice));
-        libraryStatus.setTextColor(librarySaveFailed || libraryInvalid ? Color.rgb(255, 192, 154) : Color.rgb(180, 199, 211));
+        libraryStatus.setTextColor(librarySaveFailed || libraryInvalid ? WARNING : TEXT_MUTED);
     }
     private String selectedResourcePlatform() { return resourcePlatform.getSelectedItemPosition() == 1 ? "ios" : "android"; }
     private int selectedResourceParallelism() {
         return ResourceTransfers.downloadParallelismAt(resourceParallelism.getSelectedItemPosition());
     }
     private void addResourceLibraryControls(LinearLayout body) {
-        TextView heading = text(R.string.library_resources_title, 15, Color.WHITE);
+        TextView heading = sectionTitle(R.string.library_resources_title);
         heading.setPadding(0, dp(12), 0, dp(4)); body.addView(heading);
         resourcePlatform = presentationSpinner(body, R.string.library_resource_platform, R.array.library_resource_platform_options);
         String selected = getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getString("resource_platform", "android");
@@ -489,13 +568,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         };
         resourcePlatform.setOnItemSelectedListener(selectionChanged);
         resourceParallelism.setOnItemSelectedListener(selectionChanged);
-        body.addView(text(R.string.library_download_parallelism_notice, 12, Color.rgb(180, 199, 211)));
-        body.addView(text(R.string.library_resources_notice, 12, Color.rgb(180, 199, 211)));
+        body.addView(text(R.string.library_download_parallelism_notice, 12, TEXT_MUTED));
+        body.addView(text(R.string.library_resources_notice, 12, TEXT_MUTED));
         downloadLibrary = button(R.string.library_download_all); body.addView(downloadLibrary);
         importLibrary = button(R.string.library_import); body.addView(importLibrary);
         exportLibrary = button(R.string.library_export); body.addView(exportLibrary);
         cancelLibrary = button(R.string.library_cancel); body.addView(cancelLibrary);
-        libraryTransferStatus = text(R.string.library_resources_waiting, 12, Color.rgb(192, 212, 222));
+        libraryTransferStatus = text(R.string.library_resources_waiting, 12, TEXT_MUTED);
         libraryTransferStatus.setTextIsSelectable(true); libraryTransferStatus.setPadding(0, dp(6), 0, dp(6)); body.addView(libraryTransferStatus);
         libraryProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         libraryProgress.setMax(1000); libraryProgress.setVisibility(View.GONE); body.addView(libraryProgress, new LinearLayout.LayoutParams(-1, dp(12)));
@@ -611,14 +690,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
         playbackInvalid = loaded.invalid;
         waitForOrientation = new CheckBox(this);
         waitForOrientation.setText(R.string.playback_wait_for_orientation);
-        waitForOrientation.setTextColor(Color.WHITE);
+        waitForOrientation.setTextColor(TEXT_PRIMARY);
         waitForOrientation.setTextSize(14);
         waitForOrientation.setChecked(playbackSettings.waitForOrientation);
         body.addView(waitForOrientation);
-        TextView notice = text(R.string.playback_wait_notice, 12, Color.rgb(180, 199, 211));
+        TextView notice = text(R.string.playback_wait_notice, 12, TEXT_MUTED);
         notice.setPadding(0, 0, 0, dp(4));
         body.addView(notice);
-        playbackStatus = text(R.string.playback_waiting, 12, Color.rgb(192, 212, 222));
+        playbackStatus = text(R.string.playback_waiting, 12, TEXT_MUTED);
         playbackStatus.setTextIsSelectable(true);
         playbackStatus.setPadding(0, 0, 0, dp(8));
         body.addView(playbackStatus);
@@ -629,15 +708,15 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void addRenderingExperiment(LinearLayout body) {
         multithreadedRendering = new CheckBox(this);
         multithreadedRendering.setText(R.string.rendering_mt_experiment);
-        multithreadedRendering.setTextColor(Color.WHITE);
+        multithreadedRendering.setTextColor(TEXT_PRIMARY);
         multithreadedRendering.setTextSize(14);
         multithreadedRendering.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(RenderingExperiment.PREFERENCE, RenderingExperiment.DEFAULT_ENABLED));
         body.addView(multithreadedRendering);
-        TextView notice = text(R.string.rendering_mt_notice, 12, Color.rgb(180, 199, 211));
+        TextView notice = text(R.string.rendering_mt_notice, 12, TEXT_MUTED);
         notice.setPadding(0, 0, 0, dp(4));
         body.addView(notice);
-        renderingStatus = text(R.string.rendering_probe_waiting, 12, Color.rgb(192, 212, 222));
+        renderingStatus = text(R.string.rendering_probe_waiting, 12, TEXT_MUTED);
         renderingStatus.setTextIsSelectable(true);
         renderingStatus.setPadding(0, 0, 0, dp(8));
         body.addView(renderingStatus);
@@ -704,9 +783,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
             } else actual += "\n" + getString(R.string.rendering_frame_times_unavailable);
         }
         setTextIfChanged(renderingStatus, request + "\n" + actual);
-        renderingStatus.setTextColor(feedback == RenderingExperiment.OBSERVED ? Color.rgb(192, 212, 222)
+        renderingStatus.setTextColor(feedback == RenderingExperiment.OBSERVED ? TEXT_MUTED
                 : feedback == RenderingExperiment.UNSUPPORTED || feedback == RenderingExperiment.INIT_FAILED
-                ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+                ? WARNING : TEXT_MUTED);
     }
 
     private void savePlaybackControl(boolean wait) {
@@ -744,7 +823,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 && playbackRuntime.optBoolean("invalid_settings_file", false))) {
             setTextIfChanged(playbackStatus, getString(playbackSaveFailed
                     ? R.string.playback_save_failed : R.string.playback_invalid));
-            playbackStatus.setTextColor(Color.rgb(255, 192, 154));
+            playbackStatus.setTextColor(WARNING);
             return;
         }
         JSONObject client = playbackRuntime == null ? null : playbackRuntime.optJSONObject("client");
@@ -763,40 +842,36 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 : feedback == PlaybackSettings.PENDING ? R.string.playback_saved_waiting
                 : R.string.playback_waiting;
         setTextIfChanged(playbackStatus, getString(message));
-        playbackStatus.setTextColor(feedback == PlaybackSettings.APPLIED ? Color.rgb(117, 226, 177)
-                : feedback == PlaybackSettings.UNSUPPORTED ? Color.rgb(255, 192, 154)
-                : Color.rgb(192, 212, 222));
+        playbackStatus.setTextColor(feedback == PlaybackSettings.APPLIED ? SUCCESS
+                : feedback == PlaybackSettings.UNSUPPORTED ? WARNING
+                : TEXT_MUTED);
     }
 
     private void addPresentationControls(LinearLayout body) {
         PresentationSettings.Loaded loaded = PresentationSettings.load(getFilesDir());
         presentationSettings = loaded.settings;
         presentationInvalid = loaded.invalid;
-        Button heading = button(R.string.presentation_title);
+        Button heading = button(R.string.presentation_title_expanded);
         body.addView(heading, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout settings = new LinearLayout(this);
         settings.setOrientation(LinearLayout.VERTICAL);
         settings.setPadding(dp(8), 0, dp(8), dp(8));
-        settings.setVisibility(View.GONE);
+        settings.setVisibility(View.VISIBLE);
         body.addView(settings, new LinearLayout.LayoutParams(-1, -2));
         heading.setOnClickListener(view -> {
             boolean expanded = settings.getVisibility() != View.VISIBLE;
             settings.setVisibility(expanded ? View.VISIBLE : View.GONE);
             heading.setText(expanded ? R.string.presentation_title_expanded : R.string.presentation_title);
         });
-        TextView notice = text(R.string.presentation_notice, 12, Color.rgb(180, 199, 211));
+        TextView notice = text(R.string.presentation_notice, 12, TEXT_MUTED);
         notice.setPadding(0, dp(4), 0, dp(8));
         settings.addView(notice);
-        TextView clientNotice = text(R.string.presentation_client_notice, 12, Color.rgb(180, 199, 211));
+        TextView clientNotice = text(R.string.presentation_client_notice, 12, TEXT_MUTED);
         clientNotice.setPadding(0, 0, 0, dp(6));
         settings.addView(clientNotice);
-        Button launchPresentation = button(R.string.presentation_launch_button);
-        launchPresentation.setOnClickListener(view -> launchClient(R.string.presentation_launch_missing,
-                "game.qualiarts.idolypride.local.diagnostics"));
-        settings.addView(launchPresentation, new LinearLayout.LayoutParams(-1, -2));
         customGraphics = new CheckBox(this);
         customGraphics.setText(R.string.presentation_custom_graphics);
-        customGraphics.setTextColor(Color.WHITE);
+        customGraphics.setTextColor(TEXT_PRIMARY);
         customGraphics.setTextSize(14);
         settings.addView(customGraphics);
         graphicsQuality = presentationSpinner(settings, R.string.presentation_quality,
@@ -813,14 +888,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 R.array.presentation_shadow_resolution_options);
         expandPhotography = new CheckBox(this);
         expandPhotography.setText(R.string.presentation_expand_photography);
-        expandPhotography.setTextColor(Color.WHITE);
+        expandPhotography.setTextColor(TEXT_PRIMARY);
         expandPhotography.setTextSize(14);
         settings.addView(expandPhotography);
         TextView photographyNotice = text(R.string.presentation_photography_notice, 12,
-                Color.rgb(180, 199, 211));
+                TEXT_MUTED);
         photographyNotice.setPadding(0, 0, 0, dp(8));
         settings.addView(photographyNotice);
-        presentationStatus = text(R.string.presentation_waiting, 12, Color.rgb(192, 212, 222));
+        presentationStatus = text(R.string.presentation_waiting, 12, TEXT_MUTED);
         presentationStatus.setTextIsSelectable(true);
         presentationStatus.setPadding(0, dp(4), 0, dp(8));
         body.addView(presentationStatus);
@@ -838,7 +913,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     }
 
     private Spinner presentationSpinner(LinearLayout parent, int labelResource, int optionsResource) {
-        TextView label = text(labelResource, 13, Color.rgb(192, 212, 222));
+        TextView label = text(labelResource, 13, TEXT_MUTED);
         label.setPadding(0, dp(6), 0, 0);
         parent.addView(label);
         Spinner spinner = new Spinner(this);
@@ -849,8 +924,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 android.R.layout.simple_spinner_item, getResources().getStringArray(optionsResource)) {
             @Override public View getView(int position, View convertView, ViewGroup parentView) {
                 TextView value = (TextView) super.getView(position, convertView, parentView);
-                value.setTextColor(Color.WHITE);
-                value.setTextSize(14);
+                value.setTextColor(TEXT_PRIMARY);
+                value.setTextSize(16);
                 return value;
             }
         };
@@ -915,12 +990,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void updatePresentationStatus() {
         if (presentationSaveFailed) {
             setTextIfChanged(presentationStatus, getString(R.string.presentation_save_failed));
-            presentationStatus.setTextColor(Color.rgb(255, 192, 154));
+            presentationStatus.setTextColor(WARNING);
             return;
         }
         if (presentationInvalid) {
             setTextIfChanged(presentationStatus, getString(R.string.presentation_invalid));
-            presentationStatus.setTextColor(Color.rgb(255, 192, 154));
+            presentationStatus.setTextColor(WARNING);
             return;
         }
         JSONObject client = !presentationObserved || !presentationServerRunning || presentationRuntime == null
@@ -937,14 +1012,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (message != 0) {
                 setTextIfChanged(presentationStatus, getString(message));
                 presentationStatus.setTextColor("applied".equals(state) || "disabled".equals(state)
-                        ? Color.rgb(117, 226, 177) : "unsupported".equals(state) || "init_failed".equals(state)
-                        ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+                        ? SUCCESS : "unsupported".equals(state) || "init_failed".equals(state)
+                        ? WARNING : TEXT_MUTED);
                 return;
             }
         }
         setTextIfChanged(presentationStatus, getString(presentationSettings.revision > 0
                 ? R.string.presentation_saved_waiting : R.string.presentation_waiting));
-        presentationStatus.setTextColor(Color.rgb(192, 212, 222));
+        presentationStatus.setTextColor(TEXT_MUTED);
     }
 
     private void launchClient(int missingMessage, String... packageNames) {
@@ -983,10 +1058,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == EXPORT_SERVER_LOGS) {
-            finishServerLogExport(resultCode, data);
-            return;
-        }
         if (requestCode == EXPORT_RESOURCES || requestCode == IMPORT_RESOURCES) {
             if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
             String platform = ResourceTransfers.platform(pendingResourcePlatform) ? pendingResourcePlatform : selectedResourcePlatform();
@@ -996,9 +1067,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (!started) resourceUnavailable();
             return;
         }
-        if (requestCode != EXPORT_DIAGNOSTICS || resultCode != RESULT_OK || data == null) return;
-        Uri destination = data.getData();
-        if (destination != null) ServerService.exportDiagnostics(getApplicationContext(), destination);
+        if (requestCode == EXPORT_DIAGNOSTICS) finishDiagnosticsExport(resultCode, data);
     }
 
     @Override protected void onStart() {
@@ -1027,7 +1096,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     @Override public void onServerChanged(String value, boolean running, boolean busy, List<String> lines, String detailsJson) {
         presentationServerRunning = running;
         status.setText(value);
-        status.setTextColor(running ? Color.rgb(117, 226, 177) : Color.WHITE);
+        status.setTextColor(running ? SUCCESS : TEXT_PRIMARY);
         start.setEnabled(!running && !busy);
         experimentalMainLive.setEnabled(!running && !busy);
         downloadMissingResources.setEnabled(!running && !busy);
@@ -1035,7 +1104,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
         resourceStorage.setEnabled(!running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
-        exportServerLogs.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);
         String currentLogs = lines.isEmpty() ? getString(R.string.waiting_logs) : String.join("\n", lines);
         if (!currentLogs.contentEquals(logs.getText())) {
@@ -1083,11 +1151,11 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (!phaseSummary.isEmpty()) summary = getString(R.string.game_last_phase, phaseSummary);
         if (client == null || client.optLong("received_events", 0) == 0 || summary.isEmpty()) {
             setTextIfChanged(gameStatus, getString(R.string.game_state_waiting));
-            gameStatus.setTextColor(Color.rgb(192, 212, 222));
+            gameStatus.setTextColor(TEXT_MUTED);
         } else {
             setTextIfChanged(gameStatus, summary);
             gameStatus.setTextColor(client.optJSONObject("latest_exception") == null
-                    ? Color.rgb(192, 212, 222) : Color.rgb(255, 192, 154));
+                    ? TEXT_MUTED : WARNING);
         }
         JSONObject exception = client == null ? null : client.optJSONObject("latest_exception");
         if (exception != null) {
@@ -1143,7 +1211,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             boolean missing = resources != null || details.optBoolean("running", false);
             setTextIfChanged(resourceStatus, getString(missing
                     ? R.string.resource_transfer_unavailable : R.string.resource_transfer_waiting));
-            resourceStatus.setTextColor(Color.rgb(192, 212, 222));
+            resourceStatus.setTextColor(TEXT_MUTED);
             resourceReceived.setVisibility(View.GONE);
             resourceServed.setVisibility(View.GONE);
             return;
@@ -1166,7 +1234,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         setTextIfChanged(resourceStatus, summary);
         Long httpFailures = resourceDiagnosticInteger(resources, "session_http_failures", 0, Long.MAX_VALUE);
         resourceStatus.setTextColor("failed".equals(resourceState) || (httpFailures != null && httpFailures > 0)
-                ? Color.rgb(255, 192, 154) : Color.rgb(192, 212, 222));
+                ? WARNING : TEXT_MUTED);
         long received = Math.max(0, resources.optLong("session_received_bytes", 0));
         long verified = Math.max(0, resources.optLong("session_verified_files", 0));
         long served = Math.max(0, resources.optLong("session_served_bytes", 0));

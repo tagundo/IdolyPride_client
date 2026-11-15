@@ -18,7 +18,7 @@ def metadata():
     build = {"id": RUN, "head_sha": SOURCE, "event": "workflow_dispatch",
              "repository": {"full_name": publisher.REPO},
              "path": ".github/workflows/release-all-platforms.yml"}
-    jobs = {"total_count": 6, "jobs": [{"name": name, "conclusion": "success"} for name in publisher.JOBS]
+    jobs = {"total_count": len(publisher.JOBS) + 1, "jobs": [{"name": name, "conclusion": "success"} for name in publisher.JOBS]
              + [{"name": "publish", "conclusion": None}]}
     rows = [{"id": index + 1, "name": prefix + SOURCE, "expired": False,
              "workflow_run": {"id": RUN, "head_sha": SOURCE},
@@ -191,10 +191,40 @@ def test_metadata_copy_refuses_symlink_and_never_materializes_binaries(tmp_path)
         publisher.copy_metadata({"another": source}, tmp_path/"other-output")
 
 
+class TinyGuard:
+    def __init__(self):
+        self.samples = 0
+
+    def check(self):
+        self.samples += 1
+
+
+@pytest.fixture
+def release_binaries(tmp_path):
+    import hashlib
+    rows = []
+    for index, name in enumerate((publisher.APK, publisher.MAC, publisher.IPA,
+                                  *publisher.ANDROID_LANGUAGE_CLIENTS.values(),
+                                  *(row["name"] for row in publisher.COMPANIONS))):
+        path = tmp_path/name
+        path.write_bytes(b"PK\x03\x04" + bytes([index])*8)
+        rows.append({"name": name, "path": str(path), "bytes": path.stat().st_size,
+                     "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
+    return rows
+
+
+def asset_metadata(wanted, index):
+    return {"id": index + 100, "name": wanted["name"], "size": wanted["bytes"],
+            "state": "uploaded", "digest": "sha256:" + wanted["sha256"],
+            "browser_download_url": publisher.asset_download_url(wanted["name"])}
+
+
 class FakeGitHub(publisher.GitHub):
-    def __init__(self, *, existing=False, bad_tag=False):
+    def __init__(self, *, existing=False, bad_tag=False, readback_failure=None, bad_inventory=False):
         super().__init__("test-token", None)
         self.calls, self.existing, self.bad_tag = [], existing, bad_tag
+        self.readback_failure, self.bad_inventory = readback_failure, bad_inventory
+        self.uploaded, self.events = [], []
 
     def api(self, path, *, method="GET", body=None, absent=False):
         self.calls.append((path, method, body))
@@ -204,52 +234,282 @@ class FakeGitHub(publisher.GitHub):
         if method == "GET" and path.startswith("/git/ref/"):
             if self.owned_release_id is None: return None
             return {"object": {"type": "commit", "sha": ("c"*40 if self.bad_tag else SOURCE)}}
+        if method == "GET" and path == "/releases/77/assets?per_page=100":
+            return self.uploaded[:-1] if self.bad_inventory else self.uploaded
         if method == "POST":
             return {"id": 77, "tag_name": publisher.TAG, "draft": True,
                     "prerelease": True, "target_commitish": SOURCE}
         if method == "PATCH" and body["draft"] is True:
             return {"id": 77, "draft": True}
         if method == "PATCH":
+            self.events.append("promote")
             return {"id": 77, "tag_name": publisher.TAG, "draft": False, "prerelease": True,
                     "target_commitish": SOURCE, "published_at": "2026-11-15T00:00:00Z",
                     "html_url": "https://github.com/"+publisher.REPO+"/releases/tag/"+publisher.TAG}
         raise AssertionError("Unexpected API call")
 
+    def upload_asset(self, release_id, wanted):
+        assert release_id == 77
+        row = asset_metadata(wanted, len(self.uploaded))
+        self.uploaded.append(row)
+        self.events.append("upload")
+        return row
 
-def test_existing_release_is_never_changed():
+    def verify_asset(self, asset, wanted, guard):
+        import io
+        self.events.append("readback")
+        raw = Path(wanted["path"]).read_bytes()
+        if len(self.uploaded) == self.readback_failure:
+            raw = raw[:-1] + b"!"
+        response = io.BytesIO(raw)
+        response.status, response.headers = 200, {"Content-Length": str(len(raw))}
+        publisher.verify_binary_stream(response, wanted, guard)
+
+
+def test_existing_release_is_never_changed(release_binaries):
     github = FakeGitHub(existing=True)
     with pytest.raises(publisher.ReleaseError):
-        github.publish(SOURCE, "release")
+        github.publish(SOURCE, "release", release_binaries, TinyGuard())
     assert all(method == "GET" for _path, method, _body in github.calls)
 
 
-def test_new_release_promotes_only_source_bound_owned_draft():
-    github = FakeGitHub()
-    result = github.publish(SOURCE, "release")
+def test_new_release_promotes_only_after_all_full_API_readbacks(release_binaries):
+    github, saved = FakeGitHub(), []
+    def before_promote():
+        assert github.events == ["upload", "readback"]*len(release_binaries)
+        github.events.append("latest_gates")
+    result = github.publish(SOURCE, "release", release_binaries, TinyGuard(),
+                            before_promote=before_promote,
+                            save_assets=lambda rows:saved.append(deepcopy(rows)))
     assert result["draft"] is False and result["prerelease"] is True
     assert github.owned_release_id == 77
+    assert github.events == ["upload", "readback"]*len(release_binaries) + ["latest_gates", "promote"]
+    assert len(saved) == len(github.asset_receipts) == len(release_binaries)
+    assert all(row["full_API_download_SHA256_verified"] is True for row in github.asset_receipts)
     assert [body for _path, method, body in github.calls if method == "POST"] == [{
         "tag_name": publisher.TAG, "target_commitish": SOURCE,
-        "name": "아이프라 로컬 v"+publisher.VERSION+" · 프로필·포토 편집과 목록 복구", "body": "release",
+        "name": "아이프라 로컬 v"+publisher.VERSION+" · 그래픽·촬영 설정과 서버·클라이언트", "body": "release",
         "draft": True, "prerelease": True, "make_latest": "false"}]
 
 
-def test_failed_promotion_verification_restores_only_just_created_draft():
+@pytest.mark.parametrize("failure", ["readback", "inventory", "latest_gates", "proof_write"])
+def test_incomplete_asset_readbacks_or_gates_never_publish(failure, release_binaries):
+    github = FakeGitHub(readback_failure=3 if failure == "readback" else None,
+                        bad_inventory=failure == "inventory")
+    def fail():
+        raise publisher.ReleaseError("simulated_gate_failure")
+    with pytest.raises(publisher.ReleaseError):
+        github.publish(SOURCE, "release", release_binaries, TinyGuard(),
+                       before_promote=fail if failure == "latest_gates" else None,
+                       save_assets=(lambda rows:fail()) if failure == "proof_write" else None)
+    assert "promote" not in github.events
+    assert github.rollback_draft_restored is True
+    assert not any(method == "PATCH" and body == {"draft": False} for _path, method, body in github.calls)
+
+
+def test_failed_promotion_verification_restores_only_just_created_draft(release_binaries):
     github = FakeGitHub(bad_tag=True)
     with pytest.raises(publisher.ReleaseError):
-        github.publish(SOURCE, "release")
+        github.publish(SOURCE, "release", release_binaries, TinyGuard())
     assert github.rollback_draft_restored is True
     assert github.calls[-1] == ("/releases/77", "PATCH", {"draft": True})
 
 
-def test_release_body_uses_fixed_new_downloads_and_labels_reused_clients():
+@pytest.mark.parametrize("case", ["missing_client", "changed_bytes", "symlink"])
+def test_unverified_binary_input_stops_before_draft_creation(case, release_binaries, tmp_path):
+    github = FakeGitHub()
+    if case == "missing_client": release_binaries.pop()
+    elif case == "changed_bytes": Path(release_binaries[0]["path"]).write_bytes(b"modified")
+    else:
+        path = Path(release_binaries[0]["path"])
+        path.rename(tmp_path/"actual-file")
+        path.symlink_to(tmp_path/"actual-file")
+    with pytest.raises(publisher.ReleaseError):
+        github.publish(SOURCE, "release", release_binaries, TinyGuard())
+    assert github.calls == []
+
+
+def test_release_body_uses_seven_assets_and_labels_reused_clients():
     artifacts = [{"name": name, "bytes": 1, "sha256": HASH} for name in (publisher.APK, publisher.MAC, publisher.IPA)]
     body = publisher.release_body(SOURCE, RUN, {"commit": "c"*40}, artifacts,
-                                  {"diagnostics": {}, "translation": {}})
+                                  {"diagnostics": {}, "translation": {}},
+                                  android_clients=[{"name": name, "bytes": 1, "sha256": HASH}
+                                                   for name in publisher.ANDROID_LANGUAGE_CLIENTS.values()])
+    assert body.count("/releases/download/"+publisher.TAG+"/") == len(publisher.EXPECTED_RELEASE_ASSETS)
     assert body.count("/raw/"+"c"*40+"/") == 3
     assert "이번 릴리즈에서 재제작하지 않았습니다" in body
     assert "별도 Mac 서버와 동시에 실행하지 마세요" in body
+    assert "통합 IPA는 게임 시작 전 한국어·일본어·영어" in body
+    assert "원하는 언어판 하나로 교체 설치" in body
+    assert "별도 PlayCover 게임 IPA는 한국어판" in body
     assert "실제 Android ARM64 기기" in body
+    assert "Fix File Picker" in body and "실기기 ZIP 가져오기·진행 표시는 아직" in body
+    assert "완전 오프라인 사용은 필요한 캐시를 준비한 뒤" in body
+
+
+@pytest.mark.parametrize("case", ["digest", "size_bool", "state", "id_bool", "name", "url"])
+def test_release_asset_API_metadata_requires_exact_uploaded_identity(case, release_binaries):
+    wanted = release_binaries[0]
+    actual = asset_metadata(wanted, 0)
+    if case == "digest": actual["digest"] = "sha256:"+"0"*64
+    elif case == "size_bool": actual["size"] = True
+    elif case == "state": actual["state"] = "starter"
+    elif case == "id_bool": actual["id"] = True
+    elif case == "name": actual["name"] += ".zip"
+    else: actual["browser_download_url"] = "https://example.com/file"
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_release_asset(actual, wanted)
+
+
+@pytest.mark.parametrize("case", ["missing", "extra", "duplicate", "new_id"])
+def test_complete_release_inventory_rejects_missing_or_replaced_assets(case, release_binaries):
+    actual = [asset_metadata(row, index) for index, row in enumerate(release_binaries)]
+    receipts = [{"id": row["id"]} for row in actual]
+    if case == "missing": actual.pop()
+    elif case == "extra": actual.append(deepcopy(actual[0]))
+    elif case == "duplicate": actual[0] = deepcopy(actual[1])
+    else: actual[0]["id"] += 999
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_release_inventory(actual, release_binaries, receipts)
+
+
+@pytest.mark.parametrize("case", ["short", "long", "hash", "prefix", "status", "encoding"])
+def test_full_binary_stream_cannot_be_replaced_by_metadata_only(case):
+    import hashlib
+    import io
+    raw = b"PK\x03\x04payload"
+    wanted = {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    body, status, headers = raw, 200, {}
+    if case == "short": body = raw[:-1]
+    elif case == "long": body += b"!"
+    elif case == "hash": wanted["sha256"] = "0"*64
+    elif case == "prefix":
+        body = b"NOPEpayload"
+        wanted["sha256"] = hashlib.sha256(body).hexdigest()
+    elif case == "status": status = 206
+    else: headers["Content-Encoding"] = "gzip"
+    response = io.BytesIO(body); response.status, response.headers = status, headers
+    with pytest.raises(publisher.ReleaseError):
+        publisher.verify_binary_stream(response, wanted, TinyGuard())
+
+
+def test_asset_download_redirect_strips_API_credentials():
+    import io
+    from urllib.error import HTTPError
+    class Opener:
+        def __init__(self): self.requests = []
+        def open(self, request, **_kwargs):
+            self.requests.append(request)
+            if len(self.requests) == 1:
+                raise HTTPError(request.full_url, 302, "redirect",
+                                {"Location":"https://release-assets.githubusercontent.com/temporary-object?signature=public-test"},
+                                io.BytesIO())
+            response = io.BytesIO(b"data"); response.status = 200; response.headers = {}
+            return response
+    opener = Opener()
+    github = publisher.GitHub("private-test-token", opener)
+    with github.binary_response("https://api.github.com/repos/"+publisher.REPO+"/releases/assets/77", asset_id=77):
+        pass
+    assert opener.requests[0].get_header("Authorization") == "Bearer private-test-token"
+    assert opener.requests[1].get_header("Authorization") is None
+    assert opener.requests[1].get_header("Accept-encoding") == "identity"
+
+
+@pytest.mark.parametrize("url", ["http://release-assets.githubusercontent.com/file",
+                                 "https://example.com/file", "https://user@release-assets.githubusercontent.com/file",
+                                 "https://release-assets.githubusercontent.com/file#fragment"])
+def test_asset_download_redirect_rejects_unapproved_origins(url):
+    import io
+    from urllib.error import HTTPError
+    class Opener:
+        def __init__(self): self.calls = 0
+        def open(self, request, **_kwargs):
+            self.calls += 1
+            raise HTTPError(request.full_url, 302, "redirect", {"Location":url}, io.BytesIO())
+    opener = Opener()
+    with pytest.raises(publisher.ReleaseError):
+        publisher.GitHub("test-token", opener).binary_response(
+            "https://api.github.com/repos/"+publisher.REPO+"/releases/assets/77", asset_id=77)
+    assert opener.calls == 1
+
+
+def test_upload_streams_only_verified_owned_file_with_exact_length(release_binaries):
+    import io
+    import json
+    wanted = release_binaries[0]
+    class Opener:
+        def open(self, request, **_kwargs):
+            assert request.full_url == "https://uploads.github.com/repos/"+publisher.REPO+"/releases/77/assets?name="+wanted["name"]
+            assert request.get_method() == "POST"
+            assert request.get_header("Content-length") == str(wanted["bytes"])
+            assert request.data.read() == Path(wanted["path"]).read_bytes()
+            response = io.BytesIO(json.dumps(asset_metadata(wanted, 0)).encode())
+            response.status, response.headers = 201, {}
+            return response
+    result = publisher.GitHub("test-token", Opener()).upload_asset(77, wanted)
+    assert result["name"] == wanted["name"]
+
+
+@pytest.mark.parametrize("failure", ["none", "pointer", "source", "qa", "hash"])
+def test_companion_original_provenance_and_entire_download_are_required(failure, tmp_path):
+    import hashlib
+    import io
+    import json
+    raw = b"PK\x03\x04original-client"
+    wanted = {**publisher.COMPANIONS[0], "bytes": len(raw), "sha256":hashlib.sha256(raw).hexdigest()}
+    pointer = ("version https://git-lfs.github.com/spec/v1\noid sha256:"+wanted["sha256"]+"\nsize "+str(len(raw))+"\n").encode()
+    provenance = {"source_commit":wanted["source_commit"],"version":wanted["version"],
+        "artifacts":[{key:wanted[key] for key in ("name","bytes","sha256")}],
+        "independent_QA":{"status":"PASS","source_commit":wanted["source_commit"],"bytes":len(raw),"sha256":wanted["sha256"]}}
+    if failure == "pointer": pointer += b" "
+    elif failure == "source": provenance["source_commit"] = "0"*40
+    elif failure == "qa": provenance["independent_QA"]["status"] = "FAIL"
+    class Opener:
+        def __init__(self): self.calls = 0
+        def open(self, request, **_kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                assert request.full_url == "https://github.com/"+publisher.REPO+".git/info/lfs/objects/batch"
+                result = {"objects":[{"oid":wanted["sha256"],"size":len(raw),"actions":{"download":{"href":"https://media.githubusercontent.com/test-object"}}}]}
+                body = json.dumps(result).encode()
+            else: body = raw[:-1] + b"!" if failure == "hash" else raw
+            response = io.BytesIO(body); response.status, response.headers = 200, {}
+            return response
+    opener = Opener()
+    class CompanionGitHub(publisher.GitHub):
+        def git_file(self, commit, name, _maximum):
+            assert commit == wanted["publication_commit"]
+            return pointer if name == wanted["name"] else json.dumps(provenance).encode()
+    github = CompanionGitHub("test-token", opener)
+    if failure == "none":
+        result = github.companion(wanted, tmp_path/wanted["name"], TinyGuard())
+        assert result["full_download_SHA256_verified"] is True
+        assert result["immutable_pointer_verified"] is True and result["fresh_source_build_claimed"] is False
+        assert Path(result["path"]).read_bytes() == raw
+    else:
+        with pytest.raises(publisher.ReleaseError):
+            github.companion(wanted, tmp_path/wanted["name"], TinyGuard())
+        assert opener.calls == (2 if failure == "hash" else 0)
+
+
+@pytest.mark.parametrize("failure", ["none", "truncated", "size", "sha"])
+def test_git_blob_is_bound_to_immutable_tree_and_actual_blob_hash(failure):
+    import base64
+    import hashlib
+    raw = b"pinned original metadata"
+    blob_sha = hashlib.sha1(b"blob "+str(len(raw)).encode()+b"\0"+raw).hexdigest()
+    class BlobGitHub(publisher.GitHub):
+        def api(self, path, **_kwargs):
+            if path.startswith("/git/trees/"):
+                return {"truncated": failure == "truncated", "tree":[{"path":"proof.json","type":"blob","size":len(raw),"sha":blob_sha}]}
+            return {"sha":blob_sha,"encoding":"base64","size":len(raw)+(1 if failure == "size" else 0),
+                    "content":base64.b64encode(raw+(b"!" if failure == "sha" else b"")).decode()}
+    github = BlobGitHub("test-token", None)
+    if failure == "none":
+        assert github.git_file("a"*40, "proof.json", 4096) == raw
+    else:
+        with pytest.raises(publisher.ReleaseError):
+            github.git_file("a"*40, "proof.json", 4096)
 
 
 def diagnostics_benchmark():
@@ -336,3 +596,107 @@ def test_translation_benchmark_semantics_and_public_input_provenance_are_require
     elif case == "not_python": report["protobuf"] = "upb"
     with pytest.raises(publisher.ReleaseError):
         publisher.validate_translation_benchmark(report, SOURCE)
+
+
+def test_android_language_client_job_and_artifact_are_mandatory():
+    build, jobs, artifacts = metadata()
+    jobs["jobs"] = [row for row in jobs["jobs"] if row["name"] != "android-clients"]
+    jobs["total_count"] = len(jobs["jobs"])
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_run(build, jobs, artifacts, SOURCE, RUN)
+    build, jobs, artifacts = metadata()
+    artifacts["artifacts"] = [row for row in artifacts["artifacts"]
+                              if row["name"] != publisher.PREFIXES["android-clients"] + SOURCE]
+    artifacts["total_count"] = len(artifacts["artifacts"])
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_run(build, jobs, artifacts, SOURCE, RUN)
+
+
+def client_report_fixture(directory):
+    import hashlib
+    import json
+    reports = {}
+    for name in publisher.ANDROID_CLIENT_REPORT_FILES:
+        path = directory/name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('{"schema":1}\n')
+        reports[name] = {"bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+    binaries = []
+    for language, name in publisher.ANDROID_LANGUAGE_CLIENTS.items():
+        path = directory/name
+        path.write_bytes(b"PK\x03\x04" + language.encode()*4)
+        binaries.append({"language": language, "name": name, "bytes": path.stat().st_size,
+                         "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                         "application_id": "game.qualiarts.idolypride.local.diagnostics", "version_code": 414,
+                         "certificate_sha256": publisher.ANDROID_CLIENT_CERTIFICATE})
+    return {"schema": 1, "status": "PASS", "source_commit": SOURCE, "run_id": RUN,
+            "languages": ["ja", "en"], "binaries": binaries,
+            "inputs": {**deepcopy(publisher.ANDROID_CLIENT_INPUTS),
+                "shadowhook": {"bytes": 461264, "sha256": "2cad01ff4d59542958775e19f281981a7e84b39670b5fae75905b8511e10c7cd"}},
+            "source_sha256": {name: HASH for name in publisher.ANDROID_CLIENT_SOURCES},
+            "validation": {**{name: True for name in publisher.ANDROID_CLIENT_FLAGS}, "runtime_device_tested": False},
+            "report_files": reports}
+
+
+@pytest.mark.parametrize("case", ["none", "source", "run", "bool_run", "languages", "missing_input",
+    "input_digest", "shadowhook_bytes", "source_pin", "failed_qa", "numeric_qa", "device_claim",
+    "missing_proof", "proof_digest", "missing_binary", "language_order", "certificate", "package",
+    "version_bool", "binary_digest"])
+def test_android_clients_require_pinned_inputs_identity_all_packaging_QA_and_raw_proofs(case, tmp_path, monkeypatch):
+    import json
+    report = client_report_fixture(tmp_path)
+    def source_pins(values, source, *, required):
+        publisher.need(source == SOURCE and required == publisher.ANDROID_CLIENT_SOURCES
+                       and set(required) <= values.keys() and all(value == HASH for value in values.values()),
+                       "mock_source_pin_differs")
+    monkeypatch.setattr(publisher, "source_pins", source_pins)
+    if case == "source": report["source_commit"] = "0"*40
+    elif case == "run": report["run_id"] += 1
+    elif case == "bool_run": report["run_id"] = True
+    elif case == "languages": report["languages"] = ["ko", "en"]
+    elif case == "missing_input": report["inputs"].pop("font")
+    elif case == "input_digest": report["inputs"]["diagnostic_base"]["sha256"] = "0"*64
+    elif case == "shadowhook_bytes": report["inputs"]["shadowhook"]["bytes"] += 1
+    elif case == "source_pin": report["source_sha256"].pop(publisher.ANDROID_CLIENT_SOURCES[0])
+    elif case == "failed_qa": report["validation"]["built_in_ui_language_verified"] = False
+    elif case == "numeric_qa": report["validation"]["font_assets_verified"] = 1
+    elif case == "device_claim": report["validation"]["runtime_device_tested"] = True
+    elif case == "missing_proof": report["report_files"].pop(next(iter(publisher.ANDROID_CLIENT_REPORT_FILES)))
+    elif case == "proof_digest":
+        name = next(iter(publisher.ANDROID_CLIENT_REPORT_FILES))
+        (tmp_path/name).write_text('{"changed":true}')
+    elif case == "missing_binary": report["binaries"].pop()
+    elif case == "language_order": report["binaries"].reverse()
+    elif case == "certificate": report["binaries"][0]["certificate_sha256"] = "0"*64
+    elif case == "package": report["binaries"][0]["application_id"] += ".other"
+    elif case == "version_bool": report["binaries"][0]["version_code"] = True
+    elif case == "binary_digest": (tmp_path/report["binaries"][0]["name"]).write_bytes(b"changed")
+    (tmp_path/"android-clients-report.json").write_text(json.dumps(report))
+    if case == "none":
+        result = publisher.validate_android_clients(tmp_path, SOURCE, RUN)
+        assert [row["language"] for row in result] == ["ja", "en"]
+        assert all(Path(row["path"]).is_file() for row in result)
+    else:
+        with pytest.raises(publisher.ReleaseError):
+            publisher.validate_android_clients(tmp_path, SOURCE, RUN)
+
+
+@pytest.mark.parametrize("missing", [None, "android-clients-report.json",
+                                    publisher.ANDROID_LANGUAGE_CLIENTS["ja"], "native/build-receipt.json"])
+def test_client_artifact_safe_inventory_requires_both_APKs_and_all_raw_provenance(missing):
+    names = {"android-clients-report.json", *publisher.ANDROID_LANGUAGE_CLIENTS.values(),
+             *publisher.ANDROID_CLIENT_REPORT_FILES}
+    if missing: names.remove(missing)
+    class Archive:
+        def infolist(self):
+            result = []
+            for name in names:
+                row = ZipInfo(name)
+                row.compress_type, row.file_size, row.external_attr = ZIP_STORED, 100, stat.S_IFREG << 16
+                result.append(row)
+            return result
+    if missing:
+        with pytest.raises(publisher.ReleaseError):
+            publisher.generic_members(Archive(), "android-clients")
+    else:
+        assert set(publisher.generic_members(Archive(), "android-clients")) == names

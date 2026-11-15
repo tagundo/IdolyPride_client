@@ -326,6 +326,49 @@ def test_archive_export_is_async_and_import_requires_native_owned_regular_file(h
     assert not command(h, "resources_download", parallelism=True)["ok"]
 
 
+def test_archive_import_accepts_native_owned_parent_through_ancestor_alias(harness, tmp_path):
+    h = harness; assert start(h)["running"]
+    selected = h.data / "imports/copied.zip"
+    selected.write_bytes(b"native copied iOS archive")
+    ancestor = tmp_path / "native-container-alias"
+    ancestor.symlink_to(h.data.parent, target_is_directory=True)
+    native_path = ancestor / h.data.name / "imports" / selected.name
+    assert native_path.parent != h.subject._paths[1] / "imports"
+    assert native_path.parent.resolve() == h.subject._paths[1] / "imports"
+    result = command(h, "resources_import", path=str(native_path))
+    assert result["ok"] and result["result"]["accepted"]
+    h.subject._archive_worker.join(3)
+    assert not h.subject._archive_worker.is_alive()
+    assert h.subject.status()["resource_operation"]["ready"]
+    assert h.runtimes[0]._library.imported == b"native copied iOS archive"
+
+
+def test_archive_import_aliases_cannot_escape_owned_parent_or_follow_links(harness, tmp_path):
+    h = harness; assert start(h)["running"]
+    imports = h.data / "imports"
+    selected = imports / "copied.zip"; selected.write_bytes(b"owned archive")
+    ancestor = tmp_path / "native-container-alias"
+    ancestor.symlink_to(h.data.parent, target_is_directory=True)
+    native_parent = ancestor / h.data.name / "imports"
+    outside = tmp_path / "outside"; (outside / "imports").mkdir(parents=True)
+    (outside / "imports/copied.zip").write_bytes(b"outside archive")
+    outside_alias = tmp_path / "outside-alias"
+    outside_alias.symlink_to(outside, target_is_directory=True)
+    assert not command(h, "resources_import", path=str(outside_alias / "imports/copied.zip"))["ok"]
+    parent_alias = tmp_path / "imports-alias"
+    parent_alias.symlink_to(imports, target_is_directory=True)
+    assert not command(h, "resources_import", path=str(parent_alias / selected.name))["ok"]
+    linked = imports / "linked.zip"; linked.symlink_to(selected)
+    assert not command(h, "resources_import", path=str(native_parent / linked.name))["ok"]
+    linked.unlink(); os.link(selected, linked)
+    assert not command(h, "resources_import", path=str(native_parent / linked.name))["ok"]
+    linked.unlink(); selected.unlink(); imports.rmdir()
+    imports.symlink_to(outside / "imports", target_is_directory=True)
+    assert not command(h, "resources_import", path=str(native_parent / "copied.zip"))["ok"]
+    assert h.runtimes[0]._library.imported is None
+    assert h.subject._archive_worker is None
+
+
 def test_export_size_and_retained_temp_file_bounds(harness, monkeypatch):
     h = harness; start(h); monkeypatch.setattr(host, "MAX_ARCHIVE_BYTES", 3)
     assert command(h, "resources_export")["ok"]

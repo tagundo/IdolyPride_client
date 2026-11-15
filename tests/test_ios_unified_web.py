@@ -37,6 +37,7 @@ function environment(hidden = false) {
   const scope = new Target();
   const document = new Target();
   document.visibilityState = hidden ? 'hidden' : 'visible';
+  document.documentElement = {dataset:{}};
   const elements = new Map();
   for (const match of fs.readFileSync(WEB + '/index.html', 'utf8').matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) elements.set(match[1], new Element(match[0]));
   elements.get('parallelism').value = '4';
@@ -75,6 +76,20 @@ function status() {
       client_diagnostics: {summary: '게임 진단 대기 중'}, logs: []
     }
   };
+}
+
+function savedStatus(request, base = status()) {
+  const result=JSON.parse(JSON.stringify(base));
+  if(request.action==='save_options') {
+    result.options={schema:1,media_mode:request.media_mode,download_missing_resources:request.download_missing_resources,
+      language:request.language,interface_language:request.interface_language};
+    result.restart_required=true;
+  } else {
+    const slot={save_presentation:'presentation',save_playback:'playback',save_media:'media_options'}[request.action];
+    assert.ok(slot,'Expected a real save command');
+    result.runtime[slot].settings={...request.settings,revision:request.settings.revision+1};
+  }
+  return result;
 }
 """
 
@@ -390,33 +405,27 @@ def test_page_has_only_bundled_scripts_and_no_network_or_html_sinks() -> None:
 
 def test_graphics_presets_keep_custom_values_and_save_upper_supported_choices() -> None:
     run_js(r"""
-const env = environment();
-const app = api.createSettingsApp(env.scope, env.document, env.timers);
-env.respond(env.posted[0], status());
-await flush();
-assert.equal(env.elements.get('render_scale').value, '1.234');
-assert.equal(env.elements.get('render_scale_preset').value, 'custom');
-assert.equal(env.elements.get('max_buffer_pixel').value, '2222');
-assert.equal(env.elements.get('max_buffer_pixel_preset').value, 'custom');
-env.elements.get('render_scale_preset').value = '2';
-env.elements.get('render_scale_preset').fire('change');
-env.elements.get('max_buffer_pixel_preset').value = '4096';
-env.elements.get('max_buffer_pixel_preset').fire('change');
-assert.equal(env.elements.get('render_scale').value, '2');
-assert.equal(env.elements.get('max_buffer_pixel').value, '4096');
-env.elements.get('presentation-form').fire('submit');
-const request = env.posted.at(-1);
-assert.equal(request.action, 'save_presentation');
-assert.equal(request.settings.render_scale, 2);
-assert.equal(request.settings.max_buffer_pixel, 4096);
-env.respond(request, status());
-await flush();
-env.elements.get('render_scale').value = '1.875';
-env.elements.get('render_scale').fire('input');
-assert.equal(env.elements.get('render_scale_preset').value, 'custom');
-env.elements.get('presentation-form').fire('submit');
-assert.equal(env.posted.at(-1).settings.render_scale, 1.875);
-app.dispose();
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+assert.equal(env.elements.get('render_scale').value,'1.234');
+assert.equal(env.elements.get('render_scale_preset').value,'custom');
+assert.equal(env.elements.get('max_buffer_pixel').value,'2222');
+env.elements.get('render_scale_preset').value='2'; env.elements.get('render_scale_preset').fire('change');
+const first=env.posted.at(-1); assert.equal(first.action,'save_presentation'); assert.equal(first.settings.render_scale,2);
+env.elements.get('max_buffer_pixel_preset').value='4096'; env.elements.get('max_buffer_pixel_preset').fire('change');
+assert.equal(env.elements.get('presentation-fields').disabled,false,'Saving does not prevent a newer edit');
+assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,1);
+const firstSaved=savedStatus(first); env.respond(first,firstSaved); await flush();
+const latest=env.posted.at(-1);
+assert.equal(latest.action,'save_presentation'); assert.equal(latest.settings.render_scale,2); assert.equal(latest.settings.max_buffer_pixel,4096);
+env.respond(latest,savedStatus(latest,firstSaved)); await flush();
+env.elements.get('render_scale').value='1.875'; env.elements.get('render_scale').fire('input');
+assert.equal(env.elements.get('render_scale_preset').value,'custom');
+const count=env.posted.filter(item=>item.action==='save_presentation').length;
+await env.tick(599); assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,count);
+env.elements.get('render_scale').fire('blur'); const custom=env.posted.at(-1);
+assert.equal(custom.action,'save_presentation'); assert.equal(custom.settings.render_scale,1.875);
+env.respond(custom,savedStatus(custom)); await flush(); app.dispose();
 """)
 
 
@@ -457,54 +466,36 @@ app.dispose();
 
 def test_saved_interface_language_overrides_device_and_preserves_unsaved_graphics() -> None:
     run_js(r"""
-const env = environment(); env.scope.navigator = {languages: ['ja-JP'], language: 'ja-JP'};
-const app = api.createSettingsApp(env.scope, env.document, env.timers);
-const ready = status(); ready.options.interface_language = 'en';
-env.respond(env.posted[0], ready); await flush();
-assert.equal(env.elements.get('interface_language').value, 'en');
-assert.equal(env.elements.get('server-state').textContent, api.translateUI('실행 중', 'en'));
-env.elements.get('render_scale').value = '1.875';
-env.elements.get('render_scale').fire('input');
-env.elements.get('media_mode').checked = false;
-env.elements.get('download_missing_resources').checked = false;
-env.elements.get('language').value = 'ja';
-env.elements.get('options-form').fire('change');
-env.elements.get('interface_language').value = 'ko';
-env.elements.get('interface_language').fire('change');
-const interfaceRequest = env.posted.at(-1);
-assert.deepEqual(interfaceRequest, {id: interfaceRequest.id, action: 'save_interface_language', interface_language: 'ko'});
-assert.equal(env.elements.get('render_scale').value, '1.875');
-assert.equal(env.elements.get('server-state').textContent, '실행 중');
-assert.equal(env.elements.get('language').value, 'ja');
-assert.equal(env.posted.filter(request => request.action === 'save_options').length, 0);
-env.respond(interfaceRequest, {interface_language: 'ko'}); await flush();
-await env.tick(4000);
-const poll = env.posted.at(-1); assert.equal(poll.action, 'status');
-env.respond(poll, ready); await flush();
-assert.equal(env.elements.get('interface_language').value, 'ko');
-assert.equal(env.elements.get('media_mode').checked, false);
-assert.equal(env.elements.get('download_missing_resources').checked, false);
-assert.equal(env.elements.get('language').value, 'ja');
-assert.equal(env.elements.get('render_scale').value, '1.875');
-env.elements.get('options-form').fire('submit');
-const options = env.posted.at(-1);
-assert.deepEqual(options, {id: options.id, action: 'save_options', media_mode: false,
-  download_missing_resources: false, language: 'ja', interface_language: 'ko'});
-const saved = status(); saved.options = {...options, schema: 1};
-delete saved.options.id; delete saved.options.action;
-env.respond(options, saved); await flush();
-assert.equal(env.elements.get('render_scale').value, '1.875');
-env.elements.get('presentation-form').fire('submit');
-const graphics = env.posted.at(-1);
-assert.equal(graphics.action, 'save_presentation');
-assert.equal(graphics.settings.render_scale, 1.875);
-env.respond(graphics, saved); await flush();
+const env=environment(); env.scope.navigator={languages:['ja-JP'],language:'ja-JP'};
+const app=api.createSettingsApp(env.scope,env.document,env.timers);
+const ready=status(); ready.options.interface_language='en';
+env.respond(env.posted[0],ready); await flush();
+env.elements.get('render_scale').value='1.875'; env.elements.get('render_scale').fire('input');
+env.elements.get('media_mode').checked=false; env.elements.get('download_missing_resources').checked=false;
+env.elements.get('language').value='ja'; env.elements.get('options-form').fire('change');
+env.elements.get('interface_language').value='ko'; env.elements.get('interface_language').fire('change');
+const interfaceRequest=env.posted.at(-1); assert.equal(interfaceRequest.action,'save_interface_language');
+env.respond(interfaceRequest,{interface_language:'ko'}); await flush();
+await env.tick(600); const graphics=env.posted.at(-1);
+assert.equal(graphics.action,'save_presentation'); assert.equal(graphics.settings.render_scale,1.875);
+const graphicsSaved=savedStatus(graphics,ready); env.respond(graphics,graphicsSaved); await flush();
+await env.tick(4000); const poll=env.posted.at(-1); assert.equal(poll.action,'status');
+env.respond(poll,graphicsSaved); await flush();
+assert.equal(env.elements.get('interface_language').value,'ko');
+assert.equal(env.elements.get('media_mode').checked,false);
+assert.equal(env.elements.get('download_missing_resources').checked,false);
+assert.equal(env.elements.get('language').value,'ja');
+assert.equal(env.elements.get('render_scale').value,'1.875');
+assert.equal(env.posted.filter(request=>request.action==='save_options').length,0);
+env.elements.get('options-form').fire('submit'); const options=env.posted.at(-1);
+assert.equal(options.interface_language,'ko'); assert.equal(options.language,'ja');
+env.respond(options,savedStatus(options,graphicsSaved)); await flush();
+assert.equal(env.elements.get('render_scale').value,'1.875');
 app.dispose();
-assert.equal(api.resolveInterfaceLanguage('system', {languages: ['en-GB']}), 'en');
-assert.equal(api.resolveInterfaceLanguage('system', {language: 'ja_JP'}), 'ja');
-assert.equal(api.resolveInterfaceLanguage('system', {language: 'fr-FR'}), 'en');
-assert.equal(api.resolveInterfaceLanguage('ko', {language: 'en-US'}), 'ko');
-assert.equal(api.translateUI('<img src=x onerror=malicious>', 'ja'), '<img src=x onerror=malicious>');
+assert.equal(api.resolveInterfaceLanguage('system',{languages:['en-GB']}),'en');
+assert.equal(api.resolveInterfaceLanguage('system',{language:'ja_JP'}),'ja');
+assert.equal(api.resolveInterfaceLanguage('system',{language:'fr-FR'}),'en');
+assert.equal(api.translateUI('<img src=x onerror=malicious>','ja'),'<img src=x onerror=malicious>');
 """)
 
 
@@ -763,7 +754,8 @@ def test_diagnostics_keeps_http_readiness_transfers_and_bounds_every_visible_cop
     run_js(r"""
 const env = environment(); const app = api.createSettingsApp(env.scope, env.document, env.timers);
 const ready = status();
-ready.native = {schema:1, http_readiness:{schema:1,ok:false,transport:'NSURLSession',http_status:0,error_code:'waiting',body_is_json:false,received_bytes:0,worker_main_thread:false}};
+ready.native = {schema:1, http_readiness:{schema:1,ok:false,transport:'NSURLSession',http_status:0,error_code:'waiting',body_is_json:false,received_bytes:0,worker_main_thread:false},
+  resource_import_progress:{event:'resource_import_progress',request_id:2,stage:'copying',copied_bytes:50,total_bytes:100}};
 ready.runtime.http_requests = {total_requests:8,active_requests:1,completed_requests:6,failed_requests:1,
   last_request:{request_id:8,method:'GET',path:'/client/playback',http_status:200,phase:'completed',elapsed_ms:3},recent_requests:[]};
 ready.runtime.resource_transfer = {requests:4};
@@ -774,6 +766,7 @@ const text = env.elements.get('diagnostics').textContent;
 assert.ok(Buffer.byteLength(text,'utf8') <= 32768);
 assert.equal(Buffer.from(text,'utf8').toString('utf8'),text,'No broken surrogate pair at the display limit');
 assert.ok(text.includes('http_readiness') && text.includes('NSURLSession'));
+assert.ok(text.includes('resource_import_progress') && text.includes('copied_bytes'));
 assert.ok(text.includes('http_requests') && text.includes('/client/playback'));
 assert.ok(text.includes('resource_transfer') && text.includes('asset_transfer'));
 assert.ok(text.includes('… 표시 한도로 나머지 진단은 생략했습니다.'));
@@ -1045,4 +1038,220 @@ assert.equal(env.elements.get('resource-state').textContent,LABEL);
 assert.equal(env.elements.get('resources-import').disabled,false,'A missed initial reply must not leave an eternal queued state');
 assert.match(env.elements.get('resource-summary').textContent,ACCEPTED ? /마쳤/ : /마치지 못/);
 app.dispose();
+""")
+
+
+def test_each_real_setting_change_autosaves_without_a_save_button() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+let current=status(); env.respond(env.posted[0],current); await flush();
+for(const [name,key,value,action] of [
+  ['options','language','en','save_options'],
+  ['presentation','quality','40','save_presentation'],
+  ['playback','wait_for_orientation',false,'save_playback'],
+  ['media','hide_video_mv',true,'save_media']
+]) {
+  const input=env.elements.get(key); if(input.type==='checkbox') input.checked=value; else input.value=value;
+  input.fire('change'); const request=env.posted.at(-1);
+  assert.equal(request.action,action); assert.equal(env.elements.get(name+'-save-feedback').dataset.state,'saving');
+  assert.equal(env.elements.get(name+'-fields').disabled,false);
+  assert.equal(env.elements.get(name+'-save-retry').hidden,true);
+  current=savedStatus(request,current); env.respond(request,current); await flush();
+  assert.equal(env.elements.get(name+'-save-feedback').dataset.state,'saved');
+}
+app.dispose(); assert.equal(env.tasks.size,0);
+""")
+
+
+def test_autosave_keeps_newer_edits_and_sends_only_one_followup_after_an_inflight_save() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('quality').value='40'; env.elements.get('quality').fire('change'); const first=env.posted.at(-1);
+env.elements.get('quality').value='100'; env.elements.get('quality').fire('change');
+assert.equal(env.elements.get('quality').value,'100');
+assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,1);
+const firstSaved=savedStatus(first); env.respond(first,firstSaved); await flush();
+assert.equal(env.elements.get('quality').value,'100','A slow reply cannot restore the earlier selection');
+const latest=env.posted.at(-1); assert.equal(latest.settings.quality,100);
+assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,2);
+env.respond(latest,savedStatus(latest,firstSaved)); await flush();
+assert.equal(env.elements.get('presentation-save-feedback').dataset.state,'saved');
+app.dispose();
+""")
+
+
+def test_invalid_number_is_never_autosaved_and_valid_input_debounces_then_flushes_on_blur() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('render_scale').value=''; env.elements.get('render_scale').fire('input');
+await env.tick(600);
+assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,0);
+assert.equal(env.elements.get('presentation-save-feedback').dataset.state,'invalid');
+env.elements.get('render_scale').value='1.75'; env.elements.get('render_scale').fire('input');
+await env.tick(599); assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,0);
+env.elements.get('render_scale').fire('blur'); const request=env.posted.at(-1);
+assert.equal(request.settings.render_scale,1.75);
+env.respond(request,savedStatus(request)); await flush(); await env.tick(1);
+assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,1);
+app.dispose();
+""")
+
+
+def test_failed_autosave_preserves_values_and_retries_only_on_user_action() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('wait_for_orientation').checked=false; env.elements.get('wait_for_orientation').fire('change');
+const request=env.posted.at(-1);
+env.scope.idolyServerReply(request.id,{id:request.id,ok:false,error:{message:'failed'}});
+await flush();
+assert.equal(env.elements.get('playback-save-feedback').dataset.state,'failed');
+assert.equal(env.elements.get('playback-save-retry').hidden,false);
+assert.equal(env.elements.get('wait_for_orientation').checked,false);
+await env.tick(4000); env.respond(env.posted.at(-1),status()); await flush();
+assert.equal(env.posted.filter(item=>item.action==='save_playback').length,1,'Polling must not create a save retry loop');
+assert.equal(env.elements.get('wait_for_orientation').checked,false);
+env.elements.get('playback-save-retry').fire('click'); const retry=env.posted.at(-1);
+assert.equal(retry.action,'save_playback'); assert.equal(retry.settings.wait_for_orientation,false);
+env.respond(retry,savedStatus(retry)); await flush();
+assert.equal(env.elements.get('playback-save-retry').hidden,true);
+app.dispose();
+""")
+
+
+def test_old_save_reply_cannot_repaint_a_different_form_that_already_saved() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('quality').value='40'; env.elements.get('quality').fire('change'); const graphics=env.posted.at(-1);
+env.elements.get('wait_for_orientation').checked=false; env.elements.get('wait_for_orientation').fire('change'); const playback=env.posted.at(-1);
+const oldGraphics=savedStatus(graphics);
+env.respond(playback,savedStatus(playback,oldGraphics)); await flush();
+assert.equal(env.elements.get('wait_for_orientation').checked,false);
+env.respond(graphics,oldGraphics); await flush();
+assert.equal(env.elements.get('wait_for_orientation').checked,false);
+assert.equal(env.elements.get('quality').value,'40');
+app.dispose();
+""")
+
+
+def test_debounced_edit_survives_background_without_sending_hidden_requests() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('render_scale').value='1.875'; env.elements.get('render_scale').fire('input');
+await env.visibility(true); assert.equal(env.tasks.size,0);
+await env.tick(60000); assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,0);
+await env.visibility(false); env.respond(env.posted.at(-1),status()); await flush();
+const request=env.posted.at(-1); assert.equal(request.action,'save_presentation'); assert.equal(request.settings.render_scale,1.875);
+env.respond(request,savedStatus(request)); await flush(); app.dispose(); assert.equal(env.tasks.size,0);
+""")
+
+
+def test_launch_barrier_waits_for_latest_autosave_and_keeps_inputs_locked_until_native_release() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('quality').value='40'; env.elements.get('quality').fire('change'); const first=env.posted.at(-1);
+env.elements.get('quality').value='100'; env.elements.get('quality').fire('change');
+env.elements.get('render_scale').value='1.875'; env.elements.get('render_scale').fire('input');
+const nonce='11111111-2222-3333-4444-555555555555';
+assert.equal(env.scope.idolyServerFlushSettings(nonce),undefined); await flush();
+assert.equal(env.document.documentElement.dataset.settingsFlush,'saving');
+assert.equal(env.elements.get('presentation-fields').disabled,true);
+assert.equal(env.posted.filter(item=>item.action==='launch_settings_barrier').length,0);
+const firstSaved=savedStatus(first); env.respond(first,firstSaved); await flush();
+const latest=env.posted.at(-1); assert.equal(latest.action,'save_presentation');
+assert.equal(latest.settings.quality,100); assert.equal(latest.settings.render_scale,1.875);
+assert.equal(env.posted.filter(item=>item.action==='launch_settings_barrier').length,0);
+env.respond(latest,savedStatus(latest,firstSaved)); await flush();
+const ack=env.posted.at(-1); assert.deepEqual(ack,{id:ack.id,action:'launch_settings_barrier',nonce,ready:true});
+assert.equal(env.document.documentElement.dataset.settingsFlush,'ready');
+env.respond(ack,{launched:true}); await flush();
+assert.equal(env.elements.get('presentation-fields').disabled,true);
+env.scope.idolyServerReleaseSettingsFlush('00000000-0000-0000-0000-000000000000');
+assert.equal(env.elements.get('presentation-fields').disabled,true,'An unrelated nonce cannot unlock launch settings');
+env.scope.idolyServerReleaseSettingsFlush(nonce);
+assert.equal(env.elements.get('presentation-fields').disabled,false);
+assert.equal(env.document.documentElement.dataset.settingsFlush,'failed');
+app.dispose(); assert.equal(env.scope.idolyServerFlushSettings,undefined);
+""")
+
+
+def test_invalid_settings_and_failed_flush_never_acknowledge_ready_to_launch() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('render_scale').value=''; env.elements.get('render_scale').fire('input');
+const nonce='11111111-2222-3333-4444-555555555555';
+env.scope.idolyServerFlushSettings(nonce); await flush();
+const ack=env.posted.at(-1); assert.equal(ack.action,'launch_settings_barrier'); assert.equal(ack.ready,false);
+assert.equal(env.posted.filter(item=>item.action==='save_presentation').length,0);
+env.respond(ack,{launched:false}); await flush();
+assert.equal(env.elements.get('presentation-fields').disabled,false);
+assert.equal(env.elements.get('presentation-save-feedback').dataset.state,'invalid');
+app.dispose();
+""")
+
+
+def test_bridge_accepts_only_bounded_uuid_launch_barrier_payloads() -> None:
+    run_js(r"""
+const env=environment(); const bridge=api.createBridge(env.scope,env.timers);
+for(const payload of [{nonce:'bad',ready:true},{nonce:'11111111-2222-3333-4444-555555555555',ready:'true'},
+ {nonce:'11111111-2222-3333-4444-555555555555',ready:true,path:'/private'}]) await assert.rejects(bridge.request('launch_settings_barrier',payload));
+assert.equal(env.posted.length,0);
+const request=bridge.request('launch_settings_barrier',{nonce:'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE',ready:false});
+env.respond(env.posted.at(-1),{launched:false}); await request; bridge.dispose();
+""")
+
+
+def test_launch_barrier_refuses_ready_when_the_latest_queued_save_fails() -> None:
+    run_js(r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+env.respond(env.posted[0],status()); await flush();
+env.elements.get('quality').value='40'; env.elements.get('quality').fire('change'); const first=env.posted.at(-1);
+env.elements.get('quality').value='100'; env.elements.get('quality').fire('change');
+env.scope.idolyServerFlushSettings('11111111-2222-3333-4444-555555555555'); await flush();
+env.respond(first,savedStatus(first)); await flush();
+const latest=env.posted.at(-1); assert.equal(latest.settings.quality,100);
+env.scope.idolyServerReply(latest.id,{id:latest.id,ok:false,error:{message:'disk unavailable'}});
+await flush();
+const ack=env.posted.at(-1); assert.equal(ack.action,'launch_settings_barrier'); assert.equal(ack.ready,false);
+assert.equal(env.elements.get('quality').value,'100');
+assert.equal(env.elements.get('presentation-save-feedback').dataset.state,'failed');
+env.respond(ack,{launched:false}); await flush();
+assert.equal(env.elements.get('presentation-fields').disabled,false);
+assert.equal(env.elements.get('presentation-save-retry').hidden,false);
+app.dispose();
+""")
+
+
+@pytest.mark.parametrize("retry_succeeds", [True,False])
+def test_launch_barrier_retries_failed_interface_save_once_without_changing_game_language(retry_succeeds) -> None:
+    run_js("const SUCCEEDS="+json.dumps(retry_succeeds)+";\n"+r"""
+const env=environment(); const app=api.createSettingsApp(env.scope,env.document,env.timers);
+const initial=status(); initial.options.interface_language='ko';
+env.respond(env.posted[0],initial); await flush();
+env.elements.get('language').value='ja'; env.elements.get('language').fire('change');
+const options=env.posted.at(-1); assert.equal(options.action,'save_options');
+env.elements.get('interface_language').value='en'; env.elements.get('interface_language').fire('change');
+const firstInterface=env.posted.at(-1);
+env.scope.idolyServerReply(firstInterface.id,{id:firstInterface.id,ok:false,error:{message:'temporary failure'}});
+await flush();
+env.scope.idolyServerFlushSettings('11111111-2222-3333-4444-555555555555'); await flush();
+assert.equal(env.posted.filter(item=>item.action==='launch_settings_barrier').length,0,'Game options must finish first');
+env.respond(options,savedStatus(options,initial)); await flush(); await flush();
+const retry=env.posted.at(-1); assert.equal(retry.action,'save_interface_language'); assert.equal(retry.interface_language,'en');
+assert.equal(env.elements.get('language').value,'ja');
+if(SUCCEEDS) env.respond(retry,{interface_language:'en'});
+else env.scope.idolyServerReply(retry.id,{id:retry.id,ok:false,error:{message:'still unavailable'}});
+await flush(); await flush();
+const ack=env.posted.at(-1); assert.equal(ack.action,'launch_settings_barrier'); assert.equal(ack.ready,SUCCEEDS);
+assert.equal(env.posted.filter(item=>item.action==='save_interface_language').length,2,'Only one retry per explicit launch attempt');
+assert.equal(env.posted.filter(item=>item.action==='save_options').length,1);
+assert.equal(env.elements.get('language').value,'ja');
+env.respond(ack,{launched:SUCCEEDS}); await flush();
+app.dispose(); assert.equal(env.tasks.size,0);
 """)

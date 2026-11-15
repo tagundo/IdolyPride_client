@@ -51,6 +51,8 @@ static NSString *localized(NSString *source) {
         @"게임 언어 데이터를 선택하지 못했습니다.":@[@"ゲームの言語データを選択できませんでした。", @"The game language data could not be selected."],
         @"서버 시작":@[@"サーバー開始", @"Start Server"],
         @"게임 시작":@[@"ゲーム開始", @"Start Game"],
+        @"설정을 저장하고 있습니다…":@[@"設定を保存しています…", @"Saving settings…"],
+        @"설정을 저장하지 못했습니다. 아래 항목을 확인한 뒤 다시 게임 시작을 눌러 주세요.":@[@"設定を保存できませんでした。下の項目を確認してから、もう一度「ゲーム開始」を押してください。", @"Settings could not be saved. Check the fields below, then select Start Game again."],
         @"게임으로 돌아가기":@[@"ゲームに戻る", @"Return to Game"],
         @"서버 실행 중":@[@"サーバー稼働中", @"Server Running"],
         @"서버 준비 중":@[@"サーバー準備中", @"Starting Server"],
@@ -176,12 +178,17 @@ static NSString *encode(id object) {
 @property (nonatomic,strong) UIButton *serverStartButton;
 @property (nonatomic,strong) UIButton *gameStartButton;
 @property (nonatomic,strong) UIButton *returnButton;
+@property (nonatomic,copy) NSString *launchSettingsNonce;
+@property (nonatomic,copy) NSString *launchSettingsCompletedNonce;
+@property (nonatomic,copy) NSString *launchSettingsMessage;
 - (void)event:(NSString *)json;
 - (void)releaseWeb;
 - (void)exportPath:(NSString *)path;
 - (void)retireExport;
 - (void)closeSettings;
 - (void)startGame;
+- (void)abortLaunchSettings;
+- (void)releaseLaunchSettingsFlush;
 - (void)startServer;
 - (void)updateServerReady;
 - (void)updateLocalizedText;
@@ -273,18 +280,18 @@ static __weak IDSettingsController *launcherController;
     return button;
 }
 - (void)updateServerReady {
-    _gameStartButton.enabled = serverReady && !serverBusy && gameStartAvailable;
+    _gameStartButton.enabled = serverReady && !serverBusy && gameStartAvailable && !_launchSettingsNonce && !_launchSettingsCompletedNonce;
     _serverStartButton.enabled = !serverReady && !serverBusy;
     [_serverStartButton setTitle:localized(serverReady ? @"서버 실행 중" : serverBusy ? @"서버 준비 중"
         : serverAttempted ? @"다시 시도" : @"서버 시작") forState:UIControlStateNormal];
     _serverStartButton.alpha = _serverStartButton.enabled ? 1.0 : 0.65;
     _gameStartButton.alpha = _gameStartButton.enabled ? 1.0 : 0.65;
-    _launcherStatus.text = localized(serverReadyStatus.length ? serverReadyStatus
+    _launcherStatus.text = localized(_launchSettingsMessage ?: (serverReadyStatus.length ? serverReadyStatus
         : (serverReady ? @"서버가 준비되었습니다." : serverBusy ? @"서버를 준비하고 있습니다…"
-            : @"서버가 실행 중이 아닙니다. ‘서버 시작’을 눌러 주세요."));
+            : @"서버가 실행 중이 아닙니다. ‘서버 시작’을 눌러 주세요.")));
     BOOL healthyStatus = serverReady && (!serverReadyStatus.length || [serverReadyStatus isEqualToString:@"서버 실행 중"]
         || [serverReadyStatus isEqualToString:@"서버가 준비되었습니다."]);
-    _launcherStatus.textColor = healthyStatus ? UIColor.systemGreenColor : UIColor.labelColor;
+    _launcherStatus.textColor = healthyStatus && !_launchSettingsMessage ? UIColor.systemGreenColor : UIColor.labelColor;
     _lastLayoutSize = CGSizeMake(-1, -1);
     [self updateCompactLayout];
 }
@@ -365,8 +372,41 @@ static __weak IDSettingsController *launcherController;
     IDNativeDismissFailure();
     IdolyEmbeddedServerRetry();
 }
+- (void)releaseLaunchSettingsFlush {
+    NSString *nonce = _launchSettingsNonce ?: _launchSettingsCompletedNonce;
+    _launchSettingsNonce = nil; _launchSettingsCompletedNonce = nil; _launchSettingsMessage = nil;
+    if (nonce && _web) {
+        NSString *script = [NSString stringWithFormat:
+            @"if(typeof window.idolyServerReleaseSettingsFlush==='function')window.idolyServerReleaseSettingsFlush.apply(window,%@)", encode(@[nonce])];
+        [_web evaluateJavaScript:script completionHandler:nil];
+    }
+}
+- (void)abortLaunchSettings {
+    [self releaseLaunchSettingsFlush];
+    _launchSettingsMessage = @"설정을 저장하지 못했습니다. 아래 항목을 확인한 뒤 다시 게임 시작을 눌러 주세요.";
+    [self updateServerReady];
+}
 - (void)startGame {
-    if (self.launcherMode && serverReady && !serverBusy && gameStartAvailable) IdolyEmbeddedServerLaunchGame();
+    // A nonce exists only for this explicit button intent. A save, status
+    // update or late ACK can never create a new intent or start Unity.
+    if (!self.launcherMode || !serverReady || serverBusy || !gameStartAvailable
+            || _launchSettingsNonce || _launchSettingsCompletedNonce || !_web || !self.viewIfLoaded.window) return;
+    NSString *nonce = NSUUID.UUID.UUIDString;
+    _launchSettingsNonce = nonce; _launchSettingsMessage = @"설정을 저장하고 있습니다…";
+    [self updateServerReady];
+    NSString *arguments = encode(@[nonce]);
+    NSString *script = [NSString stringWithFormat:
+        @"(()=>{if(typeof window.idolyServerFlushSettings!=='function')return false;window.idolyServerFlushSettings.apply(window,%@);return true;})()", arguments];
+    __weak typeof(self) weakSelf = self;
+    [_web evaluateJavaScript:script completionHandler:^(id value, NSError *error) {
+        IDSettingsController *strongSelf = weakSelf;
+        if (strongSelf && [strongSelf.launchSettingsNonce isEqual:nonce] && (error || ![value isEqual:@YES]))
+            [strongSelf abortLaunchSettings];
+    }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        IDSettingsController *strongSelf = weakSelf;
+        if (strongSelf && [strongSelf.launchSettingsNonce isEqual:nonce]) [strongSelf abortLaunchSettings];
+    });
 }
 - (void)viewDidAppear:(BOOL)animated { [super viewDidAppear:animated]; atomic_store(&settingsVisible, true); }
 - (void)viewWillDisappear:(BOOL)animated { [super viewWillDisappear:animated]; atomic_store(&settingsVisible, false); }
@@ -375,6 +415,7 @@ static __weak IDSettingsController *launcherController;
     if (self.isBeingDismissed || self.navigationController.isBeingDismissed) [self releaseWeb];
 }
 - (void)releaseWeb {
+    _launchSettingsNonce = nil; _launchSettingsCompletedNonce = nil;
     atomic_store(&settingsVisible, false);
     [_web.configuration.userContentController removeScriptMessageHandlerForName:@"idolyServer"];
     [_web stopLoading]; _web.navigationDelegate = nil;
@@ -528,6 +569,23 @@ static __weak IDSettingsController *launcherController;
     if (![identifier isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)identifier) == CFBooleanGetTypeID()
         || identifier.doubleValue != identifier.longLongValue || identifier.longLongValue < 1 || identifier.longLongValue > INT32_MAX
         || ![action isKindOfClass:NSString.class]) return;
+    if ([action isEqual:@"launch_settings_barrier"]) {
+        NSString *nonce = [request[@"nonce"] isKindOfClass:NSString.class] ? request[@"nonce"] : nil;
+        NSNumber *ready = [request[@"ready"] isKindOfClass:NSNumber.class] ? request[@"ready"] : nil;
+        BOOL valid = request.count == 4 && nonce.length == 36 && [[NSUUID alloc] initWithUUIDString:nonce]
+            && ready && CFGetTypeID((__bridge CFTypeRef)ready) == CFBooleanGetTypeID();
+        if (!valid || !self.launcherMode || !_launchSettingsNonce || ![_launchSettingsNonce isEqual:nonce]) {
+            [self localFailure:identifier message:@"허용되지 않은 서버 요청입니다."]; return;
+        }
+        BOOL launch = ready.boolValue && serverReady && !serverBusy && gameStartAvailable
+            && _web && self.viewIfLoaded.window && atomic_load(&settingsVisible);
+        if (launch) {
+            _launchSettingsCompletedNonce = nonce; _launchSettingsNonce = nil; _launchSettingsMessage = nil;
+        } else [self abortLaunchSettings];
+        [self sendReply:identifier json:encode(@{@"id":identifier,@"ok":@YES,@"result":@{@"launched":@(launch)}})];
+        if (launch) IdolyEmbeddedServerLaunchGame();
+        return;
+    }
     // Validate the clipboard payload itself, before JSON expansion or Python
     // gating; escaped text can exceed the ordinary host-envelope byte budget.
     if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
@@ -830,6 +888,8 @@ static void refreshFailureAlert(void) {
 }
 void IDNativeStartupFailure(NSString *message) {
     NSCAssert(NSThread.isMainThread, @"Startup UI belongs to main thread");
+    [launcherController releaseLaunchSettingsFlush];
+    [launcherController updateServerReady];
     pendingFailure = message;
     if (failureWindow) return;
     UIWindowScene *scene = launcherWindow.windowScene ?: windowScene();

@@ -7,6 +7,7 @@ contains bounded metadata only; it never replaces an existing release or tag.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import importlib.util
 import json
@@ -21,13 +22,14 @@ import statistics
 import subprocess
 import sys
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import Request
 from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD, IPA_VERSION = "0.3.34", 51, "156.9115"
+VERSION, BUILD, IPA_VERSION = "0.3.35", 52, "156.9115"
 TAG = "local-server-v" + VERSION
 BASELINE = "50e349f4db6db0d3122bdc09c3b06307145f814f"
 MIB, CHUNK = 1024 * 1024, 128 * 1024
@@ -36,7 +38,7 @@ IPA = "IdolyPride-6.1.1-Unified-iOS.ipa"
 APK = "IdolyPride-Local-Server-Android.apk"
 QA_APK = "IdolyPride-Local-Server-Android-x86_64-QA.apk"
 MAC = "IdolyPride-Local-Server-macOS-arm64.app.zip"
-JOBS = ("portable", "performance", "android", "macos", "ios-unified")
+JOBS = ("portable", "performance", "android", "macos", "android-clients", "ios-unified")
 PREFIXES = {name: "optimized-release-" + name + "-" for name in JOBS[:-1]}
 PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
@@ -67,6 +69,37 @@ COMPANIONS = (
      "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
      "publication_commit": "7fcc9f8661b5158cf66d93e9c307607db2c2ee43", "version": "0.3.31"},
 )
+
+ANDROID_LANGUAGE_CLIENTS = {
+    "ja": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
+    "en": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
+}
+EXPECTED_RELEASE_ASSETS = frozenset((APK, MAC, IPA, *ANDROID_LANGUAGE_CLIENTS.values(),
+                                     *(row["name"] for row in COMPANIONS)))
+
+ARCHIVE_LIMITS["android-clients"] = 900*MIB
+BINARY_LIMITS.update({name: 384*MIB for name in ANDROID_LANGUAGE_CLIENTS.values()})
+ANDROID_CLIENT_CERTIFICATE = "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc"
+ANDROID_CLIENT_INPUTS = {
+    "diagnostic_base": {"bytes": 159549324, "sha256": "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df"},
+    "apkeditor": {"bytes": 7126009, "sha256": "4a98ae6a755264357603f1906b92e62e757d59229014e33395f4e03ff019fda8"},
+    "font": {"bytes": 3781740, "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314"},
+    "english_ui": {"bytes": 227781, "sha256": "b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702"},
+    "english_ui_proof": {"bytes": 348, "sha256": "298138bcadd69249a4b064b1b96ada4c15e6da2c42327d1d97e27a2b6c69cb62"},
+}
+ANDROID_CLIENT_FLAGS = ("pinned_inputs_verified", "source_bound_native_and_feature_verified",
+    "signature_v2_v3_verified", "zipalign_16384_verified", "same_update_identity_verified",
+    "declared_member_inventory_verified", "local_resource_output_fields_verified",
+    "built_in_ui_language_verified", "font_assets_verified", "original_inputs_unchanged")
+ANDROID_CLIENT_SOURCES = ("tools/release_android_clients.py", "client-presentation/build_addon.py",
+    "client-presentation/build_full_client.py", "client-presentation/native/bridge.cpp",
+    "client-presentation/native/profile.json", "src/idoly_local/ui_assets.py",
+    "src/idoly_local/font_assets.py", "src/idoly_local/static_ui_assets.py",
+    "src/idoly_local/ui_display_literals.py", "src/idoly_local/story_loading_prefab.py",
+    "ios-unified/client-language-inputs/en.csv", "ios-unified/client-language-inputs/en-report.json")
+ANDROID_CLIENT_REPORT_FILES = frozenset((
+    *(name.replace(".apk", ".provenance.json") for name in ANDROID_LANGUAGE_CLIENTS.values()),
+    "native/build-receipt.json", "diagnostics-feature.provenance.json"))
 
 
 class ReleaseError(ValueError):
@@ -212,7 +245,8 @@ def generic_members(archive, role):
     need(0 < len(rows) <= 1024 and len({row.filename for row in rows}) == len(rows),
          "zip_inventory_bound_or_duplicate")
     result, total, folded = {}, 0, set()
-    binaries = {APK, QA_APK} if role == "android" else {MAC} if role == "macos" else set()
+    binaries = ({APK, QA_APK} if role == "android" else {MAC} if role == "macos" else
+                set(ANDROID_LANGUAGE_CLIENTS.values()) if role == "android-clients" else set())
     for row in rows:
         name = row.filename.rstrip("/")
         path = safe_relative(name)
@@ -233,7 +267,8 @@ def generic_members(archive, role):
         result[name] = row
     required = ({"platform-report.json", APK, QA_APK, "android-qa.json"} if role == "android" else
                 {"platform-report.json", MAC} if role == "macos" else
-                {"portable-report.json"} if role == "portable" else
+                {"android-clients-report.json", *ANDROID_LANGUAGE_CLIENTS.values(), *ANDROID_CLIENT_REPORT_FILES}
+                if role == "android-clients" else {"portable-report.json"} if role == "portable" else
                 {"performance-report.json", "diagnostics-polling.json", "translation-startup.json"})
     need(required <= result.keys(), "artifact_required_members_missing")
     return result
@@ -509,10 +544,116 @@ def validate_platform_files(directory, report, guard):
     return {"path": str(binary), **platform_binary(report["binary"], platform)}
 
 
+
+def validate_android_clients(directory, source, run):
+    report = read_json(directory/"android-clients-report.json")
+    need(type(report.get("schema")) is int and report["schema"] == 1 and report.get("status") == "PASS"
+         and report.get("source_commit") == source and type(report.get("run_id")) is int and report["run_id"] == run
+         and report.get("languages") == ["ja", "en"], "android_clients_source_or_language_differs")
+    source_pins(report.get("source_sha256"), source, required=ANDROID_CLIENT_SOURCES)
+    inputs = report.get("inputs")
+    need(type(inputs) is dict and set(inputs) == {*ANDROID_CLIENT_INPUTS, "shadowhook"},
+         "android_clients_input_inventory_differs")
+    for name, expected in ANDROID_CLIENT_INPUTS.items():
+        need(type(inputs[name]) is dict and set(inputs[name]) == set(expected)
+             and all(type(inputs[name].get(key)) is type(value) and inputs[name][key] == value
+                     for key, value in expected.items()), "android_clients_input_pin_differs")
+    shadowhook = inputs["shadowhook"]
+    need(type(shadowhook) is dict and set(shadowhook) == {"bytes", "sha256"}
+         and type(shadowhook.get("bytes")) is int and shadowhook["bytes"] == 461264
+         and shadowhook.get("sha256") == "2cad01ff4d59542958775e19f281981a7e84b39670b5fae75905b8511e10c7cd",
+         "android_clients_shadowhook_pin_differs")
+    checks = report.get("validation")
+    need(type(checks) is dict and set(checks) == {*ANDROID_CLIENT_FLAGS, "runtime_device_tested"}
+         and all(checks.get(name) is True for name in ANDROID_CLIENT_FLAGS)
+         and checks.get("runtime_device_tested") is False, "android_clients_packaging_qa_failed")
+    files = report.get("report_files")
+    need(type(files) is dict and set(files) == ANDROID_CLIENT_REPORT_FILES,
+         "android_clients_report_inventory_differs")
+    for name, expected in files.items():
+        safe_relative(name)
+        need(type(expected) is dict and set(expected) == {"bytes", "sha256"}
+             and type(expected.get("bytes")) is int and 0 < expected["bytes"] <= MAX_JSON
+             and is_sha(expected.get("sha256")), "android_clients_report_record_invalid")
+        path = directory.joinpath(*PurePosixPath(name).parts)
+        info = path.lstat()
+        need(stat.S_ISREG(info.st_mode) and info.st_size == expected["bytes"] and digest(path) == expected["sha256"],
+             "android_clients_report_digest_differs")
+        read_json(path)
+    rows = report.get("binaries")
+    need(type(rows) is list and len(rows) == len(ANDROID_LANGUAGE_CLIENTS)
+         and all(type(row) is dict for row in rows)
+         and [row.get("language") for row in rows] == ["ja", "en"], "android_clients_binary_set_differs")
+    result = []
+    for row in rows:
+        language = row["language"]
+        need(set(row) == {"language", "name", "bytes", "sha256", "application_id", "version_code", "certificate_sha256"}
+             and row.get("name") == ANDROID_LANGUAGE_CLIENTS[language]
+             and row.get("application_id") == "game.qualiarts.idolypride.local.diagnostics"
+             and type(row.get("version_code")) is int and row["version_code"] == 414
+             and row.get("certificate_sha256") == ANDROID_CLIENT_CERTIFICATE,
+             "android_clients_update_identity_differs")
+        wanted = {key: row[key] for key in ("name", "bytes", "sha256")}
+        path = verified_file(directory, wanted, name=ANDROID_LANGUAGE_CLIENTS[language],
+                             maximum=BINARY_LIMITS[wanted["name"]])
+        result.append({**row, "path": str(path)})
+    return result
+
+
+def asset_download_url(name):
+    safe_relative(name)
+    need("/" not in name, "release_asset_name_invalid")
+    return "https://github.com/" + REPO + "/releases/download/" + TAG + "/" + name
+
+
+def verify_binary_stream(response, wanted, guard, outgoing=None):
+    need(response.status == 200 and response.headers.get("Content-Encoding", "identity") == "identity"
+         and response.headers.get("Content-Length") in (None, str(wanted["bytes"])), "binary_http_response_differs")
+    value, count, prefix = hashlib.sha256(), 0, b""
+    while True:
+        guard.check()
+        block = response.read(CHUNK)
+        if not block:
+            break
+        count += len(block)
+        need(count <= wanted["bytes"], "binary_download_extent_exceeded")
+        if len(prefix) < 4:
+            prefix = (prefix + block)[:4]
+        value.update(block)
+        if outgoing is not None:
+            need(outgoing.write(block) == len(block), "binary_download_short_write")
+    need(count == wanted["bytes"] and value.hexdigest() == wanted["sha256"],
+         "binary_download_sha256_differs")
+    need(prefix == b"PK\x03\x04", "binary_zip_prefix_differs")
+
+
+def validate_release_asset(asset, wanted):
+    need(type(asset) is dict and type(asset.get("id")) is int and asset["id"] > 0
+         and asset.get("name") == wanted["name"] and asset.get("state") == "uploaded"
+         and type(asset.get("size")) is int and asset["size"] == wanted["bytes"]
+         and asset.get("digest") == "sha256:" + wanted["sha256"]
+         and asset.get("browser_download_url") == asset_download_url(wanted["name"]),
+         "release_asset_identity_differs")
+    return asset
+
+
+def validate_release_inventory(assets, binaries, receipts):
+    names = EXPECTED_RELEASE_ASSETS
+    need(type(assets) is list and len(assets) == len(binaries) == len(receipts) == len(names)
+         and all(type(row) is dict for row in assets)
+         and {row.get("name") for row in assets} == {row["name"] for row in binaries} == names
+         and len({row.get("id") for row in assets}) == len(names)
+         and {row.get("id") for row in assets} == {row["id"] for row in receipts},
+         "release_asset_inventory_differs")
+    for wanted in binaries:
+        validate_release_asset(next(row for row in assets if row["name"] == wanted["name"]), wanted)
+
+
 class GitHub:
     def __init__(self, token, opener):
         self.token, self.opener = token, opener
         self.owned_release_id, self.rollback_draft_restored = None, None
+        self.asset_receipts = []
 
     def api(self, path, *, method="GET", body=None, absent=False):
         need(path.startswith("/") and "\n" not in path and "\r" not in path, "github_api_path")
@@ -527,11 +668,111 @@ class GitHub:
             if absent and error.code == 404:
                 error.close()
                 return None
+            error.close()
             raise ReleaseError("github_api_request_failed") from None
         with response:
             raw = response.read(2*MIB + 1)
             need(response.status in (200, 201) and len(raw) <= 2*MIB, "github_api_response_bound")
         return decode(raw)
+
+    def binary_response(self, target, *, headers=None, asset_id=None):
+        parsed = urlsplit(target)
+        hosts = {"github.com", "lfs.github.com", "media.githubusercontent.com",
+                 "github-cloud.githubusercontent.com", "objects.githubusercontent.com",
+                 "release-assets.githubusercontent.com", "github-cloud.s3.amazonaws.com"}
+        need(parsed.scheme == "https" and parsed.port in (None, 443) and not parsed.username
+             and not parsed.password and not parsed.fragment, "binary_download_url_invalid")
+        request_headers = {"Accept-Encoding": "identity", "User-Agent": "idoly-verified-release", **(headers or {})}
+        if asset_id is not None:
+            need(type(asset_id) is int and asset_id > 0 and target == "https://api.github.com/repos/" + REPO
+                 + "/releases/assets/" + str(asset_id) and headers is None, "asset_api_url_invalid")
+            request_headers.update(Authorization="Bearer " + self.token, Accept="application/octet-stream")
+            request_headers["X-GitHub-Api-Version"] = "2022-11-28"
+        else:
+            need(parsed.hostname in hosts and self.token not in target, "binary_download_host_invalid")
+        for _ in range(4):
+            try:
+                return self.opener.open(Request(target, headers=request_headers), timeout=90)
+            except HTTPError as error:
+                location, status = error.headers.get("Location", ""), error.code
+                error.close()
+                need(status in (301, 302, 303, 307, 308), "binary_download_http_failed")
+                redirected = urlsplit(location)
+                need(redirected.scheme == "https" and redirected.port in (None, 443)
+                     and not redirected.username and not redirected.password and not redirected.fragment
+                     and redirected.hostname in hosts and self.token not in location,
+                     "binary_download_redirect_invalid")
+                target = location
+                # API and LFS credentials must never follow a redirect.
+                request_headers = {"Accept-Encoding": "identity", "User-Agent": "idoly-verified-release"}
+        raise ReleaseError("binary_download_redirect_limit")
+
+    def git_file(self, commit, name, maximum):
+        need(is_sha(commit, 40) and "/" not in name, "companion_git_path_invalid")
+        tree = self.api("/git/trees/" + commit)
+        rows = tree.get("tree")
+        need(tree.get("truncated") is False and type(rows) is list and len(rows) <= 100,
+             "companion_git_tree_invalid")
+        matches = [row for row in rows if row.get("path") == name]
+        need(len(matches) == 1 and matches[0].get("type") == "blob"
+             and type(matches[0].get("size")) is int and 0 < matches[0]["size"] <= maximum
+             and is_sha(matches[0].get("sha"), 40), "companion_git_blob_invalid")
+        wanted = matches[0]
+        blob = self.api("/git/blobs/" + wanted["sha"])
+        need(blob.get("sha") == wanted["sha"] and blob.get("encoding") == "base64"
+             and blob.get("size") == wanted["size"] and type(blob.get("content")) is str
+             and len(blob["content"]) <= 2*maximum, "companion_git_blob_invalid")
+        raw = base64.b64decode("".join(blob["content"].split()), validate=True)
+        need(len(raw) == wanted["size"] and hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == wanted["sha"],
+             "companion_git_blob_sha_differs")
+        return raw
+
+    def companion(self, wanted, destination, guard):
+        need(not destination.exists() and not destination.is_symlink(), "fresh_companion_path_required")
+        pointer = self.git_file(wanted["publication_commit"], wanted["name"], 256)
+        expected = ("version https://git-lfs.github.com/spec/v1\noid sha256:" + wanted["sha256"]
+                    + "\nsize " + str(wanted["bytes"]) + "\n").encode()
+        need(pointer == expected, "companion_immutable_pointer_differs")
+        provenance_raw = self.git_file(wanted["publication_commit"], "RELEASE-VERIFICATION.json", 128*1024)
+        provenance = decode(provenance_raw)
+        record_keys = ("name", "bytes", "sha256")
+        independent = provenance.get("independent_QA", {})
+        need(provenance.get("source_commit") == wanted["source_commit"] and provenance.get("version") == wanted["version"]
+             and provenance.get("artifacts") == [{key: wanted[key] for key in record_keys}]
+             and independent.get("status") == "PASS" and independent.get("source_commit") == wanted["source_commit"]
+             and all(independent.get(key) == wanted[key] for key in ("bytes", "sha256")),
+             "companion_original_provenance_differs")
+        body = json.dumps({"operation": "download", "transfers": ["basic"],
+                          "objects": [{"oid": wanted["sha256"], "size": wanted["bytes"]}]}).encode()
+        authorization = "Basic " + base64.b64encode(("x-access-token:" + self.token).encode()).decode()
+        request = Request("https://github.com/" + REPO + ".git/info/lfs/objects/batch", data=body, method="POST",
+                          headers={"Authorization": authorization, "Accept": "application/vnd.git-lfs+json",
+                                   "Content-Type": "application/vnd.git-lfs+json"})
+        with self.opener.open(request, timeout=60) as response:
+            raw = response.read(MIB + 1)
+            need(response.status == 200 and len(raw) <= MIB, "companion_lfs_batch_bound")
+        objects = decode(raw).get("objects")
+        need(type(objects) is list and len(objects) == 1 and objects[0].get("oid") == wanted["sha256"]
+             and objects[0].get("size") == wanted["bytes"] and not objects[0].get("error"),
+             "companion_lfs_object_differs")
+        action = objects[0].get("actions", {}).get("download", {})
+        headers = action.get("header", {})
+        need(type(headers) is dict and len(headers) <= 16, "companion_lfs_headers_invalid")
+        for key, value in headers.items():
+            need(type(key) is str and re.fullmatch(r"[A-Za-z0-9-]{1,64}", key)
+                 and key.lower() not in {"host", "cookie", "proxy-authorization"}
+                 and type(value) is str and len(value) <= 4096 and self.token not in value
+                 and all(32 <= ord(char) < 127 for char in value), "companion_lfs_headers_invalid")
+        target = action.get("href")
+        need(type(target) is str and 0 < len(target) <= 16000, "companion_lfs_url_invalid")
+        with self.binary_response(target, headers=headers) as response, destination.open("xb") as outgoing:
+            verify_binary_stream(response, wanted, guard, outgoing)
+        need(digest(destination) == wanted["sha256"] and destination.stat().st_size == wanted["bytes"],
+             "companion_file_sha256_differs")
+        return {**wanted, "reused_unchanged": True, "new_download_verification_this_release": True,
+                "original_provenance_sha256": hashlib.sha256(provenance_raw).hexdigest(),
+                "immutable_pointer_verified": True, "full_download_SHA256_verified": True,
+                "fresh_source_build_claimed": False, "path": str(destination)}
 
     def require_fresh(self):
         need(self.api("/releases/tags/" + TAG, absent=True) is None
@@ -540,10 +781,39 @@ class GitHub:
         need(type(releases) is list and len(releases) <= 100
              and not any(row.get("tag_name") == TAG for row in releases), "release_already_exists")
 
-    def publish(self, source, body):
+    def upload_asset(self, release_id, wanted):
+        path = verified_file(Path(wanted["path"]).parent, {key: wanted[key] for key in ("name", "bytes", "sha256")})
+        with path.open("rb") as incoming:
+            request = Request("https://uploads.github.com/repos/" + REPO + "/releases/" + str(release_id)
+                              + "/assets?name=" + wanted["name"], data=incoming, method="POST",
+                              headers={"Authorization": "Bearer " + self.token, "Accept": "application/vnd.github+json",
+                                       "Content-Type": "application/octet-stream", "Content-Length": str(wanted["bytes"]),
+                                       "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "idoly-verified-release"})
+            try:
+                response = self.opener.open(request, timeout=120)
+            except HTTPError as error:
+                error.close()
+                raise ReleaseError("release_asset_upload_failed") from None
+            with response:
+                raw = response.read(MIB + 1)
+                need(response.status == 201 and len(raw) <= MIB, "release_asset_upload_response_bound")
+        return validate_release_asset(decode(raw), wanted)
+
+    def verify_asset(self, asset, wanted, guard):
+        url = "https://api.github.com/repos/" + REPO + "/releases/assets/" + str(asset["id"])
+        with self.binary_response(url, asset_id=asset["id"]) as response:
+            verify_binary_stream(response, wanted, guard)
+
+    def publish(self, source, body, binaries, guard, *, save_assets=None, before_promote=None):
+        need(type(binaries) is list and len(binaries) == len(EXPECTED_RELEASE_ASSETS)
+             and {row["name"] for row in binaries} == EXPECTED_RELEASE_ASSETS,
+             "release_binary_set_differs")
+        for row in binaries:
+            verified_file(Path(row["path"]).parent, {key: row[key] for key in ("name", "bytes", "sha256")})
         self.require_fresh()
         created = self.api("/releases", method="POST", body={
-            "tag_name": TAG, "target_commitish": source, "name": "아이프라 로컬 v" + VERSION + " · 프로필·포토 편집과 목록 복구",
+            "tag_name": TAG, "target_commitish": source,
+            "name": "아이프라 로컬 v" + VERSION + " · 그래픽·촬영 설정과 서버·클라이언트",
             "body": body, "draft": True, "prerelease": True, "make_latest": "false"})
         need(type(created) is dict and type(created.get("id")) is int and created["id"] > 0
              and created.get("tag_name") == TAG and created.get("draft") is True
@@ -551,6 +821,21 @@ class GitHub:
              "new_draft_identity_differs")
         self.owned_release_id = created["id"]
         try:
+            for row in binaries:
+                guard.check()
+                asset = self.upload_asset(created["id"], row)
+                validate_release_asset(asset, row)
+                self.verify_asset(asset, row, guard)
+                self.asset_receipts.append({"id": asset["id"], "name": row["name"], "bytes": row["bytes"],
+                    "sha256": row["sha256"], "API_digest": asset["digest"],
+                    "download_url": asset["browser_download_url"], "full_API_download_SHA256_verified": True})
+                if save_assets is not None:
+                    save_assets(self.asset_receipts)
+            validate_release_inventory(self.api("/releases/" + str(created["id"]) + "/assets?per_page=100"),
+                                       binaries, self.asset_receipts)
+            if before_promote is not None:
+                before_promote()
+            guard.check()
             result = self.api("/releases/" + str(created["id"]), method="PATCH", body={"draft": False})
             need(result.get("id") == created["id"] and result.get("tag_name") == TAG
                  and result.get("draft") is False and result.get("prerelease") is True
@@ -561,10 +846,11 @@ class GitHub:
             tag = self.api("/git/ref/tags/" + TAG)
             need(tag.get("object", {}).get("type") == "commit"
                  and tag["object"].get("sha") == source, "published_tag_source_differs")
+            validate_release_inventory(self.api("/releases/" + str(created["id"]) + "/assets?per_page=100"),
+                                       binaries, self.asset_receipts)
             return {key: result[key] for key in ("id", "tag_name", "html_url", "published_at", "draft", "prerelease")}
         except BaseException:
-            # Only this call's validated, newly-created release can be restored.
-            # Never edit a pre-existing release or move any existing tag.
+            # Restore only this call's validated newly-created release.
             try:
                 restored = self.api("/releases/" + str(created["id"]), method="PATCH", body={"draft": True})
                 self.rollback_draft_restored = (restored.get("id") == created["id"]
@@ -574,34 +860,52 @@ class GitHub:
             raise
 
 
-def release_body(source, run, publication, artifacts, metrics):
-    lines = ["# 아이프라 로컬 v" + VERSION, "",
-             "Android 서버 APK, iPhone·iPad 통합 IPA, Apple Silicon Mac 서버 앱을 같은 소스로 제작했습니다.",
-             "보유 버디 카드·프로필 장식·기본/포토/카드 배경·카드 이미지 선택과 포토 잠금/해제를 복구했습니다.",
-             "같은 포토 전환 요청은 재시도·재시작·동시 요청에도 한 번만 반영합니다. 저장된 일일·주간·일반 미션과 일일·콘테스트·타워의 목록/이력을 조회하며 새 미션·보상·일일/타워 전투는 생성하지 않습니다.",
-             "개별 Where 예외의 원인 해결 여부는 재현 기록으로 확인해야 합니다. NPC의 MV 출연은 별도 조사 단계입니다.",
-             "계정·설정·받은 리소스는 기존 저장소를 유지합니다. 실제 게임 FPS 향상을 측정한 릴리즈는 아닙니다.", "",
+def release_body(source, run, publication, artifacts, metrics, android_clients=()):
+    lines = ["# 아이프라 로컬 v" + VERSION + " · 설정 화면과 서버·게임 클라이언트", "",
+             "설정 화면의 가독성, 자동 저장과 게임 시작 순서, ZIP 가져오기 진행 표시, 포즈의 활성 인원 검사를 보완한 릴리즈입니다. Assets에서 서버와 게임 설치 파일 7종을 함께 받을 수 있습니다.", "",
+             "이번 변경", "",
+             "- Android 서버 화면을 밝은 카드와 16sp 글자로 정리했습니다. 게임 실행 버튼 하나를 상단 고정 영역에 두고, 진단과 서버 로그는 JSON 파일 하나로 내보냅니다. 그래픽·촬영 설정은 처음부터 펼쳐 표시하며 변경하면 바로 저장합니다.",
+             "- 통합 IPA의 게임 옵션·그래픽/촬영·재생·미디어 설정은 자동으로 저장합니다. 숫자 입력은 600ms 대기 또는 입력 완료 뒤 저장하고, 실패하면 다시 시도할 수 있습니다. 게임 시작은 최신 설정 저장이 끝난 뒤 진행합니다.",
+             "- 통합 IPA " + IPA_VERSION + "는 ZIP 가져오기 사본 모드와 파일 복사 진행·용량 표시를 보완하고, 같은 앱 보관 폴더로 이어지는 경로 별칭을 처리합니다.",
+             "- 포즈 편집은 회색 비활성 칸을 포함한 전체 명단 수 대신 실제 활성 인원으로 정원 조건을 검사하도록 수정했습니다. 전체 명단의 ID·보유 검사는 유지합니다. 이 설명은 서버 검증 로직의 변경이며 실제 기기의 해당 화면 재현 성공을 뜻하지 않습니다.",
+             "기존 프로필·포토 편집과 저장된 미션·퀘스트 목록 복구 기능은 유지합니다. 새로운 미션·보상·일일/타워 전투를 생성하지 않습니다.", "",
              "| 파일 | 용도 | 다운로드 |", "| --- | --- | --- |"]
-    kinds = {APK: "Android ARM64 서버", IPA: "iPhone·iPad 통합 서버·게임", MAC: "Apple Silicon Mac 서버"}
-    for row in artifacts:
-        url = "https://github.com/" + REPO + "/raw/" + publication["commit"] + "/" + row["name"]
-        lines.append("| " + row["name"] + " | " + kinds[row["name"]] + " | [받기](" + url + ") |")
-    lines += ["", "Android는 서버 APK와 아래 게임 APK를 함께 사용합니다. Mac 서버 앱은 아래 별도 PlayCover IPA와 사용합니다.",
-              "통합 IPA는 자체 서버를 포함하므로 별도 Mac 서버와 동시에 실행하지 마세요.", ""]
+    kinds = {APK: "Android ARM64 서버 v" + VERSION, IPA: "iPhone·iPad / PlayCover 통합 서버·게임 " + IPA_VERSION,
+             MAC: "Apple Silicon Mac 서버 v" + VERSION,
+             COMPANIONS[0]["name"]: "한국어 Android 게임 · v0.3.31 동일 바이트",
+             COMPANIONS[1]["name"]: "별도 한국어 PlayCover 게임 · v0.3.31 동일 바이트",
+             ANDROID_LANGUAGE_CLIENTS["ja"]: "일본어 Android 게임 · 새 빌드",
+             ANDROID_LANGUAGE_CLIENTS["en"]: "영어 Android 게임 · 새 빌드"}
+    for row in [*artifacts, *android_clients, *COMPANIONS]:
+        lines.append("| " + row["name"] + " | " + kinds[row["name"]] + " | [받기](" + asset_download_url(row["name"]) + ") |")
+    lines += ["", "설치와 시작", "",
+              "- Android ARM64(Android 9 이상): 서버 APK와 원하는 게임 언어의 APK 한 개(KO/JA/EN)를 설치합니다. 서버 앱의 게임 언어도 맞춘 뒤 서버 시작 → 아이프라 실행을 누르세요.",
+              "- iPhone·iPad: Unified-iOS.ipa 하나를 개인 서명해 설치합니다. 서버 메뉴에서 준비가 끝나면 게임 시작을 누르세요.",
+              "- Apple Silicon Mac / PlayCover: 통합 IPA 하나를 사용하거나, Mac 서버 ZIP과 별도 한국어 PlayCover IPA를 함께 사용합니다. 별도 구성은 서버 시작 → PlayCover에서 열기를 누른 뒤 게임을 실행합니다.",
+              "통합 IPA는 자체 서버를 포함하므로 별도 Mac 서버와 동시에 실행하지 마세요.", "",
+              "통합 IPA는 게임 시작 전 한국어·일본어·영어 데이터를 선택합니다. Android의 KO/JA/EN 게임 APK는 같은 앱 ID·업데이트 서명을 사용하므로 동시에 설치하는 대신 원하는 언어판 하나로 교체 설치합니다. 교체 전에 게임을 완전히 종료하고 서버의 게임 언어도 맞춰 주세요. 별도 PlayCover 게임 IPA는 한국어판입니다. 번역 자료가 없는 문구·이미지는 원본을 유지합니다.",
+              "게임 중 안전 영역 오른쪽 위를 한 손가락으로 2초 누르면 서버 메뉴가 열립니다. 받은 리소스가 없으면 인터넷으로 자동 다운로드하며, 완전 오프라인 사용은 필요한 캐시를 준비한 뒤 가능합니다.",
+              "동일 설치판 업데이트는 기존 계정·설정·받은 자료를 유지합니다. Sideloadly와 LiveContainer는 서로 다른 컨테이너이므로 자료를 자동 공유하지 않습니다.", "",
+              "사용자는 Sideloadly 설치판의 ZIP 가져오기와 LiveContainer에서 Fix File Picker를 켠 파일 선택을 확인했습니다. LiveContainer의 이 설정은 파일 선택 문제의 직접 우회이며, 최신 " + IPA_VERSION + "의 실기기 ZIP 가져오기·진행 표시는 아직 재확인이 필요합니다.",
+              "Simulator의 파일 선택기 표시·취소와 ZIP 내보내기→가져오기 검사는 실제 Files 앱 탭 조작, LiveContainer 제공자의 실제 파일 복사 성공, Unity 게임 렌더링 검사를 대신하지 않습니다.", "",
+              "검증 범위", "",
+              "게시 파이프라인은 전체 코드 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, 실제 Mac 앱의 시작·중지와 코드 서명, Apple SDK IPA 빌드와 같은 저장소의 KO→EN→JA→EN→KO 재실행·파일 해시·연결 중단 검사를 필수로 판정합니다.",
+              "새 JA/EN APK는 서명·16KiB 정렬·내장 UI 언어·폰트·멤버 목록의 패키징 검사를 포함합니다. 실제 Android ARM64 기기 및 이번 IPA의 PlayCover·iPhone·iPad 게임 재확인은 별도 대상입니다.",
+              "원본 Actions ZIP 전체 SHA-256과 새 서버·통합 IPA 3파일의 LFS 전체 재다운로드 SHA-256을 확인하며, 두 기존 클라이언트도 고정된 원래 게시 커밋의 출처·전체 SHA-256을 다시 대조합니다. 공개 전 이 릴리즈의 7개 Assets를 각각 GitHub API에서 전체 다운로드해 SHA-256과 파일 목록을 확인해야 합니다.",
+              "[Actions 검증](https://github.com/" + REPO + "/actions/runs/" + str(run) + ") · 서버·통합 IPA·JA/EN APK 빌드 소스 " + source,
+              "개별 Where 예외의 원인과 NPC의 MV 출연은 이 설정·배포 변경의 해결 범위로 주장하지 않습니다.", "",
+              "한국어 게임 2종은 검증된 v0.3.31 파일을 그대로 재사용합니다:"]
     for row in COMPANIONS:
-        url = "https://github.com/" + REPO + "/raw/" + row["publication_commit"] + "/" + row["name"]
-        lines.append("- [기존 한국어 게임 " + row["name"] + "](" + url + ") · v" + row["version"]
-                     + " · 기존 소스 " + row["source_commit"] + " · 이번 릴리즈에서 재제작하지 않았습니다.")
-    lines += ["", "검증: 전체 코드 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, 실제 Mac 앱의 시작·중지와 코드 서명,",
-              "실제 Apple SDK IPA 빌드와 같은 저장소의 KO→EN→JA→EN→KO 재실행·파일 해시·연결 중단 검사를 통과했습니다.",
-              "실제 Android ARM64 기기 및 이번 IPA의 PlayCover·iPhone·iPad 게임 재확인은 별도 대상입니다.",
-              "", "원본 Actions ZIP 전체 SHA-256과 게시한 파일 전체 재다운로드 SHA-256을 검증했습니다.",
-              "[Actions 검증](https://github.com/" + REPO + "/actions/runs/" + str(run) + ") · 소스 " + source,
-              "", "측정 수치와 범위는 아래 벤치마크 결과를 따릅니다. 진단 수치는 합성 기록이 있는 서버 상태 조회이며 전체 게임 성능 수치가 아닙니다.",
+        lines.append("- " + row["name"] + " · v" + row["version"] + " · 소스 " + row["source_commit"]
+                     + " · 원래 게시 " + row["publication_commit"] + " · 이번 릴리즈에서 재제작하지 않았습니다.")
+    lines += ["", "새 서버·통합 IPA 3파일의 불변 LFS 대체 주소:"]
+    for row in artifacts:
+        lines.append("- [" + row["name"] + "](https://github.com/" + REPO + "/raw/" + publication["commit"] + "/" + row["name"] + ")")
+    lines += ["", "기존 서버 최적화 측정 범위를 유지합니다. 진단 수치는 합성 기록이 있는 상태 조회이며 전체 게임 FPS·기기 시작 시간 수치가 아닙니다.",
               "", "진단 조회 측정: " + json.dumps(metrics["diagnostics"], ensure_ascii=False, sort_keys=True),
               "", "공개 번역 자료 시작 검사: " + json.dumps(metrics["translation"], ensure_ascii=False, sort_keys=True),
               "", "SHA-256:"]
-    for row in artifacts:
+    for row in [*artifacts, *android_clients, *COMPANIONS]:
         lines.append("- " + row["sha256"] + "  " + row["name"] + " · " + str(row["bytes"]) + " bytes")
     return "\n".join(lines) + "\n"
 
@@ -691,6 +995,7 @@ def main(argv=None):
         ipa_manifest, _identity = delivery.verify_members(directories["ios-unified"], ios_proof, args.source_commit,
                                                          args.run_id, ipa_binding["artifact_id"], guard)
         binaries += ipa_manifest["artifacts"]
+        android_client_binaries = validate_android_clients(directories["android-clients"], args.source_commit, args.run_id)
         need({row["name"] for row in binaries} == {APK, MAC, IPA} and len(binaries) == 3, "primary_binary_set_differs")
         for row in binaries:
             verified_file(Path(row["path"]).parent, {key: row[key] for key in ("name", "bytes", "sha256")})
@@ -706,6 +1011,9 @@ def main(argv=None):
                               encoding="utf-8")
         state.update(all_qa_passed=True, whole_API_archive_digests_verified=True, performance=metrics,
                      artifacts=[{key: row[key] for key in ("name", "bytes", "sha256")} for row in binaries],
+                     android_clients=[{key: value for key, value in row.items() if key != "path"}
+                                      for row in android_client_binaries],
+                     android_clients_packaging_QA_verified=True, android_clients_runtime_device_tested=False,
                      companions=[{**row, "reused_unchanged": True, "new_download_verification_this_release": False}
                                  for row in COMPANIONS])
         write_json(state_path, state)
@@ -724,7 +1032,19 @@ def main(argv=None):
                  and all(type(matched[0].get(key)) is type(value) and matched[0][key] == value for key, value in row.items()),
                  "full_remote_binary_sha256_not_verified")
         write_json(args.output/"publication.json", publication)
-        body = release_body(args.source_commit, args.run_id, publication, state["artifacts"], metrics)
+        companion_directory = args.work/"companions"
+        companion_directory.mkdir(mode=0o700)
+        companion_binaries = []
+        for wanted in COMPANIONS:
+            guard.check()
+            companion_binaries.append(github.companion(wanted, companion_directory/wanted["name"], guard))
+        state["companions"] = [{key: value for key, value in row.items() if key != "path"}
+                               for row in companion_binaries]
+        state["all_companion_source_and_download_SHA256_verified"] = True
+        write_json(args.output/"companion-provenance.json", {"schema": 1, "companions": state["companions"]})
+        write_json(state_path, state)
+        body = release_body(args.source_commit, args.run_id, publication, state["artifacts"], metrics,
+                            android_clients=state["android_clients"])
         (args.output/"RELEASE.md").write_text(body, encoding="utf-8")
         metadata_files = copy_metadata(directories, args.output)
         state.update(status="READY_TO_PUBLISH", branch=branch, publication_commit=publication["commit"],
@@ -740,16 +1060,36 @@ def main(argv=None):
                      github.api("/actions/runs/" + str(args.run_id) + "/jobs?filter=latest&per_page=100"),
                      github.api("/actions/runs/" + str(args.run_id) + "/artifacts?per_page=100"),
                      args.source_commit, args.run_id)
-        release = github.publish(args.source_commit, body)
+        def save_assets(receipts):
+            state["release_asset_receipts"] = [dict(row) for row in receipts]
+            state["release_assets_uploaded"] = len(receipts) == len(EXPECTED_RELEASE_ASSETS)
+            write_json(state_path, state)
+
+        def before_promote():
+            validate_run(github.api("/actions/runs/" + str(args.run_id)),
+                         github.api("/actions/runs/" + str(args.run_id) + "/jobs?filter=latest&per_page=100"),
+                         github.api("/actions/runs/" + str(args.run_id) + "/artifacts?per_page=100"),
+                         args.source_commit, args.run_id)
+
+        release = github.publish(args.source_commit, body, binaries + android_client_binaries + companion_binaries, guard,
+                                 save_assets=save_assets, before_promote=before_promote)
         state.update(status="PASS_PUBLISHED", release_published=True, release=release,
                      branch=branch, publication_commit=publication["commit"],
                      full_remote_download_SHA256_verified=True, report_files=metadata_files,
-                     resources=guard.report())
+                     full_release_asset_API_SHA256_verified=True, release_assets_uploaded=True,
+                     release_asset_receipts=github.asset_receipts, resources=guard.report())
         for row in state["artifacts"]:
-            row["download_url"] = "https://github.com/" + REPO + "/raw/" + publication["commit"] + "/" + row["name"]
+            row["immutable_download_url"] = "https://github.com/" + REPO + "/raw/" + publication["commit"] + "/" + row["name"]
+            row["download_url"] = asset_download_url(row["name"])
+        for row in state["companions"]:
+            row["download_url"] = asset_download_url(row["name"])
+        for row in state["android_clients"]:
+            row["download_url"] = asset_download_url(row["name"])
         write_json(state_path, state)
         print(json.dumps({"status": state["status"], "release": release["html_url"],
-                          "artifacts": state["artifacts"]}, sort_keys=True))
+                          "artifacts": state["artifacts"], "companions": state["companions"],
+                          "android_clients": state["android_clients"],
+                          "release_asset_receipts": state["release_asset_receipts"]}, sort_keys=True))
         return 0
     except BaseException as error:
         state.update(status="FAIL", error_type=type(error).__name__, resources=guard.report())

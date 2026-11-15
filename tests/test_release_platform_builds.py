@@ -111,7 +111,7 @@ def apk_fixture(monkeypatch,tmp_path,*,wrong_cert=False,wrong_version=False,tamp
     def capture(arguments,**kwargs):
         name=Path(arguments[0]).name
         if name=="apksigner":return "Verified using v2 scheme (APK Signature Scheme v2): true\nSigner #1 certificate SHA-256 digest: "+("f"*64 if wrong_cert else builds.ANDROID_CERT)+"\n"
-        if name=="aapt":return "package: name='"+builds.ANDROID_PACKAGE+"' versionCode='"+("50" if wrong_version else "51")+"' versionName='0.3.34'\n"+("application-debuggable\n" if debuggable else "")
+        if name=="aapt":return "package: name='"+builds.ANDROID_PACKAGE+"' versionCode='"+("51" if wrong_version else "52")+"' versionName='0.3.35'\n"+("application-debuggable\n" if debuggable else "")
         assert name=="zipalign";return "Verification successful"
     monkeypatch.setattr(builds,"capture",capture)
     return target,{"library_bytes":len(engine),"library_sha256":hashlib.sha256(engine).hexdigest()}
@@ -120,7 +120,7 @@ def apk_fixture(monkeypatch,tmp_path,*,wrong_cert=False,wrong_version=False,tamp
 def test_arm_apk_requires_exact_identity_signer_and_embedded_bytes(monkeypatch,tmp_path):
     target,engine=apk_fixture(monkeypatch,tmp_path)
     result=builds.check_apk(target,"arm64-v8a",{},engine,tmp_path)
-    assert result["certificate_sha256"]==builds.ANDROID_CERT and result["build_number"]==51
+    assert result["certificate_sha256"]==builds.ANDROID_CERT and result["build_number"]==52
 
 
 @pytest.mark.parametrize("change",["wrong_cert","wrong_version","tampered","debuggable"])

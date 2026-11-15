@@ -556,6 +556,19 @@ static void ProbePollLanguage(WKWebView *__weak weakWeb,NSString *script,NSTimeI
         });
     }];
 }
+static void ProbeAutoSaveLanguage(WKWebView *web,NSString *next,NSString *effective,void (^completion)(NSDictionary *)) {
+    NSString *setup=[ProbeReplyHook stringByAppendingFormat:
+        @"window.__idolyProbeGameAck=null;(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form');"
+         "if(!s||!f)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",next];
+    [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
+        if (error || ![value isEqual:@YES]) { completion(@{}); return; }
+        NSString *poll=[NSString stringWithFormat:
+            @"(()=>{const a=window.__idolyProbeGameAck,f=document.getElementById('options-fields'),m=document.getElementById('message');"
+             "return {ready:!!a&&a.language==='%@'&&a.effective==='%@'&&!!f&&!f.disabled&&!!m&&!m.hidden&&m.dataset.error==='false',"
+             "ack_id:a?a.id:0};})()",next,effective];
+        ProbePollLanguage(web,poll,NSProcessInfo.processInfo.systemUptime+15,nil,completion);
+    }];
+}
 static NSString *ProbeChromeTitle(NSString *language) {
     return [language isEqual:@"ja"] ? @"アイプラサーバー" : [language isEqual:@"en"] ? @"Idoly Server" : @"아이프라 서버";
 }
@@ -675,6 +688,146 @@ static void ProbeZIPImportPicker(WKWebView *web,UIViewController *presenter,void
         metrics[@"timed_out"]=@YES; finish();
     });
     ProbeZIPImportBegin(web,presenter,state,finish);
+}
+
+static void ProbeZIPRoundTripPoll(WKWebView *__weak web,UIViewController *__weak presenter,
+                                  NSMutableDictionary *state,void (^finish)(void));
+static void ProbeZIPRoundTripPicker(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
+                                    NSMutableDictionary *state,void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    UIViewController *presenter=weakPresenter; UIViewController *shown=presenter.presentedViewController;
+    if ([shown isKindOfClass:UIDocumentPickerViewController.class] && shown.viewIfLoaded.window && !shown.isBeingPresented) {
+        UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
+        NSMutableDictionary *metrics=state[@"metrics"];
+        metrics[@"picker_presented"]=@YES; metrics[@"picker_import_mode"]=@(picker.documentPickerMode==UIDocumentPickerModeImport);
+        metrics[@"picker_single_selection"]=@(!picker.allowsMultipleSelection);
+        if (![picker.delegate respondsToSelector:@selector(documentPicker:didPickDocumentsAtURLs:)]) { finish(); return; }
+        [picker.delegate documentPicker:picker didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:state[@"source"]]]];
+        metrics[@"selection_delegate_invoked"]=@YES;
+        [picker dismissViewControllerAnimated:NO completion:nil]; metrics[@"dismissed_programmatically"]=@YES;
+        state[@"phase"]=@"import"; ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish); return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/4),dispatch_get_main_queue(),^{
+        ProbeZIPRoundTripPicker(weakWeb,weakPresenter,state,finish);
+    });
+}
+static void ProbeZIPRoundTripOpen(WKWebView *web,UIViewController *presenter,NSMutableDictionary *state,void (^finish)(void)) {
+    NSString *script=@"(() => {const b=document.getElementById('resources-import');if(!b||b.disabled)return {ready:false};"
+        "const q=window.__idolyZIPRoundTripObserved={request_id:null,queued:false,copied_bytes:0,total_bytes:0,reply_accepted:false};"
+        "const event=window.idolyServerEvent,reply=window.idolyServerReply;"
+        "window.idolyServerEvent=function(v){if(v&&v.event==='resource_import_progress'){"
+        "if(q.request_id===null)q.request_id=v.request_id;if(q.request_id===v.request_id){"
+        "q.queued=q.queued||v.stage==='queued';q.copied_bytes=v.copied_bytes;q.total_bytes=v.total_bytes;}}return event.apply(this,arguments);};"
+        "window.idolyServerReply=function(id,v){let x=v;try{if(typeof x==='string')x=JSON.parse(x);}catch(_){}"
+        "if(id===q.request_id&&x&&x.ok===true&&x.result&&x.result.accepted===true)q.reply_accepted=true;return reply.apply(this,arguments);};"
+        "b.click();return {ready:true,button_disabled:b.disabled};})()";
+    ProbePollLanguage(web,script,[state[@"deadline"] doubleValue],nil,^(NSDictionary *value){
+        if ([state[@"finished"] boolValue]) return;
+        state[@"metrics"][@"wk_import_dispatched"]=@([value[@"ready"] isEqual:@YES] && [value[@"button_disabled"] isEqual:@YES]);
+        if (![value[@"ready"] isEqual:@YES]) { finish(); return; }
+        ProbeZIPRoundTripPicker(web,presenter,state,finish);
+    });
+}
+static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
+                                  NSMutableDictionary *state,void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    IdolyEmbeddedServerCommand(@"{\"id\":7302,\"action\":\"status\"}",^(NSString *reply){
+        if ([state[@"finished"] boolValue]) return;
+        NSDictionary *envelope=ProbeObject(reply), *status=envelope[@"result"];
+        NSDictionary *operation=[status[@"resource_operation"] isKindOfClass:NSDictionary.class] ? status[@"resource_operation"] : @{};
+        NSDictionary *job=[operation[@"job"] isKindOfClass:NSDictionary.class] ? operation[@"job"] : @{};
+        NSMutableDictionary *metrics=state[@"metrics"];
+        if ([state[@"phase"] isEqual:@"export"] && [operation[@"ready"] isEqual:@YES] && [job[@"action"] isEqual:@"export"]) {
+            metrics[@"export_ready"]=@([operation[@"accepted"] isEqual:@YES]);
+            metrics[@"export_archive_complete"]=@([job[@"archive_complete"] isEqual:@YES]);
+            metrics[@"exported_files"]=job[@"exported_files"] ?: @0;
+            NSString *source=operation[@"output_path"], *imports=status[@"paths"][@"imports"];
+            if (![source isKindOfClass:NSString.class] || ![imports isKindOfClass:NSString.class]) { finish(); return; }
+            state[@"source"]=source; state[@"imports"]=imports;
+            dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                NSDictionary *hash=ProbeResourceHash(source);
+                NSArray *before=[NSFileManager.defaultManager contentsOfDirectoryAtPath:imports error:NULL] ?: @[];
+                dispatch_async(dispatch_get_main_queue(),^{
+                    if ([state[@"finished"] boolValue]) return;
+                    if (!hash[@"sha256"]) { finish(); return; }
+                    state[@"source_hash"]=hash; state[@"before_imports"]=[NSSet setWithArray:before];
+                    metrics[@"source_bytes"]=hash[@"bytes"]; metrics[@"source_sha256"]=hash[@"sha256"];
+                    ProbeZIPRoundTripOpen(weakWeb,weakPresenter,state,finish);
+                });
+            }); return;
+        }
+        if ([state[@"phase"] isEqual:@"import"] && [operation[@"ready"] isEqual:@YES] && [job[@"action"] isEqual:@"import"]) {
+            metrics[@"backend_ready"]=@YES;
+            metrics[@"backend_success"]=@([operation[@"accepted"] isEqual:@YES] && [job[@"platform"] isEqual:@"ios"]
+                && [@[@"completed",@"partial"] containsObject:job[@"state"]] && [job[@"failed_files"] isEqual:@0]);
+            metrics[@"imported_files"]=job[@"imported_files"] ?: @0; metrics[@"failed_files"]=job[@"failed_files"] ?: @(-1);
+            NSNumber *requests=status[@"runtime"][@"resource_transfer"][@"session_http_requests"];
+            metrics[@"upstream_requests_unchanged"]=@([requests isEqual:state[@"upstream_requests"]]);
+            NSString *script=@"(() => {const q=window.__idolyZIPRoundTripObserved||{},b=document.getElementById('resources-import'),"
+                "s=document.getElementById('resource-state');return {reply_accepted:q.reply_accepted===true,queued:q.queued===true,"
+                "copied_bytes:q.copied_bytes||0,total_bytes:q.total_bytes||0,button_restored:!!b&&!b.disabled,"
+                "ready:!!s&&['완료','일부 완료','Complete','Partially complete','完了','一部完了'].includes(s.textContent)&&!!b&&!b.disabled};})()";
+            ProbePollLanguage(weakWeb,script,[state[@"deadline"] doubleValue],nil,^(NSDictionary *value){
+                if ([state[@"finished"] boolValue]) return;
+                metrics[@"import_reply_accepted"]=@([value[@"reply_accepted"] isEqual:@YES]);
+                metrics[@"native_copy_queued"]=@([value[@"queued"] isEqual:@YES]);
+                metrics[@"copied_bytes"]=value[@"copied_bytes"] ?: @0; metrics[@"total_bytes"]=value[@"total_bytes"] ?: @0;
+                metrics[@"dom_completed"]=@([value[@"ready"] isEqual:@YES]);
+                metrics[@"button_restored"]=@([value[@"button_restored"] isEqual:@YES]);
+                metrics[@"picker_detached"]=@(weakPresenter.presentedViewController==nil);
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                    NSString *imports=state[@"imports"], *copyPath=nil;
+                    for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:imports error:NULL])
+                        if (![state[@"before_imports"] containsObject:name] && [name.pathExtension.lowercaseString isEqual:@"zip"]) {
+                            if (copyPath) { copyPath=nil; break; } copyPath=[imports stringByAppendingPathComponent:name];
+                        }
+                    NSDictionary *copied=copyPath ? ProbeResourceHash(copyPath) : @{}, *source=ProbeResourceHash(state[@"source"]);
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        if ([state[@"finished"] boolValue]) return;
+                        NSDictionary *original=state[@"source_hash"];
+                        metrics[@"owned_copy_found"]=@(copied[@"sha256"]!=nil);
+                        metrics[@"copy_source_distinct"]=@(copied[@"identity"] && ![copied[@"identity"] isEqual:original[@"identity"]]);
+                        metrics[@"source_preserved"]=@([source[@"sha256"] isEqual:original[@"sha256"]] && [source[@"bytes"] isEqual:original[@"bytes"]]);
+                        metrics[@"copy_bytes_match"]=@([copied[@"bytes"] isEqual:original[@"bytes"]]
+                            && [metrics[@"copied_bytes"] isEqual:original[@"bytes"]] && [metrics[@"total_bytes"] isEqual:original[@"bytes"]]);
+                        metrics[@"source_copy_sha256_match"]=@([copied[@"sha256"] isEqual:original[@"sha256"]]);
+                        metrics[@"copied_sha256"]=copied[@"sha256"] ?: @""; finish();
+                    });
+                });
+            }); return;
+        }
+        if ([operation[@"accepted"] isEqual:@NO]) { finish(); return; }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/4),dispatch_get_main_queue(),^{
+            ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish);
+        });
+    });
+}
+static void ProbeZIPRoundTrip(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+    if (probeRunIndex!=0) { completion(@{@"performed":@NO,@"reason":@"first-cold-run-only"}); return; }
+    NSMutableDictionary *metrics=[@{@"performed":@YES,@"scope":@"stock-simulator",
+        @"selection_trigger":@"delegate-callback",@"timed_out":@NO} mutableCopy];
+    NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
+    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics,@"phase":@"export",@"deadline":@(started+120)} mutableCopy];
+    void (^finish)(void)=^{
+        if ([state[@"finished"] boolValue]) return;
+        state[@"finished"]=@YES; metrics[@"elapsed_seconds"]=@(MAX(0.0,NSProcessInfo.processInfo.systemUptime-started));
+        completion(metrics.copy);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if ([state[@"finished"] boolValue]) return; metrics[@"timed_out"]=@YES; finish();
+    });
+    IdolyEmbeddedServerCommand(@"{\"id\":7300,\"action\":\"status\"}",^(NSString *reply){
+        if ([state[@"finished"] boolValue]) return;
+        NSDictionary *status=ProbeObject(reply)[@"result"];
+        state[@"upstream_requests"]=status[@"runtime"][@"resource_transfer"][@"session_http_requests"] ?: @(-1);
+        IdolyEmbeddedServerCommand(@"{\"id\":7301,\"action\":\"resources_export\"}",^(NSString *exportReply){
+            if ([state[@"finished"] boolValue]) return;
+            NSDictionary *value=ProbeObject(exportReply);
+            metrics[@"export_accepted"]=@([value[@"ok"] isEqual:@YES] && [value[@"result"][@"accepted"] isEqual:@YES]);
+            if (![metrics[@"export_accepted"] isEqual:@YES]) { finish(); return; }
+            ProbeZIPRoundTripPoll(web,presenter,state,finish);
+        });
+    });
 }
 
 static BOOL ProbeAES(const unsigned char *key, size_t keySize, const unsigned char *expected) {
@@ -837,6 +990,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *nativeHeaderProbe;
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
 @property(nonatomic, strong) NSDictionary *zipImportObservation;
+@property(nonatomic, strong) NSDictionary *zipRoundTripObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
 @property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
 @property(nonatomic,strong) NSMutableArray *interfaceLanguageCycle;
@@ -871,7 +1025,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
@@ -887,7 +1041,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{},
-        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{},
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
@@ -1066,24 +1220,22 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 - (void)saveNextLanguage:(WKWebView *)web completion:(void (^)(BOOL))completion {
     NSString *next=ProbeNextLanguage();
-    NSString *setup=[ProbeReplyHook stringByAppendingFormat:
-        @"window.__idolyProbeGameAck=null;(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form');"
-         "if(!s||!f)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));f.requestSubmit();return true;})()",next];
-    [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
-        if(error || ![value isEqual:@YES]) { completion(NO); return; }
-        NSString *poll=[NSString stringWithFormat:
-            @"(()=>{const a=window.__idolyProbeGameAck,f=document.getElementById('options-fields'),m=document.getElementById('message');"
-             "return {ready:!!a&&a.language==='%@'&&a.effective==='%@'&&!!f&&!f.disabled&&!!m&&!m.hidden&&m.dataset.error==='false',"
-             "ack_id:a?a.id:0};})()",next,probeExpectedLanguage];
-        ProbePollLanguage(web,poll,NSProcessInfo.processInfo.systemUptime+15,nil,^(NSDictionary *ack){
-            BOOL saved=[ack[@"ready"] isEqual:@YES];
-            self.languageSave=@{@"current_language":probeExpectedLanguage,@"next_language":next,
-                @"ack_id":ack[@"ack_id"] ?: @0,@"acknowledged":@(saved),@"persisted_language":next,
-                @"effective_language":probeExpectedLanguage,@"options_fields_reenabled":@(saved),@"message_success":@(saved)};
-            if (saved) [self recordCheckpoint:@"language_saved"];
-            completion(saved);
-        });
-    }];
+    void (^finish)(NSDictionary *)=^(NSDictionary *ack){
+        BOOL saved=[ack[@"ready"] isEqual:@YES];
+        self.languageSave=@{@"current_language":probeExpectedLanguage,@"next_language":next,
+            @"ack_id":ack[@"ack_id"] ?: @0,@"acknowledged":@(saved),@"persisted_language":next,
+            @"save_trigger":@"change-autosave",@"effective_language":probeExpectedLanguage,
+            @"options_fields_reenabled":@(saved),@"message_success":@(saved)};
+        if (saved) [self recordCheckpoint:@"language_saved"];
+        completion(saved);
+    };
+    // The last return is already Korean. Make a real EN edit first so this
+    // check cannot pass by resubmitting unchanged values or a stale ACK.
+    if (probeRunIndex==4) ProbeAutoSaveLanguage(web,@"en",probeExpectedLanguage,^(NSDictionary *ack){
+        if (![ack[@"ready"] isEqual:@YES]) { completion(NO); return; }
+        ProbeAutoSaveLanguage(web,next,probeExpectedLanguage,finish);
+    });
+    else ProbeAutoSaveLanguage(web,next,probeExpectedLanguage,finish);
 }
 - (void)probeLauncher:(NSDictionary *)status {
     if (self.probeError || self.launchDispatched || self.reportScheduled) return;
@@ -1188,16 +1340,40 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     if (![self observeKeyboard:@"before_launch" phase:2 ready:NO calls:2 failure:@"keyboard_before_launch_failed"]) return;
     [self recordCheckpoint:@"keyboard_before_launch_checked"];
     self.launchDispatched = YES;
-    self.launcherProbe[@"button_dispatch_count"] = @1;
-    [self recordCheckpoint:@"launch_action_requested"];
-    BOOL dispatched = ProbeDispatchButton(item);
-    self.launcherProbe[@"button_action_dispatched"] = @(dispatched);
-    self.launcherProbe[@"button_control_event"] = @"touch-up-inside";
-    [self recordCheckpoint:@"launch_action_dispatched"];
-    if (!dispatched) { self.probeError = @"ready_launch_action_not_dispatched"; return; }
-    // Repeated clicks must not forward Unity a second time.
-    IdolyEmbeddedServerLaunchGame();
-    self.launcherProbe[@"duplicate_launch_called"] = @YES;
+    WKWebView *web=ProbeFindSettingsWeb(item.window.rootViewController.view);
+    if (!web) { [self failProbe:@"launch_settings_barrier_failed"]; return; }
+    NSString *setup=@"(() => {const old=window.idolyServerFlushSettings;if(typeof old!=='function')return false;"
+        "const q=window.__idolyProbeLaunchGate={calls:0,held:false,release:null};"
+        "window.webkit.messageHandlers.idolyServer.postMessage({id:2000000000,action:'launch_settings_barrier',"
+        "nonce:'00000000-0000-4000-8000-000000000000',ready:true});"
+        "window.idolyServerFlushSettings=function(nonce){q.calls++;q.held=true;q.release=()=>{"
+        "window.idolyServerFlushSettings=old;q.held=false;old(nonce);};};return true;})()";
+    [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
+        if (error || ![value isEqual:@YES]) { [self failProbe:@"launch_settings_barrier_failed"]; return; }
+        self.launcherProbe[@"button_dispatch_count"] = @1;
+        [self recordCheckpoint:@"launch_action_requested"];
+        BOOL dispatched = ProbeDispatchButton(item);
+        self.launcherProbe[@"button_action_dispatched"] = @(dispatched);
+        self.launcherProbe[@"button_control_event"] = @"touch-up-inside";
+        [self recordCheckpoint:@"launch_action_dispatched"];
+        if (!dispatched) { [self failProbe:@"ready_launch_action_not_dispatched"]; return; }
+        NSString *heldScript=@"(() => {const q=window.__idolyProbeLaunchGate;return {ready:!!q&&q.calls===1&&q.held&&typeof q.release==='function'};})()";
+        ProbePollLanguage(web,heldScript,NSProcessInfo.processInfo.systemUptime+5,nil,^(NSDictionary *held){
+            NSDictionary *pending=ProbeObject(IdolyEmbeddedServerStatusJSON());
+            BOOL stillCold=ProbePreRuntime() && self.originalCount==0 && [UnityFramework getInstance].probeRunCount==0
+                && [pending[@"phase"] isEqual:@2] && [pending[@"launch_requested"] isEqual:@NO];
+            self.launcherProbe[@"cold_while_settings_flush_held"]=@(stillCold);
+            self.launcherProbe[@"game_button_disabled_during_flush"]=@(!item.enabled);
+            self.launcherProbe[@"settings_flush_called_once"]=@([held[@"ready"] isEqual:@YES]);
+            self.launcherProbe[@"unsolicited_settings_ack_ignored"]=@(stillCold);
+            if (![held[@"ready"] isEqual:@YES] || !stillCold || item.enabled) { [self failProbe:@"launch_settings_barrier_failed"]; return; }
+            self.launcherProbe[@"settings_flush_released_before_forward"]=@YES;
+            [web evaluateJavaScript:@"window.__idolyProbeLaunchGate.release()" completionHandler:^(id released,NSError *releaseError){
+                (void)released;
+                if (releaseError) [self failProbe:@"launch_settings_barrier_failed"];
+            }];
+        });
+    }];
 }
 
 // Exact Unity ABI: void return, instance receiver, selector, one object argument.
@@ -1206,6 +1382,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     ++self.originalCount;
     if (![self observeOctoBudgetBeforeOriginal]) return;
     self.launcherProbe[@"forwarded_after_button"] = @(self.launchDispatched);
+    IdolyEmbeddedServerLaunchGame(); self.launcherProbe[@"duplicate_launch_called"] = @YES;
     [self recordCheckpoint:@"unity_forwarded"];
     if (self.reportScheduled) return;
     self.reportScheduled = YES; [self.waitingTimer invalidate]; self.waitingTimer = nil;
@@ -1358,6 +1535,20 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 }
                 if (!zipOK) { [self failProbe:@"settings_zip_import_picker_failed"]; return; }
                 [self recordCheckpoint:@"settings_zip_import_cancelled"];
+                ProbeZIPRoundTrip(web,navigation.topViewController,^(NSDictionary *roundtrip) {
+                self.zipRoundTripObservation=roundtrip; menu[@"zip_roundtrip"]=roundtrip;
+                BOOL roundtripOK=probeRunIndex!=0 && [roundtrip[@"performed"] isEqual:@NO];
+                if (probeRunIndex==0) {
+                    roundtripOK=[roundtrip[@"timed_out"] isEqual:@NO];
+                    for (NSString *key in @[@"export_accepted",@"export_ready",@"export_archive_complete",@"wk_import_dispatched",
+                            @"picker_presented",@"picker_import_mode",@"picker_single_selection",@"selection_delegate_invoked",
+                            @"dismissed_programmatically",@"picker_detached",@"import_reply_accepted",@"native_copy_queued",
+                            @"copy_bytes_match",@"owned_copy_found",@"copy_source_distinct",@"source_preserved",
+                            @"source_copy_sha256_match",@"backend_ready",@"backend_success",@"dom_completed",@"button_restored",
+                            @"upstream_requests_unchanged"]) roundtripOK=roundtripOK && [roundtrip[key] isEqual:@YES];
+                }
+                if (!roundtripOK) { [self failProbe:@"settings_zip_roundtrip_failed"]; return; }
+                [self recordCheckpoint:@"settings_zip_roundtrip_checked"];
                 [self saveNextLanguage:web completion:^(BOOL saved){
                 if (!saved) { [self failProbe:@"language_save_failed"]; return; }
                 BOOL closed = ProbeDispatchButton(close);
@@ -1368,6 +1559,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 [self observeMenuDismissal:navigation report:report menu:menu
                                   started:NSProcessInfo.processInfo.systemUptime observations:0];
                 }];
+                });
                 });
             });
         });

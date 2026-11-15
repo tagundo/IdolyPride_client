@@ -139,7 +139,8 @@ def native_report(language="ko", run_index=None):
                 "ready_button_enabled": True, "ready_button_title": "게임 시작",
                 "ready_button_kind":"UIButton","button_control_event":"touch-up-inside",
                 "button_action_dispatched": True, "button_dispatch_count": 1,
-                "duplicate_launch_called": True, "forwarded_after_button": True},
+                "duplicate_launch_called": True, "forwarded_after_button": True,
+                **{key:True for key in probe.LAUNCH_SETTINGS_FLAGS}},
             "corner_gesture": {"game_window_key": True, "matching_count": 1,
                 "recognizer_name": "idoly.server-menu-corner", "one_finger_count": 1, "three_finger_count": 0,
                 "minimum_press_seconds": 2.0, "allowable_movement_points": 12.0, "delegate_present": True,
@@ -207,6 +208,11 @@ def native_report(language="ko", run_index=None):
             "grpc_connected_after_cancel":True,"assets_connected_after_cancel":True,
             "passes":[{**{key:True for key in probe.ZIP_IMPORT_PASS_BOOL_FIELDS},"document_picker_mode":0}
                       for _ in range(2)]},
+        "zip_roundtrip":({"performed":True,"scope":"stock-simulator","selection_trigger":"delegate-callback",
+            "timed_out":False,"elapsed_seconds":4.0,**{key:True for key in probe.ZIP_ROUNDTRIP_FLAGS},
+            "source_bytes":4096,"copied_bytes":4096,"total_bytes":4096,"exported_files":0,"imported_files":0,
+            "failed_files":0,"source_sha256":"a"*64,"copied_sha256":"a"*64}
+            if run_index == 0 else {"performed":False,"reason":"first-cold-run-only"}),
         "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
         "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
             "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":True,
@@ -248,6 +254,7 @@ def native_report(language="ko", run_index=None):
         for index,item in enumerate(("ja","en","ko"))]
     next_language = ("en","ja","en","ko","ko")[run_index]
     report["language_save"] = {"current_language":language,"next_language":next_language,"ack_id":200,
+        "save_trigger":"change-autosave",
         "acknowledged":True,"persisted_language":next_language,"effective_language":language,
         "options_fields_reenabled":True,"message_success":True}
     return report
@@ -1064,6 +1071,59 @@ def test_zip_import_checkpoint_preserves_safe_cancel_evidence(tmp_path, source, 
     if source == "checkpoint":
         assert clean["stage"] == "settings_zip_import_cancelled"
     assert "DO-NOT-EXPORT" not in json.dumps(clean)
+
+
+@pytest.mark.parametrize("field,value", [(key,value) for key in probe.ZIP_ROUNDTRIP_FLAGS for value in (False,1)] + [
+    ("performed",False),("performed",1),("scope","livecontainer"),("selection_trigger","files-row-tap"),
+    ("timed_out",True),("source_bytes",0),("copied_bytes",4095),("total_bytes",4097),("failed_files",1),
+    ("imported_files",1),("exported_files",True),("source_sha256","not-a-hash"),("copied_sha256","b"*64),
+    ("elapsed_seconds",121),("elapsed_seconds",float("nan")),("elapsed_seconds",True)])
+def test_first_cold_run_requires_actual_zip_copy_and_host_roundtrip_evidence(field, value):
+    observed = native_report()
+    observed["menu_lifetime"]["zip_roundtrip"][field] = value
+    with pytest.raises(probe.ProbeError, match="^settings_zip_roundtrip_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("language,run_index", [("en",1),("ja",2),("en",3),("ko",4)])
+def test_roundtrip_is_required_once_and_later_runs_require_exact_skip_provenance(language, run_index):
+    observed = native_report(language,run_index)
+    assert probe.validate_report(observed)["menu_lifetime"]["zip_roundtrip"] == {
+        "performed":False,"reason":"first-cold-run-only"}
+    observed["menu_lifetime"]["zip_roundtrip"] = native_report()["menu_lifetime"]["zip_roundtrip"]
+    with pytest.raises(probe.ProbeError, match="^settings_zip_roundtrip_failed$"):
+        probe.validate_report(observed)
+    first = native_report()
+    first["menu_lifetime"]["zip_roundtrip"] = {"performed":False,"reason":"first-cold-run-only"}
+    with pytest.raises(probe.ProbeError, match="^settings_zip_roundtrip_failed$"):
+        probe.validate_report(first)
+
+
+@pytest.mark.parametrize("field,value", [(key,value) for key in probe.LAUNCH_SETTINGS_FLAGS for value in (False,1)])
+def test_launch_stays_cold_until_real_settings_flush_releases(field, value):
+    observed = native_report()
+    observed["launcher"][field] = value
+    with pytest.raises(probe.ProbeError, match="^launch_settings_barrier_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("trigger", [None,"submit-button","requestSubmit",1])
+def test_language_cycle_requires_change_autosave_instead_of_explicit_submit(trigger):
+    observed = native_report()
+    observed["language_save"]["save_trigger"] = trigger
+    with pytest.raises(probe.ProbeError, match="^language_save_failed$"):
+        probe.validate_report(observed)
+
+
+def test_roundtrip_audit_keeps_full_hash_and_byte_evidence_without_paths():
+    observed = native_report()
+    observed["menu_lifetime"]["zip_roundtrip"].update(source_path="DO-NOT-EXPORT",owned_path="DO-NOT-EXPORT")
+    checked = probe.validate_report(observed)["menu_lifetime"]["zip_roundtrip"]
+    assert checked["source_bytes"] == checked["copied_bytes"] == checked["total_bytes"] == 4096
+    assert checked["source_sha256"] == checked["copied_sha256"] == "a"*64
+    assert "DO-NOT-EXPORT" not in json.dumps(checked)
+    assert probe.zip_roundtrip_observation({"source_path":"DO-NOT-EXPORT","source_bytes":True,
+        "source_sha256":"invalid","performed":True}) == {"performed":True}
 
 
 def test_diagnostics_copy_audit_discards_all_copied_text_and_keeps_only_flags_and_size():
@@ -1965,13 +2025,14 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker"))
+                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker", "zip_roundtrip"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]
     assert result["report_http_readiness"] == raw_report["server_status"]["http_readiness"]
     assert result["diagnostics_copy"] == raw_report["menu_lifetime"]["diagnostics_copy"]
     assert result["zip_import_picker"] == raw_report["menu_lifetime"]["zip_import_picker"]
+    assert result["zip_roundtrip"] == raw_report["menu_lifetime"]["zip_roundtrip"]
     assert result["octo_budget"] == raw_report["server_status"]["octo_budget"]
     assert result["octo_budget_probe"] == raw_report["octo_budget_probe"]
     assert "must not retain" not in json.dumps(result)

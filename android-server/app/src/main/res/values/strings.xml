@@ -23,12 +23,12 @@
     <string name="first_launch_note">첫 실행에서는 포함된 서버 데이터를 준비합니다. 기존 로컬 계정과 저장 데이터는 유지됩니다.</string>
     <string name="launch_diagnostic_client">아이프라 실행</string>
     <string name="diagnostic_client_missing">아이프라 로컬 클라이언트 APK를 먼저 설치해 주세요.</string>
-    <string name="export_diagnostics">진단 기록 내보내기</string>
+    <string name="export_diagnostics">진단·서버 기록 내보내기</string>
     <string name="export_server_logs">서버 기록 내보내기</string>
     <string name="server_logs_export_saved">서버 기록을 저장했습니다.</string>
     <string name="server_logs_export_failed">서버 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
-    <string name="export_saved">진단 기록을 저장했습니다.</string>
-    <string name="export_failed">진단 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
+    <string name="export_saved">진단·서버 기록을 저장했습니다.</string>
+    <string name="export_failed">진단·서버 기록을 저장하지 못했습니다. 저장 위치를 다시 선택해 주세요.</string>
     <string name="export_picker_failed">파일 저장 화면을 열지 못했습니다.</string>
     <string name="game_state_title">게임 로딩 상태</string>
     <string name="game_state_waiting">게임 상태 수신 대기</string>
@@ -218,4 +218,13 @@
     <string name="library_export_document">ZIP을 선택한 위치에 저장했습니다.</string>
     <string name="library_import_result">가져온 검증 완료 파일 %1$d개 · 실패 %2$d개</string>
     <string name="library_import_partial">일부 파일은 가져오지 못했습니다. 검증 완료된 보관 파일은 유지했습니다.</string>
+    <string name="settings_automatic_notice">변경한 설정은 자동으로 저장됩니다. 게임 적용 여부는 각 항목의 상태를 확인해 주세요.</string>
+    <string name="mode_section_title">감상 모드</string>
+    <string name="experiment_section_title">실험 기능</string>
+    <string name="playback_section_title">MV 재생</string>
+    <string name="resources_section_title">게임 리소스</string>
+    <string name="diagnostics_section_title">진단</string>
+    <string name="diagnostics_details">상태·최근 기록 보기 ▾</string>
+    <string name="diagnostics_details_expanded">상태·최근 기록 보기 ▴</string>
+    <string name="diagnostics_export_notice">게임·서버 상태와 최근 기록을 JSON 한 파일로 저장합니다.</string>
 </resources>

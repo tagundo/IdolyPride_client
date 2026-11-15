@@ -875,7 +875,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @MainActor
 struct PresentationControls: View {
     @ObservedObject var model: ServerModel
-    @State private var expanded = false
+    @State private var expanded = true
 
     private func picker<Value: Hashable>(_ title: String, selection: Binding<Value>,
             values: [Value], label: @escaping (Value) -> String) -> some View {

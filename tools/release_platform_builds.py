@@ -22,7 +22,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD_NUMBER = "0.3.34",51
+VERSION, BUILD_NUMBER = "0.3.35",52
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"

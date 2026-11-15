@@ -12,6 +12,14 @@
   const BUFFER_PRESETS = [720, 1080, 1440, 1920, 2560, 3840, 4096];
   const UI_TRANSLATIONS = {
   "en": {
+    "변경하면 자동으로 저장됩니다.": "Changes are saved automatically.",
+    "변경 사항을 저장할 준비가 되었습니다.": "Changes are waiting to be saved.",
+    "저장 중…": "Saving…",
+    "자동 저장했습니다.": "Saved automatically.",
+    "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.": "Could not save settings. Choose Retry.",
+    "입력값의 범위를 확인해 주세요. 유효한 값만 자동으로 저장합니다.": "Check the allowed ranges. Only valid values are saved automatically.",
+    "게임을 시작하기 전에 설정 저장을 확인하고 있습니다.": "Checking saved settings before starting the game.",
+    "설정을 저장하지 못해 게임을 시작하지 않았습니다. 입력값과 저장 상태를 확인해 주세요.": "The game was not started because settings could not be saved. Check the values and save status.",
     "ZIP 선택 대기": "Waiting for ZIP selection",
     "ZIP 복사 중": "Copying ZIP",
     "ZIP 검증 준비": "Preparing ZIP validation",
@@ -82,7 +90,7 @@
     "ZIP 가져오기": "Import ZIP",
     "ZIP 내보내기": "Export ZIP",
     "작업 취소": "Cancel task",
-    "파일 앱에서 ZIP을 선택하거나 저장합니다. 내보내기에는 현재 보관된 파일만 포함됩니다.": "Choose or save a ZIP using the Files app. Exports include only files already stored.",
+    "iOS 게임 리소스 ZIP을 선택하면 파일을 검증해 이 앱에 보관합니다. 완료 후 게임 시작을 누르세요. 직접 압축을 풀 필요는 없습니다. 내보내기에는 현재 보관된 파일만 포함됩니다.": "Choose an iOS game resource ZIP to verify its files and store them in this app. When import finishes, tap Start game. You do not need to extract the ZIP yourself. Exports include only files already stored.",
     "진단": "Diagnostics",
     "게임 진단 대기 중": "Waiting for game diagnostics",
     "상태·최근 기록 보기": "View status and recent logs",
@@ -214,7 +222,7 @@
     "렌더 버퍼 최대 크기 직접 입력 값": "Custom maximum render buffer size",
     "리소스 검증 진행률": "Resource verification progress",
     "게임 시작 전의 변경은 ‘게임 시작’ 때 적용됩니다. 게임 시작 후의 감상 모드·언어 변경은 다음 앱 실행부터 적용됩니다.": "Changes saved before starting the game apply when you choose Start Game. Viewing mode and game language changed during gameplay apply next time you open the app.",
-    "게임 시작 전에 저장하면 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.": "Save before starting the game to use the selected language. Language changes made after the game starts apply when you reopen the app. Missing translations and untranslated images keep the original content.",
+    "설정은 자동으로 저장됩니다. 게임 시작 전에 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.": "Settings are saved automatically. The selected language is used when you start the game. Language changes made after the game starts apply when you reopen the app. Missing translations and untranslated images keep the original content.",
     "설정 저장": "Save settings",
     "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다.": "Saved. Before gameplay, changes apply when you choose Start Game. If the game has already started, they apply next time you open the app.",
     "진단 전체 복사": "Copy all diagnostics",
@@ -223,6 +231,14 @@
     "… 표시 한도로 나머지 진단은 생략했습니다.": "… Remaining diagnostics omitted at the display limit."
   },
   "ja": {
+    "변경하면 자동으로 저장됩니다.": "変更すると自動的に保存されます。",
+    "변경 사항을 저장할 준비가 되었습니다.": "変更内容の保存を待っています。",
+    "저장 중…": "保存中…",
+    "자동 저장했습니다.": "自動保存しました。",
+    "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.": "設定を保存できませんでした。「再試行」を押してください。",
+    "입력값의 범위를 확인해 주세요. 유효한 값만 자동으로 저장합니다.": "入力値の範囲を確認してください。有効な値だけを自動保存します。",
+    "게임을 시작하기 전에 설정 저장을 확인하고 있습니다.": "ゲーム開始前に設定の保存を確認しています。",
+    "설정을 저장하지 못해 게임을 시작하지 않았습니다. 입력값과 저장 상태를 확인해 주세요.": "設定を保存できなかったためゲームを開始しませんでした。入力値と保存状態を確認してください。",
     "ZIP 선택 대기": "ZIP選択待ち",
     "ZIP 복사 중": "ZIPをコピー中",
     "ZIP 검증 준비": "ZIP検証を準備中",
@@ -293,7 +309,7 @@
     "ZIP 가져오기": "ZIPを読み込む",
     "ZIP 내보내기": "ZIPを書き出す",
     "작업 취소": "処理を中止",
-    "파일 앱에서 ZIP을 선택하거나 저장합니다. 내보내기에는 현재 보관된 파일만 포함됩니다.": "「ファイル」アプリでZIPを選択または保存します。書き出しには保存済みのファイルのみが含まれます。",
+    "iOS 게임 리소스 ZIP을 선택하면 파일을 검증해 이 앱에 보관합니다. 완료 후 게임 시작을 누르세요. 직접 압축을 풀 필요는 없습니다. 내보내기에는 현재 보관된 파일만 포함됩니다.": "iOSゲームリソースのZIPを選ぶと、ファイルを検証してこのアプリに保管します。完了したら「ゲーム開始」を押してください。自分でZIPを展開する必要はありません。書き出しには保管済みのファイルのみが含まれます。",
     "진단": "診断",
     "게임 진단 대기 중": "ゲームの診断待ち",
     "상태·최근 기록 보기": "状態・最近のログを表示",
@@ -425,7 +441,7 @@
     "렌더 버퍼 최대 크기 직접 입력 값": "描画バッファの最大サイズの直接入力値",
     "리소스 검증 진행률": "リソース検証の進捗",
     "게임 시작 전의 변경은 ‘게임 시작’ 때 적용됩니다. 게임 시작 후의 감상 모드·언어 변경은 다음 앱 실행부터 적용됩니다.": "ゲーム開始前の変更は「ゲーム開始」時に適用されます。ゲーム開始後の鑑賞モード・言語の変更は次回のアプリ起動時に適用されます。",
-    "게임 시작 전에 저장하면 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.": "ゲーム開始前に保存すると、選択した言語で開始します。ゲーム開始後に変更した言語は、アプリの再起動後に適用されます。翻訳のない文章・画像は原文のまま表示されます。",
+    "설정은 자동으로 저장됩니다. 게임 시작 전에 선택한 언어로 시작합니다. 게임을 시작한 뒤 변경한 언어는 앱을 다시 실행하면 적용됩니다. 번역이 없는 문구·이미지는 원본으로 표시합니다.": "設定は自動保存されます。ゲーム開始前に選択した言語で開始します。ゲーム開始後に変更した言語は、アプリの再起動後に適用されます。翻訳のない文章・画像は原文のまま表示されます。",
     "설정 저장": "設定を保存",
     "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다.": "保存しました。ゲーム開始前なら「ゲーム開始」時に適用されます。すでにゲームを開始している場合は、次回のアプリ起動時に適用されます。",
     "진단 전체 복사": "診断をすべてコピー",
@@ -493,6 +509,9 @@
 
   function validRequest(action, payload) {
     if (action === "status") return exact(payload, []);
+    if (action === "launch_settings_barrier") return exact(payload, ["nonce", "ready"])
+      && typeof payload.nonce === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.nonce)
+      && typeof payload.ready === "boolean";
     if (action === "save_interface_language") return exact(payload, ["interface_language"])
       && choice(payload.interface_language, INTERFACE_LANGUAGES);
     if (action === "diagnostics_copy") return exact(payload, ["text"]) && typeof payload.text === "string"
@@ -620,6 +639,7 @@
     let interfaceDirty = false;
     let interfaceSelected = false;
     let interfaceVersion = 0;
+    let interfaceOperation = null;
     let language = resolveInterfaceLanguage(interfaceChoice, scope.navigator);
     const t = value => translateUI(value, language);
     const text = (id, value, localize = true) => { el(id).textContent = localize ? t(value) : value; };
@@ -649,6 +669,7 @@
       for (const entry of staticAttributes) entry.node.setAttribute("aria-label", t(entry.source));
       if (messageSource) text("message", messageSource);
       if (copyFeedbackSource) text("diagnostics-copy-feedback", copyFeedbackSource);
+      for (const name of Object.keys(forms)) renderSaveFeedback(name);
     }
     function syncPreset(key) {
       const presets = key === "render_scale" ? SCALE_PRESETS : BUFFER_PRESETS;
@@ -668,6 +689,9 @@
     let refreshing = false;
     let mutationVersion = 0;
     let visibilityVersion = 0;
+    let launchFlushing = false;
+    let flushNonce = null;
+    let flushGeneration = 0;
     let resourcePending = false;
     let importProgress = null;
     let latestImportRequestID = 0;
@@ -711,7 +735,8 @@
     function updateForm(name, settings) {
       const form = forms[name];
       if (!form.valid(settings)) {
-        el(name + "-fields").disabled = !form.value || Boolean(form.busy) || !snapshot.running || snapshot.state !== "ready";
+        el(name + "-fields").disabled = launchFlushing || !form.value || !snapshot.running || snapshot.state !== "ready";
+        renderSaveFeedback(name);
         return;
       }
       settings = name === "options" ? {interface_language: "system", ...settings} : settings;
@@ -724,7 +749,9 @@
         }
       }
       if (name === "presentation" && !form.dirty && !form.busy) for (const key of ["render_scale", "max_buffer_pixel"]) syncPreset(key);
-      el(name + "-fields").disabled = Boolean(form.busy) || !snapshot.running || snapshot.state !== "ready";
+      if (!form.dirty && !form.busy) form.fingerprint = formFingerprint(name);
+      el(name + "-fields").disabled = launchFlushing || !snapshot.running || snapshot.state !== "ready";
+      renderSaveFeedback(name);
     }
     function settingsFromForm(name) {
       const form = forms[name];
@@ -736,6 +763,43 @@
       }
       if (!form.valid(value)) throw new Error("설정 값의 범위를 확인해 주세요.");
       return value;
+    }
+    function formFingerprint(name) {
+      return JSON.stringify(forms[name].fields.map(key => el(key).type === "checkbox" ? el(key).checked : el(key).value));
+    }
+    function clearAutosave(name) {
+      const form = forms[name];
+      if (form.autosaveTimer !== null) timers.clearTimeout(form.autosaveTimer);
+      form.autosaveTimer = null;
+    }
+    function renderSaveFeedback(name) {
+      const form = forms[name];
+      text(name + "-save-feedback", form.feedback || "변경하면 자동으로 저장됩니다.");
+      el(name + "-save-feedback").dataset.state = form.saveState || "ready";
+      el(name + "-save-retry").hidden = form.saveState !== "failed";
+      el(name + "-save-retry").disabled = launchFlushing || Boolean(form.busy) || !snapshot || !snapshot.running || snapshot.state !== "ready";
+    }
+    function saveFeedback(name, state, value) {
+      forms[name].saveState = state; forms[name].feedback = value;
+      renderSaveFeedback(name);
+    }
+    function queueSave(name, delay = 0) {
+      const form = forms[name];
+      clearAutosave(name);
+      if (!form.dirty || !visible || disposed) return;
+      saveFeedback(name, "pending", "변경 사항을 저장할 준비가 되었습니다.");
+      if (delay > 0) form.autosaveTimer = timers.setTimeout(() => {
+        form.autosaveTimer = null; save(name);
+      }, delay);
+      else save(name);
+    }
+    function markEdited(name, delay = null) {
+      if (disposed || launchFlushing) return;
+      const form = forms[name], fingerprint = formFingerprint(name);
+      if (form.fingerprint !== fingerprint) {
+        form.fingerprint = fingerprint; form.editRevision++; form.dirty = true; mutationVersion++;
+      }
+      if (form.dirty && delay !== null) queueSave(name, delay);
     }
     function stopPolling() {
       if (pollTimer !== null) timers.clearTimeout(pollTimer);
@@ -823,7 +887,7 @@
           "schema", "phase", "captured", "forwarded", "attempts", "hook_installed",
           "python_initialized", "launch_requested", "launch_prepared", "launcher_visible",
           "keyboard_lifecycle", "keyboard_ready", "unity_host", "late_startup_calls", "octo_budget",
-          "game_hook_error", "error", "game_error", "client_data", "http_readiness"
+          "game_hook_error", "error", "game_error", "client_data", "http_readiness", "resource_import_progress"
         ].filter(key => Object.prototype.hasOwnProperty.call(snapshot.native, key)).map(key => [key, snapshot.native[key]])) : null,
         http_requests: runtime.http_requests || null,
         resource_transfer: runtime.resource_transfer || null,
@@ -888,6 +952,9 @@
       text("media-effective", mediaChanged ? "변경한 목록 설정은 다음 앱 실행부터 적용됩니다." : "목록 설정은 다음 앱 실행부터 적용됩니다.");
       renderResources(runtime);
       renderDiagnostics(runtime);
+      for (const [name, form] of Object.entries(forms)) if (form.resumeQueued && value.running && value.state === "ready") {
+        form.resumeQueued = false; queueSave(name);
+      }
       return true;
     }
     async function refresh() {
@@ -906,32 +973,65 @@
         schedulePoll();
       }
     }
-    async function save(name) {
+    function savedFormSettings(name, result) {
+      const runtime = object(result.runtime) ? result.runtime : {};
+      return name === "options" ? result.options : name === "presentation" ? runtime.presentation && runtime.presentation.settings
+        : name === "playback" ? runtime.playback && runtime.playback.settings : runtime.media_options && runtime.media_options.settings;
+    }
+    function save(name, force = false) {
       const form = forms[name];
-      if (!visible || disposed || form.busy || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
+      clearAutosave(name);
+      if (!visible || disposed || !snapshot || !snapshot.running || snapshot.state !== "ready") return Promise.resolve(false);
+      if (form.busy) { form.queued = true; return form.inflight; }
+      if (!form.dirty && !force) return Promise.resolve(true);
       let value;
       try { value = settingsFromForm(name); }
-      catch (error) { message(error.message, true); return; }
-      form.busy = true;
-      mutationVersion++;
-      const visibility = visibilityVersion;
-      el(name + "-fields").disabled = true;
-      try {
-        const result = await bridge.request("save_" + name, name === "options" ? value : {settings: value});
-        if (!visible || disposed || visibility !== visibilityVersion) return;
-        form.dirty = false;
-        form.busy = false;
-        if (!renderStatus(result)) { await refresh(); return; }
-        message(name === "options" ? "저장했습니다. 게임 시작 전이면 ‘게임 시작’ 때 적용됩니다. 이미 게임을 시작했다면 다음 앱 실행부터 적용됩니다." : name === "media" ? "저장했습니다. 다음 앱 실행부터 적용됩니다." : "설정을 저장했습니다. 게임 적용 상태를 확인해 주세요.");
-      } catch (error) {
-        if (visible && !disposed && visibility === visibilityVersion) message(error.message, true);
-      } finally {
-        form.busy = false;
-        if (!disposed) el(name + "-fields").disabled = !form.value || !snapshot || !snapshot.running || snapshot.state !== "ready";
-        schedulePoll();
+      catch (error) {
+        saveFeedback(name, "invalid", "입력값의 범위를 확인해 주세요. 유효한 값만 자동으로 저장합니다.");
+        if (force) message(error.message, true);
+        return Promise.resolve(false);
       }
+      const edited = form.editRevision, version = ++mutationVersion, visibility = visibilityVersion;
+      form.busy = true; form.queued = false;
+      saveFeedback(name, "saving", "저장 중…");
+      const operation = (async () => {
+        try {
+          const result = await bridge.request("save_" + name, name === "options" ? value : {settings: value});
+          if (!visible || disposed || visibility !== visibilityVersion) return false;
+          const settings = savedFormSettings(name, result);
+          if (!form.valid(settings)) throw new Error("서버 상태 형식을 확인하지 못했습니다.");
+          form.value = {...settings};
+          if (form.editRevision === edited) form.dirty = false;
+          // Another edit/save may have happened while this request was in flight.
+          // Its complete status reply must not repaint newer fields in other forms.
+          if (version === mutationVersion) renderStatus(result);
+          else updateForm(name, settings);
+          saveFeedback(name, form.dirty ? "pending" : "saved", form.dirty
+            ? "변경 사항을 저장할 준비가 되었습니다." : "자동 저장했습니다.");
+          return true;
+        } catch (error) {
+          if (visible && !disposed && visibility === visibilityVersion) {
+            saveFeedback(name, "failed", "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.");
+            if (force) message(error.message, true);
+          }
+          return false;
+        } finally {
+          form.busy = false; form.inflight = null;
+          if (!disposed) {
+            if (snapshot) updateForm(name, form.value);
+            if (form.queued && form.dirty && visible && !launchFlushing) queueSave(name);
+            schedulePoll();
+          }
+        }
+      })();
+      form.inflight = operation;
+      return operation;
     }
-    async function saveInterfaceLanguage(value) {
+    function saveInterfaceLanguage(value) {
+      interfaceOperation = persistInterfaceLanguage(value);
+      return interfaceOperation;
+    }
+    async function persistInterfaceLanguage(value) {
       if (!visible || disposed || !choice(value, INTERFACE_LANGUAGES)) return;
       const version = ++interfaceVersion;
       const visibility = visibilityVersion;
@@ -949,13 +1049,79 @@
         interfaceDirty = false;
         if (snapshot) snapshot.options = {...snapshot.options, interface_language: value};
         if (forms.options.value) forms.options.value.interface_language = value;
+        return true;
       } catch (_) {
         if (visible && !disposed && visibility === visibilityVersion && version === interfaceVersion)
           message("서버 화면 언어를 저장하지 못했습니다. 다시 선택해 주세요.", true);
+        return false;
       } finally {
         if (!disposed) schedulePoll();
       }
     }
+    function setFlushState(state) {
+      if (document.documentElement && document.documentElement.dataset) document.documentElement.dataset.settingsFlush = state;
+    }
+    function updateFlushControls() {
+      el("interface_language").disabled = launchFlushing;
+      if (snapshot) for (const name of Object.keys(forms)) updateForm(name, forms[name].value);
+    }
+    function releaseSettingsFlush(nonce) {
+      if (nonce !== flushNonce) return;
+      flushGeneration++; flushNonce = null; launchFlushing = false;
+      setFlushState("failed"); updateFlushControls();
+      if (visible && !disposed) message("설정을 저장하지 못해 게임을 시작하지 않았습니다. 입력값과 저장 상태를 확인해 주세요.", true);
+    }
+    function flushSettings(nonce) {
+      if (typeof nonce !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(nonce)
+          || !visible || disposed || launchFlushing) return;
+      for (const name of Object.keys(forms)) { markEdited(name); clearAutosave(name); }
+      const generation = ++flushGeneration;
+      flushNonce = nonce; launchFlushing = true; setFlushState("saving"); updateFlushControls();
+      message("게임을 시작하기 전에 설정 저장을 확인하고 있습니다.");
+      // Native evaluateJavaScript need not understand Promise return values on
+      // iOS 13. Only this explicit nonce ACK can release the native launch gate.
+      (async () => {
+        let ready = false;
+        try {
+          if (!snapshot || !snapshot.running || snapshot.state !== "ready") throw new Error("not_ready");
+          for (const name of Object.keys(forms)) {
+            try { settingsFromForm(name); }
+            catch (_) {
+              saveFeedback(name, "invalid", "입력값의 범위를 확인해 주세요. 유효한 값만 자동으로 저장합니다.");
+              throw new Error("invalid_settings");
+            }
+          }
+          await Promise.all(Object.entries(forms).map(async ([name, form]) => {
+            if (form.inflight) await form.inflight;
+            if (generation !== flushGeneration || !visible || disposed) throw new Error("flush_cancelled");
+            if (form.dirty) {
+              form.queued = false;
+              if (!await save(name) || form.dirty) throw new Error("save_failed");
+            }
+          }));
+          if (interfaceOperation) await interfaceOperation;
+          if (generation !== flushGeneration || !visible || disposed) throw new Error("flush_cancelled");
+          // One explicit launch attempt may retry a failed interface save once,
+          // just as it flushes dirty game forms. Never create a background loop.
+          if (interfaceDirty) await saveInterfaceLanguage(interfaceChoice);
+          if (interfaceDirty || generation !== flushGeneration || !visible || disposed) throw new Error("flush_cancelled");
+          ready = true; setFlushState("ready");
+        } catch (_) {
+          if (generation !== flushGeneration || disposed) return;
+          setFlushState("failed");
+          if (visible) message("설정을 저장하지 못해 게임을 시작하지 않았습니다. 입력값과 저장 상태를 확인해 주세요.", true);
+        }
+        if (generation !== flushGeneration || !visible || disposed) return;
+        try {
+          const result = await bridge.request("launch_settings_barrier", {nonce, ready});
+          if (generation === flushGeneration && (!ready || result.launched !== true)) releaseSettingsFlush(nonce);
+        } catch (_) {
+          if (generation === flushGeneration) releaseSettingsFlush(nonce);
+        }
+      })();
+    }
+    scope.idolyServerFlushSettings = flushSettings;
+    scope.idolyServerReleaseSettingsFlush = releaseSettingsFlush;
     async function resource(action) {
       if (!visible || disposed || resourcePending || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
       const payload = action === "cancel" ? {job_id: job && job.job_id} : action === "download" ? {parallelism: Number(el("parallelism").value)} : {};
@@ -997,33 +1163,56 @@
       visibilityVersion++;
       stopPolling();
       if (visible) { bridge.resume(); Promise.resolve().then(refresh); }
-      else bridge.suspend();
+      else {
+        if (launchFlushing) releaseSettingsFlush(flushNonce);
+        for (const [name, form] of Object.entries(forms)) {
+          clearAutosave(name); form.resumeQueued = form.dirty && form.saveState !== "failed";
+        }
+        bridge.suspend();
+      }
     }
     function dispose() {
       if (disposed) return;
       disposed = true;
       visible = false;
       stopPolling();
+      for (const name of Object.keys(forms)) clearAutosave(name);
+      flushGeneration++; flushNonce = null;
+      if (scope.idolyServerFlushSettings === flushSettings) delete scope.idolyServerFlushSettings;
+      if (scope.idolyServerReleaseSettingsFlush === releaseSettingsFlush) delete scope.idolyServerReleaseSettingsFlush;
       bridge.dispose();
       document.removeEventListener("visibilitychange", onVisibility);
       scope.removeEventListener("pagehide", dispose);
     }
     for (const [name, form] of Object.entries(forms)) {
-      form.dirty = false;
-      form.busy = false;
-      el(name + "-form").addEventListener("input", () => { form.dirty = true; });
-      el(name + "-form").addEventListener("change", () => { form.dirty = true; });
-      el(name + "-form").addEventListener("submit", event => { event.preventDefault(); save(name); });
+      Object.assign(form, {dirty:false, busy:false, queued:false, inflight:null, autosaveTimer:null,
+        editRevision:0, fingerprint:null, resumeQueued:false, saveState:"ready", feedback:"변경하면 자동으로 저장됩니다."});
+      // Keep form submission as an explicit retry/Enter path. Ordinary changes
+      // save from the real control events, so no Save button is needed.
+      for (const kind of ["input", "change"]) el(name + "-form").addEventListener(kind, event => {
+        if (!event.target || event.target === el(name + "-form")) markEdited(name);
+      });
+      el(name + "-form").addEventListener("submit", event => {
+        event.preventDefault(); markEdited(name); save(name, true);
+      });
+      el(name + "-save-retry").addEventListener("click", () => { markEdited(name); save(name, true); });
+      for (const key of form.fields) {
+        const input = el(key), numeric = input.type === "number";
+        input.addEventListener("input", () => {
+          if (numeric && name === "presentation") syncPreset(key);
+          markEdited(name, numeric ? 600 : null);
+        });
+        input.addEventListener("change", () => markEdited(name, 0));
+        if (numeric) input.addEventListener("blur", () => markEdited(name, 0));
+      }
     }
     el("interface_language").addEventListener("change", () => saveInterfaceLanguage(el("interface_language").value));
     for (const key of ["render_scale", "max_buffer_pixel"]) {
       el(key + "_preset").addEventListener("change", () => {
         const value = el(key + "_preset").value;
-        if (value !== "custom") el(key).value = value;
+        if (value !== "custom") { el(key).value = value; markEdited("presentation", 0); }
         else if (typeof el(key).focus === "function") el(key).focus();
-        forms.presentation.dirty = true;
       });
-      el(key).addEventListener("input", () => { syncPreset(key); forms.presentation.dirty = true; });
     }
     applyInterfaceLanguage(interfaceChoice);
     updateCopyButton();
