@@ -23,6 +23,15 @@ static NSInteger interfaceLanguageIndex = -1;
 static const NSUInteger maxJSON = 65536;
 static const NSUInteger maxDiagnosticCopy = 32768;
 
+static WKWebsiteDataStore *IDSettingsWebsiteDataStore(void) {
+    // Trusted settings documents remain separate WK views. Reuse only their
+    // in-memory WebKit session across launcher/menu opens, never disk storage.
+    static WKWebsiteDataStore *store;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ store = WKWebsiteDataStore.nonPersistentDataStore; });
+    return store;
+}
+
 static NSInteger resolvedInterfaceLanguage(void) {
     NSString *language = [interfaceLanguage isEqualToString:@"system"]
         ? NSLocale.preferredLanguages.firstObject.lowercaseString : interfaceLanguage;
@@ -217,7 +226,7 @@ static __weak IDSettingsController *launcherController;
     }
     _page = [NSBundle.mainBundle.bundleURL URLByAppendingPathComponent:@"LocalServer/settings/index.html"];
     WKWebViewConfiguration *configuration = [WKWebViewConfiguration new];
-    configuration.websiteDataStore = WKWebsiteDataStore.nonPersistentDataStore;
+    configuration.websiteDataStore = IDSettingsWebsiteDataStore();
     [configuration.userContentController addScriptMessageHandler:self name:@"idolyServer"];
     _web = [[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration];
     _web.translatesAutoresizingMaskIntoConstraints = NO;

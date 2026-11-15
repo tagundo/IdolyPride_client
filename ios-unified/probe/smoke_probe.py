@@ -74,7 +74,8 @@ LAUNCH_SETTINGS_FLAGS = ("cold_while_settings_flush_held", "game_button_disabled
 SETTINGS_WEB_BOOL_FIELDS = ("web_found", "timed_out", "evaluation_succeeded", "ready", "forms_present",
     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "document_complete",
     "options_fields_enabled", "presentation_fields_enabled", "bridge_reply_present", "error_is_wk_domain",
-    "navigation_loading", "navigation_file_url", "web_attached", "evaluation_started", "evaluation_completed")
+    "navigation_loading", "navigation_file_url", "web_attached", "evaluation_started", "evaluation_completed",
+    "data_store_reused", "launcher_store_nonpersistent", "menu_store_nonpersistent", "web_view_recreated", "launcher_document_marker_absent")
 SIGPIPE_PHASES = ("before_server", "before_game_worker")
 SIGPIPE_FLAGS = ("sigaction_read", "sigpipe_ignored", "socketpair_created", "peer_closed", "write_epipe", "process_survived")
 # A well-formed unknown protobuf varint makes empty requests exercise AES too.
@@ -808,7 +809,8 @@ def validate_report(value):
     web = menu.get("web")
     require(type(web) is dict and all(web.get(key) is True for key in (
         "web_found", "evaluation_succeeded", "ready", "forms_present", "scale_2_present", "buffer_4096_present",
-        "no_horizontal_overflow", "navigation_file_url", "web_attached", "evaluation_started", "evaluation_completed"))
+        "no_horizontal_overflow", "navigation_file_url", "web_attached", "evaluation_started", "evaluation_completed",
+        "data_store_reused", "launcher_store_nonpersistent", "menu_store_nonpersistent", "web_view_recreated", "launcher_document_marker_absent"))
         and web.get("navigation_loading") is False and type(web.get("navigation_progress")) in (int,float)
         and web["navigation_progress"] == 1.0 and web.get("timed_out") is False, "settings_web_readiness_or_layout_failed")
     viewport, content = web.get("viewport_width"), web.get("content_width")
@@ -868,7 +870,8 @@ def validate_report(value):
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count", "navigation_loading", "navigation_file_url",
-                    "web_attached", "navigation_progress", "evaluation_started", "evaluation_completed")},
+                    "web_attached", "navigation_progress", "evaluation_started", "evaluation_completed", "data_store_reused",
+                    "launcher_store_nonpersistent", "menu_store_nonpersistent", "web_view_recreated", "launcher_document_marker_absent")},
                 "host_status_after_close": {"id":2,"ok":True,"result":{"state":"ready","running":True,
                     "runtime":{key:after_runtime[key] for key in ("running","grpc_address","asset_url")}}}},
             "ports": {key: ports[key] for key in ("grpc", "assets", "grpc_connect", "assets_connect")},

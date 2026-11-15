@@ -222,7 +222,9 @@ def native_report(language="ko", run_index=None):
                "scale_2_present":True,"buffer_4096_present":True,"no_horizontal_overflow":True,
                "timed_out":False,"viewport_width":393,"content_width":393,"select_count":14,
                "navigation_loading":False,"navigation_file_url":True,"web_attached":True,"navigation_progress":1,
-               "evaluation_started":True,"evaluation_completed":True},
+               "evaluation_started":True,"evaluation_completed":True,"data_store_reused":True,
+               "launcher_store_nonpersistent":True,"menu_store_nonpersistent":True,"web_view_recreated":True,
+               "launcher_document_marker_absent":True},
         "host_status_after_close":{"id":2,"ok":True,"result":{"state":"ready","running":True,
                "last_error":None,"runtime":{"running":True,"grpc_address":"127.0.0.1:50051",
                                               "asset_url":"http://127.0.0.1:8080"}}}}
@@ -789,6 +791,25 @@ def test_language_save_timeout_preserves_only_bounded_last_ack_and_form_scalars(
     assert clean["feedback_state"] == "pending" and clean["form_feedback_saved"] is False
     assert clean["server_status_received"] is False and clean["persisted_language"] == "unknown" and clean["timed_out"] is True
     assert "DO-NOT-EXPORT" not in json.dumps(clean)
+
+
+def test_settings_views_share_only_one_nonpersistent_store_and_still_create_new_web_views():
+    source = (Path(__file__).resolve().parents[1]/"ios-unified/native/IdolySettings.m").read_text()
+    shared = source.split("static WKWebsiteDataStore *IDSettingsWebsiteDataStore(",1)[1].split("static NSInteger resolvedInterfaceLanguage(",1)[0]
+    assert "dispatch_once(&once" in shared and "WKWebsiteDataStore.nonPersistentDataStore" in shared
+    assert source.count("WKWebsiteDataStore.nonPersistentDataStore") == 1
+    assert "configuration.websiteDataStore = IDSettingsWebsiteDataStore();" in source
+    assert "[[WKWebView alloc] initWithFrame:self.view.bounds configuration:configuration]" in source
+    assert "defaultDataStore" not in source and "WKProcessPool" not in source
+
+
+@pytest.mark.parametrize("field,value", [(key,value) for key in ("data_store_reused","launcher_store_nonpersistent",
+    "menu_store_nonpersistent","web_view_recreated","launcher_document_marker_absent") for value in (False,1)])
+def test_settings_context_reuses_nonpersistent_store_without_reusing_document(field, value):
+    observed = native_report()
+    observed["menu_lifetime"]["web"][field] = value
+    with pytest.raises(probe.ProbeError,match="^settings_web_readiness_or_layout_failed$"):
+        probe.validate_report(observed)
 
 
 def test_settings_dom_waits_for_public_navigation_before_evaluation_with_same_deadline():

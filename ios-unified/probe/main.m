@@ -413,6 +413,7 @@ static NSString *const ProbeSettingsDOMScript =
      "forms_present:!!o&&!!p,document_complete:document.readyState==='complete',"
      "options_fields_enabled:!!o&&!o.disabled,presentation_fields_enabled:!!p&&!p.disabled,"
      "bridge_reply_present:typeof window.idolyServerReply==='function',"
+     "launcher_document_marker_absent:window.__idolyProbeLauncherDocument!==true,"
      "scale_2_present:has(s,'2'),buffer_4096_present:has(m,'4096'),"
      "viewport_width:w,content_width:c,no_horizontal_overflow:w>0&&c<=w+2,"
      "select_count:document.querySelectorAll('select').length}; })()";
@@ -450,7 +451,7 @@ static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictiona
         if (!error && [value isKindOfClass:NSDictionary.class]) {
             for (NSString *key in @[@"ready", @"forms_present", @"scale_2_present", @"buffer_4096_present",
                     @"viewport_width", @"content_width", @"no_horizontal_overflow", @"select_count",
-                    @"document_complete",@"options_fields_enabled",@"presentation_fields_enabled",@"bridge_reply_present"]) {
+                    @"document_complete",@"options_fields_enabled",@"presentation_fields_enabled",@"bridge_reply_present",@"launcher_document_marker_absent"]) {
                 id scalar = value[key];
                 if ([scalar isKindOfClass:NSNumber.class]) metrics[key] = scalar;
             }
@@ -1066,6 +1067,9 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *earlyStatus;
 @property(nonatomic, strong) NSDictionary *menuCloseObservation;
 @property(nonatomic, strong) NSDictionary *settingsWebObservation;
+@property(nonatomic, strong) WKWebsiteDataStore *launcherWebsiteDataStore;
+@property(nonatomic, weak) WKWebView *launcherSettingsWeb;
+@property(nonatomic) BOOL launcherStoreNonpersistent;
 @property(nonatomic, strong) NSMutableDictionary *keyboardProbe;
 @property(nonatomic, strong) NSDictionary *nativeHeaderProbe;
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
@@ -1251,6 +1255,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     if (self.interfaceInFlight) return;
     self.interfaceInFlight=YES; self.interfaceLanguageCycle=[NSMutableArray array];
     WKWebView *web=ProbeFindSettingsWeb(ProbeButtonOwner(button).view);
+    self.launcherSettingsWeb=web; self.launcherWebsiteDataStore=web.configuration.websiteDataStore;
+    self.launcherStoreNonpersistent=self.launcherWebsiteDataStore && !self.launcherWebsiteDataStore.persistent;
     ProbeSettingsDOM(web,^(NSDictionary *metrics){
         self.settingsWebObservation=metrics;
         if (![metrics[@"ready"] isEqual:@YES]) { [self failProbe:@"language_interface_cycle_failed"]; return; }
@@ -1262,7 +1268,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         [self recordCheckpoint:@"interface_language_cycle_checked"]; return; }
     NSString *language=@[@"ja",@"en",@"ko"][step];
     NSString *setup=[ProbeReplyHook stringByAppendingFormat:
-        @"window.__idolyProbeInterfaceAck=null;(()=>{const s=document.getElementById('interface_language');"
+        @"window.__idolyProbeLauncherDocument=true;window.__idolyProbeInterfaceAck=null;(()=>{const s=document.getElementById('interface_language');"
          "if(!s)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",language];
     [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
         if(error || ![value isEqual:@YES]) { [self failProbe:@"language_interface_cycle_failed"]; return; }
@@ -1596,8 +1602,19 @@ static NSDictionary *ProbeKeyboardObservation(void) {
             @"server_control_found":@YES, @"server_control_disabled_while_running":@YES} mutableCopy];
         WKWebView *web = ProbeFindSettingsWeb(navigation.topViewController.view);
         ProbeSettingsDOM(web, ^(NSDictionary *metrics) {
-            menu[@"web"] = metrics; self.settingsWebObservation=metrics;
+            WKWebsiteDataStore *store=web.configuration.websiteDataStore;
+            BOOL reused=self.launcherWebsiteDataStore && store==self.launcherWebsiteDataStore;
+            BOOL nonpersistent=store && !store.persistent;
+            BOOL newView=web && web!=self.launcherSettingsWeb;
+            NSMutableDictionary *observed=[metrics mutableCopy];
+            observed[@"data_store_reused"]=@(reused); observed[@"launcher_store_nonpersistent"]=@(self.launcherStoreNonpersistent);
+            observed[@"menu_store_nonpersistent"]=@(nonpersistent); observed[@"web_view_recreated"]=@(newView);
+            menu[@"web"] = observed; self.settingsWebObservation=observed;
             [self recordCheckpoint:@"settings_web_observed"];
+            if (!reused || !self.launcherStoreNonpersistent || !nonpersistent || !newView
+                    || ![metrics[@"launcher_document_marker_absent"] isEqual:@YES]) {
+                [self failProbe:@"settings_web_readiness_or_layout_failed"]; return;
+            }
             if (![metrics[@"web_found"] isEqual:@YES] || ![metrics[@"ready"] isEqual:@YES]
                     || ![metrics[@"evaluation_succeeded"] isEqual:@YES]
                     || ![metrics[@"scale_2_present"] isEqual:@YES] || ![metrics[@"buffer_4096_present"] isEqual:@YES]
