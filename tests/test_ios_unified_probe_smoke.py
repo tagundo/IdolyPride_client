@@ -133,6 +133,14 @@ def native_report():
             "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
                 "last_error": None, "runtime": {"running": True, "grpc_address": "127.0.0.1:50051",
                                                 "asset_url": "http://127.0.0.1:8080"}}}}
+    report["server_status"]["octo_budget"] = {"schema":1,"status":"configured","prepared":True,
+        "configured":True,"original_seconds":10,"effective_seconds":330,"cache_wait_seconds":300,
+        "scope":"unified-loopback","error":None}
+    report["octo_budget_probe"] = {"prepared_without_managed_callbacks":True,
+        "during_original_seconds":10,"during_original_configured":False,"first_queued_seconds":330,
+        "configured_before_first_queued_work":True,"queued_work_on_main_thread":True,
+        "class_initialized":True,"initializations":1,"reads":2,"writes":1,
+        "last_snapshot":330,"first_queued_snapshot_count":1,"writes_before_initialization":0}
     report["keyboard"] = {
         "before_capture":{"ready":False,"phase":2,"returned_nil":False,
                           "returned_initialized_field":True,"returned_same_field":True,
@@ -464,6 +472,155 @@ def test_diagnostics_copy_deadline_snapshot_preserves_only_latest_safe_flags(tmp
     assert caught.value.native_diagnostics_copy["completed"] is False
     assert caught.value.native_diagnostics_copy["clipboard_cleared"] is False
     assert "DONT-COPY" not in json.dumps(caught.value.native_diagnostics_copy)
+
+
+@pytest.mark.parametrize("field,value,code", (
+    ("prepared_without_managed_callbacks",False,"octo_budget_preinit_failed"),
+    ("prepared_without_managed_callbacks",1,"octo_budget_preinit_failed"),
+    ("during_original_seconds",330,"octo_budget_original_failed"),
+    ("during_original_seconds",True,"octo_budget_original_failed"),
+    ("during_original_configured",True,"octo_budget_original_failed"),
+    ("during_original_configured",0,"octo_budget_original_failed"),
+    ("first_queued_seconds",10,"octo_budget_queued_work_failed"),
+    ("last_snapshot",10,"octo_budget_queued_work_failed"),
+    ("first_queued_seconds",float("inf"),"octo_budget_queued_work_failed"),
+    ("configured_before_first_queued_work",False,"octo_budget_queued_work_failed"),
+    ("queued_work_on_main_thread",False,"octo_budget_queued_work_failed"),
+    ("class_initialized",False,"octo_budget_queued_work_failed"),
+    ("initializations",2,"octo_budget_queued_work_failed"),
+    ("reads",1,"octo_budget_queued_work_failed"),("writes",0,"octo_budget_queued_work_failed"),
+    ("writes",True,"octo_budget_queued_work_failed"),
+    ("first_queued_snapshot_count",2,"octo_budget_queued_work_failed"),
+    ("writes_before_initialization",1,"octo_budget_queued_work_failed"),
+    ("writes_before_initialization",False,"octo_budget_queued_work_failed"),
+))
+def test_octo_budget_requires_prepare_only_original_default_and_configured_first_queued_work(field, value, code):
+    report = native_report()
+    report["octo_budget_probe"][field] = value
+    with pytest.raises(probe.ProbeError,match="^"+code+"$"):
+        probe.validate_report(report)
+
+
+@pytest.mark.parametrize("field,value", (("schema",True),("status","prepared"),("prepared",1),
+    ("configured",False),("original_seconds",True),("original_seconds",330),
+    ("effective_seconds",10),("effective_seconds",float("nan")),
+    ("cache_wait_seconds",True),("cache_wait_seconds",299),("scope","global"),("error","never-export")))
+def test_octo_budget_native_policy_status_requires_exact_configured_success(field, value):
+    report = native_report()
+    report["server_status"]["octo_budget"][field] = value
+    with pytest.raises(probe.ProbeError,match="^octo_budget_queued_work_failed$"):
+        probe.validate_report(report)
+
+
+def test_octo_budget_requires_explicit_null_error_key_and_preserves_exact_float_seconds():
+    report = native_report()
+    del report["server_status"]["octo_budget"]["error"]
+    with pytest.raises(probe.ProbeError,match="^octo_budget_queued_work_failed$"):
+        probe.validate_report(report)
+    report["server_status"]["octo_budget"]["error"] = None
+    for key in ("original_seconds","effective_seconds","cache_wait_seconds"):
+        report["server_status"]["octo_budget"][key] = float(report["server_status"]["octo_budget"][key])
+    for key in ("during_original_seconds","first_queued_seconds","last_snapshot"):
+        report["octo_budget_probe"][key] = float(report["octo_budget_probe"][key])
+    assert probe.validate_report(report)["server_status"]["octo_budget"]["effective_seconds"] == 330.0
+
+
+def test_octo_budget_projects_only_known_partial_policy_and_probe_scalars():
+    report = native_report()
+    report["server_status"]["octo_budget"].update(private_data="never-export")
+    report["octo_budget_probe"].update(private_data="never-export")
+    checked = probe.validate_report(report)
+    assert "never-export" not in json.dumps(checked)
+    assert probe.octo_budget_observation({"schema":True,"status":"never-export","scope":"never-export",
+        "error":"never-export","prepared":1,"configured":False,"original_seconds":True,
+        "effective_seconds":3601,"cache_wait_seconds":float("inf")}) == {"configured":False}
+    assert probe.octo_budget_probe_observation({"reads":True,"writes":17,"initializations":-1,
+        "first_queued_seconds":True,"during_original_seconds":-1,"last_snapshot":float("nan"),
+        "class_initialized":False,"private":"never-export"}) == {"class_initialized":False}
+    assert probe.octo_budget_observation({"status":"failed","error":"readback_mismatch"}) == {
+        "status":"failed","error":"readback_mismatch"}
+    assert probe.octo_budget_observation({"status":"idle","error":None}) == {"status":"idle","error":None}
+
+
+@pytest.mark.parametrize("source,filename,stage", (
+    ("checkpoint","embedded-probe-checkpoint.json","octo_budget_original_observed"),
+    ("status","embedded-probe-status.json","octo_budget_first_queued_work_observed"),
+    ("report","embedded-probe.json","octo_budget_first_queued_work_observed")))
+def test_octo_budget_failure_checkpoint_projects_partial_evidence_without_errors(tmp_path, source, filename, stage):
+    documents = tmp_path/"Documents"
+    documents.mkdir()
+    report = native_report()
+    budget = report["server_status"]["octo_budget"]
+    budget.update(status="prepared",configured=False,effective_seconds=10,error="never-export")
+    report["octo_budget_probe"].update(first_queued_seconds=10,private="never-export")
+    observed = report if source != "checkpoint" else {"schema":1,"stage":stage,
+        "octo_budget":budget,"octo_budget_probe":report["octo_budget_probe"]}
+    (documents/filename).write_text(json.dumps(observed))
+    result = probe.failure_checkpoint(tmp_path)
+    assert result["octo_budget"]["configured"] is False
+    assert result["octo_budget_probe"]["first_queued_seconds"] == 10
+    assert "error" not in result["octo_budget"]
+    if source == "checkpoint":
+        assert result["stage"] == stage
+    assert "never-export" not in json.dumps(result)
+
+
+def test_octo_budget_final_failure_audit_keeps_safe_policy_and_snapshot_evidence(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"budget-container")
+    report = native_report()
+    report["octo_budget_probe"].update(first_queued_seconds=10,private="never-export")
+    report["server_status"]["octo_budget"].update(error="never-export")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch(__name__+".native_report",return_value=report),mock.patch.object(probe,"probe_rpcs") as rpc:
+        result = probe.run_probe(app,tmp_path/"budget-failure.json")
+    assert result["error"] == "octo_budget_queued_work_failed"
+    assert result["native_octo_budget_probe_observed"]["first_queued_seconds"] == 10
+    assert result["native_octo_budget_observed"]["configured"] is True
+    assert "error" not in result["native_octo_budget_observed"]
+    assert "never-export" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_octo_budget_waiting_failure_audit_keeps_only_partial_public_scalars(app, tmp_path):
+    controller = FakeSimctl(tmp_path/"budget-wait-container")
+    def command(arguments,timeout):
+        result = controller(arguments,timeout)
+        if arguments[0] == "launch":
+            documents = controller.container/"Documents"
+            (documents/"embedded-probe.json").unlink()
+            observed = {"server_status":{"phase":2,"error":None,"octo_budget":{
+                "status":"prepared","prepared":True,"configured":False,"error":"never-export"}},
+                "octo_budget_probe":{"prepared_without_managed_callbacks":False,"reads":0,"private":"never-export"},
+                "probe_error":"octo_budget_preinit_failed"}
+            (documents/"embedded-probe-status.json").write_text(json.dumps(observed))
+        return result
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",command):
+        result = probe.run_probe(app,tmp_path/"budget-wait-failure.json")
+    assert result["error"] == "octo_budget_preinit_failed"
+    assert result["native_octo_budget_probe_observed"]["reads"] == 0
+    assert result["native_octo_budget_observed"]["configured"] is False
+    assert "never-export" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("safe_partial", (True,False))
+def test_octo_budget_deadline_retains_only_latest_partial_public_observation(tmp_path, safe_partial):
+    documents = tmp_path/"Documents"
+    documents.mkdir()
+    waiting = documents/"embedded-probe-status.json"
+    report = native_report()
+    waiting.write_text(json.dumps(report))
+    def replace_with_partial(_seconds):
+        report["server_status"]["octo_budget"] = {"error":"never-export"}
+        report["octo_budget_probe"] = {"private":"never-export"}
+        if safe_partial:
+            report["server_status"]["octo_budget"]["configured"] = False
+            report["octo_budget_probe"]["first_queued_seconds"] = 10
+        waiting.write_text(json.dumps(report))
+    remaining = mock.Mock(side_effect=[1,1,1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep",side_effect=replace_with_partial),pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path,remaining)
+    assert getattr(caught.value,"native_octo_budget",{}) == ({"configured":False} if safe_partial else {})
+    assert getattr(caught.value,"native_octo_budget_probe",{}) == ({"first_queued_seconds":10} if safe_partial else {})
 
 
 @pytest.mark.parametrize("phase,field,replacement", (
@@ -1116,12 +1273,15 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert result["report_valid"] is True
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
-                   "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy"))
+                   "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
+                   "octo_budget", "octo_budget_probe"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]
     assert result["report_http_readiness"] == raw_report["server_status"]["http_readiness"]
     assert result["diagnostics_copy"] == raw_report["menu_lifetime"]["diagnostics_copy"]
+    assert result["octo_budget"] == raw_report["server_status"]["octo_budget"]
+    assert result["octo_budget_probe"] == raw_report["octo_budget_probe"]
     assert "must not retain" not in json.dumps(result)
 
 

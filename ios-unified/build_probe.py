@@ -90,6 +90,7 @@ def validate_inputs(prepared, output, arch):
 def clang_command(compiler, sdk, output, arch):
     return [str(compiler), "-target", arch + "-apple-ios13.0-simulator", "-isysroot", str(sdk),
             "-fobjc-arc", "-fblocks", "-O2", "-Wall", "-Wextra", "-Werror",
+            "-DIDOLY_SMOKE_SIMULATOR=1",
             "-Wno-deprecated-declarations", "-I", str(HERE / "native"),
             "-F", str(Path(output) / "Frameworks"), "-framework", "IdolyEmbeddedServer",
             "-framework", "Foundation", "-framework", "UIKit", "-framework", "WebKit",
@@ -104,7 +105,8 @@ def info_plist():
             "CFBundlePackageType": "APPL", "CFBundleVersion": "1", "CFBundleShortVersionString": "1.0",
             "CFBundleSupportedPlatforms": ["iPhoneSimulator"], "MinimumOSVersion": "13.0",
             "LSRequiresIPhoneOS": True, "UIDeviceFamily": [1, 2], "UILaunchScreen": {},
-            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True}}
+            "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
+            "IdolyUnifiedLoopbackOrigin": "http://127.0.0.1:8080"}
 
 
 def build(prepared, output, *, arch, report_path=None):
@@ -121,7 +123,9 @@ def build(prepared, output, *, arch, report_path=None):
     sdk = subprocess.check_output([xcrun, "--sdk", "iphonesimulator", "--show-sdk-path"], text=True).strip()
     compiler = subprocess.check_output([xcrun, "--sdk", "iphonesimulator", "--find", "clang"], text=True).strip()
     require(Path(sdk).is_dir() and Path(compiler).is_file(), "Simulator SDK/compiler unavailable")
-    source_inputs = [HERE / "probe/main.m", HERE / "native/IdolyEmbeddedServer.h", Path(__file__).resolve()]
+    source_inputs = [HERE / "probe/main.m", HERE / "native/IdolyEmbeddedServer.h",
+                     HERE / "native/IdolyOctoBudget.h", HERE / "native/OctoBudgetPolicy.h",
+                     HERE / "native/tests/OctoBudgetFixture.h", Path(__file__).resolve()]
     source_pins = {str(path.relative_to(HERE)): sha_file(path) for path in source_inputs}
     output.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir(mode=0o700)

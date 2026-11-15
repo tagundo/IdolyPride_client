@@ -4,6 +4,7 @@
 #import "IdolyClientData.h"
 #import "IdolyKeyboardLifecycle.h"
 #import "IdolyLocalHTTP.h"
+#import "IdolyOctoBudget.h"
 #import "GatePolicy.h"
 #if !IDOLY_SMOKE_SIMULATOR
 #import "UnityStartupProfile.h"
@@ -230,6 +231,15 @@ static void forwardUnityIfVisible(void) {
         }
         return;
     }
+    NSString *budgetError = nil;
+    if (!IDOctoBudgetPrepare(&budgetError)) {
+        if (IDGateLaunchFailed(&gate)) {
+            lastGameError = budgetError ?: @"로컬 리소스 대기 설정을 준비하지 못했습니다.";
+            IDNativeSetServerState(YES, NO, @"서버 실행 중 · 게임 연결 준비 실패");
+            IDNativeStartupFailure(lastGameError);
+        }
+        return;
+    }
     if (!IDGateForwardVisible(&gate, UIApplication.sharedApplication.applicationState == UIApplicationStateBackground)) return;
     lastError = nil; lastGameError = nil; IDNativeDismissFailure();
     IDNativeSetServerState(YES, NO, @"서버 실행 중");
@@ -239,6 +249,20 @@ static void forwardUnityIfVisible(void) {
     savedController = nil; savedApplication = nil;
     ((void (*)(id, SEL, id))originalStartUnity)(controller, startSelector, application);
     atomic_store(&unityKeyboardReady, true);
+    // The original initializer creates the IL2CPP runtime. Configure its named
+    // SDK field synchronously before queued main-thread network continuations.
+    // The package marker is emitted only for the audited unified loopback app;
+    // the app-side HTTP readiness check additionally confirms this listener.
+    id origin = NSBundle.mainBundle.infoDictionary[@"IdolyUnifiedLoopbackOrigin"];
+    BOOL loopbackAttested = [origin isKindOfClass:NSString.class]
+        && [origin isEqualToString:@"http://127.0.0.1:8080"]
+        && [lastHTTPReadiness[@"ok"] isEqual:@YES]
+        && [lastHTTPReadiness[@"url"] isEqualToString:@"http://127.0.0.1:8080/client/playback"];
+    if (!IDOctoBudgetConfigure(loopbackAttested, &budgetError)) {
+        lastGameError = budgetError ?: @"로컬 리소스 대기 설정을 적용하지 못했습니다.";
+        IDNativeShowLauncher();
+        IDNativeStartupFailure(lastGameError);
+    }
 }
 static void beginServer(void) {
     NSCAssert([NSThread isMainThread], @"Gate state belongs to main thread");
@@ -505,6 +529,7 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
     __block NSString *result;
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@(hookInstalled),
         @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
+        @"octo_budget":IDOctoBudgetInfo(),
         @"http_readiness":lastHTTPReadiness ?: (id)NSNull.null,
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
         @"attempts":@(gate.attempts), @"python_initialized":@(atomic_load(&pythonReady)),

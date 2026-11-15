@@ -11,6 +11,17 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#if IDOLY_SMOKE_SIMULATOR
+#include "../native/tests/OctoBudgetFixture.h"
+
+// The weak provider is defined only by this disposable Simulator host. The
+// shipped device framework instead resolves its audited original IL2CPP APIs.
+__attribute__((visibility("default"))) BOOL IDOctoBudgetSmokeAPIs(IDOctoBudgetAPIs *apis) {
+    if (!apis) return NO;
+    *apis = IDOctoBudgetFixtureAPIs();
+    return YES;
+}
+#endif
 
 static NSDictionary *ProbeObject(NSString *text) {
     NSData *raw = [text dataUsingEncoding:NSUTF8StringEncoding];
@@ -504,12 +515,16 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSMutableDictionary *keyboardProbe;
 @property(nonatomic, strong) NSDictionary *nativeHeaderProbe;
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
+@property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
+@property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
 - (void)initUnityWithApplication:(UIApplication *)application __attribute__((objc_method_family(none)));
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
 - (void)failProbe:(NSString *)code;
 - (BOOL)observeKeyboard:(NSString *)name phase:(NSUInteger)phase ready:(BOOL)ready calls:(NSUInteger)calls failure:(NSString *)code;
 - (void)probeAfterOriginalReturnedOnMain:(BOOL)originalOnMain applicationMatches:(BOOL)argumentMatches;
+- (BOOL)observeOctoBudgetBeforeOriginal;
+- (BOOL)observeOctoBudgetFirstQueuedWork;
 - (void)probeMenuAfterLaunch:(NSMutableDictionary *)report;
 - (void)observeMenuDismissal:(UINavigationController *)navigation report:(NSMutableDictionary *)report
                        menu:(NSMutableDictionary *)menu started:(NSTimeInterval)started observations:(NSUInteger)observations;
@@ -523,7 +538,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}});
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{}});
 }
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
@@ -536,7 +551,59 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_lifecycle":ProbeKeyboardLifecycle(status),
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"keyboard":self.keyboardProbe.copy ?: @{},
-        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}});
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{},
+        @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{}});
+}
+- (BOOL)observeOctoBudgetBeforeOriginal {
+#if IDOLY_SMOKE_SIMULATOR
+    NSDictionary *native = ProbeObject(IdolyEmbeddedServerStatusJSON());
+    NSDictionary *budget = [native[@"octo_budget"] isKindOfClass:NSDictionary.class] ? native[@"octo_budget"] : @{};
+    IDOctoBudgetFixtureData *state = IDOctoBudgetFixtureState();
+    BOOL untouched = [budget[@"prepared"] isEqual:@YES] && [budget[@"configured"] isEqual:@NO]
+        && !state->initialized && state->initializations == 0 && state->reads == 0 && state->writes == 0
+        && state->value == 0.0f;
+    self.octoBudgetProbe[@"prepared_without_managed_callbacks"] = @(untouched);
+    if (!untouched) { [self failProbe:@"octo_budget_preinit_failed"]; return NO; }
+    // An inline SDK read during the original initializer still sees its own
+    // ten-second default. The next queued work is checked separately below.
+    float seconds = IDOctoBudgetFixtureSnapshot();
+    BOOL configured = [budget[@"configured"] isEqual:@YES];
+    self.octoBudgetProbe[@"during_original_seconds"] = @(seconds);
+    self.octoBudgetProbe[@"during_original_configured"] = @(configured);
+    BOOL original = seconds == 10.0f && !configured && state->initialized
+        && state->initializations == 1 && state->reads == 0 && state->writes == 0;
+    if (!original) { [self failProbe:@"octo_budget_original_failed"]; return NO; }
+    [self recordCheckpoint:@"octo_budget_original_observed"];
+    return YES;
+#else
+    [self failProbe:@"octo_budget_preinit_failed"]; return NO;
+#endif
+}
+- (BOOL)observeOctoBudgetFirstQueuedWork {
+#if IDOLY_SMOKE_SIMULATOR
+    NSDictionary *native = ProbeObject(IdolyEmbeddedServerStatusJSON());
+    NSDictionary *budget = [native[@"octo_budget"] isKindOfClass:NSDictionary.class] ? native[@"octo_budget"] : @{};
+    BOOL configured = [budget[@"configured"] isEqual:@YES];
+    float seconds = IDOctoBudgetFixtureSnapshot();
+    IDOctoBudgetFixtureData *state = IDOctoBudgetFixtureState();
+    ++self.firstOctoQueuedSnapshotCount;
+    [self.octoBudgetProbe addEntriesFromDictionary:@{@"first_queued_seconds":@(seconds),
+        @"configured_before_first_queued_work":@(configured), @"queued_work_on_main_thread":@(NSThread.isMainThread),
+        @"class_initialized":@((BOOL)state->initialized), @"initializations":@(state->initializations),
+        @"reads":@(state->reads), @"writes":@(state->writes),
+        @"writes_before_initialization":@(state->writes_before_initialization), @"last_snapshot":@(state->last_snapshot),
+        @"first_queued_snapshot_count":@(self.firstOctoQueuedSnapshotCount)}];
+    BOOL ready = configured && NSThread.isMainThread && [native[@"keyboard_ready"] isEqual:@YES]
+        && seconds == 330.0f && state->last_snapshot == 330.0f && state->initialized
+        && state->initializations == 1 && state->reads == 2 && state->writes == 1
+        && state->writes_before_initialization == 0
+        && self.firstOctoQueuedSnapshotCount == 1;
+    if (!ready) { [self failProbe:@"octo_budget_queued_work_failed"]; return NO; }
+    [self recordCheckpoint:@"octo_budget_first_queued_work_observed"];
+    return YES;
+#else
+    [self failProbe:@"octo_budget_queued_work_failed"]; return NO;
+#endif
 }
 - (BOOL)observeKeyboard:(NSString *)name phase:(NSUInteger)phase ready:(BOOL)ready calls:(NSUInteger)calls failure:(NSString *)code {
     NSDictionary *value = ProbeKeyboardObservation();
@@ -557,6 +624,10 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)options {
     (void)application; (void)options;
+#if IDOLY_SMOKE_SIMULATOR
+    IDOctoBudgetFixtureReset();
+#endif
+    self.octoBudgetProbe = [NSMutableDictionary dictionary];
     [self recordCheckpoint:@"delegate_entered"];
     self.window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
     UIViewController *screen = [UIViewController new]; screen.view.backgroundColor = UIColor.systemBackgroundColor;
@@ -576,7 +647,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
             @"original_called":@(self.originalCount),
             @"server_status":status, @"probe_error":self.probeError ?: NSNull.null,
-            @"keyboard":self.keyboardProbe.copy, @"native_header":self.nativeHeaderProbe ?: @{}});
+            @"keyboard":self.keyboardProbe.copy, @"native_header":self.nativeHeaderProbe ?: @{},
+            @"octo_budget_probe":self.octoBudgetProbe.copy});
     }];
     dispatch_async(dispatch_get_main_queue(), ^{
         // The process-owned server must start before Unity reaches its hook.
@@ -707,6 +779,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 // Exact Unity ABI: void return, instance receiver, selector, one object argument.
 - (void)initUnityWithApplication:(UIApplication *)application {
     ++self.originalCount;
+    if (![self observeOctoBudgetBeforeOriginal]) return;
     self.launcherProbe[@"forwarded_after_button"] = @(self.launchDispatched);
     [self recordCheckpoint:@"unity_forwarded"];
     if (self.reportScheduled) return;
@@ -730,6 +803,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     });
 }
 - (void)probeAfterOriginalReturnedOnMain:(BOOL)originalOnMain applicationMatches:(BOOL)argumentMatches {
+    if (![self observeOctoBudgetFirstQueuedWork]) return;
     if (![self observeKeyboard:@"after_init" phase:4 ready:YES calls:4 failure:@"keyboard_after_init_failed"]) return;
     [self recordCheckpoint:@"keyboard_after_init_checked"];
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
@@ -752,6 +826,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                         @"command_completion_main_thread":@(completionOnMain), @"server_status":status,
                         @"launcher":self.launcherProbe.copy,
                         @"keyboard":self.keyboardProbe.copy,
+                        @"octo_budget_probe":self.octoBudgetProbe.copy,
                         @"native_header":self.nativeHeaderProbe ?: @{},
                         @"early_status":self.earlyStatus ?: @{},
                         @"corner_gesture":ProbeCornerGesture(self.window),

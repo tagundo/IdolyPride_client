@@ -63,6 +63,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_precreated_instance_not_reused",
     "native_header_layout_failed", "native_header_restore_failed",
     "settings_diagnostics_copy_failed",
+    "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
     "delegate_entered", "window_ready", "server_starting", "server_ready",
@@ -74,6 +75,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
     "settings_diagnostics_copied",
+    "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
 KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
 KEYBOARD_BOOL_FIELDS = ("ready", "returned_nil", "returned_initialized_field", "returned_same_field")
@@ -88,6 +90,15 @@ HEADER_NUMBER_FIELDS = ("root_width", "root_height", "header_width", "header_hei
 HTTP_READINESS_URL = "http://127.0.0.1:8080/client/playback"
 DIAGNOSTICS_COPY_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "completed",
                                 "feedback_success", "pasteboard_matches", "clipboard_seeded", "clipboard_cleared")
+OCTO_BUDGET_SECONDS = ("original_seconds", "effective_seconds", "cache_wait_seconds")
+OCTO_BUDGET_PROBE_SECONDS = ("during_original_seconds", "first_queued_seconds", "last_snapshot")
+OCTO_BUDGET_PROBE_BOOLS = ("prepared_without_managed_callbacks", "during_original_configured",
+    "configured_before_first_queued_work", "queued_work_on_main_thread", "class_initialized")
+OCTO_BUDGET_PROBE_COUNTERS = ("initializations", "reads", "writes", "first_queued_snapshot_count",
+                             "writes_before_initialization")
+OCTO_BUDGET_ERROR_CODES = frozenset(("api_origin_mismatch", "not_prepared", "unattested_loopback",
+    "wrong_thread", "incomplete_apis", "runtime_unavailable", "invalid_assemblies", "image_mismatch",
+    "class_mismatch", "field_mismatch", "field_not_static", "type_mismatch", "unexpected_value", "readback_mismatch"))
 CHECKPOINT_READ_CODES = frozenset((
     "invalid_bounded_file", "file_changed_while_opening", "file_changed_while_reading",
     "json_size_bound", "duplicate_json_key", "nonfinite_json", "invalid_json", "json_object_required",
@@ -289,6 +300,28 @@ def validate_report(value):
             and all(type(status.get(key)) is int and status[key] == 1
                     for key in ("captured", "forwarded", "attempts")),
             "embedded_server_not_ready")
+    budget, budget_probe = status.get("octo_budget"), value.get("octo_budget_probe")
+    require(type(budget_probe) is dict and budget_probe.get("prepared_without_managed_callbacks") is True,
+            "octo_budget_preinit_failed")
+    require(type(budget_probe.get("during_original_seconds")) in (int,float)
+            and math.isfinite(budget_probe["during_original_seconds"])
+            and budget_probe["during_original_seconds"] == 10
+            and budget_probe.get("during_original_configured") is False, "octo_budget_original_failed")
+    require(all(budget_probe.get(key) is True for key in
+                ("configured_before_first_queued_work", "queued_work_on_main_thread", "class_initialized"))
+            and all(type(budget_probe.get(key)) in (int,float) and math.isfinite(budget_probe[key])
+                    and budget_probe[key] == 330 for key in ("first_queued_seconds", "last_snapshot"))
+            and all(type(budget_probe.get(key)) is int and budget_probe[key] == wanted for key,wanted in
+                (("initializations",1),("reads",2),("writes",1),("first_queued_snapshot_count",1),
+                 ("writes_before_initialization",0))),
+            "octo_budget_queued_work_failed")
+    require(type(budget) is dict and type(budget.get("schema")) is int and budget["schema"] == 1
+            and budget.get("status") == "configured" and budget.get("prepared") is True
+            and budget.get("configured") is True and budget.get("scope") == "unified-loopback"
+            and "error" in budget and budget["error"] is None
+            and all(type(budget.get(key)) in (int,float) and math.isfinite(budget[key]) and budget[key] == wanted
+                    for key,wanted in (("original_seconds",10),("effective_seconds",330),("cache_wait_seconds",300))),
+            "octo_budget_queued_work_failed")
     http = status.get("http_readiness")
     require(type(http) is dict and type(http.get("schema")) is int and http["schema"] == 1
             and http.get("ok") is True and http.get("transport") == "NSURLSession"
@@ -477,6 +510,7 @@ def validate_report(value):
             "native_crypto": {"ok": True, "nist_encrypt": True, "nist_decrypt": True,
                               "invalid_iv_rejected": True, "worker_main_thread": False},
             "keyboard": keyboard_observation(keyboard),
+            "octo_budget_probe": octo_budget_probe_observation(budget_probe),
             "native_header": header_observation(header),
             "early_status": {key: early[key] for key in (
                 "id", "ok", "state", "running", "phase", "captured", "completion_main_thread")},
@@ -496,6 +530,7 @@ def validate_report(value):
                  "launch_requested", "launch_prepared", "launcher_visible")},
                  "keyboard_lifecycle":keyboard_lifecycle_observation(lifecycle), "keyboard_ready":True,
                  "http_readiness":http_readiness_observation(http),
+                 "octo_budget":octo_budget_observation(budget),
                  "client_data":{key: data[key] for key in ("selected", "language", "bundle_identifier")}},
             "menu_lifetime": {**{key: menu[key] for key in (
                 "opened_via_owned_menu_target", "full_screen", "frame_width_matches", "return_button_found",
@@ -522,6 +557,8 @@ def wait_report(container, remaining):
     last_header = {}
     last_http = {}
     last_copy = {}
+    last_budget = {}
+    last_budget_probe = {}
     def checked_remaining():
         try:
             return remaining()
@@ -534,6 +571,10 @@ def wait_report(container, remaining):
                 error.native_http = dict(last_http)
             if last_copy:
                 error.native_diagnostics_copy = dict(last_copy)
+            if last_budget:
+                error.native_octo_budget = dict(last_budget)
+            if last_budget_probe:
+                error.native_octo_budget_probe = dict(last_budget_probe)
             raise
     while True:
         checked_remaining()
@@ -565,6 +606,7 @@ def wait_report(container, remaining):
                 copied = diagnostics_copy_from_observation(observed)
                 if copied:
                     error.native_diagnostics_copy = copied
+                attach_octo_budget_observation(error, observed)
                 raise
         except FileNotFoundError:
             pass
@@ -581,6 +623,15 @@ def wait_report(container, remaining):
             if copied:
                 last_copy.clear()
                 last_copy.update(copied)
+            budget = octo_budget_from_observation(waiting_value)
+            if type(waiting_value.get("octo_budget")) is dict or (type(observed_status) is dict
+                    and type(observed_status.get("octo_budget")) is dict):
+                last_budget.clear()
+                last_budget.update(budget)
+            budget_probe = octo_budget_probe_observation(waiting_value.get("octo_budget_probe"))
+            if type(waiting_value.get("octo_budget_probe")) is dict:
+                last_budget_probe.clear()
+                last_budget_probe.update(budget_probe)
             failure = waiting_value.get("probe_error")
             if failure is not None:
                 require(type(failure) is str and failure in LAUNCHER_FAILURE_CODES,
@@ -625,8 +676,64 @@ def wait_report(container, remaining):
                     copied = diagnostics_copy_from_observation(waiting_value)
                     if copied:
                         error.native_diagnostics_copy = copied
+                    attach_octo_budget_observation(error, waiting_value)
                 raise
         time.sleep(min(0.25, checked_remaining()))
+
+
+def octo_budget_observation(value):
+    """Keep fixed policy labels and bounded scalar state, never raw errors."""
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in ("prepared", "configured") if type(value.get(key)) is bool}
+    if type(value.get("schema")) is int and value["schema"] == 1:
+        clean["schema"] = 1
+    if value.get("status") in ("idle", "prepared", "failed", "configured"):
+        clean["status"] = value["status"]
+    if value.get("scope") == "unified-loopback":
+        clean["scope"] = "unified-loopback"
+    if "error" in value and value["error"] is None:
+        clean["error"] = None
+    elif type(value.get("error")) is str and value["error"] in OCTO_BUDGET_ERROR_CODES:
+        clean["error"] = value["error"]
+    for key in OCTO_BUDGET_SECONDS:
+        number = value.get(key)
+        if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= 3600:
+            clean[key] = number
+    return clean
+
+
+def octo_budget_probe_observation(value):
+    if type(value) is not dict:
+        return {}
+    clean = {key:value[key] for key in OCTO_BUDGET_PROBE_BOOLS if type(value.get(key)) is bool}
+    for key in OCTO_BUDGET_PROBE_SECONDS:
+        number = value.get(key)
+        if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= 3600:
+            clean[key] = number
+    for key in OCTO_BUDGET_PROBE_COUNTERS:
+        count = value.get(key)
+        if type(count) is int and 0 <= count <= 16:
+            clean[key] = count
+    return clean
+
+
+def octo_budget_from_observation(value):
+    if type(value) is not dict:
+        return {}
+    raw = value.get("octo_budget")
+    if type(raw) is not dict and type(value.get("server_status")) is dict:
+        raw = value["server_status"].get("octo_budget")
+    return octo_budget_observation(raw)
+
+
+def attach_octo_budget_observation(error, value):
+    budget = octo_budget_from_observation(value)
+    if budget:
+        error.native_octo_budget = budget
+    policy_probe = octo_budget_probe_observation(value.get("octo_budget_probe")) if type(value) is dict else {}
+    if policy_probe:
+        error.native_octo_budget_probe = policy_probe
 
 
 def diagnostics_copy_observation(value):
@@ -830,6 +937,12 @@ def failure_checkpoint(container):
         copied = diagnostics_copy_from_observation(observed)
         if copied:
             result["diagnostics_copy"] = copied
+        budget = octo_budget_from_observation(observed)
+        if budget:
+            result["octo_budget"] = budget
+        budget_probe = octo_budget_probe_observation(observed.get("octo_budget_probe"))
+        if budget_probe:
+            result["octo_budget_probe"] = budget_probe
         if source == "checkpoint":
             stage = observed.get("stage")
             if type(observed.get("schema")) is int and observed["schema"] == 1 \
@@ -1300,6 +1413,10 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=240):
             report["native_http_readiness_observed"] = http_readiness_observation(error.native_http)
         if isinstance(error, ProbeError) and type(getattr(error, "native_diagnostics_copy", None)) is dict and error.native_diagnostics_copy:
             report["native_diagnostics_copy_observed"] = diagnostics_copy_observation(error.native_diagnostics_copy)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_octo_budget", None)) is dict and error.native_octo_budget:
+            report["native_octo_budget_observed"] = octo_budget_observation(error.native_octo_budget)
+        if isinstance(error, ProbeError) and type(getattr(error, "native_octo_budget_probe", None)) is dict and error.native_octo_budget_probe:
+            report["native_octo_budget_probe_observed"] = octo_budget_probe_observation(error.native_octo_budget_probe)
         if isinstance(error, ProbeError) and type(getattr(error, "tool_detail", None)) is dict:
             report["simctl_failure"] = error.tool_detail
     finally:
