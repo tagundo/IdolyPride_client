@@ -1,5 +1,18 @@
 # 검증 상태
 
+2026-11-15 통합 IPA **156.9113**과 서버 **v0.3.33 / build 50**의 빌드·실행·게시 검증을 통과했습니다. [세 플랫폼 상세 기록](../docs/releases/recovery-v0.3.33.md).
+
+- 빌드 소스: `b9c3e3d7ed954e0c1c9d87e1f726fb8c29a8e479`
+- [성공한 Actions 실행](https://github.com/tagundo/IdolyPride_client/actions/runs/43716026678)
+- [검증된 IPA 다운로드](https://github.com/tagundo/IdolyPride_client/raw/c5f299259b3009c6a5807f28b6707167c645c57d/IdolyPride-6.1.1-Unified-iOS.ipa)
+- 게시 커밋: `c5f299259b3009c6a5807f28b6707167c645c57d`
+- 파일: `IdolyPride-6.1.1-Unified-iOS.ipa` / 525,695,863 bytes
+- SHA-256: `b4c8b1b5eb8a6ee43c567912ae92f33106ab5403c5916c7b340896368bde654e`
+
+오른쪽 위 제스처 영역을 128×128 포인트로 확장하고 2초·한 손가락·이동 제한을 유지했습니다. 휴대폰·태블릿·가로·작은 안전 영역·회전 후 경계의 C 정책 검사 43개와 실제 Simulator의 제스처 등록 검사를 통과했습니다. 전체 6,860개·하위 375개 검사, 기존 Apple SDK·Mac Foundation/AppKit·다섯 언어 재실행·EPIPE 생존·서버/리소스 검사를 같은 소스에서 통과했습니다. 게시 파일 전체 원격 SHA-256과 인증 없는 64바이트 HTTP 206도 확인했습니다. 실제 PlayCover·iPhone·iPad의 게임 및 터치 재검증은 별도 대상입니다.
+
+## 이전 156.9112 검증 기록
+
 2026-11-15 통합 IPA `156.9112`와 서버 v0.3.32의 공통 최적화·빌드·실행·게시 검증을 통과했습니다. [세 플랫폼 상세 기록](../docs/releases/optimization-v0.3.32.md).
 
 - 빌드 소스: `7f4244f146a07c35cafcdacf1e5caef949cd1d1c`
