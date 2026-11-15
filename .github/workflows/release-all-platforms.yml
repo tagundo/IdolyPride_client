@@ -28,8 +28,6 @@ jobs:
   portable:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    env:
-      IDOLY_PREFERENCE_MASTER_DIR: ${{ runner.temp }}/idoly-recovery-references/master-json
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,6 +97,8 @@ jobs:
           PY
       - name: Require actual supplementary-master and media-inventory contracts
         shell: bash
+        env:
+          IDOLY_PREFERENCE_MASTER_DIR: ${{ runner.temp }}/idoly-recovery-references/master-json
         run: |
           set -euo pipefail
           uv run --locked --all-extras python -m pytest -q \
@@ -121,6 +121,8 @@ jobs:
           PY
       - name: Run shared server and portable platform regressions
         shell: bash
+        env:
+          IDOLY_PREFERENCE_MASTER_DIR: ${{ runner.temp }}/idoly-recovery-references/master-json
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/idoly-portable"
