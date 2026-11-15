@@ -258,7 +258,11 @@ def native_report(language="ko", run_index=None):
     report["language_save"] = {"current_language":language,"next_language":next_language,"ack_id":200,
         "save_trigger":"change-autosave",
         "acknowledged":True,"persisted_language":next_language,"effective_language":language,
-        "options_fields_reenabled":True,"message_success":True}
+        "options_fields_reenabled":True,"message_success":True,"form_feedback_saved":True,
+        "request_id":200,"request_action":"save_options","request_language":next_language,
+        "request_observed":True,"ack_correlated":True,"feedback_source":"options-save-feedback","feedback_state":"saved",
+        "ack_language":next_language,"ack_effective_language":language,"server_status_received":True,
+        "server_language_matches":True,"server_effective_matches":True,"timed_out":False}
     return report
 
 
@@ -742,6 +746,49 @@ def test_native_boolean_observations_cast_c_logical_results_before_json_boxing()
         anchor = variable+'[@"'+key+'"]='
         assert source.count(anchor) == 1
         assert source.split(anchor,1)[1].startswith('@((BOOL)('), key
+
+
+def test_autosave_language_probe_uses_own_feedback_correlated_send_and_independent_readback():
+    source = (Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    saving = source.split("static void ProbeAutoSaveLanguage(",1)[1].split("static NSString *ProbeChromeTitle(",1)[0]
+    assert "window.__idolyProbeGameAck=null" in saving and "window.__idolyProbeOptionsRequest=null" in saving
+    assert "r.action==='save_options'" in saving and "return original.apply(h,arguments)" in saving
+    assert "getElementById('options-save-feedback')" in saving and "m.dataset.state==='saved'" in saving
+    assert "getElementById('message')" not in saving and "requestSubmit" not in saving
+    assert "a.id===r.id" in saving and "IdolyEmbeddedServerCommand(request" in saving
+    assert 'options[@"language"]' in saving and 'activeOptions[@"language"]' in saving
+    assert "15*NSEC_PER_SEC" in saving
+    polling = source.split("static void ProbePollLanguageAttempt(",1)[1].split("static void ProbeAutoSaveLanguage(",1)[0]
+    assert 'last[@"ready"]=@NO' in polling and 'last[@"timed_out"]=@YES' in polling
+    hook = source.split("static NSString *const ProbeReplyHook",1)[1].split("static void ProbePollLanguageAttempt(",1)[0]
+    assert "q.action==='save_options'&&q.id===id" in hook
+    relaunch = source.split('- (void)saveNextLanguage:(WKWebView *)web completion:(void (^)(BOOL))completion {',1)[1].split('- (void)probeLauncher:',1)[0]
+    assert 'failed[@"attempted_language"]=@"en"; finish(failed)' in relaunch
+    assert '@"next_language":attempted' in relaunch
+
+
+@pytest.mark.parametrize("field,value", [(key,value) for key in probe.LANGUAGE_SAVE_FLAGS for value in (False,1)] + [
+    ("feedback_source","message"),("feedback_state","pending"),("feedback_state","failed"),
+    ("request_action","status"),("request_language","ko"),("request_id",199),("request_id",True),
+    ("ack_language","ko"),("ack_effective_language","en"),("timed_out",True),("timed_out",0)])
+def test_language_save_requires_matching_form_feedback_correlated_ack_and_server_readback(field, value):
+    observed = native_report()
+    observed["language_save"][field] = value
+    with pytest.raises(probe.ProbeError, match="^language_save_failed$"):
+        probe.validate_report(observed)
+
+
+def test_language_save_timeout_preserves_only_bounded_last_ack_and_form_scalars():
+    raw = {"request_id":22,"request_action":"save_options","request_language":"ja","request_observed":True,
+        "ack_id":22,"ack_correlated":True,"acknowledged":True,"ack_language":"ja","ack_effective_language":"en",
+        "feedback_source":"options-save-feedback","feedback_state":"pending","form_feedback_saved":False,
+        "options_fields_reenabled":True,"server_status_received":False,"timed_out":True,
+        "persisted_language":"unknown","effective_language":"unknown","raw_message":"DO-NOT-EXPORT"}
+    clean = probe.language_save_observation(raw)
+    assert clean["request_id"] == clean["ack_id"] == 22 and clean["ack_language"] == "ja"
+    assert clean["feedback_state"] == "pending" and clean["form_feedback_saved"] is False
+    assert clean["server_status_received"] is False and clean["persisted_language"] == "unknown" and clean["timed_out"] is True
+    assert "DO-NOT-EXPORT" not in json.dumps(clean)
 
 
 def test_settings_dom_waits_for_public_navigation_before_evaluation_with_same_deadline():

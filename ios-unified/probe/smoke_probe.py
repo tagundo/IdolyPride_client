@@ -67,7 +67,8 @@ HOST_PROBE_COUNTS = ("application_main_adapter_calls", "original_run_main_calls"
 LANGUAGE_CYCLE_FLAGS = ("acknowledged", "dom_language_matches", "native_title_matches",
     "native_game_button_matches", "native_status_label_matches", "native_server_button_matches",
     "game_select_unchanged", "persisted_game_language_unchanged")
-LANGUAGE_SAVE_FLAGS = ("acknowledged", "options_fields_reenabled", "message_success")
+LANGUAGE_SAVE_FLAGS = ("acknowledged", "options_fields_reenabled", "message_success", "form_feedback_saved",
+    "request_observed", "ack_correlated", "server_status_received", "server_language_matches", "server_effective_matches")
 LAUNCH_SETTINGS_FLAGS = ("cold_while_settings_flush_held", "game_button_disabled_during_flush",
     "settings_flush_called_once", "unsolicited_settings_ack_ignored", "settings_flush_released_before_forward")
 SETTINGS_WEB_BOOL_FIELDS = ("web_found", "timed_out", "evaluation_succeeded", "ready", "forms_present",
@@ -395,6 +396,11 @@ def _validate_language_evidence(host, probe, cycle, saved, language, run_index=N
     require(type(saved) is dict and saved.get("current_language") == language
             and saved.get("next_language") == next_language and saved.get("persisted_language") == next_language
             and saved.get("effective_language") == language and saved.get("save_trigger") == "change-autosave"
+            and saved.get("feedback_source") == "options-save-feedback" and saved.get("feedback_state") == "saved"
+            and saved.get("request_action") == "save_options" and saved.get("request_language") == next_language
+            and saved.get("ack_language") == next_language and saved.get("ack_effective_language") == language
+            and saved.get("timed_out") is False
+            and type(saved.get("request_id")) is int and saved["request_id"] == saved.get("ack_id")
             and type(saved.get("ack_id")) is int and 1 <= saved["ack_id"] <= 2**31-1
             and all(saved.get(key) is True for key in LANGUAGE_SAVE_FLAGS), "language_save_failed")
     return {"language":language,"run_index":run_index,"unity_host":unity_host_observation(host),
@@ -530,9 +536,15 @@ def language_save_observation(value):
     if type(value) is not dict: return {}
     clean = {key:value[key] for key in LANGUAGE_SAVE_FLAGS if type(value.get(key)) is bool}
     if value.get("save_trigger") == "change-autosave": clean["save_trigger"] = "change-autosave"
-    for key in ("current_language","next_language","persisted_language","effective_language"):
-        if value.get(key) in LANGUAGE_ORDER: clean[key] = value[key]
-    if type(value.get("ack_id")) is int and 1 <= value["ack_id"] <= 2**31-1: clean["ack_id"] = value["ack_id"]
+    if value.get("feedback_source") == "options-save-feedback": clean["feedback_source"] = "options-save-feedback"
+    if value.get("feedback_state") in ("ready","pending","saving","saved","invalid","failed","unknown"):
+        clean["feedback_state"] = value["feedback_state"]
+    if value.get("request_action") in ("save_options","unknown"): clean["request_action"] = value["request_action"]
+    if type(value.get("timed_out")) is bool: clean["timed_out"] = value["timed_out"]
+    for key in ("current_language","next_language","persisted_language","effective_language","request_language","ack_language","ack_effective_language"):
+        if value.get(key) in (*LANGUAGE_ORDER,"unknown"): clean[key] = value[key]
+    for key in ("request_id","ack_id"):
+        if type(value.get(key)) is int and 1 <= value[key] <= 2**31-1: clean[key] = value[key]
     return clean
 
 

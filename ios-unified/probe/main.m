@@ -558,32 +558,95 @@ static NSString *const ProbeReplyHook =
      "window.idolyServerReply=function(id,envelope){let v=envelope;try{if(typeof v==='string')v=JSON.parse(v);}catch(e){}"
      "if(v&&v.id===id&&v.ok===true&&v.result){if(typeof v.result.interface_language==='string')"
      "window.__idolyProbeInterfaceAck={id:v.id,language:v.result.interface_language};"
-     "if(v.result.options)window.__idolyProbeGameAck={id:v.id,language:v.result.options.language,"
-     "effective:v.result.effective_options?v.result.effective_options.language:null};}"
+     "const q=window.__idolyProbeOptionsRequest;"
+     "if(q&&q.action==='save_options'&&q.id===id&&v.result.options)window.__idolyProbeGameAck={id:v.id,"
+     "language:v.result.options.language,effective:v.result.effective_options?v.result.effective_options.language:null};}"
      "return old.apply(this,arguments);};window.__idolyProbeHook=true;}";
-static void ProbePollLanguage(WKWebView *__weak weakWeb,NSString *script,NSTimeInterval deadline,
-                             BOOL (^nativeReady)(void),void (^completion)(NSDictionary *)) {
+static void ProbePollLanguageAttempt(WKWebView *__weak weakWeb,NSString *script,NSTimeInterval deadline,
+                                    BOOL (^nativeReady)(void),NSMutableDictionary *state,void (^completion)(NSDictionary *)) {
+    if ([state[@"finished"] boolValue]) return;
     WKWebView *web=weakWeb;
-    if (!web || NSProcessInfo.processInfo.systemUptime>=deadline) { completion(@{}); return; }
+    if (!web || NSProcessInfo.processInfo.systemUptime>=deadline) {
+        NSMutableDictionary *last=[state[@"last"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        last[@"ready"]=@NO; last[@"timed_out"]=@YES; completion(last); return;
+    }
     [web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
+        if ([state[@"finished"] boolValue]) return;
+        if (!error && [value isKindOfClass:NSDictionary.class]) state[@"last"]=[value copy];
         if (!error && [value isKindOfClass:NSDictionary.class] && [value[@"ready"] isEqual:@YES]
                 && (!nativeReady || nativeReady())) { completion(value); return; }
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
-            ProbePollLanguage(weakWeb,script,deadline,nativeReady,completion);
+            ProbePollLanguageAttempt(weakWeb,script,deadline,nativeReady,state,completion);
         });
     }];
 }
+static void ProbePollLanguage(WKWebView *__weak weakWeb,NSString *script,NSTimeInterval deadline,
+                             BOOL (^nativeReady)(void),void (^completion)(NSDictionary *)) {
+    ProbePollLanguageAttempt(weakWeb,script,deadline,nativeReady,[NSMutableDictionary dictionary],completion);
+}
 static void ProbeAutoSaveLanguage(WKWebView *web,NSString *next,NSString *effective,void (^completion)(NSDictionary *)) {
+    NSTimeInterval deadline=NSProcessInfo.processInfo.systemUptime+15;
+    NSMutableDictionary *state=[@{@"finished":@NO,@"last":@{}} mutableCopy];
+    void (^finish)(NSDictionary *)=^(NSDictionary *metrics){
+        if ([state[@"finished"] boolValue]) return;
+        state[@"finished"]=@YES; completion(metrics);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,15*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        NSMutableDictionary *last=[state[@"last"] mutableCopy] ?: [NSMutableDictionary dictionary];
+        last[@"ready"]=@NO; last[@"timed_out"]=@YES; finish(last);
+    });
+    // createBridge reads this handler for every send; it does not bind it in
+    // advance. Observe metadata and forward the original message exactly once.
     NSString *setup=[ProbeReplyHook stringByAppendingFormat:
-        @"window.__idolyProbeGameAck=null;(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form');"
-         "if(!s||!f)return false;s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",next];
+        @"(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form'),"
+         "h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.idolyServer;"
+         "if(!s||!f||!h||typeof h.postMessage!=='function')return false;"
+         "if(!window.__idolyProbeTransportObserver){const original=h.postMessage;const observe=function(r){"
+         "if(r&&r.action==='save_options'&&Number.isInteger(r.id))window.__idolyProbeOptionsRequest={id:r.id,action:r.action,language:r.language};"
+         "return original.apply(h,arguments);};h.postMessage=observe;if(h.postMessage!==observe)return false;"
+         "window.__idolyProbeTransportObserver=true;}"
+         "window.__idolyProbeOptionsRequest=null;window.__idolyProbeGameAck=null;"
+         "s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",next];
     [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
-        if (error || ![value isEqual:@YES]) { completion(@{}); return; }
+        if ([state[@"finished"] boolValue]) return;
+        if (error || ![value isEqual:@YES]) { finish(@{@"ready":@NO,@"timed_out":@NO}); return; }
         NSString *poll=[NSString stringWithFormat:
-            @"(()=>{const a=window.__idolyProbeGameAck,f=document.getElementById('options-fields'),m=document.getElementById('message');"
-             "return {ready:!!a&&a.language==='%@'&&a.effective==='%@'&&!!f&&!f.disabled&&!!m&&!m.hidden&&m.dataset.error==='false',"
-             "ack_id:a?a.id:0};})()",next,effective];
-        ProbePollLanguage(web,poll,NSProcessInfo.processInfo.systemUptime+15,nil,completion);
+            @"(()=>{const a=window.__idolyProbeGameAck,r=window.__idolyProbeOptionsRequest,f=document.getElementById('options-fields'),"
+             "m=document.getElementById('options-save-feedback');const observed=!!r&&r.action==='save_options'&&r.language==='%@',"
+             "correlated=observed&&!!a&&a.id===r.id,acknowledged=correlated&&a.language==='%@'&&a.effective==='%@',"
+             "enabled=!!f&&!f.disabled,saved=!!m&&m.dataset.state==='saved';"
+             "return {ready:acknowledged&&enabled&&saved,request_observed:observed,ack_correlated:correlated,acknowledged,"
+             "options_fields_reenabled:enabled,form_feedback_saved:saved,request_id:r?r.id:0,ack_id:a?a.id:0,"
+             "request_action:r&&r.action==='save_options'?'save_options':'unknown',"
+             "request_language:r&&['ko','en','ja'].includes(r.language)?r.language:'unknown',"
+             "ack_language:a&&['ko','en','ja'].includes(a.language)?a.language:'unknown',"
+             "ack_effective_language:a&&['ko','en','ja'].includes(a.effective)?a.effective:'unknown',"
+             "feedback_state:m&&['ready','pending','saving','saved','invalid','failed'].includes(m.dataset.state)?m.dataset.state:'unknown'};})()",next,next,effective];
+        ProbePollLanguageAttempt(web,poll,deadline,nil,state,^(NSDictionary *ack){
+            if ([state[@"finished"] boolValue]) return;
+            state[@"last"]=ack;
+            if (![ack[@"ready"] isEqual:@YES]) { finish(ack); return; }
+            NSString *request=[NSString stringWithFormat:@"{\"id\":%lu,\"action\":\"status\"}",(unsigned long)(7900+probeRunIndex)];
+            IdolyEmbeddedServerCommand(request,^(NSString *reply){
+                if ([state[@"finished"] boolValue]) return;
+                NSDictionary *envelope=ProbeObject(reply);
+                NSDictionary *status=[envelope[@"result"] isKindOfClass:NSDictionary.class] ? envelope[@"result"] : @{};
+                NSDictionary *options=[status[@"options"] isKindOfClass:NSDictionary.class] ? status[@"options"] : @{};
+                NSDictionary *activeOptions=[status[@"effective_options"] isKindOfClass:NSDictionary.class] ? status[@"effective_options"] : @{};
+                NSString *persisted=options[@"language"],*active=activeOptions[@"language"];
+                NSArray *languages=@[@"ko",@"en",@"ja"];
+                if (![persisted isKindOfClass:NSString.class] || ![languages containsObject:persisted]) persisted=@"unknown";
+                if (![active isKindOfClass:NSString.class] || ![languages containsObject:active]) active=@"unknown";
+                BOOL received=[envelope[@"ok"] isEqual:@YES] && [status[@"state"] isEqual:@"ready"] && [status[@"running"] isEqual:@YES];
+                BOOL matches=received && [persisted isEqual:next], effectiveMatches=received && [active isEqual:effective];
+                BOOL timedOut=NSProcessInfo.processInfo.systemUptime>=deadline;
+                NSMutableDictionary *metrics=[ack mutableCopy];
+                metrics[@"persisted_language"]=persisted; metrics[@"effective_language"]=active;
+                metrics[@"server_status_received"]=@(received); metrics[@"server_language_matches"]=@(matches);
+                metrics[@"server_effective_matches"]=@(effectiveMatches); metrics[@"timed_out"]=@(timedOut);
+                metrics[@"ready"]=@((BOOL)(matches && effectiveMatches && !timedOut)); state[@"last"]=metrics; finish(metrics);
+            });
+        });
     }];
 }
 static NSString *ProbeChromeTitle(NSString *language) {
@@ -1239,17 +1302,30 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     NSString *next=ProbeNextLanguage();
     void (^finish)(NSDictionary *)=^(NSDictionary *ack){
         BOOL saved=[ack[@"ready"] isEqual:@YES];
-        self.languageSave=@{@"current_language":probeExpectedLanguage,@"next_language":next,
-            @"ack_id":ack[@"ack_id"] ?: @0,@"acknowledged":@(saved),@"persisted_language":next,
-            @"save_trigger":@"change-autosave",@"effective_language":probeExpectedLanguage,
-            @"options_fields_reenabled":@(saved),@"message_success":@(saved)};
+        NSString *attempted=[ack[@"attempted_language"] isEqual:@"en"] ? @"en" : next;
+        self.languageSave=@{@"current_language":probeExpectedLanguage,@"next_language":attempted,
+            @"request_id":ack[@"request_id"] ?: @0,@"ack_id":ack[@"ack_id"] ?: @0,
+            @"request_action":ack[@"request_action"] ?: @"unknown",@"request_language":ack[@"request_language"] ?: @"unknown",
+            @"request_observed":@([ack[@"request_observed"] isEqual:@YES]),@"ack_correlated":@([ack[@"ack_correlated"] isEqual:@YES]),
+            @"acknowledged":@([ack[@"acknowledged"] isEqual:@YES]),
+            @"persisted_language":ack[@"persisted_language"] ?: @"unknown",@"effective_language":ack[@"effective_language"] ?: @"unknown",
+            @"save_trigger":@"change-autosave",@"feedback_source":@"options-save-feedback",
+            @"feedback_state":ack[@"feedback_state"] ?: @"unknown",@"ack_language":ack[@"ack_language"] ?: @"unknown",
+            @"ack_effective_language":ack[@"ack_effective_language"] ?: @"unknown",
+            @"options_fields_reenabled":@([ack[@"options_fields_reenabled"] isEqual:@YES]),
+            @"form_feedback_saved":@([ack[@"form_feedback_saved"] isEqual:@YES]),@"message_success":@([ack[@"form_feedback_saved"] isEqual:@YES]),
+            @"server_status_received":@([ack[@"server_status_received"] isEqual:@YES]),
+            @"server_language_matches":@([ack[@"server_language_matches"] isEqual:@YES]),
+            @"server_effective_matches":@([ack[@"server_effective_matches"] isEqual:@YES]),@"timed_out":@([ack[@"timed_out"] isEqual:@YES])};
         if (saved) [self recordCheckpoint:@"language_saved"];
         completion(saved);
     };
     // The last return is already Korean. Make a real EN edit first so this
     // check cannot pass by resubmitting unchanged values or a stale ACK.
     if (probeRunIndex==4) ProbeAutoSaveLanguage(web,@"en",probeExpectedLanguage,^(NSDictionary *ack){
-        if (![ack[@"ready"] isEqual:@YES]) { completion(NO); return; }
+        if (![ack[@"ready"] isEqual:@YES]) {
+            NSMutableDictionary *failed=[ack mutableCopy]; failed[@"attempted_language"]=@"en"; finish(failed); return;
+        }
         ProbeAutoSaveLanguage(web,next,probeExpectedLanguage,finish);
     });
     else ProbeAutoSaveLanguage(web,next,probeExpectedLanguage,finish);
