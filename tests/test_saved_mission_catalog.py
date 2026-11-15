@@ -1,5 +1,8 @@
 """Persisted mission menus use actual memberships and never manufacture activity."""
 import json
+from types import SimpleNamespace
+
+from google.protobuf import descriptor_pb2, descriptor_pool
 
 import grpc
 import pytest
@@ -143,16 +146,47 @@ def test_named_master_reward_resolves_without_granting_anything(mission_game):
 
 def test_original_client_resource_enum_supports_inline_item_display(mission_game):
     game = mission_game
+    enums = [enum for file in game[0].schema.files for enum in file.enum_types_by_name.values()
+             if enum.name == "ResourceType"]
     types = mission._resource_types(game[0].schema)
-    if "item" not in types:
-        pytest.skip("Legacy minimal schema has no ResourceType enum; actual 6.1.1 case covers Item")
+    if not enums:
+        assert types == {"stone": 15}
+        pytest.skip("Legacy minimal schema intentionally has no ResourceType enum")
+    assert len(enums) == 1
     assert types["item"] == 1 and types["stone"] == 15
+    assert "resource_type_item" not in types and "resource_type_stone" not in types
     write_master(game, [definition(reward="rd_auto;item;item-card_enhance;10")])
     import_missions(game, [{"missionId": "saved-daily", "currentThreshold": 3,
                            "progress": 5, "statusType": 2}])
     before = dump(game[1])
     assert list_result(game).userMissions[0] == current(game).missions[0]
     assert dump(game[1]) == before
+
+
+@pytest.mark.parametrize("prefix", ("", "ResourceType_"))
+def test_resource_display_keys_match_native_member_names_for_bare_and_recovered_enum(prefix):
+    file = descriptor_pb2.FileDescriptorProto(name="resource-display.proto", package="display")
+    enum = file.enum_type.add(name="ResourceType")
+    for name, number in (("Unknown", 0), ("Item", 1), ("Gold", 8), ("ManagerExp", 14), ("Stone", 15)):
+        enum.value.add(name=prefix + name, number=number)
+    pool = descriptor_pool.DescriptorPool()
+    pool.Add(file)
+    schema = SimpleNamespace(files=[pool.FindFileByName(file.name)])
+    assert mission._resource_types(schema) == {
+        "item": 1, "gold": 8, "manager_exp": 14, "stone": 15}
+
+
+def test_resource_display_key_normalization_rejects_ambiguous_enum_aliases():
+    file = descriptor_pb2.FileDescriptorProto(name="ambiguous-resource.proto", package="display")
+    enum = file.enum_type.add(name="ResourceType")
+    enum.value.add(name="ResourceType_Item", number=1)
+    enum.value.add(name="Item", number=2)
+    pool = descriptor_pool.DescriptorPool()
+    pool.Add(file)
+    schema = SimpleNamespace(files=[pool.FindFileByName(file.name)])
+    with pytest.raises(RpcFailure) as failure:
+        mission._resource_types(schema)
+    assert failure.value.code == RpcCode.FAILED_PRECONDITION
 
 
 @pytest.mark.parametrize("problem", (

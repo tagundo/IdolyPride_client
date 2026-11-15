@@ -165,7 +165,19 @@ def _resource_types(schema):
     def snake(name):
         name = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
         return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name).lower()
-    return {snake(value.name): value.number for value in enums[0].values if value.number > 0}
+    result = {}
+    enum = enums[0]
+    for value in enum.values:
+        if value.number <= 0:
+            continue
+        # Recovered protobuf descriptors retain names such as ResourceType_Item.
+        # Native C# reflection sees the member Item; strip only this exact enum
+        # prefix before applying its CamelToLowerSnakeCase display-key mapping.
+        key = snake(value.name.removeprefix(enum.name + "_"))
+        if not key or key in result:
+            _fail("ambiguous resource display identity")
+        result[key] = value.number
+    return result
 
 
 def _display_reward(catalog, key, resource_types):
