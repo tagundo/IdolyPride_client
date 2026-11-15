@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "source_commit": "3fd0287e2d0013a7f4f6d3ad2e5f64f5493f6565",
+  "artifacts": [
+    {
+      "name": "IdolyPride-6.1.1-Unified-iOS.ipa",
+      "bytes": 525675230,
+      "sha256": "c2c950b90d4014f380ec7781b0504975d7b9b4db13e409bd860b294d47132af7"
+    }
+  ],
+  "validation": {
+    "Actions_run": 43671475243,
+    "Simulator_core": "PASS",
+    "physical_gameplay": "NOT_TESTED",
+    "PlayCover": "NOT_TESTED"
+  }
+}
