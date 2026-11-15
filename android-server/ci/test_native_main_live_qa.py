@@ -75,6 +75,19 @@ class ModeDevice(Device):
         self.mode = False
         self.forget_mode = False
 
+    def capture(self, stage):
+        captured = super().capture(stage)
+        if stage.startswith(("48-main-live-find-", "48-main-live-checked-")):
+            hierarchy = qa.ET.Element("hierarchy")
+            qa.ET.SubElement(hierarchy, "node", {
+                "text": "첫 메인 라이브 실험 기능 사용",
+                "class": "android.widget.CheckBox", "checkable": "true",
+                "enabled": "true", "checked": str(self.mode).lower(),
+                "bounds": "[55,700][1025,800]",
+            })
+            return hierarchy
+        return captured
+
     def tap(self, text, stage):
         if text == "첫 메인 라이브 실험 기능 사용":
             assert self.process and not self.running
