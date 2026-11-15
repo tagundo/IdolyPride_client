@@ -197,6 +197,7 @@
     "idoly_local.photo_shooting",
     "idoly_local.playback",
     "idoly_local.presentation",
+    "idoly_local.profile_emblems",
     "idoly_local.profile_favorites",
     "idoly_local.profile_layout",
     "idoly_local.profile_messages",
