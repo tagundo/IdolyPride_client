@@ -684,6 +684,73 @@ def test_private_probe_cache_identity_file_must_be_absent_initially_and_is_never
     assert path.read_text() == "owned-existing-private-state"
 
 
+def test_settings_web_diagnostic_projection_keeps_only_bounded_scalar_metrics():
+    observed = probe.settings_web_observation({"web_found":True,"ready":False,"document_complete":False,
+        "options_fields_enabled":True,"presentation_fields_enabled":False,"bridge_reply_present":True,
+        "error_is_wk_domain":True,"viewport_width":402,"content_width":403.5,"select_count":14,
+        "observations":128,"elapsed_seconds":600,"evaluation_error_code":-100,
+        "script":"never-export-web","error_description":"never-export-web"})
+    assert observed["ready"] is False and observed["evaluation_error_code"] == -100
+    assert observed["observations"] == 128 and "never-export-web" not in json.dumps(observed)
+    assert probe.settings_web_observation({"ready":1,"viewport_width":float("nan"),"content_width":16385,
+        "select_count":True,"observations":129,"elapsed_seconds":601,"evaluation_error_code":True,
+        "timed_out":True,"raw":"never-export-web"}) == {"timed_out":True}
+    assert probe.settings_web_from_observation({"menu_lifetime":{"web":{"ready":False,"select_count":0}}}) == {
+        "ready":False,"select_count":0}
+
+
+@pytest.mark.parametrize("source,filename", (("checkpoint","embedded-language-en-checkpoint.json"),
+    ("status","embedded-language-en-status.json"),("report","embedded-language-en.json")))
+def test_settings_web_diagnostics_survive_checkpoint_status_and_final_without_raw_web_payload(tmp_path, source, filename):
+    documents = tmp_path/"Documents";documents.mkdir()
+    native = native_report("en",1)
+    metrics = {"web_found":True,"ready":False,"document_complete":False,"observations":7,
+        "elapsed_seconds":10.5,"evaluation_error_code":4,"error_is_wk_domain":True,"raw":"never-export-web"}
+    value = native if source == "report" else {"schema":1,"stage":"settings_web_observed"}
+    if source == "report":
+        value["menu_lifetime"]["web"].update(metrics)
+    else: value["settings_web"] = metrics
+    (documents/filename).write_text(json.dumps(value))
+    observed = probe.failure_checkpoint(tmp_path,"en",1)
+    assert observed["settings_web"]["ready"] is False and observed["settings_web"]["observations"] == 7
+    assert observed["settings_web"]["evaluation_error_code"] == 4
+    if source == "checkpoint": assert observed["stage"] == "settings_web_observed"
+    assert "never-export-web" not in json.dumps(observed)
+
+
+def test_settings_web_final_failure_still_enforces_dom_gate_and_exports_safe_observation(app, tmp_path):
+    native = native_report()
+    native["menu_lifetime"]["web"].update(ready=False,document_complete=False,observations=3,
+        elapsed_seconds=10.25,evaluation_error_code=5,error_is_wk_domain=True,raw="never-export-web")
+    controller = FakeSimctl(tmp_path/"settings-web-failure-container")
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",controller), \
+            mock.patch(__name__+".native_report",return_value=native),mock.patch.object(probe,"probe_rpcs") as rpc:
+        result = probe.run_probe(app,tmp_path/"settings-web-failure.json")
+    assert result["error"] == "settings_web_readiness_or_layout_failed"
+    assert result["native_settings_web_observed"]["document_complete"] is False
+    assert result["native_settings_web_observed"]["evaluation_error_code"] == 5
+    assert "never-export-web" not in json.dumps(result)
+    rpc.assert_not_called()
+
+
+def test_settings_web_probe_error_and_deadline_preserve_safe_latest_metrics(tmp_path):
+    documents = tmp_path/"Documents";documents.mkdir()
+    path = documents/"embedded-language-en-status.json"
+    value = {"server_status":{"phase":4,"error":None},"settings_web":{"ready":False,
+        "observations":12,"elapsed_seconds":10.1,"evaluation_error_code":4,"raw":"never-export-web"},
+        "probe_error":"settings_web_readiness_or_layout_failed"}
+    path.write_text(json.dumps(value))
+    with pytest.raises(probe.ProbeError) as caught: probe.wait_report(tmp_path,lambda:1,expected_language="en",run_index=1)
+    assert caught.value.native_settings_web["observations"] == 12
+    assert "never-export-web" not in json.dumps(caught.value.native_settings_web)
+    del value["probe_error"];path.write_text(json.dumps(value))
+    remaining = mock.Mock(side_effect=[1,1,probe.ProbeError("probe_deadline_exceeded")])
+    with mock.patch.object(probe.time,"sleep"),pytest.raises(probe.ProbeError) as caught:
+        probe.wait_report(tmp_path,remaining,expected_language="en",run_index=1)
+    assert caught.value.native_settings_web["elapsed_seconds"] == 10.1
+    assert "never-export-web" not in json.dumps(caught.value.native_settings_web)
+
+
 @pytest.mark.parametrize("phase,key,value", (
     ("before_server","sigaction_read",False),("before_server","sigpipe_ignored",False),
     ("before_server","write_epipe",False),("before_server","process_survived",False),
@@ -1806,7 +1873,7 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate"))
+                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web"))
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]

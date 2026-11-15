@@ -68,6 +68,9 @@ LANGUAGE_CYCLE_FLAGS = ("acknowledged", "dom_language_matches", "native_title_ma
     "native_game_button_matches", "native_status_label_matches", "native_server_button_matches",
     "game_select_unchanged", "persisted_game_language_unchanged")
 LANGUAGE_SAVE_FLAGS = ("acknowledged", "options_fields_reenabled", "message_success")
+SETTINGS_WEB_BOOL_FIELDS = ("web_found", "timed_out", "evaluation_succeeded", "ready", "forms_present",
+    "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "document_complete",
+    "options_fields_enabled", "presentation_fields_enabled", "bridge_reply_present", "error_is_wk_domain")
 SIGPIPE_PHASES = ("before_server", "before_game_worker")
 SIGPIPE_FLAGS = ("sigaction_read", "sigpipe_ignored", "socketpair_created", "peer_closed", "write_epipe", "process_survived")
 # A well-formed unknown protobuf varint makes empty requests exercise AES too.
@@ -104,7 +107,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
-    "settings_diagnostics_copied",
+    "settings_diagnostics_copied", "settings_web_observed",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
@@ -843,6 +846,7 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
     last_budget_probe = {}
     last_language = {}
     last_server_gate = {}
+    last_settings_web = {}
     def checked_remaining():
         try:
             return remaining()
@@ -863,6 +867,8 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
                 error.native_language = dict(last_language)
             if last_server_gate:
                 error.native_server_gate = dict(last_server_gate)
+            if last_settings_web:
+                error.native_settings_web = dict(last_settings_web)
             raise
     while True:
         checked_remaining()
@@ -894,6 +900,8 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
                 observed_status = observed.get("server_status")
                 gate = server_gate_observation(observed_status)
                 if gate: error.native_server_gate = gate
+                settings_web = settings_web_from_observation(observed)
+                if settings_web: error.native_settings_web = settings_web
                 http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
                 if http:
                     error.native_http = http
@@ -931,6 +939,11 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
             if type(waiting_value.get("octo_budget_probe")) is dict:
                 last_budget_probe.clear()
                 last_budget_probe.update(budget_probe)
+            settings_web = settings_web_from_observation(waiting_value)
+            menu = waiting_value.get("menu_lifetime")
+            if "settings_web" in waiting_value or (type(menu) is dict and "web" in menu):
+                last_settings_web.clear()
+                last_settings_web.update(settings_web)
             observed_language = language_observation(waiting_value)
             if any(key in waiting_value for key in ("unity_host", "unity_host_probe", "interface_language_cycle", "language_save")) \
                     or (type(observed_status) is dict and "unity_host" in observed_status):
@@ -976,6 +989,8 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
                     observed_status = waiting_value.get("server_status")
                     gate = server_gate_observation(observed_status)
                     if gate: error.native_server_gate = gate
+                    settings_web = settings_web_from_observation(waiting_value)
+                    if settings_web: error.native_settings_web = settings_web
                     http = http_readiness_observation(observed_status.get("http_readiness")) if type(observed_status) is dict else {}
                     if http:
                         error.native_http = http
@@ -987,6 +1002,27 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
                     if evidence: error.native_language = evidence
                 raise
         time.sleep(min(0.25, checked_remaining()))
+
+
+def settings_web_observation(value):
+    """Export only bounded DOM readiness scalars, never script/error text."""
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in SETTINGS_WEB_BOOL_FIELDS if type(value.get(key)) is bool}
+    for key,maximum in (("viewport_width",16384),("content_width",16384),("elapsed_seconds",600)):
+        number = value.get(key)
+        if type(number) in (int,float) and math.isfinite(number) and 0 <= number <= maximum: clean[key] = number
+    for key,low,high in (("select_count",0,256),("observations",1,128),("evaluation_error_code",-100,100)):
+        number = value.get(key)
+        if type(number) is int and low <= number <= high: clean[key] = number
+    return clean
+
+
+def settings_web_from_observation(value):
+    if type(value) is not dict: return {}
+    raw = value.get("settings_web")
+    if type(raw) is not dict and type(value.get("menu_lifetime")) is dict:
+        raw = value["menu_lifetime"].get("web")
+    return settings_web_observation(raw)
 
 
 def octo_budget_observation(value):
@@ -1235,6 +1271,8 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
         result[source + "_available"] = True
         gate = server_gate_observation(observed.get("server_status") if type(observed.get("server_status")) is dict else observed)
         if gate: result["server_gate"] = gate
+        settings_web = settings_web_from_observation(observed)
+        if settings_web: result["settings_web"] = settings_web
         language = language_observation(observed)
         if language: result["language_observation"] = language
         menu = menu_close_observation(observed.get("menu_close"))
@@ -1766,6 +1804,10 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=600):
         if not gate:
             gate = server_gate_observation(report["native_checkpoint"].get("server_gate"))
         if gate: report["native_server_gate_observed"] = gate
+        settings_web = settings_web_observation(getattr(error,"native_settings_web",None))
+        if not settings_web:
+            settings_web = settings_web_observation(report["native_checkpoint"].get("settings_web"))
+        if settings_web: report["native_settings_web_observed"] = settings_web
         evidence = language_observation(getattr(error,"native_language",None))
         if not evidence:
             evidence = language_observation(report["native_checkpoint"].get("language_observation"))

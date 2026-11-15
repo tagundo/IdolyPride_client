@@ -410,7 +410,10 @@ static NSString *const ProbeSettingsDOMScript =
      "const has=(e,v)=>!!e&&Array.from(e.options).some(x=>x.value===v);"
      "const w=d?d.clientWidth:0, c=Math.max(d?d.scrollWidth:0,b?b.scrollWidth:0);"
      "return {ready:document.readyState==='complete'&&!!o&&!!p&&!o.disabled&&!p.disabled,"
-     "forms_present:!!o&&!!p,scale_2_present:has(s,'2'),buffer_4096_present:has(m,'4096'),"
+     "forms_present:!!o&&!!p,document_complete:document.readyState==='complete',"
+     "options_fields_enabled:!!o&&!o.disabled,presentation_fields_enabled:!!p&&!p.disabled,"
+     "bridge_reply_present:typeof window.idolyServerReply==='function',"
+     "scale_2_present:has(s,'2'),buffer_4096_present:has(m,'4096'),"
      "viewport_width:w,content_width:c,no_horizontal_overflow:w>0&&c<=w+2,"
      "select_count:document.querySelectorAll('select').length}; })()";
 
@@ -419,13 +422,18 @@ static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictiona
     if ([state[@"finished"] boolValue]) return;
     WKWebView *web = weakWeb;
     if (!web) { finish(@{@"web_found":@NO, @"timed_out":@NO}); return; }
+    state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
     [web evaluateJavaScript:ProbeSettingsDOMScript completionHandler:^(id value, NSError *error) {
         if ([state[@"finished"] boolValue]) return;
+        BOOL wkError=error && [error.domain isEqual:WKErrorDomain];
         NSMutableDictionary *metrics = [NSMutableDictionary dictionaryWithDictionary:
-            @{@"web_found":@YES, @"timed_out":@NO, @"evaluation_succeeded":@((BOOL)(!error && [value isKindOfClass:NSDictionary.class]))}];
+            @{@"web_found":@YES, @"timed_out":@NO, @"evaluation_succeeded":@((BOOL)(!error && [value isKindOfClass:NSDictionary.class])),
+                @"error_is_wk_domain":@(wkError)}];
+        if (!error || (error.code>=-100 && error.code<=100)) metrics[@"evaluation_error_code"]=@(error ? error.code : 0);
         if (!error && [value isKindOfClass:NSDictionary.class]) {
             for (NSString *key in @[@"ready", @"forms_present", @"scale_2_present", @"buffer_4096_present",
-                    @"viewport_width", @"content_width", @"no_horizontal_overflow", @"select_count"]) {
+                    @"viewport_width", @"content_width", @"no_horizontal_overflow", @"select_count",
+                    @"document_complete",@"options_fields_enabled",@"presentation_fields_enabled",@"bridge_reply_present"]) {
                 id scalar = value[key];
                 if ([scalar isKindOfClass:NSNumber.class]) metrics[key] = scalar;
             }
@@ -443,11 +451,15 @@ static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictiona
 static void ProbeSettingsDOM(WKWebView *web, void (^completion)(NSDictionary *)) {
     NSCAssert(NSThread.isMainThread, @"WK inspection belongs on main thread");
     BOOL webFound = web != nil;
-    NSMutableDictionary *state = [NSMutableDictionary dictionaryWithDictionary:@{@"finished":@NO}];
+    NSMutableDictionary *state = [NSMutableDictionary dictionaryWithDictionary:@{@"finished":@NO,@"observations":@0}];
+    NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
     void (^finish)(NSDictionary *) = ^(NSDictionary *metrics) {
         if ([state[@"finished"] boolValue]) return;
         state[@"finished"] = @YES;
-        completion(metrics);
+        NSMutableDictionary *observed=[metrics mutableCopy];
+        observed[@"observations"]=state[@"observations"];
+        observed[@"elapsed_seconds"]=@(MAX(0.0,MIN(600.0,NSProcessInfo.processInfo.systemUptime-started)));
+        completion(observed);
     };
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         NSMutableDictionary *metrics = [state[@"last"] mutableCopy] ?: [NSMutableDictionary dictionary];
@@ -729,6 +741,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic) BOOL captureDispatched;
 @property(nonatomic, strong) NSDictionary *earlyStatus;
 @property(nonatomic, strong) NSDictionary *menuCloseObservation;
+@property(nonatomic, strong) NSDictionary *settingsWebObservation;
 @property(nonatomic, strong) NSMutableDictionary *keyboardProbe;
 @property(nonatomic, strong) NSDictionary *nativeHeaderProbe;
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
@@ -764,6 +777,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
+        @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
         @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
@@ -779,7 +793,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"launcher_visible":ProbeScalar(status, @"launcher_visible"),
         @"keyboard_lifecycle":ProbeKeyboardLifecycle(status),
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
-        @"menu_close":self.menuCloseObservation ?: @{}, @"keyboard":self.keyboardProbe.copy ?: @{},
+        @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
+        @"keyboard":self.keyboardProbe.copy ?: @{},
         @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
@@ -872,7 +887,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
             @"original_called":@(self.originalCount),
             @"server_status":status, @"probe_error":self.probeError ?: NSNull.null,
-            @"keyboard":self.keyboardProbe.copy, @"native_header":self.nativeHeaderProbe ?: @{},
+            @"settings_web":self.settingsWebObservation ?: @{}, @"keyboard":self.keyboardProbe.copy, @"native_header":self.nativeHeaderProbe ?: @{},
             @"octo_budget_probe":self.octoBudgetProbe.copy});
     }];
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -911,6 +926,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     self.interfaceInFlight=YES; self.interfaceLanguageCycle=[NSMutableArray array];
     WKWebView *web=ProbeFindSettingsWeb(ProbeButtonOwner(button).view);
     ProbeSettingsDOM(web,^(NSDictionary *metrics){
+        self.settingsWebObservation=metrics;
         if (![metrics[@"ready"] isEqual:@YES]) { [self failProbe:@"language_interface_cycle_failed"]; return; }
         [self interfaceStep:0 web:web button:button];
     });
@@ -1218,7 +1234,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
             @"server_control_found":@YES, @"server_control_disabled_while_running":@YES} mutableCopy];
         WKWebView *web = ProbeFindSettingsWeb(navigation.topViewController.view);
         ProbeSettingsDOM(web, ^(NSDictionary *metrics) {
-            menu[@"web"] = metrics;
+            menu[@"web"] = metrics; self.settingsWebObservation=metrics;
+            [self recordCheckpoint:@"settings_web_observed"];
             if (![metrics[@"web_found"] isEqual:@YES] || ![metrics[@"ready"] isEqual:@YES]
                     || ![metrics[@"evaluation_succeeded"] isEqual:@YES]
                     || ![metrics[@"scale_2_present"] isEqual:@YES] || ![metrics[@"buffer_4096_present"] isEqual:@YES]
