@@ -33,6 +33,7 @@ def descriptor_bytes():
     decoration.field.add(name="name", number=2, type=9)
     api = descriptor_pb2.FileDescriptorProto(name="preferences-api.proto", package="api", syntax="proto3")
     api.message_type.add(name="Empty")
+    api.service.add(name="System").method.add(name="Check", input_type=".api.Empty", output_type=".api.Empty")
     pack = api.message_type.add(name="Pack")
     for number, name, kind in ((1, "type", 9), (2, "fileName", 9), (3, "fileSize", 5),
                                (4, "cryptoKey", 9), (5, "downloadUrl", 9)):
