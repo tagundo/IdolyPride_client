@@ -465,25 +465,60 @@ def validate_diagnostics_benchmark(report, source):
          and type(report.get("repeats")) is int and 3 <= report["repeats"] <= 10
          and type(report.get("iterations")) is int and 100 <= report["iterations"] <= 100000,
          "diagnostics_benchmark_bounds")
+    contract = module("published_diagnostics_comparison_contract", ROOT/"tools/benchmark_diagnostics_polling.py")
+    need(contract.strict_equal(report.get("comparison_scope"), contract.comparison_scope())
+         and contract.strict_equal(report.get("management_contract"), contract.management_contract())
+         and report.get("tracemalloc_separate_pass") is True,
+         "diagnostics_comparison_contract_differs")
+    script_sha = report.get("benchmark_sha256")
+    need(is_sha(script_sha) and blob_sha(source, "tools/benchmark_diagnostics_polling.py") == script_sha,
+         "diagnostics_benchmark_script_pin_differs")
     expected = {"baseline": {"poll": 1, "explicit_export": 2},
                 "candidate": {"poll": 0, "explicit_export": 1}}
-    need(report.get("expected_history_deepcopy_calls") == expected, "diagnostics_copy_policy_differs")
-    hashes = report.get("identical_outputs")
+    need(contract.strict_equal(report.get("expected_history_deepcopy_calls"), expected),
+         "diagnostics_copy_policy_differs")
+    hashes = report.get("identical_legacy_outputs")
     need(type(hashes) is dict and set(hashes) == {"summary_sha256", "poll_sha256", "export_sha256"}
-         and all(is_sha(value) for value in hashes.values()), "diagnostics_semantics_missing")
+         and all(is_sha(value) for value in hashes.values()) and "identical_outputs" not in report,
+         "diagnostics_semantics_missing")
+    full = report.get("full_outputs")
+    need(type(full) is dict and set(full) == {"baseline", "candidate"}
+         and all(type(value) is dict and set(value) == {"poll_sha256", "export_sha256"}
+                 and all(is_sha(digest) for digest in value.values()) for value in full.values()),
+         "diagnostics_full_output_provenance_missing")
     runs = report.get("runs")
     need(type(runs) is dict and set(runs) == {"baseline", "candidate"}, "diagnostics_run_set")
+    roots = {}
     for name, group in runs.items():
         need(type(group) is list and len(group) == report["repeats"], "diagnostics_run_count")
         for row in group:
-            need(type(row) is dict and row.get("history_deepcopy_calls") == expected[name]
-                 and row.get("synthetic_events") == 200 and row.get("frames_per_event") == 16
+            try:
+                contract.validate_worker_comparison(row, name)
+            except (ValueError, TypeError, KeyError):
+                raise ReleaseError("diagnostics_run_comparison_contract_differs") from None
+            need(type(row.get("schema")) is int and row["schema"] == 1
+                 and type(row.get("iterations")) is int and row["iterations"] == report["iterations"]
+                 and row.get("benchmark_sha256") == script_sha
+                 and contract.strict_equal(row.get("history_deepcopy_calls"), expected[name])
+                 and all(type(row.get(key)) is int and row[key] == wanted for key, wanted in (
+                     ("synthetic_events", 200), ("frames_per_event", 16), ("received_events", 200),
+                     ("stored_events", 200), ("default_full_events", 200), ("exported_events", 200)))
                  and row.get("poll_contains_events") is False
-                 and row.get("stored_events") == row.get("default_full_events") == row.get("exported_events") == 200
                  and all(row.get(key) == value for key, value in hashes.items())
+                 and all(row.get("full_" + key) == value for key, value in full[name].items())
+                 and type(row.get("tracemalloc_peak_bytes")) is int and 0 < row["tracemalloc_peak_bytes"] <= 10**12
                  and all(number(row.get(key), 10**12, positive=True) for key in
                          ("wall_microseconds_per_poll", "cpu_microseconds_per_poll")),
                  "diagnostics_run_semantics_differs")
+            root = row.get("source_root")
+            need(type(root) is str and len(root) <= 4096 and PurePosixPath(root).is_absolute()
+                 and ".." not in PurePosixPath(root).parts and roots.get(name, root) == root,
+                 "diagnostics_run_source_root_differs")
+            roots[name] = root
+    need(roots["baseline"] != roots["candidate"]
+         and not PurePosixPath(roots["baseline"]).is_relative_to(PurePosixPath(roots["candidate"]))
+         and not PurePosixPath(roots["candidate"]).is_relative_to(PurePosixPath(roots["baseline"])),
+         "diagnostics_run_source_roots_overlap")
     pins = report.get("source_sha256")
     need(type(pins) is dict and set(pins) == {"baseline", "candidate"}, "benchmark_source_pins_missing")
     for name, revision in (("baseline", BASELINE), ("candidate", source)):
@@ -501,7 +536,8 @@ def validate_diagnostics_benchmark(report, source):
                         for key in expected_medians["baseline"]}
     need(report.get("median") == expected_medians and report.get("median_speedup") == expected_speedup,
          "diagnostics_derived_metrics_differ")
-    return {key: report[key] for key in ("median", "median_speedup", "expected_history_deepcopy_calls")}
+    return {key: report[key] for key in ("median", "median_speedup", "expected_history_deepcopy_calls",
+        "comparison_scope", "management_contract", "identical_legacy_outputs", "full_outputs", "benchmark_sha256")}
 
 
 def validate_translation_benchmark(report, source):

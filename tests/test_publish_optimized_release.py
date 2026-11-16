@@ -12,6 +12,10 @@ SPEC = importlib.util.spec_from_file_location("optimized_release_publisher",
 publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 SOURCE, RUN, HASH = "a" * 40, 123, "b" * 64
+BENCH_SPEC = importlib.util.spec_from_file_location("diagnostics_benchmark_contract",
+    Path(__file__).resolve().parents[1] / "tools/benchmark_diagnostics_polling.py")
+benchmark_contract = importlib.util.module_from_spec(BENCH_SPEC)
+BENCH_SPEC.loader.exec_module(benchmark_contract)
 RELEASE_VERSION = "2026.11.16.1"
 
 
@@ -548,15 +552,25 @@ def diagnostics_benchmark():
     expected = {"baseline": {"poll": 1, "explicit_export": 2},
                 "candidate": {"poll": 0, "explicit_export": 1}}
     hashes = {name: HASH for name in ("summary_sha256", "poll_sha256", "export_sha256")}
+    full_outputs = {"baseline": {"poll_sha256": HASH, "export_sha256": HASH},
+                    "candidate": {"poll_sha256": "c"*64, "export_sha256": "d"*64}}
     runs = {}
     for name, wall, cpu in (("baseline", 3.0, 2.0), ("candidate", 1.0, 1.0)):
-        row = {"history_deepcopy_calls": expected[name], "synthetic_events": 200, "frames_per_event": 16,
-               "poll_contains_events": False, "stored_events": 200, "default_full_events": 200,
+        row = {"schema": 1, "role": name, "iterations": 1000, "source_root": "/trusted/"+name,
+               "history_deepcopy_calls": expected[name], "synthetic_events": 200, "frames_per_event": 16,
+               "poll_contains_events": False, "received_events": 200, "stored_events": 200, "default_full_events": 200,
                "exported_events": 200, **hashes, "wall_microseconds_per_poll": wall,
-               "cpu_microseconds_per_poll": cpu}
+               "cpu_microseconds_per_poll": cpu, "tracemalloc_peak_bytes": 100000 if name == "baseline" else 1000,
+               "comparison_scope": benchmark_contract.comparison_scope(),
+               "management_contract": benchmark_contract.expected_management_evidence(name),
+               "benchmark_sha256": HASH,
+               **{"full_"+key: value for key, value in full_outputs[name].items()}}
         runs[name] = [deepcopy(row) for _ in range(3)]
-    return {"schema": 1, "iterations": 1000, "repeats": 3,
-            "expected_history_deepcopy_calls": expected, "identical_outputs": hashes, "runs": runs,
+    return {"schema": 1, "iterations": 1000, "repeats": 3, "tracemalloc_separate_pass": True,
+            "expected_history_deepcopy_calls": expected, "identical_legacy_outputs": hashes, "runs": runs,
+            "comparison_scope": benchmark_contract.comparison_scope(),
+            "management_contract": benchmark_contract.management_contract(),
+            "full_outputs": full_outputs, "benchmark_sha256": HASH,
             "source_sha256": {name: {"diagnostics.py": HASH, "app_runtime.py": HASH}
                               for name in ("baseline", "candidate")},
             "median": {"baseline": {"wall_microseconds_per_poll": 3.0, "cpu_microseconds_per_poll": 2.0},
@@ -582,6 +596,42 @@ def test_optimization_cannot_trade_away_diagnostic_export_or_output(monkeypatch,
     elif case == "event_loss": row["stored_events"] = 199
     elif case == "wrong_source": report["source_sha256"]["candidate"]["diagnostics.py"] = "c"*64
     elif case == "unequal_semantics": row["poll_sha256"] = "c"*64
+    with pytest.raises(publisher.ReleaseError):
+        publisher.validate_diagnostics_benchmark(report, SOURCE)
+
+
+@pytest.mark.parametrize("case", ["missing_scope", "extra_projection", "scope_bool", "missing_contract",
+    "candidate_partial", "baseline_additions", "wrong_role", "contract_bool", "default_zero_bool",
+    "copy_count_bool", "missing_full", "full_row_differs", "candidate_full_is_legacy", "benchmark_pin",
+    "row_benchmark_pin", "trace_disabled", "trace_missing", "same_source_root", "old_identical_claim",
+    "export_contract_partial", "event_bool", "worker_schema_bool"])
+def test_diagnostics_management_extension_cannot_hide_other_changes_or_drop_provenance(monkeypatch, case):
+    monkeypatch.setattr(publisher, "blob_sha", lambda source, name: HASH)
+    report = diagnostics_benchmark()
+    candidate = report["runs"]["candidate"][0]
+    if case == "missing_scope": report.pop("comparison_scope")
+    elif case == "extra_projection": report["comparison_scope"]["excluded_runtime_fields_after_validation"].append("client_diagnostics")
+    elif case == "scope_bool": report["comparison_scope"]["schema"] = True
+    elif case == "missing_contract": report.pop("management_contract")
+    elif case == "candidate_partial": candidate["management_contract"]["poll"].pop("account_selection")
+    elif case == "baseline_additions": report["runs"]["baseline"][0]["management_contract"]["poll"] = benchmark_contract.management_defaults()
+    elif case == "wrong_role": candidate["role"] = "baseline"
+    elif case == "contract_bool": candidate["management_contract"]["poll"]["durable_history"]["schema"] = True
+    elif case == "default_zero_bool": candidate["management_contract"]["poll"]["account_selection"]["restart_required"] = 0
+    elif case == "copy_count_bool": candidate["history_deepcopy_calls"]["explicit_export"] = True
+    elif case == "missing_full": report.pop("full_outputs")
+    elif case == "full_row_differs": candidate["full_poll_sha256"] = "e"*64
+    elif case == "candidate_full_is_legacy": candidate["full_poll_sha256"] = candidate["poll_sha256"]
+    elif case == "benchmark_pin": report["benchmark_sha256"] = "e"*64
+    elif case == "row_benchmark_pin": candidate["benchmark_sha256"] = "e"*64
+    elif case == "trace_disabled": report["tracemalloc_separate_pass"] = False
+    elif case == "trace_missing": candidate.pop("tracemalloc_peak_bytes")
+    elif case == "same_source_root":
+        for row in report["runs"]["candidate"]: row["source_root"] = "/trusted/baseline"
+    elif case == "old_identical_claim": report["identical_outputs"] = report["identical_legacy_outputs"]
+    elif case == "export_contract_partial": candidate["management_contract"]["export_runtime"].pop("durable_history")
+    elif case == "event_bool": candidate["received_events"] = True
+    elif case == "worker_schema_bool": candidate["schema"] = True
     with pytest.raises(publisher.ReleaseError):
         publisher.validate_diagnostics_benchmark(report, SOURCE)
 

@@ -40,7 +40,12 @@ def test_native_locator_scrolls_only_observed_settings_scrollview(monkeypatch):
     ])
     node = qa.find(guest, lambda value: value.get("content-desc") == "target", "scroll", "down")
     assert node.get("content-desc") == "target"
-    assert guest.actions == [("shell", "input", "swipe", "320", "876", "320", "124", "350")]
+    assert len(guest.actions) == 1
+    action = guest.actions[0]
+    assert action[:3] == ("shell", "input", "swipe")
+    x1, y1, x2, y2, duration = map(int, action[3:])
+    assert x1 == x2 == 320 and 100 < y2 < y1 < 900
+    assert y1-y2 <= (900-100)//2 and duration >= 600
 
 
 def test_missing_control_without_scrollview_cannot_send_a_blind_input():

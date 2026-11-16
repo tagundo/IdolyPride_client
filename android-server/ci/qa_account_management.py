@@ -42,16 +42,21 @@ def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16):
         scrolling = [node for node in tree.iter("node")
                      if node.get("scrollable") == "true" and "ScrollView" in node.get("class", "") and bounds(node)]
         if not scrolling:
-            raise RuntimeError("Account QA expected a visible settings scroll view")
+            raise RuntimeError("Account QA expected a visible settings scroll view: " + stage)
         area = max(scrolling, key=lambda node: (bounds(node)[2]-bounds(node)[0])*(bounds(node)[3]-bounds(node)[1]))
         left, top, right, bottom = bounds(area)
-        x, y1, y2 = (left+right)//2, top+24, bottom-24
+        # A fast full-height swipe flings past entire button groups on API 30.
+        # Move through the central third slowly so successive observations overlap.
+        travel = max(24, (bottom-top)//3)
+        x = (left+right)//2
+        y1 = (top+bottom)//2 - travel//2
+        y2 = y1 + travel
         if direction == "up":
-            qa.adb("shell", "input", "swipe", str(x), str(y1), str(x), str(y2), "350")
+            qa.adb("shell", "input", "swipe", str(x), str(y1), str(x), str(y2), "650")
         else:
-            qa.adb("shell", "input", "swipe", str(x), str(y2), str(x), str(y1), "350")
+            qa.adb("shell", "input", "swipe", str(x), str(y2), str(x), str(y1), "650")
         time.sleep(.25)
-    raise RuntimeError("Account QA native control was not observed enabled")
+    raise RuntimeError("Account QA native control was not observed enabled: " + stage)
 
 
 def tap_node(qa, node):

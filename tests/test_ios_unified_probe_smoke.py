@@ -2214,7 +2214,8 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker", "zip_roundtrip"))
+                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker", "zip_roundtrip", "account_management"))
+    assert result["account_management"] == probe.account_management_observation(raw_report["menu_lifetime"]["account_management"])
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
     assert result["native_header"] == raw_report["native_header"]
@@ -3192,13 +3193,13 @@ def account_fixture_schema(path):
     from idoly_local.schema import Schema
     file = descriptor_pb2.FileDescriptorProto(name="account-native-observer-test.proto", package="api", syntax="proto3")
     file.message_type.add(name="Empty")
-    user = file.message_type.add(name="User")
+    user = file.message_type.add(name="SavedUser")
     user.field.add(name="name",number=1,type=9)
     public = file.message_type.add(name="UserPublic")
     public.field.add(name="serverUserId",number=1,type=9)
     public.field.add(name="publicUserId",number=2,type=9)
     response = file.message_type.add(name="UserGetResponse")
-    response.field.add(name="user",number=1,type=11,type_name=".api.User")
+    response.field.add(name="user",number=1,type=11,type_name=".api.SavedUser")
     response.field.add(name="userPublic",number=2,type=11,type_name=".api.UserPublic")
     file.message_type.add(name="SettingInfo")
     file.message_type.add(name="LessonProgress")

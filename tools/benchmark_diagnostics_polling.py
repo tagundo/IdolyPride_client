@@ -12,6 +12,7 @@ import hashlib
 import importlib
 import json
 import os
+import re
 from pathlib import Path
 import selectors
 import statistics
@@ -34,6 +35,111 @@ def require(condition, message):
 def canonical_hash(value):
     raw = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+MANAGEMENT_KEYS = ("durable_history", "startup_checks", "account_selection")
+ROLES = ("baseline", "candidate")
+
+
+def strict_equal(actual, expected):
+    """JSON comparison must not accept Python's True == 1 equivalence."""
+    if type(actual) is not type(expected):
+        return False
+    if type(expected) is dict:
+        return actual.keys() == expected.keys() and all(strict_equal(actual[key], value) for key, value in expected.items())
+    if type(expected) is list:
+        return len(actual) == len(expected) and all(strict_equal(a, b) for a, b in zip(actual, expected))
+    return actual == expected
+
+
+def management_defaults():
+    return {
+        "durable_history": {"schema": 1, "available": False, "load_state": "unavailable",
+            "persistence": "unavailable", "last_write_error": None, "current_run": None,
+            "retained_records": 0, "total_records": 0, "records": [],
+            "last_failure": None, "last_startup": None},
+        "startup_checks": {"schema": 1, "scope": "not_run", "run_id": None, "started_at": None,
+            "updated_at": None, "state": "not_run", "gameplay_verified": False, "checks": []},
+        "account_selection": {"active_profile": "sandbox", "selected_for_next_start": "sandbox",
+            "selection_revision": None, "invalid_registry": False, "restart_required": False},
+    }
+
+
+def comparison_scope():
+    return {"schema": 1, "name": "legacy-runtime-status-v1",
+            "excluded_runtime_fields_after_validation": list(MANAGEMENT_KEYS),
+            "canonical_comparison": "untimed",
+            "timed_operation": "full Runtime.status()",
+            "tracemalloc_operation": "full Runtime.status()"}
+
+
+def management_contract():
+    return {"schema": 1, "name": "unbound-runtime-management-v1",
+            "baseline": "all_three_fields_absent", "candidate": "all_three_exact_defaults",
+            "candidate_defaults": management_defaults()}
+
+
+def expected_management_evidence(role):
+    require(role in ROLES and type(role) is str, "Benchmark worker role is invalid")
+    return {"schema": 1, "role": role,
+            "poll": management_defaults() if role == "candidate" else {},
+            "export_runtime": management_defaults() if role == "candidate" else {}}
+
+
+def project_outputs(poll, exported, role):
+    """Validate exactly three additions, then retain every other key/value."""
+    require(type(poll) is dict and type(exported) is dict and type(exported.get("runtime")) is dict,
+            "Benchmark output objects are invalid")
+    runtime = exported["runtime"]
+    require(type(poll.get("profile")) is str and poll["profile"] == "sandbox"
+            and type(runtime.get("profile")) is str and runtime["profile"] == "sandbox"
+            and poll.get("running") is False and runtime.get("running") is False,
+            "Benchmark requires a fresh unbound sandbox Runtime")
+    evidence = {"schema": 1, "role": role,
+                "poll": {key: poll[key] for key in MANAGEMENT_KEYS if key in poll},
+                "export_runtime": {key: runtime[key] for key in MANAGEMENT_KEYS if key in runtime}}
+    require(strict_equal(evidence, expected_management_evidence(role)),
+            "Runtime management contract differs for " + str(role))
+    legacy_poll = {key: value for key, value in poll.items() if key not in MANAGEMENT_KEYS}
+    legacy_export = dict(exported)
+    legacy_export["runtime"] = {key: value for key, value in runtime.items() if key not in MANAGEMENT_KEYS}
+    return legacy_poll, legacy_export, evidence
+
+
+def validate_worker_comparison(row, role):
+    require(type(row) is dict and type(row.get("role")) is str and row["role"] == role,
+            "Benchmark worker role differs")
+    require(strict_equal(row.get("comparison_scope"), comparison_scope())
+            and strict_equal(row.get("management_contract"), expected_management_evidence(role)),
+            "Benchmark worker comparison contract differs")
+    for key in ("summary_sha256", "poll_sha256", "export_sha256", "full_poll_sha256", "full_export_sha256", "benchmark_sha256"):
+        require(type(row.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}", row[key]) is not None,
+                "Benchmark worker output hash is invalid")
+    same = role == "baseline"
+    require((row["full_poll_sha256"] == row["poll_sha256"]) is same
+            and (row["full_export_sha256"] == row["export_sha256"]) is same,
+            "Benchmark full/projected output relation differs")
+
+
+def compare_outputs(rows):
+    require(type(rows) is dict and set(rows) == set(ROLES), "Benchmark role set differs")
+    for role, group in rows.items():
+        require(type(group) is list and group, "Benchmark role has no runs")
+        for row in group:
+            validate_worker_comparison(row, role)
+    hashes = {}
+    for key in ("summary_sha256", "poll_sha256", "export_sha256"):
+        values = {row[key] for group in rows.values() for row in group}
+        require(len(values) == 1, "Baseline/candidate legacy output mismatch: " + key)
+        hashes[key] = next(iter(values))
+    full_outputs = {}
+    for role, group in rows.items():
+        full_outputs[role] = {}
+        for key in ("poll_sha256", "export_sha256"):
+            values = {row["full_" + key] for row in group}
+            require(len(values) == 1, "Full output changed between runs: " + role)
+            full_outputs[role][key] = next(iter(values))
+    return hashes, full_outputs
 
 
 def source_root(value):
@@ -64,6 +170,7 @@ def bounded_integer(value):
 def worker(argv):
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--root", required=True)
+    parser.add_argument("--role", choices=ROLES, required=True)
     parser.add_argument("--iterations", required=True, type=bounded_integer)
     parser.add_argument("--tracemalloc", action="store_true")
     args = parser.parse_args(argv)
@@ -93,6 +200,10 @@ def worker(argv):
     exported = runtime.diagnostics_snapshot()
     require(exported["client_diagnostics"]["events"] == events, "Explicit export lost diagnostic events or frames")
     require("events" not in exported["runtime"]["client_diagnostics"], "Export's runtime summary contains history")
+
+    # Comparison/projection is untimed; polling and allocation loops below
+    # continue to call the full, unmodified Runtime.status().
+    legacy_poll, legacy_export, evidence = project_outputs(poll, exported, args.role)
 
     # Instrument only outside timing. The baseline copies the whole history
     # during a routine poll; the candidate must avoid that discarded work.
@@ -129,13 +240,17 @@ def worker(argv):
             peak_bytes = tracemalloc.get_traced_memory()[1]
         finally:
             tracemalloc.stop()
-    result = {"schema": 1, "source_root": str(root), "iterations": args.iterations,
+    result = {"schema": 1, "role": args.role, "source_root": str(root), "iterations": args.iterations,
               "synthetic_events": EVENT_COUNT, "frames_per_event": FRAME_COUNT,
               "poll_contains_events": False, "received_events": summary["received_events"],
               "stored_events": summary["stored_events"], "default_full_events": len(default_full["events"]),
               "exported_events": len(exported["client_diagnostics"]["events"]),
-              "summary_sha256": canonical_hash(summary), "poll_sha256": canonical_hash(poll),
-              "export_sha256": canonical_hash(exported), "history_deepcopy_calls": copy_counts,
+              "summary_sha256": canonical_hash(summary), "poll_sha256": canonical_hash(legacy_poll),
+              "export_sha256": canonical_hash(legacy_export), "full_poll_sha256": canonical_hash(poll),
+              "full_export_sha256": canonical_hash(exported), "comparison_scope": comparison_scope(),
+              "management_contract": evidence,
+              "benchmark_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              "history_deepcopy_calls": copy_counts,
               "wall_seconds": wall_seconds, "process_cpu_seconds": cpu_seconds,
               "wall_microseconds_per_poll": wall_seconds * 1e6 / args.iterations,
               "cpu_microseconds_per_poll": cpu_seconds * 1e6 / args.iterations,
@@ -143,9 +258,9 @@ def worker(argv):
     print(json.dumps(result, sort_keys=True, allow_nan=False))
 
 
-def run_worker(script, root, cwd, iterations, trace):
+def run_worker(script, root, cwd, iterations, trace, role):
     command = [sys.executable, "-I", "-B", str(script), "--_worker", "--root", str(root),
-               "--iterations", str(iterations)]
+               "--iterations", str(iterations), "--role", role]
     if trace:
         command.append("--tracemalloc")
     process = subprocess.Popen(command, cwd=cwd, stdin=subprocess.DEVNULL,
@@ -173,9 +288,16 @@ def run_worker(script, root, cwd, iterations, trace):
         require(code == 0, "Benchmark worker failed: " + bytes(buffers["stderr"]).decode("utf-8", errors="replace")[:2000])
         require(not buffers["stderr"], "Benchmark worker emitted unexpected stderr")
         result = json.loads(bytes(buffers["stdout"]).decode("utf-8"))
-        require(isinstance(result, dict) and result.get("schema") == 1, "Malformed benchmark worker result")
-        require(result.get("source_root") == str(root) and result.get("iterations") == iterations,
-                "Benchmark worker provenance differs")
+        require(type(result) is dict and type(result.get("schema")) is int and result["schema"] == 1,
+                "Malformed benchmark worker result")
+        validate_worker_comparison(result, role)
+        require(result["benchmark_sha256"] == hashlib.sha256(Path(script).read_bytes()).hexdigest(),
+                "Benchmark worker script provenance differs")
+        require(result.get("source_root") == str(root) and type(result.get("iterations")) is int
+                and result["iterations"] == iterations, "Benchmark worker provenance differs")
+        require((type(result.get("tracemalloc_peak_bytes")) is int and result["tracemalloc_peak_bytes"] > 0)
+                if trace else result.get("tracemalloc_peak_bytes") is None,
+                "Benchmark allocation observation differs")
         return result
     finally:
         selector.close()
@@ -212,23 +334,22 @@ def coordinator(argv):
     work.mkdir(mode=0o700)
     rows = {name: [] for name in roots}
     script = Path(__file__).resolve(strict=True)
+    benchmark_sha256 = hashlib.sha256(script.read_bytes()).hexdigest()
     for repeat in range(args.repeats):
         # Alternate order to reduce simple first/second-run ordering effects.
         order = ("baseline", "candidate") if repeat % 2 == 0 else ("candidate", "baseline")
         for name in order:
             child_cwd = work / f"{name}-{repeat + 1}"
             child_cwd.mkdir(mode=0o700)
-            rows[name].append(run_worker(script, roots[name], child_cwd, args.iterations, args.tracemalloc))
+            rows[name].append(run_worker(script, roots[name], child_cwd, args.iterations, args.tracemalloc, name))
     require(source_sha256 == {name: source_hashes(root) for name, root in roots.items()},
             "Benchmark source modules changed during measurement")
-    hashes = {}
-    for key in ("summary_sha256", "poll_sha256", "export_sha256"):
-        values = {row[key] for group in rows.values() for row in group}
-        require(len(values) == 1, "Baseline/candidate output mismatch: " + key)
-        hashes[key] = next(iter(values))
+    require(benchmark_sha256 == hashlib.sha256(script.read_bytes()).hexdigest(),
+            "Benchmark script changed during measurement")
+    hashes, full_outputs = compare_outputs(rows)
     expected = {"baseline": {"poll": 1, "explicit_export": 2}, "candidate": {"poll": 0, "explicit_export": 1}}
     for name, group in rows.items():
-        require(all(row["history_deepcopy_calls"] == expected[name] for row in group),
+        require(all(strict_equal(row["history_deepcopy_calls"], expected[name]) for row in group),
                 "Unexpected full-history copy path: " + name)
     medians = {name: {key: statistics.median(row[key] for row in group)
                       for key in ("wall_microseconds_per_poll", "cpu_microseconds_per_poll")}
@@ -236,7 +357,9 @@ def coordinator(argv):
     report = {"schema": 1, "benchmark": "Runtime.status synthetic diagnostics polling", "python": sys.version,
               "iterations": args.iterations, "repeats": args.repeats,
               "source_sha256": source_sha256,
-              "tracemalloc_separate_pass": args.tracemalloc, "identical_outputs": hashes,
+              "tracemalloc_separate_pass": args.tracemalloc, "identical_legacy_outputs": hashes,
+              "comparison_scope": comparison_scope(), "management_contract": management_contract(),
+              "full_outputs": full_outputs, "benchmark_sha256": benchmark_sha256,
               "expected_history_deepcopy_calls": expected, "median": medians, "runs": rows,
               "median_speedup": {key: medians["baseline"][key] / medians["candidate"][key]
                                  for key in medians["baseline"]}}
@@ -244,7 +367,8 @@ def coordinator(argv):
     require(len(encoded.encode("utf-8")) <= 131072, "Benchmark report exceeded its output limit")
     with output.open("x", encoding="utf-8") as stream:
         stream.write(encoded)
-    print(json.dumps({"report": str(output), "identical_outputs": hashes, "median": medians,
+    print(json.dumps({"report": str(output), "identical_legacy_outputs": hashes,
+                      "comparison_scope": comparison_scope(), "full_outputs": full_outputs, "median": medians,
                       "median_speedup": report["median_speedup"]}, sort_keys=True))
 
 
