@@ -17,6 +17,11 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.text.InputType;
+import android.text.InputFilter;
+import android.view.WindowManager;
+import android.view.inputmethod.EditorInfo;
+import android.widget.EditText;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -56,6 +61,22 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private ProgressBar accountProgress;
     private int accountOffset, restoreOffset;
     private boolean accountLifecycleBusy, accountDialogOpen;
+
+    private JSONObject officialJob = new JSONObject(), officialAppliedAccount;
+    private TextView officialStatus, officialPreview;
+    private ProgressBar officialProgress;
+    private Button officialInspect, officialFetch, officialNew, officialReplace, officialCancel, officialSelect, officialNormal;
+    private boolean officialRequest, officialPolling;
+    private int officialLastError;
+    private AlertDialog officialCredentials, officialWizardDialog;
+    private final Runnable officialRefresh = new Runnable() {
+        @Override public void run() {
+            if (!presentationObserved || officialStatus == null) return;
+            if (!officialRequest && !ServerService.isImportingOfficial() && officialCredentials == null && officialWizardDialog == null)
+                requestOfficial("official_status", new JSONObject(), true);
+            officialStatus.postDelayed(this, 1000);
+        }
+    };
 
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
@@ -218,6 +239,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 if (exported != null) pendingAccountExport = new JSONObject(exported);
                 if (preview != null) pendingAccountPreview = new JSONObject(preview);
             } catch (org.json.JSONException invalid) { pendingAccountExport = null; pendingAccountPreview = null; }
+            // Only the local slot/revision is restorable; no official ID,
+            // password, ticket, job preview or authentication state enters Bundle.
+            String importedProfile = savedInstanceState.getString("official_local_profile");
+            String importedRevision = savedInstanceState.getString("official_local_revision");
+            if (importedProfile != null && importedProfile.length() <= 64 && importedRevision != null
+                    && importedRevision.matches("[0-9a-f]{64}"))
+                officialAppliedAccount = accountPayload("profile", importedProfile, "revision", importedRevision);
         }
         getWindow().setStatusBarColor(PAGE_BACKGROUND);
         getWindow().setNavigationBarColor(PAGE_BACKGROUND);
@@ -289,6 +317,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
         addServerChecksControls(card(body, R.string.server_checks_title));
         addAccountControls(card(body, R.string.accounts_title));
+        addOfficialImportControls(card(body, R.string.official_title));
 
         LinearLayout libraryCard = card(body, 0);
         addLibraryControls(libraryCard);
@@ -479,6 +508,258 @@ public final class MainActivity extends Activity implements ServerService.Observ
         accountOperation = text(R.string.accounts_ready, 16, TEXT_MUTED);
         accountOperation.setTextIsSelectable(true); accountOperation.setContentDescription("idoly.accounts.result");
         body.addView(accountOperation); updateAccountControls();
+    }
+
+    private Button officialButton(LinearLayout body, int label, String identifier, View.OnClickListener action) {
+        Button control = button(label); control.setContentDescription(identifier); control.setOnClickListener(action);
+        body.addView(control, new LinearLayout.LayoutParams(-1, -2)); return control;
+    }
+
+    private void addOfficialImportControls(LinearLayout body) {
+        body.addView(text(R.string.official_notice, 16, TEXT_MUTED));
+        body.addView(text(R.string.official_warning, 16, TEXT_MUTED));
+        officialStatus = text(R.string.official_stage_idle, 17, TEXT_PRIMARY);
+        officialStatus.setContentDescription("idoly.official.status"); body.addView(officialStatus);
+        officialProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        officialProgress.setIndeterminate(true); officialProgress.setVisibility(View.GONE);
+        body.addView(officialProgress, new LinearLayout.LayoutParams(-1, dp(12)));
+        officialPreview = text(R.string.official_stage_idle, 16, TEXT_PRIMARY); officialPreview.setTextIsSelectable(true);
+        officialPreview.setContentDescription("idoly.official.preview"); body.addView(officialPreview);
+        officialInspect = officialButton(body, R.string.official_inspect, "idoly.official.inspect", view -> showOfficialCredentials());
+        officialFetch = officialButton(body, R.string.official_fetch, "idoly.official.fetch", view -> {
+            String checkedJob = officialJob.optString("job_id");
+            showOfficialDialog(new AlertDialog.Builder(this).setTitle(R.string.official_fetch_title)
+                    .setMessage(officialPreview.getText() + "\n\n" + getString(R.string.official_warning))
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .setPositiveButton(R.string.official_fetch, (dialog, which) ->
+                            requestOfficial("official_fetch", accountPayload("job_id", checkedJob), false)).create());
+        });
+        officialNew = officialButton(body, R.string.official_apply_new, "idoly.official.apply-new", view -> showOfficialLocalName());
+        officialReplace = officialButton(body, R.string.official_apply_replace, "idoly.official.apply-replace", view -> replaceOfficialAccount());
+        officialCancel = officialButton(body, R.string.official_cancel, "idoly.official.cancel", view ->
+                requestOfficial("official_cancel", accountPayload("job_id", officialJob.optString("job_id")), false));
+        officialSelect = officialButton(body, R.string.official_select_imported, "idoly.official.select", view -> {
+            if (officialAppliedAccount == null) return;
+            performAccount("accounts_select", accountPayload("mode", "normal", "profile", officialAppliedAccount.optString("profile"),
+                    "expected_revision", officialAppliedAccount.optString("revision"),
+                    "selection_revision", accountStatus.optString("selection_revision")));
+        });
+        officialNormal = officialButton(body, R.string.official_normal_mode, "idoly.official.normal-mode", view -> {
+            if (presentationServerRunning || accountLifecycleBusy) {
+                Toast.makeText(this, R.string.official_replace_blocked, Toast.LENGTH_LONG).show(); return;
+            }
+            // This is an explicit user action, separate from saving or selecting an account.
+            mediaMode.setChecked(false);
+            Toast.makeText(this, R.string.official_normal_selected, Toast.LENGTH_LONG).show();
+        });
+        renderOfficialJob();
+    }
+
+    private void showOfficialDialog(AlertDialog dialog) {
+        officialWizardDialog = dialog;
+        dialog.setOnDismissListener(ignored -> officialWizardDialog = null);
+        dialog.show();
+    }
+
+    private EditText officialSecretField(int hint, boolean password, int maximum) {
+        EditText control = new EditText(this); control.setHint(hint); control.setSingleLine(true);
+        control.setTextSize(16); control.setTextColor(TEXT_PRIMARY); control.setHintTextColor(TEXT_MUTED);
+        control.setInputType(InputType.TYPE_CLASS_TEXT | (password ? InputType.TYPE_TEXT_VARIATION_PASSWORD : InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD));
+        control.setFilters(new InputFilter[]{new InputFilter.LengthFilter(maximum)});
+        control.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+        control.setSaveEnabled(false); control.setFreezesText(false);
+        if (Build.VERSION.SDK_INT >= 26) control.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
+        control.setPadding(dp(8), dp(8), dp(8), dp(8)); return control;
+    }
+
+    private static void clearOfficialInput(EditText id, EditText password) {
+        id.getText().clear(); password.getText().clear();
+        id.setText(""); password.setText("");
+    }
+
+    private static boolean validOfficialPassword(String value) {
+        if (value.length() < 1 || value.length() > 128 || value.charAt(0) == ' ' || value.charAt(value.length() - 1) == ' ') return false;
+        for (int index = 0; index < value.length(); index++)
+            if (value.charAt(index) < 32 || value.charAt(index) > 126) return false;
+        return true;
+    }
+
+    private void showOfficialCredentials() {
+        if (officialRequest || officialJob.optBoolean("busy", false)) return;
+        LinearLayout fields = new LinearLayout(this); fields.setOrientation(LinearLayout.VERTICAL);
+        fields.setPadding(dp(20), dp(8), dp(20), dp(8)); fields.setSaveEnabled(false);
+        fields.addView(text(R.string.official_warning, 15, TEXT_MUTED));
+        fields.addView(text(R.string.official_id_label, 16, TEXT_PRIMARY));
+        EditText identifier = officialSecretField(R.string.official_id_hint, false, 64);
+        identifier.setContentDescription("idoly.official.user-id"); fields.addView(identifier);
+        fields.addView(text(R.string.official_password_label, 16, TEXT_PRIMARY));
+        EditText password = officialSecretField(R.string.official_password_hint, true, 128);
+        password.setContentDescription("idoly.official.password"); fields.addView(password);
+        fields.addView(text(R.string.official_platform_label, 16, TEXT_PRIMARY));
+        Spinner platform = new Spinner(this); platform.setContentDescription("idoly.official.platform");
+        platform.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, new String[]{"Android", "iPhone / iPad"}));
+        fields.addView(platform);
+        ScrollView scroll = new ScrollView(this); scroll.addView(fields);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(R.string.official_credentials_title).setView(scroll)
+                .setNegativeButton(android.R.string.cancel, null).setPositiveButton(R.string.official_confirm_inspect, null).create();
+        officialCredentials = dialog;
+        dialog.setOnDismissListener(ignored -> { clearOfficialInput(identifier, password); officialCredentials = null; });
+        dialog.setOnShowListener(ignored -> {
+            if (dialog.getWindow() != null) dialog.getWindow().addFlags(WindowManager.LayoutParams.FLAG_SECURE);
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+                String userId = identifier.getText().toString(), secret = password.getText().toString();
+                clearOfficialInput(identifier, password);
+                if (!userId.matches("[A-Za-z0-9_-]{1,64}") || !validOfficialPassword(secret)) {
+                    Toast.makeText(this, R.string.official_error_input, Toast.LENGTH_LONG).show(); return;
+                }
+                JSONObject request = accountPayload("user_id", userId, "password", secret,
+                        "platform", platform.getSelectedItemPosition() == 1 ? "ios" : "android");
+                dialog.dismiss(); requestOfficial("official_inspect", request, false);
+            });
+        });
+        dialog.show();
+    }
+
+    private void showOfficialLocalName() {
+        EditText name = new EditText(this); name.setSingleLine(true); name.setHint(R.string.official_slot_hint);
+        name.setContentDescription("idoly.official.profile-input"); name.setSaveEnabled(false);
+        name.setFilters(new InputFilter[]{new InputFilter.LengthFilter(64)});
+        showOfficialDialog(new AlertDialog.Builder(this).setTitle(R.string.official_choose_slot).setView(name)
+                .setMessage(R.string.official_ready_notice).setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.official_apply_confirm, (dialog, which) -> {
+                    String profile = name.getText().toString(); name.getText().clear();
+                    if (profile.isEmpty() || profile.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 64
+                            || profile.indexOf('/') >= 0 || profile.indexOf('\\') >= 0
+                            || profile.codePoints().anyMatch(Character::isISOControl)) {
+                        Toast.makeText(this, R.string.official_slot_invalid, Toast.LENGTH_LONG).show(); return;
+                    }
+                    requestOfficial("official_apply", accountPayload("job_id", officialJob.optString("job_id"),
+                            "profile", profile, "replace", false, "expected_revision", null), false);
+                }).create());
+    }
+
+    private void replaceOfficialAccount() {
+        if (presentationServerRunning || accountLifecycleBusy) {
+            Toast.makeText(this, R.string.official_replace_blocked, Toast.LENGTH_LONG).show(); return;
+        }
+        JSONObject row = selectedAccount();
+        if (row == null || !"normal".equals(row.optString("mode"))) {
+            Toast.makeText(this, R.string.official_choose_normal, Toast.LENGTH_LONG).show(); return;
+        }
+        String profile = row.optString("profile"), revision = row.optString("revision");
+        showOfficialDialog(new AlertDialog.Builder(this).setTitle(R.string.official_apply_replace)
+                .setMessage(getString(R.string.official_replace_confirm, profile)).setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.official_apply_confirm, (dialog, which) ->
+                        requestOfficial("official_apply", accountPayload("job_id", officialJob.optString("job_id"),
+                                "profile", profile, "replace", true, "expected_revision", revision), false)).create());
+    }
+
+    private void requestOfficial(String action, JSONObject payload, boolean poll) {
+        if (officialRequest || ServerService.isImportingOfficial()) {
+            payload.remove("password"); payload.remove("user_id"); return;
+        }
+        if ("official_inspect".equals(action)) officialAppliedAccount = null;
+        if (!poll) officialLastError = 0;
+        officialPolling = poll; officialRequest = true;
+        if (!poll) {
+            officialStatus.setText("official_inspect".equals(action) ? R.string.official_stage_checking
+                    : "official_fetch".equals(action) ? R.string.official_stage_fetching
+                    : "official_apply".equals(action) ? R.string.official_stage_staging : R.string.official_stage_preparing);
+            officialStatus.setTextColor(TEXT_PRIMARY);
+        }
+        updateOfficialControls();
+        ServerService.officialImport(getApplicationContext(), action, payload, result -> {
+            officialRequest = false; officialPolling = false;
+            if (isFinishing() || isDestroyed()) return;
+            if (!result.optBoolean("ok", false)) {
+                if (!poll) { officialLastError = officialError(result.optString("error"));
+                    officialStatus.setText(officialLastError); officialStatus.setTextColor(WARNING); }
+                updateOfficialControls(); return;
+            }
+            JSONObject job = result.optJSONObject("job"); if (job != null) officialJob = job;
+            JSONObject active = result.optJSONObject("active"); if (active != null) activeAccount = active;
+            JSONObject accounts = result.optJSONObject("status"); if (accounts != null) renderAccounts(accounts);
+            if ("official_apply".equals(action)) {
+                JSONObject imported = result.optJSONObject("account");
+                if (imported != null) officialAppliedAccount = accountPayload("profile", imported.optString("profile"), "revision", imported.optString("revision"));
+                refreshAccounts();
+            }
+            renderOfficialJob();
+        });
+    }
+
+    private int officialError(String code) {
+        if ("official_active_restart_required".equals(code)) return R.string.official_replace_blocked;
+        if ("official_job_missing".equals(code) || code.contains("expired") || code.contains("cancelled")) return R.string.official_error_expired;
+        if (code.contains("revision") || code.contains("stale")) return R.string.official_error_stale;
+        if (code.contains("credential") || code.contains("password") || code.contains("user_id") || "official_request_invalid".equals(code)) return R.string.official_error_input;
+        if (code.contains("catalog") || code.contains("master") || code.contains("schema")) return R.string.official_error_catalog;
+        return R.string.official_error_generic;
+    }
+
+    private int officialStage(String stage) {
+        switch (stage) {
+            case "idle": return R.string.official_stage_idle;
+            case "checking": return R.string.official_stage_checking;
+            case "verifying": return R.string.official_stage_verifying;
+            case "verified": return R.string.official_stage_verified;
+            case "transferring": return R.string.official_stage_transferring;
+            case "firebase": return R.string.official_stage_firebase;
+            case "login": return R.string.official_stage_login;
+            case "master": return R.string.official_stage_master;
+            case "account": return R.string.official_stage_account;
+            case "collected": return R.string.official_stage_collected;
+            case "fetching": return R.string.official_stage_fetching;
+            case "catalog_check": return R.string.official_stage_catalog_check;
+            case "staging": return R.string.official_stage_staging;
+            case "ready": return R.string.official_stage_ready;
+            case "completed": return R.string.official_stage_completed;
+            case "cancelled": return R.string.official_stage_cancelled;
+            case "failed": return R.string.official_stage_failed;
+            default: return R.string.official_stage_preparing;
+        }
+    }
+
+    private void renderOfficialJob() {
+        if (officialStatus == null) return;
+        String state = officialJob.optString("state", "idle");
+        officialStatus.setText(officialStage(officialJob.optString("progress", state)));
+        officialStatus.setTextColor("failed".equals(state) ? WARNING : TEXT_PRIMARY);
+        if ("failed".equals(state)) officialStatus.setText(officialError(officialJob.optString("error_code")));
+        if (officialLastError != 0) { officialStatus.setText(officialLastError); officialStatus.setTextColor(WARNING); }
+        JSONObject preview = officialJob.optJSONObject("preview");
+        StringBuilder summary = new StringBuilder();
+        if (preview != null) {
+            summary.append(getString(R.string.official_preview, preview.optString("manager_name"),
+                    preview.optInt("manager_level"), preview.optString("public_id")));
+            JSONObject inventory = preview.optJSONObject("inventory");
+            if (inventory != null) summary.append("\n").append(getString(R.string.official_counts,
+                    inventory.optInt("cards"), inventory.optInt("items"), inventory.optInt("photos")));
+        }
+        int expiry = officialJob.optInt("expires_in_seconds", 0);
+        if (expiry > 0) summary.append("\n").append(getString(R.string.official_expiry, expiry));
+        if ("ready".equals(state)) summary.append("\n\n").append(getString(R.string.official_ready_notice));
+        if (officialAppliedAccount != null) summary.append("\n\n").append(getString(R.string.official_completed_notice));
+        officialPreview.setText(summary.toString().trim()); updateOfficialControls();
+    }
+
+    private void updateOfficialControls() {
+        if (officialInspect == null) return;
+        String state = officialJob.optString("state", "idle");
+        boolean pending = officialRequest || ServerService.isImportingOfficial();
+        boolean working = officialJob.optBoolean("busy", false);
+        boolean ready = "ready".equals(state) && !working && !pending;
+        officialInspect.setEnabled(!working && !pending);
+        officialFetch.setEnabled("verified".equals(state) && !working && !pending);
+        officialNew.setEnabled(ready && !ServerService.isManagingAccounts() && !accountLifecycleBusy);
+        officialReplace.setEnabled(ready && !presentationServerRunning && !accountLifecycleBusy && !ServerService.isManagingAccounts());
+        officialCancel.setEnabled(!pending && !officialJob.optString("job_id").isEmpty()
+                && (working || "verified".equals(state) || "ready".equals(state)));
+        boolean imported = officialAppliedAccount != null;
+        officialSelect.setVisibility(imported ? View.VISIBLE : View.GONE); officialNormal.setVisibility(imported ? View.VISIBLE : View.GONE);
+        officialSelect.setEnabled(imported && !pending && !ServerService.isManagingAccounts() && !accountLifecycleBusy);
+        officialNormal.setEnabled(imported && !pending && !presentationServerRunning && !accountLifecycleBusy);
+        officialProgress.setVisibility((pending && !officialPolling) || working ? View.VISIBLE : View.GONE);
     }
 
     private void addServerChecksControls(LinearLayout body) {
@@ -1087,6 +1368,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         state.putInt("account_offset", accountOffset); state.putInt("restore_offset", restoreOffset);
         if (pendingAccountExport != null) state.putString("account_export", pendingAccountExport.toString());
         if (pendingAccountPreview != null) state.putString("account_preview", pendingAccountPreview.toString());
+        if (officialAppliedAccount != null) {
+            state.putString("official_local_profile", officialAppliedAccount.optString("profile"));
+            state.putString("official_local_revision", officialAppliedAccount.optString("revision"));
+        }
         super.onSaveInstanceState(state);
     }
 
@@ -1497,11 +1782,15 @@ public final class MainActivity extends Activity implements ServerService.Observ
         ServerService.observe(this);
         playbackStatus.removeCallbacks(playbackRefresh);
         playbackStatus.post(playbackRefresh);
+        officialStatus.removeCallbacks(officialRefresh); officialStatus.post(officialRefresh);
         if (!ServerService.isManagingAccounts()) refreshAccounts();
     }
 
     @Override protected void onStop() {
         presentationObserved = false;
+        if (officialStatus != null) officialStatus.removeCallbacks(officialRefresh);
+        if (officialCredentials != null) officialCredentials.dismiss();
+        if (officialWizardDialog != null) officialWizardDialog.dismiss();
         presentationRuntime = null;
         playbackRuntime = null;
         playbackRuntimeRunning = false;
@@ -1520,6 +1809,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         status.setText(value);
         status.setTextColor(running ? SUCCESS : TEXT_PRIMARY);
         accountLifecycleBusy = busy;
+        updateOfficialControls();
         start.setEnabled(!running && !busy && !ServerService.isManagingAccounts());
         updateAccountControls();
         experimentalMainLive.setEnabled(!running && !busy);

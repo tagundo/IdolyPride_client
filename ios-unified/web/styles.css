@@ -89,10 +89,14 @@ footer { font-size: .75rem; text-align: center; color: var(--muted); padding: .5
   .interface-language { flex: 1; flex-wrap: wrap; }
   .interface-language select { width: auto; flex: 1; }
   .numeric-control { grid-template-columns: minmax(0, 1fr) minmax(0, .7fr); }
-  section[aria-labelledby="accounts-heading"] .row { align-items: stretch; flex-direction: column; gap: .35rem; padding: .6rem 0; }
-  section[aria-labelledby="accounts-heading"] .row > span:first-child { flex: initial; }
+  section[aria-labelledby="accounts-heading"] .row,
+  section[aria-labelledby="official-heading"] .row { align-items: stretch; flex-direction: column; gap: .35rem; padding: .6rem 0; }
+  section[aria-labelledby="accounts-heading"] .row > span:first-child,
+  section[aria-labelledby="official-heading"] .row > span:first-child { flex: initial; }
   section[aria-labelledby="accounts-heading"] .row > select,
-  section[aria-labelledby="accounts-heading"] .row > input[type="text"] { width: 100%; max-width: 100%; }
+  section[aria-labelledby="official-heading"] .row > select,
+  section[aria-labelledby="accounts-heading"] .row > input[type="text"],
+  section[aria-labelledby="official-heading"] .row > input[type="text"] { width: 100%; max-width: 100%; }
 }
 @media (max-height: 480px) and (orientation: landscape) {
   main { padding-top: .65rem; padding-bottom: .75rem; gap: .75rem; }

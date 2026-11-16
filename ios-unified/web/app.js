@@ -470,6 +470,18 @@
   Object.assign(UI_TRANSLATIONS.ja, {"해당 모드의 다음 계정으로 선택": "このモードの次回アカウントに選択", "계정 선택은 해당 모드의 저장 슬롯을 바꿉니다. 사용할 일반·감상 모드도 위 설정에서 확인해 주세요.": "アカウント選択は指定モードの保存スロットを変更します。通常・鑑賞モードの設定も上で確認してください。", "게임 ID: ": "ゲームID: "});
   Object.assign(UI_TRANSLATIONS.en, {"해당 모드의 다음 계정으로 선택": "Use at next start in this mode", "계정 선택은 해당 모드의 저장 슬롯을 바꿉니다. 사용할 일반·감상 모드도 위 설정에서 확인해 주세요.": "Account selection changes the save slot for that mode. Check the normal/viewing mode setting above too.", "게임 ID: ": "Game ID: "});
 
+  Object.assign(UI_TRANSLATIONS.ja, {"일본 공식 계정 가져오기": "日本公式アカウントの取り込み", "기존 일본 공식 계정의 인계 정보를 확인한 뒤, 별도 버튼으로 공식 인계 로그인과 데이터 내려받기를 진행합니다.": "既存の日本公式アカウントの引き継ぎ情報を確認後、別のボタンで公式の引き継ぎログインとデータ取得を行います。", "인계 ID·비밀번호는 앱의 보안 입력창에서만 입력합니다. 입력한 정보는 제출하거나 취소하면 지웁니다.": "引き継ぎIDとパスワードはアプリの安全な入力画面にのみ入力します。送信またはキャンセル時に入力内容を消去します。", "인계 정보 확인": "引き継ぎ情報を確認", "공식 인계 로그인·내려받기": "公式の引き継ぎログイン・データ取得", "공식 계정 작업 취소": "公式アカウント処理を中止", "공식 계정 작업 진행률": "公式アカウント処理の進行状況", "인계 정보를 확인해 주세요.": "引き継ぎ情報を確認してください。", "기존 일반 계정 덮어쓰기 · 위 ‘관리할 계정’에서 대상을 선택하세요": "既存の通常アカウントを上書き・上の「管理するアカウント」で対象を選択してください", "받은 데이터를 일반 계정으로 저장": "取得したデータを通常アカウントに保存", "기본값은 새 일반 계정으로 저장입니다. 덮어쓰기 전 상태는 복구점으로 보관합니다. 저장 후 위 유저 관리에서 일반 계정을 선택하고 감상 모드를 꺼 주세요.": "初期設定は新しい通常アカウントへの保存です。上書き前の状態は復元ポイントに保存します。保存後、上のユーザー管理で通常アカウントを選択し、鑑賞モードをオフにしてください。", "인계 정보 확인 중": "引き継ぎ情報を確認中", "공식 계정 확인 완료": "公式アカウントを確認済み", "공식 계정 데이터 받는 중": "公式アカウントのデータを取得中", "로컬 저장 준비 완료": "ローカル保存の準備完了", "일반 계정 저장 완료": "通常アカウントへの保存完了", "작업을 취소했습니다.": "処理をキャンセルしました。", "공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요.": "公式アカウント処理を完了できませんでした。状態を確認してください。", "공식 계정 작업에 실패했습니다. 입력 정보와 연결 상태를 확인해 주세요.": "公式アカウント処理に失敗しました。入力情報と接続状態を確認してください。", "확인한 계정으로 공식 인계 로그인·내려받기를 진행할 수 있습니다.": "確認済みのアカウントで公式の引き継ぎログインとデータ取得を行えます。", "내려받기와 검증을 마쳤습니다. 저장할 로컬 계정을 확인해 주세요.": "取得と検証が完了しました。保存先のローカルアカウントを確認してください。", "일반 계정으로 저장했습니다. 유저 관리에서 계정과 사용할 모드를 선택해 주세요.": "通常アカウントに保存しました。ユーザー管理でアカウントと使用するモードを選択してください。", "덮어쓸 일반 계정을 위에서 선택해 주세요.": "上で上書き対象の通常アカウントを選択してください。", "덮어쓸 저장 슬롯: ": "上書き先の保存スロット: ", "새 일반 계정으로 저장합니다.": "新しい通常アカウントに保存します。", "매니저 레벨: ": "マネージャーレベル: ", "공식 계정 작업을 처리하고 있습니다.": "公式アカウント処理中です。", "공식 로그인 준비": "公式ログインを準備中", "공식 계정 확인": "公式アカウントを確認中", "공식 인계 로그인": "公式の引き継ぎログイン中", "로그인 인증": "ログインを認証中", "계정 데이터 검증": "アカウントデータを検証中", "로컬 저장 준비": "ローカル保存を準備中"});
+  Object.assign(UI_TRANSLATIONS.en, {"일본 공식 계정 가져오기": "Import Japanese official account", "기존 일본 공식 계정의 인계 정보를 확인한 뒤, 별도 버튼으로 공식 인계 로그인과 데이터 내려받기를 진행합니다.": "Check the transfer details for an existing Japanese official account, then use the separate button to perform the official transfer login and download data.", "인계 ID·비밀번호는 앱의 보안 입력창에서만 입력합니다. 입력한 정보는 제출하거나 취소하면 지웁니다.": "Enter transfer credentials only in the app’s secure prompt. The input is cleared when submitted or cancelled.", "인계 정보 확인": "Check transfer details", "공식 인계 로그인·내려받기": "Official transfer login and download", "공식 계정 작업 취소": "Cancel official account task", "공식 계정 작업 진행률": "Official account task progress", "인계 정보를 확인해 주세요.": "Check the transfer details first.", "기존 일반 계정 덮어쓰기 · 위 ‘관리할 계정’에서 대상을 선택하세요": "Replace an existing normal account · choose the target under Account to manage above", "받은 데이터를 일반 계정으로 저장": "Save downloaded data as a normal account", "기본값은 새 일반 계정으로 저장입니다. 덮어쓰기 전 상태는 복구점으로 보관합니다. 저장 후 위 유저 관리에서 일반 계정을 선택하고 감상 모드를 꺼 주세요.": "The default saves a new normal account. Replacing an account saves a restore point first. After saving, select the normal account in User management above and turn off Viewing mode.", "인계 정보 확인 중": "Checking transfer details", "공식 계정 확인 완료": "Official account verified", "공식 계정 데이터 받는 중": "Downloading official account data", "로컬 저장 준비 완료": "Ready to save locally", "일반 계정 저장 완료": "Normal account saved", "작업을 취소했습니다.": "Task cancelled.", "공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요.": "Could not complete the official account task. Check its status.", "공식 계정 작업에 실패했습니다. 입력 정보와 연결 상태를 확인해 주세요.": "The official account task failed. Check the transfer details and connection.", "확인한 계정으로 공식 인계 로그인·내려받기를 진행할 수 있습니다.": "You can now perform the official transfer login and download for the verified account.", "내려받기와 검증을 마쳤습니다. 저장할 로컬 계정을 확인해 주세요.": "Download and validation completed. Check which local account to save.", "일반 계정으로 저장했습니다. 유저 관리에서 계정과 사용할 모드를 선택해 주세요.": "Saved as a normal account. Choose the account and mode in User management.", "덮어쓸 일반 계정을 위에서 선택해 주세요.": "Choose the normal account to replace above.", "덮어쓸 저장 슬롯: ": "Save slot to replace: ", "새 일반 계정으로 저장합니다.": "Save as a new normal account.", "매니저 레벨: ": "Manager level: ", "공식 계정 작업을 처리하고 있습니다.": "Processing official account task.", "공식 로그인 준비": "Preparing official login", "공식 계정 확인": "Verifying official account", "공식 인계 로그인": "Official transfer login", "로그인 인증": "Authenticating login", "계정 데이터 검증": "Validating account data", "로컬 저장 준비": "Preparing local storage"});
+
+  Object.assign(UI_TRANSLATIONS.ja, {"인계 ID와 비밀번호 형식을 확인해 주세요.": "引き継ぎIDとパスワードの形式を確認してください。", "공식 서버에서 인계 정보를 확인하지 못했습니다. 입력 정보를 다시 확인해 주세요.": "公式サーバーで引き継ぎ情報を確認できませんでした。入力情報を確認してください。", "확인 정보가 만료되었습니다. 인계 정보를 다시 확인해 주세요.": "確認情報が期限切れです。引き継ぎ情報をもう一度確認してください。", "일본 공식 서버 점검 중입니다. 나중에 다시 시도해 주세요.": "日本公式サーバーはメンテナンス中です。後でもう一度お試しください。", "공식 서버 자료와 로컬 자료가 맞지 않습니다. 앱을 업데이트한 뒤 다시 시도해 주세요.": "公式サーバーとローカルのデータが一致しません。アプリを更新してから再試行してください。", "일본 공식 서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.": "日本公式サーバーに接続できませんでした。接続状態を確認してください。"});
+  Object.assign(UI_TRANSLATIONS.en, {"인계 ID와 비밀번호 형식을 확인해 주세요.": "Check the transfer ID and password format.", "공식 서버에서 인계 정보를 확인하지 못했습니다. 입력 정보를 다시 확인해 주세요.": "The official server could not verify the transfer details. Check the entered details.", "확인 정보가 만료되었습니다. 인계 정보를 다시 확인해 주세요.": "Verification has expired. Check the transfer details again.", "일본 공식 서버 점검 중입니다. 나중에 다시 시도해 주세요.": "The Japanese official server is under maintenance. Try again later.", "공식 서버 자료와 로컬 자료가 맞지 않습니다. 앱을 업데이트한 뒤 다시 시도해 주세요.": "Official and local data do not match. Update the app and try again.", "일본 공식 서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.": "Could not connect to the Japanese official server. Check your connection."});
+
+  Object.assign(UI_TRANSLATIONS.ja, {"저장 슬롯 이름을 슬래시·제어문자 없이 UTF-8 64바이트 이내로 입력해 주세요.": "保存スロット名はスラッシュ・制御文字なし、UTF-8で64バイト以内にしてください。"});
+  Object.assign(UI_TRANSLATIONS.en, {"저장 슬롯 이름을 슬래시·제어문자 없이 UTF-8 64바이트 이내로 입력해 주세요.": "Enter a save slot name of up to 64 UTF-8 bytes without slashes or control characters."});
+
+  Object.assign(UI_TRANSLATIONS.ja, {"일반 계정 저장 중": "通常アカウントに保存中", "대상 계정이 변경되었습니다. 계정 목록을 다시 확인해 주세요.": "対象アカウントが変更されました。一覧を確認し直してください。"});
+  Object.assign(UI_TRANSLATIONS.en, {"일반 계정 저장 중": "Saving normal account", "대상 계정이 변경되었습니다. 계정 목록을 다시 확인해 주세요.": "The target account changed. Check the account list again."});
+
   function resolveInterfaceLanguage(value, navigator = {}) {
     if (["ko", "ja", "en"].includes(value)) return value;
     const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
@@ -528,12 +540,17 @@
   }
 
   function validRequest(action, payload) {
-    if (action === "status") return exact(payload, []);
+    if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
 
     const profile = value => typeof value === "string" && value.trim() === value && utf8Length(value) >= 1
       && utf8Length(value) <= 64 && !/[\/\\\u0000-\u001f\u007f]/.test(value);
     const revision = value => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
     const mode = value => choice(value, ["normal", "media"]);
+    const officialID = value => typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+    if (["official_fetch","official_cancel"].includes(action)) return exact(payload,["job_id"]) && officialID(payload.job_id);
+    if (action === "official_apply") return exact(payload,["job_id","profile","replace","expected_revision"])
+      && officialID(payload.job_id) && profile(payload.profile) && typeof payload.replace === "boolean"
+      && (payload.replace ? revision(payload.expected_revision) : payload.expected_revision === null);
     if (action === "accounts_status") return exact(payload, []) || exact(payload, ["offset", "restore_offset"])
       && integer(payload.offset) && integer(payload.restore_offset) && payload.offset <= 65535 && payload.restore_offset <= 65535;
     if (action === "accounts_create") return exact(payload, ["mode", "profile", "manager_name"]) && mode(payload.mode)
@@ -604,7 +621,12 @@
       pending.delete(id);
       timers.clearTimeout(item.timer);
       if (envelope.ok) item.resolve(envelope.result);
-      else item.reject(new Error(plain(envelope.error && envelope.error.message, 300) || "요청을 처리하지 못했습니다."));
+      else {
+        const error = new Error(plain(envelope.error && envelope.error.message, 300) || "요청을 처리하지 못했습니다.");
+        const code = envelope.error && envelope.error.code;
+        if (typeof code === "string" && /^[a-z][a-z0-9_]{0,79}$/.test(code)) error.code = code;
+        item.reject(error);
+      }
     }
     function armTimeout(id, item) {
       timers.clearTimeout(item.timer);
@@ -640,7 +662,7 @@
         if (pending.size >= MAX_PENDING || nextID > MAX_ID) return Promise.reject(new Error("진행 중인 요청을 마친 후 다시 시도해 주세요."));
         const id = nextID++;
         return new Promise((resolve, reject) => {
-          const timeout = (["resources_import", "resources_export"].includes(action) || action.startsWith("accounts_")) ? 120000 : 20000;
+          const timeout = (["resources_import", "resources_export"].includes(action) || (action.startsWith("accounts_") || action.startsWith("official_"))) ? 120000 : 20000;
           const item = {resolve, reject, timer: null, timeout, action, importStage: null, importCopied: -1};
           pending.set(id, item); armTimeout(id, item);
           try { handler.postMessage({id, action, ...payload}); }
@@ -718,6 +740,7 @@
       if (accountSnapshot) renderAccounts(accountSnapshot);
       renderAccountPreview(); accountFeedback(accountFeedbackSource,accountFeedbackDetail);
       if (snapshot) renderServerChecks(snapshot.runtime);
+      renderOfficial();
     }
     function syncPreset(key) {
       const presets = key === "render_scale" ? SCALE_PRESETS : BUFFER_PRESETS;
@@ -741,6 +764,8 @@
     let flushNonce = null;
     let flushGeneration = 0;
     let accountSnapshot = null, accountPreview = null, accountPending = false, accountProgress = null, accountRequested = false, historyPending = false;
+    let officialJob = null, officialPending = false, officialFeedbackSource = "";
+    const officialBusy = () => Boolean(officialJob && officialJob.busy === true);
     let accountFeedbackSource = "", accountFeedbackDetail = "";
     let resourcePending = false;
     let importProgress = null;
@@ -858,7 +883,7 @@
     function schedulePoll() {
       stopPolling();
       if (!visible || disposed) return;
-      pollTimer = timers.setTimeout(() => { pollTimer = null; refresh(); }, (job && ACTIVE_JOBS.has(job.state)) || (importProgress && importProgress.stage === "queued") ? 1000 : 4000);
+      pollTimer = timers.setTimeout(() => { pollTimer = null; refresh(); }, (job && ACTIVE_JOBS.has(job.state)) || (importProgress && importProgress.stage === "queued") || officialBusy() ? 1000 : 4000);
     }
     function observeImportProgress(value) {
       if (!validImportProgress(value)) return;
@@ -890,7 +915,7 @@
       const activeJob = Boolean(job && ACTIVE_JOBS.has(job.state));
       const busy = activeJob || archivePending || copyingImport || waitingImport;
       const ready = Boolean(snapshot && snapshot.running && snapshot.state === "ready");
-      for (const action of ["preview", "download", "import", "export"]) el("resources-" + action).disabled = !ready || busy || resourcePending || accountPending;
+      for (const action of ["preview", "download", "import", "export"]) el("resources-" + action).disabled = !ready || busy || resourcePending || accountPending || officialPending || officialBusy();
       el("parallelism").disabled = busy || resourcePending || !ready;
       el("resources-cancel").disabled = !ready || !activeJob || resourcePending || !/^[A-Za-z0-9_-]{1,64}$/.test(job.job_id || "");
       const states = {preparing: "준비", running: "진행 중", export_ready: "내보내기 준비", cancelling: "취소 중", completed: "완료", partial: "일부 완료", failed: "실패", cancelled: "취소됨"};
@@ -973,8 +998,8 @@
     }
     function renderAccountControls() {
       const available = snapshot && snapshot.account_management_available === true;
-      el("accounts-refresh").disabled = !available || accountPending || launchFlushing;
-      el("accounts-fields").disabled = !available || !accountSnapshot || accountPending || launchFlushing;
+      el("accounts-refresh").disabled = !available || accountPending || officialPending || officialBusy() || launchFlushing;
+      el("accounts-fields").disabled = !available || !accountSnapshot || accountPending || officialPending || officialBusy() || launchFlushing;
       const current = selectedAccount(), point = selectedRestorePoint();
       const details = [];
       if (current) {
@@ -985,12 +1010,12 @@
           if (Number.isSafeInteger(inventory[key]) && inventory[key] >= 0) details.push(t(label) + ": " + inventory[key]);
       }
       text("accounts-user-detail",details.join(" · "),false);
-      for (const name of ["select","export","clone"]) el("accounts-"+name).disabled = !current || accountPending || launchFlushing;
-      const fileBusy = resourcePending || Boolean(job && ACTIVE_JOBS.has(job.state)) || Boolean(importProgress && ["selecting","preparing","copying","queued"].includes(importProgress.stage));
+      for (const name of ["select","export","clone"]) el("accounts-"+name).disabled = !current || accountPending || officialPending || officialBusy() || launchFlushing;
+      const fileBusy = resourcePending || officialPending || officialBusy() || Boolean(job && ACTIVE_JOBS.has(job.state)) || Boolean(importProgress && ["selecting","preparing","copying","queued"].includes(importProgress.stage));
       el("accounts-export").disabled = !current || accountPending || launchFlushing || fileBusy;
       el("accounts-preview").disabled = accountPending || launchFlushing || fileBusy;
       el("accounts-import").disabled = !accountPreview || accountPending || launchFlushing || fileBusy;
-      el("accounts-restore").disabled = !current || !point || current.mode !== point.mode || current.profile !== point.profile || accountPending || launchFlushing;
+      el("accounts-restore").disabled = !current || !point || current.mode !== point.mode || current.profile !== point.profile || accountPending || officialPending || officialBusy() || launchFlushing;
       el("accounts-previous").disabled = !accountSnapshot || !accountSnapshot.offset || accountPending;
       el("accounts-next").disabled = !accountSnapshot || !Number.isInteger(accountSnapshot.next_offset) || accountPending;
       el("accounts-restore-previous").disabled = !accountSnapshot || !accountSnapshot.restore_offset || accountPending;
@@ -1038,7 +1063,7 @@
         : history && history.available === false ? t("오류 기록을 저장할 수 없습니다.") : t("저장된 최근 오류가 없습니다."), false);
     }
     async function account(action, explicitPayload) {
-      if (!visible || disposed || accountPending || !snapshot || snapshot.account_management_available !== true || launchFlushing) return;
+      if (!visible || disposed || accountPending || officialPending || officialBusy() || !snapshot || snapshot.account_management_available !== true || launchFlushing) return;
       const current = selectedAccount(), point = selectedRestorePoint();
       if (["export","preview","import","restore"].includes(action) && (resourcePending || job && ACTIVE_JOBS.has(job.state))) {
         message("진행 중인 파일 작업을 마친 후 다시 시도해 주세요.",true); return;
@@ -1107,6 +1132,79 @@
         if (visible && !disposed) refresh();
       }
     }
+    function officialFailure(code) {
+      if (["transfer_id_invalid","transfer_password_invalid"].includes(code)) return "인계 ID와 비밀번호 형식을 확인해 주세요.";
+      if (code === "transfer_rejected") return "공식 서버에서 인계 정보를 확인하지 못했습니다. 입력 정보를 다시 확인해 주세요.";
+      if (["verification_expired","verification_closed","verification_consumed","verification_invalid","official_session_expired"].includes(code)) return "확인 정보가 만료되었습니다. 인계 정보를 다시 확인해 주세요.";
+      if (code === "official_maintenance") return "일본 공식 서버 점검 중입니다. 나중에 다시 시도해 주세요.";
+      if (["official_schema_unsupported","master_version_invalid","official_config_scope_mismatch","official_protocol_changed","official_catalog_changed","official_master_mismatch","official_catalog_reference_missing"].includes(code)) return "공식 서버 자료와 로컬 자료가 맞지 않습니다. 앱을 업데이트한 뒤 다시 시도해 주세요.";
+      if (["official_rpc_failed","official_seed_failed","official_firebase_failed","official_transport_unavailable"].includes(code)) return "일본 공식 서버에 연결하지 못했습니다. 연결 상태를 확인해 주세요.";
+      if (["account_revision_conflict","account_target_exists","account_target_missing"].includes(code)) return "대상 계정이 변경되었습니다. 계정 목록을 다시 확인해 주세요.";
+      if (code === "account_restart_required") return "게임을 완전히 종료하고 다시 연 뒤 게임 시작 전에 계정을 복원해 주세요.";
+      return "공식 계정 작업에 실패했습니다. 입력 정보와 연결 상태를 확인해 주세요.";
+    }
+    function renderOfficial() {
+      const job = officialJob || {}, state = job.state || "idle";
+      const labels = {idle:"대기",checking:"인계 정보 확인 중",verified:"공식 계정 확인 완료",fetching:"공식 계정 데이터 받는 중",ready:"로컬 저장 준비 완료",completed:"일반 계정 저장 완료",failed:"실패",cancelled:"취소됨"};
+      const stages = {applying:"일반 계정 저장 중",preparing:"공식 로그인 준비",checking:"인계 정보 확인 중",verifying:"공식 계정 확인",verified:"공식 계정 확인 완료",transferring:"공식 인계 로그인",firebase:"로그인 인증",login:"공식 인계 로그인",master:"계정 데이터 검증",account:"계정 데이터 검증",collected:"계정 데이터 검증",fetching:"공식 계정 데이터 받는 중",catalog_check:"계정 데이터 검증",staging:"로컬 저장 준비",ready:"로컬 저장 준비 완료",completed:"일반 계정 저장 완료",failed:"실패",cancelled:"취소됨"};
+      text("official-state", labels[state] || "확인 중");
+      const feedback = officialFeedbackSource || (job.busy === true ? stages[job.progress] || "공식 계정 작업을 처리하고 있습니다." : state === "verified" ? "확인한 계정으로 공식 인계 로그인·내려받기를 진행할 수 있습니다." : state === "ready" ? "내려받기와 검증을 마쳤습니다. 저장할 로컬 계정을 확인해 주세요." : state === "completed" ? "일반 계정으로 저장했습니다. 유저 관리에서 계정과 사용할 모드를 선택해 주세요." : state === "failed" ? officialFailure(job.error_code) : state === "cancelled" ? "작업을 취소했습니다." : stages[job.progress] || "인계 정보를 확인해 주세요.");
+      text("official-feedback",feedback);
+      const preview = object(job.preview) ? job.preview : null, lines = [];
+      if (preview) {
+        if (typeof preview.manager_name === "string") lines.push(t("게임 내 매니저: ")+plain(preview.manager_name,128));
+        if (typeof preview.public_id === "string") lines.push(t("게임 ID: ")+plain(preview.public_id,256));
+        if (Number.isSafeInteger(preview.manager_level)) lines.push(t("매니저 레벨: ")+preview.manager_level);
+        const inventory = object(preview.inventory) ? preview.inventory : {};
+        for (const [key,label] of [["cards","카드"],["items","아이템 종류"],["photos","포토"]])
+          if (Number.isSafeInteger(inventory[key]) && inventory[key] >= 0) lines.push(t(label)+": "+inventory[key]);
+      }
+      text("official-preview",lines.join(" · "),false); el("official-preview").hidden = !lines.length;
+      const resourceJob = snapshot && object(snapshot.runtime.resource_library) ? snapshot.runtime.resource_library.job : null;
+      const fileBusy = resourcePending || Boolean(resourceJob && ACTIVE_JOBS.has(resourceJob.state)) || Boolean(importProgress && ["selecting","preparing","copying","queued"].includes(importProgress.stage));
+      const blocked = officialPending || officialBusy() || accountPending || launchFlushing || fileBusy;
+      el("official-inspect").disabled = !snapshot || snapshot.official_import_available !== true || blocked;
+      el("official-fetch").disabled = blocked || state !== "verified";
+      el("official-fields").disabled = blocked || state !== "ready";
+      const target = selectedAccount(), replace = el("official-replace").checked;
+      text("official-target",replace ? target && target.mode === "normal" ? t("덮어쓸 저장 슬롯: ")+target.profile : t("덮어쓸 일반 계정을 위에서 선택해 주세요.") : t("새 일반 계정으로 저장합니다."),false);
+      el("official-apply").disabled = blocked || state !== "ready" || replace && (!target || target.mode !== "normal");
+      el("official-cancel").disabled = officialPending || job.progress === "applying" || !job.job_id || !["checking","verified","fetching","ready"].includes(state);
+      el("official-progress").hidden = !officialPending && !officialBusy();
+      el("official-progress").removeAttribute("value");
+    }
+    async function official(action) {
+      if (!visible || disposed || officialPending || !snapshot || snapshot.official_import_available !== true || launchFlushing) return;
+      if (action !== "status" && action !== "cancel" && (accountPending || resourcePending || officialBusy())) return;
+      const payload = {}, job = officialJob || {};
+      if (["fetch","cancel","apply"].includes(action)) payload.job_id = job.job_id;
+      if (action === "apply") {
+        const replace = el("official-replace").checked, target = selectedAccount();
+        if (replace && (!target || target.mode !== "normal")) { officialFeedbackSource = "덮어쓸 일반 계정을 위에서 선택해 주세요.";renderOfficial();return; }
+        Object.assign(payload,{profile:replace ? target.profile : el("official-profile").value.trim(),replace,expected_revision:replace ? target.revision : null});
+        if (!validRequest("official_apply",payload)) { officialFeedbackSource = "저장 슬롯 이름을 슬래시·제어문자 없이 UTF-8 64바이트 이내로 입력해 주세요.";renderOfficial();return; }
+      }
+      officialPending = true; mutationVersion++;
+      if (action !== "status") officialFeedbackSource = "공식 계정 작업을 처리하고 있습니다.";
+      const visibility = visibilityVersion; renderOfficial();renderAccountControls();renderResources(snapshot.runtime);
+      try {
+        const result = await bridge.request("official_"+action,payload);
+        if (!visible || disposed || visibility !== visibilityVersion) return;
+        if (result.action !== "official_"+action) throw new Error("공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요.");
+        if (result.cancelled === true) { officialFeedbackSource = "작업을 취소했습니다.";return; }
+        if (!object(result.job) || typeof result.job.busy !== "boolean" || !choice(result.job.state,["idle","checking","verified","fetching","ready","completed","failed","cancelled"])
+            || result.job.state !== "idle" && !(typeof result.job.job_id === "string" && /^[0-9a-f]{32}$/.test(result.job.job_id))) throw new Error("공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요.");
+        officialJob = result.job; officialFeedbackSource = "";
+        if (object(result.status)) renderAccounts(result.status);
+      } catch (error) {
+        if (visible && !disposed && visibility === visibilityVersion) officialFeedbackSource = officialFailure(error.code);
+      } finally {
+        officialPending = false;
+        if (!disposed) {renderOfficial();renderAccountControls();if(snapshot)renderResources(snapshot.runtime);}
+        if (action !== "status" && visible && !disposed) refresh();
+      }
+    }
+
     async function clearDiagnostics() {
       if (!visible || disposed || historyPending) return;
       historyPending = true; el("diagnostics-clear").disabled = true; mutationVersion++;
@@ -1128,6 +1226,7 @@
           "keyboard_lifecycle", "keyboard_ready", "unity_host", "late_startup_calls", "octo_budget",
           "game_hook_error", "error", "game_error", "client_data", "http_readiness", "resource_import_progress"
         ].filter(key => Object.prototype.hasOwnProperty.call(snapshot.native, key)).map(key => [key, snapshot.native[key]])) : null,
+        official_import: object(snapshot.official_import) ? snapshot.official_import : null,
         startup_checks: runtime.startup_checks || null,
         durable_history: runtime.durable_history || null,
         http_requests: runtime.http_requests || null,
@@ -1191,13 +1290,22 @@
       const media = object(runtime.media_options) ? runtime.media_options : {};
       const mediaChanged = validMedia(media.settings) && validMedia(media.effective_settings) && forms.media.fields.some(key => media.settings[key] !== media.effective_settings[key]);
       text("media-effective", mediaChanged ? "변경한 목록 설정은 다음 앱 실행부터 적용됩니다." : "목록 설정은 다음 앱 실행부터 적용됩니다.");
+      if (object(value.official_import)) {
+        const publicJob = value.official_import, previous = officialJob;
+        if (!officialPending && previous && (previous.job_id !== publicJob.job_id || previous.state !== publicJob.state)) officialFeedbackSource = "";
+        if (!officialPending) officialJob = {...publicJob,...(previous && previous.job_id === publicJob.job_id && ["verified","ready","completed"].includes(publicJob.state) && object(previous.preview) ? {preview:previous.preview} : {})};
+        if (!officialPending && publicJob.state !== "idle" && (publicJob.busy === true || !previous || previous.job_id !== publicJob.job_id || previous.state !== publicJob.state)) Promise.resolve().then(() => official("status"));
+      }
+      renderOfficial();
       renderResources(runtime);
       renderServerChecks(runtime);
       el("diagnostics-clear").disabled = historyPending || value.account_management_available !== true;
       if (!accountPending && object(value.accounts)) renderAccounts(value.accounts);
       renderAccountControls();
       if (value.account_management_available === true && !accountRequested) {
-        accountRequested = true; Promise.resolve().then(() => account("status"));
+        Promise.resolve().then(() => {
+          if (!accountPending && !officialPending && !officialBusy() && !accountRequested) { accountRequested = true; account("status"); }
+        });
       }
       renderDiagnostics(runtime);
       for (const [name, form] of Object.entries(forms)) if (form.resumeQueued && value.running && value.state === "ready") {
@@ -1311,7 +1419,7 @@
     }
     function updateFlushControls() {
       el("interface_language").disabled = launchFlushing;
-      renderAccountControls();
+      renderAccountControls(); renderOfficial();
       if (snapshot) for (const name of Object.keys(forms)) updateForm(name, forms[name].value);
     }
     function releaseSettingsFlush(nonce) {
@@ -1332,7 +1440,7 @@
       (async () => {
         let ready = false;
         try {
-          if (!snapshot || !snapshot.running || snapshot.state !== "ready" || accountPending) throw new Error("not_ready");
+          if (!snapshot || !snapshot.running || snapshot.state !== "ready" || accountPending || officialPending || officialBusy()) throw new Error("not_ready");
           for (const name of Object.keys(forms)) {
             try { settingsFromForm(name); }
             catch (_) {
@@ -1372,7 +1480,7 @@
     scope.idolyServerFlushSettings = flushSettings;
     scope.idolyServerReleaseSettingsFlush = releaseSettingsFlush;
     async function resource(action) {
-      if (!visible || disposed || resourcePending || accountPending || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
+      if (!visible || disposed || resourcePending || accountPending || officialPending || officialBusy() || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
       const payload = action === "cancel" ? {job_id: job && job.job_id} : action === "download" ? {parallelism: Number(el("parallelism").value)} : {};
       resourcePending = true; renderAccountControls();
       if (action === "import") importProgress = {stage: "selecting", request_id: null, copied_bytes: 0, total_bytes: 0, previous_job_id: job && job.job_id, previous_operation: snapshot.resource_operation, previous_request_id: latestImportRequestID, accepted: false};
@@ -1469,7 +1577,9 @@
     el("diagnostics-clear").addEventListener("click", clearDiagnostics);
     el("accounts-refresh").addEventListener("click", () => account("status"));
     for (const action of ["create","clone","select","export","preview","import","restore"]) el("accounts-"+action).addEventListener("click", () => account(action));
-    el("accounts-current").addEventListener("change", renderAccountControls);
+    el("accounts-current").addEventListener("change", () => {renderAccountControls();renderOfficial();});
+    for (const action of ["inspect","fetch","cancel","apply"]) el("official-"+action).addEventListener("click", () => official(action));
+    el("official-replace").addEventListener("change",renderOfficial);
     el("accounts-restore-point").addEventListener("change", renderAccountControls);
     el("accounts-previous").addEventListener("click", () => account("status",{offset:Math.max(0,accountSnapshot.offset-24),restore_offset:accountSnapshot.restore_offset || 0}));
     el("accounts-next").addEventListener("click", () => account("status",{offset:accountSnapshot.next_offset,restore_offset:accountSnapshot.restore_offset || 0}));

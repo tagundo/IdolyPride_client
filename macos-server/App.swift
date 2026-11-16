@@ -103,6 +103,30 @@ final class ServerModel: ObservableObject {
     private var restoreOffset = 0
     private var diagnosticStatus: [String: Any] = [:]
 
+    // Transfer credentials live only in OfficialImportControls' local State.
+    @Published var officialUILanguage = UserDefaults.standard.string(forKey: "officialInterfaceLanguage")
+        ?? (Locale.preferredLanguages.first?.hasPrefix("ja") == true ? "ja" : Locale.preferredLanguages.first?.hasPrefix("ko") == true ? "ko" : "en") {
+        didSet { if ["ko", "ja", "en"].contains(officialUILanguage) { UserDefaults.standard.set(officialUILanguage, forKey: "officialInterfaceLanguage") } }
+    }
+    @Published var officialPlatform = "ios"
+    @Published var officialTargetProfile = "official-import"
+    @Published var officialReplace = false
+    @Published var officialReplaceProfile = ""
+    @Published private(set) var officialState = "idle"
+    @Published private(set) var officialProgress = "preparing"
+    @Published private(set) var officialBusy = false
+    @Published private(set) var officialPending = false
+    @Published private(set) var officialExpiry = 0
+    @Published private(set) var officialErrorCode: String?
+    @Published private(set) var officialPreview: [String: Any] = [:]
+    @Published private(set) var officialImportedAccount: ManagedAccount?
+    @Published private(set) var officialNotice = ""
+    private var officialJobID: String?
+    private var officialRequestSerial = 0
+    private var pendingOfficialID: Int?
+    private var pendingOfficialAction: String?
+    private var officialActivationProfile: String?
+
     private var invalidResourceLocation = false
     private var experimentalLiveObserved = false
     @Published var status = "앱을 준비하고 있습니다."
@@ -552,6 +576,172 @@ final class ServerModel: ObservableObject {
         }
     }
 
+    func officialText(_ ko: String, _ en: String, _ ja: String) -> String {
+        officialUILanguage == "ja" ? ja : officialUILanguage == "ko" ? ko : en
+    }
+    var officialNormalAccounts: [ManagedAccount] { accounts.filter { $0.mode == "normal" } }
+    var officialCanFetch: Bool {
+        officialState == "verified" && officialJobID != nil && !officialPreview.isEmpty && !officialPending && !officialBusy
+    }
+    var officialCanApply: Bool {
+        officialState == "ready" && officialJobID != nil && !officialPending && !officialBusy
+            && !running && !busy && !canStop && !accountPending
+    }
+    var officialStatusText: String {
+        switch officialNotice {
+        case "invalid_id": return officialText("인계 ID는 영문·숫자·_·- 1~64자로 입력해 주세요.", "Use 1–64 letters, digits, _ or - for the transfer ID.", "引き継ぎIDは英数字・_・-の1～64文字で入力してください。")
+        case "invalid_password": return officialText("비밀번호는 앞뒤 공백 없이 ASCII 1~128자로 입력해 주세요.", "Use 1–128 ASCII characters without leading or trailing spaces.", "パスワードは前後に空白を付けずASCII 1～128文字で入力してください。")
+        case "stopped_required": return officialText("게임을 종료하고 이 서버를 완전히 중지한 뒤 적용해 주세요.", "Quit the game and fully stop this server before applying.", "ゲームを終了し、このサーバーを完全に停止してから適用してください。")
+        case "invalid_profile": return officialText("저장 슬롯 이름은 슬래시·제어문자 없이 UTF-8 64바이트 이내로 입력해 주세요.", "Use a slot name of up to 64 UTF-8 bytes without slashes or control characters.", "保存スロット名はスラッシュ・制御文字なし、UTF-8で64バイト以内にしてください。")
+        case "select_target": return officialText("교체할 일반 계정을 선택해 주세요.", "Select a normal account to replace.", "置き換える通常アカウントを選択してください。")
+        case "send_failed": return officialText("요청을 전달하지 못했습니다. 입력은 지웠으며 자동 재시도하지 않습니다.", "The request was not sent. Input was cleared; it will not retry automatically.", "要求を送信できませんでした。入力は消去され、自動再試行は行いません。")
+        case "session_closed": return officialText("임시 인계 확인 세션을 종료했습니다. 이미 저장한 로컬 계정은 유저 관리에 남습니다.", "The temporary transfer session ended. Any local account already saved remains in user management.", "一時引き継ぎ確認セッションを終了しました。保存済みのローカルアカウントはユーザー管理に残ります。")
+        case "selected": return officialText("다음 일반 계정 선택과 감상 모드 끄기를 저장했습니다. 서버를 시작해 주세요.", "Saved the next normal account and turned off viewing mode. Start the server when ready.", "次回の通常アカウントを保存し、鑑賞モードをオフにしました。サーバーを起動してください。")
+        default: break
+        }
+        if officialBusy && officialProgress == "applying" {
+            return officialText("검증된 계정을 로컬에 저장하고 있습니다.", "Saving the verified account locally.", "検証済みアカウントをローカルに保存しています。")
+        }
+        if let code = officialErrorCode {
+            switch code {
+            case "transfer_rejected", "transfer_id_invalid", "transfer_password_invalid":
+                return officialText("인계 ID 또는 비밀번호를 확인하고 새 확인을 시작해 주세요.", "Check the transfer ID and password, then start a new verification.", "引き継ぎIDとパスワードを確認し、新しい確認を開始してください。")
+            case "verification_expired", "official_session_expired", "verification_consumed", "official_job_missing", "official_job_mismatch":
+                return officialText("확인 자료가 만료되었거나 더 이상 사용할 수 없습니다. 인계 정보를 다시 확인해 주세요.", "Verification data expired or is no longer usable. Verify the transfer credentials again.", "確認データが期限切れ、または使用できなくなりました。引き継ぎ情報を再確認してください。")
+            case "official_maintenance":
+                return officialText("공식 서비스가 점검 중입니다. 나중에 직접 다시 시도해 주세요.", "The official service is under maintenance. Try again manually later.", "公式サービスはメンテナンス中です。後で手動で再試行してください。")
+            case "official_reauthentication_required":
+                return officialText("공식 인증을 다시 확인해야 합니다. 새 인계 확인을 시작해 주세요.", "Official authentication must be checked again. Start a new transfer verification.", "公式認証の再確認が必要です。新しい引き継ぎ確認を開始してください。")
+            case "official_master_mismatch", "official_catalog_changed", "official_protocol_changed", "account_protocol_schema_differs":
+                return officialText("공식 자료와 로컬 자료가 일치하지 않아 저장을 중단했습니다. 자료를 확인한 뒤 다시 시도해 주세요.", "Official and local data do not match, so saving was stopped. Check the data before trying again.", "公式データとローカルデータが一致しないため保存を停止しました。データを確認してから再試行してください。")
+            case "account_revision_conflict", "account_target_exists", "account_target_missing":
+                return officialText("저장 대상이 바뀌었습니다. 계정 목록을 새로 불러오거나 새 슬롯 이름을 선택해 주세요.", "The save target changed. Refresh the account list or choose a new slot name.", "保存先が変更されました。一覧を更新するか、新しいスロット名を選んでください。")
+            case "official_server_running", "official_server_starting":
+                return officialText("게임을 종료하고 서버가 완전히 중지된 뒤 적용해 주세요.", "Quit the game and fully stop the server before applying.", "ゲームを終了し、サーバーを完全に停止してから適用してください。")
+            default:
+                return officialText("공식 계정 작업을 완료하지 못했습니다. 상태를 확인한 뒤 직접 다시 시도해 주세요.", "The official account task did not complete. Check its status before trying again manually.", "公式アカウント処理を完了できませんでした。状態を確認し、必要なら手動で再試行してください。")
+            }
+        }
+        switch officialState {
+        case "checking": return officialText("공식 인계 정보를 확인하고 있습니다.", "Checking official transfer credentials.", "公式の引き継ぎ情報を確認しています。")
+        case "verified": return officialText("확인된 계정입니다. 아래 요약을 확인한 뒤 공식 로그인·내려받기를 요청해 주세요.", "Review the verified account below, then request official transfer login and download.", "確認されたアカウントです。要約を確認してから公式引き継ぎログイン・取得を要求してください。")
+        case "fetching": return officialStageText
+        case "ready": return officialText("검증된 공식 계정 자료를 준비했습니다. 로컬 저장 대상과 교체 여부를 확인해 주세요.", "Verified official account data is ready. Review the local destination and replacement choice.", "検証済みの公式アカウントデータを準備しました。保存先と置き換えの選択を確認してください。")
+        case "completed": return officialText("일반 계정으로 저장했습니다. 자동으로 계정이나 감상 모드를 바꾸지 않았습니다.", "Saved as a normal account. Account selection and viewing mode were not changed automatically.", "通常アカウントとして保存しました。アカウント選択と鑑賞モードは自動変更していません。")
+        case "cancelled": return officialText("작업을 취소하고 임시 인증 자료를 지웠습니다.", "Cancelled the task and cleared temporary authentication data.", "処理を取り消し、一時認証データを消去しました。")
+        case "failed": return officialText("공식 계정 작업을 완료하지 못했습니다. 자동 재시도하지 않습니다.", "The official account task did not complete. It will not retry automatically.", "公式アカウント処理を完了できませんでした。自動再試行は行いません。")
+        default: return officialText("인계 ID·비밀번호로 공식 JP 계정을 확인하고 이 Mac의 일반 계정으로 가져옵니다.", "Inspect an official JP account with its transfer ID and password, then import it into a normal local slot.", "引き継ぎIDとパスワードで公式JPアカウントを確認し、このMacの通常スロットに取り込みます。")
+        }
+    }
+    var officialStageText: String {
+        switch officialProgress {
+        case "transferring", "firebase", "login": return officialText("공식 인계 로그인 중", "Official transfer login in progress", "公式引き継ぎログイン中")
+        case "master", "catalog_check": return officialText("공식 마스터 자료 확인 중", "Checking official master data", "公式マスターデータを確認中")
+        case "account", "collected", "staging": return officialText("계정 자료 내려받기·검증 중", "Downloading and validating account data", "アカウントデータを取得・検証中")
+        default: return officialText("공식 계정 작업 처리 중", "Processing official account task", "公式アカウント処理中")
+        }
+    }
+    var officialPreviewText: String {
+        var lines: [String] = []
+        if let name = officialPreview["manager_name"] as? String {
+            lines.append(officialText("매니저", "Manager", "マネージャー") + ": " + name)
+        }
+        if let identifier = officialPreview["public_id"] as? String {
+            lines.append(officialText("공개 게임 ID", "Public game ID", "公開ゲームID") + ": " + identifier)
+        }
+        if let level = officialPreview["manager_level"] as? Int { lines.append(officialText("레벨", "Level", "レベル") + ": \(level)") }
+        let inventory = officialPreview["inventory"] as? [String: Any] ?? [:]
+        for (key, ko, en, ja) in [("cards", "카드", "Cards", "カード"), ("items", "아이템 종류", "Item types", "アイテム種類"), ("photos", "포토", "Photos", "フォト")] {
+            if let count = inventory[key] as? Int { lines.append(officialText(ko, en, ja) + ": \(count)") }
+        }
+        return lines.joined(separator: "\n")
+    }
+    private func updateOfficialJob(_ job: [String: Any], privateSummary: Bool) {
+        let states = ["idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled"]
+        guard let state = job["state"] as? String, states.contains(state) else { return }
+        officialState = state
+        officialProgress = job["progress"] as? String ?? "preparing"
+        officialBusy = job["busy"] as? Bool ?? false
+        officialJobID = job["job_id"] as? String
+        officialExpiry = max(0, min(600, job["expires_in_seconds"] as? Int ?? 0))
+        officialErrorCode = job["error_code"] as? String
+        if privateSummary { officialPreview = job["preview"] as? [String: Any] ?? [:] }
+        if ["idle", "failed", "cancelled"].contains(state) { officialPreview = [:] }
+    }
+    func inspectOfficial(userID: String, password: String) {
+        guard !officialPending, !officialBusy, !busy else { return }
+        guard !userID.isEmpty, userID.utf8.count <= 64, userID.unicodeScalars.allSatisfy({
+            (65...90).contains($0.value) || (97...122).contains($0.value) || (48...57).contains($0.value) || $0.value == 95 || $0.value == 45
+        }) else { officialNotice = "invalid_id"; return }
+        guard (1...128).contains(password.utf8.count), password.trimmingCharacters(in: .whitespacesAndNewlines) == password,
+              password.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value < 127 }) else { officialNotice = "invalid_password"; return }
+        officialPreview = [:]; officialImportedAccount = nil; officialNotice = ""; officialErrorCode = nil
+        sendOfficial("official_inspect", payload: ["user_id": userID, "password": password, "platform": officialPlatform])
+    }
+    func fetchOfficial() {
+        guard officialCanFetch, let job = officialJobID else { return }
+        officialNotice = ""; sendOfficial("official_fetch", payload: ["job_id": job])
+    }
+    func cancelOfficial() {
+        guard !officialPending, let job = officialJobID else { return }
+        officialPreview = [:]; sendOfficial("official_cancel", payload: ["job_id": job])
+    }
+    func refreshOfficial() { if !officialPending { sendOfficial("official_status", payload: [:]) } }
+    func applyOfficial() {
+        guard officialCanApply, let job = officialJobID else { officialNotice = "stopped_required"; return }
+        var payload: [String: Any] = ["job_id": job, "replace": officialReplace]
+        if officialReplace {
+            guard let target = officialNormalAccounts.first(where: { $0.profile == officialReplaceProfile }) else { officialNotice = "select_target"; return }
+            let alert = NSAlert(); alert.messageText = officialText("일반 계정을 교체하시겠습니까?", "Replace this normal account?", "この通常アカウントを置き換えますか？")
+            alert.informativeText = officialText("게임을 종료했는지 확인해 주세요. 선택한 슬롯의 진행·보유 항목을 교체하며 직전 상태의 복구점을 자동으로 남깁니다.", "Ensure the game is closed. This replaces the selected slot's progress and inventory and creates an automatic restore point first.", "ゲームが終了していることを確認してください。選択した進行・所持項目を置き換え、直前の復元ポイントを自動作成します。")
+            alert.addButton(withTitle: officialText("교체", "Replace", "置き換え")); alert.addButton(withTitle: officialText("취소", "Cancel", "キャンセル"))
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            payload["profile"] = target.profile; payload["expected_revision"] = target.revision
+        } else {
+            let name = officialTargetProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, name.utf8.count <= 64, !name.contains("/"), !name.contains("\\"),
+                  name.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else { officialNotice = "invalid_profile"; return }
+            payload["profile"] = name; payload["expected_revision"] = NSNull()
+        }
+        officialNotice = ""; sendOfficial("official_apply", payload: payload)
+    }
+    func useOfficialImportForNextStart() {
+        guard let row = officialImportedAccount, !running, !busy, !canStop, !accountPending, !officialPending, !officialBusy else { officialNotice = "stopped_required"; return }
+        var payload: [String: Any] = ["mode": "normal", "profile": row.profile, "expected_revision": row.revision]
+        if let revision = accountSelectionRevision { payload["selection_revision"] = revision }
+        sendAccount("accounts_select", payload: payload)
+        if accountPending { officialActivationProfile = row.profile }
+    }
+    private func sendOfficial(_ action: String, payload: [String: Any]) {
+        guard !shutdownRequested, !officialPending, let writer = input?.fileHandleForWriting, child?.isRunning == true else { officialNotice = "send_failed"; return }
+        officialRequestSerial = officialRequestSerial >= Int(Int32.max) ? 1 : officialRequestSerial + 1
+        var command = payload; command["action"] = action; command["request_id"] = officialRequestSerial
+        var bytes = Data()
+        defer { bytes.resetBytes(in: 0..<bytes.count); command.removeAll(keepingCapacity: false) }
+        do {
+            bytes = try JSONSerialization.data(withJSONObject: command); bytes.append(10)
+            guard Self.nonblockingWrite(bytes, fileDescriptor: writer.fileDescriptor) else { officialNotice = "send_failed"; return }
+            officialPending = true; pendingOfficialID = officialRequestSerial; pendingOfficialAction = action
+        } catch { officialNotice = "send_failed" }
+    }
+    private func consumeOfficial(_ event: [String: Any], kind: String) {
+        guard let identifier = event["request_id"] as? Int, identifier == pendingOfficialID,
+              event["action"] as? String == pendingOfficialAction else { return }
+        let action = pendingOfficialAction
+        pendingOfficialID = nil; pendingOfficialAction = nil; officialPending = false
+        if kind == "official_error" {
+            officialErrorCode = event["code"] as? String ?? "official_operation_failed"
+            officialPreview = [:]; return
+        }
+        guard let result = event["result"] as? [String: Any], result["action"] as? String == action,
+              let job = result["job"] as? [String: Any] else { officialErrorCode = "official_response_invalid"; officialPreview = [:]; return }
+        officialNotice = ""; updateOfficialJob(job, privateSummary: true)
+        if action == "official_apply", officialState == "completed" {
+            if let state = result["status"] as? [String: Any] { updateAccounts(state) }
+            if let row = result["account"] as? [String: Any] { officialImportedAccount = ManagedAccount(row) }
+        }
+    }
+
     private func sendAccount(_ action: String, payload: [String: Any], destination: String? = nil) {
         guard !shutdownRequested, !accountPending, let writer = input?.fileHandleForWriting,
               child?.isRunning == true else { return }
@@ -579,6 +769,7 @@ final class ServerModel: ObservableObject {
             return
         }
         let action = pendingAccountAction
+        let activationProfile = officialActivationProfile; officialActivationProfile = nil
         pendingAccountID = nil; pendingAccountAction = nil; accountPending = false
         if kind == "account_error" {
             let code = event["code"] as? String ?? "account_operation_failed"
@@ -592,7 +783,14 @@ final class ServerModel: ObservableObject {
         guard let result = event["result"] as? [String: Any], result["ok"] as? Bool == true else {
             accountMessage = "계정 응답을 확인하지 못했습니다."; return
         }
-        if let state = result["status"] as? [String: Any] { updateAccounts(state) }
+        if let state = result["status"] as? [String: Any] {
+            updateAccounts(state)
+            if action == "accounts_select", let profile = activationProfile,
+                  (state["selected"] as? [String: String])?["normal"] == profile {
+                mediaMode = false; accountMode = "normal"; selectedAccountProfile = profile
+                officialNotice = "selected"
+            }
+        }
         if action == "accounts_preview", let token = result["token"] as? String,
               let archive = result["archive"] as? [String: Any] {
             accountPreviewToken = token
@@ -795,6 +993,7 @@ final class ServerModel: ObservableObject {
     private func pollStatus() {
         guard !shutdownRequested, child?.isRunning == true else { return }
         updatePresentationFeedback()
+        if officialJobID != nil && !officialPending && !["completed", "cancelled", "failed"].contains(officialState) { refreshOfficial() }
         if statusPolling.lastStatusUptime != nil && !statusPolling.fresh(at: ProcessInfo.processInfo.systemUptime) {
             presentationClient = nil
             status = "서버 응답을 기다리고 있습니다."
@@ -878,6 +1077,10 @@ final class ServerModel: ObservableObject {
                 self.resourcePending = false
                 self.accountPending = false
                 self.pendingAccountID = nil; self.pendingAccountAction = nil
+                self.officialPending = false; self.officialBusy = false
+                self.pendingOfficialID = nil; self.pendingOfficialAction = nil; self.officialJobID = nil
+                self.officialPreview = [:]; self.officialImportedAccount = nil
+                self.officialState = "idle"; self.officialErrorCode = nil; self.officialNotice = "session_closed"
                 self.statusTimer?.invalidate()
                 self.statusTimer = nil
                 self.statusPolling.reset()
@@ -931,6 +1134,8 @@ final class ServerModel: ObservableObject {
                 resourceMessage = event["message"] as? String ?? "리소스 작업 상태가 갱신되었습니다."
             case "account_result", "account_error", "account_progress":
                 consumeAccount(event, kind: kind)
+            case "official_result", "official_error":
+                consumeOfficial(event, kind: kind)
             case "status":
                 guard let state = event["status"] as? [String: Any] else { continue }
                 statusPolling.received(at: ProcessInfo.processInfo.systemUptime)
@@ -943,6 +1148,7 @@ final class ServerModel: ObservableObject {
                 updateResourceStatus(state)
                 updateServerChecks(state)
                 if let accountStatus = state["accounts"] as? [String: Any] { updateAccounts(accountStatus) }
+                if let officialStatus = state["official_import"] as? [String: Any] { updateOfficialJob(officialStatus, privateSummary: false) }
                 if !accountsInitiallyRequested && !busy && !smoke {
                     accountsInitiallyRequested = true
                     refreshAccounts()
@@ -1018,7 +1224,7 @@ final class ServerModel: ObservableObject {
     }
 
     func start() {
-        guard !running && !busy && !canStop && !accountPending else { return }
+        guard !running && !busy && !canStop && !accountPending && !officialPending && !officialBusy else { return }
         var cache: String?
         if resourcesInDownloads {
             guard let selected = externalResourceDirectory(),
@@ -1134,6 +1340,7 @@ final class ServerModel: ObservableObject {
         shutdownCompletions.append(completion)
         guard !shutdownRequested else { return }
         shutdownRequested = true
+        officialPreview = [:]; officialJobID = nil
         busy = true
         canStop = false
         status = "서버를 종료하고 있습니다."
@@ -1359,6 +1566,98 @@ struct AccountControls: View {
     }
 }
 
+
+@MainActor
+struct OfficialImportControls: View {
+    @ObservedObject var model: ServerModel
+    @State private var transferID = ""
+    @State private var transferPassword = ""
+    private func text(_ ko: String, _ en: String, _ ja: String) -> String { model.officialText(ko, en, ja) }
+    private var credentials: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker(text("공식 계정 플랫폼", "Official account platform", "公式アカウントのプラットフォーム"), selection: $model.officialPlatform) {
+                Text("iOS").tag("ios"); Text("Android").tag("android")
+            }
+            TextField(text("공식 JP 인계 ID", "Official JP transfer ID", "公式JPの引き継ぎID"), text: $transferID)
+                .textFieldStyle(.roundedBorder).accessibilityIdentifier("official-transfer-id")
+            SecureField(text("인계 비밀번호", "Transfer password", "引き継ぎパスワード"), text: $transferPassword)
+                .textFieldStyle(.roundedBorder).accessibilityIdentifier("official-transfer-password")
+            Button(text("1. 공식 인계 정보 확인", "1. Check official transfer credentials", "1. 公式引き継ぎ情報を確認")) {
+                model.inspectOfficial(userID: transferID, password: transferPassword)
+                transferID = ""; transferPassword = ""
+            }.fixedSize(horizontal: false, vertical: true)
+                .disabled(model.officialPending || model.officialBusy || model.busy || model.accountPending)
+            Text(text("확인은 공식 인계 인증 요청입니다. 다음 로그인·내려받기는 공식 계정의 로그인 상태에 영향을 줄 수 있습니다. ID·비밀번호는 저장하거나 기록하지 않으며 제출 후 입력칸을 지웁니다.",
+                "Checking sends an official transfer authentication request. Transfer login and download can affect the official account's login state. ID and password are not saved or logged; input clears after submission.",
+                "確認は公式の引き継ぎ認証要求です。ログイン・取得は公式アカウントのログイン状態に影響する場合があります。ID・パスワードは保存・記録せず、送信後に入力を消去します。"))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }.disabled(model.officialPending || model.officialBusy)
+    }
+    private var destination: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle(text("기존 일반 계정 교체", "Replace an existing normal account", "既存の通常アカウントを置き換える"), isOn: $model.officialReplace)
+            if model.officialReplace {
+                Picker(text("교체할 일반 계정", "Normal account to replace", "置き換える通常アカウント"), selection: $model.officialReplaceProfile) {
+                    Text(text("계정 선택", "Select an account", "アカウントを選択")).tag("")
+                    ForEach(model.officialNormalAccounts) { row in Text(row.profile).tag(row.profile) }
+                }
+                Text(text("직전 상태의 복구점을 자동 생성합니다. 대상과 버전이 바뀌면 교체를 거절합니다.", "An automatic restore point preserves the previous state. Replacement is rejected if the target revision changed.", "直前の復元ポイントを自動作成します。対象の版が変わると置き換えを拒否します。"))
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                TextField(text("새 일반 계정 저장 슬롯", "New normal account slot", "新しい通常アカウントの保存スロット"), text: $model.officialTargetProfile)
+                    .textFieldStyle(.roundedBorder)
+            }
+            Text(text("게임을 종료하고 서버를 중지한 뒤 저장합니다. 공식 보유·진행 자료를 사용하며 새 시작 계정으로 대신 만들지 않습니다. 다운로드 리소스는 별도로 보관합니다.",
+                "Quit the game and stop the server before saving. Official inventory and progress are used; no starter account replaces them. Downloaded resources are stored separately.",
+                "ゲームを終了しサーバーを停止してから保存します。公式の所持・進行データを使い、初期アカウントに置き換えません。リソースは別途保管します。"))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Button(text("3. 검증된 자료를 일반 계정에 저장", "3. Save verified data as a normal account", "3. 検証済みデータを通常アカウントに保存")) { model.applyOfficial() }
+                .fixedSize(horizontal: false, vertical: true).disabled(!model.officialCanApply)
+        }.disabled(model.officialPending || model.officialBusy)
+    }
+    var body: some View {
+        GroupBox(text("공식 JP 계정 가져오기", "Import an official JP account", "公式JPアカウントの取り込み")) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker(text("이 안내의 언어", "Language for this panel", "この案内の言語"), selection: $model.officialUILanguage) {
+                    Text("한국어").tag("ko"); Text("English").tag("en"); Text("日本語").tag("ja")
+                }
+                credentials
+                if !model.officialPreviewText.isEmpty {
+                    Text(model.officialPreviewText).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+                if ["verified", "ready"].contains(model.officialState) {
+                    Text(text("임시 확인 자료 만료까지", "Temporary data expires in", "一時確認データの有効期間") + " \(model.officialExpiry)s")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Button(text("2. 공식 인계 로그인·내려받기", "2. Official transfer login and download", "2. 公式引き継ぎログイン・取得")) { model.fetchOfficial() }
+                    .fixedSize(horizontal: false, vertical: true).disabled(!model.officialCanFetch)
+                if model.officialState == "ready" { destination }
+                if model.officialState == "completed", let imported = model.officialImportedAccount {
+                    Text(text("저장된 일반 계정", "Saved normal account", "保存した通常アカウント") + ": " + imported.profile)
+                        .font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    Button(text("다음 실행에서 이 일반 계정 사용 · 감상 모드 끄기", "Use this normal account next time and turn off viewing mode", "次回この通常アカウントを使用・鑑賞モードをオフ")) { model.useOfficialImportForNextStart() }
+                        .disabled(model.running || model.busy || model.canStop || model.accountPending || model.officialPending)
+                }
+                HStack {
+                    Button(text("상태 확인", "Refresh status", "状態を確認")) { model.refreshOfficial() }.disabled(model.officialPending)
+                    Button(text("작업 취소", "Cancel task", "処理を取り消す")) {
+                        transferID = ""; transferPassword = ""; model.cancelOfficial()
+                    }.disabled(model.officialPending || ["idle", "completed", "cancelled", "failed"].contains(model.officialState))
+                    Button(text("입력 지우기", "Clear input", "入力を消去")) { transferID = ""; transferPassword = "" }
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    if model.officialPending || model.officialBusy { ProgressView().controlSize(.small) }
+                    Text(model.officialStatusText).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    if let code = model.officialErrorCode {
+                        DisclosureGroup(text("오류 코드", "Error code", "エラーコード")) { Text(code).font(.caption).textSelection(.enabled) }
+                    }
+                }
+            }.padding(.top, 6).frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityIdentifier("official-import-controls")
+            .onDisappear { transferID = ""; transferPassword = "" }
+    }
+}
+
 struct ServerView: View {
     @ObservedObject var model: ServerModel
     var body: some View {
@@ -1374,7 +1673,7 @@ struct ServerView: View {
             }
             Text(model.status).font(.headline).accessibilityIdentifier("server-status")
             HStack {
-                Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop || model.accountPending)
+                Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop || model.accountPending || model.officialPending || model.officialBusy)
                 Button("중지") { model.stop() }.disabled(!model.canStop)
                 Button("PlayCover에서 열기") { model.openGame() }.disabled(!model.running)
                 Spacer()
@@ -1388,6 +1687,7 @@ struct ServerView: View {
                     Text("연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     AccountControls(model: model)
+                    OfficialImportControls(model: model)
                     DisclosureGroup("서버 준비 검사 · 이전 오류 기록") {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(model.startupChecksMessage).font(.caption).textSelection(.enabled)

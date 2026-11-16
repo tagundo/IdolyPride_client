@@ -69,6 +69,11 @@ public final class ServerService extends Service {
         Thread thread = new Thread(task, "account-management"); thread.setDaemon(true); return thread;
     });
 
+    private static final AtomicBoolean OFFICIAL_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService OFFICIAL_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "official-account-transfer"); thread.setDaemon(true); return thread;
+    });
+
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopQueued = new AtomicBoolean(false);
     private final AtomicBoolean startQueued = new AtomicBoolean(false);
@@ -194,6 +199,49 @@ public final class ServerService extends Service {
             MAIN.post(() -> callback.completed(completed));
             dispatch();
         });
+    }
+
+    static boolean isImportingOfficial() { return OFFICIAL_BUSY.get(); }
+
+    /** Credentials travel only through this worker, never runtimeDetails, logs or exports. */
+    static void officialImport(Context context, String action, JSONObject payload, AccountCallback callback) {
+        Context application = context.getApplicationContext();
+        if (!OFFICIAL_BUSY.compareAndSet(false, true)) {
+            if (payload != null) { payload.remove("password"); payload.remove("user_id"); }
+            MAIN.post(() -> callback.completed(accountFailure("official_operation_busy")));
+            return;
+        }
+        // Release the mutable request and the worker's serialized reference as soon
+        // as Python has copied/validated the one-shot transfer credentials.
+        final String[] request = {payload == null ? "{}" : payload.toString()};
+        if (payload != null) { payload.remove("password"); payload.remove("user_id"); }
+        try {
+            OFFICIAL_IO.execute(() -> {
+                JSONObject result;
+                try {
+                    PyObject module;
+                    synchronized (PYTHON_LOCK) {
+                        if (!Python.isStarted()) Python.start(new AndroidPlatform(application));
+                        module = Python.getInstance().getModule("android_server_runtime");
+                    }
+                    String raw = module.callAttr("official_command_json", application.getFilesDir().getAbsolutePath(),
+                            action, request[0], application.getAssets()).toString();
+                    if (raw.length() > 2 * 1024 * 1024) throw new IOException("Official response unavailable");
+                    result = new JSONObject(raw);
+                } catch (Exception ignored) {
+                    // Exception text and stack traces may contain transfer inputs.
+                    result = accountFailure("official_operation_failed");
+                } finally {
+                    request[0] = null;
+                    OFFICIAL_BUSY.set(false);
+                }
+                JSONObject completed = result;
+                MAIN.post(() -> callback.completed(completed));
+            });
+        } catch (RejectedExecutionException ignored) {
+            request[0] = null; OFFICIAL_BUSY.set(false);
+            MAIN.post(() -> callback.completed(accountFailure("official_operation_failed")));
+        }
     }
 
     public static void observe(Observer observer) {

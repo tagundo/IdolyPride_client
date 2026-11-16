@@ -76,6 +76,41 @@ def _json(value):
     return raw
 
 
+def _official_job(value, *, private=False, errors=()):
+    """A second bounded boundary between the service and native/Web diagnostics."""
+    value = value if isinstance(value, dict) else {}
+    states = ("idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled")
+    stages = ("idle", "applying", "preparing", "checking", "verifying", "verified", "transferring", "firebase", "login",
+              "master", "account", "collected", "fetching", "catalog_check", "staging", "ready", "completed", "cancelled", "failed")
+    identifier, code = value.get("job_id"), value.get("error_code")
+    def counts(raw):
+        return {key: raw[key] for key in ("cards", "items", "photos")
+            if isinstance(raw, dict) and type(raw.get(key)) is int and 0 <= raw[key] <= 2**31 - 1}
+    result = {"schema": 1, "state": value.get("state") if value.get("state") in states else "failed",
+        "job_id": identifier if type(identifier) is str and len(identifier) == 32
+            and all(character in "0123456789abcdef" for character in identifier) else None,
+        "progress": value.get("progress") if value.get("progress") in stages else "preparing",
+        "busy": value.get("busy") is True, "counts": counts(value.get("counts")),
+        "error_code": code if type(code) is str and code in errors else None,
+        "expires_in_seconds": value.get("expires_in_seconds") if type(value.get("expires_in_seconds")) is int
+            and 0 <= value["expires_in_seconds"] <= 600 else 0}
+    preview = value.get("preview")
+    if private and isinstance(preview, dict):
+        safe = {"inventory": counts(preview.get("inventory"))}
+        for key in ("public_id", "server_id", "manager_name"):
+            text = preview.get(key)
+            try:
+                if type(text) is str and text.isprintable() and 0 < len(text.encode("utf-8")) <= 256:
+                    safe[key] = text
+            except UnicodeError:
+                pass
+        level = preview.get("manager_level")
+        if type(level) is int and 0 <= level <= 2**31 - 1:
+            safe["manager_level"] = level
+        result["preview"] = safe
+    return result
+
+
 def _status_budget(value):
     # Native adds gate/progress observations after this reply. Reserve room so
     # a full account page cannot turn an otherwise valid status into an error.
@@ -222,6 +257,8 @@ class _Host:
         self._game_prepared = False
         self._prepared_account = None
         self._startup_observations = None
+        self._official_import = None
+        self._official_errors = ()
 
     def _native(self):
         if self._bridge is None:
@@ -308,7 +345,9 @@ class _Host:
             "options": options, "effective_options": effective, "restart_required": restart,
             "invalid_options_file": invalid, "runtime": observed, "last_error": error,
             "resource_operation": operation, "paths": None,
-            "account_management_available": paths is not None, "accounts": self._account_status}
+            "account_management_available": paths is not None, "accounts": self._account_status,
+            "official_import_available": paths is not None,
+            "official_import": _official_job(self._official_import.status(public=True), errors=self._official_errors) if self._official_import is not None else None}
         if paths is not None:
             result["paths"] = {"imports": str(paths[1] / "imports"), "exports": str(paths[1] / "tmp/exports")}
         # Diagnostic histories may be large; public settings stay available.
@@ -493,6 +532,8 @@ class _Host:
             status = self.status()
             if status["state"] != "ready" or not status["running"]:
                 raise RuntimeError("The local server must be ready before starting the game")
+            if self._official_import is not None and self._official_import.status(public=True).get("busy") is True:
+                raise RuntimeError("Finish or cancel the official account operation before starting the game")
             runtime = status.get("runtime", {})
             job = runtime.get("resource_library", {}).get("job")
             operation = status.get("resource_operation")
@@ -534,6 +575,11 @@ class _Host:
         return {"state": result["state"], "running": result["running"]}
 
     def close(self):
+        if self._official_import is not None:
+            try:
+                self._official_import.close()
+            except Exception:
+                pass  # Never export a credential-bearing shutdown exception.
         with self._condition:
             self._closed = True; self._generation += 1; self._state = "closed"
             runtime = self._runtime; self._condition.notify_all()
@@ -630,6 +676,60 @@ class _Host:
             return initial
 
 
+    def _guard_prepared_account(self, mode, profile):
+        with self._condition:
+            prepared, identity = self._game_prepared, self._prepared_account
+        if prepared and (identity is None or identity == (mode, profile)):
+            raise ValueError("account_restart_required")
+
+    def _official_command(self, action, value):
+        """Explicit native commands; credentials never enter status or events."""
+        if self._paths is None or self._closed:
+            raise ValueError("official_storage_unavailable")
+        payload = {key: item for key, item in value.items() if key not in ("id", "action")}
+        replacing = action == "official_apply" and payload.get("replace") is True
+        if replacing:
+            self._guard_prepared_account("normal", payload.get("profile"))
+        if self._official_import is None:
+            from .official_import import OfficialImportManager, ERROR_CODES
+            self._official_errors = frozenset(ERROR_CODES)
+            self._official_import = OfficialImportManager(self._paths[1])
+        with self._condition:
+            runtime, paths, ports = self._runtime, self._paths, self._ports
+        observed = runtime.status() if runtime is not None else {}
+        replaces_active = (replacing and observed.get("running") is True
+            and observed.get("media_mode") is not True and observed.get("profile") == payload.get("profile"))
+        if replaces_active:
+            operation = self.status().get("resource_operation")
+            job = observed.get("resource_library", {}).get("job")
+            if (isinstance(operation, dict) and operation.get("accepted") is True and operation.get("ready") is not True
+                    or isinstance(job, dict) and job.get("state") in ("preparing", "running", "export_ready", "cancelling")):
+                raise ValueError("account_operation_busy")
+            runtime.stop()
+            with self._condition:
+                self._runtime = None
+                self._state = "idle"
+        try:
+            result = self._official_import.command(action, payload)
+        finally:
+            if replaces_active:
+                refreshed = self.start(*paths, ports=ports)
+                if not refreshed.get("running"):
+                    raise RuntimeError("Account operation completed but server restart failed")
+        if not isinstance(result, dict) or not isinstance(result.get("job"), dict):
+            raise ValueError("official_response_invalid")
+        if result.get("action") != action:
+            raise ValueError("official_response_invalid")
+        safe = {"action": action, "job": _official_job(result["job"], private=True, errors=self._official_errors)}
+        if action == "official_apply":
+            if isinstance(result.get("status"), dict):
+                with self._condition:
+                    self._account_status = result["status"]
+                safe["status"] = result["status"]
+            if isinstance(result.get("account"), dict):
+                safe["account"] = result["account"]
+        return safe
+
     def _account_command(self, action, value):
         """Trusted native account operations; paths never come from the web page."""
         from .account_manager import account_command
@@ -658,14 +758,12 @@ class _Host:
         with self._condition:
             runtime, paths, ports = self._runtime, self._paths, self._ports
             prepared = self._game_prepared
-            prepared_account = self._prepared_account
         observed = runtime.status() if runtime is not None else {}
         active_mode = "media" if observed.get("media_mode") else "normal"
         replacing = (action == "accounts_restore"
             or action == "accounts_import" and payload.get("replace") is True)
-        if prepared and replacing and (prepared_account is None
-                or prepared_account == (payload.get("mode"), payload.get("profile"))):
-            raise ValueError("account_restart_required")
+        if replacing:
+            self._guard_prepared_account(payload.get("mode"), payload.get("profile"))
         replaces_active = (replacing and observed.get("running") is True
             and payload.get("mode") == active_mode and payload.get("profile") == observed.get("profile"))
         if replaces_active and prepared:
@@ -756,7 +854,10 @@ class _Host:
             "accounts_preview": {"path"},
             "accounts_import": {"token", "mode", "profile", "replace", "expected_revision"},
             "accounts_restore": {"restore_id", "mode", "profile", "expected_revision"},
-            "diagnostics_clear": set()}
+            "diagnostics_clear": set(),
+            "official_inspect": {"user_id", "password", "platform"},
+            "official_fetch": {"job_id"}, "official_apply": {"job_id", "profile", "replace", "expected_revision"},
+            "official_cancel": {"job_id"}, "official_status": set()}
         if action not in fields or value.keys() - {"id", "action"} - fields[action]:
             raise ValueError("Unknown command or fields")
         if action == "status":
@@ -784,6 +885,8 @@ class _Host:
             return self.status()
         if action.startswith("accounts_"):
             return self._account_command(action, value)
+        if action.startswith("official_"):
+            return self._official_command(action, value)
         runtime = self._ready_runtime()
         if action == "save_options":
             options = self._options()
@@ -863,12 +966,23 @@ class _Host:
         except Exception as error:
             code = "invalid_command" if isinstance(error, (ValueError, TypeError, KeyError, UnicodeError, RecursionError)) else "operation_failed"
             message = "The local server command could not be completed"
-            if isinstance(value, dict) and str(value.get("action", "")).startswith("accounts_"):
+            if isinstance(value, dict) and str(value.get("action", "")).startswith(("accounts_", "official_")):
                 import re
                 if isinstance(error, ValueError) and re.fullmatch(r"account_[a-z0-9_]{1,64}", str(error)):
                     code = str(error)
+                if str(value.get("action", "")).startswith("official_"):
+                    # A password can itself resemble a diagnostic code. Export
+                    # only service constants, never arbitrary exception text.
+                    try:
+                        from .official_import import ERROR_CODES
+                    except ImportError:
+                        ERROR_CODES = ()
+                    safe = set(ERROR_CODES) | {"official_storage_unavailable", "official_response_invalid", "account_restart_required", "account_operation_busy"}
+                    candidate = getattr(error, "code", None)
+                    code = candidate if isinstance(candidate, str) and candidate in safe else str(error) if type(error) is ValueError and str(error) in safe else "operation_failed"
                 message = ("게임을 완전히 종료하고 다시 연 뒤 게임 시작 전에 계정을 복원해 주세요."
-                    if code == "account_restart_required" else "계정 작업을 마치지 못했습니다. 목록을 새로 불러와 확인해 주세요.")
+                    if code == "account_restart_required" else "공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요."
+                    if str(value.get("action", "")).startswith("official_") else "계정 작업을 마치지 못했습니다. 목록을 새로 불러와 확인해 주세요.")
             return _json({"id": identifier, "ok": False, "error": {"code": code, "message": message}})
 
 

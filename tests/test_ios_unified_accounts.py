@@ -227,9 +227,9 @@ def test_export_reservation_is_before_status_cleanup_and_retained_until_picker_c
     source=(Path(__file__).resolve().parents[1]/"ios-unified/native/IdolySettings.m").read_text()
     block=source.split("- (void)dispatchRequest:(NSDictionary *)request {",1)[1].split("- (void)sendRequest:",1)[0]
     assert block.index('_pendingExportRequestID = request[@"id"]') < block.index('IdolyEmbeddedServerCommand(statusRequest')
-    assert "if (_pendingExportRequestID || _pendingImport)" in block
+    assert "if (_pendingExportRequestID || _pendingImport || _officialPrompt)" in block
     assert "pendingExportJobID" in source and "releaseExportRequest" in source
-    assert 'if (_pendingImport || _pendingExportRequestID)' in source
+    assert 'if (_pendingImport || _pendingExportRequestID || _officialPrompt)' in source
     assert 'if (_preparedExportPath) [self exportPath:_preparedExportPath]' in source
 
 

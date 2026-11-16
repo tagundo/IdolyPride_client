@@ -362,7 +362,7 @@ def status_json():
         value = _RUNTIME.status() if _RUNTIME is not None else _LAST_STATUS
         if _TRANSLATION_STATUS.get("state") != "absent":
             value = dict(value, bundled_translations=dict(_TRANSLATION_STATUS))
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(dict(value, official_import=_official_public_status()), ensure_ascii=False)
 
 
 def diagnostics_json():
@@ -371,7 +371,7 @@ def diagnostics_json():
         value = _RUNTIME.diagnostics_snapshot() if _RUNTIME is not None else _LAST_DIAGNOSTICS
         if _TRANSLATION_STATUS.get("state") != "absent":
             value = dict(value, bundled_translations=dict(_TRANSLATION_STATUS))
-        return json.dumps(value, ensure_ascii=False)
+        return json.dumps(dict(value, official_import=_official_public_status()), ensure_ascii=False)
 
 
 def _resource_library_reference():
@@ -541,3 +541,160 @@ def management_command_json(files_dir, action, payload_json="{}", assets=None):
         return json.dumps({"schema": 1, "ok": False, "error": code}, ensure_ascii=False)
     except Exception:
         return json.dumps({"schema": 1, "ok": False, "error": "account_operation_failed"})
+
+
+# Transfer credentials stay on this direct native boundary, never in management
+# request logs, saved preferences, generic status, diagnostics, or public routes.
+_OFFICIAL_MANAGER = None
+_OFFICIAL_ROOT = None
+_OFFICIAL_ACTIONS = frozenset({"official_inspect", "official_fetch", "official_apply", "official_cancel", "official_status"})
+_OFFICIAL_STATES = frozenset({"idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled"})
+_OFFICIAL_STAGES = frozenset({"idle", "preparing", "checking", "verifying", "verified", "transferring", "firebase", "login", "master", "account", "collected", "fetching", "catalog_check", "staging", "ready", "completed", "cancelled", "failed"})
+_OFFICIAL_HOST_ERRORS = frozenset({"official_request_invalid", "official_active_restart_required", "official_response_invalid",
+                                 "official_operation_failed", "official_status_failed", "official_job_missing", "official_storage_changed"})
+
+
+def _official_idle():
+    return {"schema": 1, "state": "idle", "job_id": None, "progress": "idle", "error_code": None,
+            "counts": {"cards": 0, "items": 0, "photos": 0}, "busy": False, "expires_in_seconds": 0}
+
+
+def _official_error_code(error):
+    # Never echo an arbitrary exception string: it may contain a credential.
+    value = str(error)
+    if value in _OFFICIAL_HOST_ERRORS:
+        return value
+    try:
+        from idoly_local.official_import import ERROR_CODES
+        if value in ERROR_CODES:
+            return value
+    except (ImportError, AttributeError, TypeError):
+        pass
+    return "official_operation_failed"
+
+
+def _official_public_status():
+    if _OFFICIAL_MANAGER is None:
+        return _official_idle()
+    try:
+        raw = _OFFICIAL_MANAGER.status(public=True)
+        if type(raw) is not dict or raw.get("state") not in _OFFICIAL_STATES:
+            raise ValueError("official_response_invalid")
+        result = _official_idle()
+        result["state"] = raw["state"]
+        identifier = raw.get("job_id")
+        if identifier is not None and (type(identifier) is not str or re.fullmatch(r"[0-9a-f]{32}", identifier) is None):
+            raise ValueError("official_response_invalid")
+        result["job_id"] = identifier
+        progress = raw.get("progress")
+        if type(progress) is str and progress in _OFFICIAL_STAGES:
+            result["progress"] = progress
+        code = raw.get("error_code")
+        if code is not None:
+            result["error_code"] = _official_error_code(ValueError(code))
+        counts = raw.get("counts")
+        if type(counts) is dict:
+            for name in ("cards", "items", "photos"):
+                count = counts.get(name, 0)
+                if type(count) is int and 0 <= count <= 1000000000:
+                    result["counts"][name] = count
+        result["busy"] = raw.get("busy") is True
+        expiry = raw.get("expires_in_seconds", 0)
+        result["expires_in_seconds"] = expiry if type(expiry) is int and 0 <= expiry <= 600 else 0
+        return result
+    except Exception:
+        return {"schema": 1, "state": "unavailable", "error_code": "official_status_failed", "busy": False}
+
+
+def _configure_official_codec():
+    from java import jclass
+    from idoly_local import codec
+    crypto = jclass("game.qualiarts.idolypride.localserver.CryptoBridge")
+
+    def aes_cbc(encrypt, key, iv, payload):
+        result = crypto.aesCbc(bool(encrypt), key, iv, payload)
+        return memoryview(result).cast("B").tobytes()
+
+    codec.configure_aes(aes_cbc)
+
+
+def _validate_official_payload(action, payload):
+    fields = {"official_inspect": {"user_id", "password", "platform"}, "official_fetch": {"job_id"},
+              "official_apply": {"job_id", "profile", "replace", "expected_revision"},
+              "official_cancel": {"job_id"}, "official_status": set()}
+    if set(payload) != fields[action]:
+        raise ValueError("official_request_invalid")
+    if action == "official_inspect":
+        user, password = payload.get("user_id"), payload.get("password")
+        if (type(user) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", user) is None
+                or type(password) is not str or not 1 <= len(password) <= 128
+                or password != password.strip(" ") or any(ord(char) < 32 or ord(char) > 126 for char in password)
+                or payload.get("platform") not in ("android", "ios")):
+            raise ValueError("official_request_invalid")
+    elif action != "official_status":
+        identifier = payload.get("job_id")
+        if type(identifier) is not str or re.fullmatch(r"[0-9a-f]{32}", identifier) is None:
+            raise ValueError("official_request_invalid")
+    if action == "official_apply":
+        profile, revision = payload.get("profile"), payload.get("expected_revision")
+        if (type(profile) is not str or not profile or not profile.isprintable() or "/" in profile or "\\" in profile
+                or len(profile.encode("utf-8")) > 64 or type(payload.get("replace")) is not bool
+                or (payload["replace"] is True and (type(revision) is not str or re.fullmatch(r"[0-9a-f]{64}", revision) is None))
+                or (payload["replace"] is False and revision is not None)):
+            raise ValueError("official_request_invalid")
+
+
+def official_command_json(files_dir, action, payload_json="{}", assets=None):
+    """Direct native transfer wizard. No credentials enter generic snapshots."""
+    global _OFFICIAL_MANAGER, _OFFICIAL_ROOT
+    payload = None
+    try:
+        if (type(action) is not str or action not in _OFFICIAL_ACTIONS or type(payload_json) is not str
+                or len(payload_json.encode("utf-8")) > 8192):
+            raise ValueError("official_request_invalid")
+        try:
+            payload = json.loads(payload_json)
+        except ValueError:
+            raise ValueError("official_request_invalid") from None
+        if type(payload) is not dict:
+            raise ValueError("official_request_invalid")
+        _validate_official_payload(action, payload)
+        root = _management_root(files_dir)
+        with _LOCK:
+            if _OFFICIAL_MANAGER is not None and _OFFICIAL_ROOT != root:
+                raise ValueError("official_storage_changed")
+            active = _RUNTIME.status() if _RUNTIME is not None else {"running": False}
+            if action == "official_apply" and payload.get("replace") is True and active.get("running") is True:
+                raise ValueError("official_active_restart_required")
+            if action == "official_status" and _OFFICIAL_MANAGER is None:
+                if payload:
+                    raise ValueError("official_request_invalid")
+                result = {"action": action, "job": _official_idle()}
+            else:
+                if _OFFICIAL_MANAGER is None:
+                    if action != "official_inspect":
+                        raise ValueError("official_job_missing")
+                    _prepare_management_payload(root, assets)
+                    os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+                    _configure_official_codec()
+                    from idoly_local.official_import import OfficialImportManager
+                    _OFFICIAL_MANAGER = OfficialImportManager(root)
+                    _OFFICIAL_ROOT = root
+                elif action in ("official_inspect", "official_fetch", "official_apply"):
+                    _configure_official_codec()
+                result = _OFFICIAL_MANAGER.command(action, payload)
+            if type(result) is not dict or type(result.get("job")) is not dict or result.get("action") != action:
+                raise ValueError("official_response_invalid")
+            result = dict(result, schema=1, ok=True, active={"running": active.get("running") is True,
+                          "mode": "media" if active.get("media_mode") is True else "normal", "profile": active.get("profile")})
+            encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
+            if len(encoded.encode("utf-8")) > 2 * 1024 * 1024:
+                raise ValueError("official_response_invalid")
+            return encoded
+    except Exception as error:
+        return json.dumps({"schema": 1, "ok": False, "error": _official_error_code(error)}, ensure_ascii=False)
+    finally:
+        if type(payload) is dict:
+            payload.pop("password", None)
+            payload.pop("user_id", None)
+        payload_json = None

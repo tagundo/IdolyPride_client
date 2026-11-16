@@ -37,6 +37,76 @@ _ACCOUNT_ACTIONS = frozenset(("accounts_status", "accounts_create", "accounts_cl
 _ACCOUNT_ARCHIVE_LIMIT = 128 * 1024 * 1024
 
 
+_OFFICIAL_ACTIONS = frozenset(("official_inspect", "official_fetch", "official_apply", "official_cancel", "official_status"))
+_OFFICIAL_STATES = frozenset(("idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled"))
+_OFFICIAL_STAGES = frozenset(("preparing", "checking", "verifying", "verified", "transferring", "firebase", "login",
+    "master", "account", "collected", "idle", "fetching", "catalog_check", "staging", "ready", "applying", "completed", "cancelled", "failed"))
+_OFFICIAL_HOST_ERRORS = frozenset(("official_request_invalid", "official_operation_busy", "official_server_starting",
+    "official_server_running", "official_operation_failed", "official_response_invalid"))
+
+
+def _official_job(value, *, private=False, errors=()):
+    """Project a bounded job; transfer credentials/tickets never enter IPC output."""
+    if type(value) is not dict or type(value.get("state")) is not str or value["state"] not in _OFFICIAL_STATES:
+        return {"schema": 1, "state": "failed", "job_id": None, "busy": False,
+                "progress": "failed", "error_code": "official_response_invalid", "counts": {}, "expires_in_seconds": 0}
+    job = {"schema": 1, "state": value["state"], "busy": value.get("busy") is True,
+        "job_id": value.get("job_id") if type(value.get("job_id")) is str
+            and re.fullmatch(r"[0-9a-f]{32}", value["job_id"]) else None,
+        "progress": value.get("progress") if type(value.get("progress")) is str and value["progress"] in _OFFICIAL_STAGES else "preparing",
+        "error_code": value.get("error_code") if value.get("error_code") in (*_OFFICIAL_HOST_ERRORS, *errors) else None,
+        "counts": {}, "expires_in_seconds": 0}
+    expires = value.get("expires_in_seconds")
+    if type(expires) is int and 0 <= expires <= 600:
+        job["expires_in_seconds"] = expires
+    def counts(raw):
+        return {key: raw[key] for key in ("cards", "items", "photos")
+            if type(raw) is dict and type(raw.get(key)) is int and 0 <= raw[key] <= 2**31-1}
+    job["counts"] = counts(value.get("counts"))
+    preview = value.get("preview")
+    if private and type(preview) is dict:
+        safe = {"inventory": counts(preview.get("inventory"))}
+        for key in ("public_id", "server_id", "manager_name"):
+            text = preview.get(key)
+            if type(text) is str and 0 < len(text) <= 128 and text.isprintable():
+                safe[key] = text
+        level = preview.get("manager_level")
+        if type(level) is int and 0 <= level <= 2**31-1:
+            safe["manager_level"] = level
+        job["preview"] = safe
+    return job
+
+
+def _official_payload(action, payload):
+    required = {"official_inspect": {"user_id", "password", "platform"}, "official_fetch": {"job_id"},
+        "official_apply": {"job_id", "profile", "replace", "expected_revision"},
+        "official_cancel": {"job_id"}, "official_status": set()}[action]
+    if set(payload) != required:
+        raise ValueError("official_request_invalid")
+    if action == "official_inspect":
+        name, password = payload["user_id"], payload["password"]
+        if (type(name) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,64}", name) is None
+                or type(password) is not str or not 1 <= len(password) <= 128 or password.strip() != password
+                or not all(32 <= ord(character) < 127 for character in password)
+                or payload["platform"] not in ("ios", "android")):
+            raise ValueError("official_request_invalid")
+    if "job_id" in payload and (type(payload["job_id"]) is not str
+            or re.fullmatch(r"[0-9a-f]{32}", payload["job_id"]) is None):
+        raise ValueError("official_request_invalid")
+    if action == "official_apply":
+        profile = payload["profile"]
+        try:
+            valid = (type(profile) is str and profile.strip() == profile and 0 < len(profile.encode("utf-8")) <= 64
+                and profile.isprintable() and "/" not in profile and "\\" not in profile)
+        except UnicodeError:
+            valid = False
+        revision = payload["expected_revision"]
+        if (not valid or type(payload["replace"]) is not bool
+                or (payload["replace"] and (type(revision) is not str or re.fullmatch(r"[0-9a-f]{64}", revision) is None))
+                or (not payload["replace"] and revision is not None)):
+            raise ValueError("official_request_invalid")
+
+
 def _account_export_copy(data_dir, result, destination, progress):
     """Copy only a verified owned account ZIP to an explicitly chosen native destination."""
     name, value = result.get("filename"), result.get("path")
@@ -117,6 +187,9 @@ class Controller:
         self.resource_worker = None
         self.account_worker = None
         self.account_status = None
+        self.official_manager = None
+        self.official_worker = None
+        self.official_error_codes = _OFFICIAL_HOST_ERRORS
         self.translation_status = {"state": "absent"}
 
     def log(self, message):
@@ -134,6 +207,8 @@ class Controller:
             status["can_stop"] = runtime is not None or starting
             if self.account_status is not None:
                 status["accounts"] = self.account_status
+            if self.official_manager is not None:
+                status["official_import"] = _official_job(self.official_manager.status(public=True), errors=self.official_error_codes)
             if self.translation_status.get("state") != "absent":
                 status["bundled_translations"] = dict(self.translation_status)
         if runtime is None:
@@ -159,7 +234,9 @@ class Controller:
             raise ValueError("Resource cache directory must be an absolute folder")
         with self.lock:
             if (self.closed or self.runtime or (self.worker and self.worker.is_alive())
-                    or (self.account_worker and self.account_worker.is_alive())):
+                    or (self.account_worker and self.account_worker.is_alive())
+                    or (self.official_worker and self.official_worker.is_alive())
+                    or (self.official_manager and self.official_manager.status(public=True).get("busy") is True)):
                 return self.status()
             self.cancelled = False
             self.worker = threading.Thread(target=self._start, args=(experimental_main_live, media_mode,
@@ -279,7 +356,8 @@ class Controller:
         with self.lock:
             if self.closed:
                 return
-            if self.account_worker is not None and self.account_worker.is_alive():
+            if ((self.account_worker is not None and self.account_worker.is_alive())
+                    or (self.official_worker is not None and self.official_worker.is_alive())):
                 self.emit("account_error", request_id=identifier, action=action, code="account_operation_busy")
                 return
             if self.worker is not None and self.worker.is_alive():
@@ -349,6 +427,82 @@ class Controller:
                 closed = self.closed
             if not closed:
                 self.status()
+
+
+    def official(self, action, command):
+        identifier = command.get("request_id")
+        payload = {key: value for key, value in command.items() if key not in ("action", "request_id")}
+        # Do not leave credentials in the stdin parser's last-command object.
+        command.pop("password", None); command.pop("user_id", None)
+        valid = type(action) is str and action in _OFFICIAL_ACTIONS
+        if not valid or type(identifier) is not int or not 1 <= identifier <= 2**31-1:
+            payload.clear()
+            self.emit("official_error", request_id=identifier if type(identifier) is int else None,
+                action=action if valid else None, code="official_request_invalid")
+            return
+        try:
+            _official_payload(action, payload)
+        except (ValueError, TypeError):
+            payload.clear()
+            self.emit("official_error", request_id=identifier, action=action, code="official_request_invalid")
+            return
+        with self.lock:
+            code = None
+            if self.closed:
+                payload.clear(); return
+            if ((self.official_worker and self.official_worker.is_alive())
+                    or (self.account_worker and self.account_worker.is_alive())):
+                code = "official_operation_busy"
+            elif self.worker and self.worker.is_alive():
+                code = "official_server_starting"
+            elif action == "official_apply" and self.runtime is not None:
+                code = "official_server_running"
+            if code:
+                payload.clear()
+                self.emit("official_error", request_id=identifier, action=action, code=code)
+                return
+            self.official_worker = threading.Thread(target=self._official_operation,
+                args=(identifier, action, payload), name="local-official-import-command", daemon=True)
+            self.official_worker.start()
+
+    def _official_operation(self, identifier, action, payload):
+        try:
+            if action in ("official_inspect", "official_fetch", "official_apply") and not (self.data_dir/"protocol/idolypride-6.1.1.pb").is_file():
+                install_payload(self.server_data, self.data_dir, self.log)
+            with self.lock:
+                if self.closed: return
+                if self.official_manager is None:
+                    from idoly_local.official_import import OfficialImportManager, ERROR_CODES
+                    self.official_error_codes = frozenset(ERROR_CODES) | _OFFICIAL_HOST_ERRORS
+                    self.official_manager = OfficialImportManager(self.data_dir)
+                manager = self.official_manager
+            result = manager.command(action, payload)
+            payload.clear()
+            if type(result) is not dict or result.get("action") != action or type(result.get("job")) is not dict:
+                raise ValueError("official_response_invalid")
+            safe = {"action": action, "job": _official_job(result["job"], private=True, errors=self.official_error_codes)}
+            if action == "official_apply":
+                if type(result.get("status")) is dict:
+                    safe["status"] = result["status"]
+                    with self.lock: self.account_status = result["status"]
+                if type(result.get("account")) is dict:
+                    safe["account"] = result["account"]
+            with self.lock: closed = self.closed
+            if not closed:
+                self.emit("official_result", request_id=identifier, action=action, result=safe)
+        except Exception as error:
+            code = getattr(error, "code", None)
+            if code not in self.official_error_codes:
+                code = "official_response_invalid" if str(error) == "official_response_invalid" else "official_operation_failed"
+            with self.lock: closed = self.closed
+            if not closed:
+                self.emit("official_error", request_id=identifier, action=action, code=code)
+        finally:
+            payload.clear()
+            with self.lock:
+                self.official_worker = None
+                closed = self.closed
+            if not closed: self.status()
 
     def _start(self, experimental_main_live=False, media_mode=False, download_missing_resources=True,
                resource_cache_dir=None):
@@ -421,11 +575,17 @@ class Controller:
             self.closed = True
             worker = self.worker
             account_worker = self.account_worker
+            official_worker = self.official_worker
+            official_manager = self.official_manager
+        if official_manager is not None:
+            official_manager.close()
         self.stop()
         if worker and worker is not threading.current_thread():
             worker.join(timeout=20)
         if account_worker and account_worker is not threading.current_thread():
             account_worker.join(timeout=20)
+        if official_worker and official_worker is not threading.current_thread():
+            official_worker.join(timeout=20)
         self.stop()
 
 
@@ -1422,7 +1582,9 @@ def main(argv=None):
         for line in sys.stdin:
             try:
                 command = json.loads(line)
+                line = ""
             except (ValueError, TypeError):
+                line = ""
                 emit("error", message="앱 제어 요청을 읽지 못했습니다.")
                 continue
             action = command.get("action") if isinstance(command, dict) else None
@@ -1455,6 +1617,9 @@ def main(argv=None):
                 controller.resources(action, command)
             elif type(action) is str and action in _ACCOUNT_ACTIONS:
                 controller.accounts(action, command)
+            elif type(action) is str and action in _OFFICIAL_ACTIONS:
+                controller.official(action, command)
+                command.clear()
             elif action == "quit":
                 break
             else:

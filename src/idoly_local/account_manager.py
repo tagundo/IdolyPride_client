@@ -554,6 +554,54 @@ class AccountManager:
             from .media_runtime import prepare_media_profile
             prepare_media_profile(state, schema, profile, self.root/"master-json")
 
+    def _preview_result(self, token, path, mode, bundle, revision):
+        receipt = {"schema": 1, "token": token, "mode": mode, "profile": bundle["profile"],
+                   "revision": revision, "bytes": path.stat().st_size,
+                   "sha256": _hash_file(path, MAX_ARCHIVE), "created_at": time.time_ns()//1_000_000}
+        _atomic(path.with_suffix(".json"), receipt)
+        return {"token": token, "archive": {**self._summary(mode, bundle, revision),
+                "bytes": receipt["bytes"], "sha256": receipt["sha256"]}}
+
+    def stage_snapshot(self, payload, *, server_id, public_id, schema_sha256):
+        """Stage exact official User.Get bytes, without touching any account slot.
+
+        Local settings, earning clocks and retry receipts are absent in an
+        official snapshot; they must never be inherited from the target slot.
+        Explicit import origin zero prevents normal starter migrations.
+        """
+        _need(type(payload) is bytes and 0 < len(payload) <= 32*1024*1024, "account_blob_invalid")
+        _need(schema_sha256 == self._schema().fingerprint, "account_protocol_schema_differs")
+        token = uuid.uuid4().hex
+        profile = "official-source-" + token[:16]
+        bundle = {"schema": 1, "profile": profile, "tables": {table: [] for table, _columns, _keys in _ACCOUNT_TABLES}}
+        bundle["tables"]["profiles"] = [{"name": profile, "server_id": server_id, "public_id": public_id}]
+        bundle["tables"]["snapshots"] = [{"profile": profile, "response": payload, "schema_sha256": schema_sha256}]
+        bundle["tables"]["starter_profiles"] = [{"profile": profile, "version": 0}]
+        self._validate(bundle)
+        revision = State.account_revision(bundle)
+        with self._locked():
+            path = self._temporary_directory("imports")/(token+".zip")
+            try:
+                self._write_archive(path, "normal", bundle, revision)
+                return self._preview_result(token, path, "normal", bundle, revision)
+            except BaseException:
+                for item in (path, path.with_suffix(".json")):
+                    if item.exists() and not item.is_symlink(): item.unlink()
+                raise
+
+    def discard_preview_token(self, token):
+        """Delete only this manager's expendable preview copy, never account data."""
+        _need(type(token) is str and _TOKEN.fullmatch(token) is not None, "account_import_token_invalid")
+        with self._locked():
+            directory = self.base/"imports"
+            if not directory.exists(): return
+            _need(directory.is_dir() and not directory.is_symlink(), "account_storage_invalid")
+            for path in (directory/(token+".zip"), directory/(token+".json")):
+                if path.exists() or path.is_symlink():
+                    info = path.lstat()
+                    _need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "account_storage_invalid")
+                    path.unlink()
+
     def command(self, action, payload):
         _need(type(action) is str and type(payload) is dict, "account_command_invalid")
         allowed = {
@@ -594,12 +642,7 @@ class AccountManager:
                 except BaseException:
                     if target.exists(): target.unlink()
                     raise
-                receipt = {"schema": 1, "token": token, "mode": manifest["mode"], "profile": manifest["profile"],
-                           "revision": manifest["revision"], "bytes": target.stat().st_size,
-                           "sha256": _hash_file(target, MAX_ARCHIVE), "created_at": time.time_ns()//1_000_000}
-                _atomic(target.with_suffix(".json"), receipt)
-                result = {"token": token, "archive": {**self._summary(manifest["mode"], bundle, manifest["revision"]),
-                          "bytes": receipt["bytes"], "sha256": receipt["sha256"]}}
+                result = self._preview_result(token, target, manifest["mode"], bundle, manifest["revision"])
             else:
                 mode, profile = _mode(payload.get("mode")), _profile(payload.get("profile"))
                 if action == "accounts_create":

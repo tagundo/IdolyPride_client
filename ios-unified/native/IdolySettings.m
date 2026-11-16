@@ -45,6 +45,14 @@ static NSString *localized(NSString *source) {
     static NSDictionary<NSString *, NSArray<NSString *> *> *catalog;
     static dispatch_once_t once;
     dispatch_once(&once, ^{ catalog = @{
+        @"일본 공식 계정 확인":@[@"日本公式アカウントの確認", @"Check Japanese official account"],
+        @"기존 일본 공식 계정의 인계 ID와 비밀번호를 입력하세요. 확인 후 별도 버튼으로 공식 인계 로그인을 진행합니다.":@[@"既存の日本公式アカウントの引き継ぎIDとパスワードを入力してください。確認後、別のボタンで公式の引き継ぎログインを行います。", @"Enter the transfer ID and password for your existing Japanese official account. A separate button performs the official transfer login after verification."],
+        @"인계 ID":@[@"引き継ぎID", @"Transfer ID"],
+        @"비밀번호":@[@"パスワード", @"Password"],
+        @"iOS 계정 확인":@[@"iOSアカウントを確認", @"Check iOS account"],
+        @"Android 계정 확인":@[@"Androidアカウントを確認", @"Check Android account"],
+        @"취소":@[@"キャンセル", @"Cancel"],
+        @"인계 ID와 비밀번호 형식을 확인해 주세요.":@[@"引き継ぎIDとパスワードの形式を確認してください。", @"Check the transfer ID and password format."],
         @"아이프라 서버":@[@"アイプラサーバー", @"Idoly Server"],
         @"아이프라 서버 설정":@[@"サーバー設定", @"Server Settings"],
         @"로컬 서버 설정…":@[@"ローカルサーバー設定…", @"Local Server Settings…"],
@@ -171,6 +179,7 @@ static NSString *encode(id object) {
 @property (nonatomic,strong) WKWebView *web;
 @property (nonatomic,strong) NSURL *page;
 @property (nonatomic,copy) NSDictionary *pendingImport;
+@property (nonatomic,strong) UIAlertController *officialPrompt;
 @property (nonatomic,copy) NSDictionary *importProgress;
 @property (nonatomic,copy) NSDictionary *accountImportProgress;
 @property (nonatomic,copy) NSString *pendingExportAction;
@@ -209,6 +218,8 @@ static NSString *encode(id object) {
 - (void)startServer;
 - (void)updateServerReady;
 - (void)updateLocalizedText;
+- (void)presentOfficialPrompt:(NSDictionary *)request;
+- (void)clearOfficialPrompt;
 - (void)updateCompactLayout;
 - (UIButton *)headerButton:(NSString *)identifier action:(SEL)action primary:(BOOL)primary;
 - (void)dispatchRequest:(NSDictionary *)request;
@@ -432,6 +443,8 @@ static __weak IDSettingsController *launcherController;
     if (self.isBeingDismissed || self.navigationController.isBeingDismissed) [self releaseWeb];
 }
 - (void)releaseWeb {
+    UIAlertController *prompt = _officialPrompt;
+    [self clearOfficialPrompt]; [prompt dismissViewControllerAnimated:NO completion:nil];
     _launchSettingsNonce = nil; _launchSettingsCompletedNonce = nil;
     atomic_store(&settingsVisible, false);
     [_web.configuration.userContentController removeScriptMessageHandlerForName:@"idolyServer"];
@@ -491,7 +504,67 @@ static __weak IDSettingsController *launcherController;
     [self sendReply:identifier json:encode(@{@"id":identifier, @"ok":@NO,
         @"error":@{@"code":@"native_files", @"message":localized(message)}})];
 }
+- (void)clearOfficialPrompt {
+    for (UITextField *field in _officialPrompt.textFields) field.text = nil;
+    _officialPrompt = nil;
+}
+- (void)presentOfficialPrompt:(NSDictionary *)request {
+    NSNumber *identifier = request[@"id"];
+    if (request.count != 2 || _officialPrompt || _pendingImport || _pendingExportRequestID || self.presentedViewController) {
+        [self localFailure:identifier message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
+    }
+    UIAlertController *prompt = [UIAlertController alertControllerWithTitle:localized(@"일본 공식 계정 확인")
+        message:localized(@"기존 일본 공식 계정의 인계 ID와 비밀번호를 입력하세요. 확인 후 별도 버튼으로 공식 인계 로그인을 진행합니다.") preferredStyle:UIAlertControllerStyleAlert];
+    [prompt addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = localized(@"인계 ID"); field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        field.autocorrectionType = UITextAutocorrectionTypeNo; field.keyboardType = UIKeyboardTypeASCIICapable;
+        field.textContentType = @"";
+    }];
+    [prompt addTextFieldWithConfigurationHandler:^(UITextField *field) {
+        field.placeholder = localized(@"비밀번호"); field.secureTextEntry = YES;
+        field.autocapitalizationType = UITextAutocapitalizationTypeNone; field.autocorrectionType = UITextAutocorrectionTypeNo;
+        field.keyboardType = UIKeyboardTypeASCIICapable; field.textContentType = @"";
+    }];
+    __weak typeof(self) weakSelf = self; __weak UIAlertController *weakPrompt = prompt;
+    void (^submit)(NSString *) = ^(NSString *platform) {
+        IDSettingsController *strongSelf = weakSelf; UIAlertController *current = weakPrompt;
+        if (!strongSelf || strongSelf.officialPrompt != current) return;
+        NSString *userID = [current.textFields[0].text copy] ?: @"";
+        NSString *password = [current.textFields[1].text copy] ?: @"";
+        [strongSelf clearOfficialPrompt];
+        NSRegularExpression *identifierRule = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z0-9_-]{1,64}$" options:0 error:NULL];
+        NSRegularExpression *passwordRule = [NSRegularExpression regularExpressionWithPattern:@"^[ -~]{1,128}$" options:0 error:NULL];
+        NSRange identifierMatch = [identifierRule rangeOfFirstMatchInString:userID options:0 range:NSMakeRange(0,userID.length)];
+        NSRange passwordMatch = [passwordRule rangeOfFirstMatchInString:password options:0 range:NSMakeRange(0,password.length)];
+        BOOL valid = identifierMatch.location == 0 && identifierMatch.length == userID.length && userID.length > 0
+            && passwordMatch.location == 0 && passwordMatch.length == password.length && password.length > 0
+            && [password isEqual:[password stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]];
+        if (!valid) {
+            NSString *code = identifierMatch.location != 0 || identifierMatch.length != userID.length || !userID.length
+                ? @"transfer_id_invalid" : @"transfer_password_invalid";
+            [strongSelf sendReply:identifier json:encode(@{@"id":identifier,@"ok":@NO,@"error":@{@"code":code,
+                @"message":localized(@"인계 ID와 비밀번호 형식을 확인해 주세요.")}})]; return;
+        }
+        // Never post credentials back into WebKit, an event, or diagnostics.
+        // Only this native prompt can add them to the in-memory host command.
+        [strongSelf sendRequest:@{@"id":identifier,@"action":@"official_inspect",
+            @"user_id":userID,@"password":password,@"platform":platform}];
+    };
+    [prompt addAction:[UIAlertAction actionWithTitle:localized(@"iOS 계정 확인") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        (void)action; submit(@"ios");
+    }]];
+    [prompt addAction:[UIAlertAction actionWithTitle:localized(@"Android 계정 확인") style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        (void)action; submit(@"android");
+    }]];
+    [prompt addAction:[UIAlertAction actionWithTitle:localized(@"취소") style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+        (void)action; IDSettingsController *strongSelf = weakSelf; [strongSelf clearOfficialPrompt];
+        [strongSelf sendReply:identifier json:encode(@{@"id":identifier,@"ok":@YES,@"result":@{@"action":@"official_inspect",@"cancelled":@YES}})];
+    }]];
+    _officialPrompt = prompt;
+    [self presentViewController:prompt animated:YES completion:nil];
+}
 - (void)dispatchRequest:(NSDictionary *)request {
+    if ([request[@"action"] isEqual:@"official_inspect"]) { [self presentOfficialPrompt:request]; return; }
     if ([request[@"action"] isEqual:@"diagnostics_copy"]) {
         // Explicit click in the trusted bundled page only. This action stays
         // available when Python/server startup is not ready or has failed.
@@ -515,7 +588,7 @@ static __weak IDSettingsController *launcherController;
     if (![request[@"action"] isEqual:@"resources_export"] && ![request[@"action"] isEqual:@"accounts_export"]) { [self sendRequest:request]; return; }
     // Reserve this export before asynchronous status/cleanup. Another click
     // cannot replace its action, delete its prepared ZIP, or steal its picker.
-    if (_pendingExportRequestID || _pendingImport) {
+    if (_pendingExportRequestID || _pendingImport || _officialPrompt) {
         [self localFailure:request[@"id"] message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
     }
     _pendingExportRequestID = request[@"id"]; _pendingExportAction = request[@"action"];
@@ -669,13 +742,14 @@ static __weak IDSettingsController *launcherController;
     if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
     NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media",
         @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export",
+        @"official_inspect",@"official_fetch",@"official_apply",@"official_cancel",@"official_status",
         @"diagnostics_clear",@"accounts_status",@"accounts_create",@"accounts_clone",@"accounts_select",
         @"accounts_export",@"accounts_preview",@"accounts_import",@"accounts_restore"]];
-    if (![actions containsObject:action] || request[@"path"] || request[@"output_path"]) {
+    if (![actions containsObject:action] || request[@"path"] || request[@"output_path"] || request[@"user_id"] || request[@"password"]) {
         [self localFailure:identifier message:@"허용되지 않은 서버 요청입니다."]; return;
     }
     if ([action isEqual:@"resources_import"] || [action isEqual:@"accounts_preview"]) {
-        if (_pendingImport || _pendingExportRequestID) { [self localFailure:identifier message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return; }
+        if (_pendingImport || _pendingExportRequestID || _officialPrompt) { [self localFailure:identifier message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return; }
         _pendingImport = request;
         NSDictionary *progress = @{@"event":[action isEqual:@"accounts_preview"] ? @"account_import_progress" : @"resource_import_progress", @"request_id":identifier,
             @"stage":@"selecting", @"copied_bytes":@0, @"total_bytes":@0};

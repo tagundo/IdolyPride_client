@@ -198,6 +198,14 @@ class Application:
                 context.abort(RpcCode.FAILED_PRECONDITION, "Media story catalog is not ready")
             if media_response is not None:
                 return media_response
+        # An explicit imported User.Get is authoritative account data. Never
+        # replay a legacy capture over it, including when replacing sandbox.
+        # Other capture-backed routes retain their documented replay behavior.
+        if path == "/api.User/Get" and self.state.starter_version(self.profile) == 0:
+            snapshot = self.state.snapshot(self.profile)
+            if snapshot is None or snapshot[1] != self.schema.fingerprint:
+                context.abort(RpcCode.FAILED_PRECONDITION, "Imported local profile is not ready for this schema")
+            return snapshot[0]
         # Media ownership is the dedicated database's live state. Captured
         # account responses must not shadow it or undo a media selection.
         response = None if self.media_mode else self.fixtures.get(path, plain)
