@@ -179,7 +179,13 @@ def test_errors_never_print_signed_storage_details(monkeypatch,tmp_path,capsys):
 def test_manual_workflow_only_has_a_minimal_gated_object_write_job():
     source=(ROOT/"tools/register_latest_server_data_lfs.py").read_text()
     workflow=(ROOT/".github/workflows/register-latest-server-data-lfs.yml").read_text()
-    assert "workflow_dispatch:" in workflow and "  push:" not in workflow
+    assert "workflow_dispatch:" in workflow and "  push:" in workflow
+    assert "paths: [.github/workflows/register-latest-server-data-lfs.yml]" in workflow
+    source_job = workflow.split("  source-checks:", 1)[1].split("  verify:", 1)[0]
+    assert "if: github.event_name == 'push'" in source_job
+    assert "GH_TOKEN:" not in source_job and "IDOLY_LFS_OBJECT_WRITE:" not in source_job
+    assert "contents: write" not in source_job
+    assert workflow.count("if: github.event_name == 'workflow_dispatch' && inputs.confirm_object_only") == 2
     assert "contents: read" in workflow and workflow.count("contents: write")==1
     assert "inputs.confirm_object_only" in workflow and "persist-credentials: false" in workflow
     assert "registration-receipt.json" in workflow and "retention-days: 30" in workflow

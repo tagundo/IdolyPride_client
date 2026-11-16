@@ -1,6 +1,9 @@
 name: Register reviewed latest public source object
 
 on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths: [.github/workflows/register-latest-server-data-lfs.yml]
   workflow_dispatch:
     inputs:
       prep_source_commit:
@@ -49,6 +52,26 @@ permissions:
   contents: read
 
 jobs:
+  source-checks:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Verify registration source without object-write authorization
+        run: |
+          uv sync --locked --all-extras --python 3.12
+          uv run --no-sync python -m pytest -q \
+            tests/test_latest_server_data_pin.py tests/test_register_latest_server_data_lfs.py
+
   verify:
     if: github.event_name == 'workflow_dispatch' && inputs.confirm_object_only
     runs-on: ubuntu-latest
