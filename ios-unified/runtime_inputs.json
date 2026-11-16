@@ -233,6 +233,7 @@
     "idoly_local.runtime_history",
     "idoly_local.schema",
     "idoly_local.social",
+    "idoly_local.startup_cache",
     "idoly_local.startup_checks",
     "idoly_local.state",
     "idoly_local.story_catalog",

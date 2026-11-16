@@ -17,7 +17,8 @@ concurrency:
 
 jobs:
   contracts:
-    runs-on: ubuntu-latest
+    # Match the pinned browser's supported OS; ubuntu-latest now resolves 26.04.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       PYTHONUNBUFFERED: '1'
