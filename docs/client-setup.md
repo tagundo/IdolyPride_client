@@ -2,7 +2,7 @@
 
 [릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 환경에 맞는 파일을 받습니다. **Android는 서버 APK와 게임 APK 하나를 같은 기기에 설치하고, iPhone·iPad와 Mac/PlayCover는 같은 서버·게임 통합 IPA 하나를 설치합니다.** 터미널·Python·Termux 없이 앱의 버튼으로 실행합니다. 현재 공개 파일과 버전은 [README](../README.md#앱으로-실행하기)를 확인합니다. 아래의 Android v0.3.0 진단 기록은 당시 동작과 수정 이력입니다.
 
-현재 서버 앱은 [v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0)입니다. 비공개 저장소이므로 접근 권한이 있는 GitHub 계정으로 로그인해 다운로드합니다. 사용자 Android 기기에서 로컬 로그인·홈과 캐릭터 표시·편성·초기 튜토리얼 전체 진행을 확인했습니다. 일반 라이브 플레이와 PlayCover 게임의 화면 진행 검증은 남아 있습니다.
+다음은 [v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0) 당시의 기록입니다. 당시 사용자 Android 기기에서 로컬 로그인·홈과 캐릭터 표시·편성·초기 튜토리얼 전체 진행을 확인했으며, 일반 라이브 플레이와 PlayCover 게임의 화면 진행 검증은 남아 있었습니다. 현재 다운로드 파일과 검증 범위는 위 README와 해당 릴리즈 기록을 확인합니다.
 
 ## Android
 
