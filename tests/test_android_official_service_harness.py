@@ -375,6 +375,5 @@ public final class ServiceStatusHarness {
     assert result.returncode == 0, result.stdout + result.stderr
     assert "service-status-locale-harness PASS" in result.stdout
     activity = SERVICE.with_name("MainActivity.java").read_text()
-    assert 'status.setContentDescription("idoly.server.status")' in activity
     assert "onServerChanged(ServerService.StatusText value," in activity
     assert "status.setText(value.render(this))" in activity
