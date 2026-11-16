@@ -220,6 +220,12 @@ def run(output):
                                 panel.locator(":scope > summary").click()
                             if not panel.evaluate("e=>e.open"):
                                 raise AssertionError("primary_panel_did_not_open")
+                        # Opening the lower primary panel can legitimately
+                        # scroll the document. Observe the expanded layout from
+                        # its top, while keeping the untouched opening-frame
+                        # navigation/header checks above independent of scrolling.
+                        page.evaluate("window.scrollTo({top:0,left:0,behavior:'instant'})")
+                        page.wait_for_function("window.scrollX===0 && window.scrollY===0")
                         geometry = page.evaluate(GEOMETRY, category)
                         record = {"language": language, "viewport": {"width": width, "height": height}, "category": category, **geometry}
                         records.append(record)

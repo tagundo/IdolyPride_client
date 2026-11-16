@@ -253,7 +253,7 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
     select_profile(qa, "sandbox", "89-event-restore-original", "down")
     tap(qa, "idoly.accounts.select", "89-event-queue-original", "down")
     find(qa, lambda n: "다음 시작 · 일반 sandbox" in n.get("text", ""),
-         "89-event-original-queued", "down", enabled=False)
+         "89-event-original-queued", "down", enabled=False, destination=("users", "accounts"))
     qa.capture("89-native-event-settings-complete")
     return {"native_event_settings_autosave": True, "native_event_settings_restart_preserved": True,
             "native_event_settings": {"scope": SCOPE, "event_id": entry["event_id"],

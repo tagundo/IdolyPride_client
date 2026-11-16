@@ -251,3 +251,19 @@ def test_current_category_repositions_once_before_existing_scroll_logic(monkeypa
     assert qa.navigation_step(guest, tree, ("users", "accounts"), state)
     assert not qa.navigation_step(guest, tree, ("users", "accounts"), state)
     assert guest.actions == [("shell", "input", "tap", "60", "35")]
+
+
+def test_actual_restart_console_routes_to_users_before_observing_queued_selection(monkeypatch):
+    monkeypatch.setattr(qa.time, "sleep", lambda _: None)
+    actual = (Path(__file__).parent / "fixtures/account-restart-console-2c35.xml").read_text()
+    initial = ET.fromstring(actual)
+    nav = next(n for n in initial.iter("node") if n.get("content-desc") == "idoly.nav.users")
+    assert any(n.get("scrollable") == "false" and "ScrollView" in n.get("class", "") for n in initial.iter("node"))
+    final = category_frame(True, True).replace('</hierarchy>', '<node text="다음 시작 · 일반 sandbox" enabled="false" bounds="[30,260][500,320]"/></hierarchy>')
+    guest = Guest([actual, category_frame(True, False), final])
+    result = qa.find_queued_account(guest, "sandbox", "restart")
+    assert "다음 시작 · 일반 sandbox" in result.get("text")
+    left, top, right, bottom = qa.bounds(nav)
+    assert guest.actions == [("shell", "input", "tap", str((left+right)//2), str((top+bottom)//2)),
+                             ("shell", "input", "tap", "260", "130")]
+    assert guest.captures == ["restart-0", "restart-1", "restart-2"]

@@ -47,7 +47,57 @@ def audit(path):
     targets = {row["name"]:Path(row["android"]["member"]).name for row in PROFILES if row["name"] in NAMES}
     need(set(targets) == set(NAMES),"Complete original logo Sprite inputs required")
     references, inspected, candidates = [], 0, []
+    external_cache = {}
     with ZipFile(path) as archive:
+        def script_info(asset, pointer):
+            file_id, path_id = pointer
+            target = asset
+            external = None
+            if file_id:
+                need(0 < file_id <= len(asset.externals), "Script file ID exceeds source externals")
+                external = str(asset.externals[file_id-1].path)
+                member = "assets/bin/Data/" + external.rsplit("/",1)[-1]
+                if member not in archive.namelist():
+                    return {"resolved":False,"external":external,"pointer":pointer}
+                if member not in external_cache:
+                    info = archive.getinfo(member)
+                    need(info.file_size <= 32*1024*1024 and len(external_cache) < 4,"Script source exceeds audit bound")
+                    env = UnityPy.load(archive.read(info))
+                    need(len(env.files)==1,"Expected one serialized script source")
+                    external_cache[member] = (env,next(iter(env.files.values())))
+                target = external_cache[member][1]
+            obj = target.objects.get(path_id)
+            if obj is None or obj.class_id != 115:
+                return {"resolved":False,"external":external,"pointer":pointer}
+            value = obj.read()
+            return {"resolved":True,"external":external,"pointer":pointer,
+                    "class_name":value.m_ClassName,"namespace":value.m_Namespace,"assembly":value.m_AssemblyName,
+                    "sha256":hashlib.sha256(obj.get_raw_data()).hexdigest()}
+        def ancestry(asset, transform_id):
+            result,seen=[],set()
+            while transform_id:
+                need(transform_id not in seen and len(seen)<12,"Prefab ancestor chain exceeds bound")
+                seen.add(transform_id)
+                obj=asset.objects.get(transform_id)
+                need(obj is not None and obj.class_id==224,"Prefab ancestor is not an original RectTransform")
+                value=obj.read();owner=value.m_GameObject
+                need(owner.m_FileID==0 and owner.m_PathID in asset.objects,"Prefab ancestor owner is external")
+                game=asset.objects[owner.m_PathID].read()
+                row={"game_object_name":game.m_Name,"transform":fact(obj),"components":[]}
+                for component in game.m_Component:
+                    pointer=getattr(component,"component",component)
+                    need(pointer.m_FileID==0 and pointer.m_PathID in asset.objects,"Prefab component is external")
+                    child=asset.objects[pointer.m_PathID]
+                    item={"path_id":child.path_id,"class_id":child.class_id}
+                    if child.class_id==114:
+                        raw=child.get_raw_data();need(len(raw)>=28,"Truncated MonoBehaviour")
+                        item["script"]=script_info(asset,list(struct.unpack_from("<iq",raw,16)))
+                    row["components"].append(item)
+                    need(len(row["components"])<=64,"Prefab ancestor component count exceeds bound")
+                result.append(row)
+                need(value.m_Father.m_FileID==0,"Prefab ancestor parent is external")
+                transform_id=value.m_Father.m_PathID
+            return result
         for row in archive.infolist():
             if not re.fullmatch("assets/bin/Data/[0-9a-f]{32}",row.filename) or not 48 <= row.file_size <= 4*1024*1024: continue
             inspected += row.file_size
@@ -77,6 +127,7 @@ def audit(path):
                 item = {"member":row.filename,"component_path_id":obj.path_id,"component_sha256":hashlib.sha256(value).hexdigest(),
                         "bytes":len(value),"script_pointer":list(struct.unpack_from("<iq",value,16)),"matches":matches,
                         "owner":[owner_file,owner_path]}
+                item["script"] = script_info(asset,item["script_pointer"])
                 if owner_file == 0 and owner_path in asset.objects and asset.objects[owner_path].class_id == 1:
                     game = asset.objects[owner_path].read();item["game_object_name"] = game.m_Name
                     components=[]
@@ -84,8 +135,11 @@ def audit(path):
                         pointer=getattr(component,"component",component)
                         components.append([pointer.m_FileID,pointer.m_PathID])
                     item["components"] = components
+                    need([0,obj.path_id] in components,"Sprite consumer does not belong to source owner")
                     item["transforms"] = [fact(asset.objects[child]) for file_id,child in components
                         if file_id==0 and child in asset.objects and asset.objects[child].class_id==224]
+                    if len(item["transforms"])==1:
+                        item["ancestors"] = ancestry(asset,item["transforms"][0]["parent"][1])
                 references.append(item)
                 need(len(references)<=128,"Android consumer reference bound")
             del asset,env;gc.collect()

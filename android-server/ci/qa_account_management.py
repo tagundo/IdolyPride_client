@@ -159,6 +159,13 @@ def tap(qa, description, stage, direction=None):
                             destination=control_destination(description)))
 
 
+def find_queued_account(qa, profile, stage):
+    # Activity recreation intentionally opens Console. The selection summary is
+    # still under Users even when Console is too short to be scrollable.
+    return find(qa, lambda node: "다음 시작 · 일반 " + profile in node.get("text", ""),
+                stage, "down", enabled=False, destination=("users", "accounts"))
+
+
 def positive(qa, stage):
     tap_node(qa, find(qa, lambda node: node.get("resource-id") == "android:id/button1", stage))
 
@@ -453,8 +460,7 @@ def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeo
     if projection(qa, copy_database, "sandbox", sessions=True) != original:
         raise RuntimeError("Native account ZIP round trip changed unrelated original state")
     qa.adb("shell", "am", "start", "-n", ACTIVITY)
-    selected = find(qa, lambda node: "다음 시작 · 일반 sandbox" in node.get("text", ""),
-                    "80-account-original-selection", "down", enabled=False)
+    selected = find_queued_account(qa, "sandbox", "80-account-original-selection")
     qa.capture("80-account-management-complete")
     return {"account_native_create": True, "account_native_clone": True,
             "account_queued_selection_persisted": True, "account_selected_encrypted_rpc": True,
