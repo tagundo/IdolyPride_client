@@ -178,7 +178,9 @@ def file_rows(directory):
         need(safe_name(name) and member_extent(name,path.stat().st_size),'latest_generated_member_invalid')
         rows.append({'path':name,'bytes':path.stat().st_size,'sha256':digest(path)})
     need(len(rows)<=2048 and sum(row['bytes'] for row in rows)<=MAX_EXPANDED,'latest_generated_extent')
-    return rows
+    # Canonical order is the complete serialized POSIX member name. Path.parts
+    # order differs for public-octo/ versus public-octo-ios/ directory prefixes.
+    return sorted(rows,key=lambda row:row['path'])
 
 
 def runtime():

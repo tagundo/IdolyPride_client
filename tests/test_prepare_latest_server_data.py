@@ -263,3 +263,25 @@ def test_only_byte_pinned_historical_empty_rule_protobuf_is_preserved(tmp_path):
     assert m.member_extent(m.EMPTY_PUBLIC_PB,0)
     assert not m.member_extent(m.EMPTY_PUBLIC_PB.replace('Master-Rule','Master-GetHelpCategory'),0)
     assert not m.member_extent(m.EMPTY_PUBLIC_PB,True)
+
+
+def test_full_serialized_member_order_handles_both_platforms_and_directory_prefixes(tmp_path):
+    public=tmp_path/'public'
+    names=('foo/record.bin','foo-bar/record.bin','public-octo/manifest.pb','public-octo-ios/manifest.pb')
+    for name in names:
+        path=public/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(name.encode())
+    expected=['data/foo-bar/record.bin','data/foo/record.bin',
+              'data/public-octo-ios/manifest.pb','data/public-octo/manifest.pb']
+    component_order=['data/'+path.relative_to(public).as_posix() for path in sorted(public.rglob('*')) if path.is_file()]
+    assert component_order!=expected  # This fixture exercises the actual prior mismatch.
+    rows=m.file_rows(public)
+    assert [row['path'] for row in rows]==expected
+    output=tmp_path/'complete.zip';m.write_payload(public,output)
+    with ZipFile(output) as archive:
+        assert archive.namelist()==expected
+        assert m.archive_rows(archive)==rows
+    # Same exact member set and canonical order still cannot hide changed bytes.
+    (public/'public-octo-ios/manifest.pb').write_bytes(b'changed-original-manifest')
+    changed=m.file_rows(public)
+    assert [row['path'] for row in changed]==expected
+    with ZipFile(output) as archive:assert m.archive_rows(archive)!=changed
