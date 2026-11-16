@@ -160,7 +160,7 @@ def korean_graph_fixture():
             "layout_size": list(size), "original_layout_size": list(size)})
     import base64
     from idoly_local.static_ui_images import _logo_rect, _logo_summary
-    fixtures=json.loads((ROOT / "tests/fixtures/love-logo-rect-transforms.json").read_text())
+    fixtures=json.loads((Path(__file__).resolve().parents[1] / "tests/fixtures/love-logo-rect-transforms.json").read_text())
     transforms=[]
     for row in fixtures["objects"]:
         if row["platform"]!="ios": continue
