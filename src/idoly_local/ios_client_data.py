@@ -124,7 +124,7 @@ def _spec(value, *, overlay=False, language=None):
     _need(value.keys() == keys and type(value["bytes"]) is int
           and 0 <= value["bytes"] <= MAX_FILE and _digest(value["sha256"]), "Invalid client-data record")
     if overlay:
-        _need(value["source"] == ("base" if language == "ko" else "archive"),
+        _need(value["source"] in (("base", "archive") if language == "ko" else ("archive",)),
               "Invalid client-data language source")
 
 
@@ -144,7 +144,9 @@ def validate_manifest(value):
         _need(type(files) is dict and files.keys() == OVERLAYS, "Missing client-data language files")
         for name, row in files.items():
             _spec(row, overlay=True, language=language)
-            if language != "ko":
+            if row["source"] == "archive":
+                _need(language != "ko" or name == "Data/resources.assets",
+                      "Only Korean resources may be refreshed from the archive")
                 _need(row["member"] == language + "/" + name, "Invalid language archive member")
         _need(total + sum(row["bytes"] for row in files.values()) <= MAX_EXPANDED,
               "Expanded client-data exceeds its bound")
@@ -156,9 +158,10 @@ def validate_manifest(value):
 
 def _inventory(archive, manifest):
     wanted = {"manifest.json": None}
-    for language in ("ja", "en"):
+    for language in LANGUAGES:
         for row in manifest["languages"][language].values():
-            wanted[row["member"]] = row
+            if row["source"] == "archive":
+                wanted[row["member"]] = row
     infos = archive.infolist()
     _need(len(infos) == len(wanted) and {i.filename for i in infos} == wanted.keys(),
           "Client-data archive inventory differs")

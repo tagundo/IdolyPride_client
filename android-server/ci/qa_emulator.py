@@ -1046,6 +1046,7 @@ def enable_main_live_through_ui(qa, *, max_scrolls=8):
     if type(max_scrolls) is not int or not 0 <= max_scrolls <= 8:
         raise ValueError("Main-live UI scroll bound differs")
     label = "첫 메인 라이브 실험 기능 사용"
+    navigation = {}
     for attempt in range(max_scrolls+1):
         hierarchy = qa.capture("48-main-live-find-"+str(attempt))
         matches = [node for node in hierarchy.iter("node") if node.get("text") == label
@@ -1070,6 +1071,11 @@ def enable_main_live_through_ui(qa, *, max_scrolls=8):
                     time.sleep(.5)
             raise RuntimeError("Main-live checkbox did not become checked")
         if attempt < max_scrolls:
+            if any(node.get("content-desc", "").startswith("idoly.nav.") for node in hierarchy.iter("node")):
+                from qa_account_management import navigation_step
+                if navigation_step(qa, hierarchy, ("server", "experimental"), navigation):
+                    time.sleep(.25)
+                    continue
             qa.adb("shell", "input", "swipe", *map(str, _main_options_swipe(hierarchy)), "400")
     raise RuntimeError("Enabled main-live checkbox not found within bounded observations")
 

@@ -41,7 +41,8 @@ def test_empty_unavailable_status_is_read_only_and_can_freeze_disabled(tmp_path,
     observed = subject.event_settings_status(root)
     assert observed == {"schema": 1, "saved": settings(), "effective": None, "restart_required": False,
         "catalog": {"schema": 1, "available": False, "events": [], "ruleset_sha256": None,
-            "reason_code": "event_catalog_unavailable"}, "invalid_settings_file": False}
+            "reason_code": "event_catalog_unavailable"}, "invalid_settings_file": False,
+        "media_mode": False, "media_default_all": False, "media_all_supported": False}
     assert subject.freeze_event_settings(root) == settings() and not root.exists()
     with pytest.raises(subject.EventSettingsError, match="event_settings_catalog_unavailable"):
         subject.event_settings_command(root, "events_save", {"settings": settings(entry()), "expected_revision": 0})
@@ -183,3 +184,121 @@ def test_command_allowlist_and_catalog_projection_are_bounded(tmp_path,producer)
     value=subject.event_settings_command(tmp_path,"events_status",{})
     assert "PRIVATE-CATALOG" not in json.dumps(value) and len(json.dumps(value))<16384
     assert value["catalog"]["events"][0]["original_duration_ms"] is None
+
+
+def permanent(identity=IDS[0]):
+    return {"event_id": identity, "start_time_ms": 0, "end_time_ms": 0}
+
+
+def test_media_missing_preferences_enable_all_supported_without_creating_or_changing_files(tmp_path, producer):
+    unsupported = deepcopy(producer["events"][0])
+    unsupported.update(id="unsupported", supported=False)
+    producer["events"].append(unsupported)
+    normal = subject.EventSettingsState(tmp_path, catalog=producer)
+    saved = normal.save(settings(entry()), expected_revision=0)
+    before = (tmp_path / subject.FILENAME).read_bytes()
+    state = subject.EventSettingsState(tmp_path, media_mode=True)
+    observed = state.status()
+    assert observed["saved"] == settings(*(permanent(identity) for identity in sorted(IDS)))
+    assert observed["media_mode"] and observed["media_default_all"] and observed["media_all_supported"]
+    assert subject.freeze_event_settings(tmp_path, media_mode=True) == observed["saved"]
+    assert not (tmp_path / subject.MEDIA_FILENAME).exists()
+    assert (tmp_path / subject.FILENAME).read_bytes() == before and normal.settings() == saved
+
+
+def test_media_choices_have_independent_cas_and_reenable_without_an_expiry_or_progress_writes(tmp_path, producer):
+    normal = subject.EventSettingsState(tmp_path, catalog=producer)
+    normal_saved = normal.save(settings(entry()), expected_revision=0)
+    normal_before = (tmp_path / subject.FILENAME).read_bytes()
+    for name in ("state.db", "media-state.db"):
+        (tmp_path / name).write_bytes(b"OPAQUE-ACCOUNT-PROGRESS-AND-SESSIONS")
+    media = subject.event_settings_command(tmp_path, "events_status", {"mode": "media"})
+    selected = subject.event_settings_command(tmp_path, "events_save", {"mode": "media",
+        "settings": settings(permanent(IDS[1])), "expected_revision": 0}, effective=media["saved"])
+    assert selected["restart_required"] and not selected["media_default_all"] and not selected["media_all_supported"]
+    assert selected["saved"]["love_events"] == [permanent(IDS[1])]
+    # A stale rapid second click cannot overwrite another committed selection.
+    with pytest.raises(subject.EventSettingsError, match="event_settings_revision_conflict"):
+        subject.event_settings_command(tmp_path, "events_save", {"mode": "media",
+            "settings": settings(), "expected_revision": 0})
+    revision = selected["saved"]["revision"]
+    enabled = subject.event_settings_command(tmp_path, "events_save", {"mode": "media",
+        "settings": settings(*(permanent(identity) for identity in IDS), revision=revision),
+        "expected_revision": revision})
+    assert enabled["media_all_supported"] and subject.freeze_event_settings(tmp_path, media_mode=True) == enabled["saved"]
+    revision = enabled["saved"]["revision"]
+    disabled = subject.event_settings_command(tmp_path, "events_save", {"mode": "media",
+        "settings": settings(revision=revision), "expected_revision": revision})
+    assert disabled["saved"]["love_events"] == [] and not disabled["media_default_all"]
+    assert subject.freeze_event_settings(tmp_path, media_mode=True)["love_events"] == []
+    assert subject.freeze_event_settings(tmp_path) == normal_saved
+    assert (tmp_path / subject.FILENAME).read_bytes() == normal_before
+    assert all((tmp_path / name).read_bytes() == b"OPAQUE-ACCOUNT-PROGRESS-AND-SESSIONS"
+               for name in ("state.db", "media-state.db"))
+
+
+@pytest.mark.parametrize("media_mode,row", [(False, permanent()), (True, entry()),
+    (True, {**permanent(), "end_time_ms": 1}), (True, {**permanent(), "start_time_ms": True})])
+def test_media_permanent_and_normal_finite_period_shapes_cannot_be_mixed(tmp_path, media_mode, row):
+    state = subject.EventSettingsState(tmp_path, catalog=catalog(), media_mode=media_mode)
+    with pytest.raises(subject.EventSettingsError, match="event_settings_invalid"):
+        state.save(settings(row), expected_revision=0)
+    assert not (tmp_path / subject.FILENAME).exists() and not (tmp_path / subject.MEDIA_FILENAME).exists()
+
+
+@pytest.mark.parametrize("mode", [True, None, 1, "gallery", "", [], {}])
+def test_command_mode_is_a_finite_string_and_never_changes_either_file(tmp_path, mode):
+    with pytest.raises(subject.EventSettingsError, match="event_settings_command_invalid"):
+        subject.event_settings_command(tmp_path, "events_status", {"mode": mode})
+    assert not tmp_path.joinpath(subject.FILENAME).exists() and not tmp_path.joinpath(subject.MEDIA_FILENAME).exists()
+
+
+def test_media_catalog_unavailable_keeps_disabled_lazy_default_and_corrupt_choices_fail_closed(tmp_path, producer):
+    producer.update(catalog(available=False))
+    assert subject.freeze_event_settings(tmp_path, media_mode=True) == settings()
+    assert not (tmp_path / subject.MEDIA_FILENAME).exists()
+    path = tmp_path / subject.MEDIA_FILENAME
+    path.write_text('{"schema":1,"revision":0,"love_events":[{"event_id":"bad","start_time_ms":1,"end_time_ms":2}]}')
+    before = path.read_bytes()
+    with pytest.raises(subject.EventSettingsError): subject.freeze_event_settings(tmp_path, media_mode=True)
+    assert path.read_bytes() == before
+
+
+def test_event_catalog_adds_three_bounded_ui_labels_without_replacing_original_titles(tmp_path, producer):
+    observed = subject.event_settings_status(tmp_path)
+    for row in observed["catalog"]["events"]:
+        assert set(row["titles"]) == {"ko", "ja", "en"}
+        assert row["titles"]["ja"] == row["title"]
+        assert not any(character in row["titles"]["ko"] for character in "もし恋君編")
+        assert all(type(value) is str and value.isprintable() and 0 < len(value.encode("utf-8")) <= 1024
+                   for value in row["titles"].values())
+    assert observed["catalog"]["events"][0]["titles"]["ko"] != observed["catalog"]["events"][0]["title"]
+
+
+@pytest.mark.parametrize("media_mode,no_op", [(False, False), (True, False), (True, True)])
+def test_successful_acknowledgement_keeps_own_snapshot_if_another_writer_commits_before_status(
+        tmp_path, producer, monkeypatch, media_mode, no_op):
+    original_status = subject.EventSettingsState.status
+    observed = {}
+    mode = "media" if media_mode else "normal"
+    rows = [permanent(identity) if media_mode else entry(identity) for identity in IDS]
+    ours = settings(*rows) if no_op else settings(rows[0])
+    def interleaved_status(state, **options):
+        committed = options.get("_saved")
+        if committed is not None:
+            observed["ours"] = deepcopy(committed)
+            writer = subject.EventSettingsState(tmp_path, catalog=producer, media_mode=media_mode)
+            external_rows = [rows[1]] if no_op else rows
+            external = settings(*external_rows, revision=committed["revision"])
+            observed["newer"] = writer.save(external, expected_revision=committed["revision"])
+        return original_status(state, **options)
+    monkeypatch.setattr(subject.EventSettingsState, "status", interleaved_status)
+    response = subject.event_settings_command(tmp_path, "events_save", {
+        "mode": mode, "settings": ours, "expected_revision": 0})
+    assert response["saved"] == observed["ours"]
+    assert response["saved"]["love_events"] == ours["love_events"]
+    assert response["media_default_all"] is (media_mode and no_op)
+    assert response["media_all_supported"] is (media_mode and no_op)
+    assert observed["newer"]["revision"] > response["saved"]["revision"]
+    stored = subject.EventSettingsState(tmp_path, catalog=producer, media_mode=media_mode).settings()
+    assert stored == observed["newer"] and stored != response["saved"]

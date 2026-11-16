@@ -529,3 +529,26 @@ def test_inferred_choice_and_ending_bonuses_never_change_real_present_affinity(g
     invoke(game,"Reset",loveId=EV)
     invoke(game,"Load",loveId=EV,slotNumber=1)
     assert user(game).loves[0].hiddenFavorability==167
+
+
+def test_media_default_event_remains_available_years_later_without_expiry_or_account_mutation(game, monkeypatch):
+    from idoly_local import event_settings
+    from test_event_settings import catalog
+    supported = catalog(); supported["events"] = [row for row in supported["events"] if row["id"] == EV]
+    monkeypatch.setattr(event_settings, "_catalog", lambda root, override=None: copy.deepcopy(supported))
+    root = game.master.parent
+    normal = event_settings.EventSettingsState(root)
+    normal.save(settings(EV), expected_revision=0)
+    before_schedule = (root / event_settings.FILENAME).read_bytes()
+    before = database(game.state)
+    game.love.settings = event_settings.freeze_event_settings(root, media_mode=True)
+    game.love.media_mode = True
+    for when in (NOW, NOW + 10 * 366 * 86400000):
+        game.clock[0] = when
+        info = invoke(game, "Title").loveInfos[0]
+        assert info.loveId == EV and info.type == 1 and info.startTime == 0 and info.endTime == 0
+        assert game.love.home_info()[1][0].endTime == 0
+    assert database(game.state) == before and not game.state.has_love_progress("player")
+    assert (root / event_settings.FILENAME).read_bytes() == before_schedule
+    assert not (root / event_settings.MEDIA_FILENAME).exists()
+    assert game.state.authenticated(game.token, "player")

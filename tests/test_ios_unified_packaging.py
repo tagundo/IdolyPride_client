@@ -373,3 +373,28 @@ def test_latest_generated_payload_pin_is_consumed_by_actual_host_validator(tmp_p
         out=tmp_path/"new.app"
         package.stage_app(root,nat,data,trans,out,manifest=manifest,web_root=web,server_data_upgrade_proof=receipt)
         assert (out/"LocalServer/payload-pin.json").read_bytes()==raw
+
+
+def test_fresh_korean_archive_is_used_without_rewriting_signed_source_data(tmp_path):
+    from idoly_local.ios_client_data import prepare_client_data
+    values, client_zip, descriptor, language, base_data = language_package_fixture(tmp_path, 'simulator')
+    raw = b'Fresh Korean original-aspect button pixels'
+    def refresh(contents):
+        value = json.loads(contents['manifest.json'])
+        member = 'ko/Data/resources.assets'
+        value['languages']['ko']['Data/resources.assets'] = {'bytes': len(raw), 'sha256': sha(raw), 'source': 'archive', 'member': member}
+        contents[member] = raw; contents['manifest.json'] = json.dumps(value).encode()
+    rewrite_language_archive(client_zip, descriptor, refresh)
+    root, nat, data, trans, source, replacement, manifest, web = values
+    out = tmp_path / 'PreparedFresh.app'
+    report = package.stage_app(root, nat, data, trans, out, manifest=manifest, web_root=web, base_ipa=source,
+        client_languages=client_zip, client_languages_metadata=descriptor)
+    assert report['base_Data']['files'] == len(base_data) - 1
+    assert not (out / 'Data/resources.assets').exists()
+    for name, value in base_data.items():
+        if name != 'Data/resources.assets': assert (out / name).read_bytes() == value
+    state = tmp_path / 'fresh-state'; state.mkdir()
+    result = prepare_client_data(out, state, 'ko')
+    bundle = Path(result['bundle_path'])
+    assert (bundle / 'Data/resources.assets').read_bytes() == raw
+    assert (bundle / 'Data/sharedassets0.assets').read_bytes() == base_data['Data/sharedassets0.assets']

@@ -97,8 +97,9 @@ def client_language_files(archive_path, descriptor_path, manifest):
             if key in manifest['inputs']:
                 require(source[field] == manifest['inputs'][key]['sha256'], 'Client-language source pin differs')
         expected = {'manifest.json': None}
-        for code in ('ja', 'en'):
-            for row in language['languages'][code].values(): expected[row['member']] = row
+        for code in ('ja', 'ko', 'en'):
+            for row in language['languages'][code].values():
+                if row['source'] == 'archive': expected[row['member']] = row
         infos = archive.infolist()
         require(len(infos) == len(expected) and {i.filename for i in infos} == set(expected), 'Client-language archive inventory differs')
         require(sum(i.file_size for i in infos) <= validator.MAX_EXPANDED, 'Client-language expanded capacity exceeded')
@@ -117,7 +118,7 @@ def client_language_files(archive_path, descriptor_path, manifest):
 def stage_base_data(base_ipa, output, language, manifest):
     require(base_ipa is not None, 'Simulator language preparation requires the pinned base IPA Data')
     verify_file(base_ipa, manifest['inputs']['base_ipa'])
-    wanted = {**language['common'], **language['languages']['ko']}
+    wanted = {**language['common'], **{name: row for name, row in language['languages']['ko'].items() if row['source'] == 'base'}}
     total = 0
     with ZipFile(base_ipa) as archive:
         infos = archive.infolist()
@@ -129,7 +130,7 @@ def stage_base_data(base_ipa, output, language, manifest):
         require(len(apps) == 1, 'Expected exactly one base app bundle')
         app = apps[0]
         actual = {i.filename[len(app):] for i in infos if i.filename.startswith(app + 'Data/') and not i.is_dir()}
-        require(actual == set(wanted), 'Simulator Data inventory differs from the client-language manifest')
+        require(actual == set(language['common']) | set(language['languages']['ko']), 'Simulator Data inventory differs from the client-language manifest')
         for name, row in sorted(wanted.items()):
             safe_name(name); info = archive.getinfo(app + name)
             require(info.file_size == row['bytes'], 'Simulator Data member size differs')
@@ -242,10 +243,11 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
             safe_name(info.filename.rstrip('/')); require(not info.flag_bits & 1 and (info.external_attr >> 16 & 0o170000) != 0o120000, 'Invalid original IPA member')
         matches = [i.filename[:-len('Info.plist')] for i in infos if i.filename.startswith('Payload/') and i.filename.endswith('.app/Info.plist') and i.filename.count('/') == 2]
         require(len(matches) == 1, 'Expected exactly one app bundle'); app = matches[0]
-        data_rows = {**proofs['client_languages']['manifest']['common'], **proofs['client_languages']['manifest']['languages']['ko']} if proofs['client_languages'] else {}
+        all_data_rows = {**proofs['client_languages']['manifest']['common'], **proofs['client_languages']['manifest']['languages']['ko']} if proofs['client_languages'] else {}
+        data_rows = {name: row for name, row in all_data_rows.items() if row.get('source', 'base') == 'base'}
         if data_rows:
             actual_data = {i.filename[len(app):] for i in infos if i.filename.startswith(app + 'Data/') and not i.is_dir()}
-            require(actual_data == set(data_rows), 'Base Data inventory differs from client-language manifest')
+            require(actual_data == set(all_data_rows), 'Base Data inventory differs from client-language manifest')
         require(source.getinfo(app + 'Info.plist').file_size <= 128 * 1024, 'Original Info.plist exceeds bound')
         info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion='156.9116',CFBundleDisplayName='아이프라 로컬',IdolyUnifiedLoopbackOrigin='http://127.0.0.1:8080')
         generated['Info.plist'] = plistlib.dumps(info,fmt=plistlib.FMT_BINARY)

@@ -32,18 +32,93 @@ def bounds(node):
     return None
 
 
+def visible_node(node, tree):
+    area = bounds(node)
+    if area is None or node.get("visible-to-user") == "false":
+        return False
+    center = ((area[0] + area[2]) // 2, (area[1] + area[3]) // 2)
+    parents = {child: parent for parent in tree.iter() for child in parent}
+    parent = parents.get(node)
+    while parent is not None:
+        if parent.get("visible-to-user") == "false":
+            return False
+        if "ScrollView" in parent.get("class", ""):
+            clip = bounds(parent)
+            if clip is None or not (clip[0] <= center[0] < clip[2] and clip[1] <= center[1] < clip[3]):
+                return False
+        parent = parents.get(parent)
+    return True
+
+
+def control_destination(description):
+    """Map stable production descriptions to visible category/panel controls."""
+    for prefix, destination in (("idoly.options.", ("server", "mode")),
+                                ("idoly.accounts.", ("users", "accounts")),
+                                ("idoly.official.", ("users", "official")),
+                                ("idoly.events.", ("content", "events"))):
+        if description.startswith(prefix):
+            return destination
+    return None
+
+
+def navigation_step(qa, tree, destination, state):
+    """Send at most one input through freshly observed native navigation.
+
+    The caller counts this observation in its original attempt budget. Old
+    single-page fixtures have no navigation controls and retain their path.
+    Never open panels by mutating app state or by tapping unseen coordinates.
+    """
+    if destination is None:
+        return False
+    category, panel = destination
+    navigation = [node for node in tree.iter("node")
+                  if node.get("content-desc", "").startswith("idoly.nav.") and visible_node(node, tree)]
+    if not navigation:
+        return False
+    wanted = [node for node in navigation if node.get("content-desc") == "idoly.nav." + category]
+    if len(wanted) != 1 or not bounds(wanted[0]) or wanted[0].get("enabled") != "true":
+        raise RuntimeError("Account QA expected one visible category control")
+    nav = wanted[0]
+    if nav.get("selected") != "true":
+        tap_node(qa, nav)
+        state["positioned"] = True
+        return True
+    headers = [node for node in tree.iter("node") if node.get("content-desc") == "idoly.panel." + panel and visible_node(node, tree)]
+    if len(headers) > 1:
+        raise RuntimeError("Account QA panel control is ambiguous")
+    if headers:
+        state["positioned"] = True
+        header = headers[0]
+        if header.get("selected") != "true":
+            if header.get("enabled") != "true":
+                return False
+            tap_node(qa, header)
+            return True
+    elif not state.get("positioned"):
+        # Clicking the current visible category resets its scroll position.
+        # Do this once only, then retain the caller's bounded observed scrolling.
+        tap_node(qa, nav)
+        state["positioned"] = True
+        return True
+    return False
+
+
 def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16, node_filter=None,
-         scroll_profile="default"):
+         scroll_profile="default", destination=None):
     if scroll_profile not in ("default", "event"):
         raise ValueError("Account QA settings scroll profile is invalid")
     divisor, duration = (2, "975") if scroll_profile == "event" else (3, "650")
+    navigation = {}
     for attempt in range(attempts):
         tree = qa.capture(stage + "-" + str(attempt))
-        matching = [node for node in tree.iter("node") if predicate(node) and bounds(node)
+        matching = [node for node in tree.iter("node") if predicate(node) and visible_node(node, tree)
                     and (node_filter is None or node_filter(node, tree))]
         usable = [node for node in matching if not enabled or node.get("enabled") == "true"]
         if usable:
             return usable[0]
+        if not matching and navigation_step(qa, tree, destination, navigation):
+            time.sleep(.25)
+            continue
         if matching or direction is None:
             time.sleep(.5)
             continue
@@ -80,7 +155,8 @@ def tap_node(qa, node):
 
 
 def tap(qa, description, stage, direction=None):
-    tap_node(qa, find(qa, lambda node: node.get("content-desc") == description, stage, direction))
+    tap_node(qa, find(qa, lambda node: node.get("content-desc") == description, stage, direction,
+                            destination=control_destination(description)))
 
 
 def positive(qa, stage):

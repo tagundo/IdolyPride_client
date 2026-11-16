@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build immutable language Data overlays from pinned, offline iOS clients.
 
-Only the two language-dependent Data members are stored for Japanese/English.
-The Korean client's common files and Korean overlays remain the signed base.
-No Unity code, fonts, SDK state, or game-time translation hook is rewritten.
+The Japanese/English overlays and freshly rebuilt Korean resources are stored
+before launch. Korean common fonts and metadata remain the verified signed base;
+a strict object comparison preserves every undeclared Korean resource object.
+No Unity code, SDK state, or game-time translation hook is rewritten.
 """
 from __future__ import annotations
 
@@ -14,6 +15,8 @@ import json
 import os
 from pathlib import Path
 import stat
+import struct
+import tempfile
 import sys
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
@@ -78,9 +81,181 @@ def _metadata_variant(raw, language):
     return result, proof
 
 
-def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_proof, report=None):
+def _exact(source, count):
+    _need(0 <= count <= MAX_FILE, "Serialized resource read exceeds its bound")
+    raw = bytearray()
+    while len(raw) < count:
+        block = source.read(min(CHUNK, count - len(raw)))
+        _need(bool(block), "Truncated serialized resource")
+        raw.extend(block)
+    return bytes(raw)
+
+
+def _skip(source, count):
+    _need(0 <= count <= MAX_FILE, "Serialized resource skip exceeds its bound")
+    while count:
+        block = _exact(source, min(CHUNK, count)); count -= len(block)
+
+
+def _build_source_pins():
+    names = ("tools/build_ios_client_languages.py", "src/idoly_local/static_ui_assets.py",
+             "src/idoly_local/static_ui_images.py", "src/idoly_local/static_ui_textures.py",
+             "src/idoly_local/ui_assets.py", "src/idoly_local/cdn_image_translation.py",
+             "client-presentation/images/korean-static-sprites-v1.json",
+             "client-presentation/images/korean-static-sprites-v2.json",
+             "client-presentation/images/korean-static-textures-v1.json",
+             "client-presentation/translations/static-ui-v1.json")
+    return {name: _hash(ROOT / name)[0] for name in names}
+
+
+def _resource_index(source):
+    """Read bounded original v22 metadata, retaining no bulk object payloads."""
+    header = _exact(source, 48)
+    _need(header[:20] == struct.pack(">4I", 0, 0, 22, 0) + b"\0" * 4,
+          "Unexpected resource serialization header")
+    metadata_size, size, offset, unknown = struct.unpack_from(">IQQQ", header, 20)
+    _need(unknown == 0 and 48 + metadata_size <= offset <= 12 * 1024 * 1024
+          and offset <= size <= MAX_FILE, "Resource metadata exceeds its bound")
+    metadata = header + _exact(source, offset - 48)
+    at = metadata.index(b"\0", 48, 80) + 1
+    _need(metadata[48:at] == b"2022.3.57f1\0", "Resource Unity version differs")
+    at += 4
+    _need(metadata[at] == 0, "Expected stripped original resource type trees")
+    count = struct.unpack_from("<i", metadata, at + 1)[0]; at += 5
+    _need(0 < count <= 16384, "Resource type count exceeds its bound")
+    types = []
+    for _ in range(count):
+        _need(at + 23 <= len(metadata), "Truncated resource type")
+        cls = struct.unpack_from("<i", metadata, at)[0]
+        length = 39 if cls == 114 else 23
+        _need(at + length <= len(metadata), "Truncated resource script type")
+        types.append((cls, metadata[at:at + length])); at += length
+    count = struct.unpack_from("<i", metadata, at)[0]; at = (at + 7) & ~3
+    _need(0 < count <= 500000 and at + 24 * count <= 48 + metadata_size,
+          "Resource object table exceeds its bound")
+    last, previous_end, physical_order = 0, 0, True
+    for number in range(count):
+        path, relative, length, kind = struct.unpack_from("<qQIi", metadata, at + number * 24)
+        _need(last < path and 0 <= kind < len(types) and relative + length <= size - offset,
+              "Invalid resource object extent")
+        physical_order = physical_order and relative >= previous_end
+        last, previous_end = path, relative + length
+    order = None
+    if not physical_order:
+        from array import array
+        # Keep only compact record indexes, not 419k Python object tuples.
+        order = array("I", sorted(range(count), key=lambda n: struct.unpack_from("<Q", metadata, at + n * 24 + 8)[0]))
+        previous_end = 0
+        for number in order:
+            _, relative, length, _ = struct.unpack_from("<qQIi", metadata, at + number * 24)
+            _need(relative >= previous_end, "Resource objects overlap"); previous_end = relative + length
+    return {"metadata": metadata, "table": at, "types": types, "count": count,
+            "order": order, "offset": offset, "bytes": size}
+
+
+def _resource_rows(index):
+    order = index["order"] if index["order"] is not None else range(index["count"])
+    for number in order:
+        yield struct.unpack_from("<qQIi", index["metadata"], index["table"] + number * 24)
+
+
+def _korean_csv(base):
+    """Recover reviewed CSV bytes only from the exact pinned Korean donor."""
+    from idoly_local.ui_assets import ASSETS, ORIGINAL_CSV_SHA256, validate_csv
+    profile = ASSETS["ios"]
+    with base.open(APP + RESOURCES) as incoming:
+        index = _resource_index(incoming)
+        row = next((r for r in _resource_rows(index) if r[0] == profile["target_path_id"]), None)
+        _need(row is not None and index["types"][row[3]][0] == 49 and row[2] <= 1024 * 1024,
+              "Korean donor UI TextAsset is missing")
+        _skip(incoming, row[1])
+        raw = _exact(incoming, row[2])
+    name_size = struct.unpack_from("<I", raw)[0]
+    _need(name_size == len(profile["target_name"]) and raw[4:4 + name_size] == profile["target_name"].encode(),
+          "Korean donor TextAsset identity differs")
+    at = (4 + name_size + 3) & ~3
+    size = struct.unpack_from("<I", raw, at)[0]; at += 4
+    _need(0 < size <= 1024 * 1024 and at + size <= len(raw), "Korean donor UI text exceeds its bound")
+    csv = raw[at:at + size]; identity = validate_csv(csv)
+    proof = {"language": "ko", "input_sha256": ORIGINAL_CSV_SHA256,
+             "output_sha256": identity["sha256"], "bytes": len(csv), "source_ui_keys": 4199,
+             "donor": {"base_ipa_sha256": BASE_SHA256, "member": APP + RESOURCES,
+                       "path_id": row[0], "object_sha256": hashlib.sha256(raw).hexdigest()}}
+    return csv, proof
+
+
+def _compare_korean_resources(original, prepared, image_proof):
+    """Permit only the declared button Sprite/private-Texture pairs to change."""
+    from idoly_local.static_ui_images import FIXED_LOVE_TEXT, TEXT_LAYOUT_POLICY
+    changed = [row for row in image_proof["sprites"] if row["name"] in FIXED_LOVE_TEXT]
+    _need(len(changed) == len(FIXED_LOVE_TEXT)
+          and {row["name"] for row in changed} == set(FIXED_LOVE_TEXT)
+          and all(row["layout_policy"] == TEXT_LAYOUT_POLICY and row["readback_pixel_exact"] is True
+                  and row["layout_size"] == row["original_layout_size"] for row in changed),
+          "Korean button geometry proof is incomplete")
+    allowed = {row["sprite_path_id"]: 213 for row in changed}
+    allowed.update({row["private_texture_path_id"]: 28 for row in changed})
+    _need(len(allowed) == 2 * len(FIXED_LOVE_TEXT), "Korean button object IDs overlap")
+    before, after = _resource_index(original), _resource_index(prepared)
+    _need(before["types"] == after["types"] and before["count"] == after["count"]
+          and before["metadata"][:24] == after["metadata"][:24]
+          and before["metadata"][32:before["table"]] == after["metadata"][32:after["table"]]
+          and before["metadata"][before["table"] + 24 * before["count"]:]
+              == after["metadata"][after["table"] + 24 * after["count"]:],
+          "Korean resource graph outside the declared objects differs")
+    positions = [before["offset"], after["offset"]]
+    differences, preserved = [], 0
+    for old, new in zip(_resource_rows(before), _resource_rows(after)):
+        _need(old[0] == new[0] and old[3] == new[3], "Korean resource object order or type changed")
+        path, _, _, kind = old
+        hashes = []
+        for number, (stream, index, row) in enumerate(((original, before, old), (prepared, after, new))):
+            _skip(stream, index["offset"] + row[1] - positions[number])
+            digest = hashlib.sha256(); remaining = row[2]
+            while remaining:
+                block = _exact(stream, min(CHUNK, remaining)); digest.update(block); remaining -= len(block)
+            positions[number] = index["offset"] + row[1] + row[2]
+            hashes.append(digest.hexdigest())
+        if path in allowed:
+            _need(before["types"][kind][0] == allowed[path], "Declared Korean object has a different class")
+            differences.append({"path_id": path, "class_id": allowed[path], "before_sha256": hashes[0],
+                                "after_sha256": hashes[1], "changed": hashes[0] != hashes[1]})
+        else:
+            _need(old[2] == new[2] and hashes[0] == hashes[1],
+                  "An undeclared Korean UI, font, story or other resource object changed")
+            preserved += 1
+    _need({row["path_id"] for row in differences} == set(allowed), "Declared Korean object is missing")
+    return {"declared_object_differences": differences, "all_other_objects_byte_identical": True,
+            "unchanged_object_count": preserved, "type_graph_and_external_references_unchanged": True}
+
+
+def _korean_resources(stock, base, destination, image_dir):
+    from idoly_local.static_ui_assets import patch_ios_stream
+    from idoly_local.static_ui_images import ios_patches
+    from idoly_local.static_ui_textures import ios_patches as direct_patches
+    csv, csv_proof = _korean_csv(base)
+    replacements, appends, images = ios_patches(stock, language="ko", image_dir=image_dir)
+    direct, direct_proof = direct_patches(stock, language="ko", image_dir=image_dir)
+    _need(not replacements.keys() & direct.keys(), "Korean sprite and direct texture targets overlap")
+    replacements.update(direct); images["direct_textures"] = direct_proof
+    with tempfile.TemporaryFile(mode="w+b") as staged:
+        with stock.open(APP + RESOURCES) as incoming:
+            proof = patch_ios_stream(incoming, staged, language="ko", ui_csv=csv, ui_proof=csv_proof,
+                                     extra_replacements=replacements, append_objects=appends, image_proof=images)
+        staged.seek(0)
+        with base.open(APP + RESOURCES) as original:
+            graph = _compare_korean_resources(original, staged, images)
+        staged.seek(0); identity = _stream(staged, destination)
+    _need(identity == {"bytes": proof["output_asset_bytes"], "sha256": proof["output_asset_sha256"]},
+          "Korean prepared resource bytes differ")
+    return identity, {"ui_translation": csv_proof, "static_images": images,
+                      "output": identity, "original_stock_rebuilt": True, **graph}
+
+
+def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_proof, image_dir=None, report=None):
     from idoly_local.ui_assets import load_package_inputs
     from idoly_local.static_ui_assets import patch_ios_stream
+    _need(image_dir is not None, "Fresh Korean resource generation requires explicit pinned image inputs")
     stock_ipa, base_ipa, output = map(Path, (stock_ipa, base_ipa, output))
     descriptor = output.with_suffix(".json")
     report = Path(report) if report else output.with_suffix(".report.json")
@@ -98,6 +273,7 @@ def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_
     partial = output.with_suffix(".zip.part")
     _need(not partial.exists() and not partial.is_symlink(), "A prior language partial was preserved")
     proofs = {}
+    build_sources = _build_source_pins()
     try:
         with ZipFile(stock_ipa) as stock, ZipFile(base_ipa) as base, ZipFile(partial, "x", compression=ZIP_DEFLATED, compresslevel=6) as archive:
             for source in (stock, base):
@@ -117,6 +293,11 @@ def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_
                 else:
                     manifest["common"][name] = row
             _need(manifest["languages"]["ko"].keys() == OVERLAYS, "Korean Data overlays missing")
+            member = "ko/" + RESOURCES
+            with archive.open(_entry(member), "w") as destination:
+                row, korean_proof = _korean_resources(stock, base, destination, image_dir)
+            manifest["languages"]["ko"][RESOURCES] = {**row, "source": "archive", "member": member}
+            proofs["korean_resources"] = korean_proof
             for language in ("ja", "en"):
                 member = language + "/" + RESOURCES
                 with stock.open(APP + RESOURCES) as incoming, archive.open(_entry(member), "w") as destination:
@@ -149,18 +330,22 @@ def build_client_languages(stock_ipa, base_ipa, output, *, english_csv, english_
         with ZipFile(partial) as check:
             _need(check.testzip() is None, "Language package CRC differs")
             _need(json.loads(check.read("manifest.json")) == manifest, "Language manifest roundtrip differs")
-            for language in ("ja", "en"):
+            for language in ("ja", "ko", "en"):
                 for row in manifest["languages"][language].values():
+                    if row["source"] != "archive":
+                        continue
                     with check.open(row["member"]) as incoming:
                         identity = _stream(incoming)
                     _need(identity == {k: row[k] for k in ("bytes", "sha256")}, "Language output member differs")
         _need(_hash(stock_ipa) == stock_identity and _hash(base_ipa) == base_identity, "Language producer inputs changed")
+        _need(_build_source_pins() == build_sources, "Language build sources changed")
         digest, size = _hash(partial)
         metadata = {"schema": 1, "bytes": size, "sha256": digest}
         receipt = {"schema": 1, "policy": POLICY, "source": manifest["source"], "package": metadata,
-                   "common_files": len(manifest["common"]), "language_members": 2,
+                   "common_files": len(manifest["common"]), "language_members": 3, "korean_resources_refreshed": True,
                    "signed_app_modified_at_runtime": False, "runtime_string_translation": False,
-                   "manifest": manifest, "proofs": proofs}
+                   "manifest": manifest, "proofs": proofs, "source_component_sha256": build_sources,
+                   "source_commit": os.environ.get("GITHUB_SHA")}
         _need(not any(p.exists() or p.is_symlink() for p in (output, descriptor, report)), "Language output appeared during build")
         # These files share a directory/filesystem. Publishing with a hard
         # link gives exclusive creation even if a destination appears late.
@@ -183,10 +368,11 @@ def main():
     parser.add_argument("--english-csv", type=Path, required=True)
     parser.add_argument("--english-proof", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--image-dir", type=Path, required=True)
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     receipt = build_client_languages(args.stock_ipa, args.base_ipa, args.output,
-                                    english_csv=args.english_csv, english_proof=args.english_proof, report=args.report)
+                                    english_csv=args.english_csv, english_proof=args.english_proof, image_dir=args.image_dir, report=args.report)
     print(json.dumps({"status": "PASS_PREBUILT_CLIENT_LANGUAGES", "package": receipt["package"],
                       "common_files": receipt["common_files"]}))
 

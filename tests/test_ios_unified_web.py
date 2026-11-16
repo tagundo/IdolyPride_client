@@ -27,11 +27,13 @@ class Target {
 class Element extends Target {
   constructor(tag) {
     super(); this.textContent = ''; this.value = ''; this.checked = /\bchecked\b/.test(tag);
-    this.disabled = /\bdisabled\b/.test(tag); this.hidden = /\bhidden\b/.test(tag); this.dataset = {};
+    this.disabled = /\bdisabled\b/.test(tag); this.hidden = /\bhidden\b/.test(tag); this.open = /\bopen\b/.test(tag); this.dataset = {}; this.attributes = {};
     this.type = (tag.match(/\btype="([^"]+)"/) || [,''])[1];
   }
   set innerHTML(_) { throw new Error('Untrusted data reached an HTML sink'); }
-  removeAttribute(name) { delete this[name]; }
+  setAttribute(name,value) { this.attributes[name]=String(value); }
+  getAttribute(name) { return this.attributes[name] === undefined ? null : this.attributes[name]; }
+  removeAttribute(name) { delete this[name]; delete this.attributes[name]; }
   replaceChildren(...nodes) { this.children=nodes; }
 }
 function environment(hidden = false) {
@@ -1257,3 +1259,80 @@ assert.equal(env.elements.get('language').value,'ja');
 env.respond(ack,{launched:SUCCEEDS}); await flush();
 app.dispose(); assert.equal(env.tasks.size,0);
 """)
+
+
+def test_categories_defaults_and_local_fold_preferences_do_not_save_server_settings():
+    run_js(r"""
+const env=environment(),store=new Map();env.scope.localStorage={getItem:key=>store.get(key)||null,setItem:(key,value)=>store.set(key,value)};
+const app=api.createSettingsApp(env.scope,env.document,env.timers);
+assert.equal(env.elements.get('category-panel-console').hidden,false);
+for(const name of ['server','users','content','graphics'])assert.equal(env.elements.get('category-panel-'+name).hidden,true);
+for(const name of ['diagnostics','accounts','official','events','resources'])assert.equal(env.elements.get('panel-'+name).open,false);
+assert.equal(env.elements.get('panel-graphics').open,true);
+env.elements.get('category-graphics').fire('click');assert.equal(env.elements.get('category-panel-graphics').hidden,false);
+assert.equal(env.elements.get('category-panel-console').hidden,true);
+assert.equal(env.elements.get('category-graphics').getAttribute('aria-selected'),'true');
+env.elements.get('panel-graphics').open=false;env.elements.get('panel-graphics').fire('toggle');
+assert.equal(env.posted.length,1,'Navigation/folding is not a server mutation');app.dispose();
+const reopened=environment();reopened.scope.localStorage=env.scope.localStorage;
+const again=api.createSettingsApp(reopened.scope,reopened.document,reopened.timers);
+assert.equal(reopened.elements.get('category-panel-graphics').hidden,false);assert.equal(reopened.elements.get('panel-graphics').open,false);again.dispose();
+""")
+
+
+def test_layout_storage_is_optional_and_only_known_categories_and_boolean_panel_preferences_apply():
+    run_js(r"""
+const env=environment();env.scope.localStorage={getItem:()=>JSON.stringify({schema:1,category:'unknown',panels:{graphics:'false',accounts:true,unknown:true}}),setItem:()=>{throw new Error('unsupported')}};
+const app=api.createSettingsApp(env.scope,env.document,env.timers);
+assert.equal(env.elements.get('category-panel-console').hidden,false);assert.equal(env.elements.get('panel-graphics').open,true);assert.equal(env.elements.get('panel-accounts').open,true);
+assert.equal(env.posted.length,1);app.dispose();
+""")
+
+
+def test_real_markup_groups_checks_with_diagnostics_and_provides_narrow_and_wide_navigation():
+    from html.parser import HTMLParser
+    class Structure(HTMLParser):
+        def __init__(self): super().__init__(); self.ids={}; self.stack=[]
+        def handle_starttag(self,tag,attrs):
+            values=dict(attrs)
+            if values.get('id'): self.ids[values['id']]=(tag,values,tuple(self.stack))
+            if tag not in {'meta','link','input','br','hr','img'}: self.stack.append((tag,values.get('id')))
+        def handle_endtag(self,tag):
+            if self.stack and self.stack[-1][0]==tag:self.stack.pop()
+    parser=Structure();parser.feed((WEB/'index.html').read_text())
+    for name in ('startup-checks','history-summary','diagnostics','diagnostics-copy'):
+        assert ('details','panel-diagnostics') in parser.ids[name][2]
+    for name in ('diagnostics','accounts','official','events','resources'):
+        assert parser.ids['panel-'+name][0]=='details' and 'open' not in parser.ids['panel-'+name][1]
+    assert 'open' in parser.ids['panel-graphics'][1]
+    assert parser.ids['category-console'][1]['role']=='tab'
+    assert all('category-panel-'+name in parser.ids for name in ('console','server','users','content','graphics'))
+    css=(WEB/'styles.css').read_text()
+    assert '.category-navigation' in css and 'orientation: landscape' in css
+    assert 'grid-template-columns: 11rem minmax(0, 1fr)' in css
+    assert 'overflow-x: auto' in css and 'min-height: 2.8rem' in css
+
+
+def test_long_help_is_closed_and_action_consequences_remain_visible():
+    from html.parser import HTMLParser
+    class Help(HTMLParser):
+        def __init__(self):super().__init__();self.stack=[];self.long=[];self.help_ids=[];self.important=[];self.in_p=None
+        def handle_starttag(self,tag,attrs):
+            values=dict(attrs)
+            if tag=='details' and 'help-details' in values.get('class','').split():
+                assert 'open' not in values;self.help_ids.append(values['id'])
+            if tag=='p':self.in_p=[values,'',any('help-details' in x[1].get('class','').split() for x in self.stack)]
+            if tag not in {'meta','link','input','br','hr','img'}:self.stack.append((tag,values))
+        def handle_data(self,data):
+            if self.in_p:self.in_p[1]+=data
+        def handle_endtag(self,tag):
+            if tag=='p' and self.in_p:
+                values,text,helped=self.in_p
+                if values.get('class')=='hint' and not values.get('id') and len(text)>=35:self.long.append(helped)
+                if values.get('class')=='hint important':self.important.append((text,helped))
+                self.in_p=None
+            if self.stack and self.stack[-1][0]==tag:self.stack.pop()
+    parser=Help();parser.feed((WEB/'index.html').read_text())
+    assert len(parser.help_ids)>=6 and parser.long and all(parser.long)
+    assert len(parser.important)==2 and all(not hidden for _,hidden in parser.important)
+    assert all(len(text)<=50 for text,_ in parser.important)

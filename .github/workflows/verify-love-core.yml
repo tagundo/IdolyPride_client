@@ -37,6 +37,29 @@ jobs:
           node-version: '22'
       - name: Install locked Python dependencies
         run: uv sync --locked --all-extras --python 3.12
+      - name: Prepare pinned browser outside project dependencies
+        timeout-minutes: 5
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/idoly-layout-browsers
+        run: |
+          python3 -m venv "$RUNNER_TEMP/idoly-layout-python"
+          "$RUNNER_TEMP/idoly-layout-python/bin/python" -m pip install --disable-pip-version-check playwright==1.56.0 pyee==13.0.0 greenlet==3.2.4
+          "$RUNNER_TEMP/idoly-layout-python/bin/python" -m playwright install --with-deps chromium
+      - name: Observe actual settings layout at portrait landscape and desktop sizes
+        timeout-minutes: 3
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/idoly-layout-browsers
+        run: >-
+          "$RUNNER_TEMP/idoly-layout-python/bin/python" tools/check_settings_layout.py
+          --output "$RUNNER_TEMP/idoly-settings-layout"
+      - name: Keep bounded settings layout observations
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: settings-layout-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-settings-layout
+          if-no-files-found: warn
+          retention-days: 3
       - name: Prepare actual pinned 6.1.1 protocol
         env:
           GH_TOKEN: ${{ github.token }}
@@ -94,6 +117,9 @@ jobs:
         # account authentication, native build, or public release is performed.
         run: |
           tests=(
+            tests/test_ios_unified_probe_navigation.py
+            tests/test_android_event_selection_queue.py
+            tests/test_ios_unified_web.py
             tests/test_love.py
             tests/test_love_application.py
             tests/test_story_application.py

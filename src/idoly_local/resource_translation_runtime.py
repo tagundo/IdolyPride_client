@@ -6,6 +6,7 @@ Only a small public-data fingerprint and revision are persisted, never a player.
 """
 from __future__ import annotations
 
+from collections import OrderedDict
 import hashlib
 import json
 import os
@@ -23,6 +24,29 @@ from .octo_manifest import Database
 from .resource_translation import load_resource_translation
 
 _LOCK = threading.Lock()
+# Exact immutable wire results only, never parsed mutable databases or players.
+_REVISION_CACHE = OrderedDict()
+_REVISION_CACHE_BYTES = 16 * 1024 * 1024
+_REVISION_CACHE_ENTRIES = 4
+
+
+def _revision_key(path, fingerprint, preserve_original, sdk_identity_compat, previous):
+    if type(preserve_original) is not bool:
+        return None
+    parser = Database.FromString
+    return (str(path.absolute()), Database, getattr(parser, "__func__", parser), fingerprint,
+            preserve_original, sdk_identity_compat,
+            None if previous is None else (previous["fingerprint"], previous["revision"]))
+
+
+def _remember_revision(key, result):
+    if key is None or type(result[0]) is not bytes or len(result[0]) > _REVISION_CACHE_BYTES:
+        return
+    _REVISION_CACHE[key] = result
+    _REVISION_CACHE.move_to_end(key)
+    while (len(_REVISION_CACHE) > _REVISION_CACHE_ENTRIES
+           or sum(len(row[0]) for row in _REVISION_CACHE.values()) > _REVISION_CACHE_BYTES):
+        _REVISION_CACHE.popitem(last=False)
 
 
 def _pairs(items):
@@ -62,7 +86,6 @@ def pin_manifest_revision(raw, state_path, *, language, preserve_original=False,
         raise ValueError("Unknown resource language")
     if type(sdk_identity_compat) is not bool:
         raise ValueError("SDK identity compatibility must be a boolean")
-    database = Database.FromString(raw)
     identity = hashlib.sha256()
     if sdk_identity_compat:
         # A cached revision from the old, overlong SDK object names must receive
@@ -72,12 +95,29 @@ def pin_manifest_revision(raw, state_path, *, language, preserve_original=False,
     identity.update(b"\0")
     identity.update(raw)
     fingerprint = identity.hexdigest()
-    minimum_revision = database.revision + int(sdk_identity_compat)
     state_path = Path(state_path)
     with _LOCK:
         previous = _state(state_path)
+        key = _revision_key(state_path, fingerprint, preserve_original, sdk_identity_compat, previous) if type(raw) is bytes else None
+        cached = _REVISION_CACHE.get(key) if key is not None else None
+        if cached is not None:
+            _REVISION_CACHE.move_to_end(key)
+            return cached
+    # Parsing stays outside the lock. A concurrent writer is re-read below;
+    # cached bytes never excuse an invalid or changed on-disk revision record.
+    database = Database.FromString(raw)
+    minimum_revision = database.revision + int(sdk_identity_compat)
+    with _LOCK:
+        previous = _state(state_path)
+        key = _revision_key(state_path, fingerprint, preserve_original, sdk_identity_compat, previous) if type(raw) is bytes else None
+        cached = _REVISION_CACHE.get(key) if key is not None else None
+        if cached is not None:
+            _REVISION_CACHE.move_to_end(key)
+            return cached
         if previous is None and preserve_original and not sdk_identity_compat:
-            return raw, False
+            result = (raw, False)
+            _remember_revision(key, result)
+            return result
         revision = (max(minimum_revision, previous["revision"])
                     if previous and previous["fingerprint"] == fingerprint
                     else max(minimum_revision, previous["revision"] + 1 if previous else minimum_revision))
@@ -102,7 +142,12 @@ def pin_manifest_revision(raw, state_path, *, language, preserve_original=False,
             for row in rows:
                 if row.state != 4:
                     row.state = 2
-        return database.SerializeToString(deterministic=True), True
+        result = (database.SerializeToString(deterministic=True), True)
+        # Only a committed-state key can authorize this result. Remembering
+        # the previous key would skip recreating a removed/restored state file.
+        committed = _revision_key(state_path, fingerprint, preserve_original, sdk_identity_compat, state) if type(raw) is bytes else None
+        _remember_revision(committed, result)
+        return result
 
 
 def select_resource_translation(original, data_dir, cache_root, *, language, platform):

@@ -84,11 +84,29 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private JSONObject eventsSnapshot = new JSONObject(), eventsDraft;
     private org.json.JSONArray eventsCatalog = new org.json.JSONArray();
+    private static final class EventUiState {
+        final boolean media;
+        final EventSelectionDraft selection;
+        JSONObject snapshot = new JSONObject();
+        String error = "";
+        int conflictRetries;
+        boolean refresh = true, blocked;
+        EventUiState(boolean media) { this.media = media; selection = new EventSelectionDraft(media); }
+    }
+    private final EventUiState normalEvents = new EventUiState(false), mediaEvents = new EventUiState(true);
+    private LinearLayout eventsChoices, eventsSchedule;
+    private final java.util.LinkedHashMap<String, CheckBox> eventChecks = new java.util.LinkedHashMap<>();
+    private String eventsCatalogKey;
+    private EventUiState eventsRequestState;
+    private int eventsBusyRetries;
+    private boolean startAfterEventsSave;
+    private Button eventsAll;
+    private TextView eventsModeNotice;
     private Spinner eventsPicker;
     private CheckBox eventsEnabled;
     private Button eventsStart, eventsEnd, eventsOff, eventsReload;
     private TextView eventsSummary, eventsSelected, eventsNotice;
-    private String eventsSelectedId = "", eventsError = "", eventsRenderedKey;
+    private String eventsSelectedId = "", eventsError = "";
     private boolean eventsRequest, eventsSaving, eventsLoading, eventsUnsaved, eventsLoaded;
     private android.app.Dialog eventsDialog;
 
@@ -156,6 +174,84 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
     };
 
+    private final java.util.LinkedHashMap<String, LinearLayout> categoryPages = new java.util.LinkedHashMap<>();
+    private final java.util.LinkedHashMap<String, Button> categoryButtons = new java.util.LinkedHashMap<>();
+    private final java.util.HashMap<String, LinearLayout[]> categoryColumns = new java.util.HashMap<>();
+    private final java.util.HashMap<String, Integer> categoryPositions = new java.util.HashMap<>();
+    private ScrollView settingsScroll;
+    private String selectedCategory = "console";
+    private boolean wideSettings, splitSettings;
+
+    private LinearLayout category(LinearLayout parent, String key) {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(splitSettings && !"console".equals(key) ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        parent.addView(page, new LinearLayout.LayoutParams(-1, -2));
+        categoryPages.put(key, page);
+        if (splitSettings && !"console".equals(key)) {
+            LinearLayout[] columns = new LinearLayout[2];
+            for (int index = 0; index < 2; index++) {
+                columns[index] = new LinearLayout(this); columns[index].setOrientation(LinearLayout.VERTICAL);
+                LinearLayout.LayoutParams placement = new LinearLayout.LayoutParams(0, -2, 1);
+                placement.setMargins(index == 0 ? 0 : dp(8), 0, index == 0 ? dp(8) : 0, 0);
+                page.addView(columns[index], placement);
+            }
+            categoryColumns.put(key, columns);
+        }
+        return page;
+    }
+
+    private LinearLayout categoryParent(String key) {
+        LinearLayout[] columns = categoryColumns.get(key);
+        if (columns == null) return categoryPages.get(key);
+        int position = categoryPositions.containsKey(key) ? categoryPositions.get(key) : 0;
+        categoryPositions.put(key, position + 1); return columns[position % columns.length];
+    }
+
+    private void showCategory(String key) {
+        if (!categoryPages.containsKey(key)) key = "console";
+        selectedCategory = key;
+        for (java.util.Map.Entry<String, LinearLayout> entry : categoryPages.entrySet())
+            entry.getValue().setVisibility(key.equals(entry.getKey()) ? View.VISIBLE : View.GONE);
+        for (java.util.Map.Entry<String, Button> entry : categoryButtons.entrySet()) {
+            boolean selected = key.equals(entry.getKey()); Button control = entry.getValue();
+            control.setSelected(selected); control.setTextColor(selected ? 0xffffffff : TEXT_PRIMARY);
+            control.setBackgroundTintList(ColorStateList.valueOf(selected ? ACCENT : CONTROL_BACKGROUND));
+        }
+        if (settingsScroll != null) settingsScroll.smoothScrollTo(0, 0);
+    }
+
+    private void addCategoryButton(LinearLayout navigation, String key, int title) {
+        Button control = button(title); control.setContentDescription("idoly.nav." + key);
+        control.setMinWidth(0); control.setMinimumWidth(0); control.setMaxLines(2);
+        control.setPadding(dp(3), dp(8), dp(3), dp(8));
+        navigation.addView(control, wideSettings ? new LinearLayout.LayoutParams(-1, -2)
+                : new LinearLayout.LayoutParams(0, -2, 1));
+        categoryButtons.put(key, control); control.setOnClickListener(view -> showCategory(key));
+    }
+
+    private LinearLayout panel(LinearLayout parent, int title, String key, boolean initiallyOpen) {
+        LinearLayout frame = card(parent, 0);
+        Button heading = button(title); heading.setContentDescription("idoly.panel." + key);
+        heading.setGravity(android.view.Gravity.START | android.view.Gravity.CENTER_VERTICAL);
+        frame.addView(heading, new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout contents = new LinearLayout(this); contents.setOrientation(LinearLayout.VERTICAL);
+        contents.setPadding(0, dp(10), 0, 0); frame.addView(contents, new LinearLayout.LayoutParams(-1, -2));
+        boolean expanded = getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getBoolean("panel_open_" + key, initiallyOpen);
+        setPanelExpanded(heading, contents, title, expanded);
+        heading.setOnClickListener(view -> {
+            boolean open = contents.getVisibility() != View.VISIBLE;
+            setPanelExpanded(heading, contents, title, open);
+            getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putBoolean("panel_open_" + key, open).apply();
+        });
+        return contents;
+    }
+
+    private void setPanelExpanded(Button heading, LinearLayout contents, int title, boolean open) {
+        heading.setText(getString(title) + (open ? "  ▴" : "  ▾")); heading.setSelected(open);
+        contents.setVisibility(open ? View.VISIBLE : View.GONE);
+        if (Build.VERSION.SDK_INT >= 30) heading.setStateDescription(getString(open ? R.string.panel_expanded : R.string.panel_collapsed));
+    }
+
     private static final int PAGE_BACKGROUND = 0xfff3f5fc;
     private static final int CARD_BACKGROUND = 0xffffffff;
     private static final int STATUS_BACKGROUND = 0xffe9eefc;
@@ -191,6 +287,21 @@ public final class MainActivity extends Activity implements ServerService.Observ
         parent.addView(result, placement);
         if (title != 0) result.addView(sectionTitle(title));
         return result;
+    }
+
+    private void addHelp(LinearLayout body, int title, int... details) {
+        Button help = button(R.string.help_details);
+        help.setContentDescription(getString(R.string.help_for, getString(title)));
+        help.setOnClickListener(view -> {
+            StringBuilder message = new StringBuilder();
+            for (int detail : details) {
+                if (message.length() > 0) message.append("\n\n");
+                message.append(getString(detail));
+            }
+            new AlertDialog.Builder(this).setTitle(title).setMessage(message.toString())
+                    .setPositiveButton(android.R.string.ok, null).show();
+        });
+        body.addView(help, new LinearLayout.LayoutParams(-1, -2));
     }
 
     private void primaryButton(Button control) {
@@ -262,17 +373,17 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 officialAppliedAccount = accountPayload("profile", importedProfile, "revision", importedRevision);
             officialWarnings = savedInstanceState.getInt("official_local_warnings", 0) & 3;
             eventsSelectedId = savedInstanceState.getString("events_selected_id", "");
-            String eventDraft = savedInstanceState.getString("events_unsaved_draft");
-            if (eventDraft != null && eventDraft.length() <= 32768) try {
-                eventsDraft = new JSONObject(eventDraft); eventsUnsaved = true;
-                eventsError = savedInstanceState.getString("events_error", "event_settings_io");
-            } catch (org.json.JSONException ignored) { eventsDraft = null; eventsUnsaved = false; }
+            restoreEventEdits(savedInstanceState, normalEvents);
+            restoreEventEdits(savedInstanceState, mediaEvents);
         }
         getWindow().setStatusBarColor(PAGE_BACKGROUND);
         getWindow().setNavigationBarColor(PAGE_BACKGROUND);
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
                 | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         boolean compact = getResources().getConfiguration().screenHeightDp < 520;
+        wideSettings = getResources().getConfiguration().screenWidthDp >= 760;
+        splitSettings = getResources().getConfiguration().screenWidthDp >= 1000;
+        if (savedInstanceState != null) selectedCategory = savedInstanceState.getString("settings_category", "console");
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(16), dp(compact ? 8 : 12), dp(16), dp(8));
@@ -281,10 +392,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         heading.setText(getString(R.string.app_name) + "  " + BuildConfig.VERSION_NAME);
         heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         content.addView(heading);
-        TextView description = text(R.string.server_description, 16, TEXT_MUTED);
-        description.setPadding(0, dp(4), 0, dp(8));
-        description.setVisibility(compact ? View.GONE : View.VISIBLE);
-        content.addView(description);
+
 
         status = text(R.string.status_stopped, 21, TEXT_PRIMARY);
         status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -306,10 +414,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         LinearLayout.LayoutParams otherHalf = new LinearLayout.LayoutParams(0, -2, 1);
         otherHalf.setMargins(dp(4), 0, 0, 0);
         controls.addView(stop, otherHalf);
-        content.addView(controls);
         Button launch = button(R.string.launch_diagnostic_client);
         primaryButton(launch);
-        content.addView(launch, new LinearLayout.LayoutParams(-1, -2));
+        if (wideSettings || compact) {
+            controls.addView(launch, new LinearLayout.LayoutParams(0, -2, 1)); content.addView(controls);
+        } else {
+            content.addView(controls); content.addView(launch, new LinearLayout.LayoutParams(-1, -2));
+        }
 
         // The settings scroll independently; the single game action stays visible.
         LinearLayout body = new LinearLayout(this);
@@ -318,33 +429,36 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView automatic = text(R.string.settings_automatic_notice, 16, TEXT_MUTED);
         automatic.setPadding(dp(2), 0, dp(2), dp(12));
         body.addView(automatic);
-        LinearLayout modeCard = card(body, R.string.mode_section_title);
+        category(body, "console"); category(body, "server"); category(body, "users");
+        category(body, "content"); category(body, "graphics");
+        categoryPages.get("console").addView(text(R.string.console_notice, 16, TEXT_MUTED));
+        LinearLayout consoleCard = panel(categoryParent("console"), R.string.console_panel_title, "checks", false);
+        addServerChecksControls(consoleCard);
+        LinearLayout modeCard = panel(categoryParent("server"), R.string.mode_section_title, "mode", true);
         mediaMode = new CheckBox(this);
         mediaMode.setText(R.string.media_mode);
+        mediaMode.setContentDescription("idoly.options.media-mode");
         mediaMode.setTextColor(TEXT_PRIMARY);
         mediaMode.setTextSize(13);
         mediaMode.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(MEDIA_MODE, false));
-        mediaMode.setOnCheckedChangeListener((button, enabled) ->
-                getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
-                        .putBoolean(MEDIA_MODE, enabled).apply());
+        mediaMode.setOnCheckedChangeListener((button, enabled) -> {
+            getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putBoolean(MEDIA_MODE, enabled).apply();
+            if (eventsSummary != null) {
+                eventState().refresh = true; syncEventView(); renderEventSettings(); pumpEventRequests();
+            }
+        });
         modeCard.addView(mediaMode);
-        TextView mediaNotice = text(R.string.media_mode_notice, 12, TEXT_MUTED);
-        mediaNotice.setPadding(0, 0, 0, dp(6));
-        modeCard.addView(mediaNotice);
-        TextView note = text(R.string.first_launch_note, 13, TEXT_MUTED);
-        note.setPadding(0, dp(8), 0, dp(14));
-        modeCard.addView(note);
+        addHelp(modeCard, R.string.mode_section_title, R.string.media_mode_notice, R.string.first_launch_note);
 
-        addServerChecksControls(card(body, R.string.server_checks_title));
-        addAccountControls(card(body, R.string.accounts_title));
-        addOfficialImportControls(card(body, R.string.official_title));
-        addEventSettingsControls(card(body, R.string.events_title));
+        addAccountControls(panel(categoryParent("users"), R.string.accounts_title, "accounts", false));
+        addOfficialImportControls(panel(categoryParent("users"), R.string.official_title, "official", false));
+        addEventSettingsControls(panel(categoryParent("content"), R.string.events_title, "events", false));
 
-        LinearLayout libraryCard = card(body, 0);
+        LinearLayout libraryCard = panel(categoryParent("content"), R.string.library_settings_title, "library", true);
         addLibraryControls(libraryCard);
 
-        LinearLayout experimentCard = card(body, R.string.experiment_section_title);
+        LinearLayout experimentCard = panel(categoryParent("server"), R.string.experiment_section_title, "experimental", false);
         experimentalMainLive = new CheckBox(this);
         experimentalMainLive.setText(R.string.experimental_main_live);
         experimentalMainLive.setTextColor(TEXT_PRIMARY);
@@ -355,19 +469,16 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
                         .putBoolean(EXPERIMENTAL_MAIN_LIVE, enabled).apply());
         experimentCard.addView(experimentalMainLive);
-        TextView liveNotice = text(R.string.experimental_main_live_notice, 12, TEXT_MUTED);
-        experimentCard.addView(liveNotice);
-        TextView replayNotice = text(R.string.tutorial_replay_notice, 16, TEXT_MUTED);
-        replayNotice.setPadding(0, dp(6), 0, dp(8));
-        experimentCard.addView(replayNotice);
         addRenderingExperiment(experimentCard);
+        addHelp(experimentCard, R.string.experiment_section_title, R.string.experimental_main_live_notice,
+                R.string.tutorial_replay_notice, R.string.rendering_mt_notice);
 
-        LinearLayout graphicsCard = card(body, 0);
+        LinearLayout graphicsCard = panel(categoryParent("graphics"), R.string.graphics_panel_title, "graphics", true);
         addPresentationControls(graphicsCard);
-        LinearLayout playbackCard = card(body, R.string.playback_section_title);
+        LinearLayout playbackCard = panel(categoryParent("graphics"), R.string.playback_section_title, "playback", true);
         addPlaybackControls(playbackCard);
 
-        LinearLayout resourcesCard = card(body, R.string.resources_section_title);
+        LinearLayout resourcesCard = panel(categoryParent("server"), R.string.resources_section_title, "resources", true);
         addResourceStorageControls(resourcesCard);
         downloadMissingResources = new CheckBox(this);
         downloadMissingResources.setText(R.string.download_missing_resources);
@@ -379,9 +490,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit()
                         .putBoolean(DOWNLOAD_MISSING_RESOURCES, enabled).apply());
         resourcesCard.addView(downloadMissingResources);
-        TextView resourceNotice = text(R.string.download_missing_resources_notice, 12, TEXT_MUTED);
-        resourceNotice.setPadding(0, 0, 0, dp(6));
-        resourcesCard.addView(resourceNotice);
         TextView resourceHeading = text(R.string.resource_transfer_title, 15, TEXT_PRIMARY);
         resourceHeading.setPadding(0, dp(10), 0, dp(4));
         resourcesCard.addView(resourceHeading);
@@ -397,25 +505,25 @@ public final class MainActivity extends Activity implements ServerService.Observ
         resourceServed.setVisibility(View.GONE);
         resourcesCard.addView(resourceServed);
         addResourceLibraryControls(resourcesCard);
+        addHelp(resourcesCard, R.string.resources_section_title, R.string.download_missing_resources_notice,
+                R.string.resource_storage_public_notice, R.string.resource_storage_private_notice,
+                R.string.library_download_parallelism_notice, R.string.library_resources_notice);
 
-        LinearLayout diagnosticsCard = card(body, R.string.diagnostics_section_title);
+        LinearLayout diagnosticsCard = consoleCard;
         gameStatus = text(R.string.game_state_waiting, 13, TEXT_MUTED);
         gameStatus.setTextIsSelectable(true);
         gameStatus.setMaxLines(3);
         gameStatus.setEllipsize(TextUtils.TruncateAt.END);
         gameStatus.setPadding(0, dp(4), 0, dp(8));
-        diagnosticsCard.addView(gameStatus);
+        categoryPages.get("console").addView(gameStatus, 1);
         lastException = text(R.string.game_state_waiting, 12, WARNING);
         lastException.setTextIsSelectable(true);
         lastException.setMaxLines(3);
         lastException.setEllipsize(TextUtils.TruncateAt.END);
         lastException.setVisibility(View.GONE);
-        diagnosticsCard.addView(lastException);
+        categoryPages.get("console").addView(lastException, 2);
         export = button(R.string.export_diagnostics);
         diagnosticsCard.addView(export, new LinearLayout.LayoutParams(-1, -2));
-        TextView exportNotice = text(R.string.diagnostics_export_notice, 16, TEXT_MUTED);
-        exportNotice.setPadding(0, dp(4), 0, dp(8));
-        diagnosticsCard.addView(exportNotice);
         Button detailsHeading = button(R.string.diagnostics_details);
         diagnosticsCard.addView(detailsHeading, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout diagnosticDetails = new LinearLayout(this);
@@ -450,15 +558,33 @@ public final class MainActivity extends Activity implements ServerService.Observ
         logScroll.addView(logs);
         logScroll.setNestedScrollingEnabled(true);
         diagnosticDetails.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(220)));
-        ScrollView detailsScroll = new ScrollView(this);
-        detailsScroll.setFillViewport(true);
-        detailsScroll.addView(body, new ScrollView.LayoutParams(-1, -2));
-        content.addView(detailsScroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        addHelp(diagnosticsCard, R.string.console_panel_title, R.string.diagnostics_export_notice);
+        settingsScroll = new ScrollView(this); settingsScroll.setFillViewport(true);
+        settingsScroll.addView(body, new ScrollView.LayoutParams(-1, -2));
+        LinearLayout navigation = new LinearLayout(this);
+        navigation.setOrientation(wideSettings ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
+        navigation.setPadding(0, dp(8), wideSettings ? dp(12) : 0, 0);
+        addCategoryButton(navigation, "console", R.string.nav_console);
+        addCategoryButton(navigation, "server", R.string.nav_server);
+        addCategoryButton(navigation, "users", R.string.nav_users);
+        addCategoryButton(navigation, "content", R.string.nav_content);
+        addCategoryButton(navigation, "graphics", R.string.nav_graphics);
+        LinearLayout workspace = new LinearLayout(this);
+        workspace.setOrientation(wideSettings ? LinearLayout.HORIZONTAL : LinearLayout.VERTICAL);
+        workspace.addView(navigation, wideSettings ? new LinearLayout.LayoutParams(dp(160), -1)
+                : new LinearLayout.LayoutParams(-1, -2));
+        workspace.addView(settingsScroll, wideSettings ? new LinearLayout.LayoutParams(0, -1, 1)
+                : new LinearLayout.LayoutParams(-1, 0, 1));
+        content.addView(workspace, new LinearLayout.LayoutParams(-1, 0, 1));
+        showCategory(selectedCategory);
         readableControls(content);
         setContentView(content);
 
         start.setOnClickListener(view -> requestServerStart());
-        stop.setOnClickListener(view -> startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP)));
+        stop.setOnClickListener(view -> {
+            startAfterEventsSave = false;
+            startService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_STOP));
+        });
         launch.setOnClickListener(view -> launchClient(R.string.diagnostic_client_missing,
                 "game.qualiarts.idolypride.local.diagnostics"));
         export.setOnClickListener(view -> requestDiagnosticsExport());
@@ -475,7 +601,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
     }
 
     private void addAccountControls(LinearLayout body) {
-        TextView notice = text(R.string.accounts_notice, 16, TEXT_MUTED); body.addView(notice);
         accountOverview = text(R.string.accounts_waiting, 16, TEXT_PRIMARY); accountOverview.setTextIsSelectable(true); body.addView(accountOverview);
         accountPicker = new Spinner(this); accountPicker.setContentDescription("idoly.accounts.list");
         body.addView(accountPicker, new LinearLayout.LayoutParams(-1, dp(52)));
@@ -515,7 +640,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
             try { startActivityForResult(picker, IMPORT_ACCOUNT); }
             catch (RuntimeException error) { accountError("account_picker_unavailable"); }
         });
-        body.addView(text(R.string.accounts_restore_notice, 16, TEXT_MUTED));
         restorePicker = new Spinner(this); restorePicker.setContentDescription("idoly.accounts.restore-list");
         body.addView(restorePicker, new LinearLayout.LayoutParams(-1, dp(52)));
         restorePage = text(R.string.accounts_restore_empty, 16, TEXT_MUTED); body.addView(restorePage);
@@ -529,7 +653,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         body.addView(accountProgress, new LinearLayout.LayoutParams(-1, dp(12)));
         accountOperation = text(R.string.accounts_ready, 16, TEXT_MUTED);
         accountOperation.setTextIsSelectable(true); accountOperation.setContentDescription("idoly.accounts.result");
-        body.addView(accountOperation); updateAccountControls();
+        body.addView(accountOperation);
+        addHelp(body, R.string.accounts_title, R.string.accounts_notice, R.string.accounts_restore_notice);
+        updateAccountControls();
     }
 
     private boolean shouldPollOfficial() {
@@ -553,8 +679,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
     }
 
     private void addOfficialImportControls(LinearLayout body) {
-        body.addView(text(R.string.official_notice, 16, TEXT_MUTED));
-        body.addView(text(R.string.official_warning, 16, TEXT_MUTED));
+        body.addView(text(R.string.official_warning_short, 16, TEXT_MUTED));
+        addHelp(body, R.string.official_title, R.string.official_notice, R.string.official_warning);
         officialStatus = text(R.string.official_stage_idle, 17, TEXT_PRIMARY);
         officialStatus.setContentDescription("idoly.official.status"); body.addView(officialStatus);
         officialProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
@@ -827,10 +953,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
         int expiry = officialJob.optInt("expires_in_seconds", 0);
         if (expiry > 0) summary.append("\n").append(getString(R.string.official_expiry));
-        if ("ready".equals(state)) summary.append("\n\n").append(getString(R.string.official_ready_notice));
-        if (officialAppliedAccount != null) summary.append("\n\n").append(getString(R.string.official_completed_notice));
-        if ((officialWarnings & OFFICIAL_WARNING_CLEANUP) != 0) summary.append("\n\n").append(getString(R.string.official_committed_cleanup));
-        if ((officialWarnings & OFFICIAL_WARNING_REFRESH) != 0) summary.append("\n\n").append(getString(R.string.official_committed_refresh));
+        if (officialAppliedAccount != null) summary.append("\n").append(getString(R.string.official_completed_short));
+        if ((officialWarnings & OFFICIAL_WARNING_CLEANUP) != 0) summary.append("\n").append(getString(R.string.official_committed_cleanup));
+        if ((officialWarnings & OFFICIAL_WARNING_REFRESH) != 0) summary.append("\n").append(getString(R.string.official_committed_refresh));
         officialPreview.setText(summary.toString().trim()); updateOfficialControls(); scheduleOfficialRefresh();
     }
 
@@ -856,16 +981,68 @@ public final class MainActivity extends Activity implements ServerService.Observ
         officialProgress.setVisibility((pending && !officialPolling) || working ? View.VISIBLE : View.GONE);
     }
 
+    private EventUiState eventState() { return mediaMode != null && mediaMode.isChecked() ? mediaEvents : normalEvents; }
+
+    private JSONObject eventSettingsJson(EventSelectionDraft selection, java.util.Map<String, EventSelectionDraft.Window> windows) {
+        org.json.JSONArray rows = new org.json.JSONArray();
+        for (java.util.Map.Entry<String, EventSelectionDraft.Window> entry : windows.entrySet()) {
+            EventSelectionDraft.Window window = entry.getValue();
+            rows.put(accountPayload("event_id", entry.getKey(), "start_time_ms", window.start, "end_time_ms", window.end));
+        }
+        return accountPayload("schema", 1, "revision", selection.revision(), "love_events", rows);
+    }
+
+    private void syncEventView() {
+        EventUiState current = eventState();
+        eventsSnapshot = current.snapshot;
+        eventsDraft = eventSettingsJson(current.selection, current.selection.rows());
+        eventsLoaded = current.selection.loaded(); eventsUnsaved = current.selection.dirty(); eventsError = current.error;
+    }
+
+    private void restoreEventEdits(Bundle state, EventUiState target) {
+        String encoded = state.getString(target.media ? "events_media_edits" : "events_normal_edits");
+        if (encoded == null || encoded.length() > 32768) return;
+        try {
+            org.json.JSONArray rows = new org.json.JSONArray(encoded);
+            if (rows.length() > 64) return;
+            for (int index = 0; index < rows.length(); index++) {
+                JSONObject row = rows.getJSONObject(index);
+                target.selection.edit(row.getString("event_id"), row.optBoolean("remove") ? null
+                        : new EventSelectionDraft.Window(row.getLong("start_time_ms"), row.getLong("end_time_ms")));
+            }
+        } catch (org.json.JSONException | IllegalArgumentException invalid) { target.error = "event_settings_invalid"; target.blocked = true; }
+    }
+
+    private void saveEventEdits(Bundle state, EventUiState source) {
+        org.json.JSONArray rows = new org.json.JSONArray();
+        for (java.util.Map.Entry<String, EventSelectionDraft.Window> entry : source.selection.pending().entrySet()) {
+            EventSelectionDraft.Window value = entry.getValue();
+            rows.put(value == null ? accountPayload("event_id", entry.getKey(), "remove", true)
+                    : accountPayload("event_id", entry.getKey(), "start_time_ms", value.start, "end_time_ms", value.end));
+        }
+        if (rows.length() > 0) state.putString(source.media ? "events_media_edits" : "events_normal_edits", rows.toString());
+    }
+
     private void addEventSettingsControls(LinearLayout body) {
-        body.addView(text(R.string.events_notice, 16, TEXT_MUTED));
-        body.addView(text(R.string.events_preset_notice, 16, TEXT_MUTED));
+        eventsModeNotice = text(R.string.events_normal_short, 16, TEXT_MUTED); body.addView(eventsModeNotice);
         eventsSummary = text(R.string.events_loading, 17, TEXT_PRIMARY);
         eventsSummary.setContentDescription("idoly.events.status"); body.addView(eventsSummary);
         body.addView(text(R.string.events_catalog, 16, TEXT_PRIMARY));
+        eventsChoices = new LinearLayout(this); eventsChoices.setOrientation(LinearLayout.VERTICAL);
+        eventsChoices.setContentDescription("idoly.events.list"); body.addView(eventsChoices);
+        LinearLayout bulk = new LinearLayout(this); bulk.setOrientation(LinearLayout.HORIZONTAL);
+        eventsAll = button(R.string.events_enable_all); eventsAll.setContentDescription("idoly.events.enable-all");
+        eventsOff = button(R.string.events_disable_all); eventsOff.setContentDescription("idoly.events.disable-all");
+        bulk.addView(eventsAll, new LinearLayout.LayoutParams(0, -2, 1));
+        bulk.addView(eventsOff, new LinearLayout.LayoutParams(0, -2, 1)); body.addView(bulk);
+        eventsAll.setOnClickListener(view -> setAllEvents(true)); eventsOff.setOnClickListener(view -> setAllEvents(false));
+        eventsSchedule = new LinearLayout(this); eventsSchedule.setOrientation(LinearLayout.VERTICAL); body.addView(eventsSchedule);
+        eventsSchedule.addView(text(R.string.events_schedule_editor, 16, TEXT_MUTED));
         eventsPicker = new Spinner(this); eventsPicker.setContentDescription("idoly.events.catalog");
-        body.addView(eventsPicker, new LinearLayout.LayoutParams(-1, dp(52)));
+        eventsSchedule.addView(eventsPicker, new LinearLayout.LayoutParams(-1, dp(52)));
         eventsPicker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                if (eventsLoading) return;
                 JSONObject row = eventsCatalog.optJSONObject(position);
                 String selected = row == null ? "" : row.optString("id");
                 if (!selected.equals(eventsSelectedId)) { eventsSelectedId = selected; renderSelectedEvent(); }
@@ -874,32 +1051,26 @@ public final class MainActivity extends Activity implements ServerService.Observ
         });
         eventsEnabled = new CheckBox(this); eventsEnabled.setText(R.string.events_enabled);
         eventsEnabled.setTextSize(16); eventsEnabled.setTextColor(TEXT_PRIMARY);
-        eventsEnabled.setContentDescription("idoly.events.enabled"); body.addView(eventsEnabled);
+        eventsEnabled.setContentDescription("idoly.events.enabled"); eventsSchedule.addView(eventsEnabled);
         eventsEnabled.setOnCheckedChangeListener((control, enabled) -> {
-            if (eventsLoading || eventsRequest || eventsSelectedId.isEmpty()) return;
-            try {
-                JSONObject previous = eventEntry(eventsDraft, eventsSelectedId);
-                long[] window = enabled ? previous == null ? EventWindow.preset(System.currentTimeMillis())
-                        : new long[]{previous.optLong("start_time_ms"), previous.optLong("end_time_ms")} : null;
-                saveEventEntry(eventsSelectedId, window);
-            } catch (IllegalArgumentException invalid) {
-                Toast.makeText(this, R.string.events_error_invalid, Toast.LENGTH_LONG).show(); renderSelectedEvent();
-            }
+            if (eventsLoading || eventsSelectedId.isEmpty()) return;
+            changeEventSelection(eventsSelectedId, enabled);
         });
         eventsStart = button(R.string.events_start_name); eventsStart.setContentDescription("idoly.events.start");
         eventsEnd = button(R.string.events_end_name); eventsEnd.setContentDescription("idoly.events.end");
         eventsStart.setOnClickListener(view -> editEventTime(true)); eventsEnd.setOnClickListener(view -> editEventTime(false));
-        body.addView(eventsStart); body.addView(eventsEnd);
-        body.addView(text(R.string.events_start_notice, 16, TEXT_MUTED));
+        eventsSchedule.addView(eventsStart); eventsSchedule.addView(eventsEnd);
         eventsSelected = text(R.string.events_off, 16, TEXT_MUTED);
         eventsSelected.setContentDescription("idoly.events.applied"); body.addView(eventsSelected);
         eventsNotice = text(R.string.events_loading, 16, TEXT_MUTED); body.addView(eventsNotice);
         eventsReload = button(R.string.events_refresh); eventsReload.setContentDescription("idoly.events.reload");
-        eventsReload.setOnClickListener(view -> refreshEventSettings(true)); body.addView(eventsReload);
-        eventsOff = button(R.string.events_disable_all); eventsOff.setContentDescription("idoly.events.disable-all");
-        eventsOff.setOnClickListener(view -> saveEventsDraft(accountPayload("schema", 1,
-                "revision", savedEventSettings().optLong("revision", 0), "love_events", new org.json.JSONArray())));
-        body.addView(eventsOff); renderEventSettings();
+        eventsReload.setOnClickListener(view -> {
+            EventUiState state = eventState(); state.blocked = false; state.conflictRetries = 0;
+            state.refresh = true; state.error = ""; syncEventView(); renderEventSettings(); pumpEventRequests();
+        }); body.addView(eventsReload);
+        addHelp(body, R.string.events_title, R.string.events_notice, R.string.events_preset_notice,
+                R.string.events_media_notice, R.string.events_start_notice);
+        syncEventView(); renderEventSettings();
     }
 
     private JSONObject savedEventSettings() {
@@ -932,8 +1103,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
     }
 
     private String eventWindowText(JSONObject entry) {
-        return entry == null ? getString(R.string.events_off) : getString(R.string.events_window,
-                eventTime(entry.optLong("start_time_ms")), eventTime(entry.optLong("end_time_ms")));
+        if (entry == null) return getString(R.string.events_off);
+        if (entry.optLong("start_time_ms") == 0 && entry.optLong("end_time_ms") == 0) return getString(R.string.events_always);
+        return getString(R.string.events_window, eventTime(entry.optLong("start_time_ms")), eventTime(entry.optLong("end_time_ms")));
     }
 
     private void renderSelectedEvent() {
@@ -944,110 +1116,200 @@ public final class MainActivity extends Activity implements ServerService.Observ
         eventsStart.setText(getString(R.string.events_start, draft == null ? getString(R.string.events_off) : eventTime(draft.optLong("start_time_ms"))));
         eventsEnd.setText(getString(R.string.events_end, draft == null ? getString(R.string.events_off) : eventTime(draft.optLong("end_time_ms"))));
         JSONObject effective = effectiveEventSettings();
-        eventsSelected.setText(getString(R.string.events_selected_status, eventWindowText(eventEntry(savedEventSettings(), eventsSelectedId)),
-                effective == null ? getString(R.string.events_not_running) : eventWindowText(eventEntry(effective, eventsSelectedId))));
+        eventsSelected.setText(getString(R.string.events_current_short, effective == null ? getString(R.string.events_not_running)
+                : getString(eventEntry(effective, eventsSelectedId) == null ? R.string.events_off : R.string.events_on)));
         eventsLoading = false; updateEventSettingsControls();
+    }
+
+    private String eventTitle(JSONObject row) {
+        JSONObject titles = row.optJSONObject("titles");
+        String language = Locale.getDefault().getLanguage();
+        String translated = titles == null ? "" : titles.optString(language);
+        return !translated.isEmpty() ? translated : row.optString("title", row.optString("id"));
     }
 
     private void renderEventSettings() {
         if (eventsSummary == null) return;
-        String key = eventsSnapshot.toString() + "|" + String.valueOf(eventsDraft) + "|" + eventsError + "|" + eventsUnsaved
-                + "|" + eventsSelectedId + "|" + presentationServerRunning + "|" + eventsRequest + "|" + eventsSaving + "|" + eventsLoaded;
-        if (key.equals(eventsRenderedKey)) { updateEventSettingsControls(); return; }
-        eventsRenderedKey = key; eventsLoading = true;
+        syncEventView(); eventsLoading = true;
         JSONObject catalog = eventsSnapshot.optJSONObject("catalog");
         org.json.JSONArray source = catalog == null ? null : catalog.optJSONArray("events");
-        eventsCatalog = new org.json.JSONArray(); java.util.ArrayList<String> labels = new java.util.ArrayList<>();
-        int selectedIndex = 0;
+        org.json.JSONArray visible = new org.json.JSONArray(); java.util.ArrayList<String> labels = new java.util.ArrayList<>();
+        StringBuilder catalogKey = new StringBuilder(); int selectedIndex = 0;
         if (source != null && catalog.optBoolean("available", false)) for (int index = 0; index < source.length(); index++) {
             JSONObject row = source.optJSONObject(index);
             if (row == null || !row.optBoolean("supported", false) || row.optString("id").isEmpty()) continue;
             if (row.optString("id").equals(eventsSelectedId)) selectedIndex = labels.size();
-            eventsCatalog.put(row); String title = row.optString("title"); labels.add(title.isEmpty() ? row.optString("id") : title);
+            visible.put(row); String title = eventTitle(row); labels.add(title);
+            catalogKey.append(row.optString("id")).append('|').append(title).append('\n');
         }
+        eventsCatalog = visible;
         if (labels.isEmpty()) { labels.add(getString(R.string.events_empty)); eventsSelectedId = ""; }
         else eventsSelectedId = eventsCatalog.optJSONObject(selectedIndex).optString("id");
-        eventsPicker.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels)); eventsPicker.setSelection(selectedIndex);
+        // Status polling and save acknowledgements must not recreate a live picker.
+        if (!catalogKey.toString().equals(eventsCatalogKey)) {
+            eventsCatalogKey = catalogKey.toString(); eventsChoices.removeAllViews(); eventChecks.clear();
+            for (int index = 0; index < visible.length(); index++) {
+                JSONObject row = visible.optJSONObject(index); final String identifier = row.optString("id");
+                CheckBox choice = new CheckBox(this); choice.setText(eventTitle(row)); choice.setTextSize(16);
+                choice.setTextColor(TEXT_PRIMARY); choice.setMinHeight(dp(52)); choice.setPadding(dp(4), dp(8), dp(4), dp(8));
+                choice.setButtonTintList(new ColorStateList(ENABLED_STATES, new int[]{TEXT_MUTED, ACCENT}));
+                choice.setContentDescription("idoly.events.toggle." + identifier);
+                choice.setOnCheckedChangeListener((view, checked) -> { if (!eventsLoading) changeEventSelection(identifier, checked); });
+                eventsChoices.addView(choice, new LinearLayout.LayoutParams(-1, -2)); eventChecks.put(identifier, choice);
+            }
+            eventsPicker.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels));
+            eventsPicker.setSelection(selectedIndex);
+        }
+        for (java.util.Map.Entry<String, CheckBox> row : eventChecks.entrySet())
+            row.getValue().setChecked(eventEntry(eventsDraft, row.getKey()) != null);
+        boolean media = eventState().media;
+        eventsSchedule.setVisibility(media ? View.GONE : View.VISIBLE);
+        eventsModeNotice.setText(media ? R.string.events_media_short : R.string.events_normal_short);
         JSONObject effective = effectiveEventSettings();
         int state = effective == null ? R.string.events_saved_next : eventsSnapshot.optBoolean("restart_required", false)
                 ? R.string.events_restart : R.string.events_saved_active;
         if (!eventsLoaded) eventsSummary.setText(eventsError.isEmpty() ? R.string.events_loading : R.string.events_error_storage);
-        else if (eventsRequest && eventsSaving) eventsSummary.setText(R.string.events_pending);
+        else if (eventsRequest && eventsSaving && eventsRequestState == eventState()) eventsSummary.setText(R.string.events_pending);
         else if (eventsSnapshot.optBoolean("invalid_settings_file", false)) eventsSummary.setText(R.string.events_invalid_file);
         else eventsSummary.setText(getString(R.string.events_summary, getString(state), eventCount(savedEventSettings()),
                 effective == null ? getString(R.string.events_not_running) : getString(R.string.events_count, eventCount(effective))));
-        StringBuilder notice = new StringBuilder();
-        if (eventsSnapshot.optBoolean("invalid_settings_file", false)) notice.append(getString(R.string.events_invalid_file));
-        else if (catalog == null || !catalog.optBoolean("available", false)) notice.append(getString(R.string.events_unavailable));
-        if (!eventsError.isEmpty()) notice.append("\n").append(getString(eventSettingsError(eventsError)));
-        if (eventsUnsaved) notice.append("\n").append(getString(R.string.events_unsaved));
-        eventsNotice.setText(notice.toString().trim()); eventsNotice.setTextColor(eventsError.isEmpty() ? TEXT_MUTED : WARNING);
+        String notice = eventsSnapshot.optBoolean("invalid_settings_file", false) ? getString(R.string.events_invalid_file)
+                : !eventsError.isEmpty() ? getString(eventSettingsError(eventsError))
+                : catalog == null || !catalog.optBoolean("available", false) ? getString(R.string.events_unavailable)
+                : eventsUnsaved && !(eventsRequest && eventsRequestState == eventState()) ? getString(R.string.events_unsaved) : "";
+        eventsNotice.setText(notice); eventsNotice.setVisibility(notice.isEmpty() ? View.GONE : View.VISIBLE);
+        eventsNotice.setTextColor(eventsError.isEmpty() ? TEXT_MUTED : WARNING);
+        eventsReload.setText(eventsUnsaved ? R.string.events_retry_save : R.string.events_refresh);
         eventsLoading = false; renderSelectedEvent();
     }
 
     private void updateEventSettingsControls() {
         if (eventsPicker == null) return;
-        boolean pending = eventsRequest || ServerService.isManagingEventSettings();
         boolean valid = eventsLoaded && !eventsSnapshot.optBoolean("invalid_settings_file", false);
         boolean supported = eventsCatalog.length() > 0;
-        boolean editable = !pending && valid && supported && !eventsUnsaved;
-        eventsPicker.setEnabled(!pending && supported);
+        boolean editable = valid && supported;
+        eventsPicker.setEnabled(editable);
         eventsEnabled.setEnabled(editable);
+        for (CheckBox choice : eventChecks.values()) choice.setEnabled(editable);
         boolean enabled = eventEntry(eventsDraft, eventsSelectedId) != null;
         eventsStart.setEnabled(editable && enabled); eventsEnd.setEnabled(editable && enabled);
-        eventsReload.setEnabled(!pending);
-        eventsOff.setEnabled(!pending && valid && (eventCount(savedEventSettings()) > 0 || eventCount(eventsDraft) > 0));
+        eventsReload.setEnabled(!eventsRequest);
+        eventsAll.setEnabled(editable);
+        eventsOff.setEnabled(valid && (eventCount(savedEventSettings()) > 0 || eventCount(eventsDraft) > 0));
     }
 
     private void refreshEventSettings(boolean discardDraft) {
-        if (eventsRequest) return;
-        if (ServerService.isManagingEventSettings()) { eventsError = "event_settings_busy"; renderEventSettings(); return; }
-        if (discardDraft) { eventsDraft = null; eventsUnsaved = false; eventsError = ""; }
-        requestEventSettings("events_status", new JSONObject(), false);
+        EventUiState state = eventState();
+        // Explicit retry always retains per-event intent, including across modes.
+        state.refresh = true; state.blocked = false; state.conflictRetries = 0;
+        pumpEventRequests();
     }
 
-    private void saveEventEntry(String identifier, long[] window) {
-        if (eventsRequest || ServerService.isManagingEventSettings()) { renderSelectedEvent(); return; }
-        if (window != null && !EventWindow.valid(window[0], window[1])) throw new IllegalArgumentException("event_settings_invalid");
-        java.util.TreeMap<String, JSONObject> entries = new java.util.TreeMap<>();
-        org.json.JSONArray old = eventsDraft == null ? null : eventsDraft.optJSONArray("love_events");
-        if (old != null) for (int index = 0; index < old.length(); index++) {
-            JSONObject row = old.optJSONObject(index); if (row != null) entries.put(row.optString("event_id"), row);
+    private void changeEventSelection(String identifier, boolean enabled) {
+        try {
+            EventUiState state = eventState(); EventSelectionDraft.Window previous = state.selection.rows().get(identifier);
+            long[] window = !enabled ? null : state.media ? new long[]{0, 0}
+                    : previous == null ? EventWindow.preset(System.currentTimeMillis()) : new long[]{previous.start, previous.end};
+            saveEventEntry(identifier, window);
+        } catch (IllegalArgumentException invalid) {
+            Toast.makeText(this, R.string.events_error_invalid, Toast.LENGTH_LONG).show(); renderEventSettings();
         }
-        entries.remove(identifier);
-        if (window != null) entries.put(identifier, accountPayload("event_id", identifier, "start_time_ms", window[0], "end_time_ms", window[1]));
-        org.json.JSONArray rows = new org.json.JSONArray(); for (JSONObject entry : entries.values()) rows.put(entry);
-        saveEventsDraft(accountPayload("schema", 1, "revision", savedEventSettings().optLong("revision", 0), "love_events", rows));
     }
 
-    private void saveEventsDraft(JSONObject draft) {
-        if (eventsRequest || ServerService.isManagingEventSettings() || eventsSnapshot.optBoolean("invalid_settings_file", false)) return;
-        eventsDraft = draft; eventsUnsaved = true; eventsError = "";
-        requestEventSettings("events_save", accountPayload("settings", draft,
-                "expected_revision", savedEventSettings().optLong("revision", 0)), true);
+    private void setAllEvents(boolean enabled) {
+        EventUiState state = eventState();
+        try {
+            if (enabled) {
+                long[] window = state.media ? new long[]{0, 0} : EventWindow.preset(System.currentTimeMillis());
+                for (int index = 0; index < eventsCatalog.length(); index++) {
+                    String id = eventsCatalog.optJSONObject(index).optString("id");
+                    if (!state.selection.rows().containsKey(id)) state.selection.edit(id, new EventSelectionDraft.Window(window[0], window[1]));
+                }
+            } else {
+                for (String id : new java.util.ArrayList<>(state.selection.rows().keySet())) state.selection.edit(id, null);
+            }
+            state.blocked = false; state.error = ""; state.conflictRetries = 0;
+            renderEventSettings(); pumpEventRequests();
+        } catch (IllegalArgumentException invalid) { Toast.makeText(this, R.string.events_error_invalid, Toast.LENGTH_LONG).show(); }
     }
 
-    private void requestEventSettings(String action, JSONObject payload, boolean saving) {
-        eventsRequest = true; eventsSaving = saving; eventsRenderedKey = null;
+    private void saveEventEntry(String identifier, long[] window) { saveEventEntry(eventState(), identifier, window); }
+
+    private void saveEventEntry(EventUiState state, String identifier, long[] window) {
+        state.selection.edit(identifier, window == null ? null : new EventSelectionDraft.Window(window[0], window[1]));
+        state.blocked = false; state.error = ""; state.conflictRetries = 0;
+        renderEventSettings(); pumpEventRequests();
+    }
+
+    private java.util.Map<String, EventSelectionDraft.Window> eventRows(JSONObject settings) throws org.json.JSONException {
+        java.util.TreeMap<String, EventSelectionDraft.Window> rows = new java.util.TreeMap<>();
+        org.json.JSONArray entries = settings.getJSONArray("love_events");
+        for (int index = 0; index < entries.length(); index++) {
+            JSONObject row = entries.getJSONObject(index); String identifier = row.getString("event_id");
+            if (rows.containsKey(identifier)) throw new IllegalArgumentException("event_settings_invalid");
+            rows.put(identifier, new EventSelectionDraft.Window(row.getLong("start_time_ms"), row.getLong("end_time_ms")));
+        }
+        return rows;
+    }
+
+    private void observeEventSettings(EventUiState state, JSONObject observed, EventSelectionDraft.Save sent) throws org.json.JSONException {
+        if (observed.has("media_mode") && observed.optBoolean("media_mode") != state.media)
+            throw new IllegalArgumentException("event_settings_invalid");
+        JSONObject saved = observed.getJSONObject("saved");
+        java.util.Map<String, EventSelectionDraft.Window> rows = eventRows(saved);
+        if (sent == null) state.selection.observe(saved.getLong("revision"), rows);
+        else state.selection.acknowledge(saved.getLong("revision"), rows, sent);
+        state.snapshot = observed;
+    }
+
+    private void pumpEventRequests() {
+        if (eventsSummary == null || eventsRequest || isFinishing() || isDestroyed()) return;
+        if (ServerService.isManagingEventSettings()) {
+            if (++eventsBusyRetries <= 20) eventsSummary.postDelayed(this::pumpEventRequests, 150);
+            else { eventState().error = "event_settings_busy"; renderEventSettings(); }
+            return;
+        }
+        eventsBusyRetries = 0;
+        EventUiState first = eventState(), second = first == normalEvents ? mediaEvents : normalEvents;
+        for (EventUiState state : new EventUiState[]{first, second}) {
+            if (state.refresh && (state == first || state.selection.dirty())) {
+                state.refresh = false; requestEventSettings(state, "events_status", null); return;
+            }
+            if (state.selection.loaded() && state.selection.dirty() && !state.blocked) {
+                requestEventSettings(state, "events_save", state.selection.prepare()); return;
+            }
+        }
+        if (startAfterEventsSave && !normalEvents.selection.dirty() && !mediaEvents.selection.dirty()) {
+            startAfterEventsSave = false; startServerWithSelectedStorage();
+        }
+    }
+
+    private void requestEventSettings(EventUiState state, String action, EventSelectionDraft.Save sent) {
+        eventsRequest = true; eventsSaving = sent != null; eventsRequestState = state;
+        JSONObject payload = accountPayload("mode", state.media ? "media" : "normal");
+        if (sent != null) payload = accountPayload("mode", state.media ? "media" : "normal", "settings",
+                eventSettingsJson(state.selection, sent.rows), "expected_revision", sent.revision);
         renderEventSettings();
         ServerService.manageEventSettings(getApplicationContext(), action, payload, result -> {
-            eventsRequest = false; eventsSaving = false;
+            eventsRequest = false; eventsSaving = false; eventsRequestState = null;
             if (isFinishing() || isDestroyed()) return;
             if (!result.optBoolean("ok", false)) {
-                eventsError = result.optString("error", "event_settings_io");
-                renderEventSettings();
-                // A CAS failure retains the local draft and only rereads settings.
-                if (saving) refreshEventSettings(false);
-                return;
+                state.error = result.optString("error", "event_settings_io");
+                boolean conflict = "event_settings_revision_conflict".equals(state.error);
+                state.blocked = !conflict || ++state.conflictRetries > 3;
+                state.refresh = conflict && !state.blocked;
+            } else try {
+                JSONObject observed = result.getJSONObject("event_settings");
+                observeEventSettings(state, observed, sent); state.error = "";
+                if (sent != null) state.conflictRetries = 0;
+            } catch (org.json.JSONException | IllegalArgumentException invalid) {
+                state.error = "event_settings_io"; state.blocked = true;
             }
-            JSONObject observed = result.optJSONObject("event_settings");
-            if (observed == null) { eventsError = "event_settings_io"; renderEventSettings(); return; }
-            eventsSnapshot = observed; eventsLoaded = true;
-            if (saving || !eventsUnsaved) {
-                try { eventsDraft = new JSONObject(savedEventSettings().toString()); eventsUnsaved = false; eventsError = ""; }
-                catch (org.json.JSONException invalid) { eventsDraft = null; eventsError = "event_settings_invalid"; }
+            if (state.blocked && startAfterEventsSave) {
+                startAfterEventsSave = false;
+                Toast.makeText(this, eventSettingsError(state.error), Toast.LENGTH_LONG).show();
             }
-            renderEventSettings();
+            renderEventSettings(); pumpEventRequests();
         });
     }
 
@@ -1060,8 +1322,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
     }
 
     private void editEventTime(boolean startTime) {
-        JSONObject entry = eventEntry(eventsDraft, eventsSelectedId); if (entry == null || eventsRequest) return;
+        JSONObject entry = eventEntry(eventsDraft, eventsSelectedId); if (entry == null || eventState().media) return;
         String identifier = eventsSelectedId;
+        EventUiState editingState = eventState();
         long start = entry.optLong("start_time_ms"), end = entry.optLong("end_time_ms");
         java.util.Calendar date = java.util.Calendar.getInstance(); date.setTimeInMillis(startTime ? start : end);
         android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this, (view, year, month, day) -> {
@@ -1073,7 +1336,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 try {
                     long[] window = startTime ? EventWindow.shiftStart(date.getTimeInMillis(), start, end)
                             : new long[]{start, date.getTimeInMillis()};
-                    saveEventEntry(identifier, window);
+                    saveEventEntry(editingState, identifier, window);
                 } catch (IllegalArgumentException invalid) { Toast.makeText(this, R.string.events_error_invalid, Toast.LENGTH_LONG).show(); }
             }, date.get(java.util.Calendar.HOUR_OF_DAY), date.get(java.util.Calendar.MINUTE), android.text.format.DateFormat.is24HourFormat(this));
             time.setTitle(startTime ? R.string.events_start_name : R.string.events_end_name);
@@ -1433,19 +1696,23 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void addResourceStorageControls(LinearLayout body) {
         resourceStorage = presentationSpinner(body, R.string.resource_storage, R.array.resource_storage_options);
         resourceStorage.setSelection(downloadsSelected() ? 0 : 1);
-        resourceStorageNotice = text(R.string.resource_storage_public_notice, 12, TEXT_MUTED);
+        resourceStorageNotice = text(R.string.resource_storage_public_short, 12, TEXT_MUTED);
         resourceStorageNotice.setPadding(0, 0, 0, dp(8)); body.addView(resourceStorageNotice);
         resourceStorage.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
                 boolean selected = position == 0;
                 getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).edit().putBoolean(RESOURCE_PUBLIC_DOWNLOADS, selected).apply();
-                resourceStorageNotice.setText(selected ? R.string.resource_storage_public_notice : R.string.resource_storage_private_notice);
+                resourceStorageNotice.setText(selected ? R.string.resource_storage_public_short : R.string.resource_storage_private_short);
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
-        resourceStorageNotice.setText(downloadsSelected() ? R.string.resource_storage_public_notice : R.string.resource_storage_private_notice);
+        resourceStorageNotice.setText(downloadsSelected() ? R.string.resource_storage_public_short : R.string.resource_storage_private_short);
     }
     private void startServerWithSelectedStorage() {
+        if (normalEvents.selection.dirty() || mediaEvents.selection.dirty()) {
+            startAfterEventsSave = true; pumpEventRequests();
+            Toast.makeText(this, R.string.events_pending, Toast.LENGTH_SHORT).show(); return;
+        }
         try { startForegroundService(new Intent(this, ServerService.class).setAction(ServerService.ACTION_START)); }
         catch (RuntimeException failed) { Toast.makeText(this, R.string.server_start_failed, Toast.LENGTH_LONG).show(); }
     }
@@ -1496,13 +1763,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
         librarySettings = loaded.settings;
         libraryInvalidLanguage = loaded.invalidLanguage; libraryInvalidMedia = loaded.invalidMedia;
         libraryInvalid = libraryInvalidLanguage || libraryInvalidMedia;
-        body.addView(sectionTitle(R.string.library_settings_title));
         libraryLanguage = presentationSpinner(body, R.string.library_language, R.array.library_language_options);
         hideVideoMv = new CheckBox(this); hideVideoMv.setText(R.string.library_hide_video_mv);
         hideVideoMv.setTextSize(13); hideVideoMv.setTextColor(TEXT_PRIMARY); body.addView(hideVideoMv);
         libraryMvSort = presentationSpinner(body, R.string.library_mv_sort, R.array.library_mv_sort_options);
         libraryOutfitSort = presentationSpinner(body, R.string.library_outfit_sort, R.array.library_outfit_sort_options);
-        libraryStatus = text(R.string.library_settings_notice, 12, TEXT_MUTED);
+        libraryStatus = text(R.string.library_settings_short, 12, TEXT_MUTED);
         libraryStatus.setTextIsSelectable(true); libraryStatus.setPadding(0, dp(4), 0, dp(8)); body.addView(libraryStatus);
         restoreLibraryControls();
         AdapterView.OnItemSelectedListener changed = new AdapterView.OnItemSelectedListener() {
@@ -1512,6 +1778,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         libraryLanguage.setOnItemSelectedListener(changed); libraryMvSort.setOnItemSelectedListener(changed);
         libraryOutfitSort.setOnItemSelectedListener(changed);
         hideVideoMv.setOnCheckedChangeListener((button, enabled) -> saveLibraryControls());
+        addHelp(body, R.string.library_settings_title, R.string.library_settings_notice);
         updateLibraryStatus();
     }
     private void restoreLibraryControls() {
@@ -1550,7 +1817,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void updateLibraryStatus() {
         if (libraryStatus == null) return;
         setTextIfChanged(libraryStatus, getString(librarySaveFailed ? R.string.library_settings_failed
-                : libraryInvalid ? R.string.library_settings_invalid : R.string.library_settings_notice));
+                : libraryInvalid ? R.string.library_settings_invalid : R.string.library_settings_short));
         libraryStatus.setTextColor(librarySaveFailed || libraryInvalid ? WARNING : TEXT_MUTED);
     }
     private String selectedResourcePlatform() { return resourcePlatform.getSelectedItemPosition() == 1 ? "ios" : "android"; }
@@ -1579,8 +1846,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
         };
         resourcePlatform.setOnItemSelectedListener(selectionChanged);
         resourceParallelism.setOnItemSelectedListener(selectionChanged);
-        body.addView(text(R.string.library_download_parallelism_notice, 12, TEXT_MUTED));
-        body.addView(text(R.string.library_resources_notice, 12, TEXT_MUTED));
         downloadLibrary = button(R.string.library_download_all); body.addView(downloadLibrary);
         importLibrary = button(R.string.library_import); body.addView(importLibrary);
         exportLibrary = button(R.string.library_export); body.addView(exportLibrary);
@@ -1690,6 +1955,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private JSONObject resourceLibraryRuntime;
 
     @Override protected void onSaveInstanceState(Bundle state) {
+        state.putString("settings_category", selectedCategory);
         state.putString("resource_platform", pendingResourcePlatform);
         state.putBoolean("storage_retry", retryStartAfterStoragePermission);
         state.putInt("account_offset", accountOffset); state.putInt("restore_offset", restoreOffset);
@@ -1701,9 +1967,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             state.putInt("official_local_warnings", officialWarnings & 3);
         }
         state.putString("events_selected_id", eventsSelectedId);
-        if (eventsUnsaved && eventsDraft != null) {
-            state.putString("events_unsaved_draft", eventsDraft.toString()); state.putString("events_error", eventsError);
-        }
+        saveEventEdits(state, normalEvents); saveEventEdits(state, mediaEvents);
         super.onSaveInstanceState(state);
     }
 
@@ -1717,13 +1981,11 @@ public final class MainActivity extends Activity implements ServerService.Observ
         waitForOrientation.setTextSize(14);
         waitForOrientation.setChecked(playbackSettings.waitForOrientation);
         body.addView(waitForOrientation);
-        TextView notice = text(R.string.playback_wait_notice, 12, TEXT_MUTED);
-        notice.setPadding(0, 0, 0, dp(4));
-        body.addView(notice);
         playbackStatus = text(R.string.playback_waiting, 12, TEXT_MUTED);
         playbackStatus.setTextIsSelectable(true);
         playbackStatus.setPadding(0, 0, 0, dp(8));
         body.addView(playbackStatus);
+        addHelp(body, R.string.playback_section_title, R.string.playback_wait_notice);
         waitForOrientation.setOnCheckedChangeListener((button, checked) -> savePlaybackControl(checked));
         updatePlaybackStatus();
     }
@@ -1736,9 +1998,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
         multithreadedRendering.setChecked(getSharedPreferences(SERVER_PREFS, MODE_PRIVATE)
                 .getBoolean(RenderingExperiment.PREFERENCE, RenderingExperiment.DEFAULT_ENABLED));
         body.addView(multithreadedRendering);
-        TextView notice = text(R.string.rendering_mt_notice, 12, TEXT_MUTED);
-        notice.setPadding(0, 0, 0, dp(4));
-        body.addView(notice);
         renderingStatus = text(R.string.rendering_probe_waiting, 12, TEXT_MUTED);
         renderingStatus.setTextIsSelectable(true);
         renderingStatus.setPadding(0, 0, 0, dp(8));
@@ -1874,24 +2133,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         PresentationSettings.Loaded loaded = PresentationSettings.load(getFilesDir());
         presentationSettings = loaded.settings;
         presentationInvalid = loaded.invalid;
-        Button heading = button(R.string.presentation_title_expanded);
-        body.addView(heading, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout settings = new LinearLayout(this);
         settings.setOrientation(LinearLayout.VERTICAL);
-        settings.setPadding(dp(8), 0, dp(8), dp(8));
-        settings.setVisibility(View.VISIBLE);
+        settings.setPadding(dp(4), 0, dp(4), dp(8));
         body.addView(settings, new LinearLayout.LayoutParams(-1, -2));
-        heading.setOnClickListener(view -> {
-            boolean expanded = settings.getVisibility() != View.VISIBLE;
-            settings.setVisibility(expanded ? View.VISIBLE : View.GONE);
-            heading.setText(expanded ? R.string.presentation_title_expanded : R.string.presentation_title);
-        });
-        TextView notice = text(R.string.presentation_notice, 12, TEXT_MUTED);
-        notice.setPadding(0, dp(4), 0, dp(8));
-        settings.addView(notice);
-        TextView clientNotice = text(R.string.presentation_client_notice, 12, TEXT_MUTED);
-        clientNotice.setPadding(0, 0, 0, dp(6));
-        settings.addView(clientNotice);
         customGraphics = new CheckBox(this);
         customGraphics.setText(R.string.presentation_custom_graphics);
         customGraphics.setTextColor(TEXT_PRIMARY);
@@ -1914,10 +2159,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         expandPhotography.setTextColor(TEXT_PRIMARY);
         expandPhotography.setTextSize(14);
         settings.addView(expandPhotography);
-        TextView photographyNotice = text(R.string.presentation_photography_notice, 12,
-                TEXT_MUTED);
-        photographyNotice.setPadding(0, 0, 0, dp(8));
-        settings.addView(photographyNotice);
+        addHelp(settings, R.string.graphics_panel_title, R.string.presentation_notice,
+                R.string.presentation_client_notice, R.string.presentation_photography_notice);
         presentationStatus = text(R.string.presentation_waiting, 12, TEXT_MUTED);
         presentationStatus.setTextIsSelectable(true);
         presentationStatus.setPadding(0, dp(4), 0, dp(8));
@@ -2148,12 +2391,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (!eventsRequest && eventsDialog == null) try {
                 JSONObject observed = new JSONObject(detailsJson).optJSONObject("event_settings");
                 if (observed != null && !observed.toString().equals(eventsSnapshot.toString())) {
-                    eventsSnapshot = observed; eventsLoaded = true;
-                    if (!eventsUnsaved) { eventsDraft = new JSONObject(savedEventSettings().toString()); eventsError = ""; }
+                    EventUiState state = observed.optBoolean("media_mode", false) ? mediaEvents : normalEvents;
+                    observeEventSettings(state, observed, null);
                 }
-            } catch (org.json.JSONException ignored) { }
+            } catch (org.json.JSONException | IllegalArgumentException ignored) { }
             if (!eventsRequest && "event_settings_busy".equals(eventsError) && !ServerService.isManagingEventSettings()) refreshEventSettings(false);
-            renderEventSettings();
+            renderEventSettings(); pumpEventRequests();
         }
         updateOfficialControls();
         start.setEnabled(!running && !busy && !ServerService.isManagingAccounts());

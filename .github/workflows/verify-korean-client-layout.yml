@@ -1,0 +1,92 @@
+name: Verify fixed Korean client image layout
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths: [.github/workflows/verify-korean-client-layout.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: korean-client-layout
+  cancel-in-progress: false
+
+jobs:
+  layout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked verification and pinned image tools
+        run: |
+          uv sync --locked --all-extras --python 3.13
+          uv pip install --python .venv/bin/python 'UnityPy==1.25.4' 'astc-encoder-py==0.1.12'
+      - name: Verify finite geometry, archive, preservation and legacy cases
+        run: >-
+          uv run --locked python -m pytest -q tests/test_static_ui_images.py
+          tests/test_ios_client_language_builder.py tests/test_ios_client_data.py
+          tests/test_ios_unified_packaging.py
+      - name: Fetch only exact stock and Korean IPA donors
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --locked python - <<'PY'
+          import importlib.util, json, os, pathlib
+          root=pathlib.Path.cwd(); work=pathlib.Path(os.environ['RUNNER_TEMP'])/'korean-layout-inputs'
+          work.mkdir(mode=0o700)
+          spec=importlib.util.spec_from_file_location('korean_layout_fetch',root/'ios-unified/fetch_inputs.py')
+          fetch=importlib.util.module_from_spec(spec);spec.loader.exec_module(fetch)
+          inputs=json.loads((root/'ios-unified/runtime_inputs.json').read_text())['inputs']
+          fetch.lfs_download(inputs['base_ipa'],work/'base.ipa')
+          fetch.release_asset_download(inputs['stock_ipa'],work/'stock.ipa')
+          for key,name in (('english_ui','en.csv'),('english_ui_proof','en-report.json')):
+              fetch.copy_local_pinned(name,work/name,inputs[key])
+          PY
+      - name: Fetch frozen existing Korean PNGs
+        run: >-
+          uv run --locked python tools/fetch_korean_ui_images.py
+          --output "$RUNNER_TEMP/korean-layout-images"
+          --report "$RUNNER_TEMP/korean-layout-image-inputs.json"
+      - name: Rebuild Korean Data and prove all other resource objects unchanged
+        run: |
+          mkdir "$RUNNER_TEMP/korean-layout-output"
+          uv run --locked python tools/build_ios_client_languages.py             --stock-ipa "$RUNNER_TEMP/korean-layout-inputs/stock.ipa"             --base-ipa "$RUNNER_TEMP/korean-layout-inputs/base.ipa"             --english-csv "$RUNNER_TEMP/korean-layout-inputs/en.csv"             --english-proof "$RUNNER_TEMP/korean-layout-inputs/en-report.json"             --image-dir "$RUNNER_TEMP/korean-layout-images"             --output "$RUNNER_TEMP/korean-layout-output/client-languages.zip"
+          uv run --locked python - <<'PY'
+          import json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'korean-layout-output'
+          report=json.loads((root/'client-languages.report.json').read_text())
+          (root/'client-languages.manifest.json').write_text(json.dumps(report['manifest'],sort_keys=True,indent=2)+'\n')
+          PY
+      - name: Read actual Sprite pixels and audit original logo consumers
+        run: >-
+          uv run --locked python tools/preview_static_ui_aspect.py
+          --client-languages "$RUNNER_TEMP/korean-layout-output/client-languages.zip"
+          --language-report "$RUNNER_TEMP/korean-layout-output/client-languages.report.json"
+          --images "$RUNNER_TEMP/korean-layout-images"
+          --source-commit "$GITHUB_SHA"
+          --ios-base "$RUNNER_TEMP/korean-layout-inputs/base.ipa"
+          --output "$RUNNER_TEMP/korean-layout-preview"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: korean-client-layout-proof-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/korean-layout-output/*.json
+            ${{ runner.temp }}/korean-layout-preview
+            ${{ runner.temp }}/korean-layout-image-inputs.json
+          if-no-files-found: warn
+          retention-days: 7

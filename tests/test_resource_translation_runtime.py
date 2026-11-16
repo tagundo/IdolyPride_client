@@ -483,3 +483,75 @@ def test_existing_legacy_fingerprint_reuses_revision_without_rewriting_state(
     assert compatible is True
     assert selected == _expected_complete_revision_snapshot(raw, 1199)
     assert state.read_bytes() == encoded
+
+
+@pytest.fixture
+def revision_parse_counter(monkeypatch):
+    from idoly_local import resource_translation_runtime as runtime
+    original=runtime.Database;calls=[]
+    class CountedDatabase:
+        @staticmethod
+        def FromString(raw):
+            calls.append(raw);return original.FromString(raw)
+    monkeypatch.setattr(runtime,"Database",CountedDatabase)
+    runtime._REVISION_CACHE.clear()
+    yield runtime,calls
+    runtime._REVISION_CACHE.clear()
+
+
+def test_revision_cache_reuses_exact_wire_and_rechecks_committed_state(tmp_path,revision_parse_counter):
+    runtime,calls=revision_parse_counter;path=tmp_path/"revision.json"
+    raw=database().SerializeToString()+b"\x80\x4b\x7b"
+    first=runtime.pin_manifest_revision(raw,path,language="ko",sdk_identity_compat=True)
+    saved=path.read_bytes();modified=path.stat().st_mtime_ns
+    second=runtime.pin_manifest_revision(raw,path,language="ko",sdk_identity_compat=True)
+    assert second==first and len(calls)==1 and path.read_bytes()==saved and path.stat().st_mtime_ns==modified
+    assert b"\x80\x4b\x7b" in second[0]
+    runtime._REVISION_CACHE.clear()
+    assert runtime.pin_manifest_revision(raw,path,language="ko",sdk_identity_compat=True)==first
+    assert len(calls)==2
+
+
+@pytest.mark.parametrize("damage",["revision","language","manifest","invalid-state","symlink","removed-state"])
+def test_revision_cache_cannot_reuse_a_stale_or_invalid_state(tmp_path,revision_parse_counter,damage):
+    runtime,calls=revision_parse_counter;path=tmp_path/"revision.json";raw=database().SerializeToString()
+    first,_=runtime.pin_manifest_revision(raw,path,language="ko")
+    before=Database.FromString(first).revision
+    language="ko"
+    if damage=="revision":
+        value=json.loads(path.read_text());value["revision"]+=9;path.write_text(json.dumps(value))
+    elif damage=="language":language="en"
+    elif damage=="manifest":
+        value=database();value.resourceList[0].name="adv_other.txt";raw=value.SerializeToString()
+    elif damage=="invalid-state":path.write_text('{}')
+    elif damage=="symlink":
+        actual=tmp_path/"actual.json";path.rename(actual);path.symlink_to(actual)
+    elif damage=="removed-state":path.unlink()
+    if damage in ("invalid-state","symlink"):
+        with pytest.raises((ValueError,OSError)):runtime.pin_manifest_revision(raw,path,language=language)
+        assert len(calls)==1
+    else:
+        selected,_=runtime.pin_manifest_revision(raw,path,language=language)
+        assert len(calls)==2 and path.is_file()
+        revision=Database.FromString(selected).revision
+        if damage=="revision":assert revision==before+9
+        elif damage in ("language","manifest"):assert revision>before
+        else:assert revision==database().revision
+
+
+def test_original_unchanged_revision_cache_does_not_create_state_or_accept_changed_bytes(tmp_path,revision_parse_counter):
+    runtime,calls=revision_parse_counter;path=tmp_path/"revision.json";raw=database().SerializeToString()
+    assert runtime.pin_manifest_revision(raw,path,language="ja",preserve_original=True)==(raw,False)
+    assert runtime.pin_manifest_revision(raw,path,language="ja",preserve_original=True)==(raw,False)
+    assert not path.exists() and len(calls)==1
+    from google.protobuf.message import DecodeError
+    with pytest.raises(DecodeError):runtime.pin_manifest_revision(b"truncated protobuf",path,language="ja",preserve_original=True)
+    assert not path.exists() and len(calls)==2
+
+
+def test_revision_wire_cache_has_a_fixed_entry_and_byte_budget(tmp_path,revision_parse_counter):
+    runtime,_=revision_parse_counter;raw=database().SerializeToString()
+    for number in range(12):
+        runtime.pin_manifest_revision(raw,tmp_path/(str(number)+".json"),language="ko")
+        assert len(runtime._REVISION_CACHE)<=runtime._REVISION_CACHE_ENTRIES
+        assert sum(len(value[0]) for value in runtime._REVISION_CACHE.values())<=runtime._REVISION_CACHE_BYTES

@@ -18,6 +18,10 @@ SCOPE = "Android emulator native event settings and encrypted Home RPC"
 
 _EVENT_ORDER = {"idoly.events."+name: index for index, name in enumerate(
     ("status", "catalog", "enabled", "start", "end", "applied", "reload", "disable-all"))}
+_SUPPORTED_UI_EVENTS = ("love-23-0514", "love-23-1114", "love-24-0517", "love-24-1114", "love-26-0313", "love-extra-25-0426")
+_MODERN_EVENT_ORDER = {description: index for index, description in enumerate(("idoly.events.status",
+    *("idoly.events.toggle." + value for value in _SUPPORTED_UI_EVENTS), "idoly.events.enable-all", "idoly.events.disable-all",
+    "idoly.events.catalog", "idoly.events.enabled", "idoly.events.start", "idoly.events.end", "idoly.events.applied", "idoly.events.reload"))}
 _BELOW_KEYS = {"library_settings_title", "experiment_section_title", "presentation_title_expanded",
                "presentation_render_scale", "presentation_max_buffer_pixel", "playback_section_title",
                "resources_section_title", "library_resources_title", "diagnostics_section_title",
@@ -45,7 +49,7 @@ def event_visible(node, tree):
 
 def event_navigation(description):
     """Navigate toward the event card from fresh anchors, within find's same budget."""
-    if description not in _EVENT_ORDER:
+    if description not in _EVENT_ORDER and description not in _MODERN_EVENT_ORDER:
         raise RuntimeError("Event QA control has no known section order")
     root = Path(__file__).resolve().parents[1] / "app/src/main/res"
     below = set()
@@ -57,8 +61,10 @@ def event_navigation(description):
     def observed(tree):
         nonlocal previous
         nodes = [node for node in tree.iter("node") if event_visible(node, tree)]
-        positions = [_EVENT_ORDER[node.get("content-desc")] for node in nodes if node.get("content-desc") in _EVENT_ORDER]
-        wanted = _EVENT_ORDER[description]
+        modern = description not in _EVENT_ORDER or any(node.get("content-desc", "").startswith("idoly.nav.") for node in tree.iter("node"))
+        order = _MODERN_EVENT_ORDER if modern else _EVENT_ORDER
+        positions = [order[node.get("content-desc")] for node in nodes if node.get("content-desc") in order]
+        wanted = order[description]
         if positions:
             if all(value < wanted for value in positions): previous = "down"
             elif all(value > wanted for value in positions): previous = "up"
@@ -77,7 +83,8 @@ def event_navigation(description):
 
 def find_event_control(qa, description, stage):
     return find(qa, lambda node: node.get("content-desc") == description,
-                stage, event_navigation(description), node_filter=event_visible, scroll_profile="event")
+                stage, event_navigation(description), node_filter=event_visible, scroll_profile="event",
+                destination=("content", "events"))
 
 
 def runtime_settings(asset_port):
@@ -124,6 +131,17 @@ def assert_enabled(settings, event_id, previous_revision):
     return entry
 
 
+def assert_enabled_many(settings, event_ids, previous_revision):
+    saved = settings.get("saved", {})
+    entries = saved.get("love_events", [])
+    if (not revision_advanced(saved, previous_revision) or len(entries) != len(event_ids)
+            or {row.get("event_id") for row in entries} != set(event_ids)):
+        raise RuntimeError("Native event multi-selection did not retain every requested event with CAS")
+    for row in entries:
+        assert_enabled({"saved": {**saved, "love_events": [row]}}, row["event_id"], previous_revision)
+    return entries
+
+
 def assert_home_event(home, entry):
     if "eventInfo" not in home.DESCRIPTOR.fields_by_name:
         raise RuntimeError("Actual encrypted Home response has no eventInfo field")
@@ -140,23 +158,31 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
     if before["profile_love_progress"]:
         raise RuntimeError("Native event QA requires the fresh no-progress synthetic slot")
     qa.adb("shell", "am", "start", "-n", ACTIVITY)
+    normal = find(qa, lambda node: node.get("content-desc") == "idoly.options.media-mode",
+                  "81-event-normal-mode", "down", destination=("server", "mode"))
+    if normal.get("checked") == "true":
+        tap_node(qa, normal)
+        normal = find(qa, lambda node: node.get("content-desc") == "idoly.options.media-mode",
+                      "81-event-normal-mode-confirm", destination=("server", "mode"))
+    if normal.get("checked") != "false":
+        raise RuntimeError("Native finite event QA requires an observed normal-mode selection")
     select_profile(qa, CREATE, "81-event-test-account", "down")
     tap(qa, "idoly.accounts.select", "81-event-queue-account", "down")
     find(qa, lambda n: n.get("content-desc") == "idoly.accounts.select", "81-event-account-queued")
     qa.tap("서버 시작", "82-event-baseline-start")
     wait_server(schema, grpc_port, timeout=startup_timeout)
     baseline_runtime, baseline = runtime_settings(asset_port)
-    if (baseline_runtime.get("profile") != CREATE or baseline.get("saved", {}).get("love_events") != []
+    if (baseline_runtime.get("profile") != CREATE or baseline_runtime.get("media_mode") is not False
+            or baseline.get("media_mode") is not False or baseline.get("saved", {}).get("love_events") != []
             or baseline.get("effective", {}).get("love_events") != []):
         raise RuntimeError("Native event QA requires a fresh disabled event selection")
     catalog = baseline["catalog"]
     supported = [row for row in catalog.get("events", []) if row.get("supported") is True]
-    if catalog.get("available") is not True or not supported:
-        raise RuntimeError("Native event QA did not receive the data-backed supported catalog")
+    if catalog.get("available") is not True or len(supported) < 2:
+        raise RuntimeError("Native event QA did not receive multiple data-backed supported events")
     chosen = supported[0]
-    # The supported-only native spinner starts with its first observed entry.
-    find_event_control(qa, "idoly.events.catalog", "83-event-catalog")
-    control = find_event_control(qa, "idoly.events.enabled", "83-event-enable")
+    # Use the visible checklist, not the old one-event schedule editor.
+    control = find_event_control(qa, "idoly.events.toggle." + chosen["id"], "83-event-enable")
     if control.get("checked") != "false":
         raise RuntimeError("Native event checkbox was unexpectedly already enabled")
     revision = baseline["saved"]["revision"]
@@ -190,6 +216,34 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
     if (disabled.get("effective") != effective["effective"] or disabled.get("restart_required") is not True
             or not revision_advanced(disabled.get("saved", {}), observed["saved"]["revision"])):
         raise RuntimeError("Native event disable changed the running frozen event selection")
+    # Successive visible selections may overlap autosave. Each actual native
+    # tap must survive in the final CAS value without a reload/conflict reset.
+    previous = disabled["saved"]["revision"]
+    selected_ids = [row["id"] for row in supported[:2]]
+    for index, event_id in enumerate(selected_ids):
+        control = find_event_control(qa, "idoly.events.toggle." + event_id, "87-event-multi-" + str(index))
+        if control.get("checked") != "false":
+            raise RuntimeError("Native event rapid selection did not begin from visible unchecked rows")
+        tap_node(qa, control)
+    _, multi = await_saved(asset_port, lambda value: {row.get("event_id") for row in value.get("saved", {}).get("love_events", [])} == set(selected_ids))
+    assert_enabled_many(multi, selected_ids, previous)
+    if multi.get("effective") != effective["effective"] or multi.get("restart_required") is not True:
+        raise RuntimeError("Native event multi-selection changed frozen running settings")
+    tap_node(qa, find_event_control(qa, "idoly.events.enable-all", "87-event-all"))
+    all_ids = [row["id"] for row in supported]
+    _, all_enabled = await_saved(asset_port, lambda value: {row.get("event_id") for row in value.get("saved", {}).get("love_events", [])} == set(all_ids))
+    # If exactly two supported events exist, enable-all is an idempotent no-op.
+    if len(all_ids) == len(selected_ids):
+        if all_enabled.get("saved") != multi.get("saved"):
+            raise RuntimeError("Native event enable-all changed an already complete selection")
+    else:
+        assert_enabled_many(all_enabled, all_ids, multi["saved"]["revision"])
+    if all_enabled.get("effective") != effective["effective"] or all_enabled.get("restart_required") is not True:
+        raise RuntimeError("Native event enable-all changed frozen running settings")
+    tap_node(qa, find_event_control(qa, "idoly.events.disable-all", "87-event-all-off"))
+    _, cleared = await_saved(asset_port, lambda value: value.get("saved", {}).get("love_events") == [])
+    if not revision_advanced(cleared.get("saved", {}), all_enabled["saved"]["revision"]):
+        raise RuntimeError("Native event all-off did not persist a new CAS revision")
     qa.tap("서버 중지", "88-event-stop")
     wait_server(schema, grpc_port, expected=False, timeout=30)
     qa.adb("shell", "am", "force-stop", PACKAGE)

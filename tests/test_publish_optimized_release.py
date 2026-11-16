@@ -410,7 +410,7 @@ def test_release_body_uses_five_assets_and_labels_reused_client(monkeypatch):
         assert publisher.asset_download_url(name) in body
     assert body.count("/releases/download/"+publisher.TAG+"/") == len(publisher.EXPECTED_RELEASE_ASSETS)
     assert body.count("/raw/"+"c"*40+"/") == 2
-    assert "이번 릴리즈에서 재제작하지 않았습니다" in body
+    assert "한국어 Android 게임 · 글자 비율을 수정한 새 빌드" in body
     assert "별도 Mac 서버와 동시에 실행하지 마세요" in body
     assert "통합 IPA는 게임 시작 전 한국어·일본어·영어" in body
     assert "원하는 언어판 하나로 교체 설치" in body
@@ -538,7 +538,7 @@ def test_companion_original_provenance_and_entire_download_are_required(failure,
     import io
     import json
     raw = b"PK\x03\x04original-client"
-    wanted = {**publisher.COMPANIONS[0], "bytes": len(raw), "sha256":hashlib.sha256(raw).hexdigest()}
+    wanted = {**publisher.LEGACY_COMPANIONS[0], "bytes": len(raw), "sha256":hashlib.sha256(raw).hexdigest()}
     pointer = ("version https://git-lfs.github.com/spec/v1\noid sha256:"+wanted["sha256"]+"\nsize "+str(len(raw))+"\n").encode()
     provenance = {"source_commit":wanted["source_commit"],"version":wanted["version"],
         "artifacts":[{key:wanted[key] for key in ("name","bytes","sha256")}],
@@ -758,7 +758,7 @@ def client_report_fixture(directory):
                          "application_id": "game.qualiarts.idolypride.local.diagnostics", "version_code": 414,
                          "certificate_sha256": publisher.ANDROID_CLIENT_CERTIFICATE})
     return {"schema": 1, "status": "PASS", "source_commit": SOURCE, "run_id": RUN,
-            "languages": ["ja", "en"], "binaries": binaries,
+            "languages": ["ko", "ja", "en"], "binaries": binaries,
             "inputs": {**deepcopy(publisher.ANDROID_CLIENT_INPUTS),
                 "shadowhook": {"bytes": 461264, "sha256": "2cad01ff4d59542958775e19f281981a7e84b39670b5fae75905b8511e10c7cd"}},
             "source_sha256": {name: HASH for name in publisher.ANDROID_CLIENT_SOURCES},
@@ -802,7 +802,7 @@ def test_android_clients_require_pinned_inputs_identity_all_packaging_QA_and_raw
     (tmp_path/"android-clients-report.json").write_text(json.dumps(report))
     if case == "none":
         result = publisher.validate_android_clients(tmp_path, SOURCE, RUN)
-        assert [row["language"] for row in result] == ["ja", "en"]
+        assert [row["language"] for row in result] == ["ko", "ja", "en"]
         assert all(Path(row["path"]).is_file() for row in result)
     else:
         with pytest.raises(publisher.ReleaseError):
@@ -988,7 +988,7 @@ def test_public_download_urls_reject_unversioned_original_names():
 
 
 def test_reused_companion_renaming_preserves_original_build_provenance(source_release_binaries, tmp_path):
-    origin = publisher.COMPANIONS[0]
+    origin = publisher.LEGACY_COMPANIONS[0]
     row = next(row for row in source_release_binaries if row["name"] == origin["name"])
     row.update({key: origin[key] for key in ("version", "source_commit", "publication_commit")})
     row.update(reused_unchanged=True, fresh_source_build_claimed=False,
@@ -1040,8 +1040,8 @@ def test_native_metadata_requires_all_resource_runtime_guards():
 def test_current_release_has_exact_five_roles_and_excludes_standalone_mac():
     assert publisher.JOBS == ("portable", "performance", "android", "android-clients", "ios-unified")
     assert len(publisher.INPUT_RELEASE_ASSETS) == len(publisher.EXPECTED_RELEASE_ASSETS) == 5
-    assert {row["name"] for row in publisher.COMPANIONS} == {
-        "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk"}
+    assert publisher.COMPANIONS == ()
+    assert set(publisher.ANDROID_LANGUAGE_CLIENTS) == {"ko", "ja", "en"}
     assert publisher.MAC not in publisher.INPUT_RELEASE_ASSETS
     for old_name in (publisher.MAC, "IdolyPride-6.1.1-Local-PlayCover-ko.ipa"):
         with pytest.raises(publisher.ReleaseError, match="release_source_name_invalid"):

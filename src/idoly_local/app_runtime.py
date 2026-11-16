@@ -470,8 +470,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         from .language_settings import LanguageSettingsState
         runtime._language_settings = LanguageSettingsState(root / "client-language.json")
         from .event_settings import EventSettingsState, freeze_event_settings
-        runtime._event_settings = EventSettingsState(root)
-        runtime._active_events = freeze_event_settings(root)
+        runtime._event_settings = EventSettingsState(root, media_mode=media_mode)
+        runtime._active_events = freeze_event_settings(root, media_mode=media_mode)
         runtime._active_media = _StartupSettings(runtime._media_settings.settings())
         runtime._effective_language = runtime._language_settings.settings()["language"]
         # Imports stay inside startup so launchers can extract bundled data and
@@ -486,7 +486,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         from .gameplay import (repair_starter_home_positions, repair_starter_inventory,
                                repair_starter_roster, repair_starter_card_level_mission,
                                seed_starter_profile)
-        from .schema import Schema
+        from .startup_cache import load_startup_schema
         from .state import State
 
         stage = "storage"
@@ -498,7 +498,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         checks.record("catalog", "ready", "catalog_present")
         stage = "protocol"
         schema_path = root / "protocol" / "idolypride-6.1.1.pb"
-        schema = Schema.from_descriptor_set(schema_path)
+        schema = load_startup_schema(schema_path)
         checks.protocol(schema, schema_path)
         stage = "master"
         archive = root / "original-master"

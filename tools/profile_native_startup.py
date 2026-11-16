@@ -194,6 +194,9 @@ def main():
                     subprocess.run(command,check=True,timeout=240,cwd=ROOT,env={**os.environ,"PYTHONDONTWRITEBYTECODE":"1"})
                     require(report.stat().st_size<=128*1024,"case_report_too_large")
                     cases.append(json.loads(report.read_text()))
+                    # Preserve every completed bounded trace even if a later
+                    # case fails or the whole Actions job reaches its deadline.
+                    shutil.copyfile(report,output.parent/report.name)
                 finally:
                     require(owned.parent==work and (owned/MARKER).read_text()==args.source_commit,"owned_cleanup_required")
                     shutil.rmtree(owned)

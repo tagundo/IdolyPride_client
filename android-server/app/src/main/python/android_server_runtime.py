@@ -506,7 +506,11 @@ def _event_settings_native(root, action, payload, active):
     from idoly_local.event_settings import event_settings_command, EventSettingsError, ERROR_CODES
     effective = None
     running_settings = active.get("event_settings")
-    if active.get("running") is True and type(running_settings) is dict:
+    requested_media = payload.get("mode", "normal") == "media"
+    active_media = (running_settings.get("media_mode", active.get("media_mode") is True)
+                    if type(running_settings) is dict else active.get("media_mode") is True)
+    if (active.get("running") is True and type(running_settings) is dict
+            and active_media is requested_media):
         effective = running_settings.get("effective")
     try:
         observed = event_settings_command(root, action, payload, effective=effective)

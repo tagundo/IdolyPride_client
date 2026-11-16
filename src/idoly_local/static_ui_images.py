@@ -2,7 +2,9 @@
 
 Each original Sprite keeps its object ID, normalized pivot, border and scale.
 New replacements use the translated PNG rectangle, as Localify does; the
-original seven retain their previous padded rectangle for compatibility.
+original seven retain their previous padded rectangle for compatibility. Fixed
+Love button labels use the original UI rectangle with a centered, uniform fit;
+changing their Sprite rectangle alone stretches Korean glyphs in fixed Images.
 A separate RGBA32 texture and full rectangle mesh replace its atlas dependency,
 so no neighbouring atlas pixels are decoded or recompressed. Original image
 translation data remains subject to its upstream terms (NOASSERTION).
@@ -21,6 +23,22 @@ from . import font_assets
 
 POLICY = "korean-static-sprites-v2"
 LEGACY_POLICY = "korean-static-sprites-v1"
+TEXT_LAYOUT_POLICY = "original-rect-love-text-v1"
+# The reported Love buttons retain their original fixed-size Image rectangle.
+# Retain each approved original rectangle, rather than stretching short Korean
+# words to the Japanese caption width. PNG identities stay in the frozen input
+# catalog. Only MAX needs a small uniform downscale; the rest retain every pixel.
+FIXED_LOVE_TEXT = {
+    "love_btn_achievement": ((280, 40), (250, 40)),
+    "love_btn_fin": ((159, 40), (147, 40)),
+    "love_btn_max": ((72, 28), (74, 28)),
+    "love_btn_mission": ((80, 40), (78, 37)),
+    "love_btn_playing": ((240, 48), (96, 48)),
+    "love_btn_present": ((194, 40), (72, 40)),
+    "love_btn_setting": ((80, 40), (75, 40)),
+    "love_btn_status": ((192, 40), (185, 37)),
+    "love_button_start": ((192, 48), (184, 48)),
+}
 SOURCE_REPOSITORY = "https://github.com/CyleAR/ipr-translation-data-ko"
 SOURCE_REVISION = "f6e5689bcd6878d962996edfd390c1442b926c0f"
 TEXTURE_TEMPLATE_BYTES = 8340
@@ -58,6 +76,22 @@ LEGACY_PROFILES = (
 def _need(ok, message):
     if not ok:
         raise ValueError(message)
+
+
+def _text_layout(profile):
+    expected = FIXED_LOVE_TEXT.get(profile["name"])
+    if expected is None:
+        return profile
+    size, png_size = expected
+    targets = ([profile["android"]] if profile["android"] is not None else []) + profile["ios"]
+    _need(tuple(profile["png_size"]) == png_size and targets
+          and all(tuple(target["source_layout"]["sprite_size"]) == size for target in targets),
+          "Fixed Love text layout differs from the original audited rectangle")
+    scale = min(1., size[0] / png_size[0], size[1] / png_size[1])
+    content = tuple(max(1, min(bound, round(value * scale))) for bound, value in zip(size, png_size))
+    return {**profile, "sprite_size": list(size), "content_size": list(content),
+            "padding_offset": [(bound - value) // 2 for bound, value in zip(size, content)],
+            "layout_policy": TEXT_LAYOUT_POLICY, "render_key_policy": TEXT_LAYOUT_POLICY}
 
 
 def _profiles():
@@ -107,7 +141,7 @@ def _profiles():
     # Preserve the seven v1 texture IDs as well as their private GUIDs/pixels.
     order = [row["name"] for row in LEGACY_PROFILES]
     order += sorted(set(by_name) - set(order))
-    return tuple(by_name[name] for name in order)
+    return tuple(_text_layout(by_name[name]) for name in order)
 
 
 PROFILES = _profiles()
@@ -146,6 +180,15 @@ def _canvas(png, profile):
               and source.size == tuple(profile["png_size"]),
               "Translated sprite PNG decode differs")
         image = source.convert("RGBA")
+    content = tuple(profile.get("content_size", profile["png_size"]))
+    if content != image.size:
+        scale = min(1., profile["sprite_size"][0] / image.width, profile["sprite_size"][1] / image.height)
+        expected = tuple(max(1, min(bound, round(value * scale)))
+                         for bound, value in zip(profile["sprite_size"], image.size))
+        _need(profile.get("layout_policy") == TEXT_LAYOUT_POLICY and content == expected
+              and all(0 < fitted <= original for fitted, original in zip(content, image.size)),
+              "Only audited Love text may use a bounded uniform downscale")
+        image = image.resize(content, Image.Resampling.LANCZOS)
     canvas = Image.new("RGBA", profile["sprite_size"], (0, 0, 0, 0))
     x, y = profile["padding_offset"]
     _need(0 <= x and 0 <= y and x + image.width <= canvas.width and y + image.height <= canvas.height,
@@ -328,7 +371,9 @@ def _proof(platform, language, rows):
             "runtime_image_hooks": False, "atlas_pixels_modified": False,
             "original_sprite_IDs_preserved": True,
             "original_pivots_borders_pixels_per_unit_preserved": True,
-            "layout_policy": "preserved-v1-layout or Localify PNG rectangle",
+            "layout_policy": "preserved-v1-layout, Localify PNG rectangle, or fixed Love text aspect",
+            "fixed_text_layout_policy": TEXT_LAYOUT_POLICY,
+            "fixed_text_sprites": sum(row["layout_policy"] == TEXT_LAYOUT_POLICY for row in rows),
             "original_layout_preserved": all(row["original_layout_size"] == row["layout_size"] for row in rows),
             "texture_format": "RGBA32", "lossy_recompression": False,
             "private_sprite_render_data_keys": True}
@@ -381,6 +426,8 @@ def android_members(archive, *, language="ja", image_dir=None):
                      "layout_size": list(profile["sprite_size"]), "png_size": list(profile["png_size"]),
                      "layout_policy": profile["layout_policy"],
                      "transparent_padding_offset": list(profile["padding_offset"]),
+                     "content_size": list(profile.get("content_size", profile["png_size"])),
+                     "PNG_resampled": profile.get("content_size", profile["png_size"]) != profile["png_size"],
                      "readback_pixel_exact": True})
         del env, source, tiny, check
     return replacements, _proof("android", language, rows)
@@ -440,6 +487,8 @@ def ios_patches(archive, *, language="ja", image_dir=None):
                          "layout_policy": translated["layout_policy"],
                          "png_size": list(translated["png_size"]),
                          "transparent_padding_offset": list(translated["padding_offset"]),
+                         "content_size": list(translated.get("content_size", translated["png_size"])),
+                         "PNG_resampled": translated.get("content_size", translated["png_size"]) != translated["png_size"],
                          "readback_pixel_exact": True})
             del tiny
     _need(not originals, "Original iOS Sprite inventory was not fully consumed")

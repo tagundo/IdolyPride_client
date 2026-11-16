@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build fixed Japanese/English game APKs on an owned remote Actions runner.
+"""Build fixed Korean/Japanese/English game APKs on an owned remote Actions runner.
 
 The pinned diagnostic base is an immutable donor, not a fresh-source claim.
 Current presentation native/Java and the complete audited full-client writer
-are rebuilt. Both languages keep the existing update identity and certificate.
+are rebuilt. All three languages keep the existing update identity and certificate.
 No device, account, private key outside this checkout or installed app is read.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-LANGUAGES = ("ja", "en")
+LANGUAGES = ("ko", "ja", "en")
 PACKAGE = "game.qualiarts.idolypride.local.diagnostics"
 VERSION_CODE = 414
 CERTIFICATE = "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc"
@@ -36,6 +36,7 @@ FONT_GIT_BLOB = "ab20ba021ecb09802976a8dcee3eaa4219bf55f7"
 CLIENT_NAMES = {lang: "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-" + lang + ".apk"
                 for lang in LANGUAGES}
 INPUTS = {
+    "korean_donor": {"bytes": 165128829, "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e"},
     "diagnostic_base": {"bytes": 159549324, "sha256": "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df"},
     "apkeditor": {"bytes": 7126009, "sha256": "4a98ae6a755264357603f1906b92e62e757d59229014e33395f4e03ff019fda8"},
     "font": {"bytes": 3781740, "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314"},
@@ -44,6 +45,7 @@ INPUTS = {
     "shadowhook": {"bytes": 461264, "sha256": "2cad01ff4d59542958775e19f281981a7e84b39670b5fae75905b8511e10c7cd"},
 }
 URLS = {
+    "korean_donor": "https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.1/IdolyPride-2026.11.17.1-Client-Android-arm64-ko.apk",
     "diagnostic_base": "https://github.com/tagundo/IdolyPride_client/releases/download/local-diagnostics-v0.2.1/IdolyPride-Local-Diagnostic-Android-arm64.apk",
     "apkeditor": "https://github.com/REAndroid/APKEditor/releases/download/V1.4.1/APKEditor-1.4.1.jar",
     "font": "https://github.com/orioncactus/pretendard/raw/5c41199ea0024a9e0b2cb31735265056e5472d76/packages/pretendard-jp/dist/public/static/PretendardJP-SemiBold.otf",
@@ -60,7 +62,9 @@ VALIDATION_FLAGS = ("pinned_inputs_verified", "source_bound_native_and_feature_v
     "declared_member_inventory_verified", "local_resource_output_fields_verified",
     "built_in_ui_language_verified", "font_assets_verified", "original_inputs_unchanged")
 REQUIRED_SOURCES = (
-    "tools/release_android_clients.py", "client-presentation/build_addon.py",
+    "tools/release_android_clients.py", "tools/fetch_korean_ui_images.py",
+    "client-presentation/images/korean-static-sprites-v1.json", "client-presentation/images/korean-static-sprites-v2.json",
+    "client-presentation/images/korean-static-textures-v1.json", "client-presentation/build_addon.py",
     "client-presentation/build_full_client.py", "client-presentation/native/bridge.cpp",
     "client-presentation/native/profile.json", "src/idoly_local/ui_assets.py",
     "src/idoly_local/font_assets.py", "src/idoly_local/static_ui_assets.py",
@@ -68,11 +72,11 @@ REQUIRED_SOURCES = (
     "ios-unified/client-language-inputs/en.csv", "ios-unified/client-language-inputs/en-report.json")
 
 
-PHASES = frozenset(("startup", "checkout", "directories", "input_diagnostic_base", "input_apkeditor",
+PHASES = frozenset(("startup", "checkout", "directories", "input_diagnostic_base", "input_korean_donor", "input_apkeditor",
     "input_font", "input_shadowhook", "input_english_ui", "input_english_ui_proof", "sdk", "resources",
     "native", "native_ndk", "native_shadowhook", "native_sources", "native_resource",
     "native_compile", "native_strip", "native_readelf", "native_receipt",
-    "feature", "language_ja", "language_en", "verification", "final"))
+    "feature", "language_ko", "language_ja", "language_en", "verification", "final"))
 _PHASE = "startup"
 
 
@@ -358,7 +362,34 @@ def prepare_native(args, addon, limits, guard, work, inputs, *, resource_guard=N
     return library, tools / "llvm-readelf"
 
 
-def verify_language(apk, proof, language, commit, full):
+def extract_korean_ui(donor, work):
+    """Reuse only the exact shipped Korean text, then rebuild from stock data."""
+    verify_input(donor, INPUTS["korean_donor"])
+    import UnityPy
+    from idoly_local.ui_assets import ORIGINAL_CSV_SHA256, MAX_CSV_BYTES, validate_csv
+    with ZipFile(donor) as archive:
+        need(len(archive.namelist()) == len(set(archive.namelist())), "duplicate_korean_donor_member")
+        item = archive.getinfo(UI_MEMBER)
+        need(0 < item.file_size <= MAX_CSV_BYTES, "korean_donor_ui_bound")
+        prepared = archive.read(item)
+    objects = list(UnityPy.load(prepared).objects)
+    need(len(objects) == 1 and objects[0].type.name == "TextAsset" and objects[0].path_id == 1,
+         "korean_donor_ui_object_differs")
+    asset = objects[0].read()
+    need(asset.m_Name == "af07872d088f944f", "korean_donor_ui_name_differs")
+    value = asset.m_Script.encode("utf-8") if isinstance(asset.m_Script, str) else asset.m_Script
+    need(type(value) is bytes, "korean_donor_ui_script_invalid")
+    checked = validate_csv(value)
+    csv_path, proof_path = Path(work)/"ko.csv", Path(work)/"ko-report.json"
+    with csv_path.open("xb") as stream:
+        need(stream.write(value) == len(value), "korean_ui_write_incomplete")
+    write_json(proof_path, {"language":"ko", "input_sha256":ORIGINAL_CSV_SHA256,
+        "output_sha256":checked["sha256"], "bytes":len(value), "source_ui_keys":checked["ui_keys"],
+        "prepared_korean_donor":dict(INPUTS["korean_donor"])})
+    return csv_path, proof_path
+
+
+def verify_language(apk, proof, language, commit, full, *, prepared_ui_sha256=None):
     need(proof.get("source_commit") == commit and proof.get("source_apk_sha256") == INPUTS["diagnostic_base"]["sha256"]
          and proof.get("source_apk_bytes") == INPUTS["diagnostic_base"]["bytes"]
          and proof.get("ui_language") == language and proof.get("certificate_sha256") == CERTIFICATE
@@ -388,10 +419,13 @@ def verify_language(apk, proof, language, commit, full):
                  and proof.get("ui_translation") is None, "japanese_ui_not_original")
         else:
             ui = proof.get("ui_translation", {})
-            need(ui.get("language") == "en" and ui.get("output_asset_sha256") == ui_hash
-                 and ui.get("compiled_csv_sha256") == INPUTS["english_ui"]["sha256"]
+            expected_csv = INPUTS["english_ui"]["sha256"] if language == "en" else prepared_ui_sha256
+            need(language in ("ko", "en") and isinstance(expected_csv, str)
+                 and re.fullmatch(r"[0-9a-f]{64}", expected_csv) is not None
+                 and ui.get("language") == language and ui.get("output_asset_sha256") == ui_hash
+                 and ui.get("compiled_csv_sha256") == expected_csv
                  and ui.get("runtime_translation_hooks_added") is False
-                 and ui.get("all_other_objects_byte_identical") is True, "english_ui_not_packaged")
+                 and ui.get("all_other_objects_byte_identical") is True, "translated_ui_not_packaged")
         full.verify_local_resource_output(archive, proof["local_resource_transport"])
         guid_hash = digest_member(full.unity_cache.MEMBER)
         native_hash = digest_member(full.addon.LIBRARY)
@@ -470,6 +504,13 @@ def build(args):
         "client-presentation/licenses/Pretendard-OFL.txt", "src/idoly_local/ui_assets.py",
         "src/idoly_local/ui_translation_build.py", *REQUIRED_SOURCES)
     source_hashes = addon.frozen_sources(args.source_commit, extra=extra)
+    from tools.fetch_korean_ui_images import fetch_images
+    image_dir = work / "ko-images"
+    image_inputs = fetch_images(image_dir)
+    korean_csv, korean_proof = extract_korean_ui(inputs["korean_donor"], work)
+    from idoly_local.ui_assets import load_package_inputs
+    korean_prepared, _ = load_package_inputs("ko", korean_csv, korean_proof)
+    korean_csv_sha256 = hashlib.sha256(korean_prepared).hexdigest()
     binaries, packaging_evidence = [], {}
     for language in LANGUAGES:
         phase("language_" + language)
@@ -479,10 +520,11 @@ def build(args):
             output=apk, ram_directory=output if hosted_disk_staging else Path("/dev/shm"), all_tmpfs=False,
             hosted_disk_staging=hosted_disk_staging,
             apkeditor=inputs["apkeditor"], font_file=inputs["font"], font_license_file=None,
-            ui_language=language, ui_csv_file=inputs["english_ui"] if language == "en" else None,
-            ui_proof_file=inputs["english_ui_proof"] if language == "en" else None,
-            image_dir=None, native_library=None, **common), resource_guard=resource_guard)
-        packaged = verify_language(apk, proof, language, args.source_commit, full)
+            ui_language=language, ui_csv_file=inputs["english_ui"] if language == "en" else korean_csv if language == "ko" else None,
+            ui_proof_file=inputs["english_ui_proof"] if language == "en" else korean_proof if language == "ko" else None,
+            image_dir=image_dir, native_library=None, **common), resource_guard=resource_guard)
+        packaged = verify_language(apk, proof, language, args.source_commit, full,
+                                   prepared_ui_sha256=korean_csv_sha256 if language == "ko" else None)
         signer = [jdk / "java", *addon.JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
         checked = limits._run(full.output_verify_command(signer, apk), root=ROOT,
                               env=shared.clean_env(), timeout=60, guard=resource_guard).decode("utf-8")
@@ -501,7 +543,7 @@ def build(args):
             "certificate_sha256": CERTIFICATE})
         packaging_evidence[language] = packaged
     phase("verification")
-    need(len({row["unity_cache_sha256"] for row in packaging_evidence.values()}) == 2, "locale_cache_guids_not_distinct")
+    need(len({row["unity_cache_sha256"] for row in packaging_evidence.values()}) == len(LANGUAGES), "locale_cache_guids_not_distinct")
     need(len({row["presentation_native_sha256"] for row in packaging_evidence.values()}) == 1, "locale_native_features_differ")
     for name, path in inputs.items():
         verify_input(path, INPUTS[name])
@@ -516,12 +558,12 @@ def build(args):
         "languages": list(LANGUAGES), "binaries": binaries, "inputs": INPUTS,
         "source_sha256": source_hashes,
         "validation": {**{name: True for name in VALIDATION_FLAGS}, "runtime_device_tested": False},
-        "packaging_evidence": packaging_evidence,
+        "packaging_evidence": packaging_evidence, "korean_image_inputs": image_inputs,
         "report_files": {name: record(output / name) for name in reports},
         "input_provenance": {"diagnostic_base_release_asset": 728205797,
             "diagnostic_base_reused_immutable": True, "fresh_native_feature_for_current_source": True,
             "font_public_commit": FONT_PUBLIC_COMMIT, "font_git_blob": FONT_GIT_BLOB,
-            "package_variants_are_alternative_updates": True, "ko_client_reused_unchanged": True},
+            "package_variants_are_alternative_updates": True, "ko_client_reused_unchanged": False, "ko_client_rebuilt_from_current_source": True},
         "resources": {**guard.report(), "hosted_policy": resource_guard.report() if resource_guard is not None else None}}
     phase("final")
     write_json(output / REPORT_NAME, value)

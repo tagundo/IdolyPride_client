@@ -503,7 +503,7 @@ jobs:
           uv sync --locked --all-extras --python 3.13
           uv pip install --python .venv/bin/python 'UnityPy==1.25.4'
           sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
-      - name: Build and verify Japanese and English game clients
+      - name: Build and verify Korean, Japanese and English game clients
         run: >-
           uv run --locked python -B tools/release_android_clients.py
           --source-commit "$GITHUB_SHA"

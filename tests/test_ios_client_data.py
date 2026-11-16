@@ -158,3 +158,54 @@ def test_symbolic_destination_is_never_followed(tmp_path):
     with pytest.raises(ValueError):
         data.prepare_client_data(app, state, "ko")
     assert list(outside.iterdir()) == []
+
+
+def refresh_korean_resource(app, manifest, raw):
+    package = app / "LocalServer/client-languages.zip"
+    with zipfile.ZipFile(package) as archive:
+        contents = {name: archive.read(name) for name in archive.namelist()}
+    member = "ko/Data/resources.assets"
+    manifest["languages"]["ko"]["Data/resources.assets"] = {**spec(raw), "source": "archive", "member": member}
+    contents[member] = raw; contents["manifest.json"] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(package, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for name, value in contents.items(): archive.writestr(name, value)
+    (app / "LocalServer/client-languages.json").write_text(json.dumps({"schema": 1, **spec(package.read_bytes())}))
+
+
+def test_refreshed_korean_resources_replace_only_owned_bundle_and_reuse_verified_cache(tmp_path):
+    app, state, originals, manifest = fixture(tmp_path)
+    old = data.prepare_client_data(app, state, "ko")
+    private = state / "account.db"; private.write_bytes(b"preserve private account")
+    raw = b"Fresh Korean text with original source aspect"
+    refresh_korean_resource(app, manifest, raw)
+    fresh = data.prepare_client_data(app, state, "ko")
+    assert old["reused"] is False and fresh["reused"] is False
+    bundle = Path(fresh["bundle_path"])
+    assert (bundle / "Data/resources.assets").read_bytes() == raw
+    assert data.prepare_client_data(app, state, "ko")["reused"] is True
+    assert (bundle / "Data/Managed/Metadata/global-metadata.dat").read_bytes() == originals["Data/Managed/Metadata/global-metadata.dat"]
+    assert all((app / name).read_bytes() == value for name, value in originals.items())
+    assert private.read_bytes() == b"preserve private account"
+    assert list((state / "client-data").glob("ko.bundle.retired-*"))
+
+
+@pytest.mark.parametrize("damage", ("metadata", "other-language", "missing-member", "wrong-hash"))
+def test_korean_archive_refresh_is_finite_and_integrity_checked(tmp_path, damage):
+    app, state, originals, manifest = fixture(tmp_path)
+    refresh_korean_resource(app, manifest, b"new approved Korean resources")
+    if damage == "metadata":
+        row = manifest["languages"]["ko"]["Data/Managed/Metadata/global-metadata.dat"]
+        row.update(source="archive", member="ko/Data/Managed/Metadata/global-metadata.dat")
+    else:
+        row = manifest["languages"]["ko"]["Data/resources.assets"]
+        if damage == "other-language": row["member"] = "en/Data/resources.assets"
+        elif damage == "missing-member": del row["member"]
+        else: row["sha256"] = "0" * 64
+    package = app / "LocalServer/client-languages.zip"
+    with zipfile.ZipFile(package) as archive: contents = {name: archive.read(name) for name in archive.namelist()}
+    contents["manifest.json"] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(package, "w") as archive:
+        for name, raw in contents.items(): archive.writestr(name, raw)
+    (app / "LocalServer/client-languages.json").write_text(json.dumps({"schema": 1, **spec(package.read_bytes())}))
+    with pytest.raises(ValueError): data.prepare_client_data(app, state, "ko")
+    assert all((app / name).read_bytes() == value for name, value in originals.items())

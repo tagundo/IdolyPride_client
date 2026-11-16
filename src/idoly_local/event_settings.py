@@ -14,6 +14,7 @@ import threading
 import time
 
 FILENAME = "server-events.json"
+MEDIA_FILENAME = "server-events-media.json"
 MAX_SAFE_INTEGER = 2**53 - 1
 MAX_WINDOW_MS = 366 * 24 * 60 * 60 * 1000  # Explicit local policy, not an official duration.
 MAX_EVENTS = 64
@@ -46,8 +47,9 @@ def _object(pairs):
     return value
 
 
-def validate_settings(value, *, catalog=None, require_supported=False):
+def validate_settings(value, *, catalog=None, require_supported=False, media_mode=False):
     """Canonicalize IDs; periods are caller-chosen local milliseconds only."""
+    _need(type(media_mode) is bool)
     _need(type(value) is dict and set(value) == {"schema", "revision", "love_events"})
     _need(type(value["schema"]) is int and value["schema"] == 1)
     _need(type(value["revision"]) is int and 0 <= value["revision"] <= MAX_SAFE_INTEGER)
@@ -58,8 +60,11 @@ def validate_settings(value, *, catalog=None, require_supported=False):
         _need(type(row) is dict and set(row) == {"event_id", "start_time_ms", "end_time_ms"})
         identity, start, end = row["event_id"], row["start_time_ms"], row["end_time_ms"]
         _need(type(identity) is str and _ID.fullmatch(identity) is not None and identity not in identities)
-        _need(type(start) is int and type(end) is int and 0 <= start < end <= MAX_SAFE_INTEGER
-              and end - start <= MAX_WINDOW_MS)
+        _need(type(start) is int and type(end) is int)
+        if media_mode:
+            _need(start == 0 and end == 0)  # Gallery choices have no artificial local expiry.
+        else:
+            _need(0 <= start < end <= MAX_SAFE_INTEGER and end - start <= MAX_WINDOW_MS)
         identities.add(identity)
         result.append(dict(row))
     if require_supported and result:
@@ -72,15 +77,15 @@ def validate_settings(value, *, catalog=None, require_supported=False):
             "love_events": sorted(result, key=lambda row: row["event_id"])}
 
 
-def _decode(raw):
+def _decode(raw, *, media_mode=False):
     _need(type(raw) is bytes and 0 < len(raw) <= MAX_BYTES)
     try:
-        return validate_settings(json.loads(raw.decode("utf-8"), object_pairs_hook=_object))
+        return validate_settings(json.loads(raw.decode("utf-8"), object_pairs_hook=_object), media_mode=media_mode)
     except (UnicodeError, RecursionError, json.JSONDecodeError):
         raise EventSettingsError("event_settings_invalid") from None
 
 
-def _read(path):
+def _read(path, *, media_mode=False):
     descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     try:
         info = os.fstat(descriptor)
@@ -90,7 +95,28 @@ def _read(path):
         _need(len(raw) == info.st_size, "event_settings_storage_invalid")
     finally:
         os.close(descriptor)
-    return _decode(raw)
+    return _decode(raw, media_mode=media_mode)
+
+
+_EVENT_TITLES = {
+    "love-23-0514": ("이치노세 레이", "Rei Ichinose"),
+    "love-23-1114": ("이부키 나기사", "Nagisa Ibuki"),
+    "love-24-0517": ("하야사카 메이", "Mei Hayasaka"),
+    "love-24-1114": ("스즈무라 유우", "Yu Suzumura"),
+    "love-26-0313": ("칸자키 리오", "Rio Kanzaki"),
+}
+
+
+def _titles(identity, original):
+    """UI labels only; original IDs, story text and captured titles stay intact."""
+    names = _EVENT_TITLES.get(identity)
+    if names is not None:
+        return {"ko": "만약 당신과 사랑에 빠진다면 · " + names[0] + " 편",
+                "ja": original, "en": "If I Fell in Love with You · " + names[1]}
+    if identity == "love-extra-25-0426":
+        return {"ko": "서큐×마법 ~KISS AND MAGIC!~", "ja": original,
+                "en": "Succu × Magic ~KISS AND MAGIC!~"}
+    return {language: original for language in ("ko", "ja", "en")}
 
 
 def _catalog(data_dir, override=None):
@@ -113,7 +139,8 @@ def _catalog(data_dir, override=None):
                   and 0 < len(row["title"].encode("utf-8")) <= 1024 and row["title"].isprintable()
                   and type(row.get("supported")) is bool)
             seen.add(row["id"])
-            safe = {"id": row["id"], "title": row["title"], "supported": row["supported"],
+            safe = {"id": row["id"], "title": row["title"],
+                    "titles": _titles(row["id"], row["title"]), "supported": row["supported"],
                     "source_grade": "original_master_and_reference_capture_claim",
                     "inference_status": "reference_routes_inferred",
                     "original_start_time_ms": None, "original_end_time_ms": None,
@@ -177,19 +204,30 @@ def _save_lock(root):
 
 class EventSettingsState:
     """Read saved choices independently; Runtime passes a frozen effective copy."""
-    def __init__(self, data_dir, *, catalog=None):
+    def __init__(self, data_dir, *, catalog=None, media_mode=False):
+        _need(type(media_mode) is bool)
         self.root = Path(data_dir).resolve()
-        self.path = self.root / FILENAME
+        self.media_mode = media_mode
+        self.path = self.root / (MEDIA_FILENAME if media_mode else FILENAME)
         self._catalog_override = deepcopy(catalog)
         self._settings = deepcopy(DEFAULTS)
         self._invalid_file = False
+        self._last_save_default_all = False
         self._lock = threading.RLock()
 
-    def settings(self):
+    def _defaults(self, catalog=None):
+        value = deepcopy(DEFAULTS)
+        if self.media_mode:
+            catalog = catalog if catalog is not None else _catalog(self.root, self._catalog_override)
+            value["love_events"] = [{"event_id": row["id"], "start_time_ms": 0, "end_time_ms": 0}
+                                    for row in catalog.get("events", ()) if row.get("supported") is True]
+        return value
+
+    def settings(self, *, _catalog_value=None):
         try:
-            value = _read(self.path)
+            value = _read(self.path, media_mode=self.media_mode)
         except FileNotFoundError:
-            value = deepcopy(DEFAULTS)
+            value = self._defaults(_catalog_value)
         except (OSError, ValueError):
             with self._lock:
                 self._invalid_file = True
@@ -198,28 +236,40 @@ class EventSettingsState:
             self._settings, self._invalid_file = value, False
             return deepcopy(value)
 
-    def status(self, *, effective=None):
-        saved = self.settings()
-        active = validate_settings(effective) if effective is not None else None
+    def status(self, *, effective=None, _saved=None, _default_all=None):
+        catalog = _catalog(self.root, self._catalog_override)
+        # A command acknowledgement describes its own committed snapshot, not
+        # a different writer's newer file observed after our mutex is released.
+        saved = (self.settings(_catalog_value=catalog) if _saved is None else
+                 validate_settings(_saved, media_mode=self.media_mode))
+        active = validate_settings(effective, media_mode=self.media_mode) if effective is not None else None
         with self._lock:
-            invalid = self._invalid_file
+            invalid = self._invalid_file if _saved is None else False
+        default_all = (self.media_mode and not os.path.lexists(self.path)
+                       if _default_all is None else _default_all)
         return {"schema": 1, "saved": saved, "effective": active,
                 "restart_required": active is not None and saved["love_events"] != active["love_events"],
-                "catalog": _catalog(self.root, self._catalog_override), "invalid_settings_file": invalid}
+                "catalog": catalog, "invalid_settings_file": invalid,
+                "media_mode": self.media_mode,
+                "media_default_all": default_all,
+                "media_all_supported": self.media_mode and catalog.get("available") is True
+                    and {row["event_id"] for row in saved["love_events"]}
+                    == {row["id"] for row in catalog["events"] if row["supported"]}}
 
     def save(self, settings, *, expected_revision):
         _need(type(expected_revision) is int and 0 <= expected_revision <= MAX_SAFE_INTEGER)
         catalog = _catalog(self.root, self._catalog_override)
-        value = validate_settings(settings, catalog=catalog, require_supported=True)
+        value = validate_settings(settings, catalog=catalog, require_supported=True, media_mode=self.media_mode)
         _need(value["revision"] == expected_revision, "event_settings_revision_conflict")
         temporary = None
         try:
             with _save_lock(self.root) as outcome:
                 try:
-                    current = _read(self.path)
+                    current = _read(self.path, media_mode=self.media_mode)
                 except FileNotFoundError:
-                    current = deepcopy(DEFAULTS)
+                    current = self._defaults(catalog)
                 _need(current["revision"] == expected_revision, "event_settings_revision_conflict")
+                self._last_save_default_all = self.media_mode and not os.path.lexists(self.path)
                 if current["love_events"] == value["love_events"]:
                     return current  # No-op autosaves never reset or advance a period.
                 _need(current["revision"] < MAX_SAFE_INTEGER, "event_settings_revision_exhausted")
@@ -234,6 +284,7 @@ class EventSettingsState:
                     os.fsync(output.fileno())
                 os.replace(temporary, self.path)
                 outcome["committed"] = True
+                self._last_save_default_all = False
                 temporary = None
             with self._lock:
                 self._settings, self._invalid_file = deepcopy(value), False
@@ -250,27 +301,34 @@ class EventSettingsState:
                     pass
 
 
-def event_settings_status(data_dir, *, effective=None):
-    return EventSettingsState(data_dir).status(effective=effective)
+def event_settings_status(data_dir, *, effective=None, media_mode=False):
+    return EventSettingsState(data_dir, media_mode=media_mode).status(effective=effective)
 
 
-def event_settings_command(data_dir, action, payload, *, effective=None):
-    _need(type(action) is str and type(payload) is dict, "event_settings_command_invalid")
-    state = EventSettingsState(data_dir)
+def event_settings_command(data_dir, action, payload, *, effective=None, media_mode=False):
+    _need(type(action) is str and type(payload) is dict and type(media_mode) is bool,
+          "event_settings_command_invalid")
+    payload = dict(payload)
+    mode = payload.pop("mode", "media" if media_mode else "normal")
+    _need(type(mode) is str and mode in ("normal", "media"), "event_settings_command_invalid")
+    media_mode = mode == "media"
+    state = EventSettingsState(data_dir, media_mode=media_mode)
+    saved = None
     if action == "events_status":
         _need(not payload, "event_settings_command_invalid")
     elif action == "events_save":
         _need(set(payload) == {"settings", "expected_revision"}, "event_settings_command_invalid")
-        state.save(payload["settings"], expected_revision=payload["expected_revision"])
+        saved = state.save(payload["settings"], expected_revision=payload["expected_revision"])
     else:
         raise EventSettingsError("event_settings_command_invalid")
-    return state.status(effective=effective)
+    return state.status(effective=effective, _saved=saved,
+                        _default_all=state._last_save_default_all if saved is not None else None)
 
 
-def freeze_event_settings(data_dir):
-    state = EventSettingsState(data_dir)
+def freeze_event_settings(data_dir, *, media_mode=False):
+    state = EventSettingsState(data_dir, media_mode=media_mode)
     value = state.settings()
     _need(not state._invalid_file)
     if not value["love_events"]:
         return value  # Disabled defaults do not require any event data/module.
-    return validate_settings(value, catalog=_catalog(state.root), require_supported=True)
+    return validate_settings(value, catalog=_catalog(state.root), require_supported=True, media_mode=media_mode)

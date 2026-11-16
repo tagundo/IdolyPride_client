@@ -203,3 +203,51 @@ def test_raw_love_json_canary_preserves_whitespace_and_all_other_tables(tmp_path
         assert {table: db.execute("SELECT * FROM " + table).fetchall() for table in before} == before
         with pytest.raises(RuntimeError, match="fresh stopped synthetic sandbox"):
             qa.seed_love_canary(db, SimpleNamespace(fingerprint="b" * 64))
+
+
+def category_frame(selected, panel=None, target=False):
+    body = '<node content-desc="idoly.nav.users" selected="' + str(selected).lower() + '" enabled="true" bounds="[10,10][110,60]"/>'
+    if panel is not None:
+        body += '<node content-desc="idoly.panel.accounts" selected="' + str(panel).lower() + '" enabled="true" bounds="[20,100][500,160]"/>'
+    if target:
+        body += '<node content-desc="idoly.accounts.create" enabled="true" bounds="[30,200][300,250]"/>'
+    return '<hierarchy>' + body + '</hierarchy>'
+
+
+def test_category_and_collapsed_panel_are_opened_through_fresh_observed_taps(monkeypatch):
+    monkeypatch.setattr(qa.time, "sleep", lambda _: None)
+    guest = Guest([category_frame(False), category_frame(True, False), category_frame(True, True, True)])
+    found = qa.find(guest, lambda n: n.get("content-desc") == "idoly.accounts.create", "route", "down",
+                    attempts=3, destination=("users", "accounts"))
+    assert found.get("content-desc") == "idoly.accounts.create"
+    assert guest.actions == [("shell", "input", "tap", "60", "35"),
+                             ("shell", "input", "tap", "260", "130")]
+    assert len(guest.captures) == 3
+
+
+def test_navigation_uses_existing_observation_budget_and_never_taps_missing_target(monkeypatch):
+    monkeypatch.setattr(qa.time, "sleep", lambda _: None)
+    guest = Guest([category_frame(False), category_frame(True, False)])
+    with pytest.raises(RuntimeError, match="native control was not observed"):
+        qa.find(guest, lambda n: n.get("content-desc") == "idoly.accounts.create", "route", "down",
+                attempts=2, destination=("users", "accounts"))
+    assert len(guest.captures) == len(guest.actions) == 2
+
+
+def test_hidden_control_and_clipped_scroll_child_are_not_tap_targets():
+    tree = ET.fromstring('<hierarchy><node class="android.widget.ScrollView" bounds="[0,100][500,400]">'
+        '<node content-desc="offscreen" bounds="[10,450][100,500]"/>'
+        '<node content-desc="hidden" visible-to-user="false" bounds="[10,200][100,250]"/>'
+        '<node content-desc="visible" bounds="[10,220][100,270]"/></node></hierarchy>')
+    nodes = {n.get("content-desc"): n for n in tree.iter("node") if n.get("content-desc")}
+    assert not qa.visible_node(nodes["offscreen"], tree)
+    assert not qa.visible_node(nodes["hidden"], tree)
+    assert qa.visible_node(nodes["visible"], tree)
+
+
+def test_current_category_repositions_once_before_existing_scroll_logic(monkeypatch):
+    monkeypatch.setattr(qa.time, "sleep", lambda _: None)
+    state = {}; guest = Guest([]); tree = ET.fromstring(category_frame(True))
+    assert qa.navigation_step(guest, tree, ("users", "accounts"), state)
+    assert not qa.navigation_step(guest, tree, ("users", "accounts"), state)
+    assert guest.actions == [("shell", "input", "tap", "60", "35")]

@@ -67,17 +67,17 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     owned["snapshots"] = (("@slot", b"unchanged snapshot"),)
     def snapshot(guest, copier, profile):
         value = copy.deepcopy(owned)
-        if damage == "progress" and model["saved"]["revision"] == disable_revision:
+        if damage == "progress" and model["saved"]["revision"] >= disable_revision:
             value["profile_love_progress"] = (("changed",),)
         return value
     def runtime(port):
         effective = copy.deepcopy(model["effective"])
         if damage == "frozen" and model["saved"]["revision"] == save_revision and model["starts"] == 1:
             effective = copy.deepcopy(model["saved"])
-        return ({"running": True, "profile": probe.CREATE}, {"schema": 1,
+        return ({"running": True, "media_mode": False, "profile": probe.CREATE}, {"schema": 1, "media_mode": False,
             "saved": copy.deepcopy(model["saved"]), "effective": effective,
             "restart_required": effective != model["saved"], "catalog": {"available": True,
-                "events": [{"id": "love-23-0514", "title": "Synthetic", "supported": True}], "ruleset_sha256": "a"*64}})
+                "events": [{"id": event_id, "title": "Synthetic", "supported": True} for event_id in ("love-23-0514", "love-23-1114")], "ruleset_sha256": "a"*64}})
     class Guest:
         def adb(self, *arguments, **kwargs):
             model["calls"].append(("adb", arguments))
@@ -94,14 +94,26 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     guest = Guest()
     def find(guest, predicate, stage, direction=None, **kwargs):
         model["calls"].append(("find", stage))
-        return ET.fromstring('<node checked="false" content-desc="'+("idoly.events.disable-all" if stage == "87-event-disable" else "idoly.events.enabled")+'"/>')
+        description = ("idoly.events.disable-all" if stage in ("87-event-disable", "87-event-all-off") else
+                       "idoly.events.enable-all" if stage == "87-event-all" else
+                       "idoly.events.toggle.love-23-1114" if stage == "87-event-multi-1" else "idoly.events.toggle.love-23-0514")
+        return ET.fromstring('<node checked="false" content-desc="'+description+'"/>')
     def enable(guest, node):
-        if node.get("content-desc") == "idoly.events.disable-all":
-            model["calls"].append(("native-description", "idoly.events.disable-all"))
-            model["saved"] = dict(copy.deepcopy(base), revision=disable_revision)
-        else:
+        description = node.get("content-desc")
+        if description == "idoly.events.disable-all":
+            model["calls"].append(("native-description", description))
+            revision = disable_revision if model["saved"]["revision"] == save_revision else model["saved"]["revision"] + 1
+            model["saved"] = dict(copy.deepcopy(base), revision=revision)
+        elif description == "idoly.events.enable-all":
+            model["calls"].append(("native-description", description))
+        elif model["starts"] == 1:
             model["calls"].append(("native-checkbox",))
             model["saved"] = settings(save_revision)["saved"]
+        else:
+            model["calls"].append(("native-description", description))
+            event_id = description.removeprefix("idoly.events.toggle.")
+            entry = copy.deepcopy(settings()["saved"]["love_events"][0]); entry["event_id"] = event_id
+            model["saved"]["love_events"].append(entry); model["saved"]["revision"] += 1
     def tap(guest, description, stage, direction=None):
         model["calls"].append(("native-description", description))
         if description == "idoly.events.disable-all":
@@ -132,7 +144,7 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     assert detail["home_event_verified"] is True and detail["progress_preserved"] is True
     assert detail["gameplay_tested"] is False and detail["physical_device_tested"] is False
     assert model["starts"] == 2 and model["selected"] == "sandbox"
-    assert model["saved"]["love_events"] == [] and model["saved"]["revision"] == disable_revision
+    assert model["saved"]["love_events"] == [] and model["saved"]["revision"] == disable_revision + 3
     assert ("encrypted-rpc", "/api.Home/Enter", b"synthetic-token") in model["calls"]
     assert model["calls"].index(("native-checkbox",)) < model["calls"].index(("native", "서버 시작", "86-event-restart"))
 
@@ -342,3 +354,17 @@ def test_saved_event_with_unchanged_or_stale_revision_is_rejected():
     for previous in (1794835740000, 1794835740001):
         with pytest.raises(RuntimeError, match="CAS"):
             probe.assert_enabled(observed, "love-23-0514", previous)
+
+
+def test_multi_event_observation_requires_all_requested_ids_and_valid_windows():
+    observed = settings(7)
+    another = copy.deepcopy(observed["saved"]["love_events"][0]); another["event_id"] = "love-23-1114"
+    observed["saved"]["love_events"].append(another)
+    assert len(probe.assert_enabled_many(observed, ["love-23-0514", "love-23-1114"], 6)) == 2
+    for damage in ("missing", "duplicate", "stale", "duration"):
+        changed = copy.deepcopy(observed)
+        if damage == "missing": changed["saved"]["love_events"].pop()
+        elif damage == "duplicate": changed["saved"]["love_events"][1]["event_id"] = "love-23-0514"
+        elif damage == "stale": changed["saved"]["revision"] = 6
+        else: changed["saved"]["love_events"][1]["end_time_ms"] += 1
+        with pytest.raises(RuntimeError): probe.assert_enabled_many(changed, ["love-23-0514", "love-23-1114"], 6)

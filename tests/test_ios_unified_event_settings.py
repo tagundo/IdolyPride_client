@@ -68,7 +68,7 @@ assert.equal(request.settings.love_events[0].end_time_ms-request.settings.love_e
 env.respond(request,eventSaved(request));await flush();
 assert.equal(env.elements.get('events-save-feedback').dataset.state,'saved');
 assert.match(env.elements.get('events-detail').textContent,/다음 서버 시작/);
-assert.match(env.elements.get('events-effective').textContent,/없음/);assert.match(env.elements.get('events-next').textContent,/Event A/);
+assert.match(env.elements.get('events-effective').textContent,/0/);assert.match(env.elements.get('events-next').getAttribute('title'),/Event A/);
 assert.equal(env.posted.some(x=>/reset|reward|clock|restart/.test(x.action)),false);app.dispose();
 """)
 
@@ -91,16 +91,18 @@ env.respond(second,eventSaved(second));await flush();assert.equal(env.elements.g
 """)
 
 
-def test_event_cas_conflict_preserves_draft_and_waits_for_explicit_retry():
+def test_event_cas_conflict_merges_only_local_intents_onto_latest_mode_revision():
     run_js(EVENT_JS+r"""
 const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);
 env.respond(env.posted[0],eventStatus());await flush();env.elements.get('events-enabled').checked=true;env.elements.get('events-enabled').fire('change');
 const first=env.posted.at(-1);env.scope.idolyServerReply(first.id,{id:first.id,ok:false,error:{code:'event_settings_revision_conflict',message:'safe'}});await flush();
-const refresh=env.posted.at(-1);assert.equal(refresh.action,'status');const newest=eventStatus({schema:1,revision:9,love_events:[]});env.respond(refresh,newest);await flush();
-assert.equal(env.elements.get('events-enabled').checked,true);assert.equal(env.elements.get('events-save-retry').hidden,false);
-assert.match(env.elements.get('events-save-feedback').textContent,/다른 화면/);await env.tick(100);assert.equal(env.posted.at(-1),refresh);
-env.elements.get('events-save-retry').fire('click');const retried=env.posted.at(-1);assert.equal(retried.action,'events_save');assert.equal(retried.expected_revision,9);
-assert.deepEqual(retried.settings.love_events,first.settings.love_events);app.dispose();
+const refresh=env.posted.at(-1);assert.equal(refresh.action,'events_status');assert.equal(refresh.mode,'normal');
+const newest=eventStatus({schema:1,revision:9,love_events:[{event_id:'love-b',start_time_ms:1000,end_time_ms:2000}]}).runtime.event_settings;newest.media_mode=false;
+env.respond(refresh,newest);await flush();await env.tick(180);
+const retried=env.posted.at(-1);assert.equal(retried.action,'events_save');assert.equal(retried.expected_revision,9);
+assert.deepEqual(retried.settings.love_events.map(row=>row.event_id),['love-a','love-b'],'Other window changes are retained');
+assert.equal(env.elements.get('events-save-retry').hidden,true);
+env.respond(retried,eventSaved(retried));await flush();assert.equal(env.elements.get('events-save-feedback').dataset.state,'saved');app.dispose();
 """)
 
 
@@ -122,7 +124,7 @@ def test_event_interface_changes_immediately_and_has_no_manual_save_button(langu
 const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);env.respond(env.posted[0],eventStatus());await flush();
 env.elements.get('interface_language').value=language;env.elements.get('interface_language').fire('change');await flush();
 const label=env.elements.get('events-effective').textContent;
-if(language==='en')assert.match(label,/Active events/);else if(language==='ja')assert.match(label,/現在適用/);else assert.match(label,/현재 적용/);
+if(language==='en')assert.match(label,/Active/);else if(language==='ja')assert.match(label,/適用中/);else assert.match(label,/현재 적용/);
 assert.ok(!env.elements.has('events-save'));assert.equal(env.elements.get('events-fields').disabled,false);app.dispose();
 """)
 
@@ -145,4 +147,131 @@ const saving=env.posted.at(-1);env.scope.idolyServerFlushSettings('00000000-0000
 assert.equal(env.posted.at(-1),saving);assert.equal(env.elements.get('events-fields').disabled,true);
 env.respond(saving,eventSaved(saving));await flush();const barrier=env.posted.at(-1);
 assert.equal(barrier.action,'launch_settings_barrier');assert.equal(barrier.ready,true);app.dispose();
+""")
+
+
+def test_visible_checklist_and_bulk_controls_support_rapid_changes_without_rebuilding_rows():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);env.respond(env.posted[0],eventStatus());await flush();
+const cards=env.elements.get('events-list').children;assert.equal(cards.length,2);
+cards[0].eventInput.checked=true;cards[0].eventInput.fire('change');cards[1].eventInput.checked=true;cards[1].eventInput.fire('change');
+assert.equal(env.elements.get('events-list').children[0],cards[0]);await env.tick(180);
+const first=env.posted.at(-1);assert.equal(first.action,'events_save');assert.deepEqual(first.settings.love_events.map(row=>row.event_id),['love-a','love-b']);
+cards[0].eventInput.checked=false;cards[0].eventInput.fire('change');await env.tick(180);assert.equal(env.posted.at(-1),first);
+env.respond(first,eventSaved(first));await flush();const next=env.posted.at(-1);assert.equal(next.expected_revision,1);assert.deepEqual(next.settings.love_events.map(row=>row.event_id),['love-b']);
+env.respond(next,eventSaved(next));await flush();env.elements.get('events-enable-all').fire('click');const all=env.posted.at(-1);
+assert.equal(all.settings.love_events.length,2);env.respond(all,eventSaved(all));await flush();env.elements.get('events-disable-all').fire('click');assert.equal(env.posted.at(-1).settings.love_events.length,0);app.dispose();
+""")
+
+
+def test_gallery_default_all_is_editable_without_fake_windows_and_titles_follow_interface_language():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);const initial=eventStatus({schema:1,revision:0,love_events:[{event_id:'love-a',start_time_ms:0,end_time_ms:0},{event_id:'love-b',start_time_ms:0,end_time_ms:0}]});
+initial.runtime.event_settings.media_mode=true;initial.runtime.event_settings.media_default_all=true;initial.runtime.event_settings.effective=structuredClone(initial.runtime.event_settings.saved);
+initial.runtime.event_settings.catalog.events[0].titles={ko:'레이 편',ja:'怜編',en:'Rei'};
+env.respond(env.posted[0],initial);await flush();assert.equal(env.elements.get('events-mode').value,'media');assert.equal(env.elements.get('events-period-editor').hidden,true);
+assert.equal(env.elements.get('events-list').children[0].children[1].textContent,'레이 편');
+env.elements.get('events-disable-all').fire('click');const empty=env.posted.at(-1);assert.equal(empty.action,'events_save');assert.equal(empty.mode,'media');assert.equal(empty.settings.love_events.length,0);
+const receipt=structuredClone(initial);receipt.runtime.event_settings.saved={schema:1,revision:1,love_events:[]};env.respond(empty,receipt);await flush();
+env.elements.get('events-enable-all').fire('click');const all=env.posted.at(-1);assert.equal(all.mode,'media');assert.ok(all.settings.love_events.every(row=>row.start_time_ms===0&&row.end_time_ms===0));
+env.respond(all,{...initial,runtime:{...initial.runtime,event_settings:{...initial.runtime.event_settings,saved:{...all.settings,revision:2}}}});await flush();
+env.elements.get('interface_language').value='en';env.elements.get('interface_language').fire('change');await flush();assert.equal(env.elements.get('events-list').children[0].children[1].textContent,'Rei');app.dispose();
+""")
+
+
+def test_mode_navigation_waits_for_pending_save_and_does_not_accept_old_mode_status():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);env.respond(env.posted[0],eventStatus());await flush();
+env.elements.get('events-enable-all').fire('click');const saving=env.posted.at(-1);env.elements.get('events-mode').value='media';env.elements.get('events-mode').fire('change');await flush();assert.equal(env.posted.at(-1),saving);
+env.respond(saving,eventSaved(saving));await flush();const loading=env.posted.at(-1);assert.equal(loading.action,'events_status');assert.equal(loading.mode,'media');
+const media=eventStatus({schema:1,revision:0,love_events:[]}).runtime.event_settings;media.media_mode=true;env.respond(loading,media);await flush();
+assert.equal(env.elements.get('events-mode').value,'media');assert.equal(env.elements.get('events-period-editor').hidden,true);
+env.scope.idolyServerEvent({event:'status',status:eventStatus({schema:1,revision:90,love_events:[]})});await flush();assert.equal(env.elements.get('events-mode').value,'media');
+assert.equal(env.elements.get('events-fields').disabled,false);app.dispose();
+""")
+
+
+def test_host_gallery_preferences_are_separate_and_legacy_commands_keep_normal_windows(harness,monkeypatch):
+    h=harness
+    monkeypatch.setattr(event_settings,"_catalog",lambda root,override=None:copy.deepcopy(CATALOG))
+    start(h)
+    normal=command(h,"events_status",mode="normal")["result"]
+    gallery=command(h,"events_status",mode="media")["result"]
+    assert normal["saved"]["love_events"]==[] and normal["media_mode"] is False
+    assert gallery["media_mode"] is True and gallery["media_default_all"] is True
+    assert {row["event_id"] for row in gallery["saved"]["love_events"]}=={"love-a","love-b"}
+    assert all(row["start_time_ms"]==row["end_time_ms"]==0 for row in gallery["saved"]["love_events"])
+    (h.data/"state.db").write_bytes(b"normal-account-canary")
+    (h.data/"media-state.db").write_bytes(b"gallery-account-canary")
+    empty={"schema":1,"revision":gallery["saved"]["revision"],"love_events":[]}
+    receipt=command(h,"events_save",mode="media",settings=empty,expected_revision=empty["revision"])
+    assert receipt["ok"] and receipt["result"]["runtime"]["event_settings"]["media_mode"] is True
+    assert command(h,"events_status",mode="media")["result"]["saved"]["love_events"]==[]
+    assert command(h,"events_status")["result"]["saved"]["love_events"]==[]
+    settings={"schema":1,"revision":0,"love_events":[{"event_id":"love-a","start_time_ms":1000,"end_time_ms":2000}]}
+    assert command(h,"events_save",mode="normal",settings=settings,expected_revision=0)["ok"]
+    assert command(h,"events_status")["result"]["saved"]["love_events"]==settings["love_events"]
+    assert command(h,"events_status",mode="media")["result"]["saved"]["love_events"]==[]
+    assert (h.data/"state.db").read_bytes()==b"normal-account-canary"
+    assert (h.data/"media-state.db").read_bytes()==b"gallery-account-canary"
+    assert h.runtimes[0].stops==0 and len(h.calls)==1
+    from idoly_local import ios_host
+    original_status=h.runtimes[0].status
+    monkeypatch.setattr(h.runtimes[0],"status",lambda:{**original_status(),"unrelated_large_history":"x"*(ios_host.MAX_JSON_BYTES*2)})
+    thinned=command(h,"status")["result"]
+    assert thinned["diagnostics_truncated"] is True
+    assert thinned["runtime"]["event_settings"]["media_mode"] is True
+    assert thinned["runtime"]["event_settings"]["media_default_all"] is False
+    assert thinned["runtime"]["event_settings"]["media_all_supported"] is False
+    assert not command(h,"events_status",mode="other")["ok"]
+
+
+def test_status_poll_started_during_event_save_cannot_revert_a_newer_acknowledged_revision():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);env.respond(env.posted[0],eventStatus());await flush();
+env.elements.get('events-enable-all').fire('click');const saving=env.posted.at(-1);
+env.elements.get('refresh').fire('click');const stalePoll=env.posted.at(-1);assert.equal(stalePoll.action,'status');
+env.respond(saving,eventSaved(saving));await flush();
+env.respond(stalePoll,eventStatus());await flush();
+assert.ok(env.elements.get('events-list').children.every(card=>card.eventInput.checked),'Old status cannot repaint newer saved choices');
+assert.match(env.elements.get('events-next').getAttribute('title'),/Event B/);
+env.elements.get('events-list').children[0].eventInput.checked=false;env.elements.get('events-list').children[0].eventInput.fire('change');await env.tick(180);
+const next=env.posted.at(-1);assert.equal(next.expected_revision,1);assert.deepEqual(next.settings.love_events.map(row=>row.event_id),['love-b']);app.dispose();
+""")
+
+
+def test_automatic_account_mode_change_can_load_revision_zero_after_a_high_normal_revision():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);
+const normal=eventStatus({schema:1,revision:900,love_events:[]});normal.options.media_mode=false;normal.runtime.event_settings.media_mode=false;env.respond(env.posted[0],normal);await flush();
+const media=eventStatus({schema:1,revision:0,love_events:[{event_id:'love-a',start_time_ms:0,end_time_ms:0},{event_id:'love-b',start_time_ms:0,end_time_ms:0}]});media.runtime.event_settings.media_mode=true;
+env.scope.idolyServerEvent({event:'status',status:media});await flush();
+assert.equal(env.elements.get('events-mode').value,'media');assert.equal(env.elements.get('events-fields').disabled,false);
+assert.ok(env.elements.get('events-list').children.every(card=>card.eventInput.checked));app.dispose();
+""")
+
+
+def test_options_ack_invalidates_an_inflight_poll_before_it_can_revert_gallery_mode():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);
+const normal=eventStatus();normal.options.media_mode=false;normal.runtime.event_settings.media_mode=false;env.respond(env.posted[0],normal);await flush();
+env.elements.get('media_mode').checked=true;env.elements.get('media_mode').fire('change');const saving=env.posted.at(-1);assert.equal(saving.action,'save_options');
+env.elements.get('refresh').fire('click');const oldPoll=env.posted.at(-1);assert.equal(oldPoll.action,'status');
+const media=eventStatus({schema:1,revision:0,love_events:[{event_id:'love-a',start_time_ms:0,end_time_ms:0},{event_id:'love-b',start_time_ms:0,end_time_ms:0}]});media.runtime.event_settings.media_mode=true;
+env.respond(saving,media);await flush();env.respond(oldPoll,normal);await flush();
+assert.equal(env.elements.get('media_mode').checked,true);assert.equal(env.elements.get('events-mode').value,'media');assert.equal(env.elements.get('events-fields').disabled,false);app.dispose();
+""")
+
+
+def test_newer_same_value_intent_survives_old_ack_and_an_external_newer_revision():
+    run_js(EVENT_JS+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);env.respond(env.posted[0],eventStatus());await flush();
+const enabled=env.elements.get('events-enabled');enabled.checked=true;enabled.fire('change');const oldOn=env.posted.at(-1);
+enabled.checked=false;enabled.fire('change');enabled.checked=true;enabled.fire('change');assert.equal(env.posted.at(-1),oldOn);
+const external=eventStatus({schema:1,revision:2,love_events:[{event_id:'love-b',start_time_ms:1000,end_time_ms:2000}]});
+env.scope.idolyServerEvent({event:'status',status:external});await flush();
+env.respond(oldOn,eventSaved(oldOn));await flush();
+const latest=env.posted.at(-1);assert.notEqual(latest.id,oldOn.id);assert.equal(latest.action,'events_save');assert.equal(latest.expected_revision,2);
+assert.deepEqual(latest.settings.love_events.map(row=>row.event_id),['love-a','love-b'],'The later on intent survives while unrelated external changes remain');
+assert.equal(env.elements.get('events-list').children[0].eventInput.checked,true);app.dispose();
 """)

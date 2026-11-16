@@ -52,7 +52,7 @@ def native_events(tmp_path, monkeypatch):
             if payload["expected_revision"] != state["saved"]["revision"]:
                 raise EventError("event_settings_revision_conflict")
             state["saved"] = dict(copy.deepcopy(payload["settings"]), revision=state["saved"]["revision"] + 1)
-            (root / "server-events.json").write_text(json.dumps(state["saved"]))
+            (root / ("server-events-media.json" if payload.get("mode") == "media" else "server-events.json")).write_text(json.dumps(state["saved"]))
         return {"schema": 1, "saved": copy.deepcopy(state["saved"]),
                 "effective": copy.deepcopy(effective), "restart_required": effective is not None and effective != state["saved"],
                 "invalid_settings_file": False,
@@ -90,8 +90,9 @@ def test_save_is_persist_only_in_both_modes_and_current_run_stays_frozen(native_
     runtime = Active(media=media)
     boundary._RUNTIME = runtime
     before = database.read_bytes()
-    settings = dict(copy.deepcopy(BASE), love_events=[{"event_id": EVENT, "start_time_ms": 1000, "end_time_ms": 2000}])
-    request = {"settings": settings, "expected_revision": 0}
+    settings = dict(copy.deepcopy(BASE), love_events=[{"event_id": EVENT,
+        "start_time_ms": 0 if media else 1000, "end_time_ms": 0 if media else 2000}])
+    request = {"mode": "media" if media else "normal", "settings": settings, "expected_revision": 0}
     result = invoke("events_save", request)
     assert result["ok"] is True and result["action"] == "events_save"
     observed = result["event_settings"]
@@ -100,8 +101,9 @@ def test_save_is_persist_only_in_both_modes_and_current_run_stays_frozen(native_
     assert calls == [(files / "data", "events_save", request, BASE)]
     assert boundary._RUNTIME is runtime and runtime.frozen == BASE and runtime.running and runtime.media is media
     assert database.read_bytes() == before
-    assert {path.name for path in (files / "data").iterdir()} == {"state.db", "server-events.json"}
-    assert json.loads((files / "data/server-events.json").read_text()) == observed["saved"]
+    filename = "server-events-media.json" if media else "server-events.json"
+    assert {path.name for path in (files / "data").iterdir()} == {"state.db", filename}
+    assert json.loads((files / "data" / filename).read_text()) == observed["saved"]
     assert result["active"] == {"running": True, "mode": "media" if media else "normal", "profile": "synthetic-slot"}
 
 
@@ -224,3 +226,18 @@ public final class EventWindowHarness {
                          capture_output=True, text=True, timeout=30)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.strip() == "event-window-harness PASS"
+
+
+@pytest.mark.parametrize("active_media,requested_mode,has_effective", [
+    (False, "normal", True), (True, "media", True),
+    (False, "media", False), (True, "normal", False)])
+def test_event_status_does_not_attribute_another_modes_runtime_to_the_selected_draft(
+        native_events, active_media, requested_mode, has_effective):
+    boundary, files, database, state, calls, Error, invoke = native_events
+    boundary._RUNTIME = Active(media=active_media)
+    before = database.read_bytes()
+    result = invoke("events_status", {"mode": requested_mode})
+    assert result["ok"] is True
+    assert result["event_settings"]["effective"] == (BASE if has_effective else None)
+    assert calls[-1][2] == {"mode": requested_mode}
+    assert database.read_bytes() == before and not (files / "data/server-events-media.json").exists()

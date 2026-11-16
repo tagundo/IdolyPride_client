@@ -19,11 +19,11 @@ COMMIT = "1" * 40
 
 
 def test_locales_are_alternative_updates_of_the_existing_server_launch_target():
-    assert tool.LANGUAGES == ("ja", "en")
+    assert tool.LANGUAGES == ("ko", "ja", "en")
     assert tool.PACKAGE == "game.qualiarts.idolypride.local.diagnostics"
     assert tool.VERSION_CODE == 414
     assert tool.CERTIFICATE == "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc"
-    assert set(tool.CLIENT_NAMES) == {"ja", "en"}
+    assert set(tool.CLIENT_NAMES) == {"ko", "ja", "en"}
     assert all(name.endswith("-" + lang + ".apk") for lang, name in tool.CLIENT_NAMES.items())
     assert len(tool.VALIDATION_FLAGS) == len(set(tool.VALIDATION_FLAGS)) == 10
 

@@ -59,14 +59,17 @@ COMMON_FLAGS = ("source_bound", "payload_sha256_verified", "translations_sha256_
 ANDROID_FLAGS = ("apk_signature_verified", "apk_alignment_verified", "package_version_verified",
                  "development_certificate_verified", "x86_emulator_runtime_passed", "account_management_roundtrip")
 MAC_FLAGS = ("codesign_strict_verified", "bundled_engine_tested", "native_gui_start_stop_tested", "account_management_roundtrip")
-COMPANIONS = (
+LEGACY_COMPANIONS = (
     {"name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk", "bytes": 165128829,
      "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
      "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
      "publication_commit": "3b2c73b51931bb7be031c37c9d55297505fb88e1", "version": "0.3.31"},
 )
 
+COMPANIONS = ()  # All current language clients are rebuilt; legacy donor pins stay immutable.
+
 ANDROID_LANGUAGE_CLIENTS = {
+    "ko": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk",
     "ja": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
     "en": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
 }
@@ -78,6 +81,7 @@ ARCHIVE_LIMITS["android-clients"] = 900*MIB
 BINARY_LIMITS.update({name: 384*MIB for name in ANDROID_LANGUAGE_CLIENTS.values()})
 ANDROID_CLIENT_CERTIFICATE = "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc"
 ANDROID_CLIENT_INPUTS = {
+    "korean_donor": {"bytes":165128829,"sha256":"44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e"},
     "diagnostic_base": {"bytes": 159549324, "sha256": "f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df"},
     "apkeditor": {"bytes": 7126009, "sha256": "4a98ae6a755264357603f1906b92e62e757d59229014e33395f4e03ff019fda8"},
     "font": {"bytes": 3781740, "sha256": "7cd2b757bd8b8db79b4b87c3b402aa62aca666b55ff50ae0799e14ece1942314"},
@@ -88,7 +92,9 @@ ANDROID_CLIENT_FLAGS = ("pinned_inputs_verified", "source_bound_native_and_featu
     "signature_v2_v3_verified", "zipalign_16384_verified", "same_update_identity_verified",
     "declared_member_inventory_verified", "local_resource_output_fields_verified",
     "built_in_ui_language_verified", "font_assets_verified", "original_inputs_unchanged")
-ANDROID_CLIENT_SOURCES = ("tools/release_android_clients.py", "client-presentation/build_addon.py",
+ANDROID_CLIENT_SOURCES = ("tools/release_android_clients.py", "tools/fetch_korean_ui_images.py",
+    "client-presentation/images/korean-static-sprites-v1.json", "client-presentation/images/korean-static-sprites-v2.json",
+    "client-presentation/images/korean-static-textures-v1.json", "client-presentation/build_addon.py",
     "client-presentation/build_full_client.py", "client-presentation/native/bridge.cpp",
     "client-presentation/native/profile.json", "src/idoly_local/ui_assets.py",
     "src/idoly_local/font_assets.py", "src/idoly_local/static_ui_assets.py",
@@ -715,7 +721,7 @@ def validate_android_clients(directory, source, run):
     report = read_json(directory/"android-clients-report.json")
     need(type(report.get("schema")) is int and report["schema"] == 1 and report.get("status") == "PASS"
          and report.get("source_commit") == source and type(report.get("run_id")) is int and report["run_id"] == run
-         and report.get("languages") == ["ja", "en"], "android_clients_source_or_language_differs")
+         and report.get("languages") == ["ko", "ja", "en"], "android_clients_source_or_language_differs")
     source_pins(report.get("source_sha256"), source, required=ANDROID_CLIENT_SOURCES)
     inputs = report.get("inputs")
     need(type(inputs) is dict and set(inputs) == {*ANDROID_CLIENT_INPUTS, "shadowhook"},
@@ -749,7 +755,7 @@ def validate_android_clients(directory, source, run):
     rows = report.get("binaries")
     need(type(rows) is list and len(rows) == len(ANDROID_LANGUAGE_CLIENTS)
          and all(type(row) is dict for row in rows)
-         and [row.get("language") for row in rows] == ["ja", "en"], "android_clients_binary_set_differs")
+         and [row.get("language") for row in rows] == ["ko", "ja", "en"], "android_clients_binary_set_differs")
     result = []
     for row in rows:
         language = row["language"]
@@ -1111,7 +1117,7 @@ def release_body(source, run, publication, artifacts, metrics, android_clients=(
              "- ZIP 가져오기 사본 모드와 복사 진행·용량 표시, 파일 경로 별칭 처리를 보완했습니다. 포즈의 정원 검사는 회색 비활성 칸을 제외한 실제 활성 인원으로 계산하며 전체 명단의 ID·보유 검사는 유지합니다. 이 항목은 서버 검증 로직의 변경이며 실기기 해당 화면 재현 성공을 뜻하지 않습니다.", "",
              "| 파일 | 용도 | 다운로드 |", "| --- | --- | --- |"]
     kinds = {APK: "Android ARM64 서버 v" + VERSION, IPA: "iPhone·iPad / PlayCover 통합 서버·게임 " + IPA_VERSION,
-             COMPANIONS[0]["name"]: "한국어 Android 게임 · v0.3.31 동일 바이트",
+             ANDROID_LANGUAGE_CLIENTS["ko"]: "한국어 Android 게임 · 글자 비율을 수정한 새 빌드",
              ANDROID_LANGUAGE_CLIENTS["ja"]: "일본어 Android 게임 · 새 빌드",
              ANDROID_LANGUAGE_CLIENTS["en"]: "영어 Android 게임 · 새 빌드"}
     for row in [*artifacts, *android_clients, *companions]:
@@ -1127,10 +1133,10 @@ def release_body(source, run, publication, artifacts, metrics, android_clients=(
               "사용자는 Sideloadly 설치판의 ZIP 가져오기와 LiveContainer에서 Fix File Picker를 켠 파일 선택을 확인했습니다. LiveContainer의 이 설정은 파일 선택 문제의 직접 우회이며, 최신 " + IPA_VERSION + "의 실기기 ZIP 가져오기·진행 표시는 아직 재확인이 필요합니다.",
               "Simulator의 파일 선택기 표시·취소와 ZIP 내보내기→가져오기 검사는 실제 Files 앱 탭 조작, LiveContainer 제공자의 실제 파일 복사 성공, Unity 게임 렌더링 검사를 대신하지 않습니다.", "",
               "검증 범위", "",
-              "게시 파이프라인은 전체 코드 검사와 성능 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, JA/EN APK 패키징, Apple SDK 통합 IPA 빌드를 필수로 판정합니다. iOS는 같은 저장소의 KO→EN→JA→EN→KO 재실행, ZIP 왕복과 계정 8개 테이블의 보존·복원도 검사합니다.",
-              "새 JA/EN APK는 서명·16KiB 정렬·내장 UI 언어·폰트·멤버 목록의 패키징 검사를 포함합니다. 실제 Android ARM64 기기 및 이번 IPA의 PlayCover·iPhone·iPad 게임 재확인은 별도 대상입니다.",
+              "게시 파이프라인은 전체 코드 검사와 성능 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, KO/JA/EN APK 패키징, Apple SDK 통합 IPA 빌드를 필수로 판정합니다. iOS는 같은 저장소의 KO→EN→JA→EN→KO 재실행, ZIP 왕복과 계정 8개 테이블의 보존·복원도 검사합니다.",
+              "새 KO/JA/EN APK는 서명·16KiB 정렬·내장 UI 언어·폰트·멤버 목록의 패키징 검사를 포함합니다. 실제 Android ARM64 기기 및 이번 IPA의 PlayCover·iPhone·iPad 게임 재확인은 별도 대상입니다.",
               "원본 Actions ZIP 전체 SHA-256과 새 서버 APK·통합 IPA 2파일의 LFS 전체 재다운로드 SHA-256을 확인합니다. 재사용하는 한국어 APK도 고정된 원래 게시 커밋의 출처·전체 SHA-256을 다시 대조합니다. 공개 전 이 릴리즈의 5개 Assets를 각각 GitHub API에서 전체 다운로드해 SHA-256과 파일 목록을 확인해야 합니다.",
-              "[Actions 검증](https://github.com/" + REPO + "/actions/runs/" + str(run) + ") · 서버·통합 IPA·JA/EN APK 빌드 소스 " + source,
+              "[Actions 검증](https://github.com/" + REPO + "/actions/runs/" + str(run) + ") · 서버·통합 IPA·KO/JA/EN APK 빌드 소스 " + source,
               "개별 Where 예외의 원인과 NPC의 MV 출연은 이번 배포의 해결 범위로 주장하지 않습니다.", "",
               "한국어 Android 게임 APK는 검증된 v0.3.31 파일을 그대로 재사용합니다:"]
     for row in companions:

@@ -403,12 +403,24 @@ static WKWebView *ProbeFindSettingsWeb(UIView *root) {
     return ProbeFindSettingsWebBounded(root, &remaining);
 }
 
+static NSString *const ProbeSettingsNavigationScript =
+    @"(function(id){\n  const target=document.getElementById(id);if(!target)return false;\n  const visible=e=>{if(!e||e.hidden)return false;const r=e.getBoundingClientRect(),s=getComputedStyle(e);return r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};\n  const page=target.closest('[role=\"tabpanel\"]');\n  if(page&&(page.hidden||page.getAttribute('aria-hidden')==='true'||getComputedStyle(page).display==='none')){\n    const suffix=page.id.replace(/^category-panel-/,'');\n    if(!['console','server','users','content','graphics'].includes(suffix))return false;\n    const nav=document.getElementById('category-'+suffix);\n    if(!nav||nav.getAttribute('aria-controls')!==page.id||nav.disabled)return false;\n    nav.scrollIntoView({block:'nearest',inline:'nearest'});if(!visible(nav))return false;nav.click();\n    if(page.hidden||page.getAttribute('aria-hidden')==='true'||getComputedStyle(page).display==='none')return false;\n  }\n  const closed=[];for(let e=target.parentElement;e;e=e.parentElement)if(e.tagName==='DETAILS'&&!e.open)closed.unshift(e);\n  for(const details of closed){const summary=Array.from(details.children).find(e=>e.tagName==='SUMMARY');\n    if(!summary)return false;summary.scrollIntoView({block:'center',inline:'nearest'});if(!visible(summary))return false;summary.click();if(!details.open)return false;}\n  target.scrollIntoView({block:'center',inline:'nearest'});return visible(target);\n})";
+
+// Disposable-probe navigation uses visible category and summary activation.
+// It never assigns production hidden/open state to bypass the real controls.
+static NSString *ProbeSettingsScript(NSString *script, NSString *identifier) {
+    NSData *data=[NSJSONSerialization dataWithJSONObject:@[identifier] options:0 error:NULL];
+    NSString *argument=[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!argument) return @"false";
+    return [NSString stringWithFormat:@"window.__idolyProbeRevealControl=(%@);if(!window.__idolyProbeRevealControl((%@)[0])){throw new Error('settings_control_not_visible');}\n%@",ProbeSettingsNavigationScript,argument,script];
+}
+
 static NSString *const ProbeSettingsDOMScript =
     @"(() => { const d=document.documentElement, b=document.body;"
      "const o=document.getElementById('options-fields'), p=document.getElementById('presentation-fields');"
      "const s=document.getElementById('render_scale_preset'), m=document.getElementById('max_buffer_pixel_preset');"
      "const has=(e,v)=>!!e&&Array.from(e.options).some(x=>x.value===v);"
-     "const w=d?d.clientWidth:0, c=Math.max(d?d.scrollWidth:0,b?b.scrollWidth:0);"
+    "const categoryKeys=['console','server','users','content','graphics'];\nconst navigation=categoryKeys.map(k=>document.getElementById('category-'+k)).filter(e=>e&&typeof e.getAttribute==='function'&&e.getAttribute('role')==='tab');\nlet categoryWidth=0,categoriesValid=true;\nif(navigation.length){\n  categoriesValid=navigation.length===categoryKeys.length;\n  const prior=navigation.find(e=>e.getAttribute('aria-selected')==='true');\n  const shown=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return !e.hidden&&r.width>0&&r.height>0&&s.display!=='none'&&s.visibility!=='hidden';};\n  for(const nav of navigation){\n    nav.scrollIntoView({block:'nearest',inline:'nearest'});if(nav.disabled||!shown(nav)){categoriesValid=false;break;}nav.click();\n    const page=document.getElementById(nav.getAttribute('aria-controls'));\n    if(!page||page.hidden||nav.getAttribute('aria-selected')!=='true'){categoriesValid=false;break;}\n    const changed=[];\n    for(const panel of Array.from(page.querySelectorAll('details.card-panel'))){\n      if(panel.open)continue;const summary=Array.from(panel.children).find(e=>e.tagName==='SUMMARY');\n      if(summary&&shown(summary)){summary.scrollIntoView({block:'center'});summary.click();if(!panel.open)categoriesValid=false;else changed.push(summary);}\n    }\n    categoryWidth=Math.max(categoryWidth,d?d.scrollWidth:0,b?b.scrollWidth:0);\n    for(const summary of changed.reverse())summary.click();\n  }\n  if(prior){prior.scrollIntoView({block:'nearest',inline:'nearest'});if(shown(prior))prior.click();else categoriesValid=false;}else categoriesValid=false;\n}\nconst w=d?d.clientWidth:0, c=Math.max(d?d.scrollWidth:0,b?b.scrollWidth:0,categoryWidth);"
      "const knownIDs=new Set([\"interface_language\",\"refresh\",\"options-fields\",\"presentation-fields\",\"accounts-fields\",\"accounts-current\",\"accounts-summary\",\"accounts-user-detail\",\"accounts-select\",\"accounts-export\",\"accounts-clone\",\"accounts-new-profile\",\"accounts-manager-name\",\"accounts-restore-point\",\"accounts-feedback\",\"accounts-refresh\",\"diagnostics\",\"message\"]),knownTags=new Set([\"MAIN\",\"SECTION\",\"HEADER\",\"DIV\",\"LABEL\",\"SPAN\",\"BUTTON\",\"SELECT\",\"INPUT\",\"FIELDSET\",\"P\",\"DETAILS\",\"SUMMARY\",\"PRE\",\"OTHER\"]),overflow=[];"
      "if(w>0&&c>w+2)for(const e of Array.from(b?b.querySelectorAll('*'):[]).slice(0,512).reverse()){"
      "const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||!(r.right>w+2||r.left<-2||e.scrollWidth>r.width+2))continue;"
@@ -421,7 +433,7 @@ static NSString *const ProbeSettingsDOMScript =
      "bridge_reply_present:typeof window.idolyServerReply==='function',"
      "launcher_document_marker_absent:window.__idolyProbeLauncherDocument!==true,"
      "scale_2_present:has(s,'2'),buffer_4096_present:has(m,'4096'),"
-     "viewport_width:w,content_width:c,no_horizontal_overflow:w>0&&c<=w+2,"
+     "viewport_width:w,content_width:c,no_horizontal_overflow:categoriesValid&&w>0&&c<=w+2,"
      "select_count:document.querySelectorAll('select').length,overflow_elements:overflow}; })()";
 
 static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictionary *state,
@@ -549,7 +561,7 @@ static void ProbeDiagnosticsCopy(WKWebView *web,void (^completion)(NSDictionary 
         "p=document.getElementById('diagnostics'); const t=p?p.textContent:'';"
         "const r=b?b.getBoundingClientRect():null; const e=!!r&&r.width>0&&r.height>0&&!b.hidden&&!b.disabled&&!!t; if(e)b.click();"
         "return {button_found:!!b,enabled_before:e,click_dispatched:e,text:t}; })()";
-    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
+    [web evaluateJavaScript:ProbeSettingsScript(script,@"diagnostics-copy") completionHandler:^(id value,NSError *error) {
         if ([state[@"finished"] boolValue]) return;
         if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
         for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched"])
@@ -616,7 +628,7 @@ static void ProbeAutoSaveLanguage(WKWebView *web,NSString *next,NSString *effect
          "window.__idolyProbeTransportObserver=observe;}"
          "window.__idolyProbeOptionsRequest=null;window.__idolyProbeGameAck=null;"
          "s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",next];
-    [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
+    [web evaluateJavaScript:ProbeSettingsScript(setup,@"language") completionHandler:^(id value,NSError *error){
         if ([state[@"finished"] boolValue]) return;
         if (error || ![value isEqual:@YES]) { finish(@{@"ready":@NO,@"timed_out":@NO}); return; }
         NSString *poll=[NSString stringWithFormat:
@@ -760,7 +772,7 @@ static void ProbeZIPImportBegin(WKWebView *__weak weakWeb, UIViewController *__w
     state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
     NSString *script=@"(() => {const b=document.getElementById('resources-import');const e=!!b&&!b.disabled;"
         "if(e)b.click();return {button_found:!!b,enabled_before:e,click_dispatched:e,button_disabled_while_pending:!!b&&b.disabled};})()";
-    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
+    [web evaluateJavaScript:ProbeSettingsScript(script,@"resources-import") completionHandler:^(id value,NSError *error) {
         if ([state[@"finished"] boolValue]) return;
         if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
         for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"button_disabled_while_pending"])
@@ -827,7 +839,7 @@ static void ProbeZIPRoundTripOpen(WKWebView *web,UIViewController *presenter,NSM
         "window.idolyServerReply=function(id,v){let x=v;try{if(typeof x==='string')x=JSON.parse(x);}catch(_){}"
         "if(id===q.request_id&&x&&x.ok===true&&x.result&&x.result.accepted===true)q.reply_accepted=true;return reply.apply(this,arguments);};"
         "b.click();return {ready:true,button_disabled:b.disabled};})()";
-    ProbePollLanguage(web,script,[state[@"deadline"] doubleValue],nil,^(NSDictionary *value){
+    ProbePollLanguage(web,ProbeSettingsScript(script,@"resources-import"),[state[@"deadline"] doubleValue],nil,^(NSDictionary *value){
         if ([state[@"finished"] boolValue]) return;
         state[@"metrics"][@"wk_import_dispatched"]=@((BOOL)([value[@"ready"] isEqual:@YES] && [value[@"button_disabled"] isEqual:@YES]));
         if (![value[@"ready"] isEqual:@YES]) { finish(); return; }
@@ -953,13 +965,14 @@ static NSString *const ProbeAccountScenario =
     "      q.copy.queued=q.copy.queued||v.stage==='queued';q.copy.copied_bytes=v.copied_bytes;q.copy.total_bytes=v.total_bytes;}\n"
     "    return oldEvent.apply(this,arguments);};\n"
     "  const until=async f=>{while(!f()){if(q.error||Date.now()>config.deadline)throw Error('account_ui_timeout');await new Promise(r=>setTimeout(r,75));}};\n"
-    "  const current=profile=>{const s=document.getElementById('accounts-current'),v=JSON.stringify([config.mode,profile]);\n"
+    "  const current=profile=>{if(typeof window.__idolyProbeRevealControl==='function'&&!window.__idolyProbeRevealControl('accounts-current'))throw Error('account_ui_control_hidden');const s=document.getElementById('accounts-current'),v=JSON.stringify([config.mode,profile]);\n"
     "    if(!s||!Array.from(s.options).some(o=>o.value===v))throw Error('account_ui_account_missing');\n"
     "    s.value=v;s.dispatchEvent(new Event('change',{bubbles:true}));};\n"
-    "  const set=(id,value)=>{const e=document.getElementById(id);if(!e)throw Error('account_ui_control_missing');e.value=value;};\n"
+    "  const set=(id,value)=>{if(typeof window.__idolyProbeRevealControl==='function'&&!window.__idolyProbeRevealControl(id))throw Error('account_ui_control_hidden');const e=document.getElementById(id);if(!e)throw Error('account_ui_control_missing');e.value=value;};\n"
     "  const click=async(action,setup,ok=true)=>{\n"
     "    const id=action==='status'?'accounts-refresh':'accounts-'+action,b=document.getElementById(id);\n"
     "    const fields=document.getElementById('accounts-fields');if(!b||!fields)throw Error('account_ui_control_missing');\n"
+    "    if(typeof window.__idolyProbeRevealControl==='function'&&!window.__idolyProbeRevealControl(id))throw Error('account_ui_control_hidden');\n"
     "    await until(()=>!b.disabled);if(setup)setup();await until(()=>!b.disabled);\n"
     "    q.expected='accounts_'+action;q.request=null;q.reply=null;if(action==='preview')q.copy=null;\n"
     "    b.scrollIntoView({block:'center'});b.click();\n"
@@ -1201,7 +1214,7 @@ static void ProbeAccountManagement(WKWebView *web,UIViewController *presenter,vo
         state[@"config"]=config;
         state[@"source"]=[documents.path stringByAppendingPathComponent:[@"probe-account-" stringByAppendingFormat:@"%@.zip",nonce]];
         NSString *script=[ProbeAccountScenario stringByAppendingFormat:@"(%@);",ProbeAccountJSON(config)];
-        [web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
+        [web evaluateJavaScript:ProbeSettingsScript(script,@"accounts-refresh") completionHandler:^(id value,NSError *error){
             if ([state[@"finished"] boolValue]) return;
             if (error || ![value isEqual:@YES]) { finish();return; }
             ProbeAccountPoll(web,presenter,state,finish);
@@ -1317,7 +1330,7 @@ static void ProbeOfficialPrompt(WKWebView *web,UIViewController *presenter,void 
     ProbeOfficialSnapshot(^(NSDictionary *before){
         if ([state[@"finished"] boolValue]) return;state[@"before"]=before;metrics[@"official_job_absent_before"]=before[@"absent"];
         if (![before[@"valid"] isEqual:@YES]||![before[@"absent"] isEqual:@YES]) {finish();return;}
-        [web evaluateJavaScript:ProbeOfficialPromptScript completionHandler:^(id value,NSError *error){
+        [web evaluateJavaScript:ProbeSettingsScript(ProbeOfficialPromptScript,@"official-inspect") completionHandler:^(id value,NSError *error){
             if ([state[@"finished"] boolValue]) return;if(error||![value isEqual:@YES]){finish();return;}
             ProbeOfficialPromptPoll(web,presenter,state,finish);
         }];

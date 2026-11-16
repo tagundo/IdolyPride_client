@@ -396,9 +396,12 @@ class _Host:
         if runtime is None and paths is not None:
             from .app_runtime import server_settings_status
             observed.update(self._startup_observations or server_settings_status(paths[1]))
-        if paths is not None and "event_settings" not in observed:
+        event_mode = options.get("media_mode") is True
+        event_status = observed.get("event_settings")
+        if paths is not None and (not isinstance(event_status, dict)
+                or event_status.get("media_mode", False) is not event_mode):
             from .event_settings import event_settings_status
-            observed["event_settings"] = event_settings_status(paths[1])
+            observed["event_settings"] = event_settings_status(paths[1], media_mode=event_mode)
         observed["logs"] = [str(x)[:512] for x in observed.get("logs", [])[-20:]]
         restart = effective is not None and any(options.get(key) != effective.get(key)
             for key in ("media_mode", "download_missing_resources", "language"))
@@ -440,7 +443,8 @@ class _Host:
                 value = observed[key]
                 settings = ({k: v for k, v in value.items() if k in (
                     "settings", "effective_settings", "invalid_settings_file", "effective_language",
-                    "schema", "saved", "effective", "restart_required", "catalog")}
+                    "schema", "saved", "effective", "restart_required", "catalog",
+                    "media_mode", "media_default_all", "media_all_supported")}
                     if isinstance(value, dict) else {})
                 for candidate in (value, settings):
                     result["runtime"][key] = candidate
@@ -981,7 +985,7 @@ class _Host:
             "official_inspect": {"user_id", "password", "platform"},
             "official_fetch": {"job_id"}, "official_apply": {"job_id", "profile", "replace", "expected_revision"},
             "official_cancel": {"job_id"}, "official_status": set(),
-            "events_status": set(), "events_save": {"settings", "expected_revision"}}
+            "events_status": {"mode"}, "events_save": {"mode", "settings", "expected_revision"}}
         if action not in fields or value.keys() - {"id", "action"} - fields[action]:
             raise ValueError("Unknown command or fields")
         if action == "status":
@@ -1014,14 +1018,22 @@ class _Host:
             runtime = self._runtime
             observed = runtime.status() if runtime is not None else {}
             event_status = observed.get("event_settings", {})
-            effective = event_status.get("effective") if isinstance(event_status, dict) else None
+            requested_media = value.get("mode", "normal") == "media"
+            active_media = (event_status.get("media_mode", observed.get("media_mode") is True)
+                            if isinstance(event_status, dict) else observed.get("media_mode") is True)
+            effective = (event_status.get("effective") if isinstance(event_status, dict)
+                         and active_media is requested_media else None)
             result = event_settings_command(self._paths[1], action,
                 {key: item for key, item in value.items() if key not in ("id", "action")}, effective=effective)
             if action == "events_status":
                 return result
-            result = self.status()
-            self._event("status", status=result)
-            return result
+            response = self.status()
+            # The receipt belongs to the requested mode even if the user changed
+            # the next-start mode while the queued preference write completed.
+            response["runtime"]["event_settings"] = result
+            response["restart_required"] = response["restart_required"] or result["restart_required"]
+            self._event("status", status=response)
+            return response
         if action.startswith("accounts_"):
             return self._account_command(action, value)
         if action.startswith("official_"):

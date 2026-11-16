@@ -503,6 +503,10 @@
     return typeof value === "string" && dictionary && Object.prototype.hasOwnProperty.call(dictionary, value) ? dictionary[value] : value;
   }
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  Object.assign(UI_TRANSLATIONS.en, {"콘솔": "Console", "유저 관리": "User management", "콘텐츠": "Content", "그래픽": "Graphics", "설정 분류": "Settings categories", "서버 메뉴 안내": "Using the server menu", "서버 연결·자료 검사·진단": "Connections, data checks and diagnostics", "모두 활성화": "Enable all", "모두 비활성화": "Disable all", "모시코이 여러 이벤트 선택": "Select multiple Moshikoi events", "이벤트별 기간 조정": "Adjust individual event windows", "설정할 계정 종류": "Account mode to configure", "여러 이벤트를 한 번에 선택할 수 있습니다. 끄더라도 저장된 진행은 유지됩니다.": "Select several events at once. Disabling keeps saved progress.", "감상 계정은 처음에 지원되는 모시코이를 모두 활성화합니다. 원하는 이벤트만 남기거나 모두 끌 수 있습니다.": "Viewing accounts start with every supported Moshikoi event enabled. Keep only the events you want, or disable all.", "최신 설정에 선택한 변경을 합쳐 저장합니다.": "Merging your changes into the latest settings."});
+  Object.assign(UI_TRANSLATIONS.ja, {"콘솔": "コンソール", "유저 관리": "ユーザー管理", "콘텐츠": "コンテンツ", "그래픽": "グラフィック", "설정 분류": "設定カテゴリ", "서버 메뉴 안내": "サーバーメニューの使い方", "서버 연결·자료 검사·진단": "接続・データ検査・診断", "모두 활성화": "すべて有効", "모두 비활성화": "すべて無効", "모시코이 여러 이벤트 선택": "もし恋イベントの複数選択", "이벤트별 기간 조정": "イベント別の期間設定", "설정할 계정 종류": "設定するアカウント種別", "여러 이벤트를 한 번에 선택할 수 있습니다. 끄더라도 저장된 진행은 유지됩니다.": "複数のイベントを一度に選べます。無効にしても保存済みの進行は保持します。", "감상 계정은 처음에 지원되는 모시코이를 모두 활성화합니다. 원하는 이벤트만 남기거나 모두 끌 수 있습니다.": "鑑賞アカウントは最初から対応するもし恋をすべて有効にします。必要なイベントのみ残したり、すべて無効にしたりできます。", "최신 설정에 선택한 변경을 합쳐 저장합니다.": "最新の設定に選択した変更を反映して保存します。"});
+  Object.assign(UI_TRANSLATIONS.en, {"도움말": "Help", "감상 계정은 처음에 모든 이벤트가 켜집니다.": "Viewing accounts start with all events enabled.", "끄더라도 진행은 유지됩니다.": "Disabling keeps saved progress.", "공식 인계 로그인은 공식 기기의 인증 상태에 영향을 줄 수 있습니다.": "Official transfer sign-in may affect the official device session.", "검사 후 가져오기를 눌러야 계정이 바뀝니다.": "The account changes only after you choose Import.", "현재 적용: ": "Active: ", "현재 적용: 대기": "Active: waiting", "다음 실행: ": "Next start: ", "다음 실행: 대기": "Next start: waiting"});
+  Object.assign(UI_TRANSLATIONS.ja, {"도움말": "ヘルプ", "감상 계정은 처음에 모든 이벤트가 켜집니다.": "鑑賞アカウントは最初からすべてのイベントが有効です。", "끄더라도 진행은 유지됩니다.": "無効にしても進行は保持します。", "공식 인계 로그인은 공식 기기의 인증 상태에 영향을 줄 수 있습니다.": "公式引き継ぎログインは公式端末の認証状態に影響する場合があります。", "검사 후 가져오기를 눌러야 계정이 바뀝니다.": "検査後に「取り込み」を押すまでアカウントは変更しません。", "현재 적용: ": "適用中: ", "현재 적용: 대기": "適用中: 待機", "다음 실행: ": "次回起動: ", "다음 실행: 대기": "次回起動: 待機"});
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const choice = (value, values) => values.includes(value);
   const exact = (value, keys) => object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
@@ -512,13 +516,14 @@
   const validPlayback = value => exact(value, ["schema", "revision", "wait_for_orientation"]) && identity(value) && typeof value.wait_for_orientation === "boolean";
   const validMedia = value => exact(value, ["schema", "revision", "hide_video_mv", "mv_sort", "outfit_sort"]) && identity(value) && typeof value.hide_video_mv === "boolean" && choice(value.mv_sort, ["recent", "old", "title", "id"]) && choice(value.outfit_sort, ["original", "recent", "old", "title", "id"]);
   const EVENT_WINDOW_LIMIT = 366 * 86400000;
-  const validEvents = value => exact(value, ["schema", "revision", "love_events"]) && identity(value)
+  const validEvents = (value, media = false) => exact(value, ["schema", "revision", "love_events"]) && identity(value)
     && Array.isArray(value.love_events) && value.love_events.length <= 64
     && value.love_events.every((row, index, rows) => exact(row, ["event_id", "start_time_ms", "end_time_ms"])
       && typeof row.event_id === "string" && /^[A-Za-z0-9_-]{1,96}$/.test(row.event_id)
       && (index === 0 || rows[index-1].event_id < row.event_id)
-      && integer(row.start_time_ms) && integer(row.end_time_ms) && row.start_time_ms < row.end_time_ms
-      && row.end_time_ms - row.start_time_ms <= EVENT_WINDOW_LIMIT);
+      && integer(row.start_time_ms) && integer(row.end_time_ms)
+      && (media ? row.start_time_ms === 0 && row.end_time_ms === 0
+        : row.start_time_ms < row.end_time_ms && row.end_time_ms - row.start_time_ms <= EVENT_WINDOW_LIMIT));
   const plain = (value, limit = 1000) => typeof value === "string" ? value.slice(0, limit) : "";
   const count = value => integer(value) ? value : 0;
   const boundedJSON = (value, limit) => {
@@ -557,8 +562,9 @@
   }
 
   function validRequest(action, payload) {
-    if (["status", "official_status", "official_inspect", "events_status"].includes(action)) return exact(payload, []);
-    if (action === "events_save") return exact(payload, ["settings", "expected_revision"]) && validEvents(payload.settings)
+    if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
+    if (action === "events_status") return exact(payload, []) || (exact(payload, ["mode"]) && choice(payload.mode, ["normal", "media"]));
+    if (action === "events_save") return (exact(payload, ["settings", "expected_revision"]) || (exact(payload, ["settings", "expected_revision", "mode"]) && choice(payload.mode, ["normal", "media"]))) && validEvents(payload.settings, payload.mode === "media")
       && integer(payload.expected_revision) && payload.settings.revision === payload.expected_revision;
 
     const profile = value => typeof value === "string" && value.trim() === value && utf8Length(value) >= 1
@@ -761,17 +767,64 @@
       if (snapshot) renderServerChecks(snapshot.runtime);
       renderOfficial(); renderEvents(false);
     }
+    const categoryNames = ["console","server","users","content","graphics"];
+    const panelDefaults = {diagnostics:false,options:true,accounts:false,official:false,events:false,graphics:true,playback:true,media:true,resources:false};
+    const layoutKey = "idoly.settings.layout.v1";
+    let selectedCategory = "console";
+    function setAttribute(node,name,value) { if (typeof node.setAttribute === "function") node.setAttribute(name,String(value)); else node[name] = String(value); }
+    function saveLayout() {
+      try {
+        const panels = {}; for (const key of Object.keys(panelDefaults)) panels[key] = el("panel-"+key).open === true;
+        scope.localStorage.setItem(layoutKey,JSON.stringify({schema:1,category:selectedCategory,panels}));
+      } catch (_) { /* Some container WebViews do not expose local storage. */ }
+    }
+    function selectCategory(key, focus = false) {
+      if (!categoryNames.includes(key)) return;
+      selectedCategory = key;
+      for (const name of categoryNames) {
+        const selected = name === key, button = el("category-"+name);
+        setAttribute(button,"aria-selected",selected); button.tabIndex = selected ? 0 : -1;
+        el("category-panel-"+name).hidden = !selected;
+      }
+      if (focus && typeof el("category-"+key).focus === "function") el("category-"+key).focus();
+      saveLayout();
+    }
+    function initializeLayout() {
+      let stored = null;
+      try { const raw = scope.localStorage.getItem(layoutKey); if (typeof raw === "string" && raw.length <= 4096) stored = JSON.parse(raw); } catch (_) {}
+      const valid = object(stored) && stored.schema === 1;
+      for (const [key,fallback] of Object.entries(panelDefaults)) {
+        const panel = el("panel-"+key);
+        panel.open = valid && object(stored.panels) && typeof stored.panels[key] === "boolean" ? stored.panels[key] : fallback;
+        panel.addEventListener("toggle",saveLayout);
+      }
+      for (const key of categoryNames) {
+        const button = el("category-"+key);
+        button.addEventListener("click",() => selectCategory(key));
+        button.addEventListener("keydown",event => {
+          let index = categoryNames.indexOf(key);
+          if (["ArrowRight","ArrowDown"].includes(event.key)) index = (index+1)%categoryNames.length;
+          else if (["ArrowLeft","ArrowUp"].includes(event.key)) index = (index+categoryNames.length-1)%categoryNames.length;
+          else if (event.key === "Home") index = 0;
+          else if (event.key === "End") index = categoryNames.length-1;
+          else return;
+          event.preventDefault(); selectCategory(categoryNames[index],true);
+        });
+      }
+      selectCategory(valid && categoryNames.includes(stored.category) ? stored.category : "console");
+    }
     function syncPreset(key) {
       const presets = key === "render_scale" ? SCALE_PRESETS : BUFFER_PRESETS;
       const value = Number(el(key).value);
       el(key + "_preset").value = el(key).value.trim() && presets.includes(value) ? String(value) : "custom";
     }
+    let eventMode = "normal", eventModeSelected = false, eventModeLoading = false, eventModeGeneration = 0;
     const forms = {
       options: {fields: ["media_mode", "download_missing_resources", "language"], valid: validOptions},
       presentation: {fields: ["custom_graphics", "quality", "target_fps", "render_scale", "max_buffer_pixel", "anti_aliasing", "shadow_resolution", "expand_photography"], valid: validPresentation},
       playback: {fields: ["wait_for_orientation"], valid: validPlayback},
       media: {fields: ["hide_video_mv", "mv_sort", "outfit_sort"], valid: validMedia},
-      events: {fields: [], valid: validEvents, available: false, draft: null}
+      events: {fields: [], valid: value => validEvents(value, eventMode === "media"), available: false, draft: null, intents: new Map(), intentVersions: new Map(), intentSequence: 0, rebaseAttempts: 0, rebaseNeeded: false}
     };
     let snapshot = null;
     let visible = document.visibilityState !== "hidden";
@@ -803,59 +856,149 @@
       return new Date(milliseconds - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
     }
     function eventTimeValue(value) { return value ? new Date(value).getTime() : NaN; }
+    function eventTitle(row) {
+      return object(row.titles) && typeof row.titles[language] === "string" ? plain(row.titles[language], 256) : plain(row.title,256) || row.id;
+    }
+    function mergedEventDraft(settings, intents) {
+      const rows = new Map(settings.love_events.map(row => [row.event_id, {...row}]));
+      for (const [id, value] of intents) { if (value === null) rows.delete(id); else rows.set(id, {...value}); }
+      return {...settings,love_events:[...rows.values()].sort((a,b) => a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0)};
+    }
     function renderEvents(syncFields = false) {
       const form = forms.events, value = eventSnapshot;
       const rows = value && object(value.catalog) && value.catalog.available === true && Array.isArray(value.catalog.events)
         ? value.catalog.events.filter(row => object(row) && row.supported === true && typeof row.id === "string"
           && /^[A-Za-z0-9_-]{1,96}$/.test(row.id)).slice(0,64) : [];
       eventRows = rows;
-      form.available = Boolean(value && validEvents(value.saved) && rows.length && value.invalid_settings_file !== true);
+      form.available = Boolean(value && form.valid(value.saved) && rows.length && value.invalid_settings_file !== true);
       const selector = el("events-choice"), chosen = selector.value;
-      const key = JSON.stringify([language, rows.map(row => [row.id, plain(row.title,256)])]);
+      const key = JSON.stringify([language, rows.map(row => [row.id,eventTitle(row)])]);
       if (key !== eventCatalogKey) {
         eventCatalogKey = key;
-        const options = rows.map(row => { const option = document.createElement("option"); option.value = row.id; option.textContent = t(plain(row.title,256) || row.id); return option; });
+        const options = rows.map(row => { const option = document.createElement("option"); option.value = row.id; option.textContent = eventTitle(row); return option; });
         if (!options.length) { const option = document.createElement("option"); option.value = ""; option.textContent = t("지원 목록 없음"); options.push(option); }
         selector.replaceChildren(...options);
         selector.value = rows.some(row => row.id === chosen) ? chosen : rows.length ? rows[0].id : "";
+        const cards = rows.map(row => {
+          const label = document.createElement("label"); label.className = "event-card";
+          const input = document.createElement("input"); input.type = "checkbox"; input.value = row.id;
+          input.addEventListener("change", () => editEventEnabled(row.id,input.checked));
+          const title = document.createElement("span"); title.textContent = eventTitle(row);
+          label.replaceChildren(input,title); label.eventInput = input;
+          return label;
+        });
+        el("events-list").replaceChildren(...cards);
         syncFields = true;
       }
       const draft = form.draft || form.value;
       const selected = draft && Array.isArray(draft.love_events) ? draft.love_events.find(row => row.event_id === selector.value) : null;
       if (syncFields) {
         el("events-enabled").checked = Boolean(selected);
-        el("events-start").value = selected ? eventLocalTime(selected.start_time_ms) : "";
-        el("events-end").value = selected ? eventLocalTime(selected.end_time_ms) : "";
+        el("events-start").value = selected && eventMode !== "media" ? eventLocalTime(selected.start_time_ms) : "";
+        el("events-end").value = selected && eventMode !== "media" ? eventLocalTime(selected.end_time_ms) : "";
       }
-      el("events-fields").disabled = launchFlushing || !form.available || !snapshot || !snapshot.running || snapshot.state !== "ready";
-      const list = settings => validEvents(settings) && settings.love_events.length ? settings.love_events.map(row => {
-        const match = rows.find(item => item.id === row.event_id); return match ? t(plain(match.title,256) || match.id) : row.event_id;
+      const disabled = launchFlushing || eventModeLoading || !form.available || !snapshot || !snapshot.running || snapshot.state !== "ready";
+      el("events-fields").disabled = disabled;
+      el("events-mode").value = eventMode;
+      el("events-mode").disabled = launchFlushing || eventModeLoading;
+      for (const card of Array.from(el("events-list").children || [])) {
+        const input = card.eventInput; if (!input) continue;
+        input.checked = Boolean(draft && draft.love_events.some(row => row.event_id === input.value));
+        input.disabled = disabled;
+      }
+      el("events-period-editor").hidden = eventMode === "media";
+      el("events-period-hint").hidden = eventMode === "media";
+      el("events-media-policy").hidden = eventMode !== "media";
+      const list = settings => form.valid(settings) && settings.love_events.length ? settings.love_events.map(row => {
+        const match = rows.find(item => item.id === row.event_id); return match ? eventTitle(match) : row.event_id;
       }).join(", ") : t("없음");
-      text("events-effective", value && validEvents(value.effective) ? t("현재 적용 이벤트: ") + list(value.effective) : t("현재 적용 값은 서버 준비 후 표시됩니다."), false);
-      text("events-next", value && validEvents(value.saved) ? t("저장된 다음 이벤트: ") + list(value.saved) : t("이벤트 설정을 아직 불러오지 못했습니다."), false);
+      text("events-effective", value && form.valid(value.effective) ? t("현재 적용: ") + value.effective.love_events.length : t("현재 적용: 대기"), false);
+      text("events-next", value && form.valid(value.saved) ? t("다음 실행: ") + value.saved.love_events.length : t("다음 실행: 대기"), false);
+      setAttribute(el("events-effective"),"title",value && form.valid(value.effective) ? list(value.effective) : "");
+      setAttribute(el("events-next"),"title",value && form.valid(value.saved) ? list(value.saved) : "");
       text("events-state", !form.available ? "지원 목록 없음" : value.restart_required === true ? "적용 대기" : "준비 완료");
       const detail = !value ? "이벤트 설정을 아직 불러오지 못했습니다." : value.invalid_settings_file === true ? "이벤트 설정 파일을 읽지 못했습니다. 자동으로 덮어쓰지 않습니다."
         : !form.available ? "지원 목록을 확인할 수 없어 이벤트 설정을 변경할 수 없습니다." : value.restart_required === true ? "저장한 이벤트 설정은 다음 서버 시작에 적용됩니다. 게임을 이미 시작했다면 앱을 완전히 종료하고 다시 열어 주세요." : "현재 서버와 저장된 이벤트 설정이 같습니다.";
       let message = t(detail);
-      const active = value && validEvents(value.effective) ? value.effective.love_events.find(row => row.event_id === selector.value) : null;
-      if (active) message += "\n" + t("현재 선택 이벤트 적용 기간: ") + eventLocalTime(active.start_time_ms).replace("T"," ") + " – " + eventLocalTime(active.end_time_ms).replace("T"," ");
+      const active = value && form.valid(value.effective) ? value.effective.love_events.find(row => row.event_id === selector.value) : null;
+      if (active && eventMode !== "media") message += "\n" + t("현재 선택 이벤트 적용 기간: ") + eventLocalTime(active.start_time_ms).replace("T"," ") + " – " + eventLocalTime(active.end_time_ms).replace("T"," ");
       text("events-detail", message, false);
+    }
+    function rememberEvent(id, row) {
+      const form = forms.events;
+      form.intents.set(id, row === null ? null : {...row});
+      form.intentVersions.set(id,++form.intentSequence);
+      form.draft = mergedEventDraft(form.draft, new Map([[id,row]]));
+    }
+    function defaultEventWindow() {
+      if (eventMode === "media") return {start_time_ms:0,end_time_ms:0};
+      const start = Math.floor(Date.now() / 60000) * 60000;
+      return {start_time_ms:start,end_time_ms:start+30*86400000};
+    }
+    function editEventEnabled(id, enabled, delay = 180) {
+      const form = forms.events;
+      if (!form.available || launchFlushing || !form.value || !form.draft || !eventRows.some(row => row.id === id)) return;
+      const current = form.draft.love_events.find(row => row.event_id === id);
+      rememberEvent(id, enabled ? current || {event_id:id,...defaultEventWindow()} : null);
+      renderEvents(true); markEdited("events", delay);
+    }
+    function editAllEvents(enabled) {
+      const form = forms.events;
+      if (!form.available || launchFlushing || !form.value || !form.draft) return;
+      for (const row of eventRows) {
+        const current = form.draft.love_events.find(entry => entry.event_id === row.id);
+        rememberEvent(row.id, enabled ? current || {event_id:row.id,...defaultEventWindow()} : null);
+      }
+      renderEvents(true); markEdited("events", 0);
     }
     function editEvent() {
       const form = forms.events;
       if (!form.available || launchFlushing || !form.value || !form.draft) return;
       const id = el("events-choice").value;
       if (!eventRows.some(row => row.id === id)) return;
-      let rows = form.draft.love_events.filter(row => row.event_id !== id);
+      let row = null;
       if (el("events-enabled").checked) {
-        if (!el("events-start").value && !el("events-end").value) {
-          const start = Math.floor(Date.now() / 60000) * 60000;
-          el("events-start").value = eventLocalTime(start); el("events-end").value = eventLocalTime(start + 30 * 86400000);
+        if (eventMode === "media") row = {event_id:id,start_time_ms:0,end_time_ms:0};
+        else {
+          if (!el("events-start").value && !el("events-end").value) {
+            const initial = defaultEventWindow(); el("events-start").value = eventLocalTime(initial.start_time_ms); el("events-end").value = eventLocalTime(initial.end_time_ms);
+          }
+          row = {event_id:id,start_time_ms:eventTimeValue(el("events-start").value),end_time_ms:eventTimeValue(el("events-end").value)};
         }
-        rows.push({event_id:id,start_time_ms:eventTimeValue(el("events-start").value),end_time_ms:eventTimeValue(el("events-end").value)});
       }
-      rows.sort((a,b) => a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0);
-      form.draft = {...form.draft,love_events:rows}; markEdited("events", 0);
+      rememberEvent(id,row); renderEvents(false); markEdited("events", 0);
+    }
+    async function refreshEventSettings() {
+      const mode = eventMode, generation = eventModeGeneration;
+      try {
+        const value = await bridge.request("events_status",{mode});
+        if (disposed || !visible || generation !== eventModeGeneration || mode !== eventMode) return;
+        if (!object(value) || value.media_mode !== (mode === "media") || !validEvents(value.saved,mode === "media")) throw new Error("서버 상태 형식을 확인하지 못했습니다.");
+        eventSnapshot = value; updateForm("events",value.saved,true);
+      } catch (_) {
+        forms.events.rebaseNeeded = false;
+        if (!disposed && visible) saveFeedback("events","failed","설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.");
+      }
+    }
+    async function switchEventMode(mode) {
+      if (!["normal","media"].includes(mode) || launchFlushing || eventModeLoading) return;
+      if (mode === eventMode) return;
+      const generation = ++eventModeGeneration, form = forms.events;
+      for (let attempt = 0; attempt < MAX_PENDING && (form.busy || form.dirty); attempt++) {
+        const saved = form.busy ? await form.inflight : await save("events", true);
+        if (!saved || disposed || !visible || generation !== eventModeGeneration) { el("events-mode").value = eventMode; return; }
+      }
+      if (form.busy || form.dirty) { el("events-mode").value = eventMode; return; }
+      eventModeLoading = true; renderEvents(false);
+      try {
+        const result = await bridge.request("events_status", {mode});
+        if (disposed || !visible || generation !== eventModeGeneration) return;
+        if (!object(result) || result.media_mode !== (mode === "media") || !validEvents(result.saved,mode === "media")) throw new Error("서버 상태 형식을 확인하지 못했습니다.");
+        eventMode = mode; eventModeSelected = true; eventSnapshot = result; eventCatalogKey = "";
+        form.value = null; form.draft = null; form.dirty = false; form.intents.clear(); form.intentVersions.clear(); form.rebaseAttempts = 0;
+        updateForm("events",result.saved);
+      } catch (error) { if (visible && !disposed) message(error.message,true); }
+      finally { eventModeLoading = false; if (!disposed) renderEvents(true); }
     }
 
     function message(value, error = false) {
@@ -889,20 +1032,25 @@
         if (!disposed) updateCopyButton();
       }
     }
-    function updateForm(name, settings) {
+    function updateForm(name, settings, eventRebase = false) {
       const form = forms[name];
       if (!form.valid(settings)) {
         el(name + "-fields").disabled = launchFlushing || !form.value || !snapshot.running || snapshot.state !== "ready" || (name === "events" && !form.available);
         renderSaveFeedback(name);
         return;
       }
+      if (name === "events" && form.value && settings.revision < form.value.revision) return;
       settings = name === "options" ? {interface_language: "system", ...settings} : settings;
       form.value = {...settings};
       if (name === "events") {
         const sync = !form.dirty && !form.busy;
-        if (sync) form.draft = {schema:settings.schema,revision:settings.revision,love_events:settings.love_events.map(row => ({...row}))};
-        if (sync) form.fingerprint = JSON.stringify(form.draft.love_events);
-        renderEvents(sync); renderSaveFeedback(name); return;
+        if (sync || (!form.busy && form.intents.size)) form.draft = mergedEventDraft(settings,form.intents);
+        if (sync || (form.rebaseNeeded && eventRebase)) form.fingerprint = JSON.stringify(form.draft.love_events);
+        const retry = eventRebase && form.rebaseNeeded && !form.busy && form.rebaseAttempts <= 2;
+        if (eventRebase) form.rebaseNeeded = false;
+        renderEvents(sync); renderSaveFeedback(name);
+        if (retry && form.dirty) queueSave(name,180);
+        return;
       }
       if (!form.dirty && !form.busy) {
         for (const key of form.fields) {
@@ -921,7 +1069,7 @@
       if (!form.value) throw new Error("설정을 먼저 불러와 주세요.");
       if (name === "events") {
         const value = {...form.draft,revision:form.value.revision};
-        if (!form.available || !validEvents(value) || value.love_events.some(row => !eventRows.some(item => item.id === row.event_id))) throw new Error("설정 값의 범위를 확인해 주세요.");
+        if (!form.available || !form.valid(value) || value.love_events.some(row => !eventRows.some(item => item.id === row.event_id))) throw new Error("설정 값의 범위를 확인해 주세요.");
         return value;
       }
       const value = name === "options" ? {interface_language: interfaceChoice} : {...form.value};
@@ -1384,9 +1532,22 @@
       updateForm("presentation", object(runtime.presentation) ? runtime.presentation.settings : null);
       updateForm("playback", object(runtime.playback) ? runtime.playback.settings : null);
       updateForm("media", object(runtime.media_options) ? runtime.media_options.settings : null);
-      eventSnapshot = object(runtime.event_settings) ? runtime.event_settings : null;
-      renderEvents(false);
-      updateForm("events", eventSnapshot && eventSnapshot.saved);
+      const incomingEvents = object(runtime.event_settings) ? runtime.event_settings : null;
+      if (!eventModeSelected && incomingEvents && typeof incomingEvents.media_mode === "boolean" && !forms.events.dirty && !forms.events.busy) {
+        const mode = incomingEvents.media_mode ? "media" : "normal";
+        if (mode !== eventMode && incomingEvents.media_mode === el("media_mode").checked) {
+          eventMode = mode; eventCatalogKey = "";
+          forms.events.value = null; forms.events.draft = null; forms.events.intents.clear(); forms.events.intentVersions.clear();
+          forms.events.fingerprint = null; forms.events.rebaseAttempts = 0; forms.events.rebaseNeeded = false;
+        }
+      }
+      const oldEventRevision = incomingEvents && object(incomingEvents.saved) && forms.events.value
+        && incomingEvents.saved.revision < forms.events.value.revision;
+      if (!oldEventRevision && (!incomingEvents || ((incomingEvents.media_mode === true ? "media" : "normal") === eventMode && !eventModeLoading))) {
+        eventSnapshot = incomingEvents;
+        renderEvents(false);
+        updateForm("events", eventSnapshot && eventSnapshot.saved);
+      }
       const effective = value.effective_options;
       text("effective-options", validOptions(effective) ? t("현재: ") + t(effective.media_mode ? "감상 모드" : "일반 모드") + " · " + LANGUAGES[effective.language] + t(" · 자동 받기 ") + t(effective.download_missing_resources ? "켜짐" : "꺼짐") : "현재 적용 값은 서버 준비 후 표시됩니다.");
       const graphics = object(runtime.presentation) && object(runtime.presentation.client) ? runtime.presentation.client : {};
@@ -1457,29 +1618,44 @@
         return Promise.resolve(false);
       }
       const edited = form.editRevision, version = ++mutationVersion, visibility = visibilityVersion;
+      const sentIntents = name === "events" ? new Map(form.intents) : null;
+      const sentIntentVersions = name === "events" ? new Map(form.intentVersions) : null;
       form.busy = true; form.queued = false;
       saveFeedback(name, "saving", "저장 중…");
       const operation = (async () => {
         try {
           const result = await bridge.request(name === "events" ? "events_save" : "save_" + name,
-            name === "options" ? value : name === "events" ? {settings:value,expected_revision:form.value.revision} : {settings: value});
+            name === "options" ? value : name === "events" ? {settings:value,expected_revision:form.value.revision,...(eventMode === "media" ? {mode:"media"} : {})} : {settings: value});
           if (!visible || disposed || visibility !== visibilityVersion) return false;
           const settings = savedFormSettings(name, result);
           if (!form.valid(settings)) throw new Error("서버 상태 형식을 확인하지 못했습니다.");
-          form.value = {...settings};
+          const latest = name === "events" && form.value && form.value.revision > settings.revision ? form.value : settings;
+          form.value = {...latest};
           if (form.editRevision === edited) form.dirty = false;
-          // Another edit/save may have happened while this request was in flight.
-          // Its complete status reply must not repaint newer fields in other forms.
-          if (version === mutationVersion) renderStatus(result);
-          else updateForm(name, settings);
+          if (name === "events") {
+            for (const id of sentIntents.keys()) if (form.intentVersions.get(id) === sentIntentVersions.get(id)) {
+              form.intents.delete(id); form.intentVersions.delete(id);
+            }
+            form.draft = mergedEventDraft(latest,form.intents);
+            form.dirty = form.intents.size > 0; form.rebaseAttempts = 0;
+            form.fingerprint = JSON.stringify(form.draft.love_events);
+          }
+          // A status poll started during this write is older than its ACK.
+          // Invalidate it while retaining the decision about newer local edits.
+          const mayRender = version === mutationVersion;
+          mutationVersion++;
+          if (mayRender && latest === settings) renderStatus(result);
+          else updateForm(name, latest);
           saveFeedback(name, form.dirty ? "pending" : "saved", form.dirty
             ? "변경 사항을 저장할 준비가 되었습니다." : "자동 저장했습니다.");
           return true;
         } catch (error) {
           if (visible && !disposed && visibility === visibilityVersion) {
             const conflict = name === "events" && error.code === "event_settings_revision_conflict";
-            saveFeedback(name, "failed", conflict ? "다른 화면에서 이벤트 설정이 바뀌었습니다. 최신 상태를 확인한 뒤 다시 시도를 눌러 현재 입력을 저장해 주세요." : "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.");
-            if (conflict) refresh();
+            if (conflict && form.rebaseAttempts < 2) {
+              form.rebaseAttempts++; form.rebaseNeeded = true;
+              saveFeedback(name,"pending","최신 설정에 선택한 변경을 합쳐 저장합니다."); refreshEventSettings();
+            } else saveFeedback(name, "failed", conflict ? "다른 화면에서 이벤트 설정이 바뀌었습니다. 최신 상태를 확인한 뒤 다시 시도를 눌러 현재 입력을 저장해 주세요." : "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.");
             if (force) message(error.message, true);
           }
           return false;
@@ -1680,6 +1856,9 @@
         if (numeric) input.addEventListener("blur", () => markEdited(name, 0));
       }
     }
+    el("events-mode").addEventListener("change", () => switchEventMode(el("events-mode").value));
+    el("events-enable-all").addEventListener("click", () => editAllEvents(true));
+    el("events-disable-all").addEventListener("click", () => editAllEvents(false));
     el("events-choice").addEventListener("change", () => renderEvents(true));
     el("events-enabled").addEventListener("change", editEvent);
     for (const id of ["events-start","events-end"]) el(id).addEventListener("change", editEvent);
@@ -1691,6 +1870,7 @@
         else if (typeof el(key).focus === "function") el(key).focus();
       });
     }
+    initializeLayout();
     applyInterfaceLanguage(interfaceChoice);
     updateCopyButton();
     el("diagnostics-copy").addEventListener("click", copyDiagnostics);
