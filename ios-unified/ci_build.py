@@ -89,6 +89,17 @@ def main():
     output.mkdir(parents=True)
     python = sys.executable
     server_data,server_data_proof=prepare_server_data(inputs,work,output)
+    runtime_inputs=json.loads((HERE/"runtime_inputs.json").read_text())
+    payload_pin=_tool_module("latest_server_data_pin").output_pin()
+    translation_pin=runtime_inputs["inputs"]["translations"]
+    startup_translations=work/"startupTranslations.zip"
+    startup_descriptor=work/"startupTranslations.json"
+    run(python,"-B",HERE.parent/"tools/build_startup_translation_receipt.py",
+        "--payload",server_data,"--payload-sha256",payload_pin["sha256"],"--payload-bytes",payload_pin["bytes"],
+        "--translations",inputs/"bundledTranslations.zip","--translations-sha256",translation_pin["sha256"],
+        "--translations-bytes",translation_pin["bytes"],"--platform","ios",
+        "--output",startup_translations,"--receipt",startup_descriptor)
+    (output/"startupTranslations.json").write_bytes(startup_descriptor.read_bytes())
     native = HERE / "native/build_native.py"
     support = inputs / "Python-3.13-iOS-support.b18.tar.gz"
     env = {"schema": 1, "source_commit": args.source_commit, "host_arch": platform.machine(),
@@ -152,7 +163,8 @@ def main():
     ipa = output / "IdolyPride-6.1.1-Unified-iOS.ipa"
     common = ["--server-data", server_data, "--server-data-upgrade-proof", server_data_proof,
               "--translations", inputs / "bundledTranslations.zip",
-              "--client-languages", client_languages, "--client-languages-metadata", client_descriptor]
+              "--client-languages", client_languages, "--client-languages-metadata", client_descriptor,
+              "--startup-translations",startup_translations,"--startup-translations-metadata",startup_descriptor]
     run(python, "-B", HERE / "package_unified.py", "--runtime-root", runtime,
         "--native-framework", framework, *common, "--output", ipa,
         "--base-ipa", inputs / "base.ipa", "--patched-unity", unity, "--source-commit", args.source_commit)

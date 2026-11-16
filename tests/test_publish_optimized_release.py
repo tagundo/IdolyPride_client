@@ -396,7 +396,7 @@ def test_release_notes_reject_unproven_resource_claims(field, value, monkeypatch
         publisher.release_scope_lines()
 
 
-def test_release_body_uses_five_assets_and_labels_reused_client(monkeypatch):
+def test_release_body_uses_five_current_assets_and_describes_settings_changes(monkeypatch):
     monkeypatch.setattr(publisher.LATEST_SERVER_DATA, "load_pin", lambda: {"upgrade_proof": scope_proof()})
     artifacts = [{"name": publisher.release_name(name), "source_name": name, "bytes": 1, "sha256": HASH}
                  for name in (publisher.APK, publisher.IPA)]
@@ -411,6 +411,9 @@ def test_release_body_uses_five_assets_and_labels_reused_client(monkeypatch):
     assert body.count("/releases/download/"+publisher.TAG+"/") == len(publisher.EXPECTED_RELEASE_ASSETS)
     assert body.count("/raw/"+"c"*40+"/") == 2
     assert "한국어 Android 게임 · 글자 비율을 수정한 새 빌드" in body
+    assert "KO/JA/EN 게임 APK 모두 현재 소스로 제작" in body
+    assert "파일을 그대로 재사용" not in body and "v0.3.31" not in body
+    assert "접힌 도움말" in body and "체크 목록" in body and "감상 계정은 지원 이벤트 전체가 기본 활성화" in body
     assert "별도 Mac 서버와 동시에 실행하지 마세요" in body
     assert "통합 IPA는 게임 시작 전 한국어·일본어·영어" in body
     assert "원하는 언어판 하나로 교체 설치" in body

@@ -14,8 +14,9 @@ import os
 from pathlib import Path
 import stat
 import threading
+import zlib
 from types import MappingProxyType
-from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED
+from zipfile import ZipFile, ZIP_STORED, ZIP_DEFLATED, BadZipFile
 
 _CACHE = OrderedDict()
 _LOCK = threading.RLock()
@@ -206,12 +207,22 @@ def validated_layer(directory,original_manifest,*,language,data_dir,platform,aut
             return result
         except BaseException:
             result.close();raise
-    result=build(legacy)
+    from .startup_receipt import binding,load_snapshot
+    prepared=load_snapshot(platform,language,binding(original_manifest,legacy,digests))
+    if prepared is not None and prepared[1]<=_MAX_METADATA_BYTES:
+        # Only exact signed-app receipt bytes can avoid the original constructors.
+        # Source full hashes and current cohort approval above are still required.
+        try:result=_clone(prepared[0],directory,language,before,digests)
+        except (ValueError,KeyError,TypeError,UnicodeError,BadZipFile,zlib.error):
+            # An unknown optional receipt shape cannot replace strict validation.
+            prepared=None;result=build(legacy)
+    else:
+        result=build(legacy)
     try:
         if (_signature(directory,data_dir,platform)!=before
                 or _hashes(directory,data_dir,platform,before)!=digests):
             raise ValueError("Prepared language cache input changed")
-        cached=_snapshot(result)
+        cached=prepared if prepared is not None and prepared[1]<=_MAX_METADATA_BYTES else _snapshot(result)
         if cached is not None and cached[1]<=_MAX_METADATA_BYTES:
             with _LOCK:
                 _CACHE[key]=cached;_CACHE.move_to_end(key)

@@ -23,7 +23,7 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
 VERSION, BUILD_NUMBER = "0.3.37",54
-COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
+COMMON_SOURCE_FILES = tuple(["tools/build_startup_translation_receipt.py","src/idoly_local/startup_receipt.py","src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"
@@ -204,6 +204,32 @@ def fetch_public_inputs(kind,destination,work,guard,*,prepare=True):
             "translations":{"platform":kind,"included":True,**TRANSLATIONS[kind]},
             "donor":{"source_commit":PUBLIC_SOURCE,**{k:v for k,v in DONORS[kind].items() if k!="prefix"}}}
 
+def startup_translation_pin(path,platform):
+    need(platform in ("android","ios"),"startup_translation_platform_invalid")
+    pin=read_json(path,maximum=4096)
+    need(type(pin) is dict and set(pin)=={"schema","platform","bytes","sha256"}
+         and type(pin["schema"]) is int and pin["schema"]==1 and pin["platform"]==platform
+         and type(pin["bytes"]) is int and 0<pin["bytes"]<=16*MIB
+         and type(pin["sha256"]) is str and re.fullmatch(r"[0-9a-f]{64}",pin["sha256"]),
+         "startup_translation_pin_invalid")
+    return pin
+
+
+def prepare_startup_translations(platform,inputs,work,guard):
+    path=inputs/"startupTranslations.zip";descriptor=inputs/"startupTranslations.json"
+    need(not any(p.exists() or p.is_symlink() for p in (path,descriptor)),"fresh_startup_translation_outputs_required")
+    run([sys.executable,"-B",ROOT/"tools/build_startup_translation_receipt.py",
+         "--payload",inputs/"ServerData.zip","--payload-sha256",SERVER_DATA["sha256"],
+         "--payload-bytes",SERVER_DATA["bytes"],"--translations",inputs/"bundledTranslations.zip",
+         "--translations-sha256",TRANSLATIONS[platform]["sha256"],
+         "--translations-bytes",TRANSLATIONS[platform]["bytes"],"--platform",platform,
+         "--output",path,"--receipt",descriptor],work/"startup-translations-build.log",guard)
+    pin=startup_translation_pin(descriptor,platform)
+    need(stat.S_ISREG(path.lstat().st_mode) and path.stat().st_size==pin["bytes"]
+         and sha(path)==pin["sha256"],"startup_translation_output_differs")
+    return pin
+
+
 def artifact(path):
     path=Path(path)
     return {"name":path.name,"bytes":path.stat().st_size,"sha256":sha(path)}
@@ -240,6 +266,17 @@ def check_apk(path,abi,inputs,engine,tools):
                          ("lib/"+abi+"/libidoly_live.so",{"bytes":engine["library_bytes"],"sha256":engine["library_sha256"]})):
             info=archive.getinfo(name);need(info.file_size==pin["bytes"],"apk_embedded_size_differs")
             with archive.open(info) as incoming:need(hashlib.file_digest(incoming,"sha256").hexdigest()==pin["sha256"],"apk_embedded_sha256_differs")
+        if "startup_translations" in inputs:
+            pin=inputs["startup_translations"]
+            need(type(pin) is dict and set(pin)=={"schema","platform","bytes","sha256"}
+                 and type(pin.get("schema")) is int and pin.get("schema")==1 and pin.get("platform")=="android"
+                 and type(pin.get("bytes")) is int and 0<pin["bytes"]<=16*MIB
+                 and type(pin.get("sha256")) is str and re.fullmatch(r"[0-9a-f]{64}",pin["sha256"]),
+                 "startup_translation_pin_invalid")
+            info=archive.getinfo("assets/startupTranslations.zip")
+            need(info.file_size==pin["bytes"] and not stat.S_ISLNK(info.external_attr>>16),"apk_startup_translation_size_differs")
+            with archive.open(info) as incoming:
+                need(hashlib.file_digest(incoming,"sha256").hexdigest()==pin["sha256"],"apk_startup_translation_sha256_differs")
         abis={PurePosixPath(info.filename).parts[1] for info in archive.infolist() if info.filename.startswith("lib/") and len(PurePosixPath(info.filename).parts)>2}
         need(abis=={abi},"apk_abi_differs")
     return {**artifact(path),"abi":abi,"application_id":ANDROID_PACKAGE,"version":VERSION,"build_number":BUILD_NUMBER,
@@ -248,6 +285,7 @@ def check_apk(path,abi,inputs,engine,tools):
 def build_android(work,output,source,pins,guard):
     need(sys.platform.startswith("linux"),"Linux_Android_build_host_required")
     inputs=work/"inputs";input_report=fetch_public_inputs("android",inputs,work,guard)
+    input_report["startup_translations"]=prepare_startup_translations("android",inputs,work,guard)
     sdk=Path(os.environ.get("ANDROID_HOME",os.environ.get("ANDROID_SDK_ROOT","")))
     ndk=sdk/"ndk"/NDK_VERSION;tools=sdk/"build-tools/34.0.0"
     need(ndk.is_dir() and (ndk/"source.properties").is_file() and NDK_VERSION in (ndk/"source.properties").read_text(),"pinned_NDK_required")
@@ -265,7 +303,10 @@ def build_android(work,output,source,pins,guard):
             "-PserverVersionCode="+str(BUILD_NUMBER),"-PliveEngineDir="+str(jni),
             "-PbundledTranslations="+str(inputs/"bundledTranslations.zip"),
             "-PbundledTranslationsSha256="+TRANSLATIONS["android"]["sha256"],
-            "-PbundledTranslationsBytes="+str(TRANSLATIONS["android"]["bytes"])]
+            "-PbundledTranslationsBytes="+str(TRANSLATIONS["android"]["bytes"]),
+            "-PstartupTranslations="+str(inputs/"startupTranslations.zip"),
+            "-PstartupTranslationsSha256="+input_report["startup_translations"]["sha256"],
+            "-PstartupTranslationsBytes="+str(input_report["startup_translations"]["bytes"])]
         run(command,work/("gradle-"+abi+".log"),guard)
         built=ROOT/"android-server/app/build/outputs/apk"/mode.lower()/("app-"+mode.lower()+".apk")
         shutil.copyfile(built,output/name)
@@ -349,6 +390,11 @@ def finish_android(inputs,work,output,source,pins,guard):
     need(public.is_absolute() and public.resolve(strict=True).is_relative_to(runner),"owned_QA_inputs_required")
     for name,pin in (("ServerData.zip",SERVER_DATA),("bundledTranslations.zip",TRANSLATIONS["android"])):
         need((public/name).stat().st_size==pin["bytes"] and sha(public/name)==pin["sha256"],"Android_QA_input_sha256_differs")
+    receipt=startup_translation_pin(public/"startupTranslations.json","android")
+    need(receipt==built["inputs"].get("startup_translations"),"Android_startup_translation_pin_differs")
+    receipt_path=public/"startupTranslations.zip"
+    need(stat.S_ISREG(receipt_path.lstat().st_mode) and receipt_path.stat().st_size==receipt["bytes"]
+         and sha(receipt_path)==receipt["sha256"],"Android_startup_translation_input_differs")
     tools=Path(os.environ.get("ANDROID_HOME",os.environ.get("ANDROID_SDK_ROOT","")))/"build-tools/34.0.0"
     for key,name,abi in (("binary",ANDROID_NAME,"arm64-v8a"),("qa_binary",ANDROID_QA_NAME,"x86_64")):
         actual=check_apk(inputs/name,abi,built["inputs"],built["live_engine"][abi],tools)

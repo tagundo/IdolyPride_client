@@ -367,3 +367,47 @@ def test_native_metadata_requires_all_resource_runtime_guards():
     assert {"src/idoly_local/resource_archive.py", "src/idoly_local/resource_library.py",
         "src/idoly_local/resource_translation.py", "src/idoly_local/resource_translation_runtime.py",
         "src/idoly_local/octo_runtime.py"} <= set(builds.COMMON_SOURCE_FILES)
+
+
+@pytest.mark.parametrize("fault",[None,"body","size","digest","platform","schema","extra"])
+def test_startup_receipt_output_is_source_pinned_and_bounded(tmp_path,monkeypatch,fault):
+    import json
+    inputs=tmp_path/"inputs";inputs.mkdir();work=tmp_path/"work";work.mkdir()
+    raw=b"verified-public-startup-receipt"
+    pin={"schema":1,"platform":"android","bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()}
+    if fault=="size":pin["bytes"]+=1
+    if fault=="digest":pin["sha256"]="f"*64
+    if fault=="platform":pin["platform"]="ios"
+    if fault=="schema":pin["schema"]=True
+    if fault=="extra":pin["arbitrary_path"]="/private/data"
+    def run(arguments,log,guard,**kwargs):
+        argv=list(map(str,arguments))
+        assert argv[2].endswith("tools/build_startup_translation_receipt.py")
+        assert argv[argv.index("--payload-sha256")+1]==builds.SERVER_DATA["sha256"]
+        assert argv[argv.index("--payload-bytes")+1]==str(builds.SERVER_DATA["bytes"])
+        assert argv[argv.index("--translations-sha256")+1]==builds.TRANSLATIONS["android"]["sha256"]
+        assert argv[argv.index("--platform")+1]=="android"
+        (inputs/"startupTranslations.zip").write_bytes(b"corrupt" if fault=="body" else raw)
+        (inputs/"startupTranslations.json").write_text(json.dumps(pin))
+    monkeypatch.setattr(builds,"run",run)
+    if fault:
+        with pytest.raises(builds.BuildError,match="startup_translation"):
+            builds.prepare_startup_translations("android",inputs,work,Guard())
+    else:
+        assert builds.prepare_startup_translations("android",inputs,work,Guard())==pin
+        with pytest.raises(builds.BuildError,match="fresh_startup"):
+            builds.prepare_startup_translations("android",inputs,work,Guard())
+
+
+@pytest.mark.parametrize("tampered",[False,True])
+def test_packaged_apk_receipt_is_checked_again_after_signing(tmp_path,monkeypatch,tampered):
+    target,engine=apk_fixture(monkeypatch,tmp_path)
+    raw=b"public-receipt"
+    pin={"schema":1,"platform":"android","bytes":len(raw),"sha256":hashlib.sha256(raw).hexdigest()}
+    with ZipFile(target,"a") as archive:
+        archive.writestr("assets/startupTranslations.zip",b"changed-------" if tampered else raw)
+    if tampered:
+        with pytest.raises(builds.BuildError,match="apk_startup_translation"):
+            builds.check_apk(target,"arm64-v8a",{"startup_translations":pin},engine,tmp_path)
+    else:
+        assert builds.check_apk(target,"arm64-v8a",{"startup_translations":pin},engine,tmp_path)["build_number"]==54

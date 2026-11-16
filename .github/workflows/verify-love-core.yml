@@ -119,6 +119,8 @@ jobs:
         run: |
           tests=(
             tests/test_ios_unified_probe_navigation.py
+            tests/test_startup_receipt.py
+            tests/test_startup_receipt_handoff.py
             tests/test_android_event_selection_queue.py
             tests/test_ios_unified_web.py
             tests/test_love.py

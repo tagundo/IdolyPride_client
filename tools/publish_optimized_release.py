@@ -45,7 +45,7 @@ PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
                   "android": 900*MIB, "macos": 640*MIB, "ios-unified": 768*MIB}
 BINARY_LIMITS = {APK: 384*MIB, QA_APK: 384*MIB, MAC: 600*MIB, IPA: 600*MIB}
-COMMON_SOURCES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
+COMMON_SOURCES = tuple(["tools/build_startup_translation_receipt.py","src/idoly_local/startup_receipt.py","src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 TRANSLATION_SOURCES = ("public_payload.py", "bundled_translations.py", "resource_translation.py",
                        "resource_translation_runtime.py", "octo_manifest.py", "octo_runtime.py")
 BASE_DATA_PIN = {"bytes": 191343014, "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
@@ -1108,8 +1108,12 @@ def release_body(source, run, publication, artifacts, metrics, android_clients=(
     lines = ["# " + release_title(), "",
              "릴리즈 버전 " + RELEASE_VERSION + " · 서버 내부 버전 " + VERSION + " / build " + str(BUILD)
              + " · 통합 IPA 내부 빌드 " + IPA_VERSION, "",
-             "최신 데이터, 로컬 계정 관리와 모시코이 진행을 통합한 릴리즈입니다. Android 서버·KO/JA/EN 게임 클라이언트와 통합 IPA, 총 5종을 제공합니다. Mac에서는 통합 IPA를 PlayCover로 사용합니다.", "",
-             "이번 변경", "", *release_scope_lines(),
+             "서버 메뉴의 분류·가로 화면 배치, 모시코이 다중 선택, 시작 처리와 한국어 이미지 비율을 개선했습니다. Android 서버·KO/JA/EN 게임 클라이언트와 통합 IPA, 총 5종을 새로 빌드합니다. Mac에서는 통합 IPA를 PlayCover로 사용합니다.", "",
+             "이번 변경", "",
+             "- 콘솔·서버 설정·유저 관리·콘텐츠·그래픽으로 분류했습니다. 긴 설명은 접힌 도움말로 옮기고 연결·자료 검사·진단을 통합했습니다. 그래픽은 기본으로 펼치며, 유저·공식 계정·모시코이·실험 설정은 접어 둡니다.",
+             "- 모시코이 목록을 번역하고 체크 목록·모두 활성화·모두 비활성화로 바꿨습니다. 감상 계정은 지원 이벤트 전체가 기본 활성화되며, 일반 계정의 기간·진행과 따로 관리합니다. 연속 선택 중 저장이 겹쳐도 최신 선택을 보존합니다.",
+             "- 한국어 선물·엔딩 달성 등의 버튼과 모시코이 로고가 고정된 칸에서 늘어나거나 눌리던 배치를 수정했습니다. 기존 번역 이미지의 픽셀과 나머지 UI·폰트·스토리 자료를 대조합니다.",
+             *release_scope_lines(),
              "- 서버 설정에서 일반/감상용 계정의 생성·복제·다음 시작 계정 선택, ZIP 미리보기·가져오기·내보내기·복원점을 제공합니다. 계정의 8개 상태 테이블과 원본 프로토콜 바이트를 함께 보존하며, 교체는 대상 버전을 확인한 뒤 자동 복원점을 만듭니다. 다른 계정과 세션은 유지하고 교체 대상의 세션만 무효화합니다.",
              "- 일본판 인계 ID·인계 비밀번호 가져오기는 익명 마스터 호환 검사를 비밀번호 확인과 인계 실행 전에 수행합니다. 인증 정보는 메모리에만 두고 보관 ZIP·진단·로그에 저장하지 않습니다. 실제 공식 계정으로 인증·인계를 실행한 검증은 하지 않았습니다.",
              "- 기존 리소스 ZIP은 원본 파일의 동일성이 확인된 항목만 최신 목록에 연결합니다. 공개 데이터 교체는 중단·복구 가능한 트랜잭션으로 수행하며 로컬 계정·설정·게임 리소스 캐시는 보존합니다.",
@@ -1135,10 +1139,11 @@ def release_body(source, run, publication, artifacts, metrics, android_clients=(
               "검증 범위", "",
               "게시 파이프라인은 전체 코드 검사와 성능 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, KO/JA/EN APK 패키징, Apple SDK 통합 IPA 빌드를 필수로 판정합니다. iOS는 같은 저장소의 KO→EN→JA→EN→KO 재실행, ZIP 왕복과 계정 8개 테이블의 보존·복원도 검사합니다.",
               "새 KO/JA/EN APK는 서명·16KiB 정렬·내장 UI 언어·폰트·멤버 목록의 패키징 검사를 포함합니다. 실제 Android ARM64 기기 및 이번 IPA의 PlayCover·iPhone·iPad 게임 재확인은 별도 대상입니다.",
-              "원본 Actions ZIP 전체 SHA-256과 새 서버 APK·통합 IPA 2파일의 LFS 전체 재다운로드 SHA-256을 확인합니다. 재사용하는 한국어 APK도 고정된 원래 게시 커밋의 출처·전체 SHA-256을 다시 대조합니다. 공개 전 이 릴리즈의 5개 Assets를 각각 GitHub API에서 전체 다운로드해 SHA-256과 파일 목록을 확인해야 합니다.",
+              "원본 Actions ZIP 전체 SHA-256과 새 서버 APK·통합 IPA 2파일의 LFS 전체 재다운로드 SHA-256을 확인합니다. KO/JA/EN 게임 APK 모두 현재 소스로 제작하며 한국어는 이전 배포본의 번역 문구만 가져옵니다. 공개 전 이 릴리즈의 5개 Assets를 각각 GitHub API에서 전체 다운로드해 SHA-256과 파일 목록을 확인해야 합니다.",
               "[Actions 검증](https://github.com/" + REPO + "/actions/runs/" + str(run) + ") · 서버·통합 IPA·KO/JA/EN APK 빌드 소스 " + source,
-              "개별 Where 예외의 원인과 NPC의 MV 출연은 이번 배포의 해결 범위로 주장하지 않습니다.", "",
-              "한국어 Android 게임 APK는 검증된 v0.3.31 파일을 그대로 재사용합니다:"]
+              "개별 Where 예외의 원인과 NPC의 MV 출연은 이번 배포의 해결 범위로 주장하지 않습니다."]
+    if companions:
+        lines += ["", "이전 버전과 동일한 파일:"]
     for row in companions:
         lines.append("- " + row["name"] + " · 원래 파일 " + row["source_name"] + " · v" + row["version"] + " · 소스 " + row["source_commit"]
                      + " · 원래 게시 " + row["publication_commit"] + " · 이번 릴리즈에서 재제작하지 않았습니다.")

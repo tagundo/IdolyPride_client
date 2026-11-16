@@ -236,6 +236,7 @@
     "idoly_local.social",
     "idoly_local.startup_cache",
     "idoly_local.startup_checks",
+    "idoly_local.startup_receipt",
     "idoly_local.state",
     "idoly_local.story_catalog",
     "idoly_local.story_read_rules",

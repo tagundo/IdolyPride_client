@@ -113,6 +113,14 @@ def child(args):
             validate_prepared=lambda prepared:validate_prepared_translations(prepared,data,platform=args._platform)))
         require(result["state"] in ("installed","unchanged"),"prepared_translation_not_ready")
         observe_cache("prepared_translation_"+label)
+    if args._receipt:
+        from idoly_local.startup_receipt import register_startup_receipt
+        pin_path=args.startup_receipts_root/args._platform/"startupTranslations.json"
+        pin=json.loads(pin_path.read_bytes())
+        result=phase(phases,"signed_startup_receipt",lambda:register_startup_receipt(
+            pin_path.with_name("startupTranslations.zip"),expected_sha256=pin["sha256"],
+            expected_bytes=pin["bytes"],platform=args._platform))
+        require(result["available"],"signed_receipt_unavailable")
     prepare_translations("empty_data")
     (data / "client-language.json").write_text('{"schema":1,"language":"ko"}')
     def no_download(*_args,**_kwargs):
@@ -158,7 +166,7 @@ def child(args):
         try:verify(runtime)
         finally:runtime.stop()
         require(State.account_bytes(state.account_snapshot("sandbox")[0])==before,"profiled_account_bytes_changed")
-    return {"platform":args._platform,"media_mode":args._media,"protobuf_backend":"python",
+    return {"platform":args._platform,"media_mode":args._media,"startup_receipt":args._receipt,"protobuf_backend":"python",
             "phases":phases,"translation_cache_observations":cache_observations,"account_bytes_preserved":True,"encrypted_loopback_verified":True,
             "instrumented_existing_startup_project_top":cpu_rows(trace) if trace is not None else [],
             "peak_rss_bytes":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024}
@@ -171,6 +179,8 @@ def main():
     parser.add_argument("--output",type=Path,required=True)
     parser.add_argument("--source-commit",required=True)
     parser.add_argument("--translations-root",type=Path)
+    parser.add_argument("--startup-receipts-root",type=Path)
+    parser.add_argument("--_receipt",action="store_true")
     parser.add_argument("--_trace",action="store_true")
     parser.add_argument("--runs",type=int,default=3)
     parser.add_argument("--_case",type=Path)
@@ -193,34 +203,37 @@ def main():
     require(latest.output_pin()==PAYLOAD,"frozen_payload_differs")
     latest.verify_payload(args.payload)
     cases=[]
-    for platform in ("android","ios"):
-        for media in (False,True):
-            for number in range(args.runs):
-                owned=Path(tempfile.mkdtemp(prefix="case-",dir=work));(owned/MARKER).write_text(args.source_commit)
-                report=work/(platform+"-"+str(media)+"-"+str(number)+".json")
-                command=[sys.executable,"-B",str(Path(__file__).resolve()),"--payload",str(args.payload),
-                    "--work",str(work),"--output",str(report),"--source-commit",args.source_commit,
-                    "--_case",str(owned),"--_platform",platform]
-                if media:command.append("--_media")
-                if number==0:command.append("--_trace")
-                if args.translations_root is not None:command.extend(("--translations-root",str(args.translations_root)))
-                try:
-                    subprocess.run(command,check=True,timeout=240,cwd=ROOT,env={**os.environ,"PYTHONDONTWRITEBYTECODE":"1"})
-                    require(report.stat().st_size<=128*1024,"case_report_too_large")
-                    cases.append(json.loads(report.read_text()))
-                    # Preserve every completed bounded trace even if a later
-                    # case fails or the whole Actions job reaches its deadline.
-                    shutil.copyfile(report,output.parent/report.name)
-                finally:
-                    require(owned.parent==work and (owned/MARKER).read_text()==args.source_commit,"owned_cleanup_required")
-                    shutil.rmtree(owned)
+    for use_receipt in ((False,True) if args.startup_receipts_root is not None else (False,)):
+        for platform in ("android","ios"):
+            for media in (False,True):
+                for number in range(args.runs):
+                    owned=Path(tempfile.mkdtemp(prefix="case-",dir=work));(owned/MARKER).write_text(args.source_commit)
+                    report=work/(platform+"-"+str(media)+"-receipt"+str(use_receipt)+"-"+str(number)+".json")
+                    command=[sys.executable,"-B",str(Path(__file__).resolve()),"--payload",str(args.payload),
+                        "--work",str(work),"--output",str(report),"--source-commit",args.source_commit,
+                        "--_case",str(owned),"--_platform",platform]
+                    if use_receipt:command.extend(("--_receipt","--startup-receipts-root",str(args.startup_receipts_root)))
+                    if media:command.append("--_media")
+                    if number==0:command.append("--_trace")
+                    if args.translations_root is not None:command.extend(("--translations-root",str(args.translations_root)))
+                    try:
+                        subprocess.run(command,check=True,timeout=240,cwd=ROOT,env={**os.environ,"PYTHONDONTWRITEBYTECODE":"1"})
+                        require(report.stat().st_size<=128*1024,"case_report_too_large")
+                        cases.append(json.loads(report.read_text()))
+                        # Preserve every completed bounded trace even if a later
+                        # case fails or the whole Actions job reaches its deadline.
+                        shutil.copyfile(report,output.parent/report.name)
+                    finally:
+                        require(owned.parent==work and (owned/MARKER).read_text()==args.source_commit,"owned_cleanup_required")
+                        shutil.rmtree(owned)
     groups=[]
-    for platform in ("android","ios"):
-        for media in (False,True):
-            selected=[case for case in cases if case["platform"]==platform and case["media_mode"] is media]
-            groups.append({"platform":platform,"media_mode":media,"runs":len(selected),"median_seconds":{
-                name:statistics.median(case["phases"][name]["wall_seconds"] for case in selected)
-                for name in selected[0]["phases"]}})
+    for use_receipt in ((False,True) if args.startup_receipts_root is not None else (False,)):
+        for platform in ("android","ios"):
+            for media in (False,True):
+                selected=[case for case in cases if case["platform"]==platform and case["media_mode"] is media and case["startup_receipt"] is use_receipt]
+                groups.append({"platform":platform,"media_mode":media,"startup_receipt":use_receipt,"runs":len(selected),"median_seconds":{
+                    name:statistics.median(case["phases"][name]["wall_seconds"] for case in selected)
+                    for name in selected[0]["phases"]}})
     output.write_text(json.dumps({"schema":1,"status":"PASS","source_commit":args.source_commit,
         "payload":PAYLOAD,"translation_bundles":TRANSLATIONS if args.translations_root is not None else None,"execution":"owned GitHub Actions Linux CPU proxy; pure-Python protobuf",
         "native_android_device_timing":False,"native_ios_device_timing":False,"java_asset_copy_measured":False,

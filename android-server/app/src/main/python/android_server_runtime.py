@@ -152,6 +152,38 @@ def _copy_asset(assets, destination: Path, expected_sha256: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _register_app_startup_receipt(assets, build_config):
+    """Read fixed signed-APK assets into immutable bytes, never writable cache."""
+    from idoly_local.startup_receipt import MAX_RECEIPT_BYTES, register_startup_receipt
+    unavailable = {"schema": 1, "available": False}
+    incoming = None
+    try:
+        expected = str(getattr(build_config,"STARTUP_TRANSLATIONS_SHA256",""))
+        size = int(getattr(build_config,"STARTUP_TRANSLATIONS_BYTES",0))
+        if not re.fullmatch(r"[0-9a-f]{64}",expected) or not 0 < size <= MAX_RECEIPT_BYTES:
+            raise ValueError("Absent or invalid optional receipt pin")
+        from java import jarray, jbyte
+        incoming = assets.open("startupTranslations.zip")
+        buffer, chunks, count = jarray(jbyte)(64*1024), [], 0
+        while True:
+            length = incoming.read(buffer)
+            if length < 0: break
+            if length:
+                count += length
+                if count > size: raise ValueError("Optional receipt asset exceeds pin")
+                chunks.append(memoryview(buffer).cast("B")[:length].tobytes())
+        raw = b"".join(chunks)
+        if len(raw) != size: raise ValueError("Optional receipt asset is truncated")
+        return register_startup_receipt(raw,expected_sha256=expected,expected_bytes=size,platform="android")
+    except Exception:
+        register_startup_receipt(b"",expected_sha256="",expected_bytes=0,platform="android")
+        return unavailable
+    finally:
+        if incoming is not None:
+            try: incoming.close()
+            except Exception: pass
+
+
 def _install_bundled_translations(assets, build_config, files, data, resource_cache_dir, log):
     """Read the separate optional asset only during server startup."""
     from idoly_local.bundled_translations import MAX_BUNDLE, install_translation_bundle
@@ -202,6 +234,7 @@ def _install_bundled_translations(assets, build_config, files, data, resource_ca
     selected_root = Path(resource_cache_dir) if resource_cache_dir is not None else data
     from idoly_local.resource_translation_runtime import validate_prepared_translations
 
+    _register_app_startup_receipt(assets,build_config)
     return install_translation_bundle(destination, selected_root, expected_sha256=expected,
         expected_bytes=size, platform="android", log=log,
         validate_prepared=lambda prepared: validate_prepared_translations(prepared, data, platform="android"))
