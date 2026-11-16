@@ -61,6 +61,7 @@ jobs:
             tests/test_account_state_backup.py
             tests/test_profiles.py
             tests/test_official_import.py
+            tests/test_official_master_preflight.py
             tests/test_official_import_original_protocol.py
             tests/test_love_catalog.py
             tests/test_love_translation.py

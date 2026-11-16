@@ -580,3 +580,99 @@ def test_faulty_transport_code_property_cannot_escape_fixed_error_boundary(schem
     with pytest.raises(OfficialAccountError, match="official_seed_failed") as caught:
         account.inspect(PUBLIC, PASSWORD)
     assert_redacted(caught.value)
+
+
+class AnonymousMasterTransport(Transport):
+    """Only the public preflight boundary differs from normal synthetic auth."""
+    def __init__(self, schema):
+        super().__init__(schema)
+        self.public_version = "synthetic-official-master"
+        self.public_fault = None
+        self.public_action = None
+        self.public_raw = None
+
+    def rpc(self, method, request, metadata, *, cancel=None, timeout=30):
+        if method == module._MASTER and "x-auth-token" not in metadata:
+            assert request == b"" and metadata == {"x-app-version":"6.1.1"} and timeout == 30
+            self.calls.append((method, request, dict(metadata), timeout))
+            if self.public_fault is not None: raise self.public_fault
+            if self.public_action is not None: self.public_action()
+            if self.public_raw is not None: return self.public_raw
+            response = self.schema.response_type(method)()
+            if self.public_version is not None: response.masterTag.version = self.public_version
+            return response.SerializeToString()
+        return super().rpc(method, request, metadata, cancel=cancel, timeout=timeout)
+
+
+def anonymous_client(schema, platform="ios"):
+    transport = AnonymousMasterTransport(schema)
+    return OfficialAccountClient(schema, platform=platform, transport=transport, config=config(platform)), transport
+
+
+@pytest.mark.parametrize("platform", ["ios", "android"])
+def test_anonymous_master_preflight_sends_no_seed_credentials_or_auth_and_keeps_inspection_separate(schema, platform):
+    account, transport = anonymous_client(schema, platform)
+    assert account.preflight_master_version("synthetic-official-master") == "synthetic-official-master"
+    assert [row[0] for row in transport.calls] == [module._MASTER]
+    assert account._verification is None and not account._busy
+    verification = account.inspect(PUBLIC, PASSWORD)
+    assert not verification.consumed
+    account.preflight_master_version("synthetic-official-master")
+    assert not verification.consumed and not verification.closed
+    result = account.fetch(verification)
+    assert result.master_version == "synthetic-official-master"
+    assert [row[0] for row in transport.calls] == [module._MASTER, "seed", module._SYSTEM, module._MIGRATE,
+        module._MASTER, module._EXECUTE, "signin", "lookup", module._SYSTEM, module._LOGIN, module._MASTER, module._USER]
+    assert_redacted(account)
+
+
+@pytest.mark.parametrize("kind,code", [("mismatch","official_master_mismatch"),
+    ("unavailable","official_rpc_failed"), ("timeout","deadline_exceeded"),
+    ("missing","master_version_invalid"), ("malformed","official_rpc_failed")])
+def test_public_preflight_failure_never_starts_transfer_authentication_or_account_read(schema, kind, code):
+    from idoly_local.official_transport import OfficialTransportError
+    account, transport = anonymous_client(schema)
+    if kind == "mismatch": transport.public_version = "different-public-version"
+    elif kind == "unavailable": transport.public_fault = RuntimeError(PASSWORD + TICKET)
+    elif kind == "timeout": transport.public_fault = OfficialTransportError("deadline_exceeded")
+    elif kind == "missing": transport.public_version = None
+    else: transport.public_raw = b"\xff"
+    with pytest.raises(OfficialAccountError) as stopped:
+        account.preflight_master_version("synthetic-official-master")
+    assert stopped.value.code == code and PASSWORD not in str(stopped.value) and TICKET not in str(stopped.value)
+    assert [row[0] for row in transport.calls] == [module._MASTER]
+    assert account._verification is None and not account._busy
+
+
+@pytest.mark.parametrize("during", [False, True])
+def test_preflight_cancellation_before_or_during_public_request_never_consumes_verified_ticket(schema, during):
+    account, transport = anonymous_client(schema)
+    verification = account.inspect(PUBLIC, PASSWORD)
+    before = len(transport.calls)
+    cancel = threading.Event()
+    if during: transport.public_action = cancel.set
+    else: cancel.set()
+    with pytest.raises(OfficialAccountError, match="cancelled"):
+        account.preflight_master_version("synthetic-official-master", cancel=cancel)
+    assert len(transport.calls) == before + int(during)
+    assert not verification.consumed and not verification.closed and verification._token == TICKET
+    assert module._EXECUTE not in [row[0] for row in transport.calls]
+
+
+def test_preflight_busy_guard_prevents_concurrent_inspection_without_sending_credentials(schema):
+    account, transport = anonymous_client(schema)
+    started, release = threading.Event(), threading.Event()
+    def waiting():
+        started.set()
+        assert release.wait(3)
+    transport.public_action = waiting
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        worker = pool.submit(account.preflight_master_version, "synthetic-official-master")
+        try:
+            assert started.wait(3)
+            with pytest.raises(OfficialAccountError, match="client_busy"):
+                account.inspect(PUBLIC, PASSWORD)
+            assert [row[0] for row in transport.calls] == [module._MASTER]
+        finally:
+            release.set()
+        assert worker.result(timeout=3) == "synthetic-official-master"

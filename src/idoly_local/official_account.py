@@ -68,6 +68,7 @@ ERROR_CODES = frozenset((
     'firebase_token_time_invalid',
     'linked_user_invalid',
     'master_version_invalid',
+    'official_master_mismatch',
     'official_config_invalid',
     'official_config_scope_mismatch',
     'official_config_unavailable',
@@ -392,6 +393,30 @@ class OfficialAccountClient:
               "official_maintenance")
         _need(not response.reviewInfo.inReview and not response.reviewInfo.alternativeApiHost,
               "official_review_unsupported")
+
+    def preflight_master_version(self, expected_version, *, cancel=None, progress=None):
+        """Check the public master before any seed, transfer or ticket use.
+
+        Only the existing empty Master.Get and public app-version header are
+        sent. The coordinator fixes the expected local version and rechecks its
+        original files before calling inspect/fetch. Post-login checks remain.
+        """
+        _need(_text(expected_version, 256) and expected_version == expected_version.strip(),
+              "master_version_invalid")
+        with self._lock:
+            self._check(cancel)
+            _need(not self._busy, "client_busy")
+            self._busy = True
+        try:
+            self._progress("checking", cancel, progress)
+            master, _ = self._call(_MASTER, {"x-app-version": self._config["app_version"]}, cancel)
+            _need(master.HasField("masterTag") and _text(master.masterTag.version, 256),
+                  "master_version_invalid")
+            _need(master.masterTag.version == expected_version, "official_master_mismatch")
+            return expected_version
+        finally:
+            with self._lock:
+                self._busy = False
 
     def inspect(self, user_id, password, *, cancel=None, progress=None):
         _need(_identity(user_id) and len(user_id) <= 64, "transfer_id_invalid")

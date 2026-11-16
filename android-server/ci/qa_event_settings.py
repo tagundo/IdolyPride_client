@@ -102,11 +102,18 @@ def await_saved(asset_port, predicate):
     raise RuntimeError("Native event QA autosave did not reach the required saved/effective state")
 
 
+def revision_advanced(saved, previous):
+    # CAS revisions are safe monotonic tokens, not consecutive counter values.
+    return (type(saved) is dict and type(previous) is int and previous >= 0
+            and type(saved.get("revision")) is int
+            and previous < saved["revision"] <= (1 << 53)-1)
+
+
 def assert_enabled(settings, event_id, previous_revision):
     saved = settings.get("saved", {})
     entries = saved.get("love_events", [])
-    if (saved.get("schema") != 1 or type(saved.get("revision")) is not int
-            or saved["revision"] != previous_revision+1 or len(entries) != 1
+    if (saved.get("schema") != 1 or not revision_advanced(saved, previous_revision)
+            or len(entries) != 1
             or entries[0].get("event_id") != event_id):
         raise RuntimeError("Native event checkbox did not save exactly the supported chosen event with CAS")
     entry = entries[0]
@@ -154,7 +161,7 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
         raise RuntimeError("Native event checkbox was unexpectedly already enabled")
     revision = baseline["saved"]["revision"]
     tap_node(qa, control)
-    active, observed = await_saved(asset_port, lambda s: s.get("saved", {}).get("revision") == revision+1)
+    active, observed = await_saved(asset_port, lambda s: revision_advanced(s.get("saved", {}), revision))
     entry = assert_enabled(observed, chosen["id"], revision)
     if (active.get("profile") != CREATE or observed.get("effective") != baseline["effective"]
             or observed.get("restart_required") is not True):
@@ -181,7 +188,7 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
     tap_node(qa, find_event_control(qa, "idoly.events.disable-all", "87-event-disable"))
     _, disabled = await_saved(asset_port, lambda s: s.get("saved", {}).get("love_events") == [])
     if (disabled.get("effective") != effective["effective"] or disabled.get("restart_required") is not True
-            or disabled.get("saved", {}).get("revision") != observed["saved"]["revision"]+1):
+            or not revision_advanced(disabled.get("saved", {}), observed["saved"]["revision"])):
         raise RuntimeError("Native event disable changed the running frozen event selection")
     qa.tap("서버 중지", "88-event-stop")
     wait_server(schema, grpc_port, expected=False, timeout=30)

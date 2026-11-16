@@ -86,6 +86,8 @@ class _Job:
     schema_fingerprint: str | None = None
     catalog_pins: dict = field(default_factory=dict, repr=False)
     master_version: str | None = None
+    expected_master_version: str | None = field(default=None, repr=False)
+    preflight_pins: dict = field(default_factory=dict, repr=False)
     stage_token: str | None = field(default=None, repr=False)
     operation: str = "inspect"
     timer: object = field(default=None, repr=False)
@@ -198,10 +200,15 @@ class OfficialImportManager:
         client, verification, keep = None, None, False
         try:
             schema = self.accounts._schema()
+            expected, pins = self._local_master_identity()
             client = self._factory(schema, platform=job.platform)
             with self._lock:
                 _need(self._current(job), "official_session_expired")
                 job.client, job.schema_fingerprint = client, schema.fingerprint
+                job.expected_master_version, job.preflight_pins = expected, pins
+            client.preflight_master_version(expected, cancel=job.cancel,
+                progress=lambda stage: self._progress(job, stage))
+            self._recheck_preflight(job)
             verification = client.inspect(credentials["user_id"], credentials["password"], cancel=job.cancel,
                                           progress=lambda stage: self._progress(job, stage))
             credentials.clear()
@@ -226,6 +233,31 @@ class OfficialImportManager:
             raise OfficialImportError("official_catalog_unavailable") from None
         pins[relative] = hashlib.sha256(raw).hexdigest()
         return raw
+
+    def _local_master_identity(self):
+        """Public local files only; their initial bytes remain pinned in RAM."""
+        pins = {}
+        try:
+            tag = _decode(self._catalog_file("original-master/master-tag.json", pins, 16*1024*1024))
+            version = self._catalog_file("master-json/!version.txt", pins, 4096).decode("utf-8").strip()
+        except OfficialImportError:
+            raise
+        except BaseException:
+            raise OfficialImportError("official_catalog_unavailable") from None
+        _need(type(tag) is dict and type(tag.get("version")) is str
+              and 0 < len(version) <= 256 and all(32 <= ord(char) < 127 for char in version),
+              "official_catalog_unavailable")
+        _need(tag["version"] == version, "official_master_mismatch")
+        return version, pins
+
+    def _recheck_preflight(self, job):
+        _need(self.accounts._schema().fingerprint == job.schema_fingerprint, "official_protocol_changed")
+        try:
+            version, pins = self._local_master_identity()
+        except BaseException:
+            raise OfficialImportError("official_catalog_changed") from None
+        _need(version == job.expected_master_version and pins == job.preflight_pins,
+              "official_catalog_changed")
 
     def _check_catalog(self, schema, collected):
         pins = {}
@@ -275,6 +307,10 @@ class OfficialImportManager:
         collected, staged = None, None
         try:
             client, verification = job.client, job.verification
+            self._recheck_preflight(job)
+            client.preflight_master_version(job.expected_master_version, cancel=job.cancel,
+                progress=lambda stage: self._progress(job, stage))
+            self._recheck_preflight(job)
             collected = client.fetch(verification, cancel=job.cancel, progress=lambda stage: self._progress(job, stage))
             _close(verification)
             with self._lock:
@@ -283,7 +319,10 @@ class OfficialImportManager:
             schema = self.accounts._schema()
             _need(schema.fingerprint == job.schema_fingerprint, "official_protocol_changed")
             self._progress(job, "catalog_check")
+            self._recheck_preflight(job)
             preview, counts, pins = self._check_catalog(schema, collected)
+            _need(all(pins.get(name) == digest for name, digest in job.preflight_pins.items()),
+                  "official_catalog_changed")
             self._progress(job, "staging")
             staged = self.accounts.stage_snapshot(collected.user_get, server_id=collected.server_id,
                 public_id=collected.public_id, schema_sha256=job.schema_fingerprint)

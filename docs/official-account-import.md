@@ -25,6 +25,45 @@ Those references support the compatibility sequence; they do not prove the origi
 
 The existing local `official_session.py` separately supports an already saved PlayCover Firebase identity. It demonstrates seed/System.Check/Auth.Login/Master.Get handling but does not implement transfer-password authentication. The new feature does not fall back to that identity or to Firebase email/password authentication.
 
+## Anonymous master compatibility preflight
+
+The native import coordinator first pins the bytes and matching version in
+`original-master/master-tag.json` (bounded to 16 MiB) and
+`master-json/!version.txt` (4 KiB). Those two SHA-256 values and the expected
+version remain only in the RAM job. Before `inspect` can send a seed request or
+transfer credentials, `OfficialAccountClient.preflight_master_version` sends
+only an empty `Master.Get` with `x-app-version=6.1.1` through the existing fixed,
+verified TLS transport. It neither obtains a seed nor sends an auth token,
+transfer ID, password, Firebase key, device ID or account request. A mismatching,
+unavailable, malformed, cancelled or timed-out response stops the operation;
+there is no retry, downgrade, data download or version-gate bypass.
+
+After the user confirms collection, the coordinator checks the same local
+file pins, repeats the anonymous query, then checks the pins again before
+calling `fetch`. The verification ticket has not been consumed and
+`Migration.Execute` has not run at that boundary. It also rechecks those local
+pins before staging. The authenticated post-transfer master/version and
+account-reference checks below remain mandatory: an anonymous response is not
+proof that a later authenticated reply, or a service updated in between,
+will return the same version. An error from that later check must not be
+presented as a guarantee that no official transfer occurred.
+
+The account-free audit at source `39bd` observed public master version
+`6b77e0d8a64b26d5bebd09a7c19a47f2dfad2af914c5160418aa2e7292e13a11`,
+while the existing runtime data is pinned to
+`961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`.
+An unchanged official reply therefore blocks this old bundle before
+credential inspection/transfer. This anonymous observation does not establish
+what every authenticated account will receive. Updating the complete master,
+translations and compatibility proofs is a separate task; this safeguard does
+not update or relax any production data pin. No real transfer, Firebase sign-in
+or official account login was performed to implement or test it.
+
+Remote-only synthetic tests cover the anonymous header/request boundary,
+known version mismatch, unavailable/invalid replies, deadlines, cancellation,
+expiry, concurrent use, byte changes to either pinned local file, preservation
+of normal/viewing account tables, and the retained authenticated mismatch gate.
+
 ## Explicit two-step API
 
 `OfficialAccountClient(schema, platform="ios" | "android", transport=None, config=None)` validates the actual descriptor field numbers/types and a public, per-platform configuration. With no usable configuration it fails closed before network construction. `official_account_config.load_public_config(platform)` owns extraction/provenance; injected synthetic configuration is used in unit tests. The client requires the Japanese project's ID/number, bundle identity, platform-specific Google app ID, and supported application version. The bundled loader includes the public API keys and original signer/project configuration extracted from the SHA-pinned original apps. These are public app settings, separate from account passwords and tokens.

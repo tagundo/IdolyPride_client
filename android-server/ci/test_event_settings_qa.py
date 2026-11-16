@@ -18,9 +18,9 @@ probe = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(probe)
 
 
-def settings():
+def settings(revision=1):
     now = int(probe.time.time()*1000)
-    return {"schema": 1, "saved": {"schema": 1, "revision": 1, "love_events": [
+    return {"schema": 1, "saved": {"schema": 1, "revision": revision, "love_events": [
         {"event_id": "love-23-0514", "start_time_ms": now, "end_time_ms": now+30*probe.DAY}]}}
 
 
@@ -30,8 +30,9 @@ def home(entry):
             startTime=entry["start_time_ms"], endTime=entry["end_time_ms"])]))
 
 
-def test_saved_observation_requires_exact_cas_event_and_local_duration():
-    observed = settings()
+@pytest.mark.parametrize("revision", [1, 1794835740000])
+def test_saved_observation_requires_exact_cas_event_and_local_duration(revision):
+    observed = settings(revision)
     entry = probe.assert_enabled(observed, "love-23-0514", 0)
     assert entry is observed["saved"]["love_events"][0]
     for damage in ("revision", "identity", "duration", "stale-period"):
@@ -55,8 +56,10 @@ def test_actual_home_projection_requires_exact_id_and_period():
             probe.assert_home_event(changed, entry)
 
 
+@pytest.mark.parametrize("save_revision,disable_revision", [(1, 2), (1794835740000, 1794835741000),
+                                                           (1794835741000, 1794835741001)])
 @pytest.mark.parametrize("damage", [None, "frozen", "progress", "home", "saved-file"])
-def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeypatch, damage):
+def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeypatch, damage, save_revision, disable_revision):
     base = {"schema": 1, "revision": 0, "love_events": []}
     model = {"saved": copy.deepcopy(base), "effective": None, "starts": 0, "calls": [], "selected": "sandbox"}
     owned = {table: () for table in account.TABLES}
@@ -64,12 +67,12 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     owned["snapshots"] = (("@slot", b"unchanged snapshot"),)
     def snapshot(guest, copier, profile):
         value = copy.deepcopy(owned)
-        if damage == "progress" and model["saved"]["revision"] == 2:
+        if damage == "progress" and model["saved"]["revision"] == disable_revision:
             value["profile_love_progress"] = (("changed",),)
         return value
     def runtime(port):
         effective = copy.deepcopy(model["effective"])
-        if damage == "frozen" and model["saved"]["revision"] == 1 and model["starts"] == 1:
+        if damage == "frozen" and model["saved"]["revision"] == save_revision and model["starts"] == 1:
             effective = copy.deepcopy(model["saved"])
         return ({"running": True, "profile": probe.CREATE}, {"schema": 1,
             "saved": copy.deepcopy(model["saved"]), "effective": effective,
@@ -95,14 +98,14 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     def enable(guest, node):
         if node.get("content-desc") == "idoly.events.disable-all":
             model["calls"].append(("native-description", "idoly.events.disable-all"))
-            model["saved"] = dict(copy.deepcopy(base), revision=2)
+            model["saved"] = dict(copy.deepcopy(base), revision=disable_revision)
         else:
             model["calls"].append(("native-checkbox",))
-            model["saved"] = settings()["saved"]
+            model["saved"] = settings(save_revision)["saved"]
     def tap(guest, description, stage, direction=None):
         model["calls"].append(("native-description", description))
         if description == "idoly.events.disable-all":
-            model["saved"] = dict(copy.deepcopy(base), revision=2)
+            model["saved"] = dict(copy.deepcopy(base), revision=disable_revision)
     def select(guest, profile, *args):
         model["selected"] = profile
         model["calls"].append(("select", profile))
@@ -129,7 +132,7 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     assert detail["home_event_verified"] is True and detail["progress_preserved"] is True
     assert detail["gameplay_tested"] is False and detail["physical_device_tested"] is False
     assert model["starts"] == 2 and model["selected"] == "sandbox"
-    assert model["saved"]["love_events"] == [] and model["saved"]["revision"] == 2
+    assert model["saved"]["love_events"] == [] and model["saved"]["revision"] == disable_revision
     assert ("encrypted-rpc", "/api.Home/Enter", b"synthetic-token") in model["calls"]
     assert model["calls"].index(("native-checkbox",)) < model["calls"].index(("native", "서버 시작", "86-event-restart"))
 
@@ -320,3 +323,22 @@ def test_unknown_scroll_profile_fails_before_any_capture_or_input():
     with pytest.raises(ValueError, match="scroll profile"):
         account.find(guest, lambda _: False, "unknown-profile", "up", scroll_profile="unobserved")
     assert guest.captures == [] and guest.actions == []
+
+
+@pytest.mark.parametrize("previous,revision,expected", [
+    (0, 1, True), (0, 1794835740000, True),
+    (1794835740000, 1794835741000, True), (100, (1 << 53)-1, True),
+    # A backward clock uses current+1, so the CAS token still advances safely.
+    (1794835741000, 1794835741001, True),
+    (100, 100, False), (100, 99, False), (100, -1, False),
+    (0, True, False), (0, 1.0, False), (0, "101", False),
+    (0, (1 << 53), False), (True, 101, False), (-1, 101, False)])
+def test_cas_revision_observation_requires_typed_safe_strict_advance(previous, revision, expected):
+    assert probe.revision_advanced({"revision": revision}, previous) is expected
+
+
+def test_saved_event_with_unchanged_or_stale_revision_is_rejected():
+    observed = settings(1794835740000)
+    for previous in (1794835740000, 1794835740001):
+        with pytest.raises(RuntimeError, match="CAS"):
+            probe.assert_enabled(observed, "love-23-0514", previous)

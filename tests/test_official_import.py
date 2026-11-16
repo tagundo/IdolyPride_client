@@ -106,6 +106,22 @@ class Client:
     def __init__(self, env, platform):
         self.env, self.platform, self.closed = env, platform, False
         self.verification, self.collected = None, None
+    def preflight_master_version(self, expected_version, *, cancel, progress):
+        if not hasattr(self.env, "preflight_calls"): self.env.preflight_calls = []
+        self.env.preflight_calls.append(expected_version)
+        started = getattr(self.env, "preflight_started", None)
+        if started is not None: started.set()
+        progress("checking")
+        gate = getattr(self.env, "preflight_gate", None)
+        if gate is not None: assert gate.wait(3), "offline preflight release timed out"
+        if cancel.is_set(): raise OfficialAccountError("cancelled")
+        error = getattr(self.env, "preflight_error", None)
+        if error is not None: raise error
+        action = getattr(self.env, "preflight_action", None)
+        if action is not None: action()
+        actual = getattr(self.env, "preflight_version", self.env.remote_version)
+        if actual != expected_version: raise OfficialAccountError("official_master_mismatch")
+        return expected_version
     def inspect(self, user_id, password, *, cancel, progress):
         self.env.calls.append("inspect")
         self.env.credentials_ok = user_id == "transfer-id" and password == PASSWORD
@@ -286,7 +302,11 @@ def test_replace_requires_current_revision_and_creates_complete_restore_point(en
 @pytest.mark.parametrize("change,code", [("version","official_master_mismatch"),("reference","official_catalog_reference_missing"),
     ("catalog_missing","official_catalog_unavailable"),("identity","official_snapshot_invalid")])
 def test_fetch_compatibility_failures_never_create_a_slot_or_keep_a_stage(env,change,code):
-    if change == "version": env.remote_version = "different-master"
+    if change == "version":
+        # Even a matching anonymous preflight cannot replace the authenticated
+        # post-fetch gate: the service may change between those two replies.
+        env.preflight_version = MASTER
+        env.remote_version = "different-master"
     elif change == "reference": env.raw = snapshot(env.schema,card="missing-card")
     elif change == "catalog_missing": (env.root/"master-json/Item.json").unlink()
     else: env.raw = snapshot(env.schema,server="different-server")

@@ -148,7 +148,8 @@ class _SyntheticTransport:
             response.userPublic.serverUserId = SERVER
             response.userPublic.publicUserId = PUBLIC
         elif path == "/api.Master/Get":
-            assert metadata["x-auth-token"] == GAME
+            if "x-auth-token" in metadata: assert metadata["x-auth-token"] == GAME
+            else: assert metadata == {"x-app-version":"6.1.1"} and plain == b""
             response.masterTag.version = MASTER
             return response.SerializeToString() + UNKNOWN
         elif path == USER:
@@ -226,7 +227,7 @@ def _inspect_fetch(manager, transports, platform):
     manager.command("official_inspect", payload)
     payload.clear()
     verified = _finish(manager, "verified")
-    assert transports[0].calls == ["seed", "/api.System/Check", "/api.Migration/MigratePassword"]
+    assert transports[0].calls == ["/api.Master/Get", "seed", "/api.System/Check", "/api.Migration/MigratePassword"]
     assert verified["preview"]["public_id"] == PUBLIC
     assert verified["preview"]["server_id"] is None
     verification = manager._job.verification
@@ -355,8 +356,8 @@ def test_original_protocol_real_client_import_reopen_export_and_local_relogin(tm
         assert all(not bundle["tables"][key] for key in ("profile_settings", "profile_lesson_progress",
                                                         "preference_receipts", "main_live_attempts", "profile_love_progress"))
         # Neither local login nor export re-enters official authentication.
-        assert transports[0].calls == ["seed", "/api.System/Check", "/api.Migration/MigratePassword",
-            "/api.Migration/Execute", "signin", "lookup", "/api.System/Check", LOGIN, "/api.Master/Get", USER]
+        assert transports[0].calls == ["/api.Master/Get", "seed", "/api.System/Check", "/api.Migration/MigratePassword",
+            "/api.Master/Get", "/api.Migration/Execute", "signin", "lookup", "/api.System/Check", LOGIN, "/api.Master/Get", USER]
         for path in tmp_path.rglob("*"):
             if not path.is_file():
                 continue
