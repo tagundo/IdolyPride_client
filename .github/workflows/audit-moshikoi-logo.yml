@@ -41,10 +41,16 @@ jobs:
           uv run --locked python tools/audit_static_logo_layout.py
           --android-base "$RUNNER_TEMP/moshikoi-logo-inputs/diagnostic-base.apk"
           --output "$RUNNER_TEMP/moshikoi-logo-proof/android-logo-consumers.json"
+      - name: Fetch exact existing PNGs for actual pixel gate readback
+        run: >-
+          uv run --locked python tools/fetch_korean_ui_images.py
+          --output "$RUNNER_TEMP/moshikoi-logo-images"
+          --report "$RUNNER_TEMP/moshikoi-logo-proof/image-inputs.json"
       - name: Verify exact layout composition over current Korean text translations
         run: |
           uv run --locked python - <<'INLINE'
-          import hashlib,json,os,pathlib
+          import hashlib,json,os,pathlib,sys
+          from io import BytesIO
           from zipfile import ZipFile
           from idoly_local import static_ui_assets,static_ui_images
           root=pathlib.Path(os.environ['RUNNER_TEMP']);donor=root/'moshikoi-logo-inputs/diagnostic-base.apk'
@@ -59,6 +65,18 @@ jobs:
               proof['text_translation_applied_before_layout']=member in translated
               proof['total_static_texts_translated']=text_proof['changed_static_texts']
               proof['source_commit']=os.environ['GITHUB_SHA']
+              images=root/'moshikoi-logo-images'
+              generated,image_proof=static_ui_images.android_members(archive,language='ko',image_dir=images,existing_replacements=translated)
+              selected=set(static_ui_images.FIXED_LOVE_TEXT)|set(static_ui_images.LOGO_TRANSFORMS)
+              wanted={row['android']['member'] for row in static_ui_images.PROFILES if row['name'] in selected}
+              wanted.add(static_ui_images.LOGO_ANDROID_MEMBER)
+              stream=BytesIO()
+              with ZipFile(stream,'w') as check:
+                  for name in sorted(wanted):check.writestr(name,generated[name])
+              stream.seek(0);sys.path.insert(0,str(pathlib.Path.cwd()/'tools'))
+              import release_android_clients as gate
+              with ZipFile(stream) as check:
+                  proof['actual_packaged_sprite_gate']=gate._verify_korean_layout(check,{'static_ui_images':image_proof,'static_ui_translation':text_proof},images)
           with donor.open('rb') as source:assert hashlib.file_digest(source,'sha256').hexdigest()=='f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df'
           (root/'moshikoi-logo-proof/android-logo-layout-proof.json').write_text(json.dumps(proof,sort_keys=True,indent=2)+'\n')
           print(json.dumps({'status':'PASS_COMPOSED_LAYOUT','transforms':len(proof['transforms']),'text_translation_applied_before_layout':proof['text_translation_applied_before_layout']}))

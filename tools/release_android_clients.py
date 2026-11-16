@@ -389,7 +389,101 @@ def extract_korean_ui(donor, work):
     return csv_path, proof_path
 
 
-def verify_language(apk, proof, language, commit, full, *, prepared_ui_sha256=None):
+def _korean_sprite_pixels(raw, canvas):
+    from idoly_local import static_ui_images as images
+    UnityPy,_=images._imports()
+    env=UnityPy.load(raw)
+    need(len(env.files)==1,"korean_sprite_asset_graph_differs")
+    asset=next(iter(env.files.values()))
+    need(int(asset.target_platform)==13 and sorted((obj.path_id,obj.class_id) for obj in env.objects)==[(1,213),(2,28)],
+         "korean_sprite_asset_graph_differs")
+    sprite=asset.objects[1].read();texture=asset.objects[2].read()
+    actual=sprite.image.convert("RGBA");decoded=texture.image.convert("RGBA")
+    need((sprite.m_Rect.width,sprite.m_Rect.height)==canvas.size and actual.size==decoded.size==canvas.size
+         and actual.tobytes()==decoded.tobytes()==canvas.tobytes(),"packaged_korean_sprite_pixels_differ")
+
+
+def _korean_prefab_transforms(raw):
+    from idoly_local import static_ui_images as images
+    UnityPy,_=images._imports()
+    env=UnityPy.load(raw)
+    need(len(env.files)==1,"korean_logo_prefab_graph_differs")
+    asset=next(iter(env.files.values()));result={}
+    for name,target in images.LOGO_TRANSFORMS.items():
+        obj=asset.objects.get(target["android"]["path_id"])
+        need(obj is not None and obj.class_id==224,"packaged_korean_logo_transform_missing")
+        result[name]=obj.get_raw_data()
+    return result
+
+
+def _verify_korean_layout(archive, proof, image_dir):
+    from idoly_local import static_ui_images as images
+    import struct
+    need(image_dir is not None,"korean_image_inputs_required_for_readback")
+    captions=images.FIXED_LOVE_TEXT;names=set(captions)|set(images.LOGO_TRANSFORMS)
+    report=proof.get("static_ui_images",{})
+    need(report.get("fixed_text_layout_policy")==images.TEXT_LAYOUT_POLICY
+         and report.get("fixed_text_sprites")==len(captions),"korean_fixed_text_layout_proof_missing")
+    entries=report.get("sprites",[])
+    need(type(entries) is list and all(type(row) is dict for row in entries),"korean_sprite_proof_invalid")
+    rows={row.get("name"):row for row in entries if row.get("name") in names}
+    need(set(rows)==names and sum(row.get("name") in names for row in entries)==len(names),
+         "korean_sprite_proof_inventory_differs")
+    for profile in (row for row in images.PROFILES if row["name"] in names):
+        target=profile["android"];row=rows[profile["name"]];member=target["member"]
+        need(row.get("input_member")==member and row.get("input_sha256")==target["asset_sha256"]
+             and row.get("png_sha256")==profile["png_sha256"] and row.get("sprite_path_id")==1
+             and row.get("private_texture_path_id")==2 and row.get("readback_pixel_exact") is True
+             and row.get("layout_policy")==profile["layout_policy"]
+             and row.get("layout_size")==list(profile["sprite_size"])
+             and row.get("original_layout_size")==target["source_layout"]["sprite_size"]
+             and row.get("content_size")==list(profile.get("content_size",profile["png_size"]))
+             and row.get("transparent_padding_offset")==list(profile["padding_offset"]),
+             "korean_sprite_layout_provenance_differs")
+        info=archive.getinfo(member)
+        need(0<info.file_size<=256*1024 and info.file_size==row.get("output_bytes"),"packaged_korean_sprite_size_differs")
+        raw=archive.read(info)
+        need(hashlib.sha256(raw).hexdigest()==row.get("output_sha256"),"packaged_korean_sprite_hash_differs")
+        canvas=images._canvas(images._png(image_dir,profile),profile)
+        _korean_sprite_pixels(raw,canvas)
+    logo=report.get("logo_layout",{});members=logo.get("members",[]);transforms=logo.get("transforms",[])
+    need(logo.get("policy")==images.LOGO_LAYOUT_POLICY and logo.get("platform")=="android"
+         and logo.get("uniform_scale")==0.75 and logo.get("content_size")==[94.5,24.0]
+         and logo.get("original_frame")==[96.0,32.0] and logo.get("full_translated_glyphs_preserved") is True
+         and logo.get("all_other_object_bytes_identical") is True and len(members)==1
+         and type(members[0]) is dict and members[0].get("member")==images.LOGO_ANDROID_MEMBER
+         and members[0].get("original_sha256")==images.LOGO_ANDROID_SHA256
+         and members[0].get("only_three_position_size_spans_changed") is True,
+         "korean_whole_logo_proof_missing")
+    text=proof.get("static_ui_translation",{})
+    stages=[row for row in text.get("assets",[]) if row.get("member")==images.LOGO_ANDROID_MEMBER]
+    need(text.get("language")=="ko" and text.get("runtime_translation_hooks_added") is False
+         and len(stages)==1 and stages[0].get("input_asset_sha256")==images.LOGO_ANDROID_SHA256
+         and stages[0].get("input_asset_bytes")==images.LOGO_ANDROID_BYTES
+         and stages[0].get("output_asset_sha256")==members[0].get("input_sha256")
+         and stages[0].get("output_asset_bytes")==members[0].get("output_bytes")
+         and stages[0].get("all_other_object_payloads_unchanged") is True,
+         "korean_logo_text_layout_chain_differs")
+    info=archive.getinfo(images.LOGO_ANDROID_MEMBER)
+    need(0<info.file_size<=2*1024*1024 and info.file_size==members[0].get("output_bytes"),"packaged_korean_logo_size_differs")
+    raw=archive.read(info);prefab_hash=hashlib.sha256(raw).hexdigest()
+    need(prefab_hash==members[0].get("output_sha256"),"packaged_korean_logo_hash_differs")
+    actual=_korean_prefab_transforms(raw)
+    need(type(transforms) is list and len(transforms)==3 and all(type(row) is dict for row in transforms)
+         and {row.get("name") for row in transforms}==set(images.LOGO_TRANSFORMS),"korean_logo_transform_inventory_differs")
+    for row in transforms:
+        name=row["name"];target=images.LOGO_TRANSFORMS[name];source=target["android"];payload=actual[name]
+        need(len(payload)==108,"packaged_korean_logo_transform_size_differs")
+        original=payload[:84]+struct.pack("<4f",target["old_x"],0.0,32.0,32.0)+payload[100:]
+        expected,canonical=images._logo_rect(original,name,"android")
+        need(payload==expected and all(row.get(key)==value for key,value in canonical.items()),
+             "packaged_korean_logo_transform_differs")
+    return {"fixed_text_layout_policy":images.TEXT_LAYOUT_POLICY,"fixed_text_sprites":len(captions),
+        "packaged_sprite_pixel_readbacks":len(names),"logo_policy":images.LOGO_LAYOUT_POLICY,
+        "logo_prefab_sha256":prefab_hash,"logo_transform_readbacks":3,"text_to_layout_chain_verified":True}
+
+
+def verify_language(apk, proof, language, commit, full, *, prepared_ui_sha256=None, korean_image_dir=None):
     need(proof.get("source_commit") == commit and proof.get("source_apk_sha256") == INPUTS["diagnostic_base"]["sha256"]
          and proof.get("source_apk_bytes") == INPUTS["diagnostic_base"]["bytes"]
          and proof.get("ui_language") == language and proof.get("certificate_sha256") == CERTIFICATE
@@ -426,12 +520,14 @@ def verify_language(apk, proof, language, commit, full, *, prepared_ui_sha256=No
                  and ui.get("compiled_csv_sha256") == expected_csv
                  and ui.get("runtime_translation_hooks_added") is False
                  and ui.get("all_other_objects_byte_identical") is True, "translated_ui_not_packaged")
+        layout=_verify_korean_layout(archive,proof,korean_image_dir) if language=="ko" else None
         full.verify_local_resource_output(archive, proof["local_resource_transport"])
         guid_hash = digest_member(full.unity_cache.MEMBER)
         native_hash = digest_member(full.addon.LIBRARY)
         need(native_hash == proof["native_library_sha256"], "packaged_presentation_native_differs")
-    return {"ui_asset_sha256": ui_hash, "unity_cache_sha256": guid_hash,
-            "presentation_native_sha256": native_hash}
+    result={"ui_asset_sha256":ui_hash,"unity_cache_sha256":guid_hash,"presentation_native_sha256":native_hash}
+    if layout is not None: result["korean_image_layout"]=layout
+    return result
 
 
 def build(args):
@@ -524,7 +620,8 @@ def build(args):
             ui_proof_file=inputs["english_ui_proof"] if language == "en" else korean_proof if language == "ko" else None,
             image_dir=image_dir, native_library=None, **common), resource_guard=resource_guard)
         packaged = verify_language(apk, proof, language, args.source_commit, full,
-                                   prepared_ui_sha256=korean_csv_sha256 if language == "ko" else None)
+                                   prepared_ui_sha256=korean_csv_sha256 if language == "ko" else None,
+                                   korean_image_dir=image_dir if language=="ko" else None)
         signer = [jdk / "java", *addon.JAVA_FLAGS, "-jar", sdk / "lib/apksigner.jar"]
         checked = limits._run(full.output_verify_command(signer, apk), root=ROOT,
                               env=shared.clean_env(), timeout=60, guard=resource_guard).decode("utf-8")

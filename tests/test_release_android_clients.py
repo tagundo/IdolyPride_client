@@ -339,3 +339,93 @@ def test_hosted_policy_is_never_implicitly_selected_for_local_or_self_hosted_run
     assert tool.runner_resource_guard(SimpleNamespace(_memory_budget=untouched)) is None
     with pytest.raises(ValueError, match="hosted_runner_required"):
         tool.HostedResourceGuard(untouched)
+
+
+@pytest.fixture
+def packaged_korean(packaged,tmp_path,monkeypatch):
+    import base64
+    import json
+    from idoly_local import static_ui_images as images
+    apk,proof,full,calls=packaged
+    with ZipFile(apk) as archive:members={name:archive.read(name) for name in archive.namelist()}
+    proof["ui_language"]=proof["ui_translation"]["language"]="ko"
+    proof["ui_translation"]["compiled_csv_sha256"]="f"*64
+    rows=[];readbacks=[]
+    for profile in images.PROFILES:
+        if profile["name"] not in set(images.FIXED_LOVE_TEXT)|set(images.LOGO_TRANSFORMS):continue
+        target=profile["android"];raw=("sprite:"+profile["name"]).encode();members[target["member"]]=raw
+        rows.append({"name":profile["name"],"input_member":target["member"],"input_sha256":target["asset_sha256"],
+            "output_sha256":hashlib.sha256(raw).hexdigest(),"output_bytes":len(raw),"png_sha256":profile["png_sha256"],
+            "sprite_path_id":1,"private_texture_path_id":2,"readback_pixel_exact":True,
+            "layout_policy":profile["layout_policy"],"layout_size":list(profile["sprite_size"]),
+            "original_layout_size":target["source_layout"]["sprite_size"],
+            "content_size":list(profile.get("content_size",profile["png_size"])),
+            "transparent_padding_offset":list(profile["padding_offset"])})
+    fixtures=json.loads((ROOT/"tests/fixtures/love-logo-rect-transforms.json").read_text())
+    actual={};transforms=[]
+    for row in fixtures["objects"]:
+        if row["platform"]!="android":continue
+        raw,record=images._logo_rect(base64.b64decode(row["raw_base64"]),row["name"],"android")
+        actual[row["name"]]=raw;transforms.append(record)
+    members[images.LOGO_ANDROID_MEMBER]=b"text-translated prefab with three canonical transforms"
+    entry={"member":images.LOGO_ANDROID_MEMBER,"original_sha256":images.LOGO_ANDROID_SHA256,
+        "input_sha256":"e"*64,"output_sha256":hashlib.sha256(members[images.LOGO_ANDROID_MEMBER]).hexdigest(),
+        "output_bytes":len(members[images.LOGO_ANDROID_MEMBER]),"only_three_position_size_spans_changed":True}
+    logo=images._logo_summary("android",transforms,[entry])
+    proof["static_ui_images"]={"fixed_text_layout_policy":images.TEXT_LAYOUT_POLICY,
+        "fixed_text_sprites":len(images.FIXED_LOVE_TEXT),"sprites":rows,"logo_layout":logo}
+    proof["static_ui_translation"]={"language":"ko","runtime_translation_hooks_added":False,
+        "assets":[{"member":images.LOGO_ANDROID_MEMBER,"input_asset_sha256":images.LOGO_ANDROID_SHA256,
+            "input_asset_bytes":images.LOGO_ANDROID_BYTES,"output_asset_sha256":entry["input_sha256"],
+            "output_asset_bytes":entry["output_bytes"],"all_other_object_payloads_unchanged":True}]}
+    def rewrite():
+        with ZipFile(apk,"w") as archive:
+            for name,raw in members.items():archive.writestr(name,raw)
+        proof["output_bytes"]=apk.stat().st_size;proof["output_apk_sha256"]=tool.sha(apk)
+    rewrite()
+    # These gate tests isolate serialized-image decoding. The owned Actions
+    # image proof and full APK gate exercise the real UnityPy pixel decoder.
+    monkeypatch.setattr(images,"_png",lambda folder,profile:profile["name"])
+    monkeypatch.setattr(images,"_canvas",lambda source,profile:(source,tuple(profile["sprite_size"])))
+    def pixels(raw,canvas):
+        assert raw==("sprite:"+canvas[0]).encode()
+        readbacks.append(canvas[0])
+    monkeypatch.setattr(tool,"_korean_sprite_pixels",pixels)
+    monkeypatch.setattr(tool,"_korean_prefab_transforms",lambda raw:dict(actual))
+    return apk,proof,full,calls,tmp_path,members,rewrite,readbacks,actual
+
+
+def test_korean_gate_binds_thirteen_packaged_sprite_pixels_and_three_exact_transforms(packaged_korean):
+    apk,proof,full,calls,images_dir,_members,_rewrite,readbacks,_actual=packaged_korean
+    result=tool.verify_language(apk,proof,"ko",COMMIT,full,prepared_ui_sha256="f"*64,korean_image_dir=images_dir)
+    layout=result["korean_image_layout"]
+    assert layout["fixed_text_sprites"]==10 and layout["packaged_sprite_pixel_readbacks"]==13
+    assert len(set(readbacks))==13 and layout["logo_transform_readbacks"]==3
+    assert layout["text_to_layout_chain_verified"] is True
+    assert layout["logo_prefab_sha256"]==proof["static_ui_images"]["logo_layout"]["members"][0]["output_sha256"]
+    assert calls==[proof["local_resource_transport"]]
+
+
+@pytest.mark.parametrize("damage",("missing-caption","old-layout","wrong-png-pin","missing-logo","wrong-logo-scale",
+    "wrong-logo-position","wrong-original-prefab","broken-text-chain","caption-payload","prefab-payload",
+    "updated-corrupt-transform","missing-image-inputs"))
+def test_korean_gate_rejects_stale_layout_forged_provenance_and_wrong_packaged_bytes(packaged_korean,damage):
+    from idoly_local import static_ui_images as images
+    apk,proof,full,_calls,images_dir,members,rewrite,_readbacks,actual=packaged_korean
+    report=proof["static_ui_images"];logo=report["logo_layout"]
+    if damage=="missing-caption":report["sprites"].pop()
+    elif damage=="old-layout":report["fixed_text_layout_policy"]="old-stretched-caption"
+    elif damage=="wrong-png-pin":report["sprites"][0]["png_sha256"]="0"*64
+    elif damage=="missing-logo":report.pop("logo_layout")
+    elif damage=="wrong-logo-scale":logo["uniform_scale"]=0.5
+    elif damage=="wrong-logo-position":logo["transforms"][0]["position"]=[0,0]
+    elif damage=="wrong-original-prefab":logo["members"][0]["original_sha256"]="0"*64
+    elif damage=="broken-text-chain":proof["static_ui_translation"]["assets"][0]["output_asset_sha256"]="0"*64
+    elif damage=="caption-payload":members[report["sprites"][0]["input_member"]]+=b"wrong";rewrite()
+    elif damage=="prefab-payload":members[images.LOGO_ANDROID_MEMBER]+=b"wrong";rewrite()
+    elif damage=="updated-corrupt-transform":
+        row=logo["transforms"][0];raw=actual[row["name"]];corrupt=bytes([raw[0]^1])+raw[1:]
+        actual[row["name"]]=corrupt;row["output_sha256"]=hashlib.sha256(corrupt).hexdigest()
+    elif damage=="missing-image-inputs":images_dir=None
+    with pytest.raises(ValueError):
+        tool.verify_language(apk,proof,"ko",COMMIT,full,prepared_ui_sha256="f"*64,korean_image_dir=images_dir)
