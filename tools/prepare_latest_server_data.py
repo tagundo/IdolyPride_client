@@ -778,10 +778,10 @@ def source_overlay(pins):
 def write_payload(public,output):
     need(not Path(output).exists() and not Path(output).is_symlink(),'latest_fresh_output_required')
     with ZipFile(output,'x',compression=ZIP_DEFLATED,compresslevel=6) as archive:
-        for path in sorted(Path(public).rglob('*')):
-            if path.is_dir():continue
-            need(path.is_file() and not path.is_symlink(),'latest_generated_member_invalid')
-            name='data/'+path.relative_to(public).as_posix();need(safe_name(name),'latest_generated_member_invalid')
+        # Reuse the exact same serialized-name order as the manifest inventory.
+        # A separate Path.parts traversal reverses platform-prefix siblings.
+        for row in file_rows(public):
+            name=row['path'];path=Path(public)/PurePosixPath(name).relative_to('data')
             info=ZipInfo(name,STAMP);info.compress_type=ZIP_DEFLATED;info.create_system=3
             info.external_attr=0o100644<<16;info.extra=info.comment=b''
             with path.open('rb') as incoming,archive.open(info,'w') as outgoing:shutil.copyfileobj(incoming,outgoing,CHUNK)
