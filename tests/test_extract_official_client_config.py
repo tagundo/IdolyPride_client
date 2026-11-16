@@ -190,6 +190,7 @@ def test_workflow_only_reads_original_assets_and_uploads_small_config():
     assert "workflow_dispatch:" in workflow and "contents: read" in workflow
     assert "725761399" in workflow and "725772331" in workflow
     assert "branches: [feat/ios-unified-server]" in workflow
+    assert "draft-release assets" in workflow and "contents: write" in workflow
     assert "actions/upload-artifact@v4" in workflow and "public-client-config.json" in workflow
-    for forbidden in ("contents: write","gh release","sideload","adb ","official-account-password"):
+    for forbidden in ("gh release","sideload","adb ","official-account-password"):
         assert forbidden not in workflow

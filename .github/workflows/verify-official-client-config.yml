@@ -21,6 +21,11 @@ env:
 
 jobs:
   extract-public-config:
+    # Original inputs are draft-release assets. GitHub requires write-scoped
+    # contents permission even to GET those existing files; this job sends no
+    # release/tag/upload mutation requests.
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
