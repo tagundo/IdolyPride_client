@@ -91,10 +91,14 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     guest = Guest()
     def find(guest, predicate, stage, direction=None, **kwargs):
         model["calls"].append(("find", stage))
-        return ET.fromstring('<node checked="false"/>')
+        return ET.fromstring('<node checked="false" content-desc="'+("idoly.events.disable-all" if stage == "87-event-disable" else "idoly.events.enabled")+'"/>')
     def enable(guest, node):
-        model["calls"].append(("native-checkbox",))
-        model["saved"] = settings()["saved"]
+        if node.get("content-desc") == "idoly.events.disable-all":
+            model["calls"].append(("native-description", "idoly.events.disable-all"))
+            model["saved"] = dict(copy.deepcopy(base), revision=2)
+        else:
+            model["calls"].append(("native-checkbox",))
+            model["saved"] = settings()["saved"]
     def tap(guest, description, stage, direction=None):
         model["calls"].append(("native-description", description))
         if description == "idoly.events.disable-all":
@@ -128,3 +132,120 @@ def test_native_flow_gates_follow_observed_save_restart_rpc_and_progress(monkeyp
     assert model["saved"]["love_events"] == [] and model["saved"]["revision"] == 2
     assert ("encrypted-rpc", "/api.Home/Enter", b"synthetic-token") in model["calls"]
     assert model["calls"].index(("native-checkbox",)) < model["calls"].index(("native", "서버 시작", "86-event-restart"))
+
+
+class NavigationGuest:
+    def __init__(self, trees):
+        self.trees, self.actions, self.captures = list(trees), [], []
+    def capture(self, stage):
+        self.captures.append(stage)
+        return ET.fromstring(self.trees.pop(0))
+    def adb(self, *args):
+        self.actions.append(args)
+        return ""
+
+
+def target_xml(description="idoly.events.catalog", *, enabled="true"):
+    return '<hierarchy><node class="android.widget.ScrollView" scrollable="true" bounds="[44,707][1036,2126]"><node content-desc="'+description+'" enabled="'+enabled+'" bounds="[88,900][992,1032]"/></node></hierarchy>'
+
+
+def viewport_xml(description="", text=""):
+    return '<hierarchy><node class="android.widget.ScrollView" scrollable="true" bounds="[44,707][1036,2126]"><node content-desc="'+description+'" text="'+text+'" bounds="[88,900][992,1032]"/></node></hierarchy>'
+
+
+def test_captured_actual_resource_viewport_navigates_up_toward_event_card(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    actual = (DIRECTORY / "fixtures/event-catalog-below-3bf.xml").read_text()
+    guest = NavigationGuest([actual, target_xml()])
+    node = probe.find_event_control(guest, "idoly.events.catalog", "lower")
+    assert node.get("enabled") == "true"
+    assert guest.actions == [("shell", "input", "swipe", "540", "1180", "540", "1653", "650")]
+    assert guest.captures == ["lower-0", "lower-1"]
+
+
+def test_above_account_section_navigates_down_and_visible_target_never_scrolls(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    guest = NavigationGuest([viewport_xml("idoly.accounts.create"), target_xml()])
+    probe.find_event_control(guest, "idoly.events.catalog", "upper")
+    assert guest.actions == [("shell", "input", "swipe", "540", "1653", "540", "1180", "650")]
+    visible = NavigationGuest([target_xml()])
+    probe.find_event_control(visible, "idoly.events.catalog", "visible")
+    assert visible.actions == [] and visible.captures == ["visible-0"]
+
+
+@pytest.mark.parametrize("visible,wanted,direction", [
+    ("idoly.events.status", "idoly.events.catalog", "down"),
+    ("idoly.events.end", "idoly.events.catalog", "up"),
+    ("idoly.events.end", "idoly.events.disable-all", "down")])
+def test_partial_event_card_uses_its_known_control_order(visible, wanted, direction):
+    decide = probe.event_navigation(wanted)
+    assert decide(ET.fromstring(viewport_xml(visible))) == direction
+
+
+def test_anchored_direction_continues_through_intermediate_unlabelled_controls(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    actual = (DIRECTORY / "fixtures/event-catalog-below-3bf.xml").read_text()
+    guest = NavigationGuest([actual, viewport_xml(text="4096"), target_xml()])
+    probe.find_event_control(guest, "idoly.events.catalog", "intermediate")
+    assert len(guest.actions) == 2 and all(int(action[4]) < int(action[6]) for action in guest.actions)
+
+
+def test_repeated_lower_bottom_still_fails_with_the_original_16_observation_budget(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    actual = (DIRECTORY / "fixtures/event-catalog-below-3bf.xml").read_text()
+    guest = NavigationGuest([actual]*16)
+    with pytest.raises(RuntimeError, match="not observed enabled"):
+        probe.find_event_control(guest, "idoly.events.catalog", "unchanged-bottom")
+    assert len(guest.captures) == 16 and len(guest.actions) == 16
+    assert all(action[:3] == ("shell", "input", "swipe") and int(action[4]) < int(action[6]) for action in guest.actions)
+
+
+def test_disabled_catalog_is_never_enabled_skipped_or_scrolled_past(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    guest = NavigationGuest([target_xml(enabled="false")]*16)
+    with pytest.raises(RuntimeError, match="not observed enabled"):
+        probe.find_event_control(guest, "idoly.events.catalog", "disabled")
+    assert len(guest.captures) == 16 and guest.actions == []
+
+
+def test_unknown_viewport_fails_without_an_unobserved_navigation_input(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    guest = NavigationGuest([viewport_xml()])
+    with pytest.raises(RuntimeError, match="cannot determine"):
+        probe.find_event_control(guest, "idoly.events.catalog", "unrecognized")
+    assert guest.actions == []
+
+
+def test_overshoot_reverses_direction_from_each_fresh_section_anchor(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    actual = (DIRECTORY / "fixtures/event-catalog-below-3bf.xml").read_text()
+    guest = NavigationGuest([actual, viewport_xml("idoly.accounts.create"), target_xml()])
+    probe.find_event_control(guest, "idoly.events.catalog", "overshoot")
+    assert len(guest.captures) == 3 and len(guest.actions) == 2
+    assert int(guest.actions[0][4]) < int(guest.actions[0][6])
+    assert int(guest.actions[1][4]) > int(guest.actions[1][6])
+
+
+def test_offscreen_or_hidden_event_node_cannot_count_as_a_visible_target_or_anchor(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    actual = ET.fromstring((DIRECTORY / "fixtures/event-catalog-below-3bf.xml").read_text())
+    area = next(node for node in actual.iter("node") if node.get("class") == "android.widget.ScrollView")
+    ET.SubElement(area, "node", {"content-desc": "idoly.events.catalog", "enabled": "true", "bounds": "[88,2200][992,2332]"})
+    ET.SubElement(area, "node", {"content-desc": "idoly.accounts.create", "enabled": "true", "bounds": "[44,116][1036,208]"})
+    hidden = ET.SubElement(area, "node", {"content-desc": "idoly.events.status", "visible-to-user": "false", "bounds": "[88,900][992,1032]"})
+    assert probe.event_visible(hidden, actual) is False
+    guest = NavigationGuest([ET.tostring(actual, encoding="unicode"), target_xml()])
+    node = probe.find_event_control(guest, "idoly.events.catalog", "offscreen")
+    assert node.get("bounds") == "[88,900][992,1032]" and len(guest.actions) == 1
+    assert int(guest.actions[0][4]) < int(guest.actions[0][6])
+
+
+def test_missing_required_control_between_visible_event_positions_is_a_hard_failure(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    tree = ET.fromstring(viewport_xml("idoly.events.status"))
+    area = next(node for node in tree.iter("node") if node.get("class") == "android.widget.ScrollView")
+    ET.SubElement(area, "node", {"content-desc": "idoly.events.end", "bounds": "[88,1100][992,1232]"})
+    guest = NavigationGuest([ET.tostring(tree, encoding="unicode")])
+    with pytest.raises(RuntimeError, match="missing within"):
+        probe.find_event_control(guest, "idoly.events.catalog", "missing-control")
+    assert guest.actions == []

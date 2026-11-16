@@ -32,10 +32,11 @@ def bounds(node):
     return None
 
 
-def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16):
+def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16, node_filter=None):
     for attempt in range(attempts):
         tree = qa.capture(stage + "-" + str(attempt))
-        matching = [node for node in tree.iter("node") if predicate(node) and bounds(node)]
+        matching = [node for node in tree.iter("node") if predicate(node) and bounds(node)
+                    and (node_filter is None or node_filter(node, tree))]
         usable = [node for node in matching if not enabled or node.get("enabled") == "true"]
         if usable:
             return usable[0]
@@ -54,7 +55,13 @@ def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16):
         x = (left+right)//2
         y1 = (top+bottom)//2 - travel//2
         y2 = y1 + travel
-        if direction == "up":
+        if callable(direction):
+            observed_direction = direction(tree)
+            if observed_direction not in ("up", "down"):
+                raise RuntimeError("Account QA requires an observed settings navigation direction")
+        else:
+            observed_direction = direction
+        if observed_direction == "up":
             qa.adb("shell", "input", "swipe", str(x), str(y1), str(x), str(y2), "650")
         else:
             qa.adb("shell", "input", "swipe", str(x), str(y2), str(x), str(y1), "650")

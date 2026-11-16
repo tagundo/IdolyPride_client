@@ -5,13 +5,77 @@ reward, reset, production credentials or physical game client is exercised.
 """
 from __future__ import annotations
 import json
+from pathlib import Path
+import xml.etree.ElementTree as ET
 import time
 from urllib.request import urlopen
 from qa_account_management import (ACTIVITY, PACKAGE, CREATE, find, tap, tap_node,
-                                    select_profile, projection)
+                                    select_profile, projection, bounds)
 
 DAY = 24 * 60 * 60 * 1000
 SCOPE = "Android emulator native event settings and encrypted Home RPC"
+
+
+_EVENT_ORDER = {"idoly.events."+name: index for index, name in enumerate(
+    ("status", "catalog", "enabled", "start", "end", "applied", "reload", "disable-all"))}
+_BELOW_KEYS = {"library_settings_title", "experiment_section_title", "presentation_title_expanded",
+               "presentation_render_scale", "presentation_max_buffer_pixel", "playback_section_title",
+               "resources_section_title", "library_resources_title", "diagnostics_section_title",
+               "library_resource_platform", "library_download_all", "library_import", "library_export", "export_diagnostics"}
+
+
+def event_viewport(tree):
+    regions = [bounds(node) for node in tree.iter("node")
+               if "ScrollView" in node.get("class", "") and bounds(node)]
+    if not regions:
+        raise RuntimeError("Event QA requires the observed settings viewport")
+    return max(regions, key=lambda area: (area[2]-area[0])*(area[3]-area[1]))
+
+
+def event_visible(node, tree):
+    area = bounds(node)
+    if area is None or node.get("visible-to-user") == "false":
+        return False
+    viewport = event_viewport(tree)
+    return (max(area[0], viewport[0]) < min(area[2], viewport[2])
+            and max(area[1], viewport[1]) < min(area[3], viewport[3]))
+
+
+def event_navigation(description):
+    """Navigate toward the event card from fresh anchors, within find's same budget."""
+    if description not in _EVENT_ORDER:
+        raise RuntimeError("Event QA control has no known section order")
+    root = Path(__file__).resolve().parents[1] / "app/src/main/res"
+    below = set()
+    for locale in ("values", "values-en", "values-ja"):
+        for row in ET.parse(root / locale / "strings.xml").getroot():
+            if row.attrib.get("name") in _BELOW_KEYS and row.text:
+                below.add(row.text)
+    previous = None
+    def observed(tree):
+        nonlocal previous
+        nodes = [node for node in tree.iter("node") if event_visible(node, tree)]
+        positions = [_EVENT_ORDER[node.get("content-desc")] for node in nodes if node.get("content-desc") in _EVENT_ORDER]
+        wanted = _EVENT_ORDER[description]
+        if positions:
+            if all(value < wanted for value in positions): previous = "down"
+            elif all(value > wanted for value in positions): previous = "up"
+            else: raise RuntimeError("Event QA control is missing within its observed section")
+        else:
+            lower = any(node.get("text") in below for node in nodes)
+            upper = any(node.get("content-desc", "").startswith(("idoly.accounts.", "idoly.official.")) for node in nodes)
+            if lower and upper: raise RuntimeError("Event QA section anchors disagree")
+            if lower: previous = "up"
+            elif upper: previous = "down"
+        if previous is None:
+            raise RuntimeError("Event QA cannot determine the current settings section")
+        return previous
+    return observed
+
+
+def find_event_control(qa, description, stage):
+    return find(qa, lambda node: node.get("content-desc") == description,
+                stage, event_navigation(description), node_filter=event_visible)
 
 
 def runtime_settings(asset_port):
@@ -82,8 +146,8 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
         raise RuntimeError("Native event QA did not receive the data-backed supported catalog")
     chosen = supported[0]
     # The supported-only native spinner starts with its first observed entry.
-    find(qa, lambda n: n.get("content-desc") == "idoly.events.catalog", "83-event-catalog", "down")
-    control = find(qa, lambda n: n.get("content-desc") == "idoly.events.enabled", "83-event-enable", "down")
+    find_event_control(qa, "idoly.events.catalog", "83-event-catalog")
+    control = find_event_control(qa, "idoly.events.enabled", "83-event-enable")
     if control.get("checked") != "false":
         raise RuntimeError("Native event checkbox was unexpectedly already enabled")
     revision = baseline["saved"]["revision"]
@@ -112,7 +176,7 @@ def exercise_event_settings(qa, schema, grpc_port, asset_port, startup_timeout, 
     _, login = bootstrap(schema, grpc_port)
     assert_home_event(rpc(schema, grpc_port, "/api.Home/Enter", login.gameAuthToken), entry)
     # Turning the setting off removes the schedule, preserving stored progress.
-    tap(qa, "idoly.events.disable-all", "87-event-disable", "down")
+    tap_node(qa, find_event_control(qa, "idoly.events.disable-all", "87-event-disable"))
     _, disabled = await_saved(asset_port, lambda s: s.get("saved", {}).get("love_events") == [])
     if (disabled.get("effective") != effective["effective"] or disabled.get("restart_required") is not True
             or disabled.get("saved", {}).get("revision") != observed["saved"]["revision"]+1):
