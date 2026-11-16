@@ -12,6 +12,16 @@ SPEC = importlib.util.spec_from_file_location("optimized_release_publisher",
 publisher = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(publisher)
 SOURCE, RUN, HASH = "a" * 40, 123, "b" * 64
+RELEASE_VERSION = "2026.11.16.1"
+
+
+@pytest.fixture(autouse=True)
+def calendar_release_identity(monkeypatch):
+    monkeypatch.setattr(publisher, "RELEASE_VERSION", None)
+    monkeypatch.setattr(publisher, "TAG", None)
+    monkeypatch.setattr(publisher, "RELEASE_NAMES", {})
+    monkeypatch.setattr(publisher, "EXPECTED_RELEASE_ASSETS", frozenset())
+    publisher.configure_release(RELEASE_VERSION)
 
 
 def metadata():
@@ -200,7 +210,7 @@ class TinyGuard:
 
 
 @pytest.fixture
-def release_binaries(tmp_path):
+def source_release_binaries(tmp_path):
     import hashlib
     rows = []
     for index, name in enumerate((publisher.APK, publisher.MAC, publisher.IPA,
@@ -211,6 +221,11 @@ def release_binaries(tmp_path):
         rows.append({"name": name, "path": str(path), "bytes": path.stat().st_size,
                      "sha256": hashlib.sha256(path.read_bytes()).hexdigest()})
     return rows
+
+
+@pytest.fixture
+def release_binaries(source_release_binaries, tmp_path):
+    return publisher.stage_release_binaries(source_release_binaries, tmp_path/"release", TinyGuard())
 
 
 def asset_metadata(wanted, index):
@@ -298,7 +313,7 @@ def test_new_release_promotes_only_after_all_full_API_readbacks(release_binaries
     assert all(row["full_API_download_SHA256_verified"] is True for row in github.asset_receipts)
     assert [body for _path, method, body in github.calls if method == "POST"] == [{
         "tag_name": publisher.TAG, "target_commitish": SOURCE,
-        "name": "아이프라 로컬 v"+publisher.VERSION+" · 그래픽·촬영 설정과 서버·클라이언트", "body": "release",
+        "name": "아이프라 로컬 "+RELEASE_VERSION+" · 그래픽·촬영 설정과 서버·클라이언트", "body": "release",
         "draft": True, "prerelease": True, "make_latest": "false"}]
 
 
@@ -340,11 +355,16 @@ def test_unverified_binary_input_stops_before_draft_creation(case, release_binar
 
 
 def test_release_body_uses_seven_assets_and_labels_reused_clients():
-    artifacts = [{"name": name, "bytes": 1, "sha256": HASH} for name in (publisher.APK, publisher.MAC, publisher.IPA)]
+    artifacts = [{"name": publisher.release_name(name), "source_name": name, "bytes": 1, "sha256": HASH}
+                 for name in (publisher.APK, publisher.MAC, publisher.IPA)]
     body = publisher.release_body(SOURCE, RUN, {"commit": "c"*40}, artifacts,
                                   {"diagnostics": {}, "translation": {}},
-                                  android_clients=[{"name": name, "bytes": 1, "sha256": HASH}
+                                  android_clients=[{"name": publisher.release_name(name), "source_name": name, "bytes": 1, "sha256": HASH}
                                                    for name in publisher.ANDROID_LANGUAGE_CLIENTS.values()])
+    assert body.startswith("# 아이프라 로컬 " + RELEASE_VERSION)
+    assert "서버 내부 버전 " + publisher.VERSION in body and publisher.IPA_VERSION in body
+    for name in publisher.EXPECTED_RELEASE_ASSETS:
+        assert publisher.asset_download_url(name) in body
     assert body.count("/releases/download/"+publisher.TAG+"/") == len(publisher.EXPECTED_RELEASE_ASSETS)
     assert body.count("/raw/"+"c"*40+"/") == 3
     assert "이번 릴리즈에서 재제작하지 않았습니다" in body
@@ -778,3 +798,110 @@ def test_asset_upload_requires_the_new_owned_release(release_binaries):
     github.owned_release_id = 77
     with pytest.raises(publisher.ReleaseError, match="owned_draft_asset_upload_required"):
         github.upload_asset(78, release_binaries[0])
+
+
+
+def test_calendar_identity_is_required_and_frozen_before_release_actions(release_binaries, monkeypatch):
+    assert publisher.TAG == "v" + RELEASE_VERSION
+    assert publisher.configure_release(RELEASE_VERSION) == RELEASE_VERSION
+    with pytest.raises(publisher.ReleaseError, match="release_identity_already_frozen"):
+        publisher.configure_release("2026.11.16.2")
+    assert publisher.RELEASE_VERSION == RELEASE_VERSION
+    assert publisher.TAG == "v" + RELEASE_VERSION
+    monkeypatch.setattr(publisher, "RELEASE_VERSION", None)
+    github = FakeGitHub()
+    with pytest.raises(publisher.ReleaseError, match="calendar_release_identity_required"):
+        github.publish(SOURCE, "release", release_binaries, TinyGuard())
+    assert github.calls == []
+
+
+@pytest.mark.parametrize("version", ["0.3.36", "2026.02.30.1", "2026.11.16.0", "2026.11.16.01", "../2026.11.16.1"])
+def test_invalid_calendar_version_stops_main_before_runner_or_network_work(version, tmp_path):
+    with pytest.raises(publisher.ReleaseError, match="calendar_release_version_invalid"):
+        publisher.main(["--release-version", version, "--source-commit", SOURCE, "--run-id", str(RUN),
+                        "--work", str(tmp_path/"work"), "--output", str(tmp_path/"output")])
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_release_version_argument_is_required_before_actions(tmp_path):
+    with pytest.raises(SystemExit) as error:
+        publisher.main(["--source-commit", SOURCE, "--run-id", str(RUN),
+                        "--work", str(tmp_path/"work"), "--output", str(tmp_path/"output")])
+    assert error.value.code == 2
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_all_seven_files_are_staged_with_exact_original_bytes_and_provenance(source_release_binaries, tmp_path):
+    expected = {row["name"]: {**row, "body": Path(row["path"]).read_bytes()} for row in source_release_binaries}
+    staged = publisher.stage_release_binaries(source_release_binaries, tmp_path/"public", TinyGuard())
+    assert {row["name"] for row in staged} == publisher.EXPECTED_RELEASE_ASSETS
+    assert len({row["name"] for row in staged}) == 7
+    assert {row["source_name"] for row in staged} == publisher.INPUT_RELEASE_ASSETS
+    for row in staged:
+        original = expected[row["source_name"]]
+        assert row["name"] == publisher.release_name(row["source_name"])
+        assert RELEASE_VERSION in row["name"]
+        assert Path(row["path"]).name == row["name"]
+        assert Path(row["path"]).read_bytes() == original["body"]
+        assert (row["bytes"], row["sha256"]) == (original["bytes"], original["sha256"])
+        assert not Path(original["path"]).exists()
+        assert original["name"] == row["source_name"]
+        assert publisher.asset_download_url(row["name"]).endswith("/" + publisher.TAG + "/" + row["name"])
+
+
+@pytest.mark.parametrize("case", ["unknown", "duplicate", "changed_bytes", "path_name", "source_name", "symlink", "existing_directory"])
+def test_staging_validates_entire_inventory_before_moving_any_file(case, source_release_binaries, tmp_path):
+    rows = deepcopy(source_release_binaries)
+    destination = tmp_path/"public"
+    if case == "unknown": rows[1]["name"] = "untracked.apk"
+    elif case == "duplicate": rows[1] = dict(rows[0])
+    elif case == "changed_bytes": Path(rows[1]["path"]).write_bytes(b"changed")
+    elif case == "path_name": rows[1]["path"] = str(tmp_path/"other.apk")
+    elif case == "source_name": rows[1]["source_name"] = "another-origin.apk"
+    elif case == "symlink":
+        original = Path(rows[1]["path"])
+        original.rename(tmp_path/"original-input")
+        original.symlink_to(tmp_path/"original-input")
+    else: destination.mkdir()
+    first = Path(rows[0]["path"])
+    with pytest.raises(publisher.ReleaseError):
+        publisher.stage_release_binaries(rows, destination, TinyGuard())
+    assert first.is_file()
+    assert not (destination/publisher.release_name(rows[0]["name"])).exists()
+
+
+@pytest.mark.parametrize("case", ["old_name", "other_date", "swapped_source"])
+def test_release_rejects_original_or_mixed_date_names_before_creating_draft(case, release_binaries):
+    if case == "old_name": release_binaries[0]["name"] = release_binaries[0]["source_name"]
+    elif case == "other_date":
+        release_binaries[0]["name"] = release_binaries[0]["name"].replace(RELEASE_VERSION, "2026.11.16.2")
+    else:
+        release_binaries[0]["source_name"], release_binaries[1]["source_name"] = (
+            release_binaries[1]["source_name"], release_binaries[0]["source_name"])
+    github = FakeGitHub()
+    with pytest.raises(publisher.ReleaseError):
+        github.publish(SOURCE, "release", release_binaries, TinyGuard())
+    assert github.calls == []
+
+
+def test_public_download_urls_reject_unversioned_original_names():
+    for name in publisher.INPUT_RELEASE_ASSETS:
+        with pytest.raises(publisher.ReleaseError, match="release_asset_name_not_versioned"):
+            publisher.asset_download_url(name)
+
+
+
+def test_reused_companion_renaming_preserves_original_build_provenance(source_release_binaries, tmp_path):
+    origin = publisher.COMPANIONS[0]
+    row = next(row for row in source_release_binaries if row["name"] == origin["name"])
+    row.update({key: origin[key] for key in ("version", "source_commit", "publication_commit")})
+    row.update(reused_unchanged=True, fresh_source_build_claimed=False,
+               original_provenance_sha256=HASH, immutable_pointer_verified=True,
+               full_download_SHA256_verified=True)
+    staged = publisher.stage_release_binaries([row], tmp_path/"companion-release", TinyGuard())[0]
+    assert staged["name"] == publisher.release_name(origin["name"])
+    assert staged["source_name"] == origin["name"]
+    for key, value in row.items():
+        if key not in ("name", "path"):
+            assert staged[key] == value
+    assert staged["version"] == "0.3.31" and staged["fresh_source_build_claimed"] is False

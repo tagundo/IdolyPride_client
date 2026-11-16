@@ -1,26 +1,27 @@
-name: Verify and release launcher and multilingual clients v0.3.35
+name: Verify and release server and clients
 
 on:
   workflow_dispatch:
     inputs:
+      release_version:
+        description: Release date in Asia/Seoul, YYYY.MM.DD.N (for example 2026.11.16.1)
+        type: string
+        required: true
       publish:
-        description: Publish the new v0.3.35 prerelease only after all platform and performance gates pass
+        description: Publish a new date-versioned prerelease only after all platform and performance gates pass
         type: boolean
         default: false
-  push:
-    branches: [feat/ios-unified-server]
-    paths: [.github/workflows/release-all-platforms.yml]
 
 permissions:
   contents: read
 
 concurrency:
-  group: optimized-release-v0.3.35
+  group: optimized-release
   cancel-in-progress: false
 
 env:
   PYTHONDONTWRITEBYTECODE: '1'
-  IDOLY_RELEASE_VERSION: '0.3.35'
+  IDOLY_RELEASE_VERSION: '${{ inputs.release_version }}'
   IDOLY_RELEASE_BUILD: '52'
   IDOLY_OPTIMIZATION_BASELINE: '50e349f4db6db0d3122bdc09c3b06307145f814f'
 
@@ -537,7 +538,7 @@ jobs:
   publish:
     needs: [portable, performance, android, macos, ios-unified, android-clients]
     if: >-
-      ${{ (github.event_name == 'push' || inputs.publish)
+      ${{ (github.event_name == 'workflow_dispatch' && inputs.publish)
           && needs.portable.result == 'success'
           && needs.performance.result == 'success'
           && needs.android.result == 'success'
@@ -570,6 +571,7 @@ jobs:
       - name: Verify all platform artifacts and publish only the fresh release
         run: >-
           uv run --locked python -B tools/publish_optimized_release.py
+          --release-version "$IDOLY_RELEASE_VERSION"
           --source-commit "$GITHUB_SHA"
           --run-id "$GITHUB_RUN_ID"
           --work "$RUNNER_TEMP/idoly-optimized-publication"
