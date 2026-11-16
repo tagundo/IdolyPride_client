@@ -173,6 +173,192 @@ def validate_candidate(schema, candidate):
     return tag, report, packs
 
 
+# Original 6.1.1 Master fields, checked against the exact descriptor before use.
+MODEL_FIELDS = {
+    'Card': {'assetId':(2,False),'characterId':(6,False),'rewardCostumeId':(21,False),
+             'rewardHairIds':(35,True),'rewardHairId':(37,False)},
+    'Costume': {'bodyAssetId':(4,False),'characterId':(5,False),'defaultHairId':(13,False)},
+    'Hair': {'hairAssetId':(2,False),'faceAssetId':(3,False),'characterId':(5,False)},
+    'Character': {'defaultCostumeId':(20,False),'defaultLiveCostumeId':(41,False)},
+}
+OCTO_PINS = {
+    'android': ('public-octo',205051,1087,'23b66c095821ed73cf9690c394d4acdbd2394315b39d30398d85f87a5762017a'),
+    'ios': ('public-octo-ios',105051,1159,'b431d531ef393ff1807229bbee4bbe75d4c9821007329f91e4822527d9844e9b'),
+}
+
+
+def validate_model_fields(schema):
+    for table, fields in MODEL_FIELDS.items():
+        descriptor = schema.pool.FindMessageTypeByName('master.'+table)
+        for name,(number,repeated) in fields.items():
+            field = descriptor.fields_by_name.get(name)
+            need(field is not None and field.number==number and field.type==9
+                 and field.is_repeated is repeated, 'candidate_schema_unsupported')
+
+
+def model_selection(before, after):
+    indexes={name:{row['id']:row for row in rows} for name,rows in after.items()}
+    old={name:row_index(rows) for name,rows in before.items()}
+    current={name:row_index(rows) for name,rows in after.items()}
+    selected={name:sorted(current[name].keys()-old[name].keys()) for name in TABLES}
+    changed_characters=sorted(key for key in current['Character'].keys() & old['Character'].keys()
+        if current['Character'][key]['row_sha256'] != old['Character'][key]['row_sha256'])
+    roots, references, invalid = {}, [], []
+    def root(asset, part, source):
+        if type(asset) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,160}',asset):
+            invalid.append({'source':source,'reason_code':'empty_or_unsupported_asset_reference'})
+            return
+        name='mdl_chr_'+asset+'_'+part
+        roots.setdefault(name,[]).append(source)
+    def hair(identity, source, owner=None):
+        row=indexes['Hair'].get(identity)
+        if row is None:
+            invalid.append({'source':source,'id':identity,'reason_code':'hair_reference_missing'});return
+        if owner is not None and row.get('characterId') != owner:
+            invalid.append({'source':source,'id':identity,'reason_code':'appearance_owner_differs'})
+        references.append({'source':source,'hair_id':identity,'character_id':row.get('characterId'),
+            'hair_asset_id':row.get('hairAssetId'),'face_asset_id':row.get('faceAssetId')})
+        root(row.get('hairAssetId'),'hair',source+'.hairAssetId')
+        root(row.get('faceAssetId'),'face',source+'.faceAssetId')
+    def costume(identity, source, owner=None):
+        row=indexes['Costume'].get(identity)
+        if row is None:
+            invalid.append({'source':source,'id':identity,'reason_code':'costume_reference_missing'});return
+        if owner is not None and row.get('characterId') != owner:
+            invalid.append({'source':source,'id':identity,'reason_code':'appearance_owner_differs'})
+        references.append({'source':source,'costume_id':identity,'character_id':row.get('characterId'),
+            'body_asset_id':row.get('bodyAssetId'),'default_hair_id':row.get('defaultHairId')})
+        root(row.get('bodyAssetId'),'body',source+'.bodyAssetId')
+        hair(row.get('defaultHairId'),source+'.defaultHairId',row.get('characterId'))
+    for identity in selected['Costume']:
+        costume(identity,'addedCostume:'+identity)
+    for identity in selected['Hair']:
+        hair(identity,'addedHair:'+identity)
+    for identity in selected['Card']:
+        card=indexes['Card'][identity];source='addedCard:'+identity
+        if card.get('rewardCostumeId'):
+            costume(card['rewardCostumeId'],source+'.rewardCostumeId',card.get('characterId'))
+        reward_hairs=[*card.get('rewardHairIds',[])]
+        if card.get('rewardHairId'):reward_hairs.append(card['rewardHairId'])
+        for reward in sorted(set(reward_hairs)):
+            hair(reward,source+'.rewardHairIds',card.get('characterId'))
+    for identity in changed_characters:
+        row=indexes['Character'][identity];source='changedCharacter:'+identity
+        costume(row.get('defaultCostumeId'),source+'.defaultCostumeId',identity)
+        live=row.get('defaultLiveCostumeId') or row.get('defaultCostumeId')
+        costume(live,source+'.defaultLiveCostumeId',identity)
+    return {'added_card_ids':selected['Card'],'added_costume_ids':selected['Costume'],
+        'added_hair_ids':selected['Hair'],'changed_character_ids':changed_characters,
+        'roots':{name:sorted(set(values)) for name,values in sorted(roots.items())},
+        'references':references,'invalid_references':invalid}
+
+
+def dependency_closure(name, nodes, by_name):
+    record=by_name.get(name)
+    if record is None or record['state']==4:
+        return {'present':False,'deleted':record is not None,'root_id':record['id'] if record else None,
+            'root_bytes':record['size'] if record else None,'root_md5':record['md5'] if record else None,
+            'closure_nodes':0,'closure_bytes':0,'missing_dependency_count':0,'missing_dependency_ids':[],
+            'closure_sha256':hashlib.sha256(b'[]').hexdigest(),'dependency_metadata_complete':False}
+    pending=[record['id']];seen=set();missing=set();rows=[]
+    while pending:
+        identity=pending.pop()
+        if identity in seen:continue
+        seen.add(identity)
+        need(len(seen)<=100000,'candidate_archive_invalid')
+        row=nodes.get(identity)
+        if row is None or row['state']==4:
+            missing.add(identity);continue
+        rows.append(row);pending.extend(row['dependencies'])
+    rows.sort(key=lambda item:item['id'])
+    return {'present':True,'deleted':False,'root_id':record['id'],'root_bytes':record['size'],'root_md5':record['md5'],
+        'closure_nodes':len(rows),'closure_bytes':sum(row['size'] for row in rows),
+        'missing_dependency_count':len(missing),'missing_dependency_ids':sorted(missing)[:128],
+        'missing_dependency_ids_truncated':len(missing)>128,
+        'closure_sha256':hashlib.sha256(canonical(rows)).hexdigest(),'dependency_metadata_complete':not missing}
+
+
+def card_family(asset, records):
+    need(type(asset) is str and re.fullmatch(r'[A-Za-z0-9_-]{1,160}',asset),'row_contract_invalid')
+    pattern=re.compile(r'img_card_(thumb|rect|full|upper)_[0-9]+_'+re.escape(asset)+r'\Z')
+    matched=sorted((row for row in records if pattern.fullmatch(row['name'])),key=lambda row:(row['kind'],row['id']))
+    return {'matched_records':matched,'active_count':sum(row['state']!=4 for row in matched),
+            'deleted_count':sum(row['state']==4 for row in matched)}
+
+
+def asset_coverage(schema, archive, before, after):
+    from Crypto.Cipher import AES
+    from idoly_local.octo_manifest import Database,OctoManifest
+    validate_model_fields(schema)
+    selection=model_selection(before,after)
+    report={'scope':'pinned-octo-model-name-and-dependency-metadata-only',
+        'field_contract':{table:{name:{'number':number,'repeated':repeated} for name,(number,repeated) in fields.items()}
+                          for table,fields in MODEL_FIELDS.items()},
+        'model_name_formats':{'body':'mdl_chr_{Costume.bodyAssetId}_body','hair':'mdl_chr_{Hair.hairAssetId}_hair',
+                              'face':'mdl_chr_{Hair.faceAssetId}_face'},
+        'name_rule_control':'Existing original Sakura default live Costume/Hair and pinned model audit',
+        'selection':{key:value for key,value in selection.items() if key!='roots'},'model_roots':[],
+        'platforms':{},'card_image_families':[],'cdn_asset_bytes_downloaded':False,'unity_playback_verified':False,
+        'integrity_scope':'catalog-declared MD5 and size only; CDN bytes not downloaded'}
+    platforms={}
+    def aes(encrypt,key,iv,data):
+        cipher=AES.new(key,AES.MODE_CBC,iv)
+        return cipher.encrypt(data) if encrypt else cipher.decrypt(data)
+    for platform,(folder,version,revision,wanted_sha) in OCTO_PINS.items():
+        settings=decode(member(archive,'data/'+folder+'/settings.json',16384))
+        raw=member(archive,'data/'+folder+'/manifest.pb',8*1024*1024)
+        need(settings.get('application_id')==212 and settings.get('application_version')==version
+             and settings.get('revision')==revision and settings.get('manifest_sha256')==wanted_sha
+             and hashlib.sha256(raw).hexdigest()==wanted_sha,'baseline_pin_differs')
+        validated=OctoManifest(raw,aes_key=bytes.fromhex(settings['aes_key_hex']),client_key=settings['client_key'],
+            base_url='http://127.0.0.1:8080',aes_cbc=aes,application_version=version)
+        need(validated.revision==revision,'baseline_pin_differs')
+        database=Database.FromString(raw);nodes={};by_name={};all_records=[]
+        for row in database.assetBundleList:
+            record={'id':row.id,'name':row.name,'state':row.state,'size':row.size,'md5':row.md5,
+                    'dependencies':sorted(row.dependencie)}
+            nodes[row.id]=record;by_name[row.name]=record
+        for kind,rows in (('assetbundle',database.assetBundleList),('resources',database.resourceList)):
+            all_records.extend({'kind':kind,'id':row.id,'name':row.name,'state':row.state,'bytes':row.size,'md5':row.md5}
+                               for row in rows)
+        platforms[platform]=(nodes,by_name,all_records)
+        report['platforms'][platform]={'application_version':version,'revision':revision,'manifest_sha256':wanted_sha,
+            'object_count':len(all_records),'model_roots':len(selection['roots']),'missing_model_roots':0,
+            'deleted_model_roots':0,'incomplete_dependency_closures':0}
+    # The literal name convention has an original playable-character control,
+    # independent of newly added IDs. A successful check proves catalog presence,
+    # never that a Unity mesh/animation/material has actually loaded.
+    baseline_indexes={table:{row['id']:row for row in rows} for table,rows in before.items()}
+    control=baseline_indexes['Character'].get('char-skr')
+    need(control is not None,'baseline_pin_differs')
+    costume=baseline_indexes['Costume'][control.get('defaultLiveCostumeId') or control['defaultCostumeId']]
+    hair=baseline_indexes['Hair'][costume['defaultHairId']]
+    control_names=['mdl_chr_'+costume['bodyAssetId']+'_body','mdl_chr_'+hair['hairAssetId']+'_hair',
+                   'mdl_chr_'+hair['faceAssetId']+'_face']
+    for platform,(_nodes,names,_all) in platforms.items():
+        need(all(name in names and names[name]['state']!=4 for name in control_names),'baseline_pin_differs')
+        report['platforms'][platform]['sakura_control_names']=control_names
+    for name,roles in selection['roots'].items():
+        row={'name':name,'sources':roles,'platforms':{}}
+        for platform,(nodes,names,_all) in platforms.items():
+            result=dependency_closure(name,nodes,names);row['platforms'][platform]=result
+            summary=report['platforms'][platform]
+            if not result['present']:
+                summary['missing_model_roots']+=1
+                if result['deleted']:summary['deleted_model_roots']+=1
+            elif not result['dependency_metadata_complete']:summary['incomplete_dependency_closures']+=1
+        report['model_roots'].append(row)
+    cards={row['id']:row for row in after['Card']}
+    for identity in selection['added_card_ids']:
+        asset=cards[identity].get('assetId')
+        need(type(asset) is str and re.fullmatch(r'[A-Za-z0-9_-]{1,160}',asset),'row_contract_invalid')
+        family={'card_id':identity,'asset_id':asset,'scope':'observed-image-family-not-exhaustive-required-image-proof','platforms':{}}
+        for platform,(_nodes,_names,records) in platforms.items():
+            family['platforms'][platform]=card_family(asset,records)
+        report['card_image_families'].append(family)
+    return report
+
+
 def audit(base, candidate, descriptor):
     need(base.is_file() and not base.is_symlink() and base.stat().st_size == BASE_BYTES and sha(base) == BASE_SHA256,
          "baseline_pin_differs")
@@ -189,12 +375,14 @@ def audit(base, candidate, descriptor):
         baseline = decode(member(archive, "data/original-master/archive-report.json", MAX_METADATA))
         need(baseline.get("complete") is True and baseline.get("master_version") == BASE_VERSION,
              "baseline_pin_differs")
-        tables = {}
+        tables, before_tables, after_tables = {}, {}, {}
         for table in TABLES:
             before = decode(member(archive, "data/master-json/" + table + ".json", MAX_TABLE))
             after = builder.decode_master_table(schema, dbapi2, candidate / "assets/master", packs[table], table)
             tables[table] = compare_rows(before, after, budget)
-    return {"baseline": {"server_data": {"bytes": BASE_BYTES, "sha256": BASE_SHA256},
+            before_tables[table], after_tables[table] = before, after
+        coverage = asset_coverage(schema, archive, before_tables, after_tables)
+    return {"asset_coverage":coverage,"baseline": {"server_data": {"bytes": BASE_BYTES, "sha256": BASE_SHA256},
                 "master_version": BASE_VERSION, "pack_count": len(baseline["packs"])},
             "candidate": {"master_version": tag.version, "pack_count": len(report["packs"]),
                 "archive_complete": True, "original_master_tag_sha256": sha(candidate / "master-tag.json")},

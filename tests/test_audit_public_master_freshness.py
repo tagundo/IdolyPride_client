@@ -88,3 +88,59 @@ def test_workflow_has_no_authentication_release_or_raw_artifact_path():
     assert 'gh release' not in text
     artifact=text.split('uses: actions/upload-artifact@v4')[1]
     assert 'proof/master-freshness.json' in artifact and '*.zip' not in artifact and '**' not in artifact
+
+
+
+def test_model_selection_uses_actual_fields_and_includes_reward_and_changed_default_refs():
+    before={'Card':[{'id':'old-card','name':'old','assetId':'old'}],
+        'Costume':[{'id':'old-cos','name':'old','characterId':'owner','bodyAssetId':'old-body','defaultHairId':'old-hair'}],
+        'Hair':[{'id':'old-hair','name':'old','characterId':'owner','hairAssetId':'old-hair-asset','faceAssetId':'old-face'}],
+        'Character':[{'id':'owner','name':'old','defaultCostumeId':'old-cos','defaultLiveCostumeId':''}]}
+    after={name:[dict(row) for row in rows] for name,rows in before.items()}
+    after['Card'].append({'id':'new-card','name':'new','assetId':'card-exact','characterId':'owner',
+        'rewardCostumeId':'new-cos','rewardHairIds':['new-hair'],'rewardHairId':'new-hair'})
+    after['Costume'].append({'id':'new-cos','name':'new','characterId':'owner','bodyAssetId':'opaque-body-asset',
+        'defaultHairId':'new-hair'})
+    after['Hair'].append({'id':'new-hair','name':'new','characterId':'owner','hairAssetId':'opaque-hair-asset',
+        'faceAssetId':'opaque-face-asset'})
+    after['Character'][0]['name']='changed'
+    result=audit.model_selection(before,after)
+    assert result['added_card_ids']==['new-card'] and result['added_costume_ids']==['new-cos']
+    assert result['added_hair_ids']==['new-hair'] and result['changed_character_ids']==['owner']
+    assert not result['invalid_references']
+    assert 'mdl_chr_opaque-body-asset_body' in result['roots']
+    assert 'mdl_chr_opaque-hair-asset_hair' in result['roots']
+    assert 'mdl_chr_opaque-face-asset_face' in result['roots']
+    assert 'mdl_chr_new-cos_body' not in result['roots']
+    assert any('addedCard:new-card.rewardCostumeId' in source for source in result['roots']['mdl_chr_opaque-body-asset_body'])
+    assert any('changedCharacter:owner.defaultLiveCostumeId' in source for source in result['roots']['mdl_chr_old-body_body'])
+
+
+def test_dependency_metadata_closure_handles_cycles_missing_and_deleted_without_io():
+    def row(identity,name,state,size,dependencies):
+        return {'id':identity,'name':name,'state':state,'size':size,'md5':'a'*32,'dependencies':dependencies}
+    root=row(1,'model',1,10,[2,3,4]);shared=row(2,'texture',3,20,[1]);deleted=row(3,'gone',4,0,[])
+    nodes={1:root,2:shared,3:deleted};names={v['name']:v for v in nodes.values()}
+    result=audit.dependency_closure('model',nodes,names)
+    assert result['present'] and not result['dependency_metadata_complete']
+    assert result['closure_nodes']==2 and result['closure_bytes']==30
+    assert result['missing_dependency_count']==2 and result['missing_dependency_ids']==[3,4]
+    assert result['root_bytes']==10 and result['root_md5']=='a'*32
+    absent=audit.dependency_closure('unknown',nodes,names)
+    assert not absent['present'] and not absent['deleted']
+    removed=audit.dependency_closure('gone',nodes,names)
+    assert not removed['present'] and removed['deleted']
+    root['dependencies']=[2]
+    complete=audit.dependency_closure('model',nodes,names)
+    assert complete['dependency_metadata_complete'] and complete['closure_nodes']==2
+    assert complete['closure_sha256'] != result['closure_sha256']
+
+
+def test_card_image_family_is_exact_observed_pattern_with_deleted_rows_separate():
+    rows=[{'kind':'assetbundle','id':1,'name':'img_card_thumb_1_exact-asset','state':3,'bytes':20,'md5':'a'*32},
+          {'kind':'assetbundle','id':2,'name':'img_card_full_0_exact-asset','state':4,'bytes':0,'md5':''},
+          {'kind':'assetbundle','id':3,'name':'img_card_thumb_1_exact-asset-neighbor','state':3,'bytes':30,'md5':'b'*32}]
+    result=audit.card_family('exact-asset',rows)
+    assert result['active_count']==1 and result['deleted_count']==1
+    assert [row['id'] for row in result['matched_records']]==[1,2]
+    with pytest.raises(audit.AuditError):audit.card_family('unsafe/../asset',rows)
