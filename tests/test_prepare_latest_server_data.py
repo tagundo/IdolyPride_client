@@ -192,6 +192,7 @@ def test_artifact_admission_never_exports_unbounded_or_arbitrary_files(tmp_path,
         (source/'latest-server-data.report.json').symlink_to(outside)
     elif kind=='unexpected':(source/'private-collection.log').write_bytes(b'not-exported')
     monkeypatch.setattr(m,'MAX_PROOF',1024)
+    monkeypatch.setattr(m,'MAX_ARTIFACT_PROOF',1024)
     destination=tmp_path/'artifact'
     assert m.admit_proof_artifact(source,destination) is False
     assert {path.name for path in destination.iterdir()}=={'latest-server-data.report.json'}
@@ -285,3 +286,23 @@ def test_full_serialized_member_order_handles_both_platforms_and_directory_prefi
     changed=m.file_rows(public)
     assert [row['path'] for row in changed]==expected
     with ZipFile(output) as archive:assert m.archive_rows(archive)!=changed
+
+
+@pytest.mark.parametrize('padding,accepted',((150000,True),(300000,False)))
+def test_four_proof_aggregate_is_one_mib_and_individual_files_remain_512_kib(tmp_path,padding,accepted):
+    source=tmp_path/'proof';source.mkdir()
+    raw=json.dumps({'public_metadata_padding':'x'*padding},separators=(',',':')).encode()
+    assert 0<len(raw)<=512*1024
+    for name in m.PROOF_NAMES:(source/name).write_bytes(raw)
+    total=4*len(raw)
+    assert total>512*1024
+    assert (total<=1024*1024) is accepted
+    destination=tmp_path/'artifact'
+    assert m.admit_proof_artifact(source,destination) is accepted
+    if accepted:
+        assert {path.name for path in destination.iterdir()}==m.PROOF_NAMES
+        assert all((destination/name).read_bytes()==raw for name in m.PROOF_NAMES)
+    else:
+        assert {path.name for path in destination.iterdir()}=={'latest-server-data.report.json'}
+        assert json.loads((destination/'latest-server-data.report.json').read_bytes())['error_code']=='latest_proof_artifact_rejected'
+    assert all((source/name).read_bytes()==raw for name in m.PROOF_NAMES)

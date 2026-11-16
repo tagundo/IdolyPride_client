@@ -65,6 +65,7 @@ EMPTY_PUBLIC_PB='data/public-fixtures/responses/api.Master-Rule-e3b0c44298fc1c14
 EMPTY_SHA256='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 BLOB_NAME='data/latest-server-overlay.zip'
 MAX_PROOF=512*1024
+MAX_ARTIFACT_PROOF=1024*1024
 MAX_METADATA=8*1024*1024
 MAX_FILE=64*1024*1024
 MAX_EXPANDED=1024*1024*1024
@@ -889,7 +890,7 @@ def admit_proof_artifact(source,destination):
                 need(stat.S_ISREG(before.st_mode) and not stat.S_ISLNK(outer.st_mode)
                      and (before.st_dev,before.st_ino)==(outer.st_dev,outer.st_ino)
                      and 0<before.st_size<=MAX_PROOF,'latest_proof_source_invalid')
-                total+=before.st_size;need(total<=MAX_PROOF,'latest_proof_artifact_bound')
+                total+=before.st_size;need(total<=MAX_ARTIFACT_PROOF,'latest_proof_artifact_bound')
                 raw=stream.read(before.st_size+1);after=os.fstat(stream.fileno())
                 need(len(raw)==before.st_size and all(getattr(before,key)==getattr(after,key)
                      for key in ('st_dev','st_ino','st_size','st_mtime_ns','st_ctime_ns')),'latest_proof_source_changed')

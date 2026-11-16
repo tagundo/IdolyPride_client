@@ -203,7 +203,11 @@ jobs:
           (proof / 'latest-server-data.readback.json').write_bytes(canonical(readback) + b'\n')
           assert {path.name for path in proof.iterdir()} == {'latest-server-data.report.json',
               'latest-server-data.readback.json', 'latest-semantic-controls.json', 'latest-octo-proof.json'}
-          assert sum(path.stat().st_size for path in proof.iterdir()) <= 512 * 1024
+          proof_sizes = {path.name: path.stat().st_size for path in sorted(proof.iterdir())}
+          proof_total = sum(proof_sizes.values())
+          print(json.dumps({'proof_file_bytes': proof_sizes, 'proof_total_bytes': proof_total}, sort_keys=True))
+          assert all(0 < size <= 512 * 1024 for size in proof_sizes.values())
+          assert proof_total <= 1024 * 1024
           print(json.dumps({'status': 'PASS', 'payload': summary, 'report_sha256': readback['report_sha256'],
               'raw_tables': 63, 'derived_love_catalog': 1, 'original_packs': 202}))
           PY
