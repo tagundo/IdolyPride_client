@@ -1343,6 +1343,10 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None,
         time.sleep(min(0.25, checked_remaining()))
 
 
+SETTINGS_OVERFLOW_IDS = ('interface_language', 'refresh', 'options-fields', 'presentation-fields', 'accounts-fields', 'accounts-current', 'accounts-summary', 'accounts-user-detail', 'accounts-select', 'accounts-export', 'accounts-clone', 'accounts-new-profile', 'accounts-manager-name', 'accounts-restore-point', 'accounts-feedback', 'accounts-refresh', 'diagnostics', 'message')
+SETTINGS_OVERFLOW_TAGS = ('MAIN', 'SECTION', 'HEADER', 'DIV', 'LABEL', 'SPAN', 'BUTTON', 'SELECT', 'INPUT', 'FIELDSET', 'P', 'DETAILS', 'SUMMARY', 'PRE', 'OTHER')
+
+
 def settings_web_observation(value):
     """Export only bounded DOM readiness scalars, never script/error text."""
     if type(value) is not dict: return {}
@@ -1353,6 +1357,16 @@ def settings_web_observation(value):
     for key,low,high in (("select_count",0,256),("observations",1,256),("evaluation_error_code",-100,100)):
         number = value.get(key)
         if type(number) is int and low <= number <= high: clean[key] = number
+    if type(value.get("overflow_elements")) is list:
+        clean["overflow_elements"] = []
+        for row in value["overflow_elements"][:8]:
+            if type(row) is not dict: continue
+            geometry = {key:row.get(key) for key in ("right","width","scroll_width")}
+            if not all(type(number) in (int,float) and math.isfinite(number) for number in geometry.values()): continue
+            if not (-16384 <= geometry["right"] <= 16384 and 0 < geometry["width"] <= 16384
+                    and 0 <= geometry["scroll_width"] <= 16384): continue
+            clean["overflow_elements"].append({"tag":row.get("tag") if row.get("tag") in SETTINGS_OVERFLOW_TAGS else "OTHER",
+                "id":row.get("id") if row.get("id") in SETTINGS_OVERFLOW_IDS else "", **geometry})
     return clean
 
 

@@ -409,6 +409,12 @@ static NSString *const ProbeSettingsDOMScript =
      "const s=document.getElementById('render_scale_preset'), m=document.getElementById('max_buffer_pixel_preset');"
      "const has=(e,v)=>!!e&&Array.from(e.options).some(x=>x.value===v);"
      "const w=d?d.clientWidth:0, c=Math.max(d?d.scrollWidth:0,b?b.scrollWidth:0);"
+     "const knownIDs=new Set([\"interface_language\",\"refresh\",\"options-fields\",\"presentation-fields\",\"accounts-fields\",\"accounts-current\",\"accounts-summary\",\"accounts-user-detail\",\"accounts-select\",\"accounts-export\",\"accounts-clone\",\"accounts-new-profile\",\"accounts-manager-name\",\"accounts-restore-point\",\"accounts-feedback\",\"accounts-refresh\",\"diagnostics\",\"message\"]),knownTags=new Set([\"MAIN\",\"SECTION\",\"HEADER\",\"DIV\",\"LABEL\",\"SPAN\",\"BUTTON\",\"SELECT\",\"INPUT\",\"FIELDSET\",\"P\",\"DETAILS\",\"SUMMARY\",\"PRE\",\"OTHER\"]),overflow=[];"
+     "if(w>0&&c>w+2)for(const e of Array.from(b?b.querySelectorAll('*'):[]).slice(0,512).reverse()){"
+     "const r=e.getBoundingClientRect();if(r.width<=0||r.height<=0||!(r.right>w+2||r.left<-2||e.scrollWidth>r.width+2))continue;"
+     "const right=Math.round(r.right*100)/100,width=Math.round(r.width*100)/100,scroll_width=e.scrollWidth;"
+     "if(![right,width,scroll_width].every(Number.isFinite)||Math.abs(right)>16384||width>16384||scroll_width<0||scroll_width>16384)continue;"
+     "overflow.push({tag:knownTags.has(e.tagName)?e.tagName:'OTHER',id:knownIDs.has(e.id)?e.id:'',right,width,scroll_width});if(overflow.length===8)break;}"
      "return {ready:document.readyState==='complete'&&!!o&&!!p&&!o.disabled&&!p.disabled,"
      "forms_present:!!o&&!!p,document_complete:document.readyState==='complete',"
      "options_fields_enabled:!!o&&!o.disabled,presentation_fields_enabled:!!p&&!p.disabled,"
@@ -416,7 +422,7 @@ static NSString *const ProbeSettingsDOMScript =
      "launcher_document_marker_absent:window.__idolyProbeLauncherDocument!==true,"
      "scale_2_present:has(s,'2'),buffer_4096_present:has(m,'4096'),"
      "viewport_width:w,content_width:c,no_horizontal_overflow:w>0&&c<=w+2,"
-     "select_count:document.querySelectorAll('select').length}; })()";
+     "select_count:document.querySelectorAll('select').length,overflow_elements:overflow}; })()";
 
 static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictionary *state,
                                     void (^finish)(NSDictionary *)) {
@@ -455,6 +461,8 @@ static void ProbeSettingsDOMAttempt(WKWebView *__weak weakWeb, NSMutableDictiona
                 id scalar = value[key];
                 if ([scalar isKindOfClass:NSNumber.class]) metrics[key] = scalar;
             }
+            id overflow=value[@"overflow_elements"];
+            if ([overflow isKindOfClass:NSArray.class] && [overflow count]<=8) metrics[@"overflow_elements"]=overflow;
         }
         state[@"last"] = metrics;
         // Retry only page/bridge readiness. A ready page with a wrong preset or

@@ -20,7 +20,11 @@ header, .section-title, .header-actions { display: flex; align-items: center; ju
 header, .overview, .wide, .message, footer { grid-column: 1 / -1; }
 header { flex-wrap: wrap; }
 .header-actions { flex-wrap: wrap; justify-content: flex-end; }
-.interface-language { display: flex; align-items: center; gap: .5rem; font-size: .8rem; }
+/* Flex items must shrink to the card width even when translated labels or
+   account slot names have a wider intrinsic size in WebKit. */
+header > *, .section-title > *, .header-actions > *, .actions > * { min-width: 0; max-width: 100%; }
+.interface-language { display: flex; align-items: center; gap: .5rem; font-size: .8rem; min-width: 0; }
+.interface-language > span { min-width: 0; overflow-wrap: anywhere; }
 .interface-language select { width: 8.5rem; max-width: 100%; }
 .eyebrow { font-size: .68rem; font-weight: 700; letter-spacing: .14em; color: var(--accent); margin: 0 0 .35rem; }
 h1 { font-size: 1.7rem; margin: 0; letter-spacing: -.04em; }
@@ -56,6 +60,7 @@ button {
   font: inherit; font-size: .86rem; font-weight: 600; min-height: 2.75rem; border: 1px solid transparent;
   border-radius: .65rem; background: var(--accent); color: #fff; padding: .65rem .95rem;
   cursor: pointer; touch-action: manipulation; overflow-wrap: anywhere;
+  min-width: 0; max-width: 100%; white-space: normal;
 }
 button.secondary { background: var(--bg); border-color: var(--line); color: var(--text); }
 button.danger { color: var(--error); }
@@ -81,9 +86,13 @@ footer { font-size: .75rem; text-align: center; color: var(--muted); padding: .5
 }
 @media (max-width: 460px) {
   .header-actions { width: 100%; justify-content: space-between; }
-  .interface-language { flex: 1; }
+  .interface-language { flex: 1; flex-wrap: wrap; }
   .interface-language select { width: auto; flex: 1; }
   .numeric-control { grid-template-columns: minmax(0, 1fr) minmax(0, .7fr); }
+  section[aria-labelledby="accounts-heading"] .row { align-items: stretch; flex-direction: column; gap: .35rem; padding: .6rem 0; }
+  section[aria-labelledby="accounts-heading"] .row > span:first-child { flex: initial; }
+  section[aria-labelledby="accounts-heading"] .row > select,
+  section[aria-labelledby="accounts-heading"] .row > input[type="text"] { width: 100%; max-width: 100%; }
 }
 @media (max-height: 480px) and (orientation: landscape) {
   main { padding-top: .65rem; padding-bottom: .75rem; gap: .75rem; }

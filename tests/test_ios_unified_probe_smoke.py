@@ -911,6 +911,43 @@ def test_settings_web_diagnostic_projection_keeps_only_bounded_scalar_metrics():
         "ready":False,"select_count":0}
 
 
+def test_settings_overflow_diagnostics_are_capped_and_never_export_arbitrary_dom_content():
+    safe={"tag":"BUTTON","id":"accounts-select","right":485,"width":400,"scroll_width":400}
+    private={**safe,"tag":"DO-NOT-EXPORT","id":"DO-NOT-EXPORT","text":"DO-NOT-EXPORT","value":"DO-NOT-EXPORT"}
+    clean=probe.settings_web_observation({"overflow_elements":[private,*([safe]*12)]})
+    assert len(clean["overflow_elements"]) == 8
+    assert clean["overflow_elements"][0] == {**safe,"tag":"OTHER","id":""}
+    assert "DO-NOT-EXPORT" not in json.dumps(clean)
+    for bad in (True,float("nan"),float("inf"),16385):
+        assert probe.settings_web_observation({"overflow_elements":[{**safe,"width":bad}]}) == {"overflow_elements":[]}
+
+
+def test_actual_settings_dom_script_collects_safe_overflow_geometry_without_accepting_layout():
+    import re
+    import subprocess
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    expression=re.search(r"static NSString \*const ProbeSettingsDOMScript =\s*(.*?)\nstatic void ProbeSettingsDOMAttempt",source,re.S)
+    pieces=re.findall(r'@?("(?:\\.|[^"\\])*")',expression.group(1))
+    script="".join(json.loads(piece) for piece in pieces).rstrip(";")
+    program=r"""
+const node={tagName:'BUTTON',id:'accounts-select',scrollWidth:400,
+  getBoundingClientRect(){return {right:485,left:85,width:400,height:44};}};
+const unknown={...node,tagName:'DO-NOT-EXPORT',id:'DO-NOT-EXPORT',textContent:'DO-NOT-EXPORT'};
+const fields={disabled:false},presets={options:[{value:'2'},{value:'4096'}]};
+const document={documentElement:{clientWidth:402,scrollWidth:485},
+  body:{scrollWidth:485,querySelectorAll(){return [...Array(12).fill(node),unknown];}},readyState:'complete',
+  getElementById(id){return id.endsWith('-fields')?fields:presets;},querySelectorAll(){return [];}};
+const window={idolyServerReply(){}};
+"""+"process.stdout.write(JSON.stringify("+script+"));"
+    checked=subprocess.run(["node"],input=program,text=True,capture_output=True,timeout=5)
+    assert checked.returncode==0,checked.stderr
+    observed=json.loads(checked.stdout)
+    assert observed["ready"] is True and observed["no_horizontal_overflow"] is False
+    assert len(observed["overflow_elements"]) == 8
+    assert "DO-NOT-EXPORT" not in checked.stdout
+    assert probe.settings_web_observation(observed)["overflow_elements"] == observed["overflow_elements"]
+
+
 @pytest.mark.parametrize("source,filename", (("checkpoint","embedded-language-en-checkpoint.json"),
     ("status","embedded-language-en-status.json"),("report","embedded-language-en.json")))
 def test_settings_web_diagnostics_survive_checkpoint_status_and_final_without_raw_web_payload(tmp_path, source, filename):
