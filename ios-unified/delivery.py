@@ -59,8 +59,9 @@ SOURCE_FILE_LIMITS = {
 
 DELIVERY_SOURCES = ("ios-unified/delivery.py", ".github/workflows/build-server-apps.yml",
                     "tools/publish_binary_bundle_lfs.py",
-                    "ios-unified/delivery-pins/client-languages-real-v2.manifest.json",
+                    "ios-unified/delivery-pins/client-languages-real-v3.manifest.json",
                     "ios-unified/ci_build.py", "ios-unified/package_unified.py", "ios-unified/runtime_inputs.json",
+                    "tools/build_startup_translation_receipt.py", "src/idoly_local/startup_receipt.py",
                     "tools/prepare_latest_server_data.py", "tools/latest_server_data_pin.py", "data/latest-server-data-pin.json",
                     "data/latest-server-overlay.zip", "data/love-server-data-pin.json", "data/love-reference.json", "data/love-adv-proof.json",
                     "data/love-reference-NOTICE.txt", "src/idoly_local/love_catalog.py", "src/idoly_local/master_build.py",
@@ -210,6 +211,194 @@ def validate_language_producer_report(report, source):
          "language_producer_source_sha256_differs")
 
 
+
+# Exact actual 23-object producer run, source 11f939c5 / Actions 43953232317.
+# The legacy v2 pin remains immutable; only this finite v3 proof is deliverable.
+LANGUAGE_MANIFEST_SHA256 = "5003fa1677b7b456d6c216da71d80a39190e786c1b5445e840a6da3a1f44eb32"
+KOREAN_RESOURCES = {"bytes": 80641216,
+    "sha256": "9b3f5bb680670f91d6c3e41c5968acf49d8b9484431d5dc4d9837c786f982020"}
+KOREAN_GRAPH_CLASSES = {
+    28: (418897, 418898, 418899, 418900, 418901, 418902, 418903, 418904, 418906, 418911),
+    213: (542, 819, 875, 1007, 1029, 1076, 1161, 1342, 1344, 1576),
+    224: (231861, 251370, 253735),
+}
+KOREAN_FIXED_TEXT = {
+    "love_btn_achievement": 1344, "love_btn_fin": 1342, "love_btn_max": 1161,
+    "love_btn_mission": 1029, "love_btn_playing": 819, "love_btn_present": 1007,
+    "love_btn_setting": 1076, "love_btn_status": 875, "love_button_start": 542,
+    "love_header_level_label": 1576,
+}
+
+
+def _canonical_sha(value):
+    try:
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError):
+        raise DeliveryError("language_proof_json_invalid") from None
+    return hashlib.sha256(raw).hexdigest()
+
+
+def validate_language_manifest(language):
+    path = HERE / "delivery-pins/client-languages-real-v3.manifest.json"
+    need(path.is_file() and not path.is_symlink() and path.stat().st_size == 8674
+         and sha(path) == LANGUAGE_MANIFEST_SHA256 and language == read(path),
+         "language_manifest_pin_differs")
+
+
+def validate_refreshed_korean_resources(report, language):
+    need(type(report) is dict and report.get("korean_resources_refreshed") is True
+         and type(report.get("common_files")) is int and report["common_files"] == 44
+         and type(report.get("language_members")) is int and report["language_members"] == 3,
+         "korean_resources_refresh_missing")
+    proofs = report.get("proofs")
+    need(type(proofs) is dict and type(language) is dict, "korean_resources_proof_missing")
+    proof = proofs.get("korean_resources")
+    need(type(proof) is dict and proof.get("output") == KOREAN_RESOURCES
+         and language.get("languages", {}).get("ko", {}).get("Data/resources.assets") ==
+             {**KOREAN_RESOURCES, "source": "archive", "member": "ko/Data/resources.assets"},
+         "korean_resources_output_differs")
+    need(all(proof.get(key) is True for key in ("original_stock_rebuilt",
+             "all_other_objects_byte_identical", "type_graph_and_external_references_unchanged"))
+         and type(proof.get("unchanged_object_count")) is int
+         and proof["unchanged_object_count"] == 418937, "korean_resources_graph_incomplete")
+    differences = proof.get("declared_object_differences")
+    need(type(differences) is list and len(differences) == 23
+         and all(type(row) is dict and type(row.get("path_id")) is int
+             and type(row.get("class_id")) is int and row.get("changed") is True
+             and set(row) == {"path_id", "class_id", "before_sha256", "after_sha256", "changed"}
+             and all(type(row.get(key)) is str and re.fullmatch(r"[0-9a-f]{64}", row[key])
+                     for key in ("before_sha256", "after_sha256")) for row in differences),
+         "korean_resources_graph_differs")
+    graph = {row["path_id"]: row for row in differences}
+    need(len(graph) == 23 and {key: tuple(sorted(row["path_id"] for row in differences
+             if row["class_id"] == key)) for key in KOREAN_GRAPH_CLASSES} == KOREAN_GRAPH_CLASSES
+         and _canonical_sha(sorted(differences, key=lambda row: row["path_id"])) ==
+             "9b2c14c97048ae0e3ed05ef52c08ff4afd0d7d4ea1c3ea2be180e1222caa2511",
+         "korean_resources_graph_differs")
+    images = proof.get("static_images")
+    need(type(images) is dict and images.get("schema") == 2
+         and images.get("policy") == "korean-static-sprites-v2" and images.get("platform") == "ios"
+         and images.get("fixed_text_layout_policy") == "original-rect-love-text-v1"
+         and type(images.get("fixed_text_sprites")) is int and images["fixed_text_sprites"] == 10
+         and type(images.get("translated_sprites")) is int and images["translated_sprites"] == 139
+         and images.get("original_layout_preserved") is False
+         and images.get("runtime_image_hooks") is False and images.get("atlas_pixels_modified") is False
+         and images.get("original_sprite_IDs_preserved") is True
+         and images.get("original_pivots_borders_pixels_per_unit_preserved") is True
+         and images.get("texture_format") == "RGBA32" and images.get("lossy_recompression") is False,
+         "korean_fixed_text_layout_differs")
+    sprites = images.get("sprites")
+    need(type(sprites) is list and len(sprites) == 139 and all(type(row) is dict
+         and type(row.get("name")) is str for row in sprites)
+         and len({row["name"] for row in sprites}) == 139, "korean_fixed_text_layout_differs")
+    fixed = [row for row in sprites if row.get("layout_policy") == "original-rect-love-text-v1"]
+    need(len(fixed) == 10 and {row["name"]: row.get("sprite_path_id") for row in fixed} == KOREAN_FIXED_TEXT
+         and all(row.get("readback_pixel_exact") is True
+             and graph[row["sprite_path_id"]]["after_sha256"] == row.get("output_sha256")
+             and row.get("private_texture_path_id") in KOREAN_GRAPH_CLASSES[28]
+             and graph[row["private_texture_path_id"]]["after_sha256"] == row.get("texture_sha256")
+             for row in fixed)
+         and _canonical_sha(sorted(fixed, key=lambda row: row["name"])) ==
+             "20986f9e392c20b5a3fc0e87a3c66ddac1a70acb249a85a9e8cd9a57c021f254",
+         "korean_fixed_text_layout_differs")
+    logo = images.get("logo_layout")
+    need(type(logo) is dict and logo.get("policy") == "love-logo-whole-label-uniform-v1"
+         and logo.get("platform") == "ios" and logo.get("uniform_scale") == 0.75
+         and logo.get("original_frame") == [96.0, 32.0] and logo.get("content_size") == [94.5, 24.0]
+         and logo.get("full_translated_glyphs_preserved") is True
+         and logo.get("all_other_object_bytes_identical") is True,
+         "korean_logo_layout_differs")
+    transforms = logo.get("transforms")
+    need(type(transforms) is list and len(transforms) == 3 and all(type(row) is dict
+             and type(row.get("path_id")) is int and row["path_id"] in KOREAN_GRAPH_CLASSES[224]
+             and type(row.get("class_id")) is int and row["class_id"] == 224
+             and type(row.get("object_bytes")) is int and row["object_bytes"] == 108
+             and row.get("only_position_and_size_changed") is True
+             and graph[row["path_id"]]["before_sha256"] == row.get("input_sha256")
+             and graph[row["path_id"]]["after_sha256"] == row.get("output_sha256") for row in transforms)
+         and len({row["path_id"] for row in transforms}) == 3
+         and _canonical_sha(logo) == "a47a9bb5fd670e17c4c1a9765be5a1bfa20344fd4a930441ae07bf60767eb910",
+         "korean_logo_layout_differs")
+
+
+
+def _startup_pin_json(raw):
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            need(key not in value, "startup_receipt_pin_invalid")
+            value[key] = item
+        return value
+    need(type(raw) is bytes and 0 < len(raw) <= 4096, "startup_receipt_pin_invalid")
+    try:
+        pin = json.loads(raw, object_pairs_hook=pairs,
+                         parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+    except (TypeError, ValueError, UnicodeError):
+        raise DeliveryError("startup_receipt_pin_invalid") from None
+    need(type(pin) is dict and set(pin) == {"schema", "platform", "bytes", "sha256"}
+         and type(pin["schema"]) is int and pin["schema"] == 1 and pin["platform"] == "ios"
+         and type(pin["bytes"]) is int and 0 < pin["bytes"] <= 16*MIB
+         and type(pin["sha256"]) is str and re.fullmatch(r"[0-9a-f]{64}", pin["sha256"]),
+         "startup_receipt_pin_invalid")
+    return pin
+
+
+def verify_bundled_startup_receipt(archive, prefix, package_report, members, guard):
+    """Require the current cohort's signed-app public receipt and actual bytes."""
+    path = members / "startupTranslations.json"
+    need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= 4096,
+         "startup_receipt_public_pin_invalid")
+    public_raw = path.read_bytes()
+    pin = _startup_pin_json(public_raw)
+    reported = package_report.get("startup_translations")
+    need(type(reported) is dict and set(reported) == set(pin)
+         and all(type(reported[key]) is type(value) and reported[key] == value
+                 for key, value in pin.items()), "startup_receipt_report_differs")
+    payloads = {}
+    for relative, limit in (("LocalServer/startupTranslations.json", 4096),
+                            ("LocalServer/startupTranslations.zip", 16*MIB)):
+        name = prefix + relative
+        entries = [item for item in archive.infolist() if item.filename == name]
+        need(len(entries) == 1 and not entries[0].is_dir() and not entries[0].flag_bits & 1
+             and stat.S_IFMT(entries[0].external_attr >> 16) in (0, stat.S_IFREG)
+             and entries[0].compress_type in (ZIP_STORED, ZIP_DEFLATED)
+             and 0 < entries[0].file_size <= limit, "startup_receipt_member_invalid")
+        with archive.open(entries[0]) as incoming:
+            chunks = []; count = 0; digest = hashlib.sha256()
+            while block := incoming.read(CHUNK):
+                guard.check(); count += len(block)
+                need(count <= limit, "startup_receipt_member_invalid")
+                digest.update(block); chunks.append(block)
+        need(count == entries[0].file_size and package_report.get("member_sha256", {}).get(name) == digest.hexdigest(),
+             "startup_receipt_member_sha256_differs")
+        payloads[relative] = b"".join(chunks)
+    need(payloads["LocalServer/startupTranslations.json"] == public_raw,
+         "startup_receipt_public_pin_differs")
+    raw = payloads["LocalServer/startupTranslations.zip"]
+    need(len(raw) == pin["bytes"] and hashlib.sha256(raw).hexdigest() == pin["sha256"],
+         "startup_receipt_archive_differs")
+    verifier = load_module("delivery_startup_receipt", ROOT / "src/idoly_local/startup_receipt.py")
+    result = verifier.inspect_startup_receipt(raw, expected_sha256=pin["sha256"],
+                                            expected_bytes=pin["bytes"], platform="ios")
+    need(type(result) is dict and type(result.get("schema")) is int and result["schema"] == 1
+         and result.get("available") is True, "startup_receipt_envelope_invalid")
+    # The envelope has already bounded the inner directory and index to 8192 bytes.
+    # These finite public hash fields are sanity checks; each runtime lease still
+    # verifies them against the actual original/legacy/current source bytes.
+    import io
+    with ZipFile(io.BytesIO(raw)) as receipt:
+        index = json.loads(receipt.read("index.json"))
+    for layer in index["layers"].values():
+        is_sha = lambda value: type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value)
+        need(type(layer) is dict and set(layer) == {"original_sha256", "legacy_sha256", "source_sha256"}
+             and is_sha(layer["original_sha256"])
+             and (layer["legacy_sha256"] is None or is_sha(layer["legacy_sha256"]))
+             and type(layer["source_sha256"]) is list and len(layer["source_sha256"]) == 4
+             and all(is_sha(value) for value in layer["source_sha256"][:3])
+             and (layer["source_sha256"][3] is None or is_sha(layer["source_sha256"][3])),
+             "startup_receipt_layer_binding_invalid")
+
+
 def check_proof_budget(report_bytes, existing_generated_bytes):
     need(type(report_bytes) is int and report_bytes >= 0
          and type(existing_generated_bytes) is int and existing_generated_bytes >= 0
@@ -351,14 +540,14 @@ def verify_members(members, proof, source, run, artifact, guard):
     source_pins={'stock_ipa_sha256':'33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848','base_ipa_sha256':'d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1','english_ui_sha256':'b30f48cdcbc0ddfc267a0a7d265ec717a7057342bdc55c9f0d16fe3ea06fc702'}
     assert read(members/'client-languages.json')==descriptor and language_build['package']==descriptor and report['client_languages']['descriptor']==descriptor
     language=report['client_languages']['manifest'];assert language==language_build['manifest'] and language['source']==source_pins and language_build['source']==source_pins
-    validated_manifest=HERE/'delivery-pins/client-languages-real-v2.manifest.json'
-    assert sha(validated_manifest)=='21ab66246fb6647a9959f8001234dab44c6c9290685cc6f0c1bd4138d2bcbc1c' and language==read(validated_manifest)
+    validate_language_manifest(language)
+    validate_refreshed_korean_resources(language_build, language)
     language_spec=importlib.util.spec_from_file_location('delivery_client_data',ROOT/'src/idoly_local/ios_client_data.py')
     language_module=importlib.util.module_from_spec(language_spec);sys.modules[language_spec.name]=language_module;language_spec.loader.exec_module(language_module)
     language_module.validate_manifest(language)
     verify_language_proofs(smoke,members,native,probe,language,descriptor)
     assert language_build['signed_app_modified_at_runtime'] is False and language_build['runtime_string_translation'] is False
-    assert language_build['common_files']==44 and language_build['language_members']==2 and set(language['languages'])=={'ja','ko','en'}
+    assert language_build['common_files']==44 and language_build['language_members']==3 and set(language['languages'])=={'ja','ko','en'}
     english_proof=read(ROOT/'ios-unified/client-language-inputs/en-report.json')
     assert sha(ROOT/'ios-unified/client-language-inputs/en.csv')==source_pins['english_ui_sha256'] and english_proof['missing_keys']==17
     assert language_build['proofs']['english_resources']['ui_translation']==english_proof
@@ -394,6 +583,7 @@ def verify_members(members, proof, source, run, artifact, guard):
      assert app_info['IdolyUnifiedLoopbackOrigin']=='http://127.0.0.1:8080'
      assert json.loads(z.read(prefix+'LocalServer/client-languages.json'))==descriptor
      verify_bundled_payload_pin(z,prefix,report)
+     verify_bundled_startup_receipt(z,prefix,report,members,guard)
      zipped=z.getinfo(prefix+'LocalServer/client-languages.zip');assert zipped.file_size==descriptor['bytes']
      with z.open(zipped) as incoming:
       digest=hashlib.sha256()
@@ -685,7 +875,7 @@ def selected_members(archive):
             metadata += item.file_size
             need(metadata <= MAX_METADATA, "metadata_total_bound")
         files[base] = item
-    need({IPA, PACKAGE_REPORT, "SHA256SUMS", "README.txt", "simulator-smoke.json", "keyboard-lifecycle-native-test.json", "local-http-native-test.json", "octo-budget-native-test.json", "unity-host-native-test.json", "probe-build.json", "server-data-upgrade.json"} <= files.keys(), "required_artifact_members_missing")
+    need({IPA, PACKAGE_REPORT, "SHA256SUMS", "README.txt", "simulator-smoke.json", "keyboard-lifecycle-native-test.json", "local-http-native-test.json", "octo-budget-native-test.json", "unity-host-native-test.json", "probe-build.json", "server-data-upgrade.json", "startupTranslations.json"} <= files.keys(), "required_artifact_members_missing")
     return files
 
 

@@ -421,11 +421,14 @@ def test_korean_gate_rejects_stale_layout_forged_provenance_and_wrong_packaged_b
     elif damage=="wrong-logo-position":logo["transforms"][0]["position"]=[0,0]
     elif damage=="wrong-original-prefab":logo["members"][0]["original_sha256"]="0"*64
     elif damage=="broken-text-chain":proof["static_ui_translation"]["assets"][0]["output_asset_sha256"]="0"*64
-    elif damage=="caption-payload":members[report["sprites"][0]["input_member"]]+=b"wrong";rewrite()
-    elif damage=="prefab-payload":members[images.LOGO_ANDROID_MEMBER]+=b"wrong";rewrite()
+    elif damage=="caption-payload":
+        member=report["sprites"][0]["input_member"];raw=members[member];members[member]=bytes([raw[0]^1])+raw[1:];rewrite()
+    elif damage=="prefab-payload":
+        member=images.LOGO_ANDROID_MEMBER;raw=members[member];members[member]=bytes([raw[0]^1])+raw[1:];rewrite()
     elif damage=="updated-corrupt-transform":
         row=logo["transforms"][0];raw=actual[row["name"]];corrupt=bytes([raw[0]^1])+raw[1:]
         actual[row["name"]]=corrupt;row["output_sha256"]=hashlib.sha256(corrupt).hexdigest()
     elif damage=="missing-image-inputs":images_dir=None
-    with pytest.raises(ValueError):
+    expected={"caption-payload":"packaged_korean_sprite_hash_differs","prefab-payload":"packaged_korean_logo_hash_differs"}.get(damage)
+    with pytest.raises(ValueError,match=expected):
         tool.verify_language(apk,proof,"ko",COMMIT,full,prepared_ui_sha256="f"*64,korean_image_dir=images_dir)

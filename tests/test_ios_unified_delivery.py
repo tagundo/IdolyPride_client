@@ -80,7 +80,7 @@ def entry(name,size=1):
 def required_entries():
     names = (delivery.IPA,delivery.PACKAGE_REPORT,"SHA256SUMS","README.txt","simulator-smoke.json",
              "keyboard-lifecycle-native-test.json","local-http-native-test.json","octo-budget-native-test.json",
-             "unity-host-native-test.json","probe-build.json","server-data-upgrade.json")
+             "unity-host-native-test.json","probe-build.json","server-data-upgrade.json","startupTranslations.json")
     return [entry(name) for name in names]
 
 
@@ -544,3 +544,158 @@ def test_committed_language_producer_and_delivery_have_the_same_finite_closure()
     actual = ast.literal_eval(assignment.value)
     assert type(actual) is tuple and len(actual) == 11
     assert actual == delivery.LANGUAGE_PRODUCER_SOURCES
+
+
+# Exact bounded proof records from Actions 43953232317. Unchanged sprites are
+# placeholders here; the 23 actual object hashes and every changed layout are real.
+KOREAN_REFRESH_PROOF = json.loads(r'''{"common_files":44,"korean_resources_refreshed":true,"language_members":3,"proofs":{"korean_resources":{"all_other_objects_byte_identical":true,"declared_object_differences":[{"after_sha256":"ab3ce9b383db93c1dfc8c1a63cfac0ca3b5dff99084841342c67142865c1b4c5","before_sha256":"7ffd5267aa86522069f31d417ce044b535ebfbb7f2d6e494dd0efe5496ed21d6","changed":true,"class_id":213,"path_id":542},{"after_sha256":"c5047a7e349e021716a688d378fc50964bfbc6ae1d497dea29ce98a9420952f4","before_sha256":"16be9241077f25dc115e3abfaa80bbaf1a2417e4bfab004bb9fd63716821903e","changed":true,"class_id":213,"path_id":819},{"after_sha256":"64a96e12e334bae3749d9a7b1b8ef4af813dc2080d9ec150dd2df38fc5d7106f","before_sha256":"0daa3069aa20b281eb6fe7ba1271fff16b2075df8181990b4c5affa74525a9b6","changed":true,"class_id":213,"path_id":875},{"after_sha256":"31c16bcc7f437d8d227b79b4d71fc55f539b5e05437dcb28295948c103bbca1e","before_sha256":"80bbe5c96e857790e572193dfaed0734acb37a463b9b04f288bf7b76d7011ee7","changed":true,"class_id":213,"path_id":1007},{"after_sha256":"d8622057839d16f5cd0abef33d2597be1533fa652b56b0da538cd94b4458abbc","before_sha256":"fb054adfcb0364f8a0812ab063e91ffcfbe7abef795f3d5106569cca99ac1e28","changed":true,"class_id":213,"path_id":1029},{"after_sha256":"8bc768fc415c99a87e5adc844d44c8d6497cf64919d39863fef438903e7cdbff","before_sha256":"41eb393aab16d113480a46a76d4d63cf8f0842b0bcc8054fae1fda36f64991dd","changed":true,"class_id":213,"path_id":1076},{"after_sha256":"7144d7ccdf206d5d67541c77dfb3ee197a340c31bab38bcbed7ae9b195f1c4dc","before_sha256":"5f2612fddc07a34df72eba836329df1a71c1909d008b102caefa2f7dc1fe0c58","changed":true,"class_id":213,"path_id":1161},{"after_sha256":"08ae50fce5579c83084a1893f52aeafe8b7aa7bf8a081d66971ecc23d9427b74","before_sha256":"8cea3133a023bc03131384e57b2b08c08ce9b60bf9d6cb5c648ff31ce62300c9","changed":true,"class_id":213,"path_id":1342},{"after_sha256":"61f9e70fcc84c3ab26dde31b915c5975870f36afcec4a6c1937a70c6c76f8160","before_sha256":"6ad94e40cacb3535518ccfbeb9d554ae7222d33dbed050a0bfa6bcd5d760abfa","changed":true,"class_id":213,"path_id":1344},{"after_sha256":"ad88fb382f989318b3ccc919b84afdf81340467b597da8063f0fff460ed58905","before_sha256":"9682d8bf26b8f67b1ffc6110454c78de7c5679e68d1030c1327085826534ee19","changed":true,"class_id":213,"path_id":1576},{"after_sha256":"5cfb93c9c4b74dc7f5baa2d9ad617b5fff182ed13746da12e8f354f24a9bb50e","before_sha256":"08479eb31ff6e4c083ec658646706dd6fe2ca15ca9f33fd8676ca213f668d50f","changed":true,"class_id":224,"path_id":231861},{"after_sha256":"805a243bd7de534379ab050fb640acdf19ef40f5962b1df6e3aabca1f70a4dfe","before_sha256":"27181f442ff15fce8493d10564b115e75bb16e0afc2dbdc14748c53128ffe4c5","changed":true,"class_id":224,"path_id":251370},{"after_sha256":"de3190d9440761254cfc18d344b2382d442f2bad53abd2d76b814a3d9a7035b1","before_sha256":"405a65bd45c8fc6b9def4cc5bd50d7950d5b1f63d93b860b363d09b6f0ce7c9f","changed":true,"class_id":224,"path_id":253735},{"after_sha256":"7bd65663257fe23eaad847fc3e80078701516151151eb33583578cd723965c8c","before_sha256":"e28531bba225b519aa09d16dbab2547b4fd8f94016d3f08cdf5604e89b9e47f7","changed":true,"class_id":28,"path_id":418897},{"after_sha256":"a811fcfc5ecb666df17991549f1c1b439d260b734ff82ba2887f3ae7f1858f0a","before_sha256":"3d2a0aa78443049f328c1cb41a736ec7285cc1ee294010738258cf8769201066","changed":true,"class_id":28,"path_id":418898},{"after_sha256":"e73171bc77ac8e1e72aac247ce94d4d3d7532e8b34a855d713f97641fda71ed5","before_sha256":"a769993e4acfd82f3ecd42fd7269b1f5984386186b552a38b9b0811a36c20c09","changed":true,"class_id":28,"path_id":418899},{"after_sha256":"7135392bdaf21c294e55ebb2cf72b60d882bf23eb2cece04456464ea7dca5426","before_sha256":"d62d90c381bc4532ba0c44ff898cb398fb2a229f381e8dead1a2c874305e1403","changed":true,"class_id":28,"path_id":418900},{"after_sha256":"2a14a8a0214e635266fffc8c4dff9adfff86fc0d0b296901584565a04172d7e6","before_sha256":"a2529b03306de5e8b89be29d9e1dd1e04b9b26d2c553b800d0e010ccd20b4a7b","changed":true,"class_id":28,"path_id":418901},{"after_sha256":"08dc7285b6fde9d65eb56de43922a099608cfa909ababcc061978e57f43942c2","before_sha256":"395351cf2a4da7b388dad6418d845589732ad605eeb89738f075a44916cd3711","changed":true,"class_id":28,"path_id":418902},{"after_sha256":"42c4181dca2c86c075aff98a59a6c3be13776a2f320f4c32a6160d46ae0fad72","before_sha256":"5af53466ee72eab64a3dae13476844828f1f9c6e4a642249cc6b70a87e8b764e","changed":true,"class_id":28,"path_id":418903},{"after_sha256":"bab356fe0dd58e661f1fdff01ad06fe051b2114a6b7b3a60fe184728be6ef4fb","before_sha256":"5b030f23a30d6a9ad546d66c78d0cf1e1b6d826c401918cad6198396f09c88a2","changed":true,"class_id":28,"path_id":418904},{"after_sha256":"57114eeecce57925ba2c603bfa4a17b9e89fd9a376698837e81759007b32d591","before_sha256":"3229c84dd0494e435a50b143edb58255a018391f65e05174271f01d8e090c8a8","changed":true,"class_id":28,"path_id":418906},{"after_sha256":"8dbbd4e8965bfc9b9876c79f36f33cd61c4341a14633fd632e74e6eb12546c34","before_sha256":"f9ba49ce4b1a0811306b78f72171f26ab9714d5e63dfc10ce03bc6b497873a1f","changed":true,"class_id":28,"path_id":418911}],"original_stock_rebuilt":true,"output":{"bytes":80641216,"sha256":"9b3f5bb680670f91d6c3e41c5968acf49d8b9484431d5dc4d9837c786f982020"},"static_images":{"atlas_pixels_modified":false,"fixed_text_layout_policy":"original-rect-love-text-v1","fixed_text_sprites":10,"language":"ko","layout_policy":"preserved-v1-layout, Localify PNG rectangle, or fixed Love text aspect","logo_layout":{"all_other_object_bytes_identical":true,"content_size":[94.5,24.0],"full_translated_glyphs_preserved":true,"members":[],"original_frame":[96.0,32.0],"platform":"ios","policy":"love-logo-whole-label-uniform-v1","runtime_gameplay_tested":false,"transforms":[{"class_id":224,"full_png_size":[31,32],"input_sha256":"405a65bd45c8fc6b9def4cc5bd50d7950d5b1f63d93b860b363d09b6f0ce7c9f","name":"love_label_mo","object_bytes":108,"only_position_and_size_changed":true,"original_position":[-32.0,0.0],"original_size":[32.0,32.0],"output_sha256":"de3190d9440761254cfc18d344b2382d442f2bad53abd2d76b814a3d9a7035b1","path_id":253735,"position":[-35.625,0.0],"size":[23.25,24.0],"uniform_scale":0.75},{"class_id":224,"full_png_size":[32,32],"input_sha256":"08479eb31ff6e4c083ec658646706dd6fe2ca15ca9f33fd8676ca213f668d50f","name":"love_label_shi","object_bytes":108,"only_position_and_size_changed":true,"original_position":[0.0,0.0],"original_size":[32.0,32.0],"output_sha256":"5cfb93c9c4b74dc7f5baa2d9ad617b5fff182ed13746da12e8f354f24a9bb50e","path_id":231861,"position":[-12.0,0.0],"size":[24.0,24.0],"uniform_scale":0.75},{"class_id":224,"full_png_size":[63,32],"input_sha256":"27181f442ff15fce8493d10564b115e75bb16e0afc2dbdc14748c53128ffe4c5","name":"love_label_koi","object_bytes":108,"only_position_and_size_changed":true,"original_position":[32.0,0.0],"original_size":[32.0,32.0],"output_sha256":"805a243bd7de534379ab050fb640acdf19ef40f5962b1df6e3aabca1f70a4dfe","path_id":251370,"position":[23.625,0.0],"size":[47.25,24.0],"uniform_scale":0.75}],"uniform_scale":0.75},"lossy_recompression":false,"original_layout_preserved":false,"original_pivots_borders_pixels_per_unit_preserved":true,"original_sprite_IDs_preserved":true,"platform":"ios","policy":"korean-static-sprites-v2","private_sprite_render_data_keys":true,"runtime_image_hooks":false,"schema":2,"sprites":[{"PNG_resampled":false,"content_size":[250,40],"input_sha256":"d989d01c45ea559db49c94d0bacec8937b9c31985d979bcc7bbb044bad76a598","layout_policy":"original-rect-love-text-v1","layout_size":[280,40],"name":"love_btn_achievement","original_layout_size":[280.0,40.0],"output_bytes":1552,"output_sha256":"61f9e70fcc84c3ab26dde31b915c5975870f36afcec4a6c1937a70c6c76f8160","png_sha256":"1c225e517ab7c7ccb41793ef5bea65201a4890b014ebff408c0007119189c6fe","png_size":[250,40],"private_texture_path_id":418897,"readback_pixel_exact":true,"sprite_path_id":1344,"texture_bytes":44952,"texture_sha256":"7bd65663257fe23eaad847fc3e80078701516151151eb33583578cd723965c8c","transparent_padding_offset":[15,0]},{"PNG_resampled":false,"content_size":[147,40],"input_sha256":"90afc5a10e79f544d23a88572c64076e331337a6b1aad462bacbb239dfbdc467","layout_policy":"original-rect-love-text-v1","layout_size":[159,40],"name":"love_btn_fin","original_layout_size":[159.0,40.0],"output_bytes":896,"output_sha256":"08ae50fce5579c83084a1893f52aeafe8b7aa7bf8a081d66971ecc23d9427b74","png_sha256":"e88f419e01512c3ddb21a823938b78e29d69400e142d4b264cfcab219acef526","png_size":[147,40],"private_texture_path_id":418898,"readback_pixel_exact":true,"sprite_path_id":1342,"texture_bytes":25584,"texture_sha256":"a811fcfc5ecb666df17991549f1c1b439d260b734ff82ba2887f3ae7f1858f0a","transparent_padding_offset":[6,0]},{"PNG_resampled":true,"content_size":[72,27],"input_sha256":"3c8b2c8d64aa551f89787e7b0fd3f5c35ef11978a8414a36be7548190230fa33","layout_policy":"original-rect-love-text-v1","layout_size":[72,28],"name":"love_btn_max","original_layout_size":[72.0,28.0],"output_bytes":568,"output_sha256":"7144d7ccdf206d5d67541c77dfb3ee197a340c31bab38bcbed7ae9b195f1c4dc","png_sha256":"260d3c1a901c253c06058e0a39fc0cb98fe03c3041b1c31ca7a250874687da13","png_size":[74,28],"private_texture_path_id":418899,"readback_pixel_exact":true,"sprite_path_id":1161,"texture_bytes":8208,"texture_sha256":"e73171bc77ac8e1e72aac247ce94d4d3d7532e8b34a855d713f97641fda71ed5","transparent_padding_offset":[0,0]},{"PNG_resampled":false,"content_size":[78,37],"input_sha256":"e7cbf50d55f6e611f3a4122bacf1a653c911462ce2eeae00615db4ecaa622ec4","layout_policy":"original-rect-love-text-v1","layout_size":[80,40],"name":"love_btn_mission","original_layout_size":[80.0,40.0],"output_bytes":616,"output_sha256":"d8622057839d16f5cd0abef33d2597be1533fa652b56b0da538cd94b4458abbc","png_sha256":"397c9b6ca09ac4d5a2c8252ada8106cdbc4d687472f1614d32f0bddf24e30d67","png_size":[78,37],"private_texture_path_id":418900,"readback_pixel_exact":true,"sprite_path_id":1029,"texture_bytes":12948,"texture_sha256":"7135392bdaf21c294e55ebb2cf72b60d882bf23eb2cece04456464ea7dca5426","transparent_padding_offset":[1,1]},{"PNG_resampled":false,"content_size":[96,48],"input_sha256":"30c5b587c2fb5edb083e5b5d2f517b4bedaab75cfb22c6616861dcb9ce36a6f3","layout_policy":"original-rect-love-text-v1","layout_size":[240,48],"name":"love_btn_playing","original_layout_size":[240.0,48.0],"output_bytes":1180,"output_sha256":"c5047a7e349e021716a688d378fc50964bfbc6ae1d497dea29ce98a9420952f4","png_sha256":"59ec50bd4243fbde660b06851fe1be8716ca72cac36417a0937cadcd7bdaa69a","png_size":[96,48],"private_texture_path_id":418901,"readback_pixel_exact":true,"sprite_path_id":819,"texture_bytes":46228,"texture_sha256":"2a14a8a0214e635266fffc8c4dff9adfff86fc0d0b296901584565a04172d7e6","transparent_padding_offset":[72,0]},{"PNG_resampled":false,"content_size":[72,40],"input_sha256":"7705b5606c35bc9fe429976b85d90f04506d2cca252549696b86dedcfd97a413","layout_policy":"original-rect-love-text-v1","layout_size":[194,40],"name":"love_btn_present","original_layout_size":[194.0,40.0],"output_bytes":928,"output_sha256":"31c16bcc7f437d8d227b79b4d71fc55f539b5e05437dcb28295948c103bbca1e","png_sha256":"e17fe8648b4ecb9882f3f4cd33fd908aafc91a13a3218db44d0daef3d6242140","png_size":[72,40],"private_texture_path_id":418902,"readback_pixel_exact":true,"sprite_path_id":1007,"texture_bytes":31188,"texture_sha256":"08dc7285b6fde9d65eb56de43922a099608cfa909ababcc061978e57f43942c2","transparent_padding_offset":[61,0]},{"PNG_resampled":false,"content_size":[75,40],"input_sha256":"94877bb1b0429fe795fb79297ea532c20e736b755d4c1c10dd6968094f08b74b","layout_policy":"original-rect-love-text-v1","layout_size":[80,40],"name":"love_btn_setting","original_layout_size":[80.0,40.0],"output_bytes":644,"output_sha256":"8bc768fc415c99a87e5adc844d44c8d6497cf64919d39863fef438903e7cdbff","png_sha256":"5a86b66900da43d8674e05c9388a9dca659db299c6fff240fcdf27fd63f5de68","png_size":[75,40],"private_texture_path_id":418903,"readback_pixel_exact":true,"sprite_path_id":1076,"texture_bytes":12948,"texture_sha256":"42c4181dca2c86c075aff98a59a6c3be13776a2f320f4c32a6160d46ae0fad72","transparent_padding_offset":[2,0]},{"PNG_resampled":false,"content_size":[185,37],"input_sha256":"b354e4bf0bbf5e1957dfce6d19c3353e459f95504a4312ee483a24879e9e8624","layout_policy":"original-rect-love-text-v1","layout_size":[192,40],"name":"love_btn_status","original_layout_size":[192.0,40.0],"output_bytes":940,"output_sha256":"64a96e12e334bae3749d9a7b1b8ef4af813dc2080d9ec150dd2df38fc5d7106f","png_sha256":"1a35c8d1735721cde72701ff2febb69535f9ebb19844b5c9b241c487844b2473","png_size":[185,37],"private_texture_path_id":418904,"readback_pixel_exact":true,"sprite_path_id":875,"texture_bytes":30864,"texture_sha256":"bab356fe0dd58e661f1fdff01ad06fe051b2114a6b7b3a60fe184728be6ef4fb","transparent_padding_offset":[3,1]},{"PNG_resampled":false,"content_size":[184,48],"input_sha256":"8c5771c8836a71a9944424d18b6c7fac5c011dcb06fd426d7afe0e0b24aa24ab","layout_policy":"original-rect-love-text-v1","layout_size":[192,48],"name":"love_button_start","original_layout_size":[192.0,48.0],"output_bytes":1292,"output_sha256":"ab3ce9b383db93c1dfc8c1a63cfac0ca3b5dff99084841342c67142865c1b4c5","png_sha256":"9cd53381f154c4ccce414fce9ee816ea6d7b4fdb0612e06ce6a821bbd1ee824f","png_size":[184,48],"private_texture_path_id":418906,"readback_pixel_exact":true,"sprite_path_id":542,"texture_bytes":37012,"texture_sha256":"57114eeecce57925ba2c603bfa4a17b9e89fd9a376698837e81759007b32d591","transparent_padding_offset":[4,0]},{"PNG_resampled":false,"content_size":[96,28],"input_sha256":"f5404b603e61255ca89fcaeeae714e42f66bda6fa73c23a3c75a24f82268e50f","layout_policy":"original-rect-love-text-v1","layout_size":[96,32],"name":"love_header_level_label","original_layout_size":[96.0,32.0],"output_bytes":440,"output_sha256":"ad88fb382f989318b3ccc919b84afdf81340467b597da8063f0fff460ed58905","png_sha256":"5b4c6479eb59d8bb382e0850a80bc07c7b992440f28d4356ee624743431df821","png_size":[96,28],"private_texture_path_id":418911,"readback_pixel_exact":true,"sprite_path_id":1576,"texture_bytes":12440,"texture_sha256":"8dbbd4e8965bfc9b9876c79f36f33cd61c4341a14633fd632e74e6eb12546c34","transparent_padding_offset":[0,2]}],"texture_format":"RGBA32","translated_sprites":139},"type_graph_and_external_references_unchanged":true,"unchanged_object_count":418937}}}''')
+
+
+@pytest.fixture
+def refreshed_korean_report():
+    report = deepcopy(KOREAN_REFRESH_PROOF)
+    sprites = report["proofs"]["korean_resources"]["static_images"]["sprites"]
+    sprites.extend({"name": "unchanged-sprite-" + str(i)} for i in range(129))
+    language = delivery.read(delivery.HERE / "delivery-pins/client-languages-real-v3.manifest.json")
+    return report, language
+
+
+def test_refreshed_korean_resources_bind_actual_23_object_graph_and_all_other_bytes(refreshed_korean_report):
+    report, language = refreshed_korean_report
+    assert delivery.validate_refreshed_korean_resources(report, language) is None
+    delivery.validate_language_manifest(language)
+    assert len(language["common"]) == 44
+    assert {key: len(language["common"]) + len(value)
+            for key, value in language["languages"].items()} == {"ja": 46, "ko": 46, "en": 46}
+    assert sum(row["source"] == "archive" for value in language["languages"].values()
+               for row in value.values()) == 3
+
+
+@pytest.mark.parametrize("damage", ["not-refreshed", "legacy-members", "bool-members", "output-sha",
+    "source-base", "other-objects", "unchanged-count", "bool-unchanged-count", "missing-change", "extra-change",
+    "changed-sha", "duplicate-id", "wrong-class", "false-change", "text-count", "text-layout", "text-padding",
+    "text-texture", "missing-fixed-text", "duplicate-sprite-name", "logo-scale", "logo-position", "logo-source",
+    "logo-output", "logo-object-bytes", "logo-other-fields", "duplicate-transform", "missing-logo"])
+def test_refreshed_korean_resources_reject_partial_stale_or_unbounded_proofs(refreshed_korean_report, damage):
+    report, language = refreshed_korean_report
+    proof = report["proofs"]["korean_resources"]
+    differences = proof["declared_object_differences"]
+    images = proof["static_images"]
+    fixed = images["sprites"][0]
+    logo = images["logo_layout"]
+    if damage == "not-refreshed": report["korean_resources_refreshed"] = False
+    elif damage == "legacy-members": report["language_members"] = 2
+    elif damage == "bool-members": report["language_members"] = True
+    elif damage == "output-sha": proof["output"]["sha256"] = "f" * 64
+    elif damage == "source-base": language["languages"]["ko"]["Data/resources.assets"]["source"] = "base"
+    elif damage == "other-objects": proof["all_other_objects_byte_identical"] = 1
+    elif damage == "unchanged-count": proof["unchanged_object_count"] = 418938
+    elif damage == "bool-unchanged-count": proof["unchanged_object_count"] = True
+    elif damage == "missing-change": differences.pop()
+    elif damage == "extra-change": differences.append(deepcopy(differences[-1]))
+    elif damage == "changed-sha": differences[0]["after_sha256"] = "e" * 64
+    elif damage == "duplicate-id": differences[0]["path_id"] = differences[1]["path_id"]
+    elif damage == "wrong-class": differences[0]["class_id"] = 28
+    elif damage == "false-change": differences[0]["changed"] = False
+    elif damage == "text-count": images["fixed_text_sprites"] = 9
+    elif damage == "text-layout": fixed["layout_size"][0] += 1
+    elif damage == "text-padding": fixed["transparent_padding_offset"][0] += 1
+    elif damage == "text-texture": fixed["texture_sha256"] = "e" * 64
+    elif damage == "missing-fixed-text": fixed["layout_policy"] = "preserved-v1-layout"
+    elif damage == "duplicate-sprite-name": images["sprites"][-1]["name"] = fixed["name"]
+    elif damage == "logo-scale": logo["uniform_scale"] = .7
+    elif damage == "logo-position": logo["transforms"][0]["position"][0] += 1
+    elif damage == "logo-source": logo["transforms"][0]["input_sha256"] = "e" * 64
+    elif damage == "logo-output": logo["transforms"][0]["output_sha256"] = "e" * 64
+    elif damage == "logo-object-bytes": logo["transforms"][0]["object_bytes"] = 109
+    elif damage == "logo-other-fields": logo["transforms"][0]["only_position_and_size_changed"] = 1
+    elif damage == "duplicate-transform": logo["transforms"][0] = deepcopy(logo["transforms"][1])
+    elif damage == "missing-logo": del images["logo_layout"]
+    with pytest.raises(delivery.DeliveryError):
+        delivery.validate_refreshed_korean_resources(report, language)
+
+
+def test_current_v3_pin_is_exact_and_legacy_v2_is_immutable():
+    pins = delivery.HERE / "delivery-pins"
+    current = pins / "client-languages-real-v3.manifest.json"
+    legacy = pins / "client-languages-real-v2.manifest.json"
+    assert current.stat().st_size == 8674
+    assert delivery.sha(current) == delivery.LANGUAGE_MANIFEST_SHA256
+    assert delivery.sha(legacy) == "21ab66246fb6647a9959f8001234dab44c6c9290685cc6f0c1bd4138d2bcbc1c"
+    assert "ios-unified/delivery-pins/client-languages-real-v3.manifest.json" in delivery.DELIVERY_SOURCES
+    assert "ios-unified/delivery-pins/client-languages-real-v2.manifest.json" not in delivery.DELIVERY_SOURCES
+    with pytest.raises(delivery.DeliveryError, match="language_manifest_pin_differs"):
+        delivery.validate_language_manifest(delivery.read(legacy))
+
+
+def test_public_startup_receipt_producer_sources_are_frozen_for_delivery():
+    assert {"tools/build_startup_translation_receipt.py", "src/idoly_local/startup_receipt.py"} <= set(delivery.DELIVERY_SOURCES)
+
+
+@pytest.mark.parametrize("damage", [None, "missing-public", "schema-bool", "size-bool", "oversize-pin",
+    "uppercase-sha", "platform", "extra-key", "duplicate-pin-key", "report", "report-schema-bool", "ipa-pin", "member-sha",
+    "zip-sha", "envelope", "layer-source", "layer-extra", "symlink", "duplicate-member", "oversized-member"])
+def test_delivery_requires_actual_signed_app_startup_receipt(tmp_path, damage):
+    import io
+    from types import SimpleNamespace
+    from zipfile import ZipFile, ZipInfo
+    layer = {"original_sha256": "a" * 64, "legacy_sha256": None,
+             "source_sha256": ["b" * 64, "c" * 64, "d" * 64, None]}
+    index = {"schema": 1, "platform": "ios", "layers": {"ko": deepcopy(layer), "en": deepcopy(layer)}}
+    if damage == "envelope": index["platform"] = "android"
+    if damage == "layer-source": index["layers"]["ko"]["source_sha256"][0] = True
+    if damage == "layer-extra": index["layers"]["en"]["private_account"] = "forbidden"
+    inner = io.BytesIO()
+    with ZipFile(inner, "w") as receipt:
+        receipt.writestr("index.json", json.dumps(index))
+        for language in ("ko", "en"):
+            for name in ("metadata.json", "base.pb", "rebased.pb"):
+                receipt.writestr(language + "/" + name, b"public fixture")
+    raw = inner.getvalue()
+    pin = {"schema": 1, "platform": "ios", "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    if damage == "schema-bool": pin["schema"] = True
+    elif damage == "size-bool": pin["bytes"] = True
+    elif damage == "oversize-pin": pin["bytes"] = 16 * delivery.MIB + 1
+    elif damage == "uppercase-sha": pin["sha256"] = "A" * 64
+    elif damage == "platform": pin["platform"] = "android"
+    elif damage == "extra-key": pin["path"] = "/private/account"
+    elif damage == "zip-sha": pin["sha256"] = "f" * 64
+    public = (json.dumps(pin, sort_keys=True) + "\n").encode()
+    if damage == "duplicate-pin-key": public = public[:-2] + b',"schema":1}\n'
+    if damage != "missing-public": (tmp_path / "startupTranslations.json").write_bytes(public)
+    embedded = public if damage != "ipa-pin" else public + b" "
+    report = {"startup_translations": deepcopy(pin), "member_sha256": {}}
+    if damage == "report": report["startup_translations"]["bytes"] = len(raw) + 1
+    if damage == "report-schema-bool": report["startup_translations"]["schema"] = True
+    prefix = "Payload/Game.app/"
+    path = tmp_path / "tiny.ipa"
+    with ZipFile(path, "w") as ipa:
+        for name, value in (("startupTranslations.json", embedded), ("startupTranslations.zip", raw)):
+            member = prefix + "LocalServer/" + name
+            if damage == "symlink" and name.endswith(".zip"):
+                info = ZipInfo(member); info.create_system = 3; info.external_attr = 0o120777 << 16
+                ipa.writestr(info, value)
+            else: ipa.writestr(member, value)
+            report["member_sha256"][member] = hashlib.sha256(value).hexdigest()
+        if damage == "duplicate-member":
+            with pytest.warns(UserWarning, match="Duplicate name"):
+                ipa.writestr(prefix + "LocalServer/startupTranslations.zip", raw)
+    if damage == "member-sha": report["member_sha256"][prefix + "LocalServer/startupTranslations.zip"] = "e" * 64
+    with ZipFile(path) as ipa:
+        if damage == "oversized-member":
+            ipa.getinfo(prefix + "LocalServer/startupTranslations.zip").file_size = 16 * delivery.MIB + 1
+        if damage is None:
+            checks = []
+            delivery.verify_bundled_startup_receipt(ipa, prefix, report, tmp_path,
+                                                  SimpleNamespace(check=lambda: checks.append(True)))
+            assert checks
+        else:
+            with pytest.raises(delivery.DeliveryError):
+                delivery.verify_bundled_startup_receipt(ipa, prefix, report, tmp_path,
+                                                      SimpleNamespace(check=lambda: None))
+
+
+def test_current_delivery_artifact_requires_public_startup_receipt_pin():
+    items = [item for item in required_entries() if item.filename != "startupTranslations.json"]
+    with pytest.raises(delivery.DeliveryError, match="required_artifact_members_missing"):
+        delivery.selected_members(Inventory(items))

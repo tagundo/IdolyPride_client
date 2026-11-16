@@ -98,6 +98,7 @@ ANDROID_CLIENT_SOURCES = ("tools/release_android_clients.py", "tools/fetch_korea
     "client-presentation/build_full_client.py", "client-presentation/native/bridge.cpp",
     "client-presentation/native/profile.json", "src/idoly_local/ui_assets.py",
     "src/idoly_local/font_assets.py", "src/idoly_local/static_ui_assets.py",
+    "src/idoly_local/static_ui_images.py", "src/idoly_local/static_ui_textures.py",
     "src/idoly_local/ui_display_literals.py", "src/idoly_local/story_loading_prefab.py",
     "ios-unified/client-language-inputs/en.csv", "ios-unified/client-language-inputs/en-report.json")
 ANDROID_CLIENT_REPORT_FILES = frozenset((
@@ -717,6 +718,21 @@ def validate_platform_files(directory, report, guard):
 
 
 
+def validate_korean_image_readbacks(evidence,provenance):
+    need(type(evidence) is dict,"korean_client_layout_missing")
+    fixed={"fixed_text_layout_policy":"original-rect-love-text-v1","fixed_text_sprites":10,
+           "packaged_sprite_pixel_readbacks":13,"logo_policy":"love-logo-whole-label-uniform-v1",
+           "logo_transform_readbacks":3,"text_to_layout_chain_verified":True}
+    need(set(evidence)==set(fixed)|{"logo_prefab_sha256"}
+         and all(type(evidence.get(key)) is type(value) and evidence[key]==value for key,value in fixed.items())
+         and is_sha(evidence["logo_prefab_sha256"]),"korean_client_layout_readbacks_differ")
+    members=provenance.get("static_ui_images",{}).get("logo_layout",{}).get("members")
+    need(type(members) is list and len(members)==1 and type(members[0]) is dict
+         and members[0].get("member")=="assets/bin/Data/ed811ae7dad6e450c8b1306dc4b48c85"
+         and members[0].get("output_sha256")==evidence["logo_prefab_sha256"],
+         "korean_client_layout_provenance_differs")
+
+
 def validate_android_clients(directory, source, run):
     report = read_json(directory/"android-clients-report.json")
     need(type(report.get("schema")) is int and report["schema"] == 1 and report.get("status") == "PASS"
@@ -751,7 +767,10 @@ def validate_android_clients(directory, source, run):
         info = path.lstat()
         need(stat.S_ISREG(info.st_mode) and info.st_size == expected["bytes"] and digest(path) == expected["sha256"],
              "android_clients_report_digest_differs")
-        read_json(path)
+        proof=read_json(path)
+        if name==ANDROID_LANGUAGE_CLIENTS["ko"].replace(".apk",".provenance.json"):
+            evidence=report.get("packaging_evidence",{}).get("ko",{}).get("korean_image_layout")
+            validate_korean_image_readbacks(evidence,proof)
     rows = report.get("binaries")
     need(type(rows) is list and len(rows) == len(ANDROID_LANGUAGE_CLIENTS)
          and all(type(row) is dict for row in rows)

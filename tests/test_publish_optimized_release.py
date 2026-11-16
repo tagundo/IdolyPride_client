@@ -750,7 +750,10 @@ def client_report_fixture(directory):
     for name in publisher.ANDROID_CLIENT_REPORT_FILES:
         path = directory/name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text('{"schema":1}\n')
+        proof={"schema":1}
+        if name==publisher.ANDROID_LANGUAGE_CLIENTS["ko"].replace(".apk",".provenance.json"):
+            proof["static_ui_images"]={"logo_layout":{"members":[{"member":"assets/bin/Data/ed811ae7dad6e450c8b1306dc4b48c85","output_sha256":HASH}]}}
+        path.write_text(json.dumps(proof)+"\n")
         reports[name] = {"bytes": path.stat().st_size, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     binaries = []
     for language, name in publisher.ANDROID_LANGUAGE_CLIENTS.items():
@@ -762,6 +765,10 @@ def client_report_fixture(directory):
                          "certificate_sha256": publisher.ANDROID_CLIENT_CERTIFICATE})
     return {"schema": 1, "status": "PASS", "source_commit": SOURCE, "run_id": RUN,
             "languages": ["ko", "ja", "en"], "binaries": binaries,
+            "packaging_evidence":{"ko":{"korean_image_layout":{
+                "fixed_text_layout_policy":"original-rect-love-text-v1","fixed_text_sprites":10,
+                "packaged_sprite_pixel_readbacks":13,"logo_policy":"love-logo-whole-label-uniform-v1",
+                "logo_prefab_sha256":HASH,"logo_transform_readbacks":3,"text_to_layout_chain_verified":True}}},
             "inputs": {**deepcopy(publisher.ANDROID_CLIENT_INPUTS),
                 "shadowhook": {"bytes": 461264, "sha256": "2cad01ff4d59542958775e19f281981a7e84b39670b5fae75905b8511e10c7cd"}},
             "source_sha256": {name: HASH for name in publisher.ANDROID_CLIENT_SOURCES},
@@ -1128,3 +1135,18 @@ def test_publication_keeps_latest_and_base_junit_evidence_without_extra_binaries
     assert (output / "portable/latest-media-contracts.xml").read_bytes() == latest.read_bytes()
     assert result["portable/latest-media-contracts.xml"]["sha256"] == publisher.digest(latest)
     assert not list(output.rglob("*.apk")) and not list(output.rglob("*.txt"))
+
+
+@pytest.mark.parametrize("field,value",[("fixed_text_sprites",9),("fixed_text_sprites",True),
+    ("packaged_sprite_pixel_readbacks",12),("logo_transform_readbacks",2),
+    ("text_to_layout_chain_verified",1),("logo_policy","old-squeezed-layout"),
+    ("logo_prefab_sha256","f"*64)])
+def test_publication_rejects_missing_packaged_korean_image_checks(tmp_path,field,value):
+    import json
+    report=client_report_fixture(tmp_path)
+    evidence=report["packaging_evidence"]["ko"]["korean_image_layout"]
+    proof=json.loads((tmp_path/publisher.ANDROID_LANGUAGE_CLIENTS["ko"].replace(".apk",".provenance.json")).read_text())
+    publisher.validate_korean_image_readbacks(evidence,proof)
+    evidence[field]=value
+    with pytest.raises(publisher.ReleaseError,match="korean_client_layout"):
+        publisher.validate_korean_image_readbacks(evidence,proof)
