@@ -331,6 +331,9 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         state = State(self.root / "state.db")
         new_profile(state, self.schema, "sandbox", "Original")
         new_profile(state, self.schema, "second-slot", "Second")
+        original_account = state.account_snapshot("sandbox")
+        original_payload = state.snapshot("sandbox")[0]
+        self.assertEqual(state.starter_version("sandbox"), 0)
         marker = self.schema.response_type("/api.User/Get")()
         marker.user.name = "CaptureOld"
         raw = marker.SerializeToString()
@@ -341,7 +344,10 @@ class EmbeddedRuntimeTests(unittest.TestCase):
 
         legacy = self.start()
         original_prepared = _Application.created[-1]
-        self.assertEqual(self._real_user_get(original_prepared), raw)
+        # Explicit imported snapshots (origin zero) remain authoritative even
+        # for the original sandbox; retaining a capture never overrides SQL.
+        self.assertEqual(self._real_user_get(original_prepared), original_payload)
+        self.assertEqual(original_prepared.fixtures.get("/api.User/Get", b""), raw)
         self.assertEqual(original_prepared.fixtures.directory, self.root / "fixtures")
         legacy.stop()
 
@@ -388,7 +394,9 @@ class EmbeddedRuntimeTests(unittest.TestCase):
                                                       "expected_revision": revision})
         self.start()
         self.assertEqual(_Application.created[-1].fixtures.directory, self.root / "fixtures")
-        self.assertEqual(self._real_user_get(_Application.created[-1]), raw)
+        self.assertEqual(self._real_user_get(_Application.created[-1]), original_payload)
+        self.assertEqual(_Application.created[-1].fixtures.get("/api.User/Get", b""), raw)
+        self.assertEqual(state.account_snapshot("sandbox"), original_account)
         self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
         self.assertEqual(source.read_bytes(), raw)
 

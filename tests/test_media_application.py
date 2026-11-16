@@ -60,18 +60,31 @@ def test_media_rejects_a_master_response_without_a_usable_version(game, tmp_path
         app(game, tmp_path, True, master_response=raw)
 
 
-def test_media_user_get_uses_live_state_while_normal_fixture_precedence_is_unchanged(game, tmp_path):
+@pytest.mark.parametrize("starter_version", [0, 1])
+def test_media_user_get_uses_live_state_and_normal_captures_only_for_starters(game, tmp_path, starter_version):
+    # The fixture saves an explicit imported snapshot by default. A known
+    # positive starter retains ordinary replay compatibility; media always
+    # serves its live database regardless of that provenance marker.
+    with game.state.connect() as db:
+        db.execute("UPDATE starter_profiles SET version=? WHERE profile=?", (starter_version, "media"))
     response = game.schema.response_type("/api.User/Get")()
     response.user.name = "Captured old account"
     captured(game, tmp_path, "/api.User/Get", response)
-    assert invoke(game, app(game, tmp_path, False), "/api.User/Get").user.name == "Captured old account"
-    application = app(game, tmp_path, True)
+    manifest = (tmp_path / "fixtures/manifest.json").read_bytes()
     before = game.state.snapshot("media")
+    normal = app(game, tmp_path, False)
+    expected = "Captured old account" if starter_version else "Media"
+    assert invoke(game, normal, "/api.User/Get").user.name == expected
+    application = app(game, tmp_path, True)
     assert invoke(game, application, "/api.User/Get").user.name == "Media"
     assert game.state.snapshot("media") == before
-    with pytest.raises(RpcFailure) as denied:
-        invoke(game, application, "/api.User/Get", authenticated=False)
-    assert denied.value.code == RpcCode.UNAUTHENTICATED
+    assert game.state.starter_version("media") == starter_version
+    assert (tmp_path / "fixtures/manifest.json").read_bytes() == manifest
+    assert normal.fixtures.get("/api.User/Get", b"") == response.SerializeToString()
+    for current in (normal, application):
+        with pytest.raises(RpcFailure) as denied:
+            invoke(game, current, "/api.User/Get", authenticated=False)
+        assert denied.value.code == RpcCode.UNAUTHENTICATED
 
 
 def test_media_360_catalog_route_keeps_auth_and_ignores_old_account_capture(game, tmp_path):
