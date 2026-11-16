@@ -69,6 +69,7 @@ def frozen(tmp_path, monkeypatch):
              "data/master-json/!version.txt": (subject.MASTER_VERSION+"\n").encode(),
              "data/love-compatibility.json": b'{"schema":1}',
              "data/love-legacy-rules.json": b'{"schema":1,"legacy":true}'}
+    files[subject.EMPTY_PUBLIC_RESPONSE] = b""
     packs, tag_packs = [], []
     for i in range(202):
         identity, name = "Pack%03d"%i, "original-%03d"%i
@@ -345,3 +346,12 @@ def test_semantic_envelope_is_finite_and_bound_to_typed_receipt_hash(frozen, dam
     write_pin(frozen)
     with pytest.raises(subject.LatestServerDataPinError, match="semantic_controls"):
         subject.load_pin()
+
+
+@pytest.mark.parametrize("name,size,digest,expected", [
+    ("exact", 0, "empty", True), ("other", 0, "empty", False),
+    ("exact", 0, "wrong", False), ("exact", False, "empty", False)])
+def test_only_the_observed_original_empty_master_rule_response_is_allowed(name,size,digest,expected):
+    path = subject.EMPTY_PUBLIC_RESPONSE if name == "exact" else "data/public-fixtures/responses/api.Master-Rule-"+("a"*64)+".pb"
+    digest = subject.EMPTY_SHA256 if digest == "empty" else "0"*64
+    assert subject._row({"path":path,"bytes":size,"sha256":digest}) is expected

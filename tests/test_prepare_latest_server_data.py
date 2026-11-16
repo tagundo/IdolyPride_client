@@ -249,3 +249,17 @@ def test_fixed_callback_failure_receipt_does_not_become_pass_or_export_raw_error
     assert value['receipt']['reason_code']=='audited_master_semantics_changed'
     assert b'secret' not in raw and b'raw remote' not in raw
     assert not (tmp_path/'public/latest-semantic-controls.json').exists()
+
+
+def test_only_byte_pinned_historical_empty_rule_protobuf_is_preserved(tmp_path):
+    public=tmp_path/'public';target=public/m.EMPTY_PUBLIC_PB.removeprefix('data/')
+    target.parent.mkdir(parents=True);target.write_bytes(b'')
+    expected=[{'path':m.EMPTY_PUBLIC_PB,'bytes':0,'sha256':m.EMPTY_SHA256}]
+    assert m.file_rows(public)==expected
+    output=tmp_path/'payload.zip';m.write_payload(public,output)
+    with ZipFile(output) as archive:assert m.archive_rows(archive)==expected
+    (public/'unrelated.pb').write_bytes(b'')
+    with pytest.raises(m.PreparationError,match='latest_generated_member_invalid'):m.file_rows(public)
+    assert m.member_extent(m.EMPTY_PUBLIC_PB,0)
+    assert not m.member_extent(m.EMPTY_PUBLIC_PB.replace('Master-Rule','Master-GetHelpCategory'),0)
+    assert not m.member_extent(m.EMPTY_PUBLIC_PB,True)

@@ -74,6 +74,8 @@ MIB = 1024*1024
 MAX_PIN, MAX_PROOF, MAX_MANIFEST = MIB, 512*1024, 2*MIB
 MAX_PAYLOAD, MAX_EXPANDED, MAX_MEMBERS = 512*MIB, 1024*MIB, 2048
 MANIFEST = "data/payload-manifest.json"
+EMPTY_PUBLIC_RESPONSE = "data/public-fixtures/responses/api.Master-Rule-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.pb"
+EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 CHUNK = 64*1024
 _DERIVATION = {"kind": "complete-public-member-replacement", "native_apply": "verified-copy",
                "sqlcipher_bytes_frozen": True, "raw_compile_repeat_byte_identity_claim": False}
@@ -226,7 +228,10 @@ def base_pin():
 
 def _row(value):
     return (type(value) is dict and set(value) == {"path", "bytes", "sha256"}
-            and _public_name(value["path"]) and _int(value["bytes"], 1, MAX_EXPANDED)
+            and _public_name(value["path"])
+            and (_int(value["bytes"], 1, MAX_EXPANDED)
+                 or type(value["bytes"]) is int and value["bytes"] == 0
+                 and value["path"] == EMPTY_PUBLIC_RESPONSE and value["sha256"] == EMPTY_SHA256)
             and _sha(value["sha256"]))
 
 
@@ -523,7 +528,9 @@ def verify_payload(path):
                     _need(info.filename == info.orig_filename and _public_name(info.filename)
                           and not info.is_dir() and mode in (0, stat.S_IFREG) and not info.flag_bits & 1
                           and info.compress_type in (ZIP_STORED, ZIP_DEFLATED)
-                          and _int(info.file_size, 1, MAX_EXPANDED), "latest_data_zip_member_invalid")
+                          and (_int(info.file_size, 1, MAX_EXPANDED)
+                               or info.file_size == 0 and info.filename == EMPTY_PUBLIC_RESPONSE),
+                          "latest_data_zip_member_invalid")
                     expanded += info.file_size
                     _need(expanded <= MAX_EXPANDED, "latest_data_expanded_bound")
                     value, count = hashlib.sha256(), 0

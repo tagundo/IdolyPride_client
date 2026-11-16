@@ -61,6 +61,8 @@ RAW_TABLES=tuple(sorted(('Character','CharacterActivityLevel','Costume','Hair','
  'ExcursionGazeReaction','ExcursionPlace','ExcursionPlaceSetting','LoveHomeAction','LoveLevel','LoveStoryEpisode',
  'LoveColor','Condition','EventMission','CardImage','Decoration')))
 MANIFEST='data/payload-manifest.json'
+EMPTY_PUBLIC_PB='data/public-fixtures/responses/api.Master-Rule-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855.pb'
+EMPTY_SHA256='e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 BLOB_NAME='data/latest-server-overlay.zip'
 MAX_PROOF=512*1024
 MAX_METADATA=8*1024*1024
@@ -132,6 +134,12 @@ def safe_name(name):
         and all(part not in ('','.','..') for part in path.parts) and not any(ord(c)<32 or c in '\\:' for c in name))
 
 
+def member_extent(name,size):
+    # One byte-pinned historical fixture is a valid empty protobuf response.
+    # No other empty member is admitted, including similarly named methods.
+    return type(size) is int and 0<=size<=MAX_FILE and (size>0 or name==EMPTY_PUBLIC_PB)
+
+
 def archive_rows(archive):
     infos=archive.infolist();need(0<len(infos)<=2048,'latest_member_count_bound')
     seen=set();rows=[];total=0
@@ -139,12 +147,12 @@ def archive_rows(archive):
         need(safe_name(info.filename) and info.filename not in seen and not info.is_dir()
              and not info.flag_bits&1 and stat.S_IFMT(info.external_attr>>16) in (0,stat.S_IFREG),'latest_member_invalid')
         seen.add(info.filename);total+=info.file_size
-        need(0<info.file_size<=MAX_FILE and total<=MAX_EXPANDED,'latest_member_extent')
+        need(member_extent(info.filename,info.file_size) and total<=MAX_EXPANDED,'latest_member_extent')
         value=hashlib.sha256();size=0
         with archive.open(info) as stream:
             while block:=stream.read(CHUNK):
                 size+=len(block);need(size<=info.file_size,'latest_member_extent');value.update(block)
-        need(size==info.file_size,'latest_member_extent')
+        need(size==info.file_size and (size>0 or value.hexdigest()==EMPTY_SHA256),'latest_member_extent')
         rows.append({'path':info.filename,'bytes':size,'sha256':value.hexdigest()})
     return sorted(rows,key=lambda row:row['path'])
 
@@ -167,7 +175,7 @@ def file_rows(directory):
         if path.is_dir():continue
         need(path.is_file() and not path.is_symlink(),'latest_generated_member_invalid')
         name='data/'+path.relative_to(directory).as_posix()
-        need(safe_name(name) and 0<path.stat().st_size<=MAX_FILE,'latest_generated_member_invalid')
+        need(safe_name(name) and member_extent(name,path.stat().st_size),'latest_generated_member_invalid')
         rows.append({'path':name,'bytes':path.stat().st_size,'sha256':digest(path)})
     need(len(rows)<=2048 and sum(row['bytes'] for row in rows)<=MAX_EXPANDED,'latest_generated_extent')
     return rows
