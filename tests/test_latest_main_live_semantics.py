@@ -30,7 +30,9 @@ def candidate(game,tmp_path):
     if not any(row["id"]=="item-photo_shooting-01" for row in rows["Item"]):rows["Item"].append({"id":"item-photo_shooting-01"})
     for row in rows["Character"]:
         key=row["id"].removeprefix("char-")
-        row["costumeIds"]=["cos-"+key];row["hairIds"]=["hair-"+key]
+        # Character has costumeIds. Hair membership is represented by the
+        # Hair.characterId and Costume.defaultHairId masters, not a hairIds field.
+        row["costumeIds"]=["cos-"+key]
     for row in rows["Music"]:row["is3DAvailable"]=True
     for row in rows["Quest"]:
         if "QuestAudienceAdvantageId" in row:row["questAudienceAdvantageId"]=row.pop("QuestAudienceAdvantageId")
@@ -65,7 +67,7 @@ def test_new_card_costume_and_hair_are_additive_without_replacing_old_membership
         row=deepcopy(next(row for row in values if row["id"]==key));row["id"]=identity;values.append(row)
         path.write_text(json.dumps(values))
     path=latest/"Character.json";values=json.loads(path.read_bytes());owner=next(row for row in values if row["id"]=="char-a")
-    owner["costumeIds"].append("cos-new");owner["hairIds"].append("hair-new");path.write_text(json.dumps(values))
+    owner["costumeIds"].append("cos-new");path.write_text(json.dumps(values))
     receipt=module.audit_latest_main_live_semantics(schema,legacy,latest)
     assert receipt["checks"]["new_cards"]==receipt["checks"]["new_costumes"]==receipt["checks"]["new_hairs"]==1
 

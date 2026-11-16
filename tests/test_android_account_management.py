@@ -277,15 +277,20 @@ public final class AccountTransfersHostTest {
 def test_first_install_management_prepares_only_pinned_public_inputs_without_starting_server(native, monkeypatch):
     boundary, files, calls, invoke = native
     copied, installed = [], []
-    config = SimpleNamespace(SERVER_DATA_SHA256="a"*64)
+    payload_sha256, payload_bytes = "a" * 64, 345678
+    config = SimpleNamespace(SERVER_DATA_SHA256=payload_sha256, SERVER_DATA_BYTES=payload_bytes)
     monkeypatch.setitem(sys.modules, "java", SimpleNamespace(jclass=lambda name: config))
     monkeypatch.setattr(boundary, "_copy_asset", lambda assets, target, digest: copied.append((assets, target, digest)))
-    monkeypatch.setattr(boundary, "install_bundle", lambda bundle, root, digest: installed.append((bundle, root, digest)) or root/"data")
+    def install_bundle(bundle, root, digest, size):
+        installed.append((bundle, root, digest, size))
+        return root / "data"
+    monkeypatch.setattr(boundary, "install_bundle", install_bundle)
     assets = object()
     result = json.loads(boundary.management_command_json(str(files), "accounts_create", "{}", assets))
     assert result["ok"] is True and boundary._RUNTIME is None
-    assert copied == [(assets, files/"bundled-server-data.zip", "a"*64)]
-    assert installed == [(files/"bundled-server-data.zip", files, "a"*64)]
+    assert copied == [(assets, files/"bundled-server-data.zip", payload_sha256)]
+    assert installed == [(files/"bundled-server-data.zip", files, payload_sha256, payload_bytes)]
+    assert type(installed[0][3]) is int
     assert calls[0] == (files/"data", "accounts_create", {})
 
 

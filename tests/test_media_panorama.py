@@ -29,7 +29,7 @@ def schema():
 
 @pytest.fixture
 def game(schema, tmp_path):
-    master = tmp_path / "master"
+    master = tmp_path / "master-json"
     master.mkdir()
     # Values are synthetic: only the public catalog identities are fixed.
     rows = {
@@ -254,8 +254,9 @@ def test_master_version_is_pinned_and_constructor_does_not_eagerly_read_it(game)
     provider = MediaPanorama(game[0].schema, None, "no-profile", game[2])
     assert provider.handle(CREATE, b"invalid") is None
     assert provider.handle("/unrelated/Method", b"invalid") is None
-    with pytest.raises(RpcFailure, match="pinned original"):
+    with pytest.raises(RpcFailure, match="audited latest cohort") as denied:
         prepare_media_panorama(game[2])
+    assert denied.value.code == RpcCode.FAILED_PRECONDITION
 
 
 def test_missing_or_invalid_snapshot_and_duplicate_ownership_do_not_mutate_it(game):

@@ -270,20 +270,32 @@ def test_incomplete_secondary_catalog_fails_before_installing_any_files(boundary
 def test_start_passes_explicit_resource_root_without_moving_private_data(boundary, tmp_path, monkeypatch, public):
     import idoly_local.app_runtime as app_runtime
     root = str(tmp_path / "Downloads/IdolyPride") if public else None
-    seen = []
+    seen, copied, installed = [], [], []
+    payload_sha256, payload_bytes = "b" * 64, 234567
+    assets = object()
     fake = SimpleNamespace(status=lambda: {"running": True})
     def start(data, **options):
         seen.append((data, options))
         return fake
     monkeypatch.setattr(app_runtime, "start", start)
-    monkeypatch.setattr(boundary, "_copy_asset", lambda *args: None)
-    monkeypatch.setattr(boundary, "install_bundle", lambda bundle, files, digest: files / "data")
-    classes = {"game.qualiarts.idolypride.localserver.BuildConfig": SimpleNamespace(SERVER_DATA_SHA256="public-test"),
+    def copy_asset(source, target, digest):
+        copied.append((source, target, digest))
+    def install_bundle(bundle, files, digest, size):
+        installed.append((bundle, files, digest, size))
+        return files / "data"
+    monkeypatch.setattr(boundary, "_copy_asset", copy_asset)
+    monkeypatch.setattr(boundary, "install_bundle", install_bundle)
+    classes = {"game.qualiarts.idolypride.localserver.BuildConfig": SimpleNamespace(
+                   SERVER_DATA_SHA256=payload_sha256, SERVER_DATA_BYTES=payload_bytes),
                "game.qualiarts.idolypride.localserver.CryptoBridge": SimpleNamespace(aesCbc=lambda *args: b"")}
     monkeypatch.setitem(sys.modules, "java", SimpleNamespace(jclass=lambda name: classes[name]))
-    result = boundary.start(str(tmp_path), object(), SimpleNamespace(log=lambda message: None),
+    result = boundary.start(str(tmp_path), assets, SimpleNamespace(log=lambda message: None),
                             None, False, True, False, root)
     assert json.loads(result)["running"] is True
+    bundle = tmp_path / "bundled-server-data.zip"
+    assert copied == [(assets, bundle, payload_sha256)]
+    assert installed == [(bundle, tmp_path, payload_sha256, payload_bytes)]
+    assert type(installed[0][3]) is int
     assert seen[0][1]["resource_cache_dir"] == root
     assert seen[0][0] == tmp_path / "data"
     assert not (tmp_path / "Downloads").exists()

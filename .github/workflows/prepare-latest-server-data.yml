@@ -73,6 +73,9 @@ jobs:
                   output.write(raw)
           print('Verified immutable public baseline and prepared the exact original 6.1.1 protocol for tests')
           PY
+      # Generation bootstrap runs all synthetic pin contracts and the real
+      # source-closure gate. The checked-in positive pin belongs to the separate
+      # full/focused gate after this new cohort has an independently verified pin.
       - name: Test strict cohort, source-blob and semantic controls offline
         run: |
           test -f tests/test_prepare_latest_server_data.py
@@ -85,13 +88,20 @@ jobs:
           test -f tests/test_public_payload_transaction.py
           test -f tests/test_public_cohort_support.py
           test -f tests/test_love_compatibility.py
+          test -f tests/test_latest_dream_semantics.py
+          test -f tests/test_latest_main_live_semantics.py
+          test -f tests/test_master_field_aliases.py
+          test -f tests/test_ios_unified_packaging.py
           uv run --no-sync python -m pytest -q \
             tests/test_prepare_latest_server_data.py tests/test_latest_server_data_pin.py \
             tests/test_story_read_semantics.py tests/test_register_latest_server_data_lfs.py \
             tests/test_resource_translation_rebase.py tests/test_resource_translation_runtime.py \
             tests/test_octo_runtime_latest.py \
             tests/test_public_payload_transaction.py tests/test_public_cohort_support.py \
-            tests/test_love_compatibility.py
+            tests/test_love_compatibility.py tests/test_latest_dream_semantics.py \
+            tests/test_latest_main_live_semantics.py tests/test_master_field_aliases.py \
+            tests/test_ios_unified_packaging.py::test_real_core_closure_matches_manifest_without_developer_tools \
+            tests/test_ios_unified_packaging.py::test_runtime_source_closure_is_explicit_and_rejects_grpc
       - name: Collect anonymous Master.Get and public packs without accounts
         # No Create/Login/Migration/transfer/auth API is called. Raw packs and
         # collector logs stay on this remote runner and are never artifacts.

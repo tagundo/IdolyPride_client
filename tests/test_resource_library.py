@@ -807,7 +807,7 @@ def latest_catalog_case(root, monkeypatch, platform="android"):
     try:
         old.start_download(platform); assert complete(old)["state"] == "completed"
         ready = old.prepare_export(platform)
-        output = io.BytesIO(); old.export_to(ready["job_id"], output)
+        output = io.BytesIO(); old.write_export(ready["job_id"], output)
         old_zip = output.getvalue()
     finally: old.close()
     database = Database.FromString(old_raw); database.revision += 101
@@ -869,7 +869,7 @@ def test_latest_registry_preserves_only_exact_old_zip_overlap_then_downloads_cha
         assert done["state"] == "completed" and done["cache_hit_files"] == 4 and done["downloaded_files"] == 3
         assert len(calls) == 3
         assert {name: (tmp_path/name).read_bytes() for name in before} == before
-        prepared = library.prepare_export(platform); output = io.BytesIO(); library.export_to(prepared["job_id"], output)
+        prepared = library.prepare_export(platform); output = io.BytesIO(); library.write_export(prepared["job_id"], output)
         with ZipFile(io.BytesIO(output.getvalue())) as archive:
             portable = json.loads(archive.read("portable-manifest.json"))
             assert portable["revision"] == approved["revision"] and portable["manifest_sha256"] == approved["manifest_sha256"]
@@ -917,7 +917,7 @@ def test_current_zip_fast_path_does_not_require_unused_legacy_catalog(tmp_path, 
     library, _, _, calls, _, _ = latest_catalog_case(tmp_path, monkeypatch)
     try:
         library.start_download("android"); assert complete(library)["state"] == "completed"
-        ready = library.prepare_export("android"); output = io.BytesIO(); library.export_to(ready["job_id"], output)
+        ready = library.prepare_export("android"); output = io.BytesIO(); library.write_export(ready["job_id"], output)
         (tmp_path/"public-octo/legacy-manifest.pb").unlink()
         imported = library.import_from(io.BytesIO(output.getvalue()), "android")
         assert imported["state"] == "completed" and imported["verified_files"] == 7

@@ -361,7 +361,7 @@ class _AuditCatalog(_Catalog):
 
     def rows(self, table, *, required=False):
         if table not in self.loaded:
-            from .master_build import _normalized_row
+            from .schema import normalize_master_row
             raw = _audit_read(self.directory / (table + ".json"))
             def pairs(items):
                 value = {}
@@ -372,15 +372,15 @@ class _AuditCatalog(_Catalog):
             rows = json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
             _audit_need(type(rows) is list and len(rows) <= 500000 and all(type(row) is dict for row in rows), self.scope, "input_invalid")
             descriptor = self.schema.pool.FindMessageTypeByName("master." + table)
-            self.loaded[table] = [_normalized_row(table, row, descriptor)[0] for row in rows]
+            self.loaded[table] = [normalize_master_row(table, row, descriptor)[0] for row in rows]
             self.pins[table + ".json"] = hashlib.sha256(raw).hexdigest()
         return super().rows(table, required=required)
 
 
 def _audit_wire(schema, table, rows):
-    from .master_build import _normalized_row
+    from .schema import normalize_master_row
     descriptor = schema.pool.FindMessageTypeByName("master." + table)
-    return sorted(hashlib.sha256(_master_message(schema, table, _normalized_row(table,row,descriptor)[0]).SerializeToString(deterministic=True)).hexdigest() for row in rows)
+    return sorted(hashlib.sha256(_master_message(schema, table, normalize_master_row(table,row,descriptor)[0]).SerializeToString(deterministic=True)).hexdigest() for row in rows)
 
 
 def _audit_equal(schema, table, old, new, scope, reason):

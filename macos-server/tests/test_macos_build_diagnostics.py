@@ -136,10 +136,11 @@ def test_mac_wrapper_retains_sanitized_child_failure_and_reraises_same_error(tmp
     assert "private-wrapper-canary" not in retained and "ValueError: public error" in retained
 
 
-def test_workflow_retains_only_sanitized_mac_log_and_fixed_failure_report():
+def test_retired_mac_builder_and_its_logs_are_not_release_workflow_targets():
     source = (Path(__file__).resolve().parents[2] / ".github/workflows/release-all-platforms.yml").read_text()
-    block = source.split("name: optimized-release-macos-diagnostics-", 1)[1].split("\n  ios-unified:", 1)[0]
-    assert "/idoly-macos-work/**/*.json" in block
-    assert "/idoly-macos-final/build-failure.json" in block
-    assert "/idoly-macos-final/mac-native-build.sanitized.log" in block
-    assert "/mac-native-build.log" not in block
+    assert "\n  macos:\n" not in source
+    assert "--platform macos" not in source and "needs.macos" not in source
+    assert "optimized-release-macos-" not in source
+    assert "idoly-macos-work" not in source and "idoly-macos-final" not in source
+    assert "mac-native-build.log" not in source
+    assert "runs-on: macos-15" in source.split("\n  ios-unified:\n", 1)[1]

@@ -149,5 +149,7 @@ def test_ios_public_catalog_is_packaged_under_separate_directory(tmp_path):
     files, summary = payload.octo_public_files(directory, platform="ios")
     assert {target for _, target in files} == {"data/public-octo-ios/settings.json", "data/public-octo-ios/manifest.pb"}
     assert summary["application_version"] == 105051 and summary["revision"] == 1159
-    with pytest.raises(ValueError, match="version"):
+    before = {path.name: path.read_bytes() for path in directory.iterdir()}
+    with pytest.raises(ValueError):
         payload.octo_public_files(directory)
+    assert {path.name: path.read_bytes() for path in directory.iterdir()} == before
