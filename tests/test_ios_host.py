@@ -643,3 +643,74 @@ def test_bundled_payload_pin_is_small_regular_and_rejects_duplicate_keys(tmp_pat
     with pytest.raises(OSError):_=host._bundled_payload_pin(bundle)
     path.unlink();os.mkfifo(path)
     with pytest.raises(ValueError,match="public payload pin"):_=host._bundled_payload_pin(bundle)
+
+
+def test_startup_failure_persists_only_safe_source_coordinates_and_preserves_private_state(harness):
+    h = harness
+    h.data.mkdir(parents=True)
+    private = h.data / "state.db"
+    private.write_bytes(b"private-account-snapshot")
+    secret = "password-do-not-record /private/provider/customer.zip"
+    def fail(*_args, **_kwargs):
+        raise ValueError(secret)
+    h.subject._installer = fail
+    result = start(h)
+    path = h.data / host.STARTUP_FAILURE_FILE
+    raw = path.read_bytes(); value = json.loads(raw)
+    assert result["state"] == "failed" and result["startup_failure"]["persistence"] == "stored"
+    assert value["stage"] == "catalog" and value["error_code"] == "invalid_input" and value["error_type"] == "ValueError"
+    assert value["frames"] and value["frames"][-1]["file"] == "ios_host.py"
+    assert value["frames"][-1]["function"] == "start" and value["frames"][-1]["line"] > 0
+    assert secret not in raw.decode() and "/private/" not in raw.decode() and "fail" not in [row["function"] for row in value["frames"]]
+    assert len(value["frames"]) <= 8 and len(raw) <= host.STARTUP_FAILURE_MAX
+    assert path.stat().st_mode & 0o777 == 0o600 and private.read_bytes() == b"private-account-snapshot"
+    from test_ios_unified_probe_smoke import probe
+    assert probe.read_startup_failure(h.data.parents[2]) == {**value, "available": True}
+
+
+@pytest.mark.parametrize("damage", ["symlink", "oversized"])
+def test_startup_diagnostic_write_failure_is_fixed_and_never_overwrites_target(harness, damage):
+    h = harness; h.data.mkdir(parents=True)
+    outside = h.data.parent / "outside-secret"; outside.write_bytes(b"credential-provider-private")
+    path = h.data / host.STARTUP_FAILURE_FILE
+    if damage == "symlink": path.symlink_to(outside)
+    else: path.write_bytes(b"x" * (host.MAX_SETTINGS_BYTES + 1))
+    def fail(*_args, **_kwargs): raise PermissionError("private credential details")
+    h.subject._installer = fail
+    result = start(h)
+    assert result["state"] == "failed" and result["last_error"]["type"] == "PermissionError"
+    assert result["startup_failure"]["persistence"] == "unavailable"
+    assert "private credential details" not in json.dumps(result["startup_failure"])
+    assert outside.read_bytes() == b"credential-provider-private"
+    if damage == "oversized": assert path.read_bytes() == b"x" * (host.MAX_SETTINGS_BYTES + 1)
+
+
+def test_startup_source_coordinates_bound_recursion_without_stringifying_exception():
+    class SecretFailure(Exception):
+        def __str__(self): raise AssertionError("must not stringify credentials")
+    namespace = {"error": SecretFailure("private password and path")}
+    exec(compile("def recursive(depth):\n if depth: return recursive(depth-1)\n raise error\n", host.__file__, "exec"), namespace)
+    try: namespace["recursive"](20)
+    except SecretFailure as error: observed = host._startup_failure(error, "runtime")
+    assert observed["error_type"] == "OtherError" and observed["error_code"] == "internal_error"
+    assert len(observed["frames"]) == 8
+    assert all(row["file"] == "ios_host.py" and row["function"] == "recursive" for row in observed["frames"])
+    assert "private" not in json.dumps(observed) and "password" not in json.dumps(observed)
+
+
+def test_startup_factory_failure_is_distinct_from_payload_preparation(harness):
+    def fail(*_args, **_kwargs): raise KeyError("private-account-identifier")
+    harness.subject._factory = fail
+    result = start(harness)
+    saved = json.loads((harness.data / host.STARTUP_FAILURE_FILE).read_bytes())
+    assert result["state"] == "failed" and saved["stage"] == "runtime"
+    assert saved["error_type"] == "KeyError" and saved["error_code"] == "internal_error"
+    assert "private-account-identifier" not in json.dumps(saved)
+
+
+@pytest.mark.parametrize("number,retained", [(13, True), (0, True), (4096, True), (-1, False), (4097, False), (True, False), (None, False)])
+def test_startup_failure_retains_only_bounded_integer_errno(number, retained):
+    observed = host._startup_failure(PermissionError(number, "provider-password-private"), "storage")
+    assert ("errno" in observed) is retained
+    if retained: assert type(observed["errno"]) is int and observed["errno"] == number
+    assert "provider-password-private" not in json.dumps(observed)

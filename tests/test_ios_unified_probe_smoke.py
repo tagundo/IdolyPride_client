@@ -3804,3 +3804,73 @@ def test_language_observer_identity_diagnostics_are_finite_and_preserve_fifth_ru
         "native_checkpoint":{"stage":"settings_official_prompt_checked","language_observation":{"language_save":observation}}})
     assert summary["run_index"]==4 and summary["native"]["language_save"]==projected
     assert "DO-NOT-EXPORT" not in json.dumps(summary)
+
+
+def startup_failure_fixture():
+    return {"schema":1,"scope":"ios-startup-failure","stage":"catalog","error_code":"invalid_input",
+            "error_type":"ValueError","frames":[{"file":"public_payload_transaction.py","function":"_need","line":61}]}
+
+
+def write_startup_failure_fixture(container, value=None):
+    data = container / "Library/Application Support/IdolyPrideLocal"
+    data.mkdir(parents=True, exist_ok=True)
+    path = data / probe.STARTUP_FAILURE_FILE
+    path.write_text(json.dumps(value if value is not None else startup_failure_fixture()))
+    return path
+
+
+def test_startup_failure_observation_is_reprojected_before_simulator_cleanup(app, tmp_path):
+    controller = FakeSimctl(tmp_path / "container", startup_failure=True)
+    def command(arguments, timeout):
+        result = controller(arguments, timeout)
+        if arguments[0] == "launch": write_startup_failure_fixture(controller.container)
+        return result
+    with mock.patch.object(probe.sys, "platform", "darwin"), mock.patch.object(probe, "_simctl", command), mock.patch.object(probe, "probe_rpcs") as rpc:
+        result = probe.run_probe(app, tmp_path / "failure.json")
+    assert result["status"] == "FAIL" and result["error"] == "native_startup_failed"
+    assert result["host_startup_failure"] == {**startup_failure_fixture(),"available":True}
+    assert result["cleanup"]["delete"] is True
+    assert probe.safe_failure_summary(result)["host_startup_failure"] == startup_failure_fixture()
+    rpc.assert_not_called()
+
+
+@pytest.mark.parametrize("damage", ["symlink", "parent-symlink", "hardlink", "oversized", "duplicate", "path", "credential", "unknown-type", "boolean-line", "unhashable", "bad-errno", "boolean-errno"])
+def test_startup_failure_reader_rejects_unsafe_or_unbounded_diagnostics(tmp_path, damage):
+    container = tmp_path / "container"; container.mkdir()
+    value = startup_failure_fixture(); path = write_startup_failure_fixture(container, value)
+    outside = tmp_path / "outside"; outside.write_text("provider-password-private")
+    if damage == "symlink": path.unlink(); path.symlink_to(outside)
+    elif damage == "parent-symlink":
+        directory = path.parent; directory.rename(directory.with_name("moved")); directory.symlink_to(directory.with_name("moved"), target_is_directory=True)
+    elif damage == "hardlink": probe.os.link(path, path.with_name("extra-link"))
+    elif damage == "oversized": path.write_bytes(b"x" * (probe.STARTUP_FAILURE_MAX+1))
+    elif damage == "duplicate": path.write_text('{"schema":1,"schema":1}')
+    else:
+        if damage == "path": value["frames"][0]["file"] = "/private/provider/password.py"
+        elif damage == "credential": value["password"] = "never disclose"
+        elif damage == "unknown-type": value["error_type"] = "SecretPasswordType"
+        elif damage == "boolean-line": value["frames"][0]["line"] = True
+        elif damage == "unhashable": value["stage"] = ["password"]
+        elif damage == "bad-errno": value["errno"] = 4097
+        elif damage == "boolean-errno": value["errno"] = True
+        path.write_text(json.dumps(value))
+    observed = probe.read_startup_failure(container)
+    assert observed == {"schema":1,"scope":"ios-startup-failure","available":False,"read_code":"startup_diagnostic_invalid"}
+    assert "password" not in json.dumps(observed).lower() and outside.read_text() == "provider-password-private"
+
+
+def test_startup_failure_reader_missing_and_safe_contract_parity(tmp_path):
+    from idoly_local import ios_host
+    assert probe.STARTUP_FAILURE_FILES == ios_host.STARTUP_FAILURE_FILES
+    assert probe.STARTUP_FAILURE_TYPES == ios_host.STARTUP_FAILURE_TYPES
+    assert probe.STARTUP_FAILURE_CODES == ios_host.STARTUP_FAILURE_CODES
+    assert probe.STARTUP_FAILURE_STAGES == ios_host.STARTUP_FAILURE_STAGES
+    assert probe.read_startup_failure(tmp_path)["read_code"] == "startup_diagnostic_missing"
+
+
+def test_startup_failure_reader_preserves_only_integer_errno(tmp_path):
+    value = startup_failure_fixture(); value["errno"] = 13
+    container = tmp_path / "container"; container.mkdir()
+    write_startup_failure_fixture(container, value)
+    assert probe.read_startup_failure(container) == {**value, "available": True}
+    assert probe.safe_failure_summary({"host_startup_failure": {**value, "available": True}})["host_startup_failure"] == value

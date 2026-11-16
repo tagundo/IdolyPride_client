@@ -995,6 +995,71 @@ def official_ui_failure_observation(value):
     return clean
 
 
+STARTUP_FAILURE_FILE = "ios-startup-failure.json"
+STARTUP_FAILURE_MAX = 16 * 1024
+STARTUP_FAILURE_STAGES = frozenset(("catalog", "resources", "storage", "runtime"))
+STARTUP_FAILURE_CODES = frozenset(("permission_denied", "missing_input", "address_in_use", "insufficient_space", "invalid_input", "internal_error"))
+STARTUP_FAILURE_TYPES = frozenset(("PermissionError", "FileNotFoundError", "OSError", "ValueError", "RuntimeError", "TypeError", "AttributeError", "ImportError", "ModuleNotFoundError", "KeyError", "IndexError", "LookupError", "UnicodeError", "UnicodeDecodeError", "OperationalError", "DatabaseError", "RpcFailure", "OtherError"))
+STARTUP_FAILURE_FILES = frozenset(('__init__.py', 'account_manager.py', 'app_runtime.py', 'appearance.py', 'application.py', 'assets.py', 'bundled_translations.py', 'card_level_missions.py', 'card_progression.py', 'catalog.py', 'codec.py', 'company.py', 'diagnostics.py', 'dream.py', 'dream_capture.py', 'event_settings.py', 'excursion.py', 'gameplay.py', 'h2_server.py', 'home_talk.py', 'initial_inventory.py', 'ios_client_data.py', 'ios_host.py', 'language_settings.py', 'latest_cohort_pins.py', 'lessons.py', 'live_accessories.py', 'live_assets.py', 'live_engine.py', 'live_input.py', 'live_rejection_diagnostics.py', 'love.py', 'love_catalog.py', 'love_compatibility_pins.py', 'main_live.py', 'master_sort.py', 'media_access.py', 'media_outfit_policy.py', 'media_panorama.py', 'media_profile.py', 'media_runtime.py', 'media_scenes.py', 'media_settings.py', 'media_stories.py', 'octo_cache.py', 'octo_http.py', 'octo_manifest.py', 'octo_runtime.py', 'official_account.py', 'official_account_config.py', 'official_import.py', 'official_roots.py', 'official_transport.py', 'panorama_rules.py', 'photo_names.py', 'photo_preferences.py', 'photo_shooting.py', 'playback.py', 'preference_master_data.py', 'presentation.py', 'profile_directory.py', 'profile_emblems.py', 'profile_favorites.py', 'profile_layout.py', 'profile_messages.py', 'profile_names.py', 'profile_preferences.py', 'profile_top.py', 'public_cohort_support.py', 'public_payload.py', 'public_payload_transaction.py', 'pvp.py', 'quest.py', 'render_probe.py', 'resource_archive.py', 'resource_library.py', 'resource_routes.py', 'resource_translation.py', 'resource_translation_runtime.py', 'rpc.py', 'runtime_history.py', 'schema.py', 'social.py', 'startup_checks.py', 'state.py', 'story_catalog.py', 'story_read_rules.py', 'story_reads.py', 'tutorial_messages.py', 'tutorial_progression.py', 'tutorial_replay.py', 'wardrobe_diagnostics.py'))
+
+
+def _startup_function(value):
+    return type(value) is str and len(value) <= 80 and value.isascii() and (value.isidentifier() or value in ("<module>", "<listcomp>", "<dictcomp>", "<setcomp>", "<genexpr>", "<lambda>"))
+
+
+def startup_failure_observation(value):
+    if (type(value) is not dict or not {"schema", "scope", "stage", "error_code", "error_type", "frames"} <= value.keys()
+            or value.keys() - {"schema", "scope", "stage", "error_code", "error_type", "frames", "errno"}
+            or type(value.get("schema")) is not int or value["schema"] != 1 or value.get("scope") != "ios-startup-failure"
+            or type(value.get("stage")) is not str or value["stage"] not in STARTUP_FAILURE_STAGES
+            or type(value.get("error_code")) is not str or value["error_code"] not in STARTUP_FAILURE_CODES
+            or type(value.get("error_type")) is not str or value["error_type"] not in STARTUP_FAILURE_TYPES or type(value.get("frames")) is not list or len(value["frames"]) > 8):
+        return {}
+    frames = []
+    for row in value["frames"]:
+        if (type(row) is not dict or set(row) != {"file", "function", "line"} or type(row.get("file")) is not str or row["file"] not in STARTUP_FAILURE_FILES
+                or not _startup_function(row.get("function")) or type(row.get("line")) is not int or not 1 <= row["line"] <= 1000000):
+            return {}
+        frames.append({key: row[key] for key in ("file", "function", "line")})
+    result = {"schema": 1, "scope": "ios-startup-failure", "stage": value["stage"], "error_code": value["error_code"],
+              "error_type": value["error_type"], "frames": frames}
+    if "errno" in value:
+        if type(value["errno"]) is not int or not 0 <= value["errno"] <= 4096:
+            return {}
+        result["errno"] = value["errno"]
+    return result
+
+
+def read_startup_failure(container):
+    missing = {"schema": 1, "scope": "ios-startup-failure", "available": False, "read_code": "startup_diagnostic_missing"}
+    try:
+        root = Path(container)
+        require(root.is_absolute(), "invalid_startup_diagnostic")
+        for part in (root, root / "Library", root / "Library/Application Support", root / "Library/Application Support/IdolyPrideLocal"):
+            require(stat.S_ISDIR(part.lstat().st_mode), "invalid_startup_diagnostic")
+        path = root / "Library/Application Support/IdolyPrideLocal" / STARTUP_FAILURE_FILE
+        before = path.lstat()
+        require(before.st_nlink == 1, "invalid_startup_diagnostic")
+        raw = read_bounded(path, STARTUP_FAILURE_MAX)
+        after = path.lstat()
+        require((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                == (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns), "invalid_startup_diagnostic")
+        def pairs(items):
+            result = {}
+            for key, value in items:
+                require(key not in result, "invalid_startup_diagnostic")
+                result[key] = value
+            return result
+        value = json.loads(raw, object_pairs_hook=pairs, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        observed = startup_failure_observation(value)
+        require(observed, "invalid_startup_diagnostic")
+        return {**observed, "available": True}
+    except FileNotFoundError:
+        return missing
+    except (OSError, ValueError, TypeError, RecursionError):
+        return {**missing, "read_code": "startup_diagnostic_invalid"}
+
+
 def safe_failure_summary(report):
     """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
     code=report.get("error")
@@ -1020,6 +1085,12 @@ def safe_failure_summary(report):
             save=language_save_observation(language.get("language_save"))
             if save:native["language_save"]=save
         clean["native"]=native
+    startup=report.get("host_startup_failure")
+    if type(startup) is dict and startup.get("available") is True:
+        observed=startup_failure_observation({key:value for key,value in startup.items() if key != "available"})
+        if observed:clean["host_startup_failure"]=observed
+    elif type(startup) is dict and startup.get("read_code") in ("startup_diagnostic_missing", "startup_diagnostic_invalid"):
+        clean["host_startup_failure"]={"available":False,"read_code":startup["read_code"]}
     driver=official_ui_failure_observation(report.get("xctest_failure"))
     if driver:clean["xctest"]=driver
     try:clean["source_sha256"]=hashlib.sha256(json.dumps(official_ui_source_pins(),sort_keys=True,separators=(",",":")).encode()).hexdigest()
@@ -2593,6 +2664,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
         report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index)
+        if report["error"] == "native_startup_failed":
+            report["host_startup_failure"] = read_startup_failure(container)
         if ui_driver is not None and callable(getattr(ui_driver,"failure_diagnostic",None)):
             try:
                 diagnostic=official_ui_failure_observation(ui_driver.failure_diagnostic())

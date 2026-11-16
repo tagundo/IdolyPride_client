@@ -27,6 +27,42 @@ DEFAULT_OPTIONS = {"schema": 1, "media_mode": True, "download_missing_resources"
                    "interface_language": "system"}
 
 
+STARTUP_FAILURE_FILE = "ios-startup-failure.json"
+STARTUP_FAILURE_MAX = 16 * 1024
+STARTUP_FAILURE_STAGES = frozenset(("catalog", "resources", "storage", "runtime"))
+STARTUP_FAILURE_CODES = frozenset(("permission_denied", "missing_input", "address_in_use", "insufficient_space", "invalid_input", "internal_error"))
+STARTUP_FAILURE_TYPES = frozenset(("PermissionError", "FileNotFoundError", "OSError", "ValueError", "RuntimeError", "TypeError", "AttributeError", "ImportError", "ModuleNotFoundError", "KeyError", "IndexError", "LookupError", "UnicodeError", "UnicodeDecodeError", "OperationalError", "DatabaseError", "RpcFailure", "OtherError"))
+STARTUP_FAILURE_FILES = frozenset(('__init__.py', 'account_manager.py', 'app_runtime.py', 'appearance.py', 'application.py', 'assets.py', 'bundled_translations.py', 'card_level_missions.py', 'card_progression.py', 'catalog.py', 'codec.py', 'company.py', 'diagnostics.py', 'dream.py', 'dream_capture.py', 'event_settings.py', 'excursion.py', 'gameplay.py', 'h2_server.py', 'home_talk.py', 'initial_inventory.py', 'ios_client_data.py', 'ios_host.py', 'language_settings.py', 'latest_cohort_pins.py', 'lessons.py', 'live_accessories.py', 'live_assets.py', 'live_engine.py', 'live_input.py', 'live_rejection_diagnostics.py', 'love.py', 'love_catalog.py', 'love_compatibility_pins.py', 'main_live.py', 'master_sort.py', 'media_access.py', 'media_outfit_policy.py', 'media_panorama.py', 'media_profile.py', 'media_runtime.py', 'media_scenes.py', 'media_settings.py', 'media_stories.py', 'octo_cache.py', 'octo_http.py', 'octo_manifest.py', 'octo_runtime.py', 'official_account.py', 'official_account_config.py', 'official_import.py', 'official_roots.py', 'official_transport.py', 'panorama_rules.py', 'photo_names.py', 'photo_preferences.py', 'photo_shooting.py', 'playback.py', 'preference_master_data.py', 'presentation.py', 'profile_directory.py', 'profile_emblems.py', 'profile_favorites.py', 'profile_layout.py', 'profile_messages.py', 'profile_names.py', 'profile_preferences.py', 'profile_top.py', 'public_cohort_support.py', 'public_payload.py', 'public_payload_transaction.py', 'pvp.py', 'quest.py', 'render_probe.py', 'resource_archive.py', 'resource_library.py', 'resource_routes.py', 'resource_translation.py', 'resource_translation_runtime.py', 'rpc.py', 'runtime_history.py', 'schema.py', 'social.py', 'startup_checks.py', 'state.py', 'story_catalog.py', 'story_read_rules.py', 'story_reads.py', 'tutorial_messages.py', 'tutorial_progression.py', 'tutorial_replay.py', 'wardrobe_diagnostics.py'))
+
+
+def _startup_function(value):
+    return type(value) is str and len(value) <= 80 and value.isascii() and (value.isidentifier() or value in ("<module>", "<listcomp>", "<dictcomp>", "<setcomp>", "<genexpr>", "<lambda>"))
+
+
+def _startup_failure(error, stage):
+    """Retain source coordinates only, never exception text, arguments or locals."""
+    from .startup_checks import failure_code
+    kind = type(error).__name__
+    result = {"schema": 1, "scope": "ios-startup-failure", "stage": stage if stage in STARTUP_FAILURE_STAGES else "runtime",
+              "error_code": failure_code(error), "error_type": kind if kind in STARTUP_FAILURE_TYPES else "OtherError", "frames": []}
+    number = getattr(error, "errno", None) if isinstance(error, OSError) else None
+    if type(number) is int and 0 <= number <= 4096:
+        result["errno"] = number
+    source_root = Path(__file__).parent
+    trace, visited = error.__traceback__, 0
+    while trace is not None and visited < 64:
+        code = trace.tb_frame.f_code
+        filename = code.co_filename
+        if type(filename) is str and len(filename) <= 4096:
+            path = Path(filename)
+            if (path.parent == source_root and path.name in STARTUP_FAILURE_FILES
+                    and _startup_function(code.co_name) and type(trace.tb_lineno) is int and 1 <= trace.tb_lineno <= 1000000):
+                result["frames"].append({"file": path.name, "function": code.co_name, "line": trace.tb_lineno})
+                result["frames"] = result["frames"][-8:]
+        trace, visited = trace.tb_next, visited + 1
+    return result
+
+
 @dataclass(frozen=True)
 class PortParams:
     """Production uses fixed loopback ports; tests may request ephemeral ports."""
@@ -286,6 +322,7 @@ class _Host:
         self._game_prepared = False
         self._prepared_account = None
         self._startup_observations = None
+        self._startup_failure = None
         self._official_import = None
         self._official_errors = ()
 
@@ -385,6 +422,8 @@ class _Host:
             "official_import": _official_job(self._official_import.status(public=True), errors=self._official_errors) if self._official_import is not None else None}
         if paths is not None:
             result["paths"] = {"imports": str(paths[1] / "imports"), "exports": str(paths[1] / "tmp/exports")}
+        if self._startup_failure is not None:
+            result["startup_failure"] = self._startup_failure
         # Diagnostic histories may be large; public settings stay available.
         try:
             _status_budget(result)
@@ -448,6 +487,7 @@ class _Host:
         wrapper_stage = "catalog"
         with self._condition:
             self._startup_observations = None
+            self._startup_failure = None
         try:
             if previous is not None:
                 previous.stop()
@@ -512,6 +552,22 @@ class _Host:
             result = self.status(); self._event("ready", status=result)
             return result
         except Exception as error:
+            failure_stage = "runtime" if factory_entered else wrapper_stage
+            try:
+                diagnostic = _startup_failure(error, failure_stage)
+            except Exception:
+                diagnostic = {"schema": 1, "scope": "ios-startup-failure", "stage": failure_stage,
+                              "error_code": "internal_error", "error_type": "OtherError", "frames": []}
+            try:
+                if self._paths is None:
+                    raise OSError()
+                _atomic_json(self._paths[1] / STARTUP_FAILURE_FILE, diagnostic)
+            except Exception:
+                persistence = "unavailable"
+            else:
+                persistence = "stored"
+            with self._condition:
+                self._startup_failure = {**diagnostic, "persistence": persistence}
             if not factory_entered and self._paths is not None:
                 try:
                     from .app_runtime import record_startup_failure
