@@ -23,7 +23,8 @@ Start the runner first and wait for its method-entry stdout marker
 `IDOLY_CANCEL_UITEST_WAITING_FOR_PROBE` before independently launching Probe.
 This ensures runner startup has finished before Probe enters the foreground.
 It waits up to 60 seconds for Probe foreground,
-then 180 seconds for the prepared prompt, allowing earlier smoke gates to run.
+then 180 seconds for the prepared prompt. The public Cancel gate runs after
+menu diagnostics and before independent ZIP/account smoke gates.
 Prompt disappearance after Cancel has a separate 10-second bound.
 
 Primary evidence is the exact test's success in the standard `.xcresult` with one

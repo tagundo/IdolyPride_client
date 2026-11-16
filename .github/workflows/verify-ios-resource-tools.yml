@@ -15,8 +15,8 @@ concurrency:
 
 env:
   PYTHONDONTWRITEBYTECODE: '1'
-  IDOLY_RELEASE_VERSION: '0.3.35'
-  IDOLY_RELEASE_BUILD: '52'
+  IDOLY_RELEASE_VERSION: '2026.11.17.2'
+  IDOLY_RELEASE_BUILD: '54'
 
 jobs:
   ios-unified:
@@ -57,9 +57,9 @@ jobs:
           --output "$RUNNER_TEMP/idoly-unified-output"
           --source-commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
-          name: unified-tools-diagnostics-${{ github.sha }}
+          name: unified-tools-proof-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/idoly-unified-output/*.json
           if-no-files-found: warn
           retention-days: 14

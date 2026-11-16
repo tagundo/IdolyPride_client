@@ -119,7 +119,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
-    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_checked", "settings_account_management_checked", "settings_official_prompt_checked",
+    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_progress", "settings_zip_roundtrip_checked", "settings_account_management_checked", "settings_official_prompt_checked",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
@@ -1060,6 +1060,38 @@ def read_startup_failure(container):
         return {**missing, "read_code": "startup_diagnostic_invalid"}
 
 
+ZIP_PROGRESS_PHASES = frozenset(("status_requested", "export_requested", "export_waiting", "export_ready",
+    "source_hashing", "import_control_waiting", "picker_waiting", "selection_dispatched", "import_waiting",
+    "import_ready", "dom_waiting", "copy_hashing", "finished", "failed", "timed_out"))
+ZIP_PROGRESS_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
+    "picker_presented", "selection_delegate_invoked", "backend_ready", "backend_success", "dom_completed",
+    "button_restored", "source_copy_sha256_match", "timed_out")
+ZIP_PROGRESS_BACKEND_STATES = frozenset(("pending", "running", "export_ready", "completed", "partial", "cancelled", "failed"))
+
+
+def zip_progress_observation(value):
+    """Keep only finite phase/counter evidence; omit file, UI and account data."""
+    if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1
+            or type(value.get("phase")) is not str or value["phase"] not in ZIP_PROGRESS_PHASES):
+        return {}
+    result = {"schema": 1, "phase": value["phase"]}
+    for key in ZIP_PROGRESS_FLAGS:
+        if type(value.get(key)) is bool:
+            result[key] = value[key]
+    for key in ("observations", "exported_files", "imported_files", "failed_files", "copied_bytes", "total_bytes"):
+        limit = 1024 ** 4 if key.endswith("bytes") else (1000 if key == "observations" else 1000000)
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= limit:
+            result[key] = item
+    elapsed = value.get("elapsed_seconds")
+    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 120:
+        result["elapsed_seconds"] = elapsed
+    backend = value.get("backend_state")
+    if type(backend) is str and backend in ZIP_PROGRESS_BACKEND_STATES:
+        result["backend_state"] = backend
+    return result
+
+
 def safe_failure_summary(report):
     """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
     code=report.get("error")
@@ -1084,6 +1116,8 @@ def safe_failure_summary(report):
         if type(language) is dict:
             save=language_save_observation(language.get("language_save"))
             if save:native["language_save"]=save
+        progress=zip_progress_observation(checkpoint.get("zip_roundtrip_progress"))
+        if progress:native["zip_roundtrip_progress"]=progress
         clean["native"]=native
     startup=report.get("host_startup_failure")
     if type(startup) is dict and startup.get("available") is True:
@@ -2146,6 +2180,9 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
         roundtrip = zip_roundtrip_observation(roundtrip_raw)
         if roundtrip:
             result["zip_roundtrip"] = roundtrip
+        progress = zip_progress_observation(observed.get("zip_roundtrip_progress"))
+        if progress:
+            result["zip_roundtrip_progress"] = progress
         account_raw=observed.get("account_management")
         if type(account_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
             account_raw=observed["menu_lifetime"].get("account_management")

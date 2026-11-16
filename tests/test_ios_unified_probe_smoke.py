@@ -3885,3 +3885,90 @@ def test_startup_failure_reader_preserves_only_integer_errno(tmp_path):
     write_startup_failure_fixture(container, value)
     assert probe.read_startup_failure(container) == {**value, "available": True}
     assert probe.safe_failure_summary({"host_startup_failure": {**value, "available": True}})["host_startup_failure"] == value
+
+
+
+def test_public_official_cancel_precedes_independent_zip_and_account_work_without_dropping_gates():
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    flow=source.split("- (void)probeMenuAfterLaunch:(NSMutableDictionary *)report {",1)[1].split("- (void)observeMenuDismissal:",1)[0]
+    order=("ProbeDiagnosticsCopy(web", "ProbeOfficialPrompt(web", "ProbeZIPImportPicker(web",
+           "ProbeZIPRoundTrip(web", "ProbeAccountManagement(web", "[self saveNextLanguage:web")
+    assert all(flow.count(call)==1 for call in order)
+    assert [flow.index(call) for call in order]==sorted(flow.index(call) for call in order)
+    for failure in ("settings_diagnostics_copy_failed", "settings_official_prompt_failed", "settings_zip_import_picker_failed",
+                    "settings_zip_roundtrip_failed", "settings_account_management_failed", "language_save_failed"):
+        assert f'failProbe:@"{failure}"' in flow
+    for key in probe.ZIP_ROUNDTRIP_FLAGS:
+        assert f'@"{key}"' in flow
+    for key in probe.OFFICIAL_PROMPT_FLAGS:
+        assert f'@"{key}"' in flow
+    assert 'probeRunIndex==0' in flow and 'credential_submission_performed' in flow
+
+
+def test_diagnostic_progress_does_not_extend_any_existing_native_or_public_deadline():
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    roundtrip=source.split("static void ProbeZIPRoundTrip(WKWebView",1)[1].split("static NSString *const ProbeAccountScenario",1)[0]
+    assert '@"deadline":@(started+120)' in roundtrip
+    assert '120*NSEC_PER_SEC' in roundtrip
+    prompt=source.split("static void ProbeOfficialPrompt(WKWebView",1)[1].split("@interface",1)[0]
+    assert '30*NSEC_PER_SEC' in prompt
+    assert 'probeRunIndex!=0' in prompt and '@"first-cold-run-only"' in prompt
+    swift=(Path(__file__).resolve().parents[1]/"ios-unified/probe/ui-tests/OfficialPromptCancelTests.swift").read_text()
+    assert 'timeout: 60' in swift and 'timeout: 180' in swift
+    assert 'ProbeOfficialActivateCancel' not in source
+
+
+@pytest.mark.parametrize("phase", sorted(probe.ZIP_PROGRESS_PHASES))
+def test_zip_progress_accepts_only_fixed_phase_and_scalar_observations(phase):
+    value={"schema":1,"phase":phase,"observations":8,"elapsed_seconds":12.5,"exported_files":3,
+           "imported_files":2,"failed_files":0,"copied_bytes":4096,"total_bytes":4096,
+           "backend_state":"export_ready", **{key:False for key in probe.ZIP_PROGRESS_FLAGS}}
+    assert probe.zip_progress_observation(value)==value
+
+
+@pytest.mark.parametrize("value", (None, [], {}, {"schema":True,"phase":"export_waiting"},
+    {"schema":2,"phase":"export_waiting"}, {"schema":1,"phase":"arbitrary-path"},
+    {"schema":1,"phase":[]}, {"schema":1,"phase":True}))
+def test_zip_progress_rejects_unknown_schema_or_phase(value):
+    assert probe.zip_progress_observation(value)=={}
+
+
+@pytest.mark.parametrize("field,bad", [(key,value) for key in probe.ZIP_PROGRESS_FLAGS for value in (1, "true")] + [
+    ("observations",True),("observations",-1),("observations",1001),("observations",1.0),
+    ("exported_files",1000001),("imported_files",float("inf")),("failed_files",-1),
+    ("copied_bytes",True),("copied_bytes",1024**4+1),("total_bytes",-1),
+    ("elapsed_seconds",True),("elapsed_seconds",float("nan")),("elapsed_seconds",float("inf")),
+    ("elapsed_seconds",-1),("elapsed_seconds",120.01),("backend_state","user-supplied-text")])
+def test_zip_progress_drops_nonfinite_or_unbounded_optional_fields(field,bad):
+    value={"schema":1,"phase":"import_waiting",field:bad}
+    assert probe.zip_progress_observation(value)=={"schema":1,"phase":"import_waiting"}
+
+
+def test_zip_progress_source_emits_only_changed_bounded_safe_observations():
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    helper=source.split("static void ProbeZIPRoundTripProgress(",1)[1].split("static void ProbeZIPRoundTripPoll(",1)[0]
+    assert '[state[@"last_progress"] isEqual:clean]' in helper
+    assert 'emitted>=64 && !terminal' in helper
+    assert 'MIN(1000,' in helper and 'MIN(120.0,' in helper
+    for private in ('job[@"output_path"]','job[@"url"]','job[@"password"]','job[@"user_id"]','job[@"error"]'):
+        assert private not in helper
+    assert 'CFBooleanGetTypeID()' in helper and 'isfinite(count)' in helper
+    phase_part=helper.split('if (![@[',1)[1].split('containsObject:phase]',1)[0]
+    import re
+    phases={json.loads(piece) for piece in re.findall(r'@?("(?:\\.|[^"\\])*")',phase_part)}
+    assert phases==set(probe.ZIP_PROGRESS_PHASES)
+
+
+def test_zip_progress_checkpoint_and_summary_never_export_paths_urls_or_credentials(tmp_path):
+    documents=tmp_path/"Documents";documents.mkdir()
+    progress={"schema":1,"phase":"source_hashing","observations":4,"elapsed_seconds":1.5,
+        "export_ready":True,"exported_files":2,"backend_state":"export_ready",
+        **{key:"DO-NOT-EXPORT" for key in ("path","url","output_path","error","user_id","password","raw_input","job")}}
+    value={"schema":1,"stage":"settings_zip_roundtrip_progress","zip_roundtrip_progress":progress}
+    (documents/"embedded-probe-checkpoint.json").write_text(json.dumps(value))
+    clean=probe.failure_checkpoint(tmp_path)
+    assert clean["stage"]=="settings_zip_roundtrip_progress"
+    assert clean["zip_roundtrip_progress"]=={key:progress[key] for key in ("schema","phase","observations","elapsed_seconds","export_ready","exported_files","backend_state")}
+    summary=probe.safe_failure_summary({"error":"settings_zip_roundtrip_failed","native_checkpoint":clean})
+    assert summary["native"]["zip_roundtrip_progress"]==clean["zip_roundtrip_progress"]
+    assert "DO-NOT-EXPORT" not in json.dumps(clean)+json.dumps(summary)

@@ -19,7 +19,7 @@ final class OfficialPromptCancelTests: XCTestCase {
         FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_PROBE_FOREGROUND\n".utf8))
 
         // Native sets these identifiers only after filling fixed synthetic data.
-        // The existing first-cold ZIP/account gates precede this prompt.
+        // The public Cancel gate runs before independent first-cold ZIP/account work.
         let transferID = "idoly-official-probe-transfer-id"
         let passwordID = "idoly-official-probe-transfer-password"
         let alert = probe.alerts.containing(.textField, identifier: transferID).firstMatch

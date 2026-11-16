@@ -808,12 +808,48 @@ static void ProbeZIPImportPicker(WKWebView *web,UIViewController *presenter,void
     ProbeZIPImportBegin(web,presenter,state,finish);
 }
 
+// Fixed scalars only: do not copy backend job dictionaries, paths, or UI text.
+static void ProbeZIPRoundTripProgress(NSMutableDictionary *state,NSString *phase) {
+    if (![@[@"status_requested",@"export_requested",@"export_waiting",@"export_ready",@"source_hashing",
+            @"import_control_waiting",@"picker_waiting",@"selection_dispatched",@"import_waiting",
+            @"import_ready",@"dom_waiting",@"copy_hashing",@"finished",@"failed",@"timed_out"] containsObject:phase]) return;
+    NSMutableDictionary *clean=[@{@"schema":@1,@"phase":phase} mutableCopy];
+    NSDictionary *metrics=state[@"metrics"], *job=state[@"backend_job"];
+    for (NSString *key in @[@"export_accepted",@"export_ready",@"export_archive_complete",@"wk_import_dispatched",
+            @"picker_presented",@"selection_delegate_invoked",@"backend_ready",@"backend_success",@"dom_completed",
+            @"button_restored",@"source_copy_sha256_match",@"timed_out"]) {
+        id value=metrics[key];
+        if ([value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value)==CFBooleanGetTypeID()) clean[key]=value;
+    }
+    for (NSString *key in @[@"exported_files",@"imported_files",@"failed_files",@"copied_bytes",@"total_bytes"]) {
+        id value=metrics[key] ?: job[key];
+        double count=[value isKindOfClass:NSNumber.class] ? [value doubleValue] : -1;
+        double limit=[key hasSuffix:@"bytes"] ? 1073741824.0*1024 : 1000000;
+        if ([value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value)!=CFBooleanGetTypeID()
+                && isfinite(count) && count>=0 && count<=limit && floor(count)==count) clean[key]=value;
+    }
+    NSString *backend=job[@"state"];
+    if ([backend isKindOfClass:NSString.class] && [@[@"pending",@"running",@"export_ready",@"completed",@"partial",@"cancelled",@"failed"] containsObject:backend]) clean[@"backend_state"]=backend;
+    // At most 64 changed observations plus a terminal transition; no poll spam.
+    if ([state[@"last_progress"] isEqual:clean]) return;
+    BOOL terminal=[@[@"finished",@"failed",@"timed_out"] containsObject:phase];
+    NSUInteger emitted=[state[@"progress_emissions"] unsignedIntegerValue];
+    if (emitted>=64 && !terminal) return;
+    state[@"last_progress"]=clean.copy; state[@"progress_emissions"]=@(emitted+1);
+    clean[@"observations"]=@(MIN(1000,[state[@"observations"] unsignedIntegerValue]));
+    clean[@"elapsed_seconds"]=@(MAX(0.0,MIN(120.0,NSProcessInfo.processInfo.systemUptime-[state[@"started"] doubleValue])));
+    void (^progress)(NSDictionary *)=state[@"progress_callback"];
+    if (progress) progress(clean.copy);
+}
+
 static void ProbeZIPRoundTripPoll(WKWebView *__weak web,UIViewController *__weak presenter,
                                   NSMutableDictionary *state,void (^finish)(void));
 static void ProbeZIPRoundTripPicker(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
                                     NSMutableDictionary *state,void (^finish)(void)) {
     if ([state[@"finished"] boolValue]) return;
     UIViewController *presenter=weakPresenter; UIViewController *shown=presenter.presentedViewController;
+    state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
+    ProbeZIPRoundTripProgress(state,@"picker_waiting");
     if ([shown isKindOfClass:UIDocumentPickerViewController.class] && shown.viewIfLoaded.window && !shown.isBeingPresented) {
         UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
         NSMutableDictionary *metrics=state[@"metrics"];
@@ -823,13 +859,15 @@ static void ProbeZIPRoundTripPicker(WKWebView *__weak weakWeb,UIViewController *
         [picker.delegate documentPicker:picker didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:state[@"source"]]]];
         metrics[@"selection_delegate_invoked"]=@YES;
         [picker dismissViewControllerAnimated:NO completion:nil]; metrics[@"dismissed_programmatically"]=@YES;
-        state[@"phase"]=@"import"; ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish); return;
+        state[@"phase"]=@"import"; ProbeZIPRoundTripProgress(state,@"selection_dispatched");
+        ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish); return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/4),dispatch_get_main_queue(),^{
         ProbeZIPRoundTripPicker(weakWeb,weakPresenter,state,finish);
     });
 }
 static void ProbeZIPRoundTripOpen(WKWebView *web,UIViewController *presenter,NSMutableDictionary *state,void (^finish)(void)) {
+    ProbeZIPRoundTripProgress(state,@"import_control_waiting");
     NSString *script=@"(() => {const b=document.getElementById('resources-import');if(!b||b.disabled)return {ready:false};"
         "const q=window.__idolyZIPRoundTripObserved={request_id:null,queued:false,copied_bytes:0,total_bytes:0,reply_accepted:false};"
         "const event=window.idolyServerEvent,reply=window.idolyServerReply;"
@@ -849,19 +887,24 @@ static void ProbeZIPRoundTripOpen(WKWebView *web,UIViewController *presenter,NSM
 static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
                                   NSMutableDictionary *state,void (^finish)(void)) {
     if ([state[@"finished"] boolValue]) return;
+    state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
+    ProbeZIPRoundTripProgress(state,[state[@"phase"] isEqual:@"export"] ? @"export_waiting" : @"import_waiting");
     IdolyEmbeddedServerCommand(@"{\"id\":7302,\"action\":\"status\"}",^(NSString *reply){
         if ([state[@"finished"] boolValue]) return;
         NSDictionary *envelope=ProbeObject(reply), *status=envelope[@"result"];
         NSDictionary *operation=[status[@"resource_operation"] isKindOfClass:NSDictionary.class] ? status[@"resource_operation"] : @{};
         NSDictionary *job=[operation[@"job"] isKindOfClass:NSDictionary.class] ? operation[@"job"] : @{};
-        NSMutableDictionary *metrics=state[@"metrics"];
+        NSMutableDictionary *metrics=state[@"metrics"]; state[@"backend_job"]=job;
+        ProbeZIPRoundTripProgress(state,[state[@"phase"] isEqual:@"export"] ? @"export_waiting" : @"import_waiting");
         if ([state[@"phase"] isEqual:@"export"] && [operation[@"ready"] isEqual:@YES] && [job[@"action"] isEqual:@"export"]) {
             metrics[@"export_ready"]=@([operation[@"accepted"] isEqual:@YES]);
             metrics[@"export_archive_complete"]=@([job[@"archive_complete"] isEqual:@YES]);
             metrics[@"exported_files"]=job[@"exported_files"] ?: @0;
+            ProbeZIPRoundTripProgress(state,@"export_ready");
             NSString *source=operation[@"output_path"], *imports=status[@"paths"][@"imports"];
             if (![source isKindOfClass:NSString.class] || ![imports isKindOfClass:NSString.class]) { finish(); return; }
             state[@"source"]=source; state[@"imports"]=imports;
+            ProbeZIPRoundTripProgress(state,@"source_hashing");
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
                 NSDictionary *hash=ProbeResourceHash(source);
                 NSArray *before=[NSFileManager.defaultManager contentsOfDirectoryAtPath:imports error:NULL] ?: @[];
@@ -879,12 +922,14 @@ static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__
             metrics[@"backend_success"]=@((BOOL)([operation[@"accepted"] isEqual:@YES] && [job[@"platform"] isEqual:@"ios"]
                 && [@[@"completed",@"partial"] containsObject:job[@"state"]] && [job[@"failed_files"] isEqual:@0]));
             metrics[@"imported_files"]=job[@"imported_files"] ?: @0; metrics[@"failed_files"]=job[@"failed_files"] ?: @(-1);
+            ProbeZIPRoundTripProgress(state,@"import_ready");
             NSNumber *requests=status[@"runtime"][@"resource_transfer"][@"session_http_requests"];
             metrics[@"upstream_requests_unchanged"]=@([requests isEqual:state[@"upstream_requests"]]);
             NSString *script=@"(() => {const q=window.__idolyZIPRoundTripObserved||{},b=document.getElementById('resources-import'),"
                 "s=document.getElementById('resource-state');return {reply_accepted:q.reply_accepted===true,queued:q.queued===true,"
                 "copied_bytes:q.copied_bytes||0,total_bytes:q.total_bytes||0,button_restored:!!b&&!b.disabled,"
                 "ready:!!s&&['완료','일부 완료','Complete','Partially complete','完了','一部完了'].includes(s.textContent)&&!!b&&!b.disabled};})()";
+            ProbeZIPRoundTripProgress(state,@"dom_waiting");
             ProbePollLanguage(weakWeb,script,[state[@"deadline"] doubleValue],nil,^(NSDictionary *value){
                 if ([state[@"finished"] boolValue]) return;
                 metrics[@"import_reply_accepted"]=@([value[@"reply_accepted"] isEqual:@YES]);
@@ -893,6 +938,7 @@ static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__
                 metrics[@"dom_completed"]=@([value[@"ready"] isEqual:@YES]);
                 metrics[@"button_restored"]=@([value[@"button_restored"] isEqual:@YES]);
                 metrics[@"picker_detached"]=@((BOOL)(weakPresenter.presentedViewController==nil));
+                ProbeZIPRoundTripProgress(state,@"copy_hashing");
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
                     NSString *imports=state[@"imports"], *copyPath=nil;
                     for (NSString *name in [NSFileManager.defaultManager contentsOfDirectoryAtPath:imports error:NULL])
@@ -920,24 +966,30 @@ static void ProbeZIPRoundTripPoll(WKWebView *__weak weakWeb,UIViewController *__
         });
     });
 }
-static void ProbeZIPRoundTrip(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+static void ProbeZIPRoundTrip(WKWebView *web,UIViewController *presenter,void (^progress)(NSDictionary *),
+                              void (^completion)(NSDictionary *)) {
     if (probeRunIndex!=0) { completion(@{@"performed":@NO,@"reason":@"first-cold-run-only"}); return; }
     NSMutableDictionary *metrics=[@{@"performed":@YES,@"scope":@"stock-simulator",
         @"selection_trigger":@"delegate-callback",@"timed_out":@NO} mutableCopy];
     NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
-    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics,@"phase":@"export",@"deadline":@(started+120)} mutableCopy];
+    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics,@"phase":@"export",@"deadline":@(started+120),
+        @"started":@(started),@"observations":@0,@"progress_emissions":@0,@"progress_callback":[progress copy]} mutableCopy];
     void (^finish)(void)=^{
         if ([state[@"finished"] boolValue]) return;
         state[@"finished"]=@YES; metrics[@"elapsed_seconds"]=@(MAX(0.0,NSProcessInfo.processInfo.systemUptime-started));
-        completion(metrics.copy);
+        NSString *phase=[metrics[@"timed_out"] isEqual:@YES] ? @"timed_out"
+            : (metrics[@"source_copy_sha256_match"]!=nil ? @"finished" : @"failed");
+        ProbeZIPRoundTripProgress(state,phase); completion(metrics.copy);
     };
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{
         if ([state[@"finished"] boolValue]) return; metrics[@"timed_out"]=@YES; finish();
     });
+    ProbeZIPRoundTripProgress(state,@"status_requested");
     IdolyEmbeddedServerCommand(@"{\"id\":7300,\"action\":\"status\"}",^(NSString *reply){
         if ([state[@"finished"] boolValue]) return;
         NSDictionary *status=ProbeObject(reply)[@"result"];
         state[@"upstream_requests"]=status[@"runtime"][@"resource_transfer"][@"session_http_requests"] ?: @(-1);
+        ProbeZIPRoundTripProgress(state,@"export_requested");
         IdolyEmbeddedServerCommand(@"{\"id\":7301,\"action\":\"resources_export\"}",^(NSString *exportReply){
             if ([state[@"finished"] boolValue]) return;
             NSDictionary *value=ProbeObject(exportReply);
@@ -1504,6 +1556,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
 @property(nonatomic, strong) NSDictionary *zipImportObservation;
 @property(nonatomic, strong) NSDictionary *zipRoundTripObservation;
+@property(nonatomic,strong) NSDictionary *zipRoundTripProgress;
 @property(nonatomic, strong) NSDictionary *accountManagementObservation;
 @property(nonatomic, strong) NSDictionary *officialPromptObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
@@ -1540,7 +1593,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"zip_roundtrip_progress":self.zipRoundTripProgress ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
@@ -1560,7 +1613,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{},
-        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{},
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"zip_roundtrip_progress":self.zipRoundTripProgress ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
@@ -2070,6 +2123,17 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                     copied = copied && [copyMetrics[key] isEqual:@YES];
                 if (!copied) { [self failProbe:@"settings_diagnostics_copy_failed"]; return; }
                 [self recordCheckpoint:@"settings_diagnostics_copied"];
+                // Run the external public Cancel gate before independent ZIP/account work.
+                ProbeOfficialPrompt(web,navigation.topViewController,^(NSDictionary *prompt){
+                self.officialPromptObservation=prompt;menu[@"official_prompt"]=prompt;
+                BOOL promptOK=probeRunIndex!=0&&[prompt[@"performed"] isEqual:@NO];
+                if(probeRunIndex==0){
+                    promptOK=[prompt[@"timed_out"] isEqual:@NO]&&[prompt[@"credential_submission_performed"] isEqual:@NO];
+                    for(NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"prompt_presented",@"field_count_two",@"secure_password_field",@"platform_actions_present",@"cancel_action_present",@"synthetic_inputs_set",@"cancel_ack_observed",@"fields_cleared",@"web_reply_cancelled",@"prompt_detached",@"official_job_absent_before",@"official_job_absent_after",@"account_data_unchanged",@"runtime_identity_unchanged",@"completed"])
+                        promptOK=promptOK&&[prompt[key] isEqual:@YES];
+                }
+                if(!promptOK){[self failProbe:@"settings_official_prompt_failed"];return;}
+                [self recordCheckpoint:@"settings_official_prompt_checked"];
                 ProbeZIPImportPicker(web,navigation.topViewController,^(NSDictionary *zipMetrics) {
                 self.zipImportObservation=zipMetrics; menu[@"zip_import_picker"]=zipMetrics;
                 BOOL zipOK=[zipMetrics[@"timed_out"] isEqual:@NO] && [zipMetrics[@"passes"] count]==2
@@ -2084,7 +2148,10 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 }
                 if (!zipOK) { [self failProbe:@"settings_zip_import_picker_failed"]; return; }
                 [self recordCheckpoint:@"settings_zip_import_cancelled"];
-                ProbeZIPRoundTrip(web,navigation.topViewController,^(NSDictionary *roundtrip) {
+                ProbeZIPRoundTrip(web,navigation.topViewController,^(NSDictionary *progress) {
+                    self.zipRoundTripProgress=progress;
+                    [self recordCheckpoint:@"settings_zip_roundtrip_progress"];
+                },^(NSDictionary *roundtrip) {
                 self.zipRoundTripObservation=roundtrip; menu[@"zip_roundtrip"]=roundtrip;
                 BOOL roundtripOK=probeRunIndex!=0 && [roundtrip[@"performed"] isEqual:@NO];
                 if (probeRunIndex==0) {
@@ -2103,16 +2170,6 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 BOOL accountOK=probeRunIndex==0 ? ([account[@"completed"] isEqual:@YES] && [account[@"timed_out"] isEqual:@NO]) : [account[@"performed"] isEqual:@NO];
                 if (!accountOK) { [self failProbe:@"settings_account_management_failed"];return; }
                 [self recordCheckpoint:@"settings_account_management_checked"];
-                ProbeOfficialPrompt(web,navigation.topViewController,^(NSDictionary *prompt){
-                self.officialPromptObservation=prompt;menu[@"official_prompt"]=prompt;
-                BOOL promptOK=probeRunIndex!=0&&[prompt[@"performed"] isEqual:@NO];
-                if(probeRunIndex==0){
-                    promptOK=[prompt[@"timed_out"] isEqual:@NO]&&[prompt[@"credential_submission_performed"] isEqual:@NO];
-                    for(NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"prompt_presented",@"field_count_two",@"secure_password_field",@"platform_actions_present",@"cancel_action_present",@"synthetic_inputs_set",@"cancel_ack_observed",@"fields_cleared",@"web_reply_cancelled",@"prompt_detached",@"official_job_absent_before",@"official_job_absent_after",@"account_data_unchanged",@"runtime_identity_unchanged",@"completed"])
-                        promptOK=promptOK&&[prompt[key] isEqual:@YES];
-                }
-                if(!promptOK){[self failProbe:@"settings_official_prompt_failed"];return;}
-                [self recordCheckpoint:@"settings_official_prompt_checked"];
                 [self saveNextLanguage:web completion:^(BOOL saved){
                 if (!saved) { [self failProbe:@"language_save_failed"]; return; }
                 BOOL closed = ProbeDispatchButton(close);
