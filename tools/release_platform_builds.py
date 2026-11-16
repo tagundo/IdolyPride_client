@@ -23,7 +23,7 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
 VERSION, BUILD_NUMBER = "0.3.37",54
-COMMON_SOURCE_FILES = tuple(["tools/build_startup_translation_receipt.py","src/idoly_local/startup_receipt.py","src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
+COMMON_SOURCE_FILES = tuple(["tools/release_interface_contract.py","tools/build_startup_translation_receipt.py","src/idoly_local/startup_receipt.py","src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"
@@ -376,6 +376,10 @@ def validate_android_qa(report):
         module("release_android_event_contract",ROOT/"tools/release_event_contract.py").validate_android(report)
     except ValueError:
         raise BuildError("Android_native_event_settings_QA_differs") from None
+    try:
+        module("release_android_interface_contract",ROOT/"tools/release_interface_contract.py").validate_android(report)
+    except ValueError:
+        raise BuildError("Android_interface_configuration_QA_differs") from None
     return report
 
 def finish_android(inputs,work,output,source,pins,guard):
@@ -417,7 +421,8 @@ def finish_android(inputs,work,output,source,pins,guard):
     report.update(binary=built["binary"],qa_binary=built["qa_binary"],application_id=ANDROID_PACKAGE,
                   certificate_sha256=ANDROID_CERT,live_engine=built["live_engine"],
                   qa_report=artifact(output/"android-qa.json"),account_management=result["account_management"],
-                  native_event_settings=result["native_event_settings"])
+                  native_event_settings=result["native_event_settings"],
+                  actual_os_api_resource_configuration=result["actual_os_api_resource_configuration"])
     report["validation"].update(apk_signature_verified=True,apk_alignment_verified=True,package_version_verified=True,
         development_certificate_verified=True,x86_emulator_runtime_passed=True,account_management_roundtrip=True)
     write_json(output/"platform-report.json",report)

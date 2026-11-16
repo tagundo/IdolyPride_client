@@ -116,4 +116,335 @@
     <string name="resource_storage_public_short">リソース: ダウンロードフォルダー</string>
     <string name="resource_storage_private_short">リソース: アプリ専用ストレージ</string>
     <string name="library_settings_short">言語変更後は対応するAPKを入れ替え、再起動してください。</string>
+    <string name="app_name">アイプラサーバー</string>
+    <string name="server_description">この端末でアイプラのローカルサーバーを実行します。</string>
+    <string name="tutorial_replay_notice">チュートリアルライブは元の記録を再生します。</string>
+    <string name="start_server">サーバー開始</string>
+    <string name="stop_server">サーバー停止</string>
+    <string name="launch_client">アイプラ ローカルを起動</string>
+    <string name="client_missing">先にアイプラ ローカルのクライアントAPKをインストールしてください。</string>
+    <string name="client_launch_failed">ローカルクライアントを開けませんでした。</string>
+    <string name="server_start_failed">サーバーサービスを開始できませんでした。</string>
+    <string name="server_ports">この端末 · 127.0.0.1
+ゲーム接続 50051 · ファイル転送 8080</string>
+    <string name="server_logs">サーバーログ</string>
+    <string name="waiting_logs">サーバーを開始すると進行状況を表示します。</string>
+    <string name="status_stopped">停止中</string>
+    <string name="status_starting">起動中</string>
+    <string name="status_running">実行中</string>
+    <string name="status_stopping">停止処理中</string>
+    <string name="status_failed">起動失敗</string>
+    <string name="notification_channel">ローカルサーバー実行</string>
+    <string name="notification_text">127.0.0.1 · ゲーム 50051 / ファイル 8080</string>
+    <string name="first_launch_note">初回起動時に同梱のサーバーデータを準備します。既存のローカルアカウントと保存データは保持されます。</string>
+    <string name="launch_diagnostic_client">アイプラを起動</string>
+    <string name="diagnostic_client_missing">先にアイプラ ローカルのクライアントAPKをインストールしてください。</string>
+    <string name="export_diagnostics">診断・サーバーログを書き出す</string>
+    <string name="export_server_logs">サーバーログを書き出す</string>
+    <string name="server_logs_export_saved">サーバーログを保存しました。</string>
+    <string name="server_logs_export_failed">サーバーログを保存できませんでした。保存先を選び直してください。</string>
+    <string name="export_saved">診断・サーバーログを保存しました。</string>
+    <string name="export_failed">診断・サーバーログを保存できませんでした。保存先を選び直してください。</string>
+    <string name="export_picker_failed">ファイル保存画面を開けませんでした。</string>
+    <string name="game_state_title">ゲームの読み込み状況</string>
+    <string name="game_state_waiting">ゲームの状態を受信待ち</string>
+    <string name="game_last_phase">最終段階 · %1$s</string>
+    <string name="game_network_waiting">ゲーム全体の通信量の測定待ち</string>
+    <string name="game_network_unavailable">ゲーム全体の受信・送信量を測定できません。</string>
+    <string name="game_network_totals">ゲーム全体の受信 %1$s · 送信 %2$s\n診断開始から%3$d秒間の累計 · ダウンロード進捗ではありません</string>
+    <string name="master_transfer_waiting">このセッションのマスターファイル転送待ち</string>
+    <string name="master_transfer_active">このセッションのマスターファイル転送 · %1$s / %2$s</string>
+    <string name="master_transfer_finished">このセッションのマスターファイル · 完了 %1$d件 · 最終転送 %2$s</string>
+    <string name="latest_game_exception">最近のゲーム例外: %1$s</string>
+    <string name="master_transfer_failed">マスターファイル転送エラー · %1$s / %2$s</string>
+    <string name="experimental_main_live">初回メインライブの実験機能を使用</string>
+    <string name="experimental_main_live_notice">最初のクエストのみ対応しています。スコアはローカルの計算規則を使用し、公式サーバーと異なる場合があります。初期設定は無効です。</string>
+    <string name="download_missing_resources">未保存のゲームリソースをダウンロード</string>
+    <string name="download_missing_resources_notice">ゲームが要求したファイルのみダウンロードし、この端末に保存します。無効にすると保存済みファイルのみ提供します。</string>
+    <string name="media_mode">鑑賞用の全解放</string>
+    <string name="media_mode_notice">鑑賞用データは通常の進行と別に保存します。モード変更後はサーバーを再起動し、ゲームのタイトル画面から再ログインしてください。初期設定は無効です。</string>
+    <string name="resource_transfer_title">ゲームリソース</string>
+    <string name="resource_transfer_waiting">サーバーを開始するとゲームリソースの状態を表示します。</string>
+    <string name="resource_transfer_unavailable">ゲームリソースの一覧が含まれていません。</string>
+    <string name="resource_transfer_idle">ゲームリソースの要求待ち</string>
+    <string name="resource_transfer_cache_only">保存済みのゲームリソースのみ使用</string>
+    <string name="resource_transfer_downloading">ゲームリソースをダウンロード中</string>
+    <string name="resource_transfer_active">ゲームリソースをダウンロード中 · 要求 %1$d件</string>
+    <string name="resource_transfer_ready">最近要求されたゲームリソースは準備済み</string>
+    <string name="resource_transfer_failed">ゲームリソースの要求に失敗 · サーバーログを確認してください。</string>
+    <string name="resource_transfer_received">今回の起動 · 受信量 %1$s · 新規保存ファイル %2$d個</string>
+    <string name="resource_transfer_served">今回の起動 · ゲームへの送信量 %1$s</string>
+    <string name="presentation_title">画質・撮影画面 ▾</string>
+    <string name="rendering_mt_experiment">マルチスレッドレンダリングで起動する実験（初期設定は無効）</string>
+    <string name="rendering_mt_notice">ゲームを完全に終了し、このサーバーアプリの起動ボタンから開き直してください。変更を要求するのは新しいゲームプロセスの起動時のみです。実行中やホーム画面から戻ったゲームには適用されません。実際のレンダリングモードは以下のゲーム測定値で確認してください。</string>
+    <string name="rendering_request_original">要求: 元の起動設定</string>
+    <string name="rendering_request_mt">要求: マルチスレッドレンダリングの起動実験</string>
+    <string name="rendering_probe_waiting">実際のモード: サーバーとゲームの測定応答待ち</string>
+    <string name="rendering_probe_client_waiting">実際のモード: 対応クライアントの測定応答待ち</string>
+    <string name="rendering_probe_stale">実際のモード: 前回の測定が古いため、新しい応答を待機中</string>
+    <string name="rendering_probe_unsupported">実際のモード: このゲームは測定に対応していません。</string>
+    <string name="rendering_probe_init_failed">実際のモード: 測定の初期化に失敗</string>
+    <string name="rendering_probe_observed">実測: %1$s · グラフィックスAPI %2$d</string>
+    <string name="rendering_mode_direct">Direct（0 · 直接レンダリング）</string>
+    <string name="rendering_mode_single">SingleThreaded（1 · シングルスレッド）</string>
+    <string name="rendering_mode_multi">MultiThreaded（2 · マルチスレッド）</string>
+    <string name="rendering_mode_legacy_jobs">LegacyJobified (3)</string>
+    <string name="rendering_mode_native_jobs">NativeGraphicsJobs (4)</string>
+    <string name="rendering_mode_native_jobs_without_render">NativeGraphicsJobsWithoutRenderThread (5)</string>
+    <string name="rendering_mt_not_observed">マルチスレッドモードは確認できませんでした。ゲームを完全に終了して開き直してください。再起動後も同じ場合、この実験は適用されていません。</string>
+    <string name="rendering_frame_times">CPUフレーム時間: %1$s ms · GPUフレーム時間: %2$s ms\n画面に表示された実際のFPSの測定値ではありません。</string>
+    <string name="rendering_frame_times_unavailable">CPU・GPUフレーム時間: 確認済みの最新測定値なし</string>
+    <string name="rendering_launch_conflict">既存のUnity起動引数とレンダリング実験は併用できません。実験を無効にして開き直してください。</string>
+    <string name="playback_wait_for_orientation">MVの開始・終了時に画面回転を待つ</string>
+    <string name="playback_wait_notice">有効にするとMVの開始・終了時に画面の回転を待ちます。初期設定は有効で、次回のMV開始・終了から適用します。</string>
+    <string name="playback_waiting">画面回転設定 · サーバーとゲームの応答待ち</string>
+    <string name="playback_saved_waiting">画面回転設定を保存済み · クライアントの受信確認待ち</string>
+    <string name="playback_client_waiting">画面回転設定に対応したクライアントの応答待ち · 対応クライアントへの更新が必要です。</string>
+    <string name="playback_unsupported">画面回転設定の受信確認待ち · 応答がない場合は対応クライアントに更新してください。</string>
+    <string name="playback_received">クライアントの設定受信を確認 · 次回のMV開始・終了から適用</string>
+    <string name="playback_save_failed">画面回転設定を保存できませんでした。以前の設定を保持します。</string>
+    <string name="playback_invalid">保存済みの画面回転設定を読み込めないため、初期値を表示しています。設定を変更すると保存し直します。</string>
+    <string name="presentation_title_expanded">画質・撮影画面 ▴</string>
+    <string name="presentation_notice">画質設定に対応したゲームが必要です。サーバー実行中も変更できます。変更は保存後、ゲームからの適用確認を待ちます。</string>
+    <string name="presentation_custom_graphics">カスタム画質設定を使用</string>
+    <string name="presentation_quality">グラフィック品質</string>
+    <string name="presentation_target_fps">目標フレームレート</string>
+    <string name="presentation_render_scale">3Dレンダリング倍率</string>
+    <string name="presentation_max_buffer_pixel">レンダーバッファーの最大サイズ</string>
+    <string name="presentation_anti_aliasing">アンチエイリアシング</string>
+    <string name="presentation_shadow_resolution">キャラクターの影の解像度</string>
+    <string name="presentation_expand_photography">撮影・360°画面の3D表示領域を拡張</string>
+    <string name="presentation_photography_notice">標準の16:9の範囲外にも3Dシーンを描画します。拡大・切り抜き・引き伸ばしは行いません。カスタム画質設定の使用とは別に保存します。</string>
+    <string name="presentation_waiting">元の設定 · 画質設定に対応したゲームの応答待ち</string>
+    <string name="presentation_saved_waiting">設定を保存済み · ゲームの適用確認待ち</string>
+    <string name="presentation_save_failed">設定を保存できませんでした。以前の設定を保持します。</string>
+    <string name="presentation_invalid">保存済み設定を読み込めないため、初期値を表示しています。設定を変更すると保存し直します。</string>
+    <string name="presentation_applied">ゲームで現在の設定の適用を確認しました。</string>
+    <string name="presentation_disabled">ゲームで元の画面設定の使用を確認しました。</string>
+    <string name="presentation_unsupported">現在のゲームまたは画面構成では、この設定を適用できません。</string>
+    <string name="presentation_waiting_for_scene">ゲームで設定を受信 · 撮影・360°画面への適用確認待ち</string>
+    <string name="presentation_init_failed">ゲームの画面設定の初期化に失敗しました。</string>
+    <string name="presentation_launch_button">アイプラを起動</string>
+    <string name="presentation_client_notice">サーバーAPKと画質機能を含むゲームAPKをそれぞれインストールしてください。このサーバーアプリはゲームAPKのダウンロード・改変・インストールを行いません。</string>
+    <string name="presentation_launch_missing">画質機能に対応したゲームが見つかりません。別途提供されるゲームAPKを先にインストールしてください。</string>
+    <string-array name="presentation_quality_options">
+        <item>元の設定を使用 (0)</item>
+        <item>低 (10)</item>
+        <item>中 (20)</item>
+        <item>高 (30)</item>
+        <item>最高 (40)</item>
+        <item>撮影用 (100)</item>
+    </string-array>
+    <string-array name="presentation_target_fps_options">
+        <item>元の設定を使用 (0)</item>
+        <item>30 fps</item>
+        <item>60 fps</item>
+        <item>90 fps</item>
+        <item>120 fps</item>
+    </string-array>
+    <string-array name="presentation_render_scale_options">
+        <item>0.25倍</item>
+        <item>0.5倍</item>
+        <item>0.75倍</item>
+        <item>1倍（標準）</item>
+        <item>1.25倍</item>
+        <item>1.5倍</item>
+        <item>2倍</item>
+    </string-array>
+    <string-array name="presentation_max_buffer_pixel_options">
+        <item>720 px</item>
+        <item>1080 px</item>
+        <item>1440 px</item>
+        <item>1920 px</item>
+        <item>2560 px</item>
+        <item>3840 px</item>
+        <item>4096 px（標準）</item>
+    </string-array>
+    <string-array name="presentation_anti_aliasing_options">
+        <item>元の設定を使用 (-1)</item>
+        <item>無効 (0)</item>
+        <item>FXAA (1)</item>
+        <item>SMAA (2)</item>
+    </string-array>
+    <string-array name="presentation_shadow_resolution_options">
+        <item>元の設定を使用 (0)</item>
+        <item>512</item>
+        <item>1024</item>
+        <item>2048</item>
+        <item>4096</item>
+    </string-array>
+    <string name="library_settings_title">一覧・表示言語</string>
+    <string name="resource_storage">リソースの保存先</string>
+    <string-array name="resource_storage_options">
+        <item>Downloads/IdolyPride（標準）</item>
+        <item>アプリ専用ストレージ</item>
+    </string-array>
+    <string name="resource_storage_public_notice">元のリソースをDownloads/IdolyPride/octo-cache（Android）・octo-cache-ios（iOS）に直接保存します。Android 11以降では、すべてのファイルへのアクセス権限が必要です。アカウント・設定・マスターデータはアプリ専用ストレージに保持します。</string>
+    <string name="resource_storage_private_notice">選択したアプリ専用ストレージにリソースを保存します。権限なしで利用でき、必要に応じてZIPの取り込み・書き出しも使用できます。</string>
+    <string name="resource_storage_permission_title">リソースをDownloadsに直接保存</string>
+    <string name="resource_storage_permission_notice">元のリソースをDownloads/IdolyPrideに直接保存するには、このサーバーアプリにすべてのファイルへのアクセスを許可する必要があります。権限設定から戻るとサーバーの起動を再試行します。許可しない場合は、アプリ専用ストレージを選択して起動できます。</string>
+    <string name="resource_storage_older_android">Downloadsへの直接保存はAndroid 11以降に対応しています。この端末ではアプリ専用ストレージを選択し、ZIPのファイル選択画面から書き出せます。保存先は自動では変更しません。</string>
+    <string name="resource_storage_use_private">アプリ専用ストレージで開始</string>
+    <string name="resource_storage_later">キャンセル</string>
+    <string name="resource_storage_open_settings">権限設定を開く</string>
+    <string name="resource_storage_settings_unavailable">この端末では権限設定を開けませんでした。保存先をアプリ専用ストレージに変更するか、権限設定を確認してください。</string>
+    <string name="resource_storage_permission_denied">Downloadsへのアクセスが許可されていないため、サーバーを起動しませんでした。権限を許可するか、アプリ専用ストレージを選択してください。</string>
+    <string name="library_language">ゲームデータの言語</string>
+    <string name="library_hide_video_mv">ライブ撮影で動画専用MVを非表示</string>
+    <string name="library_mv_sort">MVの並び順</string>
+    <string name="library_outfit_sort">衣装の並び順</string>
+    <string name="library_settings_notice">変更後はサーバーを再起動し、ゲームのタイトル画面から再ログインしてください。ゲームUIの言語を変更するには、同じ言語のクライアントに更新してください。衣装の並べ替えには最新の対応クライアントが必要です。翻訳のない項目は原文で表示します。</string>
+    <string name="library_settings_invalid">保存済みの一覧・言語設定を読み込めないため、初期値を表示しています。変更すると保存し直します。</string>
+    <string name="library_settings_failed">一覧・言語設定を保存できませんでした。以前の設定を保持します。</string>
+    <string-array name="library_language_options">
+        <item>日本語（原文）</item>
+        <item>韓国語</item>
+        <item>English</item>
+    </string-array>
+    <string-array name="library_mv_sort_options">
+        <item>公開日が新しい順</item>
+        <item>公開日が古い順</item>
+        <item>タイトル順</item>
+        <item>ID順</item>
+    </string-array>
+    <string-array name="library_outfit_sort_options">
+        <item>元の並び順</item>
+        <item>登場が新しい順</item>
+        <item>登場が古い順</item>
+        <item>名前順</item>
+        <item>ID順</item>
+    </string-array>
+    <string name="library_resources_title">リソース保管庫</string>
+    <string name="library_resource_platform">リソースのプラットフォーム</string>
+    <string-array name="library_resource_platform_options">
+        <item>Android</item>
+        <item>iOS · PlayCover</item>
+    </string-array>
+    <string name="library_download_parallelism">同時ダウンロード数</string>
+    <string-array name="library_download_parallelism_options">
+        <item>1個</item>
+        <item>2個</item>
+        <item>4個（標準）</item>
+        <item>8個</item>
+    </string-array>
+    <string name="library_download_parallelism_notice">選択した数のファイルを同時にダウンロードします。次のダウンロード作業から適用します。</string>
+    <string name="library_resources_notice">サーバー起動前に選択した場所に元のファイルを直接保存します。全件ダウンロードには多くの通信量と空き容量が必要です。再開時は検証済みファイルを再利用します。ZIPの取り込み・書き出しは任意で、アカウントの保存データは含みません。</string>
+    <string name="library_download_all">全リソースをダウンロード・再開</string>
+    <string name="library_import">リソースZIPを取り込む</string>
+    <string name="library_export">保存済みリソースをZIPに書き出す</string>
+    <string name="library_cancel">リソース作業を中止</string>
+    <string name="library_resources_waiting">リソース作業はサーバーを起動すると利用できます。</string>
+    <string name="library_resources_unavailable">サーバーの実行状態と進行中のリソース作業を確認してください。</string>
+    <string name="library_resources_ready">プラットフォームを選ぶと、ダウンロード・取り込み・書き出しを開始できます。</string>
+    <string name="library_resources_preparing">%1$sを準備中 · %2$s · 準備が完了すると中止できます。</string>
+    <string name="library_resources_working">%1$sを実行中 · ローカル転送 %2$s</string>
+    <string name="library_resources_cancelling">%1$sを中止中 · %2$s · 完了までお待ちください。</string>
+    <string name="library_resources_failed">リソース作業を完了できませんでした。サーバーの状態と選択したファイル・保存先を確認してください。新しく作成した未完成ファイルは可能な場合に削除します。</string>
+    <string name="library_resources_cancelled">リソース作業を中止しました。検証済みの保存ファイルは保持します。</string>
+    <string name="library_import_seekable">選択したファイルを直接シークできません。ZIPをこの端末のローカルストレージに保存して選び直してください。</string>
+    <string name="library_catalog_unavailable">選択したプラットフォームのリソースカタログがありません。該当カタログを含むサーバーファイルが必要です。</string>
+    <string name="library_picker_failed">ファイル選択画面を開けませんでした。</string>
+    <string name="library_job_running">準備・実行中</string>
+    <string name="library_job_completed">完了</string>
+    <string name="library_job_partial">一部のみ完了 · 未保存または失敗したファイルがあります。</string>
+    <string name="library_job_failed">失敗</string>
+    <string name="library_job_cancelled">中止済み</string>
+    <string name="library_job_cancelling">中止処理中</string>
+    <string name="library_job_summary">%1$s · %2$s\n検証済み %3$d / %4$d個 · 未保存 %5$d個 · 失敗 %6$d個</string>
+    <string name="library_job_parallelism">%1$d個同時ダウンロード · 実行中 %2$d個</string>
+    <string name="library_job_transfer_metrics">受信 %1$s · 平均受信速度 %2$s/s · %3$d秒</string>
+    <string name="library_job_bytes">容量検証済み %1$s / %2$s</string>
+    <string name="library_job_phase_summary">接続 %1$d · 受信 %2$d · 検証 %3$d · 保存 %4$d · コピー %5$d個</string>
+    <string name="library_job_cached">既存の保存ファイルを再利用 %1$d個</string>
+    <string name="library_export_downloads">ZIPをDownloads/IdolyPride/exportsに保存しました。</string>
+    <string name="library_export_document">ZIPを選択した場所に保存しました。</string>
+    <string name="library_import_result">取り込み済みの検証済みファイル %1$d個 · 失敗 %2$d個</string>
+    <string name="library_import_partial">一部のファイルを取り込めませんでした。検証済みの保存ファイルは保持しました。</string>
+    <string name="mode_section_title">鑑賞モード</string>
+    <string name="experiment_section_title">実験機能</string>
+    <string name="playback_section_title">MV再生</string>
+    <string name="resources_section_title">ゲームリソース</string>
+    <string name="diagnostics_section_title">診断</string>
+    <string name="diagnostics_details">状態・最近のログを表示 ▾</string>
+    <string name="diagnostics_details_expanded">状態・最近のログを表示 ▴</string>
+    <string name="diagnostics_export_notice">ゲーム・サーバーの状態と最近のログをJSONファイルにまとめて保存します。</string>
+    <string name="accounts_title">ユーザー管理</string>
+    <string name="accounts_notice">通常・鑑賞アカウントを別々に管理します。アカウントZIPにはゲームの保存・進行データが含まれ、リソースZIPとは別です。選択したアカウントは次回のサーバー起動から使用します。</string>
+    <string name="accounts_waiting">アカウントの状態確認待ち</string>
+    <string name="accounts_ready">アカウントの選択・バックアップを利用できます。</string>
+    <string name="accounts_complete">アカウント作業が完了しました。</string>
+    <string name="accounts_previous">前のアカウント一覧</string>
+    <string name="accounts_next">次のアカウント一覧</string>
+    <string name="accounts_refresh">アカウント一覧を更新</string>
+    <string name="accounts_create">新しいアカウントを作成</string>
+    <string name="accounts_clone">選択したアカウントを複製</string>
+    <string name="accounts_select">このモードの次回アカウントに選択</string>
+    <string name="accounts_export">選択したアカウントをZIPにバックアップ</string>
+    <string name="accounts_import">アカウントZIPを取り込む</string>
+    <string name="accounts_restore_notice">アカウントを置き換える前に復元ポイントを自動作成します。復元するアカウントと同じアカウントの復元ポイントを選択してください。</string>
+    <string name="accounts_restore_next">次の復元ポイント一覧 · 最後の次は先頭</string>
+    <string name="accounts_restore">選択した復元ポイントから復元</string>
+    <string name="accounts_restore_empty">保存済みの復元ポイントなし</string>
+    <string name="accounts_choose">先にアカウントを選択してください。</string>
+    <string name="accounts_working">アカウントを処理中…</string>
+    <string name="accounts_selected">このモードの次回アカウントに選択しました。使用する鑑賞用の全解放設定も確認してください。ゲームを完全に終了し、サーバーを停止・開始してからゲームを開き直してください。</string>
+    <string name="accounts_restored">アカウントの保存データを取り込みました。今すぐ使用するにはアカウントを選択し、ゲームとサーバーを再起動してください。</string>
+    <string name="accounts_exported">アカウントZIPを保存しました。別のインストール環境でもアカウントZIPの取り込みから利用できます。</string>
+    <string name="accounts_unprepared">初回起動の準備が必要</string>
+    <string name="accounts_empty">保存済みアカウントなし</string>
+    <string name="accounts_page">アカウント %1$d–%2$d / 全%3$d個</string>
+    <string name="accounts_restore_page">復元ポイント %1$d–%2$d / 全%3$d個</string>
+    <string name="accounts_normal">通常</string>
+    <string name="accounts_media">鑑賞</string>
+    <string name="accounts_next_selection">次回起動 · 通常 %1$s / 鑑賞 %2$s</string>
+    <string name="accounts_active">現在実行中 · %1$s · %2$s</string>
+    <string name="accounts_not_running">現在サーバーは停止中</string>
+    <string name="accounts_profile_hint">ローカル保存枠の名前 · UTF-8で64バイト以内</string>
+    <string name="accounts_manager_hint">ゲーム内のマネージャー名 · 1～10文字</string>
+    <string name="accounts_manager_default">マネージャー</string>
+    <string name="accounts_profile_required">アカウント名を入力してください。</string>
+    <string name="accounts_import_preview">アカウントバックアップの確認</string>
+    <string name="accounts_import_new">新しいアカウントとして取り込む</string>
+    <string name="accounts_import_replace">選択したアカウントに上書き</string>
+    <string name="accounts_archive_summary">バックアップ %1$dバイト\nライブ処理履歴 %2$d件 · 設定処理履歴 %3$d件\nリソースファイルは含まれません。</string>
+    <string name="accounts_replace_confirm">%1$sアカウント「%2$s」の保存データを置き換えます。現在のデータは自動復元ポイントに保存します。他のアカウントは変更しません。</string>
+    <string name="accounts_restore_choose_target">先に上の一覧で復元ポイントと同じアカウントを選択してください。</string>
+    <string name="accounts_stop_to_restore">現在実行中のアカウントです。ゲームを完全に終了し、サーバーを停止してから復元してください。</string>
+    <string name="accounts_failed">アカウント作業を完了できませんでした。既存の保存データを確認し、再試行してください。(%1$s)</string>
+    <string name="accounts_transfer">%1$s · %2$s</string>
+    <string name="accounts_transfer_total">%1$s · %2$s / %3$s</string>
+    <string name="accounts_transfer_saving">アカウントバックアップを保存中</string>
+    <string name="accounts_transfer_copying">アカウントZIPをコピー・検証中</string>
+    <string name="server_checks_title">サーバー接続・データ確認</string>
+    <string name="server_checks_waiting">サーバー起動確認はまだ実行していません。</string>
+    <string name="server_checks_refresh">確認結果・エラーログを更新</string>
+    <string name="server_checks_current">今回の起動時のサーバー準備確認 · ゲーム全体の動作検証ではありません。</string>
+    <string name="server_checks_previous">前回起動時の確認記録 · 現在の接続状態を示すものではありません。</string>
+    <string name="server_history_empty">保存済みの最近の失敗記録なし</string>
+    <string name="server_history_view">保存済みの診断ログを表示</string>
+    <string name="server_history_clear">保存済みの診断ログを削除</string>
+    <string name="server_history_clear_confirm">保存済みのサーバー診断ログのみ削除します。アカウントとリソースは保持します。</string>
+    <string name="server_history_last">最後に保存された失敗 · %1$s\n%2$s</string>
+    <string name="server_check_ready">準備完了</string>
+    <string name="server_check_blocked">確認が必要</string>
+    <string name="server_check_attention">注意項目あり</string>
+    <string name="server_check_stopped">停止中</string>
+    <string name="server_check_unchecked">未確認</string>
+    <string name="server_check_protocol">ゲームプロトコル</string>
+    <string name="server_check_catalog">ゲームカタログ</string>
+    <string name="server_check_master">元のマスターデータ</string>
+    <string name="server_check_storage">保存先</string>
+    <string name="server_check_http">ファイルサーバー接続</string>
+    <string name="server_check_grpc">ゲームサーバー接続</string>
+    <string name="server_check_resources">リソース一覧</string>
+    <string name="server_check_account">選択したアカウント</string>
+    <string name="server_check_unknown">その他の確認</string>
+    <string name="accounts_clone_notice">複製は同じゲームアカウントの保存データの分岐です。ゲーム内IDと進行状況をそのままコピーし、ローカルの保存枠のみ新しく作成します。</string>
+    <string name="accounts_too_large">取り込めるアカウントZIPは最大128MiBです。リソースZIPはゲームリソースのメニューから取り込んでください。</string>
+    <string name="accounts_empty_archive">選択したアカウントZIPは空です。別のファイルを選択してください。</string>
+    <string name="accounts_provider_permission">選択したファイルにアクセスできません。ファイルアプリの保存先とアクセス権限を確認し、選び直してください。</string>
+    <string name="accounts_preparing">アカウント管理データを準備し、保存データを確認中…</string>
+    <string name="accounts_confirm">確認</string>
+    <string name="accounts_cancel">キャンセル</string>
+    <string name="accounts_date_unknown">日時を確認できません</string>
 </resources>

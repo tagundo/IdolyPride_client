@@ -45,7 +45,7 @@ PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
                   "android": 900*MIB, "macos": 640*MIB, "ios-unified": 768*MIB}
 BINARY_LIMITS = {APK: 384*MIB, QA_APK: 384*MIB, MAC: 600*MIB, IPA: 600*MIB}
-COMMON_SOURCES = tuple(["tools/build_startup_translation_receipt.py","src/idoly_local/startup_receipt.py","src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
+COMMON_SOURCES = tuple(["tools/release_interface_contract.py","tools/build_startup_translation_receipt.py","src/idoly_local/startup_receipt.py","src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 TRANSLATION_SOURCES = ("public_payload.py", "bundled_translations.py", "resource_translation.py",
                        "resource_translation_runtime.py", "octo_manifest.py", "octo_runtime.py")
 BASE_DATA_PIN = {"bytes": 191343014, "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
@@ -697,6 +697,12 @@ def validate_platform_files(directory, report, guard):
         except ValueError:
             raise ReleaseError("android_native_event_settings_not_passed") from None
         need(event_detail == report.get("native_event_settings"), "android_native_event_settings_report_differs")
+        try:
+            interface_detail = module("published_android_interface_contract", ROOT/"tools/release_interface_contract.py").validate_android(qa)
+        except ValueError:
+            raise ReleaseError("android_interface_configuration_not_passed") from None
+        need(interface_detail == report.get("actual_os_api_resource_configuration"),
+             "android_interface_configuration_report_differs")
     else:
         smoke_path = verified_file(directory, report.get("account_smoke"), name="engine-smoke.json", maximum=MAX_JSON)
         try:

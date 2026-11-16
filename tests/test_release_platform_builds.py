@@ -18,7 +18,9 @@ class Guard:
 
 
 def passed_qa():
-    return {"ok":True,"target":"Android emulator","device_game_client_tested":False,
+    import json
+    interface=json.loads((Path(__file__).resolve().parent/"fixtures/android-interface-configuration.json").read_text())
+    return {**interface,"ok":True,"target":"Android emulator","device_game_client_tested":False,
             **{key:True for key in builds.QA_FLAGS},
              "main_live":{"platform":"Android native","quest_id":"qt-main-1-001-01","ruleset":"live-v5","chart_count":183,"beat_count":855},
             "account_management":{"scope":"Android emulator native UI and real document provider",
@@ -411,3 +413,9 @@ def test_packaged_apk_receipt_is_checked_again_after_signing(tmp_path,monkeypatc
             builds.check_apk(target,"arm64-v8a",{"startup_translations":pin},engine,tmp_path)
     else:
         assert builds.check_apk(target,"arm64-v8a",{"startup_translations":pin},engine,tmp_path)["build_number"]==54
+
+
+def test_android_public_os_language_and_landscape_proof_is_a_required_release_gate():
+    report=passed_qa();report.pop("actual_os_api_resource_configuration")
+    with pytest.raises(builds.BuildError,match="Android_interface_configuration_QA_differs"):
+        builds.validate_android_qa(report)

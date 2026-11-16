@@ -122,6 +122,8 @@ jobs:
             tests/test_startup_receipt.py
             tests/test_startup_receipt_handoff.py
             tests/test_android_event_selection_queue.py
+            tests/test_android_interface_languages.py
+            tests/test_android_interface_qa.py
             tests/test_ios_unified_web.py
             tests/test_love.py
             tests/test_love_application.py

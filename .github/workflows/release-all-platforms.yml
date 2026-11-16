@@ -359,7 +359,8 @@ jobs:
       - name: Exercise actual x86_64 server UI and encrypted RPCs
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
+          # Public per-app LocaleManager preferences require Android 13+.
+          api-level: 34
           arch: x86_64
           target: google_apis
           profile: pixel_4
@@ -390,6 +391,8 @@ jobs:
         with:
           name: optimized-release-android-ui-${{ github.sha }}
           path: |
+            ${{ runner.temp }}/idoly-android-qa/qa/00-interface-*.png
+            ${{ runner.temp }}/idoly-android-qa/qa/00-interface-*.xml
             ${{ runner.temp }}/idoly-android-qa/qa/02-running.png
             ${{ runner.temp }}/idoly-android-qa/qa/02-running.xml
             ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.png

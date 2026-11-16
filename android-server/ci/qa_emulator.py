@@ -1162,6 +1162,8 @@ def main():
         print("Starting the server through its native UI", flush=True)
         from qa_launcher_guard import recover_initial_launcher
         recover_initial_launcher(qa, result["target_evidence"])
+        from qa_interface import exercise_interface_configuration
+        result.update(exercise_interface_configuration(qa))
         qa.tap("서버 시작", "01-start")
         result["initial_storage_private_selected"] = complete_initial_storage_choice(qa)
         wait_server(schema, grpc_port, timeout=args.startup_timeout)

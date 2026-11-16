@@ -381,7 +381,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
                 | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         boolean compact = getResources().getConfiguration().screenHeightDp < 520;
-        wideSettings = getResources().getConfiguration().screenWidthDp >= 760;
+        // Short landscape windows need horizontal navigation to keep all tabs visible.
+        wideSettings = getResources().getConfiguration().screenWidthDp >= 760 && !compact;
         splitSettings = getResources().getConfiguration().screenWidthDp >= 1000;
         if (savedInstanceState != null) selectedCategory = savedInstanceState.getString("settings_category", "console");
         LinearLayout content = new LinearLayout(this);
@@ -426,12 +427,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setPadding(0, dp(12), 0, 0);
-        TextView automatic = text(R.string.settings_automatic_notice, 16, TEXT_MUTED);
-        automatic.setPadding(dp(2), 0, dp(2), dp(12));
-        body.addView(automatic);
         category(body, "console"); category(body, "server"); category(body, "users");
         category(body, "content"); category(body, "graphics");
-        categoryPages.get("console").addView(text(R.string.console_notice, 16, TEXT_MUTED));
+        for (String key : new String[]{"server", "content", "graphics"}) {
+            TextView automatic = text(R.string.settings_automatic_notice, 16, TEXT_MUTED);
+            automatic.setPadding(dp(2), 0, dp(2), dp(12));
+            LinearLayout[] columns = categoryColumns.get(key);
+            (columns == null ? categoryPages.get(key) : columns[0]).addView(automatic);
+        }
         LinearLayout consoleCard = panel(categoryParent("console"), R.string.console_panel_title, "checks", false);
         addServerChecksControls(consoleCard);
         LinearLayout modeCard = panel(categoryParent("server"), R.string.mode_section_title, "mode", true);
@@ -515,13 +518,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         gameStatus.setMaxLines(3);
         gameStatus.setEllipsize(TextUtils.TruncateAt.END);
         gameStatus.setPadding(0, dp(4), 0, dp(8));
-        categoryPages.get("console").addView(gameStatus, 1);
+        categoryPages.get("console").addView(gameStatus, 0);
         lastException = text(R.string.game_state_waiting, 12, WARNING);
         lastException.setTextIsSelectable(true);
         lastException.setMaxLines(3);
         lastException.setEllipsize(TextUtils.TruncateAt.END);
         lastException.setVisibility(View.GONE);
-        categoryPages.get("console").addView(lastException, 2);
+        categoryPages.get("console").addView(lastException, 1);
         export = button(R.string.export_diagnostics);
         diagnosticsCard.addView(export, new LinearLayout.LayoutParams(-1, -2));
         Button detailsHeading = button(R.string.diagnostics_details);
@@ -558,7 +561,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         logScroll.addView(logs);
         logScroll.setNestedScrollingEnabled(true);
         diagnosticDetails.addView(logScroll, new LinearLayout.LayoutParams(-1, dp(220)));
-        addHelp(diagnosticsCard, R.string.console_panel_title, R.string.diagnostics_export_notice);
+        addHelp(diagnosticsCard, R.string.console_panel_title, R.string.console_notice,
+                R.string.diagnostics_export_notice);
         settingsScroll = new ScrollView(this); settingsScroll.setFillViewport(true);
         settingsScroll.addView(body, new ScrollView.LayoutParams(-1, -2));
         LinearLayout navigation = new LinearLayout(this);

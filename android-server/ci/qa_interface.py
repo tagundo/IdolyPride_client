@@ -1,0 +1,205 @@
+"""Observed native resource/locales and landscape proof on a disposable guest.
+
+Configuration uses Android's public LocaleManager and WindowManager shell APIs.
+No application-private preferences/database are changed, no hidden view is
+forced visible, and the existing five-observation UI budget is unchanged.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+import re
+import time
+import xml.etree.ElementTree as ET
+
+from qa_account_management import bounds, visible_node, tap_node
+
+PACKAGE = "game.qualiarts.idolypride.localserver"
+ACTIVITY = PACKAGE + "/.MainActivity"
+ROOT = Path(__file__).resolve().parents[2]
+LANGUAGES = ("en", "ja", "ko")
+CATEGORIES = ("console", "server", "users", "content", "graphics")
+OBSERVATIONS = 5
+
+
+def labels(language):
+    if language not in LANGUAGES:
+        raise ValueError("Unsupported interface QA language")
+    path = ROOT / "android-server/app/src/main/res" / ("values-" + language) / "strings.xml"
+    rows = {node.get("name"): "".join(node.itertext()) for node in ET.parse(path).getroot()
+            if node.tag == "string"}
+    keys = ("app_name", "start_server", "stop_server", *("nav_" + key for key in CATEGORIES))
+    if any(not rows.get(key, "").strip() for key in keys):
+        raise RuntimeError("Interface QA requires explicit translated title, controls and categories")
+    return {key: rows[key] for key in keys}
+
+
+def app_bounds(tree):
+    areas = [bounds(node) for node in tree.iter("node")
+             if node.get("package") == PACKAGE and visible_node(node, tree)]
+    areas = [area for area in areas if area is not None]
+    if not areas:
+        raise RuntimeError("Native application viewport was not observed")
+    return max(areas, key=lambda area: (area[2] - area[0]) * (area[3] - area[1]))
+
+
+def nav_node(tree, category):
+    matches = [node for node in tree.iter("node")
+               if node.get("package") == PACKAGE
+               and node.get("content-desc") == "idoly.nav." + category and visible_node(node, tree)]
+    if len(matches) != 1 or matches[0].get("enabled") != "true":
+        raise RuntimeError("Native interface category was not uniquely visible")
+    return matches[0]
+
+
+def language_proof(tree, expected):
+    nodes = [node for node in tree.iter("node") if node.get("package") == PACKAGE and visible_node(node, tree)]
+    titles = [node for node in nodes if node.get("class") == "android.widget.TextView"
+              and node.get("text", "").startswith(expected["app_name"] + "  ")]
+    if len(titles) != 1:
+        raise RuntimeError("Native interface title did not use the selected language")
+    for key in ("start_server", "stop_server"):
+        if len([node for node in nodes if node.get("class") == "android.widget.Button"
+                and node.get("text") == expected[key]]) != 1:
+            raise RuntimeError("Native interface server controls did not use the selected language")
+    for category in CATEGORIES:
+        if nav_node(tree, category).get("text") != expected["nav_" + category]:
+            raise RuntimeError("Native interface category did not use the selected language")
+    return {"title": titles[0].get("text"), "start": expected["start_server"],
+            "stop": expected["stop_server"], "actual_ui_observed": True}
+
+
+def observe(qa, stage, checker):
+    last = None
+    for attempt in range(OBSERVATIONS):
+        tree = qa.capture(stage + "-" + str(attempt))
+        try:
+            proof = checker(tree)
+        except RuntimeError as error:
+            last = error
+            if attempt + 1 < OBSERVATIONS:
+                time.sleep(.5)
+        else:
+            return tree, proof
+    raise RuntimeError("Native interface observation failed: " + stage + "; " + str(last))
+
+
+def configure_locale(qa, language):
+    # AOSP android-14.0.0_r1 LocaleManagerShellCommand requires --locales;
+    # the trailing positional language would silently leave an empty list.
+    qa.adb("shell", "cmd", "locale", "set-app-locales", PACKAGE, "--user", "0", "--locales", language)
+    reply = qa.adb("shell", "cmd", "locale", "get-app-locales", PACKAGE, "--user", "0").strip()
+    match = re.search(r"\[([^\]]*)\]\s*$", reply)
+    if match is None or match.group(1) != language:
+        raise RuntimeError("Android public app-locale configuration did not match")
+    qa.adb("shell", "am", "start", "-n", ACTIVITY)
+
+
+def density_dpi(qa):
+    value = qa.adb("shell", "wm", "density")
+    matches = re.findall(r"(Physical|Override) density:\s*(\d+)", value)
+    readings = {kind: int(number) for kind, number in matches}
+    density = readings.get("Override", readings.get("Physical"))
+    if type(density) is not int or not 120 <= density <= 1000:
+        raise RuntimeError("Android public display density was not available")
+    return density
+
+
+def wide_proof(tree, density, *, graphics):
+    language_proof(tree, labels("ko"))
+    left, top, right, bottom = app_bounds(tree)
+    if right - left <= bottom - top:
+        raise RuntimeError("Actual native application viewport is not landscape")
+    minimum = float("inf")
+    for category in CATEGORIES:
+        node = nav_node(tree, category)
+        x0, y0, x1, y1 = bounds(node)
+        if x0 < left or y0 < top or x1 > right or y1 > bottom:
+            raise RuntimeError("Landscape category is clipped by the application viewport")
+        target = min(x1 - x0, y1 - y0) * 160.0 / density
+        if target < 44.0:
+            raise RuntimeError("Landscape category target is smaller than 44 dp")
+        minimum = min(minimum, target)
+    if any(node.get("resource-id") == "android:id/alertTitle" for node in tree.iter("node")):
+        raise RuntimeError("A help or system dialog obscures the landscape settings")
+    key = "graphics" if graphics else "checks"
+    panels = [node for node in tree.iter("node") if node.get("content-desc") == "idoly.panel." + key
+              and node.get("package") == PACKAGE and visible_node(node, tree)]
+    if len(panels) != 1 or panels[0].get("selected") != ("true" if graphics else "false"):
+        raise RuntimeError("Landscape default panel state was not observed")
+    if nav_node(tree, "graphics" if graphics else "console").get("selected") != "true":
+        raise RuntimeError("Landscape category selection was not observed")
+    return {"width_px": right - left, "height_px": bottom - top, "density_dpi": density,
+            "visible_categories": len(CATEGORIES), "minimum_navigation_target_dp": round(minimum, 2),
+            "help_closed": True, "default_panel": key, "default_panel_expanded": graphics}
+
+
+def observe_wide(qa, density):
+    # Both actual Console and Graphics observations share five attempts.
+    graphics, last, console = False, None, None
+    for attempt in range(OBSERVATIONS):
+        tree = qa.capture("00-interface-wide-" + str(attempt))
+        try:
+            proof = wide_proof(tree, density, graphics=graphics)
+        except RuntimeError as error:
+            last = error
+            if attempt + 1 < OBSERVATIONS:
+                time.sleep(.5)
+            continue
+        if graphics:
+            return {"console": console, "graphics": proof, "actual_rotation": 1}
+        console = proof
+        tap_node(qa, nav_node(tree, "graphics"))
+        graphics = True
+    raise RuntimeError("Native landscape UI was not observed within five attempts; " + str(last))
+
+
+def observe_portrait(qa):
+    last = None
+    for attempt in range(OBSERVATIONS):
+        tree = qa.capture("00-interface-portrait-" + str(attempt))
+        try:
+            language_proof(tree, labels("ko"))
+            left, top, right, bottom = app_bounds(tree)
+            if bottom - top <= right - left:
+                raise RuntimeError("Actual native application viewport did not return to portrait")
+            console = nav_node(tree, "console")
+        except RuntimeError as error:
+            last = error
+            if attempt + 1 < OBSERVATIONS:
+                time.sleep(.5)
+            continue
+        if console.get("selected") == "true":
+            return {"actual_rotation": 0, "width_px": right-left, "height_px": bottom-top,
+                    "interface_language": "ko", "console_selected": True}
+        tap_node(qa, console)
+    raise RuntimeError("Native portrait UI was not restored within five attempts; " + str(last))
+
+
+def exercise_interface_configuration(qa):
+    sdk = qa.adb("shell", "getprop", "ro.build.version.sdk").strip()
+    if not sdk.isdigit() or int(sdk) < 33:
+        raise RuntimeError("Official per-app language QA requires Android API 33 or newer")
+    density = density_dpi(qa)
+    cases, selected, rotated = [], None, False
+    try:
+        for language in LANGUAGES:
+            configure_locale(qa, language)
+            selected = language
+            _, proof = observe(qa, "00-interface-" + language,
+                               lambda tree, expected=labels(language): language_proof(tree, expected))
+            cases.append({"language": language, **proof})
+        rotated = True
+        qa.adb("shell", "wm", "user-rotation", "lock", "1")
+        wide = observe_wide(qa, density)
+    finally:
+        if rotated:
+            qa.adb("shell", "wm", "user-rotation", "lock", "0", check=False)
+        if selected != "ko":
+            # Cleanup uses the same public user preference API; a failed case
+            # never claims success or continues into the 32 legacy checks.
+            qa.adb("shell", "cmd", "locale", "set-app-locales", PACKAGE,
+                   "--user", "0", "--locales", "ko", check=False)
+    restored = observe_portrait(qa)
+    return {"actual_os_api_resource_configuration": {
+        "authority": "Android public LocaleManager and WindowManager shell APIs",
+        "sdk": int(sdk), "languages": cases, "wide": wide, "restored_portrait": restored}}
