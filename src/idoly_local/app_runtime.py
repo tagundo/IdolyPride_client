@@ -50,6 +50,7 @@ class Runtime:
         self._media_settings = None
         self._language_settings = None
         self._event_settings = None
+        self._payload_lease = None
         self._active_events = None
         self._library = None
         self._last_library_status = None
@@ -265,6 +266,12 @@ class Runtime:
                     self._asset_started = False
                 except Exception as error:
                     failures.append(error)
+            if not failures and self._payload_lease is not None:
+                try:
+                    self._payload_lease.close()
+                    self._payload_lease = None
+                except Exception as error:
+                    failures.append(error)
             self._stopped = not failures
             if failures:
                 self._last_error = "Server cleanup failed; retry Stop"
@@ -446,6 +453,9 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     stage = "startup"
     try:
         runtime = Runtime(profile, log_callback, data_dir=root, history=history, startup_checks=checks)
+        stage = "catalog"
+        from .public_payload import acquire_payload_read_lease
+        runtime._payload_lease = acquire_payload_read_lease(root)
         runtime._media_mode = media_mode
         from .presentation import PresentationState
         runtime._presentation = PresentationState(root / "client-presentation.json")

@@ -7,6 +7,7 @@ See docs/story-read-support.md for evidence and explicit limitations.
 
 SCHEMA_SHA256 = "0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3"
 MASTER_VERSION = "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60"
+LATEST_MASTER_VERSION = "6b77e0d8a64b26d5bebd09a7c19a47f2dfad2af914c5160418aa2e7292e13a11"
 BASELINE_ID = "fresh-official-2026-10-25"
 SOURCE_COMMIT = "c40ea107b9cc8e53ae1705f82a5c39cc9fe3be02"
 
@@ -440,3 +441,115 @@ FREE_STONE_STORIES = frozenset((
     'st-eve-2607-marathon-raid-004',
     'st-eve-2607-marathon-raid-005',
 ))
+
+
+
+def audit_story_semantics(stories, conditions, messages, telephones, items):
+    """Audit only the fixed 425-story scope against a complete decoded cohort.
+
+    Telephone is mandatory even when a payload omits its raw JSON. A compiler
+    must decode that table for this audit; absence never means no dependencies.
+    This function reads public definitions only and never changes game state.
+    """
+    import hashlib
+    import json
+
+    def need(value, code):
+        if not value:
+            raise ValueError(code)
+
+    def identity(value):
+        return (type(value) is str and 0 < len(value.encode("utf-8")) <= 512
+                and all(ord(character) >= 32 for character in value))
+
+    def index(rows):
+        need(type(rows) is list and 0 < len(rows) <= 100000, "story_semantic_table_missing")
+        result = {}
+        for row in rows:
+            need(type(row) is dict and identity(row.get("id"))
+                 and row["id"] not in result, "story_semantic_identity_invalid")
+            result[row["id"]] = row
+        return result
+
+    def fingerprint(value):
+        return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
+            separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+    story_rows, condition_rows, item_rows = index(stories), index(conditions), index(items)
+    message_rows, telephone_rows = index(messages), index(telephones)
+    scope = NO_REWARD_STORIES | FREE_STONE_STORIES
+    need(len(NO_REWARD_STORIES) == 143 and len(FREE_STONE_STORIES) == 282
+         and len(scope) == 425 and not NO_REWARD_STORIES & FREE_STONE_STORIES,
+         "story_semantic_rule_overlap")
+    rewards = []
+    for name in sorted(scope):
+        expected = "" if name in NO_REWARD_STORIES else "rd_auto;stone;;30"
+        need(name in story_rows and story_rows[name].get("rewardId", "") == expected,
+             "story_semantic_reward_changed")
+        rewards.append([name, expected])
+    graph = {}
+    for name, row in condition_rows.items():
+        settings = row.get("settings")
+        need(type(settings) is list and all(type(value) is dict for value in settings),
+             "story_semantic_condition_invalid")
+        dependencies, read_stories, item_ids = set(), set(), set()
+        pending, nodes = list(settings), 0
+        while pending:
+            node = pending.pop()
+            nodes += 1
+            need(nodes <= 10000, "story_semantic_condition_bound")
+            if type(node) is dict:
+                if "readStory" in node:
+                    entry = node["readStory"]
+                    need(type(entry) is dict and identity(entry.get("storyId")),
+                         "story_semantic_story_reference_invalid")
+                    read_stories.add(entry["storyId"])
+                for key, value in node.items():
+                    if key in ("conditionId", "itemId"):
+                        need(identity(value), "story_semantic_reference_invalid")
+                        (dependencies if key == "conditionId" else item_ids).add(value)
+                    elif type(value) in (dict, list):
+                        pending.append(value)
+            elif type(node) is list:
+                pending.extend(node)
+        graph[name] = (dependencies, read_stories, item_ids)
+    roots = []
+    for table, rows in (("Message", message_rows), ("Telephone", telephone_rows)):
+        for name, row in sorted(rows.items()):
+            condition = row.get("unlockConditionId", "")
+            need(type(condition) is str and (not condition or identity(condition)),
+                 "story_semantic_unlock_invalid")
+            roots.append([table, name, condition])
+    state, referenced_stories, referenced_items = {}, set(), set()
+    for _, _, root in roots:
+        if not root:
+            continue
+        pending = [(root, False)]
+        while pending:
+            name, exiting = pending.pop()
+            if exiting:
+                state[name] = 2
+                continue
+            if state.get(name) == 2:
+                continue
+            need(state.get(name) != 1, "story_semantic_condition_cycle")
+            need(name in graph, "story_semantic_condition_missing")
+            dependencies, read_stories, item_ids = graph[name]
+            need(read_stories <= story_rows.keys(), "story_semantic_story_missing")
+            need(item_ids <= item_rows.keys(), "story_semantic_item_missing")
+            referenced_stories.update(read_stories)
+            referenced_items.update(item_ids)
+            state[name] = 1
+            pending.append((name, True))
+            pending.extend((value, False) for value in sorted(dependencies, reverse=True))
+    need(not scope & referenced_stories, "story_semantic_narrative_dependency_changed")
+    closure = [[name, sorted(graph[name][0]), sorted(graph[name][1]), sorted(graph[name][2])]
+               for name in sorted(state)]
+    return {"schema": 1, "scope_stories": len(scope), "no_reward_stories": len(NO_REWARD_STORIES),
+            "free_stone_stories": len(FREE_STONE_STORIES), "message_rows": len(message_rows),
+            "telephone_rows": len(telephone_rows), "condition_rows": len(condition_rows),
+            "reachable_conditions": len(state), "read_story_references": len(referenced_stories),
+            "supported_story_dependencies": 0, "item_references": len(referenced_items),
+            "story_rewards_sha256": fingerprint(rewards),
+            "condition_closure_sha256": fingerprint({"roots": roots, "closure": closure}),
+            "item_references_sha256": fingerprint([item_rows[name] for name in sorted(referenced_items)])}

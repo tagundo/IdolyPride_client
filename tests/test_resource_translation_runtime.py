@@ -275,7 +275,7 @@ def test_installer_semantic_helper_validates_both_languages_closes_archives_and_
     class ObservedLayer(ResourceTranslation):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs); opened.append(self)
-    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    monkeypatch.setattr("idoly_local.resource_translation.ResourceTranslation", ObservedLayer)
     coverage = validate_prepared_translations(tmp_path / "staged", private, platform="android")
     assert set(coverage) == {"ko", "en"} and all(value["translated"] == 1 for value in coverage.values())
     assert len(opened) == 2 and all(layer._archive is None for layer in opened)
@@ -283,7 +283,7 @@ def test_installer_semantic_helper_validates_both_languages_closes_archives_and_
     altered = database(); altered.assetBundleList[0].priority += 1
     wrong = altered.SerializeToString(); settings["manifest_sha256"] = hashlib.sha256(wrong).hexdigest()
     (archive / "manifest.pb").write_bytes(wrong); (archive / "settings.json").write_text(json.dumps(settings))
-    with pytest.raises(ValueError, match="identity"):
+    with pytest.raises(ValueError, match="identity|not approved"):
         validate_prepared_translations(tmp_path / "staged", private, platform="android")
     assert len(opened) == 2 and not list(private.glob("client-resource-revision-*.json"))
     (archive / "manifest.pb").write_bytes(raw); settings["manifest_sha256"] = hashlib.sha256(raw).hexdigest()
@@ -350,7 +350,7 @@ def test_previous_language_is_released_at_next_constructor_entry(tmp_path, monke
             assert opened_archive.fp is None and self._archive is None
             events.append(("closed", self.language))
 
-    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    monkeypatch.setattr("idoly_local.resource_translation.ResourceTranslation", ObservedLayer)
     coverage = validate_prepared_translations(staged, private, platform=platform)
     expected = {"adv_resources": 1, "translated": 1, "missing": 0, "unchanged_original": 0}
     assert coverage == {"ko": expected, "en": expected}
@@ -386,7 +386,7 @@ def test_next_constructor_failure_preserves_exception_after_releasing_previous_l
             assert opened_archive.fp is None
             events.append(("closed", self.language))
 
-    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    monkeypatch.setattr("idoly_local.resource_translation.ResourceTranslation", ObservedLayer)
     with pytest.raises(ValueError) as caught:
         validate_prepared_translations(staged, private, platform=platform)
     assert caught.value is failure
@@ -418,7 +418,7 @@ def test_coverage_copy_failure_still_closes_archive_and_releases_layer(tmp_path,
             super().close()
             closed.append((self.language, opened_archive.fp is None))
 
-    monkeypatch.setattr(runtime, "ResourceTranslation", ObservedLayer)
+    monkeypatch.setattr("idoly_local.resource_translation.ResourceTranslation", ObservedLayer)
     with pytest.raises(RuntimeError) as caught:
         validate_prepared_translations(staged, private, platform=platform)
     assert caught.value is failure

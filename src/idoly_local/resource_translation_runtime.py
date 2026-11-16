@@ -20,7 +20,7 @@ from zipfile import BadZipFile
 from google.protobuf.message import DecodeError
 
 from .octo_manifest import Database
-from .resource_translation import ResourceTranslation
+from .resource_translation import load_resource_translation
 
 _LOCK = threading.Lock()
 
@@ -113,7 +113,8 @@ def select_resource_translation(original, data_dir, cache_root, *, language, pla
         from .bundled_translations import resolve_translation_root
         directory = resolve_translation_root(cache_root, platform=platform) / language / platform
         if directory.exists():
-            layer = ResourceTranslation(directory, original, language=language)
+            layer = load_resource_translation(directory, original, language=language,
+                data_dir=data_dir, platform=platform)
     raw = original if layer is None else layer.manifest
     try:
         raw, compatible = pin_manifest_revision(raw,
@@ -146,7 +147,8 @@ def validate_prepared_translations(directory, data_dir, *, platform):
         if not selected.exists():
             continue
         try:
-            layer = ResourceTranslation(selected, original, language=language)
+            layer = load_resource_translation(selected, original, language=language,
+                data_dir=data_dir, platform=platform)
         except (DecodeError, BadZipFile, zlib.error, UnicodeError, RecursionError):
             raise ValueError("Prepared language resource format is invalid") from None
         try:

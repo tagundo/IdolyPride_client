@@ -44,6 +44,30 @@ def _platform_archive(platform):
     return PLATFORM_ARCHIVES[platform]
 
 
+
+def latest_resource_archive_pin(platform):
+    """Return a finite approved latest tuple, or None before actual pinning."""
+    _archive, _cache, version, old_revision = _platform_archive(platform)
+    from .latest_cohort_pins import RESOURCE_ARCHIVES
+    from .resource_translation import LEGACY_MANIFEST_SHA256
+    if not isinstance(RESOURCE_ARCHIVES, dict):
+        raise ValueError("Latest game resource authority is invalid")
+    if platform not in RESOURCE_ARCHIVES:
+        return None
+    approved = RESOURCE_ARCHIVES[platform]
+    if (not isinstance(approved, dict) or set(approved) != {
+            "application_version", "revision", "manifest_sha256", "legacy_manifest_sha256"}
+            or type(approved.get("revision")) is not int
+            or not old_revision < approved["revision"] <= 2**31 - 1
+            or type(approved.get("application_version")) is not int
+            or approved["application_version"] != version
+            or any(not isinstance(approved.get(key), str) or not _HEX64.fullmatch(approved[key])
+                for key in ("manifest_sha256", "legacy_manifest_sha256"))
+            or approved["legacy_manifest_sha256"] != LEGACY_MANIFEST_SHA256[platform]):
+        raise ValueError("Latest game resource archive is not approved")
+    return dict(approved)
+
+
 def resource_cache_root(data_dir, resource_cache_dir=None):
     """Choose resource storage only; catalogs, profiles and state stay private."""
     try:
@@ -151,6 +175,11 @@ def load_octo_archive(directory, *, platform="android"):
         raise ValueError("Game resource settings are invalid") from None
     if not isinstance(settings, dict) or set(settings) != _SETTINGS:
         raise ValueError("Game resource settings fields differ")
+    if settings.get("revision") != revision:
+        approved = latest_resource_archive_pin(platform)
+        if approved is None or settings.get("manifest_sha256") != approved["manifest_sha256"]:
+            raise ValueError("Latest game resource archive is not approved")
+        revision = approved["revision"]
     for key, expected in (("schema", 1), ("application_id", 212),
                           ("application_version", version), ("revision", revision)):
         if type(settings[key]) is not int or settings[key] != expected:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 import os
+import json
 import shutil
 import stat
 import tempfile
@@ -17,6 +18,9 @@ FIXED_FILES = {
     "payload-manifest.json",
     "love-reference.json",
     "love-adv-proof.json",
+    "love-compatibility.json",
+    "love-legacy-rules.json",
+    "latest-semantic-controls.json",
     "licenses/love-reference-NOTICE.txt",
     "licenses/love-reference-AGPL-3.0.txt",
     "public-fixtures/manifest.json",
@@ -30,8 +34,10 @@ FIXED_FILES = {
     "protocol/idolypride-6.1.1.evidence.json",
     "public-octo/settings.json",
     "public-octo/manifest.pb",
+    "public-octo/legacy-manifest.pb",
     "public-octo-ios/settings.json",
     "public-octo-ios/manifest.pb",
+    "public-octo-ios/legacy-manifest.pb",
     "original-master/response.pb",
     "original-master/master-tag.json",
     "original-master/media-master-tag.json",
@@ -74,8 +80,34 @@ def member_path(name: str) -> str:
     raise ValueError("Server data contains files outside the public payload")
 
 
-def install_payload(source: Path, data_dir: Path, log=None) -> dict:
-    """Copy only missing public files; existing state and files remain intact."""
+def acquire_payload_read_lease(data_dir):
+    """Hold the public cohort stable until the calling runtime has fully stopped."""
+    from .public_payload_transaction import acquire_payload_read_lease as acquire
+    return acquire(data_dir)
+
+
+def install_payload(source: Path, data_dir: Path, log=None, *, expected_sha256=None, expected_bytes=None) -> dict:
+    """Install a pinned latest cohort transactionally; retain legacy missing-only fixtures."""
+    latest = expected_sha256 is not None or expected_bytes is not None
+    if not latest:
+        with ZipFile(source) as archive:
+            if "data/payload-manifest.json" in archive.namelist():
+                info = archive.getinfo("data/payload-manifest.json")
+                if info.file_size > 2*1024*1024:
+                    raise ValueError("public_payload_invalid")
+                try:
+                    manifest = json.loads(archive.read(info))
+                except (ValueError, UnicodeError):
+                    manifest = {}  # Preserve legacy non-JSON namespace fixtures.
+                overlay = manifest.get("source_overlay", {}) if type(manifest) is dict else {}
+                operation = overlay.get("operation") if type(overlay) is dict else None
+                if operation == "latest-cohort-overlay-v1":
+                    latest = True
+                elif operation not in (None, "love-source-overlay-v1"):
+                    raise ValueError("public_payload_policy_unsupported")
+    if latest:
+        from .public_payload_transaction import install_managed_payload
+        return install_managed_payload(source, data_dir, expected_sha256=expected_sha256, expected_bytes=expected_bytes)
     data_dir = Path(data_dir).expanduser().resolve()
     copied = preserved = 0
     with ZipFile(source) as archive:

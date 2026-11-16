@@ -1,0 +1,135 @@
+name: Register reviewed latest public source object
+
+on:
+  workflow_dispatch:
+    inputs:
+      prep_source_commit:
+        description: Frozen preparation source commit
+        required: true
+        type: string
+      prep_run_id:
+        description: Successful preparation run ID
+        required: true
+        type: string
+      source_artifact_id:
+        description: Compiled source artifact ID
+        required: true
+        type: string
+      source_artifact_sha256:
+        description: Source artifact API archive SHA256
+        required: true
+        type: string
+      proof_artifact_id:
+        description: Small proof artifact ID
+        required: true
+        type: string
+      proof_artifact_sha256:
+        description: Proof artifact API archive SHA256
+        required: true
+        type: string
+      report_sha256:
+        description: Independently reviewed report SHA256
+        required: true
+        type: string
+      blob_sha256:
+        description: Independently reviewed complete blob SHA256
+        required: true
+        type: string
+      blob_bytes:
+        description: Independently reviewed complete blob byte count
+        required: true
+        type: string
+      confirm_object_only:
+        description: Register the reviewed object without publishing any Git reference or release
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_object_only
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Validate fixed public preparation identities
+        env:
+          PREP_SOURCE: ${{ inputs.prep_source_commit }}
+          PREP_RUN: ${{ inputs.prep_run_id }}
+          SOURCE_ARTIFACT: ${{ inputs.source_artifact_id }}
+          PROOF_ARTIFACT: ${{ inputs.proof_artifact_id }}
+          SOURCE_SHA: ${{ inputs.source_artifact_sha256 }}
+          PROOF_SHA: ${{ inputs.proof_artifact_sha256 }}
+          REPORT_SHA: ${{ inputs.report_sha256 }}
+          BLOB_SHA: ${{ inputs.blob_sha256 }}
+          BLOB_BYTES: ${{ inputs.blob_bytes }}
+        run: |
+          python - <<'PYCODE'
+          import os,re
+          assert re.fullmatch('[0-9a-f]{40}',os.environ['PREP_SOURCE'])
+          for key in ('PREP_RUN','SOURCE_ARTIFACT','PROOF_ARTIFACT','BLOB_BYTES'):
+              value=os.environ[key]
+              assert re.fullmatch('[1-9][0-9]{0,18}',value) and int(value)<2**63
+          assert int(os.environ['BLOB_BYTES'])<=512*1024*1024
+          for key in ('SOURCE_SHA','PROOF_SHA','REPORT_SHA','BLOB_SHA'):
+              assert re.fullmatch('[0-9a-f]{64}',os.environ[key])
+          PYCODE
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.prep_source_commit }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Run bounded offline pin and registration tests
+        run: |
+          uv sync --locked --all-extras --python 3.12
+          uv run --no-sync python -m pytest -q \
+            tests/test_latest_server_data_pin.py tests/test_register_latest_server_data_lfs.py
+
+  register:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.confirm_object_only && needs.verify.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.prep_source_commit }}
+          persist-credentials: false
+      - name: Register the fixed object and verify its complete LFS readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IDOLY_LFS_OBJECT_WRITE: reviewed-object-only
+          PREP_SOURCE: ${{ inputs.prep_source_commit }}
+          PREP_RUN: ${{ inputs.prep_run_id }}
+          SOURCE_ARTIFACT: ${{ inputs.source_artifact_id }}
+          PROOF_ARTIFACT: ${{ inputs.proof_artifact_id }}
+          SOURCE_SHA: ${{ inputs.source_artifact_sha256 }}
+          PROOF_SHA: ${{ inputs.proof_artifact_sha256 }}
+          REPORT_SHA: ${{ inputs.report_sha256 }}
+          BLOB_SHA: ${{ inputs.blob_sha256 }}
+          BLOB_BYTES: ${{ inputs.blob_bytes }}
+        run: |
+          python -B tools/register_latest_server_data_lfs.py \
+            --prep-source "$PREP_SOURCE" --prep-run "$PREP_RUN" \
+            --source-artifact-id "$SOURCE_ARTIFACT" --source-artifact-sha256 "$SOURCE_SHA" \
+            --proof-artifact-id "$PROOF_ARTIFACT" --proof-artifact-sha256 "$PROOF_SHA" \
+            --report-sha256 "$REPORT_SHA" --blob-sha256 "$BLOB_SHA" --blob-bytes "$BLOB_BYTES" \
+            --work "$RUNNER_TEMP/latest-source-object-registration"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: latest-source-object-receipt-${{ github.run_id }}
+          path: ${{ runner.temp }}/latest-source-object-registration/registration-receipt.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6

@@ -349,12 +349,26 @@ class Love:
                    for group,indices in entries.items()):
                 _fail("progress_rules_differ")
 
+    def _progress_ruleset(self, row):
+        plan = self._load()
+        current = plan["ruleset_sha256"]
+        aliases = plan.get("progress_ruleset_aliases", [])
+        if (type(aliases) is not list or len(aliases) > 1
+                or any(type(value) is not str or not re.fullmatch(r"[0-9a-f]{64}", value) for value in aliases)):
+            _fail("progress_rules_differ")
+        if row is None:
+            return current
+        if row[1] != self.schema.fingerprint or row[2] not in (current, *aliases):
+            _fail("progress_rules_differ")
+        # A validated compatibility alias is an accepted existing storage pin,
+        # never an instruction to rewrite account metadata or archive bytes.
+        return row[2]
+
     def _saved(self, identity, event):
         row = self.state.love_progress(self.profile,identity)
         if row is None:
             return None
-        if row[1] != self.schema.fingerprint or row[2] != self._load()["ruleset_sha256"]:
-            _fail("progress_rules_differ")
+        self._progress_ruleset(row)
         return self._progress(row[0],identity,event)
 
     def _unlocked(self, snapshot, event):
@@ -497,9 +511,11 @@ class Love:
     def _mutate(self, identity, event, result, operation, now, *, registering=False):
         def callback(snapshot_raw, progress_raw):
             snapshot = self._parse(snapshot_raw)
+            original_snapshot = snapshot.SerializeToString()
             if not self._unlocked(snapshot,event):
                 _fail("event_locked",RpcCode.PERMISSION_DENIED)
             data = self._progress(progress_raw,identity,event) if progress_raw is not None else None
+            original_data = copy.deepcopy(data)
             love = self._love(snapshot,identity)
             if registering:
                 if data is not None:
@@ -518,10 +534,13 @@ class Love:
                 _fail("love_state_invalid")
             updated.loves.add().CopyFrom(love)
             self._references(data,event)
-            return snapshot.SerializeToString(),_encode_progress(data)
+            encoded_snapshot = snapshot.SerializeToString()
+            encoded_progress = progress_raw if progress_raw is not None and data == original_data else _encode_progress(data)
+            return (snapshot_raw if encoded_snapshot == original_snapshot else encoded_snapshot),encoded_progress
         try:
-            self.state.mutate_love_snapshot(self.profile,self.schema.fingerprint,identity,
-                self._load()["ruleset_sha256"],callback)
+            row = self.state.love_progress(self.profile,identity)
+            ruleset = self._progress_ruleset(row)
+            self.state.mutate_love_snapshot(self.profile,self.schema.fingerprint,identity,ruleset,callback)
         except ValueError:
             _fail("progress_unavailable_or_rules_changed")
 
