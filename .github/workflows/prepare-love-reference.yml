@@ -1,0 +1,31 @@
+name: Prepare pinned Love reference
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Normalize exact public reference inputs only
+        run: |
+          uv run --no-project --python 3.12 --with PyYAML==6.0.3 \
+            python tools/prepare_love_reference.py \
+            --output "$RUNNER_TEMP/love-reference.json" \
+            --report "$RUNNER_TEMP/love-reference.report.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: love-reference-source-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/love-reference.json
+            ${{ runner.temp }}/love-reference.report.json
+          if-no-files-found: error
+          retention-days: 7
