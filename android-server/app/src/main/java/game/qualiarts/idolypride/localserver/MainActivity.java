@@ -56,7 +56,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private ProgressBar accountProgress;
     private int accountOffset, restoreOffset;
     private boolean accountLifecycleBusy, accountDialogOpen;
-    private String pendingSelectedAccountMode;
 
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
@@ -521,7 +520,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void performAccount(String action, JSONObject payload) {
         if (ServerService.isManagingAccounts()) return;
-        if ("accounts_select".equals(action)) pendingSelectedAccountMode = payload.optString("mode");
         accountOperation.setText(R.string.accounts_working); accountOperation.setTextColor(TEXT_MUTED);
         ServerService.manageAccounts(getApplicationContext(), action, payload, accountCallback(action));
         updateAccountControls();
@@ -556,8 +554,6 @@ public final class MainActivity extends Activity implements ServerService.Observ
         JSONObject settings = result.optJSONObject("settings"); if (settings != null) renderServerChecks(settings);
         accountOperation.setTextColor(SUCCESS); accountOperation.setText(R.string.accounts_complete);
         if ("accounts_select".equals(action)) {
-            if (pendingSelectedAccountMode != null) mediaMode.setChecked("media".equals(pendingSelectedAccountMode));
-            pendingSelectedAccountMode = null;
             accountOperation.setText(R.string.accounts_selected);
         } else if ("accounts_export".equals(action)) {
             pendingAccountExport = accountPayload("path", result.optString("path"), "filename", result.optString("filename"),
@@ -607,7 +603,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         names = new java.util.ArrayList<>();
         for (int index = 0; index < restoreRows.length(); index++) {
             JSONObject row = restoreRows.optJSONObject(index); if (row != null)
-                names.add(accountMode(row.optString("mode")) + " · " + row.optString("profile") + " · " + row.optString("created_at"));
+                names.add(accountMode(row.optString("mode")) + " · " + row.optString("profile") + " · " + accountDate(row.optLong("created_at", 0)));
         }
         if (names.isEmpty()) names.add(getString(R.string.accounts_restore_empty));
         restorePicker.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, names));
@@ -616,6 +612,17 @@ public final class MainActivity extends Activity implements ServerService.Observ
         restorePage.setText(getString(R.string.accounts_restore_page, restoreRows.length() == 0 ? 0 : restoreOffset + 1,
                 restoreOffset + restoreRows.length(), value.optInt("restore_points_total", restoreRows.length())));
         renderAccountOverview(); updateAccountControls();
+    }
+
+    private String accountDate(long timestamp) {
+        if (timestamp <= 0) return getString(R.string.accounts_date_unknown);
+        return java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
+                .format(new java.util.Date(timestamp));
+    }
+
+    private String accountDate(String timestamp) {
+        try { return accountDate(java.time.Instant.parse(timestamp).toEpochMilli()); }
+        catch (RuntimeException invalid) { return getString(R.string.accounts_date_unknown); }
     }
 
     private String accountMode(String value) { return getString("media".equals(value) ? R.string.accounts_media : R.string.accounts_normal); }
@@ -786,7 +793,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (history != null) durableHistory = history;
         JSONObject failure = durableHistory.optJSONObject("last_failure");
         if (failure == null) durableFailure.setText(R.string.server_history_empty);
-        else durableFailure.setText(getString(R.string.server_history_last, failure.optString("timestamp"), failure.optString("code")));
+        else durableFailure.setText(getString(R.string.server_history_last, accountDate(failure.optString("timestamp")), failure.optString("code")));
     }
 
     private void requestDiagnosticsExport() {

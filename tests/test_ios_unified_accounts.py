@@ -250,3 +250,62 @@ def test_failed_payload_installation_exposes_persisted_history_before_runtime_cr
     assert prior["runtime"]["startup_checks"]["scope"]=="previous_run"
     assert prior["runtime"]["durable_history"]["last_failure"]["kind"]=="startup_failure"
     assert "provider-path-must-not-be-exported" not in json.dumps(result)
+
+def test_account_page_and_last_failure_survive_status_budget_with_native_headroom(harness,monkeypatch):
+    h=harness;start(h)
+    base=h.runtimes[0].status()
+    accounts={"schema":1,"selected":{"normal":"slot-0","media":"sandbox"},"selection_revision":"a"*64,
+        "restore_points":[],"accounts":[]}
+    for number in range(24):
+        accounts["accounts"].append({"mode":"normal","profile":"slot-"+str(number),"revision":"b"*64,
+            "server_id":"s"*256,"public_id":"p"*256,"has_snapshot":True,"manager_name":"매"*40,
+            "inventory":{"cards":100,"items":30,"photos":9},
+            "counts":{"profiles":1,"snapshots":1,"profile_settings":1,"starter_profiles":1,
+                "profile_lesson_progress":1,"preference_receipts":100,"main_live_attempts":10}})
+    h.subject._account_status=accounts
+    last={"sequence":100,"timestamp":"2026-11-16T00:00:00.000Z","run_id":"c"*32,
+        "kind":"http_failure","code":"http_request_failed","http_status":404}
+    base["durable_history"]={"schema":1,"available":True,"load_state":"loaded","persistence":"stored",
+        "last_write_error":None,"current_run":"c"*32,"retained_records":128,"total_records":400,
+        "last_failure":last,"records":[{**last,"sequence":index,"path":"/api."+("A"*1700)+"/Get"} for index in range(20)]}
+    base["startup_checks"]={"schema":1,"scope":"current_run","state":"blocked","gameplay_verified":False,
+        "checks":[{"id":"http","state":"blocked","code":"address_in_use"}]}
+    base["huge_probe"]="x"*100000
+    monkeypatch.setattr(h.runtimes[0],"status",lambda:base)
+    encoded=h.subject.command('{"id":7,"action":"status"}')
+    response=json.loads(encoded)
+    assert response["ok"] and len(encoded.encode("utf-8")) <= 65536-8192+128
+    observed=response["result"]
+    assert len(observed["accounts"]["accounts"])==24
+    assert observed["runtime"]["startup_checks"]["checks"][0]["code"]=="address_in_use"
+    history=observed["runtime"]["durable_history"]
+    assert history["last_failure"]==last
+    assert history["records_truncated"] is True and len(history["records"]) <= 3
+    assert history["retained_records"]==128 and history["total_records"]==400
+
+
+@pytest.mark.parametrize("language,description",[("en","Close another server using the same port."),("ja","同じポートを使う別のサーバーを終了してください。")])
+def test_readiness_cards_show_localized_action_and_keep_fixed_codes_in_diagnostic_copy(language,description):
+    run_js("const LANGUAGE="+json.dumps(language)+";const DESCRIPTION="+json.dumps(description)+";\n"+r"""
+const env=environment();const app=api.createSettingsApp(env.scope,env.document,env.timers);
+const value=status();value.options.interface_language=LANGUAGE;
+value.runtime.startup_checks={scope:'current_run',checks:[{id:'http',state:'blocked',code:'address_in_use'}]};
+value.runtime.durable_history={available:true,last_failure:{kind:'startup_failure',code:'internal_error',timestamp:'2026-11-16T00:00:00Z'}};
+env.respond(env.posted[0],value);await flush();
+assert.ok(env.elements.get('startup-checks').textContent.includes(DESCRIPTION));
+assert.ok(!env.elements.get('startup-checks').textContent.includes('address_in_use'));
+assert.ok(!env.elements.get('history-summary').textContent.includes('internal_error'));
+assert.ok(env.elements.get('diagnostics').textContent.includes('address_in_use'));
+app.dispose();
+""")
+
+def test_new_manager_name_preserves_accepted_text_and_uses_game_utf16_limit():
+    run_js(r"""
+const env=environment();const bridge=api.createBridge(env.scope,env.timers);
+const accepted=bridge.request('accounts_create',{mode:'normal',profile:'local-slot',manager_name:' A '});
+assert.equal(env.posted[0].manager_name,' A ');
+env.respond(env.posted[0],{ok:true});await accepted;
+await assert.rejects(bridge.request('accounts_create',{mode:'normal',profile:'local-slot',manager_name:'😀'.repeat(6)}),/허용되지/);
+await assert.rejects(bridge.request('accounts_create',{mode:'normal',profile:'local-slot',manager_name:'A\nB'}),/허용되지/);
+bridge.dispose();
+""")

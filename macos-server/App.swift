@@ -1320,7 +1320,7 @@ struct AccountControls: View {
                 }.disabled(model.accountPending)
                 Text(model.accountPageMessage).font(.caption).foregroundStyle(.secondary)
                 HStack {
-                    TextField("새 계정 이름", text: $model.newAccountProfile)
+                    TextField("새 저장 슬롯 이름", text: $model.newAccountProfile)
                     TextField("게임 내 매니저 이름 (새 계정)", text: $model.newAccountManagerName)
                 }.disabled(model.accountPending)
                 HStack {
@@ -1352,7 +1352,7 @@ struct AccountControls: View {
                 }.disabled(model.accountPending)
                 if model.accountPending { ProgressView().controlSize(.small) }
                 Text(model.accountMessage).font(.caption).textSelection(.enabled)
-                Text("계정 ZIP에는 계정·진행·게임 설정을 보관하며 다운로드 리소스는 포함하지 않습니다. 리소스 ZIP에는 계정이 없습니다. 계정 선택은 다음 서버 시작부터 적용되고, 교체·복구는 게임 종료 후 서버를 중지한 상태에서 진행합니다.")
+                Text("계정 ZIP에는 계정·진행·게임 설정을 보관하며 다운로드 리소스는 포함하지 않습니다. 리소스 ZIP에는 계정이 없습니다. 선택은 해당 일반/감상 모드의 다음 계정에 적용됩니다. 사용할 감상 모드도 별도로 확인해 주세요. 복제는 게임 내 이름과 ID를 보존한 저장 분기입니다. 교체·복구는 게임 종료 후 서버를 중지한 상태에서 진행합니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(.top, 6)
         }

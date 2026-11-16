@@ -1369,6 +1369,9 @@ def main():
                                                  args.master_dir, args.startup_timeout, preserved))
         result.update(exercise_main_live_checks(qa, schema, grpc_port, login.gameAuthToken,
                                                 args.master_dir, args.startup_timeout, preserved))
+        from qa_account_management import exercise_account_management
+        result.update(exercise_account_management(qa, schema, grpc_port, asset_port, args.startup_timeout,
+            wait_server=wait_server, bootstrap=bootstrap, rpc=rpc, copy_database=_copy_private_database))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)
     except BaseException as error:

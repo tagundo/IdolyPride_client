@@ -464,6 +464,12 @@
   Object.assign(UI_TRANSLATIONS.ja, {"아이템 종류":"アイテムの種類"});
   Object.assign(UI_TRANSLATIONS.en, {"아이템 종류":"Item types"});
 
+  Object.assign(UI_TRANSLATIONS.ja, {"게임 통신 자료를 확인했습니다.": "ゲームの通信データを確認しました。", "게임 목록 자료를 확인했습니다.": "ゲームカタログを確認しました。", "마스터 목록과 파일 크기를 확인했습니다.": "マスター一覧とファイルサイズを確認しました。", "이 기기에 저장할 수 있습니다.": "この端末に保存できます。", "저장 공간이 부족합니다. 파일을 정리해 주세요.": "空き容量が不足しています。ファイルを整理してください。", "파일 서버 응답을 확인했습니다.": "ファイルサーバーの応答を確認しました。", "게임 연결을 받을 준비가 되었습니다.": "ゲームからの接続を受け付けられます。", "게임 연결을 중지했습니다.": "ゲーム接続を停止しました。", "게임 리소스 목록이 없습니다.": "ゲームリソースの一覧がありません。", "필요한 파일을 인터넷으로 받을 수 있습니다.": "必要なファイルをインターネットから取得できます。", "오프라인용 파일이 모두 준비됐는지 확인해 주세요.": "オフライン用ファイルが揃っているか確認してください。", "선택한 계정을 확인했습니다.": "選択したアカウントを確認しました。", "계정을 다시 선택해 주세요.": "アカウントを選び直してください。", "저장소 접근 권한을 확인해 주세요.": "保存先へのアクセス権限を確認してください。", "같은 포트의 다른 서버를 종료해 주세요.": "同じポートを使う別のサーバーを終了してください。", "필요한 서버 자료가 없습니다.": "必要なサーバーデータがありません。", "서버 자료·설정의 형식을 확인해 주세요.": "サーバーデータと設定の形式を確認してください。", "저장 공간을 확보해 주세요.": "空き容量を確保してください。", "진단 기록을 확인해 주세요.": "診断記録を確認してください。", "게임 요청이 실패했습니다.": "ゲームリクエストが失敗しました。", "파일 요청이 실패했습니다.": "ファイルリクエストが失敗しました。", "서버를 시작하지 못했습니다.": "サーバーを起動できませんでした。", "서버 작업을 마치지 못했습니다.": "サーバー処理を完了できませんでした。"});
+  Object.assign(UI_TRANSLATIONS.en, {"게임 통신 자료를 확인했습니다.": "Game protocol data checked.", "게임 목록 자료를 확인했습니다.": "Game catalog checked.", "마스터 목록과 파일 크기를 확인했습니다.": "Master catalog and file sizes checked.", "이 기기에 저장할 수 있습니다.": "Storage is writable.", "저장 공간이 부족합니다. 파일을 정리해 주세요.": "Storage is low. Free some space.", "파일 서버 응답을 확인했습니다.": "File server response checked.", "게임 연결을 받을 준비가 되었습니다.": "Ready to receive game connections.", "게임 연결을 중지했습니다.": "Game listener stopped.", "게임 리소스 목록이 없습니다.": "Game resource catalog is missing.", "필요한 파일을 인터넷으로 받을 수 있습니다.": "Missing files can be downloaded online.", "오프라인용 파일이 모두 준비됐는지 확인해 주세요.": "Check that all files needed offline are stored.", "선택한 계정을 확인했습니다.": "Selected account checked.", "계정을 다시 선택해 주세요.": "Select an account again.", "저장소 접근 권한을 확인해 주세요.": "Check storage access permissions.", "같은 포트의 다른 서버를 종료해 주세요.": "Close another server using the same port.", "필요한 서버 자료가 없습니다.": "Required server data is missing.", "서버 자료·설정의 형식을 확인해 주세요.": "Check the format of server data and settings.", "저장 공간을 확보해 주세요.": "Free storage space.", "진단 기록을 확인해 주세요.": "Check the diagnostic record.", "게임 요청이 실패했습니다.": "A game request failed.", "파일 요청이 실패했습니다.": "A file request failed.", "서버를 시작하지 못했습니다.": "The server could not start.", "서버 작업을 마치지 못했습니다.": "A server operation could not finish."});
+
+  Object.assign(UI_TRANSLATIONS.ja, {"해당 모드의 다음 계정으로 선택": "このモードの次回アカウントに選択", "계정 선택은 해당 모드의 저장 슬롯을 바꿉니다. 사용할 일반·감상 모드도 위 설정에서 확인해 주세요.": "アカウント選択は指定モードの保存スロットを変更します。通常・鑑賞モードの設定も上で確認してください。", "게임 ID: ": "ゲームID: "});
+  Object.assign(UI_TRANSLATIONS.en, {"해당 모드의 다음 계정으로 선택": "Use at next start in this mode", "계정 선택은 해당 모드의 저장 슬롯을 바꿉니다. 사용할 일반·감상 모드도 위 설정에서 확인해 주세요.": "Account selection changes the save slot for that mode. Check the normal/viewing mode setting above too.", "게임 ID: ": "Game ID: "});
+
   function resolveInterfaceLanguage(value, navigator = {}) {
     if (["ko", "ja", "en"].includes(value)) return value;
     const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
@@ -936,7 +942,7 @@
       const inventory = object(archive.inventory) ? archive.inventory : {};
       for (const [key,label] of [["cards","카드"],["items","아이템 종류"],["photos","포토"]])
         if (Number.isSafeInteger(inventory[key]) && inventory[key] >= 0) lines.push(t(label) + ": " + inventory[key]);
-      if (typeof archive.manager_name === "string") lines.push(t("게임 내 매니저: ") + plain(archive.manager_name,64));
+      if (typeof archive.manager_name === "string") lines.push(t("게임 내 매니저: ") + plain(archive.manager_name,128));
       lines.push(t("게임 리소스 파일은 포함하지 않습니다."));
       text("accounts-preview-detail",lines.join("\n"),false);
     }
@@ -970,6 +976,15 @@
       el("accounts-refresh").disabled = !available || accountPending || launchFlushing;
       el("accounts-fields").disabled = !available || !accountSnapshot || accountPending || launchFlushing;
       const current = selectedAccount(), point = selectedRestorePoint();
+      const details = [];
+      if (current) {
+        if (typeof current.manager_name === "string") details.push(t("게임 내 매니저: ") + plain(current.manager_name,128));
+        if (typeof current.public_id === "string") details.push(t("게임 ID: ") + plain(current.public_id,256));
+        const inventory = object(current.inventory) ? current.inventory : {};
+        for (const [key,label] of [["cards","카드"],["items","아이템 종류"],["photos","포토"]])
+          if (Number.isSafeInteger(inventory[key]) && inventory[key] >= 0) details.push(t(label) + ": " + inventory[key]);
+      }
+      text("accounts-user-detail",details.join(" · "),false);
       for (const name of ["select","export","clone"]) el("accounts-"+name).disabled = !current || accountPending || launchFlushing;
       const fileBusy = resourcePending || Boolean(job && ACTIVE_JOBS.has(job.state)) || Boolean(importProgress && ["selecting","preparing","copying","queued"].includes(importProgress.stage));
       el("accounts-export").disabled = !current || accountPending || launchFlushing || fileBusy;
@@ -1010,12 +1025,16 @@
       const history = object(runtime.durable_history) ? runtime.durable_history : null;
       const labels = {protocol:"프로토콜",catalog:"게임 목록",master:"마스터 파일",storage:"저장 공간",http:"파일 서버",grpc:"게임 서버",resources:"게임 리소스",account:"계정"};
       const states = {ready:"준비 완료",blocked:"확인 필요",missing:"없음",attention:"확인 필요",not_checked:"검사 전",stopped:"중지됨",checking:"확인 중",not_run:"검사 전"};
+      const descriptions = {"descriptor_loaded": "게임 통신 자료를 확인했습니다.", "catalog_present": "게임 목록 자료를 확인했습니다.", "tag_and_pack_sizes_checked": "마스터 목록과 파일 크기를 확인했습니다.", "storage_writable": "이 기기에 저장할 수 있습니다.", "low_free_space": "저장 공간이 부족합니다. 파일을 정리해 주세요.", "http_json_ready": "파일 서버 응답을 확인했습니다.", "listener_started": "게임 연결을 받을 준비가 되었습니다.", "listener_stopped": "게임 연결을 중지했습니다.", "resource_catalog_missing": "게임 리소스 목록이 없습니다.", "on_demand_enabled": "필요한 파일을 인터넷으로 받을 수 있습니다.", "offline_cache_unverified": "오프라인용 파일이 모두 준비됐는지 확인해 주세요.", "selection_ready": "선택한 계정을 확인했습니다.", "selection_invalid": "계정을 다시 선택해 주세요.", "permission_denied": "저장소 접근 권한을 확인해 주세요.", "address_in_use": "같은 포트의 다른 서버를 종료해 주세요.", "missing_input": "필요한 서버 자료가 없습니다.", "invalid_input": "서버 자료·설정의 형식을 확인해 주세요.", "insufficient_space": "저장 공간을 확보해 주세요.", "internal_error": "진단 기록을 확인해 주세요."};
       const lines = checks && Array.isArray(checks.checks) ? checks.checks.slice(0,12).filter(object).map(row =>
-        t(labels[row.id] || "검사") + " · " + t(states[row.state] || "확인 중") + (row.code ? " (" + plain(row.code,80) + ")" : "")) : [];
+        t(labels[row.id] || "검사") + " · " + t(states[row.state] || "확인 중") + (descriptions[row.code] ? " · " + t(descriptions[row.code]) : "")
+        + (Number.isSafeInteger(row.free_bytes) && row.free_bytes >= 0 ? " · " + formatBytes(row.free_bytes) : "")) : [];
       if (checks && checks.scope === "previous_run") lines.unshift(t("이전 실행의 검사 기록입니다."));
       text("startup-checks", lines.length ? lines.join("\n") : t("서버 준비 검사를 기다리고 있습니다."), false);
       const failure = history && object(history.last_failure) ? history.last_failure : null;
-      text("history-summary", failure ? t("마지막 오류: ") + plain(failure.code,100) + " · " + plain(failure.timestamp,64)
+      const failures = {rpc:"게임 요청이 실패했습니다.",http_failure:"파일 요청이 실패했습니다.",startup_failure:"서버를 시작하지 못했습니다."};
+      const when = failure && typeof failure.timestamp === "string" && Number.isFinite(Date.parse(failure.timestamp)) ? new Date(failure.timestamp).toLocaleString(language) : "";
+      text("history-summary", failure ? t("마지막 오류: ") + t(failures[failure.kind] || "서버 작업을 마치지 못했습니다.") + (when ? " · " + when : "")
         : history && history.available === false ? t("오류 기록을 저장할 수 없습니다.") : t("저장된 최근 오류가 없습니다."), false);
     }
     async function account(action, explicitPayload) {

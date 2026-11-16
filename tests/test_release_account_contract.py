@@ -55,3 +55,38 @@ def test_report_identity_and_scope_cannot_be_weakened(case):
     else: detail["checks"]["unverified_claim"] = True
     with pytest.raises(ValueError):
         contract.validate(smoke)
+
+
+def android_valid():
+    return {**{key: True for key in contract.ANDROID_CHECKS},
+        "account_management": {"scope": contract.ANDROID_SCOPE,
+            "archive_filename_observed": "IdolyPride-Account-"+"a"*32+".zip",
+            "owned_tables": list(contract.TABLES), "imported_sessions": 0, "physical_device_tested": False}}
+
+
+def test_android_account_ui_and_provider_scope_is_explicit():
+    value = android_valid()
+    assert contract.validate_android(value) == value["account_management"]
+
+
+@pytest.mark.parametrize("key", ["account_native_create","account_native_clone","account_queued_selection_persisted","account_selected_encrypted_rpc","account_document_export_import","account_zip_whole_state_preserved","account_original_whole_state_preserved","account_import_sessions_excluded","account_selection_restored"])
+@pytest.mark.parametrize("value", [False, 1, None])
+def test_android_account_ui_observations_are_mandatory(key, value):
+    report = android_valid()
+    report[key] = value
+    with pytest.raises(ValueError):
+        contract.validate_android(report)
+
+
+@pytest.mark.parametrize("case", ["scope", "filename", "tables", "sessions", "sessions_bool", "physical"])
+def test_android_native_scope_does_not_claim_device_or_imported_sessions(case):
+    report = android_valid()
+    detail = report["account_management"]
+    if case == "scope": detail["scope"] = "physical"
+    elif case == "filename": detail["archive_filename_observed"] = "../account.zip"
+    elif case == "tables": detail["owned_tables"].pop()
+    elif case == "sessions": detail["imported_sessions"] = 1
+    elif case == "sessions_bool": detail["imported_sessions"] = False
+    else: detail["physical_device_tested"] = True
+    with pytest.raises(ValueError):
+        contract.validate_android(report)

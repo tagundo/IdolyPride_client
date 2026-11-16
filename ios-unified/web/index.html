@@ -46,10 +46,12 @@
       <p class="hint">계정 ZIP에는 계정 진행·보유 항목·게임 설정을 보관합니다. 게임 리소스 ZIP과는 별개입니다.</p>
       <p class="hint">로컬 계정 이름은 저장 슬롯 이름입니다. 복제·가져오기는 게임 내 ID와 매니저 이름을 그대로 유지합니다.</p>
       <p class="hint">계정 선택은 다음 서버 시작에 적용됩니다. 게임을 시작한 뒤 활성 계정을 복원하려면 앱을 완전히 종료하고 다시 열어 주세요.</p>
+      <p class="hint">계정 선택은 해당 모드의 저장 슬롯을 바꿉니다. 사용할 일반·감상 모드도 위 설정에서 확인해 주세요.</p>
       <p id="accounts-summary" class="account-text">계정 목록을 불러오면 관리할 수 있습니다.</p>
       <fieldset id="accounts-fields" disabled>
         <label class="row"><span>관리할 계정</span><select id="accounts-current"><option value="">계정 없음</option></select></label>
-        <div class="actions"><button id="accounts-select" type="button">다음 시작 계정으로 선택</button><button id="accounts-export" type="button" class="secondary">계정 ZIP 내보내기</button><button id="accounts-clone" type="button" class="secondary">아래 이름으로 복제</button></div>
+        <p id="accounts-user-detail" class="account-text hint"></p>
+        <div class="actions"><button id="accounts-select" type="button">해당 모드의 다음 계정으로 선택</button><button id="accounts-export" type="button" class="secondary">계정 ZIP 내보내기</button><button id="accounts-clone" type="button" class="secondary">아래 이름으로 복제</button></div>
         <div class="actions"><button id="accounts-previous" type="button" class="secondary">이전 계정 목록</button><button id="accounts-next" type="button" class="secondary">다음 계정 목록</button></div>
         <details>
           <summary>계정 생성·복제</summary>

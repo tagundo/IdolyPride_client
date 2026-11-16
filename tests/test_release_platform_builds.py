@@ -19,7 +19,11 @@ class Guard:
 def passed_qa():
     return {"ok":True,"target":"Android emulator","device_game_client_tested":False,
             **{key:True for key in builds.QA_FLAGS},
-            "main_live":{"platform":"Android native","quest_id":"qt-main-1-001-01","ruleset":"live-v5","chart_count":183,"beat_count":855}}
+             "main_live":{"platform":"Android native","quest_id":"qt-main-1-001-01","ruleset":"live-v5","chart_count":183,"beat_count":855},
+            "account_management":{"scope":"Android emulator native UI and real document provider",
+                "archive_filename_observed":"IdolyPride-Account-"+"a"*32+".zip",
+                "owned_tables":["profiles","snapshots","profile_settings","starter_profiles","profile_lesson_progress","preference_receipts","main_live_attempts"],
+                "imported_sessions":0,"physical_device_tested":False}}
 
 
 def test_complete_native_x86_qa_receipt_is_accepted():

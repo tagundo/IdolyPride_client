@@ -76,6 +76,15 @@ def _json(value):
     return raw
 
 
+def _status_budget(value):
+    # Native adds gate/progress observations after this reply. Reserve room so
+    # a full account page cannot turn an otherwise valid status into an error.
+    raw = _json(value)
+    if len(raw.encode("utf-8")) > MAX_JSON_BYTES - 8192:
+        raise ValueError("Status exceeds its native-envelope budget")
+    return raw
+
+
 def _regular(path, *, maximum=MAX_ARCHIVE_BYTES):
     info = Path(path).lstat()
     if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or not 0 < info.st_size <= maximum:
@@ -304,9 +313,9 @@ class _Host:
             result["paths"] = {"imports": str(paths[1] / "imports"), "exports": str(paths[1] / "tmp/exports")}
         # Diagnostic histories may be large; public settings stay available.
         try:
-            _json(result)
+            _status_budget(result)
         except ValueError:
-            result["runtime"] = _thin_observation(observed, ("running", "grpc_address", "asset_url")) or {}
+            result["runtime"] = _thin_observation(observed, ("running", "profile", "media_mode", "grpc_address", "asset_url")) or {}
             result["runtime"].update(_thin_transfers(observed))
             result["diagnostics_truncated"] = True
             # Retaining an unbounded language/renderer report here would make
@@ -322,18 +331,29 @@ class _Host:
                 for candidate in (value, settings):
                     result["runtime"][key] = candidate
                     try:
-                        _json(result)
+                        _status_budget(result)
                     except (ValueError, TypeError, RecursionError):
                         del result["runtime"][key]
                     else:
                         break
         for key in ("startup_checks", "durable_history"):
             if key in observed and key not in result["runtime"]:
-                result["runtime"][key] = observed[key]
-                try:
-                    _json(result)
-                except (ValueError, TypeError, RecursionError):
-                    del result["runtime"][key]
+                value = observed[key]
+                candidates = [value]
+                if key == "durable_history" and isinstance(value, dict):
+                    summary = {name: value[name] for name in ("schema", "available", "load_state", "persistence",
+                        "last_write_error", "current_run", "retained_records", "total_records", "last_failure") if name in value}
+                    records = value.get("records") if isinstance(value.get("records"), list) else []
+                    candidates += [{**summary, "records": records[-3:], "records_truncated": len(records) > 3},
+                                   {**summary, "records": [], "records_truncated": bool(records)}]
+                for candidate in candidates:
+                    result["runtime"][key] = candidate
+                    try:
+                        _status_budget(result)
+                    except (ValueError, TypeError, RecursionError):
+                        del result["runtime"][key]
+                    else:
+                        break
         return result
 
     def start(self, bundle_dir, data_dir, resource_dir, *, ports=None):

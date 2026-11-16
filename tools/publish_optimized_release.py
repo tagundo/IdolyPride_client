@@ -57,7 +57,7 @@ CERTIFICATE = "ff5b25120ac58f5b82861320925448663a5ac3f812e93736cad1de6a6ac29e51"
 COMMON_FLAGS = ("source_bound", "payload_sha256_verified", "translations_sha256_verified",
                 "live_engine_included", "live_engine_source_built")
 ANDROID_FLAGS = ("apk_signature_verified", "apk_alignment_verified", "package_version_verified",
-                 "development_certificate_verified", "x86_emulator_runtime_passed")
+                 "development_certificate_verified", "x86_emulator_runtime_passed", "account_management_roundtrip")
 MAC_FLAGS = ("codesign_strict_verified", "bundled_engine_tested", "native_gui_start_stop_tested", "account_management_roundtrip")
 COMPANIONS = (
     {"name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk", "bytes": 165128829,
@@ -593,7 +593,12 @@ def validate_platform_files(directory, report, guard):
                  "starter_inventory_persisted", "main_live_first_quest", "main_live_mode_default_off", "main_live_opt_in",
                  "main_live_persisted", "main_live_attempts_persisted", "main_live_clock_preserved",
                  "main_live_identity_preserved", "main_live_sessions_preserved", "main_live_settings_preserved",
-                 "main_live_cached_no_grant")), "android_runtime_qa_not_passed")
+                 "main_live_cached_no_grant",'account_native_create','account_native_clone','account_queued_selection_persisted','account_selected_encrypted_rpc','account_document_export_import','account_zip_whole_state_preserved','account_original_whole_state_preserved','account_import_sessions_excluded','account_selection_restored')), "android_runtime_qa_not_passed")
+        try:
+            detail = module("published_android_account_contract", ROOT/"tools/release_account_contract.py").validate_android(qa)
+        except ValueError:
+            raise ReleaseError("android_account_management_not_passed") from None
+        need(detail == report.get("account_management"), "android_account_management_report_differs")
     else:
         smoke_path = verified_file(directory, report.get("account_smoke"), name="engine-smoke.json", maximum=MAX_JSON)
         try:

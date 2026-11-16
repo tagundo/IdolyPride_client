@@ -50,7 +50,7 @@ QA_FLAGS = ("final_stop","system_check","local_auth","home_rpcs","restart_sessio
  "gameplay_change_preserved","port_rebound","upgrade_identity_preserved","upgrade_sessions_preserved",
  "upgrade_settings_preserved","starter_inventory_persisted","main_live_first_quest","main_live_mode_default_off",
  "main_live_opt_in","main_live_persisted","main_live_attempts_persisted","main_live_clock_preserved",
- "main_live_identity_preserved","main_live_sessions_preserved","main_live_settings_preserved","main_live_cached_no_grant")
+ "main_live_identity_preserved","main_live_sessions_preserved","main_live_settings_preserved","main_live_cached_no_grant",'account_native_create','account_native_clone','account_queued_selection_persisted','account_selected_encrypted_rpc','account_document_export_import','account_zip_whole_state_preserved','account_original_whole_state_preserved','account_import_sessions_excluded','account_selection_restored')
 
 class BuildError(ValueError):
     """Fixed credential-free failure codes only."""
@@ -281,6 +281,10 @@ def validate_android_qa(report):
     need(type(live) is dict and live.get("platform")=="Android native" and live.get("quest_id")=="qt-main-1-001-01"
          and live.get("ruleset")=="live-v5" and live.get("chart_count")==183 and live.get("beat_count")==855,
          "Android_live_engine_QA_differs")
+    try:
+        module("release_android_account_contract",ROOT/"tools/release_account_contract.py").validate_android(report)
+    except ValueError:
+        raise BuildError("Android_account_management_QA_differs") from None
     return report
 
 def finish_android(inputs,work,output,source,pins,guard):
@@ -314,9 +318,9 @@ def finish_android(inputs,work,output,source,pins,guard):
     report=base_report("android",source,pins,built["inputs"])
     report.update(binary=built["binary"],qa_binary=built["qa_binary"],application_id=ANDROID_PACKAGE,
                   certificate_sha256=ANDROID_CERT,live_engine=built["live_engine"],
-                  qa_report=artifact(output/"android-qa.json"))
+                  qa_report=artifact(output/"android-qa.json"),account_management=result["account_management"])
     report["validation"].update(apk_signature_verified=True,apk_alignment_verified=True,package_version_verified=True,
-        development_certificate_verified=True,x86_emulator_runtime_passed=True)
+        development_certificate_verified=True,x86_emulator_runtime_passed=True,account_management_roundtrip=True)
     write_json(output/"platform-report.json",report)
     return report
 

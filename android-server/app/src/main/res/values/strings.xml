@@ -237,7 +237,7 @@
     <string name="accounts_refresh">계정 목록 새로고침</string>
     <string name="accounts_create">새 계정 만들기</string>
     <string name="accounts_clone">선택한 계정 복제</string>
-    <string name="accounts_select">선택한 계정을 다음 시작에 사용</string>
+    <string name="accounts_select">해당 모드의 다음 계정으로 선택</string>
     <string name="accounts_export">선택한 계정 ZIP 백업</string>
     <string name="accounts_import">계정 ZIP 가져오기</string>
     <string name="accounts_restore_notice">계정을 교체하기 전 자동 복원 지점을 만듭니다. 복원할 계정과 같은 계정의 복원 지점을 선택하세요.</string>
@@ -246,7 +246,7 @@
     <string name="accounts_restore_empty">보관된 복원 지점 없음</string>
     <string name="accounts_choose">먼저 계정을 선택해 주세요.</string>
     <string name="accounts_working">계정 작업 중…</string>
-    <string name="accounts_selected">다음 서버 시작에 적용됩니다. 게임을 완전히 종료하고 서버를 중지·시작한 뒤 다시 게임을 열어 주세요.</string>
+    <string name="accounts_selected">해당 모드의 다음 계정으로 선택했습니다. 사용할 감상용 전체 해금 설정도 확인해 주세요. 게임을 완전히 종료하고 서버를 중지·시작한 뒤 다시 게임을 열어 주세요.</string>
     <string name="accounts_restored">계정 저장을 가져왔습니다. 현재 사용하려면 계정을 선택한 뒤 게임과 서버를 다시 시작해 주세요.</string>
     <string name="accounts_exported">계정 ZIP을 저장했습니다. 다른 설치 환경에서도 계정 ZIP 가져오기로 사용할 수 있습니다.</string>
     <string name="accounts_unprepared">첫 시작 준비 필요</string>
@@ -305,4 +305,5 @@
     <string name="accounts_preparing">계정 관리 자료를 준비하고 저장을 검사하는 중…</string>
     <string name="accounts_confirm">확인</string>
     <string name="accounts_cancel">취소</string>
+    <string name="accounts_date_unknown">시각 확인 불가</string>
 </resources>
