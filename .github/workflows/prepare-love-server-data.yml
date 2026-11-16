@@ -1,0 +1,181 @@
+name: Prepare reproducible Love server data
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/prepare-love-server-data.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked original-master decoder and test dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Verify finite overlay and strict pin contracts offline
+        run: |
+          test -f tests/test_prepare_love_server_data.py
+          test -f tests/test_love_server_data_pin.py
+          uv run --no-sync python -m pytest -q \
+            tests/test_prepare_love_server_data.py tests/test_love_server_data_pin.py
+      - name: Fetch only the immutable public base payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --no-sync python - <<'PY'
+          import hashlib, importlib.util, os, shutil
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP']) / 'love-server-data'
+          work.mkdir()
+          spec = importlib.util.spec_from_file_location('public_input_fetch', root / 'ios-unified/fetch_inputs.py')
+          fetch = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(fetch)
+          donor = work / 'public-donor.zip'
+          fetch.lfs_download({'bytes': 332386192, 'sha256': '303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc'}, donor)
+          base = work / 'base-ServerData.zip'
+          value, count = hashlib.sha256(), 0
+          with ZipFile(donor) as archive:
+              matches = [i for i in archive.infolist() if i.filename == 'assets/ServerData.zip']
+              assert len(matches) == 1 and matches[0].file_size == 191343014
+              with archive.open(matches[0]) as source, base.open('xb') as output:
+                  while block := source.read(65536):
+                      count += len(block)
+                      assert count <= 191343014
+                      value.update(block)
+                      output.write(block)
+          assert count == 191343014 and value.hexdigest() == '37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223'
+          donor.unlink()
+          print('Verified immutable public base:', count, value.hexdigest())
+          PY
+      - name: Prepare actual original-master catalog and preserve every old entry
+        run: |
+          mkdir "$RUNNER_TEMP/love-server-data/proof"
+          uv run --no-sync python tools/prepare_love_server_data.py \
+            --base-zip "$RUNNER_TEMP/love-server-data/base-ServerData.zip" \
+            --output "$RUNNER_TEMP/love-server-data/ServerData.zip" \
+            --report "$RUNNER_TEMP/love-server-data/proof/love-server-data.report.json" \
+            --prepare-overlay "$RUNNER_TEMP/love-server-data/love-server-overlay.zip"
+      - name: Independently read back the whole output and bounded public proof
+        run: |
+          uv run --no-sync python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP']) / 'love-server-data'
+          proof = work / 'proof'
+          def canonical(value):
+              return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()
+          def file_sha(path):
+              value = hashlib.sha256()
+              with path.open('rb') as stream:
+                  while block := stream.read(65536):
+                      value.update(block)
+              return value.hexdigest()
+          raw_report = (proof / 'love-server-data.report.json').read_bytes()
+          assert len(raw_report) <= 512 * 1024
+          report = json.loads(raw_report)
+          payload = work / 'ServerData.zip'
+          assert payload.stat().st_size == report['output']['bytes']
+          assert file_sha(payload) == report['output']['sha256']
+          source_names = {'tools/prepare_love_server_data.py', 'tools/build_server_payload.py',
+              'src/idoly_local/love_catalog.py', 'data/love-reference.json', 'data/love-adv-proof.json',
+              'data/love-reference-NOTICE.txt', 'LICENSE'}
+          assert set(report['component_sources']) == source_names
+          assert {name: file_sha(root / name) for name in source_names} == report['component_sources']
+          assert hashlib.sha256(canonical(report['component_sources'])).hexdigest() == report['component_sources_sha256']
+          overlay = work / 'love-server-overlay.zip'
+          prepared = report['prepared_overlay']
+          assert overlay.stat().st_size == prepared['bytes'] <= 32 * 1024 * 1024
+          assert file_sha(overlay) == prepared['sha256']
+          overlay_inventory = []
+          with ZipFile(overlay) as archive:
+              assert len(archive.infolist()) == 11
+              for info in sorted(archive.infolist(), key=lambda item: item.filename):
+                  assert not info.is_dir() and info.compress_type == 0
+                  assert info.date_time == (2000, 1, 1, 0, 0, 0) and not info.extra and not info.comment
+                  value = hashlib.sha256()
+                  with archive.open(info) as stream:
+                      while block := stream.read(65536):
+                          value.update(block)
+                  overlay_inventory.append({'path': info.filename, 'bytes': info.file_size, 'sha256': value.hexdigest()})
+          assert overlay_inventory == prepared['members']
+          inventory = []
+          with ZipFile(payload) as archive:
+              names = sorted(archive.namelist())
+              assert names == sorted(set(names)) == report['output']['member_names']
+              manifest_raw = archive.read('data/payload-manifest.json')
+              assert hashlib.sha256(manifest_raw).hexdigest() == report['output']['payload_manifest_sha256']
+              for info in sorted(archive.infolist(), key=lambda item: item.filename):
+                  if info.is_dir() or info.filename == 'data/payload-manifest.json':
+                      continue
+                  value, count = hashlib.sha256(), 0
+                  with archive.open(info) as stream:
+                      while block := stream.read(65536):
+                          count += len(block)
+                          assert count <= info.file_size
+                          value.update(block)
+                  assert count == info.file_size
+                  inventory.append({'path': info.filename, 'bytes': count, 'sha256': value.hexdigest()})
+              catalog = json.loads(archive.read('data/master-json/LoveCatalog.json'))
+              assert catalog['ruleset_sha256'] == report['love_catalog']['ruleset_sha256']
+              assert len(catalog['events']) == 6
+              assert sum(len(event['episodes']) for event in catalog['events'].values()) == 72
+          inventory_raw = canonical(inventory)
+          assert hashlib.sha256(inventory_raw).hexdigest() == report['output']['member_inventory_sha256']
+          tables = sorted(name[len('data/master-json/'):-5] for name in names
+              if name.startswith('data/master-json/') and name.endswith('.json') and name.count('/') == 2)
+          assert tables == report['output']['master_json_table_names']
+          assert len(tables) == report['output']['master_json_tables']
+          (proof / 'payload-manifest.json').write_bytes(manifest_raw)
+          (proof / 'member-inventory.json').write_bytes(inventory_raw + b'\n')
+          receipt = {'schema': 1, 'scope': 'independent_public_output_readback',
+              'report_sha256': hashlib.sha256(raw_report).hexdigest(), 'report_bytes': len(raw_report),
+              'output': report['output'], 'prepared_overlay': prepared,
+              'component_sources_sha256': report['component_sources_sha256'],
+              'catalog_events': len(catalog['events']),
+              'catalog_episodes': sum(len(event['episodes']) for event in catalog['events'].values())}
+          (proof / 'independent-readback.json').write_bytes(canonical(receipt) + b'\n')
+          assert {path.name for path in proof.iterdir()} == {
+              'love-server-data.report.json', 'payload-manifest.json', 'member-inventory.json', 'independent-readback.json'}
+          assert sum(path.stat().st_size for path in proof.iterdir()) <= 512 * 1024
+          print(json.dumps({'status': 'PASS', 'output_bytes': payload.stat().st_size,
+              'output_sha256': report['output']['sha256'], 'report_sha256': receipt['report_sha256'],
+              'catalog_events': receipt['catalog_events'], 'catalog_episodes': receipt['catalog_episodes'],
+              'old_entries_preserved': report['unchanged_old_entries']['count']}))
+          PY
+      - name: Upload bounded proof separately from binary payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: love-server-data-proof-${{ github.sha }}
+          path: ${{ runner.temp }}/love-server-data/proof/*.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload bounded checked-in public overlay candidate separately
+        uses: actions/upload-artifact@v4
+        with:
+          name: love-server-data-overlay-${{ github.sha }}
+          path: ${{ runner.temp }}/love-server-data/love-server-overlay.zip
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload internal reproducibility payload only
+        uses: actions/upload-artifact@v4
+        with:
+          name: love-server-data-payload-${{ github.sha }}
+          path: ${{ runner.temp }}/love-server-data/ServerData.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 3
