@@ -171,7 +171,25 @@ for(const value of ['일본 공식 계정 가져오기','공식 인계 로그인
   if(language!=='ko')assert.notEqual(api.translateUI(value,language),value);
 }
 const html=fs.readFileSync(WEB+'/index.html','utf8'),js=fs.readFileSync(WEB+'/app.js','utf8');
-assert.ok(!html.includes('type="password"'));assert.ok(!js.includes('localStorage'));
+assert.ok(!html.includes('type="password"'));
+// Session UI storage may keep only finite category/fold preferences. Account
+// names, preview data and credentials must never enter that storage.
+const layoutEnv=environment(),writes=[];
+const categories=['console','server','users','content','graphics'];
+const panelKeys=['diagnostics','options','accounts','official','events','graphics','playback','media','resources'];
+layoutEnv.scope.localStorage={getItem:()=>null,setItem:(key,raw)=>{
+  assert.equal(key,'idoly.settings.layout.v1');const value=JSON.parse(raw);
+  assert.deepEqual(Object.keys(value).sort(),['category','panels','schema']);assert.equal(value.schema,1);
+  assert.ok(categories.includes(value.category));assert.deepEqual(Object.keys(value.panels).sort(),panelKeys.slice().sort());
+  assert.ok(Object.values(value.panels).every(item=>typeof item==='boolean'));
+  assert.ok(!raw.includes('private-preview-canary')&&!raw.includes('private-slot-canary'));writes.push(raw);
+}};
+const layoutApp=api.createSettingsApp(layoutEnv.scope,layoutEnv.document,layoutEnv.timers),base=status();
+base.official_import_available=true;base.official_import={schema:1,state:'ready',job_id:'a'.repeat(32),busy:false,progress:'ready',counts:{cards:1,items:1,photos:1},error_code:null,expires_in_seconds:120,
+ preview:{manager_name:'private-preview-canary',public_id:'private-id',manager_level:1,inventory:{cards:1,items:1,photos:1}}};
+layoutEnv.respond(layoutEnv.posted[0],base);await flush();layoutEnv.elements.get('official-profile').value='private-slot-canary';
+layoutEnv.elements.get('category-users').fire('click');layoutEnv.elements.get('panel-official').open=true;layoutEnv.elements.get('panel-official').fire('toggle');
+assert.ok(writes.length>=3);assert.ok(layoutEnv.elements.get('official-preview').textContent.includes('private-preview-canary'));layoutApp.dispose();
 const panel=html.split('aria-labelledby="official-heading"')[1].split('</section>')[0];
 assert.deepEqual([...panel.matchAll(/<input\b[^>]*id="([^"]+)"/g)].map(row=>row[1]),['official-profile','official-replace']);
 const env=environment(),bridge=api.createBridge(env.scope,env.timers);

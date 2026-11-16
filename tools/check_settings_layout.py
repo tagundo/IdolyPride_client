@@ -147,11 +147,21 @@ def served_source():
 
 GEOMETRY = r"""(category)=>{
  const page=document.getElementById('category-panel-'+category),width=document.documentElement.clientWidth;
- const content=Math.max(document.documentElement.scrollWidth,document.body.scrollWidth);
+ const content=Math.max(document.documentElement.scrollWidth,document.body.scrollWidth),height=document.documentElement.clientHeight;
+ const nav=document.querySelector('.category-navigation'),navRect=nav.getBoundingClientRect(),navStyle=getComputedStyle(nav);
+ const navigation=Array.from(nav.querySelectorAll('button')).map(e=>{const r=e.getBoundingClientRect();return {id:e.id,left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height};});
+ const clipped=navigation.filter(r=>r.width<1||r.height<1||r.left< -1||r.right>width+1||r.top< -1||r.bottom>height+1).map(r=>r.id);
+ const ownScroll=(nav.scrollWidth>nav.clientWidth+1&&['auto','scroll'].includes(navStyle.overflowX))||(nav.scrollHeight>nav.clientHeight+1&&['auto','scroll'].includes(navStyle.overflowY));
+ const navRegionVisible=navRect.top>= -1&&navRect.bottom<=height+1&&navRect.left>= -1&&navRect.right<=width+1;
+ const contentTop=page.getBoundingClientRect().top;
  const controls=Array.from(page.querySelectorAll('button,select,input[type="text"],input[type="number"],input[type="datetime-local"],summary.panel-summary,label.switch,label.event-card')).concat(Array.from(document.querySelectorAll('.category-navigation button,#interface_language,#refresh')));
  const visible=controls.map(e=>{const r=e.getBoundingClientRect();return {id:e.id||e.tagName,width:r.width,height:r.height,hidden:r.width===0||r.height===0};}).filter(r=>!r.hidden);
  const bad=visible.filter(r=>r.height<43.5||r.width<43.5).map(r=>({id:r.id,width:Math.round(r.width*100)/100,height:Math.round(r.height*100)/100}));
- return {viewport_width:width,content_width:content,visible_controls:visible.length,bad_hit_areas:bad.slice(0,12),
+ return {viewport_width:width,viewport_height:height,content_width:content,visible_controls:visible.length,bad_hit_areas:bad.slice(0,12),
+   navigation_top:Math.min(...navigation.map(r=>r.top)),navigation_count:navigation.length,navigation_clipped:clipped,
+   navigation_internal_scroll:ownScroll,navigation_region_visible:navRegionVisible,
+   navigation_discoverable:navigation.length===5&&(clipped.length===0||(ownScroll&&navRegionVisible)),
+   available_content_ratio:Math.min(1,Math.max(0,(height-Math.max(0,contentTop))/height)),
    open_help:Array.from(document.querySelectorAll('details.help-details,details.server-guide')).filter(e=>e.open).map(e=>e.id||e.className),
    selected:document.getElementById('category-'+category).getAttribute('aria-selected')==='true',
    layout: getComputedStyle(document.querySelector('.settings-shell')).gridTemplateColumns};
@@ -160,7 +170,7 @@ GEOMETRY = r"""(category)=>{
 
 def run(output):
     from playwright.sync_api import sync_playwright
-    records, screenshots, blocked, page_errors = [], [], [], []
+    records, screenshots, blocked, page_errors, default_views = [], [], [], [], []
     with served_source() as (origin, sources), sync_playwright() as driver:
         browser = driver.chromium.launch(headless=True)
         version = browser.version
@@ -182,6 +192,18 @@ def run(output):
                     page.add_init_script(bridge_script(fixture(language)))
                     page.goto(origin + "/index.html", wait_until="load")
                     page.wait_for_function("document.getElementById('options-fields').disabled===false && document.getElementById('events-list').children.length===6 && document.documentElement.lang==='" + language + "'", timeout=10000)
+                    # Observe the untouched opening frame before Playwright scrolls
+                    # controls into view. A landscape header must leave at least
+                    # half the viewport for content and expose every category.
+                    initial = page.evaluate(GEOMETRY, "console")
+                    default_views.append({"language": language, "viewport": {"width": width, "height": height}, **initial})
+                    if (not initial["navigation_discoverable"] or initial["bad_hit_areas"]
+                            or initial["content_width"] > initial["viewport_width"] + 2 or initial["open_help"]):
+                        raise AssertionError("default_navigation_or_layout_failed")
+                    if width > height and height <= 560:
+                        if (initial["navigation_top"] > height * .42 or initial["available_content_ratio"] < .5
+                                or initial["navigation_clipped"]):
+                            raise AssertionError("landscape_header_hides_navigation_or_content")
                     for identifier in ("panel-diagnostics", "panel-accounts", "panel-official", "panel-events"):
                         if page.locator("#" + identifier).evaluate("e=>e.open"):
                             raise AssertionError("default_panel_should_be_collapsed:" + identifier)
@@ -202,7 +224,8 @@ def run(output):
                         record = {"language": language, "viewport": {"width": width, "height": height}, "category": category, **geometry}
                         records.append(record)
                         if (not geometry["selected"] or geometry["content_width"] > geometry["viewport_width"] + 2
-                                or not geometry["visible_controls"] or geometry["bad_hit_areas"] or geometry["open_help"]):
+                                or not geometry["visible_controls"] or geometry["bad_hit_areas"] or geometry["open_help"]
+                                or not geometry["navigation_discoverable"]):
                             raise AssertionError("actual_browser_layout_failed")
                         if language == "ko":
                             panels.first.locator(":scope > summary").scroll_into_view_if_needed()
@@ -217,7 +240,7 @@ def run(output):
                     context.close()
         except Exception:
             observation = {"schema": 1, "status": "FAIL", "scope": "synthetic-readonly-browser-layout",
-                           "source_commit": os.environ["GITHUB_SHA"], "cases": records,
+                           "source_commit": os.environ["GITHUB_SHA"], "cases": records, "default_views": default_views,
                            "blocked_requests": blocked, "page_error_types": page_errors}
             (output / "failure-observation.json").write_text(json.dumps(observation, ensure_ascii=False, indent=2) + "\n")
             if "page" in locals() and not page.is_closed():
@@ -234,7 +257,7 @@ def run(output):
             "browser": {"engine": "chromium", "version": version,
                         "playwright": importlib.metadata.version("playwright")},
             "source_commit": os.environ["GITHUB_SHA"], "source_files": sources,
-            "cases": records, "screenshots": screenshots}
+            "default_views": default_views, "cases": records, "screenshots": screenshots}
 
 
 def main():

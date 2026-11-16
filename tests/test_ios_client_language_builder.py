@@ -169,7 +169,7 @@ def test_korean_refresh_compares_every_undeclared_resource_object(builder):
     result = builder._compare_korean_resources(BytesIO(serialized_resource(before)), BytesIO(serialized_resource(after)), proof)
     assert result["all_other_objects_byte_identical"] is True
     assert result["unchanged_object_count"] == 1
-    assert len(result["declared_object_differences"]) == 18
+    assert len(result["declared_object_differences"]) == 20
     assert all(row["changed"] for row in result["declared_object_differences"])
 
 

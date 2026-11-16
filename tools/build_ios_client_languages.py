@@ -98,7 +98,8 @@ def _skip(source, count):
 
 
 def _build_source_pins():
-    names = ("tools/build_ios_client_languages.py", "src/idoly_local/static_ui_assets.py",
+    names = ("tools/build_ios_client_languages.py", "tools/fetch_korean_ui_images.py",
+             "src/idoly_local/static_ui_assets.py",
              "src/idoly_local/static_ui_images.py", "src/idoly_local/static_ui_textures.py",
              "src/idoly_local/ui_assets.py", "src/idoly_local/cdn_image_translation.py",
              "client-presentation/images/korean-static-sprites-v1.json",

@@ -38,6 +38,7 @@ FIXED_LOVE_TEXT = {
     "love_btn_setting": ((80, 40), (75, 40)),
     "love_btn_status": ((192, 40), (185, 37)),
     "love_button_start": ((192, 48), (184, 48)),
+    "love_header_level_label": ((96, 32), (96, 28)),
 }
 SOURCE_REPOSITORY = "https://github.com/CyleAR/ipr-translation-data-ko"
 SOURCE_REVISION = "f6e5689bcd6878d962996edfd390c1442b926c0f"

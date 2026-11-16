@@ -3464,6 +3464,9 @@ def test_native_account_click_completion_respects_single_use_import_and_pending_
     expression=re.search(r"static NSString \*const ProbeAccountScenario =\s*(.*?)\nstatic NSString \*ProbeAccountJSON",source,re.S)
     pieces=re.findall(r'@?("(?:\\.|[^"\\])*")',expression.group(1))
     script="".join(json.loads(piece) for piece in pieces)
+    reveal_match=re.search(r"static NSString \*const ProbeSettingsNavigationScript =\s*(.*?);\n\n//",source,re.S)
+    assert reveal_match is not None
+    reveal="".join(json.loads(piece) for piece in re.findall(r'@?("(?:\\.|[^"\\])*")',reveal_match.group(1)))
     until=script[script.index("  const until="):script.index("  const current=")]
     click=script[script.index("  const click="):script.index("  const seed=")]
     program="const testCase="+json.dumps(case)+r""";
@@ -3475,11 +3478,19 @@ const button={disabled:false,scrollIntoView(){},click(){
   q.reply={id:testCase==='wrong_reply_id'?2:1,ok:true,result:{action:'accounts_import'}};
   if(testCase!=='pending_fields')setTimeout(()=>{unlocked=true;fields.disabled=false;},25);
 }};
-const document={getElementById(id){return id==='accounts-fields'?fields:id==='accounts-import'?button:null;}};
-"""+until+click+r"""
+const navigation=[],page={id:'category-panel-users',hidden:true,parentElement:null,getAttribute(){return null;}};
+const panel={tagName:'DETAILS',open:false,parentElement:page,children:[]};
+const summary={tagName:'SUMMARY',scrollIntoView(){},getBoundingClientRect(){return {width:page.hidden?0:100,height:44};},click(){navigation.push('panel-accounts');panel.open=!panel.open;}};
+panel.children=[summary,button];button.parentElement=panel;button.hidden=false;button.closest=()=>page;
+button.getBoundingClientRect=()=>({width:!page.hidden&&panel.open?100:0,height:44});
+const nav={id:'category-users',disabled:false,scrollIntoView(){},getAttribute(name){return name==='aria-controls'?page.id:null;},getBoundingClientRect(){return {width:100,height:44};},click(){navigation.push('category-users');page.hidden=false;}};
+const document={getElementById(id){return id==='accounts-fields'?fields:id==='accounts-import'?button:id==='category-users'?nav:null;}};
+const getComputedStyle=e=>({display:e.hidden?'none':'block',visibility:'visible'});
+"""+"const window={__idolyProbeRevealControl:"+reveal+"};\n"+until+click+r"""
 (async()=>{
   let result=null,error=null;
   try{result=await click('import');}catch(value){error=value.message;}
+  if(navigation.join(',')!=='category-users,panel-accounts')throw Error('native account navigation was bypassed');
   if(testCase==='consumed_preview'){
     if(!result||result.action!=='accounts_import'||error||!unlocked||fields.disabled||!button.disabled||clicks!==1)
       throw Error('single-use import completion lost');

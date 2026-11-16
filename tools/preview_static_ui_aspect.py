@@ -22,7 +22,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-NAMES = ("love_btn_present", "love_btn_achievement", "love_btn_playing")
+NAMES = ("love_btn_present", "love_btn_achievement", "love_btn_playing", "love_header_level_label")
 
 
 def need(ok, message):

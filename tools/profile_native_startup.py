@@ -66,6 +66,17 @@ def child(args):
     require((root / MARKER).read_text()==args.source_commit, "owned_case_required")
     require(root.parent==args.work.resolve(strict=True), "owned_case_parent_required")
     phases={}
+    cache_observations={}
+    def observe_cache(label):
+        try:
+            from idoly_local import resource_translation_cache as cache
+        except ImportError:
+            cache_observations[label]={"available":False}
+            return
+        with cache._LOCK:
+            cache_observations[label]={"available":True,"entries":len(cache._CACHE),
+                "serialized_metadata_bytes":sum(row[1] for row in cache._CACHE.values()),
+                "entry_budget":cache._MAX_ENTRIES,"serialized_byte_budget":cache._MAX_METADATA_BYTES}
     imports=time.perf_counter()
     from idoly_local import app_runtime, codec
     from idoly_local.schema import Schema
@@ -101,6 +112,7 @@ def child(args):
             expected_sha256=pin["sha256"],expected_bytes=pin["bytes"],platform=args._platform,
             validate_prepared=lambda prepared:validate_prepared_translations(prepared,data,platform=args._platform)))
         require(result["state"] in ("installed","unchanged"),"prepared_translation_not_ready")
+        observe_cache("prepared_translation_"+label)
     prepare_translations("empty_data")
     (data / "client-language.json").write_text('{"schema":1,"language":"ko"}')
     def no_download(*_args,**_kwargs):
@@ -125,6 +137,7 @@ def child(args):
     runtime=phase(phases,"runtime_new_account",start)
     try:verify(runtime)
     finally:runtime.stop()
+    observe_cache("runtime_new_account")
     state=State(data / ("media-state.db" if args._media else "state.db"))
     before=State.account_bytes(state.account_snapshot("sandbox")[0])
     if args._platform=="android":
@@ -135,6 +148,7 @@ def child(args):
     try:verify(runtime)
     finally:runtime.stop()
     require(State.account_bytes(state.account_snapshot("sandbox")[0])==before,"account_bytes_changed")
+    observe_cache("runtime_existing_account")
     # Separate instrumented run: unprofiled phase timings above remain honest.
     trace=None
     if args._trace:
@@ -145,7 +159,7 @@ def child(args):
         finally:runtime.stop()
         require(State.account_bytes(state.account_snapshot("sandbox")[0])==before,"profiled_account_bytes_changed")
     return {"platform":args._platform,"media_mode":args._media,"protobuf_backend":"python",
-            "phases":phases,"account_bytes_preserved":True,"encrypted_loopback_verified":True,
+            "phases":phases,"translation_cache_observations":cache_observations,"account_bytes_preserved":True,"encrypted_loopback_verified":True,
             "instrumented_existing_startup_project_top":cpu_rows(trace) if trace is not None else [],
             "peak_rss_bytes":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024}
 

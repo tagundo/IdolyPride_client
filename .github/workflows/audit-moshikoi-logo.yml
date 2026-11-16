@@ -1,0 +1,50 @@
+name: Audit original Moshikoi logo consumers
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths: [.github/workflows/audit-moshikoi-logo.yml]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install pinned read-only asset tools
+        run: |
+          uv sync --locked --all-extras --python 3.13
+          uv pip install --python .venv/bin/python 'UnityPy==1.25.4' 'astc-encoder-py==0.1.12'
+      - name: Fetch only exact original diagnostic APK
+        run: |
+          uv run --locked python - <<'INLINE'
+          import os,pathlib,sys
+          root=pathlib.Path.cwd();sys.path.insert(0,str(root/'tools'))
+          import release_android_clients as clients
+          import release_platform_builds as shared
+          work=pathlib.Path(os.environ['RUNNER_TEMP'])/'moshikoi-logo-inputs';work.mkdir(mode=0o700)
+          clients.download(clients.URLS['diagnostic_base'],clients.INPUTS['diagnostic_base'],work/'diagnostic-base.apk',shared.Guard())
+          INLINE
+      - name: Audit aligned Sprite references and owner transforms
+        run: >-
+          uv run --locked python tools/audit_static_logo_layout.py
+          --android-base "$RUNNER_TEMP/moshikoi-logo-inputs/diagnostic-base.apk"
+          --output "$RUNNER_TEMP/moshikoi-logo-proof/android-logo-consumers.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moshikoi-logo-consumers-${{ github.sha }}
+          path: ${{ runner.temp }}/moshikoi-logo-proof
+          if-no-files-found: warn
+          retention-days: 7

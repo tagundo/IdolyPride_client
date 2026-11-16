@@ -158,6 +158,7 @@ def test_pinned_rgb_image_expands_to_rgba_without_changing_its_rgb_samples(tmp_p
     ("love_button_start", (192,48), (184,48), (4,0)),
     ("love_btn_fin", (159,40), (147,40), (6,0)),
     ("love_btn_max", (72,28), (72,27), (0,0)),
+    ("love_header_level_label", (96,32), (96,28), (0,2)),
 ])
 def test_fixed_love_button_text_keeps_original_ui_geometry(name, size, content, offset):
     row = next(row for row in images.PROFILES if row["name"] == name)
@@ -169,7 +170,7 @@ def test_fixed_love_button_text_keeps_original_ui_geometry(name, size, content, 
         assert tuple(target["source_layout"]["sprite_size"]) == size
 
 
-@pytest.mark.parametrize("name", ("love_btn_present", "love_btn_achievement", "love_btn_playing"))
+@pytest.mark.parametrize("name", ("love_btn_present", "love_btn_achievement", "love_btn_playing", "love_header_level_label"))
 def test_short_korean_words_are_padded_not_stretched_or_redrawn(name):
     pytest.importorskip("UnityPy")
     from io import BytesIO

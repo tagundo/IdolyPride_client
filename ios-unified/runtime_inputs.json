@@ -228,6 +228,7 @@
     "idoly_local.resource_library",
     "idoly_local.resource_routes",
     "idoly_local.resource_translation",
+    "idoly_local.resource_translation_cache",
     "idoly_local.resource_translation_runtime",
     "idoly_local.rpc",
     "idoly_local.runtime_history",

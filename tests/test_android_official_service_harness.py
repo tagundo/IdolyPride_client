@@ -179,7 +179,7 @@ public final class OfficialPollingHarness {
  static final class CheckBox { boolean checked;boolean isChecked(){return checked;} }
  static final class R { static final class string {
   static final int official_preview=1,official_counts=2,official_expiry=3,official_ready_notice=4,
-   official_completed_notice=5,official_committed_cleanup=6,official_committed_refresh=7;
+   official_completed_notice=5,official_committed_cleanup=6,official_committed_refresh=7,official_completed_short=8;
  } }
  static final class org { static final class json { static final class JSONException extends Exception {} } }
  static final class JSONObject {

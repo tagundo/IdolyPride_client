@@ -96,7 +96,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private final EventUiState normalEvents = new EventUiState(false), mediaEvents = new EventUiState(true);
     private LinearLayout eventsChoices, eventsSchedule;
     private final java.util.LinkedHashMap<String, CheckBox> eventChecks = new java.util.LinkedHashMap<>();
-    private String eventsCatalogKey;
+    private String eventsCatalogKey, eventsRenderedKey;
     private EventUiState eventsRequestState;
     private int eventsBusyRetries;
     private boolean startAfterEventsSave;
@@ -1128,9 +1128,18 @@ public final class MainActivity extends Activity implements ServerService.Observ
         return !translated.isEmpty() ? translated : row.optString("title", row.optString("id"));
     }
 
+    private String eventRenderKey() {
+        return eventState().media + "|" + eventsSnapshot.toString() + "|" + String.valueOf(eventsDraft)
+                + "|" + eventsError + "|" + eventsUnsaved + "|" + eventsSelectedId + "|" + eventsLoaded
+                + "|" + presentationServerRunning + "|" + (eventsRequest && eventsRequestState == eventState())
+                + "|" + eventsSaving + "|" + Locale.getDefault().getLanguage();
+    }
+
     private void renderEventSettings() {
         if (eventsSummary == null) return;
-        syncEventView(); eventsLoading = true;
+        syncEventView();
+        if (eventRenderKey().equals(eventsRenderedKey)) { updateEventSettingsControls(); return; }
+        eventsLoading = true;
         JSONObject catalog = eventsSnapshot.optJSONObject("catalog");
         org.json.JSONArray source = catalog == null ? null : catalog.optJSONArray("events");
         org.json.JSONArray visible = new org.json.JSONArray(); java.util.ArrayList<String> labels = new java.util.ArrayList<>();
@@ -1181,6 +1190,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         eventsNotice.setTextColor(eventsError.isEmpty() ? TEXT_MUTED : WARNING);
         eventsReload.setText(eventsUnsaved ? R.string.events_retry_save : R.string.events_refresh);
         eventsLoading = false; renderSelectedEvent();
+        eventsRenderedKey = eventRenderKey();
     }
 
     private void updateEventSettingsControls() {

@@ -320,26 +320,35 @@ LEGACY_MANIFEST_SHA256 = {
 
 
 def load_resource_translation(directory, original_manifest, *, language, data_dir, platform):
-    """Select the original strict layer or a pinned latest-catalog rebase."""
-    report = json.loads(_read(Path(directory) / "manifest.json", MAX_MANIFEST).decode("utf-8"))
-    source_sha = hashlib.sha256(original_manifest).hexdigest()
-    if not isinstance(report, dict) or report.get("original_manifest_sha256") == source_sha:
-        return ResourceTranslation(directory, original_manifest, language=language)
-    from .octo_runtime import latest_resource_archive_pin
-    approved = latest_resource_archive_pin(platform)
-    legacy_sha = LEGACY_MANIFEST_SHA256.get(platform)
-    if (not isinstance(approved, dict) or not legacy_sha
-            or approved.get("manifest_sha256") != source_sha
-            or approved.get("legacy_manifest_sha256") != legacy_sha
-            or report.get("original_manifest_sha256") != legacy_sha):
-        raise ValueError("Prepared translation latest cohort is not approved")
-    archive = "public-octo" if platform == "android" else "public-octo-ios"
-    legacy = _read(Path(data_dir) / archive / "legacy-manifest.pb", MAX_MANIFEST)
-    if hashlib.sha256(legacy).hexdigest() != legacy_sha:
-        raise ValueError("Prepared translation legacy manifest differs")
-    layer = ResourceTranslation(directory, legacy, language=language)
-    try:
-        return RebasedResourceTranslation(layer, legacy, original_manifest)
-    except BaseException:
-        layer.close()
-        raise
+    """Select the strict layer, reusing only already validated immutable inputs."""
+    def authorize():
+        # Approval is re-evaluated even on a process-local metadata cache hit.
+        report = json.loads(_read(Path(directory) / "manifest.json", MAX_MANIFEST).decode("utf-8"))
+        source_sha = hashlib.sha256(original_manifest).hexdigest()
+        if not isinstance(report, dict) or report.get("original_manifest_sha256") == source_sha:
+            return None
+        from .octo_runtime import latest_resource_archive_pin
+        approved = latest_resource_archive_pin(platform)
+        legacy_sha = LEGACY_MANIFEST_SHA256.get(platform)
+        if (not isinstance(approved, dict) or not legacy_sha
+                or approved.get("manifest_sha256") != source_sha
+                or approved.get("legacy_manifest_sha256") != legacy_sha
+                or report.get("original_manifest_sha256") != legacy_sha):
+            raise ValueError("Prepared translation latest cohort is not approved")
+        archive = "public-octo" if platform == "android" else "public-octo-ios"
+        legacy = _read(Path(data_dir) / archive / "legacy-manifest.pb", MAX_MANIFEST)
+        if hashlib.sha256(legacy).hexdigest() != legacy_sha:
+            raise ValueError("Prepared translation legacy manifest differs")
+        return legacy
+    def build(legacy):
+        if legacy is None:
+            return ResourceTranslation(directory, original_manifest, language=language)
+        layer = ResourceTranslation(directory, legacy, language=language)
+        try:
+            return RebasedResourceTranslation(layer, legacy, original_manifest)
+        except BaseException:
+            layer.close()
+            raise
+    from .resource_translation_cache import validated_layer
+    return validated_layer(directory, original_manifest, language=language, data_dir=data_dir,
+                           platform=platform, authorize=authorize, build=build)
