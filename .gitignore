@@ -19,3 +19,10 @@ private/
 
 # Pinned public Mozilla roots; private certificate files stay ignored.
 !macos-server/certificates/cacert.pem
+
+# Audited source-only Love routing reference and metadata; no ADV/media/account data.
+!/data/
+/data/*
+!/data/love-reference.json
+!/data/love-adv-proof.json
+!/data/love-reference-NOTICE.txt

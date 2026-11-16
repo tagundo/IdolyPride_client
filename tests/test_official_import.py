@@ -431,7 +431,14 @@ def test_explicit_imported_user_get_outranks_legacy_capture_but_starter_keeps_re
     state = populate(env,"target"); token,_ = state.login("target")
     original = state.snapshot("target")[0]; captured = b"legacy captured account"
     app = application(env,state,captured)
+    # Local Love mutation establishes SQL ownership even for a known starter.
+    assert state.starter_version("target") == 7 and state.has_love_progress("target")
+    assert app.handle("/api.User/Get",b"",Context(token)) == original
+    # An untouched positive starter retains the existing replay contract.
+    with state.connect() as db: db.execute("DELETE FROM profile_love_progress WHERE profile=?",("target",))
+    assert not state.has_love_progress("target")
     assert app.handle("/api.User/Get",b"",Context(token)) == captured
+    # Explicit imports stay authoritative without requiring Love state.
     state.save_snapshot("target",original,env.schema.fingerprint,starter_version=0)
     token,_ = state.login("target")
     assert app.handle("/api.User/Get",b"",Context(token)) == original

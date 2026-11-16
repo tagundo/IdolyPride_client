@@ -49,6 +49,8 @@ class Runtime:
         self._wardrobe_probe = None
         self._media_settings = None
         self._language_settings = None
+        self._event_settings = None
+        self._active_events = None
         self._library = None
         self._last_library_status = None
         self._active_media = None
@@ -133,6 +135,8 @@ class Runtime:
             result["media_options"] = self._media_settings.status()
             if self._active_media is not None:
                 result["media_options"]["effective_settings"] = self._active_media.settings()
+        if self._event_settings is not None:
+            result["event_settings"] = self._event_settings.status(effective=self._active_events)
         if self._language_settings is not None:
             result["language"] = self._language_settings.status()
             result["language"]["effective_language"] = self._effective_language
@@ -455,6 +459,9 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         runtime._media_settings = MediaSettingsState(root / "client-media.json")
         from .language_settings import LanguageSettingsState
         runtime._language_settings = LanguageSettingsState(root / "client-language.json")
+        from .event_settings import EventSettingsState, freeze_event_settings
+        runtime._event_settings = EventSettingsState(root)
+        runtime._active_events = freeze_event_settings(root)
         runtime._active_media = _StartupSettings(runtime._media_settings.settings())
         runtime._effective_language = runtime._language_settings.settings()["language"]
         # Imports stay inside startup so launchers can extract bundled data and
@@ -579,7 +586,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         if media_mode:
             media_options.update(media_mode=True, photo_scene_access=media_scenes)
         application = Application(schema, state, fixtures, profile=profile, master_response=master_response,
-                                  master_dir=master_dir, **media_options, **live_options)
+                                  master_dir=master_dir, event_settings=runtime._active_events, **media_options, **live_options)
         runtime._experimental_main_live = experimental_main_live
         if experimental_main_live:
             runtime._log("일반 라이브 실험 기능 사용: 첫 메인 퀘스트 · 로컬 계산 규칙")

@@ -330,9 +330,15 @@ class _Host:
         if runtime is None and paths is not None:
             from .app_runtime import server_settings_status
             observed.update(self._startup_observations or server_settings_status(paths[1]))
+        if paths is not None and "event_settings" not in observed:
+            from .event_settings import event_settings_status
+            observed["event_settings"] = event_settings_status(paths[1])
         observed["logs"] = [str(x)[:512] for x in observed.get("logs", [])[-20:]]
         restart = effective is not None and any(options.get(key) != effective.get(key)
             for key in ("media_mode", "download_missing_resources", "language"))
+        events = observed.get("event_settings", {})
+        if isinstance(events, dict) and events.get("restart_required") is True:
+            restart = True
         media = observed.get("media_options", {})
         if media.get("effective_settings") is not None and media.get("settings") != media["effective_settings"]:
             restart = True
@@ -360,12 +366,13 @@ class _Host:
             # Retaining an unbounded language/renderer report here would make
             # the fallback overflow too, hiding the counters again. Prefer the
             # complete field when it fits, then its validated control settings.
-            for key in ("presentation", "playback", "media_options", "language"):
+            for key in ("presentation", "playback", "media_options", "language", "event_settings"):
                 if key not in observed:
                     continue
                 value = observed[key]
                 settings = ({k: v for k, v in value.items() if k in (
-                    "settings", "effective_settings", "invalid_settings_file", "effective_language")}
+                    "settings", "effective_settings", "invalid_settings_file", "effective_language",
+                    "schema", "saved", "effective", "restart_required", "catalog")}
                     if isinstance(value, dict) else {})
                 for candidate in (value, settings):
                     result["runtime"][key] = candidate
@@ -887,7 +894,8 @@ class _Host:
             "diagnostics_clear": set(),
             "official_inspect": {"user_id", "password", "platform"},
             "official_fetch": {"job_id"}, "official_apply": {"job_id", "profile", "replace", "expected_revision"},
-            "official_cancel": {"job_id"}, "official_status": set()}
+            "official_cancel": {"job_id"}, "official_status": set(),
+            "events_status": set(), "events_save": {"settings", "expected_revision"}}
         if action not in fields or value.keys() - {"id", "action"} - fields[action]:
             raise ValueError("Unknown command or fields")
         if action == "status":
@@ -913,6 +921,21 @@ class _Host:
             with self._condition:
                 self._startup_observations = None
             return self.status()
+        if action in ("events_status", "events_save"):
+            if self._paths is None:
+                raise ValueError("Event preference storage is unavailable")
+            from .event_settings import event_settings_command
+            runtime = self._runtime
+            observed = runtime.status() if runtime is not None else {}
+            event_status = observed.get("event_settings", {})
+            effective = event_status.get("effective") if isinstance(event_status, dict) else None
+            result = event_settings_command(self._paths[1], action,
+                {key: item for key, item in value.items() if key not in ("id", "action")}, effective=effective)
+            if action == "events_status":
+                return result
+            result = self.status()
+            self._event("status", status=result)
+            return result
         if action.startswith("accounts_"):
             return self._account_command(action, value)
         if action.startswith("official_"):
@@ -1013,6 +1036,11 @@ class _Host:
                 message = ("게임을 완전히 종료하고 다시 연 뒤 게임 시작 전에 계정을 복원해 주세요."
                     if code == "account_restart_required" else "공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요."
                     if str(value.get("action", "")).startswith("official_") else "계정 작업을 마치지 못했습니다. 목록을 새로 불러와 확인해 주세요.")
+            if isinstance(value, dict) and value.get("action") in ("events_status", "events_save"):
+                from .event_settings import ERROR_CODES
+                candidate = getattr(error, "code", None)
+                code = candidate if type(candidate) is str and candidate in ERROR_CODES else "operation_failed"
+                message = "이벤트 설정을 저장하지 못했습니다. 저장 상태와 지원 목록을 확인해 주세요."
             return _json({"id": identifier, "ok": False, "error": {"code": code, "message": message}})
 
 

@@ -1371,6 +1371,10 @@ def main():
                                                 args.master_dir, args.startup_timeout, preserved))
         from qa_account_management import exercise_account_management
         result.update(exercise_account_management(qa, schema, grpc_port, asset_port, args.startup_timeout,
+            wait_server=wait_server, bootstrap=bootstrap, rpc=rpc, copy_database=_copy_private_database,
+            guard_stopped=_guard_stopped_emulator, checkpoint=_checkpoint))
+        from qa_event_settings import exercise_event_settings
+        result.update(exercise_event_settings(qa, schema, grpc_port, asset_port, args.startup_timeout,
             wait_server=wait_server, bootstrap=bootstrap, rpc=rpc, copy_database=_copy_private_database))
         qa.adb("shell", "am", "start", "-n", ACTIVITY)
         result.update(ok=True, final_stop=True)

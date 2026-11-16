@@ -1,8 +1,9 @@
 """Finite normal-account Moshi Koi gameplay with atomic, portable progress.
 
-Original 6.1.1 RPC/masters/ADV define the client contract. Route interpretation
-is an explicitly pinned local compatibility policy; inferred favorability is
-not claimed as an officially verified reward formula. No stones are invented.
+Original 6.1.1 RPC/masters/ADV define the client contract. Inferred route data
+is an explicitly pinned local compatibility policy for branching only. No
+inferred choice or ending bonus changes actual UserLove.hiddenFavorability;
+only the original present Item.value does. No stones or finish items are invented.
 """
 from __future__ import annotations
 
@@ -163,7 +164,7 @@ class Love:
     def _active(self, now):
         settings = self.settings
         if (type(settings) is not dict or settings.get("schema") != 1
-                or type(settings.get("love_events")) is not list or len(settings["love_events"]) > 16):
+                or type(settings.get("love_events")) is not list or len(settings["love_events"]) > 64):
             _fail("event_settings_invalid")
         active, seen = {}, set()
         for row in settings["love_events"]:
@@ -350,7 +351,7 @@ class Love:
         love = self._love(snapshot,identity)
         info.isUnplayed = data is None and (self.media_mode or love is None)
         info.lastPlayTime = data["last_play_ms"] if data else 0
-        info.isLessonRewardMax = bool(data and now >= data["lesson_anchor_ms"]+event["lessonMaxHours"]*3600000)
+        info.isLessonRewardMax = bool(not self.media_mode and data and now >= data["lesson_anchor_ms"]+event["lessonMaxHours"]*3600000)
         present = event.get("presentItemId","")
         info.hasHiddenFavorabilityObtainItem = bool(not self.media_mode and present and self._item_amount(snapshot,present,now)>0)
         # Mission grants/claims remain separate APIs. These IDs are original
@@ -467,15 +468,14 @@ class Love:
             if not matches or matches[0]["index"] != condition["choice"]:return False
         return True
 
-    def _score(self,event,choices,field="scores"):
+    def _route_points(self,event,choices):
         total=0
         for episode,rows in choices.items():
             groups={row["index"]:row for row in event["routes"][episode].get("groups",[])}
             for row in rows:
                 if row["valid"]:
-                    values=groups[row["group"]].get(field,[])
+                    values=groups[row["group"]].get("points",[])
                     if values:total+=values[row["index"]-1]
-                    elif field=="scores":_fail("score_unsupported",RpcCode.UNIMPLEMENTED)
         if not -(1<<63)<=total<=_I64:_fail("route_score_overflow",RpcCode.OUT_OF_RANGE)
         return total
 
@@ -483,10 +483,7 @@ class Love:
         route=event["routes"][episode]
         for group in route.get("groups",[]):
             row=result.storyChoiceGroupInfos.add(groupIndex=group["index"])
-            scores=group.get("scores")
-            if type(scores) is not list or len(scores)!=group["count"]:
-                _fail("score_unsupported",RpcCode.UNIMPLEMENTED)
-            row.existsObtainableFavorabilityDifference=hint>=1 and len(set(scores))>1
+            row.existsObtainableFavorabilityDifference=hint>=1 and group.get("best",0)>0
             past=data["past_choices"].get(episode,{}).get(str(group["index"]),[])
             for index in range(1,group["count"]+1):
                 row.storyChoiceInfos.add(index=index,isBestObtainableFavorability=hint>=2 and index==group.get("best",0),
@@ -521,7 +518,7 @@ class Love:
         return [selected[key] for key in sorted(selected)]
 
     def _resolve(self,event,episode,choices):
-        route=event["routes"][episode];points=self._score(event,choices,"points")
+        route=event["routes"][episode];points=self._route_points(event,choices)
         for outcome in route.get("outcomes",[]):
             if set(outcome)-{"all","next","ending","minPoints","maxPoints"}:
                 _fail("branch_unsupported",RpcCode.UNIMPLEMENTED)
@@ -547,7 +544,7 @@ class Love:
         number=event["episodes"][episode]["episode"]
         required=event["episodeUnlockLevels"].get(str(number),event["episodeUnlockLevels"].get(number))
         if required is None or not self.media_mode and level<required:_fail("episode_level_locked")
-        self._hint(event,data,request.hintLevel)
+        unlocked_hint=self._hint(event,data,request.hintLevel)
         if data["current"] and data["current"]["episode_id"]!=episode:_fail("different_episode_active")
         if restart and not data["current"]:_fail("episode_not_active")
         if not data["current"]:
@@ -556,14 +553,15 @@ class Love:
             if cost and not self.media_mode:self._consume(snapshot,event["storyReadItemId"],cost,updated,now)
         data["current"]={"episode_id":episode,"hint":request.hintLevel}
         data["last_play_ms"]=now;love.isReadingStory=True
-        self._choice_response(result,event,data,episode,request.hintLevel)
+        # Return metadata for all unlocked hint levels so the original client
+        # can change its local hint display while ADV is already playing.
+        self._choice_response(result,event,data,episode,unlocked_hint)
 
     def _finish(self,event,data,love,snapshot,result,request,now,updated):
         episode=request.storyEpisodeId
         if data["current"] is None or data["current"]["episode_id"]!=episode:_fail("episode_not_active")
         self._hint(event,data,request.hintLevel)
         selected=self._select(event,data,episode,request)
-        previous=self._score(event,data["choices"])
         position=data["path"].index(episode)
         data["path"]=data["path"][:position+1]
         data["choices"]={key:rows for key,rows in data["choices"].items() if key in data["path"][:-1]}
@@ -574,17 +572,14 @@ class Love:
             if row["valid"]:
                 seen=past.setdefault(str(row["group"]),[])
                 if row["index"] not in seen:seen.append(row["index"])
-        bonus=0
         if end_id:
             matches=[row for row in event["endings"] if row["id"]==end_id]
             if len(matches)!=1:_fail("ending_unsupported",RpcCode.UNIMPLEMENTED)
             ending=matches[0]
             result.storyEndName=ending["name"];result.endRollAssetId=ending.get("endRollAssetId","")
             if end_id not in love.unlockedLoveStoryEndIDs:
-                # This is the pinned reference compatibility favorability,
-                # not a premium currency, gift, mission or daily bonus.
-                if "favorability" not in ending:_fail("ending_bonus_unknown",RpcCode.UNIMPLEMENTED)
-                bonus=self._number(ending["favorability"])
+                # Inferred first-ending favorability is metadata only. It is
+                # not accrued to actual account state without official proof.
                 result.unlockSave=not love.unlockedLoveStoryEndIDs
                 love.unlockedLoveStoryEndIDs.append(end_id)
             data["path"]=[self._first(event)];data["choices"]={}
@@ -594,9 +589,9 @@ class Love:
                     or next_id in data["path"]):
                 _fail("branch_unsupported",RpcCode.UNIMPLEMENTED)
             data["path"].append(next_id)
-        total=love.hiddenFavorability+bonus+self._score(event,data["choices"])-previous
-        if not -(1<<63)<=total<=_I64:_fail("favorability_overflow",RpcCode.OUT_OF_RANGE)
-        love.hiddenFavorability=total;love.isReadingStory=False
+        # Both inferred choice and ending scores stay outside UserLove's
+        # real affinity. Finishing still records actual seen story/end IDs.
+        love.isReadingStory=False
         data["current"]=None;data["last_play_ms"]=now
         story=event["episodes"][episode]["storyId"]
         rows=[row for row in snapshot.stories if row.storyId==story]
@@ -745,16 +740,10 @@ class Love:
                 elif saved is None:_fail("save_not_found",RpcCode.NOT_FOUND)
                 elif name=="UpdateSaveName":saved["name"]=self._name(request.name)
                 else:
-                    previous=self._score(event,data["choices"])
                     data["path"]=copy.deepcopy(saved["path"]);data["choices"]=copy.deepcopy(saved["choices"])
-                    total=love.hiddenFavorability+self._score(event,data["choices"])-previous
-                    if not -(1<<63)<=total<=_I64:_fail("favorability_overflow",RpcCode.OUT_OF_RANGE)
-                    love.hiddenFavorability=total;result.storyEpisodeIds.extend(data["path"])
+                    result.storyEpisodeIds.extend(data["path"])
             elif name=="Reset":
                 if data["current"]:_fail("finish_reading_first")
-                total=love.hiddenFavorability-self._score(event,data["choices"])
-                if not -(1<<63)<=total<=_I64:_fail("favorability_overflow",RpcCode.OUT_OF_RANGE)
-                love.hiddenFavorability=total
                 data["path"]=[self._first(event)];data["choices"]={};result.storyEpisodeIds.extend(data["path"])
             elif name in ("ReceiveLessonReward","PromoteLesson"):
                 self._lesson(result,snapshot,event,data,updated,now,name=="PromoteLesson")

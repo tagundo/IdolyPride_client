@@ -45,7 +45,7 @@ PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
                   "android": 900*MIB, "macos": 640*MIB, "ios-unified": 768*MIB}
 BINARY_LIMITS = {APK: 384*MIB, QA_APK: 384*MIB, MAC: 600*MIB, IPA: 600*MIB}
-COMMON_SOURCES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py"])
+COMMON_SOURCES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py","tools/release_event_contract.py"])
 TRANSLATION_SOURCES = ("public_payload.py", "bundled_translations.py", "resource_translation.py",
                        "resource_translation_runtime.py", "octo_manifest.py", "octo_runtime.py")
 DATA_PIN = {"bytes": 191343014, "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
@@ -629,12 +629,17 @@ def validate_platform_files(directory, report, guard):
                  "starter_inventory_persisted", "main_live_first_quest", "main_live_mode_default_off", "main_live_opt_in",
                  "main_live_persisted", "main_live_attempts_persisted", "main_live_clock_preserved",
                  "main_live_identity_preserved", "main_live_sessions_preserved", "main_live_settings_preserved",
-                 "main_live_cached_no_grant",'account_native_create','account_native_clone','account_queued_selection_persisted','account_selected_encrypted_rpc','account_document_export_import','account_zip_whole_state_preserved','account_original_whole_state_preserved','account_import_sessions_excluded','account_selection_restored')), "android_runtime_qa_not_passed")
+                 "main_live_cached_no_grant",'account_native_create','account_native_clone','account_queued_selection_persisted','account_selected_encrypted_rpc','account_document_export_import','account_zip_whole_state_preserved','account_original_whole_state_preserved','account_import_sessions_excluded','account_selection_restored','native_event_settings_autosave','native_event_settings_restart_preserved')), "android_runtime_qa_not_passed")
         try:
             detail = module("published_android_account_contract", ROOT/"tools/release_account_contract.py").validate_android(qa)
         except ValueError:
             raise ReleaseError("android_account_management_not_passed") from None
         need(detail == report.get("account_management"), "android_account_management_report_differs")
+        try:
+            event_detail = module("published_android_event_contract", ROOT/"tools/release_event_contract.py").validate_android(qa)
+        except ValueError:
+            raise ReleaseError("android_native_event_settings_not_passed") from None
+        need(event_detail == report.get("native_event_settings"), "android_native_event_settings_report_differs")
     else:
         smoke_path = verified_file(directory, report.get("account_smoke"), name="engine-smoke.json", maximum=MAX_JSON)
         try:

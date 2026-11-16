@@ -411,7 +411,7 @@ def cancel_resource_job(identifier):
 _MANAGEMENT_ACTIONS = frozenset({
     "accounts_status", "accounts_create", "accounts_clone", "accounts_select",
     "accounts_export", "accounts_preview", "accounts_import", "accounts_restore",
-    "server_settings_status", "server_history_clear",
+    "server_settings_status", "server_history_clear", "events_status", "events_save",
 })
 
 
@@ -479,11 +479,32 @@ def _prepare_management_payload(root, assets):
         _record_pre_runtime_failure(root, error, "catalog")
         raise
 
+def _event_settings_native(root, action, payload, active):
+    """Save only configuration; never touches account progress or server lifecycle."""
+    from idoly_local.event_settings import event_settings_command, EventSettingsError, ERROR_CODES
+    effective = None
+    running_settings = active.get("event_settings")
+    if active.get("running") is True and type(running_settings) is dict:
+        effective = running_settings.get("effective")
+    try:
+        observed = event_settings_command(root, action, payload, effective=effective)
+    except EventSettingsError as error:
+        code = getattr(error, "code", None)
+        raise ValueError(code if code in ERROR_CODES else "event_settings_command_invalid") from None
+    except Exception:
+        raise ValueError("event_settings_io") from None
+    if (type(observed) is not dict or observed.get("schema") != 1
+            or type(observed.get("saved")) is not dict or type(observed.get("catalog")) is not dict):
+        raise ValueError("event_settings_response_invalid")
+    return {"schema": 1, "ok": True, "action": action, "event_settings": observed}
+
+
 def management_command_json(files_dir, action, payload_json="{}", assets=None):
     """Trusted Android bridge. A selected account applies on the next startup."""
     try:
         if (type(action) is not str or action not in _MANAGEMENT_ACTIONS
-                or type(payload_json) is not str or len(payload_json.encode("utf-8")) > 8192):
+                or type(payload_json) is not str
+                or len(payload_json.encode("utf-8")) > (65536 if action == "events_save" else 8192)):
             raise ValueError("account_request_invalid")
         try:
             payload = json.loads(payload_json)
@@ -499,7 +520,9 @@ def management_command_json(files_dir, action, payload_json="{}", assets=None):
             active_account = {"running": active.get("running") is True,
                               "mode": "media" if active.get("media_mode") is True else "normal",
                               "profile": active.get("profile")}
-            if action in ("server_settings_status", "server_history_clear"):
+            if action in ("events_status", "events_save"):
+                result = _event_settings_native(root, action, payload, active)
+            elif action in ("server_settings_status", "server_history_clear"):
                 if payload:
                     raise ValueError("account_request_invalid")
                 from idoly_local.app_runtime import server_settings_status, clear_server_history

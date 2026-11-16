@@ -32,7 +32,7 @@ PROBE_SOURCE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROBE_SOURCE_DIR))
 from ui_test_driver import (ProbePromptCancelDriver, DriverError, ERROR_CODES as UI_DRIVER_ERRORS,
     DIAGNOSTIC_CHECKS as UI_DIAGNOSTIC_CHECKS, DIAGNOSTIC_TYPES as UI_DIAGNOSTIC_TYPES,
-    DIAGNOSTIC_TOKEN_KINDS as UI_DIAGNOSTIC_TOKEN_KINDS)
+    DIAGNOSTIC_TOKEN_KINDS as UI_DIAGNOSTIC_TOKEN_KINDS, PHASE_MARKERS as UI_PHASE_MARKERS)
 
 
 BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
@@ -976,6 +976,50 @@ def official_ui_build_metadata(value):
     return clean
 
 
+def official_ui_failure_observation(value):
+    if type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1 or value.get("scope") != "owned-public-xctest-failure":
+        return {}
+    clean={"schema":1,"scope":"owned-public-xctest-failure"}
+    if value.get("phase") in ("building","testing","summary","tests","unknown"):clean["phase"]=value["phase"]
+    if type(value.get("error_code")) is str and value["error_code"] in UI_DRIVER_ERRORS:clean["error_code"]=value["error_code"]
+    for key in ("ready_marker_observed","test_spawned"):
+        if type(value.get(key)) is bool:clean[key]=value[key]
+    for key,minimum,maximum in (("child_pid",1,2**31-1),("child_exit_code",-255,255)):
+        observed=value.get(key)
+        if observed is None or type(observed) is int and minimum<=observed<=maximum:clean[key]=observed
+    elapsed=value.get("phase_elapsed_seconds")
+    if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0<=elapsed<=900:clean["phase_elapsed_seconds"]=elapsed
+    markers=value.get("markers")
+    if type(markers) is dict:clean["markers"]={key:markers[key] for key in UI_PHASE_MARKERS.values() if type(markers.get(key)) is bool}
+    return clean
+
+
+def safe_failure_summary(report):
+    """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
+    code=report.get("error")
+    clean={"schema":1,"scope":"owned-simulator-failure","error_code":code if type(code) is str and code in (UI_DRIVER_ERRORS | LAUNCHER_FAILURE_CODES) else "probe_failed"}
+    checkpoint=report.get("native_checkpoint")
+    if type(checkpoint) is dict:
+        native={}
+        if type(checkpoint.get("stage")) is str and checkpoint["stage"] in NATIVE_CHECKPOINT_STAGES:native["stage"]=checkpoint["stage"]
+        for key,minimum,maximum in (("phase",0,4),("process_id",1,2**31-1),("main_heartbeat_count",0,100000),("checkpoint_count",0,100000)):
+            value=checkpoint.get(key)
+            if type(value) is int and minimum<=value<=maximum:native[key]=value
+        for key in ("main_thread_checkpoint","launch_requested","launch_prepared","keyboard_ready","launcher_visible"):
+            if type(checkpoint.get(key)) is bool:native[key]=checkpoint[key]
+        for key in ("checkpoint_age_seconds","status_age_seconds","report_age_seconds","main_elapsed_seconds"):
+            value=checkpoint.get(key)
+            if type(value) in (int,float) and math.isfinite(value) and 0<=value<=3600:native[key]=value
+        gate=server_gate_observation(checkpoint.get("server_gate"))
+        if gate:native["server_gate"]=gate
+        clean["native"]=native
+    driver=official_ui_failure_observation(report.get("xctest_failure"))
+    if driver:clean["xctest"]=driver
+    try:clean["source_sha256"]=hashlib.sha256(json.dumps(official_ui_source_pins(),sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    except ProbeError:pass
+    return clean
+
+
 OFFICIAL_PROMPT_FLAGS = ("button_found", "enabled_before", "click_dispatched", "empty_web_payload", "prompt_presented",
     "field_count_two", "secure_password_field", "platform_actions_present", "cancel_action_present", "synthetic_inputs_set",
     "cancel_ack_observed", "fields_cleared", "web_reply_cancelled", "prompt_detached", "official_job_absent_before",
@@ -1014,7 +1058,7 @@ def validate_official_prompt(value, run_index):
 
 
 ACCOUNT_TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
-                  "profile_lesson_progress", "preference_receipts", "main_live_attempts")
+                  "profile_lesson_progress", "preference_receipts", "main_live_attempts", "profile_love_progress")
 ACCOUNT_BLOB_TABLES = ("snapshots", "profile_settings", "profile_lesson_progress",
                        "preference_receipts", "main_live_attempts")
 ACCOUNT_UI_FLAGS = ("management_controls_ready", "inactive_clone_created", "export_reply_correlated",
@@ -1024,8 +1068,8 @@ ACCOUNT_UI_FLAGS = ("management_controls_ready", "inactive_clone_created", "expo
     "native_copy_bytes_match")
 ACCOUNT_NATIVE_FLAGS = ("export_picker_presented", "export_picker_cancelled", "archive_copy_sha256_verified",
     "next_selection_pending_only", "original_runtime_preserved", "listeners_survived")
-ACCOUNT_STATE_FLAGS = ("all_seven_tables_nonempty", "archive_all_tables_exact", "new_import_all_tables_exact",
-    "restored_all_tables_exact", "unknown_response_blobs_exact", "source_account_preserved",
+ACCOUNT_STATE_FLAGS = ("all_eight_tables_nonempty", "archive_all_tables_exact", "new_import_all_tables_exact",
+    "restored_all_tables_exact", "unknown_response_blobs_exact", "love_progress_bytes_exact", "source_account_preserved",
     "original_account_preserved", "original_sessions_preserved", "source_session_preserved",
     "target_session_invalidated", "original_selection_restored")
 ACCOUNT_UI_ACTIONS = ("accounts_status", "accounts_clone", "accounts_status", "accounts_export",
@@ -1153,8 +1197,19 @@ class AccountFixtureHarness:
             tables[table].append(row)
             columns = ("profile", "path", "request_id") if table == "preference_receipts" else ("profile", "request_id")
             tables[table].sort(key=lambda item: tuple(item[key] for key in columns))
+        # Love progress is strict JSON, not protobuf. Preserve its original
+        # whitespace bytes independently from the five protobuf unknown fields.
+        love = {"schema":1,"love_id":"love-23-0514","player_name":"ProbeA" if phase=="source" else "ProbeB",
+            "registered_ms":1,"exp":0,"lesson_anchor_ms":1,"last_play_ms":1,
+            "path":["love-event-story-love-23-0514-001"],"choices":{},"past_choices":{},"current":None,
+            "saves":[],"promotion_day":"2026-11-16","promotion_used":0}
+        love_raw=(json.dumps(love,sort_keys=True,indent=2)+"\n").encode()
+        from idoly_local.love import validate_progress
+        validate_progress(love_raw,love["love_id"])
+        tables["profile_love_progress"]=[{"profile":profile,"love_id":love["love_id"],"response":love_raw,
+            "schema_sha256":self.schema.fingerprint,"ruleset_sha256":hashlib.sha256(b"probe-owned-love-json-v1").hexdigest()}]
         State.validate_account(bundle)
-        require(all(tables[table] for table in ACCOUNT_TABLES), "settings_account_fixture_failed")
+        require(bundle.get("schema")==2 and all(tables[table] for table in ACCOUNT_TABLES), "settings_account_fixture_failed")
         state.replace_account(profile, bundle, expected_revision=revision)
         actual = state.account_snapshot(profile)
         require(actual[0] == bundle, "settings_account_fixture_failed")
@@ -1226,6 +1281,8 @@ class AccountFixtureHarness:
             "restored_all_tables_persisted": target == self.target_bundle,
             "source_session_preserved": state.authenticated(self.source_token,self.source),
             "target_session_invalidated": not state.authenticated(self.target_token,self.target),
+            "love_progress_bytes_persisted": source[0]["tables"]["profile_love_progress"] == self.source_bundle[0]["tables"]["profile_love_progress"]
+                and target[0]["tables"]["profile_love_progress"] == self.target_bundle[0]["tables"]["profile_love_progress"],
             "original_selection_preserved": selection_status(self.root)["selected"][self.mode] == "sandbox"}
         require(all(type(value) is bool and value is True for value in checks.values()), "settings_account_fixture_failed")
         return {"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
@@ -1258,6 +1315,7 @@ class AccountFixtureHarness:
                     (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),
                     "settings_account_fixture_failed")
         require(sha == native.get("archive_sha256") and before.st_size == native.get("archive_bytes")
+                and type(manifest.get("schema")) is int and manifest["schema"] == 2
                 and manifest.get("kind") == "idoly-local-account" and manifest.get("mode") == self.mode
                 and manifest.get("profile") == self.source and manifest.get("account_bytes") == len(account_bytes)
                 and manifest.get("account_sha256") == hashlib.sha256(account_bytes).hexdigest(),
@@ -1267,17 +1325,22 @@ class AccountFixtureHarness:
                 return base64.b64decode(value["$bytes"], validate=True)
             return value
         archived = json.loads(account_bytes, object_hook=unpack)
+        require(type(archived.get("schema")) is int and archived["schema"]==2 and set(archived.get("tables",{}))==set(ACCOUNT_TABLES),
+                "settings_account_fixture_failed")
         State.validate_account(archived)
         state = self._state(self.mode)
         source, target = state.account_snapshot(self.source), state.account_snapshot(self.target)
         require(source is not None and target is not None, "settings_account_fixture_failed")
         checks = {
-            "all_seven_tables_nonempty": all(self.source_bundle[0]["tables"][table] for table in ACCOUNT_TABLES),
+            "all_eight_tables_nonempty": all(self.source_bundle[0]["tables"][table] for table in ACCOUNT_TABLES),
             "archive_all_tables_exact": archived == self.source_bundle[0],
             "new_import_all_tables_exact": self.import_exact,
             "restored_all_tables_exact": target == self.target_bundle,
             "unknown_response_blobs_exact": all(
                 target[0]["tables"][table] == self.target_bundle[0]["tables"][table] for table in ACCOUNT_BLOB_TABLES),
+            "love_progress_bytes_exact": archived["tables"]["profile_love_progress"] == self.source_bundle[0]["tables"]["profile_love_progress"]
+                and source[0]["tables"]["profile_love_progress"] == self.source_bundle[0]["tables"]["profile_love_progress"]
+                and target[0]["tables"]["profile_love_progress"] == self.target_bundle[0]["tables"]["profile_love_progress"],
             "source_account_preserved": source == self.source_bundle,
             "original_account_preserved": state.account_snapshot("sandbox") == self.original_bundle,
             "original_sessions_preserved": self._sessions(state,"sandbox") == self.original_sessions,
@@ -1286,7 +1349,7 @@ class AccountFixtureHarness:
             "original_selection_restored": selection_status(self.root)["selected"][self.mode] == "sandbox",
         }
         # A positive row-count expression must become a true JSON boolean, not a list.
-        checks["all_seven_tables_nonempty"] = bool(checks["all_seven_tables_nonempty"])
+        checks["all_eight_tables_nonempty"] = bool(checks["all_eight_tables_nonempty"])
         require(all(type(value) is bool and value is True for value in checks.values()),
                 "settings_account_fixture_failed")
         return {"observer": "runner-sqlite-and-archive", "seed_fixture_used": True, "gameplay_tested": False,
@@ -1677,7 +1740,7 @@ def validate_account_management(value, run_index):
 
 
 ACCOUNT_PERSIST_FLAGS = ("source_all_tables_persisted", "restored_all_tables_persisted",
-    "source_session_preserved", "target_session_invalidated", "original_selection_preserved")
+    "source_session_preserved", "target_session_invalidated", "original_selection_preserved", "love_progress_bytes_persisted")
 
 
 def validate_account_management_after_relaunch(value, first_account_summary):
@@ -1935,6 +1998,12 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
         phase = value.get("phase")
         if type(phase) is int and 0 <= phase <= 4:
             clean["phase"] = phase
+        for key,maximum in (("process_id",2**31-1),("main_heartbeat_count",100000),("checkpoint_count",100000)):
+            item=value.get(key)
+            if type(item) is int and (1 if key=="process_id" else 0)<=item<=maximum:clean[key]=item
+        if type(value.get("main_thread_checkpoint")) is bool:clean["main_thread_checkpoint"]=value["main_thread_checkpoint"]
+        elapsed=value.get("main_elapsed_seconds")
+        if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0<=elapsed<=900:clean["main_elapsed_seconds"]=elapsed
         application_state = value.get("application_state")
         if type(application_state) is int and 0 <= application_state <= 2:
             clean["application_state"] = application_state
@@ -1967,6 +2036,11 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
             result[source + "_read_error"] = "unreadable_checkpoint"
             continue
         result[source + "_available"] = True
+        try:
+            info=(documents/name).lstat()
+            age=time.time()-info.st_mtime
+            if stat.S_ISREG(info.st_mode) and 0<=age<=3600:result[source+"_age_seconds"]=round(age,3)
+        except OSError:pass
         gate = server_gate_observation(observed.get("server_status") if type(observed.get("server_status")) is dict else observed)
         if gate: result["server_gate"] = gate
         settings_web = settings_web_from_observation(observed)
@@ -2512,6 +2586,11 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
         report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index)
+        if ui_driver is not None and callable(getattr(ui_driver,"failure_diagnostic",None)):
+            try:
+                diagnostic=official_ui_failure_observation(ui_driver.failure_diagnostic())
+                if diagnostic:report["xctest_failure"]=diagnostic
+            except DriverError:pass
         if ui_driver is not None and callable(getattr(ui_driver,"build_failure_log",None)):
             try:
                 raw=ui_driver.build_failure_log()
@@ -2598,6 +2677,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 report.update(status="FAIL", cleanup_complete=False)
                 report["native_checkpoint"] = checkpoint
         report["seconds"] = round(time.monotonic() - start, 3)
+        if report.get("status")=="FAIL":
+            print("IDOLY_SAFE_PROBE_FAILURE "+json.dumps(safe_failure_summary(report),sort_keys=True,separators=(",",":"),allow_nan=False))
         write_audit(audit, report)
     return report
 

@@ -32,6 +32,15 @@ SOURCE_PATHS = (
 SCHEME = "IdolyProbeCancelUITests"
 TEST_IDENTIFIER = SCHEME + "/OfficialPromptCancelTests/testCancelExistingProbePrompt"
 READY_MARKER = b"IDOLY_CANCEL_UITEST_WAITING_FOR_PROBE"
+PHASE_MARKERS = {
+    b"IDOLY_CANCEL_UITEST_PROBE_FOREGROUND": "foreground_observed",
+    b"IDOLY_CANCEL_UITEST_WAITING_FOR_PROMPT": "prompt_waiting",
+    b"IDOLY_CANCEL_UITEST_PROMPT_FOUND": "prompt_observed",
+    b"IDOLY_CANCEL_UITEST_BEFORE_CANCEL_TAP": "cancel_tap_requested",
+    b"IDOLY_CANCEL_UITEST_AFTER_CANCEL_TAP": "cancel_tapped",
+    b"IDOLY_CANCEL_UITEST_PROMPT_DISMISSED": "prompt_dismissed",
+    b"IDOLY_OFFICIAL_PROMPT_CANCEL_UI_TEST_PASS": "method_completed",
+}
 DUMMY_BUNDLE = "local.idoly.cancel-driver-host"
 RUNNER_BUNDLE = "local.idoly.cancel-driver-uitests.xctrunner"
 _LOG_LIMIT = 2 * 1024 * 1024
@@ -215,6 +224,10 @@ class ProbePromptCancelDriver:
         self._output_paths = {}
         self._failure_phase, self._test_spawned = None, False
         self._metadata_diagnostic = None
+        self._phase_started = 0
+        self._phase_markers = {name: False for name in PHASE_MARKERS.values()}
+        self._failure_observation = None
+        self._last_child_pid = self._last_child_exit = None
 
     def __repr__(self):
         return "<ProbePromptCancelDriver public XCTest; diagnostics redacted>"
@@ -232,6 +245,7 @@ class ProbePromptCancelDriver:
         if phase == "testing":
             self._test_spawned = True
         self._log_size, self._line, self._maximum = 0, b"", maximum
+        self._last_child_pid = self._last_child_exit = None
         try:
             self._log = output.open("xb")
             self._process = subprocess.Popen(args, stdout=subprocess.PIPE,
@@ -241,7 +255,8 @@ class ProbePromptCancelDriver:
         except Exception:
             self._stop()
             raise DriverError("ui_driver_spawn_failed") from None
-        self._phase, self._phase_deadline = phase, time.monotonic() + self._budget(cap)
+        self._phase_started = time.monotonic()
+        self._phase, self._phase_deadline = phase, self._phase_started + self._budget(cap)
         self._output_paths[phase] = output
 
     def start(self):
@@ -281,8 +296,13 @@ class ProbePromptCancelDriver:
                 self._line += data
                 lines = self._line.split(b"\n")
                 self._line = lines.pop()[-1024:]
-                if any(line.rstrip(b"\r") == READY_MARKER for line in lines):
-                    self._ready = True
+                for line in lines:
+                    marker = line.rstrip(b"\r")
+                    if marker == READY_MARKER:
+                        self._ready = True
+                    name = PHASE_MARKERS.get(marker)
+                    if name is not None:
+                        self._phase_markers[name] = True
         self._log.flush()
 
     def _source_unchanged(self):
@@ -428,6 +448,7 @@ class ProbePromptCancelDriver:
 
     def _ended(self, code):
         phase = self._phase
+        self._last_child_pid, self._last_child_exit = self._process.pid, code
         self._log.close()
         self._log = None
         self._process.stdout.close()
@@ -456,6 +477,27 @@ class ProbePromptCancelDriver:
                 "xcresult_tests_sha256": hashlib.sha256(raw).hexdigest()}
             self._phase = "passed"
 
+    def _observe_failure(self):
+        process = self._process
+        try:
+            code = process.poll() if process is not None else self._last_child_exit
+        except Exception:
+            code = None
+        code = code if type(code) is int and -255 <= code <= 255 else None
+        pid = getattr(process, "pid", None) if process is not None else self._last_child_pid
+        pid = pid if type(pid) is int and 1 <= pid <= 2**31-1 else None
+        self._failure_observation = {"schema": 1, "scope": "owned-public-xctest-failure",
+            "phase": self._failure_phase if self._failure_phase in ("building", "testing", "summary", "tests") else "unknown",
+            "error_code": self._error, "ready_marker_observed": self._ready, "test_spawned": self._test_spawned,
+            "child_pid": pid, "child_exit_code": code,
+            "phase_elapsed_seconds": round(min(900, max(0, time.monotonic()-self._phase_started)), 3),
+            "markers": dict(self._phase_markers)}
+
+    def failure_diagnostic(self):
+        if self._closed or self._phase != "failed" or self._failure_observation is None:
+            return None
+        return json.loads(json.dumps(self._failure_observation))
+
     def poll(self):
         _need(not self._closed, "ui_driver_closed")
         if self._phase not in ("idle", "passed", "failed"):
@@ -469,10 +511,12 @@ class ProbePromptCancelDriver:
             except DriverError as error:
                 self._failure_phase = self._phase
                 self._error, self._phase = error.code, "failed"
+                self._observe_failure()
                 self._stop()
             except Exception:
                 self._failure_phase = self._phase
                 self._error, self._phase = "ui_driver_result_invalid", "failed"
+                self._observe_failure()
                 self._stop()
         phase = "building" if self._phase == "building" else self._phase if self._phase in ("passed", "failed", "idle") else "running"
         return {"phase": phase, "ready": self._ready, "error_code": self._error}

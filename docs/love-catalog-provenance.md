@@ -1,0 +1,29 @@
+# Love catalog sources and preparation
+
+The default server payload includes LoveHomeAction, LoveLevel, LoveStoryEpisode and LoveColor, together with their original Story/Setting/Item/Character/Costume/Area/Condition/EventMission prerequisites. Packaging these tables does not enable an event. Events remain disabled until an explicit local schedule is saved; the local schedule does not alter the global game clock or establish an official event end date.
+
+## Original master evidence
+
+The original master version is `961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`. `tools/build_server_payload.py` verifies each original encrypted master pack before decoding. `love_catalog.LOVE_MASTER_PINS` additionally fixes the four Love pack hashes and counts: 243 home actions, 57 levels, 72 story episodes and one color definition. The resulting runtime catalog records the hashes of every decoded prerequisite file; a changed file invalidates the cached catalog.
+
+The original descriptor file SHA-256 is `c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad`; the runtime Schema's normalized fingerprint is separately `0fcf90596261dcd9bbed165bd93859dc30127e2a494e6529bafbd8885675edf3`. These are intentionally different identities. Story episode assets are joined through original Story.advAssetIds, not the similarly named LoveStoryEpisode.assetId. All 72 original Love story rows have empty rewardId; an unrelated story reader's stone reward must not be reused.
+
+## Reference routing and limits
+
+`data/love-reference.json` is canonical JSON prepared remotely with PyYAML 6.0.3 from exactly twelve byte/hash-pinned public YAML files at [vertesan/solis-server 9b67c06939403d7035e1795745f791340a775868](https://github.com/vertesan/solis-server/tree/9b67c06939403d7035e1795745f791340a775868/internal/makino/moshikoi). Its 44,247 bytes have SHA-256 `3f1f8e30a499c630a23dfca8e9216e165a2086d3c031b52aba39dc76d05438ec`. The original source hashes, capture claims, and inference comments remain inside the canonical file. The preparation downloads no account, media, or original ADV script data and performs no official authentication.
+
+The six event IDs are love-23-0514, love-23-1114, love-24-0517, love-24-1114, love-26-0313 and love-extra-25-0426. Reference settings describe server captures; this project has not independently authenticated those captures. Numeric route weights, branch associations and ending bonuses identified as inferred remain compatibility metadata. They are not verified official awards. `score_bonus_grants` and the stone-grant policy are false; merely carrying a reference favorability number does not authorize crediting an official account statistic.
+
+`data/love-adv-proof.json` contains 10,239 bytes (SHA-256 `1000ef777c5a95212a48be4d7294f741c1d41bb24ac132589b1711a07bcfded6`). It records only file hashes, byte counts, choice alternative counts and condition-branch counts observed by streaming existing original resource exports; no dialogue or media is copied. The original 72 story records refer to 69 distinct ADV assets. Exactly 68 resource exports were available. All 71 reference route definitions have choice alternative counts matching their observed original ADV scripts.
+
+The remaining node, love-event-story-love-24-1114-004-bad, refers to love_2411_04_02. Both its preserved original ADV source and a reference route definition are unavailable. The exact object is also absent from the pinned original Android and iOS manifests inspected for this task. No neighboring object ID or missing branch count is guessed. The catalog marks this episode's advEvidence.available=false so the game handler can reject entry before mutation. This is partial support, not a claim that all 72 story paths were restored or that a future upstream resource could never exist.
+
+## Runtime and distribution
+
+`build_love_catalog` runs in the CI payload staging directory, combining verified original master inputs and the small canonical reference/proof. It emits master-json/LoveCatalog.json with a content-derived ruleset hash and explicit source/inference grades. Runtime loading checks the supported schema, original version, reference/proof pins, ruleset digest and prerequisite file hashes. Its cache also binds inode, size, modification time and change time; settings polling does not repeatedly parse large master tables. Returned game catalogs are private copies, while `event_catalog(data_dir)` exposes only bounded titles, IDs, support/source grades and dates. Missing or damaged data returns available=false without creating files.
+
+Captured start dates are reference evidence. Official end times and durations are unknown and remain null. User-selected local windows are a separate local policy, with the common settings layer enforcing its stated bounds. The catalog itself grants no currency, items, progress, ownership, account selection or schedule changes.
+
+The server payload includes the canonical reference/proof, `data/licenses/love-reference-NOTICE.txt`, and the complete AGPL license text as `data/licenses/love-reference-AGPL-3.0.txt`. The public upstream source/license URL and exact source pin are retained. The reference's licensing does not relicense original game text, artwork, audio or other game assets, which remain owned by their respective right holders. The proof contains no original dialogue bytes or user account data.
+
+Portable tests cover pinned metadata, the original descriptor identity, source tampering, cache invalidation, safe unavailable behavior and package table contracts. Actual original-pack preparation is validated by the remote payload build. No local project imports, test execution or official authentication were used while preparing this source change. Public release remains subject to the wider native/runtime validation gates.

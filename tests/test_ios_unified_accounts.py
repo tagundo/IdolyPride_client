@@ -45,7 +45,14 @@ def seeded_account(h):
     preference.commonResponse.updatedData.user.name = "Portable manager"
     live = schema.response_type("/api.Quest/StartMainLive")()
     live.commonResponse.updatedData.user.name = "Portable manager"
+    love={"schema":1,"love_id":"love-23-0514","player_name":"HostQA","registered_ms":1,"exp":0,
+        "lesson_anchor_ms":1,"last_play_ms":1,"path":["love-event-story-love-23-0514-001"],"choices":{},
+        "past_choices":{},"current":None,"saves":[],"promotion_day":"2026-11-16","promotion_used":0}
+    love_raw=(json.dumps(love,sort_keys=True,indent=2)+"\n").encode()
+    from idoly_local.love import validate_progress
+    validate_progress(love_raw,love["love_id"])
     with state.connect() as db:
+        db.execute("INSERT INTO profile_love_progress VALUES (?,?,?,?,?)",("source",love["love_id"],love_raw,schema.fingerprint,"c"*64))
         db.execute("INSERT INTO profile_settings VALUES (?,?,?)",("source",settings.SerializeToString()+unknown,schema.fingerprint))
         db.execute("INSERT INTO profile_lesson_progress VALUES (?,?,?)",("source",lesson.SerializeToString()+unknown,schema.fingerprint))
         db.execute("INSERT INTO preference_receipts VALUES (?,?,?,?,?,?)",("source","/api.Home/SetReview","7","a"*64,schema.fingerprint,preference.SerializeToString()+unknown))
@@ -92,6 +99,14 @@ def test_account_archive_roundtrip_uses_real_state_and_preserves_every_non_sessi
     assert state.authenticated(token,"source")
     assert source["tables"]["profile_settings"] and source["tables"]["profile_lesson_progress"]
     assert source["tables"]["preference_receipts"] and source["tables"]["main_live_attempts"]
+    assert source["schema"] == restored["schema"] == 2
+    assert set(source["tables"]) == set(restored["tables"]) == {"profiles","snapshots","profile_settings","starter_profiles",
+        "profile_lesson_progress","preference_receipts","main_live_attempts","profile_love_progress"}
+    original_love=source["tables"]["profile_love_progress"][0]
+    imported_love=restored["tables"]["profile_love_progress"][0]
+    assert original_love["response"] == imported_love["response"]
+    assert original_love["response"].endswith(b"\n") and b'  "player_name": "HostQA"' in original_love["response"]
+    assert original_love["ruleset_sha256"] == imported_love["ruleset_sha256"] == "c"*64
     cached=h.subject.status()
     assert cached["account_management_available"] is True
     assert any(row["profile"]=="imported" for row in cached["accounts"]["accounts"])
@@ -261,7 +276,7 @@ def test_account_page_and_last_failure_survive_status_budget_with_native_headroo
             "server_id":"s"*256,"public_id":"p"*256,"has_snapshot":True,"manager_name":"매"*40,
             "inventory":{"cards":100,"items":30,"photos":9},
             "counts":{"profiles":1,"snapshots":1,"profile_settings":1,"starter_profiles":1,
-                "profile_lesson_progress":1,"preference_receipts":100,"main_live_attempts":10}})
+                "profile_lesson_progress":1,"preference_receipts":100,"main_live_attempts":10,"profile_love_progress":6}})
     h.subject._account_status=accounts
     last={"sequence":100,"timestamp":"2026-11-16T00:00:00.000Z","run_id":"c"*32,
         "kind":"http_failure","code":"http_request_failed","http_status":404}

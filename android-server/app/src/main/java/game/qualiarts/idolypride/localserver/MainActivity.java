@@ -82,6 +82,16 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
     };
 
+    private JSONObject eventsSnapshot = new JSONObject(), eventsDraft;
+    private org.json.JSONArray eventsCatalog = new org.json.JSONArray();
+    private Spinner eventsPicker;
+    private CheckBox eventsEnabled;
+    private Button eventsStart, eventsEnd, eventsOff, eventsReload;
+    private TextView eventsSummary, eventsSelected, eventsNotice;
+    private String eventsSelectedId = "", eventsError = "", eventsRenderedKey;
+    private boolean eventsRequest, eventsSaving, eventsLoading, eventsUnsaved, eventsLoaded;
+    private android.app.Dialog eventsDialog;
+
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
     private CheckBox mediaMode;
@@ -251,6 +261,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
                     && importedRevision.matches("[0-9a-f]{64}"))
                 officialAppliedAccount = accountPayload("profile", importedProfile, "revision", importedRevision);
             officialWarnings = savedInstanceState.getInt("official_local_warnings", 0) & 3;
+            eventsSelectedId = savedInstanceState.getString("events_selected_id", "");
+            String eventDraft = savedInstanceState.getString("events_unsaved_draft");
+            if (eventDraft != null && eventDraft.length() <= 32768) try {
+                eventsDraft = new JSONObject(eventDraft); eventsUnsaved = true;
+                eventsError = savedInstanceState.getString("events_error", "event_settings_io");
+            } catch (org.json.JSONException ignored) { eventsDraft = null; eventsUnsaved = false; }
         }
         getWindow().setStatusBarColor(PAGE_BACKGROUND);
         getWindow().setNavigationBarColor(PAGE_BACKGROUND);
@@ -323,6 +339,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         addServerChecksControls(card(body, R.string.server_checks_title));
         addAccountControls(card(body, R.string.accounts_title));
         addOfficialImportControls(card(body, R.string.official_title));
+        addEventSettingsControls(card(body, R.string.events_title));
 
         LinearLayout libraryCard = card(body, 0);
         addLibraryControls(libraryCard);
@@ -837,6 +854,235 @@ public final class MainActivity extends Activity implements ServerService.Observ
         officialLocalRefresh.setVisibility((officialWarnings & OFFICIAL_WARNING_REFRESH) != 0 ? View.VISIBLE : View.GONE);
         officialLocalRefresh.setEnabled(!ServerService.isManagingAccounts() && !accountLifecycleBusy);
         officialProgress.setVisibility((pending && !officialPolling) || working ? View.VISIBLE : View.GONE);
+    }
+
+    private void addEventSettingsControls(LinearLayout body) {
+        body.addView(text(R.string.events_notice, 16, TEXT_MUTED));
+        body.addView(text(R.string.events_preset_notice, 16, TEXT_MUTED));
+        eventsSummary = text(R.string.events_loading, 17, TEXT_PRIMARY);
+        eventsSummary.setContentDescription("idoly.events.status"); body.addView(eventsSummary);
+        body.addView(text(R.string.events_catalog, 16, TEXT_PRIMARY));
+        eventsPicker = new Spinner(this); eventsPicker.setContentDescription("idoly.events.catalog");
+        body.addView(eventsPicker, new LinearLayout.LayoutParams(-1, dp(52)));
+        eventsPicker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                JSONObject row = eventsCatalog.optJSONObject(position);
+                String selected = row == null ? "" : row.optString("id");
+                if (!selected.equals(eventsSelectedId)) { eventsSelectedId = selected; renderSelectedEvent(); }
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        eventsEnabled = new CheckBox(this); eventsEnabled.setText(R.string.events_enabled);
+        eventsEnabled.setTextSize(16); eventsEnabled.setTextColor(TEXT_PRIMARY);
+        eventsEnabled.setContentDescription("idoly.events.enabled"); body.addView(eventsEnabled);
+        eventsEnabled.setOnCheckedChangeListener((control, enabled) -> {
+            if (eventsLoading || eventsRequest || eventsSelectedId.isEmpty()) return;
+            try {
+                JSONObject previous = eventEntry(eventsDraft, eventsSelectedId);
+                long[] window = enabled ? previous == null ? EventWindow.preset(System.currentTimeMillis())
+                        : new long[]{previous.optLong("start_time_ms"), previous.optLong("end_time_ms")} : null;
+                saveEventEntry(eventsSelectedId, window);
+            } catch (IllegalArgumentException invalid) {
+                Toast.makeText(this, R.string.events_error_invalid, Toast.LENGTH_LONG).show(); renderSelectedEvent();
+            }
+        });
+        eventsStart = button(R.string.events_start_name); eventsStart.setContentDescription("idoly.events.start");
+        eventsEnd = button(R.string.events_end_name); eventsEnd.setContentDescription("idoly.events.end");
+        eventsStart.setOnClickListener(view -> editEventTime(true)); eventsEnd.setOnClickListener(view -> editEventTime(false));
+        body.addView(eventsStart); body.addView(eventsEnd);
+        body.addView(text(R.string.events_start_notice, 16, TEXT_MUTED));
+        eventsSelected = text(R.string.events_off, 16, TEXT_MUTED);
+        eventsSelected.setContentDescription("idoly.events.applied"); body.addView(eventsSelected);
+        eventsNotice = text(R.string.events_loading, 16, TEXT_MUTED); body.addView(eventsNotice);
+        eventsReload = button(R.string.events_refresh); eventsReload.setContentDescription("idoly.events.reload");
+        eventsReload.setOnClickListener(view -> refreshEventSettings(true)); body.addView(eventsReload);
+        eventsOff = button(R.string.events_disable_all); eventsOff.setContentDescription("idoly.events.disable-all");
+        eventsOff.setOnClickListener(view -> saveEventsDraft(accountPayload("schema", 1,
+                "revision", savedEventSettings().optLong("revision", 0), "love_events", new org.json.JSONArray())));
+        body.addView(eventsOff); renderEventSettings();
+    }
+
+    private JSONObject savedEventSettings() {
+        JSONObject value = eventsSnapshot.optJSONObject("saved");
+        return value == null ? accountPayload("schema", 1, "revision", 0, "love_events", new org.json.JSONArray()) : value;
+    }
+
+    private static JSONObject eventEntry(JSONObject settings, String identifier) {
+        org.json.JSONArray entries = settings == null ? null : settings.optJSONArray("love_events");
+        if (entries != null) for (int index = 0; index < entries.length(); index++) {
+            JSONObject entry = entries.optJSONObject(index);
+            if (entry != null && identifier.equals(entry.optString("event_id"))) return entry;
+        }
+        return null;
+    }
+
+    private static int eventCount(JSONObject settings) {
+        org.json.JSONArray entries = settings == null ? null : settings.optJSONArray("love_events");
+        return entries == null ? 0 : entries.length();
+    }
+
+    private JSONObject effectiveEventSettings() {
+        return presentationServerRunning ? eventsSnapshot.optJSONObject("effective") : null;
+    }
+
+    private String eventTime(long milliseconds) {
+        java.util.Date date = new java.util.Date(milliseconds);
+        return android.text.format.DateFormat.getMediumDateFormat(this).format(date) + " "
+                + android.text.format.DateFormat.getTimeFormat(this).format(date);
+    }
+
+    private String eventWindowText(JSONObject entry) {
+        return entry == null ? getString(R.string.events_off) : getString(R.string.events_window,
+                eventTime(entry.optLong("start_time_ms")), eventTime(entry.optLong("end_time_ms")));
+    }
+
+    private void renderSelectedEvent() {
+        if (eventsEnabled == null) return;
+        eventsLoading = true;
+        JSONObject draft = eventEntry(eventsDraft, eventsSelectedId);
+        eventsEnabled.setChecked(draft != null);
+        eventsStart.setText(getString(R.string.events_start, draft == null ? getString(R.string.events_off) : eventTime(draft.optLong("start_time_ms"))));
+        eventsEnd.setText(getString(R.string.events_end, draft == null ? getString(R.string.events_off) : eventTime(draft.optLong("end_time_ms"))));
+        JSONObject effective = effectiveEventSettings();
+        eventsSelected.setText(getString(R.string.events_selected_status, eventWindowText(eventEntry(savedEventSettings(), eventsSelectedId)),
+                effective == null ? getString(R.string.events_not_running) : eventWindowText(eventEntry(effective, eventsSelectedId))));
+        eventsLoading = false; updateEventSettingsControls();
+    }
+
+    private void renderEventSettings() {
+        if (eventsSummary == null) return;
+        String key = eventsSnapshot.toString() + "|" + String.valueOf(eventsDraft) + "|" + eventsError + "|" + eventsUnsaved
+                + "|" + eventsSelectedId + "|" + presentationServerRunning + "|" + eventsRequest + "|" + eventsSaving + "|" + eventsLoaded;
+        if (key.equals(eventsRenderedKey)) { updateEventSettingsControls(); return; }
+        eventsRenderedKey = key; eventsLoading = true;
+        JSONObject catalog = eventsSnapshot.optJSONObject("catalog");
+        org.json.JSONArray source = catalog == null ? null : catalog.optJSONArray("events");
+        eventsCatalog = new org.json.JSONArray(); java.util.ArrayList<String> labels = new java.util.ArrayList<>();
+        int selectedIndex = 0;
+        if (source != null && catalog.optBoolean("available", false)) for (int index = 0; index < source.length(); index++) {
+            JSONObject row = source.optJSONObject(index);
+            if (row == null || !row.optBoolean("supported", false) || row.optString("id").isEmpty()) continue;
+            if (row.optString("id").equals(eventsSelectedId)) selectedIndex = labels.size();
+            eventsCatalog.put(row); String title = row.optString("title"); labels.add(title.isEmpty() ? row.optString("id") : title);
+        }
+        if (labels.isEmpty()) { labels.add(getString(R.string.events_empty)); eventsSelectedId = ""; }
+        else eventsSelectedId = eventsCatalog.optJSONObject(selectedIndex).optString("id");
+        eventsPicker.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, labels)); eventsPicker.setSelection(selectedIndex);
+        JSONObject effective = effectiveEventSettings();
+        int state = effective == null ? R.string.events_saved_next : eventsSnapshot.optBoolean("restart_required", false)
+                ? R.string.events_restart : R.string.events_saved_active;
+        if (!eventsLoaded) eventsSummary.setText(eventsError.isEmpty() ? R.string.events_loading : R.string.events_error_storage);
+        else if (eventsRequest && eventsSaving) eventsSummary.setText(R.string.events_pending);
+        else if (eventsSnapshot.optBoolean("invalid_settings_file", false)) eventsSummary.setText(R.string.events_invalid_file);
+        else eventsSummary.setText(getString(R.string.events_summary, getString(state), eventCount(savedEventSettings()),
+                effective == null ? getString(R.string.events_not_running) : getString(R.string.events_count, eventCount(effective))));
+        StringBuilder notice = new StringBuilder();
+        if (eventsSnapshot.optBoolean("invalid_settings_file", false)) notice.append(getString(R.string.events_invalid_file));
+        else if (catalog == null || !catalog.optBoolean("available", false)) notice.append(getString(R.string.events_unavailable));
+        if (!eventsError.isEmpty()) notice.append("\n").append(getString(eventSettingsError(eventsError)));
+        if (eventsUnsaved) notice.append("\n").append(getString(R.string.events_unsaved));
+        eventsNotice.setText(notice.toString().trim()); eventsNotice.setTextColor(eventsError.isEmpty() ? TEXT_MUTED : WARNING);
+        eventsLoading = false; renderSelectedEvent();
+    }
+
+    private void updateEventSettingsControls() {
+        if (eventsPicker == null) return;
+        boolean pending = eventsRequest || ServerService.isManagingEventSettings();
+        boolean valid = eventsLoaded && !eventsSnapshot.optBoolean("invalid_settings_file", false);
+        boolean supported = eventsCatalog.length() > 0;
+        boolean editable = !pending && valid && supported && !eventsUnsaved;
+        eventsPicker.setEnabled(!pending && supported);
+        eventsEnabled.setEnabled(editable);
+        boolean enabled = eventEntry(eventsDraft, eventsSelectedId) != null;
+        eventsStart.setEnabled(editable && enabled); eventsEnd.setEnabled(editable && enabled);
+        eventsReload.setEnabled(!pending);
+        eventsOff.setEnabled(!pending && valid && (eventCount(savedEventSettings()) > 0 || eventCount(eventsDraft) > 0));
+    }
+
+    private void refreshEventSettings(boolean discardDraft) {
+        if (eventsRequest) return;
+        if (ServerService.isManagingEventSettings()) { eventsError = "event_settings_busy"; renderEventSettings(); return; }
+        if (discardDraft) { eventsDraft = null; eventsUnsaved = false; eventsError = ""; }
+        requestEventSettings("events_status", new JSONObject(), false);
+    }
+
+    private void saveEventEntry(String identifier, long[] window) {
+        if (eventsRequest || ServerService.isManagingEventSettings()) { renderSelectedEvent(); return; }
+        if (window != null && !EventWindow.valid(window[0], window[1])) throw new IllegalArgumentException("event_settings_invalid");
+        java.util.TreeMap<String, JSONObject> entries = new java.util.TreeMap<>();
+        org.json.JSONArray old = eventsDraft == null ? null : eventsDraft.optJSONArray("love_events");
+        if (old != null) for (int index = 0; index < old.length(); index++) {
+            JSONObject row = old.optJSONObject(index); if (row != null) entries.put(row.optString("event_id"), row);
+        }
+        entries.remove(identifier);
+        if (window != null) entries.put(identifier, accountPayload("event_id", identifier, "start_time_ms", window[0], "end_time_ms", window[1]));
+        org.json.JSONArray rows = new org.json.JSONArray(); for (JSONObject entry : entries.values()) rows.put(entry);
+        saveEventsDraft(accountPayload("schema", 1, "revision", savedEventSettings().optLong("revision", 0), "love_events", rows));
+    }
+
+    private void saveEventsDraft(JSONObject draft) {
+        if (eventsRequest || ServerService.isManagingEventSettings() || eventsSnapshot.optBoolean("invalid_settings_file", false)) return;
+        eventsDraft = draft; eventsUnsaved = true; eventsError = "";
+        requestEventSettings("events_save", accountPayload("settings", draft,
+                "expected_revision", savedEventSettings().optLong("revision", 0)), true);
+    }
+
+    private void requestEventSettings(String action, JSONObject payload, boolean saving) {
+        eventsRequest = true; eventsSaving = saving; eventsRenderedKey = null;
+        renderEventSettings();
+        ServerService.manageEventSettings(getApplicationContext(), action, payload, result -> {
+            eventsRequest = false; eventsSaving = false;
+            if (isFinishing() || isDestroyed()) return;
+            if (!result.optBoolean("ok", false)) {
+                eventsError = result.optString("error", "event_settings_io");
+                renderEventSettings();
+                // A CAS failure retains the local draft and only rereads settings.
+                if (saving) refreshEventSettings(false);
+                return;
+            }
+            JSONObject observed = result.optJSONObject("event_settings");
+            if (observed == null) { eventsError = "event_settings_io"; renderEventSettings(); return; }
+            eventsSnapshot = observed; eventsLoaded = true;
+            if (saving || !eventsUnsaved) {
+                try { eventsDraft = new JSONObject(savedEventSettings().toString()); eventsUnsaved = false; eventsError = ""; }
+                catch (org.json.JSONException invalid) { eventsDraft = null; eventsError = "event_settings_invalid"; }
+            }
+            renderEventSettings();
+        });
+    }
+
+    private int eventSettingsError(String code) {
+        if ("event_settings_revision_conflict".equals(code)) return R.string.events_error_conflict;
+        if ("event_settings_busy".equals(code)) return R.string.events_error_busy;
+        if ("event_settings_catalog_unavailable".equals(code) || "event_settings_unsupported".equals(code)) return R.string.events_unavailable;
+        if ("event_settings_invalid".equals(code)) return R.string.events_error_invalid;
+        return R.string.events_error_storage;
+    }
+
+    private void editEventTime(boolean startTime) {
+        JSONObject entry = eventEntry(eventsDraft, eventsSelectedId); if (entry == null || eventsRequest) return;
+        String identifier = eventsSelectedId;
+        long start = entry.optLong("start_time_ms"), end = entry.optLong("end_time_ms");
+        java.util.Calendar date = java.util.Calendar.getInstance(); date.setTimeInMillis(startTime ? start : end);
+        android.app.DatePickerDialog picker = new android.app.DatePickerDialog(this, (view, year, month, day) -> {
+            if (!presentationObserved) return;
+            date.set(java.util.Calendar.YEAR, year); date.set(java.util.Calendar.MONTH, month); date.set(java.util.Calendar.DAY_OF_MONTH, day);
+            android.app.TimePickerDialog time = new android.app.TimePickerDialog(this, (clock, hour, minute) -> {
+                date.set(java.util.Calendar.HOUR_OF_DAY, hour); date.set(java.util.Calendar.MINUTE, minute);
+                date.set(java.util.Calendar.SECOND, 0); date.set(java.util.Calendar.MILLISECOND, 0);
+                try {
+                    long[] window = startTime ? EventWindow.shiftStart(date.getTimeInMillis(), start, end)
+                            : new long[]{start, date.getTimeInMillis()};
+                    saveEventEntry(identifier, window);
+                } catch (IllegalArgumentException invalid) { Toast.makeText(this, R.string.events_error_invalid, Toast.LENGTH_LONG).show(); }
+            }, date.get(java.util.Calendar.HOUR_OF_DAY), date.get(java.util.Calendar.MINUTE), android.text.format.DateFormat.is24HourFormat(this));
+            time.setTitle(startTime ? R.string.events_start_name : R.string.events_end_name);
+            time.setOnDismissListener(dialog -> { if (eventsDialog == time) eventsDialog = null; });
+            eventsDialog = time; time.show();
+        }, date.get(java.util.Calendar.YEAR), date.get(java.util.Calendar.MONTH), date.get(java.util.Calendar.DAY_OF_MONTH));
+        picker.setTitle(startTime ? R.string.events_start_name : R.string.events_end_name);
+        picker.setOnDismissListener(dialog -> { if (eventsDialog == picker) eventsDialog = null; });
+        eventsDialog = picker; picker.show();
     }
 
     private void addServerChecksControls(LinearLayout body) {
@@ -1454,6 +1700,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
             state.putString("official_local_revision", officialAppliedAccount.optString("revision"));
             state.putInt("official_local_warnings", officialWarnings & 3);
         }
+        state.putString("events_selected_id", eventsSelectedId);
+        if (eventsUnsaved && eventsDraft != null) {
+            state.putString("events_unsaved_draft", eventsDraft.toString()); state.putString("events_error", eventsError);
+        }
         super.onSaveInstanceState(state);
     }
 
@@ -1865,6 +2115,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         playbackStatus.removeCallbacks(playbackRefresh);
         playbackStatus.post(playbackRefresh);
         officialStatus.removeCallbacks(officialRefresh); officialStatus.post(officialRefresh);
+        refreshEventSettings(false);
         if (!ServerService.isManagingAccounts()) refreshAccounts();
     }
 
@@ -1874,6 +2125,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (officialCredentials != null) officialCredentials.dismiss();
         if (officialWizardDialog != null) officialWizardDialog.dismiss();
         clearDeferredOfficial();
+        if (eventsDialog != null) eventsDialog.dismiss();
         presentationRuntime = null;
         playbackRuntime = null;
         playbackRuntimeRunning = false;
@@ -1892,6 +2144,17 @@ public final class MainActivity extends Activity implements ServerService.Observ
         status.setText(value);
         status.setTextColor(running ? SUCCESS : TEXT_PRIMARY);
         accountLifecycleBusy = busy;
+        if (eventsSummary != null) {
+            if (!eventsRequest && eventsDialog == null) try {
+                JSONObject observed = new JSONObject(detailsJson).optJSONObject("event_settings");
+                if (observed != null && !observed.toString().equals(eventsSnapshot.toString())) {
+                    eventsSnapshot = observed; eventsLoaded = true;
+                    if (!eventsUnsaved) { eventsDraft = new JSONObject(savedEventSettings().toString()); eventsError = ""; }
+                }
+            } catch (org.json.JSONException ignored) { }
+            if (!eventsRequest && "event_settings_busy".equals(eventsError) && !ServerService.isManagingEventSettings()) refreshEventSettings(false);
+            renderEventSettings();
+        }
         updateOfficialControls();
         start.setEnabled(!running && !busy && !ServerService.isManagingAccounts());
         updateAccountControls();

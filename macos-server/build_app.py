@@ -21,6 +21,9 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "tools"))
+
+from release_account_contract import validate as validate_account_roundtrip
 
 from payload import member_path, translation_bundle_input
 from certificate_bundle import install_certificate_bundle
@@ -275,6 +278,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             engine_report = json.loads((evidence / "engine-smoke.json").read_text())
             if engine_report.get("frozen_runtime") is not True:
                 raise ValueError("The bundled engine did not use its frozen Python runtime")
+            validate_account_roundtrip(engine_report)
             if engine_report.get("home_fish_heaven_absent") is not True:
                 raise ValueError("The bundled engine did not verify the inactive home fish-heaven event is absent")
             if not all(engine_report.get(key) is True for key in

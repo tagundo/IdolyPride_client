@@ -22,8 +22,12 @@ def passed_qa():
              "main_live":{"platform":"Android native","quest_id":"qt-main-1-001-01","ruleset":"live-v5","chart_count":183,"beat_count":855},
             "account_management":{"scope":"Android emulator native UI and real document provider",
                 "archive_filename_observed":"IdolyPride-Account-"+"a"*32+".zip",
-                "owned_tables":["profiles","snapshots","profile_settings","starter_profiles","profile_lesson_progress","preference_receipts","main_live_attempts"],
-                "imported_sessions":0,"physical_device_tested":False}}
+                "owned_tables":["profiles","snapshots","profile_settings","starter_profiles","profile_lesson_progress","preference_receipts","main_live_attempts","profile_love_progress"],
+                "imported_sessions":0,"physical_device_tested":False},
+            "native_event_settings":{"scope":"Android emulator native event settings and encrypted Home RPC",
+                "event_id":"love-23-0514","settings_revision":1,"start_time_ms":1000,"end_time_ms":1000+30*24*60*60*1000,
+                "ruleset_sha256":"a"*64,"saved_file_verified":True,"effective_match":True,"home_event_verified":True,
+                "progress_preserved":True,"selection_restored":True,"physical_device_tested":False,"gameplay_tested":False}}
 
 
 def test_complete_native_x86_qa_receipt_is_accepted():
@@ -201,3 +205,12 @@ def test_public_reference_prefix_does_not_allow_path_escape(monkeypatch,tmp_path
     with pytest.raises(builds.BuildError,match="QA_reference_path_invalid"):
         builds.extract_qa_references(payload,tmp_path/"references",Guard())
     assert not (tmp_path/"escape.pb").exists()
+
+
+@pytest.mark.parametrize("field,value", [("event_id", "unsupported-event"), ("effective_match", 1),
+    ("progress_preserved", False), ("settings_revision", True), ("gameplay_tested", True)])
+def test_native_event_scope_cannot_be_replaced_by_a_summary_flag(field, value):
+    report = passed_qa()
+    report["native_event_settings"][field] = value
+    with pytest.raises(builds.BuildError, match="native_event_settings"):
+        builds.validate_android_qa(report)

@@ -1056,10 +1056,11 @@ static void ProbeAccountSeed(WKWebView *web,NSMutableDictionary *state,NSString 
         && [ack[@"profile"] isEqual:request[@"profile"]];
     NSDictionary *rows=[ack[@"table_rows"] isKindOfClass:NSDictionary.class]?ack[@"table_rows"]:@{};
     for (NSString *table in @[@"profiles",@"snapshots",@"profile_settings",@"starter_profiles",
-            @"profile_lesson_progress",@"preference_receipts",@"main_live_attempts"])
+            @"profile_lesson_progress",@"preference_receipts",@"main_live_attempts",@"profile_love_progress"])
         valid=valid && [rows[table] isKindOfClass:NSNumber.class]
             && CFGetTypeID((__bridge CFTypeRef)rows[table])!=CFBooleanGetTypeID()
             && [rows[table] unsignedIntegerValue]>0 && [rows[table] unsignedIntegerValue]<=20000;
+    valid=valid && rows.count==8;
     if (!valid) { finish(); return; }
     state[[@"seed_done_" stringByAppendingString:phase]]=@YES;
     NSMutableDictionary *safe=[ack mutableCopy];
@@ -1467,6 +1468,9 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) UILabel *label;
 @property(nonatomic, strong) NSTimer *waitingTimer;
 @property(nonatomic) NSUInteger originalCount;
+@property(nonatomic) NSUInteger mainHeartbeatCount;
+@property(nonatomic) NSUInteger checkpointCount;
+@property(nonatomic) NSTimeInterval probeStartedUptime;
 @property(nonatomic) BOOL reportScheduled;
 @property(nonatomic, strong) NSMutableDictionary *launcherProbe;
 @property(nonatomic, copy) NSString *probeError;
@@ -1526,7 +1530,11 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 - (void)recordCheckpoint:(NSString *)stage {
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
+    ++self.checkpointCount;
     ProbeWrite(@"embedded-probe-checkpoint.json", @{@"schema":@1, @"stage":stage,
+        @"process_id":@(getpid()), @"main_thread_checkpoint":@((BOOL)NSThread.isMainThread),
+        @"main_heartbeat_count":@(self.mainHeartbeatCount), @"checkpoint_count":@(self.checkpointCount),
+        @"main_elapsed_seconds":@(MAX(0,NSProcessInfo.processInfo.systemUptime-self.probeStartedUptime)),
         @"original_called":@(self.originalCount), @"phase":ProbeScalar(status, @"phase"),
         @"application_state":@(UIApplication.sharedApplication.applicationState),
         @"launch_requested":ProbeScalar(status, @"launch_requested"),
@@ -1611,6 +1619,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 }
 - (void)startWithApplication:(UIApplication *)application hostDelegate:(id)hostDelegate {
     (void)application;
+    self.probeStartedUptime=NSProcessInfo.processInfo.systemUptime;
     self.octoBudgetProbe=[NSMutableDictionary dictionaryWithDictionary:@{@"apis_registered":@YES}];
     self.window=[(id<UIApplicationDelegate>)hostDelegate window];
     probePlaceholderWindow=self.window; probeHostDelegate=hostDelegate;
@@ -1622,6 +1631,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     [self recordCheckpoint:@"window_ready"];
     self.waitingTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         (void)timer;
+        ++self.mainHeartbeatCount;
         NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
         [self recordCheckpoint:[status[@"phase"] isEqual:@2] ? @"server_ready" : @"server_starting"];
         [self probeLauncher:status];

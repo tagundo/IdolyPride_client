@@ -181,3 +181,25 @@ def test_provider_evidence_queries_only_observed_synthetic_export(tmp_path):
     assert filename in query[query.index("--where")+1] and "_display_name=" in query[-1]
     assert options == {"check": False}
     assert len(saved["window_focus"]) == 1
+
+
+def test_raw_love_json_canary_preserves_whitespace_and_all_other_tables(tmp_path):
+    from types import SimpleNamespace
+    with sqlite3.connect(tmp_path / "state.db") as db:
+        db.execute("CREATE TABLE profiles(name TEXT,server_id TEXT)")
+        db.execute("INSERT INTO profiles VALUES('sandbox','synthetic-server')")
+        db.execute("CREATE TABLE snapshots(profile TEXT,response BLOB,schema_sha256 TEXT)")
+        db.execute("INSERT INTO snapshots VALUES(?,?,?)", ("sandbox", b"unchanged unknown protobuf", "b" * 64))
+        for table in (*qa.TABLES[2:-1], "sessions"):
+            db.execute("CREATE TABLE " + table + "(profile TEXT,value BLOB)")
+            db.execute("INSERT INTO " + table + " VALUES(?,?)", ("sandbox", b"raw canary " + table.encode()))
+        db.execute("CREATE TABLE profile_love_progress(profile TEXT,love_id TEXT,response BLOB,schema_sha256 TEXT,ruleset_sha256 TEXT)")
+        before = {table: db.execute("SELECT * FROM " + table).fetchall() for table in (*qa.TABLES[:-1], "sessions")}
+        raw = qa.seed_love_canary(db, SimpleNamespace(fingerprint="b" * 64))
+        assert raw.startswith(b" \n{") and raw.endswith(b"\n ")
+        row = db.execute("SELECT * FROM profile_love_progress").fetchone()
+        assert row == ("sandbox", "love-23-0514", raw, "b" * 64, "a" * 64)
+        assert b'"player_name": "QA raw JSON canary"' in raw
+        assert {table: db.execute("SELECT * FROM " + table).fetchall() for table in before} == before
+        with pytest.raises(RuntimeError, match="fresh stopped synthetic sandbox"):
+            qa.seed_love_canary(db, SimpleNamespace(fingerprint="b" * 64))

@@ -747,7 +747,7 @@ static __weak IDSettingsController *launcherController;
     // gating; escaped text can exceed the ordinary host-envelope byte budget.
     if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
     if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
-    NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media",
+    NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media", @"events_status", @"events_save",
         @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export",
         @"official_inspect",@"official_fetch",@"official_apply",@"official_cancel",@"official_status",
         @"diagnostics_clear",@"accounts_status",@"accounts_create",@"accounts_clone",@"accounts_select",

@@ -28,6 +28,13 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.13.5'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install locked Python dependencies
         run: uv sync --locked --all-extras --python 3.12
       - name: Prepare actual pinned 6.1.1 protocol
@@ -54,6 +61,20 @@ jobs:
             tests/test_profiles.py
             tests/test_official_import.py
             tests/test_official_import_original_protocol.py
+            tests/test_love_catalog.py
+            tests/test_build_server_payload.py
+            tests/test_event_master_data.py
+            tests/test_android_event_settings.py
+            tests/test_ios_unified_event_settings.py
+            tests/test_ios_unified_accounts.py
+            tests/test_ios_unified_probe_smoke.py
+            tests/test_ios_unified_ui_test_driver.py
+            tests/test_release_event_contract.py
+            tests/test_release_platform_builds.py
+            macos-server/tests/test_macos_event_settings.py
+            macos-server/tests/test_macos_account_schema.py
+            android-server/ci/test_account_management_qa.py
+            android-server/ci/test_event_settings_qa.py
           )
           for test_path in "${tests[@]}"; do
             if [ ! -f "$test_path" ]; then

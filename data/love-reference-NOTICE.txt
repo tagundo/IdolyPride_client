@@ -1,0 +1,5 @@
+Love compatibility reference notice
+
+Reference settings and inferred route definitions derive from vertesan/solis-server, commit 9b67c06939403d7035e1795745f791340a775868. Original public source and license: https://github.com/vertesan/solis-server/tree/9b67c06939403d7035e1795745f791340a775868/internal/makino/moshikoi and its LICENSE (GNU Affero General Public License, version 3). Source hashes, exact paths and original inference notices are retained in love-reference.json. Corresponding modified implementation/source: https://github.com/tagundo/IdolyPride_client . The complete AGPL text accompanies this notice in the payload.
+
+Original game text, images, voices and other assets remain owned by their respective right holders; the reference license does not relicense original game assets. ADV proof includes only hashes/counts, not dialogue/media. Numeric route weights and associations explicitly marked inferred are compatibility policy, not verified official awards. No official authentication or account data is included.

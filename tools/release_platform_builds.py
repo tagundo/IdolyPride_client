@@ -23,7 +23,7 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
 VERSION, BUILD_NUMBER = "0.3.36",53
-COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py"])
+COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py","tools/release_event_contract.py"])
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"
@@ -50,7 +50,7 @@ QA_FLAGS = ("final_stop","system_check","local_auth","home_rpcs","restart_sessio
  "gameplay_change_preserved","port_rebound","upgrade_identity_preserved","upgrade_sessions_preserved",
  "upgrade_settings_preserved","starter_inventory_persisted","main_live_first_quest","main_live_mode_default_off",
  "main_live_opt_in","main_live_persisted","main_live_attempts_persisted","main_live_clock_preserved",
- "main_live_identity_preserved","main_live_sessions_preserved","main_live_settings_preserved","main_live_cached_no_grant",'account_native_create','account_native_clone','account_queued_selection_persisted','account_selected_encrypted_rpc','account_document_export_import','account_zip_whole_state_preserved','account_original_whole_state_preserved','account_import_sessions_excluded','account_selection_restored')
+ "main_live_identity_preserved","main_live_sessions_preserved","main_live_settings_preserved","main_live_cached_no_grant",'account_native_create','account_native_clone','account_queued_selection_persisted','account_selected_encrypted_rpc','account_document_export_import','account_zip_whole_state_preserved','account_original_whole_state_preserved','account_import_sessions_excluded','account_selection_restored','native_event_settings_autosave','native_event_settings_restart_preserved')
 
 class BuildError(ValueError):
     """Fixed credential-free failure codes only."""
@@ -119,7 +119,7 @@ def capture(arguments,*,cwd=ROOT):
 
 def source_binding(source):
     need(re.fullmatch(r"[0-9a-f]{40}",source) and capture(["git","rev-parse","HEAD"]).strip()==source,"frozen_source_required")
-    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py","tools/release_account_contract.py")
+    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py","tools/release_account_contract.py","tools/release_event_contract.py")
     need(not capture(["git","status","--porcelain","--untracked-files=no","--",*paths]).strip(),"source_worktree_changed")
     names=capture(["git","ls-files","--",*paths]).splitlines()
     suffixes={".py",".java",".kt",".kts",".h",".c",".cpp",".go",".mod",".sum",".swift",".json",".xml",".properties",".txt",".pem",".keystore"}
@@ -285,6 +285,10 @@ def validate_android_qa(report):
         module("release_android_account_contract",ROOT/"tools/release_account_contract.py").validate_android(report)
     except ValueError:
         raise BuildError("Android_account_management_QA_differs") from None
+    try:
+        module("release_android_event_contract",ROOT/"tools/release_event_contract.py").validate_android(report)
+    except ValueError:
+        raise BuildError("Android_native_event_settings_QA_differs") from None
     return report
 
 def finish_android(inputs,work,output,source,pins,guard):
@@ -318,7 +322,8 @@ def finish_android(inputs,work,output,source,pins,guard):
     report=base_report("android",source,pins,built["inputs"])
     report.update(binary=built["binary"],qa_binary=built["qa_binary"],application_id=ANDROID_PACKAGE,
                   certificate_sha256=ANDROID_CERT,live_engine=built["live_engine"],
-                  qa_report=artifact(output/"android-qa.json"),account_management=result["account_management"])
+                  qa_report=artifact(output/"android-qa.json"),account_management=result["account_management"],
+                  native_event_settings=result["native_event_settings"])
     report["validation"].update(apk_signature_verified=True,apk_alignment_verified=True,package_version_verified=True,
         development_certificate_verified=True,x86_emulator_runtime_passed=True,account_management_roundtrip=True)
     write_json(output/"platform-report.json",report)

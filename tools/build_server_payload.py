@@ -14,9 +14,13 @@ from zipfile import ZipFile, ZIP_DEFLATED
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from idoly_local.schema import Schema
 from idoly_local.catalog import FixtureStore
+from idoly_local.love_catalog import LOVE_TABLES, build_love_catalog, validate_love_master
 
 
 TABLES = ("Character", "CharacterActivityLevel", "Costume", "Hair", "Card", "Area", "AreaGroup", "Quest", "Setting", "Tutorial", "CardParameter", "CardRarity", "Accessory", "HierarchyDetailGrade", "HierarchyGrade", "Reward", "Item", "CardLevelRelease", "Skill", "Music", "MusicChartPattern", "Emblem", "SkillEfficacy", "SkillTrigger", "SkillTarget", "Stage", "ManagerLevel", "CardLevel", "Consumption", "Message", "MessageGroup", "EventStory", "ExtraStoryPart", "ExtraStory", "Story", "QuestPressure", "QuestAudienceAdvantage", "ComboAdvantage", "QuestStaminaConsumption", "Mission", "StoryPart", "PhotoActivity", "PhotoQuestMusic", "PhotoQuestStage", "PhotoExpression", "CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel", "CompanyEnjoyCharacterLevelSetting")
+# Love is default-off at runtime; its audited read/progression inputs still ship.
+TABLES = TABLES + LOVE_TABLES + ("Condition", "EventMission")
+
 MISSION_MASTER_VERSION = "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60"
 MISSION_PACK_SHA256 = "9c9cbec8de1ef1d7c9fb89b6b4319bf75ea5875fc9d7b13de877bcb43eaa1647"
 MISSION_ROW_COUNT = 7087
@@ -63,7 +67,7 @@ def payload_tables(event_read_masters=False):
     """Include public event read prerequisites only with explicit export."""
     if type(event_read_masters) is not bool:
         raise TypeError("Event read master export must be an explicit boolean")
-    return TABLES + EVENT_READ_TABLES if event_read_masters else TABLES
+    return tuple(dict.fromkeys(TABLES + EVENT_READ_TABLES)) if event_read_masters else TABLES
 
 
 def validate_event_master(table, version, pack_sha256, values):
@@ -196,6 +200,8 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
         for table in selected_tables:
             pack = packs[table]
             values = decode_master_table(schema, sqlcipher, root, pack, table)
+            if table in LOVE_TABLES:
+                validate_love_master(table, response.masterTag.version, digest(root / pack.fileName), values)
             if table == "Mission":
                 validate_mission_master(response.masterTag.version, digest(root / pack.fileName), values)
             if table in EVENT_READ_TABLES:
@@ -207,6 +213,24 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
         version = catalog / "!version.txt"
         version.write_text(response.masterTag.version, encoding="ascii")
         files.append((version, "data/master-json/!version.txt"))
+        love = build_love_catalog(schema, catalog,
+            pack_proofs={table: digest(root / packs[table].fileName) for table in LOVE_TABLES})
+        love_path = catalog / "LoveCatalog.json"
+        love_path.write_text(json.dumps(love, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        files.append((love_path, "data/master-json/LoveCatalog.json"))
+        source_root = Path(__file__).resolve().parents[1]
+        for source_name, target_name in (("data/love-reference.json", "data/love-reference.json"),
+            ("data/love-adv-proof.json", "data/love-adv-proof.json"),
+            ("data/love-reference-NOTICE.txt", "data/licenses/love-reference-NOTICE.txt"),
+            ("LICENSE", "data/licenses/love-reference-AGPL-3.0.txt")):
+            source = source_root / source_name
+            if not source.is_file() or source.is_symlink():
+                raise ValueError("Required Love source/provenance/license file is unavailable")
+            files.append((source, target_name))
+        love_report = {"events": len(love["events"]), "episodes": 72, "unique_adv_assets": 69,
+            "observed_adv_assets": 68, "missing_adv_assets": ["love_2411_04_02"],
+            "ruleset_sha256": love["ruleset_sha256"], "inference_status": "reference_routes_inferred",
+            "reference_sha256": love["reference_sha256"], "adv_proof_sha256": love["adv_proof_sha256"]}
         from idoly_local.tutorial_replay import validate_replays
         replay_root = data_dir / "public-tutorial"
         replay_report = validate_replays(schema, catalog, replay_root)
@@ -231,7 +255,7 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
             files.append((overlay_root / "assets/master" / name, "data/original-master/assets/master/" + name))
         summary = {"schema": 1, "master_version": response.masterTag.version,
                    "schema_sha256": schema.fingerprint, "tables": counts, "tutorial_replays": replay_report,
-                   "story_catalog": story_report,
+                   "story_catalog": story_report, "love_catalog": love_report,
                    "files": [{"path": name, "bytes": path.stat().st_size, "sha256": digest(path)} for path, name in files]}
         if octo_summary is not None:
             summary["octo_resources"] = octo_summary
@@ -249,7 +273,7 @@ def build_payload(data_dir: Path, output: Path, *, octo_data: Path | None = None
                 raise ValueError("Server payload CRC validation failed")
         payload.rename(output)
     return {"file": str(output), "bytes": output.stat().st_size, "sha256": digest(output), "tables": counts,
-            "media_master_overlay": overlay_report}
+            "media_master_overlay": overlay_report, "love_catalog": love_report}
 
 
 def main():

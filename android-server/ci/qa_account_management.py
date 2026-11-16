@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import shlex
 import sqlite3
+import subprocess
 import tempfile
 import time
 from urllib.request import urlopen
@@ -19,7 +20,7 @@ ACTIVITY = PACKAGE + "/.MainActivity"
 CREATE, CLONE, IMPORTED = "zz-qa-created", "zz-qa-clone", "zz-qa-imported"
 DOCUMENT_UI_PACKAGES = frozenset(("com.android.documentsui", "com.google.android.documentsui"))
 TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
-          "profile_lesson_progress", "preference_receipts", "main_live_attempts")
+          "profile_lesson_progress", "preference_receipts", "main_live_attempts", "profile_love_progress")
 
 
 def bounds(node):
@@ -100,6 +101,54 @@ def projection(qa, copy_database, profile, *, sessions=False):
             if not result["profiles"] or not result["snapshots"]:
                 raise RuntimeError("Account QA expected a complete stored profile")
             return result
+
+
+def seed_love_canary(db, schema):
+    """Add one valid raw-JSON portability canary to the fresh synthetic slot.
+
+    Its rules pin is synthetic: this proves backup bytes, never Love gameplay.
+    Caller must bind and stop the disposable emulator before any installation.
+    """
+    from idoly_local.love import validate_progress
+    if (db.execute("SELECT name FROM profiles ORDER BY name").fetchall() != [("sandbox",)]
+            or db.execute("SELECT profile,schema_sha256 FROM snapshots").fetchall() != [("sandbox", schema.fingerprint)]
+            or db.execute("SELECT COUNT(*) FROM profile_love_progress").fetchone() != (0,)):
+        raise RuntimeError("Love portability fixture requires the fresh stopped synthetic sandbox")
+    value = {"schema": 1, "love_id": "love-23-0514", "player_name": "QA raw JSON canary",
+             "registered_ms": 1, "exp": 0, "lesson_anchor_ms": 1, "last_play_ms": 1,
+             "path": ["love-event-story-love-23-0514-001"], "choices": {}, "past_choices": {},
+             "current": None, "saves": [], "promotion_day": "2026-11-16", "promotion_used": 0}
+    raw = (" \n" + json.dumps(value, ensure_ascii=False, indent=2) + "\n ").encode("utf-8")
+    validate_progress(raw, value["love_id"])
+    preserved = {table: db.execute("SELECT * FROM " + table + " ORDER BY rowid").fetchall()
+                 for table in (*TABLES[:-1], "sessions")}
+    db.execute("INSERT INTO profile_love_progress(profile,love_id,response,schema_sha256,ruleset_sha256) VALUES(?,?,?,?,?)",
+               ("sandbox", value["love_id"], raw, schema.fingerprint, "a" * 64))
+    db.commit()
+    if any(db.execute("SELECT * FROM " + table + " ORDER BY rowid").fetchall() != rows
+           for table, rows in preserved.items()):
+        raise RuntimeError("Love portability fixture changed unrelated synthetic state")
+    return raw
+
+
+def stage_love_canary(qa, schema, copy_database, guard_stopped, checkpoint):
+    with tempfile.TemporaryDirectory(prefix="idoly-love-portability-") as temporary:
+        path = copy_database(qa, temporary)
+        with sqlite3.connect(path) as db:
+            checkpoint(db)
+            canary = seed_love_canary(db, schema)
+            checkpoint(db)
+        replacement = path.read_bytes()
+        guard_stopped(qa)
+        database = "files/data/state.db"
+        qa.adb("shell", "run-as", PACKAGE, "rm", "-f", database + "-wal", database + "-shm")
+        written = subprocess.run([*qa.command, "shell", "run-as", PACKAGE, "dd", "of=" + database],
+                                 input=replacement, capture_output=True, timeout=90)
+        if written.returncode:
+            raise RuntimeError("Could not install the synthetic Love portability canary")
+        if qa.adb("exec-out", "run-as", PACKAGE, "cat", database, binary=True) != replacement:
+            raise RuntimeError("Synthetic Love portability canary write verification failed")
+        return canary
 
 
 def document_name(qa):
@@ -244,8 +293,11 @@ def open_document(qa, filename):
 
 
 def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeout, *,
-                                wait_server, bootstrap, rpc, copy_database):
+                                wait_server, bootstrap, rpc, copy_database, guard_stopped, checkpoint):
+    canary = stage_love_canary(qa, schema, copy_database, guard_stopped, checkpoint)
     original = projection(qa, copy_database, "sandbox", sessions=True)
+    if original["profile_love_progress"][0][2] != canary:
+        raise RuntimeError("Original Love portability canary was not retained exactly")
     qa.adb("shell", "am", "start", "-n", ACTIVITY)
     tap(qa, "idoly.accounts.create", "60-account-create", "down")
     input_profile(qa, CREATE, "61-account-create-name")
@@ -264,6 +316,8 @@ def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeo
     if cloned != {key: value for key, value in original.items() if key != "sessions"}:
         raise RuntimeError("Native clone changed account identity, clock, receipts or protobuf bytes")
     created = projection(qa, copy_database, CREATE)
+    if created["profile_love_progress"]:
+        raise RuntimeError("A newly created native account inherited another slot Love progress")
     if created["profiles"][0][1:] == original["profiles"][0][1:]:
         raise RuntimeError("A new native account reused the original synthetic identity")
 

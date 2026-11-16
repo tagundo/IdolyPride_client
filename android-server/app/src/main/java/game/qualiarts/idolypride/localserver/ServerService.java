@@ -74,6 +74,11 @@ public final class ServerService extends Service {
         Thread thread = new Thread(task, "official-account-transfer"); thread.setDaemon(true); return thread;
     });
 
+    private static final AtomicBoolean EVENTS_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService EVENTS_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "event-settings"); thread.setDaemon(true); return thread;
+    });
+
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopQueued = new AtomicBoolean(false);
     private final AtomicBoolean startQueued = new AtomicBoolean(false);
@@ -241,6 +246,35 @@ public final class ServerService extends Service {
         } catch (RejectedExecutionException ignored) {
             request[0] = null; OFFICIAL_BUSY.set(false);
             MAIN.post(() -> callback.completed(accountFailure("official_operation_failed")));
+        }
+    }
+
+    static boolean isManagingEventSettings() { return EVENTS_BUSY.get(); }
+
+    /** Direct native settings: background JSON I/O, no HTTP admin or lifecycle action. */
+    static void manageEventSettings(Context context, String action, JSONObject payload, AccountCallback callback) {
+        Context application = context.getApplicationContext();
+        if (!EVENTS_BUSY.compareAndSet(false, true)) {
+            MAIN.post(() -> callback.completed(accountFailure("event_settings_busy"))); return;
+        }
+        final String request = payload == null ? "{}" : payload.toString();
+        try { EVENTS_IO.execute(() -> {
+            JSONObject result;
+            try {
+                PyObject module;
+                synchronized (PYTHON_LOCK) {
+                    if (!Python.isStarted()) Python.start(new AndroidPlatform(application));
+                    module = Python.getInstance().getModule("android_server_runtime");
+                }
+                String raw = module.callAttr("management_command_json", application.getFilesDir().getAbsolutePath(),
+                        action, request).toString();
+                if (raw.length() > 2 * 1024 * 1024) throw new IOException("Settings response unavailable");
+                result = new JSONObject(raw);
+            } catch (Exception ignored) { result = accountFailure("event_settings_io"); }
+            finally { EVENTS_BUSY.set(false); }
+            JSONObject completed = result; MAIN.post(() -> callback.completed(completed)); dispatch();
+        }); } catch (RejectedExecutionException ignored) {
+            EVENTS_BUSY.set(false); MAIN.post(() -> callback.completed(accountFailure("event_settings_busy"))); dispatch();
         }
     }
 

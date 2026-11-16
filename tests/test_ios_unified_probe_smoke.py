@@ -88,7 +88,7 @@ def modeled_account_observer_for_mock_simulator_transport(monkeypatch):
             return {"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
                 "gameplay_tested":False,"checks":{key:True for key in (
                     "source_all_tables_persisted","restored_all_tables_persisted","source_session_preserved",
-                    "target_session_invalidated","original_selection_preserved")},
+                    "target_session_invalidated","original_selection_preserved","love_progress_bytes_persisted")},
                 "normalized_source_sha256":"a"*64,"normalized_restored_sha256":"b"*64}
     monkeypatch.setattr(probe, "AccountFixtureHarness", ModeledFixture)
     monkeypatch.setattr(probe, "ProbePromptCancelDriver", ModeledUIDriver)
@@ -3349,7 +3349,7 @@ def complete_account_observer(observer, manager, state):
     return {"archive_sha256":exported["sha256"],"archive_bytes":exported["bytes"]},source_ack,target_ack
 
 
-def test_owned_simulator_fixture_uses_real_schema_seven_tables_unknown_blobs_and_full_archive(real_account_observer):
+def test_owned_simulator_fixture_uses_real_schema_eight_tables_unknown_blobs_and_full_archive(real_account_observer):
     observer,manager,state=real_account_observer
     assert observer.descriptor_sha256 == hashlib.sha256((observer.root/"protocol/idolypride-6.1.1.pb").read_bytes()).hexdigest()
     assert observer.schema.fingerprint != observer.descriptor_sha256
@@ -3363,6 +3363,10 @@ def test_owned_simulator_fixture_uses_real_schema_seven_tables_unknown_blobs_and
     assert probe.PUBLIC_PROBE_FIELD in state.snapshot(observer.source)[0]
     assert (probe.PUBLIC_PROBE_FIELD[:-1]+b"\x02") in state.snapshot(observer.target)[0]
     assert all(observer.verify_persisted()["checks"].values())
+    love=state.account_snapshot(observer.source)[0]["tables"]["profile_love_progress"][0]
+    assert love["response"].endswith(b"\n") and b'  "player_name": "ProbeA"' in love["response"]
+    assert state.account_snapshot(observer.target)[0]["tables"]["profile_love_progress"][0]["response"] != love["response"]
+    assert proof["checks"]["love_progress_bytes_exact"] is True
 
 
 @pytest.mark.parametrize("case",["descriptor_raw","account_schema"])
@@ -3706,3 +3710,53 @@ def test_generated_xctestrun_diagnostic_projects_only_known_scalar_fields():
     assert "DO-NOT-EXPORT" not in json.dumps(projected)
     assert projected["paths"]["test_host"]=={"type":"str","token_kind":"testroot","owned":True,"exists":True}
     assert projected["bundles"]["runner"]=={"bundle_matches":True,"platforms_type":"list","platforms_exact":True}
+
+
+def test_failure_checkpoint_heartbeat_distinguishes_main_activity_without_exporting_payload(tmp_path):
+    documents=tmp_path/"Documents";documents.mkdir()
+    (documents/"embedded-probe-checkpoint.json").write_text(json.dumps({"schema":1,"stage":"server_starting","phase":1,
+        "process_id":1234,"main_thread_checkpoint":True,"main_heartbeat_count":42,"checkpoint_count":45,
+        "main_elapsed_seconds":11.5,"raw_log":"DO-NOT-EXPORT"}))
+    observed=probe.failure_checkpoint(tmp_path)
+    assert observed["process_id"]==1234 and observed["main_thread_checkpoint"] is True
+    assert observed["main_heartbeat_count"]==42 and observed["checkpoint_count"]==45
+    assert observed["main_elapsed_seconds"]==11.5 and 0<=observed["checkpoint_age_seconds"]<=60
+    assert "DO-NOT-EXPORT" not in json.dumps(observed)
+
+
+def test_safe_ci_failure_summary_keeps_finite_phase_pid_and_markers_only():
+    report={"error":"ui_driver_deadline","native_checkpoint":{"stage":"server_starting","phase":1,
+        "process_id":4321,"main_heartbeat_count":80,"checkpoint_count":83,"main_thread_checkpoint":True,
+        "checkpoint_age_seconds":0.2,"status_age_seconds":0.3,"main_elapsed_seconds":20,"raw":"DO-NOT-EXPORT"},
+        "xctest_failure":{"schema":1,"scope":"owned-public-xctest-failure","phase":"testing","error_code":"ui_driver_deadline",
+            "ready_marker_observed":True,"test_spawned":True,"child_pid":1234,"child_exit_code":None,"phase_elapsed_seconds":300,
+            "markers":{"foreground_observed":True,"prompt_waiting":True,"cancel_tapped":False,"unknown":"DO-NOT-EXPORT"},"raw":"DO-NOT-EXPORT"}}
+    projected=probe.safe_failure_summary(report)
+    assert projected["native"]["checkpoint_age_seconds"]==0.2 and projected["native"]["main_heartbeat_count"]==80
+    assert projected["xctest"]["child_exit_code"] is None and projected["xctest"]["phase"]=="testing"
+    assert projected["xctest"]["markers"]=={"foreground_observed":True,"prompt_waiting":True,"cancel_tapped":False}
+    assert "DO-NOT-EXPORT" not in json.dumps(projected)
+    report["error"]="DO-NOT-EXPORT";report["native_checkpoint"]["stage"]="DO-NOT-EXPORT"
+    assert probe.safe_failure_summary(report)["error_code"]=="probe_failed"
+
+
+def test_native_probe_heartbeat_is_read_only_and_has_no_new_lifecycle_or_credential_dispatch():
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    recorder=source.split('- (void)recordCheckpoint:(NSString *)stage {',1)[1].split('- (BOOL)observeOctoBudgetBeforeOriginal',1)[0]
+    assert '@"process_id":@(getpid())' in recorder and '@"main_thread_checkpoint":@((BOOL)NSThread.isMainThread)' in recorder
+    assert '@"main_heartbeat_count":@(self.mainHeartbeatCount)' in recorder and '++self.checkpointCount' in recorder
+    assert '++self.mainHeartbeatCount' in source and 'credential' not in recorder
+
+
+@pytest.mark.parametrize("profile_kind",["source","target"])
+def test_account_fixture_rejects_lost_love_progress_even_when_seven_old_tables_survive(real_account_observer,profile_kind):
+    observer,manager,state=real_account_observer
+    native,source_ack,target_ack=complete_account_observer(observer,manager,state)
+    profile=getattr(observer,profile_kind)
+    with state.connect() as db:
+        db.execute("DELETE FROM profile_love_progress WHERE profile=?",(profile,))
+    assert all(state.account_snapshot(profile)[0]["tables"][table] for table in probe.ACCOUNT_TABLES if table!="profile_love_progress")
+    with pytest.raises(probe.ProbeError,match="settings_account_fixture_failed"):
+        observer.verify(native)
+    with pytest.raises(probe.ProbeError,match="settings_account_fixture_failed"):
+        observer.verify_persisted()

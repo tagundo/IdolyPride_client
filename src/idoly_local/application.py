@@ -150,6 +150,26 @@ class Application:
         event_field = result.DESCRIPTOR.fields_by_name.get("eventInfo")
         if event_field is not None and "loveEventInfos" in event_field.message_type.fields_by_name:
             result.eventInfo.ClearField("loveEventInfos")
+        # A private Home capture must not replay old progress over a local Love
+        # run. Only rows backed by our explicit sidecar become SQL-owned here;
+        # an imported original UserLove without that state remains untouched.
+        common_field = result.DESCRIPTOR.fields_by_name.get("commonResponse")
+        if common_field is not None and "updatedData" in common_field.message_type.fields_by_name:
+            update = result.commonResponse.updatedData
+            if "loves" in update.DESCRIPTOR.fields_by_name:
+                owned = [row for row in update.loves
+                         if self.state.love_progress(self.profile, row.loveId) is not None]
+                if owned:
+                    from .rpc import RpcFailure
+                    snapshot = self.state.snapshot(self.profile)
+                    if snapshot is None or snapshot[1] != self.schema.fingerprint:
+                        raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local Love account snapshot is not ready")
+                    current = self.schema.response_type("/api.User/Get").FromString(snapshot[0])
+                    by_id = {row.loveId: row for row in current.loves}
+                    for row in owned:
+                        if row.loveId not in by_id:
+                            raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local Love progress is inconsistent")
+                        row.CopyFrom(by_id[row.loveId])
         info = self.love.home_info()
         if info is not None:
             love, events = info

@@ -37,6 +37,8 @@ _ACCOUNT_ACTIONS = frozenset(("accounts_status", "accounts_create", "accounts_cl
 _ACCOUNT_ARCHIVE_LIMIT = 128 * 1024 * 1024
 
 
+_EVENT_ACTIONS = frozenset(("events_status", "events_save"))
+
 _OFFICIAL_ACTIONS = frozenset(("official_inspect", "official_fetch", "official_apply", "official_cancel", "official_status"))
 _OFFICIAL_STATES = frozenset(("idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled"))
 _OFFICIAL_STAGES = frozenset(("preparing", "checking", "verifying", "verified", "transferring", "firebase", "login",
@@ -44,6 +46,34 @@ _OFFICIAL_STAGES = frozenset(("preparing", "checking", "verifying", "verified", 
 _OFFICIAL_WARNINGS = frozenset(("account_temporary_cleanup_pending", "account_status_refresh_required"))
 _OFFICIAL_HOST_ERRORS = frozenset(("official_request_invalid", "official_operation_busy", "official_server_starting",
     "official_server_running", "official_operation_failed", "official_response_invalid"))
+
+
+def _event_payload(action, payload):
+    """Expand this Mac-only compact stdin wire; common JSON stays unchanged."""
+    if type(action) is not str or action not in _EVENT_ACTIONS or type(payload) is not dict:
+        raise ValueError("event_settings_command_invalid")
+    if action == "events_status":
+        if payload: raise ValueError("event_settings_command_invalid")
+        return {}
+    if set(payload) != {"settings", "expected_revision"}:
+        raise ValueError("event_settings_command_invalid")
+    settings, expected = payload["settings"], payload["expected_revision"]
+    if (type(settings) is not dict or set(settings) != {"schema", "revision", "love_events"}
+            or type(settings["schema"]) is not int or settings["schema"] != 1
+            or type(settings["revision"]) is not int or not 0 <= settings["revision"] <= 2**53-1
+            or type(expected) is not int or not 0 <= expected <= 2**53-1
+            or type(settings["love_events"]) is not list or len(settings["love_events"]) > 64):
+        raise ValueError("event_settings_command_invalid")
+    rows, seen = [], set()
+    for row in settings["love_events"]:
+        if (type(row) is not list or len(row) != 3 or type(row[0]) is not str
+                or re.fullmatch(r"[A-Za-z0-9_-]{1,96}", row[0]) is None or row[0] in seen
+                or type(row[1]) is not int or type(row[2]) is not int):
+            raise ValueError("event_settings_command_invalid")
+        seen.add(row[0])
+        rows.append({"event_id": row[0], "start_time_ms": row[1], "end_time_ms": row[2]})
+    return {"settings": {"schema": 1, "revision": settings["revision"], "love_events": rows},
+            "expected_revision": expected}
 
 
 def _official_job(value, *, private=False, errors=()):
@@ -190,6 +220,7 @@ class Controller:
         self.account_status = None
         self.official_manager = None
         self.official_worker = None
+        self.events_worker = None
         self.official_error_codes = _OFFICIAL_HOST_ERRORS
         self.translation_status = {"state": "absent"}
 
@@ -218,6 +249,12 @@ class Controller:
                 status.update(server_settings_status(self.data_dir))
             except (ImportError, OSError, ValueError):
                 pass
+        if "event_settings" not in status:
+            try:
+                from idoly_local.event_settings import event_settings_status
+                status["event_settings"] = event_settings_status(self.data_dir)
+            except (ImportError, OSError, ValueError):
+                pass
         self.emit("status", status=status)
         return status
 
@@ -237,6 +274,7 @@ class Controller:
             if (self.closed or self.runtime or (self.worker and self.worker.is_alive())
                     or (self.account_worker and self.account_worker.is_alive())
                     or (self.official_worker and self.official_worker.is_alive())
+                    or (self.events_worker and self.events_worker.is_alive())
                     or (self.official_manager and self.official_manager.status(public=True).get("busy") is True)):
                 return self.status()
             self.cancelled = False
@@ -430,6 +468,53 @@ class Controller:
                 self.status()
 
 
+    def events(self, action, command):
+        identifier = command.get("request_id")
+        payload = {key: value for key, value in command.items() if key not in ("action", "request_id")}
+        valid = type(action) is str and action in _EVENT_ACTIONS
+        try:
+            if not valid or type(identifier) is not int or not 1 <= identifier <= 2**31-1:
+                raise ValueError("event_settings_command_invalid")
+            if len(json.dumps(command, separators=(",", ":"), ensure_ascii=True).encode("utf-8")) + 1 > 512:
+                raise ValueError("event_settings_command_invalid")
+            payload = _event_payload(action, payload)
+        except (ValueError, TypeError, RecursionError):
+            self.emit("events_error", request_id=identifier if type(identifier) is int else None,
+                action=action if valid else None, code="event_settings_command_invalid")
+            return
+        with self.lock:
+            if self.closed: return
+            if self.events_worker and self.events_worker.is_alive():
+                self.emit("events_error", request_id=identifier, action=action, code="event_settings_busy")
+                return
+            self.events_worker = threading.Thread(target=self._events_operation,
+                args=(identifier, action, payload), name="local-event-settings-command", daemon=True)
+            self.events_worker.start()
+
+    def _events_operation(self, identifier, action, payload):
+        errors = frozenset()
+        try:
+            from idoly_local.event_settings import event_settings_command, ERROR_CODES
+            errors = ERROR_CODES
+            with self.lock: runtime = self.runtime
+            effective = None
+            if runtime is not None:
+                effective = runtime.status().get("event_settings", {}).get("effective")
+            result = event_settings_command(self.data_dir, action, payload, effective=effective)
+            with self.lock: closed = self.closed
+            if not closed:
+                self.emit("events_result", request_id=identifier, action=action, result=result)
+        except Exception as error:
+            code = getattr(error, "code", None)
+            if type(code) is not str or code not in errors: code = "event_settings_io"
+            with self.lock: closed = self.closed
+            if not closed: self.emit("events_error", request_id=identifier, action=action, code=code)
+        finally:
+            with self.lock:
+                self.events_worker = None
+                closed = self.closed
+            if not closed: self.status()
+
     def official(self, action, command):
         identifier = command.get("request_id")
         payload = {key: value for key, value in command.items() if key not in ("action", "request_id")}
@@ -584,6 +669,7 @@ class Controller:
             worker = self.worker
             account_worker = self.account_worker
             official_worker = self.official_worker
+            events_worker = self.events_worker
             official_manager = self.official_manager
         if official_manager is not None:
             official_manager.close()
@@ -594,6 +680,8 @@ class Controller:
             account_worker.join(timeout=20)
         if official_worker and official_worker is not threading.current_thread():
             official_worker.join(timeout=20)
+        if events_worker and events_worker is not threading.current_thread():
+            events_worker.join(timeout=20)
         self.stop()
 
 
@@ -1081,12 +1169,25 @@ def _account_roundtrip_reference(data_dir, schema, original_token):
     root = Path(data_dir)
     state = State(root / "state.db")
     media_state = State(root / "media-state.db")
+    # Explicit QA-only local progress proves the eighth table's JSON bytes,
+    # whitespace and context survive clone/export/import/replace/restore.
+    love_id, love_ruleset = "love-23-0514", "d" * 64
+    love_fixture = json.dumps({"schema": 1, "love_id": love_id, "player_name": "QA",
+        "registered_ms": 1, "exp": 0, "lesson_anchor_ms": 1, "last_play_ms": 1,
+        "path": ["love-event-story-love-23-0514-001"], "choices": {}, "past_choices": {},
+        "current": None, "saves": [], "promotion_day": "2026-11-16", "promotion_used": 0},
+        ensure_ascii=False, sort_keys=True, indent=1).encode("utf-8") + b"\n"
+    state.mutate_love_snapshot("sandbox", schema.fingerprint, love_id, love_ruleset,
+                              lambda original, previous: (original, love_fixture))
     original = state.account_snapshot("sandbox")
     if original is None:
         raise RuntimeError("Account smoke needs the seeded original profile")
     original_bundle, original_revision = original
     tables = ["profiles", "snapshots", "profile_settings", "starter_profiles",
-              "profile_lesson_progress", "preference_receipts", "main_live_attempts"]
+              "profile_lesson_progress", "preference_receipts", "main_live_attempts", "profile_love_progress"]
+    if (original_bundle["schema"] != 2 or len(original_bundle["tables"]["profile_love_progress"]) != 1
+            or original_bundle["tables"]["profile_love_progress"][0]["response"] != love_fixture):
+        raise RuntimeError("Account smoke must seed exact Love JSON bytes in the schema-2 eighth table")
     if set(original_bundle["tables"]) != set(tables):
         raise RuntimeError("Account smoke table inventory differs")
     def normalized(bundle):
@@ -1114,8 +1215,10 @@ def _account_roundtrip_reference(data_dir, schema, original_token):
     checks = {}
     invoke("accounts_create", {"mode": "normal", "profile": created_name, "manager_name": "MacQA"})
     invoke("accounts_create", {"mode": "media", "profile": media_name, "manager_name": "MediaQA"})
-    checks["normal_account_created"] = state.snapshot(created_name) is not None
-    checks["media_account_created"] = media_state.snapshot(media_name) is not None
+    checks["normal_account_created"] = (state.snapshot(created_name) is not None
+        and state.account_snapshot(created_name)[0]["tables"]["profile_love_progress"] == [])
+    checks["media_account_created"] = (media_state.snapshot(media_name) is not None
+        and media_state.account_snapshot(media_name)[0]["tables"]["profile_love_progress"] == [])
     checks["mode_isolation"] = state.snapshot(media_name) is None and media_state.snapshot(created_name) is None
     invoke("accounts_clone", {"mode": "normal", "source_profile": "sandbox", "profile": copy_name,
                              "expected_revision": original_revision})
@@ -1168,6 +1271,8 @@ def _account_roundtrip_reference(data_dir, schema, original_token):
         # A real unknown top-level protobuf field must survive backup and restore.
         return response.SerializeToString() + b"\xf8\x7f\x01"
     state.mutate_snapshot(restored_name, schema.fingerprint, canary)
+    state.mutate_love_snapshot(restored_name, schema.fingerprint, love_id, love_ruleset,
+        lambda user, previous: (user, love_fixture.replace(b'"QA"', b'"Mac restore QA"')))
     saved_canary, canary_revision = state.account_snapshot(restored_name)
     canary_snapshot = state.snapshot(restored_name)[0]
     stale_preview = invoke("accounts_preview", {"path": str(destination)})
@@ -1625,6 +1730,8 @@ def main(argv=None):
                 controller.resources(action, command)
             elif type(action) is str and action in _ACCOUNT_ACTIONS:
                 controller.accounts(action, command)
+            elif type(action) is str and action in _EVENT_ACTIONS:
+                controller.events(action, command)
             elif type(action) is str and action in _OFFICIAL_ACTIONS:
                 controller.official(action, command)
                 command.clear()

@@ -119,7 +119,7 @@ def test_real_application_love_flow_changes_userget_but_unrelated_stale_routes_s
     assert response.commonResponse.updatedData.loves[0].isReadingStory is False
     top=request(game,app,"/api.Love/Top",loveId=EV)
     assert list(top.storyEpisodeIds)==[E1,E2]
-    assert request(game,app,"/api.User/Get").loves[0].hiddenFavorability==5
+    assert request(game,app,"/api.User/Get").loves[0].hiddenFavorability==0
     assert request(game,app,unrelated).SerializeToString()==old.SerializeToString()
 
 
@@ -147,3 +147,65 @@ def test_captured_home_invalid_love_uses_transport_abort_and_never_leaks_excepti
     assert rejected.value.code==RpcCode.FAILED_PRECONDITION
     assert len(context.aborts)==1 and context.aborts[0][0]==RpcCode.FAILED_PRECONDITION
     assert "SYNTHETIC_PRIVATE_EXCEPTION_PAYLOAD" not in context.aborts[0][1]
+
+
+def test_captured_home_known_love_delta_uses_current_sql_and_keeps_unrelated_capture_bytes(game,tmp_path):
+    app,store=app_for(game,tmp_path)
+    register(game);invoke(game,"Present",loveId=EV)
+    def preserve(raw):
+        current=game.schema.response_type("/api.User/Get").FromString(raw)
+        current.loves[0].MergeFromString(b"\xa0\x06\x09")
+        return current.SerializeToString()
+    game.state.mutate_snapshot("player",game.schema.fingerprint,preserve)
+    current=user(game).loves[0].SerializeToString()
+    captured=game.schema.response_type("/api.Home/Enter").FromString(stale_home(game))
+    stale=captured.commonResponse.updatedData.loves.add(loveId=EV,hiddenFavorability=999,isReadingStory=True)
+    stale.unlockedLoveStoryEndIDs.append("stale-unlocked-ending")
+    stale.MergeFromString(UNKNOWN)
+    other=captured.commonResponse.updatedData.loves.add(loveId="love-unrelated-captured",hiddenFavorability=438)
+    other.MergeFromString(UNKNOWN);other_raw=other.SerializeToString()
+    captured.commonResponse.updatedData.user.name="Unrelated captured manager"
+    captured.commonResponse.updatedData.user.MergeFromString(UNKNOWN)
+    other_user=captured.commonResponse.updatedData.user.SerializeToString()
+    store._responses[("/api.Home/Enter",None)]=captured.SerializeToString()
+    before=database(game.state)
+    result=request(game,app,"/api.Home/Enter")
+    rows=result.commonResponse.updatedData.loves
+    assert rows[0].SerializeToString()==current and rows[0].hiddenFavorability==167
+    assert rows[1].SerializeToString()==other_raw
+    assert result.commonResponse.updatedData.user.SerializeToString()==other_user
+    assert UNKNOWN in result.SerializeToString() and database(game.state)==before
+
+
+def test_captured_home_love_delta_without_server_progress_keeps_original_capture_policy(game,tmp_path):
+    app,store=app_for(game,tmp_path)
+    def preserve(raw):
+        current=game.schema.response_type("/api.User/Get").FromString(raw)
+        current.loves.add(loveId=EV,hiddenFavorability=345).MergeFromString(UNKNOWN)
+        return current.SerializeToString()
+    game.state.mutate_snapshot("player",game.schema.fingerprint,preserve)
+    assert not game.state.has_love_progress("player")
+    captured=game.schema.response_type("/api.Home/Enter").FromString(stale_home(game))
+    row=captured.commonResponse.updatedData.loves.add(loveId=EV,hiddenFavorability=999)
+    row.MergeFromString(UNKNOWN);old=row.SerializeToString()
+    store._responses[("/api.Home/Enter",None)]=captured.SerializeToString()
+    before=database(game.state)
+    assert request(game,app,"/api.Home/Enter").commonResponse.updatedData.loves[0].SerializeToString()==old
+    assert database(game.state)==before and user(game).loves[0].hiddenFavorability==345
+
+
+def test_captured_home_progress_with_missing_sql_love_row_aborts_without_mutation(game,tmp_path):
+    app,store=app_for(game,tmp_path);register(game)
+    def remove(raw):
+        current=game.schema.response_type("/api.User/Get").FromString(raw)
+        del current.loves[:]
+        return current.SerializeToString()
+    game.state.mutate_snapshot("player",game.schema.fingerprint,remove)
+    captured=game.schema.response_type("/api.Home/Enter").FromString(stale_home(game))
+    captured.commonResponse.updatedData.loves.add(loveId=EV,hiddenFavorability=999)
+    store._responses[("/api.Home/Enter",None)]=captured.SerializeToString()
+    before=database(game.state);context=Context(game.token)
+    with pytest.raises(RpcFailure) as stopped:
+        app.handle("/api.Home/Enter",codec.encode(b""),context)
+    assert stopped.value.code==RpcCode.FAILED_PRECONDITION and len(context.aborts)==1
+    assert database(game.state)==before

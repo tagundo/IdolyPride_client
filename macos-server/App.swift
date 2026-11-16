@@ -24,6 +24,17 @@ struct ManagedAccount: Identifiable, Equatable {
     }
 }
 
+struct LocalLoveEvent: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let supported: Bool
+    init?(_ row: [String: Any]) {
+        guard let id = row["id"] as? String, !id.isEmpty, id.utf8.count <= 96,
+              let title = row["title"] as? String, !title.isEmpty, title.utf8.count <= 1024 else { return nil }
+        self.id = id; self.title = title; self.supported = row["supported"] as? Bool == true
+    }
+}
+
 struct AccountRestorePoint: Identifiable, Equatable {
     let id: String
     let mode: String
@@ -128,6 +139,22 @@ final class ServerModel: ObservableObject {
     private var pendingOfficialID: Int?
     private var pendingOfficialAction: String?
     private var officialActivationProfile: String?
+
+    @Published private(set) var eventRows: [LocalLoveEvent] = []
+    @Published private(set) var eventPending = false
+    @Published private(set) var eventCatalogAvailable = false
+    @Published private(set) var eventInvalidFile = false
+    @Published private(set) var eventRestartRequired = false
+    @Published private(set) var eventDraftDirty = false
+    @Published private(set) var eventErrorCode: String?
+    @Published private(set) var eventDraft: [[String: Any]] = []
+    private var eventEffective: [[String: Any]] = []
+    private var eventHasEffective = false
+    private var eventRevision = 0
+    private var eventRequestSerial = 0
+    private var pendingEventID: Int?
+    private var pendingEventAction: String?
+    private var eventSnapshotData: Data?
 
     private var invalidResourceLocation = false
     private var experimentalLiveObserved = false
@@ -761,6 +788,119 @@ final class ServerModel: ObservableObject {
         }
     }
 
+    var eventFeedbackText: String {
+        if eventPending { return officialText("로컬 이벤트 설정을 저장·확인하고 있습니다.", "Saving or checking local event settings.", "ローカルイベント設定を保存・確認しています。") }
+        if eventInvalidFile { return officialText("저장 파일을 읽지 못했습니다. 기존 파일을 자동으로 덮어쓰지 않습니다.", "The saved file is invalid. It will not be overwritten automatically.", "保存ファイルを読み取れません。自動で上書きしません。") }
+        if eventErrorCode != nil {
+            if eventErrorCode == "event_settings_revision_conflict" {
+                return officialText("다른 곳에서 설정이 바뀌었습니다. 저장값을 다시 불러온 뒤 변경해 주세요. 미저장 입력은 현재 화면에 남아 있습니다.", "Settings changed elsewhere. Reload saved values before editing again. Unsaved input remains on this screen.", "別の場所で設定が変更されました。保存値を再読み込みしてから変更してください。未保存の入力はこの画面に残ります。")
+            }
+            return officialText("설정을 저장하지 못했습니다. 입력과 기존 적용값을 유지합니다.", "Settings could not be saved. Input and the effective settings are preserved.", "設定を保存できませんでした。入力と適用中の値を保持します。")
+        }
+        if eventDraftDirty { return officialText("미저장 변경이 남아 있습니다.", "Unsaved changes remain.", "未保存の変更があります。") }
+        if eventRestartRequired { return officialText("저장했습니다. 게임을 종료하고 서버를 다시 시작하면 적용됩니다.", "Saved. Quit the game and restart the server to apply.", "保存しました。ゲームを終了し、サーバーを再起動すると適用されます。") }
+        if !eventCatalogAvailable { return officialText("지원 이벤트 자료를 준비하지 못했습니다. 서버 준비 후 다시 불러와 주세요.", "Supported event data is unavailable. Reload after the server data is prepared.", "対応イベントのデータを準備できません。サーバーデータの準備後に再読み込みしてください。") }
+        return officialText("선택과 기간은 자동 저장됩니다. 이벤트 진행은 초기화하지 않습니다.", "Selections and periods save automatically. Event progress is preserved.", "選択と期間は自動保存されます。イベントの進行は初期化しません。")
+    }
+    func eventEnabled(_ id: String) -> Bool { eventDraft.contains { $0["event_id"] as? String == id } }
+    func eventEnabledBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { self.eventEnabled(id) }, set: { enabled in
+            guard !self.eventPending, !self.eventInvalidFile else { return }
+            var rows = self.eventDraft.filter { $0["event_id"] as? String != id }
+            if enabled {
+                guard self.eventCatalogAvailable, self.eventRows.contains(where: { $0.id == id && $0.supported }) else { return }
+                let start = Int(Date().timeIntervalSince1970 * 1000)
+                rows.append(["event_id": id, "start_time_ms": start, "end_time_ms": start + 30 * 86400000])
+            }
+            self.eventDraft = rows.sorted { ($0["event_id"] as? String ?? "") < ($1["event_id"] as? String ?? "") }
+            self.eventDraftDirty = true; self.saveEventDraft()
+        })
+    }
+    func eventDateBinding(_ id: String, start: Bool) -> Binding<Date> {
+        let key = start ? "start_time_ms" : "end_time_ms"
+        return Binding(get: {
+            let value = self.eventDraft.first { $0["event_id"] as? String == id }?[key] as? Int
+            return value.map { Date(timeIntervalSince1970: Double($0) / 1000) } ?? Date()
+        }, set: { date in
+            guard !self.eventPending, !self.eventInvalidFile,
+                  let index = self.eventDraft.firstIndex(where: { $0["event_id"] as? String == id }) else { return }
+            let milliseconds = date.timeIntervalSince1970 * 1000
+            guard milliseconds.isFinite, milliseconds >= 0, milliseconds <= 9007199254740991 else { return }
+            var rows = self.eventDraft; rows[index][key] = Int(milliseconds)
+            self.eventDraft = rows; self.eventDraftDirty = true; self.saveEventDraft()
+        })
+    }
+    func eventEffectiveText(_ id: String) -> String {
+        if !eventHasEffective { return officialText("현재 적용: 서버 중지", "Effective now: server stopped", "現在の適用: サーバー停止中") }
+        guard let row = eventEffective.first(where: { $0["event_id"] as? String == id }),
+              let start = row["start_time_ms"] as? Int, let end = row["end_time_ms"] as? Int else {
+            return officialText("현재 적용: 꺼짐", "Effective now: off", "現在の適用: オフ")
+        }
+        let formatter = DateFormatter(); formatter.dateStyle = .medium; formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: officialUILanguage)
+        return officialText("현재 적용: ", "Effective now: ", "現在の適用: ")
+            + formatter.string(from: Date(timeIntervalSince1970: Double(start) / 1000)) + " – "
+            + formatter.string(from: Date(timeIntervalSince1970: Double(end) / 1000))
+    }
+    func clearEventSelection() {
+        guard !eventPending, !eventInvalidFile else { return }
+        eventDraft = []; eventDraftDirty = true; saveEventDraft()
+    }
+    func refreshEvents() { if !eventPending { sendEvent("events_status", payload: [:]) } }
+    func saveEventDraft() {
+        guard !eventPending, !eventInvalidFile, eventErrorCode != "event_settings_revision_conflict" else { return }
+        sendEvent("events_save", payload: ["settings": ["schema": 1, "revision": eventRevision,
+            "love_events": eventDraft], "expected_revision": eventRevision])
+    }
+    private func updateEventSettings(_ value: [String: Any], replaceDraft: Bool = false) {
+        if !replaceDraft && (eventPending || eventDraftDirty) { return }
+        guard let saved = value["saved"] as? [String: Any], let revision = saved["revision"] as? Int,
+              let rows = saved["love_events"] as? [[String: Any]],
+              let catalog = value["catalog"] as? [String: Any] else { return }
+        let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        if !replaceDraft && data == eventSnapshotData { return }
+        eventSnapshotData = data
+        eventRows = (catalog["events"] as? [[String: Any]] ?? []).compactMap(LocalLoveEvent.init)
+        eventCatalogAvailable = catalog["available"] as? Bool == true
+        eventInvalidFile = value["invalid_settings_file"] as? Bool == true
+        eventRestartRequired = value["restart_required"] as? Bool == true
+        eventHasEffective = value["effective"] is [String: Any]
+        eventEffective = (value["effective"] as? [String: Any])?["love_events"] as? [[String: Any]] ?? []
+        eventRevision = revision; eventDraft = rows; eventDraftDirty = false; eventErrorCode = nil
+    }
+    private func sendEvent(_ action: String, payload: [String: Any]) {
+        guard !shutdownRequested, !eventPending, let writer = input?.fileHandleForWriting, child?.isRunning == true else { return }
+        eventRequestSerial = eventRequestSerial >= Int(Int32.max) ? 1 : eventRequestSerial + 1
+        var command = payload; command["action"] = action; command["request_id"] = eventRequestSerial
+        if action == "events_save" {
+            // Only this private Mac wire is compact. The engine expands each
+            // triple before the common settings validator/CAS operation.
+            guard var settings = payload["settings"] as? [String: Any],
+                  let rows = settings["love_events"] as? [[String: Any]] else { eventErrorCode = "event_settings_invalid"; return }
+            var compact: [[Any]] = []
+            for row in rows {
+                guard let id = row["event_id"] as? String, let start = row["start_time_ms"] as? Int,
+                      let end = row["end_time_ms"] as? Int else { eventErrorCode = "event_settings_invalid"; return }
+                compact.append([id, start, end])
+            }
+            settings["love_events"] = compact; command["settings"] = settings
+        }
+        do {
+            var bytes = try JSONSerialization.data(withJSONObject: command); bytes.append(10)
+            guard bytes.count <= 512 else { eventErrorCode = "event_settings_command_invalid"; return }
+            guard Self.nonblockingWrite(bytes, fileDescriptor: writer.fileDescriptor) else { eventErrorCode = "event_settings_io"; return }
+            eventPending = true; pendingEventID = eventRequestSerial; pendingEventAction = action
+        } catch { eventErrorCode = "event_settings_invalid" }
+    }
+    private func consumeEvents(_ event: [String: Any], kind: String) {
+        guard let id = event["request_id"] as? Int, id == pendingEventID,
+              event["action"] as? String == pendingEventAction else { return }
+        pendingEventID = nil; pendingEventAction = nil; eventPending = false
+        if kind == "events_error" { eventErrorCode = event["code"] as? String ?? "event_settings_io"; return }
+        guard let value = event["result"] as? [String: Any] else { eventErrorCode = "event_settings_invalid"; return }
+        updateEventSettings(value, replaceDraft: true)
+    }
+
     private func sendAccount(_ action: String, payload: [String: Any], destination: String? = nil) {
         guard !shutdownRequested, !accountPending, let writer = input?.fileHandleForWriting,
               child?.isRunning == true else { return }
@@ -1101,6 +1241,7 @@ final class ServerModel: ObservableObject {
                 self.accountPending = false
                 self.pendingAccountID = nil; self.pendingAccountAction = nil
                 self.officialPending = false; self.officialBusy = false
+                self.eventPending = false; self.pendingEventID = nil; self.pendingEventAction = nil
                 self.pendingOfficialID = nil; self.pendingOfficialAction = nil; self.officialJobID = nil
                 self.officialPreview = [:]; self.officialImportedAccount = nil
                 self.officialWarningCodes = []; self.officialAccountListRefreshRequired = false
@@ -1160,6 +1301,8 @@ final class ServerModel: ObservableObject {
                 consumeAccount(event, kind: kind)
             case "official_result", "official_error":
                 consumeOfficial(event, kind: kind)
+            case "events_result", "events_error":
+                consumeEvents(event, kind: kind)
             case "status":
                 guard let state = event["status"] as? [String: Any] else { continue }
                 statusPolling.received(at: ProcessInfo.processInfo.systemUptime)
@@ -1173,6 +1316,7 @@ final class ServerModel: ObservableObject {
                 updateServerChecks(state)
                 if let accountStatus = state["accounts"] as? [String: Any] { updateAccounts(accountStatus) }
                 if let officialStatus = state["official_import"] as? [String: Any] { updateOfficialJob(officialStatus, privateSummary: false) }
+                if let eventStatus = state["event_settings"] as? [String: Any] { updateEventSettings(eventStatus) }
                 if !accountsInitiallyRequested && !busy && !smoke {
                     accountsInitiallyRequested = true
                     refreshAccounts()
@@ -1248,7 +1392,7 @@ final class ServerModel: ObservableObject {
     }
 
     func start() {
-        guard !running && !busy && !canStop && !accountPending && !officialPending && !officialBusy else { return }
+        guard !running && !busy && !canStop && !accountPending && !officialPending && !officialBusy && !eventPending else { return }
         var cache: String?
         if resourcesInDownloads {
             guard let selected = externalResourceDirectory(),
@@ -1592,6 +1736,56 @@ struct AccountControls: View {
 
 
 @MainActor
+struct LocalLoveEventControls: View {
+    @ObservedObject var model: ServerModel
+    private func text(_ ko: String, _ en: String, _ ja: String) -> String { model.officialText(ko, en, ja) }
+    var body: some View {
+        GroupBox(text("이벤트 · 모시코이", "Events · Moshikoi", "イベント・もし恋")) {
+            VStack(alignment: .leading, spacing: 10) {
+                Picker(text("이 안내의 언어", "Language for this panel", "この案内の言語"), selection: $model.officialUILanguage) {
+                    Text("한국어").tag("ko"); Text("English").tag("en"); Text("日本語").tag("ja")
+                }
+                Text(text("저장값은 다음 서버 시작부터 일반·감상 모드에 적용하며 진행은 모드별로 보관합니다.", "Saved values apply at the next server start in normal and viewing modes; progress is stored separately.", "保存値は次回のサーバー起動から通常・鑑賞モードに適用され、進行はモード別に保存します。"))
+                    .font(.caption).fixedSize(horizontal: false, vertical: true)
+                Text(text("기간은 이 기기에서 정하는 로컬 운영 기간입니다. 공식 종료 시각·기간은 확인되지 않았습니다. 켜면 지금부터 30일로 제안하며 최대 366일까지 편집할 수 있습니다.", "These are local server periods, not verified official dates. Enabling proposes 30 days from now; each period may be edited up to 366 days.", "この端末で指定するローカル運営期間です。公式の終了時刻・期間は未確認です。有効化時は現在から30日を提案し、最大366日まで編集できます。"))
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                ForEach(model.eventRows) { row in
+                    LocalLoveEventRow(model: model, row: row)
+                }
+                Text(model.eventFeedbackText).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Button(text("저장값 다시 불러오기", "Reload saved values", "保存値を再読み込み")) { model.refreshEvents() }.disabled(model.eventPending)
+                    Button(text("다시 저장", "Retry saving", "保存を再試行")) { model.saveEventDraft() }
+                        .disabled(model.eventPending || !model.eventDraftDirty || model.eventInvalidFile || model.eventErrorCode == "event_settings_revision_conflict")
+                    Button(text("모두 끄기 · 진행 유지", "Turn all off · keep progress", "すべてオフ・進行を保持")) { model.clearEventSelection() }
+                        .disabled(model.eventPending || model.eventInvalidFile || model.eventDraft.isEmpty)
+                }
+                if let code = model.eventErrorCode { Text(code).font(.caption).textSelection(.enabled) }
+            }.padding(.top, 6).frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityIdentifier("local-love-event-controls")
+    }
+}
+
+struct LocalLoveEventRow: View {
+    @ObservedObject var model: ServerModel
+    let row: LocalLoveEvent
+    private func text(_ ko: String, _ en: String, _ ja: String) -> String { model.officialText(ko, en, ja) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Toggle(row.title, isOn: model.eventEnabledBinding(row.id))
+                .fixedSize(horizontal: false, vertical: true)
+                .disabled(model.eventPending || model.eventInvalidFile || (!model.eventEnabled(row.id) && (!model.eventCatalogAvailable || !row.supported)))
+            if model.eventEnabled(row.id) {
+                DatePicker(text("로컬 시작", "Local start", "ローカル開始"), selection: model.eventDateBinding(row.id, start: true), displayedComponents: [.date, .hourAndMinute])
+                DatePicker(text("로컬 종료", "Local end", "ローカル終了"), selection: model.eventDateBinding(row.id, start: false), displayedComponents: [.date, .hourAndMinute])
+            }
+            Text(model.eventEffectiveText(row.id)).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !row.supported { Text(text("아직 지원 자료를 검증하지 못했습니다.", "Required data has not been validated.", "必要なデータをまだ検証できていません。" )).font(.caption) }
+            Divider()
+        }.disabled(model.eventPending || model.eventInvalidFile)
+    }
+}
+
 struct OfficialImportControls: View {
     @ObservedObject var model: ServerModel
     @State private var transferID = ""
@@ -1704,7 +1898,7 @@ struct ServerView: View {
             }
             Text(model.status).font(.headline).accessibilityIdentifier("server-status")
             HStack {
-                Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop || model.accountPending || model.officialPending || model.officialBusy)
+                Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop || model.accountPending || model.officialPending || model.officialBusy || model.eventPending)
                 Button("중지") { model.stop() }.disabled(!model.canStop)
                 Button("PlayCover에서 열기") { model.openGame() }.disabled(!model.running)
                 Spacer()
@@ -1718,6 +1912,7 @@ struct ServerView: View {
                     Text("연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.")
                         .font(.caption).foregroundStyle(.secondary)
                     AccountControls(model: model)
+                    LocalLoveEventControls(model: model)
                     OfficialImportControls(model: model)
                     DisclosureGroup("서버 준비 검사 · 이전 오류 기록") {
                         VStack(alignment: .leading, spacing: 8) {

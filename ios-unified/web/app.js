@@ -485,6 +485,12 @@
   Object.assign(UI_TRANSLATIONS.ja, {"계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요.": "アカウントの保存は完了しましたが、サーバーを再起動できませんでした。「サーバー開始」を再試行し、失敗が続く場合はアプリを開き直してください。", "서버를 다시 시작하지 못했습니다. 서버 상태를 확인해 주세요.": "サーバーを再起動できませんでした。サーバーの状態を確認してください。", "계정 저장은 완료됐습니다. 임시 파일 정리가 남아 있습니다.": "アカウントの保存は完了しました。一時ファイルの削除が残っています。", "계정 저장은 완료됐습니다. 위 ‘계정 목록 불러오기’로 목록을 새로 확인해 주세요.": "アカウントの保存は完了しました。上の「アカウント一覧を読み込む」で一覧を更新してください。"});
   Object.assign(UI_TRANSLATIONS.en, {"계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요.": "The account was saved, but the server could not restart. Select Start Server again; if it keeps failing, reopen the app.", "서버를 다시 시작하지 못했습니다. 서버 상태를 확인해 주세요.": "The server could not restart. Check its status.", "계정 저장은 완료됐습니다. 임시 파일 정리가 남아 있습니다.": "The account was saved. Temporary files still need cleanup.", "계정 저장은 완료됐습니다. 위 ‘계정 목록 불러오기’로 목록을 새로 확인해 주세요.": "The account was saved. Use Load accounts above to refresh the list."});
 
+  Object.assign(UI_TRANSLATIONS.en, {"모시코이 이벤트 설정": "Moshikoi event settings", "지원 목록에서 이벤트와 기간을 설정합니다. 설정만 자동 저장하며 이벤트 시작·진행 초기화·보상 지급을 실행하지 않습니다.": "Choose supported events and their time windows. Changes only save settings; they do not start events, reset progress or grant rewards.", "처음 켜면 현재 기기 시각부터 30일을 제안합니다. 직접 바꿀 수 있으며 최대 366일입니다. 이 기간은 로컬 설정이며 원본 이벤트 기간이 아닙니다.": "Enabling an event proposes 30 days from the current device time. You can edit it, up to 366 days. This is a local setting, not the original event period.", "설정할 이벤트": "Event to configure", "지원 목록 없음": "No supported catalog", "다음 서버 시작에 이 이벤트 사용": "Use this event at the next server start", "시작 시각 · 기기 현지 시간": "Start · Device local time", "종료 시각 · 기기 현지 시간": "End · Device local time", "끄면 사용 목록에서만 제외합니다. 저장된 이벤트 진행은 유지합니다.": "Disabling only removes the event from the enabled list. Saved progress is preserved.", "현재 적용 이벤트: ": "Active events: ", "저장된 다음 이벤트: ": "Saved events for next start: ", "없음": "None", "이벤트 설정을 아직 불러오지 못했습니다.": "Event settings have not loaded yet.", "저장한 이벤트 설정은 다음 서버 시작에 적용됩니다. 게임을 이미 시작했다면 앱을 완전히 종료하고 다시 열어 주세요.": "Saved event settings apply at the next server start. If the game has started, fully close and reopen the app.", "지원 목록을 확인할 수 없어 이벤트 설정을 변경할 수 없습니다.": "The supported catalog is unavailable, so event settings cannot be changed.", "이벤트 설정 파일을 읽지 못했습니다. 자동으로 덮어쓰지 않습니다.": "The event settings file could not be read. It will not be overwritten automatically.", "현재 서버와 저장된 이벤트 설정이 같습니다.": "The running server and saved event settings match.", "다른 화면에서 이벤트 설정이 바뀌었습니다. 최신 상태를 확인한 뒤 다시 시도를 눌러 현재 입력을 저장해 주세요.": "Event settings changed in another window. Review the latest status, then choose Retry to save your current edits.", "현재 선택 이벤트 적용 기간: ": "Active window for selected event: "});
+  Object.assign(UI_TRANSLATIONS.ja, {"모시코이 이벤트 설정": "もし恋イベント設定", "지원 목록에서 이벤트와 기간을 설정합니다. 설정만 자동 저장하며 이벤트 시작·진행 초기화·보상 지급을 실행하지 않습니다.": "対応リストからイベントと期間を設定します。設定のみ自動保存し、イベント開始・進行初期化・報酬付与は実行しません。", "처음 켜면 현재 기기 시각부터 30일을 제안합니다. 직접 바꿀 수 있으며 최대 366일입니다. 이 기간은 로컬 설정이며 원본 이벤트 기간이 아닙니다.": "初めて有効にすると端末の現在時刻から30日間を提案します。最大366日まで編集できます。これはローカル設定で、元の開催期間ではありません。", "설정할 이벤트": "設定するイベント", "지원 목록 없음": "対応リストなし", "다음 서버 시작에 이 이벤트 사용": "次回サーバー起動時にこのイベントを使用", "시작 시각 · 기기 현지 시간": "開始日時・端末の現地時刻", "종료 시각 · 기기 현지 시간": "終了日時・端末の現地時刻", "끄면 사용 목록에서만 제외합니다. 저장된 이벤트 진행은 유지합니다.": "無効にすると使用リストからのみ外れます。保存済みの進行状況は保持します。", "현재 적용 이벤트: ": "現在適用中のイベント: ", "저장된 다음 이벤트: ": "保存済みの次回イベント: ", "없음": "なし", "이벤트 설정을 아직 불러오지 못했습니다.": "イベント設定をまだ読み込めていません。", "저장한 이벤트 설정은 다음 서버 시작에 적용됩니다. 게임을 이미 시작했다면 앱을 완전히 종료하고 다시 열어 주세요.": "保存したイベント設定は次回のサーバー起動時に反映します。ゲーム開始後はアプリを完全に終了して開き直してください。", "지원 목록을 확인할 수 없어 이벤트 설정을 변경할 수 없습니다.": "対応リストを確認できないためイベント設定を変更できません。", "이벤트 설정 파일을 읽지 못했습니다. 자동으로 덮어쓰지 않습니다.": "イベント設定ファイルを読み込めません。自動で上書きしません。", "현재 서버와 저장된 이벤트 설정이 같습니다.": "現在のサーバーと保存済みイベント設定は一致しています。", "다른 화면에서 이벤트 설정이 바뀌었습니다. 최신 상태를 확인한 뒤 다시 시도를 눌러 현재 입력을 저장해 주세요.": "別の画面でイベント設定が変更されました。最新の状態を確認し、「再試行」で現在の入力を保存してください。", "현재 선택 이벤트 적용 기간: ": "選択中イベントの適用期間: "});
+
+  Object.assign(UI_TRANSLATIONS.en, {"이벤트 설정을 저장하지 못했습니다. 저장 상태와 지원 목록을 확인해 주세요.": "Could not save event settings. Check the saved state and supported catalog."});
+  Object.assign(UI_TRANSLATIONS.ja, {"이벤트 설정을 저장하지 못했습니다. 저장 상태와 지원 목록을 확인해 주세요.": "イベント設定を保存できません。保存状態と対応リストを確認してください。"});
+
   function resolveInterfaceLanguage(value, navigator = {}) {
     if (["ko", "ja", "en"].includes(value)) return value;
     const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
@@ -505,6 +511,14 @@
   const validPresentation = value => exact(value, ["schema", "revision", "custom_graphics", "quality", "target_fps", "render_scale", "max_buffer_pixel", "anti_aliasing", "shadow_resolution", "expand_photography"]) && identity(value) && typeof value.custom_graphics === "boolean" && typeof value.expand_photography === "boolean" && choice(value.quality, [0, 10, 20, 30, 40, 100]) && choice(value.target_fps, [0, 30, 60, 90, 120]) && typeof value.render_scale === "number" && Number.isFinite(value.render_scale) && value.render_scale >= 0.25 && value.render_scale <= 2 && integer(value.max_buffer_pixel) && value.max_buffer_pixel >= 256 && value.max_buffer_pixel <= 4096 && value.max_buffer_pixel % 2 === 0 && choice(value.anti_aliasing, [-1, 0, 1, 2]) && choice(value.shadow_resolution, [0, 512, 1024, 2048, 4096]);
   const validPlayback = value => exact(value, ["schema", "revision", "wait_for_orientation"]) && identity(value) && typeof value.wait_for_orientation === "boolean";
   const validMedia = value => exact(value, ["schema", "revision", "hide_video_mv", "mv_sort", "outfit_sort"]) && identity(value) && typeof value.hide_video_mv === "boolean" && choice(value.mv_sort, ["recent", "old", "title", "id"]) && choice(value.outfit_sort, ["original", "recent", "old", "title", "id"]);
+  const EVENT_WINDOW_LIMIT = 366 * 86400000;
+  const validEvents = value => exact(value, ["schema", "revision", "love_events"]) && identity(value)
+    && Array.isArray(value.love_events) && value.love_events.length <= 64
+    && value.love_events.every((row, index, rows) => exact(row, ["event_id", "start_time_ms", "end_time_ms"])
+      && typeof row.event_id === "string" && /^[A-Za-z0-9_-]{1,96}$/.test(row.event_id)
+      && (index === 0 || rows[index-1].event_id < row.event_id)
+      && integer(row.start_time_ms) && integer(row.end_time_ms) && row.start_time_ms < row.end_time_ms
+      && row.end_time_ms - row.start_time_ms <= EVENT_WINDOW_LIMIT);
   const plain = (value, limit = 1000) => typeof value === "string" ? value.slice(0, limit) : "";
   const count = value => integer(value) ? value : 0;
   const boundedJSON = (value, limit) => {
@@ -543,7 +557,9 @@
   }
 
   function validRequest(action, payload) {
-    if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
+    if (["status", "official_status", "official_inspect", "events_status"].includes(action)) return exact(payload, []);
+    if (action === "events_save") return exact(payload, ["settings", "expected_revision"]) && validEvents(payload.settings)
+      && integer(payload.expected_revision) && payload.settings.revision === payload.expected_revision;
 
     const profile = value => typeof value === "string" && value.trim() === value && utf8Length(value) >= 1
       && utf8Length(value) <= 64 && !/[\/\\\u0000-\u001f\u007f]/.test(value);
@@ -743,7 +759,7 @@
       if (accountSnapshot) renderAccounts(accountSnapshot);
       renderAccountPreview(); accountFeedback(accountFeedbackSource,accountFeedbackDetail);
       if (snapshot) renderServerChecks(snapshot.runtime);
-      renderOfficial();
+      renderOfficial(); renderEvents(false);
     }
     function syncPreset(key) {
       const presets = key === "render_scale" ? SCALE_PRESETS : BUFFER_PRESETS;
@@ -754,7 +770,8 @@
       options: {fields: ["media_mode", "download_missing_resources", "language"], valid: validOptions},
       presentation: {fields: ["custom_graphics", "quality", "target_fps", "render_scale", "max_buffer_pixel", "anti_aliasing", "shadow_resolution", "expand_photography"], valid: validPresentation},
       playback: {fields: ["wait_for_orientation"], valid: validPlayback},
-      media: {fields: ["hide_video_mv", "mv_sort", "outfit_sort"], valid: validMedia}
+      media: {fields: ["hide_video_mv", "mv_sort", "outfit_sort"], valid: validMedia},
+      events: {fields: [], valid: validEvents, available: false, draft: null}
     };
     let snapshot = null;
     let visible = document.visibilityState !== "hidden";
@@ -778,6 +795,68 @@
     let job = null;
     const logs = [];
     let messageSource = "";
+    let eventSnapshot = null, eventRows = [], eventCatalogKey = "";
+
+    function eventLocalTime(milliseconds) {
+      const date = new Date(milliseconds);
+      if (!Number.isFinite(date.getTime())) return "";
+      return new Date(milliseconds - date.getTimezoneOffset() * 60000).toISOString().slice(0,16);
+    }
+    function eventTimeValue(value) { return value ? new Date(value).getTime() : NaN; }
+    function renderEvents(syncFields = false) {
+      const form = forms.events, value = eventSnapshot;
+      const rows = value && object(value.catalog) && value.catalog.available === true && Array.isArray(value.catalog.events)
+        ? value.catalog.events.filter(row => object(row) && row.supported === true && typeof row.id === "string"
+          && /^[A-Za-z0-9_-]{1,96}$/.test(row.id)).slice(0,64) : [];
+      eventRows = rows;
+      form.available = Boolean(value && validEvents(value.saved) && rows.length && value.invalid_settings_file !== true);
+      const selector = el("events-choice"), chosen = selector.value;
+      const key = JSON.stringify([language, rows.map(row => [row.id, plain(row.title,256)])]);
+      if (key !== eventCatalogKey) {
+        eventCatalogKey = key;
+        const options = rows.map(row => { const option = document.createElement("option"); option.value = row.id; option.textContent = t(plain(row.title,256) || row.id); return option; });
+        if (!options.length) { const option = document.createElement("option"); option.value = ""; option.textContent = t("지원 목록 없음"); options.push(option); }
+        selector.replaceChildren(...options);
+        selector.value = rows.some(row => row.id === chosen) ? chosen : rows.length ? rows[0].id : "";
+        syncFields = true;
+      }
+      const draft = form.draft || form.value;
+      const selected = draft && Array.isArray(draft.love_events) ? draft.love_events.find(row => row.event_id === selector.value) : null;
+      if (syncFields) {
+        el("events-enabled").checked = Boolean(selected);
+        el("events-start").value = selected ? eventLocalTime(selected.start_time_ms) : "";
+        el("events-end").value = selected ? eventLocalTime(selected.end_time_ms) : "";
+      }
+      el("events-fields").disabled = launchFlushing || !form.available || !snapshot || !snapshot.running || snapshot.state !== "ready";
+      const list = settings => validEvents(settings) && settings.love_events.length ? settings.love_events.map(row => {
+        const match = rows.find(item => item.id === row.event_id); return match ? t(plain(match.title,256) || match.id) : row.event_id;
+      }).join(", ") : t("없음");
+      text("events-effective", value && validEvents(value.effective) ? t("현재 적용 이벤트: ") + list(value.effective) : t("현재 적용 값은 서버 준비 후 표시됩니다."), false);
+      text("events-next", value && validEvents(value.saved) ? t("저장된 다음 이벤트: ") + list(value.saved) : t("이벤트 설정을 아직 불러오지 못했습니다."), false);
+      text("events-state", !form.available ? "지원 목록 없음" : value.restart_required === true ? "적용 대기" : "준비 완료");
+      const detail = !value ? "이벤트 설정을 아직 불러오지 못했습니다." : value.invalid_settings_file === true ? "이벤트 설정 파일을 읽지 못했습니다. 자동으로 덮어쓰지 않습니다."
+        : !form.available ? "지원 목록을 확인할 수 없어 이벤트 설정을 변경할 수 없습니다." : value.restart_required === true ? "저장한 이벤트 설정은 다음 서버 시작에 적용됩니다. 게임을 이미 시작했다면 앱을 완전히 종료하고 다시 열어 주세요." : "현재 서버와 저장된 이벤트 설정이 같습니다.";
+      let message = t(detail);
+      const active = value && validEvents(value.effective) ? value.effective.love_events.find(row => row.event_id === selector.value) : null;
+      if (active) message += "\n" + t("현재 선택 이벤트 적용 기간: ") + eventLocalTime(active.start_time_ms).replace("T"," ") + " – " + eventLocalTime(active.end_time_ms).replace("T"," ");
+      text("events-detail", message, false);
+    }
+    function editEvent() {
+      const form = forms.events;
+      if (!form.available || launchFlushing || !form.value || !form.draft) return;
+      const id = el("events-choice").value;
+      if (!eventRows.some(row => row.id === id)) return;
+      let rows = form.draft.love_events.filter(row => row.event_id !== id);
+      if (el("events-enabled").checked) {
+        if (!el("events-start").value && !el("events-end").value) {
+          const start = Math.floor(Date.now() / 60000) * 60000;
+          el("events-start").value = eventLocalTime(start); el("events-end").value = eventLocalTime(start + 30 * 86400000);
+        }
+        rows.push({event_id:id,start_time_ms:eventTimeValue(el("events-start").value),end_time_ms:eventTimeValue(el("events-end").value)});
+      }
+      rows.sort((a,b) => a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0);
+      form.draft = {...form.draft,love_events:rows}; markEdited("events", 0);
+    }
 
     function message(value, error = false) {
       messageSource = plain(value, 500);
@@ -813,12 +892,18 @@
     function updateForm(name, settings) {
       const form = forms[name];
       if (!form.valid(settings)) {
-        el(name + "-fields").disabled = launchFlushing || !form.value || !snapshot.running || snapshot.state !== "ready";
+        el(name + "-fields").disabled = launchFlushing || !form.value || !snapshot.running || snapshot.state !== "ready" || (name === "events" && !form.available);
         renderSaveFeedback(name);
         return;
       }
       settings = name === "options" ? {interface_language: "system", ...settings} : settings;
       form.value = {...settings};
+      if (name === "events") {
+        const sync = !form.dirty && !form.busy;
+        if (sync) form.draft = {schema:settings.schema,revision:settings.revision,love_events:settings.love_events.map(row => ({...row}))};
+        if (sync) form.fingerprint = JSON.stringify(form.draft.love_events);
+        renderEvents(sync); renderSaveFeedback(name); return;
+      }
       if (!form.dirty && !form.busy) {
         for (const key of form.fields) {
           const input = el(key);
@@ -834,6 +919,11 @@
     function settingsFromForm(name) {
       const form = forms[name];
       if (!form.value) throw new Error("설정을 먼저 불러와 주세요.");
+      if (name === "events") {
+        const value = {...form.draft,revision:form.value.revision};
+        if (!form.available || !validEvents(value) || value.love_events.some(row => !eventRows.some(item => item.id === row.event_id))) throw new Error("설정 값의 범위를 확인해 주세요.");
+        return value;
+      }
       const value = name === "options" ? {interface_language: interfaceChoice} : {...form.value};
       for (const key of form.fields) {
         const input = el(key);
@@ -843,6 +933,7 @@
       return value;
     }
     function formFingerprint(name) {
+      if (name === "events") return JSON.stringify(forms.events.draft && forms.events.draft.love_events);
       return JSON.stringify(forms[name].fields.map(key => el(key).type === "checkbox" ? el(key).checked : el(key).value));
     }
     function clearAutosave(name) {
@@ -855,7 +946,7 @@
       text(name + "-save-feedback", form.feedback || "변경하면 자동으로 저장됩니다.");
       el(name + "-save-feedback").dataset.state = form.saveState || "ready";
       el(name + "-save-retry").hidden = form.saveState !== "failed";
-      el(name + "-save-retry").disabled = launchFlushing || Boolean(form.busy) || !snapshot || !snapshot.running || snapshot.state !== "ready";
+      el(name + "-save-retry").disabled = launchFlushing || Boolean(form.busy) || !snapshot || !snapshot.running || snapshot.state !== "ready" || (name === "events" && !form.available);
     }
     function saveFeedback(name, state, value) {
       forms[name].saveState = state; forms[name].feedback = value;
@@ -873,6 +964,7 @@
     }
     function markEdited(name, delay = null) {
       if (disposed || launchFlushing) return;
+      if (name === "events" && !forms.events.available) return;
       const form = forms[name], fingerprint = formFingerprint(name);
       if (form.fingerprint !== fingerprint) {
         form.fingerprint = fingerprint; form.editRevision++; form.dirty = true; mutationVersion++;
@@ -1292,6 +1384,9 @@
       updateForm("presentation", object(runtime.presentation) ? runtime.presentation.settings : null);
       updateForm("playback", object(runtime.playback) ? runtime.playback.settings : null);
       updateForm("media", object(runtime.media_options) ? runtime.media_options.settings : null);
+      eventSnapshot = object(runtime.event_settings) ? runtime.event_settings : null;
+      renderEvents(false);
+      updateForm("events", eventSnapshot && eventSnapshot.saved);
       const effective = value.effective_options;
       text("effective-options", validOptions(effective) ? t("현재: ") + t(effective.media_mode ? "감상 모드" : "일반 모드") + " · " + LANGUAGES[effective.language] + t(" · 자동 받기 ") + t(effective.download_missing_resources ? "켜짐" : "꺼짐") : "현재 적용 값은 서버 준비 후 표시됩니다.");
       const graphics = object(runtime.presentation) && object(runtime.presentation.client) ? runtime.presentation.client : {};
@@ -1346,7 +1441,7 @@
     function savedFormSettings(name, result) {
       const runtime = object(result.runtime) ? result.runtime : {};
       return name === "options" ? result.options : name === "presentation" ? runtime.presentation && runtime.presentation.settings
-        : name === "playback" ? runtime.playback && runtime.playback.settings : runtime.media_options && runtime.media_options.settings;
+        : name === "playback" ? runtime.playback && runtime.playback.settings : name === "events" ? runtime.event_settings && runtime.event_settings.saved : runtime.media_options && runtime.media_options.settings;
     }
     function save(name, force = false) {
       const form = forms[name];
@@ -1366,7 +1461,8 @@
       saveFeedback(name, "saving", "저장 중…");
       const operation = (async () => {
         try {
-          const result = await bridge.request("save_" + name, name === "options" ? value : {settings: value});
+          const result = await bridge.request(name === "events" ? "events_save" : "save_" + name,
+            name === "options" ? value : name === "events" ? {settings:value,expected_revision:form.value.revision} : {settings: value});
           if (!visible || disposed || visibility !== visibilityVersion) return false;
           const settings = savedFormSettings(name, result);
           if (!form.valid(settings)) throw new Error("서버 상태 형식을 확인하지 못했습니다.");
@@ -1381,7 +1477,9 @@
           return true;
         } catch (error) {
           if (visible && !disposed && visibility === visibilityVersion) {
-            saveFeedback(name, "failed", "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.");
+            const conflict = name === "events" && error.code === "event_settings_revision_conflict";
+            saveFeedback(name, "failed", conflict ? "다른 화면에서 이벤트 설정이 바뀌었습니다. 최신 상태를 확인한 뒤 다시 시도를 눌러 현재 입력을 저장해 주세요." : "설정을 저장하지 못했습니다. 다시 시도를 눌러 주세요.");
+            if (conflict) refresh();
             if (force) message(error.message, true);
           }
           return false;
@@ -1456,6 +1554,10 @@
         try {
           if (!snapshot || !snapshot.running || snapshot.state !== "ready" || accountPending || officialPending || officialBusy()) throw new Error("not_ready");
           for (const name of Object.keys(forms)) {
+            if (name === "events" && !forms.events.available) {
+              if (forms.events.dirty || forms.events.busy) throw new Error("event_settings_unavailable");
+              continue;
+            }
             try { settingsFromForm(name); }
             catch (_) {
               saveFeedback(name, "invalid", "입력값의 범위를 확인해 주세요. 유효한 값만 자동으로 저장합니다.");
@@ -1463,6 +1565,7 @@
             }
           }
           await Promise.all(Object.entries(forms).map(async ([name, form]) => {
+            if (name === "events" && !form.available && !form.dirty && !form.inflight) return;
             if (form.inflight) await form.inflight;
             if (generation !== flushGeneration || !visible || disposed) throw new Error("flush_cancelled");
             if (form.dirty) {
@@ -1577,6 +1680,9 @@
         if (numeric) input.addEventListener("blur", () => markEdited(name, 0));
       }
     }
+    el("events-choice").addEventListener("change", () => renderEvents(true));
+    el("events-enabled").addEventListener("change", editEvent);
+    for (const id of ["events-start","events-end"]) el(id).addEventListener("change", editEvent);
     el("interface_language").addEventListener("change", () => saveInterfaceLanguage(el("interface_language").value));
     for (const key of ["render_scale", "max_buffer_pixel"]) {
       el(key + "_preset").addEventListener("change", () => {

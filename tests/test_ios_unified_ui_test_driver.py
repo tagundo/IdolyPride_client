@@ -462,3 +462,32 @@ def test_diagnostic_exposes_only_fixed_path_kind_and_bundle_match_not_raw_metada
     assert PRIVATE not in json.dumps(diagnostic) and "https://" not in json.dumps(diagnostic)
     assert diagnostic["check"] in module.DIAGNOSTIC_CHECKS
     assert all(value["token_kind"] in module.DIAGNOSTIC_TOKEN_KINDS for value in diagnostic["paths"].values())
+
+
+def test_failure_diagnostic_records_only_fixed_marker_flow_and_own_child_before_deadline_kill(env):
+    module,driver,processes,source,clock=env
+    testing(env)
+    process=processes.calls[1]
+    process.emit(module.READY_MARKER+b"\n"+b"IDOLY_CANCEL_UITEST_PROBE_FOREGROUND\n"+
+        b"IDOLY_CANCEL_UITEST_WAITING_FOR_PROMPT\n"+b"prefix IDOLY_CANCEL_UITEST_PROMPT_FOUND\n"+PRIVATE.encode()+b"\n")
+    assert driver.poll()["ready"] is True
+    clock[0]+=301
+    assert driver.poll()["error_code"]=="ui_driver_deadline"
+    observed=driver.failure_diagnostic()
+    assert observed["phase"]=="testing" and observed["test_spawned"] is True and observed["ready_marker_observed"] is True
+    assert observed["child_pid"]==process.pid and observed["child_exit_code"] is None
+    assert observed["markers"]["foreground_observed"] is True and observed["markers"]["prompt_waiting"] is True
+    assert observed["markers"]["prompt_observed"] is False and observed["markers"]["cancel_tapped"] is False
+    assert PRIVATE not in json.dumps(observed)
+    observed["markers"]["cancel_tapped"]=True
+    assert driver.failure_diagnostic()["markers"]["cancel_tapped"] is False
+    driver.close();assert driver.failure_diagnostic() is None
+
+
+def test_failure_diagnostic_keeps_exact_own_child_exit_after_result_rejection(env):
+    module,driver,processes,source,clock=env
+    testing(env);process=processes.calls[1];process.complete(module.READY_MARKER+b"\n",code=65)
+    assert driver.poll()["error_code"]=="ui_driver_test_failed"
+    diagnostic=driver.failure_diagnostic()
+    assert diagnostic["child_pid"]==process.pid and diagnostic["child_exit_code"]==65
+    assert diagnostic["phase"]=="testing" and diagnostic["ready_marker_observed"] is True

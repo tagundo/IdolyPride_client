@@ -16,13 +16,16 @@ final class OfficialPromptCancelTests: XCTestCase {
         let probe = XCUIApplication(bundleIdentifier: "game.qualiarts.idolypride.iosprobe")
         let foreground = probe.wait(for: .runningForeground, timeout: 60)
         XCTAssertTrue(foreground, "The independently started Probe must be in the foreground")
+        FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_PROBE_FOREGROUND\n".utf8))
 
         // Native sets these identifiers only after filling fixed synthetic data.
         // The existing first-cold ZIP/account gates precede this prompt.
         let transferID = "idoly-official-probe-transfer-id"
         let passwordID = "idoly-official-probe-transfer-password"
         let alert = probe.alerts.containing(.textField, identifier: transferID).firstMatch
+        FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_WAITING_FOR_PROMPT\n".utf8))
         XCTAssertTrue(alert.waitForExistence(timeout: 180), "Expected the prepared native transfer prompt")
+        FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_PROMPT_FOUND\n".utf8))
         let singleAlert = probe.alerts.count == 1
         let idField = alert.textFields.matching(identifier: transferID).firstMatch
         let passwordField = alert.secureTextFields.matching(identifier: passwordID).firstMatch
@@ -49,10 +52,13 @@ final class OfficialPromptCancelTests: XCTestCase {
         let cancel = cancels[0]
         let hittable = cancel.isEnabled && cancel.isHittable
         XCTAssertTrue(hittable, "The exact Cancel action must be enabled and hittable")
+        FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_BEFORE_CANCEL_TAP\n".utf8))
         cancel.tap() // The sole UI input performed by this test.
+        FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_AFTER_CANCEL_TAP\n".utf8))
         let disappeared = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: alert)
         let dismissed = XCTWaiter.wait(for: [disappeared], timeout: 10) == .completed
         XCTAssertTrue(dismissed, "The native prompt must disappear after the real Cancel tap")
+        FileHandle.standardOutput.write(Data("IDOLY_CANCEL_UITEST_PROMPT_DISMISSED\n".utf8))
         XCTAssertEqual(probe.state, .runningForeground)
 
         // Additional native gates independently require the cancelled Web ACK,

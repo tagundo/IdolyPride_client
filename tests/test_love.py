@@ -95,8 +95,8 @@ def game(tmp_path,schema):
         token=token,other_token=other_token,original=snapshot.SerializeToString())
 
 
-def invoke(game,name,**fields):
-    path="/api.Love/"+name
+def invoke(game,method_name,**fields):
+    path="/api.Love/"+method_name
     raw=game.schema.request_type(path)(**fields).SerializeToString()
     return game.schema.response_type(path).FromString(game.love.handle(path,raw))
 
@@ -171,15 +171,15 @@ def test_first_episode_branch_end_unlocks_save_and_never_grants_stones(game):
     after=user(game)
     assert end.storyEndName=="Bad test end" and end.unlockSave and not end.rewards
     assert list(after.loves[0].unlockedLoveStoryEndIDs)==[END_BAD]
-    assert after.loves[0].hiddenFavorability==100
+    assert after.loves[0].hiddenFavorability==0
     assert not after.loves[0].isReadingStory and progress(game)["path"]==[E1]
     assert after.points==before.points and after.balance==before.balance
     assert after.stories[0].storyId=="st-love-test-001" and after.stories[0].statusType==2
     assert end.commonResponse.updatedData.stories[0]==after.stories[0]
     assert not end.commonResponse.updatedData.points and not end.commonResponse.updatedData.balance.SerializeToString()
-    # Permanent end bonuses are never credited twice by replaying the same end.
+    # Inferred end bonuses are withheld on both the first clear and replay.
     second=finish_first(game,bad=True)
-    assert not second.unlockSave and user(game).loves[0].hiddenFavorability==100
+    assert not second.unlockSave and user(game).loves[0].hiddenFavorability==0
 
 
 def test_start_restart_resume_charge_once_use_earliest_valid_stack_and_finish_route(game):
@@ -205,14 +205,14 @@ def test_start_restart_resume_charge_once_use_earliest_valid_stack_and_finish_ro
     end=invoke(game,"Finish",storyEpisodeId=E2,hintLevel=1,
         selectStoryChoiceInfos=[{"groupIndex":1,"index":1,"isValid":True}])
     assert end.storyEndName=="Good test end" and end.endRollAssetId=="test_end_roll"
-    assert user(game).loves[0].hiddenFavorability==200 and progress(game)["path"]==[E1]
+    assert user(game).loves[0].hiddenFavorability==0 and progress(game)["path"]==[E1]
     assert progress(game)["past_choices"][E2]["1"]==[1]
     before=database(game.state)
     with pytest.raises(RpcFailure):invoke(game,"Finish",storyEpisodeId=E2,hintLevel=1)
     assert database(game.state)==before
 
 
-def test_invalid_forged_conditional_choices_and_unknown_end_bonus_roll_back_everything(game):
+def test_invalid_forged_conditional_choices_and_unknown_ending_roll_back_everything(game):
     register(game);invoke(game,"Start",storyEpisodeId=E1,hintLevel=0)
     original=database(game.state)
     for choices in ([{"groupIndex":1,"index":2,"isValid":True}],
@@ -222,7 +222,7 @@ def test_invalid_forged_conditional_choices_and_unknown_end_bonus_roll_back_ever
         with pytest.raises(RpcFailure) as stopped:
             invoke(game,"Finish",storyEpisodeId=E1,hintLevel=0,selectStoryChoiceInfos=choices)
         assert stopped.value.code==RpcCode.INVALID_ARGUMENT and database(game.state)==original
-    del game.plan["events"][EV]["endings"][0]["favorability"]
+    game.plan["events"][EV]["routes"][E1]["outcomes"][0]["ending"]="unknown-ending"
     with pytest.raises(RpcFailure) as stopped:
         invoke(game,"Finish",storyEpisodeId=E1,hintLevel=0,
                selectStoryChoiceInfos=[{"groupIndex":1,"index":1,"isValid":True}])
@@ -238,10 +238,10 @@ def test_normal_save_load_rename_reset_roundtrip_and_reading_reset_preserve_end_
     invoke(game,"UpdateSaveName",loveId=EV,slotNumber=1,name="첫 저장")
     assert invoke(game,"Top",loveId=EV).saveInfo.saveDataInfos[0].name=="첫 저장"
     invoke(game,"Reset",loveId=EV)
-    assert progress(game)["path"]==[E1] and user(game).loves[0].hiddenFavorability==100
+    assert progress(game)["path"]==[E1] and user(game).loves[0].hiddenFavorability==0
     restored=invoke(game,"Load",loveId=EV,slotNumber=1)
     assert list(restored.storyEpisodeIds)==[E1,E2] and progress(game)["choices"]==saved_choices
-    assert user(game).loves[0].hiddenFavorability==105
+    assert user(game).loves[0].hiddenFavorability==0
     invoke(game,"Start",storyEpisodeId=E1,hintLevel=0)
     with pytest.raises(RpcFailure):invoke(game,"Load",loveId=EV,slotNumber=1)
     invoke(game,"ResetReadingStoryStatus",loveId=EV)
@@ -426,7 +426,7 @@ def test_finish_ignores_bounded_false_history_echoes_but_requires_single_active_
     assert not result.storyEndName and progress(game)["path"]==[E1,E2]
     assert progress(game)["choices"][E1]==[{"group":1,"index":2,"valid":True},
                                             {"group":2,"index":1,"valid":True}]
-    assert user(game).loves[0].hiddenFavorability==5
+    assert user(game).loves[0].hiddenFavorability==0
 
 
 def test_false_history_echoes_still_require_real_group_and_choice_bounds(game):
@@ -481,3 +481,46 @@ def test_mixed_schedule_extra_notifications_do_not_leak_into_standard_aggregate(
     assert home.isViewable and home.isUnlocked and not home.existsUnplayedLove
     assert not next(row for row in entries if row.id==EV).isUnplayed
     assert next(row for row in entries if row.id==EXTRA).isUnplayed
+
+
+def test_media_viewer_never_reports_a_full_reward_notification(game,tmp_path):
+    media=State(tmp_path/"media-notification.db")
+    snapshot=game.schema.response_type("/api.User/Get")();snapshot.user.name="Viewer"
+    media.save_snapshot("player",snapshot.SerializeToString(),game.schema.fingerprint)
+    viewer=Love(game.schema,media,"player",game.master,event_settings=settings(),media_mode=True,clock=lambda:game.clock[0])
+    viewer._prepared=game.plan
+    local=SimpleNamespace(**{**vars(game),"state":media,"love":viewer})
+    register(local);game.clock[0]+=7200000
+    title=invoke(local,"Title");home,entries=viewer.home_info()
+    assert not title.loveInfos[0].isLessonRewardMax
+    assert not home.existsLessonRewardMaxLove and not entries[0].isLessonRewardMax
+    assert not user(local).items
+
+
+def test_start_keeps_all_unlocked_hint_metadata_when_current_local_display_is_off(game):
+    register(game);invoke(game,"PromoteLesson",loveId=EV)
+    game.plan["events"][EV]["routes"][E1]["groups"][1]["best"]=1
+    result=invoke(game,"Start",storyEpisodeId=E1,hintLevel=0)
+    assert result.storyChoiceGroupInfos[0].existsObtainableFavorabilityDifference
+    assert result.storyChoiceGroupInfos[0].storyChoiceInfos[1].isBestObtainableFavorability
+    # best is pinned route metadata, not recomputed from potentially tied
+    # compatibility scores. The client controls whether it displays the hint.
+    assert result.storyChoiceGroupInfos[1].existsObtainableFavorabilityDifference
+    assert result.storyChoiceGroupInfos[1].storyChoiceInfos[0].isBestObtainableFavorability
+    assert progress(game)["current"]["hint"]==0
+
+
+def test_inferred_choice_and_ending_bonuses_never_change_real_present_affinity(game):
+    register(game);invoke(game,"Present",loveId=EV)
+    assert user(game).loves[0].hiddenFavorability==167
+    # Numeric compatibility weights remain available to the route interpreter,
+    # but even extreme inferred bonuses cannot become actual account affinity.
+    game.plan["events"][EV]["endings"][0]["favorability"]=(1<<63)-1
+    result=finish_first(game,bad=True)
+    assert result.storyEndName=="Bad test end" and result.unlockSave
+    assert user(game).loves[0].hiddenFavorability==167 and not result.rewards
+    finish_first(game)
+    invoke(game,"Save",loveId=EV,slotNumber=1)
+    invoke(game,"Reset",loveId=EV)
+    invoke(game,"Load",loveId=EV,slotNumber=1)
+    assert user(game).loves[0].hiddenFavorability==167
