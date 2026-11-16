@@ -15,6 +15,10 @@ from zipfile import ZipFile
 
 FIXED_FILES = {
     "payload-manifest.json",
+    "love-reference.json",
+    "love-adv-proof.json",
+    "licenses/love-reference-NOTICE.txt",
+    "licenses/love-reference-AGPL-3.0.txt",
     "public-fixtures/manifest.json",
     "public-tutorial/manifest.json",
     "public-tutorial/tutorial-short.pb",

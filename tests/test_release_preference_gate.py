@@ -24,7 +24,9 @@ def evidence(tmp_path):
     path = tmp_path / "preference-contracts.xml"
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
     contracts = {
-        "input": dict(release.DATA_PIN),
+        # The three actual preference master tests consume the immutable base
+        # donor. Native packages independently pin the prepared Love upgrade.
+        "input": dict(release.BASE_DATA_PIN),
         "master_version": "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60",
         "selected_counts": {"CardImage": 611, "Decoration": 361},
         "module_sha256": release.digest(release.ROOT / "src/idoly_local/preference_master_data.py"),
@@ -89,4 +91,12 @@ def test_junit_is_independently_checked_even_when_report_claims_success(evidence
     report["preference_master_contracts"]["junit"].update(
         bytes=path.stat().st_size, sha256=release.digest(path))
     with pytest.raises(release.ReleaseError):
+        release.validate_portable(report, SOURCE, directory)
+
+
+def test_prepared_native_payload_cannot_relabel_the_immutable_preference_input(evidence):
+    report, directory, _ = evidence
+    assert release.DATA_PIN != release.BASE_DATA_PIN
+    report["preference_master_contracts"]["input"] = dict(release.DATA_PIN)
+    with pytest.raises(release.ReleaseError, match="public_input_pin_differs"):
         release.validate_portable(report, SOURCE, directory)

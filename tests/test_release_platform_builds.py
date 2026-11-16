@@ -276,3 +276,49 @@ def test_native_inputs_use_only_verified_prepared_payload_with_original_donor_un
         assert (destination / "bundledTranslations.zip").read_bytes() == translated
         assert seen == [("overlay",), ("prepare", "BaseServerData.zip", "ServerData.zip"), ("proof",), ("payload",)]
     assert donor.read_bytes() == donor_raw
+
+
+@pytest.mark.parametrize("kind", ["android", "ios"])
+def test_input_only_fetch_preserves_the_exact_immutable_benchmark_base(monkeypatch, tmp_path, kind):
+    from types import SimpleNamespace
+    import shutil
+    original, translations = b"fixed original reference bytes", b"fixed translations"
+    pin = lambda raw: {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    donor = tmp_path / "donor.zip"
+    with ZipFile(donor, "w") as archive:
+        archive.writestr("base/ServerData.zip", original)
+        archive.writestr("base/bundledTranslations.zip", translations)
+    monkeypatch.setattr(builds, "DONORS", {kind: {**pin(donor.read_bytes()), "prefix": "base/"}})
+    monkeypatch.setattr(builds, "BASE_SERVER_DATA", pin(original))
+    monkeypatch.setattr(builds, "TRANSLATIONS", {kind: pin(translations)})
+    def load(name, path):
+        assert str(path).endswith("fetch_inputs.py"), "Input-only preparation must not invoke a payload upgrade"
+        return SimpleNamespace(lfs_download=lambda record, target: shutil.copyfile(donor, target))
+    monkeypatch.setattr(builds, "module", load)
+    work = tmp_path / "work"; work.mkdir()
+    report = builds.fetch_public_inputs(kind, work / "inputs", work, Guard(), prepare=False)
+    assert report["server_data"] == pin(original) and "server_data_provenance" not in report
+    assert (work / "inputs/ServerData.zip").read_bytes() == original
+    assert not (work / "inputs/BaseServerData.zip").exists()
+
+
+def test_explicit_base_reference_extraction_remains_full_hash_bound(monkeypatch, tmp_path):
+    payload, _files = reference_payload(monkeypatch, tmp_path)
+    approved = dict(builds.SERVER_DATA)
+    monkeypatch.setattr(builds, "BASE_SERVER_DATA", approved)
+    monkeypatch.setattr(builds, "SERVER_DATA", {"bytes": approved["bytes"]+1, "sha256": "a"*64})
+    with pytest.raises(builds.BuildError, match="pin_differs"):
+        builds.extract_qa_references(payload, tmp_path / "wrong-default", Guard())
+    builds.extract_qa_references(payload, tmp_path / "base-references", Guard(), expected_pin=approved)
+    assert (tmp_path / "base-references/protocol/idolypride-6.1.1.pb").is_file()
+    payload.write_bytes(payload.read_bytes()+b"tampered")
+    with pytest.raises(builds.BuildError, match="pin_differs"):
+        builds.extract_qa_references(payload, tmp_path / "tampered", Guard(), expected_pin=approved)
+
+
+@pytest.mark.parametrize("pin", [{"bytes": 1, "sha256": "a"*64}, {"bytes": True, "sha256": "a"*64},
+                                  {"bytes": 191343014, "sha256": "a"*64, "extra": True}])
+def test_qa_reference_pin_override_cannot_admit_an_arbitrary_archive(tmp_path, pin):
+    path = tmp_path / "not-approved.zip"; path.write_bytes(b"x")
+    with pytest.raises(builds.BuildError, match="purpose_pin_invalid"):
+        builds.extract_qa_references(path, tmp_path / "references", Guard(), expected_pin=pin)

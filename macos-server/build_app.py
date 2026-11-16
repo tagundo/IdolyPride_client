@@ -34,6 +34,39 @@ LIVE_ENGINE_LICENSE_FILES = (
     "LICENSE", "NOTICE", "third-party-licenses/Go-LICENSE", "third-party-licenses/Protobuf-LICENSE",
     "third-party-licenses/YAML-LICENSE", "third-party-licenses/YAML-NOTICE",
 )
+BUILD_PHASES = frozenset(("preflight", "pyinstaller", "assemble", "swift", "sign",
+                         "engine_smoke", "relocated_app", "archive", "complete"))
+BUILD_ERROR_CLASSES = frozenset(("ValueError", "OSError", "FileNotFoundError", "PermissionError",
+                                "CalledProcessError", "TimeoutExpired", "RuntimeError"))
+
+
+class BuildDiagnostics:
+    """Only fixed, credential-free fields cross the child-build boundary."""
+    def __init__(self, evidence):
+        self.path = Path(evidence) / "mac-build-phase.json"
+        self.phase = "preflight"
+
+    def checkpoint(self, phase, error=None):
+        if phase not in BUILD_PHASES:
+            raise ValueError("Unknown macOS build diagnostic phase")
+        self.phase = phase
+        value = {"schema": 1, "status": "PASS" if phase == "complete" else "RUNNING", "phase": phase}
+        if error is not None:
+            name = type(error).__name__
+            value.update(status="FAIL", error_class=name if name in BUILD_ERROR_CLASSES else "Exception",
+                         error_code="mac_build_" + phase + "_failed")
+            code = getattr(error, "returncode", None)
+            if type(code) is int and -255 <= code <= 255:
+                value["exitcode"] = code
+        raw = (json.dumps(value, sort_keys=True) + "\n").encode("utf-8")
+        if len(raw) > 1024:
+            raise ValueError("macOS build diagnostic exceeds bound")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_bytes(raw)
+        except OSError:
+            # Diagnostics must not turn a real build failure into a new one.
+            pass
 
 
 def run(arguments, **kwargs):
@@ -153,9 +186,9 @@ def smoke_native_app(app: Path, evidence: Path, data_dir: Path, timeout: float =
     return report
 
 
-def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
+def _build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
           live_engine_library: Path | None = None, *, build_number: str = "52", translations=None,
-          translations_sha256=None, translations_bytes=None):
+          translations_sha256=None, translations_bytes=None, diagnostics):
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise ValueError("Build on an Apple Silicon macOS runner (macos-15, uname -m = arm64)")
     if output.suffix != ".app" or output.exists() or archive.exists():
@@ -198,7 +231,9 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             shutil.copy2(live_engine_library, staging / LIVE_ENGINE_NAME)
             pyinstaller.extend(["--add-binary", str(staging / LIVE_ENGINE_NAME) + ":."])
         pyinstaller.append(HERE / "engine.py")
+        diagnostics.checkpoint("pyinstaller")
         run(pyinstaller, cwd=ROOT, env=environment)
+        diagnostics.checkpoint("assemble")
         contents = output / "Contents"
         resources = contents / "Resources"
         executable = contents / "MacOS" / APP_NAME
@@ -237,6 +272,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                 "NSDownloadsFolderUsageDescription": "게임 리소스를 Downloads/IdolyPride에 보관하고 게임에 제공합니다.",
                 "NSPrincipalClass": "NSApplication",
             }, stream)
+        diagnostics.checkpoint("swift")
         run(["/usr/bin/xcrun", "swiftc", "-swift-version", "5", "-parse-as-library", "-O",
              "-target", "arm64-apple-macos13.0", "-framework", "SwiftUI", "-framework", "AppKit",
              HERE / "App.swift", HERE / "PresentationSettings.swift", "-o", executable], env=environment)
@@ -251,6 +287,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             "user_python_required": False, "user_terminal_required": False,
             "game_client_tested": False, "live_engine": live_engine, "public_tls_trust": public_tls_trust}
         write_json(resources / "bundle-provenance.json", provenance)
+        diagnostics.checkpoint("sign")
         run(["/usr/bin/codesign", "--force", "--deep", "--sign", "-", output])
         if live_engine_library is not None:
             run(["/usr/bin/codesign", "--verify", "--strict", embedded_live_engine])
@@ -272,6 +309,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
             runtime_environment["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin"
             runtime_environment["PYTHONNOUSERSITE"] = "1"
             engine = resources / "runtime/IdolyServerEngine"
+            diagnostics.checkpoint("engine_smoke")
             run([engine, "--smoke", "--data-dir", temporary / "engine-smoke-data",
                  "--server-data", resources / "ServerData.zip", "--report", evidence / "engine-smoke.json"],
                 env=runtime_environment, timeout=120)
@@ -308,6 +346,7 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                     "main_live_settings_preserved", "main_live_cached_no_grant")
                 if not all(engine_report.get(key) is True for key in main_flags):
                     raise ValueError("The bundled engine did not verify opt-in main-live settlement and exact persistent retries")
+            diagnostics.checkpoint("relocated_app")
             moved = temporary / "이동한 앱" / "IdolyPride Local Server.app"
             moved.parent.mkdir()
             shutil.copytree(output, moved, symlinks=True)
@@ -317,12 +356,30 @@ def build(server_data: Path, output: Path, archive: Path, evidence: Path, versio
                 smoke_native_app(moved, evidence, temporary / "gui-smoke-data")
             run(["/usr/bin/codesign", "--verify", "--deep", "--strict", moved])
         run(["/usr/bin/codesign", "--verify", "--deep", "--strict", output])
+        diagnostics.checkpoint("archive")
         archive.parent.mkdir(parents=True, exist_ok=True)
         run(["/usr/bin/ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", output, archive])
         provenance.update(archive_sha256=digest(archive), archive_bytes=archive.stat().st_size,
                           bundled_engine_tested=smoke, native_gui_start_stop_tested=smoke)
         write_json(evidence / "build-report.json", provenance)
     return provenance
+
+
+def build(server_data: Path, output: Path, archive: Path, evidence: Path, version: str, smoke: bool = True,
+          live_engine_library: Path | None = None, *, build_number: str = "52", translations=None,
+          translations_sha256=None, translations_bytes=None):
+    diagnostics = BuildDiagnostics(evidence)
+    diagnostics.checkpoint("preflight")
+    try:
+        result = _build(server_data, output, archive, evidence, version, smoke,
+                        live_engine_library, build_number=build_number, translations=translations,
+                        translations_sha256=translations_sha256, translations_bytes=translations_bytes,
+                        diagnostics=diagnostics)
+    except BaseException as error:
+        diagnostics.checkpoint(diagnostics.phase, error)
+        raise
+    diagnostics.checkpoint("complete")
+    return result
 
 
 def main(argv=None):

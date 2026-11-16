@@ -651,7 +651,7 @@ def translation_benchmark():
                         ("elapsed_seconds", "validation_seconds", "peak_rss_bytes", "validation_peak_rss_bytes")}
     return {"schema": 1, "status": "PASS", "platform": "ios", "protobuf": "python", "same_semantics": True,
             "baseline_revision_expected": publisher.BASELINE, "sequence": ["ja", "ko", "en", "ko"],
-            "runs_per_source": 3, "inputs": {"server_data": deepcopy(publisher.DATA_PIN),
+            "runs_per_source": 3, "inputs": {"server_data": deepcopy(publisher.BASE_DATA_PIN),
                                             "translations": deepcopy(publisher.TRANSLATION_PINS["ios"])},
             "source_sha256": {name: {filename: HASH for filename in publisher.TRANSLATION_SOURCES}
                               for name in ("baseline", "candidate")},

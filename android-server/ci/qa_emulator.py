@@ -1154,6 +1154,8 @@ def main():
         result["expected_starter_marker"] = expected_marker
         replays = {kind: load_tutorial_replay(schema, args.public_tutorial_dir, kind) for kind in TUTORIAL_REPLAYS}
         print("Starting the server through its native UI", flush=True)
+        from qa_launcher_guard import recover_initial_launcher
+        recover_initial_launcher(qa, result["target_evidence"])
         qa.tap("서버 시작", "01-start")
         result["initial_storage_private_selected"] = complete_initial_storage_choice(qa)
         wait_server(schema, grpc_port, timeout=args.startup_timeout)
@@ -1383,6 +1385,7 @@ def main():
         result["error"] = str(error)
         raise
     finally:
+        result["launcher_environment_incidents"] = getattr(qa, "launcher_environment_incidents", [])
         if verified_target:
             try:
                 qa.capture("55-final")

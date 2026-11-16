@@ -556,7 +556,7 @@ def validate_translation_benchmark(report, source):
          and type(report.get("runs_per_source")) is int and 3 <= report["runs_per_source"] <= 5,
          "translation_benchmark_identity")
     inputs = report.get("inputs", {})
-    pin(inputs.get("server_data"), DATA_PIN)
+    pin(inputs.get("server_data"), BASE_DATA_PIN)
     pin(inputs.get("translations"), TRANSLATION_PINS["ios"])
     runs, expected_semantics = report.get("runs"), None
     need(type(runs) is dict and set(runs) == {"baseline", "candidate"}, "translation_run_set")

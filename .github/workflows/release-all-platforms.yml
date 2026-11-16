@@ -81,7 +81,7 @@ jobs:
           expected = {'bytes':191343014,'sha256':'37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223'}
           assert proof['status'] == 'PASS' and proof['source_commit'] == os.environ['GITHUB_SHA']
           assert proof['inputs']['server_data'] == expected
-          extract_qa_references(inputs/'ServerData.zip', references, Guard())
+          extract_qa_references(inputs/'ServerData.zip', references, Guard(), expected_pin=expected)
           descriptor = references/'protocol/idolypride-6.1.1.pb'
           descriptor_sha = hashlib.sha256(descriptor.read_bytes()).hexdigest()
           assert descriptor_sha == 'c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad'
@@ -424,7 +424,10 @@ jobs:
         if: failure()
         with:
           name: optimized-release-macos-diagnostics-${{ github.sha }}
-          path: ${{ runner.temp }}/idoly-macos-work/**/*.json
+          path: |
+            ${{ runner.temp }}/idoly-macos-work/**/*.json
+            ${{ runner.temp }}/idoly-macos-final/build-failure.json
+            ${{ runner.temp }}/idoly-macos-final/mac-native-build.sanitized.log
           if-no-files-found: warn
           retention-days: 14
 

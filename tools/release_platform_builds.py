@@ -151,8 +151,8 @@ def copy_member(archive,name,destination,pin,guard):
             digest.update(block);outgoing.write(block)
     need(count==pin["bytes"] and digest.hexdigest()==pin["sha256"],"donor_member_sha256_differs")
 
-def fetch_public_inputs(kind,destination,work,guard):
-    need(kind in ("android","ios"),"unknown_input_platform")
+def fetch_public_inputs(kind,destination,work,guard,*,prepare=True):
+    need(kind in ("android","ios") and type(prepare) is bool,"unknown_input_platform")
     helper=module("release_public_input_fetch",ROOT/"ios-unified/fetch_inputs.py")
     donor=work/("donor-"+kind+".zip")
     helper.lfs_download(DONORS[kind],donor)
@@ -161,9 +161,12 @@ def fetch_public_inputs(kind,destination,work,guard):
     destination.mkdir(mode=0o700,exist_ok=True)
     with ZipFile(donor) as archive:
         need(len(archive.infolist())<=32768 and len(set(archive.namelist()))==len(archive.infolist()),"donor_inventory_bound")
-        copy_member(archive,DONORS[kind]["prefix"]+"ServerData.zip",destination/"BaseServerData.zip",BASE_SERVER_DATA,guard)
+        copy_member(archive,DONORS[kind]["prefix"]+"ServerData.zip",destination/("BaseServerData.zip" if prepare else "ServerData.zip"),BASE_SERVER_DATA,guard)
         copy_member(archive,DONORS[kind]["prefix"]+"bundledTranslations.zip",destination/"bundledTranslations.zip",TRANSLATIONS[kind],guard)
     need(identity(donor)==owned,"owned_donor_identity_changed");donor.unlink()
+    if not prepare:
+        return {"server_data":dict(BASE_SERVER_DATA),"translations":{"platform":kind,"included":True,**TRANSLATIONS[kind]},
+                "donor":{"source_commit":PUBLIC_SOURCE,**{k:v for k,v in DONORS[kind].items() if k!="prefix"}}}
     base=destination/"BaseServerData.zip";base_owned=identity(base)
     need(LOVE_SERVER_DATA.base_pin()==BASE_SERVER_DATA,"Love_base_payload_pin_differs")
     guard.check()
@@ -269,8 +272,12 @@ QA_REFERENCE_FILES = frozenset(("protocol/idolypride-6.1.1.pb","master-json/!ver
     "public-tutorial/manifest.json","public-tutorial/tutorial-short.pb","public-tutorial/tutorial-full.pb",
     "public-story/manifest.json","public-story/story-list-event.pb","public-story/story-list-extra.pb"))
 
-def extract_qa_references(payload,destination,guard):
-    need(payload.stat().st_size==SERVER_DATA["bytes"] and sha(payload)==SERVER_DATA["sha256"],"QA_payload_pin_differs")
+def extract_qa_references(payload,destination,guard,*,expected_pin=None):
+    approved=SERVER_DATA if expected_pin is None else expected_pin
+    need(type(approved) is dict and set(approved)=={"bytes","sha256"}
+         and type(approved.get("bytes")) is int and type(approved.get("sha256")) is str
+         and (approved==BASE_SERVER_DATA or approved==SERVER_DATA),"QA_payload_purpose_pin_invalid")
+    need(payload.stat().st_size==approved["bytes"] and sha(payload)==approved["sha256"],"QA_payload_pin_differs")
     destination.mkdir(mode=0o700)
     total=0;copied=set()
     with ZipFile(payload) as archive:
@@ -351,17 +358,70 @@ def finish_android(inputs,work,output,source,pins,guard):
     write_json(output/"platform-report.json",report)
     return report
 
+def retain_mac_build_failure(log, output, *, environ=None):
+    """Retain only a bounded, redacted tail; never publish the raw child log."""
+    from urllib.parse import quote, quote_plus
+    limit = 16 * 1024
+    descriptor = os.open(log, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        need(stat.S_ISREG(before.st_mode), "mac_diagnostic_log_not_regular")
+        offset = max(0, before.st_size - limit)
+        stream.seek(offset)
+        raw = stream.read(limit + 1)
+        need(len(raw) <= limit, "mac_diagnostic_log_bound")
+    if offset:
+        # Never keep an opening partial credential line from a tail seek.
+        raw = raw.partition(b"\n")[2]
+    text = raw.decode("utf-8", errors="replace")
+    values = set()
+    for key, value in (os.environ if environ is None else environ).items():
+        if (type(key) is str and type(value) is str and value
+                and re.search(r"token|key|password|passwd|secret|credential|authorization|cookie", key, re.I)):
+            for part in (value, *value.splitlines()):
+                if part:
+                    values.update((part, json.dumps(part, ensure_ascii=True)[1:-1],
+                                   json.dumps(part, ensure_ascii=False)[1:-1], quote(part, safe=""), quote_plus(part)))
+    for value in sorted(values, key=len, reverse=True):
+        text = text.replace(value, "[REDACTED]")
+    text = re.sub(r"-----BEGIN [^\r\n]*PRIVATE KEY-----.*?(?:-----END [^\r\n]*PRIVATE KEY-----|$)",
+                  "[REDACTED PRIVATE KEY]", text, flags=re.S)
+    text = re.sub(r"((?:https?|s3|gs)://[^\s?'\"<>]+)\?[^\s'\"<>]*",
+                  r"\1?[REDACTED]", text, flags=re.I)
+    text = re.sub(r"((?:https?)://)[^/@\s]+:[^/@\s]+@", r"\1[REDACTED]@", text, flags=re.I)
+    lines = []
+    for line in text.splitlines():
+        if (re.search(r"\bauthorization\b|\bbearer\s+\S+", line, re.I)
+                or re.search(r"[\w.-]*(?:token|password|passwd|secret|credential|cookie|signature|api[_-]?key|private[_-]?key|access[_-]?key)[\w.-]*[\"']?\s*[:=]",
+                             line, re.I)):
+            line = "[REDACTED CREDENTIAL LINE]"
+        lines.append(line)
+    safe = ("\n".join(lines) + "\n").encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+    path = Path(output) / "mac-native-build.sanitized.log"
+    with path.open("x", encoding="utf-8") as stream:
+        stream.write(safe)
+    print("Sanitized macOS child build output:\n" + safe, file=sys.stderr)
+    return path
+
+
 def build_macos(work,output,source,pins,guard):
     need(sys.platform=="darwin" and platform.machine()=="arm64","actual_Apple_Silicon_host_required")
     inputs=work/"inputs";input_report=fetch_public_inputs("ios",inputs,work,guard)
     library,engine=build_go("macos",work,guard)
     evidence=work/"mac-evidence"
     app=work/"IdolyPrideLocalServer.app"
-    run([sys.executable,"-B",ROOT/"macos-server/build_app.py","--server-data",inputs/"ServerData.zip",
-        "--output",app,"--archive",output/MAC_NAME,"--evidence",evidence,"--version",VERSION,
-        "--build-number",str(BUILD_NUMBER),"--live-engine-library",library,"--translations",inputs/"bundledTranslations.zip",
-        "--translations-sha256",TRANSLATIONS["ios"]["sha256"],"--translations-bytes",str(TRANSLATIONS["ios"]["bytes"])],
-        work/"mac-native-build.log",guard)
+    try:
+        run([sys.executable,"-B",ROOT/"macos-server/build_app.py","--server-data",inputs/"ServerData.zip",
+            "--output",app,"--archive",output/MAC_NAME,"--evidence",evidence,"--version",VERSION,
+            "--build-number",str(BUILD_NUMBER),"--live-engine-library",library,"--translations",inputs/"bundledTranslations.zip",
+            "--translations-sha256",TRANSLATIONS["ios"]["sha256"],"--translations-bytes",str(TRANSLATIONS["ios"]["bytes"])],
+            work/"mac-native-build.log",guard)
+    except BaseException:
+        try:
+            retain_mac_build_failure(work/"mac-native-build.log", output)
+        except (OSError, ValueError):
+            print("mac_build_diagnostic_unavailable", file=sys.stderr)
+        raise
     raw=read_json(evidence/"build-report.json")
     need(raw.get("source_commit")==source and raw.get("version")==VERSION and raw.get("build_number")==str(BUILD_NUMBER)
          and raw.get("architecture")=="arm64" and raw.get("minimum_macos")=="13.0"
@@ -447,7 +507,7 @@ def main():
     args.work.mkdir(mode=0o700);args.output.mkdir(mode=0o700)
     try:
         if args.platform=="inputs":
-            data=fetch_public_inputs("ios",args.output,args.work,guard)
+            data=fetch_public_inputs("ios",args.output,args.work,guard,prepare=False)
             result={"schema":1,"status":"PASS","source_commit":args.source_commit,"run_id":int(os.environ["GITHUB_RUN_ID"]),
                     "source_sha256":pins,"inputs":data}
             write_json(args.output/"inputs-report.json",result)

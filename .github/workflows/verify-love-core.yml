@@ -64,6 +64,10 @@ jobs:
             tests/test_official_import_original_protocol.py
             tests/test_love_catalog.py
             tests/test_love_translation.py
+            macos-server/tests/test_macos_build_diagnostics.py
+            android-server/ci/test_launcher_guard.py
+            tests/test_release_preference_gate.py
+            tests/test_public_payload.py
             tests/test_stage_private_candidate.py
             tests/test_love_server_data_pin.py
             tests/test_love_server_data_pin_checked_in.py
