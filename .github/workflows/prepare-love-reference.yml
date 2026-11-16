@@ -1,6 +1,9 @@
 name: Prepare pinned Love reference
 
 on:
+  push:
+    paths:
+      - .github/workflows/prepare-love-reference.yml
   workflow_dispatch:
 
 permissions:
