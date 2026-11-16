@@ -37,6 +37,11 @@ RUNNER_BUNDLE = "local.idoly.cancel-driver-uitests.xctrunner"
 _LOG_LIMIT = 2 * 1024 * 1024
 _JSON_LIMIT = 4 * 1024 * 1024
 _PLIST_LIMIT = 256 * 1024
+DIAGNOSTIC_CHECKS = frozenset(("products", "candidate_count", "plist_read", "root_schema",
+    "configuration_count", "target_count", "target_contract", "test_host_path", "test_bundle_path",
+    "dummy_app_path", "runner_bundle", "dummy_bundle", "complete"))
+DIAGNOSTIC_TYPES = frozenset(("absent", "dict", "list", "str", "int", "bool", "bytes", "other"))
+DIAGNOSTIC_TOKEN_KINDS = frozenset(("absent", "testroot", "testhost", "absolute", "relative", "url", "other"))
 ERROR_CODES = frozenset(("ui_driver_udid_invalid", "ui_driver_callback_invalid", "ui_driver_deadline",
     "ui_driver_state_invalid", "ui_driver_source_invalid", "ui_driver_source_changed", "ui_driver_spawn_failed",
     "ui_driver_log_limit", "ui_driver_io_failed", "ui_driver_build_failed", "ui_driver_xctestrun_invalid",
@@ -209,6 +214,7 @@ class ProbePromptCancelDriver:
         self._log_size, self._line, self._phase_deadline = 0, b"", 0
         self._output_paths = {}
         self._failure_phase, self._test_spawned = None, False
+        self._metadata_diagnostic = None
 
     def __repr__(self):
         return "<ProbePromptCancelDriver public XCTest; diagnostics redacted>"
@@ -298,40 +304,114 @@ class ProbePromptCancelDriver:
         _need(path.is_relative_to(products), "ui_driver_xctestrun_invalid")
         return path
 
+    @staticmethod
+    def _kind(value):
+        if value is None:
+            return "absent"
+        for kind in (dict, list, str, int, bool, bytes):
+            if type(value) is kind:
+                return kind.__name__
+        return "other"
+
+    def _path_metadata(self, value, products, host=None):
+        kind = self._kind(value)
+        result = {"type": kind, "token_kind": "absent" if value is None else "other",
+                  "owned": False, "exists": None}
+        if type(value) is not str:
+            return result
+        result["token_kind"] = ("testroot" if value.startswith("__TESTROOT__/") else
+            "testhost" if value.startswith("__TESTHOST__/") else "url" if "://" in value else
+            "absolute" if Path(value).is_absolute() else "relative")
+        expanded = value.replace("__TESTROOT__", str(products))
+        if host is not None:
+            expanded = expanded.replace("__TESTHOST__", str(host))
+        path = Path(expanded)
+        # No outside path is inspected just to construct a diagnostic.
+        if path.is_absolute() and path.is_relative_to(products) and ".." not in path.parts:
+            try:
+                actual = path.resolve(strict=False)
+                result["owned"] = actual.is_relative_to(products)
+                if result["owned"]:
+                    result["exists"] = actual.exists()
+            except Exception:
+                pass
+        return result
+
     def _built(self):
         self._source_unchanged()
+        diagnostic = self._metadata_diagnostic = {"schema": 1,
+            "scope": "pre-input-generated-xctestrun", "check": "products"}
         products = (self._derived / "Build/Products").resolve(strict=True)
         _need(products.is_relative_to(self._work), "ui_driver_xctestrun_invalid")
+        diagnostic["check"] = "candidate_count"
+        diagnostic["all_xctestrun_count"] = min(129, len(list(products.glob("*.xctestrun"))))
         candidates = list(products.glob(SCHEME + "*iphonesimulator*.xctestrun"))
+        diagnostic["candidate_count"] = min(129, len(candidates))
         _need(len(candidates) == 1, "ui_driver_xctestrun_invalid")
         path = candidates[0]
+        diagnostic["check"] = "plist_read"
         raw = _read(path, _PLIST_LIMIT)
+        diagnostic.update(plist_bytes=len(raw), plist_sha256=hashlib.sha256(raw).hexdigest())
         data = plistlib.loads(raw)
-        _need(type(data) is dict and data.get("__xctestrun_metadata__", {}).get("FormatVersion") == 2,
-              "ui_driver_xctestrun_invalid")
-        configurations = data.get("TestConfigurations")
-        _need(type(configurations) is list and len(configurations) == 1, "ui_driver_xctestrun_invalid")
-        targets = configurations[0].get("TestTargets")
-        _need(type(targets) is list and len(targets) == 1 and type(targets[0]) is dict,
-              "ui_driver_xctestrun_invalid")
-        target = targets[0]
-        # A generated test run must still point only at the separate dummy app.
-        # Never let an identifier override target the existing Probe instead.
+        diagnostic["check"] = "root_schema"
+        _need(type(data) is dict, "ui_driver_xctestrun_invalid")
+        metadata = data.get("__xctestrun_metadata__")
+        version = metadata.get("FormatVersion") if type(metadata) is dict else None
+        diagnostic["format_version_type"] = self._kind(version)
+        diagnostic["format_version"] = version if type(version) is int and version in (1, 2) else None
+        _need(type(version) is int and version in (1, 2), "ui_driver_xctestrun_invalid")
+        if version == 1:
+            # Apple's traditional scheme format stores each test target at the
+            # top level. Metadata is not a target; every other key must be our
+            # single fixed UI target. No extra test target is ignored.
+            diagnostic["configuration_count"] = 0
+            keys = [key for key in data if key != "__xctestrun_metadata__"]
+            diagnostic["check"] = "target_count"
+            diagnostic["target_count"] = min(129, len(keys))
+            _need(keys == [SCHEME] and type(data[SCHEME]) is dict, "ui_driver_xctestrun_invalid")
+            target = data[SCHEME]
+        else:
+            configurations = data.get("TestConfigurations")
+            diagnostic["check"] = "configuration_count"
+            diagnostic["configuration_count"] = min(129, len(configurations)) if type(configurations) is list else 0
+            _need(type(configurations) is list and len(configurations) == 1
+                  and type(configurations[0]) is dict, "ui_driver_xctestrun_invalid")
+            targets = configurations[0].get("TestTargets")
+            diagnostic["check"] = "target_count"
+            diagnostic["target_count"] = min(129, len(targets)) if type(targets) is list else 0
+            _need(type(targets) is list and len(targets) == 1 and type(targets[0]) is dict,
+                  "ui_driver_xctestrun_invalid")
+            target = targets[0]
+        diagnostic["check"] = "target_contract"
+        diagnostic["blueprint_matches"] = target.get("BlueprintName") == SCHEME
+        diagnostic["is_ui_test_bundle"] = target.get("IsUITestBundle") is True
         serialized_target = json.dumps(target, sort_keys=True)
         _need("game.qualiarts.idolypride.iosprobe" not in serialized_target
               and target.get("UITargetAppBundleIdentifier", DUMMY_BUNDLE) == DUMMY_BUNDLE,
               "ui_driver_xctestrun_invalid")
-        _need(target.get("BlueprintName") == SCHEME and target.get("IsUITestBundle") is True,
-              "ui_driver_xctestrun_invalid")
+        _need(diagnostic["blueprint_matches"] and diagnostic["is_ui_test_bundle"], "ui_driver_xctestrun_invalid")
+        paths = diagnostic["paths"] = {}
+        diagnostic["check"] = "test_host_path"
+        paths["test_host"] = self._path_metadata(target.get("TestHostPath"), products)
         host = self._product(target.get("TestHostPath"), products)
+        diagnostic["check"] = "test_bundle_path"
+        paths["test_bundle"] = self._path_metadata(target.get("TestBundlePath"), products, host)
         test = self._product(target.get("TestBundlePath"), products, host)
+        diagnostic["check"] = "dummy_app_path"
+        paths["dummy_app"] = self._path_metadata(target.get("UITargetAppPath"), products)
         app = self._product(target.get("UITargetAppPath"), products)
         _need(test.name == SCHEME + ".xctest" and app.name == "CancelDriverHost.app",
               "ui_driver_xctestrun_invalid")
-        for bundle, identifier in ((host, RUNNER_BUNDLE), (app, DUMMY_BUNDLE)):
+        bundles = diagnostic["bundles"] = {}
+        for label, bundle, identifier in (("runner", host, RUNNER_BUNDLE), ("dummy", app, DUMMY_BUNDLE)):
+            diagnostic["check"] = label + "_bundle"
             info = plistlib.loads(_read(bundle / "Info.plist", _PLIST_LIMIT))
-            _need(info.get("CFBundleIdentifier") == identifier
-                  and info.get("CFBundleSupportedPlatforms") == ["iPhoneSimulator"], "ui_driver_xctestrun_invalid")
+            _need(type(info) is dict, "ui_driver_xctestrun_invalid")
+            details = bundles[label] = {"bundle_matches": info.get("CFBundleIdentifier") == identifier,
+                "platforms_type": self._kind(info.get("CFBundleSupportedPlatforms")),
+                "platforms_exact": info.get("CFBundleSupportedPlatforms") == ["iPhoneSimulator"]}
+            _need(details["bundle_matches"] and details["platforms_exact"], "ui_driver_xctestrun_invalid")
+        diagnostic["check"] = "complete"
         self._xctestrun_sha = hashlib.sha256(raw).hexdigest()
         self._spawn(["xcodebuild", "-xctestrun", str(path), "-destination", "id=" + self.udid,
             "-resultBundlePath", str(self._result), "-parallel-testing-enabled", "NO",
@@ -396,6 +476,13 @@ class ProbePromptCancelDriver:
                 self._stop()
         phase = "building" if self._phase == "building" else self._phase if self._phase in ("passed", "failed", "idle") else "running"
         return {"phase": phase, "ready": self._ready, "error_code": self._error}
+
+    def build_metadata_diagnostic(self):
+        """A fixed, typed pre-input gate diagnostic; no plist/path/env values."""
+        if (self._closed or self._phase != "failed" or self._failure_phase != "building"
+                or self._test_spawned or self._ready or self._metadata_diagnostic is None):
+            return None
+        return json.loads(json.dumps(self._metadata_diagnostic))
 
     def build_failure_log(self):
         """Return only an owned pre-input build tail, never UI/result logs.

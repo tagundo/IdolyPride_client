@@ -3661,6 +3661,8 @@ def test_pre_input_xctest_build_failure_has_only_bounded_owned_diagnostic(app,tm
     class FailedBuild(ModeledUIDriver):
         def start(self):raise probe.DriverError("ui_driver_build_failed")
         def build_failure_log(self):return b"BUILD-ONLY-"+b"x"*20000
+        def build_metadata_diagnostic(self):return {"schema":1,"scope":"pre-input-generated-xctestrun",
+            "check":"root_schema","format_version_type":"int","format_version":1,"raw_path":"DO-NOT-EXPORT"}
     sim=FakeSimctl(tmp_path/"failed-ui-build")
     monkeypatch.setattr(probe,"ProbePromptCancelDriver",FailedBuild)
     with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",sim):
@@ -3673,4 +3675,34 @@ def test_pre_input_xctest_build_failure_has_only_bounded_owned_diagnostic(app,tm
     assert diagnostic["sha256"]==hashlib.sha256(diagnostic["text"].encode()).hexdigest()
     assert result["xctest_build_diagnostic"]=={key:diagnostic[key] for key in ("scope","tail_bytes","sha256")} | {"file_name":"failed-ui-build-xctest-build.json"}
     assert "text" not in result["xctest_build_diagnostic"]
+    metadata=(tmp_path/"failed-ui-build-xctest-metadata.json").read_bytes()
+    assert b"DO-NOT-EXPORT" not in metadata
+    assert json.loads(metadata)=={"schema":1,"scope":"pre-input-generated-xctestrun","check":"root_schema",
+        "format_version_type":"int","format_version":1}
+    assert result["xctest_build_metadata"]=={"file_name":"failed-ui-build-xctest-metadata.json",
+        "scope":"pre-input-generated-xctestrun","bytes":len(metadata),"sha256":hashlib.sha256(metadata).hexdigest()}
     assert result["cleanup"]=={"shutdown":True,"delete":True}
+
+
+@pytest.mark.parametrize("changed",[
+    {"check":"DO-NOT-EXPORT"},{"check":[]},{"candidate_count":True},{"target_count":130},
+    {"format_version_type":"DO-NOT-EXPORT"},{"format_version":True},{"plist_sha256":"DO-NOT-EXPORT"},
+    {"paths":{"test_host":{"type":"str","token_kind":"DO-NOT-EXPORT","owned":True,"exists":True}}},
+    {"paths":{"test_host":{"type":[],"token_kind":"absolute","owned":True,"exists":True}}},
+    {"bundles":{"runner":{"bundle_matches":1,"platforms_type":"list","platforms_exact":True}}}])
+def test_generated_xctestrun_diagnostic_requires_finite_typed_metadata(changed):
+    value={"schema":1,"scope":"pre-input-generated-xctestrun","check":"root_schema",**changed}
+    with pytest.raises(probe.ProbeError,match="^official_ui_metadata_invalid$"):
+        probe.official_ui_build_metadata(value)
+
+
+def test_generated_xctestrun_diagnostic_projects_only_known_scalar_fields():
+    value={"schema":1,"scope":"pre-input-generated-xctestrun","check":"runner_bundle","plist_bytes":123,
+        "plist_sha256":"a"*64,"paths":{"test_host":{"type":"str","token_kind":"testroot","owned":True,
+        "exists":True,"raw_path":"DO-NOT-EXPORT"},"unknown":"DO-NOT-EXPORT"},"bundles":{"runner":{
+        "bundle_matches":True,"platforms_type":"list","platforms_exact":True,"identifier":"DO-NOT-EXPORT"}},
+        "raw_plist":"DO-NOT-EXPORT"}
+    projected=probe.official_ui_build_metadata(value)
+    assert "DO-NOT-EXPORT" not in json.dumps(projected)
+    assert projected["paths"]["test_host"]=={"type":"str","token_kind":"testroot","owned":True,"exists":True}
+    assert projected["bundles"]["runner"]=={"bundle_matches":True,"platforms_type":"list","platforms_exact":True}

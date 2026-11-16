@@ -94,7 +94,7 @@ def env(tmp_path, monkeypatch):
     driver.close()
 
 
-def built_products(env, *, mutate=None, extra=False):
+def built_products(env, *, mutate=None, extra=False, format_version=2):
     module, driver, processes, source, clock = env
     products = driver._derived / "Build/Products"
     host = products / "Debug-iphonesimulator/IdolyProbeCancelUITests-Runner.app"
@@ -111,8 +111,11 @@ def built_products(env, *, mutate=None, extra=False):
         "UITargetAppPath": "__TESTROOT__/Debug-iphonesimulator/CancelDriverHost.app"}
     if mutate:
         mutate(target)
-    data = {"__xctestrun_metadata__": {"FormatVersion": 2},
-            "TestConfigurations": [{"TestTargets": [target]}]}
+    data = {"__xctestrun_metadata__": {"FormatVersion": format_version}}
+    if format_version == 1:
+        data[module.SCHEME] = target
+    else:
+        data["TestConfigurations"] = [{"TestTargets": [target]}]
     path = products / "IdolyProbeCancelUITests_iphonesimulator18.5-arm64.xctestrun"
     path.write_bytes(plistlib.dumps(data))
     if extra:
@@ -391,3 +394,71 @@ def test_pre_input_build_diagnostic_cannot_follow_replaced_symlink(env):
     foreign.write_bytes(PRIVATE.encode())
     log.symlink_to(foreign)
     assert driver.build_failure_log() is None
+
+
+
+@pytest.mark.parametrize("format_version", [1, 2])
+def test_documented_traditional_and_test_configuration_formats_keep_same_strict_target(env, format_version):
+    module, driver, processes, source, clock = env
+    driver.start()
+    generated = built_products(env, format_version=format_version)
+    processes.calls[0].complete()
+    status = driver.poll()
+    assert status == {"phase": "running", "ready": False, "error_code": None}
+    assert len(processes.calls) == 2
+    assert processes.calls[1].args[processes.calls[1].args.index("-xctestrun") + 1] == str(generated)
+    assert driver.build_metadata_diagnostic() is None
+    assert driver._metadata_diagnostic["format_version"] == format_version
+    assert driver._metadata_diagnostic["target_count"] == 1
+
+
+@pytest.mark.parametrize("bad", [True, 0, 3, "1"])
+def test_metadata_version_must_be_exact_supported_integer_and_diagnostic_is_typed(env, bad):
+    module, driver, processes, source, clock = env
+    driver.start()
+    path = built_products(env)
+    data = plistlib.loads(path.read_bytes())
+    data["__xctestrun_metadata__"]["FormatVersion"] = bad
+    path.write_bytes(plistlib.dumps(data))
+    processes.calls[0].complete()
+    assert driver.poll()["error_code"] == "ui_driver_xctestrun_invalid"
+    diagnostic = driver.build_metadata_diagnostic()
+    assert diagnostic["check"] == "root_schema" and diagnostic["format_version"] is None
+    assert diagnostic["format_version_type"] in module.DIAGNOSTIC_TYPES
+    assert diagnostic["scope"] == "pre-input-generated-xctestrun"
+    assert diagnostic["candidate_count"] == 1 and len(diagnostic["plist_sha256"]) == 64
+    assert not any(value in json.dumps(diagnostic) for value in (str(driver._work), str(source), PRIVATE))
+    driver.close()
+    assert driver.build_metadata_diagnostic() is None
+
+
+@pytest.mark.parametrize("format_version", [1, 2])
+def test_both_formats_reject_extra_targets_instead_of_ignoring_them(env, format_version):
+    module, driver, processes, source, clock = env
+    driver.start()
+    path = built_products(env, format_version=format_version)
+    data = plistlib.loads(path.read_bytes())
+    if format_version == 1:
+        data["OtherTarget"] = copy.deepcopy(data[module.SCHEME])
+    else:
+        data["TestConfigurations"][0]["TestTargets"].append(copy.deepcopy(data["TestConfigurations"][0]["TestTargets"][0]))
+    path.write_bytes(plistlib.dumps(data))
+    processes.calls[0].complete()
+    assert driver.poll()["error_code"] == "ui_driver_xctestrun_invalid"
+    assert len(processes.calls) == 1
+    diagnostic = driver.build_metadata_diagnostic()
+    assert diagnostic["check"] == "target_count" and diagnostic["target_count"] == 2
+
+
+def test_diagnostic_exposes_only_fixed_path_kind_and_bundle_match_not_raw_metadata(env):
+    module, driver, processes, source, clock = env
+    driver.start()
+    built_products(env, mutate=lambda target: target.update(UITargetAppPath="https://secret?" + PRIVATE))
+    processes.calls[0].complete()
+    assert driver.poll()["error_code"] == "ui_driver_xctestrun_invalid"
+    diagnostic = driver.build_metadata_diagnostic()
+    assert diagnostic["check"] == "dummy_app_path"
+    assert diagnostic["paths"]["dummy_app"] == {"type": "str", "token_kind": "url", "owned": False, "exists": None}
+    assert PRIVATE not in json.dumps(diagnostic) and "https://" not in json.dumps(diagnostic)
+    assert diagnostic["check"] in module.DIAGNOSTIC_CHECKS
+    assert all(value["token_kind"] in module.DIAGNOSTIC_TOKEN_KINDS for value in diagnostic["paths"].values())

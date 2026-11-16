@@ -30,7 +30,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 PROBE_SOURCE_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(PROBE_SOURCE_DIR))
-from ui_test_driver import ProbePromptCancelDriver, DriverError, ERROR_CODES as UI_DRIVER_ERRORS
+from ui_test_driver import (ProbePromptCancelDriver, DriverError, ERROR_CODES as UI_DRIVER_ERRORS,
+    DIAGNOSTIC_CHECKS as UI_DIAGNOSTIC_CHECKS, DIAGNOSTIC_TYPES as UI_DIAGNOSTIC_TYPES,
+    DIAGNOSTIC_TOKEN_KINDS as UI_DIAGNOSTIC_TOKEN_KINDS)
 
 
 BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
@@ -933,6 +935,45 @@ def _poll_official_ui_driver(driver):
         code=state.get("error_code")
         raise ProbeError(code if type(code) is str and code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed")
     return state
+
+
+def official_ui_build_metadata(value):
+    """Project only fixed pre-input schema metadata, never paths or plist values."""
+    fail="official_ui_metadata_invalid"
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"]==1
+        and value.get("scope")=="pre-input-generated-xctestrun" and type(value.get("check")) is str and value["check"] in UI_DIAGNOSTIC_CHECKS,fail)
+    clean={key:value[key] for key in ("schema","scope","check")}
+    for key in ("all_xctestrun_count","candidate_count","configuration_count","target_count"):
+        if key in value:
+            require(type(value[key]) is int and 0<=value[key]<=129,fail);clean[key]=value[key]
+    if "plist_bytes" in value:
+        require(type(value["plist_bytes"]) is int and 1<=value["plist_bytes"]<=262144,fail);clean["plist_bytes"]=value["plist_bytes"]
+    if "plist_sha256" in value:
+        require(_hex_digest(value["plist_sha256"]),fail);clean["plist_sha256"]=value["plist_sha256"]
+    if "format_version_type" in value:
+        require(type(value["format_version_type"]) is str and value["format_version_type"] in UI_DIAGNOSTIC_TYPES,fail);clean["format_version_type"]=value["format_version_type"]
+    if "format_version" in value:
+        observed=value["format_version"];require(observed is None or (type(observed) is int and observed in (1,2)),fail);clean["format_version"]=observed
+    for key in ("blueprint_matches","is_ui_test_bundle"):
+        if key in value:
+            require(type(value[key]) is bool,fail);clean[key]=value[key]
+    for group,names in (("paths",("test_host","test_bundle","dummy_app")),("bundles",("runner","dummy"))):
+        if group not in value:continue
+        require(type(value[group]) is dict,fail);clean[group]={}
+        for name in names:
+            if name not in value[group]:continue
+            row=value[group][name];require(type(row) is dict,fail)
+            if group=="paths":
+                require(type(row.get("type")) is str and row["type"] in UI_DIAGNOSTIC_TYPES
+                    and type(row.get("token_kind")) is str and row["token_kind"] in UI_DIAGNOSTIC_TOKEN_KINDS
+                    and type(row.get("owned")) is bool and "exists" in row and (row["exists"] is None or type(row["exists"]) is bool),fail)
+                clean[group][name]={key:row[key] for key in ("type","token_kind","owned","exists")}
+            else:
+                require(type(row.get("bundle_matches")) is bool and type(row.get("platforms_type")) is str and row["platforms_type"] in UI_DIAGNOSTIC_TYPES
+                    and type(row.get("platforms_exact")) is bool,fail)
+                clean[group][name]={key:row[key] for key in ("bundle_matches","platforms_type","platforms_exact")}
+    require(len(json.dumps(clean,separators=(",",":"),sort_keys=True).encode())<=8192,fail)
+    return clean
 
 
 OFFICIAL_PROMPT_FLAGS = ("button_found", "enabled_before", "click_dispatched", "empty_web_payload", "prompt_presented",
@@ -2489,6 +2530,18 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                     report["xctest_build_diagnostic"]["file_name"]=diagnostic_path.name
             except (OSError,ProbeError,DriverError):
                 report["xctest_build_diagnostic"]={"available":False}
+        if ui_driver is not None and callable(getattr(ui_driver,"build_metadata_diagnostic",None)):
+            try:
+                observed=ui_driver.build_metadata_diagnostic()
+                if observed is not None:
+                    diagnostic=official_ui_build_metadata(observed)
+                    diagnostic_path=audit.with_name(audit.stem+"-xctest-metadata.json")
+                    write_audit(diagnostic_path,diagnostic)
+                    encoded=(json.dumps(diagnostic,separators=(",",":"),sort_keys=True)+"\n").encode()
+                    report["xctest_build_metadata"]={"scope":diagnostic["scope"],"bytes":len(encoded),
+                        "sha256":hashlib.sha256(encoded).hexdigest(),"file_name":diagnostic_path.name}
+            except (OSError,ProbeError,DriverError):
+                report["xctest_build_metadata"]={"available":False}
         if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
             report["native_startup_error"] = error.native_detail
         if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
