@@ -265,6 +265,9 @@ def test_actual_item_definitions_present_promote_and_lesson_clock_have_no_backfi
     assert received.obtainExp==14 and received.totalExp==182 and received.rewards[0].amount==4
     repeated=invoke(game,"ReceiveLessonReward",loveId=EV)
     assert repeated.obtainExp==0 and not repeated.rewards
+    # Keep the clock rollback inside the explicitly active event period;
+    # schedule expiry is tested separately and must remain authoritative.
+    game.love.settings=settings(start=NOW-60000)
     game.clock[0]-=20000
     rolled=invoke(game,"ReceiveLessonReward",loveId=EV)
     assert not rolled.rewards and progress(game)["lesson_anchor_ms"]==NOW+10000
@@ -278,7 +281,9 @@ def test_atomic_concurrent_reward_claim_and_sql_failure_preserve_inventory(game)
     with game.state.connect() as db:
         db.execute("CREATE TRIGGER deny_love BEFORE UPDATE ON profile_love_progress BEGIN SELECT RAISE(ABORT,'synthetic failure'); END")
     guarded=database(game.state)
-    with pytest.raises(sqlite3.IntegrityError):invoke(game,"Present",loveId=EV)
+    # A drink changes both inventory/User.Get and progress JSON. Present
+    # legitimately leaves JSON unchanged and skips that redundant SQL UPDATE.
+    with pytest.raises(sqlite3.IntegrityError):invoke(game,"PromoteLesson",loveId=EV)
     assert database(game.state)==guarded
 
 

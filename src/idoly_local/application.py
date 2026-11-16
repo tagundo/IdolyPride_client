@@ -141,18 +141,14 @@ class Application:
         return _private_story_permissions(self.schema, self.fixtures, "/api.Story/ListEvent")
 
     def _fill_love_home(self, raw):
-        """Apply only the configured local Love event fields to either Home source."""
+        """Apply only configured Love fields; otherwise preserve captured wire bytes."""
         result = self.schema.response_type("/api.Home/Enter").FromString(raw)
         if "loveInfo" not in result.DESCRIPTOR.fields_by_name:
             return raw
-        result.ClearField("loveInfo")
-        result.loveInfo.SetInParent()
-        event_field = result.DESCRIPTOR.fields_by_name.get("eventInfo")
-        if event_field is not None and "loveEventInfos" in event_field.message_type.fields_by_name:
-            result.eventInfo.ClearField("loveEventInfos")
-        # A private Home capture must not replay old progress over a local Love
-        # run. Only rows backed by our explicit sidecar become SQL-owned here;
-        # an imported original UserLove without that state remains untouched.
+        info = self.love.home_info()
+        changed = False
+        # Only explicit local sidecar ownership can replace a captured delta.
+        # Imported UserLove rows without that state retain their original policy.
         common_field = result.DESCRIPTOR.fields_by_name.get("commonResponse")
         if common_field is not None and "updatedData" in common_field.message_type.fields_by_name:
             update = result.commonResponse.updatedData
@@ -169,11 +165,24 @@ class Application:
                     for row in owned:
                         if row.loveId not in by_id:
                             raise RpcFailure(RpcCode.FAILED_PRECONDITION, "Local Love progress is inconsistent")
-                        row.CopyFrom(by_id[row.loveId])
-        info = self.love.home_info()
-        if info is not None:
-            love, events = info
-            result.loveInfo.CopyFrom(love)
+                        if row.SerializeToString() != by_id[row.loveId].SerializeToString():
+                            row.CopyFrom(by_id[row.loveId])
+                            changed = True
+        event_field = result.DESCRIPTOR.fields_by_name.get("eventInfo")
+        has_events = event_field is not None and "loveEventInfos" in event_field.message_type.fields_by_name
+        if info is None:
+            if result.loveInfo.SerializeToString():
+                result.ClearField("loveInfo")
+                result.loveInfo.SetInParent()
+                changed = True
+            if has_events and result.eventInfo.loveEventInfos:
+                result.eventInfo.ClearField("loveEventInfos")
+                changed = True
+            return result.SerializeToString() if changed else raw
+        love, events = info
+        result.loveInfo.CopyFrom(love)
+        if has_events:
+            result.eventInfo.ClearField("loveEventInfos")
             result.eventInfo.loveEventInfos.extend(events)
         return result.SerializeToString()
 

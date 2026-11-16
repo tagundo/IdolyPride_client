@@ -54,6 +54,7 @@ jobs:
           tests=(
             tests/test_love.py
             tests/test_love_application.py
+            tests/test_story_application.py
             tests/test_love_state.py
             tests/test_event_settings.py
             tests/test_account_manager.py
