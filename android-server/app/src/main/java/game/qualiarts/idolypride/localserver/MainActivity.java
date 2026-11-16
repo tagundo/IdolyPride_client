@@ -55,6 +55,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private org.json.JSONArray accountRows = new org.json.JSONArray(), restoreRows = new org.json.JSONArray();
     private JSONObject accountStatus = new JSONObject(), activeAccount = new JSONObject(), durableHistory = new JSONObject();
     private JSONObject pendingAccountExport, pendingAccountPreview;
+    private int pendingAccountPicker;
     private Spinner accountPicker, restorePicker;
     private TextView accountOverview, accountPage, restorePage, accountOperation, serverChecks, durableFailure;
     private Button accountPrevious, accountNext, restoreNext, restoreAccount;
@@ -359,6 +360,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
             accountOffset = Math.max(0, savedInstanceState.getInt("account_offset", 0));
             restoreOffset = Math.max(0, savedInstanceState.getInt("restore_offset", 0));
+            pendingAccountPicker = restoredAccountPicker(savedInstanceState.getInt("account_picker", 0));
             try {
                 String exported = savedInstanceState.getString("account_export"), preview = savedInstanceState.getString("account_preview");
                 if (exported != null) pendingAccountExport = new JSONObject(exported);
@@ -641,8 +643,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                     .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).setType("application/zip")
                     .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/zip", "application/x-zip-compressed", "application/octet-stream"});
-            try { startActivityForResult(picker, IMPORT_ACCOUNT); }
-            catch (RuntimeException error) { accountError("account_picker_unavailable"); }
+            openAccountDocumentPicker(picker, IMPORT_ACCOUNT);
         });
         restorePicker = new Spinner(this); restorePicker.setContentDescription("idoly.accounts.restore-list");
         body.addView(restorePicker, new LinearLayout.LayoutParams(-1, dp(52)));
@@ -1395,6 +1396,19 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void accountChooseNotice() { Toast.makeText(this, R.string.accounts_choose, Toast.LENGTH_LONG).show(); }
 
+    private static int restoredAccountPicker(int requestCode) {
+        return requestCode == EXPORT_ACCOUNT || requestCode == IMPORT_ACCOUNT ? requestCode : 0;
+    }
+
+    private void openAccountDocumentPicker(Intent picker, int requestCode) {
+        pendingAccountPicker = requestCode;
+        try { startActivityForResult(picker, requestCode); }
+        catch (RuntimeException error) {
+            pendingAccountPicker = 0;
+            accountError("account_picker_unavailable");
+        }
+    }
+
     private void refreshAccounts() {
         performAccount("accounts_status", accountPayload("offset", accountOffset, "restore_offset", restoreOffset));
     }
@@ -1446,8 +1460,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
                     .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION).setType("application/zip")
                     .putExtra(Intent.EXTRA_TITLE, result.optString("filename", "IdolyPride-Account.zip"));
-            try { startActivityForResult(picker, EXPORT_ACCOUNT); }
-            catch (RuntimeException error) { accountError("account_picker_unavailable"); }
+            openAccountDocumentPicker(picker, EXPORT_ACCOUNT);
         } else if ("accounts_preview".equals(action)) {
             pendingAccountPreview = accountPayload("token", result.optString("token"), "archive", result.optJSONObject("archive"));
             showAccountImportChoices();
@@ -1973,6 +1986,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         state.putString("resource_platform", pendingResourcePlatform);
         state.putBoolean("storage_retry", retryStartAfterStoragePermission);
         state.putInt("account_offset", accountOffset); state.putInt("restore_offset", restoreOffset);
+        state.putInt("account_picker", pendingAccountPicker);
         if (pendingAccountExport != null) state.putString("account_export", pendingAccountExport.toString());
         if (pendingAccountPreview != null) state.putString("account_preview", pendingAccountPreview.toString());
         if (officialAppliedAccount != null) {
@@ -2339,10 +2353,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == EXPORT_ACCOUNT || requestCode == IMPORT_ACCOUNT) {
+            pendingAccountPicker = 0;
             if (resultCode != RESULT_OK || data == null || data.getData() == null) {
                 if (requestCode == EXPORT_ACCOUNT && pendingAccountExport != null) {
                     ServerService.discardAccountDocument(getApplicationContext(), pendingAccountExport.optString("path")); pendingAccountExport = null;
                 }
+                if (!ServerService.isManagingAccounts()) refreshAccounts();
                 return;
             }
             accountOperation.setText(R.string.accounts_working);
@@ -2373,7 +2389,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         playbackStatus.post(playbackRefresh);
         officialStatus.removeCallbacks(officialRefresh); officialStatus.post(officialRefresh);
         refreshEventSettings(false);
-        if (!ServerService.isManagingAccounts()) refreshAccounts();
+        // onStart can run before onActivityResult. Reserve the single account
+        // worker for the document result so a background status read cannot
+        // reject ZIP save/preview as account_operation_busy.
+        if (pendingAccountPicker == 0 && !ServerService.isManagingAccounts()) refreshAccounts();
     }
 
     @Override protected void onStop() {

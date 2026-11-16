@@ -439,8 +439,10 @@ def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeo
     tap(qa, "idoly.accounts.export", "71-account-export", "down")
     filename = document_name(qa)
     save_document(qa)
-    find(qa, lambda node: node.get("content-desc") == "idoly.accounts.export", "74-account-export-saved", "up")
-    tap(qa, "idoly.accounts.import", "75-account-import", "down")
+    find(qa, lambda node: node.get("content-desc") == "idoly.accounts.result"
+         and node.get("text") == "계정 ZIP을 저장했습니다. 다른 설치 환경에서도 계정 ZIP 가져오기로 사용할 수 있습니다.",
+         "74-account-export-saved", "down", enabled=False, destination=("users", "accounts"))
+    tap(qa, "idoly.accounts.import", "75-account-import", "up")
     open_document(qa, filename)
     try:
         tap(qa, "idoly.accounts.import-new", "76-account-native-preview")

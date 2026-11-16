@@ -126,6 +126,7 @@ jobs:
             tests/test_android_interface_qa.py
             tests/test_release_interface_contract.py
             tests/test_android_official_service_harness.py
+            tests/test_android_account_picker_lifecycle.py
             tests/test_ios_unified_web.py
             tests/test_love.py
             tests/test_love_application.py
