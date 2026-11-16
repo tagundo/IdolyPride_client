@@ -3551,3 +3551,18 @@ h.postMessage({id:4,action:'official_fetch'});if(q.forbidden!==true)throw Error(
 """
     checked=subprocess.run(["node"],input=program,text=True,capture_output=True,timeout=5)
     assert checked.returncode==0,checked.stderr
+
+
+def test_official_cancel_probe_walks_public_virtual_containers_with_identity_budget():
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    block=source.split("static BOOL ProbeOfficialActivateCancel(",1)[1].split("static void ProbeOfficialPromptPoll",1)[0]
+    assert "[visited containsObject:element]" in block and "[visited addObject:element];--*remaining" in block
+    assert "accessibilityElementCount" in block and "accessibilityElementAtIndex:index" in block
+    assert "index<MIN(count,64)&&*remaining" in block
+    assert "[[element accessibilityLabel] isEqual:title]" in block and "UIAccessibilityTraitButton" in block
+    poll=source.split("static void ProbeOfficialPromptPoll",1)[1].split("static void ProbeOfficialPrompt(",1)[0]
+    assert "NSPointerFunctionsObjectPointerPersonality" in poll and "NSUInteger remaining=512" in poll
+    assert "action.style==UIAlertActionStyleCancel" in poll
+    assert "[prompt.view accessibilityPerformEscape]" in poll and "[prompt accessibilityPerformEscape]" in poll
+    assert "valueForKey" not in block+poll and "performSelector" not in block+poll
+    assert 'metrics[@"web_reply_cancelled"]' in poll and 'metrics[@"fields_cleared"]' in poll

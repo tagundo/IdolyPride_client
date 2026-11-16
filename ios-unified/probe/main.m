@@ -1232,19 +1232,29 @@ static void ProbeOfficialSnapshot(void (^completion)(NSDictionary *)) {
         });
     });
 }
-static BOOL ProbeOfficialActivateCancel(UIView *root,NSString *title,NSUInteger *remaining) {
-    if (!root||!*remaining) return NO;--*remaining;
-    if ([root.accessibilityLabel isEqual:title]&&(root.accessibilityTraits&UIAccessibilityTraitButton)
-            &&[root accessibilityActivate]) return YES;
-    if ([root isKindOfClass:UIButton.class]&&[[(UIButton *)root titleForState:UIControlStateNormal] isEqual:title]) {
-        [(UIButton *)root sendActionsForControlEvents:UIControlEventTouchUpInside];return YES;
+static BOOL ProbeOfficialActivateCancel(id element,NSString *title,NSUInteger *remaining,NSHashTable *visited) {
+    if (!element||!*remaining||[visited containsObject:element]) return NO;
+    [visited addObject:element];--*remaining;
+    if ([[element accessibilityLabel] isEqual:title]&&([element accessibilityTraits]&UIAccessibilityTraitButton)
+            &&[element accessibilityActivate]) return YES;
+    if ([element isKindOfClass:UIButton.class]&&[[(UIButton *)element titleForState:UIControlStateNormal] isEqual:title]) {
+        [(UIButton *)element sendActionsForControlEvents:UIControlEventTouchUpInside];return YES;
     }
-    for (UIView *child in root.subviews) if (ProbeOfficialActivateCancel(child,title,remaining)) return YES;
-    for (id child in root.accessibilityElements) {
-        if (!*remaining) break;--*remaining;
-        if ([child isKindOfClass:UIAccessibilityElement.class]&&[[child accessibilityLabel] isEqual:title]
-                &&([child accessibilityTraits]&UIAccessibilityTraitButton)&&[child accessibilityActivate]) return YES;
+    // UIKit alerts may expose virtual action elements only through the public
+    // container protocol; they need not appear in UIView.subviews or an array.
+    if ([element respondsToSelector:@selector(accessibilityElementCount)]
+            &&[element respondsToSelector:@selector(accessibilityElementAtIndex:)]) {
+        NSInteger count=[element accessibilityElementCount];
+        if (count!=NSNotFound&&count>0) for (NSInteger index=0;index<MIN(count,64)&&*remaining;++index)
+            if (ProbeOfficialActivateCancel([element accessibilityElementAtIndex:index],title,remaining,visited)) return YES;
     }
+    if ([element respondsToSelector:@selector(accessibilityElements)]) {
+        id children=[element accessibilityElements];
+        if ([children isKindOfClass:NSArray.class]) for (id child in [children subarrayWithRange:NSMakeRange(0,MIN([children count],64))])
+            if (ProbeOfficialActivateCancel(child,title,remaining,visited)) return YES;
+    }
+    if ([element isKindOfClass:UIView.class]) for (UIView *child in [(UIView *)element subviews])
+        if (ProbeOfficialActivateCancel(child,title,remaining,visited)) return YES;
     return NO;
 }
 static void ProbeOfficialPromptPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
@@ -1278,7 +1288,16 @@ static void ProbeOfficialPromptPoll(WKWebView *__weak weakWeb,UIViewController *
             prompt.textFields[0].text=@"ProbeNeverSubmit_ID";prompt.textFields[1].text=@"ProbeNeverSubmit_Pass";
             metrics[@"synthetic_inputs_set"]=@((BOOL)(prompt.textFields[0].text.length>0&&prompt.textFields[1].text.length>0));
             NSUInteger remaining=512;
-            if (ProbeOfficialActivateCancel(prompt.view,cancel.title,&remaining)) {
+            NSHashTable *visited=[NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality|NSPointerFunctionsStrongMemory];
+            BOOL activated=ProbeOfficialActivateCancel(prompt.view,cancel.title,&remaining,visited);
+            // A public accessibility Escape on this inspected cancel-bearing
+            // alert is Cancel, never the default action. Require the real Web
+            // cancellation ACK, cleared fields and detached sheet afterwards.
+            if (!activated&&!prompt.isBeingDismissed&&prompt.viewIfLoaded.window)
+                activated=[prompt.view accessibilityPerformEscape];
+            if (!activated&&!prompt.isBeingDismissed&&prompt.viewIfLoaded.window)
+                activated=[prompt accessibilityPerformEscape];
+            if (activated) {
                 state[@"cancel_requested"]=@YES;metrics[@"cancel_action_activated"]=@YES;
             }
         }

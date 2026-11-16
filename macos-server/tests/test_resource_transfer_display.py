@@ -13,6 +13,19 @@ COUNTERS = ("session_served_bytes", "session_received_bytes", "session_http_requ
             "session_http_failures", "session_cache_hits", "session_cache_misses")
 
 
+def compile_swift(arguments):
+    try:
+        return subprocess.run(arguments, check=True, capture_output=True, timeout=60)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        stderr = error.stderr or b""
+        if isinstance(stderr, bytes):
+            stderr = stderr[-4096:].decode("utf-8", errors="replace")
+        else:
+            stderr = stderr[-4096:]
+        reason = "timed out after 60 seconds" if isinstance(error, subprocess.TimeoutExpired) else f"exited {error.returncode}"
+        pytest.fail(f"Swift compiler {reason}; last 4 KiB of stderr:\n{stderr}", pytrace=False)
+
+
 def bounded():
     resource.setrlimit(resource.RLIMIT_AS, (128 * 1024 * 1024,) * 2)
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -83,7 +96,6 @@ print("SWIFT_RESOURCE_TRANSFER_DISPLAY_PASS")
 '''
     path = tmp_path / "display.swift"; path.write_text(source)
     binary = tmp_path / "display"
-    subprocess.run([shutil.which("swiftc"), str(path), "-o", str(binary)], check=True,
-                   capture_output=True, timeout=30)
+    compile_swift([shutil.which("swiftc"), str(path), "-o", str(binary)])
     result = subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=3)
     assert result.stdout.strip() == "SWIFT_RESOURCE_TRANSFER_DISPLAY_PASS"
