@@ -3387,6 +3387,41 @@ def test_account_native_scenario_is_valid_javascript_and_preserves_original_prob
         assert gate in source
 
 
+@pytest.mark.parametrize("case",["consumed_preview","pending_fields","wrong_reply_id"])
+def test_native_account_click_completion_respects_single_use_import_and_pending_state(case):
+    import re
+    import subprocess
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    expression=re.search(r"static NSString \*const ProbeAccountScenario =\s*(.*?)\nstatic NSString \*ProbeAccountJSON",source,re.S)
+    pieces=re.findall(r'@?("(?:\\.|[^"\\])*")',expression.group(1))
+    script="".join(json.loads(piece) for piece in pieces)
+    until=script[script.index("  const until="):script.index("  const current=")]
+    click=script[script.index("  const click="):script.index("  const seed=")]
+    program="const testCase="+json.dumps(case)+r""";
+const q={error:null},config={deadline:Date.now()+350},fields={disabled:false};
+let clicks=0,unlocked=false;
+const button={disabled:false,scrollIntoView(){},click(){
+  clicks++;fields.disabled=true;button.disabled=true;
+  q.request={id:1,action:'accounts_import'};
+  q.reply={id:testCase==='wrong_reply_id'?2:1,ok:true,result:{action:'accounts_import'}};
+  if(testCase!=='pending_fields')setTimeout(()=>{unlocked=true;fields.disabled=false;},25);
+}};
+const document={getElementById(id){return id==='accounts-fields'?fields:id==='accounts-import'?button:null;}};
+"""+until+click+r"""
+(async()=>{
+  let result=null,error=null;
+  try{result=await click('import');}catch(value){error=value.message;}
+  if(testCase==='consumed_preview'){
+    if(!result||result.action!=='accounts_import'||error||!unlocked||fields.disabled||!button.disabled||clicks!==1)
+      throw Error('single-use import completion lost');
+  }else if(error!=='account_ui_timeout'||result!==null||clicks!==1)
+    throw Error('pending or uncorrelated completion accepted');
+})().catch(error=>{console.error(error.message);process.exitCode=1;});
+"""
+    checked=subprocess.run(["node"],input=program,text=True,capture_output=True,timeout=5)
+    assert checked.returncode==0,checked.stderr
+
+
 @pytest.mark.parametrize("field", probe.ACCOUNT_PERSIST_FLAGS)
 @pytest.mark.parametrize("bad", [False, 1])
 def test_after_five_cold_runs_requires_each_actual_boolean_preservation_check(field,bad):
