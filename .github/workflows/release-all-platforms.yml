@@ -442,7 +442,7 @@ jobs:
         run: python3 -B ios-unified/fetch_inputs.py --output "$RUNNER_TEMP/idoly-unified-inputs"
       - name: Install build verification dependencies
         run: |
-          python3 -m pip install --disable-pip-version-check pytest==8.4.2 pycryptodome==3.23.0
+          python3 -m pip install --disable-pip-version-check pytest==8.4.2 pycryptodome==3.23.0 UnityPy==1.25.4 astc-encoder-py==0.1.12 Pillow==13.0.0
           python3 -m pip install --no-index "$RUNNER_TEMP"/idoly-unified-inputs/wheels/*.whl
       - name: Verify host lifecycle, packaging, load gate and settings bridge
         run: |
@@ -504,7 +504,7 @@ jobs:
       - name: Install locked client tools and pinned Android SDK
         run: |
           uv sync --locked --all-extras --python 3.13
-          uv pip install --python .venv/bin/python 'UnityPy==1.25.4'
+          uv pip install --python .venv/bin/python 'UnityPy==1.25.4' 'astc-encoder-py==0.1.12' 'Pillow==13.0.0'
           sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
       - name: Build and verify Korean, Japanese and English game clients
         run: >-
