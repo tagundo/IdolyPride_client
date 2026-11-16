@@ -120,6 +120,48 @@ jobs:
           assert all(int(suite.get(key,'0')) == 0 for suite in root.iter('testsuite')
                      for key in ('failures','errors','skipped'))
           PY
+      - name: Fetch the frozen latest cohort for real media startup contracts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --locked --all-extras python - <<'PY'
+          import os
+          from pathlib import Path
+          from tools import latest_server_data_pin as latest
+          expected = {"bytes":198675046,"sha256":"3ea45bd9fba07d35cf366d50e8bc7604aeb67ea0aa1cd55f751474a75724dbce"}
+          assert latest.output_pin() == expected
+          work = Path(os.environ['RUNNER_TEMP']) / 'idoly-latest-media'
+          work.mkdir(mode=0o700)
+          payload = work / 'ServerData.zip'
+          fetched = latest.fetch_overlay(payload)
+          assert {key:fetched[key] for key in ('bytes','sha256')} == expected
+          verified = latest.verify_payload(payload)
+          assert {key:verified[key] for key in ('bytes','sha256')} == expected
+          # The registered whole blob is the complete latest ZIP. BASE inputs,
+          # their three mandatory contracts and their reports stay unchanged.
+          PY
+      - name: Require both actual latest Korean media startup and retention contracts
+        shell: bash
+        env:
+          IDOLY_LATEST_MEDIA_PAYLOAD: ${{ runner.temp }}/idoly-latest-media/ServerData.zip
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/idoly-portable"
+          uv run --locked --all-extras python -m pytest -q \
+            tests/test_latest_media_startup.py \
+            --junitxml="$RUNNER_TEMP/idoly-portable/latest-media-contracts.xml" \
+            | tee "$RUNNER_TEMP/idoly-portable/latest-media-contracts.txt"
+          python3 - <<'PY'
+          import os, pathlib, xml.etree.ElementTree as ET
+          root = ET.parse(pathlib.Path(os.environ['RUNNER_TEMP'])/'idoly-portable/latest-media-contracts.xml').getroot()
+          expected = {'test_actual_latest_media_preparation_and_restart_preserve_accounts[' + platform + ']'
+                      for platform in ('android','ios')}
+          cases = list(root.iter('testcase'))
+          assert len(cases) == 2 and {case.attrib['name'] for case in cases} == expected
+          assert not any(list(root.iter(tag)) for tag in ('failure','error','skipped'))
+          assert all(int(suite.get(key,'0')) == 0 for suite in root.iter('testsuite')
+                     for key in ('failures','errors','skipped'))
+          PY
       - name: Prepare Swift system modules before bounded formatter checks
         shell: bash
         timeout-minutes: 3

@@ -70,7 +70,7 @@ def schema():
 
 @pytest.fixture
 def game(schema, tmp_path):
-    master = tmp_path/"master";master.mkdir()
+    master = tmp_path/"master-json";master.mkdir()
     (master/"!version.txt").write_text(MASTER_VERSION)
     places=[dict(id=p,name=p,advAssetId="adv",idleCameraMotionAssetId="cam",backgroundAssetId="scene",
                  bgmAssetId="bgm",sceneLayoutAssetId="layout",notWearableCostumeTypeIds=["schl"],
@@ -290,3 +290,55 @@ def test_finish_enforces_original_reaction_outfit_restrictions(game):
     with pytest.raises(RpcFailure) as caught:finish(game)
     assert caught.value.code==RpcCode.INVALID_ARGUMENT and dump(game)==before
     assert not call(game,_FINISH,costumeId="cos-a",hairId="hair-a").rewardResults
+
+
+def approve_latest_excursion(game, monkeypatch):
+    from test_media_access import approve_latest_fixture
+    return approve_latest_fixture(game[2], monkeypatch, "media_access", tuple(game[3]),
+        {"schema": 1, "area": game[3]["Area"][0], "quests": game[3]["Quest"]})
+
+
+def test_latest_audited_excursion_lists_and_applies_only_media_access_aggregate(game, monkeypatch):
+    from idoly_local.latest_cohort_pins import MASTER_VERSION as latest_version
+    approve_latest_excursion(game, monkeypatch)
+    before = dump(game)
+    plan = prepare_excursion(game[2])
+    assert plan.master_version == latest_version
+    assert list(call(game, _LIST, characterId="char-a").excursionPlaceIds) == ["park", "pool"]
+    assert not call(game, _CHECK, characterId="char-a", excursionPlaceId="park", costumeId="cos-a", hairId="hair-a").commonResponse.ListFields()
+    value = snapshot(game); value.areas.add(areaId="other", clearQuestCount=7).MergeFromString(UNKNOWN)
+    expected = type(value)(); expected.CopyFrom(value)
+    expected.areas.add(areaId="area-main-013", clearQuestCount=2)
+    assert apply_excursion_access(value, plan) and value.SerializeToString() == expected.SerializeToString()
+    assert not apply_excursion_access(value, plan)
+    assert dump(game) == before
+    assert game[1].authenticated(game[4], "gallery")
+
+
+@pytest.mark.parametrize("damage", ["unapproved", "proof", "file", "future-version"])
+def test_latest_excursion_requires_the_exact_approved_public_cohort_before_account_changes(game, monkeypatch, damage):
+    pins = approve_latest_excursion(game, monkeypatch)
+    if damage == "unapproved": monkeypatch.setattr(pins, "FEATURE_FILES", {})
+    elif damage == "proof": (game[2].parent / "latest-semantic-controls.json").write_text("{}")
+    elif damage == "file": (game[2] / "ExcursionPlace.json").write_text("[]")
+    elif damage == "future-version": (game[2] / "!version.txt").write_text("unapproved-future")
+    before = dump(game)
+    with pytest.raises(RpcFailure) as caught: prepare_excursion(game[2])
+    assert caught.value.code == RpcCode.FAILED_PRECONDITION and dump(game) == before
+
+
+@pytest.mark.parametrize("damage", ["quest", "scene", "version", "directory", "changed-file"])
+def test_latest_excursion_access_rejects_forged_or_stale_plan_before_snapshot_mutation(game, monkeypatch, damage):
+    from dataclasses import replace
+    from types import MappingProxyType
+    approve_latest_excursion(game, monkeypatch)
+    plan = prepare_excursion(game[2])
+    if damage == "quest": plan = replace(plan, quest_ids=("forged-quest",))
+    elif damage == "scene": plan = replace(plan, places=MappingProxyType({}))
+    elif damage == "version": plan = replace(plan, master_version="unapproved-future")
+    elif damage == "directory": plan = replace(plan, _master_dir=None)
+    elif damage == "changed-file": (game[2] / "ExcursionGazeReaction.json").write_text("[]")
+    value = snapshot(game); before = value.SerializeToString(); account_before = dump(game)
+    with pytest.raises(RpcFailure) as caught: apply_excursion_access(value, plan)
+    assert caught.value.code == RpcCode.FAILED_PRECONDITION
+    assert value.SerializeToString() == before and dump(game) == account_before
