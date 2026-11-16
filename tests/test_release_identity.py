@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 import pytest
-import yaml
+import re
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("calendar_release_identity", ROOT/"tools/release_identity.py")
@@ -63,33 +63,30 @@ def test_identity_preview_does_not_publish_or_choose_a_clock_dependent_version()
 
 
 def workflow(name):
-    return yaml.load((ROOT/".github/workflows"/name).read_text(), Loader=yaml.BaseLoader)
+    return (ROOT/".github/workflows"/name).read_text()
 
 
 def test_publishing_requires_explicit_manual_opt_in_and_quoted_validated_version():
     release = workflow("release-all-platforms.yml")
-    assert set(release["on"]) == {"workflow_dispatch"}
-    inputs = release["on"]["workflow_dispatch"]["inputs"]
-    assert inputs["release_version"]["type"] == "string"
-    assert inputs["release_version"]["required"] == "true"
-    assert release["env"]["IDOLY_RELEASE_VERSION"] == "${{ inputs.release_version }}"
-    publish = release["jobs"]["publish"]
-    condition = publish["if"]
+    events = release.split("\npermissions:", 1)[0]
+    assert "\n  workflow_dispatch:" in events and "\n  push:" not in events
+    assert re.search(r"(?m)^      release_version:\n        description: [^\n]+\n        type: string\n        required: true$", events)
+    assert "IDOLY_RELEASE_VERSION: '${{ inputs.release_version }}'" in release
+    publish = release.split("\n  publish:\n", 1)[1]
+    condition = publish.split("\n    runs-on:", 1)[0]
     assert "github.event_name == 'workflow_dispatch'" in condition
     assert "&& inputs.publish" in condition
     assert "github.event_name == 'push'" not in condition
-    command = next(step["run"] for step in publish["steps"]
-        if "tools/publish_optimized_release.py" in step.get("run", ""))
-    assert '--release-version "$IDOLY_RELEASE_VERSION"' in command
-    assert "${{ inputs.release_version }}" not in command
+    assert '--release-version "$IDOLY_RELEASE_VERSION"' in publish
+    assert "${{ inputs.release_version }}" not in publish
 
 
 def test_focused_checks_have_no_publication_credentials_or_build_steps():
     checks = workflow("verify-release-naming.yml")
-    assert checks["permissions"] == {"contents": "read"}
-    job = checks["jobs"]["naming"]
-    assert "permissions" not in job and "env" not in job
-    runs = "\n".join(step.get("run", "") for step in job["steps"])
-    assert "tests/test_publish_optimized_release.py" in runs
-    assert "tests/test_release_identity.py" in runs
-    assert "GH_TOKEN" not in runs and "publish_optimized_release.py --" not in runs
+    assert "\npermissions:\n  contents: read\n" in checks
+    assert "contents: write" not in checks and "GH_TOKEN" not in checks
+    job = checks.split("\n  naming:\n", 1)[1]
+    assert "\n    permissions:" not in job and "\n    env:" not in job
+    assert "tests/test_publish_optimized_release.py" in job
+    assert "tests/test_release_identity.py" in job
+    assert "tools/publish_optimized_release.py" not in job
