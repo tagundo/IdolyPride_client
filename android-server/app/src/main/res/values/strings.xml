@@ -327,7 +327,7 @@
     <string name="official_fetch_title">확인한 공식 계정으로 진행</string>
     <string name="official_preview">매니저: %1$s · Lv %2$d\n공개 ID: %3$s</string>
     <string name="official_counts">카드 %1$d · 아이템 %2$d · 사진 %3$d</string>
-    <string name="official_expiry">이 작업의 남은 유효 시간: %1$d초</string>
+    <string name="official_expiry">인계 정보 확인을 시작한 뒤 최대 10분간 유효합니다.</string>
     <string name="official_ready_notice">내려받은 자료의 검증이 끝났습니다. 기본값은 새 일반 계정 저장입니다. 기존 계정 덮어쓰기는 서버를 중지한 뒤 계정 관리에서 대상을 고르세요.</string>
     <string name="official_completed_notice">일반 계정에 저장했습니다. 아래에서 가져온 계정을 선택하고 일반 모드로 전환한 뒤 게임과 서버를 다시 시작하세요. 감상 계정은 별도로 유지됩니다.</string>
     <string name="official_choose_slot">로컬 계정 이름</string>

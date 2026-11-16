@@ -28,6 +28,10 @@ from zipfile import BadZipFile, ZipFile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
+PROBE_SOURCE_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROBE_SOURCE_DIR))
+from ui_test_driver import ProbePromptCancelDriver, DriverError, ERROR_CODES as UI_DRIVER_ERRORS
+
 
 BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
 # ServerData archives contain a data/ root; the installer removes that prefix
@@ -884,9 +888,56 @@ def validate_report(value):
 
 
 
+UI_TEST_SOURCE_PATHS = ("ui_test_driver.py", "ui-tests/CancelDriverHost.swift", "ui-tests/OfficialPromptCancelTests.swift",
+    "ui-tests/IdolyProbeCancelUITests.xcodeproj/project.pbxproj",
+    "ui-tests/IdolyProbeCancelUITests.xcodeproj/xcshareddata/xcschemes/IdolyProbeCancelUITests.xcscheme")
+UI_TEST_IDENTIFIER = "IdolyProbeCancelUITests/OfficialPromptCancelTests/testCancelExistingProbePrompt"
+
+
+def official_ui_source_pins():
+    try:
+        return {name:hashlib.sha256(read_bounded(PROBE_SOURCE_DIR/name,256*1024)).hexdigest() for name in UI_TEST_SOURCE_PATHS}
+    except (OSError,ProbeError):
+        raise ProbeError("official_ui_test_sources_unavailable") from None
+
+
+def validate_official_ui_proof(value, *, expected_simulator=None):
+    fail="official_ui_test_evidence_failed"
+    require(type(value) is dict and type(value.get("schema")) is int and value["schema"]==1
+        and value.get("status")=="PASS" and value.get("execution")=="public_xctest"
+        and value.get("test_identifier")==UI_TEST_IDENTIFIER
+        and type(value.get("tests")) is int and value["tests"]==1
+        and type(value.get("failures")) is int and value["failures"]==0
+        and type(value.get("skipped")) is int and value["skipped"]==0
+        and value.get("actual_cancel_tap") is True and value.get("ready_marker_observed") is True,fail)
+    identifier=value.get("simulator_udid")
+    require(type(identifier) is str and re.fullmatch(r"[0-9A-F]{8}(?:-[0-9A-F]{4}){3}-[0-9A-F]{12}",identifier)
+        and (expected_simulator is None or identifier==expected_simulator),fail)
+    pins=official_ui_source_pins()
+    source_hash=hashlib.sha256(json.dumps(pins,sort_keys=True,separators=(",",":")).encode()).hexdigest()
+    require(type(value.get("source_pins")) is dict and value["source_pins"]==pins and value.get("source_sha256")==source_hash
+        and all(_hex_digest(value.get(key)) for key in ("xctestrun_sha256","xcresult_summary_sha256","xcresult_tests_sha256")),fail)
+    return {key:value[key] for key in ("schema","status","execution","simulator_udid","test_identifier","tests","failures",
+        "skipped","actual_cancel_tap","ready_marker_observed","source_pins","source_sha256","xctestrun_sha256",
+        "xcresult_summary_sha256","xcresult_tests_sha256")}
+
+
+def _poll_official_ui_driver(driver):
+    try:
+        state=driver.poll()
+    except DriverError as error:
+        raise ProbeError(error.code if error.code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed") from None
+    require(type(state) is dict and state.get("phase") in ("building","running","passed","failed")
+        and type(state.get("ready")) is bool,"official_ui_test_driver_failed")
+    if state["phase"]=="failed":
+        code=state.get("error_code")
+        raise ProbeError(code if type(code) is str and code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed")
+    return state
+
+
 OFFICIAL_PROMPT_FLAGS = ("button_found", "enabled_before", "click_dispatched", "empty_web_payload", "prompt_presented",
     "field_count_two", "secure_password_field", "platform_actions_present", "cancel_action_present", "synthetic_inputs_set",
-    "cancel_action_activated", "fields_cleared", "web_reply_cancelled", "prompt_detached", "official_job_absent_before",
+    "cancel_ack_observed", "fields_cleared", "web_reply_cancelled", "prompt_detached", "official_job_absent_before",
     "official_job_absent_after", "account_data_unchanged", "runtime_identity_unchanged", "completed")
 
 
@@ -895,10 +946,13 @@ def official_prompt_observation(value):
     clean = {key:value[key] for key in (*OFFICIAL_PROMPT_FLAGS, "performed", "timed_out", "credential_submission_performed")
              if type(value.get(key)) is bool}
     for key, expected in (("scope","stock-simulator"),("ui_trigger","dom-click"),
-                          ("cancel_trigger","accessibility-or-control-action"),("reason","first-cold-run-only")):
+                          ("cancel_trigger","public-xctest-tap"),("reason","first-cold-run-only")):
         if value.get(key) == expected: clean[key] = expected
     seconds = value.get("elapsed_seconds")
     if type(seconds) in (int,float) and math.isfinite(seconds) and 0 <= seconds <= 30: clean["elapsed_seconds"] = seconds
+    if type(value.get("ui_test")) is dict:
+        try: clean["ui_test"]=validate_official_ui_proof(value["ui_test"])
+        except ProbeError: pass
     return clean
 
 
@@ -909,11 +963,12 @@ def validate_official_prompt(value, run_index):
         require(value == {"performed":False,"reason":"first-cold-run-only"} and type(value.get("performed")) is bool,fail)
         return dict(value)
     require(value.get("performed") is True and value.get("scope") == "stock-simulator"
-        and value.get("ui_trigger") == "dom-click" and value.get("cancel_trigger") == "accessibility-or-control-action"
+        and value.get("ui_trigger") == "dom-click" and value.get("cancel_trigger") == "public-xctest-tap"
         and value.get("timed_out") is False and value.get("credential_submission_performed") is False
         and all(value.get(key) is True for key in OFFICIAL_PROMPT_FLAGS)
         and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
         and 0 <= value["elapsed_seconds"] <= 30,fail)
+    validate_official_ui_proof(value.get("ui_test"))
     return official_prompt_observation(value)
 
 
@@ -1200,7 +1255,7 @@ class AccountFixtureHarness:
             "archive_sha256": sha, "archive_bytes": before.st_size}
 
 
-def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None):
+def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None, ui_driver=None, simulator_udid=None):
     documents = Path(container) / "Documents"
     final_name, waiting_name, _checkpoint_name = language_paths(expected_language,run_index)
     final, waiting = documents / final_name, documents / waiting_name
@@ -1238,6 +1293,8 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None,
             raise
     while True:
         checked_remaining()
+        if ui_driver is not None:
+            _poll_official_ui_driver(ui_driver)
         if account_fixture is not None:
             account_fixture.process()
         try:
@@ -1247,6 +1304,14 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None,
                 detail = menu.get("account_management") if type(menu) is dict else None
                 if type(detail) is dict:
                     detail["state_observation"] = account_fixture.verify(detail)
+            if ui_driver is not None:
+                try:
+                    proof=validate_official_ui_proof(ui_driver.finish(),expected_simulator=simulator_udid)
+                except DriverError as error:
+                    raise ProbeError(error.code if error.code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed") from None
+                menu=observed.get("menu_lifetime")
+                require(type(menu) is dict and type(menu.get("official_prompt")) is dict,"official_ui_test_evidence_failed")
+                menu["official_prompt"]["ui_test"]=proof
             try:
                 checked = validate_report(observed)
                 expected_index = MATRIX_LANGUAGES.index(expected_language) if run_index is None else run_index
@@ -2281,6 +2346,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
     created = None
     container = None
     account_harness = None
+    ui_driver = None
     current_language = "ko"
     current_run_index = 0
     start = time.monotonic()
@@ -2338,6 +2404,15 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         container = candidate
         account_harness = AccountFixtureHarness(container, schema, descriptor_sha256=report["descriptor_sha256"])
         report["fresh_local_state_before_launch"] = True
+        stage = "official_ui_test_build_and_start"
+        try:
+            ui_driver = ProbePromptCancelDriver(created,remaining=remaining)
+            ui_driver.start()
+        except DriverError as error:
+            raise ProbeError(error.code if error.code in UI_DRIVER_ERRORS else "official_ui_test_driver_failed") from None
+        while not _poll_official_ui_driver(ui_driver)["ready"]:
+            remaining()
+            time.sleep(min(0.1,remaining()))
         stage = "app_launch"
         try:
             _simctl(["launch", created, BUNDLE_ID, "--idoly-probe-language=ko", "--idoly-probe-run-index=0"], remaining(180))
@@ -2352,7 +2427,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 report["launch_ack_diagnostic"] = error.tool_detail
             report["launch_ack_checkpoint"] = failure_checkpoint(container)
         stage = "startup_gate_report"
-        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0, account_fixture=account_harness)
+        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0, account_fixture=account_harness, ui_driver=ui_driver, simulator_udid=created)
+        report["official_prompt_ui_test"] = report["native_probe"]["menu_lifetime"]["official_prompt"]["ui_test"]
         summaries = [validate_language_relaunch_report(report["native_probe"],"ko",run_index=0)]
         compare_language_canaries(summaries[0],"ko",canaries,report["language_canaries_sha256"])
         stage = "asset_listener"
@@ -2395,6 +2471,24 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
         report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index)
+        if ui_driver is not None and callable(getattr(ui_driver,"build_failure_log",None)):
+            try:
+                raw=ui_driver.build_failure_log()
+                if type(raw) is bytes and raw:
+                    raw=raw[-16384:]
+                    diagnostic={"schema":1,"scope":"pre-input-xctest-build","tail_bytes":len(raw),
+                        "sha256":hashlib.sha256(raw).hexdigest(),"text":raw.decode("utf-8","replace")}
+                    # Keep escaped JSON below the same audit cap even if a
+                    # compiler emits control bytes or malformed UTF-8.
+                    while len(json.dumps(diagnostic,separators=(",",":"),sort_keys=True).encode())+1>MAX_JSON:
+                        raw=raw[-max(1,len(raw)//2):]
+                        diagnostic.update(tail_bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest(),text=raw.decode("utf-8","replace"))
+                    diagnostic_path=audit.with_name(audit.stem+"-xctest-build.json")
+                    write_audit(diagnostic_path,diagnostic)
+                    report["xctest_build_diagnostic"]={key:diagnostic[key] for key in ("scope","tail_bytes","sha256")}
+                    report["xctest_build_diagnostic"]["file_name"]=diagnostic_path.name
+            except (OSError,ProbeError,DriverError):
+                report["xctest_build_diagnostic"]={"available":False}
         if isinstance(error, ProbeError) and isinstance(getattr(error, "native_detail", None), str):
             report["native_startup_error"] = error.native_detail
         if isinstance(error, ProbeError) and type(getattr(error, "native_crypto", None)) is dict:
@@ -2433,6 +2527,13 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         # Capture before deleting the owned container, including when an
         # otherwise passing run subsequently encounters a cleanup failure.
         checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index)
+        if ui_driver is not None:
+            try:
+                ui_driver.close()
+                report["ui_test_driver_cleanup"] = True
+            except BaseException:
+                report["ui_test_driver_cleanup"] = False
+                report.update(status="FAIL",cleanup_complete=False)
         if created is not None:
             for action in ("shutdown", "delete"):
                 try:

@@ -52,6 +52,29 @@ def modeled_account_management(run_index=0):
             "normalized_restored_sha256":"b"*64,"archive_sha256":"9"*64,"archive_bytes":4096}}
 
 
+def modeled_ui_test_proof(udid=None):
+    pins=probe.official_ui_source_pins()
+    return {"schema":1,"status":"PASS","execution":"public_xctest","simulator_udid":udid or CREATED,
+        "test_identifier":probe.UI_TEST_IDENTIFIER,"tests":1,"failures":0,"skipped":0,
+        "actual_cancel_tap":True,"ready_marker_observed":True,"source_pins":pins,
+        "source_sha256":hashlib.sha256(json.dumps(pins,sort_keys=True,separators=(",",":")).encode()).hexdigest(),
+        "xctestrun_sha256":"a"*64,"xcresult_summary_sha256":"b"*64,"xcresult_tests_sha256":"c"*64}
+
+
+class ModeledUIDriver:
+    def __init__(self,simulator_udid,*,remaining):
+        self.udid=simulator_udid;self.remaining=remaining;self.started=False;self.closed=False
+    def start(self):
+        assert not self.started;self.started=True
+    def poll(self):
+        assert self.started and not self.closed
+        return {"phase":"running","ready":True}
+    def finish(self):
+        assert self.started and not self.closed
+        return modeled_ui_test_proof(self.udid)
+    def close(self):self.closed=True
+
+
 @pytest.fixture(autouse=True)
 def modeled_account_observer_for_mock_simulator_transport(monkeypatch):
     # FakeSimctl writes modeled reports; it never runs UIKit or the real fixture.
@@ -68,6 +91,7 @@ def modeled_account_observer_for_mock_simulator_transport(monkeypatch):
                     "target_session_invalidated","original_selection_preserved")},
                 "normalized_source_sha256":"a"*64,"normalized_restored_sha256":"b"*64}
     monkeypatch.setattr(probe, "AccountFixtureHarness", ModeledFixture)
+    monkeypatch.setattr(probe, "ProbePromptCancelDriver", ModeledUIDriver)
 
 
 CREATED = "00000000-0000-4000-8000-000000000123"
@@ -261,8 +285,8 @@ def native_report(language="ko", run_index=None):
             if run_index == 0 else {"performed":False,"reason":"first-cold-run-only"}),
         "account_management":modeled_account_management(run_index),
         "official_prompt":({"performed":True,"scope":"stock-simulator","ui_trigger":"dom-click",
-            "cancel_trigger":"accessibility-or-control-action","timed_out":False,"credential_submission_performed":False,
-            "elapsed_seconds":0.9,**{key:True for key in probe.OFFICIAL_PROMPT_FLAGS}}
+            "cancel_trigger":"public-xctest-tap","timed_out":False,"credential_submission_performed":False,
+            "elapsed_seconds":0.9,**{key:True for key in probe.OFFICIAL_PROMPT_FLAGS},"ui_test":modeled_ui_test_proof()}
             if run_index==0 else {"performed":False,"reason":"first-cold-run-only"}),
         "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
         "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
@@ -3553,16 +3577,100 @@ h.postMessage({id:4,action:'official_fetch'});if(q.forbidden!==true)throw Error(
     assert checked.returncode==0,checked.stderr
 
 
-def test_official_cancel_probe_walks_public_virtual_containers_with_identity_budget():
+def test_official_cancel_probe_publishes_ready_fields_and_requires_real_cancel_ack():
     source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
-    block=source.split("static BOOL ProbeOfficialActivateCancel(",1)[1].split("static void ProbeOfficialPromptPoll",1)[0]
-    assert "[visited containsObject:element]" in block and "[visited addObject:element];--*remaining" in block
-    assert "accessibilityElementCount" in block and "accessibilityElementAtIndex:index" in block
-    assert "index<MIN(count,64)&&*remaining" in block
-    assert "[[element accessibilityLabel] isEqual:title]" in block and "UIAccessibilityTraitButton" in block
     poll=source.split("static void ProbeOfficialPromptPoll",1)[1].split("static void ProbeOfficialPrompt(",1)[0]
-    assert "NSPointerFunctionsObjectPointerPersonality" in poll and "NSUInteger remaining=512" in poll
-    assert "action.style==UIAlertActionStyleCancel" in poll
-    assert "[prompt.view accessibilityPerformEscape]" in poll and "[prompt accessibilityPerformEscape]" in poll
-    assert "valueForKey" not in block+poll and "performSelector" not in block+poll
-    assert 'metrics[@"web_reply_cancelled"]' in poll and 'metrics[@"fields_cleared"]' in poll
+    assert "ProbeOfficialActivateCancel" not in source
+    assert "accessibilityActivate" not in poll and "accessibilityPerformEscape" not in poll
+    assert "sendActionsForControlEvents" not in poll and "valueForKey" not in poll and "performSelector" not in poll
+    assert 'action.style==UIAlertActionStyleCancel' in poll
+    assert 'hasPrefix:' not in poll
+    for title in ("iOS 계정 확인","iOSアカウントを確認","Check iOS account","Android 계정 확인","Androidアカウントを確認","Check Android account"):
+        assert title in poll
+    assert 'iosActions==1&&androidActions==1' in poll
+    assert poll.index('metrics[@"synthetic_inputs_set"]') < poll.index('accessibilityIdentifier=@"idoly-official-probe-transfer-id"')
+    assert 'accessibilityIdentifier=@"idoly-official-probe-transfer-password"' in poll
+    assert '[metrics[@"web_reply_cancelled"] isEqual:@YES]' in poll and 'metrics[@"cancel_ack_observed"]=@YES' in poll
+    assert 'metrics[@"fields_cleared"]' in poll and 'metrics[@"account_data_unchanged"]' in poll
+
+
+@pytest.mark.parametrize("field,bad",[("actual_cancel_tap",False),("actual_cancel_tap",1),("ready_marker_observed",False),
+    ("tests",True),("tests",0),("tests",2),("failures",1),("skipped",1),("status","FAIL"),
+    ("execution","native-handler"),("test_identifier","Other/test"),("source_sha256","a"*64),
+    ("xctestrun_sha256","not-a-hash"),("simulator_udid","not-owned")])
+def test_official_prompt_requires_strict_external_xctest_result_and_source_binding(field,bad):
+    proof=modeled_ui_test_proof();proof[field]=bad
+    with pytest.raises(probe.ProbeError,match="^official_ui_test_evidence_failed$"):
+        probe.validate_official_ui_proof(proof,expected_simulator=CREATED)
+
+
+def test_official_ui_proof_rejects_another_simulator_or_changed_source_and_drops_raw_payload():
+    proof=modeled_ui_test_proof();proof["raw_input"]="DO-NOT-EXPORT"
+    assert "DO-NOT-EXPORT" not in json.dumps(probe.validate_official_ui_proof(proof,expected_simulator=CREATED))
+    with pytest.raises(probe.ProbeError):probe.validate_official_ui_proof(proof,expected_simulator="00000000-0000-4000-8000-000000000999")
+    proof["source_pins"]["ui-tests/OfficialPromptCancelTests.swift"]="a"*64
+    with pytest.raises(probe.ProbeError):probe.validate_official_ui_proof(proof)
+    native=native_report();del native["menu_lifetime"]["official_prompt"]["ui_test"]
+    with pytest.raises(probe.ProbeError):probe.validate_report(native)
+
+
+def test_xctest_runner_starts_before_existing_probe_and_closes_before_owned_simulator(app,tmp_path,monkeypatch):
+    events=[]
+    class Driver(ModeledUIDriver):
+        def start(self):events.append("driver-start");super().start()
+        def poll(self):events.append("driver-ready");return super().poll()
+        def finish(self):events.append("driver-finish");return super().finish()
+        def close(self):events.append("driver-close");super().close()
+    sim=FakeSimctl(tmp_path/"ui-runner-container")
+    def control(args,timeout):
+        if args[0] in ("launch","terminate","shutdown","delete"):events.append(args[0])
+        return sim(args,timeout)
+    monkeypatch.setattr(probe,"ProbePromptCancelDriver",Driver)
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",control), \
+            mock.patch.object(probe.socket,"create_connection"),mock.patch.object(probe,"probe_rpcs",return_value=[]), \
+            mock.patch.object(probe,"probe_master_file",return_value=master_file_report()), \
+            mock.patch.object(probe,"probe_sdk_resource",return_value=sdk_resource_report()):
+        result=probe.run_probe(app,tmp_path/"ui-runner.json")
+    assert result["status"]=="PASS"
+    assert events.index("driver-start") < events.index("driver-ready") < events.index("launch")
+    assert events.index("driver-finish") < events.index("terminate")
+    assert events.index("driver-close") < events.index("shutdown") < events.index("delete")
+    assert events.count("driver-start")==1 and events.count("driver-finish")==1
+    assert events.count("launch")==5 and [x[0] for x in sim.calls].count("install")==1
+    assert result["official_prompt_ui_test"]["test_identifier"]==probe.UI_TEST_IDENTIFIER
+
+
+def test_failed_xctest_result_still_cleans_only_owned_driver_and_simulator(app,tmp_path,monkeypatch):
+    closed=[]
+    class Failed(ModeledUIDriver):
+        def finish(self):raise probe.DriverError("ui_driver_test_failed")
+        def close(self):closed.append(True);super().close()
+    sim=FakeSimctl(tmp_path/"failed-ui-runner")
+    monkeypatch.setattr(probe,"ProbePromptCancelDriver",Failed)
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",sim), \
+            mock.patch.object(probe,"probe_rpcs") as rpc:
+        result=probe.run_probe(app,tmp_path/"failed-ui-runner.json")
+    assert result["status"]=="FAIL" and result["error"]=="ui_driver_test_failed"
+    assert closed==[True] and result["ui_test_driver_cleanup"] is True
+    assert result["cleanup"]=={"shutdown":True,"delete":True}
+    assert [x[0] for x in sim.calls].count("launch")==1
+    rpc.assert_not_called()
+
+
+def test_pre_input_xctest_build_failure_has_only_bounded_owned_diagnostic(app,tmp_path,monkeypatch):
+    class FailedBuild(ModeledUIDriver):
+        def start(self):raise probe.DriverError("ui_driver_build_failed")
+        def build_failure_log(self):return b"BUILD-ONLY-"+b"x"*20000
+    sim=FakeSimctl(tmp_path/"failed-ui-build")
+    monkeypatch.setattr(probe,"ProbePromptCancelDriver",FailedBuild)
+    with mock.patch.object(probe.sys,"platform","darwin"),mock.patch.object(probe,"_simctl",sim):
+        result=probe.run_probe(app,tmp_path/"failed-ui-build.json")
+    assert result["status"]=="FAIL" and result["error"]=="ui_driver_build_failed"
+    assert not any(call[0]=="launch" for call in sim.calls)
+    diagnostic=json.loads((tmp_path/"failed-ui-build-xctest-build.json").read_text())
+    assert diagnostic["scope"]=="pre-input-xctest-build" and diagnostic["tail_bytes"]==16384
+    assert len(diagnostic["text"].encode())==16384
+    assert diagnostic["sha256"]==hashlib.sha256(diagnostic["text"].encode()).hexdigest()
+    assert result["xctest_build_diagnostic"]=={key:diagnostic[key] for key in ("scope","tail_bytes","sha256")} | {"file_name":"failed-ui-build-xctest-build.json"}
+    assert "text" not in result["xctest_build_diagnostic"]
+    assert result["cleanup"]=={"shutdown":True,"delete":True}

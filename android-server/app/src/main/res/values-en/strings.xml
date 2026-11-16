@@ -21,7 +21,7 @@
     <string name="official_fetch_title">Continue with this official account</string>
     <string name="official_preview">Manager: %1$s · Lv %2$d\nPublic ID: %3$s</string>
     <string name="official_counts">Cards %1$d · Items %2$d · Photos %3$d</string>
-    <string name="official_expiry">This transfer expires in %1$d seconds</string>
+    <string name="official_expiry">Verification expires within 10 minutes of starting the check.</string>
     <string name="official_ready_notice">Downloaded data is verified. Save it as a new normal account, or stop the server and choose an existing normal account in Account management before replacing it.</string>
     <string name="official_completed_notice">Saved in a normal account. Select the imported account below, switch to normal mode, then restart the game and server. Viewing accounts remain separate.</string>
     <string name="official_choose_slot">Local account slot name</string>

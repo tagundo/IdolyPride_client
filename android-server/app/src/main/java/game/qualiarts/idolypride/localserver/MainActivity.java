@@ -809,7 +809,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
                     inventory.optInt("cards"), inventory.optInt("items"), inventory.optInt("photos")));
         }
         int expiry = officialJob.optInt("expires_in_seconds", 0);
-        if (expiry > 0) summary.append("\n").append(getString(R.string.official_expiry, expiry));
+        if (expiry > 0) summary.append("\n").append(getString(R.string.official_expiry));
         if ("ready".equals(state)) summary.append("\n\n").append(getString(R.string.official_ready_notice));
         if (officialAppliedAccount != null) summary.append("\n\n").append(getString(R.string.official_completed_notice));
         if ((officialWarnings & OFFICIAL_WARNING_CLEANUP) != 0) summary.append("\n\n").append(getString(R.string.official_committed_cleanup));

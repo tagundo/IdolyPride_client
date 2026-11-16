@@ -21,7 +21,7 @@
     <string name="official_fetch_title">確認した公式アカウントで続行</string>
     <string name="official_preview">マネージャー: %1$s · Lv %2$d\n公開ID: %3$s</string>
     <string name="official_counts">カード %1$d · アイテム %2$d · 写真 %3$d</string>
-    <string name="official_expiry">この操作の有効期限まで %1$d 秒</string>
+    <string name="official_expiry">確認開始から最大10分間有効です。</string>
     <string name="official_ready_notice">取得データの検証が完了しました。新しい通常アカウントへの保存が基本です。置き換える場合はサーバーを停止し、アカウント管理で通常アカウントを選択してください。</string>
     <string name="official_completed_notice">通常アカウントに保存しました。下で取り込んだアカウントを選択し、通常モードに切り替えてからゲームとサーバーを再起動してください。鑑賞用アカウントは別管理です。</string>
     <string name="official_choose_slot">ローカル保存枠の名前</string>

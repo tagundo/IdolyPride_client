@@ -1232,31 +1232,6 @@ static void ProbeOfficialSnapshot(void (^completion)(NSDictionary *)) {
         });
     });
 }
-static BOOL ProbeOfficialActivateCancel(id element,NSString *title,NSUInteger *remaining,NSHashTable *visited) {
-    if (!element||!*remaining||[visited containsObject:element]) return NO;
-    [visited addObject:element];--*remaining;
-    if ([[element accessibilityLabel] isEqual:title]&&([element accessibilityTraits]&UIAccessibilityTraitButton)
-            &&[element accessibilityActivate]) return YES;
-    if ([element isKindOfClass:UIButton.class]&&[[(UIButton *)element titleForState:UIControlStateNormal] isEqual:title]) {
-        [(UIButton *)element sendActionsForControlEvents:UIControlEventTouchUpInside];return YES;
-    }
-    // UIKit alerts may expose virtual action elements only through the public
-    // container protocol; they need not appear in UIView.subviews or an array.
-    if ([element respondsToSelector:@selector(accessibilityElementCount)]
-            &&[element respondsToSelector:@selector(accessibilityElementAtIndex:)]) {
-        NSInteger count=[element accessibilityElementCount];
-        if (count!=NSNotFound&&count>0) for (NSInteger index=0;index<MIN(count,64)&&*remaining;++index)
-            if (ProbeOfficialActivateCancel([element accessibilityElementAtIndex:index],title,remaining,visited)) return YES;
-    }
-    if ([element respondsToSelector:@selector(accessibilityElements)]) {
-        id children=[element accessibilityElements];
-        if ([children isKindOfClass:NSArray.class]) for (id child in [children subarrayWithRange:NSMakeRange(0,MIN([children count],64))])
-            if (ProbeOfficialActivateCancel(child,title,remaining,visited)) return YES;
-    }
-    if ([element isKindOfClass:UIView.class]) for (UIView *child in [(UIView *)element subviews])
-        if (ProbeOfficialActivateCancel(child,title,remaining,visited)) return YES;
-    return NO;
-}
 static void ProbeOfficialPromptPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
                                     NSMutableDictionary *state,void (^finish)(void)) {
     if ([state[@"finished"] boolValue]) return;
@@ -1271,37 +1246,37 @@ static void ProbeOfficialPromptPoll(WKWebView *__weak weakWeb,UIViewController *
         for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"web_reply_cancelled"])
             metrics[key]=@((BOOL)[value[key] isEqual:@YES]);
         UIViewController *shown=presenter.presentedViewController;
-        if (![state[@"cancel_requested"] boolValue]&&[shown isKindOfClass:UIAlertController.class]
+        if (![state[@"synthetic_ready"] boolValue]&&[shown isKindOfClass:UIAlertController.class]
                 &&shown.viewIfLoaded.window&&!shown.isBeingPresented) {
             UIAlertController *prompt=(UIAlertController *)shown;state[@"prompt"]=prompt;
             metrics[@"prompt_presented"]=@YES;
             metrics[@"field_count_two"]=@((BOOL)(prompt.textFields.count==2));
             metrics[@"secure_password_field"]=@((BOOL)(prompt.textFields.count==2&&!prompt.textFields[0].secureTextEntry&&prompt.textFields[1].secureTextEntry));
-            UIAlertAction *cancel=nil;NSUInteger platforms=0,cancels=0;
+            NSUInteger iosActions=0,androidActions=0,cancels=0;
+            NSArray *iosTitles=@[@"iOS 계정 확인",@"iOSアカウントを確認",@"Check iOS account"];
+            NSArray *androidTitles=@[@"Android 계정 확인",@"Androidアカウントを確認",@"Check Android account"];
             for (UIAlertAction *action in prompt.actions) {
-                if (action.style==UIAlertActionStyleCancel) {cancel=action;++cancels;}
-                else if (action.style==UIAlertActionStyleDefault&&([action.title hasPrefix:@"iOS"]||[action.title hasPrefix:@"Android"])) ++platforms;
+                if (action.style==UIAlertActionStyleCancel) ++cancels;
+                else if (action.style==UIAlertActionStyleDefault) {
+                    if ([iosTitles containsObject:action.title]) ++iosActions;
+                    if ([androidTitles containsObject:action.title]) ++androidActions;
+                }
             }
-            metrics[@"platform_actions_present"]=@((BOOL)(prompt.actions.count==3&&platforms==2));
+            metrics[@"platform_actions_present"]=@((BOOL)(prompt.actions.count==3&&iosActions==1&&androidActions==1));
             metrics[@"cancel_action_present"]=@((BOOL)(cancels==1));
             if (![metrics[@"secure_password_field"] isEqual:@YES]||![metrics[@"platform_actions_present"] isEqual:@YES]||cancels!=1) {finish();return;}
             prompt.textFields[0].text=@"ProbeNeverSubmit_ID";prompt.textFields[1].text=@"ProbeNeverSubmit_Pass";
             metrics[@"synthetic_inputs_set"]=@((BOOL)(prompt.textFields[0].text.length>0&&prompt.textFields[1].text.length>0));
-            NSUInteger remaining=512;
-            NSHashTable *visited=[NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality|NSPointerFunctionsStrongMemory];
-            BOOL activated=ProbeOfficialActivateCancel(prompt.view,cancel.title,&remaining,visited);
-            // A public accessibility Escape on this inspected cancel-bearing
-            // alert is Cancel, never the default action. Require the real Web
-            // cancellation ACK, cleared fields and detached sheet afterwards.
-            if (!activated&&!prompt.isBeingDismissed&&prompt.viewIfLoaded.window)
-                activated=[prompt.view accessibilityPerformEscape];
-            if (!activated&&!prompt.isBeingDismissed&&prompt.viewIfLoaded.window)
-                activated=[prompt accessibilityPerformEscape];
-            if (activated) {
-                state[@"cancel_requested"]=@YES;metrics[@"cancel_action_activated"]=@YES;
-            }
+            // The external public XCTest runner waits for these identifiers.
+            // Publish them only after all native checks and synthetic input.
+            prompt.textFields[0].accessibilityIdentifier=@"idoly-official-probe-transfer-id";
+            prompt.textFields[1].accessibilityIdentifier=@"idoly-official-probe-transfer-password";
+            state[@"synthetic_ready"]=@YES;
         }
         UIAlertController *prompt=state[@"prompt"];
+        if ([metrics[@"web_reply_cancelled"] isEqual:@YES]) {
+            state[@"cancel_requested"]=@YES;metrics[@"cancel_ack_observed"]=@YES;
+        }
         if ([state[@"cancel_requested"] boolValue]&&prompt&&!presenter.presentedViewController&&!prompt.viewIfLoaded.window&&!prompt.isBeingDismissed
                 &&[metrics[@"web_reply_cancelled"] isEqual:@YES]&&![state[@"observing_after"] boolValue]) {
             state[@"observing_after"]=@YES;metrics[@"prompt_detached"]=@YES;
@@ -1323,7 +1298,7 @@ static void ProbeOfficialPrompt(WKWebView *web,UIViewController *presenter,void 
     if (probeRunIndex!=0) {completion(@{@"performed":@NO,@"reason":@"first-cold-run-only"});return;}
     NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
     NSMutableDictionary *metrics=[@{@"performed":@YES,@"scope":@"stock-simulator",@"ui_trigger":@"dom-click",
-        @"cancel_trigger":@"accessibility-or-control-action",@"credential_submission_performed":@NO,@"timed_out":@NO,@"completed":@NO} mutableCopy];
+        @"cancel_trigger":@"public-xctest-tap",@"credential_submission_performed":@NO,@"timed_out":@NO,@"completed":@NO} mutableCopy];
     NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics} mutableCopy];
     void (^finish)(void)=^{
         if ([state[@"finished"] boolValue]) return;state[@"finished"]=@YES;
@@ -2105,7 +2080,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 BOOL promptOK=probeRunIndex!=0&&[prompt[@"performed"] isEqual:@NO];
                 if(probeRunIndex==0){
                     promptOK=[prompt[@"timed_out"] isEqual:@NO]&&[prompt[@"credential_submission_performed"] isEqual:@NO];
-                    for(NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"prompt_presented",@"field_count_two",@"secure_password_field",@"platform_actions_present",@"cancel_action_present",@"synthetic_inputs_set",@"cancel_action_activated",@"fields_cleared",@"web_reply_cancelled",@"prompt_detached",@"official_job_absent_before",@"official_job_absent_after",@"account_data_unchanged",@"runtime_identity_unchanged",@"completed"])
+                    for(NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"prompt_presented",@"field_count_two",@"secure_password_field",@"platform_actions_present",@"cancel_action_present",@"synthetic_inputs_set",@"cancel_ack_observed",@"fields_cleared",@"web_reply_cancelled",@"prompt_detached",@"official_job_absent_before",@"official_job_absent_after",@"account_data_unchanged",@"runtime_identity_unchanged",@"completed"])
                         promptOK=promptOK&&[prompt[key] isEqual:@YES];
                 }
                 if(!promptOK){[self failProbe:@"settings_official_prompt_failed"];return;}
