@@ -478,6 +478,36 @@ def validate_portable(report, source, directory):
     need(len(cases) == counts["count"] and names <= {row.get("name") for row in cases}
          and not any(row.find(tag) is not None for row in cases for tag in ("failure", "error", "skipped")),
          "preference_contract_required_cases_not_passed")
+    validate_latest_media_contracts(directory)
+
+
+def validate_latest_media_contracts(directory):
+    """Require the real latest cohort on both platform startup paths."""
+    path = Path(directory) / "latest-media-contracts.xml"
+    need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= MAX_JSON,
+         "latest_media_junit_missing")
+    import xml.etree.ElementTree as ET
+    try:
+        root = ET.fromstring(path.read_bytes())
+    except ET.ParseError:
+        raise ReleaseError("latest_media_junit_invalid") from None
+    names = {"test_actual_latest_media_preparation_and_restart_preserve_accounts[" + platform + "]": platform
+             for platform in ("android", "ios")}
+    cases = list(root.iter("testcase"))
+    need(len(cases) == 2 and {row.get("name") for row in cases} == set(names)
+         and not any(list(root.iter(tag)) for tag in ("failure", "error", "skipped"))
+         and all(suite.get(key, "0") == "0" for suite in root.iter("testsuite")
+                 for key in ("failures", "errors", "skipped")),
+         "latest_media_required_cases_not_passed")
+    version = LATEST_SERVER_DATA.load_pin()["upgrade_proof"]["original_master"]["version"]
+    for case in cases:
+        properties = case.findall("./properties/property")
+        expected = {"payload_sha256": DATA_PIN["sha256"], "master_version": version,
+                    "resource_platform": names[case.get("name")]}
+        need(len(properties) == len(expected)
+             and all(set(row.attrib) == {"name", "value"} for row in properties)
+             and {row.get("name"): row.get("value") for row in properties} == expected,
+             "latest_media_payload_properties_differ")
 
 
 def validate_diagnostics_benchmark(report, source):
@@ -1122,9 +1152,11 @@ def copy_metadata(directories, output):
     inventory, total = {}, 0
     for role, directory in directories.items():
         paths = list(directory.rglob("*.json"))
-        junit = directory / "preference-contracts.xml"
-        if role == "portable" and junit.exists():
-            paths.append(junit)
+        if role == "portable":
+            for name in ("preference-contracts.xml", "latest-media-contracts.xml"):
+                junit = directory / name
+                if junit.exists():
+                    paths.append(junit)
         for path in sorted(paths):
             need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= MAX_JSON,
                  "proof_metadata_file_bound")

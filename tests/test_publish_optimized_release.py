@@ -1055,3 +1055,73 @@ def test_excluded_mac_asset_cannot_reenter_current_publication(old_name, source_
     with pytest.raises(publisher.ReleaseError, match="release_staging_input_names_invalid"):
         publisher.stage_release_binaries(rows, tmp_path/"forbidden", TinyGuard())
     assert all(Path(row["path"]).is_file() for row in source_release_binaries)
+
+
+def latest_media_xml(directory):
+    import xml.etree.ElementTree as ET
+    root = ET.Element("testsuites")
+    suite = ET.SubElement(root, "testsuite", tests="2", failures="0", errors="0", skipped="0")
+    version = publisher.LATEST_SERVER_DATA.load_pin()["upgrade_proof"]["original_master"]["version"]
+    for platform in ("android", "ios"):
+        case = ET.SubElement(suite, "testcase", name="test_actual_latest_media_preparation_and_restart_preserve_accounts[" + platform + "]")
+        properties = ET.SubElement(case, "properties")
+        for name, value in {"payload_sha256": publisher.DATA_PIN["sha256"],
+                            "master_version": version, "resource_platform": platform}.items():
+            ET.SubElement(properties, "property", name=name, value=value)
+    path = directory / "latest-media-contracts.xml"
+    ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+    return path
+
+
+def test_actual_latest_junit_requires_both_platforms_and_exact_payload_properties(tmp_path):
+    latest_media_xml(tmp_path)
+    assert publisher.validate_latest_media_contracts(tmp_path) is None
+
+
+@pytest.mark.parametrize("damage", ["missing", "skip", "failure", "error", "case-missing", "case-replaced",
+    "case-duplicate", "case-extra", "reported-skip", "reported-error", "reported-failure", "invalid-xml",
+    "wrong-payload", "wrong-master", "wrong-platform", "property-missing", "property-duplicate", "property-extra",
+    "symlink", "empty", "oversize"])
+def test_latest_media_contracts_cannot_be_skipped_replaced_or_relabelled(tmp_path, monkeypatch, damage):
+    import xml.etree.ElementTree as ET
+    path = latest_media_xml(tmp_path)
+    tree = ET.parse(path); suite = tree.find(".//testsuite"); cases = tree.findall(".//testcase")
+    if damage in ("skip", "failure", "error"):
+        ET.SubElement(cases[0], {"skip": "skipped"}.get(damage, damage))
+    elif damage == "case-missing": suite.remove(cases[0])
+    elif damage == "case-replaced": cases[0].set("name", "unrelated-test")
+    elif damage == "case-duplicate": cases[0].set("name", cases[1].get("name"))
+    elif damage == "case-extra": suite.append(deepcopy(cases[0]))
+    elif damage.startswith("reported-"):
+        suite.set({"reported-skip": "skipped", "reported-error": "errors", "reported-failure": "failures"}[damage], "1")
+    elif damage.startswith("wrong-"):
+        name = {"wrong-payload": "payload_sha256", "wrong-master": "master_version", "wrong-platform": "resource_platform"}[damage]
+        for prop in cases[0].findall("./properties/property"):
+            if prop.get("name") == name: prop.set("value", "unapproved")
+    elif damage.startswith("property-"):
+        properties = cases[0].find("properties")
+        if damage == "property-missing": properties.remove(properties[0])
+        elif damage == "property-duplicate": properties.append(deepcopy(properties[0]))
+        else: ET.SubElement(properties, "property", name="unverified", value="true")
+    tree.write(path, encoding="utf-8", xml_declaration=True)
+    if damage == "missing": path.unlink()
+    elif damage == "invalid-xml": path.write_bytes(b"<unfinished")
+    elif damage == "empty": path.write_bytes(b"")
+    elif damage == "oversize": monkeypatch.setattr(publisher, "MAX_JSON", path.stat().st_size - 1)
+    elif damage == "symlink":
+        original = tmp_path / "actual.xml"; path.rename(original); path.symlink_to(original)
+    with pytest.raises(publisher.ReleaseError): publisher.validate_latest_media_contracts(tmp_path)
+
+
+def test_publication_keeps_latest_and_base_junit_evidence_without_extra_binaries(tmp_path):
+    source, output = tmp_path / "portable", tmp_path / "proof"
+    source.mkdir(); output.mkdir()
+    latest = latest_media_xml(source)
+    base = source / "preference-contracts.xml"; base.write_bytes(b"<testsuites/>")
+    (source / "latest-media-contracts.txt").write_text("not part of bounded publication metadata")
+    (source / "unexpected.apk").write_bytes(b"not copied")
+    result = publisher.copy_metadata({"portable": source}, output)
+    assert set(result) == {"portable/latest-media-contracts.xml", "portable/preference-contracts.xml"}
+    assert (output / "portable/latest-media-contracts.xml").read_bytes() == latest.read_bytes()
+    assert result["portable/latest-media-contracts.xml"]["sha256"] == publisher.digest(latest)
+    assert not list(output.rglob("*.apk")) and not list(output.rglob("*.txt"))

@@ -23,6 +23,16 @@ def evidence(tmp_path):
         ET.SubElement(suite, "testcase", name=name, classname="tests.test_profile_preferences")
     path = tmp_path / "preference-contracts.xml"
     ET.ElementTree(root).write(path, encoding="utf-8", xml_declaration=True)
+    latest_root = ET.Element("testsuites")
+    latest_suite = ET.SubElement(latest_root, "testsuite", tests="2", failures="0", errors="0", skipped="0")
+    version = release.LATEST_SERVER_DATA.load_pin()["upgrade_proof"]["original_master"]["version"]
+    for platform in ("android", "ios"):
+        case = ET.SubElement(latest_suite, "testcase", name="test_actual_latest_media_preparation_and_restart_preserve_accounts[" + platform + "]")
+        properties = ET.SubElement(case, "properties")
+        for name, value in {"payload_sha256": release.DATA_PIN["sha256"], "master_version": version,
+                            "resource_platform": platform}.items():
+            ET.SubElement(properties, "property", name=name, value=value)
+    ET.ElementTree(latest_root).write(tmp_path / "latest-media-contracts.xml", encoding="utf-8", xml_declaration=True)
     contracts = {
         # The three actual preference master tests consume the immutable base
         # donor. Native packages independently pin the prepared Love upgrade.
@@ -99,4 +109,11 @@ def test_prepared_native_payload_cannot_relabel_the_immutable_preference_input(e
     assert release.DATA_PIN != release.BASE_DATA_PIN
     report["preference_master_contracts"]["input"] = dict(release.DATA_PIN)
     with pytest.raises(release.ReleaseError, match="public_input_pin_differs"):
+        release.validate_portable(report, SOURCE, directory)
+
+
+def test_successful_base_contracts_cannot_replace_actual_latest_media_evidence(evidence):
+    report, directory, _ = evidence
+    (directory / "latest-media-contracts.xml").unlink()
+    with pytest.raises(release.ReleaseError, match="latest_media_junit_missing"):
         release.validate_portable(report, SOURCE, directory)
