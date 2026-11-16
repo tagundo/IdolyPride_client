@@ -124,8 +124,8 @@ android {
         applicationId = "game.qualiarts.idolypride.localserver"
         minSdk = 26
         targetSdk = 34
-        versionCode = providers.gradleProperty("serverVersionCode").orElse("53").get().toInt()
-        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.36").get()
+        versionCode = providers.gradleProperty("serverVersionCode").orElse("54").get().toInt()
+        versionName = providers.gradleProperty("serverVersionName").orElse("0.3.37").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
         buildConfigField("long", "SERVER_DATA_BYTES", "${payloadBytes}L")

@@ -121,11 +121,12 @@ section[aria-labelledby="events-heading"] input[type="datetime-local"] { font: i
 }
 
 /* Navigation follows the task, while cards retain independent open states. */
-.settings-shell { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; grid-column: 1 / -1; min-width: 0; }
-.category-navigation { display: flex; gap: .4rem; overflow-x: auto; padding: .3rem; background: var(--card); border: 1px solid var(--line); border-radius: .85rem; align-self: start; }
+.settings-shell { display: block; grid-column: 1 / -1; min-width: 0; }
+.category-navigation { position: sticky; top: max(.5rem, env(safe-area-inset-top)); z-index: 3; display: flex; gap: .4rem; overflow-x: auto; padding: .3rem; background: var(--card); border: 1px solid var(--line); border-radius: .85rem; align-self: start; }
 .category-navigation button { flex: 1 0 auto; min-height: 2.8rem; padding: .65rem .9rem; color: var(--muted); background: transparent; white-space: nowrap; }
 .category-navigation button[aria-selected="true"] { color: var(--accent); background: var(--soft); }
 .settings-content, .category-page { min-width: 0; }
+.settings-content { margin-top: 1rem; }
 .category-page { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
 .category-page > section { min-width: 0; padding: 0; container-type: inline-size; }
 .card-panel { border: 0; margin: 0; padding: 0; }
@@ -148,13 +149,15 @@ section[aria-labelledby="events-heading"] input[type="datetime-local"] { font: i
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 1.25rem; }
 @container (min-width: 40rem) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 760px) {
-  .settings-shell { grid-template-columns: 11rem minmax(0, 1fr); align-items: start; }
+  .settings-shell { display: grid; grid-template-columns: 11rem minmax(0, 1fr); align-items: start; gap: 1rem; }
+  .settings-content { margin-top: 0; }
   .category-navigation { position: sticky; top: 1rem; flex-direction: column; overflow: visible; }
   .category-navigation button { text-align: start; width: 100%; }
   .category-page { grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)); }
 }
 @media (orientation: landscape) and (max-height: 560px) and (min-width: 620px) {
-  .settings-shell { grid-template-columns: 9rem minmax(0, 1fr); gap: .75rem; }
+  .settings-shell { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: .75rem; }
+  .settings-content { margin-top: 0; }
   .category-navigation { position: sticky; top: .5rem; flex-direction: column; overflow: visible; }
   .category-navigation button { min-height: 2.75rem; padding: .55rem .65rem; text-align: start; }
   .overview { padding: .8rem 1rem; }

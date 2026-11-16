@@ -113,7 +113,7 @@ static NSString *localized(NSString *source) {
         @"설정 요청 형식이 올바르지 않습니다.":@[@"設定リクエストの形式が正しくありません。", @"The settings request format is invalid."],
         @"서버 응답이 너무 큽니다.":@[@"サーバーの応答が大きすぎます。", @"The server response is too large."],
         @"로컬 서버 연결을 복구하지 못했습니다. 게임을 다시 열어 주세요.":@[@"ローカルサーバーへの接続を復旧できませんでした。ゲームを開き直してください。", @"The local server connection could not be restored. Please reopen the game."],
-        @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 서버 메뉴가 다시 열립니다.":@[@"準備ができたら右上の「ゲーム開始」を押してください。ゲーム中は画面右上の隅を指1本で2秒間押すと、サーバーメニューを再び開けます。", @"When ready, select Start Game at the top right. During play, hold the screen's upper-right corner with one finger for 2 seconds to reopen this menu."],
+        @"게임 중: 오른쪽 위를 2초간 눌러 서버 메뉴 열기.":@[@"ゲーム中：右上を2秒間長押しでサーバーメニュー。", @"During play: hold the upper-right corner for 2 seconds to open the server menu."],
         @"이 메뉴를 닫아도 서버는 계속 실행됩니다.":@[@"このメニューを閉じてもサーバーは動作し続けます。", @"Closing this menu keeps the server running."],
         @"요청이 너무 큽니다.":@[@"リクエストが大きすぎます。", @"The request is too large."],
         @"진단 내용을 복사하지 못했습니다.":@[@"診断情報をコピーできませんでした。", @"The diagnostic text could not be copied."],
@@ -328,7 +328,7 @@ static __weak IDSettingsController *launcherController;
     [_gameStartButton setTitle:localized(@"게임 시작") forState:UIControlStateNormal];
     [_returnButton setTitle:localized(@"게임으로 돌아가기") forState:UIControlStateNormal];
     _launcherHint.text = localized(self.launcherMode
-        ? @"준비가 끝나면 오른쪽 위의 ‘게임 시작’을 누르세요. 게임 중에는 화면 오른쪽 위 모서리를 한 손가락으로 2초간 누르면 서버 메뉴가 다시 열립니다."
+        ? @"게임 중: 오른쪽 위를 2초간 눌러 서버 메뉴 열기."
         : @"이 메뉴를 닫아도 서버는 계속 실행됩니다.");
     [self updateServerReady];
 }

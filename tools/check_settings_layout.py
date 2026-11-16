@@ -233,6 +233,25 @@ def run(output):
                                 or not geometry["visible_controls"] or geometry["bad_hit_areas"] or geometry["open_help"]
                                 or not geometry["navigation_discoverable"]):
                             raise AssertionError("actual_browser_layout_failed")
+                        long_phone_page = (width < height and category in ("users", "graphics")
+                            and page.evaluate("document.documentElement.scrollHeight>innerHeight+1"))
+                        if long_phone_page:
+                            # Exercise the phone's sticky category bar after real
+                            # long-content scrolling, not merely at the page top.
+                            # Naturally short pages do not need artificial height.
+                            page.evaluate("window.scrollTo({top:document.documentElement.scrollHeight,left:0,behavior:'instant'})")
+                            page.wait_for_function("window.scrollY>0", timeout=2000)
+                            scrolled = page.evaluate(GEOMETRY, category)
+                            record["long_content_scroll"] = {
+                                "scroll_y": page.evaluate("window.scrollY"),
+                                "navigation_top": scrolled["navigation_top"],
+                                "navigation_region_visible": scrolled["navigation_region_visible"],
+                                "navigation_discoverable": scrolled["navigation_discoverable"],
+                                "navigation_internal_scroll": scrolled["navigation_internal_scroll"]}
+                            if (not scrolled["navigation_discoverable"] or not scrolled["navigation_region_visible"]
+                                    or scrolled["content_width"] > scrolled["viewport_width"] + 2
+                                    or scrolled["bad_hit_areas"] or scrolled["open_help"]):
+                                raise AssertionError("long_content_hides_phone_navigation")
                         if language == "ko":
                             panels.first.locator(":scope > summary").scroll_into_view_if_needed()
                             name = str(width) + "x" + str(height) + "-" + category + ".png"

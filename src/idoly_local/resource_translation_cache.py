@@ -74,10 +74,30 @@ def _aliases(value):
     return {identity:record.cache_key for identity,record in value.items()}
 
 
+def _plain_metadata(value):
+    # Cache only the ordinary JSON metadata produced by the real constructors.
+    # Optional reuse must not copy or serialize custom caller-owned sentinels;
+    # callers retain their original exception and layer-cleanup behavior.
+    pending=[value];seen=set()
+    while pending:
+        item=pending.pop();kind=type(item)
+        if kind in (str,int,float,bool,type(None)):continue
+        if kind not in (dict,list):return False
+        identity=id(item)
+        if identity in seen:return False
+        seen.add(identity)
+        if kind is dict:
+            if any(type(key) is not str for key in item):return False
+            pending.extend(item.values())
+        else:pending.extend(item)
+    return True
+
+
 def _snapshot(layer):
     from .resource_translation import ResourceTranslation, RebasedResourceTranslation
     if type(layer) not in (ResourceTranslation,RebasedResourceTranslation):return None
     base=layer._layer if type(layer) is RebasedResourceTranslation else layer
+    if not _plain_metadata(base.report) or not _plain_metadata(layer.report):return None
     value={"manifest":base.manifest,"report":deepcopy(base.report),
            "records":dict(base._records),"aliases":_aliases(base.object_aliases),"rebase":None}
     if type(layer) is RebasedResourceTranslation:

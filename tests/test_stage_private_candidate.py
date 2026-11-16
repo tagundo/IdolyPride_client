@@ -147,7 +147,7 @@ def test_same_run_metadata_and_all_existing_verifiers_precede_private_copies(tmp
     pub.write_json = lambda path, value: path.write_text(json.dumps(value))
     pub.DATA_PIN = {"bytes": 123, "sha256": "c" * 64}
     pub.LOVE_SERVER_DATA = SimpleNamespace(load_pin=lambda: {"upgrade_proof": {"fixed": True}})
-    pub.VERSION, pub.IPA_VERSION, pub.REPO = "0.3.36", "156.9116", "tagundo/IdolyPride_client"
+    pub.VERSION, pub.IPA_VERSION, pub.REPO = "0.3.37", "156.9117", "tagundo/IdolyPride_client"
     def fetch(binding, token, path, guard):
         assert token == "test-token"
         events.append(("fetch", binding["artifact_id"]))

@@ -22,7 +22,7 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD_NUMBER = "0.3.36",53
+VERSION, BUILD_NUMBER = "0.3.37",54
 COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
@@ -507,7 +507,7 @@ def verify_ios(inputs,work,output,source,pins,guard):
     helper=module("release_unified_delivery",ROOT/"ios-unified/delivery.py")
     manifest,_owned=helper.verify_members(inputs,output,source,int(os.environ["GITHUB_RUN_ID"]),0,guard)
     report={"schema":1,"status":"PASS","platform":"ios-unified","source_commit":source,
-            "run_id":int(os.environ["GITHUB_RUN_ID"]),"version":"156.9116","source_sha256":pins,
+            "run_id":int(os.environ["GITHUB_RUN_ID"]),"version":"156.9117","source_sha256":pins,
             "binary":{key:manifest["artifacts"][0][key] for key in ("name","bytes","sha256")},
             "validation":{"all_existing_unified_delivery_gates":True,"artifact_api_digest_required_before_publication":True},
             "execution":{"actual_iOS_Simulator_execution":True,"physical_PlayCover_execution":False,"physical_iPhone_iPad_execution":False}}

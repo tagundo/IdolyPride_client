@@ -30,10 +30,11 @@ def fact(reader):
     result = {"path_id": reader.path_id, "class_id": reader.class_id,
               "sha256": hashlib.sha256(reader.get_raw_data()).hexdigest(),
               "file_offset": reader.byte_start, "bytes": len(reader.get_raw_data())}
-    if reader.class_id == 224:
+    if reader.class_id in (4,224):
         result["parent"] = [value.m_Father.m_FileID,value.m_Father.m_PathID]
         result["children"] = [[item.m_FileID,item.m_PathID] for item in value.m_Children]
         for key in ("m_LocalPosition","m_LocalScale","m_LocalRotation","m_AnchorMin","m_AnchorMax","m_AnchoredPosition","m_SizeDelta","m_Pivot"):
+            if not hasattr(value,key): continue
             vector = getattr(value,key)
             result[key] = {axis:getattr(vector,axis) for axis in ("x","y","z","w") if hasattr(vector,axis)}
         result["raw_base64"] = base64.b64encode(reader.get_raw_data()).decode()
@@ -79,7 +80,7 @@ def audit(path):
                 need(transform_id not in seen and len(seen)<12,"Prefab ancestor chain exceeds bound")
                 seen.add(transform_id)
                 obj=asset.objects.get(transform_id)
-                need(obj is not None and obj.class_id==224,"Prefab ancestor is not an original RectTransform")
+                need(obj is not None and obj.class_id in (4,224),"Prefab ancestor is not an original Transform or RectTransform")
                 value=obj.read();owner=value.m_GameObject
                 need(owner.m_FileID==0 and owner.m_PathID in asset.objects,"Prefab ancestor owner is external")
                 game=asset.objects[owner.m_PathID].read()
