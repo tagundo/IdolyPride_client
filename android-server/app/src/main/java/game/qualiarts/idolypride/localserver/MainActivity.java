@@ -67,6 +67,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private ProgressBar officialProgress;
     private Button officialInspect, officialFetch, officialNew, officialReplace, officialCancel, officialSelect, officialNormal, officialLocalRefresh;
     private boolean officialRequest, officialPolling;
+    private String officialRenderedJob;
+    private String officialDeferredAction;
+    private JSONObject officialDeferredPayload;
     private int officialLastError, officialWarnings;
     private static final int OFFICIAL_WARNING_CLEANUP = 1, OFFICIAL_WARNING_REFRESH = 2;
     private AlertDialog officialCredentials, officialWizardDialog;
@@ -75,7 +78,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (!presentationObserved || officialStatus == null) return;
             if (!officialRequest && !ServerService.isImportingOfficial() && officialCredentials == null && officialWizardDialog == null)
                 requestOfficial("official_status", new JSONObject(), true);
-            officialStatus.postDelayed(this, 1000);
+            scheduleOfficialRefresh();
         }
     };
 
@@ -512,6 +515,21 @@ public final class MainActivity extends Activity implements ServerService.Observ
         body.addView(accountOperation); updateAccountControls();
     }
 
+    private boolean shouldPollOfficial() {
+        if (officialRequest || ServerService.isImportingOfficial() || officialJob.optBoolean("busy", false)) return true;
+        String state = officialJob.optString("state", "idle");
+        return "checking".equals(state) || "verified".equals(state)
+                || "fetching".equals(state) || "ready".equals(state);
+    }
+
+    private void scheduleOfficialRefresh() {
+        if (officialStatus == null) return;
+        officialStatus.removeCallbacks(officialRefresh);
+        // Completed/idle jobs do not change. Repainting them once per second
+        // prevents accessibility clients from observing a stable, idle window.
+        if (presentationObserved && shouldPollOfficial()) officialStatus.postDelayed(officialRefresh, 2500);
+    }
+
     private Button officialButton(LinearLayout body, int label, String identifier, View.OnClickListener action) {
         Button control = button(label); control.setContentDescription(identifier); control.setOnClickListener(action);
         body.addView(control, new LinearLayout.LayoutParams(-1, -2)); return control;
@@ -588,7 +606,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     }
 
     private void showOfficialCredentials() {
-        if (officialRequest || officialJob.optBoolean("busy", false)) return;
+        if ((officialRequest && !officialPolling) || officialDeferredPayload != null || officialJob.optBoolean("busy", false)) return;
         LinearLayout fields = new LinearLayout(this); fields.setOrientation(LinearLayout.VERTICAL);
         fields.setPadding(dp(20), dp(8), dp(20), dp(8)); fields.setSaveEnabled(false);
         fields.addView(text(R.string.official_warning, 15, TEXT_MUTED));
@@ -657,14 +675,38 @@ public final class MainActivity extends Activity implements ServerService.Observ
                                 "profile", profile, "replace", true, "expected_revision", revision), false)).create());
     }
 
+    private boolean deferOfficialSubmission(String action, JSONObject payload, boolean poll) {
+        if (poll || !officialRequest || !officialPolling || officialDeferredPayload != null) return false;
+        officialDeferredAction = action; officialDeferredPayload = payload;
+        updateOfficialControls(); return true;
+    }
+
+    private void clearDeferredOfficial() {
+        if (officialDeferredPayload != null) {
+            officialDeferredPayload.remove("password"); officialDeferredPayload.remove("user_id");
+        }
+        officialDeferredPayload = null; officialDeferredAction = null; officialRenderedJob = null;
+    }
+
+    private void drainDeferredOfficial() {
+        if (officialDeferredPayload == null || !presentationObserved) return;
+        JSONObject payload = officialDeferredPayload; String action = officialDeferredAction;
+        officialDeferredPayload = null; officialDeferredAction = null;
+        requestOfficial(action, payload, false);
+    }
+
     private void requestOfficial(String action, JSONObject payload, boolean poll) {
-        if (officialRequest || ServerService.isImportingOfficial()) {
+        // A real user action takes the next slot after a harmless status read.
+        // There is only one transient pending submission; it is cleared on stop.
+        if (deferOfficialSubmission(action, payload, poll)) return;
+        if (officialRequest || ServerService.isImportingOfficial() || officialDeferredPayload != null) {
             payload.remove("password"); payload.remove("user_id"); return;
         }
         if ("official_inspect".equals(action)) { officialAppliedAccount = null; officialWarnings = 0; }
         if (!poll) officialLastError = 0;
         officialPolling = poll; officialRequest = true;
         if (!poll) {
+            officialRenderedJob = null;
             officialStatus.setText("official_inspect".equals(action) ? R.string.official_stage_checking
                     : "official_fetch".equals(action) ? R.string.official_stage_fetching
                     : "official_apply".equals(action) ? R.string.official_stage_staging : R.string.official_stage_preparing);
@@ -673,11 +715,11 @@ public final class MainActivity extends Activity implements ServerService.Observ
         updateOfficialControls();
         ServerService.officialImport(getApplicationContext(), action, payload, result -> {
             officialRequest = false; officialPolling = false;
-            if (isFinishing() || isDestroyed()) return;
+            if (isFinishing() || isDestroyed()) { clearDeferredOfficial(); return; }
             if (!result.optBoolean("ok", false)) {
                 if (!poll) { officialLastError = officialError(result.optString("error"));
                     officialStatus.setText(officialLastError); officialStatus.setTextColor(WARNING); }
-                updateOfficialControls(); return;
+                updateOfficialControls(); scheduleOfficialRefresh(); drainDeferredOfficial(); return;
             }
             JSONObject job = result.optJSONObject("job"); if (job != null) officialJob = job;
             JSONObject active = result.optJSONObject("active"); if (active != null) activeAccount = active;
@@ -697,7 +739,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 if (accounts != null && (officialWarnings & OFFICIAL_WARNING_REFRESH) == 0) renderAccounts(accounts);
                 refreshAccounts();
             }
-            renderOfficialJob();
+            renderOfficialJob(); drainDeferredOfficial();
         });
     }
 
@@ -734,8 +776,24 @@ public final class MainActivity extends Activity implements ServerService.Observ
         }
     }
 
+    private boolean officialJobChanged() {
+        // Time-to-expiry is informative, not structural: its countdown alone
+        // must not repaint the screen or emit accessibility content changes.
+        String key = accountPayload("state", officialJob.optString("state", "idle"),
+                "job_id", officialJob.optString("job_id"), "progress", officialJob.optString("progress"),
+                "error_code", officialJob.optString("error_code"), "busy", officialJob.optBoolean("busy", false),
+                "counts", officialJob.optJSONObject("counts"), "preview", officialJob.optJSONObject("preview"),
+                "local_account", officialAppliedAccount, "local_warnings", officialWarnings,
+                "selection_revision", accountStatus.optString("selection_revision"),
+                "selected", accountStatus.optJSONObject("selected"), "target", selectedAccount(),
+                "media_mode", mediaMode != null && mediaMode.isChecked(), "local_error", officialLastError).toString();
+        if (key.equals(officialRenderedJob)) return false;
+        officialRenderedJob = key; return true;
+    }
+
     private void renderOfficialJob() {
         if (officialStatus == null) return;
+        if (!officialJobChanged()) { scheduleOfficialRefresh(); return; }
         String state = officialJob.optString("state", "idle");
         officialStatus.setText(officialStage(officialJob.optString("progress", state)));
         officialStatus.setTextColor("failed".equals(state) ? WARNING : TEXT_PRIMARY);
@@ -756,13 +814,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (officialAppliedAccount != null) summary.append("\n\n").append(getString(R.string.official_completed_notice));
         if ((officialWarnings & OFFICIAL_WARNING_CLEANUP) != 0) summary.append("\n\n").append(getString(R.string.official_committed_cleanup));
         if ((officialWarnings & OFFICIAL_WARNING_REFRESH) != 0) summary.append("\n\n").append(getString(R.string.official_committed_refresh));
-        officialPreview.setText(summary.toString().trim()); updateOfficialControls();
+        officialPreview.setText(summary.toString().trim()); updateOfficialControls(); scheduleOfficialRefresh();
     }
 
     private void updateOfficialControls() {
         if (officialInspect == null) return;
         String state = officialJob.optString("state", "idle");
-        boolean pending = officialRequest || ServerService.isImportingOfficial();
+        boolean pending = officialDeferredPayload != null
+                || ((officialRequest || ServerService.isImportingOfficial()) && !officialPolling);
         boolean working = officialJob.optBoolean("busy", false);
         boolean ready = "ready".equals(state) && !working && !pending;
         officialInspect.setEnabled(!working && !pending);
@@ -1814,6 +1873,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (officialStatus != null) officialStatus.removeCallbacks(officialRefresh);
         if (officialCredentials != null) officialCredentials.dismiss();
         if (officialWizardDialog != null) officialWizardDialog.dismiss();
+        clearDeferredOfficial();
         presentationRuntime = null;
         playbackRuntime = null;
         playbackRuntimeRunning = false;
