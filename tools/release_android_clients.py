@@ -530,6 +530,11 @@ def verify_language(apk, proof, language, commit, full, *, prepared_ui_sha256=No
     return result
 
 
+def korean_image_fetcher():
+    # Direct script execution exposes tools/ rather than its parent namespace.
+    return importlib.import_module("fetch_korean_ui_images").fetch_images
+
+
 def build(args):
     phase("checkout")
     need(re.fullmatch(r"[0-9a-f]{40}", args.source_commit), "exact_source_commit_required")
@@ -600,7 +605,7 @@ def build(args):
         "client-presentation/licenses/Pretendard-OFL.txt", "src/idoly_local/ui_assets.py",
         "src/idoly_local/ui_translation_build.py", *REQUIRED_SOURCES)
     source_hashes = addon.frozen_sources(args.source_commit, extra=extra)
-    from tools.fetch_korean_ui_images import fetch_images
+    fetch_images = korean_image_fetcher()
     image_dir = work / "ko-images"
     image_inputs = fetch_images(image_dir)
     korean_csv, korean_proof = extract_korean_ui(inputs["korean_donor"], work)

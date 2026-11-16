@@ -432,3 +432,20 @@ def test_korean_gate_rejects_stale_layout_forged_provenance_and_wrong_packaged_b
     expected={"caption-payload":"packaged_korean_sprite_hash_differs","prefab-payload":"packaged_korean_logo_hash_differs"}.get(damage)
     with pytest.raises(ValueError,match=expected):
         tool.verify_language(apk,proof,"ko",COMMIT,full,prepared_ui_sha256="f"*64,korean_image_dir=images_dir)
+
+
+def test_image_fetcher_imports_with_the_actual_direct_script_search_path():
+    import subprocess
+    import sys
+    root=Path(__file__).resolve().parents[1]
+    script="""import importlib.util,sys
+from pathlib import Path
+root=Path(sys.argv[1])
+sys.path[:0]=[str(root/'tools'),str(root/'src'),str(root/'client-presentation')]
+spec=importlib.util.spec_from_file_location('standalone_client_builder',root/'tools/release_android_clients.py')
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+fetch=module.korean_image_fetcher()
+assert callable(fetch) and fetch.__module__=='fetch_korean_ui_images'
+assert 'tools.fetch_korean_ui_images' not in sys.modules
+"""
+    subprocess.run([sys.executable,"-I","-B","-c",script,str(root)],check=True,capture_output=True,timeout=20)
