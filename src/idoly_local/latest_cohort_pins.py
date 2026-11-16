@@ -1,7 +1,7 @@
 """Runtime authority generated from the independently read latest public proof.
 
-Preparation source: e917b61364a08cddbee9e5e0fc969ccae3459ccc
-Actions run: 43902573251. No account data or runtime state is stored here.
+Preparation source: 8726a7cfaac5b303263005cbef8b1bc226b17dec
+Actions run: 43908928713. No account data or runtime state is stored here.
 This data does not influence compilation and is bound by native source checks.
 """
 MASTER_VERSION = '6b77e0d8a64b26d5bebd09a7c19a47f2dfad2af914c5160418aa2e7292e13a11'

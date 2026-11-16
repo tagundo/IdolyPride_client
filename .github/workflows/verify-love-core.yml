@@ -74,11 +74,13 @@ jobs:
             tests/test_public_cohort_support.py
             tests/test_love_compatibility.py
             tests/test_latest_server_data_pin.py
+            tests/test_latest_server_data_pin_checked_in.py
             tests/test_prepare_latest_server_data.py
             tests/test_register_latest_server_data_lfs.py
             tests/test_story_read_semantics.py
             tests/test_latest_dream_semantics.py
             tests/test_latest_main_live_semantics.py
+            tests/test_master_field_aliases.py
             tests/test_media_access.py
             tests/test_media_panorama.py
             tests/test_story_reads.py
