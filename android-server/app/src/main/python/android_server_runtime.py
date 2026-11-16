@@ -302,18 +302,23 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
             result = crypto.aesCbc(bool(encrypt), key, iv, payload)
             return memoryview(result).cast("B").tobytes()
 
+        runtime_entered = False
+        preparation_stage = "catalog"
         try:
             log("서버 데이터 확인 중…")
             bundle = files / "bundled-server-data.zip"
             _copy_asset(assets, bundle, expected)
             data = install_bundle(bundle, files, expected)
+            preparation_stage = "resources"
             try:
                 _TRANSLATION_STATUS = _install_bundled_translations(
                     assets, build_config, files, data, resource_cache_dir, log)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as translation_error:
+                _record_pre_runtime_failure(files / "data", translation_error, "resources")
                 _TRANSLATION_STATUS = {"state": "failed", "installed": False,
                                        "previous_files_preserved": True}
                 log("번역 패키지를 설치하지 못했습니다. 기존 번역과 원본 자료는 변경하지 않았습니다.")
+            preparation_stage = "catalog"
             from idoly_local.app_runtime import start as start_runtime
 
             live_options = {}
@@ -322,6 +327,7 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
                     raise ValueError("Experimental live library directory is unavailable")
                 live_options = {"experimental_main_live": True,
                                 "live_engine_library": Path(str(native_library_dir)) / "libidoly_live.so"}
+            runtime_entered = True
             _RUNTIME = start_runtime(data, profile="sandbox", log_callback=log, aes_cbc=aes_cbc,
                                      download_missing_resources=download_missing_resources,
                                      media_mode=media_mode,
@@ -333,6 +339,8 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
             return json.dumps(_LAST_STATUS, ensure_ascii=False)
         except BaseException as error:
             _LAST_STATUS = {"running": False, "message": "서버를 시작하지 못했습니다", "error_type": type(error).__name__}
+            if not runtime_entered:
+                _LAST_STATUS.update(_record_pre_runtime_failure(files / "data", error, preparation_stage))
             log("서버 시작 오류: " + type(error).__name__)
             raise
 
@@ -398,3 +406,138 @@ def cancel_resource_job(identifier):
     if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", identifier):
         raise ValueError("Invalid resource cancellation")
     return json.dumps(_resource_library_reference().cancel(identifier), ensure_ascii=False)
+
+# Native account management never shares the public loopback HTTP routes.
+_MANAGEMENT_ACTIONS = frozenset({
+    "accounts_status", "accounts_create", "accounts_clone", "accounts_select",
+    "accounts_export", "accounts_preview", "accounts_import", "accounts_restore",
+    "server_settings_status", "server_history_clear",
+})
+
+
+def _management_root(files_dir):
+    if type(files_dir) is not str or not files_dir or "\0" in files_dir:
+        raise ValueError("account_storage_invalid")
+    files = Path(files_dir)
+    if not files.is_absolute() or files.is_symlink() or not files.is_dir():
+        raise ValueError("account_storage_invalid")
+    root = files.resolve(strict=True) / "data"
+    if root.is_symlink():
+        raise ValueError("account_storage_invalid")
+    return root
+
+
+def _approved_account_input(root, value):
+    import stat
+    if type(value) is not str or "\0" in value:
+        raise ValueError("account_import_path_invalid")
+    path = Path(value)
+    inbox = root / "account-management" / "inbox"
+    if (not path.is_absolute() or path.is_symlink()
+            or re.fullmatch(r"account-import-[0-9a-f]{32}\.zip", path.name) is None):
+        raise ValueError("account_import_path_invalid")
+    try:
+        info = path.lstat()
+        approved = inbox.resolve(strict=True)
+        if ((root / "account-management").is_symlink() or inbox.is_symlink()
+                or path.parent.resolve(strict=True) != approved or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1 or not 0 < info.st_size <= 128 * 1024 * 1024):
+            raise ValueError("account_import_path_invalid")
+    except OSError:
+        raise ValueError("account_import_path_invalid") from None
+    return str(path)
+
+
+
+def _record_pre_runtime_failure(root, error, stage):
+    try:
+        from idoly_local.app_runtime import record_startup_failure
+        return record_startup_failure(root, error, stage=stage)
+    except Exception:
+        # Reporting cannot hide the original preparation failure.
+        return {}
+
+
+def _prepare_management_payload(root, assets):
+    """Prepare only SHA-bound public inputs; never starts listeners or creates a user."""
+    if assets is None or ((root / "protocol" / "idolypride-6.1.1.pb").is_file()
+                          and (root / "master-json").is_dir()):
+        return
+    from java import jclass
+    build_config = jclass("game.qualiarts.idolypride.localserver.BuildConfig")
+    expected = str(build_config.SERVER_DATA_SHA256)
+    if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+        raise ValueError("account_payload_identity_invalid")
+    files = root.parent
+    bundle = files / "bundled-server-data.zip"
+    try:
+        _copy_asset(assets, bundle, expected)
+        prepared = install_bundle(bundle, files, expected)
+        if prepared.resolve() != root.resolve():
+            raise ValueError("account_storage_invalid")
+    except BaseException as error:
+        _record_pre_runtime_failure(root, error, "catalog")
+        raise
+
+def management_command_json(files_dir, action, payload_json="{}", assets=None):
+    """Trusted Android bridge. A selected account applies on the next startup."""
+    try:
+        if (type(action) is not str or action not in _MANAGEMENT_ACTIONS
+                or type(payload_json) is not str or len(payload_json.encode("utf-8")) > 8192):
+            raise ValueError("account_request_invalid")
+        try:
+            payload = json.loads(payload_json)
+        except ValueError:
+            raise ValueError("account_request_invalid") from None
+        if type(payload) is not dict:
+            raise ValueError("account_request_invalid")
+        root = _management_root(files_dir)
+        with _LOCK:
+            if action.startswith("accounts_") and action != "accounts_status":
+                _prepare_management_payload(root, assets)
+            active = _RUNTIME.status() if _RUNTIME is not None else {"running": False}
+            active_account = {"running": active.get("running") is True,
+                              "mode": "media" if active.get("media_mode") is True else "normal",
+                              "profile": active.get("profile")}
+            if action in ("server_settings_status", "server_history_clear"):
+                if payload:
+                    raise ValueError("account_request_invalid")
+                from idoly_local.app_runtime import server_settings_status, clear_server_history
+                if action == "server_history_clear":
+                    if _RUNTIME is not None:
+                        _RUNTIME.clear_history()
+                    else:
+                        clear_server_history(root)
+                observed = _RUNTIME.status() if _RUNTIME is not None else server_settings_status(root)
+                result = {"schema": 1, "ok": True, "action": action,
+                          "settings": {key: observed.get(key) for key in ("durable_history", "startup_checks")}}
+            else:
+                if action == "accounts_preview":
+                    payload = dict(payload, path=_approved_account_input(root, payload.get("path")))
+                replaces = action == "accounts_restore" or (
+                    action == "accounts_import" and payload.get("replace") is True)
+                if (replaces and active_account["running"]
+                        and payload.get("mode") == active_account["mode"]
+                        and payload.get("profile") == active_account["profile"]):
+                    raise ValueError("account_active_restart_required")
+                os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+                from idoly_local.account_manager import account_command
+                result = account_command(root, action, payload)
+                if type(result) is not dict or result.get("ok") is not True:
+                    raise ValueError("account_response_invalid")
+                if action == "accounts_status":
+                    from idoly_local.app_runtime import server_settings_status
+                    observed = _RUNTIME.status() if _RUNTIME is not None else server_settings_status(root)
+                    result = dict(result, settings={key: observed.get(key) for key in ("durable_history", "startup_checks")})
+            result = dict(result, active=active_account)
+            encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
+            if len(encoded.encode("utf-8")) > 2 * 1024 * 1024:
+                raise ValueError("account_response_invalid")
+            return encoded
+    except (ValueError, OSError) as error:
+        code = str(error)
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,95}", code) is None:
+            code = "account_operation_failed"
+        return json.dumps({"schema": 1, "ok": False, "error": code}, ensure_ascii=False)
+    except Exception:
+        return json.dumps({"schema": 1, "ok": False, "error": "account_operation_failed"})

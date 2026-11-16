@@ -327,8 +327,8 @@ def main(argv=None):
     parser.add_argument("--output", required=True, type=Path, help="New IdolyPrideLocalServer.app path")
     parser.add_argument("--archive", required=True, type=Path, help="New deliverable .app.zip path")
     parser.add_argument("--evidence", required=True, type=Path)
-    parser.add_argument("--version", default="0.3.35")
-    parser.add_argument("--build-number", default="52")
+    parser.add_argument("--version", default="0.3.36")
+    parser.add_argument("--build-number", default="53")
     parser.add_argument("--skip-smoke", action="store_true", help="Development only; release builds must run smoke checks")
     parser.add_argument("--live-engine-library", type=Path,
                         help="Optional ARM64 macOS 13 libidoly_live.dylib; experimental engine remains off by default")

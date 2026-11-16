@@ -74,6 +74,7 @@ class Application:
         from .photo_preferences import PhotoPreferences
         from .profile_favorites import ProfileFavorites
         from .profile_top import ProfileTop
+        from .profile_directory import ProfileDirectory
         from .card_level_missions import CardLevelMissions
         from .dream import Dream
         from .pvp import Pvp
@@ -113,6 +114,8 @@ class Application:
                                  lessons=None if media_mode else self.lessons, stories=self.stories,
                                  story_extra_fixture=self._story_extra_fixture, dream=self.dream)
         self.profile_top = ProfileTop(schema, state, profile, self.gameplay.catalog)
+        self.profile_directory = ProfileDirectory(schema, state, profile, self.gameplay.catalog,
+                                                  self.profile_preferences)
         self.card_level_missions = CardLevelMissions(schema, state, profile, master_dir)
         self.tutorial_progression = TutorialProgression(schema, state, profile, master_dir)
         self.tutorial_messages = TutorialMessages(schema, state, profile, master_dir)
@@ -268,6 +271,8 @@ class Application:
                 response = self.profile_favorites.handle(path, plain)
             if response is None:
                 response = self.profile_top.handle(path, plain)
+            if response is None:
+                response = self.profile_directory.handle(path, plain)
             if response is None:
                 response = self.card_level_missions.handle(path, plain)
             if response is None and self.main_lives is not None:

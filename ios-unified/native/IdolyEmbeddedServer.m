@@ -655,7 +655,8 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
             ++interfaceSelectionRevision;
             IDNativeSetInterfaceLanguage(locale);
         }
-        if ([object[@"action"] isEqual:@"status"] && gate.phase != IDGateReady && gate.phase != IDGateRunning) {
+        if ([object[@"action"] isEqual:@"status"] && gate.phase != IDGateReady && gate.phase != IDGateRunning
+                && !IDGateReadFailedHostStatus(&gate, atomic_load(&pythonReady), worker != nil)) {
             NSString *state = gate.phase == IDGateStarting ? @"starting" : gate.phase == IDGateFailed ? @"failed" : @"idle";
             NSDictionary *native = [NSJSONSerialization JSONObjectWithData:[IdolyEmbeddedServerStatusJSON() dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
             completion(JSON(@{@"id":identifier, @"ok":@YES, @"result":@{@"state":state, @"running":@NO,
@@ -674,6 +675,13 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
                 if ([parsed isKindOfClass:NSMutableDictionary.class] && [parsed[@"ok"] isEqual:@YES]
                         && [parsed[@"result"] isKindOfClass:NSMutableDictionary.class]) {
                     parsed[@"result"][@"native"] = [NSJSONSerialization JSONObjectWithData:[IdolyEmbeddedServerStatusJSON() dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] ?: @{};
+                    if ([object[@"action"] isEqual:@"status"] && gate.phase == IDGateFailed) {
+                        // Keep the host's saved startup checks/history, while
+                        // retaining the native launch failure as current state.
+                        parsed[@"result"][@"state"] = @"failed";
+                        parsed[@"result"][@"running"] = @NO;
+                        parsed[@"result"][@"last_error"] = lastError ?: (id)NSNull.null;
+                    }
                     completion(JSON(parsed) ?: failure(@"native_failure", @"서버 응답이 너무 큽니다."));
                 } else completion(reply);
             });

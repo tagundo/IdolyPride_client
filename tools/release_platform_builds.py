@@ -22,7 +22,8 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD_NUMBER = "0.3.35",52
+VERSION, BUILD_NUMBER = "0.3.36",53
+COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py"])
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"
@@ -118,7 +119,7 @@ def capture(arguments,*,cwd=ROOT):
 
 def source_binding(source):
     need(re.fullmatch(r"[0-9a-f]{40}",source) and capture(["git","rev-parse","HEAD"]).strip()==source,"frozen_source_required")
-    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py")
+    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py","tools/release_account_contract.py")
     need(not capture(["git","status","--porcelain","--untracked-files=no","--",*paths]).strip(),"source_worktree_changed")
     names=capture(["git","ls-files","--",*paths]).splitlines()
     suffixes={".py",".java",".kt",".kts",".h",".c",".cpp",".go",".mod",".sum",".swift",".json",".xml",".properties",".txt",".pem",".keystore"}
@@ -129,8 +130,8 @@ def source_binding(source):
             need(path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(ROOT),"source_file_invalid")
             pins[name]=sha(path)
     need("tools/release_platform_builds.py" in pins,"build_driver_source_pin_missing")
-    for name in ("app_runtime.py","diagnostics.py","resource_translation_runtime.py"):
-        need("src/idoly_local/"+name in pins,"common_source_pin_missing")
+    for name in COMMON_SOURCE_FILES:
+        need(name in pins,"common_source_pin_missing")
     return pins
 
 def copy_member(archive,name,destination,pin,guard):
@@ -351,10 +352,16 @@ def build_macos(work,output,source,pins,guard):
     for name in ("engine-smoke.json","native-smoke.json","native-app-smoke.json"):
         path=evidence/name
         if path.is_file():shutil.copyfile(path,output/name)
+    try:
+        account_detail=module("release_account_contract",ROOT/"tools/release_account_contract.py").validate(
+            read_json(output/"engine-smoke.json"))
+    except ValueError:
+        raise BuildError("Mac_account_management_smoke_not_passed") from None
     report=base_report("macos",source,pins,input_report)
+    report.update(account_management=account_detail,account_smoke=artifact(output/"engine-smoke.json"))
     report.update(binary=actual,live_engine=live,application_id="game.idolypride.localserver",
                   signature="ad-hoc",notarized=False,build_report=artifact(output/"mac-build-report.json"))
-    report["validation"].update(codesign_strict_verified=True,bundled_engine_tested=True,native_gui_start_stop_tested=True)
+    report["validation"].update(codesign_strict_verified=True,bundled_engine_tested=True,native_gui_start_stop_tested=True,account_management_roundtrip=True)
     write_json(output/"platform-report.json",report)
     return report
 
@@ -379,7 +386,7 @@ def verify_ios(inputs,work,output,source,pins,guard):
     helper=module("release_unified_delivery",ROOT/"ios-unified/delivery.py")
     manifest,_owned=helper.verify_members(inputs,output,source,int(os.environ["GITHUB_RUN_ID"]),0,guard)
     report={"schema":1,"status":"PASS","platform":"ios-unified","source_commit":source,
-            "run_id":int(os.environ["GITHUB_RUN_ID"]),"version":"156.9115","source_sha256":pins,
+            "run_id":int(os.environ["GITHUB_RUN_ID"]),"version":"156.9116","source_sha256":pins,
             "binary":{key:manifest["artifacts"][0][key] for key in ("name","bytes","sha256")},
             "validation":{"all_existing_unified_delivery_gates":True,"artifact_api_digest_required_before_publication":True},
             "execution":{"actual_iOS_Simulator_execution":True,"physical_PlayCover_execution":False,"physical_iPhone_iPad_execution":False}}

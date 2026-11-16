@@ -3,6 +3,40 @@ import Foundation
 import SwiftUI
 import Darwin
 
+
+struct ManagedAccount: Identifiable, Equatable {
+    let mode: String
+    let profile: String
+    let revision: String
+    let summary: String
+    var id: String { mode + ":" + profile }
+    init?(_ row: [String: Any]) {
+        guard let mode = row["mode"] as? String, ["normal", "media"].contains(mode),
+              let profile = row["profile"] as? String, !profile.isEmpty, profile.utf8.count <= 64,
+              let revision = row["revision"] as? String, revision.count == 64 else { return nil }
+        self.mode = mode; self.profile = profile; self.revision = revision
+        let counts = row["counts"] as? [String: Any] ?? [:]
+        let labels = ["cards": "카드", "characters": "아이돌", "costumes": "의상", "photos": "포토"]
+        self.summary = labels.keys.sorted().compactMap { key in
+            guard let count = counts[key] as? Int, count >= 0 else { return nil }
+            return "\(labels[key]!) \(count)"
+        }.joined(separator: " · ")
+    }
+}
+
+struct AccountRestorePoint: Identifiable, Equatable {
+    let id: String
+    let mode: String
+    let profile: String
+    let created: String
+    init?(_ row: [String: Any]) {
+        guard let id = row["id"] as? String, !id.isEmpty,
+              let mode = row["mode"] as? String, let profile = row["profile"] as? String else { return nil }
+        self.id = id; self.mode = mode; self.profile = profile
+        self.created = row["created_at"].map { String(describing: $0) } ?? id
+    }
+}
+
 @MainActor
 final class ServerModel: ObservableObject {
     @Published var running = false
@@ -41,6 +75,34 @@ final class ServerModel: ObservableObject {
     @Published private(set) var resourcePending = false
     @Published private(set) var playbackMessage = "Mac의 기본값은 꺼짐입니다. 켜면 원본 회전 대기 동작을 사용합니다."
     @Published private(set) var presentationFeedback = ClientPresentationFeedback.waiting
+
+    @Published private(set) var accounts: [ManagedAccount] = []
+    @Published private(set) var accountMode = "normal"
+    @Published var selectedAccountProfile = ""
+    @Published var newAccountProfile = ""
+    @Published var newAccountManagerName = ""
+    @Published var selectedRestorePoint = ""
+    @Published private(set) var accountMessage = "새로고침으로 일반·감상 계정과 복구 지점을 확인합니다."
+    @Published private(set) var accountPending = false
+    @Published private(set) var accountPreviewMessage = ""
+    @Published private(set) var accountSelectionMessage = ""
+    @Published private(set) var currentAccountMessage = ""
+    @Published private(set) var accountPageMessage = ""
+    @Published private(set) var restorePoints: [AccountRestorePoint] = []
+    @Published private(set) var nextAccountOffset: Int?
+    @Published private(set) var nextRestoreOffset: Int?
+    @Published private(set) var startupChecksMessage = "서버 준비 검사 대기"
+    @Published private(set) var durableHistoryMessage = "저장된 오류 기록을 확인하고 있습니다."
+    private var accountSelectionRevision: String?
+    private var accountPreviewToken: String?
+    private var accountRequestSerial = 0
+    private var pendingAccountID: Int?
+    private var pendingAccountAction: String?
+    private var accountsInitiallyRequested = false
+    private var accountOffset = 0
+    private var restoreOffset = 0
+    private var diagnosticStatus: [String: Any] = [:]
+
     private var invalidResourceLocation = false
     private var experimentalLiveObserved = false
     @Published var status = "앱을 준비하고 있습니다."
@@ -266,6 +328,288 @@ final class ServerModel: ObservableObject {
               !["f", "d"].contains(String(cString: number.objCType)),
               [1, 2, 4, 8].contains(number.intValue) else { return 4 }
         return number.intValue
+    }
+
+
+    var visibleAccounts: [ManagedAccount] { accounts.filter { $0.mode == accountMode } }
+    var visibleRestorePoints: [AccountRestorePoint] {
+        restorePoints.filter { $0.mode == accountMode && $0.profile == selectedAccountProfile }
+    }
+    var selectedManagedAccount: ManagedAccount? {
+        visibleAccounts.first { $0.profile == selectedAccountProfile }
+    }
+    var hasAccountPreview: Bool { accountPreviewToken != nil }
+    var accountModeBinding: Binding<String> {
+        Binding(get: { self.accountMode }, set: { value in
+            guard ["normal", "media"].contains(value), !self.accountPending else { return }
+            self.accountMode = value
+            self.selectedAccountProfile = self.visibleAccounts.first?.profile ?? ""
+            self.selectedRestorePoint = ""
+        })
+    }
+
+    private func updateAccounts(_ value: [String: Any]) {
+        let rows = (value["accounts"] as? [[String: Any]] ?? []).compactMap(ManagedAccount.init)
+        if accounts != rows { accounts = rows }
+        let points = (value["restore_points"] as? [[String: Any]] ?? []).compactMap(AccountRestorePoint.init)
+        if restorePoints != points { restorePoints = points }
+        accountSelectionRevision = value["selection_revision"] as? String
+        accountOffset = value["offset"] as? Int ?? 0
+        restoreOffset = value["restore_offset"] as? Int ?? 0
+        nextAccountOffset = value["next_offset"] as? Int
+        nextRestoreOffset = value["next_restore_offset"] as? Int
+        let selected = value["selected"] as? [String: String] ?? [:]
+        accountSelectionMessage = "다음 시작 · 일반: \(selected["normal"] ?? "sandbox") · 감상: \(selected["media"] ?? "sandbox")"
+        accountPageMessage = "계정 \(rows.count) / \(value["accounts_total"] as? Int ?? rows.count)개 · 복구 지점 \(points.count) / \(value["restore_points_total"] as? Int ?? points.count)개"
+        if !visibleAccounts.contains(where: { $0.profile == selectedAccountProfile }) {
+            selectedAccountProfile = visibleAccounts.first(where: { $0.profile == selected[accountMode] })?.profile
+                ?? visibleAccounts.first?.profile ?? ""
+        }
+        if !visibleRestorePoints.contains(where: { $0.id == selectedRestorePoint }) { selectedRestorePoint = "" }
+    }
+
+
+    private static func settingsCodeDescription(_ code: String) -> String {
+        let labels = [
+            "selection_ready": "다음 시작 계정 확인", "selection_invalid": "예약 계정을 확인해 주세요.",
+            "catalog_present": "기본 목록 확인", "descriptor_loaded": "통신 규격 확인",
+            "tag_and_pack_sizes_checked": "마스터 목록·파일 크기 확인", "storage_writable": "저장 위치 쓰기 가능",
+            "low_free_space": "남은 저장 공간이 부족합니다.", "http_json_ready": "파일 서버 응답 확인",
+            "listener_started": "게임 서버 연결 대기", "listener_stopped": "서버 중지",
+            "resource_catalog_missing": "리소스 목록이 없습니다.", "on_demand_enabled": "필요한 파일 자동 받기 사용",
+            "offline_cache_unverified": "오프라인 파일 전체 검증 전", "permission_denied": "저장 위치의 접근 권한을 확인해 주세요.",
+            "address_in_use": "다른 서버가 같은 포트를 사용하고 있습니다.", "missing_input": "필수 파일이 없습니다.",
+            "invalid_input": "필수 파일을 읽지 못했습니다.", "insufficient_space": "저장 공간이 부족합니다.",
+            "internal_error": "준비 검사에 실패했습니다.", "startup_requested": "서버 시작 요청",
+            "server_ready": "로컬 서버 준비 완료", "server_stopped": "로컬 서버 중지",
+            "grpc_stopped": "게임 연결 중지", "profile_created": "일반 계정 준비",
+            "profile_loaded": "기존 계정 준비", "media_profile_prepared": "감상 계정 준비",
+            "media_master_prepared": "감상용 마스터 준비", "selected_resource_storage": "선택한 리소스 보관 위치 사용",
+            "cleanup_failed": "중지 정리를 완료하지 못했습니다.", "history_cleared": "보관 기록 지움",
+            "history_recovered": "손상된 기록 대신 새 기록 시작"
+        ]
+        return labels[code] ?? code
+    }
+
+    private static func historyDescription(_ row: [String: Any]) -> String {
+        let kind = row["kind"] as? String ?? ""
+        let labels = ["rpc": "게임 요청", "http_failure": "파일 요청 실패",
+            "startup_failure": "서버 시작 실패", "lifecycle": "실행 상태"]
+        var parts = [row["timestamp"] as? String ?? "", labels[kind] ?? kind]
+        if let code = row["code"] as? String, !code.isEmpty { parts.append(settingsCodeDescription(code)) }
+        if let path = row["path"] as? String, !path.isEmpty { parts.append(path) }
+        if let outcome = row["outcome"] as? String, !outcome.isEmpty {
+            let outcomes = ["OK": "정상", "UNIMPLEMENTED": "미구현", "INVALID_ARGUMENT": "잘못된 입력",
+                "INTERNAL": "내부 오류", "UNAUTHENTICATED": "다시 로그인 필요"]
+            parts.append(outcomes[outcome] ?? outcome)
+        }
+        if let status = row["http_status"] as? Int, status > 0 { parts.append("HTTP \(status)") }
+        if let stage = row["stage"] as? String, !stage.isEmpty { parts.append(stage) }
+        if let type = row["error_type"] as? String, !type.isEmpty { parts.append(type) }
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    private func updateServerChecks(_ state: [String: Any]) {
+        diagnosticStatus = state.filter { $0.key != "accounts" }
+        currentAccountMessage = (state["running"] as? Bool == true)
+            ? "현재 실행 · \(state["media_mode"] as? Bool == true ? "감상" : "일반"): \(state["profile"] as? String ?? "확인 중")"
+            : "현재 실행 중인 계정 없음"
+        if let checks = state["startup_checks"] as? [String: Any] {
+            let labels = ["protocol": "게임 통신 규격", "catalog": "기본 목록", "master": "마스터 파일",
+                "storage": "저장 공간", "http": "파일 서버", "grpc": "게임 서버",
+                "resources": "게임 리소스", "account": "계정"]
+            let names = ["ready": "준비됨", "blocked": "실패", "missing": "누락",
+                "attention": "확인 필요", "not_checked": "미검사", "stopped": "중지"]
+            let scope = checks["scope"] as? String ?? "not_run"
+            let prefix = scope == "previous_run" ? "이전 실행의 검사" : (scope == "current_run" ? "현재 실행의 검사" : "아직 실행하지 않았습니다")
+            let lines = (checks["checks"] as? [[String: Any]] ?? []).compactMap { row -> String? in
+                guard let id = row["id"] as? String, let phase = row["state"] as? String else { return nil }
+                let code = row["code"] as? String ?? ""
+                return "\(labels[id] ?? id): \(names[phase] ?? phase)\(code.isEmpty ? "" : " · " + Self.settingsCodeDescription(code))"
+            }
+            startupChecksMessage = ([prefix] + lines + ["서버 준비 상태이며 실제 게임 재생 검증은 아닙니다."]).joined(separator: "\n")
+        }
+        if let history = state["durable_history"] as? [String: Any] {
+            let available = history["available"] as? Bool ?? false
+            let load = history["load_state"] as? String ?? ""
+            let lines = (history["records"] as? [[String: Any]] ?? []).suffix(20).map(Self.historyDescription)
+            let prefix = !available ? "오류 기록 보관에 접근하지 못했습니다."
+                : (load == "recovered_invalid" ? "이전 기록 파일을 읽지 못해 새 기록을 시작했습니다." : "재실행 후에도 보관되는 최근 기록")
+            durableHistoryMessage = ([prefix] + (lines.isEmpty ? ["보관된 기록 없음"] : lines)).joined(separator: "\n")
+        }
+    }
+
+    func refreshAccounts(offset: Int = 0, restoreOffset: Int = 0) {
+        sendAccount("accounts_status", payload: ["offset": max(0, offset), "restore_offset": max(0, restoreOffset)])
+    }
+    func previousAccounts() { refreshAccounts(offset: max(0, accountOffset - 24), restoreOffset: restoreOffset) }
+    func moreAccounts() { if let offset = nextAccountOffset { refreshAccounts(offset: offset, restoreOffset: restoreOffset) } }
+    func previousRestorePoints() { refreshAccounts(offset: accountOffset, restoreOffset: max(0, restoreOffset - 16)) }
+    func moreRestorePoints() { if let offset = nextRestoreOffset { refreshAccounts(offset: accountOffset, restoreOffset: offset) } }
+
+    private func targetProfile() -> String? {
+        let name = newAccountProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.utf8.count <= 64, !name.contains("/"), !name.contains("\\"),
+              name.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            alertMessage = "새 계정 이름을 1~64 UTF-8바이트로 입력해 주세요. 경로 문자와 제어 문자는 사용할 수 없습니다."
+            return nil
+        }
+        return name
+    }
+    func createAccount() {
+        guard let profile = targetProfile() else { return }
+        let name = newAccountManagerName.trimmingCharacters(in: .whitespacesAndNewlines)
+        sendAccount("accounts_create", payload: ["mode": accountMode, "profile": profile,
+            "manager_name": name.isEmpty ? profile : name])
+    }
+    func cloneAccount() {
+        guard let source = selectedManagedAccount, let profile = targetProfile() else { return }
+        sendAccount("accounts_clone", payload: ["mode": source.mode, "source_profile": source.profile,
+            "profile": profile, "expected_revision": source.revision])
+    }
+    func selectAccount() {
+        guard let row = selectedManagedAccount else { return }
+        var payload: [String: Any] = ["mode": row.mode, "profile": row.profile, "expected_revision": row.revision]
+        if let revision = accountSelectionRevision { payload["selection_revision"] = revision }
+        sendAccount("accounts_select", payload: payload)
+    }
+    func exportAccount() {
+        guard let row = selectedManagedAccount, !accountPending else { return }
+        let panel = NSSavePanel()
+        panel.allowedFileTypes = ["zip"]
+        panel.nameFieldStringValue = "IdolyPride-Account-backup.zip"
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        sendAccount("accounts_export", payload: ["mode": row.mode, "profile": row.profile,
+            "expected_revision": row.revision], destination: url.path)
+    }
+    func previewAccountImport() {
+        guard !accountPending else { return }
+        let panel = NSOpenPanel()
+        panel.allowedFileTypes = ["zip"]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        accountPreviewToken = nil; accountPreviewMessage = ""
+        sendAccount("accounts_preview", payload: ["path": url.path])
+    }
+    func importAccount(replacing: Bool) {
+        guard let token = accountPreviewToken, !accountPending else { return }
+        var payload: [String: Any] = ["token": token, "mode": accountMode, "replace": replacing]
+        if replacing {
+            guard !running, !busy, !canStop, let target = selectedManagedAccount else {
+                alertMessage = "게임을 종료하고 서버를 중지한 뒤 계정을 교체해 주세요."; return
+            }
+            let warning = NSAlert()
+            warning.messageText = "선택한 계정을 백업 내용으로 교체할까요?"
+            warning.informativeText = "\(target.profile)의 현재 상태를 복구 지점으로 보관한 뒤 교체합니다."
+            warning.addButton(withTitle: "교체"); warning.addButton(withTitle: "취소")
+            guard warning.runModal() == .alertFirstButtonReturn else { return }
+            payload["profile"] = target.profile
+            payload["expected_revision"] = target.revision
+        } else {
+            guard let profile = targetProfile() else { return }
+            payload["profile"] = profile; payload["expected_revision"] = NSNull()
+        }
+        sendAccount("accounts_import", payload: payload)
+    }
+    func restoreAccount() {
+        guard !running, !busy, !canStop, let target = selectedManagedAccount,
+              !selectedRestorePoint.isEmpty, !accountPending else { return }
+        let warning = NSAlert()
+        warning.messageText = "선택한 복구 지점으로 되돌릴까요?"
+        warning.informativeText = "대상 계정: \(target.profile). 현재 상태도 복구 지점으로 보관합니다."
+        warning.addButton(withTitle: "복구"); warning.addButton(withTitle: "취소")
+        guard warning.runModal() == .alertFirstButtonReturn else { return }
+        sendAccount("accounts_restore", payload: ["id": selectedRestorePoint, "mode": target.mode,
+            "profile": target.profile, "expected_revision": target.revision])
+    }
+    func clearServerHistory() {
+        let warning = NSAlert()
+        warning.messageText = "보관된 서버 기록을 지울까요?"
+        warning.informativeText = "게임 계정과 리소스는 변경하지 않습니다."
+        warning.addButton(withTitle: "기록 지우기"); warning.addButton(withTitle: "취소")
+        guard warning.runModal() == .alertFirstButtonReturn else { return }
+        sendAccount("settings_clear_history", payload: [:])
+    }
+    func exportDiagnostics() {
+        let panel = NSSavePanel()
+        panel.allowedFileTypes = ["json"]
+        panel.nameFieldStringValue = "IdolyPride-diagnostics.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let snapshot: [String: Any] = ["schema": 1, "runtime": diagnosticStatus, "server_logs": logs]
+        guard let bytes = try? JSONSerialization.data(withJSONObject: snapshot, options: [.prettyPrinted, .sortedKeys]) else {
+            alertMessage = "진단 기록을 만들지 못했습니다."; return
+        }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            do {
+                try bytes.write(to: url, options: .atomic)
+                DispatchQueue.main.async { self?.accountMessage = "진단·서버 기록을 JSON 하나로 저장했습니다." }
+            } catch {
+                DispatchQueue.main.async { self?.alertMessage = "진단 기록을 저장하지 못했습니다." }
+            }
+        }
+    }
+
+    private func sendAccount(_ action: String, payload: [String: Any], destination: String? = nil) {
+        guard !shutdownRequested, !accountPending, let writer = input?.fileHandleForWriting,
+              child?.isRunning == true else { return }
+        accountRequestSerial = accountRequestSerial >= Int(Int32.max) ? 1 : accountRequestSerial + 1
+        var command = payload
+        command["action"] = action; command["request_id"] = accountRequestSerial
+        if let destination = destination { command["destination"] = destination }
+        do {
+            var bytes = try JSONSerialization.data(withJSONObject: command); bytes.append(10)
+            guard Self.nonblockingWrite(bytes, fileDescriptor: writer.fileDescriptor) else {
+                alertMessage = "계정 요청을 전달하지 못했습니다. 이름과 파일 경로가 길면 짧은 이름의 ZIP을 Downloads에 두고 다시 선택해 주세요."
+                return
+            }
+            pendingAccountID = accountRequestSerial; pendingAccountAction = action
+            accountPending = true; accountMessage = "계정 작업을 준비하고 있습니다."
+        } catch { alertMessage = "계정 요청을 만들지 못했습니다." }
+    }
+    private func consumeAccount(_ event: [String: Any], kind: String) {
+        guard let identifier = event["request_id"] as? Int, identifier == pendingAccountID,
+              event["action"] as? String == pendingAccountAction else { return }
+        if kind == "account_progress" {
+            if let received = event["received_bytes"] as? Int, let total = event["total_bytes"] as? Int, total > 0 {
+                accountMessage = "계정 ZIP 저장 중 · \(received) / \(total)바이트"
+            } else { accountMessage = "계정 자료를 준비·검증하고 있습니다." }
+            return
+        }
+        let action = pendingAccountAction
+        pendingAccountID = nil; pendingAccountAction = nil; accountPending = false
+        if kind == "account_error" {
+            let code = event["code"] as? String ?? "account_operation_failed"
+            let messages = ["account_server_running": "게임을 종료하고 서버를 중지한 뒤 교체·복구해 주세요.",
+                "account_operation_busy": "이전 계정 작업이 끝난 뒤 다시 시도해 주세요.",
+                "account_server_starting": "서버 시작이 끝난 뒤 다시 시도해 주세요."]
+            accountMessage = messages[code] ?? "계정 작업을 완료하지 못했습니다. 새로고침 후 다시 확인해 주세요."
+            alertMessage = accountMessage + "\n" + code
+            return
+        }
+        guard let result = event["result"] as? [String: Any], result["ok"] as? Bool == true else {
+            accountMessage = "계정 응답을 확인하지 못했습니다."; return
+        }
+        if let state = result["status"] as? [String: Any] { updateAccounts(state) }
+        if action == "accounts_preview", let token = result["token"] as? String,
+              let archive = result["archive"] as? [String: Any] {
+            accountPreviewToken = token
+            if let mode = archive["mode"] as? String, ["normal", "media"].contains(mode) { accountMode = mode }
+            accountPreviewMessage = "선택한 계정 ZIP · \(archive["mode"] as? String ?? "") · \(archive["profile"] as? String ?? "") · \(archive["bytes"] as? Int ?? 0)바이트"
+            accountMessage = "미리보기를 확인한 뒤 새 계정으로 가져오거나 선택 계정을 교체해 주세요."
+        } else {
+            let messages = ["accounts_status": "계정과 복구 지점 목록을 갱신했습니다.",
+                "accounts_create": "새 계정을 만들었습니다.", "accounts_clone": "계정을 복제했습니다.",
+                "accounts_select": "다음 서버 시작 계정을 저장했습니다. 게임을 종료하고 서버를 재시작해 주세요.",
+                "accounts_export": "계정 ZIP을 저장했습니다. 게임 리소스는 별도 ZIP으로 옮깁니다.",
+                "accounts_import": "계정을 가져왔습니다. 선택 후 서버를 다시 시작해 주세요.",
+                "accounts_restore": "계정을 복구했습니다. 서버를 다시 시작해 주세요.",
+                "settings_clear_history": "보관된 서버 기록을 지웠습니다."]
+            accountMessage = messages[action ?? ""] ?? "계정 작업을 완료했습니다."
+            if action == "accounts_import" { accountPreviewToken = nil; accountPreviewMessage = "" }
+        }
     }
 
     func resources(_ action: String) {
@@ -532,6 +876,8 @@ final class ServerModel: ObservableObject {
                 self.busy = false
                 self.canStop = false
                 self.resourcePending = false
+                self.accountPending = false
+                self.pendingAccountID = nil; self.pendingAccountAction = nil
                 self.statusTimer?.invalidate()
                 self.statusTimer = nil
                 self.statusPolling.reset()
@@ -583,6 +929,8 @@ final class ServerModel: ObservableObject {
             case "resource_result":
                 resourcePending = false
                 resourceMessage = event["message"] as? String ?? "리소스 작업 상태가 갱신되었습니다."
+            case "account_result", "account_error", "account_progress":
+                consumeAccount(event, kind: kind)
             case "status":
                 guard let state = event["status"] as? [String: Any] else { continue }
                 statusPolling.received(at: ProcessInfo.processInfo.systemUptime)
@@ -593,6 +941,12 @@ final class ServerModel: ObservableObject {
                 status = running ? "로컬 서버가 실행 중입니다." : (busy ? "서버를 시작하고 있습니다." : "서버가 중지되어 있습니다.")
                 presentationClient = (state["presentation"] as? [String: Any])?["client"] as? [String: Any]
                 updateResourceStatus(state)
+                updateServerChecks(state)
+                if let accountStatus = state["accounts"] as? [String: Any] { updateAccounts(accountStatus) }
+                if !accountsInitiallyRequested && !busy && !smoke {
+                    accountsInitiallyRequested = true
+                    refreshAccounts()
+                }
                 updatePresentationFeedback()
                 checkpoint(running ? "server_running" : (busy ? "server_starting" : "server_stopped"))
                 if smoke { advanceSmoke() }
@@ -664,7 +1018,7 @@ final class ServerModel: ObservableObject {
     }
 
     func start() {
-        guard !running && !busy && !canStop else { return }
+        guard !running && !busy && !canStop && !accountPending else { return }
         var cache: String?
         if resourcesInDownloads {
             guard let selected = externalResourceDirectory(),
@@ -940,6 +1294,71 @@ struct PresentationControls: View {
 }
 
 @MainActor
+
+struct AccountControls: View {
+    @ObservedObject var model: ServerModel
+    var body: some View {
+        GroupBox("유저 관리 · 계정 백업") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.currentAccountMessage).font(.caption).textSelection(.enabled)
+                Text(model.accountSelectionMessage).font(.caption).textSelection(.enabled)
+                Picker("계정 종류", selection: model.accountModeBinding) {
+                    Text("일반 진행").tag("normal")
+                    Text("전체 해금 감상").tag("media")
+                }.disabled(model.accountPending)
+                Picker("관리할 계정", selection: $model.selectedAccountProfile) {
+                    Text("계정 선택").tag("")
+                    ForEach(model.visibleAccounts) { row in Text(row.profile).tag(row.profile) }
+                }.disabled(model.accountPending)
+                if let row = model.selectedManagedAccount, !row.summary.isEmpty {
+                    Text(row.summary).font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("새로고침") { model.refreshAccounts() }
+                    Button("이전 계정") { model.previousAccounts() }
+                    Button("다음 계정") { model.moreAccounts() }.disabled(model.nextAccountOffset == nil)
+                }.disabled(model.accountPending)
+                Text(model.accountPageMessage).font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    TextField("새 계정 이름", text: $model.newAccountProfile)
+                    TextField("게임 내 매니저 이름 (새 계정)", text: $model.newAccountManagerName)
+                }.disabled(model.accountPending)
+                HStack {
+                    Button("새 계정 만들기") { model.createAccount() }
+                    Button("선택 계정 복제") { model.cloneAccount() }.disabled(model.selectedManagedAccount == nil)
+                    Button("다음 시작 계정으로 선택") { model.selectAccount() }.disabled(model.selectedManagedAccount == nil)
+                }.disabled(model.accountPending)
+                HStack {
+                    Button("계정 ZIP 내보내기…") { model.exportAccount() }.disabled(model.selectedManagedAccount == nil)
+                    Button("계정 ZIP 가져오기 미리보기…") { model.previewAccountImport() }
+                }.disabled(model.accountPending)
+                if model.hasAccountPreview {
+                    Text(model.accountPreviewMessage).font(.caption).textSelection(.enabled)
+                    HStack {
+                        Button("새 계정으로 가져오기") { model.importAccount(replacing: false) }
+                        Button("선택 계정 교체") { model.importAccount(replacing: true) }
+                            .disabled(model.running || model.busy || model.canStop || model.selectedManagedAccount == nil)
+                    }.disabled(model.accountPending)
+                }
+                Picker("선택 계정의 복구 지점", selection: $model.selectedRestorePoint) {
+                    Text("복구 지점 선택").tag("")
+                    ForEach(model.visibleRestorePoints) { point in Text(point.created).tag(point.id) }
+                }.disabled(model.accountPending)
+                HStack {
+                    Button("이전 복구 지점") { model.previousRestorePoints() }
+                    Button("다음 복구 지점") { model.moreRestorePoints() }.disabled(model.nextRestoreOffset == nil)
+                    Button("선택 지점으로 복구") { model.restoreAccount() }
+                        .disabled(model.running || model.busy || model.canStop || model.selectedRestorePoint.isEmpty)
+                }.disabled(model.accountPending)
+                if model.accountPending { ProgressView().controlSize(.small) }
+                Text(model.accountMessage).font(.caption).textSelection(.enabled)
+                Text("계정 ZIP에는 계정·진행·게임 설정을 보관하며 다운로드 리소스는 포함하지 않습니다. 리소스 ZIP에는 계정이 없습니다. 계정 선택은 다음 서버 시작부터 적용되고, 교체·복구는 게임 종료 후 서버를 중지한 상태에서 진행합니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.padding(.top, 6)
+        }
+    }
+}
+
 struct ServerView: View {
     @ObservedObject var model: ServerModel
     var body: some View {
@@ -955,7 +1374,7 @@ struct ServerView: View {
             }
             Text(model.status).font(.headline).accessibilityIdentifier("server-status")
             HStack {
-                Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop)
+                Button("서버 시작") { model.start() }.disabled(model.running || model.busy || model.canStop || model.accountPending)
                 Button("중지") { model.stop() }.disabled(!model.canStop)
                 Button("PlayCover에서 열기") { model.openGame() }.disabled(!model.running)
                 Spacer()
@@ -968,6 +1387,17 @@ struct ServerView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("연결용 IPA는 별도 파일입니다. 위 버튼으로 PlayCover를 연 뒤 게임을 선택해 실행합니다.")
                         .font(.caption).foregroundStyle(.secondary)
+                    AccountControls(model: model)
+                    DisclosureGroup("서버 준비 검사 · 이전 오류 기록") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(model.startupChecksMessage).font(.caption).textSelection(.enabled)
+                            Text(model.durableHistoryMessage).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                            HStack {
+                                Button("진단·서버 기록 내보내기…") { model.exportDiagnostics() }
+                                Button("보관 기록 지우기") { model.clearServerHistory() }.disabled(model.accountPending)
+                            }
+                        }.padding(.top, 6)
+                    }
                     Toggle("감상용 전체 해금", isOn: $model.mediaMode)
                         .disabled(model.running || model.busy || model.canStop)
                     Text("감상용 저장은 일반 진행과 별도로 보관합니다. 모드를 바꾼 뒤에는 서버를 다시 시작하고 게임 타이틀에서 다시 로그인해 주세요. 기본값은 꺼짐입니다.")

@@ -2,6 +2,14 @@
 #include <assert.h>
 #include <stdio.h>
 int main(void) {
+    assert(!IDGateReadFailedHostStatus(NULL, 1, 1));
+    for (int phase = IDGateIdle; phase <= IDGateRunning; ++phase)
+        for (int python = 0; python <= 1; ++python)
+            for (int worker = 0; worker <= 1; ++worker) {
+                IDGate observed = {.phase = (IDGatePhase)phase};
+                assert(IDGateReadFailedHostStatus(&observed, python, worker)
+                    == (phase == IDGateFailed && python && worker));
+            }
     IDGate g = {0};
     assert(!IDGateForward(&g));
     IDGate early = {0};

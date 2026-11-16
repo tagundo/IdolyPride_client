@@ -256,7 +256,7 @@ def verify_members(members, proof, source, run, artifact, guard):
     from zipfile import ZipFile
     with ZipFile(path) as z:
      app_info=plistlib.loads(z.read(prefix+'Info.plist'))
-     assert app_info['CFBundleVersion']=='156.9115'
+     assert app_info['CFBundleVersion']=='156.9116'
      assert app_info['IdolyUnifiedLoopbackOrigin']=='http://127.0.0.1:8080'
      assert json.loads(z.read(prefix+'LocalServer/client-languages.json'))==descriptor
      zipped=z.getinfo(prefix+'LocalServer/client-languages.zip');assert zipped.file_size==descriptor['bytes']
@@ -266,7 +266,7 @@ def verify_members(members, proof, source, run, artifact, guard):
       assert digest.hexdigest()==descriptor['sha256']
     manifest={'schema':1,'source_commit':SOURCE,'artifacts':[{'path':str(path),'name':IPA,'bytes':report['output_bytes'],'sha256':report['output_sha256']}], 'validation':{'Actions_run':RUN,'Simulator_core':'PASS','physical_gameplay':'NOT_TESTED','PlayCover':'NOT_TESTED'}}
     (STAGE/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    (STAGE/'README.md').write_text('아이프라 iPhone·iPad 통합 IPA 기능·진단 보완 시험판 (156.9115)\n\n서버 메뉴에서 일본어·한국어·영어를 선택하고 서버 시작 후 게임 시작을 누르세요. 서버 화면 언어는 즉시 바뀌며 게임 언어 데이터는 게임 시작 전에 선택합니다. 개인 서명 후 설치해 주세요. 게임 중 안전 영역 오른쪽 위의 128×128 영역을 한 손가락으로 2초간 길게 누르면 서버 메뉴가 다시 열립니다. Mac에서는 앱 메뉴의 로컬 서버 설정… 또는 ⌘⇧,를 사용할 수 있습니다. 미번역 문구·이미지는 원본을 유지하며 영어 UI 자료에는 미번역 키 17개가 있습니다.\n\n이번 수정은 ZIP 파일 선택기를 원본 직접 열기에서 가져오기 사본 모드로 바꿉니다. LiveContainer에서 복사 모드로 전달되도록 하며 기존 ZIP 확장자·내용·저장 경로 검증은 유지합니다. ZIP 선택 후 준비·복사한 용량·복사 진행률을 표시하고 기존 검증·저장 파일 수로 이어집니다. 진행이 확인될 때만 복사 응답 대기 시간을 갱신하며 멈춘 요청의 지연 오류는 유지합니다. 같은 보관 폴더의 조상 경로 별칭을 서버의 정규 경로와 비교하도록 보완해 /var와 /private/var 같은 표시 차이로 가져오기를 거절하는 경로를 수정합니다. 최종 디렉터리·파일 심볼릭 링크와 하드링크 차단은 유지합니다. 사용자는 Sideloadly에서 내보낸 iOS ZIP을 LiveContainer·SideStore 설치판에 가져오지 못했다고 보고했습니다. LiveContainer의 Fix File Picker를 켜면 파일 선택은 됐으며, 수정판의 실제 가져오기는 실기기 재확인이 필요합니다.\n\n이전 릴리즈의 보유 버디 카드·프로필 장식·기본/포토/카드 배경·카드 이미지 선택과 포토 잠금 전환을 복구합니다. 포토 전환은 같은 요청을 재시도해도 한 번만 반영합니다. 실제 저장된 일일·주간·일반 미션과 일일·콘테스트·타워 목록/이력을 조회하며 새 미션·보상·일일/타워 전투는 생성하지 않습니다. 128×128 영역의 2초 길게 누르기와 기존 진단 수정을 유지합니다. 이전 v0.3.32의 상태 조회 이력 복사 절감, 번역 검증 계층 해제와 SHA256 순차 계산을 유지하며 기존 지문·캐시 리비전은 그대로 사용합니다.\n\n서버가 HTTP를 받기 전 SIGPIPE를 무시하는 156.9111 수정과 Unity 초기화 전에 언어별 Data를 선택하는 호스트 수정을 유지합니다. 156.9109의 E209 대기 한도 330초, 6자리 OctoManifest 별칭, 기존 키보드 객체 재사용과 내장 MIME 표도 유지합니다. 원본 SDK 파일·내부 캐시 키·준비된 ZIP 바이트는 바꾸지 않습니다.\n\n출판 전 Apple SDK 빌드, Mac Foundation·AppKit 검사와 새 Simulator의 한국어→영어→일본어→영어→한국어 다섯 번 시작 검사, 캐시 파일 전체 해시·재사용, 서버 시작 전과 게임 시작 전 SIGPIPE/EPIPE 생존, 메뉴 종료 후 서버 유지, AES·암호화 통신을 통과해야 합니다. Master.Get은 원본 ZIP과 HEAD·최대 64바이트 Range를 대조하며 OctoManifest의 모든 활성 이름과 번역 이미지 한 개의 전체 로컬 HTTP 응답도 검사합니다. 이미지 MD5·길이·ETag는 제공 목록 기준입니다. Simulator의 Unity 진입점·관리 API는 검사용 대역이며 실제 게임 렌더링이나 전체 리소스 로딩 검사가 아닙니다.\n\n156.9115의 실제 PlayCover 재시험, iPhone·iPad 실기기, 오프라인 전체 리소스 캐시와 MV 성능 확인은 대기 중입니다.\n')
+    (STAGE/'README.md').write_text('아이프라 통합 IPA 내부 검증 빌드 (156.9116)\n\n공개 릴리즈가 아닙니다. 서버 설정·계정 관리와 관련 게임 API를 구현하고 검증하는 소스의 빌드입니다.\n\n일본어·한국어·영어 게임 데이터를 선택하고 서버 준비 후 게임 시작을 누릅니다. 서버 화면 언어는 즉시 적용하며 게임 시작 뒤 바꾼 언어와 계정은 앱을 완전히 종료·재실행해 적용합니다. 개인 서명이 필요합니다. 게임 중 오른쪽 위 128×128 안전 영역을 2초 누르거나 Mac의 로컬 서버 설정… / ⌘⇧,로 메뉴를 엽니다.\n\n실제 시작 검사와 이전 실행의 실패 기록, 일반·감상 계정 목록·생성·복제·다음 시작 선택, 계정 ZIP 내보내기·미리보기·가져오기·자동 복구 지점을 제공합니다. 복제는 게임 내 ID를 보존하는 같은 계정의 저장 분기입니다. 계정 ZIP은 7개 계정 테이블을 보존하며 로그인 세션·리소스·앱 전역 설정은 포함하지 않습니다. 계정 ZIP과 리소스 ZIP은 별개입니다. 미리보기 뒤 자료가 바뀌면 덮어쓰기를 중단합니다.\n\n기존 설정 자동 저장, 게임 시작 전 저장 대기, 리소스 ZIP 사본·진행 표시, 언어 Data 캐시·SIGPIPE 처리·그래픽/촬영 설정을 유지합니다. LiveContainer는 Fix File Picker 설정도 확인합니다.\n\n새 게임 호출은 선택된 로컬 계정의 Profile.FindUser 조회와 미등록 생일의 Profile.UpdateBirthday 등록 두 개입니다. Firebase 가입·삭제·재가입이나 생일 이벤트·외부 보상 복구로 표시하지 않습니다.\n\n실제 Apple SDK 및 동일 Simulator KO→EN→JA→EN→KO 다섯 재실행 검사를 유지합니다. 계정 검사는 검사용 고정 자료와 실제 저장소의 바이트·세션·백업·복구 흐름을 대조합니다. Simulator Unity 진입점은 검사용이며 실제 게임 렌더링·전체 콘텐츠 플레이를 확인한 것이 아닙니다. 실제 PlayCover·iPhone·iPad 및 LiveContainer·SideStore Files 공급자의 기기 검사는 별도입니다.\n')
     return manifest,identity
 
 class NoRedirect(HTTPRedirectHandler):
@@ -473,7 +473,7 @@ def main():
     work.mkdir(mode=0o700)
     proof = work/"proof";proof.mkdir(mode=0o700)
     members = work/"members";members.mkdir(mode=0o700)
-    state = {"schema":1,"status":"RUNNING","source_commit":args.source_commit,"run_id":args.run_id,"artifact_id":args.artifact_id,"version":"156.9115","source_sha256":source_pins}
+    state = {"schema":1,"status":"RUNNING","source_commit":args.source_commit,"run_id":args.run_id,"artifact_id":args.artifact_id,"version":"156.9116","source_sha256":source_pins}
     def save():
         (proof/"delivery-proof.json").write_text(json.dumps(state,indent=2)+"\n")
     save()
@@ -708,7 +708,7 @@ def fetch_proof(args):
          and publication.get("published") is True and publication.get("source_commit") == args.source_commit
          and publication.get("branch") == branch and publication.get("commit") == proof.get("publication_commit")
          and type(publication.get("commit")) is str and re.fullmatch(r"[0-9a-f]{40}",publication["commit"]),"publication_proof_failed")
-    need(proof.get("version") == "156.9115" and manifest.get("source_commit") == args.source_commit
+    need(proof.get("version") == "156.9116" and manifest.get("source_commit") == args.source_commit
          and manifest.get("validation",{}).get("Actions_run") == args.run_id
          and len(manifest.get("artifacts",[])) == 1
          and len(publication.get("artifacts",[])) == 1,"proof_artifact_count_differs")

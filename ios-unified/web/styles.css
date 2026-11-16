@@ -96,3 +96,6 @@ footer { font-size: .75rem; text-align: center; color: var(--muted); padding: .5
   button { color: #14203b; }
 }
 @media (prefers-reduced-motion: no-preference) { button { transition: background-color .12s ease; } }
+
+input[type="text"] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: .5rem; min-height: 2.75rem; padding: .5rem; max-width: 58%; width: 14rem; min-width: 0; }
+.account-text { white-space: pre-line; overflow-wrap: anywhere; }

@@ -32,6 +32,8 @@ Mac 별도 서버의 계정·설정은 `~/Library/Application Support/IdolyPride
 
 [프로필·포토 사용 흐름](docs/preference-support.md) · [미션·퀘스트 목록의 복구 범위](docs/menu-recovery-v0.3.34.md)
 
+개발 브랜치의 [서버 설정·유저 관리 구현과 검증 범위](docs/server-user-management.md)는 별도로 정리합니다. 현재 공개 v0.3.35에 포함됐다는 뜻은 아니며 새 공개 배포는 보류합니다.
+
 다음 릴리즈부터 **연도.월.일.회차** 버전과 버전이 포함된 APK·IPA·Mac 파일명을 사용합니다. 예: `IdolyPride-2026.11.16.1-Server-Android.apk`. [날짜 버전·파일명 규칙](docs/release-versioning.md)
 
 ## 기능별 구현 기록

@@ -44,6 +44,20 @@ public final class MainActivity extends Activity implements ServerService.Observ
     static final String MEDIA_MODE = "media_mode";
     static final String RESOURCE_PUBLIC_DOWNLOADS = "resource_public_downloads";
     static final String RESOURCE_DOWNLOAD_PARALLELISM = "resource_download_parallelism";
+
+    private static final int EXPORT_ACCOUNT = 50055, IMPORT_ACCOUNT = 50056;
+    private final java.util.ArrayList<Button> accountButtons = new java.util.ArrayList<>();
+    private org.json.JSONArray accountRows = new org.json.JSONArray(), restoreRows = new org.json.JSONArray();
+    private JSONObject accountStatus = new JSONObject(), activeAccount = new JSONObject(), durableHistory = new JSONObject();
+    private JSONObject pendingAccountExport, pendingAccountPreview;
+    private Spinner accountPicker, restorePicker;
+    private TextView accountOverview, accountPage, restorePage, accountOperation, serverChecks, durableFailure;
+    private Button accountPrevious, accountNext, restoreNext, restoreAccount;
+    private ProgressBar accountProgress;
+    private int accountOffset, restoreOffset;
+    private boolean accountLifecycleBusy, accountDialogOpen;
+    private String pendingSelectedAccountMode;
+
     private CheckBox experimentalMainLive;
     private CheckBox downloadMissingResources;
     private CheckBox mediaMode;
@@ -198,6 +212,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (savedInstanceState != null) {
             pendingResourcePlatform = savedInstanceState.getString("resource_platform");
             retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
+            accountOffset = Math.max(0, savedInstanceState.getInt("account_offset", 0));
+            restoreOffset = Math.max(0, savedInstanceState.getInt("restore_offset", 0));
+            try {
+                String exported = savedInstanceState.getString("account_export"), preview = savedInstanceState.getString("account_preview");
+                if (exported != null) pendingAccountExport = new JSONObject(exported);
+                if (preview != null) pendingAccountPreview = new JSONObject(preview);
+            } catch (org.json.JSONException invalid) { pendingAccountExport = null; pendingAccountPreview = null; }
         }
         getWindow().setStatusBarColor(PAGE_BACKGROUND);
         getWindow().setNavigationBarColor(PAGE_BACKGROUND);
@@ -266,6 +287,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         TextView note = text(R.string.first_launch_note, 13, TEXT_MUTED);
         note.setPadding(0, dp(8), 0, dp(14));
         modeCard.addView(note);
+
+        addServerChecksControls(card(body, R.string.server_checks_title));
+        addAccountControls(card(body, R.string.accounts_title));
 
         LinearLayout libraryCard = card(body, 0);
         addLibraryControls(libraryCard);
@@ -391,6 +415,378 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 50051);
         }
+    }
+
+
+    private Button accountButton(LinearLayout body, int label, String identifier, View.OnClickListener listener) {
+        Button control = button(label); control.setContentDescription(identifier);
+        control.setOnClickListener(listener); accountButtons.add(control);
+        body.addView(control, new LinearLayout.LayoutParams(-1, -2)); return control;
+    }
+
+    private void addAccountControls(LinearLayout body) {
+        TextView notice = text(R.string.accounts_notice, 16, TEXT_MUTED); body.addView(notice);
+        accountOverview = text(R.string.accounts_waiting, 16, TEXT_PRIMARY); accountOverview.setTextIsSelectable(true); body.addView(accountOverview);
+        accountPicker = new Spinner(this); accountPicker.setContentDescription("idoly.accounts.list");
+        body.addView(accountPicker, new LinearLayout.LayoutParams(-1, dp(52)));
+        accountPicker.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { updateAccountControls(); }
+            @Override public void onNothingSelected(AdapterView<?> parent) {}
+        });
+        accountPage = text(R.string.accounts_waiting, 16, TEXT_MUTED); body.addView(accountPage);
+        accountPrevious = accountButton(body, R.string.accounts_previous, "idoly.accounts.previous", view -> {
+            accountOffset = Math.max(0, accountOffset - 24); refreshAccounts();
+        });
+        accountNext = accountButton(body, R.string.accounts_next, "idoly.accounts.next", view -> {
+            int next = accountStatus.optInt("next_offset", -1); if (next >= 0) { accountOffset = next; refreshAccounts(); }
+        });
+        accountButton(body, R.string.accounts_refresh, "idoly.accounts.refresh", view -> refreshAccounts());
+        accountButton(body, R.string.accounts_create, "idoly.accounts.create", view -> showAccountNameDialog("create", null));
+        accountButton(body, R.string.accounts_clone, "idoly.accounts.clone", view -> {
+            JSONObject source = selectedAccount(); if (source != null) showAccountNameDialog("clone", source); else accountChooseNotice();
+        });
+        accountButton(body, R.string.accounts_select, "idoly.accounts.select", view -> {
+            JSONObject row = selectedAccount(); if (row == null) { accountChooseNotice(); return; }
+            performAccount("accounts_select", accountPayload("mode", row.optString("mode"), "profile", row.optString("profile"),
+                    "expected_revision", row.optString("revision"), "selection_revision", accountStatus.optString("selection_revision")));
+        });
+        accountButton(body, R.string.accounts_export, "idoly.accounts.export", view -> {
+            JSONObject row = selectedAccount(); if (row == null) { accountChooseNotice(); return; }
+            if (pendingAccountExport != null) ServerService.discardAccountDocument(getApplicationContext(), pendingAccountExport.optString("path"));
+            pendingAccountExport = null;
+            performAccount("accounts_export", accountPayload("mode", row.optString("mode"), "profile", row.optString("profile"),
+                    "expected_revision", row.optString("revision")));
+        });
+        accountButton(body, R.string.accounts_import, "idoly.accounts.import", view -> {
+            if (pendingAccountPreview != null) { showAccountImportChoices(); return; }
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION).setType("application/zip")
+                    .putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/zip", "application/x-zip-compressed", "application/octet-stream"});
+            try { startActivityForResult(picker, IMPORT_ACCOUNT); }
+            catch (RuntimeException error) { accountError("account_picker_unavailable"); }
+        });
+        body.addView(text(R.string.accounts_restore_notice, 16, TEXT_MUTED));
+        restorePicker = new Spinner(this); restorePicker.setContentDescription("idoly.accounts.restore-list");
+        body.addView(restorePicker, new LinearLayout.LayoutParams(-1, dp(52)));
+        restorePage = text(R.string.accounts_restore_empty, 16, TEXT_MUTED); body.addView(restorePage);
+        restoreNext = accountButton(body, R.string.accounts_restore_next, "idoly.accounts.restore-next", view -> {
+            int next = accountStatus.optInt("next_restore_offset", -1);
+            restoreOffset = next >= 0 ? next : 0; refreshAccounts();
+        });
+        restoreAccount = accountButton(body, R.string.accounts_restore, "idoly.accounts.restore", view -> requestAccountRestore());
+        accountProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        accountProgress.setIndeterminate(true); accountProgress.setVisibility(View.GONE);
+        body.addView(accountProgress, new LinearLayout.LayoutParams(-1, dp(12)));
+        accountOperation = text(R.string.accounts_ready, 16, TEXT_MUTED);
+        accountOperation.setTextIsSelectable(true); accountOperation.setContentDescription("idoly.accounts.result");
+        body.addView(accountOperation); updateAccountControls();
+    }
+
+    private void addServerChecksControls(LinearLayout body) {
+        serverChecks = text(R.string.server_checks_waiting, 16, TEXT_MUTED); serverChecks.setTextIsSelectable(true); body.addView(serverChecks);
+        durableFailure = text(R.string.server_history_empty, 16, TEXT_MUTED); durableFailure.setTextIsSelectable(true); body.addView(durableFailure);
+        Button refresh = button(R.string.server_checks_refresh); refresh.setContentDescription("idoly.settings.refresh");
+        refresh.setOnClickListener(view -> performAccount("server_settings_status", new JSONObject())); body.addView(refresh);
+        Button history = button(R.string.server_history_view); history.setOnClickListener(view -> {
+            TextView content = text(R.string.server_history_empty, 16, TEXT_PRIMARY);
+            try { content.setText(durableHistory.toString(2)); } catch (org.json.JSONException ignored) { content.setText(R.string.server_history_empty); } content.setTextIsSelectable(true); content.setPadding(dp(16), dp(12), dp(16), dp(12));
+            ScrollView scroll = new ScrollView(this); scroll.addView(content);
+            new AlertDialog.Builder(this).setTitle(R.string.server_history_view).setView(scroll)
+                    .setPositiveButton(R.string.accounts_confirm, null).show();
+        }); body.addView(history);
+        Button clear = button(R.string.server_history_clear); clear.setOnClickListener(view ->
+                new AlertDialog.Builder(this).setTitle(R.string.server_history_clear).setMessage(R.string.server_history_clear_confirm)
+                        .setNegativeButton(R.string.accounts_cancel, null)
+                        .setPositiveButton(R.string.accounts_confirm, (dialog, which) -> performAccount("server_history_clear", new JSONObject())).show());
+        body.addView(clear);
+    }
+
+    private static JSONObject accountPayload(Object... pairs) {
+        JSONObject value = new JSONObject();
+        try { for (int index = 0; index < pairs.length; index += 2)
+            value.put((String) pairs[index], pairs[index + 1] == null ? JSONObject.NULL : pairs[index + 1]); }
+        catch (org.json.JSONException impossible) { throw new IllegalArgumentException(impossible); }
+        return value;
+    }
+
+    private JSONObject selectedAccount() {
+        return accountPicker == null ? null : accountRows.optJSONObject(accountPicker.getSelectedItemPosition());
+    }
+
+    private void accountChooseNotice() { Toast.makeText(this, R.string.accounts_choose, Toast.LENGTH_LONG).show(); }
+
+    private void refreshAccounts() {
+        performAccount("accounts_status", accountPayload("offset", accountOffset, "restore_offset", restoreOffset));
+    }
+
+    private void performAccount(String action, JSONObject payload) {
+        if (ServerService.isManagingAccounts()) return;
+        if ("accounts_select".equals(action)) pendingSelectedAccountMode = payload.optString("mode");
+        accountOperation.setText(R.string.accounts_working); accountOperation.setTextColor(TEXT_MUTED);
+        ServerService.manageAccounts(getApplicationContext(), action, payload, accountCallback(action));
+        updateAccountControls();
+    }
+
+    private ServerService.AccountCallback accountCallback(String action) {
+        return new ServerService.AccountCallback() {
+            @Override public void progress(String phase, long bytes, long total) {
+                if (isFinishing() || isDestroyed()) return;
+                accountProgress.setVisibility(View.VISIBLE); accountProgress.setIndeterminate(total <= 0);
+                if ("preparing".equals(phase)) { accountOperation.setText(R.string.accounts_preparing); return; }
+                if (total > 0) { accountProgress.setMax(1000); accountProgress.setProgress((int) Math.min(1000, bytes * 1000 / total)); }
+                accountOperation.setText(getString(total > 0 ? R.string.accounts_transfer_total : R.string.accounts_transfer,
+                        getString("saving".equals(phase) ? R.string.accounts_transfer_saving : R.string.accounts_transfer_copying),
+                        formatBytes(bytes), formatBytes(Math.max(0, total))));
+            }
+            @Override public void completed(JSONObject result) {
+                if (isFinishing() || isDestroyed()) {
+                    if ("accounts_export".equals(action) && result.optBoolean("ok", false))
+                        ServerService.discardAccountDocument(getApplicationContext(), result.optString("path"));
+                    return;
+                }
+                applyAccountResult(action, result); updateAccountControls();
+            }
+        };
+    }
+
+    private void applyAccountResult(String action, JSONObject result) {
+        if (!result.optBoolean("ok", false)) { accountError(result.optString("error", "account_operation_failed")); return; }
+        JSONObject active = result.optJSONObject("active"); if (active != null) activeAccount = active;
+        JSONObject values = result.optJSONObject("status"); if (values != null) renderAccounts(values);
+        JSONObject settings = result.optJSONObject("settings"); if (settings != null) renderServerChecks(settings);
+        accountOperation.setTextColor(SUCCESS); accountOperation.setText(R.string.accounts_complete);
+        if ("accounts_select".equals(action)) {
+            if (pendingSelectedAccountMode != null) mediaMode.setChecked("media".equals(pendingSelectedAccountMode));
+            pendingSelectedAccountMode = null;
+            accountOperation.setText(R.string.accounts_selected);
+        } else if ("accounts_export".equals(action)) {
+            pendingAccountExport = accountPayload("path", result.optString("path"), "filename", result.optString("filename"),
+                    "bytes", result.optLong("bytes", -1), "sha256", result.optString("sha256"));
+            Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                    .addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION).setType("application/zip")
+                    .putExtra(Intent.EXTRA_TITLE, result.optString("filename", "IdolyPride-Account.zip"));
+            try { startActivityForResult(picker, EXPORT_ACCOUNT); }
+            catch (RuntimeException error) { accountError("account_picker_unavailable"); }
+        } else if ("accounts_preview".equals(action)) {
+            pendingAccountPreview = accountPayload("token", result.optString("token"), "archive", result.optJSONObject("archive"));
+            showAccountImportChoices();
+        } else if ("accounts_import".equals(action) || "accounts_restore".equals(action)) {
+            pendingAccountPreview = null; accountOperation.setText(R.string.accounts_restored);
+        } else if ("accounts_save_document".equals(action)) {
+            pendingAccountExport = null; accountOperation.setText(R.string.accounts_exported);
+        } else if ("accounts_status".equals(action)) {
+            accountOperation.setText(R.string.accounts_ready);
+            if (pendingAccountPreview != null && !accountDialogOpen) showAccountImportChoices();
+        }
+        renderAccountOverview();
+    }
+
+    private void renderAccounts(JSONObject value) {
+        JSONObject selected = selectedAccount();
+        String previousMode = selected == null ? "" : selected.optString("mode");
+        String previousProfile = selected == null ? "" : selected.optString("profile");
+        if (previousProfile.isEmpty()) {
+            previousMode = activeAccount.optBoolean("running", false) ? activeAccount.optString("mode") : mediaMode.isChecked() ? "media" : "normal";
+            JSONObject queued = value.optJSONObject("selected");
+            previousProfile = activeAccount.optBoolean("running", false) ? activeAccount.optString("profile")
+                    : queued == null ? "sandbox" : queued.optString(previousMode, "sandbox");
+        }
+        accountStatus = value; accountOffset = value.optInt("offset", 0); restoreOffset = value.optInt("restore_offset", 0);
+        accountRows = value.optJSONArray("accounts"); if (accountRows == null) accountRows = new org.json.JSONArray();
+        restoreRows = value.optJSONArray("restore_points"); if (restoreRows == null) restoreRows = new org.json.JSONArray();
+        java.util.ArrayList<String> names = new java.util.ArrayList<>(); int selection = 0;
+        for (int index = 0; index < accountRows.length(); index++) {
+            JSONObject row = accountRows.optJSONObject(index); if (row == null) continue;
+            names.add(accountMode(row.optString("mode")) + " · " + row.optString("profile")
+                    + (row.optBoolean("has_snapshot", false) ? "" : " · " + getString(R.string.accounts_unprepared)));
+            if (previousMode.equals(row.optString("mode")) && previousProfile.equals(row.optString("profile"))) selection = index;
+        }
+        if (names.isEmpty()) names.add(getString(R.string.accounts_empty));
+        accountPicker.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, names));
+        accountPicker.setSelection(selection);
+        names = new java.util.ArrayList<>();
+        for (int index = 0; index < restoreRows.length(); index++) {
+            JSONObject row = restoreRows.optJSONObject(index); if (row != null)
+                names.add(accountMode(row.optString("mode")) + " · " + row.optString("profile") + " · " + row.optString("created_at"));
+        }
+        if (names.isEmpty()) names.add(getString(R.string.accounts_restore_empty));
+        restorePicker.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, names));
+        accountPage.setText(getString(R.string.accounts_page, accountRows.length() == 0 ? 0 : accountOffset + 1,
+                accountOffset + accountRows.length(), value.optInt("accounts_total", accountRows.length())));
+        restorePage.setText(getString(R.string.accounts_restore_page, restoreRows.length() == 0 ? 0 : restoreOffset + 1,
+                restoreOffset + restoreRows.length(), value.optInt("restore_points_total", restoreRows.length())));
+        renderAccountOverview(); updateAccountControls();
+    }
+
+    private String accountMode(String value) { return getString("media".equals(value) ? R.string.accounts_media : R.string.accounts_normal); }
+
+    private void renderAccountOverview() {
+        if (accountOverview == null) return;
+        JSONObject selected = accountStatus.optJSONObject("selected");
+        String selection = selected == null ? getString(R.string.accounts_waiting)
+                : getString(R.string.accounts_next_selection, selected.optString("normal", "sandbox"), selected.optString("media", "sandbox"));
+        String active = activeAccount.optBoolean("running", false)
+                ? getString(R.string.accounts_active, accountMode(activeAccount.optString("mode")), activeAccount.optString("profile"))
+                : getString(R.string.accounts_not_running);
+        accountOverview.setText(active + "\n" + selection);
+    }
+
+    private void updateAccountControls() {
+        if (accountPicker == null) return;
+        boolean busy = ServerService.isManagingAccounts() || accountLifecycleBusy;
+        for (Button control : accountButtons) control.setEnabled(!busy);
+        accountPicker.setEnabled(!busy && accountRows.length() > 0);
+        restorePicker.setEnabled(!busy && restoreRows.length() > 0);
+        if (accountProgress != null) accountProgress.setVisibility(ServerService.isManagingAccounts() ? View.VISIBLE : View.GONE);
+        accountPrevious.setEnabled(!busy && accountOffset > 0);
+        accountNext.setEnabled(!busy && accountStatus.optInt("next_offset", -1) >= 0);
+        restoreNext.setEnabled(!busy && (restoreOffset > 0 || accountStatus.optInt("next_restore_offset", -1) >= 0));
+        restoreAccount.setEnabled(!busy && restoreRows.length() > 0 && accountRows.length() > 0);
+    }
+
+    private void showAccountNameDialog(String kind, JSONObject source) {
+        LinearLayout fields = new LinearLayout(this); fields.setOrientation(LinearLayout.VERTICAL); fields.setPadding(dp(20), dp(8), dp(20), 0);
+        if ("clone".equals(kind)) fields.addView(text(R.string.accounts_clone_notice, 16, TEXT_MUTED));
+        android.widget.EditText profile = new android.widget.EditText(this);
+        profile.setSingleLine(true); profile.setHint(R.string.accounts_profile_hint); profile.setContentDescription("idoly.accounts.profile-input");
+        fields.addView(profile);
+        android.widget.EditText manager = new android.widget.EditText(this);
+        manager.setSingleLine(true); manager.setHint(R.string.accounts_manager_hint); manager.setText(R.string.accounts_manager_default);
+        manager.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(10)});
+        manager.setContentDescription("idoly.accounts.manager-input");
+        Spinner mode = new Spinner(this); mode.setContentDescription("idoly.accounts.mode-input");
+        mode.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item,
+                new String[]{getString(R.string.accounts_normal), getString(R.string.accounts_media)}));
+        mode.setSelection(mediaMode.isChecked() ? 1 : 0);
+        if ("create".equals(kind)) { fields.addView(manager); fields.addView(mode); }
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("clone".equals(kind) ? R.string.accounts_clone : R.string.accounts_create)
+                .setView(fields).setNegativeButton(R.string.accounts_cancel, null).setPositiveButton(R.string.accounts_confirm, null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String name = profile.getText().toString().trim();
+            if (name.isEmpty()) { profile.setError(getString(R.string.accounts_profile_required)); return; }
+            dialog.dismiss();
+            if ("clone".equals(kind) && source != null)
+                performAccount("accounts_clone", accountPayload("mode", source.optString("mode"), "source_profile", source.optString("profile"),
+                        "profile", name, "expected_revision", source.optString("revision")));
+            else performAccount("accounts_create", accountPayload("mode", mode.getSelectedItemPosition() == 1 ? "media" : "normal",
+                    "profile", name, "manager_name", manager.getText().toString()));
+        })); dialog.show();
+    }
+
+    private void showAccountImportChoices() {
+        if (pendingAccountPreview == null || accountDialogOpen) return;
+        JSONObject archive = pendingAccountPreview.optJSONObject("archive");
+        if (archive == null) { pendingAccountPreview = null; accountError("account_archive_invalid"); return; }
+        JSONObject selected = selectedAccount();
+        boolean replace = selected != null && archive.optString("mode").equals(selected.optString("mode"));
+        LinearLayout preview = new LinearLayout(this); preview.setOrientation(LinearLayout.VERTICAL);
+        preview.setPadding(dp(20), dp(8), dp(20), dp(8));
+        String summary = accountMode(archive.optString("mode")) + " · " + archive.optString("profile")
+                + "\n" + getString(R.string.accounts_archive_summary, archive.optLong("bytes", 0),
+                archive.optJSONObject("counts") == null ? 0 : archive.optJSONObject("counts").optInt("main_live_attempts", 0),
+                archive.optJSONObject("counts") == null ? 0 : archive.optJSONObject("counts").optInt("preference_receipts", 0));
+        TextView details = text(R.string.accounts_import_preview, 16, TEXT_PRIMARY); details.setText(summary);
+        details.setTextIsSelectable(true); preview.addView(details);
+        Button create = button(R.string.accounts_import_new); create.setContentDescription("idoly.accounts.import-new"); preview.addView(create);
+        Button overwrite = button(R.string.accounts_import_replace); overwrite.setContentDescription("idoly.accounts.import-replace");
+        if (replace) preview.addView(overwrite);
+        accountDialogOpen = true;
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(R.string.accounts_import_preview).setView(preview)
+                .setNegativeButton(R.string.accounts_cancel, (choice, which) -> pendingAccountPreview = null).create();
+        create.setOnClickListener(view -> { dialog.dismiss(); requestNewAccountImport(archive); });
+        overwrite.setOnClickListener(view -> { dialog.dismiss(); requestReplaceAccountImport(archive, selected); });
+        dialog.setOnDismissListener(ignored -> accountDialogOpen = false); dialog.show();
+    }
+
+    private void requestNewAccountImport(JSONObject archive) {
+        android.widget.EditText field = new android.widget.EditText(this); field.setSingleLine(true);
+        field.setHint(R.string.accounts_profile_hint); field.setContentDescription("idoly.accounts.profile-input");
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(R.string.accounts_import_new).setView(field)
+                .setNegativeButton(R.string.accounts_cancel, null).setPositiveButton(R.string.accounts_confirm, null).create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String name = field.getText().toString().trim();
+            if (name.isEmpty()) { field.setError(getString(R.string.accounts_profile_required)); return; }
+            String token = pendingAccountPreview == null ? "" : pendingAccountPreview.optString("token");
+            dialog.dismiss(); performAccount("accounts_import", accountPayload("token", token, "mode", archive.optString("mode"),
+                    "profile", name, "replace", false, "expected_revision", null));
+        })); dialog.show();
+    }
+
+    private boolean activeAccountTarget(String mode, String profile) {
+        return activeAccount.optBoolean("running", false) && mode.equals(activeAccount.optString("mode"))
+                && profile.equals(activeAccount.optString("profile"));
+    }
+
+    private void requestReplaceAccountImport(JSONObject archive, JSONObject selected) {
+        String mode = selected.optString("mode"), profile = selected.optString("profile");
+        if (activeAccountTarget(mode, profile)) { accountError("account_active_restart_required"); return; }
+        new AlertDialog.Builder(this).setTitle(R.string.accounts_import_replace)
+                .setMessage(getString(R.string.accounts_replace_confirm, accountMode(mode), profile))
+                .setNegativeButton(R.string.accounts_cancel, null)
+                .setPositiveButton(R.string.accounts_confirm, (dialog, which) -> performAccount("accounts_import", accountPayload(
+                        "token", pendingAccountPreview == null ? "" : pendingAccountPreview.optString("token"),
+                        "mode", mode, "profile", profile, "replace", true, "expected_revision", selected.optString("revision")))).show();
+    }
+
+    private void requestAccountRestore() {
+        JSONObject point = restoreRows.optJSONObject(restorePicker.getSelectedItemPosition()), row = selectedAccount();
+        if (point == null || row == null) { accountChooseNotice(); return; }
+        if (!point.optString("mode").equals(row.optString("mode")) || !point.optString("profile").equals(row.optString("profile"))) {
+            Toast.makeText(this, R.string.accounts_restore_choose_target, Toast.LENGTH_LONG).show(); return;
+        }
+        if (activeAccountTarget(row.optString("mode"), row.optString("profile"))) { accountError("account_active_restart_required"); return; }
+        new AlertDialog.Builder(this).setTitle(R.string.accounts_restore).setMessage(getString(R.string.accounts_replace_confirm,
+                accountMode(row.optString("mode")), row.optString("profile"))).setNegativeButton(R.string.accounts_cancel, null)
+                .setPositiveButton(R.string.accounts_confirm, (dialog, which) -> performAccount("accounts_restore", accountPayload(
+                        "id", point.optString("id"), "mode", row.optString("mode"), "profile", row.optString("profile"),
+                        "expected_revision", row.optString("revision")))).show();
+    }
+
+    private void accountError(String code) {
+        if (code == null || !code.matches("[a-z][a-z0-9_]{0,95}")) code = "account_operation_failed";
+        accountOperation.setTextColor(WARNING);
+        int message = "account_active_restart_required".equals(code) ? R.string.accounts_stop_to_restore
+                : "account_archive_too_large".equals(code) ? R.string.accounts_too_large
+                : "account_archive_empty".equals(code) ? R.string.accounts_empty_archive
+                : "account_document_permission".equals(code) ? R.string.accounts_provider_permission : 0;
+        accountOperation.setText(message == 0 ? getString(R.string.accounts_failed, code) : getString(message));
+        updateAccountControls();
+    }
+
+    private String checkState(String state) {
+        if ("ready".equals(state)) return getString(R.string.server_check_ready);
+        if ("blocked".equals(state) || "missing".equals(state)) return getString(R.string.server_check_blocked);
+        if ("attention".equals(state)) return getString(R.string.server_check_attention);
+        if ("stopped".equals(state)) return getString(R.string.server_check_stopped);
+        return getString(R.string.server_check_unchecked);
+    }
+
+    private String checkName(String id) {
+        String[] ids = {"protocol", "catalog", "master", "storage", "http", "grpc", "resources", "account"};
+        int[] names = {R.string.server_check_protocol, R.string.server_check_catalog, R.string.server_check_master, R.string.server_check_storage,
+                R.string.server_check_http, R.string.server_check_grpc, R.string.server_check_resources, R.string.server_check_account};
+        for (int index = 0; index < ids.length; index++) if (ids[index].equals(id)) return getString(names[index]);
+        return getString(R.string.server_check_unknown);
+    }
+
+    private void renderServerChecks(JSONObject settings) {
+        if (serverChecks == null) return;
+        JSONObject checks = settings.optJSONObject("startup_checks");
+        if (checks == null) { serverChecks.setText(R.string.server_checks_waiting); return; }
+        String scope = checks.optString("scope", "not_run");
+        StringBuilder message = new StringBuilder(getString("current_run".equals(scope) ? R.string.server_checks_current
+                : "previous_run".equals(scope) ? R.string.server_checks_previous : R.string.server_checks_waiting));
+        org.json.JSONArray items = checks.optJSONArray("checks");
+        if (items != null) for (int index = 0; index < Math.min(items.length(), 16); index++) {
+            JSONObject row = items.optJSONObject(index); if (row != null)
+                message.append("\n").append(checkName(row.optString("id"))).append(" · ").append(checkState(row.optString("state")));
+        }
+        setTextIfChanged(serverChecks, message.toString());
+        JSONObject history = settings.optJSONObject("durable_history");
+        if (history != null) durableHistory = history;
+        JSONObject failure = durableHistory.optJSONObject("last_failure");
+        if (failure == null) durableFailure.setText(R.string.server_history_empty);
+        else durableFailure.setText(getString(R.string.server_history_last, failure.optString("timestamp"), failure.optString("code")));
     }
 
     private void requestDiagnosticsExport() {
@@ -681,6 +1077,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("resource_platform", pendingResourcePlatform);
         state.putBoolean("storage_retry", retryStartAfterStoragePermission);
+        state.putInt("account_offset", accountOffset); state.putInt("restore_offset", restoreOffset);
+        if (pendingAccountExport != null) state.putString("account_export", pendingAccountExport.toString());
+        if (pendingAccountPreview != null) state.putString("account_preview", pendingAccountPreview.toString());
         super.onSaveInstanceState(state);
     }
 
@@ -1058,6 +1457,21 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == EXPORT_ACCOUNT || requestCode == IMPORT_ACCOUNT) {
+            if (resultCode != RESULT_OK || data == null || data.getData() == null) {
+                if (requestCode == EXPORT_ACCOUNT && pendingAccountExport != null) {
+                    ServerService.discardAccountDocument(getApplicationContext(), pendingAccountExport.optString("path")); pendingAccountExport = null;
+                }
+                return;
+            }
+            accountOperation.setText(R.string.accounts_working);
+            if (requestCode == IMPORT_ACCOUNT)
+                ServerService.previewAccountDocument(getApplicationContext(), data.getData(), accountCallback("accounts_preview"));
+            else if (pendingAccountExport != null)
+                ServerService.saveAccountDocument(getApplicationContext(), data.getData(), pendingAccountExport, accountCallback("accounts_save_document"));
+            else accountError("account_export_unavailable");
+            updateAccountControls(); return;
+        }
         if (requestCode == EXPORT_RESOURCES || requestCode == IMPORT_RESOURCES) {
             if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
             String platform = ResourceTransfers.platform(pendingResourcePlatform) ? pendingResourcePlatform : selectedResourcePlatform();
@@ -1076,6 +1490,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         ServerService.observe(this);
         playbackStatus.removeCallbacks(playbackRefresh);
         playbackStatus.post(playbackRefresh);
+        if (!ServerService.isManagingAccounts()) refreshAccounts();
     }
 
     @Override protected void onStop() {
@@ -1097,7 +1512,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         presentationServerRunning = running;
         status.setText(value);
         status.setTextColor(running ? SUCCESS : TEXT_PRIMARY);
-        start.setEnabled(!running && !busy);
+        accountLifecycleBusy = busy;
+        start.setEnabled(!running && !busy && !ServerService.isManagingAccounts());
+        updateAccountControls();
         experimentalMainLive.setEnabled(!running && !busy);
         downloadMissingResources.setEnabled(!running && !busy);
         mediaMode.setEnabled(!running && !busy);
@@ -1105,6 +1522,13 @@ public final class MainActivity extends Activity implements ServerService.Observ
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);
+        try {
+            JSONObject observed = new JSONObject(detailsJson);
+            if (observed.has("startup_checks") || observed.has("durable_history")) renderServerChecks(observed);
+            if (running) activeAccount = accountPayload("running", true, "mode", observed.optBoolean("media_mode", false) ? "media" : "normal", "profile", observed.optString("profile"));
+            else activeAccount = accountPayload("running", false);
+            renderAccountOverview();
+        } catch (org.json.JSONException ignored) {}
         String currentLogs = lines.isEmpty() ? getString(R.string.waiting_logs) : String.join("\n", lines);
         if (!currentLogs.contentEquals(logs.getText())) {
             boolean follow = logs.getHeight() - logScroll.getScrollY() <= logScroll.getHeight() + dp(32);

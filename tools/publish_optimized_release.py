@@ -29,7 +29,7 @@ import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
-VERSION, BUILD, IPA_VERSION = "0.3.35", 52, "156.9115"
+VERSION, BUILD, IPA_VERSION = "0.3.36", 53, "156.9116"
 RELEASE_VERSION, TAG = None, None
 RELEASE_NAMES = {}
 BASELINE = "50e349f4db6db0d3122bdc09c3b06307145f814f"
@@ -45,8 +45,7 @@ PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
                   "android": 900*MIB, "macos": 640*MIB, "ios-unified": 768*MIB}
 BINARY_LIMITS = {APK: 384*MIB, QA_APK: 384*MIB, MAC: 600*MIB, IPA: 600*MIB}
-COMMON_SOURCES = ("src/idoly_local/app_runtime.py", "src/idoly_local/diagnostics.py",
-                  "src/idoly_local/resource_translation_runtime.py")
+COMMON_SOURCES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py"])
 TRANSLATION_SOURCES = ("public_payload.py", "bundled_translations.py", "resource_translation.py",
                        "resource_translation_runtime.py", "octo_manifest.py", "octo_runtime.py")
 DATA_PIN = {"bytes": 191343014, "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
@@ -59,7 +58,7 @@ COMMON_FLAGS = ("source_bound", "payload_sha256_verified", "translations_sha256_
                 "live_engine_included", "live_engine_source_built")
 ANDROID_FLAGS = ("apk_signature_verified", "apk_alignment_verified", "package_version_verified",
                  "development_certificate_verified", "x86_emulator_runtime_passed")
-MAC_FLAGS = ("codesign_strict_verified", "bundled_engine_tested", "native_gui_start_stop_tested")
+MAC_FLAGS = ("codesign_strict_verified", "bundled_engine_tested", "native_gui_start_stop_tested", "account_management_roundtrip")
 COMPANIONS = (
     {"name": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk", "bytes": 165128829,
      "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
@@ -331,7 +330,7 @@ def generic_members(archive, role):
             need(total <= 64*MIB, "metadata_total_bound")
         result[name] = row
     required = ({"platform-report.json", APK, QA_APK, "android-qa.json"} if role == "android" else
-                {"platform-report.json", MAC} if role == "macos" else
+                {"platform-report.json", MAC, "engine-smoke.json"} if role == "macos" else
                 {"android-clients-report.json", *ANDROID_LANGUAGE_CLIENTS.values(), *ANDROID_CLIENT_REPORT_FILES}
                 if role == "android-clients" else {"portable-report.json"} if role == "portable" else
                 {"performance-report.json", "diagnostics-polling.json", "translation-startup.json"})
@@ -596,6 +595,12 @@ def validate_platform_files(directory, report, guard):
                  "main_live_identity_preserved", "main_live_sessions_preserved", "main_live_settings_preserved",
                  "main_live_cached_no_grant")), "android_runtime_qa_not_passed")
     else:
+        smoke_path = verified_file(directory, report.get("account_smoke"), name="engine-smoke.json", maximum=MAX_JSON)
+        try:
+            account_detail = module("published_account_contract", ROOT/"tools/release_account_contract.py").validate(read_json(smoke_path))
+        except ValueError:
+            raise ReleaseError("mac_account_management_smoke_not_passed") from None
+        need(account_detail == report.get("account_management"), "mac_account_management_report_differs")
         with ZipFile(binary) as archive:
             entries = [row for row in archive.infolist() if row.filename.endswith(".app/Contents/Info.plist")]
             need(len(entries) == 1 and 0 < entries[0].file_size <= 65536, "mac_plist_inventory")

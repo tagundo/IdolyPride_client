@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import signal
 import socket
@@ -15,6 +16,7 @@ import stat
 import tempfile
 import threading
 import time
+import uuid
 
 from payload import install_bundled_translations, install_payload
 
@@ -30,6 +32,80 @@ def emit(event: str, **values):
         print(json.dumps({"event": event, **values}, ensure_ascii=False), flush=True)
 
 
+_ACCOUNT_ACTIONS = frozenset(("accounts_status", "accounts_create", "accounts_clone", "accounts_select",
+    "accounts_export", "accounts_preview", "accounts_import", "accounts_restore", "settings_clear_history"))
+_ACCOUNT_ARCHIVE_LIMIT = 128 * 1024 * 1024
+
+
+def _account_export_copy(data_dir, result, destination, progress):
+    """Copy only a verified owned account ZIP to an explicitly chosen native destination."""
+    name, value = result.get("filename"), result.get("path")
+    expected_size, expected_sha = result.get("bytes"), result.get("sha256")
+    if (type(name) is not str or re.fullmatch(r"IdolyPride-Account-[0-9a-f]{32}\.zip", name) is None
+            or type(value) is not str or type(expected_size) is not int
+            or not 0 < expected_size <= _ACCOUNT_ARCHIVE_LIMIT
+            or type(expected_sha) is not str or re.fullmatch(r"[0-9a-f]{64}", expected_sha) is None):
+        raise ValueError("account_export_identity_invalid")
+    source = Path(value)
+    exports = Path(data_dir) / "account-management" / "exports"
+    if source.name != name or exports.is_symlink() or source.parent.resolve(strict=True) != exports.resolve(strict=True):
+        raise ValueError("account_export_path_invalid")
+    if (type(destination) is not str or not 0 < len(destination) <= 4096 or "\0" in destination):
+        raise ValueError("account_destination_invalid")
+    chosen = Path(destination)
+    if not chosen.is_absolute() or chosen.suffix.lower() != ".zip" or chosen.is_symlink():
+        raise ValueError("account_destination_invalid")
+    parent = chosen.parent.resolve(strict=True)
+    target = parent / chosen.name
+    if not parent.is_dir() or source.resolve(strict=True) == target:
+        raise ValueError("account_destination_invalid")
+    def check_target():
+        if target.exists() or target.is_symlink():
+            info = target.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("account_destination_invalid")
+    check_target()
+    temporary = None
+    count, checksum, last_progress = 0, hashlib.sha256(), 0.0
+    try:
+        source_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(source_fd, "rb") as incoming:
+            before = os.fstat(incoming.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or before.st_size != expected_size:
+                raise ValueError("account_export_identity_invalid")
+            fd, temporary = tempfile.mkstemp(prefix=".idoly-account-", suffix=".part", dir=parent)
+            with os.fdopen(fd, "wb") as outgoing:
+                while True:
+                    block = incoming.read(64 * 1024)
+                    if not block:
+                        break
+                    count += len(block)
+                    if count > expected_size or outgoing.write(block) != len(block):
+                        raise ValueError("account_export_copy_failed")
+                    checksum.update(block)
+                    now = time.monotonic()
+                    if now - last_progress >= .25:
+                        progress(count, expected_size)
+                        last_progress = now
+                outgoing.flush()
+                os.fsync(outgoing.fileno())
+            after = os.fstat(incoming.fileno())
+            if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+                    != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+                    or count != expected_size or checksum.hexdigest() != expected_sha):
+                raise ValueError("account_export_copy_failed")
+        check_target()
+        os.replace(temporary, target)
+        temporary = None
+        progress(count, expected_size)
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
 class Controller:
     def __init__(self, data_dir, server_data, profile="sandbox", emit_event=emit):
         self.data_dir, self.server_data = Path(data_dir), Path(server_data)
@@ -39,6 +115,8 @@ class Controller:
         self.cancelled = False
         self.closed = False
         self.resource_worker = None
+        self.account_worker = None
+        self.account_status = None
         self.translation_status = {"state": "absent"}
 
     def log(self, message):
@@ -54,8 +132,16 @@ class Controller:
             status = {key: value for key, value in status.items() if key != "logs"}
             status["starting"] = starting
             status["can_stop"] = runtime is not None or starting
+            if self.account_status is not None:
+                status["accounts"] = self.account_status
             if self.translation_status.get("state") != "absent":
                 status["bundled_translations"] = dict(self.translation_status)
+        if runtime is None:
+            try:
+                from idoly_local.app_runtime import server_settings_status
+                status.update(server_settings_status(self.data_dir))
+            except (ImportError, OSError, ValueError):
+                pass
         self.emit("status", status=status)
         return status
 
@@ -72,7 +158,8 @@ class Controller:
                 or not Path(resource_cache_dir).is_absolute()):
             raise ValueError("Resource cache directory must be an absolute folder")
         with self.lock:
-            if self.closed or self.runtime or (self.worker and self.worker.is_alive()):
+            if (self.closed or self.runtime or (self.worker and self.worker.is_alive())
+                    or (self.account_worker and self.account_worker.is_alive())):
                 return self.status()
             self.cancelled = False
             self.worker = threading.Thread(target=self._start, args=(experimental_main_live, media_mode,
@@ -178,9 +265,95 @@ class Controller:
                     pass
             self.status()
 
+
+    def accounts(self, action, command):
+        """The native app owns picker approval; no account mutation is exposed over HTTP."""
+        identifier = command.get("request_id")
+        if type(action) is not str or action not in _ACCOUNT_ACTIONS or type(identifier) is not int or not 1 <= identifier <= 2**31 - 1:
+            self.emit("account_error", request_id=identifier if type(identifier) is int else None,
+                      action=action if type(action) is str and action in _ACCOUNT_ACTIONS else None,
+                      code="account_request_invalid")
+            return
+        payload = {key: value for key, value in command.items()
+                   if key not in ("action", "request_id", "destination")}
+        with self.lock:
+            if self.closed:
+                return
+            if self.account_worker is not None and self.account_worker.is_alive():
+                self.emit("account_error", request_id=identifier, action=action, code="account_operation_busy")
+                return
+            if self.worker is not None and self.worker.is_alive():
+                self.emit("account_error", request_id=identifier, action=action, code="account_server_starting")
+                return
+            # Replacement is deliberately stopped-server only, even if the game
+            # currently looks idle. Selecting an account merely queues a restart.
+            if action == "accounts_restore" or (action == "accounts_import" and payload.get("replace") is True):
+                if self.runtime is not None:
+                    self.emit("account_error", request_id=identifier, action=action, code="account_server_running")
+                    return
+            self.account_worker = threading.Thread(target=self._account_operation,
+                args=(identifier, action, payload, command.get("destination")),
+                name="local-account-operation", daemon=True)
+            self.account_worker.start()
+
+    def _account_operation(self, identifier, action, payload, destination):
+        self.emit("account_progress", request_id=identifier, action=action, stage="preparing")
+        preparing_catalog = False
+        try:
+            if action == "settings_clear_history":
+                if payload:
+                    raise ValueError("account_request_invalid")
+                from idoly_local import app_runtime
+                with self.lock:
+                    runtime = self.runtime
+                if runtime is not None:
+                    settings = runtime.clear_history()
+                else:
+                    settings = app_runtime.clear_server_history(self.data_dir)
+                result = {"schema": 1, "ok": True, "action": action, "settings": settings}
+            else:
+                if action != "accounts_status" and not (self.data_dir / "protocol/idolypride-6.1.1.pb").is_file():
+                    preparing_catalog = True
+                    install_payload(self.server_data, self.data_dir, self.log)
+                    preparing_catalog = False
+                from idoly_local.account_manager import account_command
+                result = account_command(self.data_dir, action, payload)
+                if type(result) is not dict or result.get("ok") is not True or result.get("action") != action:
+                    raise ValueError("account_response_invalid")
+                if action == "accounts_export":
+                    _account_export_copy(self.data_dir, result, destination,
+                        lambda received, total: self.emit("account_progress", request_id=identifier,
+                            action=action, stage="copying", received_bytes=received, total_bytes=total))
+                    # Native picker paths are private command inputs, not log/UI payload.
+                    result = {key: value for key, value in result.items() if key != "path"}
+                with self.lock:
+                    if isinstance(result.get("status"), dict):
+                        self.account_status = result["status"]
+            with self.lock:
+                closed = self.closed
+            if not closed:
+                self.emit("account_result", request_id=identifier, action=action, result=result)
+        except Exception as error:
+            if preparing_catalog:
+                from idoly_local.app_runtime import record_startup_failure
+                record_startup_failure(self.data_dir, error, stage="catalog")
+            value = str(error)
+            code = value if re.fullmatch(r"[a-z][a-z0-9_]{1,79}", value) else "account_operation_failed"
+            with self.lock:
+                closed = self.closed
+            if not closed:
+                self.emit("account_error", request_id=identifier, action=action, code=code)
+        finally:
+            with self.lock:
+                self.account_worker = None
+                closed = self.closed
+            if not closed:
+                self.status()
+
     def _start(self, experimental_main_live=False, media_mode=False, download_missing_resources=True,
                resource_cache_dir=None):
         runtime = None
+        runtime_entered = False
         try:
             self.log("서버 데이터를 준비하고 있습니다.")
             install_payload(self.server_data, self.data_dir, self.log)
@@ -188,7 +361,9 @@ class Controller:
                 selected_root = Path(resource_cache_dir) if resource_cache_dir is not None else self.data_dir
                 self.translation_status = install_bundled_translations(
                     self.server_data, selected_root, self.log, data_dir=self.data_dir)
-            except (OSError, ValueError):
+            except (OSError, ValueError) as error:
+                from idoly_local.app_runtime import record_startup_failure
+                record_startup_failure(self.data_dir, error, stage="catalog")
                 self.translation_status = {"state": "failed", "installed": False,
                                            "previous_files_preserved": True}
                 self.log("번역 패키지를 설치하지 못했습니다. 기존 번역과 원본 자료는 변경하지 않았습니다.")
@@ -197,6 +372,7 @@ class Controller:
                 if self.cancelled or self.closed:
                     return
             live_options = {"experimental_main_live": True} if experimental_main_live else {}
+            runtime_entered = True
             runtime = app_runtime.start(self.data_dir, profile=self.profile, log_callback=self.log,
                                        media_mode=media_mode, download_missing_resources=download_missing_resources,
                                        resource_platform="ios", resource_cache_dir=resource_cache_dir, **live_options)
@@ -208,11 +384,14 @@ class Controller:
             else:
                 self.log("로컬 서버가 시작되었습니다.")
         except Exception as error:
+            if not runtime_entered:
+                from idoly_local.app_runtime import record_startup_failure
+                record_startup_failure(self.data_dir, error, stage="catalog")
             if runtime is not None:
                 with self.lock:
                     self.runtime = runtime
                 self.stop()
-            self.log(f"서버 시작 실패: {type(error).__name__}: {error}")
+            self.log("서버 시작 실패: " + type(error).__name__)
             self.emit("error", message="서버를 시작하지 못했습니다. 데이터와 포트 사용 상태를 확인해 주세요.")
         finally:
             # This worker is about to finish; avoid reporting a stale starting state.
@@ -228,7 +407,7 @@ class Controller:
             try:
                 runtime.stop()
             except Exception as error:
-                self.log(f"서버 중지 실패: {type(error).__name__}: {error}")
+                self.log("서버 중지 실패: " + type(error).__name__)
                 self.emit("error", message="서버를 완전히 중지하지 못했습니다. 중지를 다시 눌러 주세요.")
             else:
                 with self.lock:
@@ -241,9 +420,12 @@ class Controller:
         with self.lock:
             self.closed = True
             worker = self.worker
+            account_worker = self.account_worker
         self.stop()
         if worker and worker is not threading.current_thread():
             worker.join(timeout=20)
+        if account_worker and account_worker is not threading.current_thread():
+            account_worker.join(timeout=20)
         self.stop()
 
 
@@ -720,6 +902,140 @@ def _main_live_database(data_dir, schema, receipt, expected_clock, expected_atte
         return attempts
 
 
+
+def _account_roundtrip_reference(data_dir, schema, original_token):
+    """Exercise portable account state and real encrypted RPCs on owned smoke data."""
+    from copy import deepcopy
+    from idoly_local import app_runtime
+    from idoly_local.account_manager import account_command, selected_profile
+    from idoly_local.state import State
+
+    root = Path(data_dir)
+    state = State(root / "state.db")
+    media_state = State(root / "media-state.db")
+    original = state.account_snapshot("sandbox")
+    if original is None:
+        raise RuntimeError("Account smoke needs the seeded original profile")
+    original_bundle, original_revision = original
+    tables = ["profiles", "snapshots", "profile_settings", "starter_profiles",
+              "profile_lesson_progress", "preference_receipts", "main_live_attempts"]
+    if set(original_bundle["tables"]) != set(tables):
+        raise RuntimeError("Account smoke table inventory differs")
+    def normalized(bundle):
+        value = deepcopy(bundle)
+        value["profile"] = "normalized"
+        for table, rows in value["tables"].items():
+            for row in rows:
+                row["name" if table == "profiles" else "profile"] = "normalized"
+        return State.account_bytes(value)
+    def sessions(profile):
+        with state.connect() as db:
+            return [tuple(row) for row in db.execute(
+                "SELECT token_hash,profile,expires_at FROM sessions WHERE profile=? ORDER BY token_hash",
+                (profile,))]
+    def invoke(action, payload):
+        result = account_command(root, action, payload)
+        if type(result) is not dict or result.get("ok") is not True or result.get("action") != action:
+            raise RuntimeError("Account smoke command response differs")
+        return result
+
+    source_sessions = sessions("sandbox")
+    nonce = uuid.uuid4().hex[:12]
+    created_name, media_name = "smoke-new-" + nonce, "smoke-media-" + nonce
+    copy_name, restored_name = "smoke-copy-" + nonce, "smoke-import-" + nonce
+    checks = {}
+    invoke("accounts_create", {"mode": "normal", "profile": created_name, "manager_name": "MacQA"})
+    invoke("accounts_create", {"mode": "media", "profile": media_name, "manager_name": "MediaQA"})
+    checks["normal_account_created"] = state.snapshot(created_name) is not None
+    checks["media_account_created"] = media_state.snapshot(media_name) is not None
+    checks["mode_isolation"] = state.snapshot(media_name) is None and media_state.snapshot(created_name) is None
+    invoke("accounts_clone", {"mode": "normal", "source_profile": "sandbox", "profile": copy_name,
+                             "expected_revision": original_revision})
+    copied = state.account_snapshot(copy_name)
+    checks["clone_all_tables_preserved"] = copied is not None and normalized(copied[0]) == normalized(original_bundle)
+
+    archive = invoke("accounts_export", {"mode": "normal", "profile": copy_name,
+                                        "expected_revision": copied[1]})
+    destination = root / ("smoke-account-" + nonce + ".zip")
+    _account_export_copy(root, archive, str(destination), lambda received, total: None)
+    with destination.open("rb") as stream:
+        copied_sha = hashlib.file_digest(stream, "sha256").hexdigest()
+    checks["archive_full_sha256_verified"] = (
+        destination.stat().st_size == archive["bytes"] and copied_sha == archive["sha256"])
+    preview = invoke("accounts_preview", {"path": str(destination)})
+    invoke("accounts_import", {"token": preview["token"], "mode": "normal", "profile": restored_name,
+                              "replace": False, "expected_revision": None})
+    imported = state.account_snapshot(restored_name)
+    checks["new_import_all_tables_preserved"] = imported is not None and normalized(imported[0]) == normalized(original_bundle)
+    checks["new_import_has_no_sessions"] = sessions(restored_name) == []
+
+    invoke("accounts_select", {"mode": "normal", "profile": copy_name, "expected_revision": copied[1]})
+    runtime = app_runtime.start(root, grpc_port=0, asset_port=0, resource_platform="ios")
+    try:
+        checks["queued_selection_applied_after_restart"] = (
+            selected_profile(root, False, "sandbox") == copy_name
+            and runtime.profile == copy_name and runtime.status()["profile"] == copy_name)
+        address = runtime.status()["grpc_address"]
+        check = _rpc(address, schema, "/api.System/Check")
+        login = _rpc(address, schema, "/api.Auth/Login")
+        user = _rpc(address, schema, "/api.User/Get", token=login.gameAuthToken)
+        original_user = schema.response_type("/api.User/Get").FromString(state.snapshot(copy_name)[0])
+        rejected = _rpc(address, schema, "/api.User/Get", token=original_token, expected_status="16")
+        checks["selected_account_encrypted_rpc"] = (
+            check.keepAliveTimeMilliseconds > 0 and bool(login.gameAuthToken)
+            and user.user.name == original_user.user.name and rejected is None)
+    finally:
+        runtime.stop()
+    current_original = state.account_snapshot("sandbox")
+    invoke("accounts_select", {"mode": "normal", "profile": "sandbox",
+                              "expected_revision": current_original[1]})
+    checks["selected_original_restored"] = selected_profile(root, False, "sandbox") == "sandbox"
+
+    target_token, _ = state.login(restored_name)
+    before_canary = state.account_snapshot(restored_name)
+    response_type = schema.response_type("/api.User/Get")
+    def canary(raw):
+        response = response_type.FromString(raw)
+        response.user.name = "Mac restore QA"
+        # A real unknown top-level protobuf field must survive backup and restore.
+        return response.SerializeToString() + b"\xf8\x7f\x01"
+    state.mutate_snapshot(restored_name, schema.fingerprint, canary)
+    saved_canary, canary_revision = state.account_snapshot(restored_name)
+    canary_snapshot = state.snapshot(restored_name)[0]
+    stale_preview = invoke("accounts_preview", {"path": str(destination)})
+    try:
+        invoke("accounts_import", {"token": stale_preview["token"], "mode": "normal",
+            "profile": restored_name, "replace": True, "expected_revision": before_canary[1]})
+    except ValueError as error:
+        checks["stale_replace_rejected"] = (
+            str(error) == "account_revision_conflict"
+            and state.account_snapshot(restored_name)[1] == canary_revision)
+    else:
+        checks["stale_replace_rejected"] = False
+    replacement_preview = invoke("accounts_preview", {"path": str(destination)})
+    replacement = invoke("accounts_import", {"token": replacement_preview["token"], "mode": "normal",
+        "profile": restored_name, "replace": True, "expected_revision": canary_revision})
+    points = [row for row in replacement["status"]["restore_points"]
+              if row["mode"] == "normal" and row["profile"] == restored_name
+              and row["revision"] == canary_revision]
+    checks["replacement_restore_point_created"] = len(points) == 1
+    checks["replacement_target_sessions_invalidated"] = not state.authenticated(target_token, restored_name)
+    if not points:
+        raise RuntimeError("Account smoke automatic restore point missing")
+    invoke("accounts_restore", {"id": points[0]["id"], "mode": "normal", "profile": restored_name,
+                               "expected_revision": state.account_snapshot(restored_name)[1]})
+    checks["restore_exact_snapshot_and_unknown_fields"] = (
+        state.account_snapshot(restored_name)[0] == saved_canary
+        and state.snapshot(restored_name)[0] == canary_snapshot
+        and state.snapshot(restored_name)[0].endswith(b"\xf8\x7f\x01"))
+    checks["original_account_all_tables_preserved"] = state.account_snapshot("sandbox") == original
+    checks["original_sessions_preserved"] = sessions("sandbox") == source_sessions
+    if not all(type(value) is bool and value is True for value in checks.values()):
+        raise RuntimeError("Account management roundtrip failed")
+    return {"schema": 1, "snapshot_tables": tables, "archive_bytes": archive["bytes"],
+            "archive_sha256": copied_sha, "checks": checks, "gameplay_tested": False}
+
+
 def smoke(data_dir, server_data, report_path, live_engine_library=None):
     from http.client import HTTPConnection
     from urllib.parse import quote, urlsplit
@@ -1045,6 +1361,8 @@ def smoke(data_dir, server_data, report_path, live_engine_library=None):
     finally:
         runtime.stop()
         report["server_stopped"] = runtime.status()["running"] is False
+    report["account_management"] = _account_roundtrip_reference(data_dir, schema, token)
+    report["account_management_roundtrip"] = all(report["account_management"]["checks"].values())
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + "\n")
@@ -1067,7 +1385,7 @@ def smoke(data_dir, server_data, report_path, live_engine_library=None):
                 "appearance_persisted", "appearance_clock_preserved", "appearance_resources_preserved",
                 "appearance_identity_preserved", "appearance_sessions_preserved", "appearance_settings_preserved",
                 "appearance_restart_no_change",
-                "settings_persisted", "profile_persisted", "asset_range", "server_stopped")
+                "settings_persisted", "profile_persisted", "asset_range", "server_stopped", "account_management_roundtrip")
     if report.get("main_live_included"):
         required += ("main_live_first_quest", "main_live_mode_default_off", "main_live_opt_in",
                      "main_live_persisted", "main_live_attempts_persisted", "main_live_clock_preserved",
@@ -1135,6 +1453,8 @@ def main(argv=None):
             elif action in ("resources_preview", "resources_download", "resources_cancel",
                             "resources_export", "resources_import"):
                 controller.resources(action, command)
+            elif type(action) is str and action in _ACCOUNT_ACTIONS:
+                controller.accounts(action, command)
             elif action == "quit":
                 break
             else:

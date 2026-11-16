@@ -209,6 +209,10 @@ class _Host:
         self._logs = deque(maxlen=100)
         self._archive_worker = None
         self._archive_result = None
+        self._account_status = None
+        self._game_prepared = False
+        self._prepared_account = None
+        self._startup_observations = None
 
     def _native(self):
         if self._bridge is None:
@@ -277,16 +281,25 @@ class _Host:
         else:
             invalid = False
         observed = dict(runtime.status() if runtime is not None else {"running": False})
+        if runtime is None and paths is not None:
+            from .app_runtime import server_settings_status
+            observed.update(self._startup_observations or server_settings_status(paths[1]))
         observed["logs"] = [str(x)[:512] for x in observed.get("logs", [])[-20:]]
         restart = effective is not None and any(options.get(key) != effective.get(key)
             for key in ("media_mode", "download_missing_resources", "language"))
         media = observed.get("media_options", {})
         if media.get("effective_settings") is not None and media.get("settings") != media["effective_settings"]:
             restart = True
+        if isinstance(self._account_status, dict) and effective is not None:
+            mode = "media" if effective.get("media_mode") else "normal"
+            selected = self._account_status.get("selected", {}).get(mode)
+            if isinstance(selected, str) and observed.get("profile") and selected != observed["profile"]:
+                restart = True
         result = {"state": state, "running": state == "ready" and observed.get("running") is True,
             "options": options, "effective_options": effective, "restart_required": restart,
             "invalid_options_file": invalid, "runtime": observed, "last_error": error,
-            "resource_operation": operation, "paths": None}
+            "resource_operation": operation, "paths": None,
+            "account_management_available": paths is not None, "accounts": self._account_status}
         if paths is not None:
             result["paths"] = {"imports": str(paths[1] / "imports"), "exports": str(paths[1] / "tmp/exports")}
         # Diagnostic histories may be large; public settings stay available.
@@ -314,6 +327,13 @@ class _Host:
                         del result["runtime"][key]
                     else:
                         break
+        for key in ("startup_checks", "durable_history"):
+            if key in observed and key not in result["runtime"]:
+                result["runtime"][key] = observed[key]
+                try:
+                    _json(result)
+                except (ValueError, TypeError, RecursionError):
+                    del result["runtime"][key]
         return result
 
     def start(self, bundle_dir, data_dir, resource_dir, *, ports=None):
@@ -329,6 +349,10 @@ class _Host:
         if already_started:
             return self.status()
         candidate = None
+        factory_entered = False
+        wrapper_stage = "catalog"
+        with self._condition:
+            self._startup_observations = None
         try:
             if previous is not None:
                 previous.stop()
@@ -351,7 +375,9 @@ class _Host:
                 self._paths = (bundle, data, resources); self._ports = selected_ports
             native = self._native()
             self._installer(bundle / "ServerData.zip", data, self._log)
+            wrapper_stage = "resources"
             self._translations(bundle / "ServerData.zip", resources, self._log, data_dir=data)
+            wrapper_stage = "storage"
             _atomic_json(data / "ios-host.json", DEFAULT_OPTIONS, only_missing=True)
             _atomic_json(data / "client-language.json", {"schema": 1, "language": "ko"}, only_missing=True)
             _directory(data / "imports", create=True); _directory(data / "tmp/exports", create=True)
@@ -370,6 +396,7 @@ class _Host:
                 from .app_runtime import start as factory
             else:
                 factory = self._factory
+            factory_entered = True
             candidate = factory(data, profile="sandbox", log_callback=self._log,
                 grpc_host="127.0.0.1", grpc_port=selected_ports.grpc_port,
                 asset_host="127.0.0.1", asset_port=selected_ports.asset_port,
@@ -389,6 +416,14 @@ class _Host:
             result = self.status(); self._event("ready", status=result)
             return result
         except Exception as error:
+            if not factory_entered and self._paths is not None:
+                try:
+                    from .app_runtime import record_startup_failure
+                    observation = record_startup_failure(self._paths[1], error, stage=wrapper_stage)
+                    with self._condition:
+                        self._startup_observations = observation
+                except Exception:
+                    pass
             if candidate is not None:
                 try:
                     candidate.stop()
@@ -466,6 +501,11 @@ class _Host:
             selected = self._options()["language"]
             prepared = prepare_client_data(paths[0].parent, paths[1], selected)
             result = self.status()
+            profile = result.get("runtime", {}).get("profile")
+            prepared_account = (("media" if result.get("effective_options", {}).get("media_mode") else "normal"), profile) if isinstance(profile, str) else None
+            with self._condition:
+                self._prepared_account = prepared_account
+                self._game_prepared = True
             return {"state": result["state"], "running": result["running"],
                     "effective_options": result["effective_options"], "client_data": prepared}
 
@@ -554,6 +594,8 @@ class _Host:
                             pass
                     response = {"accepted": False, "ready": False, "output_path": None,
                         "error": {"code": "archive_failed", "message": "Resource archive operation failed", "type": type(error).__name__}}
+                    if job is not None:
+                        response["job"] = job
                 finally:
                     if temporary is not None:
                         try:
@@ -567,13 +609,134 @@ class _Host:
             self._archive_worker.start()
             return initial
 
+
+    def _account_command(self, action, value):
+        """Trusted native account operations; paths never come from the web page."""
+        from .account_manager import account_command
+        if self._paths is None:
+            raise ValueError("account_storage_unavailable")
+        with self._condition:
+            if self._closed:
+                raise ValueError("account_host_closed")
+        root = self._paths[1]
+        payload = {key: item for key, item in value.items() if key not in ("id", "action")}
+        if action == "accounts_restore":
+            payload["id"] = payload.pop("restore_id", None)
+        approved_import = None
+        approved_identity = None
+        if action == "accounts_export":
+            exports = root / "tmp" / "exports"
+            if sum(1 for _, _path in zip(range(MAX_EXPORT_FILES), exports.iterdir())) >= MAX_EXPORT_FILES:
+                raise ValueError("account_export_cleanup_required")
+        if action == "accounts_preview":
+            approved_import = Path(payload.get("path", ""))
+            if (not approved_import.is_absolute() or approved_import.suffix.lower() != ".zip"
+                    or _directory(approved_import.parent) != root / "imports"):
+                raise ValueError("account_import_path_invalid")
+            info = _regular(approved_import, maximum=128 * 1024**2)
+            approved_identity = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+        with self._condition:
+            runtime, paths, ports = self._runtime, self._paths, self._ports
+            prepared = self._game_prepared
+            prepared_account = self._prepared_account
+        observed = runtime.status() if runtime is not None else {}
+        active_mode = "media" if observed.get("media_mode") else "normal"
+        replacing = (action == "accounts_restore"
+            or action == "accounts_import" and payload.get("replace") is True)
+        if prepared and replacing and (prepared_account is None
+                or prepared_account == (payload.get("mode"), payload.get("profile"))):
+            raise ValueError("account_restart_required")
+        replaces_active = (replacing and observed.get("running") is True
+            and payload.get("mode") == active_mode and payload.get("profile") == observed.get("profile"))
+        if replaces_active and prepared:
+            raise ValueError("account_restart_required")
+        if replaces_active:
+            operation = self.status().get("resource_operation")
+            job = observed.get("resource_library", {}).get("job")
+            if (isinstance(operation, dict) and operation.get("accepted") is True and operation.get("ready") is not True
+                    or isinstance(job, dict) and job.get("state") in ("preparing", "running", "export_ready", "cancelling")):
+                raise ValueError("account_operation_busy")
+            runtime.stop()
+            with self._condition:
+                self._runtime = None
+                self._state = "idle"
+        try:
+            result = account_command(root, action, payload)
+        finally:
+            if approved_import is not None:
+                try:
+                    info = _regular(approved_import, maximum=128 * 1024**2)
+                    if (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns) == approved_identity:
+                        approved_import.unlink()
+                except (OSError, ValueError):
+                    pass
+            if replaces_active:
+                refreshed = self.start(*paths, ports=ports)
+                if not refreshed.get("running"):
+                    raise RuntimeError("Account operation completed but server restart failed")
+        if not isinstance(result, dict) or not isinstance(result.get("status"), dict):
+            raise ValueError("account_response_invalid")
+        if action == "accounts_export":
+            import hashlib
+            import re
+            filename = result.get("filename")
+            if not isinstance(filename, str) or re.fullmatch(r"IdolyPride-Account-[0-9a-f]{32}\.zip", filename) is None:
+                raise ValueError("account_export_name_invalid")
+            source = Path(result.get("path", ""))
+            owned = root / "account-management" / "exports"
+            if source.name != filename or _directory(source.parent) != _directory(owned):
+                raise ValueError("account_export_path_invalid")
+            before = _regular(source, maximum=128 * 1024**2)
+            exports = root / "tmp" / "exports"
+            if sum(1 for _, _path in zip(range(MAX_EXPORT_FILES), exports.iterdir())) >= MAX_EXPORT_FILES:
+                raise ValueError("account_export_cleanup_required")
+            target = exports / filename
+            if target.exists() or target.is_symlink():
+                raise ValueError("account_export_target_exists")
+            incoming_fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            try:
+                with os.fdopen(incoming_fd, "rb") as incoming, target.open("xb") as outgoing:
+                    after = os.fstat(incoming.fileno())
+                    if ((before.st_dev, before.st_ino, before.st_size) != (after.st_dev, after.st_ino, after.st_size)
+                            or not stat.S_ISREG(after.st_mode) or after.st_nlink != 1):
+                        raise ValueError("account_export_source_changed")
+                    digest, count = hashlib.sha256(), 0
+                    while block := incoming.read(65536):
+                        count += len(block)
+                        if count > 128 * 1024**2:
+                            raise ValueError("account_export_too_large")
+                        digest.update(block)
+                        outgoing.write(block)
+                    outgoing.flush()
+                    os.fsync(outgoing.fileno())
+                if count != result.get("bytes") or digest.hexdigest() != result.get("sha256"):
+                    raise ValueError("account_export_digest_differs")
+            except BaseException:
+                target.unlink(missing_ok=True)
+                raise
+            source.unlink()
+            result = {key: item for key, item in result.items() if key != "path"}
+            result.update(ready=True, output_path=str(target))
+        with self._condition:
+            self._account_status = result["status"]
+        return result
+
     def _dispatch(self, value):
         action = value.get("action")
         fields = {"status": set(), "save_interface_language": {"interface_language"},
             "save_options": {"media_mode", "download_missing_resources", "language", "interface_language"},
             "save_presentation": {"settings"}, "save_playback": {"settings"}, "save_media": {"settings"},
             "resources_preview": set(), "resources_download": {"parallelism"}, "resources_cancel": {"job_id"},
-            "resources_import": {"path"}, "resources_export": set()}
+            "resources_import": {"path"}, "resources_export": set(),
+            "accounts_status": {"offset", "restore_offset"},
+            "accounts_create": {"mode", "profile", "manager_name"},
+            "accounts_clone": {"mode", "source_profile", "profile", "expected_revision"},
+            "accounts_select": {"mode", "profile", "expected_revision", "selection_revision"},
+            "accounts_export": {"mode", "profile", "expected_revision"},
+            "accounts_preview": {"path"},
+            "accounts_import": {"token", "mode", "profile", "replace", "expected_revision"},
+            "accounts_restore": {"restore_id", "mode", "profile", "expected_revision"},
+            "diagnostics_clear": set()}
         if action not in fields or value.keys() - {"id", "action"} - fields[action]:
             raise ValueError("Unknown command or fields")
         if action == "status":
@@ -588,6 +751,19 @@ class _Host:
             options["interface_language"] = value["interface_language"]
             _atomic_json(self._paths[1] / "ios-host.json", options)
             return {"interface_language": options["interface_language"]}
+        if action == "diagnostics_clear":
+            if self._paths is None:
+                raise ValueError("Server history storage is unavailable")
+            if self._runtime is not None:
+                self._runtime.clear_history()
+            else:
+                from .app_runtime import clear_server_history
+                clear_server_history(self._paths[1])
+            with self._condition:
+                self._startup_observations = None
+            return self.status()
+        if action.startswith("accounts_"):
+            return self._account_command(action, value)
         runtime = self._ready_runtime()
         if action == "save_options":
             options = self._options()
@@ -650,6 +826,7 @@ class _Host:
 
     def command(self, raw_json):
         identifier = None
+        value = None
         try:
             value = _decode(raw_json)
             if not isinstance(value, dict):
@@ -665,7 +842,14 @@ class _Host:
             return _json({"id": identifier, "ok": True, "result": result})
         except Exception as error:
             code = "invalid_command" if isinstance(error, (ValueError, TypeError, KeyError, UnicodeError, RecursionError)) else "operation_failed"
-            return _json({"id": identifier, "ok": False, "error": {"code": code, "message": "The local server command could not be completed"}})
+            message = "The local server command could not be completed"
+            if isinstance(value, dict) and str(value.get("action", "")).startswith("accounts_"):
+                import re
+                if isinstance(error, ValueError) and re.fullmatch(r"account_[a-z0-9_]{1,64}", str(error)):
+                    code = str(error)
+                message = ("게임을 완전히 종료하고 다시 연 뒤 게임 시작 전에 계정을 복원해 주세요."
+                    if code == "account_restart_required" else "계정 작업을 마치지 못했습니다. 목록을 새로 불러와 확인해 주세요.")
+            return _json({"id": identifier, "ok": False, "error": {"code": code, "message": message}})
 
 
 _HOST = _Host()

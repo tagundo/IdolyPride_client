@@ -108,6 +108,8 @@ static NSString *localized(NSString *source) {
         @"이 메뉴를 닫아도 서버는 계속 실행됩니다.":@[@"このメニューを閉じてもサーバーは動作し続けます。", @"Closing this menu keeps the server running."],
         @"요청이 너무 큽니다.":@[@"リクエストが大きすぎます。", @"The request is too large."],
         @"진단 내용을 복사하지 못했습니다.":@[@"診断情報をコピーできませんでした。", @"The diagnostic text could not be copied."],
+        @"진행 중인 파일 작업을 마친 후 다시 시도해 주세요.":@[@"進行中のファイル操作が完了してから再試行してください。", @"Finish the current file operation before trying again."],
+        @"ZIP 파일을 준비하지 못했습니다.":@[@"ZIPファイルを準備できませんでした。", @"Could not prepare the ZIP file."],
         @"허용되지 않은 서버 요청입니다.":@[@"許可されていないサーバーリクエストです。", @"This server request is not allowed."],
         @"이미 파일을 선택하고 있습니다.":@[@"すでにファイルを選択中です。", @"A file selection is already open."],
         @"파일 선택을 취소했습니다.":@[@"ファイル選択をキャンセルしました。", @"File selection was cancelled."],
@@ -170,6 +172,11 @@ static NSString *encode(id object) {
 @property (nonatomic,strong) NSURL *page;
 @property (nonatomic,copy) NSDictionary *pendingImport;
 @property (nonatomic,copy) NSDictionary *importProgress;
+@property (nonatomic,copy) NSDictionary *accountImportProgress;
+@property (nonatomic,copy) NSString *pendingExportAction;
+@property (nonatomic,copy) NSNumber *pendingExportRequestID;
+@property (nonatomic,copy) NSString *pendingExportJobID;
+@property (nonatomic,copy) NSString *preparedExportPath;
 @property (nonatomic) BOOL pendingExport;
 @property (nonatomic,copy) NSString *lastExportPath;
 @property (nonatomic) BOOL launcherMode;
@@ -194,6 +201,7 @@ static NSString *encode(id object) {
 - (void)releaseWeb;
 - (void)exportPath:(NSString *)path;
 - (void)retireExport;
+- (void)releaseExportRequest;
 - (void)closeSettings;
 - (void)startGame;
 - (void)abortLaunchSettings;
@@ -460,11 +468,26 @@ static __weak IDSettingsController *launcherController;
     if ([value isKindOfClass:NSDictionary.class]
             && [value[@"result"] isKindOfClass:NSMutableDictionary.class]
             && [value[@"result"][@"native"] isKindOfClass:NSMutableDictionary.class])
+    {
         value[@"result"][@"native"][@"resource_import_progress"] = _importProgress ?: (id)NSNull.null;
+        value[@"result"][@"native"][@"account_import_progress"] = _accountImportProgress ?: (id)NSNull.null;
+    }
+    if ([value isKindOfClass:NSDictionary.class] && _pendingExportRequestID
+            && [_pendingExportAction isEqual:@"resources_export"]) {
+        NSDictionary *result = [value[@"result"] isKindOfClass:NSDictionary.class] ? value[@"result"] : nil;
+        NSDictionary *operation = [result[@"resource_operation"] isKindOfClass:NSDictionary.class] ? result[@"resource_operation"] : nil;
+        NSDictionary *job = [operation[@"job"] isKindOfClass:NSDictionary.class] ? operation[@"job"] : nil;
+        if (_pendingExportJobID && [job[@"job_id"] isEqual:_pendingExportJobID]) {
+            if ([operation[@"accepted"] isEqual:@NO]) [self localFailure:_pendingExportRequestID message:@"ZIP 파일을 준비하지 못했습니다."];
+            else if ([operation[@"ready"] isEqual:@YES] && [operation[@"accepted"] isEqual:@YES]) [self exportPath:operation[@"output_path"]];
+        }
+    }
+    if (_preparedExportPath) [self exportPath:_preparedExportPath];
     NSString *array = value ? encode(@[identifier, value]) : nil;
     if (array) [_web evaluateJavaScript:[@"window.idolyServerReply.apply(null," stringByAppendingFormat:@"%@)",array] completionHandler:nil];
 }
 - (void)localFailure:(NSNumber *)identifier message:(NSString *)message {
+    if ([_pendingExportRequestID isEqual:identifier]) [self releaseExportRequest];
     [self sendReply:identifier json:encode(@{@"id":identifier, @"ok":@NO,
         @"error":@{@"code":@"native_files", @"message":localized(message)}})];
 }
@@ -489,7 +512,14 @@ static __weak IDSettingsController *launcherController;
         [self sendReply:identifier json:encode(@{@"id":identifier, @"ok":@YES, @"result":@{@"copied":@YES}})];
         return;
     }
-    if (![request[@"action"] isEqual:@"resources_export"]) { [self sendRequest:request]; return; }
+    if (![request[@"action"] isEqual:@"resources_export"] && ![request[@"action"] isEqual:@"accounts_export"]) { [self sendRequest:request]; return; }
+    // Reserve this export before asynchronous status/cleanup. Another click
+    // cannot replace its action, delete its prepared ZIP, or steal its picker.
+    if (_pendingExportRequestID || _pendingImport) {
+        [self localFailure:request[@"id"] message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
+    }
+    _pendingExportRequestID = request[@"id"]; _pendingExportAction = request[@"action"];
+    _pendingExportJobID = nil; _preparedExportPath = nil; _pendingExport = YES;
     // A completed export may outlive its closed settings page. Before the next
     // explicit export, retire only our own completed temporary ZIP namespace.
     // Never touch .part files or race an active host archive operation.
@@ -507,7 +537,7 @@ static __weak IDSettingsController *launcherController;
             NSURL *directory = root ? [NSURL fileURLWithPath:root isDirectory:YES] : nil;
             NSArray<NSURL *> *files = directory ? [NSFileManager.defaultManager contentsOfDirectoryAtURL:directory
                 includingPropertiesForKeys:@[NSURLIsRegularFileKey,NSURLIsSymbolicLinkKey] options:0 error:NULL] : nil;
-            NSRegularExpression *name = [NSRegularExpression regularExpressionWithPattern:@"^IdolyPride-Resources-ios-[0-9a-f]{32}\\.zip$" options:0 error:NULL];
+            NSRegularExpression *name = [NSRegularExpression regularExpressionWithPattern:@"^IdolyPride-(Resources-ios|Account)-[0-9a-f]{32}\\.zip$" options:0 error:NULL];
             if (files.count <= 32) for (NSURL *url in files) {
                 NSString *leaf = url.lastPathComponent; NSNumber *regular = nil, *link = nil;
                 [url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];
@@ -523,7 +553,11 @@ static __weak IDSettingsController *launcherController;
     NSNumber *identifier = request[@"id"];
     NSString *raw = encode(request);
     if (!raw) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
-    if ([request[@"action"] isEqual:@"resources_export"]) _pendingExport = YES;
+    if ([request[@"action"] isEqual:@"resources_export"] || [request[@"action"] isEqual:@"accounts_export"]) {
+        if (![_pendingExportRequestID isEqual:identifier] || ![_pendingExportAction isEqual:request[@"action"]]) {
+            [self localFailure:identifier message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
+        }
+    }
     __weak typeof(self) weakSelf = self;
     IdolyEmbeddedServerCommand(raw, ^(NSString *reply) {
         IDSettingsController *strongSelf = weakSelf;
@@ -539,28 +573,62 @@ static __weak IDSettingsController *launcherController;
                 failed[@"stage"] = @"failed"; [strongSelf event:encode(failed)];
             }
         }
-        [strongSelf sendReply:identifier json:reply];
+        if ([request[@"action"] isEqual:@"accounts_preview"]) {
+            NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary *value = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+            if ([value[@"ok"] isEqual:@YES]) strongSelf.accountImportProgress = nil;
+            else {
+                NSMutableDictionary *failed = strongSelf.accountImportProgress.mutableCopy;
+                failed[@"stage"] = @"failed"; if (failed) [strongSelf event:encode(failed)];
+            }
+        }
+        NSString *accountExportPath = nil;
+        NSString *webReply = reply;
+        if ([request[@"action"] hasPrefix:@"accounts_"]) {
+            NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
+            id parsed = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:NSJSONReadingMutableContainers error:NULL] : nil;
+            NSMutableDictionary *value = [parsed isKindOfClass:NSMutableDictionary.class] ? parsed : nil;
+            NSMutableDictionary *result = [value[@"result"] isKindOfClass:NSMutableDictionary.class] ? value[@"result"] : nil;
+            if ([request[@"action"] isEqual:@"accounts_export"] && [value[@"ok"] isEqual:@YES]) accountExportPath = result[@"output_path"];
+            [result removeObjectForKey:@"path"]; [result removeObjectForKey:@"output_path"];
+            webReply = encode(value) ?: reply;
+        }
+        [strongSelf sendReply:identifier json:webReply];
+        if ([request[@"action"] isEqual:@"accounts_export"]) {
+            if (accountExportPath) [strongSelf exportPath:accountExportPath];
+            else [strongSelf releaseExportRequest];
+        }
         if ([request[@"action"] isEqual:@"resources_export"]) {
             NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
             NSDictionary *value = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
             NSString *path = [value isKindOfClass:NSDictionary.class] && [value[@"ok"] isEqual:@YES]
                 && [value[@"result"] isKindOfClass:NSDictionary.class] ? value[@"result"][@"output_path"] : nil;
-            if ([value[@"result"] isKindOfClass:NSDictionary.class] && [value[@"result"][@"ready"] isEqual:@YES])
-                [strongSelf exportPath:path];
-            else if (![value[@"ok"] isEqual:@YES]) strongSelf.pendingExport = NO;
+            NSDictionary *result = [value[@"result"] isKindOfClass:NSDictionary.class] ? value[@"result"] : nil;
+            NSDictionary *job = [result[@"job"] isKindOfClass:NSDictionary.class] ? result[@"job"] : nil;
+            if ([strongSelf.pendingExportRequestID isEqual:identifier] && [value[@"ok"] isEqual:@YES]
+                    && [result[@"accepted"] isEqual:@YES] && [job[@"job_id"] isKindOfClass:NSString.class]) {
+                strongSelf.pendingExportJobID = job[@"job_id"];
+                if ([result[@"ready"] isEqual:@YES]) [strongSelf exportPath:path];
+            } else if ([strongSelf.pendingExportRequestID isEqual:identifier]) [strongSelf releaseExportRequest];
         }
     });
 }
 - (void)exportPath:(NSString *)path {
-    if (!_pendingExport || ![path isKindOfClass:NSString.class] || [path isEqual:_lastExportPath]) return;
+    if (!_pendingExport || !_pendingExportRequestID || [path isEqual:_lastExportPath]) return;
+    if (![path isKindOfClass:NSString.class]) { [self localFailure:_pendingExportRequestID message:@"ZIP 파일을 준비하지 못했습니다."]; return; }
     NSString *root = [IDNativeDataDirectory() stringByAppendingPathComponent:@"tmp/exports"];
     NSURL *url = [NSURL fileURLWithPath:path]; NSNumber *regular = nil, *symlink = nil;
     [url getResourceValue:&regular forKey:NSURLIsRegularFileKey error:NULL];
     [url getResourceValue:&symlink forKey:NSURLIsSymbolicLinkKey error:NULL];
     NSString *resolvedRoot = root.stringByResolvingSymlinksInPath;
-    BOOL inside = root && regular.boolValue && !symlink.boolValue && [url.pathExtension.lowercaseString isEqual:@"zip"]
+    NSString *pattern = [_pendingExportAction isEqual:@"accounts_export"] ? @"^IdolyPride-Account-[0-9a-f]{32}\\.zip$" : @"^IdolyPride-Resources-ios-[0-9a-f]{32}\\.zip$";
+    NSRegularExpression *name = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    BOOL knownName = [name numberOfMatchesInString:url.lastPathComponent options:0 range:NSMakeRange(0,url.lastPathComponent.length)] == 1;
+    BOOL inside = root && knownName && regular.boolValue && !symlink.boolValue && [url.pathExtension.lowercaseString isEqual:@"zip"]
         && [url.URLByResolvingSymlinksInPath.path hasPrefix:[resolvedRoot stringByAppendingString:@"/"]];
-    if (inside && atomic_load(&settingsVisible) && !self.presentedViewController) {
+    if (!inside) { [self localFailure:_pendingExportRequestID message:@"ZIP 파일을 준비하지 못했습니다."]; return; }
+    _preparedExportPath = path;
+    if (atomic_load(&settingsVisible) && !self.presentedViewController) {
         _pendingExport = NO; _lastExportPath = path;
         UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
             initWithURL:url inMode:UIDocumentPickerModeExportToService];
@@ -600,15 +668,18 @@ static __weak IDSettingsController *launcherController;
     if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
     if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
     NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media",
-        @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export"]];
+        @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export",
+        @"diagnostics_clear",@"accounts_status",@"accounts_create",@"accounts_clone",@"accounts_select",
+        @"accounts_export",@"accounts_preview",@"accounts_import",@"accounts_restore"]];
     if (![actions containsObject:action] || request[@"path"] || request[@"output_path"]) {
         [self localFailure:identifier message:@"허용되지 않은 서버 요청입니다."]; return;
     }
-    if ([action isEqual:@"resources_import"]) {
-        if (_pendingImport) { [self localFailure:identifier message:@"이미 파일을 선택하고 있습니다."]; return; }
+    if ([action isEqual:@"resources_import"] || [action isEqual:@"accounts_preview"]) {
+        if (_pendingImport || _pendingExportRequestID) { [self localFailure:identifier message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return; }
         _pendingImport = request;
-        _importProgress = @{@"event":@"resource_import_progress", @"request_id":identifier,
+        NSDictionary *progress = @{@"event":[action isEqual:@"accounts_preview"] ? @"account_import_progress" : @"resource_import_progress", @"request_id":identifier,
             @"stage":@"selecting", @"copied_bytes":@0, @"total_bytes":@0};
+        if ([action isEqual:@"accounts_preview"]) _accountImportProgress = progress; else _importProgress = progress;
         // We consume a private copy of the ZIP, never edit the provider's file.
         // Import also asks container hosts for a copy instead of in-place access.
         UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
@@ -620,11 +691,16 @@ static __weak IDSettingsController *launcherController;
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
     (void)controller;
     if (_pendingImport) [self localFailure:_pendingImport[@"id"] message:@"파일 선택을 취소했습니다."];
-    _pendingImport = nil; _importProgress = nil;
+    _pendingImport = nil; _importProgress = nil; _accountImportProgress = nil;
     [self retireExport];
+}
+- (void)releaseExportRequest {
+    _pendingExport = NO; _pendingExportRequestID = nil; _pendingExportAction = nil;
+    _pendingExportJobID = nil; _preparedExportPath = nil;
 }
 - (void)retireExport {
     NSString *path = _lastExportPath; _lastExportPath = nil;
+    [self releaseExportRequest];
     NSString *root = [IDNativeDataDirectory() stringByAppendingPathComponent:@"tmp/exports"];
     if (!path || !root || ![path.stringByResolvingSymlinksInPath hasPrefix:[root.stringByResolvingSymlinksInPath stringByAppendingString:@"/"]]) return;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0), ^{
@@ -638,13 +714,16 @@ static __weak IDSettingsController *launcherController;
     NSURL *source = urls.count == 1 ? urls[0] : nil;
     NSString *data = IDNativeDataDirectory();
     if (!source.isFileURL || !data || ![source.pathExtension.lowercaseString isEqual:@"zip"]) {
-        _pendingImport = nil; _importProgress = nil;
+        _pendingImport = nil; _importProgress = nil; _accountImportProgress = nil;
         [self localFailure:request[@"id"] message:@"ZIP 파일을 선택해 주세요."]; return;
     }
+    BOOL accountImport = [request[@"action"] isEqual:@"accounts_preview"];
+    NSString *progressEvent = accountImport ? @"account_import_progress" : @"resource_import_progress";
+    uint64_t byteLimit = accountImport ? 128ULL * 1024ULL * 1024ULL : 512ULL * 1024ULL * 1024ULL * 1024ULL;
     __weak typeof(self) weakSelf = self;
     void (^progress)(NSString *, uint64_t, uint64_t) = ^(NSString *stage, uint64_t copied, uint64_t total) {
         // Only bounded counters cross the bridge; provider paths stay native.
-        NSString *json = encode(@{@"event":@"resource_import_progress", @"request_id":request[@"id"],
+        NSString *json = encode(@{@"event":progressEvent, @"request_id":request[@"id"],
             @"stage":stage, @"copied_bytes":@(copied), @"total_bytes":@(total)});
         dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf event:json]; });
     };
@@ -665,12 +744,14 @@ static __weak IDSettingsController *launcherController;
                 NSNumber *fileSize = nil;
                 if ([readURL getResourceValue:&fileSize forKey:NSURLFileSizeKey error:NULL]
                         && fileSize.longLongValue > 0) total = fileSize.unsignedLongLongValue;
+                if (total > byteLimit) { copyError = [NSError errorWithDomain:@"IdolyImport" code:3 userInfo:nil]; return; }
                 progress(@"copying", 0, total);
                 NSTimeInterval lastProgress = NSProcessInfo.processInfo.systemUptime;
                 NSInputStream *in = [NSInputStream inputStreamWithURL:readURL];
                 NSOutputStream *out = [NSOutputStream outputStreamWithURL:destination append:NO];
                 [in open]; [out open]; uint8_t buffer[65536]; NSInteger size;
                 while ((size = [in read:buffer maxLength:sizeof buffer]) > 0) {
+                    if ((uint64_t)size > byteLimit - copied) { copyError = [NSError errorWithDomain:@"IdolyImport" code:3 userInfo:nil]; break; }
                     if (!weakSelf) { copyError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSUserCancelledError userInfo:nil]; break; }
                     NSInteger used = 0;
                     while (used < size) {
@@ -703,7 +784,7 @@ static __weak IDSettingsController *launcherController;
             }
             strongSelf->_pendingImport = nil;
             // Queue the last progress event before the reply/backend handoff.
-            NSString *json = encode(@{@"event":@"resource_import_progress", @"request_id":request[@"id"],
+            NSString *json = encode(@{@"event":progressEvent, @"request_id":request[@"id"],
                 @"stage":failure ? @"failed" : @"queued", @"copied_bytes":@(copied), @"total_bytes":@(total)});
             [strongSelf event:json];
             if (failure) [strongSelf localFailure:request[@"id"] message:@"ZIP 파일을 앱 보관 폴더로 가져오지 못했습니다."];
@@ -715,6 +796,7 @@ static __weak IDSettingsController *launcherController;
     NSData *bytes = [json dataUsingEncoding:NSUTF8StringEncoding];
     id object = bytes && bytes.length <= maxJSON ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
     if ([object isKindOfClass:NSDictionary.class]) {
+        if ([object[@"event"] isEqual:@"account_import_progress"]) _accountImportProgress = object;
         if ([object[@"event"] isEqual:@"resource_import_progress"]) _importProgress = object;
         else if ([_importProgress[@"stage"] isEqual:@"queued"]
                 && [object[@"event"] isEqual:@"resource_result"]
@@ -724,8 +806,13 @@ static __weak IDSettingsController *launcherController;
     if (!_web || !atomic_load(&settingsVisible)) return;
     NSString *array = object ? encode(@[object]) : nil;
     if (array) [_web evaluateJavaScript:[@"window.idolyServerEvent.apply(null," stringByAppendingFormat:@"%@)",array] completionHandler:nil];
+    NSDictionary *eventJob = [object isKindOfClass:NSDictionary.class] && [object[@"job"] isKindOfClass:NSDictionary.class] ? object[@"job"] : nil;
     if ([object isKindOfClass:NSDictionary.class] && [object[@"event"] isEqual:@"resource_result"]
-        && [object[@"ready"] isEqual:@YES]) [self exportPath:object[@"output_path"]];
+            && _pendingExportRequestID && [_pendingExportAction isEqual:@"resources_export"]
+            && _pendingExportJobID && [eventJob[@"job_id"] isEqual:_pendingExportJobID]) {
+        if ([object[@"accepted"] isEqual:@NO]) [self localFailure:_pendingExportRequestID message:@"ZIP 파일을 준비하지 못했습니다."];
+        else if ([object[@"ready"] isEqual:@YES] && [object[@"accepted"] isEqual:@YES]) [self exportPath:object[@"output_path"]];
+    }
 }
 @end
 

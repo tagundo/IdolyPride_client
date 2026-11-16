@@ -7,6 +7,11 @@ typedef struct {
     IDGatePhase phase;
     unsigned captured, forwarded, attempts, launch_requested, launch_prepared;
 } IDGate;
+// Failed startup may still have a live interpreter and durable diagnostics.
+// Starting remains immediate so periodic status calls cannot queue behind it.
+static inline int IDGateReadFailedHostStatus(const IDGate *g, int python_ready, int worker_ready) {
+    return g && g->phase == IDGateFailed && python_ready && worker_ready;
+}
 static inline int IDGateCapture(IDGate *g) {
     if (g->captured || g->forwarded) return 0;
     g->captured = 1; return 1;

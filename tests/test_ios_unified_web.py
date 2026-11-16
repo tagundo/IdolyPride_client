@@ -32,6 +32,7 @@ class Element extends Target {
   }
   set innerHTML(_) { throw new Error('Untrusted data reached an HTML sink'); }
   removeAttribute(name) { delete this[name]; }
+  replaceChildren(...nodes) { this.children=nodes; }
 }
 function environment(hidden = false) {
   const scope = new Target();
@@ -41,6 +42,7 @@ function environment(hidden = false) {
   const elements = new Map();
   for (const match of fs.readFileSync(WEB + '/index.html', 'utf8').matchAll(/<[^>]+\bid="([^"]+)"[^>]*>/g)) elements.set(match[1], new Element(match[0]));
   elements.get('parallelism').value = '4';
+  document.createElement = tag => new Element("<"+tag+">");
   document.getElementById = id => { assert.ok(elements.has(id), 'Real HTML element exists: ' + id); return elements.get(id); };
   const posted = [];
   scope.webkit = {messageHandlers: {idolyServer: {postMessage(value) { posted.push(JSON.parse(JSON.stringify(value))); }}}};

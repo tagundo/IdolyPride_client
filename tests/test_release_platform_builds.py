@@ -47,7 +47,7 @@ def test_wrong_ruleset_cannot_satisfy_engine_qa():
 
 
 def test_source_binding_requires_clean_current_common_modules(monkeypatch,tmp_path):
-    names=["src/idoly_local/"+name for name in ("app_runtime.py","diagnostics.py","resource_translation_runtime.py")]+["tools/release_platform_builds.py"]
+    names=list(builds.COMMON_SOURCE_FILES)+["tools/release_platform_builds.py"]
     for name in names:
         path=tmp_path/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(name)
     monkeypatch.setattr(builds,"ROOT",tmp_path)
@@ -111,7 +111,7 @@ def apk_fixture(monkeypatch,tmp_path,*,wrong_cert=False,wrong_version=False,tamp
     def capture(arguments,**kwargs):
         name=Path(arguments[0]).name
         if name=="apksigner":return "Verified using v2 scheme (APK Signature Scheme v2): true\nSigner #1 certificate SHA-256 digest: "+("f"*64 if wrong_cert else builds.ANDROID_CERT)+"\n"
-        if name=="aapt":return "package: name='"+builds.ANDROID_PACKAGE+"' versionCode='"+("51" if wrong_version else "52")+"' versionName='0.3.35'\n"+("application-debuggable\n" if debuggable else "")
+        if name=="aapt":return "package: name='"+builds.ANDROID_PACKAGE+"' versionCode='"+("52" if wrong_version else "53")+"' versionName='0.3.36'\n"+("application-debuggable\n" if debuggable else "")
         assert name=="zipalign";return "Verification successful"
     monkeypatch.setattr(builds,"capture",capture)
     return target,{"library_bytes":len(engine),"library_sha256":hashlib.sha256(engine).hexdigest()}
@@ -120,7 +120,7 @@ def apk_fixture(monkeypatch,tmp_path,*,wrong_cert=False,wrong_version=False,tamp
 def test_arm_apk_requires_exact_identity_signer_and_embedded_bytes(monkeypatch,tmp_path):
     target,engine=apk_fixture(monkeypatch,tmp_path)
     result=builds.check_apk(target,"arm64-v8a",{},engine,tmp_path)
-    assert result["certificate_sha256"]==builds.ANDROID_CERT and result["build_number"]==52
+    assert result["certificate_sha256"]==builds.ANDROID_CERT and result["build_number"]==53
 
 
 @pytest.mark.parametrize("change",["wrong_cert","wrong_version","tampered","debuggable"])

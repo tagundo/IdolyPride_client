@@ -450,6 +450,20 @@
     "… 표시 한도로 나머지 진단은 생략했습니다.": "… 表示上限に達したため、残りの診断を省略しました。"
   }
 };
+
+  Object.assign(UI_TRANSLATIONS.ja, {"유저 관리": "ユーザー管理", "계정 목록 불러오기": "アカウント一覧を読み込む", "계정 ZIP에는 계정 진행·보유 항목·게임 설정을 보관합니다. 게임 리소스 ZIP과는 별개입니다.": "アカウントZIPには進行状況・所持品・ゲーム設定が含まれます。ゲームリソースZIPとは別です。", "계정 선택은 다음 서버 시작에 적용됩니다. 게임을 시작한 뒤 활성 계정을 복원하려면 앱을 완전히 종료하고 다시 열어 주세요.": "アカウント選択は次のサーバー起動時に反映されます。ゲーム開始後に使用中のアカウントを復元するには、アプリを完全に終了して開き直してください。", "계정 목록을 불러오면 관리할 수 있습니다.": "一覧を読み込むとアカウントを管理できます。", "관리할 계정": "管理するアカウント", "계정 없음": "アカウントなし", "다음 시작 계정으로 선택": "次回起動のアカウントに選択", "계정 ZIP 내보내기": "アカウントZIPを書き出す", "아래 이름으로 복제": "下の名前で複製", "이전 계정 목록": "前のアカウント一覧", "다음 계정 목록": "次のアカウント一覧", "계정 생성·복제": "アカウント作成・複製", "계정 종류": "アカウントの種類", "새 계정 이름": "新しいアカウント名", "새 계정 매니저 이름": "新規アカウントのマネージャー名", "새 계정 만들기": "アカウントを作成", "계정 백업 가져오기": "アカウントバックアップを取り込む", "계정 ZIP 선택·검사": "アカウントZIPを選択・検証", "선택한 계정에 덮어쓰기 · 기존 상태의 복구점 자동 생성": "選択中のアカウントを上書き・変更前の復元ポイントを自動作成", "덮어쓰지 않으면 ‘새 계정 이름’으로 가져옵니다. 선택한 ZIP은 검사만으로 계정을 바꾸지 않습니다.": "上書きしない場合は「新しいアカウント名」で取り込みます。ZIPの検証だけではアカウントは変更されません。", "검사한 계정 가져오기": "検証済みアカウントを取り込む", "이전 상태로 복원": "以前の状態に復元", "자동 복구점": "自動復元ポイント", "복구점 없음": "復元ポイントなし", "복원할 계정과 복구점의 계정이 같아야 합니다. 복원 직전 상태도 새 복구점으로 남깁니다.": "対象アカウントと復元ポイントのアカウントは一致する必要があります。復元直前の状態も新しい復元ポイントとして保存します。", "선택한 복구점으로 복원": "選択した復元ポイントへ復元", "이전 복구점 목록": "前の復元ポイント", "다음 복구점 목록": "次の復元ポイント", "계정 작업 진행률": "アカウント処理の進行状況", "현재 계정: ": "現在のアカウント: ", "다음 시작 · 일반: ": "次回起動・通常: ", " / 감상: ": " / 鑑賞: ", "서버 준비 검사": "サーバー準備の検査", "서버 준비 검사를 기다리고 있습니다.": "サーバー準備の検査を待っています。", "마지막 오류: ": "最後のエラー: ", "오류 기록을 저장할 수 없습니다.": "エラー記録を保存できません。", "저장된 최근 오류가 없습니다.": "保存された最近のエラーはありません。", "이전 실행의 검사 기록입니다.": "前回起動時の検査記録です。", "프로토콜": "プロトコル", "게임 목록": "ゲームカタログ", "마스터 파일": "マスターファイル", "저장 공간": "保存領域", "파일 서버": "ファイルサーバー", "게임 서버": "ゲームサーバー", "게임 리소스": "ゲームリソース", "계정": "アカウント", "검사": "検査", "준비 완료": "準備完了", "확인 필요": "確認が必要", "검사 전": "未検査", "중지됨": "停止", "계정 작업을 처리하고 있습니다.": "アカウント処理中です。", "ZIP과 같은 종류의 계정을 선택해 주세요.": "ZIPと同じ種類のアカウントを選択してください。", "계정 ZIP 검사 결과를 확인하지 못했습니다.": "アカウントZIPの検証結果を確認できませんでした。", "계정 ZIP을 검사했습니다. 가져올 이름과 대상을 확인해 주세요.": "アカウントZIPを検証しました。取り込み先と名前を確認してください。", "계정 목록을 불러왔습니다.": "アカウント一覧を読み込みました。", "다음 서버 시작에 선택한 계정을 적용합니다.": "次のサーバー起動時に選択したアカウントを使用します。", "계정 ZIP을 준비했습니다. 파일 앱에서 저장해 주세요.": "アカウントZIPを準備しました。ファイルアプリで保存してください。", "계정 작업을 마쳤습니다.": "アカウント処理が完了しました。", "게임을 완전히 종료하고 다시 연 뒤 게임 시작 전에 계정을 복원해 주세요.": "アプリを完全に終了して開き直し、ゲーム開始前にアカウントを復元してください。", "계정 작업을 마치지 못했습니다. 목록을 새로 불러와 확인해 주세요.": "アカウント処理を完了できませんでした。一覧を読み直して確認してください。", "이전 오류 기록 지우기": "保存されたエラー記録を消去"});
+  Object.assign(UI_TRANSLATIONS.en, {"유저 관리": "User management", "계정 목록 불러오기": "Load accounts", "계정 ZIP에는 계정 진행·보유 항목·게임 설정을 보관합니다. 게임 리소스 ZIP과는 별개입니다.": "Account ZIPs contain progress, inventory and game settings. They are separate from game resource ZIPs.", "계정 선택은 다음 서버 시작에 적용됩니다. 게임을 시작한 뒤 활성 계정을 복원하려면 앱을 완전히 종료하고 다시 열어 주세요.": "Account selection applies at the next server start. To restore the active account after starting the game, fully close and reopen the app.", "계정 목록을 불러오면 관리할 수 있습니다.": "Load the list to manage accounts.", "관리할 계정": "Account to manage", "계정 없음": "No accounts", "다음 시작 계정으로 선택": "Use at next start", "계정 ZIP 내보내기": "Export account ZIP", "아래 이름으로 복제": "Clone with the name below", "이전 계정 목록": "Previous accounts", "다음 계정 목록": "Next accounts", "계정 생성·복제": "Create or clone an account", "계정 종류": "Account type", "새 계정 이름": "New account name", "새 계정 매니저 이름": "New account manager name", "새 계정 만들기": "Create account", "계정 백업 가져오기": "Import account backup", "계정 ZIP 선택·검사": "Choose and check account ZIP", "선택한 계정에 덮어쓰기 · 기존 상태의 복구점 자동 생성": "Replace selected account · automatically save a restore point", "덮어쓰지 않으면 ‘새 계정 이름’으로 가져옵니다. 선택한 ZIP은 검사만으로 계정을 바꾸지 않습니다.": "Without replacement, import uses the New account name. Checking a ZIP alone does not change an account.", "검사한 계정 가져오기": "Import checked account", "이전 상태로 복원": "Restore previous state", "자동 복구점": "Automatic restore point", "복구점 없음": "No restore points", "복원할 계정과 복구점의 계정이 같아야 합니다. 복원 직전 상태도 새 복구점으로 남깁니다.": "The account and restore point must match. The state before restoration is also saved as a new restore point.", "선택한 복구점으로 복원": "Restore selected point", "이전 복구점 목록": "Previous restore points", "다음 복구점 목록": "Next restore points", "계정 작업 진행률": "Account task progress", "현재 계정: ": "Active account: ", "다음 시작 · 일반: ": "Next start · Normal: ", " / 감상: ": " / Viewing: ", "서버 준비 검사": "Server readiness checks", "서버 준비 검사를 기다리고 있습니다.": "Waiting for server readiness checks.", "마지막 오류: ": "Last failure: ", "오류 기록을 저장할 수 없습니다.": "Error history cannot be saved.", "저장된 최근 오류가 없습니다.": "No recent failures are saved.", "이전 실행의 검사 기록입니다.": "These checks are from the previous run.", "프로토콜": "Protocol", "게임 목록": "Game catalog", "마스터 파일": "Master files", "저장 공간": "Storage", "파일 서버": "File server", "게임 서버": "Game server", "게임 리소스": "Game resources", "계정": "Account", "검사": "Check", "준비 완료": "Ready", "확인 필요": "Needs attention", "검사 전": "Not checked", "중지됨": "Stopped", "계정 작업을 처리하고 있습니다.": "Processing account task.", "ZIP과 같은 종류의 계정을 선택해 주세요.": "Choose an account with the same type as the ZIP.", "계정 ZIP 검사 결과를 확인하지 못했습니다.": "Could not read the account ZIP check result.", "계정 ZIP을 검사했습니다. 가져올 이름과 대상을 확인해 주세요.": "Account ZIP checked. Verify the target and name before importing.", "계정 목록을 불러왔습니다.": "Accounts loaded.", "다음 서버 시작에 선택한 계정을 적용합니다.": "The selected account will apply at the next server start.", "계정 ZIP을 준비했습니다. 파일 앱에서 저장해 주세요.": "Account ZIP prepared. Save it in the Files app.", "계정 작업을 마쳤습니다.": "Account task completed.", "게임을 완전히 종료하고 다시 연 뒤 게임 시작 전에 계정을 복원해 주세요.": "Fully close and reopen the app, then restore the account before starting the game.", "계정 작업을 마치지 못했습니다. 목록을 새로 불러와 확인해 주세요.": "Could not complete the account task. Reload the list and check again.", "이전 오류 기록 지우기": "Clear saved error history"});
+
+
+  Object.assign(UI_TRANSLATIONS.ja, {"새 저장 슬롯 이름": "新しい保存スロット名", "매니저 이름 · 새 계정 생성 시": "マネージャー名・新規作成時のみ", "덮어쓰지 않으면 ‘새 저장 슬롯 이름’으로 가져옵니다. 선택한 ZIP은 검사만으로 계정을 바꾸지 않습니다.": "上書きしない場合は「新しい保存スロット名」で取り込みます。ZIPの検証だけではアカウントは変更されません。", "로컬 계정 이름은 저장 슬롯 이름입니다. 복제·가져오기는 게임 내 ID와 매니저 이름을 그대로 유지합니다.": "ローカルアカウント名は保存スロット名です。複製・取り込みではゲーム内IDとマネージャー名は変わりません。", "원본 저장 슬롯: ": "元の保存スロット: ", "계정 자료: ": "アカウントデータ: ", "게임 내 매니저: ": "ゲーム内マネージャー: ", "게임 리소스 파일은 포함하지 않습니다.": "ゲームリソースファイルは含まれません。", "카드": "カード", "아이템": "アイテム", "포토": "フォト"});
+  Object.assign(UI_TRANSLATIONS.en, {"새 저장 슬롯 이름": "New save slot name", "매니저 이름 · 새 계정 생성 시": "Manager name · new accounts only", "덮어쓰지 않으면 ‘새 저장 슬롯 이름’으로 가져옵니다. 선택한 ZIP은 검사만으로 계정을 바꾸지 않습니다.": "Without replacement, import uses the New save slot name. Checking a ZIP alone does not change an account.", "로컬 계정 이름은 저장 슬롯 이름입니다. 복제·가져오기는 게임 내 ID와 매니저 이름을 그대로 유지합니다.": "Local account names identify save slots. Cloning or importing preserves the in-game ID and manager name.", "원본 저장 슬롯: ": "Original save slot: ", "계정 자료: ": "Account data: ", "게임 내 매니저: ": "In-game manager: ", "게임 리소스 파일은 포함하지 않습니다.": "Game resource files are not included.", "카드": "Cards", "아이템": "Items", "포토": "Photos"});
+
+  Object.assign(UI_TRANSLATIONS.ja, {"진행 중인 파일 작업을 마친 후 다시 시도해 주세요.":"進行中のファイル操作が完了してから再試行してください。"});
+  Object.assign(UI_TRANSLATIONS.en, {"진행 중인 파일 작업을 마친 후 다시 시도해 주세요.":"Finish the current file operation before trying again."});
+
+  Object.assign(UI_TRANSLATIONS.ja, {"아이템 종류":"アイテムの種類"});
+  Object.assign(UI_TRANSLATIONS.en, {"아이템 종류":"Item types"});
+
   function resolveInterfaceLanguage(value, navigator = {}) {
     if (["ko", "ja", "en"].includes(value)) return value;
     const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
@@ -509,6 +523,30 @@
 
   function validRequest(action, payload) {
     if (action === "status") return exact(payload, []);
+
+    const profile = value => typeof value === "string" && value.trim() === value && utf8Length(value) >= 1
+      && utf8Length(value) <= 64 && !/[\/\\\u0000-\u001f\u007f]/.test(value);
+    const revision = value => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+    const mode = value => choice(value, ["normal", "media"]);
+    if (action === "accounts_status") return exact(payload, []) || exact(payload, ["offset", "restore_offset"])
+      && integer(payload.offset) && integer(payload.restore_offset) && payload.offset <= 65535 && payload.restore_offset <= 65535;
+    if (action === "accounts_create") return exact(payload, ["mode", "profile", "manager_name"]) && mode(payload.mode)
+      && profile(payload.profile) && typeof payload.manager_name === "string" && payload.manager_name.trim().length > 0
+      && payload.manager_name.length <= 10 && !/[\r\n\t]/.test(payload.manager_name);
+    if (action === "accounts_clone") return exact(payload, ["mode", "source_profile", "profile", "expected_revision"])
+      && mode(payload.mode) && profile(payload.profile) && profile(payload.source_profile) && revision(payload.expected_revision);
+    if (action === "accounts_select") return exact(payload, ["mode", "profile", "expected_revision", "selection_revision"])
+      && mode(payload.mode) && profile(payload.profile) && revision(payload.expected_revision) && revision(payload.selection_revision);
+    if (action === "accounts_export") return exact(payload, ["mode", "profile", "expected_revision"])
+      && mode(payload.mode) && profile(payload.profile) && revision(payload.expected_revision);
+    if (action === "accounts_preview" || action === "diagnostics_clear") return exact(payload, []);
+    if (action === "accounts_import") return exact(payload, ["token", "mode", "profile", "replace", "expected_revision"])
+      && typeof payload.token === "string" && /^[0-9a-f]{32}$/.test(payload.token) && mode(payload.mode) && profile(payload.profile)
+      && typeof payload.replace === "boolean" && (payload.replace ? revision(payload.expected_revision) : payload.expected_revision === null);
+    if (action === "accounts_restore") return exact(payload, ["restore_id", "mode", "profile", "expected_revision"])
+      && typeof payload.restore_id === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(payload.restore_id)
+      && mode(payload.mode) && profile(payload.profile) && revision(payload.expected_revision);
+
     if (action === "launch_settings_barrier") return exact(payload, ["nonce", "ready"])
       && typeof payload.nonce === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(payload.nonce)
       && typeof payload.ready === "boolean";
@@ -528,7 +566,7 @@
   }
 
   function validImportProgress(value) {
-    return object(value) && value.event === "resource_import_progress"
+    return object(value) && ["resource_import_progress","account_import_progress"].includes(value.event)
       && Number.isInteger(value.request_id) && value.request_id >= 1 && value.request_id <= MAX_ID
       && ["selecting", "preparing", "copying", "queued", "failed"].includes(value.stage)
       && Number.isSafeInteger(value.copied_bytes) && value.copied_bytes >= 0
@@ -572,9 +610,10 @@
     }
     function event(value) {
       if (!active || disposed || !object(value) || !boundedJSON(value, 524288)) return;
-      if (value.event === "resource_import_progress") {
+      if (["resource_import_progress","account_import_progress"].includes(value.event)) {
         const item = pending.get(value.request_id);
-        if (!validImportProgress(value) || !item || item.action !== "resources_import") return;
+        const action = value.event === "account_import_progress" ? "accounts_preview" : "resources_import";
+        if (!validImportProgress(value) || !item || item.action !== action) return;
         const order = {selecting: -1, preparing: 0, copying: 1, queued: 2, failed: 3};
         if (item.importStage !== null && (order[value.stage] < order[item.importStage] || value.copied_bytes < item.importCopied)) return;
         // Extend only this import's inactivity deadline when real work advances.
@@ -595,7 +634,7 @@
         if (pending.size >= MAX_PENDING || nextID > MAX_ID) return Promise.reject(new Error("진행 중인 요청을 마친 후 다시 시도해 주세요."));
         const id = nextID++;
         return new Promise((resolve, reject) => {
-          const timeout = ["resources_import", "resources_export"].includes(action) ? 120000 : 20000;
+          const timeout = (["resources_import", "resources_export"].includes(action) || action.startsWith("accounts_")) ? 120000 : 20000;
           const item = {resolve, reject, timer: null, timeout, action, importStage: null, importCopied: -1};
           pending.set(id, item); armTimeout(id, item);
           try { handler.postMessage({id, action, ...payload}); }
@@ -670,6 +709,9 @@
       if (messageSource) text("message", messageSource);
       if (copyFeedbackSource) text("diagnostics-copy-feedback", copyFeedbackSource);
       for (const name of Object.keys(forms)) renderSaveFeedback(name);
+      if (accountSnapshot) renderAccounts(accountSnapshot);
+      renderAccountPreview(); accountFeedback(accountFeedbackSource,accountFeedbackDetail);
+      if (snapshot) renderServerChecks(snapshot.runtime);
     }
     function syncPreset(key) {
       const presets = key === "render_scale" ? SCALE_PRESETS : BUFFER_PRESETS;
@@ -692,6 +734,8 @@
     let launchFlushing = false;
     let flushNonce = null;
     let flushGeneration = 0;
+    let accountSnapshot = null, accountPreview = null, accountPending = false, accountProgress = null, accountRequested = false, historyPending = false;
+    let accountFeedbackSource = "", accountFeedbackDetail = "";
     let resourcePending = false;
     let importProgress = null;
     let latestImportRequestID = 0;
@@ -840,7 +884,7 @@
       const activeJob = Boolean(job && ACTIVE_JOBS.has(job.state));
       const busy = activeJob || archivePending || copyingImport || waitingImport;
       const ready = Boolean(snapshot && snapshot.running && snapshot.state === "ready");
-      for (const action of ["preview", "download", "import", "export"]) el("resources-" + action).disabled = !ready || busy || resourcePending;
+      for (const action of ["preview", "download", "import", "export"]) el("resources-" + action).disabled = !ready || busy || resourcePending || accountPending;
       el("parallelism").disabled = busy || resourcePending || !ready;
       el("resources-cancel").disabled = !ready || !activeJob || resourcePending || !/^[A-Za-z0-9_-]{1,64}$/.test(job.job_id || "");
       const states = {preparing: "준비", running: "진행 중", export_ready: "내보내기 준비", cancelling: "취소 중", completed: "완료", partial: "일부 완료", failed: "실패", cancelled: "취소됨"};
@@ -878,6 +922,182 @@
         text("resource-detail", "");
       }
     }
+
+
+    function renderAccountPreview() {
+      el("accounts-preview-detail").hidden = !accountPreview;
+      if (!accountPreview) return;
+      const archive = accountPreview.archive;
+      const lines = [
+        t(archive.mode === "media" ? "감상 모드" : "일반 모드"),
+        t("원본 저장 슬롯: ") + plain(archive.profile,64),
+        t("계정 자료: ") + formatBytes(archive.bytes)
+      ];
+      const inventory = object(archive.inventory) ? archive.inventory : {};
+      for (const [key,label] of [["cards","카드"],["items","아이템 종류"],["photos","포토"]])
+        if (Number.isSafeInteger(inventory[key]) && inventory[key] >= 0) lines.push(t(label) + ": " + inventory[key]);
+      if (typeof archive.manager_name === "string") lines.push(t("게임 내 매니저: ") + plain(archive.manager_name,64));
+      lines.push(t("게임 리소스 파일은 포함하지 않습니다."));
+      text("accounts-preview-detail",lines.join("\n"),false);
+    }
+    function accountFeedback(source,detail="") {
+      accountFeedbackSource=source; accountFeedbackDetail=detail;
+      text("accounts-feedback",t(source)+detail,false);
+    }
+    function optionsFor(id, rows, empty) {
+      const select = el(id), previous = select.value;
+      const fingerprint = JSON.stringify(rows);
+      if (select.dataset.optionsFingerprint !== fingerprint) {
+        select.dataset.optionsFingerprint = fingerprint;
+        const nodes = (rows.length ? rows : [{value:"", label:t(empty)}]).map(row => {
+          const option = document.createElement("option");
+          option.value = row.value; option.textContent = row.label; return option;
+        });
+        select.replaceChildren(...nodes);
+      }
+      select.value = rows.some(row => row.value === previous) ? previous : rows.length ? rows[0].value : "";
+    }
+    function selectedAccount() {
+      if (!accountSnapshot) return null;
+      return accountSnapshot.accounts.find(row => JSON.stringify([row.mode,row.profile]) === el("accounts-current").value) || null;
+    }
+    function selectedRestorePoint() {
+      if (!accountSnapshot) return null;
+      return accountSnapshot.restore_points.find(row => row.id === el("accounts-restore-point").value) || null;
+    }
+    function renderAccountControls() {
+      const available = snapshot && snapshot.account_management_available === true;
+      el("accounts-refresh").disabled = !available || accountPending || launchFlushing;
+      el("accounts-fields").disabled = !available || !accountSnapshot || accountPending || launchFlushing;
+      const current = selectedAccount(), point = selectedRestorePoint();
+      for (const name of ["select","export","clone"]) el("accounts-"+name).disabled = !current || accountPending || launchFlushing;
+      const fileBusy = resourcePending || Boolean(job && ACTIVE_JOBS.has(job.state)) || Boolean(importProgress && ["selecting","preparing","copying","queued"].includes(importProgress.stage));
+      el("accounts-export").disabled = !current || accountPending || launchFlushing || fileBusy;
+      el("accounts-preview").disabled = accountPending || launchFlushing || fileBusy;
+      el("accounts-import").disabled = !accountPreview || accountPending || launchFlushing || fileBusy;
+      el("accounts-restore").disabled = !current || !point || current.mode !== point.mode || current.profile !== point.profile || accountPending || launchFlushing;
+      el("accounts-previous").disabled = !accountSnapshot || !accountSnapshot.offset || accountPending;
+      el("accounts-next").disabled = !accountSnapshot || !Number.isInteger(accountSnapshot.next_offset) || accountPending;
+      el("accounts-restore-previous").disabled = !accountSnapshot || !accountSnapshot.restore_offset || accountPending;
+      el("accounts-restore-next").disabled = !accountSnapshot || !Number.isInteger(accountSnapshot.next_restore_offset) || accountPending;
+      const progress = el("accounts-progress");
+      progress.hidden = !accountPending;
+      if (accountProgress && accountProgress.total_bytes > 0) {
+        progress.max = accountProgress.total_bytes;
+        progress.value = Math.min(accountProgress.copied_bytes, accountProgress.total_bytes);
+      } else progress.removeAttribute("value");
+    }
+    function renderAccounts(value) {
+      if (!object(value) || !Array.isArray(value.accounts) || !Array.isArray(value.restore_points)
+          || !object(value.selected) || typeof value.selection_revision !== "string") return false;
+      accountSnapshot = {...value,
+        accounts:value.accounts.filter(row => object(row) && choice(row.mode,["normal","media"])
+          && typeof row.profile === "string" && typeof row.revision === "string").slice(0,24),
+        restore_points:value.restore_points.filter(row => object(row) && typeof row.id === "string"
+          && choice(row.mode,["normal","media"]) && typeof row.profile === "string").slice(0,16)};
+      optionsFor("accounts-current", accountSnapshot.accounts.map(row => ({value:JSON.stringify([row.mode,row.profile]),
+        label:t(row.mode === "media" ? "감상 모드" : "일반 모드") + " · " + plain(row.profile,64)})), "계정 없음");
+      optionsFor("accounts-restore-point", accountSnapshot.restore_points.map(row => ({value:row.id,
+        label:t(row.mode === "media" ? "감상 모드" : "일반 모드") + " · " + plain(row.profile,64) + " · " + (Number.isSafeInteger(row.created_at) ? new Date(row.created_at).toLocaleString(language) : plain(row.created_at,64))})), "복구점 없음");
+      const runtime = snapshot && object(snapshot.runtime) ? snapshot.runtime : {};
+      const active = typeof runtime.profile === "string" ? t(runtime.media_mode ? "감상 모드" : "일반 모드") + " · " + runtime.profile : t("확인 중");
+      text("accounts-summary", t("현재 계정: ") + active + "\n" + t("다음 시작 · 일반: ") + plain(value.selected.normal,64)
+        + t(" / 감상: ") + plain(value.selected.media,64), false);
+      renderAccountControls(); return true;
+    }
+    function renderServerChecks(runtime) {
+      const checks = object(runtime.startup_checks) ? runtime.startup_checks : null;
+      const history = object(runtime.durable_history) ? runtime.durable_history : null;
+      const labels = {protocol:"프로토콜",catalog:"게임 목록",master:"마스터 파일",storage:"저장 공간",http:"파일 서버",grpc:"게임 서버",resources:"게임 리소스",account:"계정"};
+      const states = {ready:"준비 완료",blocked:"확인 필요",missing:"없음",attention:"확인 필요",not_checked:"검사 전",stopped:"중지됨",checking:"확인 중",not_run:"검사 전"};
+      const lines = checks && Array.isArray(checks.checks) ? checks.checks.slice(0,12).filter(object).map(row =>
+        t(labels[row.id] || "검사") + " · " + t(states[row.state] || "확인 중") + (row.code ? " (" + plain(row.code,80) + ")" : "")) : [];
+      if (checks && checks.scope === "previous_run") lines.unshift(t("이전 실행의 검사 기록입니다."));
+      text("startup-checks", lines.length ? lines.join("\n") : t("서버 준비 검사를 기다리고 있습니다."), false);
+      const failure = history && object(history.last_failure) ? history.last_failure : null;
+      text("history-summary", failure ? t("마지막 오류: ") + plain(failure.code,100) + " · " + plain(failure.timestamp,64)
+        : history && history.available === false ? t("오류 기록을 저장할 수 없습니다.") : t("저장된 최근 오류가 없습니다."), false);
+    }
+    async function account(action, explicitPayload) {
+      if (!visible || disposed || accountPending || !snapshot || snapshot.account_management_available !== true || launchFlushing) return;
+      const current = selectedAccount(), point = selectedRestorePoint();
+      if (["export","preview","import","restore"].includes(action) && (resourcePending || job && ACTIVE_JOBS.has(job.state))) {
+        message("진행 중인 파일 작업을 마친 후 다시 시도해 주세요.",true); return;
+      }
+      let payload = explicitPayload || {};
+      if (!explicitPayload) {
+        if (["select","export"].includes(action)) {
+          if (!current) return;
+          payload = {mode:current.mode,profile:current.profile,expected_revision:current.revision};
+          if (action === "select") payload.selection_revision = accountSnapshot.selection_revision;
+        } else if (action === "create") payload = {mode:el("accounts-mode").value,profile:el("accounts-new-profile").value.trim(),manager_name:el("accounts-manager-name").value};
+        else if (action === "clone") {
+          if (!current) return;
+          payload = {mode:current.mode,source_profile:current.profile,profile:el("accounts-new-profile").value.trim(),expected_revision:current.revision};
+        } else if (action === "import") {
+          if (!accountPreview) return;
+          const replace = el("accounts-replace").checked;
+          if (replace && (!current || current.mode !== accountPreview.archive.mode)) {
+            message("ZIP과 같은 종류의 계정을 선택해 주세요.",true); return;
+          }
+          payload = {token:accountPreview.token,mode:accountPreview.archive.mode,
+            profile:replace ? current.profile : el("accounts-new-profile").value.trim(),replace,
+            expected_revision:replace ? current.revision : null};
+        } else if (action === "restore") {
+          if (!current || !point || current.mode !== point.mode || current.profile !== point.profile) return;
+          payload = {restore_id:point.id,mode:current.mode,profile:current.profile,expected_revision:current.revision};
+        }
+      }
+      accountPending = true; mutationVersion++;
+      if (snapshot) renderResources(snapshot.runtime);
+      const visibility = visibilityVersion;
+      if (action === "preview") accountProgress = {stage:"selecting",copied_bytes:0,total_bytes:0};
+      accountFeedback( action === "preview" ? "파일 앱에서 ZIP을 선택해 주세요." : "계정 작업을 처리하고 있습니다.");
+      renderAccountControls();
+      try {
+        const result = await bridge.request("accounts_"+action,payload);
+        if (!visible || disposed || visibility !== visibilityVersion) return;
+        if (result.cancelled === true) return;
+        if (object(result.status)) renderAccounts(result.status);
+        if (action === "preview") {
+          if (typeof result.token !== "string" || !object(result.archive)) throw new Error("계정 ZIP 검사 결과를 확인하지 못했습니다.");
+          accountPreview = {token:result.token,archive:result.archive};
+          const original = plain(result.archive.profile,64);
+          let prefix = ""; for (const character of original) {
+            if (utf8Length(prefix+character+"-import") > 64) break;
+            prefix += character;
+          }
+          el("accounts-new-profile").value = prefix + "-import";
+          el("accounts-mode").value = result.archive.mode;
+          el("accounts-replace").checked = false;
+          renderAccountPreview();
+          accountFeedback("계정 ZIP을 검사했습니다. 가져올 이름과 대상을 확인해 주세요.");
+        } else {
+          accountFeedback( action === "status" ? "계정 목록을 불러왔습니다." : action === "select"
+            ? "다음 서버 시작에 선택한 계정을 적용합니다." : action === "export" ? "계정 ZIP을 준비했습니다. 파일 앱에서 저장해 주세요."
+              : "계정 작업을 마쳤습니다.");
+          if (action === "import") { accountPreview = null; el("accounts-preview-detail").hidden = true; }
+        }
+      } catch (error) {
+        if (visible && !disposed && visibility === visibilityVersion) {
+          accountFeedback(error.message); message(error.message,true);
+        }
+      } finally {
+        accountPending = false; accountProgress = null;
+        if (!disposed) { renderAccountControls(); if (snapshot) renderResources(snapshot.runtime); }
+        if (visible && !disposed) refresh();
+      }
+    }
+    async function clearDiagnostics() {
+      if (!visible || disposed || historyPending) return;
+      historyPending = true; el("diagnostics-clear").disabled = true; mutationVersion++;
+      try {
+        const result = await bridge.request("diagnostics_clear");
+        if (visible && !disposed) renderStatus(result);
+      } catch (error) { if (visible && !disposed) message(error.message,true); }
+      finally { historyPending = false; if (!disposed) el("diagnostics-clear").disabled = false; }
+    }
+
     function renderDiagnostics(runtime) {
       const diagnostic = object(runtime.client_diagnostics) ? runtime.client_diagnostics : {};
       text("diagnostic-summary", plain(diagnostic.summary, 500) || t("게임 진단 대기 중"), false);
@@ -889,6 +1109,8 @@
           "keyboard_lifecycle", "keyboard_ready", "unity_host", "late_startup_calls", "octo_budget",
           "game_hook_error", "error", "game_error", "client_data", "http_readiness", "resource_import_progress"
         ].filter(key => Object.prototype.hasOwnProperty.call(snapshot.native, key)).map(key => [key, snapshot.native[key]])) : null,
+        startup_checks: runtime.startup_checks || null,
+        durable_history: runtime.durable_history || null,
         http_requests: runtime.http_requests || null,
         resource_transfer: runtime.resource_transfer || null,
         asset_transfer: runtime.asset_transfer || null,
@@ -951,6 +1173,13 @@
       const mediaChanged = validMedia(media.settings) && validMedia(media.effective_settings) && forms.media.fields.some(key => media.settings[key] !== media.effective_settings[key]);
       text("media-effective", mediaChanged ? "변경한 목록 설정은 다음 앱 실행부터 적용됩니다." : "목록 설정은 다음 앱 실행부터 적용됩니다.");
       renderResources(runtime);
+      renderServerChecks(runtime);
+      el("diagnostics-clear").disabled = historyPending || value.account_management_available !== true;
+      if (!accountPending && object(value.accounts)) renderAccounts(value.accounts);
+      renderAccountControls();
+      if (value.account_management_available === true && !accountRequested) {
+        accountRequested = true; Promise.resolve().then(() => account("status"));
+      }
       renderDiagnostics(runtime);
       for (const [name, form] of Object.entries(forms)) if (form.resumeQueued && value.running && value.state === "ready") {
         form.resumeQueued = false; queueSave(name);
@@ -1063,6 +1292,7 @@
     }
     function updateFlushControls() {
       el("interface_language").disabled = launchFlushing;
+      renderAccountControls();
       if (snapshot) for (const name of Object.keys(forms)) updateForm(name, forms[name].value);
     }
     function releaseSettingsFlush(nonce) {
@@ -1083,7 +1313,7 @@
       (async () => {
         let ready = false;
         try {
-          if (!snapshot || !snapshot.running || snapshot.state !== "ready") throw new Error("not_ready");
+          if (!snapshot || !snapshot.running || snapshot.state !== "ready" || accountPending) throw new Error("not_ready");
           for (const name of Object.keys(forms)) {
             try { settingsFromForm(name); }
             catch (_) {
@@ -1123,9 +1353,9 @@
     scope.idolyServerFlushSettings = flushSettings;
     scope.idolyServerReleaseSettingsFlush = releaseSettingsFlush;
     async function resource(action) {
-      if (!visible || disposed || resourcePending || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
+      if (!visible || disposed || resourcePending || accountPending || !snapshot || !snapshot.running || snapshot.state !== "ready") return;
       const payload = action === "cancel" ? {job_id: job && job.job_id} : action === "download" ? {parallelism: Number(el("parallelism").value)} : {};
-      resourcePending = true;
+      resourcePending = true; renderAccountControls();
       if (action === "import") importProgress = {stage: "selecting", request_id: null, copied_bytes: 0, total_bytes: 0, previous_job_id: job && job.job_id, previous_operation: snapshot.resource_operation, previous_request_id: latestImportRequestID, accepted: false};
       else if (action !== "cancel") importProgress = null;
       mutationVersion++;
@@ -1152,7 +1382,7 @@
           message(error.message, true);
         }
       } finally {
-        resourcePending = false;
+        resourcePending = false; if (!disposed) renderAccountControls();
         if (!disposed && snapshot) renderResources(snapshot.runtime);
         if (visible && !disposed) refresh();
       }
@@ -1217,9 +1447,24 @@
     applyInterfaceLanguage(interfaceChoice);
     updateCopyButton();
     el("diagnostics-copy").addEventListener("click", copyDiagnostics);
+    el("diagnostics-clear").addEventListener("click", clearDiagnostics);
+    el("accounts-refresh").addEventListener("click", () => account("status"));
+    for (const action of ["create","clone","select","export","preview","import","restore"]) el("accounts-"+action).addEventListener("click", () => account(action));
+    el("accounts-current").addEventListener("change", renderAccountControls);
+    el("accounts-restore-point").addEventListener("change", renderAccountControls);
+    el("accounts-previous").addEventListener("click", () => account("status",{offset:Math.max(0,accountSnapshot.offset-24),restore_offset:accountSnapshot.restore_offset || 0}));
+    el("accounts-next").addEventListener("click", () => account("status",{offset:accountSnapshot.next_offset,restore_offset:accountSnapshot.restore_offset || 0}));
+    el("accounts-restore-previous").addEventListener("click", () => account("status",{offset:accountSnapshot.offset || 0,restore_offset:Math.max(0,accountSnapshot.restore_offset-16)}));
+    el("accounts-restore-next").addEventListener("click", () => account("status",{offset:accountSnapshot.offset || 0,restore_offset:accountSnapshot.next_restore_offset}));
     el("refresh").addEventListener("click", () => { message(""); refresh(); });
     for (const action of ["preview", "download", "import", "export", "cancel"]) el("resources-" + action).addEventListener("click", () => resource(action));
     bridge.subscribe(event => {
+      if (event.event === "account_import_progress" && accountPending) {
+        accountProgress = event;
+        accountFeedback( event.stage === "selecting" ? "파일 앱에서 ZIP을 선택해 주세요." : event.stage === "failed" ? "ZIP 가져오기를 마치지 못했습니다." : event.stage === "queued" ? "복사를 마쳤습니다. ZIP 목록과 내용을 검증하고 있습니다." : "ZIP을 앱 보관 폴더로 복사하고 있습니다.");
+        if (event.stage === "copying") accountFeedback(accountFeedbackSource," " + formatBytes(event.copied_bytes) + (event.total_bytes ? " / " + formatBytes(event.total_bytes) : ""));
+        renderAccountControls();
+      }
       if (event.event === "resource_import_progress") {
         observeImportProgress(event);
         if (snapshot) renderResources(snapshot.runtime);

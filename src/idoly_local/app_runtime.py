@@ -24,8 +24,11 @@ class _StartupSettings:
 class Runtime:
     """Own listeners, threads and a bounded log for one embedded server instance."""
 
-    def __init__(self, profile: str, log_callback=None):
+    def __init__(self, profile: str, log_callback=None, *, data_dir=None, history=None, startup_checks=None):
         self.profile = profile
+        self._data_dir = Path(data_dir) if data_dir is not None else None
+        self._history = history
+        self._startup_checks = startup_checks
         self._callback = log_callback
         self._logs = deque(maxlen=200)
         self._log_lock = threading.Lock()
@@ -73,6 +76,11 @@ class Runtime:
         line = str(message).replace("\r", " ").replace("\n", " ")[:2000]
         with self._log_lock:
             self._logs.append(line)
+        if self._history is not None:
+            try:
+                self._history.record_log(line)
+            except Exception:
+                pass  # Observations cannot interrupt game requests.
         if self._callback is not None:
             try:
                 self._callback(line)
@@ -95,6 +103,13 @@ class Runtime:
             last_library_status = self._last_library_status
         with self._log_lock:
             result["logs"] = list(self._logs)
+        result["durable_history"] = self._history.status() if self._history is not None else _disabled_history()
+        if self._startup_checks is not None:
+            result["startup_checks"] = self._startup_checks.status()
+        else:
+            from .startup_checks import no_checks
+            result["startup_checks"] = no_checks()
+        result["account_selection"] = self._account_selection()
         result["client_diagnostics"] = self._diagnostics.status(include_events=False)
         with self._transfer_lock:
             result["asset_transfer"] = dict(self._transfer_status)
@@ -132,8 +147,27 @@ class Runtime:
 
     def diagnostics_snapshot(self) -> dict:
         """Export only safe runtime observations, never profiles or credentials."""
-        return {"schema": 1, "runtime": self.status(),
+        runtime = self.status()
+        if self._history is not None:
+            runtime["durable_history"] = self._history.status(full=True)
+        return {"schema": 1, "runtime": runtime,
                 "client_diagnostics": self._diagnostics.status()}
+
+    def _account_selection(self):
+        selected, revision, invalid = self.profile, None, False
+        if self._data_dir is not None:
+            from .account_manager import selection_status
+            value = selection_status(self._data_dir, fallback=self.profile)
+            invalid = value["invalid_registry"]
+            revision = value["selection_revision"]
+            selected = None if invalid else value["selected"]["media" if self._media_mode else "normal"]
+        return {"active_profile": self.profile, "selected_for_next_start": selected,
+                "selection_revision": revision, "invalid_registry": invalid,
+                "restart_required": not invalid and selected != self.profile}
+
+    def clear_history(self):
+        """Explicit native action; no game HTTP mutation route is installed."""
+        return self._history.clear() if self._history is not None else _disabled_history()
 
     def _observe_http_request(self, event):
         """Thin HTTP observations; independent of file/resource byte transfers."""
@@ -162,6 +196,11 @@ class Runtime:
                 if phase == "failed":
                     self._http_status["last_failed_request"] = row
             self._http_status["last_request"] = row
+        if phase == "failed" and self._history is not None:
+            try:
+                self._history.http_failure(row)
+            except Exception:
+                pass
 
     def _observe_transfer(self, event):
         with self._transfer_lock:
@@ -233,8 +272,95 @@ class Runtime:
                 self._last_error = None
         if failures:
             self._log(self._last_error)
+            if self._history is not None:
+                self._history.flush()
             raise RuntimeError(self._last_error) from failures[0]
         self._log("Local server stopped")
+        if self._startup_checks is not None:
+            self._startup_checks.stopped()
+        if self._history is not None:
+            self._history.close()
+
+
+def _disabled_history():
+    return {"schema": 1, "available": False, "load_state": "unavailable",
+            "persistence": "unavailable", "last_write_error": None, "current_run": None,
+            "retained_records": 0, "total_records": 0, "records": [],
+            "last_failure": None, "last_startup": None}
+
+
+def server_settings_status(data_dir):
+    """Read prior observations without opening a profile, starting a run or writing."""
+    from .runtime_history import stored_status
+    from .startup_checks import no_checks
+    history = stored_status(data_dir)
+    checks = deepcopy(history["last_startup"]) if history["last_startup"] is not None else no_checks()
+    if checks["scope"] != "not_run":
+        checks["scope"] = "previous_run"
+    return {"durable_history": history, "startup_checks": checks}
+
+
+def record_startup_failure(data_dir, error, stage="catalog"):
+    """Observe a native payload-preparation failure before start() was entered.
+
+    Callers must not call this for an exception already observed by start().
+    A failed diagnostic write never replaces the original startup exception.
+    The return value can be shown immediately even when its file is unavailable.
+    """
+    import re
+    import uuid
+    from .runtime_history import PersistentHistory, timestamp
+    from .startup_checks import StartupChecks, failure_code
+    safe_stage = stage if stage in ("account", "catalog", "protocol", "master", "storage",
+                                    "http", "grpc", "resources") else "catalog"
+    history = None
+    try:
+        root = Path(data_dir)
+        if not root.is_absolute() or root.is_symlink():
+            raise ValueError("Observation storage is unavailable")
+        root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not root.is_dir() or root.is_symlink():
+            raise ValueError("Observation storage is unavailable")
+        history = PersistentHistory(root)
+        checks = StartupChecks(history)
+        history.record("lifecycle", "startup_requested")
+        checks.failed(safe_stage, error)
+        history.startup_failure(safe_stage, error, failure_code(error))
+        history.close()
+        return {"durable_history": history.status(full=True), "startup_checks": checks.status()}
+    except Exception:
+        if history is not None:
+            try:
+                history.close()
+            except Exception:
+                pass
+        # No app-owned writable directory is available. Still report the
+        # original fixed failure identity in memory, without its path/message.
+        when, identity = timestamp(), uuid.uuid4().hex
+        name = type(error).__name__
+        if re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", name) is None:
+            name = "Exception"
+        code = failure_code(error)
+        row = {"sequence": 1, "timestamp": when, "run_id": identity,
+               "kind": "startup_failure", "code": code, "stage": safe_stage, "error_type": name}
+        checks = {"schema": 1, "scope": "current_run", "run_id": identity,
+            "started_at": when, "updated_at": when, "state": "blocked", "gameplay_verified": False,
+            "checks": [{"id": safe_stage, "state": "blocked", "code": code}]}
+        unavailable = _disabled_history()
+        unavailable.update(last_write_error="history_io", current_run=identity, retained_records=1,
+                           total_records=1, records=[row], last_failure=row, last_startup=checks)
+        return {"durable_history": unavailable, "startup_checks": checks}
+
+
+def clear_server_history(data_dir):
+    """Explicit native clear while no owned Runtime is active."""
+    from .runtime_history import PersistentHistory
+    history = PersistentHistory(data_dir)
+    try:
+        history.clear()
+    finally:
+        history.close()
+    return server_settings_status(data_dir)["durable_history"]
 
 
 def start(data_dir, profile="sandbox", log_callback=None, *,
@@ -274,23 +400,40 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
     if log_callback is not None and not callable(log_callback):
         raise ValueError("Log callback must accept one message string")
     root = Path(data_dir).resolve()
-    runtime = Runtime(profile, log_callback)
-    runtime._media_mode = media_mode
-    from .presentation import PresentationState
-    runtime._presentation = PresentationState(root / "client-presentation.json")
-    from .playback import PlaybackState
-    runtime._playback = PlaybackState(root / "client-playback.json")
-    from .render_probe import RenderProbeState
-    runtime._render_probe = RenderProbeState()
-    from .wardrobe_diagnostics import WardrobeDiagnostics
-    runtime._wardrobe_probe = WardrobeDiagnostics(runtime._log)
-    from .media_settings import MediaSettingsState
-    runtime._media_settings = MediaSettingsState(root / "client-media.json")
-    from .language_settings import LanguageSettingsState
-    runtime._language_settings = LanguageSettingsState(root / "client-language.json")
-    runtime._active_media = _StartupSettings(runtime._media_settings.settings())
-    runtime._effective_language = runtime._language_settings.settings()["language"]
+    from .runtime_history import PersistentHistory
+    from .startup_checks import StartupChecks, failure_code
+    history = PersistentHistory(root)
+    checks = StartupChecks(history)
+    history.record("lifecycle", "startup_requested")
     try:
+        from .account_manager import selected_profile
+        profile = selected_profile(root, media_mode, fallback=profile)
+        checks.record("account", "ready", "selection_ready")
+    except Exception as error:
+        checks.record("account", "blocked", "selection_invalid")
+        checks.state("blocked")
+        history.startup_failure("account", error, "selection_invalid")
+        history.close()
+        raise
+    runtime = None
+    stage = "startup"
+    try:
+        runtime = Runtime(profile, log_callback, data_dir=root, history=history, startup_checks=checks)
+        runtime._media_mode = media_mode
+        from .presentation import PresentationState
+        runtime._presentation = PresentationState(root / "client-presentation.json")
+        from .playback import PlaybackState
+        runtime._playback = PlaybackState(root / "client-playback.json")
+        from .render_probe import RenderProbeState
+        runtime._render_probe = RenderProbeState()
+        from .wardrobe_diagnostics import WardrobeDiagnostics
+        runtime._wardrobe_probe = WardrobeDiagnostics(runtime._log)
+        from .media_settings import MediaSettingsState
+        runtime._media_settings = MediaSettingsState(root / "client-media.json")
+        from .language_settings import LanguageSettingsState
+        runtime._language_settings = LanguageSettingsState(root / "client-language.json")
+        runtime._active_media = _StartupSettings(runtime._media_settings.settings())
+        runtime._effective_language = runtime._language_settings.settings()["language"]
         # Imports stay inside startup so launchers can extract bundled data and
         # configure their platform's codec before loading the application engine.
         if aes_cbc is not None:
@@ -306,10 +449,18 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         from .schema import Schema
         from .state import State
 
+        stage = "storage"
+        checks.storage(root, resource_cache_dir)
+        stage = "catalog"
         master_dir = root / "master-json"
         if not master_dir.is_dir():
             raise ValueError("Bundled master-json catalog is missing")
-        schema = Schema.from_descriptor_set(root / "protocol" / "idolypride-6.1.1.pb")
+        checks.record("catalog", "ready", "catalog_present")
+        stage = "protocol"
+        schema_path = root / "protocol" / "idolypride-6.1.1.pb"
+        schema = Schema.from_descriptor_set(schema_path)
+        checks.protocol(schema, schema_path)
+        stage = "master"
         archive = root / "original-master"
         master_tag = select_master_tag(archive / "master-tag.json", media_mode=media_mode)
         from .language_settings import select_language_tag
@@ -320,6 +471,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
             # Detect incomplete/invalid media data before inventory seeding.
             # The final response is rebased to the bound HTTP port below.
             prepare_master_tag(schema, master_tag, archive / "assets" / "master", "http://127.0.0.1")
+        stage = "account"
         state = State(root / ("media-state.db" if media_mode else "state.db"))
         media_scenes = None
         if media_mode:
@@ -339,6 +491,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
             if repair_starter_card_level_mission(state, schema, profile, master_dir):
                 runtime._log("기본 카드 레벨 달성 미션을 준비했습니다.")
             runtime._log("Loaded local profile " + profile)
+        stage = "http"
         runtime._asset = create_asset_server(asset_host, asset_port, archive / "assets",
                                              diagnostics=runtime._diagnostics,
                                              transfer_callback=runtime._observe_transfer,
@@ -355,6 +508,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         if ":" in asset_url_host:
             asset_url_host = "[" + asset_url_host + "]"
         runtime._asset_url = f"http://{asset_url_host}:{bound_asset_port}"
+        stage = "resources"
         from .octo_runtime import create_octo_gateway
         gateway, runtime._resources = create_octo_gateway(
             root, runtime._asset_url, aes_cbc=aes_cbc, fetcher=resource_fetcher,
@@ -379,8 +533,11 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         # Installed before any serving thread starts, just like the gateway.
         # The handler reads this bound attribute for export/status commands.
         runtime._asset.resource_library = runtime._library
+        stage = "master"
         master_response = prepare_master_tag(schema, master_tag,
                                              archive / "assets" / "master", runtime._asset_url)
+        checks.master(schema, master_response)
+        checks.resources(runtime._resources, download_missing_resources)
         if media_mode:
             runtime._log("감상 촬영용 의상 제한 해제 마스터를 제공합니다.")
         fixtures = FixtureStore(root / ("media-fixtures" if media_mode else "fixtures"), schema)
@@ -401,24 +558,34 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         runtime._experimental_main_live = experimental_main_live
         if experimental_main_live:
             runtime._log("일반 라이브 실험 기능 사용: 첫 메인 퀘스트 · 로컬 계산 규칙")
+        stage = "grpc"
         runtime._grpc = create_server(application, host=grpc_host, port=grpc_port, log_callback=runtime._log)
         runtime._grpc_address = f"{runtime._grpc.address[0]}:{runtime._grpc.address[1]}"
         runtime._asset_thread = threading.Thread(target=runtime._asset.serve_forever,
                                                   name=f"idoly-assets-{bound_asset_port}", daemon=True)
         runtime._asset_thread.start()
         runtime._asset_started = True
+        stage = "http"
+        checks.http_listener(runtime, bound_asset_port)
+        stage = "grpc"
         runtime._grpc.start()
+        checks.grpc_listener(runtime)
         runtime._running = True
+        checks.state("ready")
+        history.record("lifecycle", "server_ready")
         runtime._log("Local gRPC server ready at " + runtime._grpc_address)
         runtime._log("Local assets ready at " + runtime._asset_url)
         return runtime
     except Exception as error:
-        runtime._last_error = "Startup failed: " + str(error)
-        runtime._log(runtime._last_error)
-        try:
-            runtime.stop()
-        except Exception:
-            # Preserve the original startup reason while still attempting both
-            # listener cleanups; stop retains resources whose cleanup failed.
-            pass
+        checks.failed(stage, error)
+        history.startup_failure(stage, error, failure_code(error))
+        if runtime is not None:
+            runtime._last_error = "Startup failed: " + str(error)
+            runtime._log(runtime._last_error)
+            try:
+                runtime.stop()
+            except Exception:
+                # Preserve the original reason while trying both cleanups.
+                pass
+        history.close()
         raise

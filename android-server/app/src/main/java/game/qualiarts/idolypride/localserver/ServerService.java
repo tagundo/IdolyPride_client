@@ -64,6 +64,11 @@ public final class ServerService extends Service {
         return thread;
     });
 
+    private static final AtomicBoolean ACCOUNT_BUSY = new AtomicBoolean(false);
+    private static final ExecutorService ACCOUNT_IO = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "account-management"); thread.setDaemon(true); return thread;
+    });
+
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopQueued = new AtomicBoolean(false);
     private final AtomicBoolean startQueued = new AtomicBoolean(false);
@@ -104,6 +109,91 @@ public final class ServerService extends Service {
                 finally { service.resourceCancelQueued.set(false); dispatch(); }
             });
         } catch (RejectedExecutionException stopped) { service.resourceCancelQueued.set(false); }
+    }
+
+
+    public interface AccountCallback {
+        void completed(JSONObject result);
+        default void progress(String phase, long bytes, long total) {}
+    }
+
+    static boolean isManagingAccounts() { return ACCOUNT_BUSY.get(); }
+
+    private static JSONObject accountFailure(String code) {
+        JSONObject result = new JSONObject();
+        try { result.put("schema", 1).put("ok", false).put("error", code); }
+        catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+        return result;
+    }
+
+    /** Native controls only. File I/O and Python account operations never run on the UI thread. */
+    static void manageAccounts(Context context, String action, JSONObject payload, AccountCallback callback) {
+        accountTask(context, action, payload, null, null, null, callback);
+    }
+
+    static void previewAccountDocument(Context context, Uri source, AccountCallback callback) {
+        accountTask(context, "accounts_preview", new JSONObject(), source, null, null, callback);
+    }
+
+    static void saveAccountDocument(Context context, Uri destination, JSONObject receipt, AccountCallback callback) {
+        accountTask(context, "accounts_save_document", receipt, null, destination, receipt.optString("path"), callback);
+    }
+
+    static void discardAccountDocument(Context context, String path) {
+        Context application = context.getApplicationContext();
+        ACCOUNT_IO.execute(() -> AccountTransfers.discardExport(application, path));
+    }
+
+    private static void accountTask(Context context, String action, JSONObject payload, Uri input,
+                                    Uri output, String exportPath, AccountCallback callback) {
+        Context application = context.getApplicationContext();
+        if (busy || !ACCOUNT_BUSY.compareAndSet(false, true)) {
+            MAIN.post(() -> callback.completed(accountFailure("account_operation_busy")));
+            return;
+        }
+        final String encodedRequest = payload == null ? "{}" : payload.toString();
+        dispatch();
+        ACCOUNT_IO.execute(() -> {
+            JSONObject result;
+            File staged = null;
+            String request = encodedRequest;
+            AccountTransfers.Progress progress = (phase, bytes, total) ->
+                    MAIN.post(() -> callback.progress(phase, bytes, total));
+            try {
+                if (output != null) {
+                    JSONObject receipt = new JSONObject(encodedRequest);
+                    AccountTransfers.save(application, output, exportPath, receipt.optLong("bytes", -1), receipt.optString("sha256"), progress);
+                    result = new JSONObject().put("schema", 1).put("ok", true).put("action", action);
+                } else {
+                    if (input != null) {
+                        staged = AccountTransfers.stage(application, input, progress);
+                        request = new JSONObject().put("path", staged.getAbsolutePath()).toString();
+                    }
+                    PyObject module;
+                    synchronized (PYTHON_LOCK) {
+                        if (!Python.isStarted()) Python.start(new AndroidPlatform(application));
+                        module = Python.getInstance().getModule("android_server_runtime");
+                    }
+                    MAIN.post(() -> callback.progress("preparing", 0, 0));
+                    String value = module.callAttr("management_command_json",
+                            application.getFilesDir().getAbsolutePath(), action, request, application.getAssets()).toString();
+                    if (value.length() > 2 * 1024 * 1024) throw new IOException("Account response unavailable");
+                    result = new JSONObject(value);
+                }
+            } catch (Exception error) {
+                Log.w("IdolyLocalServer", "Account operation failed: " + error.getClass().getSimpleName());
+                String code = error instanceof AccountTransfers.Failure ? ((AccountTransfers.Failure) error).code
+                        : error instanceof SecurityException ? "account_document_permission"
+                        : error instanceof IOException ? "account_document_io" : "account_operation_failed";
+                result = accountFailure(code);
+            } finally {
+                if (staged != null) staged.delete();
+                ACCOUNT_BUSY.set(false);
+            }
+            JSONObject completed = result;
+            MAIN.post(() -> callback.completed(completed));
+            dispatch();
+        });
     }
 
     public static void observe(Observer observer) {
@@ -385,6 +475,30 @@ public final class ServerService extends Service {
         });
     }
 
+
+    /** Fresh persisted observations are also exported after a full app process restart. */
+    private static JSONObject readServerSettings(Context context) {
+        try {
+            PyObject module;
+            synchronized (PYTHON_LOCK) {
+                if (!Python.isStarted()) Python.start(new AndroidPlatform(context.getApplicationContext()));
+                module = Python.getInstance().getModule("android_server_runtime");
+            }
+            String raw = module.callAttr("management_command_json",
+                    context.getFilesDir().getAbsolutePath(), "server_settings_status", "{}").toString();
+            if (raw.length() > 2 * 1024 * 1024) throw new IOException("Settings observations unavailable");
+            JSONObject response = new JSONObject(raw);
+            JSONObject settings = response.optJSONObject("settings");
+            if (response.optBoolean("ok", false) && settings != null) return settings;
+        } catch (Exception error) {
+            Log.w("IdolyLocalServer", "Persisted diagnostics unavailable: " + error.getClass().getSimpleName());
+        }
+        JSONObject missing = new JSONObject();
+        try { missing.put("available", false).put("error", "server_settings_unavailable"); }
+        catch (org.json.JSONException impossible) { throw new IllegalStateException(impossible); }
+        return missing;
+    }
+
     private static void writeExport(Context context, Uri destination, String snapshot) {
         final String details = runtimeDetails;
         final List<String> lines;
@@ -400,6 +514,7 @@ public final class ServerService extends Service {
                 document.put("runtime", new JSONObject(details));
                 document.put("diagnostics", new JSONObject(snapshot));
                 document.put("server_logs", new JSONArray(lines));
+                document.put("server_settings", readServerSettings(context));
                 byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);
                 try (OutputStream stream = context.getContentResolver().openOutputStream(destination, "wt")) {
                     if (stream == null) throw new java.io.IOException("Document is unavailable");

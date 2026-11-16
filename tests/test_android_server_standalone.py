@@ -259,6 +259,9 @@ public final class CombinedDiagnosticExportHost {
   static String runtimeDetails="{}",lastDiagnostics="{}";static ServerService activeService;
   final Queue worker=new Queue();RuntimeSnapshot runtime;boolean destroyed;
   static void dispatch() {}
+  static JSONObject readServerSettings(Context context) {
+   return new JSONObject("{\"startup_checks\":{\"scope\":\"previous_run\"},\"durable_history\":{\"retained_records\":3}}");
+  }
 """ + capture + "\n" + export + "\n" + write + r"""
  }
  static final class org { static final class json { static final class JSONArray {
@@ -366,8 +369,9 @@ public final class CombinedDiagnosticExportHost {
     assert len(documents) == 4
     for document in documents:
         assert set(document) == {"schema", "server_version", "server_version_code", "bundled_data_sha256",
-                                 "runtime", "diagnostics", "server_logs"}
+                                 "runtime", "diagnostics", "server_logs", "server_settings"}
         assert document["schema"] == 1 and document["server_version"] == "fixture-version"
+        assert document["server_settings"] == {"startup_checks": {"scope": "previous_run"}, "durable_history": {"retained_records": 3}}
         assert document["server_version_code"] == 52 and document["bundled_data_sha256"] == "fixture-data-sha"
     assert documents[0]["runtime"] == {"running": True, "http": {"completed": 3}}
     assert documents[0]["diagnostics"] == {"phase": "home", "received_events": 7}

@@ -240,6 +240,76 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(state.snapshot("sandbox"), before)
         self.assertTrue(state.authenticated(session_token, "sandbox"))
 
+    def test_startup_checks_observe_real_descriptor_master_and_owned_listeners(self):
+        runtime = self.start()
+        checks = runtime.status()["startup_checks"]
+        rows = {row["id"]: row for row in checks["checks"]}
+        self.assertEqual(checks["state"], "ready")
+        self.assertEqual(checks["scope"], "current_run")
+        self.assertIs(checks["gameplay_verified"], False)
+        self.assertEqual(rows["protocol"]["fingerprint"], self.schema.fingerprint)
+        self.assertEqual(rows["master"]["pack_count"], 1)
+        self.assertEqual(rows["master"]["pack_bytes"], 13)
+        self.assertEqual(rows["master"]["version"], "fixture-master")
+        self.assertGreater(rows["http"]["port"], 0)
+        self.assertGreater(rows["grpc"]["port"], 0)
+        self.assertEqual(rows["resources"]["state"], "missing")
+        self.assertEqual(rows["resources"]["offline"], "not_checked")
+        runtime.stop()
+        previous = app_runtime.server_settings_status(self.root)
+        self.assertEqual(previous["startup_checks"]["state"], "stopped")
+        self.assertEqual(previous["startup_checks"]["scope"], "previous_run")
+
+    def test_failed_startup_is_available_after_relaunch_without_private_paths(self):
+        (self.root / "protocol" / "idolypride-6.1.1.pb").unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.start()
+        previous = app_runtime.server_settings_status(self.root)
+        self.assertEqual(previous["startup_checks"]["state"], "blocked")
+        failure = previous["durable_history"]["last_failure"]
+        self.assertEqual(failure["stage"], "protocol")
+        self.assertEqual(failure["code"], "missing_input")
+        self.assertEqual(failure["error_type"], "FileNotFoundError")
+        text = json.dumps(previous)
+        self.assertNotIn(str(self.root), text)
+        self.assertNotIn("fixture-key", text)
+        self.assertNotIn("Starter Manager", text)
+
+    def test_http_failure_survives_normal_stop_and_next_start(self):
+        from urllib.error import HTTPError
+        runtime = self.start()
+        with self.assertRaises(HTTPError) as caught:
+            urlopen(runtime.status()["asset_url"] + "/does-not-exist?token=private-query", timeout=2)
+        caught.exception.read()
+        caught.exception.close()
+        from time import monotonic, sleep
+        deadline = monotonic() + 2
+        failed = None
+        while monotonic() < deadline:
+            failed = runtime._history.status()["last_failure"]
+            if failed is not None:
+                break
+            sleep(.005)
+        self.assertIsNotNone(failed)
+        self.assertEqual(failed["kind"], "http_failure")
+        self.assertEqual(failed["http_status"], 404)
+        runtime.stop()
+        restarted = self.start()
+        current = restarted.status()["durable_history"]
+        self.assertEqual(current["last_failure"], failed)
+        self.assertNotEqual(current["current_run"], failed["run_id"])
+        self.assertNotIn("private-query", json.dumps(current))
+
+    def test_invalid_actual_http_readiness_json_blocks_start_and_preserves_failure(self):
+        with mock.patch("idoly_local.playback.PlaybackState.settings", return_value={"schema": 2}):
+            with self.assertRaisesRegex(ValueError, "readiness JSON"):
+                self.start()
+        previous = app_runtime.server_settings_status(self.root)
+        self.assertEqual(previous["startup_checks"]["state"], "blocked")
+        self.assertEqual(previous["durable_history"]["last_failure"]["stage"], "http")
+        self.assertEqual(previous["durable_history"]["last_failure"]["code"], "invalid_input")
+        self.assertIs(previous["startup_checks"]["gameplay_verified"], False)
+
     def test_stop_releases_both_ports_and_restart_preserves_snapshot(self):
         first = self.start()
         original = self.rpc(first, "/api.User/Get").SerializeToString()
