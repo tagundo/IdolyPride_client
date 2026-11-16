@@ -24,6 +24,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = {"bytes":198675046,"sha256":"3ea45bd9fba07d35cf366d50e8bc7604aeb67ea0aa1cd55f751474a75724dbce"}
+TRANSLATIONS = {
+    "android":{"bytes":125709184,"sha256":"22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec"},
+    "ios":{"bytes":125717042,"sha256":"987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72"}}
 MARKER = ".idoly-startup-profile-owned"
 
 
@@ -82,6 +85,23 @@ def child(args):
         data=root / "data"
         install=lambda:install_payload(payload,data,expected_sha256=PAYLOAD["sha256"],expected_bytes=PAYLOAD["bytes"])
     phase(phases,"public_install_empty_data",install)
+    def prepare_translations(label):
+        if args.translations_root is None:
+            return
+        from idoly_local.bundled_translations import install_translation_bundle
+        from idoly_local.resource_translation_runtime import validate_prepared_translations
+        translation=args.translations_root / args._platform / "bundledTranslations.zip"
+        pin=TRANSLATIONS[args._platform]
+        require(translation.is_file() and not translation.is_symlink() and translation.stat().st_size==pin["bytes"],
+                "prepared_translation_source_missing")
+        if args._platform=="android":
+            digest=phase(phases,"android_translation_zip_check_"+label,lambda:adapter._digest(translation))
+            require(digest==pin["sha256"],"prepared_translation_source_differs")
+        result=phase(phases,"prepared_translation_"+label,lambda:install_translation_bundle(translation,data,
+            expected_sha256=pin["sha256"],expected_bytes=pin["bytes"],platform=args._platform,
+            validate_prepared=lambda prepared:validate_prepared_translations(prepared,data,platform=args._platform)))
+        require(result["state"] in ("installed","unchanged"),"prepared_translation_not_ready")
+    prepare_translations("empty_data")
     (data / "client-language.json").write_text('{"schema":1,"language":"ko"}')
     def no_download(*_args,**_kwargs):
         raise AssertionError("Startup profiling may not download game resources")
@@ -94,6 +114,8 @@ def child(args):
         require(status["running"] is True and status["startup_checks"]["state"]=="ready", "runtime_not_ready")
         require(status["language"]["effective_language"]=="ko", "unexpected_language")
         require(status["media_mode"] is args._media, "unexpected_mode")
+        if args.translations_root is not None:
+            require(status["language"]["resource_translation"]["prepared"] is True,"translation_not_selected")
         import grpc
         schema=Schema.from_descriptor_set(data / "protocol/idolypride-6.1.1.pb")
         with grpc.insecure_channel(status["grpc_address"]) as channel:
@@ -105,21 +127,26 @@ def child(args):
     finally:runtime.stop()
     state=State(data / ("media-state.db" if args._media else "state.db"))
     before=State.account_bytes(state.account_snapshot("sandbox")[0])
+    if args._platform=="android":
+        phase(phases,"android_cached_zip_check_preserved",lambda:adapter._copy_asset(None,payload,PAYLOAD["sha256"]))
     phase(phases,"public_install_preserved",install)
+    prepare_translations("preserved_data")
     runtime=phase(phases,"runtime_existing_account",start)
     try:verify(runtime)
     finally:runtime.stop()
     require(State.account_bytes(state.account_snapshot("sandbox")[0])==before,"account_bytes_changed")
     # Separate instrumented run: unprofiled phase timings above remain honest.
-    trace=cProfile.Profile();trace.enable()
-    try:runtime=start()
-    finally:trace.disable()
-    try:verify(runtime)
-    finally:runtime.stop()
-    require(State.account_bytes(state.account_snapshot("sandbox")[0])==before,"profiled_account_bytes_changed")
+    trace=None
+    if args._trace:
+        trace=cProfile.Profile();trace.enable()
+        try:runtime=start()
+        finally:trace.disable()
+        try:verify(runtime)
+        finally:runtime.stop()
+        require(State.account_bytes(state.account_snapshot("sandbox")[0])==before,"profiled_account_bytes_changed")
     return {"platform":args._platform,"media_mode":args._media,"protobuf_backend":"python",
             "phases":phases,"account_bytes_preserved":True,"encrypted_loopback_verified":True,
-            "instrumented_existing_startup_project_top":cpu_rows(trace),
+            "instrumented_existing_startup_project_top":cpu_rows(trace) if trace is not None else [],
             "peak_rss_bytes":resource.getrusage(resource.RUSAGE_SELF).ru_maxrss*1024}
 
 
@@ -129,6 +156,8 @@ def main():
     parser.add_argument("--work",type=Path,required=True)
     parser.add_argument("--output",type=Path,required=True)
     parser.add_argument("--source-commit",required=True)
+    parser.add_argument("--translations-root",type=Path)
+    parser.add_argument("--_trace",action="store_true")
     parser.add_argument("--runs",type=int,default=3)
     parser.add_argument("--_case",type=Path)
     parser.add_argument("--_platform",choices=("android","ios"))
@@ -159,6 +188,8 @@ def main():
                     "--work",str(work),"--output",str(report),"--source-commit",args.source_commit,
                     "--_case",str(owned),"--_platform",platform]
                 if media:command.append("--_media")
+                if number==0:command.append("--_trace")
+                if args.translations_root is not None:command.extend(("--translations-root",str(args.translations_root)))
                 try:
                     subprocess.run(command,check=True,timeout=240,cwd=ROOT,env={**os.environ,"PYTHONDONTWRITEBYTECODE":"1"})
                     require(report.stat().st_size<=128*1024,"case_report_too_large")
@@ -174,7 +205,7 @@ def main():
                 name:statistics.median(case["phases"][name]["wall_seconds"] for case in selected)
                 for name in selected[0]["phases"]}})
     output.write_text(json.dumps({"schema":1,"status":"PASS","source_commit":args.source_commit,
-        "payload":PAYLOAD,"execution":"owned GitHub Actions Linux CPU proxy; pure-Python protobuf",
+        "payload":PAYLOAD,"translation_bundles":TRANSLATIONS if args.translations_root is not None else None,"execution":"owned GitHub Actions Linux CPU proxy; pure-Python protobuf",
         "native_android_device_timing":False,"native_ios_device_timing":False,"java_asset_copy_measured":False,
         "unity_gameplay_tested":False,"cases":cases,"groups":groups},sort_keys=True,indent=2)+"\n")
     print(json.dumps({"status":"PASS","source_commit":args.source_commit,"groups":groups},sort_keys=True))

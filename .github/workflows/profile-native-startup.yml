@@ -44,6 +44,12 @@ jobs:
           work=Path(os.environ['RUNNER_TEMP'])/'idoly-startup-input'
           work.mkdir(mode=0o700)
           latest.fetch_overlay(work/'ServerData.zip')
+          from tools import release_platform_builds as builds
+          donors=work/'language-inputs'
+          donors.mkdir(mode=0o700)
+          guard=builds.Guard()
+          for platform in ('android','ios'):
+              builds.fetch_public_inputs(platform,donors/platform,work,guard,prepare=False)
           PYFETCH
       - name: Measure empty-data and preserved-data startup without asset downloads
         run: >-
@@ -52,6 +58,7 @@ jobs:
           --work "$RUNNER_TEMP/idoly-startup-work"
           --output "$RUNNER_TEMP/idoly-startup-output/startup-profile.json"
           --source-commit "$GITHUB_SHA" --runs 3
+          --translations-root "$RUNNER_TEMP/idoly-startup-input/language-inputs"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
