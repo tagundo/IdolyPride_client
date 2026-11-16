@@ -1,0 +1,81 @@
+name: Verify Mac account import native candidate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-macos-account-import.yml
+      - macos-server/tests/test_swift_shutdown.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-macos-account-import-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  IDOLY_RELEASE_BUILD: '53'
+
+# Reuses the exact Mac build/smoke commands from release-all-platforms.
+# contents:write is required to GET the existing draft input assets.
+# This workflow creates Actions artifacts only and has no publication job.
+jobs:
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Label internal artifacts with the current Seoul date
+        run: echo "IDOLY_RELEASE_VERSION=$(TZ=Asia/Seoul date +%Y.%m.%d).1" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: arm64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.3'
+          cache: false
+      - name: Install locked Mac build dependencies
+        run: |
+          test "$(uname -m)" = arm64
+          uv sync --locked --python 3.12
+          uv pip install --python .venv/bin/python -r macos-server/requirements-build.txt
+          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 --header 'Accept: application/octet-stream' > "$RUNNER_TEMP/idoly-mac-protocol.zip"
+          uv run --locked python macos-preserver/extract_descriptor.py --payload "$RUNNER_TEMP/idoly-mac-protocol.zip" --output data/protocol/idolypride-6.1.1.pb
+          rm "$RUNNER_TEMP/idoly-mac-protocol.zip"
+          uv run --locked python -m pytest -q macos-server/tests
+      - name: Build and exercise relocated native SwiftUI server
+        run: >-
+          uv run --locked python tools/release_platform_builds.py
+          --platform macos --source-commit "$GITHUB_SHA"
+          --work "$RUNNER_TEMP/idoly-macos-work"
+          --output "$RUNNER_TEMP/idoly-macos-final"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: verified-macos-account-import-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-macos-final
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: verified-macos-account-import-diagnostics-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-macos-work/**/*.json
+          if-no-files-found: warn
+          retention-days: 14
