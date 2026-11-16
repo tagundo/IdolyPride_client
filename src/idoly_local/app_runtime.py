@@ -363,6 +363,28 @@ def clear_server_history(data_dir):
     return server_settings_status(data_dir)["durable_history"]
 
 
+def _profile_fixture_directory(root, profile, legacy_profile, media_mode):
+    """Keep historical captures bound to the launcher's original fallback slot.
+
+    Captured responses are developer overrides, separate from portable account
+    SQLite state. New account slots must never inherit another slot's captures.
+    """
+    if profile == legacy_profile:
+        return root / ("media-fixtures" if media_mode else "fixtures")
+    import hashlib
+    identity = hashlib.sha256(profile.encode("utf-8")).hexdigest()
+    base = root / "account-fixtures"
+    mode = base / ("media" if media_mode else "normal")
+    selected = mode / identity
+    for directory in (base, mode, selected):
+        if directory.is_symlink():
+            raise ValueError("Account fixture storage must be a regular directory")
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError("Account fixture storage must be a regular directory")
+    return selected
+
+
 def start(data_dir, profile="sandbox", log_callback=None, *,
           grpc_host="127.0.0.1", grpc_port=50051,
           asset_host="127.0.0.1", asset_port=8080, aes_cbc=None,
@@ -399,6 +421,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         raise ValueError("A nonempty local profile is required")
     if log_callback is not None and not callable(log_callback):
         raise ValueError("Log callback must accept one message string")
+    legacy_profile = profile
     root = Path(data_dir).resolve()
     from .runtime_history import PersistentHistory
     from .startup_checks import StartupChecks, failure_code
@@ -540,7 +563,9 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         checks.resources(runtime._resources, download_missing_resources)
         if media_mode:
             runtime._log("감상 촬영용 의상 제한 해제 마스터를 제공합니다.")
-        fixtures = FixtureStore(root / ("media-fixtures" if media_mode else "fixtures"), schema)
+        stage = "account"
+        fixture_dir = _profile_fixture_directory(root, profile, legacy_profile, media_mode)
+        fixtures = FixtureStore(fixture_dir, schema)
         live_options = {}
         if experimental_main_live:
             import sys

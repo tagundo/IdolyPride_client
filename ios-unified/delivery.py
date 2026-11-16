@@ -146,6 +146,9 @@ def verify_members(members, proof, source, run, artifact, guard):
     probe_spec=importlib.util.spec_from_file_location('delivery_launcher_probe',ROOT/'ios-unified/probe/smoke_probe.py')
     probe=importlib.util.module_from_spec(probe_spec);sys.modules[probe_spec.name]=probe;probe_spec.loader.exec_module(probe)
     probe.validate_report(smoke['native_probe'])
+    probe.validate_account_management_after_relaunch(
+        smoke.get('account_management_after_relaunch'),
+        smoke['native_probe']['menu_lifetime'].get('account_management'))
     probe.validate_master_file_report(smoke['master_file'])
     probe.validate_sdk_resource_report(smoke['sdk_resource'])
     assert smoke['native_probe']['server_status']['keyboard_ready'] is True

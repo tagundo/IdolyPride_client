@@ -398,10 +398,11 @@ def tiny_core(h, monkeypatch):
         response.field.add(name="masterTag", number=1, type=11, type_name=".api.MasterTag")
         file.service.add(name="Master").method.add(name="Get", input_type=".api.Empty", output_type=".api.MasterGetResponse")
         file.service.add(name="System").method.add(name="Check", input_type=".api.Empty", output_type=".api.Empty")
-        user = file.message_type.add(name="User")
+        # Services and messages share a protobuf package namespace.
+        user = file.message_type.add(name="SavedUser")
         user.field.add(name="name", number=1, type=9)
         user_response = file.message_type.add(name="UserGetResponse")
-        user_response.field.add(name="user", number=1, type=11, type_name=".api.User")
+        user_response.field.add(name="user", number=1, type=11, type_name=".api.SavedUser")
         file.service.add(name="User").method.add(name="Get", input_type=".api.Empty", output_type=".api.UserGetResponse")
         descriptor = descriptor_pb2.FileDescriptorSet(); descriptor.file.add().CopyFrom(file)
         (root / "protocol").mkdir(exist_ok=True)
@@ -421,6 +422,14 @@ def tiny_core(h, monkeypatch):
     h.subject._installer = install; h.subject._factory = None
 
 
+def startup_reason(result, opened=None):
+    runtime = result.get("runtime", {})
+    return json.dumps({"state": result.get("state"), "last_error": result.get("last_error"),
+        "startup_checks": runtime.get("startup_checks"),
+        "last_failure": runtime.get("durable_history", {}).get("last_failure"),
+        "opened_asset_ports": opened}, ensure_ascii=False, sort_keys=True)
+
+
 def test_failed_bind_real_runtime_releases_already_bound_asset_listener(harness, monkeypatch):
     from idoly_local import assets
     h = harness; tiny_core(h, monkeypatch)
@@ -431,7 +440,7 @@ def test_failed_bind_real_runtime_releases_already_bound_asset_listener(harness,
     monkeypatch.setattr(assets, "create_asset_server", observe)
     try:
         result = h.subject.start(h.bundle, h.data, h.resources, ports=host.PortParams(occupied, 0))
-        assert result["state"] == "failed" and len(opened) == 1
+        assert result["state"] == "failed" and len(opened) == 1, startup_reason(result, opened)
         probe = socket.socket()
         try: probe.bind(("127.0.0.1", opened[0]))
         finally: probe.close()
@@ -445,7 +454,7 @@ def test_real_core_loopback_http_h2_sqlite_start_and_shutdown(harness, monkeypat
     from h2.connection import H2Connection
     from h2.events import StreamEnded, TrailersReceived
     h = harness; tiny_core(h, monkeypatch); result = start(h)
-    assert result["state"] == "ready", result
+    assert result["state"] == "ready", startup_reason(result)
     address = result["runtime"]["grpc_address"]; asset_url = result["runtime"]["asset_url"]
     with urlopen(asset_url + "/client/playback", timeout=3) as response:
         assert json.loads(response.read())["wait_for_orientation"] is True

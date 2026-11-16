@@ -24,6 +24,52 @@ spec = importlib.util.spec_from_file_location("ios_unified_smoke_probe", SOURCE)
 probe = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(probe)
 
+
+REAL_ACCOUNT_FIXTURE_HARNESS = probe.AccountFixtureHarness
+
+
+def modeled_account_management(run_index=0):
+    if run_index != 0:
+        return {"performed": False, "reason": "first-cold-run-only"}
+    source_rows = {table: 1 for table in probe.ACCOUNT_TABLES}
+    target_rows = {**source_rows, "preference_receipts": 2, "main_live_attempts": 2}
+    def fixture(phase, rows, digest, revision, request):
+        return {"schema":1,"ready":True,"phase":phase,"request_sha256":request*64,
+            "bundle_revision":revision*64,"normalized_sha256":digest*64,
+            "table_rows":rows,"unknown_tables":list(probe.ACCOUNT_BLOB_TABLES)}
+    return {"performed":True,"scope":"stock-simulator","ui_trigger":"dom-click",
+        "selection_trigger":"delegate-callback","seed_fixture_used":True,"gameplay_tested":False,
+        "timed_out":False,"completed":True,"elapsed_seconds":10.0,
+        **{key:True for key in probe.ACCOUNT_NATIVE_FLAGS},
+        "ui_flags":{key:True for key in probe.ACCOUNT_UI_FLAGS},"ui_actions":list(probe.ACCOUNT_UI_ACTIONS),
+        "archive_bytes":4096,"archive_sha256":"9"*64,"preview_picker_count":2,
+        "preview_copies":[{"queued":True,"copied_bytes":4096,"total_bytes":4096} for _ in range(2)],
+        "fixture_source":fixture("source",source_rows,"a","c","e"),
+        "fixture_target":fixture("target",target_rows,"b","d","f"),
+        "state_observation":{"observer":"runner-sqlite-and-archive","seed_fixture_used":True,
+            "gameplay_tested":False,"checks":{key:True for key in probe.ACCOUNT_STATE_FLAGS},
+            "table_rows":target_rows,"normalized_source_sha256":"a"*64,
+            "normalized_restored_sha256":"b"*64,"archive_sha256":"9"*64,"archive_bytes":4096}}
+
+
+@pytest.fixture(autouse=True)
+def modeled_account_observer_for_mock_simulator_transport(monkeypatch):
+    # FakeSimctl writes modeled reports; it never runs UIKit or the real fixture.
+    # Real producer/SQLite/ZIP tests below retain the original class explicitly.
+    class ModeledFixture:
+        def __init__(self, *args, **kwargs): pass
+        def process(self): pass
+        def verify(self, native):
+            return native.get("state_observation", modeled_account_management()["state_observation"])
+        def verify_persisted(self):
+            return {"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
+                "gameplay_tested":False,"checks":{key:True for key in (
+                    "source_all_tables_persisted","restored_all_tables_persisted","source_session_preserved",
+                    "target_session_invalidated","original_selection_preserved")},
+                "normalized_source_sha256":"a"*64,"normalized_restored_sha256":"b"*64}
+    monkeypatch.setattr(probe, "AccountFixtureHarness", ModeledFixture)
+
+
 CREATED = "00000000-0000-4000-8000-000000000123"
 DEVICE = "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"
 RUNTIME = "com.apple.CoreSimulator.SimRuntime.iOS-18-5"
@@ -213,6 +259,7 @@ def native_report(language="ko", run_index=None):
             "source_bytes":4096,"copied_bytes":4096,"total_bytes":4096,"exported_files":0,"imported_files":0,
             "failed_files":0,"source_sha256":"a"*64,"copied_sha256":"a"*64}
             if run_index == 0 else {"performed":False,"reason":"first-cold-run-only"}),
+        "account_management":modeled_account_management(run_index),
         "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
         "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
             "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":True,
@@ -3081,3 +3128,273 @@ def test_game_data_failure_ends_wait_without_waiting_for_server_timeout(tmp_path
     with pytest.raises(probe.ProbeError, match="native_game_preparation_failed") as caught:
         probe.wait_report(tmp_path, lambda: 1)
     assert caught.value.native_detail == "public fixture error"
+
+@pytest.mark.parametrize("field", probe.ACCOUNT_UI_FLAGS)
+@pytest.mark.parametrize("bad", [False, 1])
+def test_account_management_requires_each_actual_ui_flag(field, bad):
+    observed = native_report()
+    observed["menu_lifetime"]["account_management"]["ui_flags"][field] = bad
+    with pytest.raises(probe.ProbeError, match="settings_account_management_failed"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("field", probe.ACCOUNT_NATIVE_FLAGS)
+@pytest.mark.parametrize("bad", [False, 1])
+def test_account_management_requires_picker_and_pending_selection_evidence(field, bad):
+    observed = native_report()
+    observed["menu_lifetime"]["account_management"][field] = bad
+    with pytest.raises(probe.ProbeError, match="settings_account_management_failed"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("field", probe.ACCOUNT_STATE_FLAGS)
+@pytest.mark.parametrize("bad", [False, 1])
+def test_account_management_requires_independent_exact_state_observation(field, bad):
+    observed = native_report()
+    observed["menu_lifetime"]["account_management"]["state_observation"]["checks"][field] = bad
+    with pytest.raises(probe.ProbeError, match="settings_account_management_failed"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("case", ["first_skip", "later_performed", "actions", "copy_extent", "copy_bool",
+    "empty_table", "row_bool", "fixture_hash", "observer", "state_hash", "gameplay", "timeout", "elapsed"])
+def test_account_management_rejects_incomplete_or_mixed_proof(case):
+    value = modeled_account_management()
+    index = 0
+    if case == "first_skip": value = {"performed":False,"reason":"first-cold-run-only"}
+    elif case == "later_performed": index = 1
+    elif case == "actions": value["ui_actions"].pop()
+    elif case == "copy_extent": value["preview_copies"][1]["copied_bytes"] -= 1
+    elif case == "copy_bool": value["preview_copies"][1]["copied_bytes"] = True
+    elif case == "empty_table": value["fixture_source"]["table_rows"]["main_live_attempts"] = 0
+    elif case == "row_bool": value["fixture_source"]["table_rows"]["snapshots"] = True
+    elif case == "fixture_hash": value["fixture_target"]["normalized_sha256"] = "a"*64
+    elif case == "observer": value["state_observation"]["observer"] = "native-ui"
+    elif case == "state_hash": value["state_observation"]["normalized_restored_sha256"] = "0"*64
+    elif case == "gameplay": value["gameplay_tested"] = True
+    elif case == "timeout": value["timed_out"] = True
+    else: value["elapsed_seconds"] = float("nan")
+    with pytest.raises(probe.ProbeError, match="settings_account_management_failed"):
+        probe.validate_account_management(value, index)
+
+
+def test_account_management_projection_drops_profile_keys_tokens_and_provider_paths():
+    value = modeled_account_management()
+    value.update(profile="DO-NOT-EXPORT",nonce="DO-NOT-EXPORT",source_path="DO-NOT-EXPORT")
+    value["fixture_source"].update(nonce="DO-NOT-EXPORT",profile="DO-NOT-EXPORT")
+    value["state_observation"]["token"] = "DO-NOT-EXPORT"
+    assert "DO-NOT-EXPORT" not in json.dumps(probe.validate_account_management(value, 0))
+    assert probe.validate_account_management({"performed":False,"reason":"first-cold-run-only"}, 4) == {
+        "performed":False,"reason":"first-cold-run-only"}
+
+
+def account_fixture_schema(path):
+    from idoly_local.schema import Schema
+    file = descriptor_pb2.FileDescriptorProto(name="account-native-observer-test.proto", package="api", syntax="proto3")
+    file.message_type.add(name="Empty")
+    user = file.message_type.add(name="User")
+    user.field.add(name="name",number=1,type=9)
+    public = file.message_type.add(name="UserPublic")
+    public.field.add(name="serverUserId",number=1,type=9)
+    public.field.add(name="publicUserId",number=2,type=9)
+    response = file.message_type.add(name="UserGetResponse")
+    response.field.add(name="user",number=1,type=11,type_name=".api.User")
+    response.field.add(name="userPublic",number=2,type=11,type_name=".api.UserPublic")
+    file.message_type.add(name="SettingInfo")
+    file.message_type.add(name="LessonProgress")
+    login = file.message_type.add(name="HomeLogin")
+    login.field.add(name="settingInfo",number=1,type=11,type_name=".api.SettingInfo")
+    lesson = file.message_type.add(name="LessonResponse")
+    lesson.field.add(name="progress",number=1,type=11,type_name=".api.LessonProgress")
+    file.message_type.add(name="Receipt")
+    for service, method, request, response in (
+        ("User","Get","Empty","UserGetResponse"),("Home","Login","HomeLogin","Empty"),
+        ("Activity","ReceiveLessonReward","Empty","LessonResponse"),
+        ("Photo","SwitchLock","Empty","Receipt"),("Quest","Start","Empty","Receipt")):
+        entry=file.service.add(name=service)
+        entry.method.add(name=method,input_type=".api."+request,output_type=".api."+response)
+    descriptor=descriptor_pb2.FileDescriptorSet(file=[file]).SerializeToString()
+    path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_bytes(descriptor)
+    return Schema.from_descriptor_set(path)
+
+
+@pytest.fixture
+def real_account_observer(tmp_path):
+    from idoly_local.account_manager import AccountManager
+    from idoly_local.state import State
+    root=tmp_path/"container/Library/Application Support/IdolyPrideLocal"
+    root.mkdir(parents=True)
+    schema=account_fixture_schema(root/"protocol/idolypride-6.1.1.pb")
+    state=State(root/"state.db")
+    identity=state.ensure_profile("sandbox")
+    response=schema.response_type("/api.User/Get")()
+    response.user.name="Sandbox"
+    response.userPublic.serverUserId=identity["server_id"]
+    response.userPublic.publicUserId=identity["public_id"]
+    state.save_snapshot("sandbox",response.SerializeToString()+b"\x80\x4b\x7b",schema.fingerprint,starter_version=7)
+    state.login("sandbox")
+    observer=REAL_ACCOUNT_FIXTURE_HARNESS(tmp_path/"container",schema,nonce="1"*32)
+    manager=AccountManager(root,schema=schema)
+    manager.command("accounts_clone",{"mode":"normal","source_profile":"sandbox","profile":observer.source,
+        "expected_revision":state.account_snapshot("sandbox")[1]})
+    return observer,manager,state
+
+
+def account_seed_request(observer, phase="source", **changes):
+    request={"schema":1,"run_index":0,"nonce":hashlib.sha256((observer.nonce+":"+phase).encode()).hexdigest()[:32],
+        "phase":phase,"mode":"normal","profile":observer.source if phase=="source" else observer.target,
+        "active_profile":"sandbox"}
+    request.update(changes)
+    observer._write(observer.request,request)
+    return request
+
+
+def consume_account_fixture_ack(observer):
+    value=json.loads(observer.ack.read_text())
+    observer.ack.unlink();observer.request.unlink()
+    return value
+
+
+def complete_account_observer(observer, manager, state):
+    import shutil
+    account_seed_request(observer);observer.process()
+    source_ack=consume_account_fixture_ack(observer)
+    exported=manager.command("accounts_export",{"mode":"normal","profile":observer.source,
+        "expected_revision":state.account_snapshot(observer.source)[1]})
+    shutil.copyfile(exported["path"],observer.archive)
+    preview=manager.command("accounts_preview",{"path":str(observer.archive)})
+    manager.command("accounts_import",{"token":preview["token"],"mode":"normal","profile":observer.target,
+        "replace":False,"expected_revision":None})
+    account_seed_request(observer,"target");observer.process()
+    target_ack=consume_account_fixture_ack(observer)
+    preview=manager.command("accounts_preview",{"path":str(observer.archive)})
+    replaced=manager.command("accounts_import",{"token":preview["token"],"mode":"normal","profile":observer.target,
+        "replace":True,"expected_revision":state.account_snapshot(observer.target)[1]})
+    point=next(row for row in replaced["status"]["restore_points"] if row["profile"]==observer.target
+        and row["revision"]==target_ack["bundle_revision"])
+    manager.command("accounts_restore",{"id":point["id"],"mode":"normal","profile":observer.target,
+        "expected_revision":state.account_snapshot(observer.target)[1]})
+    return {"archive_sha256":exported["sha256"],"archive_bytes":exported["bytes"]},source_ack,target_ack
+
+
+def test_owned_simulator_fixture_uses_real_schema_seven_tables_unknown_blobs_and_full_archive(real_account_observer):
+    observer,manager,state=real_account_observer
+    native,source_ack,target_ack=complete_account_observer(observer,manager,state)
+    proof=observer.verify(native)
+    assert all(proof["checks"].values())
+    assert set(proof["table_rows"])==set(probe.ACCOUNT_TABLES)
+    assert all(count>0 for count in proof["table_rows"].values())
+    assert source_ack["request_sha256"] != target_ack["request_sha256"]
+    assert source_ack["normalized_sha256"] != target_ack["normalized_sha256"]
+    assert probe.PUBLIC_PROBE_FIELD in state.snapshot(observer.source)[0]
+    assert (probe.PUBLIC_PROBE_FIELD[:-1]+b"\x02") in state.snapshot(observer.target)[0]
+    assert all(observer.verify_persisted()["checks"].values())
+
+
+@pytest.mark.parametrize("case",["nonce","active_target","mode","phase","schema_bool","run_bool",
+                                "extra","symlink","hardlink","old_mtime","oversize","ack_exists"])
+def test_account_fixture_refuses_unbound_or_replayed_requests_before_database_mutation(real_account_observer,case,tmp_path):
+    import os
+    observer,manager,state=real_account_observer
+    before=state.account_snapshot(observer.source)
+    changes={}
+    if case=="nonce":changes["nonce"]="0"*32
+    elif case=="active_target":changes["profile"]="sandbox"
+    elif case=="mode":changes["mode"]="unrecognized"
+    elif case=="phase":changes["phase"]="target"
+    elif case=="schema_bool":changes["schema"]=True
+    elif case=="run_bool":changes["run_index"]=False
+    elif case=="extra":changes["provider_path"]="DO-NOT-EXPORT"
+    account_seed_request(observer,**changes)
+    if case=="symlink":
+        original=tmp_path/"request-source.json";observer.request.rename(original);observer.request.symlink_to(original)
+    elif case=="hardlink":os.link(observer.request,tmp_path/"request-alias.json")
+    elif case=="old_mtime":os.utime(observer.request,ns=(observer.created_ns-1,observer.created_ns-1))
+    elif case=="oversize":observer.request.write_bytes(b" "*8193)
+    elif case=="ack_exists":observer.ack.write_text("{}")
+    with pytest.raises(probe.ProbeError):
+        observer.process()
+    assert state.account_snapshot(observer.source)==before
+
+
+def test_account_fixture_consumed_ack_is_not_reissued_and_different_replay_is_rejected(real_account_observer):
+    observer,manager,state=real_account_observer
+    account_seed_request(observer);observer.process()
+    consume_account_fixture_ack(observer)
+    before=state.account_snapshot(observer.source)
+    account_seed_request(observer);observer.process()
+    assert not observer.ack.exists() and state.account_snapshot(observer.source)==before
+    account_seed_request(observer,nonce="0"*32)
+    with pytest.raises(probe.ProbeError):
+        observer.process()
+    assert state.account_snapshot(observer.source)==before
+
+
+@pytest.mark.parametrize("case",["archive_hash","restored_blob"])
+def test_account_observer_checks_actual_values_instead_of_trusting_native_flags(real_account_observer,case):
+    observer,manager,state=real_account_observer
+    native,_source,_target=complete_account_observer(observer,manager,state)
+    if case=="archive_hash":native["archive_sha256"]="0"*64
+    else:state.mutate_snapshot(observer.target,observer.schema.fingerprint,
+        lambda raw:raw+probe.PUBLIC_PROBE_FIELD)
+    with pytest.raises(probe.ProbeError,match="settings_account_fixture_failed"):
+        observer.verify(native)
+
+
+def test_account_native_scenario_is_valid_javascript_and_preserves_original_probe_gates(tmp_path):
+    import re
+    import subprocess
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    expression=re.search(r"static NSString \*const ProbeAccountScenario =\s*(.*?)\nstatic NSString \*ProbeAccountJSON",source,re.S)
+    assert expression is not None
+    pieces=re.findall(r'@?("(?:\\.|[^"\\])*")',expression.group(1))
+    script="".join(json.loads(piece) for piece in pieces).rstrip(";")
+    assert script.startswith("(function(config)")
+    checked=subprocess.run(["node","--check"],input=script,text=True,capture_output=True)
+    assert checked.returncode==0,checked.stderr
+    for gate in ("ProbeZIPRoundTrip(web","ProbeAccountManagement(web","ProbeDiagnosticsCopy(web",
+                 "data_store_reused","ProbeAutoSaveLanguage"):
+        assert gate in source
+
+
+@pytest.mark.parametrize("field", probe.ACCOUNT_PERSIST_FLAGS)
+@pytest.mark.parametrize("bad", [False, 1])
+def test_after_five_cold_runs_requires_each_actual_boolean_preservation_check(field,bad):
+    first=modeled_account_management()
+    value={"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
+        "gameplay_tested":False,"checks":{key:True for key in probe.ACCOUNT_PERSIST_FLAGS},
+        "normalized_source_sha256":"a"*64,"normalized_restored_sha256":"b"*64}
+    value["checks"][field]=bad
+    with pytest.raises(probe.ProbeError,match="settings_account_management_failed"):
+        probe.validate_account_management_after_relaunch(value,first)
+
+
+@pytest.mark.parametrize("case",["missing","scope","schema_bool","source_hash","restore_hash","hash_swap","gameplay","fixture","first_skip"])
+def test_after_relaunch_state_must_match_the_first_complete_fixture_proof(case):
+    first=modeled_account_management()
+    value={"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
+        "gameplay_tested":False,"checks":{key:True for key in probe.ACCOUNT_PERSIST_FLAGS},
+        "normalized_source_sha256":"a"*64,"normalized_restored_sha256":"b"*64}
+    if case=="missing":value["checks"].pop("source_all_tables_persisted")
+    elif case=="scope":value["observer"]="native-ui"
+    elif case=="schema_bool":value["schema"]=True
+    elif case=="source_hash":value["normalized_source_sha256"]="0"*64
+    elif case=="restore_hash":value["normalized_restored_sha256"]="0"*64
+    elif case=="hash_swap":value.update(normalized_source_sha256="b"*64,normalized_restored_sha256="a"*64)
+    elif case=="gameplay":value["gameplay_tested"]=True
+    elif case=="fixture":value["seed_fixture_used"]=False
+    else:first={"performed":False,"reason":"first-cold-run-only"}
+    with pytest.raises(probe.ProbeError,match="settings_account_management_failed"):
+        probe.validate_account_management_after_relaunch(value,first)
+
+
+def test_after_relaunch_projection_keeps_only_bound_metrics_and_actual_hashes():
+    first=modeled_account_management()
+    value={"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
+        "gameplay_tested":False,"checks":{key:True for key in probe.ACCOUNT_PERSIST_FLAGS},
+        "normalized_source_sha256":"a"*64,"normalized_restored_sha256":"b"*64,
+        "provider_path":"DO-NOT-EXPORT","token":"DO-NOT-EXPORT"}
+    checked=probe.validate_account_management_after_relaunch(value,first)
+    assert "DO-NOT-EXPORT" not in json.dumps(checked)
+    assert checked["checks"]==value["checks"]

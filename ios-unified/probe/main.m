@@ -911,6 +911,269 @@ static void ProbeZIPRoundTrip(WKWebView *web,UIViewController *presenter,void (^
     });
 }
 
+static NSString *const ProbeAccountScenario =
+    @"(function(config){\n"
+    "  const q=window.__idolyAccountProbe={done:false,error:null,pause:null,expected:null,request:null,reply:null,\n"
+    "    ui_actions:[],flags:{},preview_evidence:[],copy:null,seedAck:null,exportReady:false,pendingObserved:false,originalObserved:false,previewRound:0};\n"
+    "  const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.idolyServer;\n"
+    "  if(!h||typeof h.postMessage!=='function')return false;\n"
+    "  const oldPost=h.postMessage,oldReply=window.idolyServerReply,oldEvent=window.idolyServerEvent;\n"
+    "  h.postMessage=function(r){if(r&&r.action===q.expected&&q.request===null&&Number.isInteger(r.id)){\n"
+    "    q.request={id:r.id,action:r.action};q.ui_actions.push(r.action);}\n"
+    "    return oldPost.apply(h,arguments);};\n"
+    "  window.idolyServerReply=function(id,envelope){let v=envelope;try{if(typeof v==='string')v=JSON.parse(v);}catch(_){}\n"
+    "    if(q.request&&q.request.id===id&&v&&v.id===id)q.reply=v;return oldReply.apply(this,arguments);};\n"
+    "  window.idolyServerEvent=function(v){if(v&&v.event==='account_import_progress'&&q.expected==='accounts_preview'\n"
+    "      &&q.request&&v.request_id===q.request.id){q.copy=q.copy||{queued:false,copied_bytes:0,total_bytes:0};\n"
+    "      q.copy.queued=q.copy.queued||v.stage==='queued';q.copy.copied_bytes=v.copied_bytes;q.copy.total_bytes=v.total_bytes;}\n"
+    "    return oldEvent.apply(this,arguments);};\n"
+    "  const until=async f=>{while(!f()){if(q.error||Date.now()>config.deadline)throw Error('account_ui_timeout');await new Promise(r=>setTimeout(r,75));}};\n"
+    "  const current=profile=>{const s=document.getElementById('accounts-current'),v=JSON.stringify([config.mode,profile]);\n"
+    "    if(!s||!Array.from(s.options).some(o=>o.value===v))throw Error('account_ui_account_missing');\n"
+    "    s.value=v;s.dispatchEvent(new Event('change',{bubbles:true}));};\n"
+    "  const set=(id,value)=>{const e=document.getElementById(id);if(!e)throw Error('account_ui_control_missing');e.value=value;};\n"
+    "  const click=async(action,setup,ok=true)=>{\n"
+    "    const id=action==='status'?'accounts-refresh':'accounts-'+action,b=document.getElementById(id);\n"
+    "    if(!b)throw Error('account_ui_control_missing');\n"
+    "    await until(()=>!b.disabled);if(setup)setup();await until(()=>!b.disabled);\n"
+    "    q.expected='accounts_'+action;q.request=null;q.reply=null;if(action==='preview')q.copy=null;\n"
+    "    b.scrollIntoView({block:'center'});b.click();\n"
+    "    await until(()=>q.request&&q.reply&&q.reply.id===q.request.id&&!b.disabled);\n"
+    "    if(q.reply.ok!==ok)throw Error('account_ui_request_failed');\n"
+    "    if(ok&&(!q.reply.result||q.reply.result.action!==q.expected))throw Error('account_ui_reply_mismatch');\n"
+    "    return ok?q.reply.result:q.reply.error;\n"
+    "  };\n"
+    "  const seed=async phase=>{q.seedAck=null;q.pause='seed-'+phase;await until(()=>q.seedAck&&q.seedAck.phase===phase);\n"
+    "    if(phase==='source')q.sourceFixture=q.seedAck;else q.targetFixture=q.seedAck;q.pause=null;await click('status');};\n"
+    "  const preview=async()=>{q.previewRound++;q.pause='preview';const v=await click('preview');q.pause=null;\n"
+    "    q.preview_evidence.push(q.copy||{});if(!v.archive||v.archive.mode!==config.mode)throw Error('account_ui_preview_mismatch');return v;};\n"
+    "  async function run(){\n"
+    "    await click('status');q.flags.management_controls_ready=true;\n"
+    "    await click('clone',()=>{current(config.active);set('accounts-new-profile',config.source);});\n"
+    "    q.flags.inactive_clone_created=true;\n"
+    "    await seed('source');current(config.source);\n"
+    "    q.export=await click('export');q.pause='export';await until(()=>q.exportReady);q.pause=null;\n"
+    "    q.flags.export_reply_correlated=true;\n"
+    "    await preview();\n"
+    "    const blocked=await click('import',()=>{current(config.active);document.getElementById('accounts-replace').checked=true;},false);\n"
+    "    if(!blocked||blocked.code!=='account_restart_required')throw Error('account_ui_active_guard_failed');\n"
+    "    q.flags.active_account_replace_rejected=true;\n"
+    "    await click('import',()=>{document.getElementById('accounts-replace').checked=false;set('accounts-new-profile',config.target);});\n"
+    "    q.flags.new_import_completed=true;\n"
+    "    await seed('target');\n"
+    "    await preview();\n"
+    "    const replaced=await click('import',()=>{current(config.target);document.getElementById('accounts-replace').checked=true;});\n"
+    "    const point=replaced.status&&replaced.status.restore_points.find(r=>r.mode===config.mode&&r.profile===config.target&&r.revision===q.targetFixture.bundle_revision);\n"
+    "    if(!point)throw Error('account_ui_restore_point_missing');\n"
+    "    q.flags.automatic_restore_point_created=true;\n"
+    "    const restored=await click('restore',()=>{current(config.target);set('accounts-restore-point',point.id);\n"
+    "      document.getElementById('accounts-restore-point').dispatchEvent(new Event('change',{bubbles:true}));});\n"
+    "    const target=restored.status&&restored.status.accounts.find(r=>r.mode===config.mode&&r.profile===config.target);\n"
+    "    if(!target||target.revision!==q.targetFixture.bundle_revision)throw Error('account_ui_restore_revision_differs');\n"
+    "    q.flags.inactive_replace_completed=true;q.flags.restore_revision_matches=true;\n"
+    "    const selected=await click('select',()=>current(config.source));\n"
+    "    if(!selected.status||selected.status.selected[config.mode]!==config.source)throw Error('account_ui_selection_failed');\n"
+    "    q.flags.next_start_selection_saved=true;q.pause='pending';await until(()=>q.pendingObserved);q.pause=null;\n"
+    "    const original=await click('select',()=>current(config.active));\n"
+    "    if(!original.status||original.status.selected[config.mode]!==config.active)throw Error('account_ui_selection_failed');\n"
+    "    q.flags.original_selection_saved=true;q.pause='original';await until(()=>q.originalObserved);q.pause=null;\n"
+    "    const feedback=document.getElementById('accounts-feedback'),fields=document.getElementById('accounts-fields');\n"
+    "    q.flags.feedback_present=!!feedback&&!!feedback.textContent.trim();\n"
+    "    q.flags.fields_reenabled=!!fields&&!fields.disabled;\n"
+    "    q.flags.native_copy_queued=q.preview_evidence.length===2&&q.preview_evidence.every(v=>v.queued===true);\n"
+    "    q.flags.native_copy_bytes_match=q.preview_evidence.length===2&&q.preview_evidence.every(v=>v.copied_bytes===q.export.bytes&&v.total_bytes===q.export.bytes);\n"
+    "    q.done=true;\n"
+    "  }\n"
+    "  run().catch(e=>{q.error=/^account_ui_[a-z_]+$/.test(String(e&&e.message))?e.message:'account_ui_flow_failed';});\n"
+    "  return true;\n"
+    "})";
+
+static NSString *ProbeAccountJSON(id value) {
+    NSData *raw=[NSJSONSerialization dataWithJSONObject:value options:NSJSONWritingSortedKeys error:NULL];
+    return raw ? [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] : nil;
+}
+static NSDictionary *ProbeAccountSmallFile(NSString *path) {
+    struct stat before,after;
+    if (lstat(path.fileSystemRepresentation,&before)!=0 || !S_ISREG(before.st_mode) || before.st_nlink!=1
+            || before.st_size<=0 || before.st_size>8192) return nil;
+    NSData *raw=[NSData dataWithContentsOfFile:path];
+    if (!raw || raw.length!=(NSUInteger)before.st_size || lstat(path.fileSystemRepresentation,&after)!=0
+            || before.st_dev!=after.st_dev || before.st_ino!=after.st_ino || before.st_size!=after.st_size
+            || before.st_mtimespec.tv_sec!=after.st_mtimespec.tv_sec || before.st_mtimespec.tv_nsec!=after.st_mtimespec.tv_nsec) return nil;
+    id value=[NSJSONSerialization JSONObjectWithData:raw options:0 error:NULL];
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
+                             NSMutableDictionary *state,void (^finish)(void));
+static void ProbeAccountResume(WKWebView *web,NSString *script) {
+    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error){(void)value;(void)error;}];
+}
+static void ProbeAccountSeed(WKWebView *web,NSMutableDictionary *state,NSString *phase,void (^finish)(void)) {
+    if ([state[[@"seed_done_" stringByAppendingString:phase]] boolValue]) return;
+    NSString *documents=state[@"documents"],*requestPath=[documents stringByAppendingPathComponent:@"embedded-probe-account-seed.json"];
+    NSString *ackPath=[documents stringByAppendingPathComponent:@"embedded-probe-account-seed-ack.json"];
+    NSString *key=[@"seed_request_" stringByAppendingString:phase];
+    NSDictionary *request=state[key];
+    if (!request) {
+        NSDictionary *config=state[@"config"];
+        NSString *nonceSource=[config[@"nonce"] stringByAppendingFormat:@":%@",phase];
+        NSData *nonceBytes=[nonceSource dataUsingEncoding:NSUTF8StringEncoding];
+        request=@{@"schema":@1,@"run_index":@0,@"nonce":[ProbeDataSHA(nonceBytes) substringToIndex:32],@"phase":phase,
+            @"mode":config[@"mode"],@"profile":[phase isEqual:@"source"]?config[@"source"]:config[@"target"],
+            @"active_profile":config[@"active"]};
+        NSData *raw=[NSJSONSerialization dataWithJSONObject:request options:NSJSONWritingSortedKeys error:NULL];
+        if (!raw || !ProbeWrite(@"embedded-probe-account-seed.json",request)) { finish(); return; }
+        state[key]=request; state[[key stringByAppendingString:@"_sha"]]=ProbeDataSHA(raw);
+    }
+    NSDictionary *ack=ProbeAccountSmallFile(ackPath);
+    if (!ack) return;
+    NSString *hash=state[[key stringByAppendingString:@"_sha"]];
+    BOOL valid=[ack[@"schema"] isEqual:@1] && [ack[@"ready"] isEqual:@YES]
+        && [ack[@"nonce"] isEqual:request[@"nonce"]] && [ack[@"phase"] isEqual:phase]
+        && [ack[@"request_sha256"] isEqual:hash] && [ack[@"mode"] isEqual:request[@"mode"]]
+        && [ack[@"profile"] isEqual:request[@"profile"]];
+    NSDictionary *rows=[ack[@"table_rows"] isKindOfClass:NSDictionary.class]?ack[@"table_rows"]:@{};
+    for (NSString *table in @[@"profiles",@"snapshots",@"profile_settings",@"starter_profiles",
+            @"profile_lesson_progress",@"preference_receipts",@"main_live_attempts"])
+        valid=valid && [rows[table] isKindOfClass:NSNumber.class]
+            && CFGetTypeID((__bridge CFTypeRef)rows[table])!=CFBooleanGetTypeID()
+            && [rows[table] unsignedIntegerValue]>0 && [rows[table] unsignedIntegerValue]<=20000;
+    if (!valid) { finish(); return; }
+    state[[@"seed_done_" stringByAppendingString:phase]]=@YES;
+    NSMutableDictionary *safe=[ack mutableCopy];
+    [safe removeObjectForKey:@"nonce"];[safe removeObjectForKey:@"profile"];[safe removeObjectForKey:@"mode"];
+    state[@"metrics"][[@"fixture_" stringByAppendingString:phase]]=safe.copy;
+    [NSFileManager.defaultManager removeItemAtPath:ackPath error:NULL];
+    [NSFileManager.defaultManager removeItemAtPath:requestPath error:NULL];
+    ProbeAccountResume(web,[NSString stringWithFormat:@"window.__idolyAccountProbe.seedAck=%@;",ProbeAccountJSON(ack)]);
+}
+static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
+                             NSMutableDictionary *state,void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    WKWebView *web=weakWeb;UIViewController *presenter=weakPresenter;
+    if (!web || !presenter) { finish(); return; }
+    NSString *script=@"(()=>{const q=window.__idolyAccountProbe;return q?{done:q.done,error:q.error,pause:q.pause,flags:q.flags,ui_actions:q.ui_actions,"
+        "previewRound:q.previewRound,preview_evidence:q.preview_evidence,export_meta:q.export?{filename:q.export.filename,bytes:q.export.bytes,sha256:q.export.sha256}:null}:null;})()";
+    [web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
+        if ([state[@"finished"] boolValue]) return;
+        if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
+        NSMutableDictionary *metrics=state[@"metrics"];
+        metrics[@"ui_flags"]=value[@"flags"] ?: @{};
+        metrics[@"ui_actions"]=value[@"ui_actions"] ?: @[];
+        metrics[@"preview_copies"]=value[@"preview_evidence"] ?: @[];
+        if ([value[@"error"] isKindOfClass:NSString.class]) { metrics[@"error_code"]=value[@"error"];finish();return; }
+        if ([value[@"done"] isEqual:@YES]) { metrics[@"completed"]=@YES;finish();return; }
+        NSString *phase=[value[@"pause"] isKindOfClass:NSString.class]?value[@"pause"]:@"";
+        if ([phase hasPrefix:@"seed-"]) ProbeAccountSeed(web,state,[phase substringFromIndex:5],finish);
+        else if ([phase isEqual:@"export"] && ![state[@"export_started"] boolValue]) {
+            UIViewController *shown=presenter.presentedViewController;
+            NSDictionary *meta=[value[@"export_meta"] isKindOfClass:NSDictionary.class]?value[@"export_meta"]:@{};
+            NSString *name=[meta[@"filename"] isKindOfClass:NSString.class]?meta[@"filename"]:nil;
+            NSRegularExpression *known=[NSRegularExpression regularExpressionWithPattern:@"^IdolyPride-Account-[0-9a-f]{32}\\.zip$" options:0 error:NULL];
+            if ([shown isKindOfClass:UIDocumentPickerViewController.class] && shown.viewIfLoaded.window && !shown.isBeingPresented
+                    && name && [known numberOfMatchesInString:name options:0 range:NSMakeRange(0,name.length)]==1) {
+                UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
+                if (picker.documentPickerMode!=UIDocumentPickerModeExportToService) { finish();return; }
+                state[@"export_started"]=@YES;metrics[@"export_picker_presented"]=@YES;
+                NSString *source=[state[@"exports"] stringByAppendingPathComponent:name];
+                NSString *target=state[@"source"];
+                dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
+                    NSDictionary *original=ProbeResourceHash(source);
+                    BOOL copied=original[@"sha256"] && ![NSFileManager.defaultManager fileExistsAtPath:target]
+                        && [NSFileManager.defaultManager copyItemAtPath:source toPath:target error:NULL];
+                    NSDictionary *copy=copied?ProbeResourceHash(target):@{};
+                    dispatch_async(dispatch_get_main_queue(),^{
+                        if ([state[@"finished"] boolValue]) return;
+                        BOOL equal=[original[@"sha256"] isEqual:meta[@"sha256"]] && [copy[@"sha256"] isEqual:original[@"sha256"]]
+                            && [original[@"bytes"] isEqual:meta[@"bytes"]] && [copy[@"bytes"] isEqual:original[@"bytes"]];
+                        metrics[@"archive_sha256"]=copy[@"sha256"] ?: @"";
+                        metrics[@"archive_bytes"]=copy[@"bytes"] ?: @0;metrics[@"archive_copy_sha256_verified"]=@((BOOL)equal);
+                        if (!equal || ![picker.delegate respondsToSelector:@selector(documentPickerWasCancelled:)]) { finish();return; }
+                        [picker.delegate documentPickerWasCancelled:picker];
+                        [picker dismissViewControllerAnimated:NO completion:nil];metrics[@"export_picker_cancelled"]=@YES;
+                        ProbeAccountResume(web,@"window.__idolyAccountProbe.exportReady=true;");
+                    });
+                });
+            }
+        } else if ([phase isEqual:@"preview"]) {
+            NSUInteger round=[value[@"previewRound"] unsignedIntegerValue];
+            UIViewController *shown=presenter.presentedViewController;
+            if (round>[state[@"preview_round"] unsignedIntegerValue] && [shown isKindOfClass:UIDocumentPickerViewController.class]
+                    && shown.viewIfLoaded.window && !shown.isBeingPresented) {
+                UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
+                BOOL valid=picker.documentPickerMode==UIDocumentPickerModeImport && !picker.allowsMultipleSelection
+                    && [picker.delegate respondsToSelector:@selector(documentPicker:didPickDocumentsAtURLs:)];
+                if (!valid) { finish();return; }
+                state[@"preview_round"]=@(round);metrics[@"preview_picker_count"]=@(round);
+                [picker.delegate documentPicker:picker didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:state[@"source"]]]];
+                [picker dismissViewControllerAnimated:NO completion:nil];
+            }
+        } else if (([phase isEqual:@"pending"] || [phase isEqual:@"original"]) && ![state[[phase stringByAppendingString:@"_requested"]] boolValue]) {
+            state[[phase stringByAppendingString:@"_requested"]]=@YES;
+            IdolyEmbeddedServerCommand(@"{\"id\":7410,\"action\":\"status\"}",^(NSString *reply){
+                if ([state[@"finished"] boolValue]) return;
+                NSDictionary *status=ProbeObject(reply)[@"result"],*runtime=status[@"runtime"],*selection=runtime[@"account_selection"];
+                NSDictionary *config=state[@"config"];
+                BOOL original=[phase isEqual:@"original"];
+                BOOL matches=[runtime[@"running"] isEqual:@YES] && [runtime[@"profile"] isEqual:config[@"active"]]
+                    && [selection[@"selected_for_next_start"] isEqual:original?config[@"active"]:config[@"source"]]
+                    && [selection[@"restart_required"] isEqual:original?@NO:@YES];
+                if (original) {
+                    metrics[@"original_runtime_preserved"]=@((BOOL)matches);
+                    metrics[@"listeners_survived"]=@((BOOL)(ProbePort(50051)&&ProbePort(8080)));
+                } else metrics[@"next_selection_pending_only"]=@((BOOL)matches);
+                if (!matches) { finish();return; }
+                ProbeAccountResume(web,original?@"window.__idolyAccountProbe.originalObserved=true;":@"window.__idolyAccountProbe.pendingObserved=true;");
+            });
+        }
+        if (![state[@"finished"] boolValue]) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+            ProbeAccountPoll(weakWeb,weakPresenter,state,finish);
+        });
+    }];
+}
+static void ProbeAccountManagement(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+    if (probeRunIndex!=0) { completion(@{@"performed":@NO,@"reason":@"first-cold-run-only"});return; }
+    NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
+    NSURL *documents=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    NSDictionary *fixture=ProbeAccountSmallFile([[documents path] stringByAppendingPathComponent:@"probe-account-fixture.json"]);
+    NSString *nonce=[fixture[@"nonce"] isKindOfClass:NSString.class]?fixture[@"nonce"]:nil;
+    NSMutableDictionary *metrics=[@{@"performed":@YES,@"scope":@"stock-simulator",@"ui_trigger":@"dom-click",
+        @"selection_trigger":@"delegate-callback",@"seed_fixture_used":@YES,@"gameplay_tested":@NO,
+        @"timed_out":@NO,@"completed":@NO} mutableCopy];
+    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics,@"documents":documents.path ?: @""} mutableCopy];
+    void (^finish)(void)=^{
+        if ([state[@"finished"] boolValue]) return;
+        state[@"finished"]=@YES;metrics[@"elapsed_seconds"]=@(MAX(0,NSProcessInfo.processInfo.systemUptime-started));
+        completion(metrics.copy);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if (![state[@"finished"] boolValue]) { metrics[@"timed_out"]=@YES;finish(); }
+    });
+    NSRegularExpression *hex=[NSRegularExpression regularExpressionWithPattern:@"^[0-9a-f]{32}$" options:0 error:NULL];
+    if (!nonce || ![fixture[@"schema"] isEqual:@1] || [hex numberOfMatchesInString:nonce options:0 range:NSMakeRange(0,nonce.length)]!=1) {finish();return;}
+    IdolyEmbeddedServerCommand(@"{\"id\":7400,\"action\":\"status\"}",^(NSString *reply){
+        if ([state[@"finished"] boolValue]) return;
+        NSDictionary *host=ProbeObject(reply)[@"result"],*runtime=host[@"runtime"];
+        NSString *exports=host[@"paths"][@"exports"];
+        if (![exports isKindOfClass:NSString.class] || !exports.isAbsolutePath) {finish();return;}
+        state[@"exports"]=exports;
+        NSString *active=runtime[@"profile"],*mode=[runtime[@"media_mode"] isEqual:@YES]?@"media":@"normal";
+        if (![active isEqual:@"sandbox"] || ![runtime[@"running"] isEqual:@YES]) {finish();return;}
+        NSDictionary *config=@{@"nonce":nonce,@"active":active,@"mode":mode,
+            @"source":[@"probe-acct-" stringByAppendingFormat:@"%@-clone",[nonce substringToIndex:12]],
+            @"target":[@"probe-acct-" stringByAppendingFormat:@"%@-import",[nonce substringToIndex:12]],
+            @"deadline":@((long long)((NSDate.date.timeIntervalSince1970+115)*1000))};
+        state[@"config"]=config;
+        state[@"source"]=[documents.path stringByAppendingPathComponent:[@"probe-account-" stringByAppendingFormat:@"%@.zip",nonce]];
+        NSString *script=[ProbeAccountScenario stringByAppendingFormat:@"(%@);",ProbeAccountJSON(config)];
+        [web evaluateJavaScript:script completionHandler:^(id value,NSError *error){
+            if ([state[@"finished"] boolValue]) return;
+            if (error || ![value isEqual:@YES]) { finish();return; }
+            ProbeAccountPoll(web,presenter,state,finish);
+        }];
+    });
+}
+
 static BOOL ProbeAES(const unsigned char *key, size_t keySize, const unsigned char *expected) {
     const unsigned char iv[16] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
                                   0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f};
@@ -1075,6 +1338,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *diagnosticsCopyObservation;
 @property(nonatomic, strong) NSDictionary *zipImportObservation;
 @property(nonatomic, strong) NSDictionary *zipRoundTripObservation;
+@property(nonatomic, strong) NSDictionary *accountManagementObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
 @property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
 @property(nonatomic,strong) NSMutableArray *interfaceLanguageCycle;
@@ -1109,7 +1373,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
@@ -1125,7 +1389,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{},
-        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{},
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
@@ -1659,6 +1923,11 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 }
                 if (!roundtripOK) { [self failProbe:@"settings_zip_roundtrip_failed"]; return; }
                 [self recordCheckpoint:@"settings_zip_roundtrip_checked"];
+                ProbeAccountManagement(web,navigation.topViewController,^(NSDictionary *account){
+                self.accountManagementObservation=account;menu[@"account_management"]=account;
+                BOOL accountOK=probeRunIndex==0 ? ([account[@"completed"] isEqual:@YES] && [account[@"timed_out"] isEqual:@NO]) : [account[@"performed"] isEqual:@NO];
+                if (!accountOK) { [self failProbe:@"settings_account_management_failed"];return; }
+                [self recordCheckpoint:@"settings_account_management_checked"];
                 [self saveNextLanguage:web completion:^(BOOL saved){
                 if (!saved) { [self failProbe:@"language_save_failed"]; return; }
                 BOOL closed = ProbeDispatchButton(close);
@@ -1669,6 +1938,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 [self observeMenuDismissal:navigation report:report menu:menu
                                   started:NSProcessInfo.processInfo.systemUptime observations:0];
                 }];
+                });
                 });
                 });
             });

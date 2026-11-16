@@ -15,6 +15,7 @@ import grpc
 from google.protobuf import descriptor_pb2
 
 from idoly_local import app_runtime, codec
+from idoly_local.application import Application as _RealApplication
 from idoly_local.gameplay import (repair_starter_home_positions, repair_starter_inventory,
                                  repair_starter_roster, repair_starter_card_level_mission)
 from idoly_local.profiles import new_profile
@@ -309,6 +310,109 @@ class EmbeddedRuntimeTests(unittest.TestCase):
         self.assertEqual(previous["durable_history"]["last_failure"]["stage"], "http")
         self.assertEqual(previous["durable_history"]["last_failure"]["code"], "invalid_input")
         self.assertIs(previous["startup_checks"]["gameplay_verified"], False)
+
+    def _real_user_get(self, prepared):
+        # Use the real Application's dispatch and authentication contract. The
+        # tiny listener application above only isolates unrelated startup data.
+        from idoly_local.h2_server import Context
+        application = _RealApplication.__new__(_RealApplication)
+        application.schema, application.state = prepared.schema, prepared.state
+        application.profile, application.fixtures = prepared.profile, prepared.fixtures
+        application.public_fixtures, application.media_stories = None, None
+        application.media_mode = False
+        application.master_response = prepared.master_response
+        token, _ = prepared.state.login(prepared.profile)
+        return application.handle("/api.User/Get", codec.encode(b""),
+                                  Context((("x-auth-token", token),)))
+
+    def test_queued_slot_does_not_inherit_legacy_captured_user_and_return_preserves_original(self):
+        from idoly_local.account_manager import account_command
+        from idoly_local.catalog import import_response
+        state = State(self.root / "state.db")
+        new_profile(state, self.schema, "sandbox", "Original")
+        new_profile(state, self.schema, "second-slot", "Second")
+        marker = self.schema.response_type("/api.User/Get")()
+        marker.user.name = "CaptureOld"
+        raw = marker.SerializeToString()
+        source = self.root / "captured-user.pb"
+        source.write_bytes(raw)
+        import_response(source, self.root / "fixtures", self.schema, "/api.User/Get")
+        manifest = (self.root / "fixtures/manifest.json").read_bytes()
+
+        legacy = self.start()
+        original_prepared = _Application.created[-1]
+        self.assertEqual(self._real_user_get(original_prepared), raw)
+        self.assertEqual(original_prepared.fixtures.directory, self.root / "fixtures")
+        legacy.stop()
+
+        revision = state.account_snapshot("second-slot")[1]
+        account_command(self.root, "accounts_select", {"mode": "normal", "profile": "second-slot",
+                                                      "expected_revision": revision})
+        selected = self.start()
+        second_prepared = _Application.created[-1]
+        self.assertEqual(selected.status()["profile"], "second-slot")
+        self.assertNotEqual(second_prepared.fixtures.directory, self.root / "fixtures")
+        self.assertIsNone(second_prepared.fixtures.get("/api.User/Get", b""))
+        actual = self.schema.response_type("/api.User/Get").FromString(self._real_user_get(second_prepared))
+        self.assertEqual(actual.user.name, "Second")
+        self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
+        selected.stop()
+
+        # Clone and portable ZIP import use the same isolated selected-slot
+        # path; neither operation incorporates the legacy captured response.
+        revision = state.account_snapshot("second-slot")[1]
+        account_command(self.root, "accounts_clone", {"mode": "normal", "source_profile": "second-slot",
+            "profile": "cloned-slot", "expected_revision": revision})
+        exported = account_command(self.root, "accounts_export", {"mode": "normal", "profile": "second-slot",
+            "expected_revision": revision})
+        preview = account_command(self.root, "accounts_preview", {"path": exported["path"]})
+        account_command(self.root, "accounts_import", {"mode": "normal", "profile": "imported-slot",
+            "token": preview["token"], "replace": False, "expected_revision": None})
+        previous_directory = second_prepared.fixtures.directory
+        for slot in ("cloned-slot", "imported-slot"):
+            revision = state.account_snapshot(slot)[1]
+            account_command(self.root, "accounts_select", {"mode": "normal", "profile": slot,
+                "expected_revision": revision})
+            scoped = self.start()
+            prepared = _Application.created[-1]
+            self.assertNotEqual(prepared.fixtures.directory, previous_directory)
+            self.assertNotEqual(prepared.fixtures.directory, self.root / "fixtures")
+            actual = self.schema.response_type("/api.User/Get").FromString(self._real_user_get(prepared))
+            self.assertEqual(actual.user.name, "Second")
+            self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
+            previous_directory = prepared.fixtures.directory
+            scoped.stop()
+
+        revision = state.account_snapshot("sandbox")[1]
+        account_command(self.root, "accounts_select", {"mode": "normal", "profile": "sandbox",
+                                                      "expected_revision": revision})
+        self.start()
+        self.assertEqual(_Application.created[-1].fixtures.directory, self.root / "fixtures")
+        self.assertEqual(self._real_user_get(_Application.created[-1]), raw)
+        self.assertEqual((self.root / "fixtures/manifest.json").read_bytes(), manifest)
+        self.assertEqual(source.read_bytes(), raw)
+
+    def test_scoped_fixture_paths_separate_modes_and_do_not_use_profile_as_a_path(self):
+        import hashlib
+        profile = "별도 계정"
+        digest = hashlib.sha256(profile.encode("utf-8")).hexdigest()
+        ordinary = app_runtime._profile_fixture_directory(self.root, profile, "sandbox", False)
+        media = app_runtime._profile_fixture_directory(self.root, profile, "sandbox", True)
+        self.assertEqual(ordinary, self.root / "account-fixtures/normal" / digest)
+        self.assertEqual(media, self.root / "account-fixtures/media" / digest)
+        self.assertTrue(ordinary.is_dir() and media.is_dir())
+        self.assertEqual(list(ordinary.iterdir()), [])
+        self.assertEqual(list(media.iterdir()), [])
+
+    def test_scoped_fixture_symlinks_cannot_alias_another_accounts_captures(self):
+        original = self.root / "fixtures"
+        original.mkdir()
+        (original / "sentinel").write_bytes(b"preserved")
+        (self.root / "account-fixtures").symlink_to(original, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "Account fixture storage"):
+            app_runtime._profile_fixture_directory(self.root, "second-slot", "sandbox", False)
+        self.assertEqual((original / "sentinel").read_bytes(), b"preserved")
+        self.assertEqual(sorted(path.name for path in original.iterdir()), ["sentinel"])
 
     def test_stop_releases_both_ports_and_restart_preserves_snapshot(self):
         first = self.start()

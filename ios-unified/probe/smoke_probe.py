@@ -96,6 +96,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_precreated_instance_not_reused",
     "native_header_layout_failed", "native_header_restore_failed",
     "settings_diagnostics_copy_failed", "settings_zip_import_picker_failed", "settings_zip_roundtrip_failed",
+    "settings_account_management_failed", "settings_account_fixture_failed",
     "host_constructor_not_installed", "host_hooks_registration_failed", "host_cold_start_failed",
     "unity_window_handoff_failed", "language_cache_identity_failed", "sigpipe_probe_failed",
     "sigpipe_before_server_failed", "sigpipe_before_game_failed",
@@ -112,7 +113,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
-    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_checked",
+    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_checked", "settings_account_management_checked",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
@@ -798,6 +799,7 @@ def validate_report(value):
                     and type(sample.get("document_picker_mode")) is int and sample["document_picker_mode"] == 0
                     for sample in zipped["passes"]), "settings_zip_import_picker_failed")
     roundtrip = validate_zip_roundtrip(menu.get("zip_roundtrip"), language_summary["run_index"])
+    accounts = validate_account_management(menu.get("account_management"), language_summary["run_index"])
     width, window_width = menu.get("frame_width"), menu.get("window_width")
     require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
             and abs(width - window_width) <= 2, "settings_menu_width_failed")
@@ -866,7 +868,7 @@ def validate_report(value):
                 "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
                 "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
                 "dismiss_observation":dismissal, "diagnostics_copy":diagnostics_copy_observation(copied),
-                "zip_import_picker":zip_import_observation(zipped), "zip_roundtrip":roundtrip,
+                "zip_import_picker":zip_import_observation(zipped), "zip_roundtrip":roundtrip, "account_management":accounts,
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count", "navigation_loading", "navigation_file_url",
@@ -880,7 +882,284 @@ def validate_report(value):
                 "runtime": {key: runtime[key] for key in ("running", "grpc_address", "asset_url")}}}}
 
 
-def wait_report(container, remaining, *, expected_language="ko", run_index=None):
+
+ACCOUNT_TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
+                  "profile_lesson_progress", "preference_receipts", "main_live_attempts")
+ACCOUNT_BLOB_TABLES = ("snapshots", "profile_settings", "profile_lesson_progress",
+                       "preference_receipts", "main_live_attempts")
+ACCOUNT_UI_FLAGS = ("management_controls_ready", "inactive_clone_created", "export_reply_correlated",
+    "active_account_replace_rejected", "new_import_completed", "automatic_restore_point_created",
+    "inactive_replace_completed", "restore_revision_matches", "next_start_selection_saved",
+    "original_selection_saved", "feedback_present", "fields_reenabled", "native_copy_queued",
+    "native_copy_bytes_match")
+ACCOUNT_NATIVE_FLAGS = ("export_picker_presented", "export_picker_cancelled", "archive_copy_sha256_verified",
+    "next_selection_pending_only", "original_runtime_preserved", "listeners_survived")
+ACCOUNT_STATE_FLAGS = ("all_seven_tables_nonempty", "archive_all_tables_exact", "new_import_all_tables_exact",
+    "restored_all_tables_exact", "unknown_response_blobs_exact", "source_account_preserved",
+    "original_account_preserved", "original_sessions_preserved", "source_session_preserved",
+    "target_session_invalidated", "original_selection_restored")
+ACCOUNT_UI_ACTIONS = ("accounts_status", "accounts_clone", "accounts_status", "accounts_export",
+    "accounts_preview", "accounts_import", "accounts_import", "accounts_status",
+    "accounts_preview", "accounts_import", "accounts_restore", "accounts_select", "accounts_select")
+
+
+def _normalized_account(bundle):
+    from copy import deepcopy
+    from idoly_local.state import State
+    value = deepcopy(bundle)
+    value["profile"] = "normalized"
+    for table, rows in value["tables"].items():
+        for row in rows:
+            row["name" if table == "profiles" else "profile"] = "normalized"
+    return State.account_bytes(value)
+
+
+class AccountFixtureHarness:
+    """Two explicit fixtures in inactive profiles of this invocation's owned Simulator.
+
+    This is test-only SQLite fixture production, never a product server command
+    and never evidence of actual game progression or Files row interaction.
+    """
+    def __init__(self, container, schema, *, nonce=None):
+        candidate=Path(container)
+        require(candidate.is_absolute() and candidate.is_dir() and not candidate.is_symlink(),"settings_account_fixture_failed")
+        self.container = candidate.resolve(strict=True)
+        self.documents = self.container/"Documents"
+        self.documents.mkdir(exist_ok=True)
+        require(self.documents.is_dir() and not self.documents.is_symlink(),"settings_account_fixture_failed")
+        self.root = self.container/"Library/Application Support/IdolyPrideLocal"
+        self.schema = schema
+        self.nonce = nonce if nonce is not None else uuid.uuid4().hex
+        require(type(self.nonce) is str and re.fullmatch(r"[0-9a-f]{32}", self.nonce), "settings_account_fixture_failed")
+        self.source = "probe-acct-" + self.nonce[:12] + "-clone"
+        self.target = "probe-acct-" + self.nonce[:12] + "-import"
+        self.input = self.documents/"probe-account-fixture.json"
+        self.request = self.documents/"embedded-probe-account-seed.json"
+        self.ack = self.documents/"embedded-probe-account-seed-ack.json"
+        self.archive = self.documents/("probe-account-" + self.nonce + ".zip")
+        for path in (self.input, self.request, self.ack, self.archive):
+            require(not path.exists() and not path.is_symlink(), "settings_account_fixture_failed")
+        self._write(self.input, {"schema": 1, "nonce": self.nonce})
+        self.created_ns = self.input.stat().st_mtime_ns
+        self.done, self.mode = {}, None
+        self.source_bundle = self.target_bundle = self.original_bundle = None
+        self.original_sessions = None
+        self.source_token = self.target_token = None
+        self.import_exact = False
+
+    @staticmethod
+    def _write(path, value):
+        raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        require(len(raw) <= 8192 and not path.is_symlink(), "settings_account_fixture_failed")
+        temporary = path.with_name("." + path.name + "." + uuid.uuid4().hex + ".tmp")
+        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+            require(not path.is_symlink(), "settings_account_fixture_failed")
+            os.replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _state(self, mode):
+        from idoly_local.state import State
+        path = self.root/("media-state.db" if mode == "media" else "state.db")
+        require(path.is_file() and not path.is_symlink() and path.stat().st_nlink == 1,
+                "settings_account_fixture_failed")
+        return State(path)
+
+    @staticmethod
+    def _sessions(state, profile):
+        with state.connect() as db:
+            return [tuple(row) for row in db.execute(
+                "SELECT token_hash,profile,expires_at FROM sessions WHERE profile=? ORDER BY token_hash", (profile,))]
+
+    def _fixture(self, state, profile, phase):
+        from copy import deepcopy
+        from idoly_local.state import State
+        from google.protobuf import message_factory
+        found = state.account_snapshot(profile)
+        require(found is not None, "settings_account_fixture_failed")
+        bundle, revision = found
+        bundle = deepcopy(bundle)
+        tables = bundle["tables"]
+        require(set(tables) == set(ACCOUNT_TABLES), "settings_account_fixture_failed")
+        suffix = PUBLIC_PROBE_FIELD if phase == "source" else PUBLIC_PROBE_FIELD[:-1] + b"\x02"
+        require(19000 not in self.schema.response_type("/api.User/Get").DESCRIPTOR.fields_by_number,
+                "settings_account_fixture_failed")
+        response = self.schema.response_type("/api.User/Get").FromString(tables["snapshots"][0]["response"])
+        if phase == "target": response.user.name = "ProbeB"
+        tables["snapshots"][0]["response"] = response.SerializeToString() + suffix
+        if not tables["starter_profiles"]:
+            tables["starter_profiles"] = [{"profile": profile, "version": 0}]
+        descriptors = {
+            "profile_settings": self.schema.request_type("/api.Home/Login").DESCRIPTOR.fields_by_name["settingInfo"].message_type,
+            "profile_lesson_progress": self.schema.response_type("/api.Activity/ReceiveLessonReward").DESCRIPTOR.fields_by_name["progress"].message_type,
+        }
+        for table, descriptor in descriptors.items():
+            require(19000 not in descriptor.fields_by_number, "settings_account_fixture_failed")
+            message = message_factory.GetMessageClass(descriptor)
+            raw = tables[table][0]["response"] if tables[table] else message().SerializeToString()
+            message.FromString(raw + suffix)
+            tables[table] = [{"profile": profile, "response": raw + suffix, "schema_sha256": self.schema.fingerprint}]
+        request_base = 8800000000000000001 if phase == "source" else 8800000000000000003
+        for table, path, index in (("preference_receipts", "/api.Photo/SwitchLock", 0),
+                                   ("main_live_attempts", "/api.Quest/Start", 1)):
+            message = self.schema.response_type(path)
+            require(19000 not in message.DESCRIPTOR.fields_by_number, "settings_account_fixture_failed")
+            row = {"profile": profile, "path": path, "request_id": str(request_base + index),
+                "request_sha256": hashlib.sha256((self.nonce + phase + table).encode()).hexdigest(),
+                "schema_sha256": self.schema.fingerprint, "response": message().SerializeToString() + suffix}
+            if table == "main_live_attempts":
+                row.update(master_version="probe-owned-account-fixture", ruleset="probe-account-state-v1",
+                           seed="17", started_time=1700000000000)
+            tables[table].append(row)
+            columns = ("profile", "path", "request_id") if table == "preference_receipts" else ("profile", "request_id")
+            tables[table].sort(key=lambda item: tuple(item[key] for key in columns))
+        State.validate_account(bundle)
+        require(all(tables[table] for table in ACCOUNT_TABLES), "settings_account_fixture_failed")
+        state.replace_account(profile, bundle, expected_revision=revision)
+        actual = state.account_snapshot(profile)
+        require(actual[0] == bundle, "settings_account_fixture_failed")
+        return actual
+
+    def process(self):
+        from idoly_local.account_manager import selection_status
+        try:
+            info = self.request.lstat()
+        except FileNotFoundError:
+            return
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and 0 < info.st_size <= 8192
+                and info.st_mtime_ns >= self.created_ns, "settings_account_fixture_failed")
+        raw = read_bounded(self.request, 8192)
+        request = parse_json(raw, 8192)
+        phase = request.get("phase")
+        require(phase in ("source", "target"), "settings_account_fixture_failed")
+        fingerprint = hashlib.sha256(raw).hexdigest()
+        if phase in self.done:
+            require(self.done[phase] == fingerprint, "settings_account_fixture_failed")
+            return
+        require(phase == ("source" if not self.done else "target"), "settings_account_fixture_failed")
+        require(set(request) == {"schema", "run_index", "nonce", "phase", "mode", "profile", "active_profile"}
+                and type(request.get("schema")) is int and request["schema"] == 1
+                and type(request.get("run_index")) is int and request["run_index"] == 0
+                and request.get("nonce") == hashlib.sha256((self.nonce + ":" + phase).encode()).hexdigest()[:32]
+                and request.get("mode") in ("normal", "media")
+                and request.get("profile") == (self.source if phase == "source" else self.target)
+                and request.get("active_profile") == "sandbox", "settings_account_fixture_failed")
+        mode = request["mode"]
+        require(self.mode in (None, mode) and self.root.is_dir() and not self.root.is_symlink()
+                and hashlib.sha256(read_bounded(self.root/"protocol/idolypride-6.1.1.pb", MAX_DESCRIPTOR)).hexdigest()
+                    == self.schema.fingerprint
+                and selection_status(self.root)["selected"][mode] == "sandbox", "settings_account_fixture_failed")
+        require(not self.ack.exists() and not self.ack.is_symlink(), "settings_account_fixture_failed")
+        self.mode = mode
+        state = self._state(mode)
+        current = state.account_snapshot("sandbox")
+        require(current is not None, "settings_account_fixture_failed")
+        if phase == "source":
+            self.original_bundle = current
+            self.original_sessions = self._sessions(state, "sandbox")
+            self.source_bundle = self._fixture(state, self.source, phase)
+            self.source_token, _identity = state.login(self.source)
+            bundle, revision = self.source_bundle
+        else:
+            require(state.account_snapshot("sandbox") == self.original_bundle, "settings_account_fixture_failed")
+            imported = state.account_snapshot(self.target)
+            self.import_exact = imported is not None and _normalized_account(imported[0]) == _normalized_account(self.source_bundle[0])
+            require(self.import_exact and self._sessions(state, self.target) == [], "settings_account_fixture_failed")
+            self.target_bundle = self._fixture(state, self.target, phase)
+            self.target_token, _identity = state.login(self.target)
+            bundle, revision = self.target_bundle
+        require(not self.ack.exists() and not self.ack.is_symlink(), "settings_account_fixture_failed")
+        ack = {"schema": 1, "ready": True, "phase": phase, "nonce": request["nonce"], "profile": request["profile"],
+            "mode": mode, "request_sha256": fingerprint, "bundle_revision": revision,
+            "normalized_sha256": hashlib.sha256(_normalized_account(bundle)).hexdigest(),
+            "table_rows": {table: len(bundle["tables"][table]) for table in ACCOUNT_TABLES},
+            "unknown_tables": list(ACCOUNT_BLOB_TABLES)}
+        self._write(self.ack, ack)
+        self.done[phase] = fingerprint
+
+    def verify_persisted(self):
+        from idoly_local.account_manager import selection_status
+        require(set(self.done) == {"source", "target"}, "settings_account_fixture_failed")
+        state = self._state(self.mode)
+        source, target = state.account_snapshot(self.source), state.account_snapshot(self.target)
+        checks = {"source_all_tables_persisted": source == self.source_bundle,
+            "restored_all_tables_persisted": target == self.target_bundle,
+            "source_session_preserved": state.authenticated(self.source_token,self.source),
+            "target_session_invalidated": not state.authenticated(self.target_token,self.target),
+            "original_selection_preserved": selection_status(self.root)["selected"][self.mode] == "sandbox"}
+        require(all(type(value) is bool and value is True for value in checks.values()), "settings_account_fixture_failed")
+        return {"schema":1,"observer":"runner-sqlite-after-five-cold-runs","seed_fixture_used":True,
+            "gameplay_tested":False,"checks":checks,"normalized_source_sha256":hashlib.sha256(_normalized_account(source[0])).hexdigest(),
+            "normalized_restored_sha256":hashlib.sha256(_normalized_account(target[0])).hexdigest()}
+
+    def verify(self, native):
+        import base64
+        from idoly_local.account_manager import selection_status
+        from idoly_local.state import State
+        require(set(self.done) == {"source", "target"} and self.mode is not None,
+                "settings_account_fixture_failed")
+        info = self.archive.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and 0 < info.st_size <= 128*1024**2,
+                "settings_account_fixture_failed")
+        fd = os.open(self.archive, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            sha = hashlib.file_digest(stream, "sha256").hexdigest()
+            stream.seek(0)
+            with ZipFile(stream) as archive:
+                members = archive.infolist()
+                require(len(members) == 2 and {row.filename for row in members} == {"manifest.json", "account.json"}
+                        and all(0 < row.file_size <= (16384 if row.filename == "manifest.json" else 96*1024**2)
+                                for row in members), "settings_account_fixture_failed")
+                manifest = parse_json(archive.read("manifest.json"), 16384)
+                account_bytes = archive.read("account.json")
+            after = os.fstat(stream.fileno())
+            require((before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns) ==
+                    (after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),
+                    "settings_account_fixture_failed")
+        require(sha == native.get("archive_sha256") and before.st_size == native.get("archive_bytes")
+                and manifest.get("kind") == "idoly-local-account" and manifest.get("mode") == self.mode
+                and manifest.get("profile") == self.source and manifest.get("account_bytes") == len(account_bytes)
+                and manifest.get("account_sha256") == hashlib.sha256(account_bytes).hexdigest(),
+                "settings_account_fixture_failed")
+        def unpack(value):
+            if type(value) is dict and set(value) == {"$bytes"}:
+                return base64.b64decode(value["$bytes"], validate=True)
+            return value
+        archived = json.loads(account_bytes, object_hook=unpack)
+        State.validate_account(archived)
+        state = self._state(self.mode)
+        source, target = state.account_snapshot(self.source), state.account_snapshot(self.target)
+        require(source is not None and target is not None, "settings_account_fixture_failed")
+        checks = {
+            "all_seven_tables_nonempty": all(self.source_bundle[0]["tables"][table] for table in ACCOUNT_TABLES),
+            "archive_all_tables_exact": archived == self.source_bundle[0],
+            "new_import_all_tables_exact": self.import_exact,
+            "restored_all_tables_exact": target == self.target_bundle,
+            "unknown_response_blobs_exact": all(
+                target[0]["tables"][table] == self.target_bundle[0]["tables"][table] for table in ACCOUNT_BLOB_TABLES),
+            "source_account_preserved": source == self.source_bundle,
+            "original_account_preserved": state.account_snapshot("sandbox") == self.original_bundle,
+            "original_sessions_preserved": self._sessions(state,"sandbox") == self.original_sessions,
+            "source_session_preserved": state.authenticated(self.source_token, self.source),
+            "target_session_invalidated": not state.authenticated(self.target_token, self.target),
+            "original_selection_restored": selection_status(self.root)["selected"][self.mode] == "sandbox",
+        }
+        # A positive row-count expression must become a true JSON boolean, not a list.
+        checks["all_seven_tables_nonempty"] = bool(checks["all_seven_tables_nonempty"])
+        require(all(type(value) is bool and value is True for value in checks.values()),
+                "settings_account_fixture_failed")
+        return {"observer": "runner-sqlite-and-archive", "seed_fixture_used": True, "gameplay_tested": False,
+            "checks": checks, "table_rows": {table: len(target[0]["tables"][table]) for table in ACCOUNT_TABLES},
+            "normalized_source_sha256": hashlib.sha256(_normalized_account(source[0])).hexdigest(),
+            "normalized_restored_sha256": hashlib.sha256(_normalized_account(target[0])).hexdigest(),
+            "archive_sha256": sha, "archive_bytes": before.st_size}
+
+
+def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None):
     documents = Path(container) / "Documents"
     final_name, waiting_name, _checkpoint_name = language_paths(expected_language,run_index)
     final, waiting = documents / final_name, documents / waiting_name
@@ -918,8 +1197,15 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None)
             raise
     while True:
         checked_remaining()
+        if account_fixture is not None:
+            account_fixture.process()
         try:
             observed = parse_json(read_bounded(final, MAX_JSON))
+            if account_fixture is not None:
+                menu = observed.get("menu_lifetime")
+                detail = menu.get("account_management") if type(menu) is dict else None
+                if type(detail) is dict:
+                    detail["state_observation"] = account_fixture.verify(detail)
             try:
                 checked = validate_report(observed)
                 expected_index = MATRIX_LANGUAGES.index(expected_language) if run_index is None else run_index
@@ -1124,6 +1410,136 @@ def attach_octo_budget_observation(error, value):
     policy_probe = octo_budget_probe_observation(value.get("octo_budget_probe")) if type(value) is dict else {}
     if policy_probe:
         error.native_octo_budget_probe = policy_probe
+
+
+
+def account_management_observation(value):
+    """Bounded test observations only: never profile keys, nonces, tokens or provider paths."""
+    if type(value) is not dict:
+        return {}
+    if value == {"performed": False, "reason": "first-cold-run-only"} and type(value.get("performed")) is bool:
+        return dict(value)
+    clean = {key: value[key] for key in ("performed", "seed_fixture_used", "gameplay_tested", "timed_out", "completed",
+        *ACCOUNT_NATIVE_FLAGS) if type(value.get(key)) is bool}
+    for key, expected in (("scope","stock-simulator"),("ui_trigger","dom-click"),("selection_trigger","delegate-callback")):
+        if value.get(key) == expected: clean[key] = expected
+    for key in ("archive_bytes","preview_picker_count"):
+        if type(value.get(key)) is int and 0 <= value[key] <= 128*1024**2: clean[key] = value[key]
+    if _hex_digest(value.get("archive_sha256")): clean["archive_sha256"] = value["archive_sha256"]
+    elapsed = value.get("elapsed_seconds")
+    if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0 <= elapsed <= 600: clean["elapsed_seconds"] = elapsed
+    if type(value.get("ui_flags")) is dict:
+        clean["ui_flags"] = {key:value["ui_flags"][key] for key in ACCOUNT_UI_FLAGS if type(value["ui_flags"].get(key)) is bool}
+    if type(value.get("ui_actions")) is list:
+        clean["ui_actions"] = [item for item in value["ui_actions"][:32] if item in ACCOUNT_UI_ACTIONS]
+    if type(value.get("preview_copies")) is list:
+        clean["preview_copies"] = [{key:row[key] for key in ("queued","copied_bytes","total_bytes")
+            if type(row.get(key)) is (bool if key=="queued" else int)}
+            for row in value["preview_copies"][:2] if type(row) is dict]
+    for phase in ("source","target"):
+        raw=value.get("fixture_"+phase)
+        if type(raw) is dict:
+            row={key:raw[key] for key in ("schema",) if type(raw.get(key)) is int}
+            if type(raw.get("ready")) is bool: row["ready"]=raw["ready"]
+            if raw.get("phase")==phase: row["phase"]=phase
+            for key in ("request_sha256","bundle_revision","normalized_sha256"):
+                if _hex_digest(raw.get(key)): row[key]=raw[key]
+            if type(raw.get("table_rows")) is dict:
+                row["table_rows"]={key:raw["table_rows"][key] for key in ACCOUNT_TABLES
+                    if type(raw["table_rows"].get(key)) is int and 0<=raw["table_rows"][key]<=20000}
+            if raw.get("unknown_tables")==list(ACCOUNT_BLOB_TABLES): row["unknown_tables"]=list(ACCOUNT_BLOB_TABLES)
+            clean["fixture_"+phase]=row
+    raw=value.get("state_observation")
+    if type(raw) is dict:
+        row={}
+        if raw.get("observer")=="runner-sqlite-and-archive": row["observer"]=raw["observer"]
+        for key in ("seed_fixture_used","gameplay_tested"):
+            if type(raw.get(key)) is bool: row[key]=raw[key]
+        if type(raw.get("checks")) is dict:
+            row["checks"]={key:raw["checks"][key] for key in ACCOUNT_STATE_FLAGS if type(raw["checks"].get(key)) is bool}
+        if type(raw.get("table_rows")) is dict:
+            row["table_rows"]={key:raw["table_rows"][key] for key in ACCOUNT_TABLES if type(raw["table_rows"].get(key)) is int}
+        for key in ("normalized_source_sha256","normalized_restored_sha256","archive_sha256"):
+            if _hex_digest(raw.get(key)): row[key]=raw[key]
+        if type(raw.get("archive_bytes")) is int: row["archive_bytes"]=raw["archive_bytes"]
+        clean["state_observation"]=row
+    code=value.get("error_code")
+    if type(code) is str and re.fullmatch(r"account_ui_[a-z_]{1,64}",code): clean["error_code"]=code
+    return clean
+
+
+def validate_account_management(value, run_index):
+    fail="settings_account_management_failed"
+    require(type(value) is dict,fail)
+    if run_index!=0:
+        require(value=={"performed":False,"reason":"first-cold-run-only"} and type(value.get("performed")) is bool,fail)
+        return dict(value)
+    require(value.get("performed") is True and value.get("scope")=="stock-simulator"
+        and value.get("ui_trigger")=="dom-click" and value.get("selection_trigger")=="delegate-callback"
+        and value.get("seed_fixture_used") is True and value.get("gameplay_tested") is False
+        and value.get("timed_out") is False and value.get("completed") is True
+        and all(value.get(key) is True for key in ACCOUNT_NATIVE_FLAGS)
+        and type(value.get("ui_flags")) is dict and all(value["ui_flags"].get(key) is True for key in ACCOUNT_UI_FLAGS)
+        and value.get("ui_actions")==list(ACCOUNT_UI_ACTIONS)
+        and type(value.get("preview_picker_count")) is int and value["preview_picker_count"]==2
+        and type(value.get("archive_bytes")) is int and 0<value["archive_bytes"]<=128*1024**2
+        and _hex_digest(value.get("archive_sha256"))
+        and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
+        and 0<=value["elapsed_seconds"]<=120,fail)
+    copies=value.get("preview_copies")
+    require(type(copies) is list and len(copies)==2 and all(type(row) is dict and row.get("queued") is True
+        and all(type(row.get(key)) is int and row[key]==value["archive_bytes"] for key in ("copied_bytes","total_bytes"))
+        for row in copies),fail)
+    for phase in ("source","target"):
+        fixture=value.get("fixture_"+phase)
+        require(type(fixture) is dict and type(fixture.get("schema")) is int and fixture["schema"]==1
+            and fixture.get("ready") is True and fixture.get("phase")==phase
+            and all(_hex_digest(fixture.get(key)) for key in ("request_sha256","bundle_revision","normalized_sha256"))
+            and type(fixture.get("table_rows")) is dict and set(fixture["table_rows"])==set(ACCOUNT_TABLES)
+            and all(type(count) is int and 1<=count<=20000 for count in fixture["table_rows"].values())
+            and fixture.get("unknown_tables")==list(ACCOUNT_BLOB_TABLES),fail)
+    require(value["fixture_source"]["normalized_sha256"]!=value["fixture_target"]["normalized_sha256"]
+        and value["fixture_source"]["request_sha256"]!=value["fixture_target"]["request_sha256"],fail)
+    observed=value.get("state_observation")
+    require(type(observed) is dict and observed.get("observer")=="runner-sqlite-and-archive"
+        and observed.get("seed_fixture_used") is True and observed.get("gameplay_tested") is False
+        and type(observed.get("checks")) is dict and all(observed["checks"].get(key) is True for key in ACCOUNT_STATE_FLAGS)
+        and type(observed.get("table_rows")) is dict and set(observed["table_rows"])==set(ACCOUNT_TABLES)
+        and all(type(count) is int for count in observed["table_rows"].values())
+        and observed["table_rows"]==value["fixture_target"]["table_rows"]
+        and observed.get("normalized_source_sha256")==value["fixture_source"]["normalized_sha256"]
+        and observed.get("normalized_restored_sha256")==value["fixture_target"]["normalized_sha256"]
+        and observed.get("archive_sha256")==value["archive_sha256"]
+        and type(observed.get("archive_bytes")) is int and observed["archive_bytes"]==value["archive_bytes"],fail)
+    return account_management_observation(value)
+
+
+
+ACCOUNT_PERSIST_FLAGS = ("source_all_tables_persisted", "restored_all_tables_persisted",
+    "source_session_preserved", "target_session_invalidated", "original_selection_preserved")
+
+
+def validate_account_management_after_relaunch(value, first_account_summary):
+    """Recheck runner observations against the first complete account proof."""
+    fail = "settings_account_management_failed"
+    first = first_account_summary
+    source = first.get("fixture_source") if type(first) is dict else None
+    target = first.get("fixture_target") if type(first) is dict else None
+    require(type(first) is dict and first.get("performed") is True and first.get("scope") == "stock-simulator"
+        and first.get("seed_fixture_used") is True and first.get("gameplay_tested") is False
+        and type(source) is dict and type(target) is dict
+        and _hex_digest(source.get("normalized_sha256")) and _hex_digest(target.get("normalized_sha256"))
+        and type(value) is dict and type(value.get("schema")) is int and value["schema"] == 1
+        and value.get("observer") == "runner-sqlite-after-five-cold-runs"
+        and value.get("seed_fixture_used") is True and value.get("gameplay_tested") is False
+        and type(value.get("checks")) is dict and set(value["checks"]) == set(ACCOUNT_PERSIST_FLAGS)
+        and all(value["checks"].get(key) is True for key in ACCOUNT_PERSIST_FLAGS)
+        and value.get("normalized_source_sha256") == source["normalized_sha256"]
+        and value.get("normalized_restored_sha256") == target["normalized_sha256"], fail)
+    return {"schema": 1, "observer": value["observer"], "seed_fixture_used": True, "gameplay_tested": False,
+        "checks": {key: value["checks"][key] for key in ACCOUNT_PERSIST_FLAGS},
+        "normalized_source_sha256": value["normalized_source_sha256"],
+        "normalized_restored_sha256": value["normalized_restored_sha256"]}
 
 
 def zip_roundtrip_observation(value):
@@ -1417,6 +1833,11 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
         roundtrip = zip_roundtrip_observation(roundtrip_raw)
         if roundtrip:
             result["zip_roundtrip"] = roundtrip
+        account_raw=observed.get("account_management")
+        if type(account_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
+            account_raw=observed["menu_lifetime"].get("account_management")
+        account=account_management_observation(account_raw)
+        if account: result["account_management"]=account
         budget = octo_budget_from_observation(observed)
         if budget:
             result["octo_budget"] = budget
@@ -1799,6 +2220,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
               "cleanup": {"shutdown": False, "delete": False}}
     created = None
     container = None
+    account_harness = None
     current_language = "ko"
     current_run_index = 0
     start = time.monotonic()
@@ -1854,6 +2276,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 path = candidate/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         container = candidate
+        account_harness = AccountFixtureHarness(container, schema)
         report["fresh_local_state_before_launch"] = True
         stage = "app_launch"
         try:
@@ -1869,7 +2292,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 report["launch_ack_diagnostic"] = error.tool_detail
             report["launch_ack_checkpoint"] = failure_checkpoint(container)
         stage = "startup_gate_report"
-        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0)
+        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0, account_fixture=account_harness)
         summaries = [validate_language_relaunch_report(report["native_probe"],"ko",run_index=0)]
         compare_language_canaries(summaries[0],"ko",canaries,report["language_canaries_sha256"])
         stage = "asset_listener"
@@ -1905,6 +2328,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         stage = "language_matrix"
         report["language_matrix"] = validate_language_matrix_report({"schema":2,"order":list(MATRIX_LANGUAGES),
             "preserved_app_container":True,"reports":summaries})
+        report["account_management_after_relaunch"] = validate_account_management_after_relaunch(
+            account_harness.verify_persisted(), report["native_probe"]["menu_lifetime"]["account_management"])
         report["status"] = "PASS"
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
