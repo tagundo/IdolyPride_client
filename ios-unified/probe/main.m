@@ -610,10 +610,10 @@ static void ProbeAutoSaveLanguage(WKWebView *web,NSString *next,NSString *effect
         @"(()=>{const s=document.getElementById('language'),f=document.getElementById('options-form'),"
          "h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.idolyServer;"
          "if(!s||!f||!h||typeof h.postMessage!=='function')return false;"
-         "if(!window.__idolyProbeTransportObserver){const original=h.postMessage;const observe=function(r){"
+         "if(h.postMessage!==window.__idolyProbeTransportObserver){const original=h.postMessage;const observe=function(r){"
          "if(r&&r.action==='save_options'&&Number.isInteger(r.id))window.__idolyProbeOptionsRequest={id:r.id,action:r.action,language:r.language};"
          "return original.apply(h,arguments);};h.postMessage=observe;if(h.postMessage!==observe)return false;"
-         "window.__idolyProbeTransportObserver=true;}"
+         "window.__idolyProbeTransportObserver=observe;}"
          "window.__idolyProbeOptionsRequest=null;window.__idolyProbeGameAck=null;"
          "s.value='%@';s.dispatchEvent(new Event('change',{bubbles:true}));return true;})()",next];
     [web evaluateJavaScript:setup completionHandler:^(id value,NSError *error){
@@ -621,10 +621,13 @@ static void ProbeAutoSaveLanguage(WKWebView *web,NSString *next,NSString *effect
         if (error || ![value isEqual:@YES]) { finish(@{@"ready":@NO,@"timed_out":@NO}); return; }
         NSString *poll=[NSString stringWithFormat:
             @"(()=>{const a=window.__idolyProbeGameAck,r=window.__idolyProbeOptionsRequest,f=document.getElementById('options-fields'),"
+             "s=document.getElementById('language'),h=window.webkit.messageHandlers.idolyServer,"
              "m=document.getElementById('options-save-feedback');const observed=!!r&&r.action==='save_options'&&r.language==='%@',"
              "correlated=observed&&!!a&&a.id===r.id,acknowledged=correlated&&a.language==='%@'&&a.effective==='%@',"
              "enabled=!!f&&!f.disabled,saved=!!m&&m.dataset.state==='saved';"
              "return {ready:acknowledged&&enabled&&saved,request_observed:observed,ack_correlated:correlated,acknowledged,"
+             "observer_matches_current_handler:!!h&&h.postMessage===window.__idolyProbeTransportObserver,"
+             "selected_language:s&&['ko','en','ja'].includes(s.value)?s.value:'unknown',"
              "options_fields_reenabled:enabled,form_feedback_saved:saved,request_id:r?r.id:0,ack_id:a?a.id:0,"
              "request_action:r&&r.action==='save_options'?'save_options':'unknown',"
              "request_language:r&&['ko','en','ja'].includes(r.language)?r.language:'unknown',"
@@ -1734,6 +1737,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
             @"request_id":ack[@"request_id"] ?: @0,@"ack_id":ack[@"ack_id"] ?: @0,
             @"request_action":ack[@"request_action"] ?: @"unknown",@"request_language":ack[@"request_language"] ?: @"unknown",
             @"request_observed":@([ack[@"request_observed"] isEqual:@YES]),@"ack_correlated":@([ack[@"ack_correlated"] isEqual:@YES]),
+            @"observer_matches_current_handler":@((BOOL)[ack[@"observer_matches_current_handler"] isEqual:@YES]),
+            @"selected_language":ack[@"selected_language"] ?: @"unknown",
             @"acknowledged":@([ack[@"acknowledged"] isEqual:@YES]),
             @"persisted_language":ack[@"persisted_language"] ?: @"unknown",@"effective_language":ack[@"effective_language"] ?: @"unknown",
             @"save_trigger":@"change-autosave",@"feedback_source":@"options-save-feedback",

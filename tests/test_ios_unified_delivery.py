@@ -78,7 +78,7 @@ def entry(name,size=1):
 def required_entries():
     names = (delivery.IPA,delivery.PACKAGE_REPORT,"SHA256SUMS","README.txt","simulator-smoke.json",
              "keyboard-lifecycle-native-test.json","local-http-native-test.json","octo-budget-native-test.json",
-             "unity-host-native-test.json","probe-build.json")
+             "unity-host-native-test.json","probe-build.json","server-data-upgrade.json")
     return [entry(name) for name in names]
 
 
@@ -252,9 +252,10 @@ def test_generated_canary_digest_binds_every_language(monkeypatch,tmp_path,chang
         ("IdolyUnityHost.h","IdolyUnityHost.m","UnityHostPolicy.h","UnityHostProfile.h","IdolyClientData.h","IdolyClientData.m")}}
     (tmp_path/"unity-host-native-test.json").write_text(json.dumps(report))
     descriptor = {"sha256":"c"*64}
+    monkeypatch.setattr(delivery,"_packaged_server_data_pin",lambda:{"bytes":12,"sha256":"a"*64})
     (tmp_path/"probe-build.json").write_text(json.dumps({"generated_language_canaries_sha256":digest,
         "copied_input_sha256":{"LocalServer/client-languages.zip":descriptor["sha256"],
-        "LocalServer/ServerData.zip":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}}))
+        "LocalServer/ServerData.zip":"a"*64}}))
     monkeypatch.setattr(delivery,"validate_probe_build_sources",lambda built:None)
     paths = ("Data/resources.assets","Data/Managed/Metadata/global-metadata.dat")
     language = {"languages":{code:{path:{"sha256":"e"*64,"bytes":17} for path in paths} for code in ("ko","en","ja")}}
@@ -362,3 +363,29 @@ def test_startup_sigpipe_policy_requires_actual_boolean_true(tmp_path,ignored):
         "sigpipe_ignored_before_server":ignored}}}}
     with pytest.raises(delivery.DeliveryError,match="sigpipe_not_ignored_before_server"):
         delivery.verify_language_proofs(smoke,tmp_path,None,None,None,None)
+
+
+def test_delivery_requires_upgraded_server_data_receipt_and_static_exact_pin(monkeypatch,tmp_path):
+    import json
+    from types import SimpleNamespace
+    proof={"schema":1,"recipe":"source-bound"};(tmp_path/"server-data-upgrade.json").write_text(json.dumps(proof))
+    monkeypatch.setattr(delivery,"_packaged_server_data_pin",lambda:{"bytes":1,"sha256":"b"*64})
+    seen=[]
+    def verify(value):assert value==proof;seen.append(value);return value
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(verify_upgrade_proof=verify))
+    delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":proof})
+    assert seen==[proof]
+    with pytest.raises(delivery.DeliveryError,match="server_data_upgrade_proof_differs"):
+        delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":{"schema":1,"recipe":"old-base"}})
+
+
+def test_delivery_cannot_substitute_missing_payload_pin_with_old_digest(monkeypatch,tmp_path):
+    import json
+    from types import SimpleNamespace
+    base={"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
+    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA}))
+    def missing():raise ValueError("love_server_data_pin_missing")
+    monkeypatch.setattr(delivery,"HERE",tmp_path)
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(base_pin=lambda:base,output_pin=missing))
+    with pytest.raises(delivery.DeliveryError,match="packaged_server_data_pin_unavailable"):
+        delivery._packaged_server_data_pin()

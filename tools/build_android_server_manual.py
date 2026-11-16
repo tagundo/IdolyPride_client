@@ -2,7 +2,7 @@
 """Build the native server with cached Android tools, without Gradle or Go.
 
 Use CPython 3.13, an exact committed source snapshot and a separately validated
-55-table public payload. Existing APKs and account files are never overwritten.
+source-pinned Love-enabled public payload. Existing APKs and account files are never overwritten.
 All Java processes are sequential, bounded and run with a single CPU/worker.
 """
 from __future__ import annotations
@@ -30,8 +30,10 @@ import zlib
 
 if __package__:
     from . import repack_android_server_python as pybundle
+    from . import love_server_data_pin as love_payload
 else:
     import repack_android_server_python as pybundle
+    import love_server_data_pin as love_payload
 
 
 PACKAGE = "game.qualiarts.idolypride.localserver"
@@ -741,6 +743,38 @@ def load_payload_inventory(path=None):
 
 
 def validate_payload(payload, expected_sha256, baseline_archive, *, catalog_inventory=None):
+    """Admit only the exact prepared native payload; no legacy/hash override path."""
+    pin = love_payload.load_pin()
+    approved = love_payload.output_pin()
+    if (type(expected_sha256) is not str or expected_sha256 != approved["sha256"]
+            or payload.stat().st_size != approved["bytes"]):
+        raise ValueError("Prepared Love payload pin differs")
+    directory = payload_directory_bounds(payload)
+    verified = love_payload.verify_payload(payload)
+    names = pin["output"]["master_json_table_names"]
+    if (pin["output"]["master_json_tables"] != 62 or len(names) != 62 or "LoveCatalog" not in names
+            or verified.get("master_json_tables") != 62 or verified.get("master_json_table_names") != names):
+        raise ValueError("Prepared Love payload must contain the exact 62 pinned JSON names")
+    with ZipFile(payload) as archive:
+        infos = pybundle._members(archive, pybundle.MAX_EXPANDED, member_limit=MAX_PAYLOAD_MEMBERS)
+        actual = sorted(name[len("data/master-json/"):-5] for name in infos
+                        if name.startswith("data/master-json/") and name.endswith(".json"))
+        if actual != names:
+            raise ValueError("Prepared Love payload JSON namespace differs")
+        report = json.loads(pybundle._read(archive, infos[PAYLOAD_MANIFEST], META_LIMIT), object_pairs_hook=pybundle._json_object)
+        tables = report.get("tables")
+        if (type(tables) is not dict or set(tables) != set(names)-{"LoveCatalog"}
+                or any(type(count) is not int or count < 0 for count in tables.values())):
+            raise ValueError("Prepared Love payload raw table counts differ")
+        if catalog_inventory is not None and report.get("prebuilt_catalogs") != catalog_inventory.get("prebuilt_catalogs"):
+            raise ValueError("Payload versioned public catalog provenance differs")
+    return {"sha256": approved["sha256"], "bytes": approved["bytes"], "tables": tables,
+            "master_json_table_names": names, "members": verified["entries"], "directory": directory,
+            "prebuilt_catalogs": report.get("prebuilt_catalogs"),
+            "server_data_provenance": pin["upgrade_proof"]}
+
+
+def _validate_legacy_base_structure(payload, expected_sha256, baseline_archive, *, catalog_inventory=None):
     """Preserve original public data and optionally add the frozen library catalog."""
     if (not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
             or payload.stat().st_size > MAX_PAYLOAD or pybundle.digest(payload) != expected_sha256):

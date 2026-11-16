@@ -63,6 +63,17 @@ jobs:
             tests/test_official_import.py
             tests/test_official_import_original_protocol.py
             tests/test_love_catalog.py
+            tests/test_love_translation.py
+            tests/test_stage_private_candidate.py
+            tests/test_love_server_data_pin.py
+            tests/test_love_server_data_pin_checked_in.py
+            tests/test_prepare_love_server_data.py
+            tests/test_build_android_server_manual.py
+            tests/test_android_server_capacity.py
+            tests/test_ios_unified_ci.py
+            tests/test_ios_unified_delivery.py
+            tests/test_ios_unified_packaging.py
+            tests/test_publish_optimized_release.py
             tests/test_build_server_payload.py
             tests/test_event_master_data.py
             tests/test_android_event_settings.py

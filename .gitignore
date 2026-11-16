@@ -26,3 +26,5 @@ private/
 !/data/love-reference.json
 !/data/love-adv-proof.json
 !/data/love-reference-NOTICE.txt
+!/data/love-server-overlay.zip
+!/data/love-server-data-pin.json

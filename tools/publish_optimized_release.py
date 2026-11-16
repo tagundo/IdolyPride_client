@@ -45,10 +45,10 @@ PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
                   "android": 900*MIB, "macos": 640*MIB, "ios-unified": 768*MIB}
 BINARY_LIMITS = {APK: 384*MIB, QA_APK: 384*MIB, MAC: 600*MIB, IPA: 600*MIB}
-COMMON_SOURCES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py","tools/release_event_contract.py"])
+COMMON_SOURCES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 TRANSLATION_SOURCES = ("public_payload.py", "bundled_translations.py", "resource_translation.py",
                        "resource_translation_runtime.py", "octo_manifest.py", "octo_runtime.py")
-DATA_PIN = {"bytes": 191343014, "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
+BASE_DATA_PIN = {"bytes": 191343014, "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
 TRANSLATION_PINS = {
     "android": {"bytes": 125709184, "sha256": "22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec"},
     "ios": {"bytes": 125717042, "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72"},
@@ -158,6 +158,10 @@ def module(name, path):
     sys.modules[name] = result
     spec.loader.exec_module(result)
     return result
+
+
+LOVE_SERVER_DATA = module("published_love_server_data_pin", ROOT/"tools/love_server_data_pin.py")
+DATA_PIN = LOVE_SERVER_DATA.output_pin()
 
 
 def configure_release(value):
@@ -395,6 +399,10 @@ def validate_platform(report, platform, source):
     source_pins(report.get("source_sha256"), source)
     inputs = report.get("inputs", {})
     pin(inputs.get("server_data"), DATA_PIN)
+    try:
+        LOVE_SERVER_DATA.verify_upgrade_proof(inputs.get("server_data_provenance"))
+    except ValueError:
+        raise ReleaseError("server_data_preparation_provenance_differs") from None
     translations = inputs.get("translations")
     target = "android" if platform == "android" else "ios"
     pin(translations, {**TRANSLATION_PINS[target], "platform": target, "included": True})
@@ -426,7 +434,7 @@ def validate_portable(report, source, directory):
          "portable_checks_not_passed")
     contracts = report.get("preference_master_contracts")
     need(type(contracts) is dict, "preference_contracts_missing")
-    pin(contracts.get("input"), DATA_PIN)
+    pin(contracts.get("input"), BASE_DATA_PIN)
     need(contracts.get("master_version") == "961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60"
          and contracts.get("selected_counts") == {"CardImage": 611, "Decoration": 361},
          "preference_contract_catalog_differs")

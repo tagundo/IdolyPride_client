@@ -22,7 +22,7 @@ class Application:
                  master_dir=None, *, experimental_main_live=False, live_engine=None,
                  dream_catalog_path=None, pvp_catalog_path=None,
                  photo_scene_access=None, photo_image_urls=None, media_mode=False, media_settings=None,
-                 event_settings=None):
+                 event_settings=None, love_display_text=None):
         if type(experimental_main_live) is not bool:
             raise ValueError("Experimental main live must be an explicit boolean")
         if type(media_mode) is not bool:
@@ -97,7 +97,8 @@ class Application:
         self.photo_preferences = PhotoPreferences(schema, state, profile)
         self.profile_favorites = ProfileFavorites(schema, state, profile, master_dir)
         from .love import Love
-        self.love = Love(schema, state, profile, master_dir, event_settings=event_settings, media_mode=media_mode)
+        self.love = Love(schema, state, profile, master_dir, event_settings=event_settings,
+                         media_mode=media_mode, display_text=love_display_text)
         self.dream = Dream(schema, state, profile, master_dir, catalog_path=dream_catalog_path)
         self.pvp = Pvp(schema, state, profile, master_dir, catalog_path=pvp_catalog_path)
         self.photo_shootings = PhotoShootings(schema, state, profile, master_dir,

@@ -146,6 +146,7 @@ def platform_report(platform):
               "binary": {"name": publisher.APK if platform == "android" else publisher.MAC, "bytes": 1, "sha256": HASH},
               "source_sha256": {name: HASH for name in publisher.COMMON_SOURCES},
               "inputs": {"server_data": deepcopy(publisher.DATA_PIN),
+                         "server_data_provenance": deepcopy(publisher.LOVE_SERVER_DATA.load_pin()["upgrade_proof"]),
                          "translations": {**translations, "platform": "android" if platform == "android" else "ios", "included": True}},
               "validation": validation,
               "execution": {"actual_macos_execution": platform == "macos",
@@ -955,3 +956,17 @@ def test_reused_companion_renaming_preserves_original_build_provenance(source_re
         if key not in ("name", "path"):
             assert staged[key] == value
     assert staged["version"] == "0.3.31" and staged["fresh_source_build_claimed"] is False
+
+
+@pytest.mark.parametrize("platform", ["android", "macos"])
+@pytest.mark.parametrize("case", ["missing", "changed-base", "changed-source", "extra-claim"])
+def test_native_payload_requires_the_exact_source_bound_upgrade_proof(monkeypatch, platform, case):
+    monkeypatch.setattr(publisher, "blob_sha", lambda source, name: HASH)
+    report = platform_report(platform)
+    proof = report["inputs"]["server_data_provenance"]
+    if case == "missing": del report["inputs"]["server_data_provenance"]
+    elif case == "changed-base": proof["base"]["sha256"] = "f"*64
+    elif case == "changed-source": proof["component_sources_sha256"] = "f"*64
+    else: proof["unverified_claim"] = True
+    with pytest.raises(publisher.ReleaseError, match="preparation_provenance"):
+        publisher.validate_platform(report, platform, SOURCE)

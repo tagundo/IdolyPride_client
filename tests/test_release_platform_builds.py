@@ -214,3 +214,65 @@ def test_native_event_scope_cannot_be_replaced_by_a_summary_flag(field, value):
     report["native_event_settings"][field] = value
     with pytest.raises(builds.BuildError, match="native_event_settings"):
         builds.validate_android_qa(report)
+
+
+@pytest.mark.parametrize("damage", [None, "base", "proof", "output", "overlay"])
+def test_native_inputs_use_only_verified_prepared_payload_with_original_donor_unchanged(monkeypatch, tmp_path, damage):
+    from types import SimpleNamespace
+    import shutil
+    old, translated, prepared = b"old immutable base", b"unchanged translations", b"new source prepared payload"
+    digest = lambda raw: {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+    donor = tmp_path / "original-donor.zip"
+    with ZipFile(donor, "w") as archive:
+        archive.writestr("assets/ServerData.zip", old)
+        archive.writestr("assets/bundledTranslations.zip", translated)
+    donor_raw = donor.read_bytes()
+    monkeypatch.setattr(builds, "DONORS", {"android": {**digest(donor_raw), "prefix": "assets/"}})
+    monkeypatch.setattr(builds, "BASE_SERVER_DATA", digest(old))
+    monkeypatch.setattr(builds, "SERVER_DATA", digest(prepared))
+    monkeypatch.setattr(builds, "TRANSLATIONS", {"android": digest(translated)})
+    proof = {"schema": 1, "status": "PASS", "synthetic": "recording-contract"}
+    repo = tmp_path / "repo"; (repo / "data").mkdir(parents=True)
+    overlay = repo / "data/love-server-overlay.zip"; overlay.write_bytes(b"fixed synthetic overlay")
+    monkeypatch.setattr(builds, "ROOT", repo)
+    seen = []
+    def verify_overlay(path):
+        assert path == overlay and path.read_bytes() == b"fixed synthetic overlay"
+        assert damage != "overlay", "fixed_overlay_pin_differs"
+        seen.append(("overlay",))
+    def upgrade(base, output, *, overlay_zip, report_path):
+        assert overlay_zip == overlay
+        assert base.read_bytes() == old and not output.exists()
+        seen.append(("prepare", base.name, output.name))
+        output.write_bytes(b"wrong output" if damage == "output" else prepared)
+        if damage == "base": base.write_bytes(b"altered base")
+        return dict(proof, synthetic="changed") if damage == "proof" else dict(proof)
+    def verify_report(value):
+        assert value == proof, "fixed_preparation_proof_differs"
+        seen.append(("proof",))
+        return dict(value)
+    def verify_payload(path):
+        assert path.read_bytes() == prepared, "fixed_payload_pin_differs"
+        seen.append(("payload",))
+        return digest(prepared)
+    monkeypatch.setattr(builds, "LOVE_SERVER_DATA", SimpleNamespace(base_pin=lambda: digest(old),
+        verify_upgrade_proof=verify_report, verify_payload=verify_payload, verify_overlay=verify_overlay))
+    def load(name, path):
+        if str(path).endswith("fetch_inputs.py"):
+            return SimpleNamespace(lfs_download=lambda record, target: shutil.copyfile(donor, target))
+        assert str(path).endswith("prepare_love_server_data.py")
+        return SimpleNamespace(upgrade_server_data=upgrade)
+    monkeypatch.setattr(builds, "module", load)
+    work = tmp_path / "work"; work.mkdir()
+    destination = work / "inputs"
+    if damage:
+        with pytest.raises((AssertionError, builds.BuildError)):
+            builds.fetch_public_inputs("android", destination, work, Guard())
+    else:
+        report = builds.fetch_public_inputs("android", destination, work, Guard())
+        assert report["server_data"] == digest(prepared) and report["server_data_provenance"] == proof
+        assert (destination / "BaseServerData.zip").read_bytes() == old
+        assert (destination / "ServerData.zip").read_bytes() == prepared
+        assert (destination / "bundledTranslations.zip").read_bytes() == translated
+        assert seen == [("overlay",), ("prepare", "BaseServerData.zip", "ServerData.zip"), ("proof",), ("payload",)]
+    assert donor.read_bytes() == donor_raw

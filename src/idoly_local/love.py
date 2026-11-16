@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import copy
 import datetime
+import hashlib
 import json
+import os
+import stat
 from pathlib import Path
 import re
 import time
@@ -138,10 +141,97 @@ def _day(now):
     return datetime.datetime.fromtimestamp((now + _JST)/1000,datetime.timezone.utc).date().isoformat()
 
 
+_MAX_DISPLAY_TEXT = 4 * 1024 * 1024
+
+
+def _display_pairs(items):
+    result = {}
+    for key, value in items:
+        if key in result:
+            raise ValueError("love_display_text_invalid")
+        result[key] = value
+    return result
+
+
+def _display_read(path, maximum):
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= maximum:
+            raise ValueError("love_display_text_invalid")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(maximum + 1)
+        if len(raw) != info.st_size:
+            raise ValueError("love_display_text_invalid")
+        return raw
+    finally:
+        os.close(descriptor)
+
+
+def _display_map(value):
+    if type(value) is not dict or len(value) > 32768:
+        raise ValueError("love_display_text_invalid")
+    total = 0
+    result = {}
+    for source, target in value.items():
+        if (type(source) is not str or type(target) is not str or not source
+                or "\0" in source or "\0" in target):
+            raise ValueError("love_display_text_invalid")
+        source_bytes, target_bytes = len(source.encode("utf-8")), len(target.encode("utf-8"))
+        if source_bytes > 4096 or target_bytes > 16384:
+            raise ValueError("love_display_text_invalid")
+        total += source_bytes + target_bytes
+        if total > _MAX_DISPLAY_TEXT:
+            raise ValueError("love_display_text_invalid")
+        if target:
+            result[source] = target
+    return result
+
+
+def load_display_text(cache_root, *, language, platform):
+    """Read existing exact generic translations once; never translate game data.
+
+    Optional absent text groups retain Japanese. Corrupt or substituted groups
+    fail with a fixed code. The normal resource installer owns their immutable
+    outer package pin; this reader also verifies the inner text pack hash.
+    """
+    if language not in ("ja", "ko", "en") or platform not in ("android", "ios"):
+        raise ValueError("love_display_text_invalid")
+    if language == "ja":
+        return {}
+    from .bundled_translations import resolve_translation_root
+    try:
+        root = resolve_translation_root(cache_root, platform=platform) / language
+        if root.is_symlink():
+            raise ValueError("love_display_text_invalid")
+        pack_path, manifest_path = root / "text.json", root / "text-manifest.json"
+        if not os.path.lexists(pack_path) and not os.path.lexists(manifest_path):
+            return {}
+        report = json.loads(_display_read(manifest_path, 128 * 1024).decode("utf-8"),
+                            object_pairs_hook=_display_pairs)
+        record = report.get("pack") if type(report) is dict else None
+        if (report.get("schema") != 1 or type(report.get("schema")) is not int
+                or report.get("language") != language or type(record) is not dict
+                or set(record) != {"name", "bytes", "sha256"} or record["name"] != "text.json"
+                or type(record["bytes"]) is not int or not 0 < record["bytes"] <= _MAX_DISPLAY_TEXT
+                or type(record["sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", record["sha256"])):
+            raise ValueError("love_display_text_invalid")
+        raw = _display_read(pack_path, _MAX_DISPLAY_TEXT)
+        if len(raw) != record["bytes"] or hashlib.sha256(raw).hexdigest() != record["sha256"]:
+            raise ValueError("love_display_text_invalid")
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_display_pairs)
+        if (type(data) is not dict or set(data) != {"schema", "language", "ui", "generic", "split", "phone"}
+                or type(data["schema"]) is not int or data["schema"] != 1 or data["language"] != language):
+            raise ValueError("love_display_text_invalid")
+        return _display_map(data["generic"])
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, UnicodeError, RecursionError):
+        raise ValueError("love_display_text_invalid") from None
+
+
 class Love:
     """Seventeen original RPCs, limited to locally scheduled, validated rules."""
     def __init__(self, schema, state, profile, master_dir, *, catalog_path=None,
-                 event_settings=None, clock=None, media_mode=False):
+                 event_settings=None, clock=None, media_mode=False, display_text=None):
         self.schema, self.state, self.profile = schema, state, profile
         self.master_dir, self.catalog_path = master_dir, catalog_path
         self.catalog = _Catalog(master_dir)
@@ -150,6 +240,10 @@ class Love:
         self.clock = clock or (lambda: time.time_ns() // 1000000)
         self.media_mode = media_mode is True
         self._prepared = None
+        self._display_text = _display_map(display_text) if display_text is not None else {}
+
+    def _text(self, original):
+        return self._display_text.get(original, original)
 
     @staticmethod
     def handles(path):
@@ -340,7 +434,7 @@ class Love:
 
     def _info(self, snapshot, identity, event, schedule, now):
         cls = message_factory.GetMessageClass(self.schema.pool.FindMessageTypeByName("api.LoveInfo"))
-        info = cls(loveId=identity,description=event["description"],assetId=event.get("assetId",identity),
+        info = cls(loveId=identity,description=self._text(event["description"]),assetId=event.get("assetId",identity),
             baseType=event.get("baseType",1),type=2 if schedule["end_time_ms"] else 1,
             startTime=schedule["start_time_ms"],endTime=schedule["end_time_ms"],
             unlockConditionId=event["unlockConditionId"],isUnlocked=self._unlocked(snapshot,event),
@@ -360,7 +454,7 @@ class Love:
         info.limitedEventMissionIds.extend(event.get("limitedEventMissionIds",[]))
         unlocked = set(love.unlockedLoveStoryEndIDs) if love else set()
         for ending in event["endings"]:
-            info.storyEndInfos.add(id=ending["id"],name=ending["name"],unlocked=self.media_mode or ending["id"] in unlocked)
+            info.storyEndInfos.add(id=ending["id"],name=self._text(ending["name"]),unlocked=self.media_mode or ending["id"] in unlocked)
         return info
 
     def home_info(self, snapshot=None):
@@ -378,7 +472,7 @@ class Love:
             if event is None:
                 _fail("event_unsupported",RpcCode.UNIMPLEMENTED)
             info = self._info(snapshot,identity,event,schedule,now)
-            row = entry_cls(id=identity,name=event["name"],startTime=info.startTime,endTime=info.endTime,
+            row = entry_cls(id=identity,name=self._text(event["name"]),startTime=info.startTime,endTime=info.endTime,
                 bannerAssetId=event["bannerAssetId"],order=order,unlockConditionId=info.unlockConditionId,
                 isUnlocked=info.isUnlocked,isLessonRewardMax=info.isLessonRewardMax,
                 isUnplayed=info.isUnplayed,hasHiddenFavorabilityObtainItem=info.hasHiddenFavorabilityObtainItem,
@@ -576,7 +670,7 @@ class Love:
             matches=[row for row in event["endings"] if row["id"]==end_id]
             if len(matches)!=1:_fail("ending_unsupported",RpcCode.UNIMPLEMENTED)
             ending=matches[0]
-            result.storyEndName=ending["name"];result.endRollAssetId=ending.get("endRollAssetId","")
+            result.storyEndName=self._text(ending["name"]);result.endRollAssetId=ending.get("endRollAssetId","")
             if end_id not in love.unlockedLoveStoryEndIDs:
                 # Inferred first-ending favorability is metadata only. It is
                 # not accrued to actual account state without official proof.
@@ -600,7 +694,7 @@ class Love:
         target.statusType=2;updated.stories.add().CopyFrom(target)
 
     def _top(self,result,snapshot,event,data,love):
-        result.loveName=event["name"];result.playerName=data["player_name"];result.exp=data["exp"]
+        result.loveName=self._text(event["name"]);result.playerName=data["player_name"];result.exp=data["exp"]
         self._lesson_progress(result.lessonProgress,event,data)
         result.storyEpisodeIds.extend(data["path"])
         result.saveInfo.unlocked=self.media_mode or bool(love.unlockedLoveStoryEndIDs)
@@ -612,7 +706,7 @@ class Love:
         result.itemInfo.lessonPromoteItemId=event["promoteItemId"]
         result.hiddenFavorability=max(0,love.hiddenFavorability)
         for end in event["endings"]:
-            result.storyEndInfos.add(id=end["id"],name=end["name"],unlocked=self.media_mode or end["id"] in love.unlockedLoveStoryEndIDs)
+            result.storyEndInfos.add(id=end["id"],name=self._text(end["name"]),unlocked=self.media_mode or end["id"] in love.unlockedLoveStoryEndIDs)
         level=self._level(event,data["exp"])["level"]
         for row in event["levels"]:
             if row["level"]>((level+5)//5)*5:continue
@@ -622,7 +716,7 @@ class Love:
             for hint,required in event["hintUnlockLevels"].items():
                 if required==row["level"]:info.unlockLoveHintType=int(hint)
         result.bannerAssetId=event["bannerAssetId"];result.expAssetId=event.get("expAssetId","exp-"+event["loveId"])
-        result.loveSimpleName=event.get("simpleName","");result.mainCharacterInfo.CopyFrom(self._main_character(event))
+        result.loveSimpleName=self._text(event.get("simpleName",""));result.mainCharacterInfo.CopyFrom(self._main_character(event))
         result.noticeInfo.SetInParent()
         groups=self.catalog.ids("EventMission")
         users={row.missionId:row for row in snapshot.missions}

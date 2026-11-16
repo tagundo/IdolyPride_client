@@ -3760,3 +3760,47 @@ def test_account_fixture_rejects_lost_love_progress_even_when_seven_old_tables_s
         observer.verify(native)
     with pytest.raises(probe.ProbeError,match="settings_account_fixture_failed"):
         observer.verify_persisted()
+
+
+@pytest.mark.parametrize("rotated",[False,True])
+def test_actual_language_observer_tracks_each_handler_identity_and_rejects_previous_save_ack(rotated):
+    import re
+    import subprocess
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    hook_source=source.split('static NSString *const ProbeReplyHook =',1)[1].split('static void ProbePollLanguageAttempt',1)[0]
+    saving=source.split('static void ProbeAutoSaveLanguage(',1)[1].split('static NSString *ProbeChromeTitle',1)[0]
+    setup_source=saving.split('NSString *setup=[ProbeReplyHook stringByAppendingFormat:',1)[1].split(',next];',1)[0]
+    extract=lambda value:"".join(json.loads(item) for item in re.findall(r'@?("(?:\\.|[^"\\])*")',value))
+    hook=extract(hook_source);setup=extract(setup_source)
+    program="const rotated="+json.dumps(rotated)+";const hook="+json.dumps(hook)+";const setup="+json.dumps(setup)+r""";
+const assert=require('node:assert/strict');let serial=0;const sent=[];
+function freshHandler(){return {postMessage(value){sent.push(value);}};}
+const window={webkit:{messageHandlers:{idolyServer:freshHandler()}},idolyServerReply(){}};
+class Event{constructor(type,options){this.type=type;this.bubbles=options.bubbles;}}
+const select={value:'ko',dispatchEvent(event){assert.equal(event.type,'change');assert.equal(event.bubbles,true);
+ window.webkit.messageHandlers.idolyServer.postMessage({id:++serial,action:'save_options',language:this.value});}};
+const form={},document={getElementById(id){return id==='language'?select:id==='options-form'?form:null;}};
+function run(language){assert.equal(eval(hook+setup.replace('%@',language)),true);}
+function reply(id,language){window.idolyServerReply(id,{id,ok:true,result:{options:{language},effective_options:{language:'ko'}}});}
+run('en');assert.equal(sent.length,1);const first=window.__idolyProbeOptionsRequest;assert.equal(first.language,'en');
+reply(first.id,'en');assert.equal(window.__idolyProbeGameAck.id,first.id);
+if(rotated)window.webkit.messageHandlers.idolyServer=freshHandler();
+run('ko');assert.equal(sent.length,2,'each real save forwarded exactly once');const second=window.__idolyProbeOptionsRequest;
+assert.equal(second.language,'ko');assert.notEqual(first.id,second.id);assert.equal(window.__idolyProbeGameAck,null);
+reply(first.id,'en');assert.equal(window.__idolyProbeGameAck,null,'previous save ACK cannot own the new save');
+reply(second.id,'ko');assert.deepEqual(window.__idolyProbeGameAck,{id:second.id,language:'ko',effective:'ko'});
+assert.equal(select.value,'ko');assert.equal(window.webkit.messageHandlers.idolyServer.postMessage,window.__idolyProbeTransportObserver);
+"""
+    checked=subprocess.run(["node"],input=program,text=True,capture_output=True,timeout=5)
+    assert checked.returncode==0,checked.stderr
+
+
+def test_language_observer_identity_diagnostics_are_finite_and_preserve_fifth_run_context():
+    observation={"selected_language":"ko","observer_matches_current_handler":False,"request_observed":False,"timed_out":True,
+        "raw_handler":"DO-NOT-EXPORT"}
+    projected=probe.language_save_observation(observation)
+    assert projected["selected_language"]=="ko" and projected["observer_matches_current_handler"] is False
+    summary=probe.safe_failure_summary({"error":"language_save_failed","failed_run_index":4,
+        "native_checkpoint":{"stage":"settings_official_prompt_checked","language_observation":{"language_save":observation}}})
+    assert summary["run_index"]==4 and summary["native"]["language_save"]==projected
+    assert "DO-NOT-EXPORT" not in json.dumps(summary)

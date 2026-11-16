@@ -285,7 +285,7 @@ def test_payload_extends_only_fifteen_public_tables_and_verifies_actual_file_pro
     baseline, payload, _files, write = payload_case
     digest = write()
     with ZipFile(baseline) as archive:
-        report = tool.validate_payload(payload, digest, archive)
+        report = tool._validate_legacy_base_structure(payload, digest, archive)
     assert len(report["tables"]) == 55 and report["sha256"] == digest
 
 
@@ -314,9 +314,9 @@ def test_versioned_payload_catalog_is_bound_to_external_frozen_inventory(payload
     with ZipFile(baseline) as archive:
         if change:
             with pytest.raises(ValueError, match="catalog|provenance"):
-                tool.validate_payload(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
+                tool._validate_legacy_base_structure(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
         else:
-            report = tool.validate_payload(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
+            report = tool._validate_legacy_base_structure(payload, tool.pybundle.digest(payload), archive, catalog_inventory=inventory)
             assert report["prebuilt_catalogs"] == inventory["prebuilt_catalogs"]
             assert report["members"] == len(files) + 1
 
@@ -335,7 +335,7 @@ def test_payload_rejects_private_extra_mutated_old_or_incomplete_tables(payload_
         files["data/master-json/StoryPart.json"] = b"[]"
     digest = write(files)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
-        tool.validate_payload(payload, digest, archive)
+        tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 @pytest.mark.parametrize("table", ["CompanyGrade", "CompanyTrustLevel", "CompanyEnjoyCharacterLevel",
@@ -350,7 +350,7 @@ def test_company_menu_public_tables_must_all_exist_and_be_nonempty(payload_case,
             files.pop("data/master-json/" + table + ".json")
         digest = write(files)
         with ZipFile(baseline) as archive, pytest.raises(ValueError):
-            tool.validate_payload(payload, digest, archive)
+            tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 @pytest.mark.parametrize("change", ["missing-tag", "missing-pack", "extra-pack", "version", "unrelated-pack", "photo-default"])
@@ -375,7 +375,7 @@ def test_media_master_overlay_members_and_original_constraints_are_strict(payloa
         files[name] = json.dumps(rows).encode()
     digest = write(files)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
-        tool.validate_payload(payload, digest, archive)
+        tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 def test_approved_payload_hash_rejects_changed_encrypted_overlay_bytes(payload_case):
@@ -385,7 +385,7 @@ def test_approved_payload_hash_rejects_changed_encrypted_overlay_bytes(payload_c
     changed[next(iter(tool.media_master.PACK_MEMBERS.values()))] = b"z" * 4096
     write(changed)
     with ZipFile(baseline) as archive, pytest.raises(ValueError, match="hash differs"):
-        tool.validate_payload(payload, approved, archive)
+        tool._validate_legacy_base_structure(payload, approved, archive)
 
 
 @pytest.mark.parametrize("change", ["file-hash", "row-count-bool", "duplicate-path", "wrong-hash", "duplicate-member"])
@@ -406,7 +406,7 @@ def test_payload_rejects_forged_manifest_hash_and_duplicate_zip_members(payload_
             archive.writestr("data/master-json/StoryPart.json", b"[]")
     digest = "0" * 64 if change == "wrong-hash" else tool.pybundle.digest(payload)
     with ZipFile(baseline) as archive, pytest.raises(ValueError):
-        tool.validate_payload(payload, digest, archive)
+        tool._validate_legacy_base_structure(payload, digest, archive)
 
 
 @pytest.mark.parametrize("compression", [ZIP_STORED, ZIP_DEFLATED])
@@ -988,3 +988,36 @@ def test_unsupported_cache_hint_still_runs_the_unchanged_memory_guard_before_spa
         tool._run(["must-not-run"], root=tmp_path, env={}, cache=cache)
     assert order == ["advice", "strict-guard"]
     assert tool.MIN_HEADROOM == 1024 * 1024 * 1024
+
+
+@pytest.mark.parametrize("damage", [None, "legacy-sha", "table-count", "namespace", "raw-counts"])
+def test_native_manual_payload_requires_exact_new_pin_and_all_62_json_names(tmp_path, monkeypatch, damage):
+    from types import SimpleNamespace
+    names = sorted(["LoveCatalog", *["Raw"+str(index).zfill(2) for index in range(61)]])
+    tables = {name: 1 for name in names if name != "LoveCatalog"}
+    manifest = {"tables": tables, "prebuilt_catalogs": None}
+    if damage == "raw-counts": manifest["tables"]["Raw00"] = True
+    files = {"data/master-json/"+name+".json": b"{}" if name == "LoveCatalog" else b'[{}]' for name in names}
+    files[tool.PAYLOAD_MANIFEST] = json.dumps(manifest).encode()
+    payload = tmp_path / "new-payload.zip"; payload.write_bytes(zip_bytes(files))
+    approved = {"bytes": payload.stat().st_size, "sha256": tool.pybundle.digest(payload)}
+    output = {**approved, "entries": len(files), "master_json_tables": 62, "master_json_table_names": names}
+    pin = {"output": output, "upgrade_proof": {"synthetic": "exact fixed preparation proof"}}
+    verified = dict(output)
+    if damage == "table-count": verified["master_json_tables"] = 55
+    elif damage == "namespace": verified["master_json_table_names"] = sorted(["WrongCatalog", *names[1:]])
+    seen = []
+    def verify(path):
+        assert path == payload and tool.pybundle.digest(path) == approved["sha256"]
+        seen.append("whole-payload-verified")
+        return verified
+    monkeypatch.setattr(tool, "love_payload", SimpleNamespace(load_pin=lambda: pin, output_pin=lambda: approved,
+                                                             verify_payload=verify))
+    expected = "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223" if damage == "legacy-sha" else approved["sha256"]
+    if damage:
+        with pytest.raises(ValueError): tool.validate_payload(payload, expected, object())
+        if damage == "legacy-sha": assert seen == []
+    else:
+        result = tool.validate_payload(payload, expected, object())
+        assert result["master_json_table_names"] == names and len(result["tables"]) == 61
+        assert result["server_data_provenance"] == pin["upgrade_proof"] and seen == ["whole-payload-verified"]

@@ -238,5 +238,9 @@
     "idoly_local.tutorial_progression",
     "idoly_local.tutorial_replay",
     "idoly_local.wardrobe_diagnostics"
-  ]
+  ],
+  "packaged_server_data": {
+    "pin": "../data/love-server-data-pin.json",
+    "policy": "love-source-overlay-v1"
+  }
 }

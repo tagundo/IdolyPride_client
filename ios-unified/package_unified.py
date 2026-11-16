@@ -17,6 +17,41 @@ from packaging_common import *
 HERE = Path(__file__).resolve().parent
 LOAD_PATH = '@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer'
 UNITY = 'Frameworks/UnityFramework.framework/UnityFramework'
+PACKAGED_SERVER_DATA = {'pin':'../data/love-server-data-pin.json','policy':'love-source-overlay-v1'}
+
+
+def _packaging_manifest(manifest):
+    if manifest is None:
+        manifest=json.loads((HERE/'runtime_inputs.json').read_text())
+        require(manifest.get('packaged_server_data')==PACKAGED_SERVER_DATA,'Pinned upgraded server data is required')
+    return manifest
+
+
+def _packaged_pin_module():
+    spec=importlib.util.spec_from_file_location('ios_packaged_love_server_data_pin',HERE.parent/'tools/love_server_data_pin.py')
+    module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+    return module
+
+
+def server_data_provenance(server_data, manifest, proof_path=None):
+    # Explicit synthetic manifests remain useful to the portable packaging
+    # fixtures. CLI/default production manifests always require the static pin.
+    if 'packaged_server_data' not in manifest:
+        verify_file(server_data,manifest['inputs']['server_data'])
+        return None
+    require(manifest['packaged_server_data']==PACKAGED_SERVER_DATA,'Packaged server data policy differs')
+    verifier=_packaged_pin_module()
+    require(manifest['inputs']['server_data']==verifier.base_pin(),'Server data base pin differs')
+    verify_file(server_data,verifier.output_pin())
+    verifier.verify_overlay(HERE.parent/'data/love-server-overlay.zip')
+    verifier.verify_payload(server_data)
+    require(proof_path is not None,'Server data upgrade proof is required')
+    proof_path=Path(proof_path)
+    require(regular(proof_path).st_size<=512*1024,'Server data upgrade proof exceeds bound')
+    proof=json.loads(proof_path.read_bytes(),object_pairs_hook=_json_pairs,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError('Nonfinite server data proof')))
+    return verifier.verify_upgrade_proof(proof)
+
 
 
 def _json_pairs(items):
@@ -123,9 +158,10 @@ def runtime_files(root, target, manifest):
     return files, report
 
 
-def bundle_files(runtime_root, native_framework, server_data, translations, target, manifest, web_root=None, *, allow_unsigned_native=False, client_languages=None, client_languages_metadata=None):
+def bundle_files(runtime_root, native_framework, server_data, translations, target, manifest, web_root=None, *, allow_unsigned_native=False, client_languages=None, client_languages_metadata=None, server_data_upgrade_proof=None):
     files, runtime = runtime_files(runtime_root, target, manifest)
-    verify_file(server_data, manifest['inputs']['server_data']); verify_file(translations, manifest['inputs']['translations'])
+    data_provenance=server_data_provenance(server_data,manifest,server_data_upgrade_proof)
+    verify_file(translations, manifest['inputs']['translations'])
     native_framework = Path(native_framework); require(native_framework.name == 'IdolyEmbeddedServer.framework' and not native_framework.is_symlink(), 'Exact embedded server framework required')
     info = plistlib.loads((native_framework / 'Info.plist').read_bytes()); require(info.get('CFBundleExecutable') == 'IdolyEmbeddedServer', 'Native framework executable differs')
     native = audit_macho(native_framework / 'IdolyEmbeddedServer', target, require_signature=not allow_unsigned_native)
@@ -146,7 +182,7 @@ def bundle_files(runtime_root, native_framework, server_data, translations, targ
     t = manifest['inputs']['translations']; metadata = {'schema':1,'platform':'ios','sha256':t['sha256'],'bytes':t['bytes']}
     generated = {'LocalServer/bundledTranslations.json':(json.dumps(metadata,indent=2)+'\n').encode()}
     require(len(files) <= manifest['capacity']['max_archive_entries'], 'Unified app inventory exceeds bound')
-    return files, generated, {'runtime':runtime,'native':native,'client_languages':language_proof}
+    return files, generated, {'runtime':runtime,'native':native,'client_languages':language_proof,'server_data_provenance':data_provenance}
 
 
 def verify_unity_patch(incoming, patched, original_sha256):
@@ -177,9 +213,9 @@ def verify_unity_patch(incoming, patched, original_sha256):
     return {'original_sha256':old_hash.hexdigest(),'patched_sha256':new_hash.hexdigest(),'bytes':size,'changed_ranges':[[16,24],[32 + old_size,32 + old_size + length]],'load_path':LOAD_PATH,'code_moved':False,'all_other_Unity_bytes_equal':True}
 
 
-def stage_app(runtime_root,native_framework,server_data,translations,output,*,target='simulator',manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,base_ipa=None):
-    manifest = manifest or json.loads((HERE / 'runtime_inputs.json').read_text()); require(target == 'simulator', 'Stage-only app is reserved for the Simulator probe'); output = Path(output); require(not output.exists(), 'Fresh prepared app output required')
-    files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,target,manifest,web_root,allow_unsigned_native=True,client_languages=client_languages,client_languages_metadata=client_languages_metadata); output.mkdir(parents=True)
+def stage_app(runtime_root,native_framework,server_data,translations,output,*,target='simulator',manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,base_ipa=None,server_data_upgrade_proof=None):
+    manifest = _packaging_manifest(manifest); require(target == 'simulator', 'Stage-only app is reserved for the Simulator probe'); output = Path(output); require(not output.exists(), 'Fresh prepared app output required')
+    files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,target,manifest,web_root,allow_unsigned_native=True,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof); output.mkdir(parents=True)
     for name,path in files.items():
         dest = output / name; dest.parent.mkdir(parents=True,exist_ok=True)
         with path.open('rb') as incoming,dest.open('xb') as outgoing: stream_copy(incoming,outgoing,regular(path).st_size)
@@ -190,10 +226,10 @@ def stage_app(runtime_root,native_framework,server_data,translations,output,*,ta
     return {'schema':1,'target':target,'prepared_app':str(output),'files':len(files)+len(generated)+(data['files'] if data else 0),'client_languages':proofs['client_languages'],'base_Data':data,'executable_and_Info_provided_by_probe':True,'actual_simulator_execution':False,'native_signing_deferred_to_probe':True}
 
 
-def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,translations,output,*,source_commit,manifest=None,web_root=None,client_languages=None,client_languages_metadata=None):
-    manifest = manifest or json.loads((HERE / 'runtime_inputs.json').read_text()); require(re.fullmatch('[0-9a-f]{40}',source_commit or ''), 'Exact unified source commit required'); verify_file(base_ipa,manifest['inputs']['base_ipa'])
+def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,translations,output,*,source_commit,manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,server_data_upgrade_proof=None):
+    manifest = _packaging_manifest(manifest); require(re.fullmatch('[0-9a-f]{40}',source_commit or ''), 'Exact unified source commit required'); verify_file(base_ipa,manifest['inputs']['base_ipa'])
     output = Path(output); partial = output.with_suffix(output.suffix + '.partial'); require(not output.exists() and not partial.exists(), 'Fresh unified IPA output required')
-    files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,'device',manifest,web_root,client_languages=client_languages,client_languages_metadata=client_languages_metadata)
+    files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,'device',manifest,web_root,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof)
     max_bytes = manifest['capacity']['max_ipa_bytes']; original_sha = {}; expected = {}; output.parent.mkdir(parents=True,exist_ok=True)
     with ZipFile(base_ipa) as source:
         infos = source.infolist(); require(len(infos) <= manifest['capacity']['max_archive_entries'] and len({i.filename for i in infos}) == len(infos), 'Original IPA inventory differs')
@@ -248,14 +284,15 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
             require(h.hexdigest() == wanted, 'Unified output member SHA/CRC differs')
     os.link(partial,output); partial.unlink()
     report = {'schema':1,'source_commit':source_commit,'base_ipa_sha256':manifest['inputs']['base_ipa']['sha256'],'output_bytes':regular(output).st_size,'output_sha256':sha_file(output),'member_sha256':expected,'original_member_sha256':original_sha,'original_members_preserved_except_Unity_header_and_Info':True,'original_SDK_members_unchanged':True,'Unity_patch':unity,'client_languages':proofs['client_languages'],'runtime_target':'device','runtime_framework_count':len(proofs['runtime']['frameworks']),'max_stream_chunk_bytes':CHUNK,'capacity_bytes':max_bytes,'actual_device_or_PlayCover_execution':False,'requires_user_sideload_resigning':True}
+    if proofs['server_data_provenance'] is not None: report['server_data_provenance']=proofs['server_data_provenance']
     output.with_suffix('.report.json').write_text(json.dumps(report,indent=2)+'\n'); return report
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__); p.add_argument('--runtime-root',type=Path,required=True); p.add_argument('--native-framework',type=Path,required=True); p.add_argument('--server-data',type=Path,required=True); p.add_argument('--translations',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--client-languages',type=Path); p.add_argument('--client-languages-metadata',type=Path); p.add_argument('--stage-only',action='store_true'); p.add_argument('--target',choices=tuple(PLATFORMS),default='device'); p.add_argument('--base-ipa',type=Path); p.add_argument('--patched-unity',type=Path); p.add_argument('--source-commit'); a = p.parse_args()
-    if a.stage_only: report = stage_app(a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,target=a.target,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,base_ipa=a.base_ipa)
+    p = argparse.ArgumentParser(description=__doc__); p.add_argument('--runtime-root',type=Path,required=True); p.add_argument('--native-framework',type=Path,required=True); p.add_argument('--server-data',type=Path,required=True); p.add_argument('--server-data-upgrade-proof',type=Path); p.add_argument('--translations',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--client-languages',type=Path); p.add_argument('--client-languages-metadata',type=Path); p.add_argument('--stage-only',action='store_true'); p.add_argument('--target',choices=tuple(PLATFORMS),default='device'); p.add_argument('--base-ipa',type=Path); p.add_argument('--patched-unity',type=Path); p.add_argument('--source-commit'); a = p.parse_args()
+    if a.stage_only: report = stage_app(a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,target=a.target,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,base_ipa=a.base_ipa,server_data_upgrade_proof=a.server_data_upgrade_proof)
     else:
         require(a.target == 'device' and a.base_ipa and a.patched_unity and a.source_commit, 'Device IPA requires exact source, base IPA and patched Unity')
-        report = package(a.base_ipa,a.patched_unity,a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,source_commit=a.source_commit,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata)
+        report = package(a.base_ipa,a.patched_unity,a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,source_commit=a.source_commit,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,server_data_upgrade_proof=a.server_data_upgrade_proof)
     print(json.dumps({'status':'PASS_PREPARED_UNIFIED_IOS_PACKAGE','output':str(a.output),'physical_execution_verified':False}))
 if __name__ == '__main__': main()

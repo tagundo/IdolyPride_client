@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,39 @@ HERE = Path(__file__).resolve().parent
 
 def run(*args):
     subprocess.run(list(map(str, args)), check=True)
+
+
+PACKAGED_SERVER_DATA = {"pin":"../data/love-server-data-pin.json","policy":"love-source-overlay-v1"}
+
+
+def _tool_module(name):
+    spec=importlib.util.spec_from_file_location("ios_ci_"+name,HERE.parent/"tools"/(name+".py"))
+    module=importlib.util.module_from_spec(spec)
+    sys.modules[spec.name]=module
+    spec.loader.exec_module(module)
+    return module
+
+
+def prepare_server_data(inputs, work, output):
+    """Upgrade the exact verified base, then require the independent static pin."""
+    manifest=json.loads((HERE/"runtime_inputs.json").read_text())
+    if manifest.get("packaged_server_data")!=PACKAGED_SERVER_DATA:
+        raise ValueError("Pinned upgraded server data is required")
+    verifier=_tool_module("love_server_data_pin")
+    if manifest["inputs"]["server_data"]!=verifier.base_pin():
+        raise ValueError("Server data base pin differs")
+    wanted=verifier.output_pin()  # Missing/unverified static pins never fall back.
+    upgraded=work/"upgraded-ServerData.zip"
+    proof_path=output/"server-data-upgrade.json"
+    upgrader=_tool_module("prepare_love_server_data")
+    overlay=HERE.parent/"data/love-server-overlay.zip"
+    verifier.verify_overlay(overlay)
+    proof=upgrader.upgrade_server_data(inputs/"ServerData.zip",upgraded,report_path=proof_path,overlay_zip=overlay)
+    verifier.verify_upgrade_proof(proof)
+    verified=verifier.verify_payload(upgraded)
+    if {key:verified[key] for key in ("bytes","sha256")}!=wanted:
+        raise ValueError("Upgraded server data output pin differs")
+    return upgraded,proof_path
 
 
 def compatible_runtime(sdk, catalog):
@@ -50,6 +84,7 @@ def main():
     work.mkdir(parents=True)
     output.mkdir(parents=True)
     python = sys.executable
+    server_data,server_data_proof=prepare_server_data(inputs,work,output)
     native = HERE / "native/build_native.py"
     support = inputs / "Python-3.13-iOS-support.b18.tar.gz"
     env = {"schema": 1, "source_commit": args.source_commit, "host_arch": platform.machine(),
@@ -107,7 +142,8 @@ def main():
     unity = work / "UnityFramework"
     run(python, "-B", HERE / "patch_load.py", "--source-ipa", inputs / "base.ipa", "--output", unity)
     ipa = output / "IdolyPride-6.1.1-Unified-iOS.ipa"
-    common = ["--server-data", inputs / "ServerData.zip", "--translations", inputs / "bundledTranslations.zip",
+    common = ["--server-data", server_data, "--server-data-upgrade-proof", server_data_proof,
+              "--translations", inputs / "bundledTranslations.zip",
               "--client-languages", client_languages, "--client-languages-metadata", client_descriptor]
     run(python, "-B", HERE / "package_unified.py", "--runtime-root", runtime,
         "--native-framework", framework, *common, "--output", ipa,

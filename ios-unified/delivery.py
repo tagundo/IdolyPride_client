@@ -41,7 +41,11 @@ RESERVED_PROOF_NAMES = frozenset(("manifest.json","delivery-proof.json","publica
                                  "proof-fetch.json","publish.log","README.md"))
 DELIVERY_SOURCES = ("ios-unified/delivery.py", ".github/workflows/build-server-apps.yml",
                     "tools/publish_binary_bundle_lfs.py",
-                    "ios-unified/delivery-pins/client-languages-real-v2.manifest.json")
+                    "ios-unified/delivery-pins/client-languages-real-v2.manifest.json",
+                    "ios-unified/ci_build.py", "ios-unified/package_unified.py", "ios-unified/runtime_inputs.json",
+                    "tools/prepare_love_server_data.py", "tools/love_server_data_pin.py", "data/love-server-data-pin.json",
+                    "data/love-server-overlay.zip", "data/love-reference.json", "data/love-adv-proof.json",
+                    "data/love-reference-NOTICE.txt", "src/idoly_local/love_catalog.py", "tools/build_server_payload.py", "LICENSE")
 
 class DeliveryError(ValueError):
     """Fixed credential-free error codes."""
@@ -67,12 +71,50 @@ def load_module(name, path):
     spec.loader.exec_module(module)
     return module
 
+PACKAGED_SERVER_DATA = {"pin":"../data/love-server-data-pin.json","policy":"love-source-overlay-v1"}
+
+
+def _packaged_server_data_verifier():
+    return load_module("delivery_love_server_data_pin",ROOT/"tools/love_server_data_pin.py")
+
+
+def _packaged_server_data_pin():
+    try:
+        manifest=small_json(HERE/"runtime_inputs.json")
+        need(manifest.get("packaged_server_data")==PACKAGED_SERVER_DATA,"packaged_server_data_policy_differs")
+        verifier=_packaged_server_data_verifier()
+        need(manifest["inputs"]["server_data"]==verifier.base_pin(),"packaged_server_data_base_differs")
+        pin=verifier.output_pin()
+        verifier.verify_overlay(ROOT/"data/love-server-overlay.zip")
+        need(type(pin) is dict and set(pin)=={"bytes","sha256"} and type(pin["bytes"]) is int
+            and 0<pin["bytes"]<=256*MIB and type(pin["sha256"]) is str
+            and re.fullmatch(r"[0-9a-f]{64}",pin["sha256"]),"packaged_server_data_pin_invalid")
+        return pin
+    except DeliveryError:
+        raise
+    except Exception:
+        raise DeliveryError("packaged_server_data_pin_unavailable") from None
+
+
+def verify_server_data_provenance(members, package_report):
+    _packaged_server_data_pin()  # Explicit committed pin is mandatory.
+    try:
+        verifier=_packaged_server_data_verifier()
+        reported=package_report.get("server_data_provenance")
+        proof=small_json(members/"server-data-upgrade.json")
+        need(verifier.verify_upgrade_proof(proof)==reported,"server_data_upgrade_proof_differs")
+    except DeliveryError:
+        raise
+    except Exception:
+        raise DeliveryError("server_data_upgrade_proof_invalid") from None
+
+
 def delivery_source_pins(source):
     need(type(source) is str and re.fullmatch(r"[0-9a-f]{40}",source),"delivery_source_invalid")
     result = {}
     for name in DELIVERY_SOURCES:
         path = ROOT/name
-        need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= 256*1024,"delivery_source_file_bound")
+        need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= (32*MIB if name=="data/love-server-overlay.zip" else 512*1024 if name=="data/love-server-data-pin.json" else 256*1024),"delivery_source_file_bound")
         object_name = source+":"+name
         size = subprocess.check_output(["git","cat-file","-s",object_name],cwd=ROOT,timeout=30).strip()
         need(size.isdigit() and int(size) == path.stat().st_size,"delivery_committed_source_size_differs")
@@ -119,7 +161,7 @@ def verify_language_proofs(smoke, members, native, probe, language, descriptor):
     validate_probe_build_sources(built)
     copied = built.get("copied_input_sha256")
     need(type(copied) is dict and copied.get("LocalServer/client-languages.zip") == descriptor["sha256"]
-         and copied.get("LocalServer/ServerData.zip") == "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223",
+         and copied.get("LocalServer/ServerData.zip") == _packaged_server_data_pin()["sha256"],
          "probe_copied_language_inputs_differ")
     canaries = built.get("generated_language_canaries_sha256")
     need(type(canaries) is str and re.fullmatch(r"[0-9a-f]{64}",canaries),"generated_canary_digest_invalid")
@@ -140,6 +182,7 @@ def verify_members(members, proof, source, run, artifact, guard):
     need(__debug__,"optimized_python_forbidden")
     SOURCE,RUN,ARTIFACT,STAGE = source,run,artifact,proof
     report=read(members/IPA.replace('.ipa','.report.json'));smoke=read(members/'simulator-smoke.json');runtime=read(members/'device-runtime-report.json');native=read(members/'device-native-build.json')
+    verify_server_data_provenance(members,report)
     assert report['source_commit']==SOURCE and report['base_ipa_sha256']=='d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1'
     assert report['original_SDK_members_unchanged'] is True and report['Unity_patch']['all_other_Unity_bytes_equal'] is True
     assert smoke['status']=='PASS' and smoke['fresh_local_state_before_launch'] is True and all(smoke['cleanup'][k] is True for k in ('shutdown','delete'))
@@ -247,7 +290,7 @@ def verify_members(members, proof, source, run, artifact, guard):
      p=p/'__init__.py' if module=='idoly_local' else p.with_suffix('.py')
      assert sha(p)==digest
     prefix='Payload/IDOLY PRIDE.app/'
-    for rel,wanted in [('LocalServer/ServerData.zip','37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223'),('LocalServer/bundledTranslations.zip','987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72'),('Frameworks/IdolyPresentation.dylib','85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5')]:assert report['member_sha256'][prefix+rel]==wanted
+    for rel,wanted in [('LocalServer/ServerData.zip',_packaged_server_data_pin()['sha256']),('LocalServer/bundledTranslations.zip','987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72'),('Frameworks/IdolyPresentation.dylib','85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5')]:assert report['member_sha256'][prefix+rel]==wanted
     assert report['member_sha256'][prefix+'Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer']==native['post_sign_binary_sha256']
     assert report['member_sha256'][prefix+'LocalServer/client-languages.zip']==descriptor['sha256']
     assert report['original_members_preserved_except_Unity_header_and_Info'] is True
@@ -553,7 +596,7 @@ def selected_members(archive):
             metadata += item.file_size
             need(metadata <= MAX_METADATA, "metadata_total_bound")
         files[base] = item
-    need({IPA, PACKAGE_REPORT, "SHA256SUMS", "README.txt", "simulator-smoke.json", "keyboard-lifecycle-native-test.json", "local-http-native-test.json", "octo-budget-native-test.json", "unity-host-native-test.json", "probe-build.json"} <= files.keys(), "required_artifact_members_missing")
+    need({IPA, PACKAGE_REPORT, "SHA256SUMS", "README.txt", "simulator-smoke.json", "keyboard-lifecycle-native-test.json", "local-http-native-test.json", "octo-budget-native-test.json", "unity-host-native-test.json", "probe-build.json", "server-data-upgrade.json"} <= files.keys(), "required_artifact_members_missing")
     return files
 
 

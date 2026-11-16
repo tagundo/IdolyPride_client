@@ -23,11 +23,11 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = "tagundo/IdolyPride_client"
 VERSION, BUILD_NUMBER = "0.3.36",53
-COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","tools/release_account_contract.py","tools/release_event_contract.py"])
+COMMON_SOURCE_FILES = tuple(["src/idoly_local/app_runtime.py","src/idoly_local/diagnostics.py","src/idoly_local/resource_translation_runtime.py","src/idoly_local/account_manager.py","src/idoly_local/state.py","src/idoly_local/runtime_history.py","src/idoly_local/startup_checks.py","src/idoly_local/profile_directory.py","src/idoly_local/love_catalog.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt"])
 GO_VERSION, NDK_VERSION = "1.27.3","26.3.11579264"
 MIB,CHUNK = 1024*1024,128*1024
 PUBLIC_SOURCE = "cba4b5a272d4e7033ec5a18223f737c37a749d8f"
-SERVER_DATA = {"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
+BASE_SERVER_DATA = {"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
 TRANSLATIONS = {
  "android":{"bytes":125709184,"sha256":"22c166ffc3bbbc9e38739cea21fbfd7a87436a166ed56cdb7ee650acfc222dec"},
  "ios":{"bytes":125717042,"sha256":"987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72"}}
@@ -78,6 +78,11 @@ def module(name,path):
     result=importlib.util.module_from_spec(spec);sys.modules[name]=result;spec.loader.exec_module(result)
     return result
 
+# No legacy-payload fallback: the exact prepared native archive must be pinned.
+LOVE_SERVER_DATA = module("release_love_server_data_pin", ROOT/"tools/love_server_data_pin.py")
+SERVER_DATA = LOVE_SERVER_DATA.output_pin()
+
+
 def clean_env():
     hidden=("GH_TOKEN","GITHUB_TOKEN","GH_DEBUG","GIT_CURL_VERBOSE","IDOLY_SERVER_KEYSTORE",
             "IDOLY_SERVER_STORE_PASSWORD","IDOLY_SERVER_KEY_ALIAS","IDOLY_SERVER_KEY_PASSWORD")
@@ -119,14 +124,14 @@ def capture(arguments,*,cwd=ROOT):
 
 def source_binding(source):
     need(re.fullmatch(r"[0-9a-f]{40}",source) and capture(["git","rev-parse","HEAD"]).strip()==source,"frozen_source_required")
-    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py","tools/release_account_contract.py","tools/release_event_contract.py")
+    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt")
     need(not capture(["git","status","--porcelain","--untracked-files=no","--",*paths]).strip(),"source_worktree_changed")
     names=capture(["git","ls-files","--",*paths]).splitlines()
     suffixes={".py",".java",".kt",".kts",".h",".c",".cpp",".go",".mod",".sum",".swift",".json",".xml",".properties",".txt",".pem",".keystore"}
     pins={}
     for name in names:
         path=ROOT/name
-        if path.suffix in suffixes:
+        if path.suffix in suffixes or name in ("data/love-server-overlay.zip", "LICENSE"):
             need(path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(ROOT),"source_file_invalid")
             pins[name]=sha(path)
     need("tools/release_platform_builds.py" in pins,"build_driver_source_pin_missing")
@@ -156,10 +161,25 @@ def fetch_public_inputs(kind,destination,work,guard):
     destination.mkdir(mode=0o700,exist_ok=True)
     with ZipFile(donor) as archive:
         need(len(archive.infolist())<=32768 and len(set(archive.namelist()))==len(archive.infolist()),"donor_inventory_bound")
-        copy_member(archive,DONORS[kind]["prefix"]+"ServerData.zip",destination/"ServerData.zip",SERVER_DATA,guard)
+        copy_member(archive,DONORS[kind]["prefix"]+"ServerData.zip",destination/"BaseServerData.zip",BASE_SERVER_DATA,guard)
         copy_member(archive,DONORS[kind]["prefix"]+"bundledTranslations.zip",destination/"bundledTranslations.zip",TRANSLATIONS[kind],guard)
     need(identity(donor)==owned,"owned_donor_identity_changed");donor.unlink()
-    return {"server_data":dict(SERVER_DATA),"translations":{"platform":kind,"included":True,**TRANSLATIONS[kind]},
+    base=destination/"BaseServerData.zip";base_owned=identity(base)
+    need(LOVE_SERVER_DATA.base_pin()==BASE_SERVER_DATA,"Love_base_payload_pin_differs")
+    guard.check()
+    overlay=ROOT/"data/love-server-overlay.zip"
+    LOVE_SERVER_DATA.verify_overlay(overlay)
+    upgrader=module("release_love_server_data_prepare",ROOT/"tools/prepare_love_server_data.py")
+    provenance=upgrader.upgrade_server_data(base,destination/"ServerData.zip",overlay_zip=overlay,
+        report_path=work/"love-server-data-preparation.json")
+    guard.check()
+    provenance=LOVE_SERVER_DATA.verify_upgrade_proof(provenance)
+    prepared=destination/"ServerData.zip";prepared_owned=identity(prepared)
+    LOVE_SERVER_DATA.verify_payload(prepared)
+    need(identity(base)==base_owned and identity(prepared)==prepared_owned,"Love_payload_identity_changed")
+    guard.check()
+    return {"server_data":dict(SERVER_DATA),"server_data_provenance":provenance,
+            "translations":{"platform":kind,"included":True,**TRANSLATIONS[kind]},
             "donor":{"source_commit":PUBLIC_SOURCE,**{k:v for k,v in DONORS[kind].items() if k!="prefix"}}}
 
 def artifact(path):
@@ -296,6 +316,8 @@ def finish_android(inputs,work,output,source,pins,guard):
     need(built.get("status")=="BUILT_REQUIRES_ANDROID_QA" and built.get("platform")=="android"
          and built.get("source_commit")==source and built.get("source_sha256")==pins
          and built.get("version")==VERSION and built.get("build_number")==BUILD_NUMBER,"Android_build_binding_differs")
+    LOVE_SERVER_DATA.verify_upgrade_proof(built.get("inputs",{}).get("server_data_provenance"))
+    need(built.get("inputs",{}).get("server_data")==SERVER_DATA,"Android_prepared_payload_pin_differs")
     runner=Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
     public=Path(built["input_directory"])
     need(public.is_absolute() and public.resolve(strict=True).is_relative_to(runner),"owned_QA_inputs_required")

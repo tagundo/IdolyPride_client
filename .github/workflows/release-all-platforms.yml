@@ -538,6 +538,73 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+
+  private-artifacts:
+    needs: [portable, performance, android, macos, ios-unified, android-clients]
+    if: >-
+      ${{ github.event_name == 'workflow_dispatch' && !inputs.publish
+          && needs.portable.result == 'success'
+          && needs.performance.result == 'success'
+          && needs.android.result == 'success'
+          && needs.macos.result == 'success'
+          && needs.ios-unified.result == 'success'
+          && needs.android-clients.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked verification dependencies
+        run: uv sync --locked --all-extras --python 3.13
+      - name: Verify and copy changed executables to dated private filenames
+        run: >-
+          uv run --locked python -B tools/stage_private_candidate.py
+          --candidate-version "$IDOLY_RELEASE_VERSION"
+          --source-commit "$GITHUB_SHA"
+          --run-id "$GITHUB_RUN_ID"
+          --work "$RUNNER_TEMP/idoly-private-candidate-work"
+          --output "$RUNNER_TEMP/idoly-private-candidate"
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: private-candidate-android-${{ inputs.release_version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-private-candidate/android
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: private-candidate-macos-${{ inputs.release_version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-private-candidate/macos
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: private-candidate-ios-unified-${{ inputs.release_version }}-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-private-candidate/ios-unified
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
   publish:
     needs: [portable, performance, android, macos, ios-unified, android-clients]
     if: >-

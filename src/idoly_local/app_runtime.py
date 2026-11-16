@@ -539,7 +539,7 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
             asset_url_host = "[" + asset_url_host + "]"
         runtime._asset_url = f"http://{asset_url_host}:{bound_asset_port}"
         stage = "resources"
-        from .octo_runtime import create_octo_gateway
+        from .octo_runtime import create_octo_gateway, resource_cache_root
         gateway, runtime._resources = create_octo_gateway(
             root, runtime._asset_url, aes_cbc=aes_cbc, fetcher=resource_fetcher,
             allow_downloads=download_missing_resources, log_callback=runtime._log,
@@ -582,11 +582,15 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
                 live_engine_library = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)) / library_name
             live_options = {"experimental_main_live": True,
                             "live_engine": NativeLiveEngine(Path(live_engine_library))}
+        from .love import load_display_text
+        love_display_text = load_display_text(resource_cache_root(root, resource_cache_dir),
+            language=runtime._effective_language, platform=resource_platform)
         media_options = {"media_settings": runtime._active_media.settings}
         if media_mode:
             media_options.update(media_mode=True, photo_scene_access=media_scenes)
         application = Application(schema, state, fixtures, profile=profile, master_response=master_response,
-                                  master_dir=master_dir, event_settings=runtime._active_events, **media_options, **live_options)
+                                  master_dir=master_dir, event_settings=runtime._active_events,
+                                  love_display_text=love_display_text, **media_options, **live_options)
         runtime._experimental_main_live = experimental_main_live
         if experimental_main_live:
             runtime._log("일반 라이브 실험 기능 사용: 첫 메인 퀘스트 · 로컬 계산 규칙")

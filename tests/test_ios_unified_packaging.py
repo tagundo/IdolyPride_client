@@ -314,3 +314,32 @@ def test_all_language_resource_verifier_reconstructs_and_reuses_each_variant(tmp
     assert all((out/name).read_bytes()==raw for name,raw in base_data.items())
     with pytest.raises(ValueError,match='Fresh absolute'):
         verifier.verify(out,tmp_path/'verification',expected_sources=language['source'])
+
+
+def test_default_production_manifest_cannot_fall_back_to_old_server_data(tmp_path,monkeypatch):
+    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":{"bytes":1,"sha256":"a"*64}}}))
+    monkeypatch.setattr(package,"HERE",tmp_path)
+    with pytest.raises(ValueError,match="Pinned upgraded server data"):
+        package._packaging_manifest(None)
+    fixture={"inputs":{"server_data":{"bytes":1,"sha256":"a"*64}}}
+    assert package._packaging_manifest(fixture) is fixture
+
+
+def test_packaging_requires_new_payload_bytes_and_independently_verified_upgrade_proof(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    data=tmp_path/"new.zip";data.write_bytes(b"new-fixed-payload")
+    base={"bytes":3,"sha256":sha(b"old")};new={"bytes":data.stat().st_size,"sha256":sha(data.read_bytes())}
+    proof={"schema":1,"recipe":"exact-fixed-proof"};receipt=tmp_path/"proof.json";receipt.write_text(json.dumps(proof))
+    calls=[]
+    def verify_payload(path):assert path==data;calls.append("payload");return new
+    def verify_proof(value):
+        assert value==proof;calls.append("proof");return value
+    verifier=SimpleNamespace(base_pin=lambda:base,output_pin=lambda:new,verify_payload=verify_payload,verify_upgrade_proof=verify_proof,
+        verify_overlay=lambda path:calls.append("overlay"))
+    monkeypatch.setattr(package,"_packaged_pin_module",lambda:verifier)
+    manifest={"inputs":{"server_data":base},"packaged_server_data":package.PACKAGED_SERVER_DATA}
+    assert package.server_data_provenance(data,manifest,receipt)==proof and calls==["overlay","payload","proof"]
+    with pytest.raises(ValueError,match="upgrade proof is required"):
+        package.server_data_provenance(data,manifest)
+    data.write_bytes(b"old")
+    with pytest.raises(ValueError):package.server_data_provenance(data,manifest,receipt)

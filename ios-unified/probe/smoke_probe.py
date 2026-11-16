@@ -549,7 +549,8 @@ def language_save_observation(value):
         clean["feedback_state"] = value["feedback_state"]
     if value.get("request_action") in ("save_options","unknown"): clean["request_action"] = value["request_action"]
     if type(value.get("timed_out")) is bool: clean["timed_out"] = value["timed_out"]
-    for key in ("current_language","next_language","persisted_language","effective_language","request_language","ack_language","ack_effective_language"):
+    if type(value.get("observer_matches_current_handler")) is bool:clean["observer_matches_current_handler"]=value["observer_matches_current_handler"]
+    for key in ("current_language","next_language","persisted_language","effective_language","request_language","ack_language","ack_effective_language","selected_language"):
         if value.get(key) in (*LANGUAGE_ORDER,"unknown"): clean[key] = value[key]
     for key in ("request_id","ack_id"):
         if type(value.get(key)) is int and 1 <= value[key] <= 2**31-1: clean[key] = value[key]
@@ -998,6 +999,8 @@ def safe_failure_summary(report):
     """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
     code=report.get("error")
     clean={"schema":1,"scope":"owned-simulator-failure","error_code":code if type(code) is str and code in (UI_DRIVER_ERRORS | LAUNCHER_FAILURE_CODES) else "probe_failed"}
+    index=report.get("failed_run_index")
+    if type(index) is int and 0<=index<=4:clean["run_index"]=index
     checkpoint=report.get("native_checkpoint")
     if type(checkpoint) is dict:
         native={}
@@ -1012,6 +1015,10 @@ def safe_failure_summary(report):
             if type(value) in (int,float) and math.isfinite(value) and 0<=value<=3600:native[key]=value
         gate=server_gate_observation(checkpoint.get("server_gate"))
         if gate:native["server_gate"]=gate
+        language=checkpoint.get("language_observation")
+        if type(language) is dict:
+            save=language_save_observation(language.get("language_save"))
+            if save:native["language_save"]=save
         clean["native"]=native
     driver=official_ui_failure_observation(report.get("xctest_failure"))
     if driver:clean["xctest"]=driver
