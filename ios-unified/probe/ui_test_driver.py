@@ -312,11 +312,20 @@ class ProbePromptCancelDriver:
         _need(type(value) is str and 0 < len(value) <= 2048 and "\\" not in value
               and "://" not in value and "?" not in value and ".." not in Path(value).parts,
               "ui_driver_xctestrun_invalid")
+        # Check reserved placeholders before inserting owned paths: tempfile
+        # names may legitimately contain double underscores.
+        template = value
+        if Path(value).is_absolute() and Path(value).is_relative_to(products):
+            template = str(Path(value).relative_to(products))
+        template = template.replace("__TESTROOT__", "")
+        if host is not None:
+            template = template.replace("__TESTHOST__", "")
+        _need("__" not in template, "ui_driver_xctestrun_invalid")
         value = value.replace("__TESTROOT__", str(products))
         if host is not None:
             value = value.replace("__TESTHOST__", str(host))
         path = Path(value)
-        _need(path.is_absolute() and "__" not in value and not path.is_symlink(), "ui_driver_xctestrun_invalid")
+        _need(path.is_absolute() and not path.is_symlink(), "ui_driver_xctestrun_invalid")
         try:
             path = path.resolve(strict=True)
         except Exception:

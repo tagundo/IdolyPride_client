@@ -307,6 +307,50 @@ def test_generated_run_cannot_target_arbitrary_paths_urls_or_probe(env, mutation
     assert_sanitized(status)
 
 
+@pytest.mark.parametrize("format_version", [1, 2])
+@pytest.mark.parametrize("path_style", ["placeholders", "absolute"])
+def test_owned_temporary_root_with_double_underscores_keeps_exact_test_target(env, tmp_path, monkeypatch, format_version, path_style):
+    module, driver, processes, source, clock = env
+    owned = tmp_path / "owned__temporary_root"
+    owned.mkdir()
+    monkeypatch.setattr(module.tempfile, "mkdtemp", lambda **kwargs: str(owned))
+    assert driver.start()["phase"] == "building"
+    products = driver._derived / "Build/Products"
+    host = products / "Debug-iphonesimulator/IdolyProbeCancelUITests-Runner.app"
+    def paths(target):
+        if path_style == "absolute":
+            target.update(TestHostPath=str(host),
+                TestBundlePath=str(host / "PlugIns/IdolyProbeCancelUITests.xctest"),
+                UITargetAppPath=str(products / "Debug-iphonesimulator/CancelDriverHost.app"))
+    generated = built_products(env, mutate=paths, format_version=format_version)
+    processes.calls[0].complete()
+    assert driver.poll() == {"phase": "running", "ready": False, "error_code": None}
+    assert len(processes.calls) == 2
+    args = processes.calls[1].args
+    assert args[args.index("-xctestrun") + 1] == str(generated)
+    assert args[args.index("-destination") + 1] == "id=" + UDID
+    assert "-only-testing:" + module.TEST_IDENTIFIER in args
+    assert driver.build_metadata_diagnostic() is None
+
+
+@pytest.mark.parametrize("marker", ["__UNKNOWN__", "__TESTHOST__", "__TESTROOT_"])
+@pytest.mark.parametrize("path_style", ["placeholders", "absolute"])
+def test_unknown_or_unavailable_template_markers_reject_even_existing_owned_app(env, marker, path_style):
+    module, driver, processes, source, clock = env
+    driver.start()
+    app = driver._derived / "Build/Products" / marker / "CancelDriverHost.app"
+    value = str(app) if path_style == "absolute" else "__TESTROOT__/" + marker + "/CancelDriverHost.app"
+    built_products(env, mutate=lambda target: target.update(UITargetAppPath=value))
+    app.mkdir(parents=True)
+    (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": module.DUMMY_BUNDLE,
+        "CFBundleSupportedPlatforms": ["iPhoneSimulator"]}))
+    processes.calls[0].complete()
+    status = driver.poll()
+    assert status == {"phase": "failed", "ready": False, "error_code": "ui_driver_xctestrun_invalid"}
+    assert len(processes.calls) == 1
+    assert_sanitized(status)
+
+
 def test_multiple_generated_xctestruns_are_rejected_instead_of_picking_one(env):
     module, driver, processes, source, clock = env
     driver.start()
