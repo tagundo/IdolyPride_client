@@ -27,12 +27,26 @@ header > *, .section-title > *, .header-actions > *, .actions > * { min-width: 0
 .interface-language > span { min-width: 0; overflow-wrap: anywhere; }
 .interface-language select { width: 8.5rem; max-width: 100%; }
 .eyebrow { font-size: .68rem; font-weight: 700; letter-spacing: .14em; color: var(--accent); margin: 0 0 .35rem; }
-h1 { font-size: 1.7rem; margin: 0; letter-spacing: -.04em; }
+h1 { font-size: 1.4rem; margin: 0; letter-spacing: -.04em; }
 h2 { font-size: 1.08rem; margin: 0 0 .75rem; letter-spacing: -.03em; }
 .section-title h2 { margin: 0; }
 .section-title { margin-bottom: .75rem; flex-wrap: wrap; }
 section { background: var(--card); border: 1px solid var(--line); border-radius: 1.1rem; padding: 1.25rem; }
-.overview { background: var(--soft); }
+.overview { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .25rem .65rem; align-items: center; background: var(--soft); padding: .4rem .65rem; }
+header .eyebrow { display: none; }
+.overview > .section-title { display: contents; }
+#server-heading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#server-state { grid-column: 1; grid-row: 1; }
+#server-summary { grid-column: 2; grid-row: 1; margin: 0; font-size: .85rem; line-height: 1.4; }
+.overview .server-guide { grid-column: 1 / -1; grid-row: 2; border: 0; margin: 0; padding: 0; }
+.overview .server-guide summary { min-height: 2.75rem; padding: .5rem .1rem; }
+#restart-notice { grid-column: 1 / -1; margin: .25rem 0; }
+@media (min-width: 620px) {
+  .overview { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .overview .server-guide { grid-column: 3; grid-row: 1; }
+  .overview .server-guide summary { white-space: nowrap; }
+  .overview .server-guide[open] { grid-column: 1 / -1; grid-row: auto; }
+}
 p { line-height: 1.6; margin: .5rem 0; overflow-wrap: anywhere; }
 .hint { font-size: .82rem; color: var(--muted); }
 .badge { flex-shrink: 0; font-size: .72rem; font-weight: 700; background: var(--bg); border: 1px solid var(--line); border-radius: 1.25rem; padding: .3rem .65rem; }

@@ -198,7 +198,8 @@ def run(output):
                     initial = page.evaluate(GEOMETRY, "console")
                     default_views.append({"language": language, "viewport": {"width": width, "height": height}, **initial})
                     if (not initial["navigation_discoverable"] or initial["bad_hit_areas"]
-                            or initial["content_width"] > initial["viewport_width"] + 2 or initial["open_help"]):
+                            or initial["content_width"] > initial["viewport_width"] + 2 or initial["open_help"]
+                            or initial["available_content_ratio"] < .5):
                         raise AssertionError("default_navigation_or_layout_failed")
                     if width > height and height <= 560:
                         if (initial["navigation_top"] > height * .42 or initial["available_content_ratio"] < .5
@@ -211,6 +212,15 @@ def run(output):
                         raise AssertionError("graphics_should_be_expanded")
                     if page.locator("details.help-details").count() < 1:
                         raise AssertionError("help_disclosures_missing")
+                    if language == "ko":
+                        # Preserve an untouched, default-collapsed opening frame
+                        # for each viewport before any category/panel interaction.
+                        name = str(width) + "x" + str(height) + "-initial.png"
+                        raw = page.screenshot(animations="disabled", caret="hide", full_page=False)
+                        if len(raw) > 2 * 1024 * 1024:
+                            raise ValueError("screenshot_bound")
+                        (output / name).write_bytes(raw)
+                        screenshots.append({"name": name, "bytes": len(raw), "sha256": digest(raw)})
                     for category in CATEGORIES:
                         page.locator("#category-" + category).click()
                         panels = page.locator("#category-panel-" + category + " details.card-panel")
@@ -279,6 +289,7 @@ def run(output):
         raise AssertionError("layout_case_inventory_or_network_error")
     return {"schema": 1, "status": "PASS", "scope": "actual-Chromium-settings-CSS-with-synthetic-readonly-native-bridge",
             "native_gameplay_tested": False, "official_authentication_performed": False,
+            "viewport_scope": "settings-web-content-only; native launcher chrome is not measured",
             "browser": {"engine": "chromium", "version": version,
                         "playwright": importlib.metadata.version("playwright")},
             "source_commit": os.environ["GITHUB_SHA"], "source_files": sources,
