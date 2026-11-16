@@ -132,7 +132,7 @@ class Transport:
             response.user.managerLevel = 4
             response.userPublic.serverUserId = SERVER
             response.userPublic.publicUserId = PUBLIC
-            response.cards.add(id="synthetic-card")
+            response.cards.add(cardId="synthetic-card")
         mutate = self.mutations.get(method)
         if mutate:
             mutate(response, request)

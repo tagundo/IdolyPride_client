@@ -68,7 +68,7 @@ jobs:
             tests/test_android_official_import.py
             tests/test_android_official_service_harness.py
             tests/test_ios_unified_official_import.py
-            macos-server/tests/test_official_import.py
+            macos-server/tests/test_macos_official_import.py
             tests/test_account_manager.py
             tests/test_account_state_backup.py
             tests/test_profiles.py
