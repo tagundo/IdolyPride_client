@@ -50,6 +50,8 @@ jobs:
           python3 -B -m pytest -q -p no:cacheprovider tests/test_ios_host.py tests/test_public_payload.py tests/test_ios_unified_*.py ios-unified/native/tests/test_build_native.py
           python3 -B ios-unified/native/build_native.py --portable-tests
       - name: Compile real Apple frameworks and run all five cold language launches
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 -B ios-unified/ci_build.py
           --inputs "$RUNNER_TEMP/idoly-unified-inputs"
