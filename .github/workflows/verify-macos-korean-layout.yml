@@ -33,16 +33,15 @@ jobs:
           version: '0.13.5'
       - name: Install locked verification and pinned image tools
         run: |
-          uv sync --locked --all-extras --python 3.13
-          uv pip install --python .venv/bin/python 'UnityPy==1.25.4' 'astc-encoder-py==0.1.12' 'Pillow==13.0.0'
+          uv sync --locked --python 3.13
+          uv pip install --python .venv/bin/python 'UnityPy==1.25.4' 'astc-encoder-py==0.1.12' 'Pillow==13.0.0' 'pycryptodome==3.23.0'
       - name: Record public encoder environment
         run: |
-          mkdir -p "$RUNNER_TEMP/korean-layout-preview"
           uv run --locked python - <<'PYENV'
           import importlib.metadata,json,os,pathlib,platform
           versions={name:importlib.metadata.version(name) for name in ('UnityPy','Pillow','astc-encoder-py')}
           report={'source_commit':os.environ['GITHUB_SHA'],'system':platform.system(),'machine':platform.machine(),'python':platform.python_version(),'versions':versions}
-          (pathlib.Path(os.environ['RUNNER_TEMP'])/'korean-layout-preview/environment.json').write_text(json.dumps(report,sort_keys=True,indent=2)+'\n')
+          (pathlib.Path(os.environ['RUNNER_TEMP'])/'macos-korean-layout-environment.json').write_text(json.dumps(report,sort_keys=True,indent=2)+'\n')
           PYENV
       - name: Verify finite geometry, archive, preservation and legacy cases
         run: >-
@@ -97,5 +96,6 @@ jobs:
             ${{ runner.temp }}/korean-layout-output/*.json
             ${{ runner.temp }}/korean-layout-preview
             ${{ runner.temp }}/korean-layout-image-inputs.json
+            ${{ runner.temp }}/macos-korean-layout-environment.json
           if-no-files-found: warn
           retention-days: 7
