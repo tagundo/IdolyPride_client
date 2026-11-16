@@ -335,11 +335,41 @@ def test_packaging_requires_new_payload_bytes_and_independently_verified_upgrade
     def verify_proof(value):
         assert value==proof;calls.append("proof");return value
     verifier=SimpleNamespace(base_pin=lambda:base,output_pin=lambda:new,verify_payload=verify_payload,verify_upgrade_proof=verify_proof,
-        verify_overlay=lambda path:calls.append("overlay"))
+        verify_source_pointer=lambda:calls.append("source-pointer"))
     monkeypatch.setattr(package,"_packaged_pin_module",lambda:verifier)
     manifest={"inputs":{"server_data":base},"packaged_server_data":package.PACKAGED_SERVER_DATA}
-    assert package.server_data_provenance(data,manifest,receipt)==proof and calls==["overlay","payload","proof"]
+    assert package.server_data_provenance(data,manifest,receipt)==proof and calls==["source-pointer","payload","proof"]
     with pytest.raises(ValueError,match="upgrade proof is required"):
         package.server_data_provenance(data,manifest)
     data.write_bytes(b"old")
     with pytest.raises(ValueError):package.server_data_provenance(data,manifest,receipt)
+
+
+@pytest.mark.parametrize("target",["device","simulator"])
+def test_latest_generated_payload_pin_is_consumed_by_actual_host_validator(tmp_path,monkeypatch,target):
+    from types import SimpleNamespace
+    from idoly_local.ios_host import _bundled_payload_pin
+    root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path,target)
+    old=dict(manifest["inputs"]["server_data"])
+    manifest["packaged_server_data"]=package.PACKAGED_SERVER_DATA
+    proof={"schema":1,"recipe":"fixed-latest-cohort"}
+    receipt=tmp_path/"proof.json";receipt.write_text(json.dumps(proof))
+    expected={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":data.stat().st_size,
+        "sha256":sha(data.read_bytes()),"manifest_sha256":"c"*64,"master_version":"d"*64}
+    verifier=SimpleNamespace(base_pin=lambda:old,output_pin=lambda:old,verify_source_pointer=lambda:None,
+        verify_payload=lambda path:old,verify_upgrade_proof=lambda value:proof,payload_pin=lambda:expected)
+    monkeypatch.setattr(package,"_packaged_pin_module",lambda:verifier)
+    _,generated,_=package.bundle_files(root,nat,data,trans,target,manifest,web,server_data_upgrade_proof=receipt)
+    raw=generated["LocalServer/payload-pin.json"]
+    assert json.loads(raw)==expected and len(raw)<=4096
+    bundle=tmp_path/"bundled";bundle.mkdir();(bundle/"payload-pin.json").write_bytes(raw)
+    assert _bundled_payload_pin(bundle)=={"expected_bytes":expected["bytes"],"expected_sha256":expected["sha256"]}
+    if target=="device":
+        out=tmp_path/"new.ipa"
+        package.package(source,replacement,root,nat,data,trans,out,source_commit="b"*40,manifest=manifest,
+            web_root=web,server_data_upgrade_proof=receipt)
+        with ZipFile(out) as archive:assert archive.read("Payload/Game.app/LocalServer/payload-pin.json")==raw
+    else:
+        out=tmp_path/"new.app"
+        package.stage_app(root,nat,data,trans,out,manifest=manifest,web_root=web,server_data_upgrade_proof=receipt)
+        assert (out/"LocalServer/payload-pin.json").read_bytes()==raw

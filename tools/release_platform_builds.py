@@ -79,8 +79,24 @@ def module(name,path):
     return result
 
 # No legacy-payload fallback: the exact prepared native archive must be pinned.
-LOVE_SERVER_DATA = module("release_love_server_data_pin", ROOT/"tools/love_server_data_pin.py")
-SERVER_DATA = LOVE_SERVER_DATA.output_pin()
+LATEST_SERVER_DATA = module("release_latest_server_data_pin", ROOT/"tools/latest_server_data_pin.py")
+LOVE_SERVER_DATA = LATEST_SERVER_DATA  # Compatibility name; the default policy is latest-only.
+COMMON_SOURCE_FILES = tuple(sorted(set(COMMON_SOURCE_FILES) | set(LATEST_SERVER_DATA.SOURCE_COMPONENTS) | {
+    'src/idoly_local/public_payload.py',
+    'src/idoly_local/public_payload_transaction.py',
+    'src/idoly_local/public_cohort_support.py',
+    'src/idoly_local/latest_cohort_pins.py',
+    'src/idoly_local/love_compatibility_pins.py',
+    'src/idoly_local/resource_library.py',
+    'src/idoly_local/resource_archive.py',
+    'src/idoly_local/octo_runtime.py',
+    'src/idoly_local/resource_translation.py',
+    'tools/prepare_latest_server_data.py',
+    'tools/latest_server_data_pin.py',
+    'data/latest-server-data-pin.json',
+    'data/latest-server-overlay.zip',
+}))
+SERVER_DATA = LATEST_SERVER_DATA.output_pin()
 
 
 def clean_env():
@@ -124,14 +140,14 @@ def capture(arguments,*,cwd=ROOT):
 
 def source_binding(source):
     need(re.fullmatch(r"[0-9a-f]{40}",source) and capture(["git","rev-parse","HEAD"]).strip()==source,"frozen_source_required")
-    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py","tools/release_account_contract.py","tools/release_event_contract.py","tools/build_server_payload.py","LICENSE","tools/prepare_love_server_data.py","tools/love_server_data_pin.py","data/love-server-data-pin.json","data/love-server-overlay.zip","data/love-reference.json","data/love-adv-proof.json","data/love-reference-NOTICE.txt")
+    paths=("src","android-server","macos-server","native-live-engine","tools/release_platform_builds.py",*COMMON_SOURCE_FILES)
     need(not capture(["git","status","--porcelain","--untracked-files=no","--",*paths]).strip(),"source_worktree_changed")
     names=capture(["git","ls-files","--",*paths]).splitlines()
     suffixes={".py",".java",".kt",".kts",".h",".c",".cpp",".go",".mod",".sum",".swift",".json",".xml",".properties",".txt",".pem",".keystore"}
     pins={}
     for name in names:
         path=ROOT/name
-        if path.suffix in suffixes or name in ("data/love-server-overlay.zip", "LICENSE"):
+        if path.suffix in suffixes or name in COMMON_SOURCE_FILES:
             need(path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(ROOT),"source_file_invalid")
             pins[name]=sha(path)
     need("tools/release_platform_builds.py" in pins,"build_driver_source_pin_missing")
@@ -170,11 +186,14 @@ def fetch_public_inputs(kind,destination,work,guard,*,prepare=True):
     base=destination/"BaseServerData.zip";base_owned=identity(base)
     need(LOVE_SERVER_DATA.base_pin()==BASE_SERVER_DATA,"Love_base_payload_pin_differs")
     guard.check()
-    overlay=ROOT/"data/love-server-overlay.zip"
+    LOVE_SERVER_DATA.verify_source_pointer()
+    overlay=work/"latest-server-overlay.zip"
+    fetched=LOVE_SERVER_DATA.fetch_overlay(overlay)
+    need({key:fetched[key] for key in ("bytes","sha256")}==SERVER_DATA,"latest_source_blob_pin_differs")
     LOVE_SERVER_DATA.verify_overlay(overlay)
-    upgrader=module("release_love_server_data_prepare",ROOT/"tools/prepare_love_server_data.py")
+    upgrader=module("release_latest_server_data_prepare",ROOT/"tools/prepare_latest_server_data.py")
     provenance=upgrader.upgrade_server_data(base,destination/"ServerData.zip",overlay_zip=overlay,
-        report_path=work/"love-server-data-preparation.json")
+        report_path=work/"server-data-preparation.json")
     guard.check()
     provenance=LOVE_SERVER_DATA.verify_upgrade_proof(provenance)
     prepared=destination/"ServerData.zip";prepared_owned=identity(prepared)
@@ -412,6 +431,7 @@ def build_macos(work,output,source,pins,guard):
     app=work/"IdolyPrideLocalServer.app"
     try:
         run([sys.executable,"-B",ROOT/"macos-server/build_app.py","--server-data",inputs/"ServerData.zip",
+            "--server-data-upgrade-proof",work/"server-data-preparation.json",
             "--output",app,"--archive",output/MAC_NAME,"--evidence",evidence,"--version",VERSION,
             "--build-number",str(BUILD_NUMBER),"--live-engine-library",library,"--translations",inputs/"bundledTranslations.zip",
             "--translations-sha256",TRANSLATIONS["ios"]["sha256"],"--translations-bytes",str(TRANSLATIONS["ios"]["bytes"])],
@@ -431,6 +451,15 @@ def build_macos(work,output,source,pins,guard):
     need(raw.get("server_data_sha256")==SERVER_DATA["sha256"] and raw.get("translations",{}).get("included") is True
          and raw["translations"]["sha256"]==TRANSLATIONS["ios"]["sha256"]
          and raw["translations"]["bytes"]==TRANSLATIONS["ios"]["bytes"],"Mac_translation_or_data_pin_differs")
+    latest=module("release_macos_latest_data_pin",ROOT/"tools/latest_server_data_pin.py")
+    expected_payload_pin=latest.payload_pin()
+    payload_pin_path=app/"Contents/Resources/payload-pin.json"
+    need(raw.get("server_data_bytes")==SERVER_DATA["bytes"]
+         and raw.get("payload_pin")==expected_payload_pin
+         and read_json(payload_pin_path,maximum=4096)==expected_payload_pin
+         and raw.get("payload_pin_sha256")==sha(payload_pin_path)
+         and latest.verify_upgrade_proof(raw.get("server_data_provenance"))==input_report["server_data_provenance"],
+         "Mac_latest_cohort_proof_or_pin_differs")
     live=raw.get("live_engine")
     need(type(live) is dict and live.get("included") is True and live.get("default_enabled") is False
          and live.get("input_sha256")==engine["library_sha256"] and live.get("ad_hoc_codesign_verified") is True,
@@ -451,7 +480,8 @@ def build_macos(work,output,source,pins,guard):
     report=base_report("macos",source,pins,input_report)
     report.update(account_management=account_detail,account_smoke=artifact(output/"engine-smoke.json"))
     report.update(binary=actual,live_engine=live,application_id="game.idolypride.localserver",
-                  signature="ad-hoc",notarized=False,build_report=artifact(output/"mac-build-report.json"))
+                  signature="ad-hoc",notarized=False,build_report=artifact(output/"mac-build-report.json"),
+                  payload_pin=expected_payload_pin,payload_pin_sha256=raw["payload_pin_sha256"])
     report["validation"].update(codesign_strict_verified=True,bundled_engine_tested=True,native_gui_start_stop_tested=True,account_management_roundtrip=True)
     write_json(output/"platform-report.json",report)
     return report

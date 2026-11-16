@@ -991,17 +991,17 @@ def test_unsupported_cache_hint_still_runs_the_unchanged_memory_guard_before_spa
 
 
 @pytest.mark.parametrize("damage", [None, "legacy-sha", "table-count", "namespace", "raw-counts"])
-def test_native_manual_payload_requires_exact_new_pin_and_all_62_json_names(tmp_path, monkeypatch, damage):
+def test_native_manual_payload_requires_exact_latest_pin_and_all_64_json_names(tmp_path, monkeypatch, damage):
     from types import SimpleNamespace
-    names = sorted(["LoveCatalog", *["Raw"+str(index).zfill(2) for index in range(61)]])
+    names = sorted(tool.LATEST_TABLES)
     tables = {name: 1 for name in names if name != "LoveCatalog"}
     manifest = {"tables": tables, "prebuilt_catalogs": None}
-    if damage == "raw-counts": manifest["tables"]["Raw00"] = True
+    if damage == "raw-counts": manifest["tables"]["CardImage"] = True
     files = {"data/master-json/"+name+".json": b"{}" if name == "LoveCatalog" else b'[{}]' for name in names}
     files[tool.PAYLOAD_MANIFEST] = json.dumps(manifest).encode()
     payload = tmp_path / "new-payload.zip"; payload.write_bytes(zip_bytes(files))
     approved = {"bytes": payload.stat().st_size, "sha256": tool.pybundle.digest(payload)}
-    output = {**approved, "entries": len(files), "master_json_tables": 62, "master_json_table_names": names}
+    output = {**approved, "entries": len(files), "master_json_tables": 64, "master_json_table_names": names}
     pin = {"output": output, "upgrade_proof": {"synthetic": "exact fixed preparation proof"}}
     verified = dict(output)
     if damage == "table-count": verified["master_json_tables"] = 55
@@ -1019,5 +1019,17 @@ def test_native_manual_payload_requires_exact_new_pin_and_all_62_json_names(tmp_
         if damage == "legacy-sha": assert seen == []
     else:
         result = tool.validate_payload(payload, expected, object())
-        assert result["master_json_table_names"] == names and len(result["tables"]) == 61
+        assert result["master_json_table_names"] == names and len(result["tables"]) == 63
         assert result["server_data_provenance"] == pin["upgrade_proof"] and seen == ["whole-payload-verified"]
+
+
+@pytest.mark.parametrize("size", [1, 222333444])
+def test_build_config_embeds_exact_native_payload_size(size):
+    raw = tool.build_config("a"*64, payload_bytes=size)
+    assert ("SERVER_DATA_BYTES = "+str(size)+"L;").encode() in raw
+
+
+@pytest.mark.parametrize("size", [True, -1, 1.0, "100", 1 << 40])
+def test_build_config_rejects_invalid_native_payload_size(size):
+    with pytest.raises(ValueError, match="payload size"):
+        tool.build_config("a"*64, payload_bytes=size)

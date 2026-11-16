@@ -1,5 +1,7 @@
 """Portable trust-boundary checks; no download, game, native build or publication."""
 from copy import deepcopy
+import hashlib
+import json
 import importlib.util
 from pathlib import Path
 import stat
@@ -189,6 +191,7 @@ def test_delivery_code_bytes_must_match_frozen_git_commit(monkeypatch,tmp_path,c
     (tmp_path/"delivery.py").write_bytes(b"changed delivery code" if changed else committed)
     monkeypatch.setattr(delivery,"ROOT",tmp_path)
     monkeypatch.setattr(delivery,"DELIVERY_SOURCES",("delivery.py",))
+    monkeypatch.setattr(delivery,"_delivery_source_paths",lambda:delivery.DELIVERY_SOURCES)
     def git(arguments,**kwargs):
         assert arguments[-1] == SOURCE+":delivery.py"
         return str(len(committed)).encode() if arguments[1] == "cat-file" else committed
@@ -253,9 +256,11 @@ def test_generated_canary_digest_binds_every_language(monkeypatch,tmp_path,chang
     (tmp_path/"unity-host-native-test.json").write_text(json.dumps(report))
     descriptor = {"sha256":"c"*64}
     monkeypatch.setattr(delivery,"_packaged_server_data_pin",lambda:{"bytes":12,"sha256":"a"*64})
+    monkeypatch.setattr(delivery,"_packaged_payload_pin_bytes",lambda:b"fixed-generated-payload-pin")
     (tmp_path/"probe-build.json").write_text(json.dumps({"generated_language_canaries_sha256":digest,
         "copied_input_sha256":{"LocalServer/client-languages.zip":descriptor["sha256"],
-        "LocalServer/ServerData.zip":"a"*64}}))
+        "LocalServer/ServerData.zip":"a"*64,
+        "LocalServer/payload-pin.json":hashlib.sha256(b"fixed-generated-payload-pin").hexdigest()}}))
     monkeypatch.setattr(delivery,"validate_probe_build_sources",lambda built:None)
     paths = ("Data/resources.assets","Data/Managed/Metadata/global-metadata.dat")
     language = {"languages":{code:{path:{"sha256":"e"*64,"bytes":17} for path in paths} for code in ("ko","en","ja")}}
@@ -384,8 +389,82 @@ def test_delivery_cannot_substitute_missing_payload_pin_with_old_digest(monkeypa
     from types import SimpleNamespace
     base={"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
     (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA}))
-    def missing():raise ValueError("love_server_data_pin_missing")
+    def missing():raise ValueError("latest_server_data_pin_missing")
     monkeypatch.setattr(delivery,"HERE",tmp_path)
     monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(base_pin=lambda:base,output_pin=missing))
     with pytest.raises(delivery.DeliveryError,match="packaged_server_data_pin_unavailable"):
         delivery._packaged_server_data_pin()
+
+
+def test_delivery_uses_latest_source_pointer_and_fixed_payload_pin_without_large_body(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    base={"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
+    wanted={"bytes":300*delivery.MIB,"sha256":"b"*64}
+    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA}))
+    calls=[]
+    verifier=SimpleNamespace(base_pin=lambda:base,output_pin=lambda:wanted,
+        verify_source_pointer=lambda:calls.append("pointer"))
+    monkeypatch.setattr(delivery,"HERE",tmp_path)
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:verifier)
+    assert delivery._packaged_server_data_pin()==wanted and calls==["pointer"]
+    assert not (tmp_path/"latest-server-overlay.zip").exists()
+    assert {"tools/latest_server_data_pin.py","tools/prepare_latest_server_data.py",
+        "data/latest-server-data-pin.json","data/latest-server-overlay.zip",
+        "src/idoly_local/master_build.py","src/idoly_local/media_master_build.py",
+        "src/idoly_local/master_translation_build.py","src/idoly_local/master_sort_build.py"}<=set(delivery.DELIVERY_SOURCES)
+
+
+@pytest.mark.parametrize("mutated",[False,True])
+def test_delivery_checks_actual_embedded_generated_payload_pin_bytes_and_report_hash(tmp_path,monkeypatch,mutated):
+    from types import SimpleNamespace
+    from zipfile import ZipFile
+    pin={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":123,"sha256":"a"*64,
+        "manifest_sha256":"b"*64,"master_version":"c"*64}
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(payload_pin=lambda:pin))
+    prefix="Payload/Game.app/";name=prefix+"LocalServer/payload-pin.json"
+    expected=(json.dumps(pin,indent=2)+"\n").encode()
+    actual=(json.dumps({**pin,"bytes":124},indent=2)+"\n").encode() if mutated else expected
+    path=tmp_path/"tiny.ipa"
+    with ZipFile(path,"w") as archive:archive.writestr(name,actual)
+    report={"member_sha256":{name:hashlib.sha256(actual).hexdigest()}}
+    with ZipFile(path) as archive:
+        if mutated:
+            with pytest.raises(delivery.DeliveryError,match="bundled_payload_pin_differs"):
+                delivery.verify_bundled_payload_pin(archive,prefix,report)
+        else:
+            delivery.verify_bundled_payload_pin(archive,prefix,report)
+            with pytest.raises(delivery.DeliveryError,match="bundled_payload_pin_differs"):
+                delivery.verify_bundled_payload_pin(archive,prefix,{"member_sha256":{name:"f"*64}})
+
+
+@pytest.mark.parametrize("kind",["missing","oversized","symlink"])
+def test_delivery_rejects_missing_oversized_or_symlink_payload_identity(tmp_path,monkeypatch,kind):
+    from zipfile import ZipFile,ZipInfo
+    prefix="Payload/Game.app/";name=prefix+"LocalServer/payload-pin.json";path=tmp_path/"tiny.ipa"
+    with ZipFile(path,"w") as archive:
+        if kind=="oversized":archive.writestr(name,b"x"*4097)
+        if kind=="symlink":
+            entry=ZipInfo(name);entry.create_system=3;entry.external_attr=(0o120777)<<16
+            archive.writestr(entry,b"/private/other.json")
+    with ZipFile(path) as archive:
+        with pytest.raises(delivery.DeliveryError,match="bundled_payload_pin_invalid"):
+            delivery.verify_bundled_payload_pin(archive,prefix,{})
+
+
+def test_delivery_source_inventory_includes_complete_finite_producer_closure(monkeypatch):
+    from types import SimpleNamespace
+    components=("src/idoly_local/deep_dependency.py","uv.lock")
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components))
+    paths=delivery._delivery_source_paths()
+    assert paths==tuple(sorted(set(delivery.DELIVERY_SOURCES)|set(components)))
+    assert {"src/idoly_local/latest_cohort_pins.py","src/idoly_local/love_compatibility_pins.py",
+        "src/idoly_local/public_cohort_support.py"}<=set(paths)
+
+
+@pytest.mark.parametrize("components",[(),["uv.lock"],("../private",),("/private",),("src//bad.py",),
+    ("src/./bad.py",),("src/../bad.py",),("src\\bad.py",),("bad\0name",),(42,)])
+def test_delivery_component_inventory_cannot_introduce_arbitrary_paths(monkeypatch,components):
+    from types import SimpleNamespace
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components))
+    with pytest.raises(delivery.DeliveryError,match="delivery_source_components_invalid"):
+        delivery._delivery_source_paths()

@@ -70,6 +70,27 @@ jobs:
             android-server/ci/test_launcher_guard.py
             tests/test_release_preference_gate.py
             tests/test_public_payload.py
+            tests/test_public_payload_transaction.py
+            tests/test_public_cohort_support.py
+            tests/test_love_compatibility.py
+            tests/test_latest_server_data_pin.py
+            tests/test_prepare_latest_server_data.py
+            tests/test_register_latest_server_data_lfs.py
+            tests/test_story_read_semantics.py
+            tests/test_latest_dream_semantics.py
+            tests/test_latest_main_live_semantics.py
+            tests/test_media_access.py
+            tests/test_media_panorama.py
+            tests/test_story_reads.py
+            tests/test_media_stories.py
+            tests/test_dream.py
+            tests/test_live_input.py
+            tests/test_resource_archive.py
+            tests/test_resource_library.py
+            tests/test_resource_translation_runtime.py
+            tests/test_resource_translation_rebase.py
+            tests/test_octo_runtime_latest.py
+            macos-server/tests/test_macos_latest_payload.py
             tests/test_stage_private_candidate.py
             tests/test_love_server_data_pin.py
             tests/test_love_server_data_pin_checked_in.py

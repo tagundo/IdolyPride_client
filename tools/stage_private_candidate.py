@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage three verified, date-named private Actions downloads without publishing.
+"""Stage two verified, date-named private Actions downloads without publishing.
 
 Only the same-run artifact metadata and binary archives are fetched. Existing
 platform and iOS verification functions run before owned copies are created.
@@ -20,7 +20,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 CHUNK = 128 * 1024
-PRIMARY_ROLES = ("android", "macos", "ios-unified")
+PRIMARY_ROLES = ("android", "ios-unified")
+REQUIRED_JOBS = ("portable", "performance", "android", "android-clients", "ios-unified")
 
 
 class PrivateCandidateError(ValueError):
@@ -49,8 +50,8 @@ def identity(path):
 def stage_copies(rows, output, version, publisher, names, guard):
     """Keep all verified raw input files and proof paths unchanged."""
     version = names.resolve_release_version(version)
-    need(type(rows) is list and len(rows) == 3 and all(type(row) is dict for row in rows)
-         and {row.get("name") for row in rows} == {publisher.APK, publisher.MAC, publisher.IPA},
+    need(type(rows) is list and len(rows) == 2 and all(type(row) is dict for row in rows)
+         and {row.get("name") for row in rows} == {publisher.APK, publisher.IPA},
          "private_primary_inventory_differs")
     checked = []
     for row in rows:
@@ -63,7 +64,7 @@ def stage_copies(rows, output, version, publisher, names, guard):
     need(not output.exists() and not output.is_symlink(), "private_fresh_output_required")
     output.mkdir(mode=0o700)
     result = []
-    roles = {publisher.APK: "android", publisher.MAC: "macos", publisher.IPA: "ios-unified"}
+    roles = {publisher.APK: "android", publisher.IPA: "ios-unified"}
     for source, before, plain in checked:
         guard.check()
         role = roles[plain["name"]]
@@ -110,12 +111,15 @@ def stage_candidate(source, run, version, work, output, token):
     work.mkdir(mode=0o700)
     github = publisher.GitHub(token, delivery.OPENER)
     # These are the only GitHub API calls. The existing validator requires all
-    # six verification jobs and immutable same-source artifact API digests.
+    # five required verification jobs and immutable same-source artifact digests.
     build = github.api("/actions/runs/" + str(run))
     jobs = github.api("/actions/runs/" + str(run) + "/jobs?filter=latest&per_page=100")
     artifacts = github.api("/actions/runs/" + str(run) + "/artifacts?per_page=100")
     need(build.get("event") == "workflow_dispatch", "private_manual_run_required")
     bindings = publisher.validate_run(build, jobs, artifacts, source, run)
+    need(type(publisher.JOBS) in (tuple, list) and tuple(publisher.JOBS) == REQUIRED_JOBS
+         and type(bindings) is dict and set(bindings) == set(REQUIRED_JOBS),
+         "private_required_artifacts_differs")
     directories = {}
     for role in PRIMARY_ROLES:
         guard.check()
@@ -130,7 +134,7 @@ def stage_candidate(source, run, version, work, output, token):
         archive.unlink()  # Only this tool's downloaded transport copy.
         directories[role] = directory
     rows, proof_files = [], {}
-    for role in ("android", "macos"):
+    for role in ("android",):
         path = directories[role] / "platform-report.json"
         report = publisher.validate_platform(publisher.read_json(path), role, source)
         rows.append(publisher.validate_platform_files(directories[role], report, guard))
@@ -145,7 +149,8 @@ def stage_candidate(source, run, version, work, output, token):
     staged = stage_copies(rows, output, version, publisher, names, guard)
     manifest = {"schema": 1, "status": "PASS_PRIVATE_CANDIDATE", "candidate_version": version,
         "source_commit": source, "run_id": run, "official_release_published": False,
-        "source_artifacts_preserved": True, "all_six_verification_jobs_passed": True,
+        "source_artifacts_preserved": True, "all_required_verification_jobs_passed": True,
+        "required_verification_jobs": list(publisher.JOBS),
         "whole_API_archive_sha256_verified": True, "input_artifacts": bindings,
         "input_proofs": proof_files, "server_data": publisher.DATA_PIN,
         "server_data_preparation": publisher.LOVE_SERVER_DATA.load_pin()["upgrade_proof"],
@@ -161,7 +166,8 @@ def stage_candidate(source, run, version, work, output, token):
             + "\nActions: https://github.com/" + publisher.REPO + "/actions/runs/" + str(run)
             + "\n\nVerified changed executable: " + row["name"]
             + "\nOriginal build proofs remain in the same Actions run.\n"
-            + "Android emulator, relocated macOS and iOS Simulator checks passed. Physical phone and PlayCover gameplay are not tested here.\n",
+            + "Android emulator and iOS Simulator checks passed. Mac uses the unified IPA.\n"
+            + "Physical phone and PlayCover gameplay are not tested here.\n",
             encoding="utf-8")
     return manifest
 

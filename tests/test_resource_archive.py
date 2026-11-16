@@ -362,3 +362,45 @@ def test_bad_catalog_iterators_and_spoofed_record_properties_cannot_escape_the_b
                       value.generation, value.size, value.md5, value.name)
     assert cache_member("android", spoofed) == cache_member("android", value)
     assert ResourceArchiveError([]).code == "archive_invalid"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("generation", 1235), ("upload_version", 202051), ("object_name", "other_object"),
+    ("size", len(BODY)+1), ("md5", "0"*32)])
+def test_legacy_overlap_never_reuses_changed_identity_size_or_digest(field, value):
+    stream, _ = exported()
+    unchanged = replace(record(), name="updated display name")
+    changed = replace(record(), **{field: value})
+    with inspect(stream) as archive:
+        assert archive.matching_objects([unchanged]) == (unchanged,)
+        assert archive.matching_objects([changed]) == ()
+        with archive.open_record(unchanged) as response: assert response.read() == BODY
+
+
+def test_legacy_overlap_requires_present_member_kind_and_unique_bounded_target_catalog(monkeypatch):
+    @contextmanager
+    def missing_body(_row):
+        raise OctoCacheMiss()
+        yield
+    stream, _ = exported(records=[record(), record(name="missing")],
+                         opener=lambda row: open_body(row) if row.object_name == "object_one" else missing_body(row))
+    with inspect(stream, records=[record(), record(name="missing")]) as archive:
+        assert archive.matching_objects([record(name="missing")]) == ()
+        assert archive.matching_objects([record()], kind="resources") == ()
+        with pytest.raises(ResourceArchiveError, match="archive_catalog"):
+            archive.matching_objects([record(), record()])
+        monkeypatch.setattr(module, "MAX_RECORDS", 1)
+        with pytest.raises(ResourceArchiveError, match="archive_bounds"):
+            archive.matching_objects([record(), record(name="another")])
+    with pytest.raises(ResourceArchiveError, match="archive_catalog"):
+        archive.matching_objects([record()])
+
+
+
+def test_human_catalog_name_change_keeps_exact_verified_cache_identity():
+    stream, _ = exported()
+    target = replace(record(), name="renamed public catalog label")
+    with inspect(stream) as archive:
+        matching = archive.matching_objects([target])
+        assert matching == (target,) and matching[0].name == target.name
+        with archive.open_record(matching[0]) as response: assert response.read() == BODY

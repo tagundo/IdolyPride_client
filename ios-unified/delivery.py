@@ -43,9 +43,12 @@ DELIVERY_SOURCES = ("ios-unified/delivery.py", ".github/workflows/build-server-a
                     "tools/publish_binary_bundle_lfs.py",
                     "ios-unified/delivery-pins/client-languages-real-v2.manifest.json",
                     "ios-unified/ci_build.py", "ios-unified/package_unified.py", "ios-unified/runtime_inputs.json",
-                    "tools/prepare_love_server_data.py", "tools/love_server_data_pin.py", "data/love-server-data-pin.json",
-                    "data/love-server-overlay.zip", "data/love-reference.json", "data/love-adv-proof.json",
-                    "data/love-reference-NOTICE.txt", "src/idoly_local/love_catalog.py", "tools/build_server_payload.py", "LICENSE")
+                    "tools/prepare_latest_server_data.py", "tools/latest_server_data_pin.py", "data/latest-server-data-pin.json",
+                    "data/latest-server-overlay.zip", "data/love-server-data-pin.json", "data/love-reference.json", "data/love-adv-proof.json",
+                    "data/love-reference-NOTICE.txt", "src/idoly_local/love_catalog.py", "src/idoly_local/master_build.py",
+                    "src/idoly_local/media_master_build.py", "src/idoly_local/master_translation_build.py",
+                    "src/idoly_local/master_sort_build.py", "src/idoly_local/latest_cohort_pins.py",
+                    "src/idoly_local/love_compatibility_pins.py", "src/idoly_local/public_cohort_support.py", "LICENSE")
 
 class DeliveryError(ValueError):
     """Fixed credential-free error codes."""
@@ -71,11 +74,11 @@ def load_module(name, path):
     spec.loader.exec_module(module)
     return module
 
-PACKAGED_SERVER_DATA = {"pin":"../data/love-server-data-pin.json","policy":"love-source-overlay-v1"}
+PACKAGED_SERVER_DATA = {"pin":"../data/latest-server-data-pin.json","policy":"latest-cohort-overlay-v1"}
 
 
 def _packaged_server_data_verifier():
-    return load_module("delivery_love_server_data_pin",ROOT/"tools/love_server_data_pin.py")
+    return load_module("delivery_latest_server_data_pin",ROOT/"tools/latest_server_data_pin.py")
 
 
 def _packaged_server_data_pin():
@@ -85,9 +88,9 @@ def _packaged_server_data_pin():
         verifier=_packaged_server_data_verifier()
         need(manifest["inputs"]["server_data"]==verifier.base_pin(),"packaged_server_data_base_differs")
         pin=verifier.output_pin()
-        verifier.verify_overlay(ROOT/"data/love-server-overlay.zip")
+        verifier.verify_source_pointer()
         need(type(pin) is dict and set(pin)=={"bytes","sha256"} and type(pin["bytes"]) is int
-            and 0<pin["bytes"]<=256*MIB and type(pin["sha256"]) is str
+            and 0<pin["bytes"]<=512*MIB and type(pin["sha256"]) is str
             and re.fullmatch(r"[0-9a-f]{64}",pin["sha256"]),"packaged_server_data_pin_invalid")
         return pin
     except DeliveryError:
@@ -109,12 +112,51 @@ def verify_server_data_provenance(members, package_report):
         raise DeliveryError("server_data_upgrade_proof_invalid") from None
 
 
+def _packaged_payload_pin_bytes():
+    raw = (json.dumps(_packaged_server_data_verifier().payload_pin(), indent=2) + "\n").encode()
+    need(0 < len(raw) <= 4096, "bundled_payload_pin_invalid")
+    return raw
+
+
+def verify_bundled_payload_pin(archive, prefix, package_report):
+    """Bind the tiny installed-data identity to both source and actual IPA bytes."""
+    name = prefix + "LocalServer/payload-pin.json"
+    entries = [item for item in archive.infolist() if item.filename == name]
+    need(len(entries) == 1 and not entries[0].is_dir()
+         and not stat.S_ISLNK(entries[0].external_attr >> 16)
+         and not entries[0].flag_bits & 1 and 0 < entries[0].file_size <= 4096,
+         "bundled_payload_pin_invalid")
+    with archive.open(entries[0]) as incoming:
+        raw = incoming.read(4097)
+        need(incoming.read(1) == b"", "bundled_payload_pin_invalid")
+    expected = _packaged_payload_pin_bytes()
+    need(len(raw) == entries[0].file_size and raw == expected
+         and package_report.get("member_sha256", {}).get(name) == hashlib.sha256(raw).hexdigest(),
+         "bundled_payload_pin_differs")
+
+
+def _delivery_source_paths():
+    components = _packaged_server_data_verifier().SOURCE_COMPONENTS
+    need(type(components) is tuple and 0 < len(components) <= 128,
+         "delivery_source_components_invalid")
+    names = set(DELIVERY_SOURCES)
+    for name in components:
+        need(type(name) is str and 0 < len(name) <= 256 and "\\" not in name and "\0" not in name,
+             "delivery_source_components_invalid")
+        path = PurePosixPath(name)
+        need(not path.is_absolute() and str(path) == name
+             and not any(part in ("", ".", "..") for part in path.parts),
+             "delivery_source_components_invalid")
+        names.add(name)
+    return tuple(sorted(names))
+
+
 def delivery_source_pins(source):
     need(type(source) is str and re.fullmatch(r"[0-9a-f]{40}",source),"delivery_source_invalid")
     result = {}
-    for name in DELIVERY_SOURCES:
+    for name in _delivery_source_paths():
         path = ROOT/name
-        need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= (32*MIB if name=="data/love-server-overlay.zip" else 512*1024 if name=="data/love-server-data-pin.json" else 256*1024),"delivery_source_file_bound")
+        need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= (1024 if name=="data/latest-server-overlay.zip" else MIB if name=="data/latest-server-data-pin.json" else 512*1024 if name=="data/love-server-data-pin.json" else 256*1024),"delivery_source_file_bound")
         object_name = source+":"+name
         size = subprocess.check_output(["git","cat-file","-s",object_name],cwd=ROOT,timeout=30).strip()
         need(size.isdigit() and int(size) == path.stat().st_size,"delivery_committed_source_size_differs")
@@ -161,7 +203,8 @@ def verify_language_proofs(smoke, members, native, probe, language, descriptor):
     validate_probe_build_sources(built)
     copied = built.get("copied_input_sha256")
     need(type(copied) is dict and copied.get("LocalServer/client-languages.zip") == descriptor["sha256"]
-         and copied.get("LocalServer/ServerData.zip") == _packaged_server_data_pin()["sha256"],
+         and copied.get("LocalServer/ServerData.zip") == _packaged_server_data_pin()["sha256"]
+         and copied.get("LocalServer/payload-pin.json") == hashlib.sha256(_packaged_payload_pin_bytes()).hexdigest(),
          "probe_copied_language_inputs_differ")
     canaries = built.get("generated_language_canaries_sha256")
     need(type(canaries) is str and re.fullmatch(r"[0-9a-f]{64}",canaries),"generated_canary_digest_invalid")
@@ -305,6 +348,7 @@ def verify_members(members, proof, source, run, artifact, guard):
      assert app_info['CFBundleVersion']=='156.9116'
      assert app_info['IdolyUnifiedLoopbackOrigin']=='http://127.0.0.1:8080'
      assert json.loads(z.read(prefix+'LocalServer/client-languages.json'))==descriptor
+     verify_bundled_payload_pin(z,prefix,report)
      zipped=z.getinfo(prefix+'LocalServer/client-languages.zip');assert zipped.file_size==descriptor['bytes']
      with z.open(zipped) as incoming:
       digest=hashlib.sha256()

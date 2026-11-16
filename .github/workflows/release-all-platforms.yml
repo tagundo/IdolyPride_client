@@ -373,64 +373,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  macos:
-    runs-on: macos-15
-    timeout-minutes: 45
-    permissions:
-      contents: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-          lfs: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-          architecture: arm64
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: '0.13.5'
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.27.3'
-          cache: false
-      - name: Install locked Mac build dependencies
-        run: |
-          test "$(uname -m)" = arm64
-          uv sync --locked --python 3.12
-          uv pip install --python .venv/bin/python -r macos-server/requirements-build.txt
-          gh api repos/tagundo/IdolyPride_client/releases/assets/732944285 --header 'Accept: application/octet-stream' > "$RUNNER_TEMP/idoly-mac-protocol.zip"
-          uv run --locked python macos-preserver/extract_descriptor.py --payload "$RUNNER_TEMP/idoly-mac-protocol.zip" --output data/protocol/idolypride-6.1.1.pb
-          rm "$RUNNER_TEMP/idoly-mac-protocol.zip"
-          uv run --locked python -m pytest -q macos-server/tests
-      - name: Build and exercise relocated native SwiftUI server
-        run: >-
-          uv run --locked python tools/release_platform_builds.py
-          --platform macos --source-commit "$GITHUB_SHA"
-          --work "$RUNNER_TEMP/idoly-macos-work"
-          --output "$RUNNER_TEMP/idoly-macos-final"
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: optimized-release-macos-${{ github.sha }}
-          path: ${{ runner.temp }}/idoly-macos-final
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: optimized-release-macos-diagnostics-${{ github.sha }}
-          path: |
-            ${{ runner.temp }}/idoly-macos-work/**/*.json
-            ${{ runner.temp }}/idoly-macos-final/build-failure.json
-            ${{ runner.temp }}/idoly-macos-final/mac-native-build.sanitized.log
-          if-no-files-found: warn
-          retention-days: 14
-
   ios-unified:
     runs-on: macos-15
     timeout-minutes: 45
@@ -462,6 +404,8 @@ jobs:
           python3 -B -m pytest -q -p no:cacheprovider tests/test_ios_host.py tests/test_public_payload.py tests/test_ios_unified_*.py ios-unified/native/tests/test_build_native.py
           python3 -B ios-unified/native/build_native.py --portable-tests
       - name: Compile real Apple frameworks and run all five cold language launches
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 -B ios-unified/ci_build.py
           --inputs "$RUNNER_TEMP/idoly-unified-inputs"
@@ -543,13 +487,12 @@ jobs:
 
 
   private-artifacts:
-    needs: [portable, performance, android, macos, ios-unified, android-clients]
+    needs: [portable, performance, android, android-clients, ios-unified]
     if: >-
       ${{ github.event_name == 'workflow_dispatch' && !inputs.publish
           && needs.portable.result == 'success'
           && needs.performance.result == 'success'
           && needs.android.result == 'success'
-          && needs.macos.result == 'success'
           && needs.ios-unified.result == 'success'
           && needs.android-clients.result == 'success' }}
     runs-on: ubuntu-24.04
@@ -594,14 +537,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: private-candidate-macos-${{ inputs.release_version }}-${{ github.sha }}
-          path: ${{ runner.temp }}/idoly-private-candidate/macos
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-      - uses: actions/upload-artifact@v4
-        if: success()
-        with:
           name: private-candidate-ios-unified-${{ inputs.release_version }}-${{ github.sha }}
           path: ${{ runner.temp }}/idoly-private-candidate/ios-unified
           if-no-files-found: error
@@ -609,13 +544,12 @@ jobs:
           retention-days: 14
 
   publish:
-    needs: [portable, performance, android, macos, ios-unified, android-clients]
+    needs: [portable, performance, android, android-clients, ios-unified]
     if: >-
       ${{ (github.event_name == 'workflow_dispatch' && inputs.publish)
           && needs.portable.result == 'success'
           && needs.performance.result == 'success'
           && needs.android.result == 'success'
-          && needs.macos.result == 'success'
           && needs.ios-unified.result == 'success'
           && needs.android-clients.result == 'success' }}
     runs-on: ubuntu-24.04

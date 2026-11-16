@@ -28,3 +28,11 @@ private/
 !/data/love-reference-NOTICE.txt
 !/data/love-server-overlay.zip
 !/data/love-server-data-pin.json
+
+# Frozen latest public payload metadata and its canonical LFS pointer only.
+!/data/latest-server-data-pin.json
+!/data/latest-server-overlay.zip
+# Original compiler source retained solely to verify the immutable old overlay.
+!/data/legacy-sources/
+/data/legacy-sources/*
+!/data/legacy-sources/love_catalog.py

@@ -603,3 +603,43 @@ def test_interface_only_command_rejects_missing_or_game_fields(harness):
     assert not command(h, "save_interface_language")["ok"]
     assert not command(h, "save_interface_language", interface_language="ja", language="en")["ok"]
     assert path.read_bytes() == before
+
+
+def test_package_generated_outer_payload_pin_reaches_installer_before_runtime(harness):
+    h=harness
+    pin={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":123,"sha256":"a"*64,
+        "manifest_sha256":"b"*64,"master_version":"c"*64}
+    (h.bundle/"payload-pin.json").write_text(json.dumps(pin))
+    seen=[]
+    def install(source,data,log,**kwargs):
+        assert source==h.bundle/"ServerData.zip" and data==h.data
+        assert h.runtimes==[]
+        seen.append(kwargs)
+    h.subject._installer=install
+    assert start(h)["state"]=="ready"
+    assert seen==[{"expected_bytes":123,"expected_sha256":"a"*64}]
+
+
+@pytest.mark.parametrize("changed",[{"schema":True},{"policy":"love-source-overlay-v1"},{"bytes":True},
+    {"bytes":0},{"bytes":512*1024**2+1},{"sha256":"not-a-digest"},{"manifest_sha256":"x"*64},
+    {"master_version":"fixture"},{"path":"/private/unapproved"}])
+def test_invalid_bundled_payload_pin_never_reaches_installer_or_runtime(harness,changed):
+    h=harness
+    pin={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":123,"sha256":"a"*64,
+        "manifest_sha256":"b"*64,"master_version":"c"*64}
+    (h.bundle/"payload-pin.json").write_text(json.dumps({**pin,**changed}))
+    seen=[];h.subject._installer=lambda *args,**kwargs:seen.append(True)
+    result=start(h)
+    assert result["state"]=="failed" and h.runtimes==[] and seen==[]
+
+
+def test_bundled_payload_pin_is_small_regular_and_rejects_duplicate_keys(tmp_path):
+    bundle=tmp_path/"LocalServer";bundle.mkdir();path=bundle/"payload-pin.json"
+    path.write_text('{"schema":1,"schema":1}')
+    with pytest.raises(ValueError,match="Duplicate"):_=host._bundled_payload_pin(bundle)
+    path.write_text(" "*4097)
+    with pytest.raises(ValueError,match="public payload pin"):_=host._bundled_payload_pin(bundle)
+    path.unlink();outside=tmp_path/"outside.json";outside.write_text('{}');path.symlink_to(outside)
+    with pytest.raises(OSError):_=host._bundled_payload_pin(bundle)
+    path.unlink();os.mkfifo(path)
+    with pytest.raises(ValueError,match="public payload pin"):_=host._bundled_payload_pin(bundle)

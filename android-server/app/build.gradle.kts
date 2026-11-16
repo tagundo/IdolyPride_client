@@ -22,6 +22,7 @@ val payloadHash = if (payloadFile.isFile) payloadFile.inputStream().use { input 
     }
     digest.digest().joinToString("") { "%02x".format(it) }
 } else "missing"
+val payloadBytes = if (payloadFile.isFile) payloadFile.length() else 0L
 val generatedAssets = layout.buildDirectory.dir("generated/serverDataAssets")
 val bundledTranslations = providers.gradleProperty("bundledTranslations").map { rootProject.file(it) }
 val bundledTranslationsHash = providers.gradleProperty("bundledTranslationsSha256").orElse("").get()
@@ -127,6 +128,7 @@ android {
         versionName = providers.gradleProperty("serverVersionName").orElse("0.3.36").get()
         ndk { abiFilters += serverAbi }
         buildConfigField("String", "SERVER_DATA_SHA256", "\"$payloadHash\"")
+        buildConfigField("long", "SERVER_DATA_BYTES", "${payloadBytes}L")
         buildConfigField("String", "BUNDLED_TRANSLATIONS_SHA256", "\"$bundledTranslationsHash\"")
         buildConfigField("long", "BUNDLED_TRANSLATIONS_BYTES", "${bundledTranslationsBytes}L")
     }

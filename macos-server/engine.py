@@ -32,6 +32,50 @@ def emit(event: str, **values):
         print(json.dumps({"event": event, **values}, ensure_ascii=False), flush=True)
 
 
+def _bundled_payload_pin(server_data):
+    path = Path(server_data).with_name("payload-pin.json")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return {}  # Explicit legacy/synthetic bundles retain missing-only install.
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or not 0 < before.st_size <= 4096:
+            raise ValueError("Bundled public payload pin is invalid")
+        raw = stream.read(4097)
+        after = os.fstat(stream.fileno())
+        if (len(raw) != before.st_size or (before.st_dev, before.st_ino, before.st_size,
+                before.st_mtime_ns, before.st_ctime_ns) != (after.st_dev, after.st_ino,
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+            raise ValueError("Bundled public payload pin is invalid")
+
+    def pairs(rows):
+        result = {}
+        for key, value in rows:
+            if key in result:
+                raise ValueError("Bundled public payload pin is invalid")
+            result[key] = value
+        return result
+
+    pin = json.loads(raw, object_pairs_hook=pairs,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Bundled public payload pin is invalid")))
+    keys = {"schema", "policy", "bytes", "sha256", "manifest_sha256", "master_version"}
+    if (type(pin) is not dict or set(pin) != keys or type(pin["schema"]) is not int or pin["schema"] != 1
+            or pin["policy"] != "latest-cohort-overlay-v1" or type(pin["bytes"]) is not int
+            or not 0 < pin["bytes"] <= 512 * 1024**2
+            or any(type(pin[key]) is not str or re.fullmatch(r"[0-9a-f]{64}", pin[key]) is None
+                   for key in ("sha256", "manifest_sha256", "master_version"))):
+        raise ValueError("Bundled public payload pin is invalid")
+    return {"expected_sha256": pin["sha256"], "expected_bytes": pin["bytes"]}
+
+
+def _install_payload(server_data, data_dir, log=None):
+    options = _bundled_payload_pin(server_data)
+    if log is None:
+        return install_payload(server_data, data_dir, **options)
+    return install_payload(server_data, data_dir, log, **options)
+
+
 _ACCOUNT_ACTIONS = frozenset(("accounts_status", "accounts_create", "accounts_clone", "accounts_select",
     "accounts_export", "accounts_preview", "accounts_import", "accounts_restore", "settings_clear_history"))
 _ACCOUNT_ARCHIVE_LIMIT = 128 * 1024 * 1024
@@ -431,7 +475,7 @@ class Controller:
             else:
                 if action != "accounts_status" and not (self.data_dir / "protocol/idolypride-6.1.1.pb").is_file():
                     preparing_catalog = True
-                    install_payload(self.server_data, self.data_dir, self.log)
+                    _install_payload(self.server_data, self.data_dir, self.log)
                     preparing_catalog = False
                 from idoly_local.account_manager import account_command
                 result = account_command(self.data_dir, action, payload)
@@ -554,7 +598,7 @@ class Controller:
     def _official_operation(self, identifier, action, payload):
         try:
             if action in ("official_inspect", "official_fetch", "official_apply") and not (self.data_dir/"protocol/idolypride-6.1.1.pb").is_file():
-                install_payload(self.server_data, self.data_dir, self.log)
+                _install_payload(self.server_data, self.data_dir, self.log)
             with self.lock:
                 if self.closed: return
                 if self.official_manager is None:
@@ -603,7 +647,7 @@ class Controller:
         runtime_entered = False
         try:
             self.log("서버 데이터를 준비하고 있습니다.")
-            install_payload(self.server_data, self.data_dir, self.log)
+            _install_payload(self.server_data, self.data_dir, self.log)
             try:
                 selected_root = Path(resource_cache_dir) if resource_cache_dir is not None else self.data_dir
                 self.translation_status = install_bundled_translations(
@@ -1316,7 +1360,7 @@ def smoke(data_dir, server_data, report_path, live_engine_library=None):
     from idoly_local.schema import Schema
     from idoly_local.state import State
 
-    install_payload(server_data, data_dir)
+    _install_payload(server_data, data_dir)
     runtime = app_runtime.start(data_dir, grpc_port=0, asset_port=0)
     if live_engine_library is None and getattr(sys, "frozen", False):
         candidate = Path(sys._MEIPASS) / "libidoly_live.dylib"

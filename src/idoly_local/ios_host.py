@@ -127,6 +127,35 @@ def _regular(path, *, maximum=MAX_ARCHIVE_BYTES):
     return info
 
 
+def _bundled_payload_pin(bundle):
+    """Read only the small package-generated public-data identity."""
+    path = Path(bundle) / "payload-pin.json"
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return {}  # Older bundles retain the legacy missing-only installer.
+    with os.fdopen(descriptor, "rb") as incoming:
+        before = os.fstat(incoming.fileno())
+        if (not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
+                or not 0 < before.st_size <= 4096):
+            raise ValueError("Bundled public payload pin is invalid")
+        raw = incoming.read(4097)
+        after = os.fstat(incoming.fileno())
+        identity = lambda row: (row.st_dev, row.st_ino, row.st_size, row.st_mtime_ns, row.st_ctime_ns)
+        if len(raw) != before.st_size or identity(before) != identity(after):
+            raise ValueError("Bundled public payload pin changed")
+    pin = _decode(raw.decode("utf-8"), maximum=4096)
+    keys = {"schema", "policy", "bytes", "sha256", "manifest_sha256", "master_version"}
+    if (type(pin) is not dict or set(pin) != keys or type(pin.get("schema")) is not int
+            or pin["schema"] != 1 or pin.get("policy") != "latest-cohort-overlay-v1"
+            or type(pin.get("bytes")) is not int or not 0 < pin["bytes"] <= 512 * 1024**2
+            or any(type(pin.get(key)) is not str or len(pin[key]) != 64
+                or any(character not in "0123456789abcdef" for character in pin[key])
+                for key in ("sha256", "manifest_sha256", "master_version"))):
+        raise ValueError("Bundled public payload pin is invalid")
+    return {"expected_sha256": pin["sha256"], "expected_bytes": pin["bytes"]}
+
+
 def _atomic_json(path, value, *, only_missing=False):
     raw = _json(value).encode("utf-8")
     if len(raw) > MAX_SETTINGS_BYTES:
@@ -440,7 +469,8 @@ class _Host:
             with self._condition:
                 self._paths = (bundle, data, resources); self._ports = selected_ports
             native = self._native()
-            self._installer(bundle / "ServerData.zip", data, self._log)
+            payload_pin = _bundled_payload_pin(bundle)
+            self._installer(bundle / "ServerData.zip", data, self._log, **payload_pin)
             wrapper_stage = "resources"
             self._translations(bundle / "ServerData.zip", resources, self._log, data_dir=data)
             wrapper_stage = "storage"

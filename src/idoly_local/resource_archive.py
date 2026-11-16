@@ -539,6 +539,37 @@ class VerifiedResourceArchive:
             except Exception:
                 pass
 
+    def matching_objects(self, records, *, kind="all"):
+        """Return only target objects with this verified source's exact identity.
+
+        A catalog revision alone grants no compatibility: cache key, complete
+        identity, size and MD5 must all agree, and the source member must exist.
+        Changed or newly added target objects remain absent for normal download.
+        """
+        if self._closed or kind not in ("all", "assetbundle", "resources"):
+            raise ResourceArchiveError("archive_catalog")
+        selected, seen = [], set()
+        try:
+            for record in records:
+                if len(seen) >= MAX_RECORDS:
+                    raise ResourceArchiveError("archive_bounds")
+                record = _record(record)
+                name = cache_member(self.platform, record)
+                if name in seen:
+                    raise ResourceArchiveError("archive_catalog")
+                seen.add(name)
+                expected = self.catalog.get(name)
+                if (name in self._present and expected is not None
+                        and (kind == "all" or record.kind == kind)
+                        and (record.cache_key, record.identity, record.size, record.md5)
+                        == (expected.cache_key, expected.identity, expected.size, expected.md5)):
+                    selected.append(record)
+            return tuple(selected)
+        except ResourceArchiveError:
+            raise
+        except Exception:
+            raise ResourceArchiveError("archive_catalog") from None
+
     @contextmanager
     def open_record(self, record):
         name = cache_member(self.platform, record)

@@ -174,6 +174,7 @@
     "idoly_local.ios_client_data",
     "idoly_local.ios_host",
     "idoly_local.language_settings",
+    "idoly_local.latest_cohort_pins",
     "idoly_local.lessons",
     "idoly_local.live_accessories",
     "idoly_local.live_assets",
@@ -182,6 +183,7 @@
     "idoly_local.live_rejection_diagnostics",
     "idoly_local.love",
     "idoly_local.love_catalog",
+    "idoly_local.love_compatibility_pins",
     "idoly_local.main_live",
     "idoly_local.master_sort",
     "idoly_local.media_access",
@@ -216,7 +218,9 @@
     "idoly_local.profile_names",
     "idoly_local.profile_preferences",
     "idoly_local.profile_top",
+    "idoly_local.public_cohort_support",
     "idoly_local.public_payload",
+    "idoly_local.public_payload_transaction",
     "idoly_local.pvp",
     "idoly_local.quest",
     "idoly_local.render_probe",
@@ -240,7 +244,7 @@
     "idoly_local.wardrobe_diagnostics"
   ],
   "packaged_server_data": {
-    "pin": "../data/love-server-data-pin.json",
-    "policy": "love-source-overlay-v1"
+    "pin": "../data/latest-server-data-pin.json",
+    "policy": "latest-cohort-overlay-v1"
   }
 }

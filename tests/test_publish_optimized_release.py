@@ -218,7 +218,7 @@ class TinyGuard:
 def source_release_binaries(tmp_path):
     import hashlib
     rows = []
-    for index, name in enumerate((publisher.APK, publisher.MAC, publisher.IPA,
+    for index, name in enumerate((publisher.APK, publisher.IPA,
                                   *publisher.ANDROID_LANGUAGE_CLIENTS.values(),
                                   *(row["name"] for row in publisher.COMPANIONS))):
         path = tmp_path/name
@@ -318,7 +318,7 @@ def test_new_release_promotes_only_after_all_full_API_readbacks(release_binaries
     assert all(row["full_API_download_SHA256_verified"] is True for row in github.asset_receipts)
     assert [body for _path, method, body in github.calls if method == "POST"] == [{
         "tag_name": publisher.TAG, "target_commitish": SOURCE,
-        "name": "아이프라 로컬 "+RELEASE_VERSION+" · 그래픽·촬영 설정과 서버·클라이언트", "body": "release",
+        "name": publisher.release_title(), "body": "release",
         "draft": True, "prerelease": True, "make_latest": "false"}]
 
 
@@ -359,9 +359,47 @@ def test_unverified_binary_input_stops_before_draft_creation(case, release_binar
     assert github.calls == []
 
 
-def test_release_body_uses_seven_assets_and_labels_reused_clients():
+def scope_proof():
+    return {"original_master": {"version": "6b77" + "0"*60, "pack_count": 202},
+            "love": {"events": 6, "episodes": 72},
+            "semantic_controls": {"features": {
+                "main_live": {"receipt": {"checks": {
+                    "old_cards_unchanged": 503, "new_cards": 1,
+                    "old_costumes_preserved": 994, "new_costumes": 17,
+                    "old_hairs_preserved": 1186, "new_hairs": 45}}},
+                "octo": {"receipt": {"required_card_images": 1, "platforms": {
+                    key: {"revision": revision, "model_roots": 125, "missing_model_roots": 0,
+                          "incomplete_dependency_closures": 0}
+                    for key, revision in (("android", 1097), ("ios", 1169))}}}}}}
+
+
+@pytest.mark.parametrize("change", ["missing", "boolean", "negative"])
+def test_release_notes_never_invent_master_counts(change, monkeypatch):
+    proof = scope_proof()
+    checks = proof["semantic_controls"]["features"]["main_live"]["receipt"]["checks"]
+    if change == "missing": checks.pop("new_cards")
+    elif change == "boolean": checks["new_cards"] = True
+    else: checks["new_cards"] = -1
+    monkeypatch.setattr(publisher.LATEST_SERVER_DATA, "load_pin", lambda: {"upgrade_proof": proof})
+    notes = "\n".join(publisher.release_scope_lines())
+    assert proof["original_master"]["version"] in notes
+    assert "카드 504" not in notes and "의상 1011" not in notes and "헤어 1231" not in notes
+
+
+@pytest.mark.parametrize("field,value", [("revision", True), ("model_roots", -1),
+                                          ("missing_model_roots", 1), ("incomplete_dependency_closures", 1)])
+def test_release_notes_reject_unproven_resource_claims(field, value, monkeypatch):
+    proof = scope_proof()
+    proof["semantic_controls"]["features"]["octo"]["receipt"]["platforms"]["android"][field] = value
+    monkeypatch.setattr(publisher.LATEST_SERVER_DATA, "load_pin", lambda: {"upgrade_proof": proof})
+    with pytest.raises(publisher.ReleaseError, match="release_scope_proof_invalid"):
+        publisher.release_scope_lines()
+
+
+def test_release_body_uses_five_assets_and_labels_reused_client(monkeypatch):
+    monkeypatch.setattr(publisher.LATEST_SERVER_DATA, "load_pin", lambda: {"upgrade_proof": scope_proof()})
     artifacts = [{"name": publisher.release_name(name), "source_name": name, "bytes": 1, "sha256": HASH}
-                 for name in (publisher.APK, publisher.MAC, publisher.IPA)]
+                 for name in (publisher.APK, publisher.IPA)]
     body = publisher.release_body(SOURCE, RUN, {"commit": "c"*40}, artifacts,
                                   {"diagnostics": {}, "translation": {}},
                                   android_clients=[{"name": publisher.release_name(name), "source_name": name, "bytes": 1, "sha256": HASH}
@@ -371,12 +409,19 @@ def test_release_body_uses_seven_assets_and_labels_reused_clients():
     for name in publisher.EXPECTED_RELEASE_ASSETS:
         assert publisher.asset_download_url(name) in body
     assert body.count("/releases/download/"+publisher.TAG+"/") == len(publisher.EXPECTED_RELEASE_ASSETS)
-    assert body.count("/raw/"+"c"*40+"/") == 3
+    assert body.count("/raw/"+"c"*40+"/") == 2
     assert "이번 릴리즈에서 재제작하지 않았습니다" in body
     assert "별도 Mac 서버와 동시에 실행하지 마세요" in body
     assert "통합 IPA는 게임 시작 전 한국어·일본어·영어" in body
     assert "원하는 언어판 하나로 교체 설치" in body
-    assert "별도 PlayCover 게임 IPA는 한국어판" in body
+    assert "Mac / PlayCover: 같은 통합 IPA 하나" in body
+    assert "5개 Assets" in body and "8개 테이블" in body
+    assert "카드 504 / 의상 1011 / 헤어 1231" in body
+    assert "Android revision 1097 / 모델 진입점 125" in body
+    assert "iOS revision 1169 / 모델 진입점 125" in body
+    assert "71편의 진행·감상" in body and "인계 실행 전에" in body
+    assert "실제 공식 계정으로 인증·인계를 실행한 검증은 하지 않았습니다" in body
+    assert publisher.MAC not in body and "Client-PlayCover-ko.ipa" not in body
     assert "실제 Android ARM64 기기" in body
     assert "Fix File Picker" in body and "실기기 ZIP 가져오기·진행 표시는 아직" in body
     assert "완전 오프라인 사용은 필요한 캐시를 준비한 뒤" in body
@@ -882,11 +927,11 @@ def test_release_version_argument_is_required_before_actions(tmp_path):
     assert list(tmp_path.iterdir()) == []
 
 
-def test_all_seven_files_are_staged_with_exact_original_bytes_and_provenance(source_release_binaries, tmp_path):
+def test_all_five_files_are_staged_with_exact_original_bytes_and_provenance(source_release_binaries, tmp_path):
     expected = {row["name"]: {**row, "body": Path(row["path"]).read_bytes()} for row in source_release_binaries}
     staged = publisher.stage_release_binaries(source_release_binaries, tmp_path/"public", TinyGuard())
     assert {row["name"] for row in staged} == publisher.EXPECTED_RELEASE_ASSETS
-    assert len({row["name"] for row in staged}) == 7
+    assert len({row["name"] for row in staged}) == 5
     assert {row["source_name"] for row in staged} == publisher.INPUT_RELEASE_ASSETS
     for row in staged:
         original = expected[row["source_name"]]
@@ -970,3 +1015,43 @@ def test_native_payload_requires_the_exact_source_bound_upgrade_proof(monkeypatc
     else: proof["unverified_claim"] = True
     with pytest.raises(publisher.ReleaseError, match="preparation_provenance"):
         publisher.validate_platform(report, platform, SOURCE)
+
+
+def test_native_publication_and_builder_require_the_same_latest_source_closure():
+    builds = publisher.module("publication_latest_builder_contract",
+        publisher.ROOT/"tools/release_platform_builds.py")
+    assert publisher.LOVE_SERVER_DATA is publisher.LATEST_SERVER_DATA
+    assert publisher.DATA_PIN == publisher.LATEST_SERVER_DATA.output_pin() == builds.SERVER_DATA
+    assert publisher.DATA_PIN != publisher.BASE_DATA_PIN == builds.BASE_SERVER_DATA
+    assert set(publisher.COMMON_SOURCES) == set(builds.COMMON_SOURCE_FILES)
+    assert set(publisher.LATEST_SERVER_DATA.SOURCE_COMPONENTS) <= set(publisher.COMMON_SOURCES)
+    assert {"data/latest-server-data-pin.json", "data/latest-server-overlay.zip",
+        "src/idoly_local/public_payload_transaction.py",
+        "src/idoly_local/latest_cohort_pins.py", "src/idoly_local/love_compatibility_pins.py"
+    } <= set(publisher.COMMON_SOURCES)
+
+
+def test_native_metadata_requires_all_resource_runtime_guards():
+    assert {"src/idoly_local/resource_archive.py", "src/idoly_local/resource_library.py",
+        "src/idoly_local/resource_translation.py", "src/idoly_local/resource_translation_runtime.py",
+        "src/idoly_local/octo_runtime.py"} <= set(publisher.COMMON_SOURCES)
+
+
+def test_current_release_has_exact_five_roles_and_excludes_standalone_mac():
+    assert publisher.JOBS == ("portable", "performance", "android", "android-clients", "ios-unified")
+    assert len(publisher.INPUT_RELEASE_ASSETS) == len(publisher.EXPECTED_RELEASE_ASSETS) == 5
+    assert {row["name"] for row in publisher.COMPANIONS} == {
+        "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ko.apk"}
+    assert publisher.MAC not in publisher.INPUT_RELEASE_ASSETS
+    for old_name in (publisher.MAC, "IdolyPride-6.1.1-Local-PlayCover-ko.ipa"):
+        with pytest.raises(publisher.ReleaseError, match="release_source_name_invalid"):
+            publisher.release_name(old_name)
+
+
+@pytest.mark.parametrize("old_name", [publisher.MAC, "IdolyPride-6.1.1-Local-PlayCover-ko.ipa"])
+def test_excluded_mac_asset_cannot_reenter_current_publication(old_name, source_release_binaries, tmp_path):
+    rows = deepcopy(source_release_binaries)
+    rows[0]["name"] = old_name
+    with pytest.raises(publisher.ReleaseError, match="release_staging_input_names_invalid"):
+        publisher.stage_release_binaries(rows, tmp_path/"forbidden", TinyGuard())
+    assert all(Path(row["path"]).is_file() for row in source_release_binaries)

@@ -17,7 +17,7 @@ from packaging_common import *
 HERE = Path(__file__).resolve().parent
 LOAD_PATH = '@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer'
 UNITY = 'Frameworks/UnityFramework.framework/UnityFramework'
-PACKAGED_SERVER_DATA = {'pin':'../data/love-server-data-pin.json','policy':'love-source-overlay-v1'}
+PACKAGED_SERVER_DATA = {'pin':'../data/latest-server-data-pin.json','policy':'latest-cohort-overlay-v1'}
 
 
 def _packaging_manifest(manifest):
@@ -28,7 +28,7 @@ def _packaging_manifest(manifest):
 
 
 def _packaged_pin_module():
-    spec=importlib.util.spec_from_file_location('ios_packaged_love_server_data_pin',HERE.parent/'tools/love_server_data_pin.py')
+    spec=importlib.util.spec_from_file_location('ios_packaged_latest_server_data_pin',HERE.parent/'tools/latest_server_data_pin.py')
     module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     return module
 
@@ -43,7 +43,7 @@ def server_data_provenance(server_data, manifest, proof_path=None):
     verifier=_packaged_pin_module()
     require(manifest['inputs']['server_data']==verifier.base_pin(),'Server data base pin differs')
     verify_file(server_data,verifier.output_pin())
-    verifier.verify_overlay(HERE.parent/'data/love-server-overlay.zip')
+    verifier.verify_source_pointer()
     verifier.verify_payload(server_data)
     require(proof_path is not None,'Server data upgrade proof is required')
     proof_path=Path(proof_path)
@@ -181,6 +181,11 @@ def bundle_files(runtime_root, native_framework, server_data, translations, targ
         p = web / name; require(regular(p).st_size <= 256 * 1024, 'Settings file exceeds bound'); files['LocalServer/settings/' + name] = p
     t = manifest['inputs']['translations']; metadata = {'schema':1,'platform':'ios','sha256':t['sha256'],'bytes':t['bytes']}
     generated = {'LocalServer/bundledTranslations.json':(json.dumps(metadata,indent=2)+'\n').encode()}
+    if data_provenance is not None:
+        payload_pin = _packaged_pin_module().payload_pin()
+        raw_pin = (json.dumps(payload_pin, indent=2) + '\n').encode()
+        require(0 < len(raw_pin) <= 4096, 'Bundled payload pin exceeds bound')
+        generated['LocalServer/payload-pin.json'] = raw_pin
     require(len(files) <= manifest['capacity']['max_archive_entries'], 'Unified app inventory exceeds bound')
     return files, generated, {'runtime':runtime,'native':native,'client_languages':language_proof,'server_data_provenance':data_provenance}
 

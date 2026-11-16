@@ -27,3 +27,74 @@ Captured start dates are reference evidence. Official end times and durations ar
 The server payload includes the canonical reference/proof, `data/licenses/love-reference-NOTICE.txt`, and the complete AGPL license text as `data/licenses/love-reference-AGPL-3.0.txt`. The public upstream source/license URL and exact source pin are retained. The reference's licensing does not relicense original game text, artwork, audio or other game assets, which remain owned by their respective right holders. The proof contains no original dialogue bytes or user account data.
 
 Portable tests cover pinned metadata, the original descriptor identity, source tampering, cache invalidation, safe unavailable behavior and package table contracts. Actual original-pack preparation is validated by the remote payload build. No local project imports, test execution or official authentication were used while preparing this source change. Public release remains subject to the wider native/runtime validation gates.
+
+
+## Finite latest-cohort progress compatibility
+
+The legacy runtime uses master
+`961e456499039e31248a818a911c8d95f92461f86aff4674ba07e29c32afcf60`
+and the prepared catalog fingerprint
+`876fab148d34d912213b3d8c6fb69b0b3c2bc86e81c75fef724636904a548b49`.
+The candidate master is
+`6b77e0d8a64b26d5bebd09a7c19a47f2dfad2af914c5160418aa2e7292e13a11`.
+A different whole-data fingerprint is expected. It must retain its truthful
+master version and complete source-file hashes; no latest catalog is relabeled
+as the old master to satisfy saved progress.
+
+`prepare_latest_love_catalog` is a build-only operation on exact public inputs.
+Its legacy directory comes directly from the pinned original base plus the
+existing old Love overlay, without rerunning or changing the old generator.
+It validates the exact legacy catalog fingerprint and all twelve raw source
+JSON hashes. The latest catalog independently validates the fixed original
+Love packs, original reference/ADV proof and all latest source hashes.
+
+Compatibility compares the full six event definitions, 72 Story rows,
+choice/branch graphs, story costs, levels, endings and withheld-bonus policy.
+External comparison includes referenced Item definitions, three consumed Love
+Setting fields, recursively referenced unlock/ending/EventMission Conditions,
+the referenced Area quest lists, selected Costume definitions and Character
+identity/model asset references. Unrelated new cards, outfits, character
+biographies and costume rosters are excluded from this semantic projection;
+their entire current source files still remain covered by catalog integrity.
+Original inferred reference routes remain inferred. A separate required
+`adv_identity_proof` contains both platforms' baseline/latest manifest SHA-256
+and all 68 exact logical script names with MD5, size, generation and object name.
+The generator validates this complete set against the pinned original ADV
+proof. Every identity must remain equal; any difference stops preparation before
+publishing compatibility outputs. These normalized identities also enter both
+semantic digests and the complete small report is retained in the compatibility
+proof (bounded to 256 KiB). An equal logical asset name alone is insufficient.
+The one missing ADV is not repaired by this comparison.
+
+The generator emits `master-json/LoveCatalog.json`, `love-compatibility.json`
+and `love-legacy-rules.json`. The last file preserves the original legacy
+catalog bytes as base64, their SHA-256 and the original external rule subset.
+The small proof binds both real master versions, both full catalog hashes and
+fingerprints, both twelve-file source maps, the semantic hashes and the exact
+legacy-rules archive hash. A non-equivalent comparison emits no aliases and
+retains the old rules for recovery; it never fabricates a progress migration.
+
+A proven catalog may contain exactly one accepted old progress fingerprint.
+Runtime requires an independently read-back, source-pinned proof for this
+finite old/latest pair, and still verifies the full current catalog, source
+files and legacy-rules archive. Its generated pin lives in
+`love_compatibility_pins.py`, excluded from compiler inputs to avoid a
+source/output hash cycle. The compiler never imports or consumes that runtime
+pin. Until actual remote evidence is frozen, the pin is `None` and the latest
+runtime catalog is intentionally unavailable.
+
+No State or account ZIP migration is performed. Existing normal/viewing
+`profile_love_progress` rows retain their exact old fingerprint and JSON bytes;
+new registrations use the actual new fingerprint. Existing rows are passed to
+the unchanged atomic State API using their original validated fingerprint.
+Read-only Love responses preserve incoming snapshot/progress bytes when their
+meaning did not change, including allowed JSON whitespace and unknown protobuf
+fields. An explicit gameplay mutation may change its intended fields but does
+not silently re-pin the row, reset a run, advance time or grant a reward.
+
+Remote-only tests cover recursive dependency changes, unrelated additions,
+missing/forged evidence, complete integrity checks, exact original rule archive
+retention, normal/viewing raw progress and account ZIP preservation, old backup
+restoration, new registration pins and fail-closed incompatible progress. Local
+verification is source/AST only. Actual latest compatibility is not claimed
+until the owned remote generator and small-artifact read-back complete.

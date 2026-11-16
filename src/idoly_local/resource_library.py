@@ -7,6 +7,8 @@ and resumes completed verified objects rather than partial HTTP byte ranges.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from contextlib import contextmanager
+import hashlib
 from pathlib import Path
 import secrets
 import shutil
@@ -15,7 +17,8 @@ import time
 
 from .octo_cache import OctoCache, OctoCacheError
 from .octo_manifest import OctoManifest
-from .octo_runtime import PLATFORM_ARCHIVES, _desktop_aes_backend, load_octo_archive
+from .octo_runtime import (PLATFORM_ARCHIVES, MAX_ARCHIVE_BYTES, _desktop_aes_backend,
+                           _read_archive_file, latest_resource_archive_pin, load_octo_archive)
 
 
 _KINDS = frozenset(("all", "assetbundle", "resources"))
@@ -48,6 +51,7 @@ class _Catalog:
     manifest: OctoManifest
     raw: bytes
     records: tuple
+    settings: dict | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass
@@ -107,7 +111,9 @@ class ResourceLibrary:
             available = (not directory.is_symlink()
                          and all((directory / name).is_file() for name in ("settings.json", "manifest.pb")))
             self._summaries[platform] = {"available": available, "loaded": False,
-                "application_version": version, "revision": revision, "object_count": None,
+                "application_version": version,
+                "revision": revision if latest_resource_archive_pin(platform) is None else None,
+                "object_count": None,
                 "total_bytes": None, "error_code": None if available else "catalog_unavailable"}
         if catalogs is not None:
             if not isinstance(catalogs, dict) or any(name not in PLATFORM_ARCHIVES for name in catalogs):
@@ -123,12 +129,18 @@ class ResourceLibrary:
         if active_gateway is not None:
             manifest = getattr(active_gateway, "manifest", None)
             for platform, (_, _, version, revision) in PLATFORM_ARCHIVES.items():
-                # Bulk preservation uses the original archive, while a game
-                # session can advertise localized or monotonically pinned JP.
-                # Only an original-revision candidate can use the reuse path;
-                # _load_catalog still verifies its complete original identity.
+                approved = latest_resource_archive_pin(platform)
+                revisions = (revision,) if approved is None else (revision, approved["revision"])
+                # Bulk preservation uses a complete approved original catalog;
+                # localized/monotonic game-session revisions cannot be reused.
                 if (isinstance(manifest, OctoManifest) and manifest.application_version == version
-                        and manifest.revision == revision):
+                        and manifest.revision in revisions):
+                    if (approved is not None and manifest.revision == approved["revision"]
+                            and manifest.archive_sha256 != approved["manifest_sha256"]):
+                        # JP's persisted monotonic counter can equal the new
+                        # baseline after row states were rewritten. Equal
+                        # revision is not the original catalog's identity.
+                        continue
                     catalogs[platform] = manifest
         return cls(data_dir, catalogs, fetcher=fetcher, max_workers=max_workers,
                    base_url=base_url, aes_cbc=aes_cbc, resource_cache_dir=resource_cache_dir)
@@ -138,12 +150,13 @@ class ResourceLibrary:
         with self._catalog_lock:
             if platform in self._catalogs:
                 return self._catalogs[platform]
-            archive_name, _cache, version, revision = PLATFORM_ARCHIVES[platform]
+            archive_name, _cache, _legacy_version, _legacy_revision = PLATFORM_ARCHIVES[platform]
             try:
                 archive = load_octo_archive(self.root / archive_name, platform=platform)
                 if archive is None:
                     raise ResourceLibraryError("catalog_unavailable")
                 settings, raw = archive
+                version, revision = settings["application_version"], settings["revision"]
                 if existing is not None:
                     if (not isinstance(existing, OctoManifest) or existing.application_version != version
                             or existing.revision != revision
@@ -158,7 +171,7 @@ class ResourceLibrary:
                 if manifest.revision != revision:
                     raise ResourceLibraryError("invalid_catalog")
                 records = tuple(sorted(manifest.objects.values(), key=lambda value: value.cache_key))
-                catalog = _Catalog(manifest, raw, records)
+                catalog = _Catalog(manifest, raw, records, dict(settings))
             except (OSError, ValueError) as error:
                 code = error.code if isinstance(error, ResourceLibraryError) else "invalid_catalog"
                 with self._lock:
@@ -167,6 +180,7 @@ class ResourceLibrary:
             self._catalogs[platform] = catalog
             with self._lock:
                 self._summaries[platform].update(available=True, loaded=True, error_code=None,
+                    application_version=version, revision=revision,
                     object_count=len(records), total_bytes=sum(record.size for record in records))
             return catalog
 
@@ -403,7 +417,8 @@ class ResourceLibrary:
             elif job.cancel.is_set():
                 job.state = "cancelled"
             elif job.counts["failed_files"] or job.counts["missing_files"]:
-                job.state = "partial" if job.counts["verified_files"] or job.action == "export" and not job.counts["failed_files"] else "failed"
+                job.state = "partial" if (job.counts["verified_files"]
+                    or job.action in ("export", "import") and not job.counts["failed_files"]) else "failed"
             elif job.counts["verified_files"] != len(job.records):
                 job.state = "partial" if job.counts["verified_files"] else "failed"
                 job.error_code = job.error_code or "cache_io"
@@ -514,14 +529,70 @@ class ResourceLibrary:
         with self._lock:
             return self._snapshot(job)
 
+    def _legacy_import_catalog(self, platform, current):
+        approved = latest_resource_archive_pin(platform)
+        archive_name, _cache, version, revision = PLATFORM_ARCHIVES[platform]
+        if approved is None:
+            return None
+        if (current.manifest.revision != approved["revision"]
+                or current.manifest.application_version != approved["application_version"]
+                or current.manifest.archive_sha256 != approved["manifest_sha256"]):
+            raise ResourceLibraryError("invalid_catalog")
+        # The preserved manifest is public producer input, never ZIP-supplied
+        # authority. It is accepted only under the exact latest registry pin.
+        directory = self.root / archive_name
+        if directory.is_symlink() or not directory.is_dir():
+            raise ResourceLibraryError("invalid_catalog")
+        raw = _read_archive_file(directory / "legacy-manifest.pb", MAX_ARCHIVE_BYTES)
+        if hashlib.sha256(raw).hexdigest() != approved["legacy_manifest_sha256"]:
+            raise ResourceLibraryError("invalid_catalog")
+        settings = current.settings
+        if settings is None:
+            raise ResourceLibraryError("invalid_catalog")
+        manifest = OctoManifest(raw, aes_key=bytes.fromhex(settings["aes_key_hex"]),
+            client_key=settings["client_key"], base_url=self._base_url,
+            aes_cbc=self._aes if self._aes is not None else _desktop_aes_backend(),
+            application_version=version)
+        if (manifest.revision != revision or manifest.archive_sha256 != approved["legacy_manifest_sha256"]):
+            raise ResourceLibraryError("invalid_catalog")
+        return _Catalog(manifest, raw, tuple(manifest.objects.values()))
+
+    @contextmanager
+    def _import_archive(self, source, job):
+        from .resource_archive import VerifiedResourceArchive, ResourceArchiveError
+        reader = VerifiedResourceArchive(source, platform=job.platform,
+            manifest_bytes=job.catalog.raw, records=job.catalog.records)
+        failure = None
+        try:
+            reader.__enter__()
+        except ResourceArchiveError as error:
+            failure = error.code
+        if failure is None:
+            try:
+                yield reader
+            finally:
+                reader.__exit__(None, None, None)
+            return
+        # Drop the failed current-reader metadata before parsing the one finite
+        # preserved source. Unknown manifests never become a third candidate.
+        del reader
+        if job.cancel.is_set():
+            raise ResourceArchiveError("cancelled")
+        legacy = self._legacy_import_catalog(job.platform, job.catalog)
+        if legacy is None:
+            raise ResourceArchiveError(failure)
+        with VerifiedResourceArchive(source, platform=job.platform,
+                manifest_bytes=legacy.raw, records=legacy.records) as reader:
+            yield reader
+
     def import_from(self, source, platform, kind="all"):
-        from .resource_archive import VerifiedResourceArchive
         job = self._reserve("import", platform, kind)
         try:
-            with VerifiedResourceArchive(source, platform=platform, manifest_bytes=job.catalog.raw,
-                                          records=job.catalog.records) as archive:
-                rows = tuple(record for record in archive.objects if kind == "all" or record.kind == kind)
+            with self._import_archive(source, job) as archive:
+                rows = archive.matching_objects(job.catalog.records, kind=kind)
                 with self._lock:
+                    if archive.manifest != job.catalog.raw:
+                        job.counts["missing_files"] = len(job.records)-len(rows)
                     job.records, job.state = rows, "running"
                     job.total_bytes = sum(record.size for record in rows)
                 cache = self._cache(job, download=True, fetcher=archive.fetch)

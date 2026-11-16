@@ -64,6 +64,28 @@ def invoke(game, path, **values):
     return game.schema.response_type(path).FromString(raw)
 
 
+def test_media_story_guard_accepts_only_approved_latest_or_legacy_cohort(game, monkeypatch):
+    import sys
+    before = game.state.snapshot("media")
+    calls = []
+    monkeypatch.setitem(sys.modules, "idoly_local.public_cohort_support", SimpleNamespace(
+        require_master_cohort=lambda directory, feature: calls.append((directory, feature))))
+    assert module._stories(module._Catalog(game.master))
+    assert calls == []
+    (game.master / "!version.txt").write_text(module.LATEST_MASTER_VERSION)
+    assert module._stories(module._Catalog(game.master))
+    assert calls == [(game.master, "story_reads")]
+    for error in (ValueError("unapproved"), FileNotFoundError("missing")):
+        monkeypatch.setitem(sys.modules, "idoly_local.public_cohort_support", SimpleNamespace(
+            require_master_cohort=lambda *_: (_ for _ in ()).throw(error)))
+        with pytest.raises(RpcFailure):
+            module._stories(module._Catalog(game.master))
+    (game.master / "!version.txt").write_text("future-master")
+    with pytest.raises(RpcFailure):
+        module._stories(module._Catalog(game.master))
+    assert game.state.snapshot("media") == before
+
+
 def dump(game):
     with game.state.connect() as db:
         return tuple(db.iterdump())

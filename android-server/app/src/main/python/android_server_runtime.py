@@ -18,7 +18,7 @@ _LAST_STATUS = {"running": False, "message": "서버 대기"}
 _LAST_DIAGNOSTICS = {"running": False}
 _TRANSLATION_STATUS = {"state": "absent"}
 _PUBLIC_FOLDERS = {"protocol", "original-master", "master-json"}
-_LOVE_METADATA_FILES = frozenset({"data/love-reference.json", "data/love-adv-proof.json",
+_LOVE_METADATA_FILES = frozenset({"data/love-reference.json", "data/love-adv-proof.json", "data/love-compatibility.json", "data/love-legacy-rules.json",
     "data/licenses/love-reference-NOTICE.txt", "data/licenses/love-reference-AGPL-3.0.txt"})
 _TUTORIAL_FILES = {"data/public-tutorial/manifest.json", "data/public-tutorial/tutorial-short.pb",
                    "data/public-tutorial/tutorial-full.pb"}
@@ -26,7 +26,8 @@ _STORY_FILES = {"data/public-story/manifest.json", "data/public-story/story-list
                 "data/public-story/story-list-extra.pb"}
 _OCTO_ARCHIVES = ({"data/public-octo/settings.json", "data/public-octo/manifest.pb"},
                   {"data/public-octo-ios/settings.json", "data/public-octo-ios/manifest.pb"})
-_OCTO_FILES = set().union(*_OCTO_ARCHIVES)
+_LATEST_OCTO_FILES = {"data/public-octo/legacy-manifest.pb", "data/public-octo-ios/legacy-manifest.pb"}
+_OCTO_FILES = set().union(*_OCTO_ARCHIVES) | _LATEST_OCTO_FILES
 
 
 def _digest(path: Path) -> str:
@@ -34,7 +35,7 @@ def _digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
+def install_bundle(bundle: Path, files: Path, expected_sha256: str, expected_bytes=None) -> Path:
     """Install only bundled public data, preserving profiles and local state.
 
     Files are replaced individually via temporary files. The completion marker
@@ -44,6 +45,23 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
     if _digest(bundle) != expected_sha256:
         raise ValueError("Bundled server data failed its SHA-256 check")
     data = files / "data"
+    with ZipFile(bundle) as source_archive:
+        if "data/payload-manifest.json" in source_archive.namelist():
+            info = source_archive.getinfo("data/payload-manifest.json")
+            if info.file_size > 2*1024*1024:
+                raise ValueError("public_payload_invalid")
+            try:
+                manifest = json.loads(source_archive.read(info))
+            except (ValueError, UnicodeError):
+                manifest = {}
+            overlay = manifest.get("source_overlay", {}) if type(manifest) is dict else {}
+            operation = overlay.get("operation") if type(overlay) is dict else None
+            if operation == "latest-cohort-overlay-v1":
+                from idoly_local.public_payload import install_payload
+                install_payload(bundle, data, expected_sha256=expected_sha256, expected_bytes=expected_bytes)
+                return data
+            if operation not in (None, "love-source-overlay-v1"):
+                raise ValueError("public_payload_policy_unsupported")
     marker = files / ".server-data-sha256"
     if marker.is_file() and marker.read_text(encoding="ascii").strip() == expected_sha256:
         required = [data / "protocol/idolypride-6.1.1.pb", data / "original-master/master-tag.json"]
@@ -65,6 +83,7 @@ def install_bundle(bundle: Path, files: Path, expected_sha256: str) -> Path:
             public = (len(path.parts) >= 3 and path.parts[0] == "data" and path.parts[1] in _PUBLIC_FOLDERS)
             public = public or info.filename == "data/payload-manifest.json"
             public = public or info.filename in _LOVE_METADATA_FILES
+            public = public or info.filename == "data/latest-semantic-controls.json"
             public = public or info.filename == "data/public-fixtures/manifest.json"
             public = public or info.filename in _TUTORIAL_FILES
             public = public or info.filename in _STORY_FILES
@@ -311,7 +330,7 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
             log("서버 데이터 확인 중…")
             bundle = files / "bundled-server-data.zip"
             _copy_asset(assets, bundle, expected)
-            data = install_bundle(bundle, files, expected)
+            data = install_bundle(bundle, files, expected, int(getattr(build_config, "SERVER_DATA_BYTES", 0)))
             preparation_stage = "resources"
             try:
                 _TRANSLATION_STATUS = _install_bundled_translations(
@@ -475,7 +494,7 @@ def _prepare_management_payload(root, assets):
     bundle = files / "bundled-server-data.zip"
     try:
         _copy_asset(assets, bundle, expected)
-        prepared = install_bundle(bundle, files, expected)
+        prepared = install_bundle(bundle, files, expected, int(getattr(build_config, "SERVER_DATA_BYTES", 0)))
         if prepared.resolve() != root.resolve():
             raise ValueError("account_storage_invalid")
     except BaseException as error:

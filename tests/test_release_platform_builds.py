@@ -1,5 +1,6 @@
 """Portable release trust-boundary tests; no downloads, tools or device work."""
 import hashlib
+import json
 import importlib.util
 from pathlib import Path
 from zipfile import ZipFile
@@ -233,16 +234,26 @@ def test_native_inputs_use_only_verified_prepared_payload_with_original_donor_un
     monkeypatch.setattr(builds, "TRANSLATIONS", {"android": digest(translated)})
     proof = {"schema": 1, "status": "PASS", "synthetic": "recording-contract"}
     repo = tmp_path / "repo"; (repo / "data").mkdir(parents=True)
-    overlay = repo / "data/love-server-overlay.zip"; overlay.write_bytes(b"fixed synthetic overlay")
+    overlay = tmp_path / "work/latest-server-overlay.zip"
     monkeypatch.setattr(builds, "ROOT", repo)
     seen = []
+    def source_pointer():
+        seen.append(("source-pointer",))
+        return digest(prepared)
+    def fetch_overlay(path):
+        assert path == overlay and not path.exists()
+        path.write_bytes(prepared)
+        seen.append(("fetch",))
+        return digest(prepared)
     def verify_overlay(path):
-        assert path == overlay and path.read_bytes() == b"fixed synthetic overlay"
+        assert path == overlay and path.read_bytes() == prepared
         assert damage != "overlay", "fixed_overlay_pin_differs"
         seen.append(("overlay",))
     def upgrade(base, output, *, overlay_zip, report_path):
         assert overlay_zip == overlay
         assert base.read_bytes() == old and not output.exists()
+        assert report_path == tmp_path / "work/server-data-preparation.json"
+        report_path.write_text(json.dumps(proof))
         seen.append(("prepare", base.name, output.name))
         output.write_bytes(b"wrong output" if damage == "output" else prepared)
         if damage == "base": base.write_bytes(b"altered base")
@@ -256,11 +267,12 @@ def test_native_inputs_use_only_verified_prepared_payload_with_original_donor_un
         seen.append(("payload",))
         return digest(prepared)
     monkeypatch.setattr(builds, "LOVE_SERVER_DATA", SimpleNamespace(base_pin=lambda: digest(old),
-        verify_upgrade_proof=verify_report, verify_payload=verify_payload, verify_overlay=verify_overlay))
+        verify_upgrade_proof=verify_report, verify_payload=verify_payload, verify_overlay=verify_overlay,
+        verify_source_pointer=source_pointer, fetch_overlay=fetch_overlay))
     def load(name, path):
         if str(path).endswith("fetch_inputs.py"):
             return SimpleNamespace(lfs_download=lambda record, target: shutil.copyfile(donor, target))
-        assert str(path).endswith("prepare_love_server_data.py")
+        assert str(path).endswith("prepare_latest_server_data.py")
         return SimpleNamespace(upgrade_server_data=upgrade)
     monkeypatch.setattr(builds, "module", load)
     work = tmp_path / "work"; work.mkdir()
@@ -274,7 +286,9 @@ def test_native_inputs_use_only_verified_prepared_payload_with_original_donor_un
         assert (destination / "BaseServerData.zip").read_bytes() == old
         assert (destination / "ServerData.zip").read_bytes() == prepared
         assert (destination / "bundledTranslations.zip").read_bytes() == translated
-        assert seen == [("overlay",), ("prepare", "BaseServerData.zip", "ServerData.zip"), ("proof",), ("payload",)]
+        assert json.loads((work / "server-data-preparation.json").read_text()) == proof
+        assert seen == [("source-pointer",), ("fetch",), ("overlay",),
+            ("prepare", "BaseServerData.zip", "ServerData.zip"), ("proof",), ("payload",)]
     assert donor.read_bytes() == donor_raw
 
 
@@ -322,3 +336,34 @@ def test_qa_reference_pin_override_cannot_admit_an_arbitrary_archive(tmp_path, p
     path = tmp_path / "not-approved.zip"; path.write_bytes(b"x")
     with pytest.raises(builds.BuildError, match="purpose_pin_invalid"):
         builds.extract_qa_references(path, tmp_path / "references", Guard(), expected_pin=pin)
+
+
+def test_latest_native_source_closure_keeps_historical_base_separate():
+    assert builds.LOVE_SERVER_DATA is builds.LATEST_SERVER_DATA
+    assert builds.SERVER_DATA == builds.LATEST_SERVER_DATA.output_pin()
+    assert builds.SERVER_DATA != builds.BASE_SERVER_DATA
+    assert builds.BASE_SERVER_DATA == {"bytes":191343014,
+        "sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
+    required = set(builds.LATEST_SERVER_DATA.SOURCE_COMPONENTS) | {
+        "tools/latest_server_data_pin.py", "data/latest-server-data-pin.json",
+        "data/latest-server-overlay.zip", "src/idoly_local/public_payload_transaction.py",
+        "src/idoly_local/latest_cohort_pins.py", "src/idoly_local/love_compatibility_pins.py"}
+    assert required <= set(builds.COMMON_SOURCE_FILES)
+
+
+def test_legacy_native_callers_pass_latest_proof_and_scope_lfs_credentials():
+    workflow = (builds.ROOT/".github/workflows/build-server-apps.yml").read_text()
+    prepare = workflow.split("- name: Prepare the frozen latest Mac public cohort",1)[1].split("- name:",1)[0]
+    assert "GH_TOKEN:" in prepare and "verifier.fetch_overlay(blob)" in prepare
+    assert "upgrade_server_data(None,payload,overlay_zip=blob,report_path=proof)" in prepare
+    mac = workflow.split("- name: Build the frozen engine and exercise the actual relocated SwiftUI app",1)[1].split("- name:",1)[0]
+    assert '--server-data "$RUNNER_TEMP/latest-macos-payload/ServerData.zip"' in mac
+    assert '--server-data-upgrade-proof "$RUNNER_TEMP/latest-macos-payload/server-data-preparation.json"' in mac
+    ios = workflow.split("- name: Compile real iOS frameworks, compose IPA and run fresh Simulator core probe",1)[1].split("- name:",1)[0]
+    assert "GH_TOKEN:" in ios and "ios-unified/ci_build.py" in ios
+
+
+def test_native_metadata_requires_all_resource_runtime_guards():
+    assert {"src/idoly_local/resource_archive.py", "src/idoly_local/resource_library.py",
+        "src/idoly_local/resource_translation.py", "src/idoly_local/resource_translation_runtime.py",
+        "src/idoly_local/octo_runtime.py"} <= set(builds.COMMON_SOURCE_FILES)

@@ -811,13 +811,40 @@ jobs:
             --report data/macos-evidence/native-live-engine/abi-report.json
           cp data/native-live/macos/build-report.json data/macos-evidence/native-live-engine/
           git diff --exit-code -- native-live-engine/go.mod native-live-engine/go.sum
+      - name: Prepare the frozen latest Mac public cohort
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PYCODE'
+          import importlib.util,os,sys
+          from pathlib import Path
+          root=Path.cwd()
+          def module(name,path):
+              spec=importlib.util.spec_from_file_location(name,root/path)
+              result=importlib.util.module_from_spec(spec);sys.modules[name]=result
+              spec.loader.exec_module(result);return result
+          work=Path(os.environ['RUNNER_TEMP'])/'latest-macos-payload'
+          work.mkdir(mode=0o700)
+          verifier=module('legacy_workflow_latest_pin','tools/latest_server_data_pin.py')
+          verifier.verify_source_pointer()
+          blob=work/'latest-server-overlay.zip'
+          verifier.fetch_overlay(blob);verifier.verify_overlay(blob)
+          prepare=module('legacy_workflow_latest_prepare','tools/prepare_latest_server_data.py')
+          payload=work/'ServerData.zip';proof=work/'server-data-preparation.json'
+          report=prepare.upgrade_server_data(None,payload,overlay_zip=blob,report_path=proof)
+          verifier.verify_upgrade_proof(report);verifier.verify_payload(payload)
+          print('Pinned latest Mac payload prepared')
+          PYCODE
       - name: Build the frozen engine and exercise the actual relocated SwiftUI app
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p data/macos-evidence data/dist
           .venv/bin/python macos-server/build_app.py \
-            --server-data "data/dist/$IDOLY_PAYLOAD_NAME" \
+            --server-data "$RUNNER_TEMP/latest-macos-payload/ServerData.zip" \
+            --server-data-upgrade-proof "$RUNNER_TEMP/latest-macos-payload/server-data-preparation.json" \
             --output data/macos/IdolyPrideLocalServer.app \
             --archive data/dist/IdolyPride-Local-Server-macOS-arm64.app.zip \
             --evidence data/macos-evidence --version "$IDOLY_APP_VERSION" --build-number "$IDOLY_APP_VERSION_CODE" \
@@ -1164,6 +1191,8 @@ jobs:
           python3 -B -m pytest -q -p no:cacheprovider tests/test_ios_host.py tests/test_public_payload.py tests/test_ios_unified_*.py ios-unified/native/tests/test_build_native.py
           python3 -B ios-unified/native/build_native.py --portable-tests
       - name: Compile real iOS frameworks, compose IPA and run fresh Simulator core probe
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: >-
           python3 -B ios-unified/ci_build.py
           --inputs "$RUNNER_TEMP/idoly-unified-inputs"

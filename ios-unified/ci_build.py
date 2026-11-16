@@ -20,7 +20,7 @@ def run(*args):
     subprocess.run(list(map(str, args)), check=True)
 
 
-PACKAGED_SERVER_DATA = {"pin":"../data/love-server-data-pin.json","policy":"love-source-overlay-v1"}
+PACKAGED_SERVER_DATA = {"pin":"../data/latest-server-data-pin.json","policy":"latest-cohort-overlay-v1"}
 
 
 def _tool_module(name):
@@ -36,14 +36,18 @@ def prepare_server_data(inputs, work, output):
     manifest=json.loads((HERE/"runtime_inputs.json").read_text())
     if manifest.get("packaged_server_data")!=PACKAGED_SERVER_DATA:
         raise ValueError("Pinned upgraded server data is required")
-    verifier=_tool_module("love_server_data_pin")
+    verifier=_tool_module("latest_server_data_pin")
     if manifest["inputs"]["server_data"]!=verifier.base_pin():
         raise ValueError("Server data base pin differs")
     wanted=verifier.output_pin()  # Missing/unverified static pins never fall back.
     upgraded=work/"upgraded-ServerData.zip"
     proof_path=output/"server-data-upgrade.json"
-    upgrader=_tool_module("prepare_love_server_data")
-    overlay=HERE.parent/"data/love-server-overlay.zip"
+    upgrader=_tool_module("prepare_latest_server_data")
+    verifier.verify_source_pointer()
+    overlay=work/"latest-server-overlay.zip"
+    fetched=verifier.fetch_overlay(overlay)
+    if {key:fetched[key] for key in ("bytes","sha256")}!=wanted:
+        raise ValueError("Fetched server data source pin differs")
     verifier.verify_overlay(overlay)
     proof=upgrader.upgrade_server_data(inputs/"ServerData.zip",upgraded,report_path=proof_path,overlay_zip=overlay)
     verifier.verify_upgrade_proof(proof)

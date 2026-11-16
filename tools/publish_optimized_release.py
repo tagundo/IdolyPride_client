@@ -39,7 +39,7 @@ IPA = "IdolyPride-6.1.1-Unified-iOS.ipa"
 APK = "IdolyPride-Local-Server-Android.apk"
 QA_APK = "IdolyPride-Local-Server-Android-x86_64-QA.apk"
 MAC = "IdolyPride-Local-Server-macOS-arm64.app.zip"
-JOBS = ("portable", "performance", "android", "macos", "android-clients", "ios-unified")
+JOBS = ("portable", "performance", "android", "android-clients", "ios-unified")
 PREFIXES = {name: "optimized-release-" + name + "-" for name in JOBS[:-1]}
 PREFIXES["ios-unified"] = "ios-unified-prototype-"
 ARCHIVE_LIMITS = {"portable": 32*MIB, "performance": 32*MIB,
@@ -64,17 +64,13 @@ COMPANIONS = (
      "sha256": "44f233290128a97f78940e3167c9486dbe39550090efcb90f7dc403430e94b9e",
      "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
      "publication_commit": "3b2c73b51931bb7be031c37c9d55297505fb88e1", "version": "0.3.31"},
-    {"name": "IdolyPride-6.1.1-Local-PlayCover-ko.ipa", "bytes": 150132823,
-     "sha256": "d872903da8d79bf4a255888f9d5a952198ff47268cfcf7c35e8ac437b56e72a1",
-     "source_commit": "cba4b5a272d4e7033ec5a18223f737c37a749d8f",
-     "publication_commit": "7fcc9f8661b5158cf66d93e9c307607db2c2ee43", "version": "0.3.31"},
 )
 
 ANDROID_LANGUAGE_CLIENTS = {
     "ja": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-ja.apk",
     "en": "IdolyPride-Local-Graphics-Diagnostic-Android-arm64-en.apk",
 }
-INPUT_RELEASE_ASSETS = frozenset((APK, MAC, IPA, *ANDROID_LANGUAGE_CLIENTS.values(),
+INPUT_RELEASE_ASSETS = frozenset((APK, IPA, *ANDROID_LANGUAGE_CLIENTS.values(),
                                   *(row["name"] for row in COMPANIONS)))
 EXPECTED_RELEASE_ASSETS = frozenset()
 
@@ -160,8 +156,24 @@ def module(name, path):
     return result
 
 
-LOVE_SERVER_DATA = module("published_love_server_data_pin", ROOT/"tools/love_server_data_pin.py")
-DATA_PIN = LOVE_SERVER_DATA.output_pin()
+LATEST_SERVER_DATA = module("published_latest_server_data_pin", ROOT/"tools/latest_server_data_pin.py")
+LOVE_SERVER_DATA = LATEST_SERVER_DATA  # Compatibility for verified provenance consumers.
+COMMON_SOURCES = tuple(sorted(set(COMMON_SOURCES) | set(LATEST_SERVER_DATA.SOURCE_COMPONENTS) | {
+    'src/idoly_local/public_payload.py',
+    'src/idoly_local/public_payload_transaction.py',
+    'src/idoly_local/public_cohort_support.py',
+    'src/idoly_local/latest_cohort_pins.py',
+    'src/idoly_local/love_compatibility_pins.py',
+    'src/idoly_local/resource_library.py',
+    'src/idoly_local/resource_archive.py',
+    'src/idoly_local/octo_runtime.py',
+    'src/idoly_local/resource_translation.py',
+    'tools/prepare_latest_server_data.py',
+    'tools/latest_server_data_pin.py',
+    'data/latest-server-data-pin.json',
+    'data/latest-server-overlay.zip',
+}))
+DATA_PIN = LATEST_SERVER_DATA.output_pin()
 
 
 def configure_release(value):
@@ -172,11 +184,11 @@ def configure_release(value):
         version = identity.resolve_release_version(value)
         names = {name: identity.asset_name(name, version) for name in INPUT_RELEASE_ASSETS}
         tag = identity.release_tag(version)
-        expected = identity.asset_names(version)
+        expected = frozenset(names.values())
     except ValueError:
         raise ReleaseError("calendar_release_version_invalid") from None
     need(RELEASE_VERSION is None or RELEASE_VERSION == version, "release_identity_already_frozen")
-    need(len(names) == len(expected) == 7 and frozenset(names.values()) == expected,
+    need(len(names) == len(expected) == 5 and frozenset(names.values()) == expected,
          "release_name_mapping_differs")
     if RELEASE_VERSION is None:
         RELEASE_VERSION, TAG, RELEASE_NAMES, EXPECTED_RELEASE_ASSETS = version, tag, names, expected
@@ -185,7 +197,7 @@ def configure_release(value):
 
 def require_release():
     need(type(RELEASE_VERSION) is str and TAG == "v" + RELEASE_VERSION
-         and len(RELEASE_NAMES) == len(EXPECTED_RELEASE_ASSETS) == 7,
+         and len(RELEASE_NAMES) == len(EXPECTED_RELEASE_ASSETS) == 5,
          "calendar_release_identity_required")
 
 
@@ -956,7 +968,7 @@ class GitHub:
         self.require_fresh()
         created = self.api("/releases", method="POST", body={
             "tag_name": TAG, "target_commitish": source,
-            "name": "아이프라 로컬 " + RELEASE_VERSION + " · 그래픽·촬영 설정과 서버·클라이언트",
+            "name": release_title(),
             "body": body, "draft": True, "prerelease": True, "make_latest": "false"})
         need(type(created) is dict and type(created.get("id")) is int and created["id"] > 0
              and created.get("tag_name") == TAG and created.get("draft") is True
@@ -1009,25 +1021,67 @@ class GitHub:
             raise
 
 
+def release_title():
+    require_release()
+    return "아이프라 로컬 " + RELEASE_VERSION + " · 최신 데이터·계정·모시코이 복구"
+
+
+def release_scope_lines():
+    """Describe measured cohort facts only after the static proof is verified."""
+    proof = LATEST_SERVER_DATA.load_pin()["upgrade_proof"]
+    master, love = proof["original_master"], proof["love"]
+    features = proof["semantic_controls"]["features"]
+    checks = features["main_live"]["receipt"].get("checks", {})
+    totals = []
+    for before, added in (("old_cards_unchanged", "new_cards"),
+                          ("old_costumes_preserved", "new_costumes"),
+                          ("old_hairs_preserved", "new_hairs")):
+        values = [checks.get(before), checks.get(added)] if type(checks) is dict else []
+        if len(values) != 2 or not all(type(value) is int and 0 <= value <= 1000000 for value in values):
+            totals = []
+            break
+        totals.append(sum(values))
+    inventory = (" · 카드 " + str(totals[0]) + " / 의상 " + str(totals[1]) + " / 헤어 " + str(totals[2])) if totals else ""
+    octo = features["octo"]["receipt"]
+    platforms = octo.get("platforms", {})
+    need(type(platforms) is dict and set(platforms) == {"android", "ios"}, "release_scope_proof_invalid")
+    platform_text = []
+    for key, label in (("android", "Android"), ("ios", "iOS")):
+        row = platforms[key]
+        need(type(row) is dict and all(type(row.get(name)) is int and 0 <= row[name] <= 1000000
+             for name in ("revision", "model_roots", "missing_model_roots", "incomplete_dependency_closures"))
+             and row["missing_model_roots"] == row["incomplete_dependency_closures"] == 0,
+             "release_scope_proof_invalid")
+        platform_text.append(label + " revision " + str(row["revision"]) + " / 모델 진입점 " + str(row["model_roots"]))
+    images = octo.get("required_card_images")
+    need(type(images) is int and 0 <= images <= 1000000, "release_scope_proof_invalid")
+    adv = read_json(ROOT/"data/love-adv-proof.json")
+    need(type(adv.get("story_count")) is int and adv["story_count"] == love["episodes"]
+         and adv.get("missing_asset_ids") == ["love_2411_04_02"], "release_scope_proof_invalid")
+    return [
+        "- 최신 원본 마스터 " + master["version"] + inventory + "를 포함합니다. 원본 팩 " + str(master["pack_count"]) + "개와 한국어·영어·일본어의 일반/감상용 데이터를 같은 코호트로 검증했습니다.",
+        "- 리소스 목록은 " + " · ".join(platform_text) + "입니다. 신규 카드 이미지 계열 " + str(images) + "개와 모델 의존성의 메타데이터를 대조했습니다. 이는 Unity에서 실제 모델·MV 재생을 확인했다는 의미가 아닙니다.",
+        "- 모시코이(もしも君と恋をしたら) " + str(love["events"]) + "개 이벤트와 " + str(love["episodes"]) + "편의 목록·진행을 복구했습니다. 원본 ADV 자료가 없는 1편은 실행할 수 없어 나머지 " + str(love["episodes"]-1) + "편의 진행·감상 경로를 제공합니다. 서버 설정에서 이벤트별 기간을 지정하며, 설정 변경은 저장된 진행을 초기화하지 않습니다. 일반 모드와 감상 모드의 진행·재화는 분리합니다. 일부 분기 가중치는 추론 자료이며 확인되지 않은 보너스 보상은 지급하지 않습니다.",
+    ]
+
+
 def release_body(source, run, publication, artifacts, metrics, android_clients=(), companions=None):
     require_release()
     if companions is None:
         companions = [{**row, "source_name": row["name"], "name": release_name(row["name"])} for row in COMPANIONS]
-    lines = ["# 아이프라 로컬 " + RELEASE_VERSION + " · 설정 화면과 서버·게임 클라이언트", "",
+    lines = ["# " + release_title(), "",
              "릴리즈 버전 " + RELEASE_VERSION + " · 서버 내부 버전 " + VERSION + " / build " + str(BUILD)
              + " · 통합 IPA 내부 빌드 " + IPA_VERSION, "",
-             "설정 화면의 가독성, 자동 저장과 게임 시작 순서, ZIP 가져오기 진행 표시, 포즈의 활성 인원 검사를 보완한 릴리즈입니다. Assets에서 서버와 게임 설치 파일 7종을 함께 받을 수 있습니다.", "",
-             "이번 변경", "",
-             "- Android 서버 화면을 밝은 카드와 16sp 글자로 정리했습니다. 게임 실행 버튼 하나를 상단 고정 영역에 두고, 진단과 서버 로그는 JSON 파일 하나로 내보냅니다. 그래픽·촬영 설정은 처음부터 펼쳐 표시하며 변경하면 바로 저장합니다.",
-             "- 통합 IPA의 게임 옵션·그래픽/촬영·재생·미디어 설정은 자동으로 저장합니다. 숫자 입력은 600ms 대기 또는 입력 완료 뒤 저장하고, 실패하면 다시 시도할 수 있습니다. 게임 시작은 최신 설정 저장이 끝난 뒤 진행합니다.",
-             "- 통합 IPA " + IPA_VERSION + "는 ZIP 가져오기 사본 모드와 파일 복사 진행·용량 표시를 보완하고, 같은 앱 보관 폴더로 이어지는 경로 별칭을 처리합니다.",
-             "- 포즈 편집은 회색 비활성 칸을 포함한 전체 명단 수 대신 실제 활성 인원으로 정원 조건을 검사하도록 수정했습니다. 전체 명단의 ID·보유 검사는 유지합니다. 이 설명은 서버 검증 로직의 변경이며 실제 기기의 해당 화면 재현 성공을 뜻하지 않습니다.",
-             "기존 프로필·포토 편집과 저장된 미션·퀘스트 목록 복구 기능은 유지합니다. 새로운 미션·보상·일일/타워 전투를 생성하지 않습니다.", "",
+             "최신 데이터, 로컬 계정 관리와 모시코이 진행을 통합한 릴리즈입니다. Android 서버·KO/JA/EN 게임 클라이언트와 통합 IPA, 총 5종을 제공합니다. Mac에서는 통합 IPA를 PlayCover로 사용합니다.", "",
+             "이번 변경", "", *release_scope_lines(),
+             "- 서버 설정에서 일반/감상용 계정의 생성·복제·다음 시작 계정 선택, ZIP 미리보기·가져오기·내보내기·복원점을 제공합니다. 계정의 8개 상태 테이블과 원본 프로토콜 바이트를 함께 보존하며, 교체는 대상 버전을 확인한 뒤 자동 복원점을 만듭니다. 다른 계정과 세션은 유지하고 교체 대상의 세션만 무효화합니다.",
+             "- 일본판 인계 ID·인계 비밀번호 가져오기는 익명 마스터 호환 검사를 비밀번호 확인과 인계 실행 전에 수행합니다. 인증 정보는 메모리에만 두고 보관 ZIP·진단·로그에 저장하지 않습니다. 실제 공식 계정으로 인증·인계를 실행한 검증은 하지 않았습니다.",
+             "- 기존 리소스 ZIP은 원본 파일의 동일성이 확인된 항목만 최신 목록에 연결합니다. 공개 데이터 교체는 중단·복구 가능한 트랜잭션으로 수행하며 로컬 계정·설정·게임 리소스 캐시는 보존합니다.",
+             "- Android 실행 버튼을 상단 하나로 통일하고 진단·서버 기록을 하나로 내보냅니다. 그래픽·촬영 설정은 펼친 상태로 표시합니다. 통합 IPA도 설정을 자동 저장하고 저장이 끝난 뒤 게임을 시작합니다. 서버 인터페이스 언어는 즉시 반영하며 게임 언어 데이터는 완전 재실행 때 선택합니다.",
+             "- ZIP 가져오기 사본 모드와 복사 진행·용량 표시, 파일 경로 별칭 처리를 보완했습니다. 포즈의 정원 검사는 회색 비활성 칸을 제외한 실제 활성 인원으로 계산하며 전체 명단의 ID·보유 검사는 유지합니다. 이 항목은 서버 검증 로직의 변경이며 실기기 해당 화면 재현 성공을 뜻하지 않습니다.", "",
              "| 파일 | 용도 | 다운로드 |", "| --- | --- | --- |"]
     kinds = {APK: "Android ARM64 서버 v" + VERSION, IPA: "iPhone·iPad / PlayCover 통합 서버·게임 " + IPA_VERSION,
-             MAC: "Apple Silicon Mac 서버 v" + VERSION,
              COMPANIONS[0]["name"]: "한국어 Android 게임 · v0.3.31 동일 바이트",
-             COMPANIONS[1]["name"]: "별도 한국어 PlayCover 게임 · v0.3.31 동일 바이트",
              ANDROID_LANGUAGE_CLIENTS["ja"]: "일본어 Android 게임 · 새 빌드",
              ANDROID_LANGUAGE_CLIENTS["en"]: "영어 Android 게임 · 새 빌드"}
     for row in [*artifacts, *android_clients, *companions]:
@@ -1035,24 +1089,24 @@ def release_body(source, run, publication, artifacts, metrics, android_clients=(
     lines += ["", "설치와 시작", "",
               "- Android ARM64(Android 9 이상): 서버 APK와 원하는 게임 언어의 APK 한 개(KO/JA/EN)를 설치합니다. 서버 앱의 게임 언어도 맞춘 뒤 서버 시작 → 아이프라 실행을 누르세요.",
               "- iPhone·iPad: Unified-iOS.ipa 하나를 개인 서명해 설치합니다. 서버 메뉴에서 준비가 끝나면 게임 시작을 누르세요.",
-              "- Apple Silicon Mac / PlayCover: 통합 IPA 하나를 사용하거나, Mac 서버 ZIP과 별도 한국어 PlayCover IPA를 함께 사용합니다. 별도 구성은 서버 시작 → PlayCover에서 열기를 누른 뒤 게임을 실행합니다.",
-              "통합 IPA는 자체 서버를 포함하므로 별도 Mac 서버와 동시에 실행하지 마세요.", "",
-              "통합 IPA는 게임 시작 전 한국어·일본어·영어 데이터를 선택합니다. Android의 KO/JA/EN 게임 APK는 같은 앱 ID·업데이트 서명을 사용하므로 동시에 설치하는 대신 원하는 언어판 하나로 교체 설치합니다. 교체 전에 게임을 완전히 종료하고 서버의 게임 언어도 맞춰 주세요. 별도 PlayCover 게임 IPA는 한국어판입니다. 번역 자료가 없는 문구·이미지는 원본을 유지합니다.",
-              "게임 중 안전 영역 오른쪽 위를 한 손가락으로 2초 누르면 서버 메뉴가 열립니다. 받은 리소스가 없으면 인터넷으로 자동 다운로드하며, 완전 오프라인 사용은 필요한 캐시를 준비한 뒤 가능합니다.",
+              "- Mac / PlayCover: 같은 통합 IPA 하나를 설치합니다. 별도 Mac 서버 앱은 이번 배포에 포함하지 않습니다.",
+              "통합 IPA는 자체 서버를 포함하므로 기존 별도 Mac 서버와 동시에 실행하지 마세요.", "",
+              "통합 IPA는 게임 시작 전 한국어·일본어·영어 데이터를 선택합니다. Android의 KO/JA/EN 게임 APK는 같은 앱 ID·업데이트 서명을 사용하므로 동시에 설치하는 대신 원하는 언어판 하나로 교체 설치합니다. 교체 전에 게임을 완전히 종료하고 서버의 게임 언어도 맞춰 주세요. 번역 자료가 없는 문구·이미지는 원본을 유지합니다.",
+              "게임 중 안전 영역 오른쪽 위를 한 손가락으로 2초 누르면 넓어진 영역에서 서버 메뉴가 열립니다. 받은 리소스가 없으면 인터넷으로 자동 다운로드하며, 완전 오프라인 사용은 필요한 캐시를 준비한 뒤 가능합니다.",
               "동일 설치판 업데이트는 기존 계정·설정·받은 자료를 유지합니다. Sideloadly와 LiveContainer는 서로 다른 컨테이너이므로 자료를 자동 공유하지 않습니다.", "",
               "사용자는 Sideloadly 설치판의 ZIP 가져오기와 LiveContainer에서 Fix File Picker를 켠 파일 선택을 확인했습니다. LiveContainer의 이 설정은 파일 선택 문제의 직접 우회이며, 최신 " + IPA_VERSION + "의 실기기 ZIP 가져오기·진행 표시는 아직 재확인이 필요합니다.",
               "Simulator의 파일 선택기 표시·취소와 ZIP 내보내기→가져오기 검사는 실제 Files 앱 탭 조작, LiveContainer 제공자의 실제 파일 복사 성공, Unity 게임 렌더링 검사를 대신하지 않습니다.", "",
               "검증 범위", "",
-              "게시 파이프라인은 전체 코드 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, 실제 Mac 앱의 시작·중지와 코드 서명, Apple SDK IPA 빌드와 같은 저장소의 KO→EN→JA→EN→KO 재실행·파일 해시·연결 중단 검사를 필수로 판정합니다.",
+              "게시 파이프라인은 전체 코드 검사와 성능 검사, Android x86_64 에뮬레이터 서버 UI·암호화 통신, JA/EN APK 패키징, Apple SDK 통합 IPA 빌드를 필수로 판정합니다. iOS는 같은 저장소의 KO→EN→JA→EN→KO 재실행, ZIP 왕복과 계정 8개 테이블의 보존·복원도 검사합니다.",
               "새 JA/EN APK는 서명·16KiB 정렬·내장 UI 언어·폰트·멤버 목록의 패키징 검사를 포함합니다. 실제 Android ARM64 기기 및 이번 IPA의 PlayCover·iPhone·iPad 게임 재확인은 별도 대상입니다.",
-              "원본 Actions ZIP 전체 SHA-256과 새 서버·통합 IPA 3파일의 LFS 전체 재다운로드 SHA-256을 확인하며, 두 기존 클라이언트도 고정된 원래 게시 커밋의 출처·전체 SHA-256을 다시 대조합니다. 공개 전 이 릴리즈의 7개 Assets를 각각 GitHub API에서 전체 다운로드해 SHA-256과 파일 목록을 확인해야 합니다.",
+              "원본 Actions ZIP 전체 SHA-256과 새 서버 APK·통합 IPA 2파일의 LFS 전체 재다운로드 SHA-256을 확인합니다. 재사용하는 한국어 APK도 고정된 원래 게시 커밋의 출처·전체 SHA-256을 다시 대조합니다. 공개 전 이 릴리즈의 5개 Assets를 각각 GitHub API에서 전체 다운로드해 SHA-256과 파일 목록을 확인해야 합니다.",
               "[Actions 검증](https://github.com/" + REPO + "/actions/runs/" + str(run) + ") · 서버·통합 IPA·JA/EN APK 빌드 소스 " + source,
-              "개별 Where 예외의 원인과 NPC의 MV 출연은 이 설정·배포 변경의 해결 범위로 주장하지 않습니다.", "",
-              "한국어 게임 2종은 검증된 v0.3.31 파일을 그대로 재사용합니다:"]
+              "개별 Where 예외의 원인과 NPC의 MV 출연은 이번 배포의 해결 범위로 주장하지 않습니다.", "",
+              "한국어 Android 게임 APK는 검증된 v0.3.31 파일을 그대로 재사용합니다:"]
     for row in companions:
         lines.append("- " + row["name"] + " · 원래 파일 " + row["source_name"] + " · v" + row["version"] + " · 소스 " + row["source_commit"]
                      + " · 원래 게시 " + row["publication_commit"] + " · 이번 릴리즈에서 재제작하지 않았습니다.")
-    lines += ["", "새 서버·통합 IPA 3파일의 불변 LFS 대체 주소:"]
+    lines += ["", "새 서버 APK·통합 IPA 2파일의 불변 LFS 대체 주소:"]
     for row in artifacts:
         lines.append("- [" + row["name"] + "](https://github.com/" + REPO + "/raw/" + publication["commit"] + "/" + row["name"] + ")")
     lines += ["", "기존 서버 최적화 측정 범위를 유지합니다. 진단 수치는 합성 기록이 있는 상태 조회이며 전체 게임 FPS·기기 시작 시간 수치가 아닙니다.",
@@ -1144,7 +1198,7 @@ def main(argv=None):
         validate_portable(read_json(directories["portable"]/"portable-report.json"), args.source_commit, directories["portable"])
         metrics = validate_performance(directories["performance"], args.source_commit)
         binaries = []
-        for platform in ("android", "macos"):
+        for platform in ("android",):
             report = validate_platform(read_json(directories[platform]/"platform-report.json"), platform, args.source_commit)
             binaries.append(validate_platform_files(directories[platform], report, guard))
         ios_proof = args.work/"ios-verified"
@@ -1154,7 +1208,7 @@ def main(argv=None):
                                                          args.run_id, ipa_binding["artifact_id"], guard)
         binaries += ipa_manifest["artifacts"]
         android_client_binaries = validate_android_clients(directories["android-clients"], args.source_commit, args.run_id)
-        need({row["name"] for row in binaries} == {APK, MAC, IPA} and len(binaries) == 3, "primary_binary_set_differs")
+        need({row["name"] for row in binaries} == {APK, IPA} and len(binaries) == 2, "primary_binary_set_differs")
         for row in binaries:
             verified_file(Path(row["path"]).parent, {key: row[key] for key in ("name", "bytes", "sha256")})
         binaries = stage_release_binaries(binaries, args.work/"release-platforms", guard)
@@ -1168,7 +1222,7 @@ def main(argv=None):
         pre_readme = args.work/"README.md"
         pre_readme.write_text("아이프라 로컬 " + RELEASE_VERSION + "\n\nSource: " + args.source_commit
                               + "\nActions: https://github.com/" + REPO + "/actions/runs/" + str(args.run_id)
-                              + "\nThree verified platform binaries. Physical Android ARM64 and IPA gameplay retesting pending.\n",
+                              + "\nTwo verified native binaries. Physical Android ARM64 and IPA gameplay retesting pending.\n",
                               encoding="utf-8")
         state.update(all_qa_passed=True, whole_API_archive_digests_verified=True, performance=metrics,
                      artifacts=[{key: row[key] for key in ("name", "source_name", "bytes", "sha256")} for row in binaries],
@@ -1186,7 +1240,7 @@ def main(argv=None):
         need(publication.get("branch") == branch and publication.get("source_commit") == args.source_commit
              and is_sha(publication.get("commit"), 40), "lfs_publication_identity_differs")
         receipts = publication.get("artifacts")
-        need(type(receipts) is list and len(receipts) == 3 and {row.get("name") for row in receipts} == {release_name(name) for name in (APK, MAC, IPA)},
+        need(type(receipts) is list and len(receipts) == 2 and {row.get("name") for row in receipts} == {release_name(name) for name in (APK, IPA)},
              "lfs_receipt_set_differs")
         for row in state["artifacts"]:
             matched = [item for item in receipts if item.get("name") == row["name"]]
