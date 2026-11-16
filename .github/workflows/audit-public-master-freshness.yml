@@ -1,0 +1,109 @@
+name: Audit latest anonymous public master data
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/audit-public-master-freshness.yml
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked read-only collection and original-master decoder
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Verify bounded anonymous comparison contracts offline
+        run: |
+          test -f tests/test_audit_public_master_freshness.py
+          uv run --no-sync python -m pytest -q tests/test_audit_public_master_freshness.py
+      - name: Fetch the immutable public baseline only
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --no-sync python - <<'PY'
+          import hashlib, importlib.util, os
+          from pathlib import Path
+          from zipfile import ZipFile
+          root = Path.cwd()
+          work = Path(os.environ['RUNNER_TEMP']) / 'public-master-freshness'
+          work.mkdir()
+          spec = importlib.util.spec_from_file_location('public_input_fetch', root / 'ios-unified/fetch_inputs.py')
+          fetch = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(fetch)
+          donor = work / 'immutable-public-donor.zip'
+          fetch.lfs_download({'bytes': 332386192, 'sha256': '303ac7c4977956d5187a0f3967409dc263dfd3ba2d97b1d6d17eb7a24b64a3cc'}, donor)
+          base = work / 'BaseServerData.zip'
+          value, count = hashlib.sha256(), 0
+          with ZipFile(donor) as archive:
+              matches = [i for i in archive.infolist() if i.filename == 'assets/ServerData.zip']
+              assert len(matches) == 1 and matches[0].file_size == 191343014
+              with archive.open(matches[0]) as incoming, base.open('xb') as outgoing:
+                  while block := incoming.read(65536):
+                      count += len(block)
+                      assert count <= 191343014
+                      value.update(block)
+                      outgoing.write(block)
+          assert count == 191343014 and value.hexdigest() == '37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223'
+          donor.unlink()
+          with ZipFile(base) as archive:
+              infos = [i for i in archive.infolist() if i.filename == 'data/protocol/idolypride-6.1.1.pb']
+              assert len(infos) == 1 and infos[0].file_size <= 4 * 1024 * 1024
+              raw = archive.read(infos[0])
+          assert hashlib.sha256(raw).hexdigest() == 'c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad'
+          with (work / 'idolypride-6.1.1.pb').open('xb') as output:
+              output.write(raw)
+          print('Verified immutable baseline and original 6.1.1 protocol; no runtime files changed')
+          PY
+      - name: Read anonymous official Master.Get and public packs only
+        id: anonymous_collect
+        # Existing collector sends only x-app-version=6.1.1, disables gRPC
+        # retries and never calls login, account creation, or transfer APIs.
+        run: |
+          umask 077
+          if uv run --no-sync idoly-local \
+            --descriptor-set "$RUNNER_TEMP/public-master-freshness/idolypride-6.1.1.pb" \
+            archive-master --app-version 6.1.1 --workers 4 \
+            --output "$RUNNER_TEMP/public-master-freshness/candidate" \
+            > "$RUNNER_TEMP/public-master-freshness/collection.log" 2>&1; then
+            echo 'ok=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ok=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Compare fixed four tables and produce bounded proof only
+        env:
+          COLLECTION_OK: ${{ steps.anonymous_collect.outputs.ok }}
+        run: |
+          arguments=(
+            --base-zip "$RUNNER_TEMP/public-master-freshness/BaseServerData.zip"
+            --candidate-root "$RUNNER_TEMP/public-master-freshness/candidate"
+            --descriptor "$RUNNER_TEMP/public-master-freshness/idolypride-6.1.1.pb"
+            --source-commit "$GITHUB_SHA"
+            --output "$RUNNER_TEMP/public-master-freshness/proof/master-freshness.json"
+          )
+          if [[ "$COLLECTION_OK" != true ]]; then
+            arguments+=(--collection-failed)
+          fi
+          uv run --no-sync python tools/audit_public_master_freshness.py "${arguments[@]}"
+      - name: Upload small comparison proof; never upload raw candidate packs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-master-freshness-${{ github.sha }}
+          path: ${{ runner.temp }}/public-master-freshness/proof/master-freshness.json
+          if-no-files-found: error
+          retention-days: 7
