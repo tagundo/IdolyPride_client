@@ -54,4 +54,8 @@
     <string name="official_stage_cancelled">Import cancelled.</string>
     <string name="official_stage_failed">Import failed</string>
     <string name="official_slot_invalid">Enter a local account name. Shorten it if it is too long, and remove line breaks or slashes.</string>
+    <string name="official_stage_applying">Saving the verified account locally</string>
+    <string name="official_committed_cleanup">The account is saved. Temporary data cleanup is pending.</string>
+    <string name="official_committed_refresh">The account is saved. Refresh the local account list to view the saved entry.</string>
+    <string name="official_refresh_local">Refresh local account list</string>
 </resources>

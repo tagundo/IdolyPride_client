@@ -132,6 +132,48 @@ def test_all_official_apply_operations_require_fully_stopped_runtime_and_preserv
     assert "mode" not in manager.calls[0][1]
 
 
+@pytest.mark.parametrize("refresh", [True, False, 1, "private refresh secret", None])
+def test_committed_apply_preserves_success_and_only_fixed_postcommit_warnings(official, refresh):
+    value, manager, events = official
+    original = manager.command
+    def committed(action, payload):
+        result = original(action, payload)
+        result.update(warning_codes=["account_temporary_cleanup_pending", "private warning secret",
+            "account_status_refresh_required", True, {"password": PASSWORD}, "account_temporary_cleanup_pending"],
+            status_refresh_required=refresh)
+        return result
+    manager.command = committed
+    invoke(value, "official_apply", {"job_id": JOB, "profile": "committed", "replace": False, "expected_revision": None})
+    result = next(data["result"] for name, data in events if name == "official_result")
+    assert result["job"]["state"] == "completed" and result["job"]["busy"] is False
+    assert result["account"] == {"mode": "normal", "profile": "committed", "revision": "b"*64}
+    assert result["warning_codes"] == ["account_status_refresh_required", "account_temporary_cleanup_pending"]
+    if type(refresh) is bool:
+        assert result["status_refresh_required"] is refresh
+    else:
+        assert "status_refresh_required" not in result
+    assert value.runtime is None and value.status()["running"] is False
+    assert value.profile == "sandbox" and result["status"]["selected"]["normal"] == "sandbox"
+    assert not any(name == "official_error" for name, data in events)
+    assert all(secret not in json.dumps(events) for secret in (PASSWORD, "private warning secret", "private refresh secret"))
+    assert "warning_codes" not in value.status()["official_import"]
+    assert [action for action, payload in manager.calls] == ["official_apply"]
+
+
+def test_native_completed_warning_ui_preserves_canonical_account_and_explicit_selection():
+    source = (Path(__file__).resolve().parents[1]/"App.swift").read_text()
+    completed = source.split('if action == "official_apply", officialState == "completed" {', 1)[1].split('private func sendAccount', 1)[0]
+    panel = source.split('if model.officialState == "completed", let imported = model.officialImportedAccount {', 1)[1].split('                HStack {', 1)[0]
+    assert 'officialImportedAccount = ManagedAccount(row)' in completed
+    assert 'officialAccountListRefreshRequired' in completed and 'account_temporary_cleanup_pending' in completed
+    assert 'officialState = "failed"' not in completed and 'official_apply' not in panel
+    assert 'Text(model.officialCompletionNotice)' in panel and 'model.refreshAccounts()' in panel
+    assert 'model.useOfficialImportForNextStart()' in panel
+    assert 'The account was saved.' in source and '再取り込みは不要です。' in source
+    assert '계정 저장은 완료' in source and 'アカウントの保存は完了しました' in source
+    assert 'Refresh account list' in panel and 'アカウント一覧を更新' in panel
+
+
 def test_busy_command_keeps_status_responsive_blocks_start_and_drops_late_results(official):
     value,manager,events=official
     entered,release=threading.Event(),threading.Event()

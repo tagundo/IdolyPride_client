@@ -54,4 +54,8 @@
     <string name="official_stage_cancelled">取り込みを中止しました。</string>
     <string name="official_stage_failed">取り込みに失敗しました</string>
     <string name="official_slot_invalid">ローカルアカウント名を入力してください。長すぎる名前や改行・スラッシュは使用できません。</string>
+    <string name="official_stage_applying">検証済みアカウントをローカルに保存中</string>
+    <string name="official_committed_cleanup">アカウントは保存済みです。一時データの整理が残っています。</string>
+    <string name="official_committed_refresh">アカウントは保存済みです。ローカル一覧を更新して保存した項目を確認してください。</string>
+    <string name="official_refresh_local">ローカルアカウント一覧を更新</string>
 </resources>

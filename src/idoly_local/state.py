@@ -548,7 +548,7 @@ class State:
             names = [row[0] for row in db.execute("SELECT name FROM profiles ORDER BY name LIMIT ? OFFSET ?", (limit, offset))]
         return count, names
 
-    def replace_account(self, profile: str, bundle: dict, *, expected_revision=None, before_replace=None) -> str:
+    def replace_account(self, profile: str, bundle: dict, *, expected_revision=None, before_replace=None, after_commit=None) -> str:
         """Atomically install all account rows and invalidate only its sessions.
 
         A current revision is mandatory for replacement. The backup callback
@@ -579,4 +579,11 @@ class State:
                 for row in bundle["tables"][table]:
                     db.execute(sql, tuple(profile if column == key else row[column] for column in columns))
             current = self._account_rows(db, profile)
-            return self.account_revision(current)
+            revision = self.account_revision(current)
+            if after_commit is not None:
+                # Opt-in callers need to distinguish a successful SQL commit
+                # from a later connection-release error. Legacy callers retain
+                # the normal context-manager commit behavior.
+                db.commit()
+                after_commit(revision)
+            return revision

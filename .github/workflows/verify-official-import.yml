@@ -65,6 +65,7 @@ jobs:
             tests/test_official_transport.py
             tests/test_official_transport_tls.py
             tests/test_official_import.py
+            tests/test_official_import_original_protocol.py
             tests/test_android_official_import.py
             tests/test_android_official_service_harness.py
             tests/test_ios_unified_official_import.py

@@ -260,6 +260,10 @@ def native_report(language="ko", run_index=None):
             "failed_files":0,"source_sha256":"a"*64,"copied_sha256":"a"*64}
             if run_index == 0 else {"performed":False,"reason":"first-cold-run-only"}),
         "account_management":modeled_account_management(run_index),
+        "official_prompt":({"performed":True,"scope":"stock-simulator","ui_trigger":"dom-click",
+            "cancel_trigger":"accessibility-or-control-action","timed_out":False,"credential_submission_performed":False,
+            "elapsed_seconds":0.9,**{key:True for key in probe.OFFICIAL_PROMPT_FLAGS}}
+            if run_index==0 else {"performed":False,"reason":"first-cold-run-only"}),
         "return_action_dispatched":True,"dismissed":True,"menu_view_detached_after_close":True,"game_window_key_after_close":True,
         "dismiss_observation":{"presented_controller_remaining":False,"settings_controller_still_presented":False,
             "settings_view_attached":False,"settings_is_being_dismissed":False,"game_window_key":True,
@@ -2251,7 +2255,7 @@ def test_failure_checkpoint_projects_only_fixed_native_stages_and_scalar_gate_fi
     assert all(type(value) in (str, int, bool, float, type(None))
                for key, value in result.items() if key not in (
                    "keyboard", "report_keyboard_lifecycle", "native_header", "report_http_readiness", "diagnostics_copy",
-                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker", "zip_roundtrip", "account_management"))
+                   "octo_budget", "octo_budget_probe", "language_observation", "server_gate", "settings_web", "zip_import_picker", "zip_roundtrip", "account_management", "official_prompt"))
     assert result["account_management"] == probe.account_management_observation(raw_report["menu_lifetime"]["account_management"])
     assert result["keyboard"] == raw_report["keyboard"]
     assert result["report_keyboard_lifecycle"] == raw_report["server_status"]["keyboard_lifecycle"]
@@ -3499,3 +3503,51 @@ def test_after_relaunch_projection_keeps_only_bound_metrics_and_actual_hashes():
     checked=probe.validate_account_management_after_relaunch(value,first)
     assert "DO-NOT-EXPORT" not in json.dumps(checked)
     assert checked["checks"]==value["checks"]
+
+
+@pytest.mark.parametrize("field",probe.OFFICIAL_PROMPT_FLAGS)
+@pytest.mark.parametrize("bad",[False,1])
+def test_official_secure_prompt_requires_each_actual_boolean(field,bad):
+    observed=native_report();observed["menu_lifetime"]["official_prompt"][field]=bad
+    with pytest.raises(probe.ProbeError,match="^settings_official_prompt_failed$"):
+        probe.validate_report(observed)
+
+
+@pytest.mark.parametrize("field,bad",[("credential_submission_performed",True),("credential_submission_performed",0),
+    ("timed_out",True),("elapsed_seconds",31),("elapsed_seconds",True),("elapsed_seconds",float("nan")),
+    ("ui_trigger","direct-backend"),("cancel_trigger","submit")])
+def test_official_prompt_never_accepts_submission_timeout_or_alternate_actions(field,bad):
+    observed=native_report();observed["menu_lifetime"]["official_prompt"][field]=bad
+    with pytest.raises(probe.ProbeError,match="^settings_official_prompt_failed$"):
+        probe.validate_report(observed)
+
+
+def test_official_prompt_projection_has_no_input_values_and_later_cold_runs_skip_exactly():
+    value=native_report()["menu_lifetime"]["official_prompt"]
+    value.update(user_id="DO-NOT-EXPORT",password="DO-NOT-EXPORT",raw_input="DO-NOT-EXPORT")
+    assert "DO-NOT-EXPORT" not in json.dumps(probe.validate_official_prompt(value,0))
+    skipped={"performed":False,"reason":"first-cold-run-only"}
+    for index in (1,2,3,4):assert probe.validate_official_prompt(skipped,index)==skipped
+    with pytest.raises(probe.ProbeError):probe.validate_official_prompt(skipped,0)
+    with pytest.raises(probe.ProbeError):probe.validate_official_prompt(value,1)
+
+
+def test_actual_official_prompt_dom_hook_only_clicks_and_observes_cancelled_reply():
+    import re
+    import subprocess
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/probe/main.m").read_text()
+    expression=re.search(r"static NSString \*const ProbeOfficialPromptScript =\s*(.*?)\nstatic void ProbeOfficialSnapshot",source,re.S)
+    script="".join(json.loads(piece) for piece in re.findall(r'@?("(?:\\.|[^"\\])*")',expression.group(1))).rstrip(";")
+    program=r"""
+let posts=0,replies=0;
+const h={postMessage(value){posts++;}},window={webkit:{messageHandlers:{idolyServer:h}},idolyServerReply(){replies++;}};
+"""+"const opened="+script+r""";
+if(opened!==true)throw Error('hook did not install');
+h.postMessage({id:3,action:'official_inspect'});
+window.idolyServerReply(3,{id:3,ok:true,result:{action:'official_inspect',cancelled:true}});
+const q=window.__idolyOfficialPromptProbe;
+if(q.request!==3||q.empty_payload!==true||q.cancelled!==true||q.forbidden!==false||posts!==1||replies!==1)throw Error('cancel correlation failed');
+h.postMessage({id:4,action:'official_fetch'});if(q.forbidden!==true)throw Error('submit accepted');
+"""
+    checked=subprocess.run(["node"],input=program,text=True,capture_output=True,timeout=5)
+    assert checked.returncode==0,checked.stderr

@@ -41,6 +41,7 @@ _OFFICIAL_ACTIONS = frozenset(("official_inspect", "official_fetch", "official_a
 _OFFICIAL_STATES = frozenset(("idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled"))
 _OFFICIAL_STAGES = frozenset(("preparing", "checking", "verifying", "verified", "transferring", "firebase", "login",
     "master", "account", "collected", "idle", "fetching", "catalog_check", "staging", "ready", "applying", "completed", "cancelled", "failed"))
+_OFFICIAL_WARNINGS = frozenset(("account_temporary_cleanup_pending", "account_status_refresh_required"))
 _OFFICIAL_HOST_ERRORS = frozenset(("official_request_invalid", "official_operation_busy", "official_server_starting",
     "official_server_running", "official_operation_failed", "official_response_invalid"))
 
@@ -487,6 +488,13 @@ class Controller:
                     with self.lock: self.account_status = result["status"]
                 if type(result.get("account")) is dict:
                     safe["account"] = result["account"]
+                if safe["job"]["state"] == "completed":
+                    warnings = result.get("warning_codes")
+                    if type(warnings) is list:
+                        safe["warning_codes"] = sorted({code for code in warnings
+                            if type(code) is str and code in _OFFICIAL_WARNINGS})
+                    if type(result.get("status_refresh_required")) is bool:
+                        safe["status_refresh_required"] = result["status_refresh_required"]
             with self.lock: closed = self.closed
             if not closed:
                 self.emit("official_result", request_id=identifier, action=action, result=safe)

@@ -1205,6 +1205,127 @@ static void ProbeAccountManagement(WKWebView *web,UIViewController *presenter,vo
     });
 }
 
+static NSString *const ProbeOfficialPromptScript =
+    @"(()=>{const h=window.webkit&&window.webkit.messageHandlers&&window.webkit.messageHandlers.idolyServer;"
+    "if(!h||typeof h.postMessage!=='function'||typeof window.idolyServerReply!=='function')return false;"
+    "const q=window.__idolyOfficialPromptProbe={request:null,empty_payload:false,cancelled:false,forbidden:false,enabled_before:false,click_dispatched:false};"
+    "q.oldPost=h.postMessage;q.oldReply=window.idolyServerReply;"
+    "q.post=function(r){if(r&&r.action==='official_inspect'){q.request=r.id;q.empty_payload=Object.keys(r).length===2&&Number.isInteger(r.id);"
+    "if(Object.keys(r).some(k=>!['id','action'].includes(k)))q.forbidden=true;}"
+    "if(r&&['official_fetch','official_apply'].includes(r.action))q.forbidden=true;return q.oldPost.apply(h,arguments);};"
+    "q.reply=function(id,v){if(id===q.request&&v&&v.id===id)q.cancelled=v.ok===true&&!!v.result&&v.result.action==='official_inspect'&&v.result.cancelled===true;"
+    "return q.oldReply.apply(this,arguments);};h.postMessage=q.post;window.idolyServerReply=q.reply;return true;})()";
+
+static void ProbeOfficialSnapshot(void (^completion)(NSDictionary *)) {
+    IdolyEmbeddedServerCommand(@"{\"id\":7500,\"action\":\"accounts_status\"}",^(NSString *reply){
+        NSDictionary *account=ProbeObject(reply),*status=account[@"result"][@"status"];
+        NSData *raw=[status isKindOfClass:NSDictionary.class]?[NSJSONSerialization dataWithJSONObject:status options:NSJSONWritingSortedKeys error:NULL]:nil;
+        NSString *digest=raw?ProbeDataSHA(raw):nil;
+        IdolyEmbeddedServerCommand(@"{\"id\":7501,\"action\":\"status\"}",^(NSString *hostReply){
+            NSDictionary *host=ProbeObject(hostReply),*value=host[@"result"],*runtime=value[@"runtime"];
+            NSDictionary *job=[value[@"official_import"] isKindOfClass:NSDictionary.class]?value[@"official_import"]:nil;
+            BOOL absent=!job || job[@"job_id"]==(id)NSNull.null;
+            BOOL valid=[account[@"ok"] isEqual:@YES]&&digest&&[host[@"ok"] isEqual:@YES]
+                &&[runtime[@"running"] isEqual:@YES]&&[runtime[@"profile"] isKindOfClass:NSString.class];
+            completion(@{@"valid":@((BOOL)valid),@"digest":digest?:@"",@"profile":runtime[@"profile"]?:@"",
+                @"media":@((BOOL)[runtime[@"media_mode"] isEqual:@YES]),@"absent":@((BOOL)absent)});
+        });
+    });
+}
+static BOOL ProbeOfficialActivateCancel(UIView *root,NSString *title,NSUInteger *remaining) {
+    if (!root||!*remaining) return NO;--*remaining;
+    if ([root.accessibilityLabel isEqual:title]&&(root.accessibilityTraits&UIAccessibilityTraitButton)
+            &&[root accessibilityActivate]) return YES;
+    if ([root isKindOfClass:UIButton.class]&&[[(UIButton *)root titleForState:UIControlStateNormal] isEqual:title]) {
+        [(UIButton *)root sendActionsForControlEvents:UIControlEventTouchUpInside];return YES;
+    }
+    for (UIView *child in root.subviews) if (ProbeOfficialActivateCancel(child,title,remaining)) return YES;
+    for (id child in root.accessibilityElements) {
+        if (!*remaining) break;--*remaining;
+        if ([child isKindOfClass:UIAccessibilityElement.class]&&[[child accessibilityLabel] isEqual:title]
+                &&([child accessibilityTraits]&UIAccessibilityTraitButton)&&[child accessibilityActivate]) return YES;
+    }
+    return NO;
+}
+static void ProbeOfficialPromptPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
+                                    NSMutableDictionary *state,void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    WKWebView *web=weakWeb;UIViewController *presenter=weakPresenter;
+    if (!web||!presenter) {finish();return;}
+    NSMutableDictionary *metrics=state[@"metrics"];
+    [web evaluateJavaScript:@"(()=>{const q=window.__idolyOfficialPromptProbe,b=document.getElementById('official-inspect');if(!q)return null;"
+        "if(!q.request&&b&&!b.disabled){q.enabled_before=!b.disabled;b.click();q.click_dispatched=Number.isInteger(q.request);}return {button_found:!!b,enabled_before:q.enabled_before,click_dispatched:q.click_dispatched,empty_web_payload:q.empty_payload,web_reply_cancelled:q.cancelled,forbidden:q.forbidden};})()"
+        completionHandler:^(id value,NSError *error){
+        if ([state[@"finished"] boolValue]) return;
+        if (error||![value isKindOfClass:NSDictionary.class]||[value[@"forbidden"] isEqual:@YES]) {finish();return;}
+        for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"web_reply_cancelled"])
+            metrics[key]=@((BOOL)[value[key] isEqual:@YES]);
+        UIViewController *shown=presenter.presentedViewController;
+        if (![state[@"cancel_requested"] boolValue]&&[shown isKindOfClass:UIAlertController.class]
+                &&shown.viewIfLoaded.window&&!shown.isBeingPresented) {
+            UIAlertController *prompt=(UIAlertController *)shown;state[@"prompt"]=prompt;
+            metrics[@"prompt_presented"]=@YES;
+            metrics[@"field_count_two"]=@((BOOL)(prompt.textFields.count==2));
+            metrics[@"secure_password_field"]=@((BOOL)(prompt.textFields.count==2&&!prompt.textFields[0].secureTextEntry&&prompt.textFields[1].secureTextEntry));
+            UIAlertAction *cancel=nil;NSUInteger platforms=0,cancels=0;
+            for (UIAlertAction *action in prompt.actions) {
+                if (action.style==UIAlertActionStyleCancel) {cancel=action;++cancels;}
+                else if (action.style==UIAlertActionStyleDefault&&([action.title hasPrefix:@"iOS"]||[action.title hasPrefix:@"Android"])) ++platforms;
+            }
+            metrics[@"platform_actions_present"]=@((BOOL)(prompt.actions.count==3&&platforms==2));
+            metrics[@"cancel_action_present"]=@((BOOL)(cancels==1));
+            if (![metrics[@"secure_password_field"] isEqual:@YES]||![metrics[@"platform_actions_present"] isEqual:@YES]||cancels!=1) {finish();return;}
+            prompt.textFields[0].text=@"ProbeNeverSubmit_ID";prompt.textFields[1].text=@"ProbeNeverSubmit_Pass";
+            metrics[@"synthetic_inputs_set"]=@((BOOL)(prompt.textFields[0].text.length>0&&prompt.textFields[1].text.length>0));
+            NSUInteger remaining=512;
+            if (ProbeOfficialActivateCancel(prompt.view,cancel.title,&remaining)) {
+                state[@"cancel_requested"]=@YES;metrics[@"cancel_action_activated"]=@YES;
+            }
+        }
+        UIAlertController *prompt=state[@"prompt"];
+        if ([state[@"cancel_requested"] boolValue]&&prompt&&!presenter.presentedViewController&&!prompt.viewIfLoaded.window&&!prompt.isBeingDismissed
+                &&[metrics[@"web_reply_cancelled"] isEqual:@YES]&&![state[@"observing_after"] boolValue]) {
+            state[@"observing_after"]=@YES;metrics[@"prompt_detached"]=@YES;
+            metrics[@"fields_cleared"]=@((BOOL)(prompt.textFields.count==2&&!prompt.textFields[0].text.length&&!prompt.textFields[1].text.length));
+            ProbeOfficialSnapshot(^(NSDictionary *after){
+                if ([state[@"finished"] boolValue]) return;NSDictionary *before=state[@"before"];
+                metrics[@"official_job_absent_after"]=after[@"absent"];
+                metrics[@"account_data_unchanged"]=@((BOOL)([after[@"valid"] isEqual:@YES]&&[after[@"digest"] isEqual:before[@"digest"]]));
+                metrics[@"runtime_identity_unchanged"]=@((BOOL)([after[@"valid"] isEqual:@YES]&&[after[@"profile"] isEqual:before[@"profile"]]&&[after[@"media"] isEqual:before[@"media"]]));
+                metrics[@"completed"]=@YES;finish();
+            });return;
+        }
+        if (![state[@"finished"] boolValue]) dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+            ProbeOfficialPromptPoll(weakWeb,weakPresenter,state,finish);
+        });
+    }];
+}
+static void ProbeOfficialPrompt(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+    if (probeRunIndex!=0) {completion(@{@"performed":@NO,@"reason":@"first-cold-run-only"});return;}
+    NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
+    NSMutableDictionary *metrics=[@{@"performed":@YES,@"scope":@"stock-simulator",@"ui_trigger":@"dom-click",
+        @"cancel_trigger":@"accessibility-or-control-action",@"credential_submission_performed":@NO,@"timed_out":@NO,@"completed":@NO} mutableCopy];
+    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics} mutableCopy];
+    void (^finish)(void)=^{
+        if ([state[@"finished"] boolValue]) return;state[@"finished"]=@YES;
+        metrics[@"elapsed_seconds"]=@(MAX(0,NSProcessInfo.processInfo.systemUptime-started));
+        [web evaluateJavaScript:@"(()=>{const q=window.__idolyOfficialPromptProbe,h=window.webkit.messageHandlers.idolyServer;if(!q)return;"
+            "if(h.postMessage===q.post)h.postMessage=q.oldPost;if(window.idolyServerReply===q.reply)window.idolyServerReply=q.oldReply;delete window.__idolyOfficialPromptProbe;})()" completionHandler:nil];
+        completion(metrics.copy);
+    };
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,30*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if (![state[@"finished"] boolValue]) {metrics[@"timed_out"]=@YES;finish();}
+    });
+    ProbeOfficialSnapshot(^(NSDictionary *before){
+        if ([state[@"finished"] boolValue]) return;state[@"before"]=before;metrics[@"official_job_absent_before"]=before[@"absent"];
+        if (![before[@"valid"] isEqual:@YES]||![before[@"absent"] isEqual:@YES]) {finish();return;}
+        [web evaluateJavaScript:ProbeOfficialPromptScript completionHandler:^(id value,NSError *error){
+            if ([state[@"finished"] boolValue]) return;if(error||![value isEqual:@YES]){finish();return;}
+            ProbeOfficialPromptPoll(web,presenter,state,finish);
+        }];
+    });
+}
+
 static BOOL ProbeAES(const unsigned char *key, size_t keySize, const unsigned char *expected) {
     const unsigned char iv[16] = {0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
                                   0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f};
@@ -1370,6 +1491,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *zipImportObservation;
 @property(nonatomic, strong) NSDictionary *zipRoundTripObservation;
 @property(nonatomic, strong) NSDictionary *accountManagementObservation;
+@property(nonatomic, strong) NSDictionary *officialPromptObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
 @property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
 @property(nonatomic,strong) NSMutableArray *interfaceLanguageCycle;
@@ -1404,7 +1526,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
@@ -1420,7 +1542,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{},
-        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{},
+        @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
@@ -1959,6 +2081,16 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 BOOL accountOK=probeRunIndex==0 ? ([account[@"completed"] isEqual:@YES] && [account[@"timed_out"] isEqual:@NO]) : [account[@"performed"] isEqual:@NO];
                 if (!accountOK) { [self failProbe:@"settings_account_management_failed"];return; }
                 [self recordCheckpoint:@"settings_account_management_checked"];
+                ProbeOfficialPrompt(web,navigation.topViewController,^(NSDictionary *prompt){
+                self.officialPromptObservation=prompt;menu[@"official_prompt"]=prompt;
+                BOOL promptOK=probeRunIndex!=0&&[prompt[@"performed"] isEqual:@NO];
+                if(probeRunIndex==0){
+                    promptOK=[prompt[@"timed_out"] isEqual:@NO]&&[prompt[@"credential_submission_performed"] isEqual:@NO];
+                    for(NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"empty_web_payload",@"prompt_presented",@"field_count_two",@"secure_password_field",@"platform_actions_present",@"cancel_action_present",@"synthetic_inputs_set",@"cancel_action_activated",@"fields_cleared",@"web_reply_cancelled",@"prompt_detached",@"official_job_absent_before",@"official_job_absent_after",@"account_data_unchanged",@"runtime_identity_unchanged",@"completed"])
+                        promptOK=promptOK&&[prompt[key] isEqual:@YES];
+                }
+                if(!promptOK){[self failProbe:@"settings_official_prompt_failed"];return;}
+                [self recordCheckpoint:@"settings_official_prompt_checked"];
                 [self saveNextLanguage:web completion:^(BOOL saved){
                 if (!saved) { [self failProbe:@"language_save_failed"]; return; }
                 BOOL closed = ProbeDispatchButton(close);
@@ -1969,6 +2101,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 [self observeMenuDismissal:navigation report:report menu:menu
                                   started:NSProcessInfo.processInfo.systemUptime observations:0];
                 }];
+                });
                 });
                 });
                 });

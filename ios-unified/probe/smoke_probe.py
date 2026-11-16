@@ -96,7 +96,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "keyboard_precreated_instance_not_reused",
     "native_header_layout_failed", "native_header_restore_failed",
     "settings_diagnostics_copy_failed", "settings_zip_import_picker_failed", "settings_zip_roundtrip_failed",
-    "settings_account_management_failed", "settings_account_fixture_failed",
+    "settings_account_management_failed", "settings_account_fixture_failed", "settings_official_prompt_failed",
     "host_constructor_not_installed", "host_hooks_registration_failed", "host_cold_start_failed",
     "unity_window_handoff_failed", "language_cache_identity_failed", "sigpipe_probe_failed",
     "sigpipe_before_server_failed", "sigpipe_before_game_failed",
@@ -113,7 +113,7 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "keyboard_before_capture_checked", "keyboard_before_launch_checked",
     "keyboard_during_init_checked", "keyboard_after_init_checked",
     "native_header_checked",
-    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_checked", "settings_account_management_checked",
+    "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_checked", "settings_account_management_checked", "settings_official_prompt_checked",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
 ))
@@ -800,6 +800,7 @@ def validate_report(value):
                     for sample in zipped["passes"]), "settings_zip_import_picker_failed")
     roundtrip = validate_zip_roundtrip(menu.get("zip_roundtrip"), language_summary["run_index"])
     accounts = validate_account_management(menu.get("account_management"), language_summary["run_index"])
+    official_prompt = validate_official_prompt(menu.get("official_prompt"), language_summary["run_index"])
     width, window_width = menu.get("frame_width"), menu.get("window_width")
     require(all(type(v) in (int, float) and math.isfinite(v) and 0 < v <= 16384 for v in (width, window_width))
             and abs(width - window_width) <= 2, "settings_menu_width_failed")
@@ -868,7 +869,7 @@ def validate_report(value):
                 "return_action_dispatched", "dismissed", "menu_view_detached_after_close", "game_window_key_after_close", "status_completion_main_thread",
                 "grpc_connected_after_close", "assets_connected_after_close", "frame_width", "window_width")},
                 "dismiss_observation":dismissal, "diagnostics_copy":diagnostics_copy_observation(copied),
-                "zip_import_picker":zip_import_observation(zipped), "zip_roundtrip":roundtrip, "account_management":accounts,
+                "zip_import_picker":zip_import_observation(zipped), "zip_roundtrip":roundtrip, "account_management":accounts, "official_prompt":official_prompt,
                 "web": {key: web[key] for key in ("web_found", "evaluation_succeeded", "ready", "forms_present",
                     "scale_2_present", "buffer_4096_present", "no_horizontal_overflow", "timed_out",
                     "viewport_width", "content_width", "select_count", "navigation_loading", "navigation_file_url",
@@ -881,6 +882,39 @@ def validate_report(value):
             "host_status": {"id": 1, "ok": True, "result": {"state": "ready", "running": True,
                 "runtime": {key: runtime[key] for key in ("running", "grpc_address", "asset_url")}}}}
 
+
+
+OFFICIAL_PROMPT_FLAGS = ("button_found", "enabled_before", "click_dispatched", "empty_web_payload", "prompt_presented",
+    "field_count_two", "secure_password_field", "platform_actions_present", "cancel_action_present", "synthetic_inputs_set",
+    "cancel_action_activated", "fields_cleared", "web_reply_cancelled", "prompt_detached", "official_job_absent_before",
+    "official_job_absent_after", "account_data_unchanged", "runtime_identity_unchanged", "completed")
+
+
+def official_prompt_observation(value):
+    if type(value) is not dict: return {}
+    clean = {key:value[key] for key in (*OFFICIAL_PROMPT_FLAGS, "performed", "timed_out", "credential_submission_performed")
+             if type(value.get(key)) is bool}
+    for key, expected in (("scope","stock-simulator"),("ui_trigger","dom-click"),
+                          ("cancel_trigger","accessibility-or-control-action"),("reason","first-cold-run-only")):
+        if value.get(key) == expected: clean[key] = expected
+    seconds = value.get("elapsed_seconds")
+    if type(seconds) in (int,float) and math.isfinite(seconds) and 0 <= seconds <= 30: clean["elapsed_seconds"] = seconds
+    return clean
+
+
+def validate_official_prompt(value, run_index):
+    fail = "settings_official_prompt_failed"
+    require(type(value) is dict,fail)
+    if run_index != 0:
+        require(value == {"performed":False,"reason":"first-cold-run-only"} and type(value.get("performed")) is bool,fail)
+        return dict(value)
+    require(value.get("performed") is True and value.get("scope") == "stock-simulator"
+        and value.get("ui_trigger") == "dom-click" and value.get("cancel_trigger") == "accessibility-or-control-action"
+        and value.get("timed_out") is False and value.get("credential_submission_performed") is False
+        and all(value.get(key) is True for key in OFFICIAL_PROMPT_FLAGS)
+        and type(value.get("elapsed_seconds")) in (int,float) and math.isfinite(value["elapsed_seconds"])
+        and 0 <= value["elapsed_seconds"] <= 30,fail)
+    return official_prompt_observation(value)
 
 
 ACCOUNT_TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
@@ -1859,6 +1893,11 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
             account_raw=observed["menu_lifetime"].get("account_management")
         account=account_management_observation(account_raw)
         if account: result["account_management"]=account
+        prompt_raw=observed.get("official_prompt")
+        if type(prompt_raw) is not dict and type(observed.get("menu_lifetime")) is dict:
+            prompt_raw=observed["menu_lifetime"].get("official_prompt")
+        prompt=official_prompt_observation(prompt_raw)
+        if prompt: result["official_prompt"]=prompt
         budget = octo_budget_from_observation(observed)
         if budget:
             result["octo_budget"] = budget

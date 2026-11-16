@@ -71,6 +71,7 @@ static NSString *localized(NSString *source) {
         @"설정을 저장하고 있습니다…":@[@"設定を保存しています…", @"Saving settings…"],
         @"설정을 저장하지 못했습니다. 아래 항목을 확인한 뒤 다시 게임 시작을 눌러 주세요.":@[@"設定を保存できませんでした。下の項目を確認してから、もう一度「ゲーム開始」を押してください。", @"Settings could not be saved. Check the fields below, then select Start Game again."],
         @"게임으로 돌아가기":@[@"ゲームに戻る", @"Return to Game"],
+        @"계정 저장 완료 · 서버 재시작 필요":@[@"アカウント保存完了 · サーバーの再起動が必要", @"Account Saved · Restart Server"],
         @"서버 실행 중":@[@"サーバー稼働中", @"Server Running"],
         @"서버 준비 중":@[@"サーバー準備中", @"Starting Server"],
         @"다시 시도":@[@"再試行", @"Retry"],
@@ -471,9 +472,15 @@ static __weak IDSettingsController *launcherController;
 - (void)sendReply:(NSNumber *)identifier json:(NSString *)json {
     // An initial page request may finish before viewDidAppear. The retained
     // web view owns that reply; releaseWeb clears it when the menu is closed.
-    if (!_web) return;
     NSData *bytes = [json dataUsingEncoding:NSUTF8StringEncoding];
     id value = bytes && bytes.length <= maxJSON ? [NSJSONSerialization JSONObjectWithData:bytes options:NSJSONReadingMutableContainers error:NULL] : nil;
+    NSDictionary *officialResult = [value isKindOfClass:NSDictionary.class] && [value[@"result"] isKindOfClass:NSDictionary.class] ? value[@"result"] : nil;
+    NSDictionary *officialJob = [officialResult[@"job"] isKindOfClass:NSDictionary.class] ? officialResult[@"job"] : nil;
+    NSArray *warnings = [officialResult[@"warning_codes"] isKindOfClass:NSArray.class] ? officialResult[@"warning_codes"] : nil;
+    if ([value isKindOfClass:NSDictionary.class] && [value[@"ok"] isEqual:@YES] && [officialResult[@"action"] isEqual:@"official_apply"]
+            && [officialJob[@"state"] isEqual:@"completed"] && [warnings containsObject:@"official_server_restart_required"])
+        IDNativeSetServerState(NO, NO, @"계정 저장 완료 · 서버 재시작 필요");
+    if (!_web) return;
     if ([value isKindOfClass:NSDictionary.class] && [value[@"error"] isKindOfClass:NSMutableDictionary.class]
             && [value[@"error"][@"message"] isKindOfClass:NSString.class])
         value[@"error"][@"message"] = localized(value[@"error"][@"message"]);

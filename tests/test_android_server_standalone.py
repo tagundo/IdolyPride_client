@@ -66,7 +66,7 @@ def test_graphics_and_playback_controls_remain_without_any_apk_installation_path
     assert "presentation_client_notice" in strings and "presentation_launch_missing" in strings
     assert not any(name.startswith("presentation_install_") for name in strings)
     # All current Java string references must resolve after deleting old install UI.
-    assert set(re.findall(r"R\.string\.([A-Za-z0-9_]+)", java_sources)) <= strings
+    assert set(re.findall(r"(?<![\w.])R\.string\.([A-Za-z0-9_]+)", java_sources)) <= strings
 
 
 def test_current_client_is_the_only_launcher_target_and_keeps_diagnostics_export():

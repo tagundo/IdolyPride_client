@@ -682,6 +682,21 @@ class _Host:
         if prepared and (identity is None or identity == (mode, profile)):
             raise ValueError("account_restart_required")
 
+    def _restart_after_official_apply(self, paths, ports, *, committed):
+        try:
+            refreshed = self.start(*paths, ports=ports)
+            if isinstance(refreshed, dict) and refreshed.get("running") is True:
+                return True
+        except Exception:
+            pass  # Never overwrite the operation's result with a restart error.
+        with self._condition:
+            if not self._closed:
+                self._state = "failed"
+                self._error = {"code": "official_server_restart_required", "message":
+                    "계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요."
+                    if committed else "서버를 다시 시작하지 못했습니다. 서버 상태를 확인해 주세요."}
+        return False
+
     def _official_command(self, action, value):
         """Explicit native commands; credentials never enter status or events."""
         if self._paths is None or self._closed:
@@ -711,23 +726,38 @@ class _Host:
                 self._state = "idle"
         try:
             result = self._official_import.command(action, payload)
-        finally:
+            if (not isinstance(result, dict) or not isinstance(result.get("job"), dict)
+                    or result.get("action") != action):
+                raise ValueError("official_response_invalid")
+            safe = {"action": action, "job": _official_job(result["job"], private=True, errors=self._official_errors)}
+            if action == "official_apply":
+                if safe["job"]["state"] != "completed":
+                    raise ValueError("official_response_invalid")
+                if isinstance(result.get("status"), dict):
+                    with self._condition:
+                        self._account_status = result["status"]
+                    safe["status"] = result["status"]
+                elif result.get("status_refresh_required") is True:
+                    with self._condition:
+                        self._account_status = None
+                if isinstance(result.get("account"), dict):
+                    safe["account"] = result["account"]
+                warnings = result.get("warning_codes")
+                if type(warnings) in (list, tuple):
+                    allowed = ("account_temporary_cleanup_pending", "account_status_refresh_required")
+                    safe["warning_codes"] = list(dict.fromkeys(code for code in warnings[:8]
+                        if type(code) is str and code in allowed))
+                if result.get("status_refresh_required") is True:
+                    safe["status_refresh_required"] = True
+        except Exception:
             if replaces_active:
-                refreshed = self.start(*paths, ports=ports)
-                if not refreshed.get("running"):
-                    raise RuntimeError("Account operation completed but server restart failed")
-        if not isinstance(result, dict) or not isinstance(result.get("job"), dict):
-            raise ValueError("official_response_invalid")
-        if result.get("action") != action:
-            raise ValueError("official_response_invalid")
-        safe = {"action": action, "job": _official_job(result["job"], private=True, errors=self._official_errors)}
-        if action == "official_apply":
-            if isinstance(result.get("status"), dict):
-                with self._condition:
-                    self._account_status = result["status"]
-                safe["status"] = result["status"]
-            if isinstance(result.get("account"), dict):
-                safe["account"] = result["account"]
+                self._restart_after_official_apply(paths, ports, committed=False)
+            raise
+        if replaces_active and not self._restart_after_official_apply(paths, ports,
+                committed=safe["job"]["state"] == "completed"):
+            # The canonical DB result is already committed. A later serving
+            # failure must not invite another transfer/apply or reset the job.
+            safe.setdefault("warning_codes", []).append("official_server_restart_required")
         return safe
 
     def _account_command(self, action, value):

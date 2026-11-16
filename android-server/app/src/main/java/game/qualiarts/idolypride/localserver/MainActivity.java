@@ -65,9 +65,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private JSONObject officialJob = new JSONObject(), officialAppliedAccount;
     private TextView officialStatus, officialPreview;
     private ProgressBar officialProgress;
-    private Button officialInspect, officialFetch, officialNew, officialReplace, officialCancel, officialSelect, officialNormal;
+    private Button officialInspect, officialFetch, officialNew, officialReplace, officialCancel, officialSelect, officialNormal, officialLocalRefresh;
     private boolean officialRequest, officialPolling;
-    private int officialLastError;
+    private int officialLastError, officialWarnings;
+    private static final int OFFICIAL_WARNING_CLEANUP = 1, OFFICIAL_WARNING_REFRESH = 2;
     private AlertDialog officialCredentials, officialWizardDialog;
     private final Runnable officialRefresh = new Runnable() {
         @Override public void run() {
@@ -246,6 +247,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             if (importedProfile != null && importedProfile.length() <= 64 && importedRevision != null
                     && importedRevision.matches("[0-9a-f]{64}"))
                 officialAppliedAccount = accountPayload("profile", importedProfile, "revision", importedRevision);
+            officialWarnings = savedInstanceState.getInt("official_local_warnings", 0) & 3;
         }
         getWindow().setStatusBarColor(PAGE_BACKGROUND);
         getWindow().setNavigationBarColor(PAGE_BACKGROUND);
@@ -552,6 +554,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             mediaMode.setChecked(false);
             Toast.makeText(this, R.string.official_normal_selected, Toast.LENGTH_LONG).show();
         });
+        officialLocalRefresh = officialButton(body, R.string.official_refresh_local, "idoly.official.refresh-local", view -> refreshAccounts());
         renderOfficialJob();
     }
 
@@ -658,7 +661,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (officialRequest || ServerService.isImportingOfficial()) {
             payload.remove("password"); payload.remove("user_id"); return;
         }
-        if ("official_inspect".equals(action)) officialAppliedAccount = null;
+        if ("official_inspect".equals(action)) { officialAppliedAccount = null; officialWarnings = 0; }
         if (!poll) officialLastError = 0;
         officialPolling = poll; officialRequest = true;
         if (!poll) {
@@ -678,10 +681,20 @@ public final class MainActivity extends Activity implements ServerService.Observ
             }
             JSONObject job = result.optJSONObject("job"); if (job != null) officialJob = job;
             JSONObject active = result.optJSONObject("active"); if (active != null) activeAccount = active;
-            JSONObject accounts = result.optJSONObject("status"); if (accounts != null) renderAccounts(accounts);
             if ("official_apply".equals(action)) {
                 JSONObject imported = result.optJSONObject("account");
                 if (imported != null) officialAppliedAccount = accountPayload("profile", imported.optString("profile"), "revision", imported.optString("revision"));
+                officialWarnings = result.optBoolean("status_refresh_required", false) ? OFFICIAL_WARNING_REFRESH : 0;
+                org.json.JSONArray notices = result.optJSONArray("warning_codes");
+                if (notices != null) for (int index = 0; index < Math.min(8, notices.length()); index++) {
+                    String code = notices.optString(index, "");
+                    if ("account_temporary_cleanup_pending".equals(code)) officialWarnings |= OFFICIAL_WARNING_CLEANUP;
+                    if ("account_status_refresh_required".equals(code)) officialWarnings |= OFFICIAL_WARNING_REFRESH;
+                }
+                // The account is already committed. Only reread local metadata;
+                // never authenticate, fetch, or apply the official transfer again.
+                JSONObject accounts = result.optJSONObject("status");
+                if (accounts != null && (officialWarnings & OFFICIAL_WARNING_REFRESH) == 0) renderAccounts(accounts);
                 refreshAccounts();
             }
             renderOfficialJob();
@@ -712,6 +725,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             case "fetching": return R.string.official_stage_fetching;
             case "catalog_check": return R.string.official_stage_catalog_check;
             case "staging": return R.string.official_stage_staging;
+            case "applying": return R.string.official_stage_applying;
             case "ready": return R.string.official_stage_ready;
             case "completed": return R.string.official_stage_completed;
             case "cancelled": return R.string.official_stage_cancelled;
@@ -740,6 +754,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (expiry > 0) summary.append("\n").append(getString(R.string.official_expiry, expiry));
         if ("ready".equals(state)) summary.append("\n\n").append(getString(R.string.official_ready_notice));
         if (officialAppliedAccount != null) summary.append("\n\n").append(getString(R.string.official_completed_notice));
+        if ((officialWarnings & OFFICIAL_WARNING_CLEANUP) != 0) summary.append("\n\n").append(getString(R.string.official_committed_cleanup));
+        if ((officialWarnings & OFFICIAL_WARNING_REFRESH) != 0) summary.append("\n\n").append(getString(R.string.official_committed_refresh));
         officialPreview.setText(summary.toString().trim()); updateOfficialControls();
     }
 
@@ -759,6 +775,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         officialSelect.setVisibility(imported ? View.VISIBLE : View.GONE); officialNormal.setVisibility(imported ? View.VISIBLE : View.GONE);
         officialSelect.setEnabled(imported && !pending && !ServerService.isManagingAccounts() && !accountLifecycleBusy);
         officialNormal.setEnabled(imported && !pending && !presentationServerRunning && !accountLifecycleBusy);
+        officialLocalRefresh.setVisibility((officialWarnings & OFFICIAL_WARNING_REFRESH) != 0 ? View.VISIBLE : View.GONE);
+        officialLocalRefresh.setEnabled(!ServerService.isManagingAccounts() && !accountLifecycleBusy);
         officialProgress.setVisibility((pending && !officialPolling) || working ? View.VISIBLE : View.GONE);
     }
 
@@ -832,6 +850,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (!result.optBoolean("ok", false)) { accountError(result.optString("error", "account_operation_failed")); return; }
         JSONObject active = result.optJSONObject("active"); if (active != null) activeAccount = active;
         JSONObject values = result.optJSONObject("status"); if (values != null) renderAccounts(values);
+        if ("accounts_status".equals(action) && values != null && (officialWarnings & OFFICIAL_WARNING_REFRESH) != 0) {
+            officialWarnings &= ~OFFICIAL_WARNING_REFRESH;
+            renderOfficialJob();
+        }
         JSONObject settings = result.optJSONObject("settings"); if (settings != null) renderServerChecks(settings);
         accountOperation.setTextColor(SUCCESS); accountOperation.setText(R.string.accounts_complete);
         if ("accounts_select".equals(action)) {
@@ -1371,6 +1393,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         if (officialAppliedAccount != null) {
             state.putString("official_local_profile", officialAppliedAccount.optString("profile"));
             state.putString("official_local_revision", officialAppliedAccount.optString("revision"));
+            state.putInt("official_local_warnings", officialWarnings & 3);
         }
         super.onSaveInstanceState(state);
     }

@@ -360,4 +360,8 @@
     <string name="official_stage_cancelled">가져오기를 취소했습니다.</string>
     <string name="official_stage_failed">가져오기 실패</string>
     <string name="official_slot_invalid">로컬 계정 이름을 입력해 주세요. 이름이 너무 길거나 줄바꿈·슬래시가 있으면 저장할 수 없습니다.</string>
+    <string name="official_stage_applying">검증된 계정을 로컬에 저장 중</string>
+    <string name="official_committed_cleanup">계정은 저장되었습니다. 임시 자료 정리가 남아 있습니다.</string>
+    <string name="official_committed_refresh">계정은 저장되었습니다. 로컬 계정 목록을 새로 고쳐 저장된 항목을 확인해 주세요.</string>
+    <string name="official_refresh_local">로컬 계정 목록 새로고침</string>
 </resources>

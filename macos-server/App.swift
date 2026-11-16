@@ -121,6 +121,8 @@ final class ServerModel: ObservableObject {
     @Published private(set) var officialPreview: [String: Any] = [:]
     @Published private(set) var officialImportedAccount: ManagedAccount?
     @Published private(set) var officialNotice = ""
+    @Published private(set) var officialWarningCodes: [String] = []
+    @Published private(set) var officialAccountListRefreshRequired = false
     private var officialJobID: String?
     private var officialRequestSerial = 0
     private var pendingOfficialID: Int?
@@ -633,6 +635,17 @@ final class ServerModel: ObservableObject {
         default: return officialText("인계 ID·비밀번호로 공식 JP 계정을 확인하고 이 Mac의 일반 계정으로 가져옵니다.", "Inspect an official JP account with its transfer ID and password, then import it into a normal local slot.", "引き継ぎIDとパスワードで公式JPアカウントを確認し、このMacの通常スロットに取り込みます。")
         }
     }
+    var officialCompletionNotice: String {
+        guard officialState == "completed", officialImportedAccount != nil else { return "" }
+        var lines: [String] = []
+        if officialWarningCodes.contains("account_temporary_cleanup_pending") {
+            lines.append(officialText("계정 저장은 완료했습니다. 임시 가져오기 파일 일부를 아직 정리하지 못했습니다. 계정을 다시 가져올 필요는 없습니다.", "The account was saved. Some temporary import files still need cleanup. Do not import the account again.", "アカウントの保存は完了しました。一部の一時取り込みファイルは未整理です。再取り込みは不要です。"))
+        }
+        if officialAccountListRefreshRequired {
+            lines.append(officialText("계정 저장은 완료했지만 목록을 갱신하지 못했습니다. 계정 목록을 새로고침해 주세요. 다시 가져올 필요는 없습니다.", "The account was saved, but the account list could not be refreshed. Refresh the list; do not import it again.", "アカウントの保存は完了しましたが、一覧を更新できませんでした。一覧を更新してください。再取り込みは不要です。"))
+        }
+        return lines.joined(separator: "\n")
+    }
     var officialStageText: String {
         switch officialProgress {
         case "transferring", "firebase", "login": return officialText("공식 인계 로그인 중", "Official transfer login in progress", "公式引き継ぎログイン中")
@@ -676,6 +689,7 @@ final class ServerModel: ObservableObject {
         guard (1...128).contains(password.utf8.count), password.trimmingCharacters(in: .whitespacesAndNewlines) == password,
               password.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value < 127 }) else { officialNotice = "invalid_password"; return }
         officialPreview = [:]; officialImportedAccount = nil; officialNotice = ""; officialErrorCode = nil
+        officialWarningCodes = []; officialAccountListRefreshRequired = false
         sendOfficial("official_inspect", payload: ["user_id": userID, "password": password, "platform": officialPlatform])
     }
     func fetchOfficial() {
@@ -739,6 +753,11 @@ final class ServerModel: ObservableObject {
         if action == "official_apply", officialState == "completed" {
             if let state = result["status"] as? [String: Any] { updateAccounts(state) }
             if let row = result["account"] as? [String: Any] { officialImportedAccount = ManagedAccount(row) }
+            officialWarningCodes = (result["warning_codes"] as? [String] ?? []).filter {
+                ["account_temporary_cleanup_pending", "account_status_refresh_required"].contains($0)
+            }
+            officialAccountListRefreshRequired = result["status_refresh_required"] as? Bool == true
+                || officialWarningCodes.contains("account_status_refresh_required")
         }
     }
 
@@ -785,6 +804,10 @@ final class ServerModel: ObservableObject {
         }
         if let state = result["status"] as? [String: Any] {
             updateAccounts(state)
+            if action == "accounts_status", state["stale"] as? Bool != true {
+                officialAccountListRefreshRequired = false
+                officialWarningCodes.removeAll { $0 == "account_status_refresh_required" }
+            }
             if action == "accounts_select", let profile = activationProfile,
                   (state["selected"] as? [String: String])?["normal"] == profile {
                 mediaMode = false; accountMode = "normal"; selectedAccountProfile = profile
@@ -1080,6 +1103,7 @@ final class ServerModel: ObservableObject {
                 self.officialPending = false; self.officialBusy = false
                 self.pendingOfficialID = nil; self.pendingOfficialAction = nil; self.officialJobID = nil
                 self.officialPreview = [:]; self.officialImportedAccount = nil
+                self.officialWarningCodes = []; self.officialAccountListRefreshRequired = false
                 self.officialState = "idle"; self.officialErrorCode = nil; self.officialNotice = "session_closed"
                 self.statusTimer?.invalidate()
                 self.statusTimer = nil
@@ -1635,6 +1659,13 @@ struct OfficialImportControls: View {
                 if model.officialState == "completed", let imported = model.officialImportedAccount {
                     Text(text("저장된 일반 계정", "Saved normal account", "保存した通常アカウント") + ": " + imported.profile)
                         .font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    if !model.officialCompletionNotice.isEmpty {
+                        Text(model.officialCompletionNotice).font(.caption).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
+                    if model.officialAccountListRefreshRequired {
+                        Button(text("계정 목록 새로고침", "Refresh account list", "アカウント一覧を更新")) { model.refreshAccounts() }
+                            .disabled(model.accountPending || model.officialPending || model.officialBusy)
+                    }
                     Button(text("다음 실행에서 이 일반 계정 사용 · 감상 모드 끄기", "Use this normal account next time and turn off viewing mode", "次回この通常アカウントを使用・鑑賞モードをオフ")) { model.useOfficialImportForNextStart() }
                         .disabled(model.running || model.busy || model.canStop || model.accountPending || model.officialPending)
                 }

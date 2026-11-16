@@ -301,12 +301,14 @@ class AccountManager:
         cutoff = time.time_ns()-24*60*60*1_000_000_000
         for modified, path in copies:
             if (modified, path) not in keep or modified < cutoff:
+                if name == "imports":
+                    for suffix in (".json", ".consumed.json"):
+                        receipt = path.with_suffix(suffix)
+                        if receipt.exists() or receipt.is_symlink():
+                            info = receipt.lstat()
+                            _need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "account_storage_invalid")
+                            receipt.unlink()
                 path.unlink()
-                receipt = path.with_suffix(".json")
-                if name == "imports" and receipt.exists():
-                    info = receipt.lstat()
-                    _need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "account_storage_invalid")
-                    receipt.unlink()
         return directory
 
     @contextmanager
@@ -315,14 +317,28 @@ class AccountManager:
             lock = self.base/"manager-lock.db"
             _need(not lock.is_symlink(), "account_storage_invalid")
             db = sqlite3.connect(lock, timeout=10, isolation_level=None)
+            outcome = {}
+            def release(function):
+                try:
+                    function()
+                except (OSError, sqlite3.Error):
+                    response = outcome.get("committed_response")
+                    if response is None: raise
+                    response["status_refresh_required"] = True
+                    response["status"] = {**response["status"], "stale": True}
+                    warnings = response.setdefault("warning_codes", [])
+                    if "account_status_refresh_required" not in warnings:
+                        warnings.append("account_status_refresh_required")
             try:
                 os.chmod(lock, 0o600)
                 db.execute("CREATE TABLE IF NOT EXISTS operation_lock (id INTEGER PRIMARY KEY)")
                 db.execute("BEGIN IMMEDIATE")
-                yield
-                db.commit()
+                yield outcome
+                # This database is a mutex, with no logical writes in its
+                # transaction. Its release cannot undo a separate State commit.
+                release(db.commit)
             finally:
-                db.close()
+                release(db.close)
 
     def _state(self, mode, *, existing=False):
         _mode(mode)
@@ -596,7 +612,7 @@ class AccountManager:
             directory = self.base/"imports"
             if not directory.exists(): return
             _need(directory.is_dir() and not directory.is_symlink(), "account_storage_invalid")
-            for path in (directory/(token+".zip"), directory/(token+".json")):
+            for path in (directory/(token+".json"), directory/(token+".consumed.json"), directory/(token+".zip")):
                 if path.exists() or path.is_symlink():
                     info = path.lstat()
                     _need(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "account_storage_invalid")
@@ -613,8 +629,8 @@ class AccountManager:
             "accounts_restore": {"id", "mode", "profile", "expected_revision"},
         }
         _need(action in allowed and set(payload) <= allowed[action], "account_command_fields_invalid")
-        with self._locked():
-            result = {}
+        with self._locked() as lock_outcome:
+            result, committed_status, warnings = {}, None, []
             if action == "accounts_status":
                 return {"schema": 1, "ok": True, "action": action, "status": self.status(**payload)}
             if action == "accounts_preview":
@@ -727,18 +743,69 @@ class AccountManager:
                     else:
                         _need(existing is None and payload.get("expected_revision") is None, "account_target_exists")
                         expected = None
-                    backup = []
-                    revision = state.replace_account(profile, bundle, expected_revision=expected,
-                        before_replace=lambda old, old_revision: backup.append(self._backup(mode, old, old_revision)))
-                    restored, _ = state.account_snapshot(profile)
-                    result = {"account": self._summary(mode, restored, revision),
-                              "restore_point": backup[0] if backup else None, "restart_required": True}
+                    # Complete all fallible reads before commit. The installed
+                    # projection follows State.replace_account's fixed table/key
+                    # mapping and preserves every original protobuf byte.
+                    installed = {"schema": bundle["schema"], "profile": profile, "tables": {}}
+                    for table, _columns, _keys in _ACCOUNT_TABLES:
+                        key = "name" if table == "profiles" else "profile"
+                        installed["tables"][table] = [{**row, key: profile} for row in bundle["tables"][table]]
+                    summary = self._summary(mode, installed, State.account_revision(installed))
+                    before_status = self.status()
+                    backup, committed_revision, consumed = [], [], None
                     if action == "accounts_import":
-                        path.unlink()
-                        path.with_suffix(".json").unlink()
+                        receipt_path, consumed_path = path.with_suffix(".json"), path.with_suffix(".consumed.json")
+                        _need(not consumed_path.exists() and not consumed_path.is_symlink(), "account_preview_changed")
+                        # Removing the usable receipt before SQL makes this token
+                        # unrepeatable even if post-commit cleanup is denied.
+                        os.replace(receipt_path, consumed_path)
+                        consumed = consumed_path
+                    try:
+                        if consumed is not None: _sync_directory(path.parent)
+                        revision = state.replace_account(profile, bundle, expected_revision=expected,
+                            before_replace=lambda old, old_revision: backup.append(self._backup(mode, old, old_revision)),
+                            after_commit=lambda value: committed_revision.append(value))
+                    except BaseException as error:
+                        if isinstance(error, (OSError, sqlite3.Error)) and committed_revision:
+                            revision = committed_revision[0]
+                            warnings.append("account_status_refresh_required")
+                        else:
+                            if consumed is not None:
+                                try:
+                                    os.replace(consumed, receipt_path)
+                                    _sync_directory(path.parent)
+                                except OSError:
+                                    raise AccountError("account_preview_changed") from None
+                            raise
+                    # State returned only after the SQLite transaction committed.
+                    # Expendable-copy cleanup/status refresh cannot turn that
+                    # success into a retry of an already-applied replacement.
+                    committed_status = before_status
+                    summary["revision"] = revision
+                    result = {"account": summary, "restore_point": backup[0] if backup else None,
+                              "restart_required": True}
+                    if consumed is not None:
+                        try:
+                            consumed.unlink()
+                            path.unlink()
+                        except OSError:
+                            warnings.append("account_temporary_cleanup_pending")
                 else:
                     raise AccountError("account_command_unknown")
-            return {"schema": 1, "ok": True, "action": action, "status": self.status(), **result}
+            try:
+                status = self.status()
+            except (OSError, sqlite3.Error, AccountError):
+                if committed_status is None: raise
+                status = {**committed_status, "stale": True}
+                result["status_refresh_required"] = True
+                warnings.append("account_status_refresh_required")
+            if "account_status_refresh_required" in warnings:
+                result["status_refresh_required"] = True
+                status = {**status, "stale": True}
+            if warnings: result["warning_codes"] = list(dict.fromkeys(warnings))
+            response = {"schema": 1, "ok": True, "action": action, "status": status, **result}
+            if committed_status is not None: lock_outcome["committed_response"] = response
+            return response
 
 
 def account_command(data_dir, action, payload):

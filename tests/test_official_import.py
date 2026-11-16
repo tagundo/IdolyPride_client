@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import errno
 import hashlib
 import json
+import os
 from pathlib import Path
 import threading
 from types import SimpleNamespace
@@ -11,7 +12,8 @@ from zipfile import ZipFile
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 import pytest
 
-from idoly_local.account_manager import AccountManager, selected_profile
+from idoly_local import account_manager as account_module
+from idoly_local.account_manager import AccountManager, AccountError, selected_profile
 from idoly_local.application import Application
 from idoly_local.official_account import OfficialAccountError
 from idoly_local.official_import import OfficialImportManager, OfficialImportError, ERROR_CODES, STAGES
@@ -342,8 +344,10 @@ def test_expiry_timer_closes_ticket_and_removes_private_staging_without_status_p
 
 
 def test_replaced_expiry_timer_cannot_cancel_newer_verified_ticket(env):
-    inspect(env); initial = env.manager._job.timer
-    finish(env,"verified"); current = env.manager._job.timer
+    env.inspect_gate = threading.Event(); inspect(env)
+    assert env.inspect_started.wait(3)
+    initial = env.manager._job.timer
+    env.inspect_gate.set(); finish(env,"verified"); current = env.manager._job.timer
     assert initial is not current and initial.cancelled
     initial.fire()
     assert env.manager.status()["state"] == "verified" and not current.cancelled
@@ -465,3 +469,183 @@ def test_invalid_target_and_revision_have_safe_recoverable_codes(env):
     with pytest.raises(OfficialImportError) as error: apply(env,job_id,"target",replace=True,revision=None)
     assert error.value.code == "account_revision_required" and state.account_snapshot("target") == before
     assert env.manager.status()["state"] == "ready"
+
+
+@pytest.mark.parametrize("denied_suffix", [".zip", ".consumed.json"])
+def test_committed_import_stays_completed_when_private_cleanup_is_denied(env,monkeypatch,denied_suffix):
+    state = populate(env,"target"); populate(env,"other")
+    old, old_revision = state.account_snapshot("target"); other = state.account_snapshot("other")
+    token,_ = state.login("target"); other_token,_ = state.login("other")
+    job_id = ready(env); stage_token = env.manager._job.stage_token
+    source = env.accounts.base/"imports"/(stage_token+".zip")
+    denied = source if denied_suffix == ".zip" else source.with_suffix(".consumed.json")
+    original_unlink = Path.unlink
+    def unlink(path,*args,**kwargs):
+        if path == denied: raise PermissionError(errno.EACCES,"private cleanup denied")
+        return original_unlink(path,*args,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path,"unlink",unlink)
+        result = apply(env,job_id,"target",replace=True,revision=old_revision)
+    assert result["job"]["state"] == "completed" and not result["job"]["busy"]
+    assert result["warning_codes"] == ["account_temporary_cleanup_pending"]
+    assert state.snapshot("target")[0] == env.raw and state.account_snapshot("target")[1] == result["account"]["revision"]
+    assert not state.authenticated(token,"target") and state.authenticated(other_token,"other")
+    assert state.account_snapshot("other") == other
+    assert result["status"]["restore_points"][0]["revision"] == old_revision
+    assert env.manager._job.stage_token is None and not source.with_suffix(".json").exists()
+    with pytest.raises(AccountError,match="account_file_unavailable"):
+        env.accounts.command("accounts_import",{"token":stage_token,"mode":"normal","profile":"duplicate",
+            "replace":False,"expected_revision":None})
+    assert state.profile("duplicate") is None
+    # A remaining ZIP anchors bounded cleanup, including its consumed receipt.
+    assert source.exists()
+    os.utime(source,(1,1))
+    env.accounts._temporary_directory("imports")
+    assert not source.exists() and not source.with_suffix(".consumed.json").exists()
+
+
+def test_postcommit_status_failure_returns_canonical_success_with_refresh_warning(env,monkeypatch):
+    state = populate(env,"target"); before = state.account_snapshot("target")
+    job_id = ready(env); original_status = env.accounts.status; calls = []
+    def status(**kwargs):
+        calls.append(True)
+        if len(calls) == 2: raise PermissionError(errno.EACCES,"postcommit refresh denied")
+        return original_status(**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(env.accounts,"status",status)
+        result = apply(env,job_id,"target",replace=True,revision=before[1])
+    assert len(calls) == 2 and result["job"]["state"] == "completed"
+    assert result["status_refresh_required"] is True and result["status"]["stale"] is True
+    assert result["warning_codes"] == ["account_status_refresh_required"]
+    saved, revision = state.account_snapshot("target")
+    assert saved["tables"]["snapshots"][0]["response"] == env.raw
+    assert result["account"]["revision"] == revision and result["account"]["server_id"] == SERVER
+    fresh = original_status()
+    assert fresh["restore_points"][0]["revision"] == before[1]
+    assert next(row for row in fresh["accounts"] if row["profile"] == "target")["revision"] == revision
+
+
+def test_precommit_backup_failure_restores_preview_receipt_and_never_changes_target(env,monkeypatch):
+    state = populate(env,"target"); before = state.account_snapshot("target"); token,_ = state.login("target")
+    job_id = ready(env); stage_token = env.manager._job.stage_token
+    source = env.accounts.base/"imports"/(stage_token+".zip")
+    def backup(*args): raise PermissionError(errno.EACCES,"precommit backup denied")
+    with monkeypatch.context() as patch:
+        patch.setattr(env.accounts,"_backup",backup)
+        with pytest.raises(OfficialImportError) as error:
+            apply(env,job_id,"target",replace=True,revision=before[1])
+    assert error.value.code == "account_permission_denied" and env.manager.status()["state"] == "ready"
+    assert state.account_snapshot("target") == before and state.authenticated(token,"target")
+    assert source.exists() and source.with_suffix(".json").exists()
+    assert not source.with_suffix(".consumed.json").exists()
+    result = apply(env,job_id,"target",replace=True,revision=before[1])
+    assert result["job"]["state"] == "completed" and result["status"]["restore_points"][0]["revision"] == before[1]
+
+
+def test_committed_restore_also_survives_status_refresh_failure(env,monkeypatch):
+    state = populate(env,"target"); old, old_revision = state.account_snapshot("target")
+    job_id = ready(env); imported = apply(env,job_id,"target",replace=True,revision=old_revision)
+    point = imported["status"]["restore_points"][0]
+    original_status = env.accounts.status; calls = []
+    def status(**kwargs):
+        calls.append(True)
+        if len(calls) == 2: raise OSError(errno.EIO,"postcommit restore refresh denied")
+        return original_status(**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(env.accounts,"status",status)
+        result = env.accounts.command("accounts_restore",{"mode":"normal","profile":"target","id":point["id"],
+            "expected_revision":imported["account"]["revision"]})
+    assert result["ok"] is True and result["account"]["revision"] == old_revision
+    assert result["status_refresh_required"] and result["warning_codes"] == ["account_status_refresh_required"]
+    assert state.account_snapshot("target") == (old,old_revision)
+
+
+@pytest.mark.parametrize("failing_release", ["commit", "close"])
+def test_manager_mutex_release_failure_cannot_reverse_committed_account_success(env,monkeypatch,failing_release):
+    state = populate(env,"target"); old, old_revision = state.account_snapshot("target")
+    token,_ = state.login("target"); job_id = ready(env)
+    original_connect = account_module.sqlite3.connect
+    class Connection:
+        def __init__(self, wrapped): self.wrapped = wrapped
+        def execute(self,*args,**kwargs): return self.wrapped.execute(*args,**kwargs)
+        def commit(self):
+            self.wrapped.commit()
+            if failing_release == "commit": raise account_module.sqlite3.OperationalError("private mutex release failure")
+        def close(self):
+            self.wrapped.close()
+            if failing_release == "close": raise OSError(errno.EIO,"private mutex close failure")
+    def connect(path,*args,**kwargs):
+        connection = original_connect(path,*args,**kwargs)
+        return Connection(connection) if Path(path).name == "manager-lock.db" else connection
+    with monkeypatch.context() as patch:
+        patch.setattr(account_module.sqlite3,"connect",connect)
+        result = apply(env,job_id,"target",replace=True,revision=old_revision)
+    assert result["job"]["state"] == "completed" and result["account"]["profile"] == "target"
+    assert result["warning_codes"] == ["account_status_refresh_required"]
+    assert result["status_refresh_required"] is True and result["status"]["stale"] is True
+    assert state.snapshot("target")[0] == env.raw and not state.authenticated(token,"target")
+    assert state.account_snapshot("target")[1] == result["account"]["revision"]
+    assert env.accounts.status()["restore_points"][0]["revision"] == old_revision
+
+
+@pytest.mark.parametrize("error_type", [OSError, account_module.sqlite3.OperationalError])
+def test_committed_state_connection_close_failure_preserves_exact_success(env,monkeypatch,error_type):
+    state = populate(env,"target"); old, old_revision = state.account_snapshot("target")
+    token,_ = state.login("target"); job_id = ready(env); stage_token = env.manager._job.stage_token
+    original_connect = account_module.sqlite3.connect
+    class Connection(account_module.sqlite3.Connection):
+        replacement = False
+        def execute(self,sql,*args,**kwargs):
+            if sql == "PRAGMA synchronous=FULL": self.replacement = True
+            return super().execute(sql,*args,**kwargs)
+        def close(self):
+            after_commit = self.replacement and not self.in_transaction
+            super().close()
+            if after_commit: raise error_type("private state close fault")
+    def connect(path,*args,**kwargs):
+        if Path(path).name == "state.db": kwargs["factory"] = Connection
+        return original_connect(path,*args,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(account_module.sqlite3,"connect",connect)
+        result = apply(env,job_id,"target",replace=True,revision=old_revision)
+        # Opt-in is restricted to replace_account; ordinary State.connect stays strict.
+        with pytest.raises(error_type):
+            with state.connect() as db: db.execute("PRAGMA synchronous=FULL")
+    assert result["job"]["state"] == "completed" and not result["job"]["busy"]
+    assert result["warning_codes"] == ["account_status_refresh_required"] and result["status_refresh_required"]
+    assert state.snapshot("target")[0] == env.raw and state.account_snapshot("target")[1] == result["account"]["revision"]
+    assert not state.authenticated(token,"target")
+    assert result["status"]["restore_points"][0]["revision"] == old_revision
+    assert not (env.accounts.base/"imports"/(stage_token+".json")).exists()
+    assert not (env.accounts.base/"imports"/(stage_token+".consumed.json")).exists()
+    assert not (env.accounts.base/"imports"/(stage_token+".zip")).exists()
+
+
+def test_failed_state_commit_never_reports_success_or_consumes_retryable_preview(env,monkeypatch):
+    state = populate(env,"target"); before = state.account_snapshot("target"); token,_ = state.login("target")
+    job_id = ready(env); stage_token = env.manager._job.stage_token
+    original_connect = account_module.sqlite3.connect
+    class Connection(account_module.sqlite3.Connection):
+        replacement = False
+        def execute(self,sql,*args,**kwargs):
+            if sql == "PRAGMA synchronous=FULL": self.replacement = True
+            return super().execute(sql,*args,**kwargs)
+        def commit(self):
+            if self.replacement:
+                error = account_module.sqlite3.OperationalError("private precommit failure")
+                error.sqlite_errorcode = account_module.sqlite3.SQLITE_BUSY
+                raise error
+            return super().commit()
+    def connect(path,*args,**kwargs):
+        if Path(path).name == "state.db": kwargs["factory"] = Connection
+        return original_connect(path,*args,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(account_module.sqlite3,"connect",connect)
+        with pytest.raises(OfficialImportError) as error:
+            apply(env,job_id,"target",replace=True,revision=before[1])
+    assert error.value.code == "account_storage_busy" and env.manager.status()["state"] == "ready"
+    assert state.account_snapshot("target") == before and state.authenticated(token,"target")
+    source = env.accounts.base/"imports"/(stage_token+".zip")
+    assert source.exists() and source.with_suffix(".json").exists()
+    assert not source.with_suffix(".consumed.json").exists()
+    assert apply(env,job_id,"target",replace=True,revision=before[1])["job"]["state"] == "completed"

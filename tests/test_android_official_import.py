@@ -304,3 +304,45 @@ def test_native_credential_validation_preserves_case_and_internal_spaces(officia
     request = {"user_id": "Synthetic_ID-42", "password": "Case Sensitive 42", "platform": "android"}
     assert invoke("official_inspect", request)["ok"] is True
     assert calls[0] == ("command", files/"data", "official_inspect", request)
+
+
+def test_postcommit_warnings_preserve_completed_account_and_allow_only_local_followup_codes(official_native):
+    boundary, files, calls, managers, invoke = official_native
+    invoke("official_inspect", {"user_id": SYNTHETIC_USER, "password": SYNTHETIC_PASSWORD, "platform": "android"})
+    account = {"mode": "normal", "profile": "committed-normal", "revision": REVISION}
+    managers[0].phase = "completed"
+    managers[0].result_override = {"action": "official_apply", "job": {
+        "state": "completed", "progress": "completed", "job_id": JOB, "busy": False},
+        "account": account, "warning_codes": ["account_temporary_cleanup_pending", SYNTHETIC_PASSWORD,
+            "account_status_refresh_required", "account_temporary_cleanup_pending"],
+        "status_refresh_required": True}
+    result = invoke("official_apply", {"job_id": JOB, "profile": account["profile"], "replace": False,
+                                        "expected_revision": None})
+    assert result["ok"] is True and result["job"]["state"] == "completed" and result["account"] == account
+    assert result["warning_codes"] == ["account_temporary_cleanup_pending", "account_status_refresh_required"]
+    assert result["status_refresh_required"] is True and "status" not in result
+    assert SYNTHETIC_PASSWORD not in json.dumps(result)
+    assert json.loads(boundary.status_json())["official_import"]["state"] == "completed"
+    assert not any(call[0] == "command" and call[2] == "official_fetch" for call in calls)
+
+
+@pytest.mark.parametrize("warnings", [SYNTHETIC_PASSWORD, [SYNTHETIC_PASSWORD], {"secret": SYNTHETIC_PASSWORD}])
+def test_arbitrary_warning_data_is_not_forwarded_or_converted_into_an_import_failure(official_native, warnings):
+    boundary, files, calls, managers, invoke = official_native
+    invoke("official_inspect", {"user_id": SYNTHETIC_USER, "password": SYNTHETIC_PASSWORD, "platform": "android"})
+    managers[0].result_override = {"action": "official_apply", "job": {"state": "completed"},
+        "account": {"mode": "normal", "profile": "committed", "revision": REVISION},
+        "warning_codes": warnings, "status_refresh_required": SYNTHETIC_PASSWORD}
+    result = invoke("official_apply", {"job_id": JOB, "profile": "committed", "replace": False,
+                                        "expected_revision": None})
+    assert result["ok"] is True and result["job"]["state"] == "completed"
+    assert result["warning_codes"] == [] and result["status_refresh_required"] is False
+    assert result["account"]["revision"] == REVISION and SYNTHETIC_PASSWORD not in json.dumps(result)
+
+
+def test_applying_is_a_fixed_public_stage_and_is_not_mistaken_for_idle(official_native):
+    boundary, files, calls, managers, invoke = official_native
+    invoke("official_inspect", {"user_id": SYNTHETIC_USER, "password": SYNTHETIC_PASSWORD, "platform": "android"})
+    managers[0].public_override = {"state": "ready", "progress": "applying", "job_id": JOB, "busy": True}
+    result = json.loads(boundary.status_json())["official_import"]
+    assert result["state"] == "ready" and result["progress"] == "applying" and result["busy"] is True

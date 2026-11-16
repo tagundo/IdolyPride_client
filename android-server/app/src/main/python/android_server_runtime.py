@@ -549,7 +549,7 @@ _OFFICIAL_MANAGER = None
 _OFFICIAL_ROOT = None
 _OFFICIAL_ACTIONS = frozenset({"official_inspect", "official_fetch", "official_apply", "official_cancel", "official_status"})
 _OFFICIAL_STATES = frozenset({"idle", "checking", "verified", "fetching", "ready", "completed", "failed", "cancelled"})
-_OFFICIAL_STAGES = frozenset({"idle", "preparing", "checking", "verifying", "verified", "transferring", "firebase", "login", "master", "account", "collected", "fetching", "catalog_check", "staging", "ready", "completed", "cancelled", "failed"})
+_OFFICIAL_STAGES = frozenset({"idle", "preparing", "checking", "verifying", "verified", "transferring", "firebase", "login", "master", "account", "collected", "fetching", "catalog_check", "staging", "ready", "applying", "completed", "cancelled", "failed"})
 _OFFICIAL_HOST_ERRORS = frozenset({"official_request_invalid", "official_active_restart_required", "official_response_invalid",
                                  "official_operation_failed", "official_status_failed", "official_job_missing", "official_storage_changed"})
 
@@ -616,6 +616,21 @@ def _configure_official_codec():
         return memoryview(result).cast("B").tobytes()
 
     codec.configure_aes(aes_cbc)
+
+
+def _official_result_warnings(action, result):
+    """Committed success stays success; forward only fixed local follow-up notices."""
+    output = dict(result)
+    warnings = output.pop("warning_codes", None)
+    refresh = output.pop("status_refresh_required", None)
+    if action == "official_apply":
+        allowed = {"account_temporary_cleanup_pending", "account_status_refresh_required"}
+        if warnings is not None:
+            output["warning_codes"] = list(dict.fromkeys(code for code in warnings[:8]
+                if type(code) is str and code in allowed)) if type(warnings) in (list, tuple) else []
+        if refresh is not None:
+            output["status_refresh_required"] = refresh is True
+    return output
 
 
 def _validate_official_payload(action, payload):
@@ -685,7 +700,7 @@ def official_command_json(files_dir, action, payload_json="{}", assets=None):
                 result = _OFFICIAL_MANAGER.command(action, payload)
             if type(result) is not dict or type(result.get("job")) is not dict or result.get("action") != action:
                 raise ValueError("official_response_invalid")
-            result = dict(result, schema=1, ok=True, active={"running": active.get("running") is True,
+            result = dict(_official_result_warnings(action, result), schema=1, ok=True, active={"running": active.get("running") is True,
                           "mode": "media" if active.get("media_mode") is True else "normal", "profile": active.get("profile")})
             encoded = json.dumps(result, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > 2 * 1024 * 1024:

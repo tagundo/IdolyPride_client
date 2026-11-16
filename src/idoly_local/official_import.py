@@ -33,6 +33,7 @@ _ACCOUNT_ERRORS = frozenset(("account_revision_conflict", "account_target_exists
 _RETRYABLE_ACCOUNT_ERRORS = frozenset(("account_revision_conflict", "account_target_exists", "account_target_missing",
     "account_permission_denied", "account_insufficient_space", "account_storage_busy", "account_storage_io",
     "account_state_rejected", "account_restore_point_limit", "account_profile_invalid", "account_revision_required"))
+WARNING_CODES = frozenset(("account_temporary_cleanup_pending", "account_status_refresh_required"))
 ERROR_CODES = frozenset((*CLIENT_ERROR_CODES, *_ACCOUNT_ERRORS, "official_command_invalid", "official_job_missing",
     "official_job_mismatch", "official_job_busy", "official_invalid_state", "official_session_expired",
     "official_closed", "official_apply_in_progress", "official_operation_failed", "official_protocol_changed",
@@ -365,8 +366,13 @@ class OfficialImportManager:
             with self._lock:
                 job.state, job.progress, job.busy, job.stage_token = "completed", "completed", False, None
                 self._cancel_timer(job)
-            return {"action": action, "job": self.status(public=False), "account": result["account"],
-                    "status": result["status"]}
+            response = {"action": action, "job": self.status(public=False), "account": result["account"],
+                        "status": result["status"]}
+            if result.get("status_refresh_required") is True: response["status_refresh_required"] = True
+            warnings = result.get("warning_codes", ())
+            if type(warnings) is list:
+                response["warning_codes"] = [code for code in warnings if type(code) is str and code in WARNING_CODES]
+            return response
         except BaseException as error:
             code = _error(error)
             with self._lock:

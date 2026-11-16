@@ -482,6 +482,9 @@
   Object.assign(UI_TRANSLATIONS.ja, {"일반 계정 저장 중": "通常アカウントに保存中", "대상 계정이 변경되었습니다. 계정 목록을 다시 확인해 주세요.": "対象アカウントが変更されました。一覧を確認し直してください。"});
   Object.assign(UI_TRANSLATIONS.en, {"일반 계정 저장 중": "Saving normal account", "대상 계정이 변경되었습니다. 계정 목록을 다시 확인해 주세요.": "The target account changed. Check the account list again."});
 
+  Object.assign(UI_TRANSLATIONS.ja, {"계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요.": "アカウントの保存は完了しましたが、サーバーを再起動できませんでした。「サーバー開始」を再試行し、失敗が続く場合はアプリを開き直してください。", "서버를 다시 시작하지 못했습니다. 서버 상태를 확인해 주세요.": "サーバーを再起動できませんでした。サーバーの状態を確認してください。", "계정 저장은 완료됐습니다. 임시 파일 정리가 남아 있습니다.": "アカウントの保存は完了しました。一時ファイルの削除が残っています。", "계정 저장은 완료됐습니다. 위 ‘계정 목록 불러오기’로 목록을 새로 확인해 주세요.": "アカウントの保存は完了しました。上の「アカウント一覧を読み込む」で一覧を更新してください。"});
+  Object.assign(UI_TRANSLATIONS.en, {"계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요.": "The account was saved, but the server could not restart. Select Start Server again; if it keeps failing, reopen the app.", "서버를 다시 시작하지 못했습니다. 서버 상태를 확인해 주세요.": "The server could not restart. Check its status.", "계정 저장은 완료됐습니다. 임시 파일 정리가 남아 있습니다.": "The account was saved. Temporary files still need cleanup.", "계정 저장은 완료됐습니다. 위 ‘계정 목록 불러오기’로 목록을 새로 확인해 주세요.": "The account was saved. Use Load accounts above to refresh the list."});
+
   function resolveInterfaceLanguage(value, navigator = {}) {
     if (["ko", "ja", "en"].includes(value)) return value;
     const languages = Array.isArray(navigator.languages) ? navigator.languages : [];
@@ -764,7 +767,7 @@
     let flushNonce = null;
     let flushGeneration = 0;
     let accountSnapshot = null, accountPreview = null, accountPending = false, accountProgress = null, accountRequested = false, historyPending = false;
-    let officialJob = null, officialPending = false, officialFeedbackSource = "";
+    let officialJob = null, officialPending = false, officialFeedbackSource = "", officialWarnings = [];
     const officialBusy = () => Boolean(officialJob && officialJob.busy === true);
     let accountFeedbackSource = "", accountFeedbackDetail = "";
     let resourcePending = false;
@@ -1103,6 +1106,9 @@
         if (!visible || disposed || visibility !== visibilityVersion) return;
         if (result.cancelled === true) return;
         if (object(result.status)) renderAccounts(result.status);
+        if (action === "status" && object(result.status) && result.status.stale !== true) {
+          officialWarnings = officialWarnings.filter(code => code !== "account_status_refresh_required");renderOfficial();
+        }
         if (action === "preview") {
           if (typeof result.token !== "string" || !object(result.archive)) throw new Error("계정 ZIP 검사 결과를 확인하지 못했습니다.");
           accountPreview = {token:result.token,archive:result.archive};
@@ -1149,7 +1155,8 @@
       const stages = {applying:"일반 계정 저장 중",preparing:"공식 로그인 준비",checking:"인계 정보 확인 중",verifying:"공식 계정 확인",verified:"공식 계정 확인 완료",transferring:"공식 인계 로그인",firebase:"로그인 인증",login:"공식 인계 로그인",master:"계정 데이터 검증",account:"계정 데이터 검증",collected:"계정 데이터 검증",fetching:"공식 계정 데이터 받는 중",catalog_check:"계정 데이터 검증",staging:"로컬 저장 준비",ready:"로컬 저장 준비 완료",completed:"일반 계정 저장 완료",failed:"실패",cancelled:"취소됨"};
       text("official-state", labels[state] || "확인 중");
       const feedback = officialFeedbackSource || (job.busy === true ? stages[job.progress] || "공식 계정 작업을 처리하고 있습니다." : state === "verified" ? "확인한 계정으로 공식 인계 로그인·내려받기를 진행할 수 있습니다." : state === "ready" ? "내려받기와 검증을 마쳤습니다. 저장할 로컬 계정을 확인해 주세요." : state === "completed" ? "일반 계정으로 저장했습니다. 유저 관리에서 계정과 사용할 모드를 선택해 주세요." : state === "failed" ? officialFailure(job.error_code) : state === "cancelled" ? "작업을 취소했습니다." : stages[job.progress] || "인계 정보를 확인해 주세요.");
-      text("official-feedback",feedback);
+      const notices = {account_temporary_cleanup_pending:"계정 저장은 완료됐습니다. 임시 파일 정리가 남아 있습니다.",account_status_refresh_required:"계정 저장은 완료됐습니다. 위 ‘계정 목록 불러오기’로 목록을 새로 확인해 주세요.",official_server_restart_required:"계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요."};
+      text("official-feedback",[t(feedback),...officialWarnings.filter(code => Object.prototype.hasOwnProperty.call(notices,code)).map(code => t(notices[code]))].join("\n"),false);
       const preview = object(job.preview) ? job.preview : null, lines = [];
       if (preview) {
         if (typeof preview.manager_name === "string") lines.push(t("게임 내 매니저: ")+plain(preview.manager_name,128));
@@ -1194,7 +1201,13 @@
         if (result.cancelled === true) { officialFeedbackSource = "작업을 취소했습니다.";return; }
         if (!object(result.job) || typeof result.job.busy !== "boolean" || !choice(result.job.state,["idle","checking","verified","fetching","ready","completed","failed","cancelled"])
             || result.job.state !== "idle" && !(typeof result.job.job_id === "string" && /^[0-9a-f]{32}$/.test(result.job.job_id))) throw new Error("공식 계정 작업을 마치지 못했습니다. 상태를 확인해 주세요.");
+        if (!officialJob || officialJob.job_id !== result.job.job_id) officialWarnings = [];
         officialJob = result.job; officialFeedbackSource = "";
+        if (action === "apply") {
+          const allowed = ["account_temporary_cleanup_pending","account_status_refresh_required","official_server_restart_required"];
+          officialWarnings = Array.isArray(result.warning_codes) ? [...new Set(result.warning_codes.filter(code => allowed.includes(code)))] : [];
+          if (result.status_refresh_required === true && !officialWarnings.includes("account_status_refresh_required")) officialWarnings.push("account_status_refresh_required");
+        }
         if (object(result.status)) renderAccounts(result.status);
       } catch (error) {
         if (visible && !disposed && visibility === visibilityVersion) officialFeedbackSource = officialFailure(error.code);
@@ -1293,6 +1306,7 @@
       if (object(value.official_import)) {
         const publicJob = value.official_import, previous = officialJob;
         if (!officialPending && previous && (previous.job_id !== publicJob.job_id || previous.state !== publicJob.state)) officialFeedbackSource = "";
+        if (!officialPending && previous && previous.job_id !== publicJob.job_id) officialWarnings = [];
         if (!officialPending) officialJob = {...publicJob,...(previous && previous.job_id === publicJob.job_id && ["verified","ready","completed"].includes(publicJob.state) && object(previous.preview) ? {preview:previous.preview} : {})};
         if (!officialPending && publicJob.state !== "idle" && (publicJob.busy === true || !previous || previous.job_id !== publicJob.job_id || previous.state !== publicJob.state)) Promise.resolve().then(() => official("status"));
       }

@@ -1,11 +1,22 @@
 """Credential-free Web requests and native-only official account integration."""
 import json
+import subprocess
+import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
 
 from test_ios_host import harness, start, command
-from test_ios_unified_web import run_js
+from test_ios_unified_web import run_js as _run_js
+from test_official_import import schema, Client, Timer, MASTER, snapshot, populate, ready
+
+
+def run_js(body):
+    try:
+        _run_js(body)
+    except subprocess.CalledProcessError as error:
+        pytest.fail("Offline Node UI assertion failed:\n"+(error.stderr or "")[:4096],pytrace=False)
 
 
 class OfficialFixture:
@@ -161,7 +172,12 @@ for(const value of ['일본 공식 계정 가져오기','공식 인계 로그인
 }
 const html=fs.readFileSync(WEB+'/index.html','utf8'),js=fs.readFileSync(WEB+'/app.js','utf8');
 assert.ok(!html.includes('type="password"'));assert.ok(!js.includes('localStorage'));
-assert.ok(!js.includes('user_id'));assert.ok(!js.includes('password'));
+const panel=html.split('aria-labelledby="official-heading"')[1].split('</section>')[0];
+assert.deepEqual([...panel.matchAll(/<input\b[^>]*id="([^"]+)"/g)].map(row=>row[1]),['official-profile','official-replace']);
+const env=environment(),bridge=api.createBridge(env.scope,env.timers);
+await assert.rejects(bridge.request('official_inspect',{user_id:'never-send',password:'never-send',platform:'ios'}));
+const request=bridge.request('official_inspect');assert.deepEqual(env.posted,[{id:1,action:'official_inspect'}]);
+env.respond(env.posted[0],{action:'official_inspect',cancelled:true});await request;bridge.dispose();
 """)
 
 
@@ -219,3 +235,139 @@ def test_host_keeps_atomic_apply_busy_progress_without_inventing_a_new_state(har
     h.subject._official_import=Applying()
     observed=command(h,"status")["result"]["official_import"]
     assert observed["state"] == "ready" and observed["progress"] == "applying" and observed["busy"] is True
+
+
+@pytest.fixture
+def local_official_host(harness,schema):
+    """Real official staging and SQLite apply with an offline protocol client."""
+    from idoly_local.account_manager import AccountManager
+    from idoly_local.official_import import OfficialImportManager, ERROR_CODES
+    h=harness;assert start(h)["running"]
+    (h.data/"original-master").mkdir();(h.data/"master-json").mkdir()
+    (h.data/"original-master/master-tag.json").write_text(json.dumps({"version":MASTER}))
+    (h.data/"master-json/!version.txt").write_text(MASTER)
+    for table,identity in (("Card","card-a"),("Item","item-a")):
+        (h.data/("master-json/"+table+".json")).write_text(json.dumps([{"id":identity}]))
+    accounts=AccountManager(h.data,schema=schema)
+    env=SimpleNamespace(root=h.data,schema=schema,accounts=accounts,clock=[1800000000.0],calls=[],clients=[],
+        raw=snapshot(schema),remote_version=MASTER,inspect_gate=None,fetch_gate=None,
+        inspect_error=None,fetch_error=None,credentials_ok=False,inspect_started=threading.Event(),fetch_started=threading.Event())
+    def factory(protocol, *, platform):
+        assert protocol is schema
+        client=Client(env,platform);env.clients.append(client);return client
+    env.manager=OfficialImportManager(h.data,accounts=accounts,client_factory=factory,
+        now=lambda:env.clock[0],timer_factory=Timer)
+    h.subject._official_import=env.manager;h.subject._official_errors=frozenset(ERROR_CODES)
+    yield h,env
+    env.manager.close()
+    if env.manager._thread is not None:env.manager._thread.join(timeout=3)
+
+
+@pytest.mark.parametrize("restart_failure",["exception","not_running"])
+@pytest.mark.parametrize("status_refresh_failure",[False,True])
+def test_real_official_commit_survives_restart_failure_and_preserves_canonical_revision(local_official_host,monkeypatch,restart_failure,status_refresh_failure):
+    h,env=local_official_host;state=populate(env,"active");before=state.account_snapshot("active")
+    job=ready(env);runtime=h.runtimes[0];original_status=runtime.status
+    monkeypatch.setattr(runtime,"status",lambda:{**original_status(),"profile":"active","media_mode":False})
+    attempts=[]
+    def fail_restart(*args,**kwargs):
+        attempts.append(True)
+        # The fault is strictly after the real SQLite replacement committed.
+        assert state.snapshot("active")[0] == env.raw
+        assert env.manager.status()["state"] == "completed"
+        if restart_failure == "exception":raise OSError("DO-NOT-EXPORT-restart-detail")
+        return {"state":"failed","running":False}
+    monkeypatch.setattr(h.subject,"start",fail_restart)
+    if status_refresh_failure:
+        actual_status=env.accounts.status
+        def fault_after_commit(*args,**kwargs):
+            if state.snapshot("active")[0] == env.raw:raise OSError("DO-NOT-EXPORT-status-detail")
+            return actual_status(*args,**kwargs)
+        monkeypatch.setattr(env.accounts,"status",fault_after_commit)
+    result=command(h,"official_apply",job_id=job,profile="active",replace=True,expected_revision=before[1])
+    assert result["ok"] is True
+    saved=result["result"];actual=state.account_snapshot("active")
+    assert saved["job"]["state"] == "completed" and saved["job"]["busy"] is False
+    assert saved["account"]["mode"] == "normal" and saved["account"]["profile"] == "active"
+    assert actual[1] == saved["account"]["revision"] and actual != before and state.snapshot("active")[0] == env.raw
+    assert "official_server_restart_required" in saved["warning_codes"]
+    assert attempts == [True] and runtime.stops == 1
+    if status_refresh_failure:
+        assert saved["status_refresh_required"] is True
+        assert "account_status_refresh_required" in saved["warning_codes"]
+    observed=command(h,"status")["result"]
+    assert observed["state"] == "failed" and observed["running"] is False
+    assert observed["last_error"]["code"] == "official_server_restart_required"
+    again=command(h,"official_apply",job_id=job,profile="active",replace=True,expected_revision=before[1])
+    assert again["ok"] is False and again["error"]["code"] == "official_invalid_state"
+    assert env.manager.status()["state"] == "completed" and attempts == [True]
+    assert env.calls == ["inspect","fetch"]
+    assert "DO-NOT-EXPORT" not in json.dumps([result,observed,again,h.bridge.events])
+
+
+def test_real_precommit_cas_error_survives_best_effort_restart_failure(local_official_host,monkeypatch):
+    h,env=local_official_host;state=populate(env,"active");before=state.account_snapshot("active");job=ready(env)
+    runtime=h.runtimes[0];actual_status=runtime.status
+    monkeypatch.setattr(runtime,"status",lambda:{**actual_status(),"profile":"active","media_mode":False})
+    attempts=[]
+    def fail_restart(*args,**kwargs):attempts.append(True);raise OSError("DO-NOT-EXPORT-restart")
+    monkeypatch.setattr(h.subject,"start",fail_restart)
+    failed=command(h,"official_apply",job_id=job,profile="active",replace=True,expected_revision="0"*64)
+    assert failed["ok"] is False and failed["error"]["code"] == "account_revision_conflict"
+    assert state.account_snapshot("active") == before and env.manager.status()["state"] == "ready"
+    assert attempts == [True] and env.calls == ["inspect","fetch"]
+    assert "DO-NOT-EXPORT" not in json.dumps([failed,h.bridge.events])
+
+
+def test_completed_service_warning_projection_keeps_only_finite_codes_and_strict_refresh_bool(harness):
+    h=harness;start(h)
+    class Warned(OfficialFixture):
+        def command(self,action,payload):
+            result=super().command(action,payload)
+            result.update(warning_codes=["account_temporary_cleanup_pending","account_temporary_cleanup_pending","account_status_refresh_required","DO-NOT-EXPORT",True],status_refresh_required=1)
+            return result
+    h.subject._official_import=Warned()
+    result=command(h,"official_apply",job_id="a"*32,profile="new",replace=False,expected_revision=None)["result"]
+    assert result["job"]["state"] == "completed"
+    assert result["warning_codes"] == ["account_temporary_cleanup_pending","account_status_refresh_required"]
+    assert "status_refresh_required" not in result and "DO-NOT-EXPORT" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("language",["ko","en","ja"])
+def test_completed_warning_ui_preserves_success_and_never_retries_apply(language):
+    run_js("const language="+json.dumps(language)+";\n"+r"""
+const env=environment(),app=api.createSettingsApp(env.scope,env.document,env.timers);
+const job=state=>({schema:1,state,job_id:'a'.repeat(32),busy:false,progress:state,counts:{cards:1,items:1,photos:1},expires_in_seconds:120,error_code:null});
+const base=status();base.official_import_available=true;base.options.interface_language=language;base.official_import=job('ready');
+env.respond(env.posted[0],base);await flush();
+const read=env.posted.find(x=>x.action==='official_status');assert.ok(read);
+env.respond(read,{action:'official_status',job:job('ready')});await flush();
+env.elements.get('official-profile').value='saved-target';env.elements.get('official-apply').fire('click');await flush();
+const apply=env.posted.find(x=>x.action==='official_apply');assert.ok(apply);
+env.respond(apply,{action:'official_apply',job:job('completed'),account:{mode:'normal',profile:'saved-target',revision:'b'.repeat(64)},
+  warning_codes:['account_temporary_cleanup_pending','account_status_refresh_required','official_server_restart_required','DO-NOT-DISPLAY'],status_refresh_required:true});await flush();
+const refresh=env.posted.filter(x=>x.action==='status').at(-1);
+env.respond(refresh,{...base,state:'failed',running:false,official_import:job('completed'),last_error:{code:'official_server_restart_required',message:'계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요.'}});await flush();
+assert.equal(env.elements.get('official-state').textContent,api.translateUI('일반 계정 저장 완료',language));
+for(const notice of ['계정 저장은 완료됐습니다. 임시 파일 정리가 남아 있습니다.','계정 저장은 완료됐습니다. 위 ‘계정 목록 불러오기’로 목록을 새로 확인해 주세요.','계정 저장은 완료됐지만 서버를 다시 시작하지 못했습니다. ‘서버 시작’을 다시 누르고, 계속 실패하면 앱을 다시 열어 주세요.'])
+  assert.ok(env.elements.get('official-feedback').textContent.includes(api.translateUI(notice,language)));
+assert.ok(!env.elements.get('official-feedback').textContent.includes('DO-NOT-DISPLAY'));
+assert.equal(env.elements.get('official-apply').disabled,true);
+assert.equal(env.posted.filter(x=>x.action==='official_apply').length,1);
+assert.equal(env.posted.some(x=>['official_inspect','official_fetch'].includes(x.action)),false);
+app.dispose();
+""")
+
+
+def test_native_restart_notice_requires_exact_completed_official_warning_without_changing_gate():
+    source=(Path(__file__).resolve().parents[1]/"ios-unified/native/IdolySettings.m").read_text()
+    block=source.split("- (void)sendReply:(NSNumber *)identifier json:(NSString *)json {",1)[1].split("- (void)localFailure:",1)[0]
+    assert '[value[@"ok"] isEqual:@YES]' in block
+    assert '[officialResult[@"action"] isEqual:@"official_apply"]' in block
+    assert '[officialJob[@"state"] isEqual:@"completed"]' in block
+    assert '[warnings containsObject:@"official_server_restart_required"]' in block
+    assert 'IDNativeSetServerState(NO, NO, @"계정 저장 완료 · 서버 재시작 필요")' in block
+    assert block.index("IDNativeSetServerState") < block.index("if (!_web) return")
+    assert 'gate.phase' not in block
+    assert '@"アカウント保存完了 · サーバーの再起動が必要"' in source
+    assert '@"Account Saved · Restart Server"' in source

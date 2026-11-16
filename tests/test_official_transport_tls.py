@@ -71,6 +71,9 @@ class LoopbackPeer:
     def __init__(self, certificates, handler, *, alpn="h2", wrong_host=False):
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         self.context.minimum_version = ssl.TLSVersion.TLSv1_2
+        # No post-handshake session-ticket writes: the ALPN-negative client
+        # deliberately closes immediately after its verified TLS handshake.
+        self.context.num_tickets = 0
         self.context.set_alpn_protocols([alpn])
         self.context.load_cert_chain(certificates.wrong if wrong_host else certificates.valid, certificates.key)
         self.server_names = []
