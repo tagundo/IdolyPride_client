@@ -36,5 +36,12 @@ jobs:
           uv run --locked python macos-preserver/extract_descriptor.py \
             --payload "$PROTOCOL_PAYLOAD" --output data/protocol/idolypride-6.1.1.pb
           rm "$PROTOCOL_PAYLOAD"
+      - name: Prepare Swift system modules before bounded formatter checks
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          if command -v swiftc >/dev/null 2>&1; then
+            printf 'import Foundation\nimport CoreFoundation\n' | swiftc -typecheck -
+          fi
       - run: uv run --locked --all-extras python -m pytest -q
       - run: uv run --locked python -m compileall -q src tools
