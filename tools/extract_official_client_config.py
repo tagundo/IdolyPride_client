@@ -99,9 +99,10 @@ def validate_config(value, platform):
     required = {"api_key", "project_id", "project_number", "google_app_id", "bundle_id", "app_version"}
     need(set(value) == required | ({"certificate_sha1"} if platform == "android" else set()), "config_fields_invalid")
     need(all(type(v) is str and 0 < len(v) <= 256 for v in value.values()), "config_values_invalid")
-    need(value["bundle_id"] == BUNDLE_ID and value["project_id"] == PROJECT_ID
-         and value["project_number"] == PROJECT_NUMBER and value["app_version"] == APP_VERSION,
-         "config_scope_mismatch")
+    need(value["bundle_id"] == BUNDLE_ID, "config_bundle_mismatch")
+    need(value["project_id"] == PROJECT_ID, "config_project_mismatch")
+    need(value["project_number"] == PROJECT_NUMBER, "config_project_number_mismatch")
+    need(value["app_version"] == APP_VERSION, "config_version_mismatch")
     need(re.fullmatch(r"AIza[A-Za-z0-9_-]{20,80}", value["api_key"]) is not None, "api_key_invalid")
     need(re.fullmatch(r"1:" + PROJECT_NUMBER + ":" + platform + r":[a-f0-9]{16,64}",
                       value["google_app_id"]) is not None, "google_app_id_invalid")
@@ -110,13 +111,35 @@ def validate_config(value, platform):
     return dict(value)
 
 
-def parse_ios_config(google_raw, info_raw):
+def public_scope_diagnostic(platform, fields):
+    """Only bounded, named PUBLIC app metadata from a SHA-pinned original.
+
+    The API key, arbitrary plist/resource contents and exception text are never
+    accepted by this formatter. Tests keep these optional diagnostics disabled.
+    """
+    allowed = {"app_bundle", "app_version", "version_code", "split", "google_bundle",
+               "project_number", "project_id", "google_app_id"}
+    need(platform in ("ios", "android") and type(fields) is dict
+         and set(fields) <= allowed, "scope_diagnostic_invalid")
+    values = {key:(value if type(value) is str and len(value) <= 256
+                   and all(32 <= ord(c) < 127 for c in value) else "<invalid>")
+              for key,value in fields.items()}
+    print("Verified-source public " + platform + " scope: "
+          + json.dumps(values, ensure_ascii=True, sort_keys=True))
+
+
+def parse_ios_config(google_raw, info_raw, *, diagnostics=False):
     try:
         google, info = plistlib.loads(google_raw), plistlib.loads(info_raw)
     except Exception:
         raise ConfigExtractionError("plist_invalid") from None
     need(type(google) is dict and type(info) is dict, "plist_invalid")
-    need(info.get("CFBundleIdentifier") == BUNDLE_ID, "config_scope_mismatch")
+    if diagnostics:
+        public_scope_diagnostic("ios", {"app_bundle":info.get("CFBundleIdentifier"),
+            "app_version":info.get("CFBundleShortVersionString"), "google_bundle":google.get("BUNDLE_ID"),
+            "project_number":google.get("GCM_SENDER_ID"), "project_id":google.get("PROJECT_ID"),
+            "google_app_id":google.get("GOOGLE_APP_ID")})
+    need(info.get("CFBundleIdentifier") == BUNDLE_ID, "ios_info_bundle_mismatch")
     fields = {"api_key":google.get("API_KEY"), "project_id":google.get("PROJECT_ID"),
         "project_number":google.get("GCM_SENDER_ID"), "google_app_id":google.get("GOOGLE_APP_ID"),
         "bundle_id":google.get("BUNDLE_ID"), "app_version":info.get("CFBundleShortVersionString")}
@@ -134,21 +157,26 @@ def extract_ios(path):
         need(info_name in {i.filename for i in infos}, "ios_info_missing")
         google, google_proof = read_metadata(archive, google_name)
         info, info_proof = read_metadata(archive, info_name)
-        config = parse_ios_config(google, info)
+        config = parse_ios_config(google, info, diagnostics=True)
     need(verify_source(path, "ios") == source, "source_changed")
     return config, {"source":source, "members":[google_proof,info_proof],
                     "identity_scope_verified":True, "app_executed":False}
 
 
-def parse_android_badging(raw):
+def parse_android_badging(raw, *, diagnostics=False):
     need(type(raw) is str and len(raw) <= MAX_TOOL_OUTPUT, "badging_invalid")
     lines = raw.splitlines()
     need(lines and lines[0].startswith("package: "), "badging_invalid")
     fields = re.findall(r"([A-Za-z][A-Za-z0-9_-]*)='([^']*)'", lines[0][9:])
     need(len(dict(fields)) == len(fields), "badging_invalid")
     value = dict(fields)
-    need(value.get("name") == BUNDLE_ID and value.get("versionName") == APP_VERSION
-         and value.get("versionCode") == "414", "config_scope_mismatch")
+    if diagnostics:
+        public_scope_diagnostic("android", {"app_bundle":value.get("name"),
+            "app_version":value.get("versionName"), "version_code":value.get("versionCode"),
+            "split":value.get("split", "<base>")})
+    need(value.get("name") == BUNDLE_ID, "android_package_mismatch")
+    need(value.get("versionName") == APP_VERSION, "android_version_mismatch")
+    need(value.get("versionCode") == "414", "android_version_code_mismatch")
     return value
 
 
@@ -232,13 +260,16 @@ def extract_android(path, build_tools):
             signature = run_tool([build_tools/"apksigner","verify","--verbose","--print-certs",target], MAX_METADATA)
             certificate = parse_android_certificate(signature)
             badging_raw = run_tool([build_tools/"aapt2","dump","badging",target])
-            badging = parse_android_badging(badging_raw)
+            badging = parse_android_badging(badging_raw, diagnostics=True)
             record = {"member":info.filename,"bytes":copied,"sha256":digest.hexdigest(),
                       "certificate_sha256":CERT_SHA256,"certificate_sha1":certificate,
                       "badging_sha256":sha(badging_raw.encode()),"signature_output_sha256":sha(signature.encode())}
             if "split" not in badging:
                 resources_raw = run_tool([build_tools/"aapt2","dump","resources",target])
                 resources = parse_android_resources(resources_raw)
+                public_scope_diagnostic("android", {"app_bundle":badging["name"],
+                    "app_version":badging["versionName"], "project_id":resources["project_id"],
+                    "project_number":resources["gcm_defaultSenderId"], "google_app_id":resources["google_app_id"]})
                 config = validate_config({"api_key":resources["google_api_key"],
                     "google_app_id":resources["google_app_id"],"project_id":resources["project_id"],
                     "project_number":resources["gcm_defaultSenderId"],"bundle_id":badging["name"],

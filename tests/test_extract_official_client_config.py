@@ -194,3 +194,34 @@ def test_workflow_only_reads_original_assets_and_uploads_small_config():
     assert "actions/upload-artifact@v4" in workflow and "public-client-config.json" in workflow
     for forbidden in ("gh release","sideload","adb ","official-account-password"):
         assert forbidden not in workflow
+
+
+def test_public_scope_diagnostic_is_named_bounded_and_excludes_keys(capsys):
+    extractor.public_scope_diagnostic("ios", {"app_bundle":extractor.BUNDLE_ID,
+        "app_version":"6.1.1", "project_id":extractor.PROJECT_ID, "google_app_id":APP})
+    output = capsys.readouterr().out
+    assert extractor.BUNDLE_ID in output and APP in output and KEY not in output
+    with pytest.raises(extractor.ConfigExtractionError, match="scope_diagnostic_invalid"):
+        extractor.public_scope_diagnostic("ios", {"api_key":KEY})
+    assert KEY not in capsys.readouterr().out
+    extractor.public_scope_diagnostic("android", {"app_bundle":"x"*257, "app_version":"bad\nvalue"})
+    output = capsys.readouterr().out
+    assert "<invalid>" in output and "bad" not in output and "x"*257 not in output
+
+
+def test_ios_explicit_scope_diagnostic_never_prints_api_key(capsys):
+    extractor.parse_ios_config(plistlib.dumps(google()), plistlib.dumps(info()), diagnostics=True)
+    output = capsys.readouterr().out
+    assert APP in output and extractor.PROJECT_ID in output and KEY not in output
+
+
+@pytest.mark.parametrize("field,value,code", [
+    ("PROJECT_ID","other-project","config_project_mismatch"),
+    ("GCM_SENDER_ID","123","config_project_number_mismatch"),
+    ("BUNDLE_ID","other.bundle","config_bundle_mismatch"),
+])
+def test_scope_failures_name_exact_failed_check(field,value,code):
+    data = google(); data[field] = value
+    with pytest.raises(extractor.ConfigExtractionError) as error:
+        extractor.parse_ios_config(plistlib.dumps(data),plistlib.dumps(info()))
+    assert error.value.code == code
