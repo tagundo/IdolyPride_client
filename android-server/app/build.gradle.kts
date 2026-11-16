@@ -1,6 +1,7 @@
 import java.security.MessageDigest
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.file.Files
 
 plugins {
     id("com.android.application")
@@ -78,7 +79,7 @@ val prepareServerDataAssets = tasks.register<Copy>("prepareServerDataAssets") {
         }
         val receipt = startupTranslations.orNull
         if (receipt != null) {
-            require(receipt.isFile && !java.nio.file.Files.isSymbolicLink(receipt.toPath())
+            require(receipt.isFile && !Files.isSymbolicLink(receipt.toPath())
                     && receipt.length() == startupTranslationsBytes) { "Optional startup receipt size differs" }
             val digest = MessageDigest.getInstance("SHA-256")
             receipt.inputStream().use { input ->
