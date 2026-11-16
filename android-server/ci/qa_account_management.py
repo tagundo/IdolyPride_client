@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shlex
 import sqlite3
 import tempfile
 import time
@@ -145,6 +146,55 @@ def find_document(qa, filename, stage, *, attempts=8):
     raise RuntimeError("Account QA enabled document item was not observed: " + stage)
 
 
+def keyboard_document(qa, filename, tree):
+    """Tab only within the observed provider; Enter requires this exact row's focus."""
+    current = document_item(tree, filename)
+    if current is None or current.get("focusable") != "true":
+        raise RuntimeError("Account QA document is not an observed keyboard focus target")
+    provider = current.get("package")
+    focusable = [node for node in tree.iter("node")
+                 if node.get("package") == provider and node.get("enabled") == "true"
+                 and node.get("focusable") == "true" and bounds(node)]
+    # API 30 shell input tap creates TOOL_TYPE_UNKNOWN. DocumentsUI's
+    # SelectionTracker handles finger/stylus, so the tile can ignore that tap.
+    # Its normal keyboard path remains available; never activate a preview child.
+    seen = set()
+    for attempt in range(min(20, len(focusable) + 1)):
+        qa.adb("shell", "input", "keyevent", "61")
+        tree = qa.capture("75-account-provider-tab-" + str(attempt))
+        current = document_item(tree, filename)
+        if current is None:
+            raise RuntimeError("Account QA document changed during provider keyboard navigation")
+        if current.get("focused") == "true":
+            qa.adb("shell", "input", "keyevent", "66")
+            return "verified_document_keyboard_focus"
+        focused = [node for node in tree.iter("node") if node.get("focused") == "true"]
+        if any(node.get("package") != provider for node in focused):
+            raise RuntimeError("Account QA keyboard focus left the observed document provider")
+        signature = tuple((node.get("resource-id"), node.get("bounds")) for node in focused)
+        if signature and signature in seen:
+            raise RuntimeError("Account QA document provider focus cycled before the named row")
+        if signature:
+            seen.add(signature)
+    raise RuntimeError("Account QA named document did not receive keyboard focus")
+
+
+def provider_evidence(qa, filename, stage):
+    """Retain only this synthetic export's MIME/size and bounded focus metadata."""
+    if not re.fullmatch(r"IdolyPride-Account-[0-9a-f]{32}\.zip", filename):
+        raise RuntimeError("Account QA refuses to query a non-synthetic document")
+    report = {"schema": 1, "filename": filename, "stage": stage}
+    raw = qa.adb("shell", "content", "query", "--uri", "content://media/external/file",
+                 "--projection", "_display_name:mime_type:_size", "--where",
+                 shlex.quote("_display_name='" + filename + "'"), check=False)
+    rows = [line for line in raw.splitlines() if line.startswith("Row:") and filename in line]
+    report["media_query"] = rows[0][:512] if len(rows) == 1 else "metadata_unavailable"
+    raw = qa.adb("shell", "dumpsys", "window", "windows", check=False)
+    report["window_focus"] = [line.strip()[:384] for line in raw.splitlines()
+                              if "mCurrentFocus=" in line or "mFocusedApp=" in line][:4]
+    (qa.artifacts / (stage + ".json")).write_text(json.dumps(report), encoding="utf-8")
+
+
 def activate_document(qa, filename, item):
     # A grid caption is not an actionable node in DocumentsUI. Its observed
     # item_root owns the tile; keyboard activation is allowed only if the next
@@ -153,7 +203,7 @@ def activate_document(qa, filename, item):
     tree = qa.capture("75-account-document-activated")
     current = document_item(tree, filename)
     if current is None:
-        return
+        return "provider_result_pending"
     opening = [node for node in tree.iter("node")
                if node.get("enabled") == "true" and bounds(node)
                and node.get("package") == current.get("package")
@@ -161,8 +211,12 @@ def activate_document(qa, filename, item):
                     or node.get("text") in ("OPEN", "Open", "열기"))]
     if opening:
         tap_node(qa, opening[0])
-    elif current.get("focused") == "true":
+        return "observed_provider_open_action"
+    if current.get("focused") == "true":
         qa.adb("shell", "input", "keyevent", "66")
+        return "verified_document_keyboard_focus"
+    return keyboard_document(qa, filename, tree)
+
 
 def open_document(qa, filename):
     try:
@@ -174,7 +228,19 @@ def open_document(qa, filename):
         tap_node(qa, find(qa, lambda item: item.get("text") in ("Downloads", "다운로드"),
                           "75-account-downloads", attempts=5))
         node = find_document(qa, filename, "75-account-download-file", attempts=10)
-    activate_document(qa, filename, node)
+    tree = qa.capture("75-account-provider-before")
+    node = document_item(tree, filename)
+    if node is None:
+        raise RuntimeError("Account QA named document disappeared before activation")
+    provider_evidence(qa, filename, "75-account-provider-metadata-before")
+    try:
+        strategy = activate_document(qa, filename, node)
+        (qa.artifacts / "75-account-provider-activation.json").write_text(
+            json.dumps({"schema": 1, "filename": filename, "strategy": strategy}), encoding="utf-8")
+        return strategy
+    finally:
+        qa.capture("75-account-provider-after")
+        provider_evidence(qa, filename, "75-account-provider-metadata-after")
 
 
 def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeout, *,
@@ -227,7 +293,11 @@ def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeo
     find(qa, lambda node: node.get("content-desc") == "idoly.accounts.export", "74-account-export-saved", "up")
     tap(qa, "idoly.accounts.import", "75-account-import", "down")
     open_document(qa, filename)
-    tap(qa, "idoly.accounts.import-new", "76-account-native-preview")
+    try:
+        tap(qa, "idoly.accounts.import-new", "76-account-native-preview")
+    except RuntimeError:
+        qa.capture("76-account-preview-timeout")
+        raise
     input_profile(qa, IMPORTED, "77-account-import-name")
     find(qa, lambda node: node.get("content-desc") == "idoly.accounts.import", "78-account-import-complete", "up")
     select_profile(qa, "sandbox", "79-account-select-original")

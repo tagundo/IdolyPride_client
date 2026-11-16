@@ -124,3 +124,60 @@ def test_disabled_provider_document_cannot_be_activated():
 def test_named_item_in_another_package_is_not_a_documentsui_target():
     tree = ET.fromstring('<hierarchy><node package="unrelated.app" resource-id="com.google.android.documentsui:id/item_root" enabled="true" focused="true" bounds="[1,2][100,200]"><node package="unrelated.app" text="account.zip" enabled="true" bounds="[2,3][99,190]"/></node></hierarchy>')
     assert qa.document_item(tree, "account.zip") is None
+
+
+def test_document_tab_reobserves_focus_and_enters_only_exact_root():
+    def tree(focused):
+        return '<hierarchy><node package="com.google.android.documentsui" enabled="true" focusable="true" focused="'+str(focused == "toolbar").lower()+'" bounds="[0,0][100,50]" resource-id="provider:id/toolbar"/><node package="com.google.android.documentsui" resource-id="provider:id/item_root" enabled="true" focusable="true" focused="'+str(focused == "document").lower()+'" bounds="[60,600][540,1300]"><node package="com.google.android.documentsui" text="account.zip" enabled="true" bounds="[200,1180][490,1240]"/></node></hierarchy>'
+    guest = Guest([tree("toolbar"), tree("document")])
+    strategy = qa.keyboard_document(guest, "account.zip", ET.fromstring(tree("none")))
+    assert strategy == "verified_document_keyboard_focus"
+    assert guest.actions == [("shell", "input", "keyevent", "61"),
+                             ("shell", "input", "keyevent", "61"),
+                             ("shell", "input", "keyevent", "66")]
+    assert guest.captures == ["75-account-provider-tab-0", "75-account-provider-tab-1"]
+
+
+def test_document_tab_rejects_preview_child_focus_and_cycles():
+    tree = '<hierarchy><node package="com.google.android.documentsui" resource-id="provider:id/item_root" enabled="true" focusable="true" focused="false" bounds="[60,600][540,1300]"><node package="com.google.android.documentsui" text="account.zip" enabled="true" bounds="[200,1180][490,1240]"/><node package="com.google.android.documentsui" resource-id="provider:id/preview_icon" enabled="true" focusable="true" focused="true" bounds="[400,700][530,830]"/></node></hierarchy>'
+    guest = Guest([tree, tree])
+    with pytest.raises(RuntimeError, match="focus cycled"):
+        qa.keyboard_document(guest, "account.zip", ET.fromstring(tree))
+    assert all(action[-1] == "61" for action in guest.actions)
+
+
+def test_document_tab_never_activates_another_package():
+    tree = '<hierarchy><node package="com.google.android.documentsui" resource-id="provider:id/item_root" enabled="true" focusable="true" bounds="[60,600][540,1300]"><node package="com.google.android.documentsui" text="account.zip" enabled="true" bounds="[200,1180][490,1240]"/></node><node package="unrelated.app" focused="true" bounds="[1,2][20,30]"/></hierarchy>'
+    guest = Guest([tree])
+    with pytest.raises(RuntimeError, match="focus left"):
+        qa.keyboard_document(guest, "account.zip", ET.fromstring(tree))
+    assert guest.actions == [("shell", "input", "keyevent", "61")]
+
+
+def test_provider_evidence_refuses_non_synthetic_queries(tmp_path):
+    guest = Guest([])
+    with pytest.raises(RuntimeError, match="non-synthetic"):
+        qa.provider_evidence(guest, "private-document.zip", "probe")
+    assert guest.actions == []
+
+
+def test_provider_evidence_queries_only_observed_synthetic_export(tmp_path):
+    filename = "IdolyPride-Account-" + "a"*32 + ".zip"
+    class MetadataGuest:
+        artifacts = tmp_path
+        actions = []
+        def adb(self, *args, **kwargs):
+            self.actions.append((args, kwargs))
+            if "query" in args:
+                return "Row: 0 _display_name="+filename+", mime_type=application/zip, _size=23900"
+            return "  mCurrentFocus=Window{synthetic com.google.android.documentsui/.picker.PickActivity}"
+    guest = MetadataGuest()
+    qa.provider_evidence(guest, filename, "observed")
+    import json
+    saved = json.loads((tmp_path/"observed.json").read_text())
+    assert saved["filename"] == filename and "mime_type=application/zip" in saved["media_query"]
+    query, options = guest.actions[0]
+    assert query[query.index("--uri")+1] == "content://media/external/file"
+    assert filename in query[query.index("--where")+1] and "_display_name=" in query[-1]
+    assert options == {"check": False}
+    assert len(saved["window_focus"]) == 1

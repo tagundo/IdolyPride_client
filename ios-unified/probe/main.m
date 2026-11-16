@@ -1088,7 +1088,7 @@ static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak 
                     && name && [known numberOfMatchesInString:name options:0 range:NSMakeRange(0,name.length)]==1) {
                 UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
                 if (picker.documentPickerMode!=UIDocumentPickerModeExportToService) { finish();return; }
-                state[@"export_started"]=@YES;metrics[@"export_picker_presented"]=@YES;
+                state[@"export_started"]=@YES;state[@"export_picker"]=picker;metrics[@"export_picker_presented"]=@YES;
                 NSString *source=[state[@"exports"] stringByAppendingPathComponent:name];
                 NSString *target=state[@"source"];
                 dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY,0),^{
@@ -1104,20 +1104,29 @@ static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak 
                         metrics[@"archive_bytes"]=copy[@"bytes"] ?: @0;metrics[@"archive_copy_sha256_verified"]=@((BOOL)equal);
                         if (!equal || ![picker.delegate respondsToSelector:@selector(documentPickerWasCancelled:)]) { finish();return; }
                         [picker.delegate documentPickerWasCancelled:picker];
-                        [picker dismissViewControllerAnimated:NO completion:nil];metrics[@"export_picker_cancelled"]=@YES;
-                        ProbeAccountResume(web,@"window.__idolyAccountProbe.exportReady=true;");
+                        state[@"export_cancel_requested"]=@YES;
+                        [picker dismissViewControllerAnimated:NO completion:nil];
                     });
                 });
+            }
+        } else if ([phase isEqual:@"export"] && [state[@"export_cancel_requested"] boolValue]
+                && ![state[@"export_detached"] boolValue]) {
+            // A cancellation delegate callback does not finish UIKit dismissal.
+            // Do not send the preview action while the export sheet is attached.
+            UIDocumentPickerViewController *picker=state[@"export_picker"];
+            if (picker && !presenter.presentedViewController && !picker.viewIfLoaded.window && !picker.isBeingDismissed) {
+                state[@"export_detached"]=@YES;metrics[@"export_picker_cancelled"]=@YES;
+                ProbeAccountResume(web,@"window.__idolyAccountProbe.exportReady=true;");
             }
         } else if ([phase isEqual:@"preview"]) {
             NSUInteger round=[value[@"previewRound"] unsignedIntegerValue];
             UIViewController *shown=presenter.presentedViewController;
             if (round>[state[@"preview_round"] unsignedIntegerValue] && [shown isKindOfClass:UIDocumentPickerViewController.class]
-                    && shown.viewIfLoaded.window && !shown.isBeingPresented) {
+                    && shown.viewIfLoaded.window && !shown.isBeingPresented && !shown.isBeingDismissed) {
                 UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
                 BOOL valid=picker.documentPickerMode==UIDocumentPickerModeImport && !picker.allowsMultipleSelection
                     && [picker.delegate respondsToSelector:@selector(documentPicker:didPickDocumentsAtURLs:)];
-                if (!valid) { finish();return; }
+                if (!valid) { metrics[@"error_code"]=@"account_ui_preview_picker_contract_failed";finish();return; }
                 state[@"preview_round"]=@(round);metrics[@"preview_picker_count"]=@(round);
                 [picker.delegate documentPicker:picker didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:state[@"source"]]]];
                 [picker dismissViewControllerAnimated:NO completion:nil];

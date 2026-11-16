@@ -352,6 +352,9 @@ jobs:
             ${{ runner.temp }}/idoly-android-qa/qa/02-running.xml
             ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.png
             ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/75-account-provider-before.png
+            ${{ runner.temp }}/idoly-android-qa/qa/75-account-provider-after.png
+            ${{ runner.temp }}/idoly-android-qa/qa/76-account-preview-timeout.png
           if-no-files-found: warn
           retention-days: 14
       - uses: actions/upload-artifact@v4
