@@ -58,18 +58,27 @@ def audit(path):
                 need(0 < file_id <= len(asset.externals), "Script file ID exceeds source externals")
                 external = str(asset.externals[file_id-1].path)
                 member = "assets/bin/Data/" + external.rsplit("/",1)[-1]
-                if member not in archive.namelist():
-                    return {"resolved":False,"external":external,"pointer":pointer}
+                names=archive.namelist()
+                if member in names: parts=[member]
+                else:
+                    numbered=[(int(name.rsplit(".split",1)[1]),name) for name in names
+                              if re.fullmatch(re.escape(member)+r"\.split[0-9]+",name)]
+                    numbered.sort();parts=[name for _,name in numbered]
+                    need(not numbered or [number for number,_ in numbered]==list(range(len(numbered))),"Script split inventory differs")
+                if not parts:
+                    return {"resolved":False,"reason":"external_member_not_found","external":external,"pointer":pointer,
+                        "nearby_member_names":[name for name in names if "globalgamemanagers" in name][:8]}
                 if member not in external_cache:
-                    info = archive.getinfo(member)
-                    need(info.file_size <= 32*1024*1024 and len(external_cache) < 4,"Script source exceeds audit bound")
-                    env = UnityPy.load(archive.read(info))
+                    need(len(parts)<=32 and sum(archive.getinfo(part).file_size for part in parts)<=32*1024*1024
+                         and len(external_cache)<4,"Script source exceeds audit bound")
+                    env = UnityPy.load(b"".join(archive.read(part) for part in parts))
                     need(len(env.files)==1,"Expected one serialized script source")
                     external_cache[member] = (env,next(iter(env.files.values())))
                 target = external_cache[member][1]
             obj = target.objects.get(path_id)
             if obj is None or obj.class_id != 115:
-                return {"resolved":False,"external":external,"pointer":pointer}
+                return {"resolved":False,"reason":"script_object_not_monoscript","external":external,"pointer":pointer,
+                        "actual_class_id":None if obj is None else obj.class_id,"object_count":len(target.objects)}
             value = obj.read()
             return {"resolved":True,"external":external,"pointer":pointer,
                     "class_name":value.m_ClassName,"namespace":value.m_Namespace,"assembly":value.m_AssemblyName,

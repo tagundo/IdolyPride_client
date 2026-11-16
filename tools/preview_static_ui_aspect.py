@@ -23,6 +23,7 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 NAMES = ("love_btn_present", "love_btn_achievement", "love_btn_playing", "love_header_level_label")
+LOGO_NAMES = ("love_label_mo", "love_label_shi", "love_label_koi")
 
 
 def need(ok, message):
@@ -48,6 +49,41 @@ def _render_checker(image):
             if (x // 8 + y // 8) % 2: draw.rectangle((x,y,x+7,y+7), fill=(166,174,182,255))
     canvas.alpha_composite(image)
     return canvas
+
+
+def whole_logo_preview(actual, transforms, proof, images_dir, output):
+    from io import BytesIO
+    from PIL import Image
+    from idoly_local import static_ui_images as sprites
+    need(proof.get("policy")==sprites.LOGO_LAYOUT_POLICY and proof.get("uniform_scale")==0.75
+         and set(actual)==set(transforms)==set(LOGO_NAMES),"Complete generated whole-logo proof required")
+    before=Image.new("RGBA",(768,256),(0,0,0,0));after=Image.new("RGBA",before.size,(0,0,0,0))
+    rows=[]
+    for number,name in enumerate(LOGO_NAMES):
+        profile=next(row for row in sprites.PROFILES if row["name"]==name)
+        target=sprites.LOGO_TRANSFORMS[name]
+        row=next(row for row in proof["transforms"] if row["name"]==name)
+        raw=transforms[name]
+        need(len(raw)==108 and hashlib.sha256(raw).hexdigest()==row["output_sha256"]
+             and struct.unpack_from("<4f",raw,84)==(target["x"],0.0,target["width"],24.0),
+             "Generated logo transform readback differs")
+        png=sprites._png(images_dir,profile)
+        with Image.open(BytesIO(png)) as source: expected=source.convert("RGBA")
+        image=actual[name]
+        need(image.size==expected.size==tuple(target["png_size"]) and image.tobytes()==expected.tobytes(),
+             "Generated logo must retain every full translated PNG pixel")
+        before.alpha_composite(image.resize((256,256),Image.Resampling.BILINEAR),(number*256,0))
+        position=(round((target["x"]-target["width"]/2+48)*8),32)
+        after.alpha_composite(image.resize((image.width*6,image.height*6),Image.Resampling.NEAREST),position)
+        rows.append({"name":name,"position":row["position"],"size":row["size"],"png_sha256":profile["png_sha256"],
+            "full_generated_sprite_pixels_exact":True,"actual_generated_transform_readback":True})
+    panel=Image.new("RGBA",(768,512),(0,0,0,0))
+    panel.paste(_render_checker(before),(0,0));panel.paste(_render_checker(after),(0,256))
+    path=output/"love-logo-before-after.png";panel.save(path,format="PNG")
+    return {"uniform_scale":0.75,"whole_content_size":[94.5,24.0],"original_frame":[96,32],
+        "all_four_glyphs_keep_the_same_aspect":True,"before_is_original_three_cell_simulation":True,
+        "after_uses_generated_sprites_and_transforms":True,"glyphs":rows,
+        "preview":{"name":path.name,"bytes":path.stat().st_size,"sha256":digest(path)}}
 
 
 def previews(client, provenance, images_dir, output, source_commit):
@@ -93,7 +129,19 @@ def previews(client, provenance, images_dir, output, source_commit):
                 "actual_generated_pixel_readback": True, "before_is_fixed_rectangle_simulation": True,
                 "preview": {"name": path.name, "bytes": path.stat().st_size, "sha256": digest(path)}})
             del environment, asset, after, expected, panel; gc.collect()
-    return rows
+        actual={};transforms={};logo=provenance["static_ui_images"]["logo_layout"]
+        for name in LOGO_NAMES:
+            profile=next(row for row in sprites.PROFILES if row["name"]==name)
+            row=next(row for row in provenance["static_ui_images"]["sprites"] if row["name"]==name)
+            raw=archive.read(profile["android"]["member"])
+            need(hashlib.sha256(raw).hexdigest()==row["output_sha256"],"Generated logo Sprite member differs")
+            env=UnityPy.load(raw);actual[name]=next(iter(env.files.values())).objects[1].read().image.convert("RGBA")
+        raw=archive.read(sprites.LOGO_ANDROID_MEMBER)
+        need(hashlib.sha256(raw).hexdigest()==logo["members"][0]["output_sha256"],"Generated logo prefab member differs")
+        env=UnityPy.load(raw);asset=next(iter(env.files.values()))
+        for name,target in sprites.LOGO_TRANSFORMS.items():transforms[name]=asset.objects[target["android"]["path_id"]].get_raw_data()
+        whole=whole_logo_preview(actual,transforms,logo,images_dir,output)
+    return rows,whole
 
 
 def previews_ios(package, report, images_dir, output, source_commit):
@@ -108,9 +156,11 @@ def previews_ios(package, report, images_dir, output, source_commit):
     proof = report["proofs"]["korean_resources"]
     need(proof["original_stock_rebuilt"] is True and proof["all_other_objects_byte_identical"] is True,
          "Korean resource graph preservation is required")
-    targets = {row["name"]: row for row in proof["static_images"]["sprites"] if row["name"] in NAMES}
-    need(set(targets) == set(NAMES), "Expected all reported Korean button targets")
+    targets = {row["name"]: row for row in proof["static_images"]["sprites"] if row["name"] in NAMES+LOGO_NAMES}
+    need(set(targets) == set(NAMES+LOGO_NAMES), "Expected all reported Korean text and logo targets")
     wanted = {path for row in targets.values() for path in (row["sprite_path_id"],row["private_texture_path_id"])}
+    logo=proof["static_images"]["logo_layout"]
+    wanted.update(row["path_id"] for row in logo["transforms"])
     raw_objects = {}
     with ZipFile(package) as archive, archive.open("ko/" + reader.RESOURCES) as incoming:
         index = reader._resource_index(incoming); position = index["offset"]
@@ -148,7 +198,19 @@ def previews_ios(package, report, images_dir, output, source_commit):
             "before_is_fixed_rectangle_simulation":True,"source":"generated_iOS_language_archive",
             "preview":{"name":path.name,"bytes":path.stat().st_size,"sha256":digest(path)}})
         del env,texture_env,clone,after,expected,panel;gc.collect()
-    return results
+    actual={};transforms={}
+    for name in LOGO_NAMES:
+        row=targets[name];raw,texture=raw_objects[row["sprite_path_id"]],raw_objects[row["private_texture_path_id"]]
+        need(hashlib.sha256(raw).hexdigest()==row["output_sha256"]
+             and hashlib.sha256(texture).hexdigest()==row["texture_sha256"],"Generated iOS logo Sprite differs")
+        env,sprite_reader=sprites._mini_asset(raw,213,9);texture_env,texture_reader=sprites._mini_asset(texture,28,9)
+        owner=sprite_reader.assets_file;clone=copy.copy(texture_reader);clone.assets_file=owner
+        clone.path_id=row["private_texture_path_id"];clone.type_id=len(owner.types)
+        clone.serialized_type=copy.copy(texture_reader.serialized_type);clone.set_raw_data(texture)
+        owner.types.append(clone.serialized_type);owner.objects[clone.path_id]=clone
+        actual[name]=sprite_reader.read().image.convert("RGBA")
+        transforms[name]=raw_objects[sprites.LOGO_TRANSFORMS[name]["ios"]["path_id"]]
+    return results,whole_logo_preview(actual,transforms,logo,images_dir,output)
 
 
 def _builder():
@@ -257,13 +319,13 @@ def main():
         need(args.provenance is not None and args.images is not None
              and re.fullmatch("[0-9a-f]{40}",args.source_commit or ""),"Complete client proof arguments required")
         need(args.provenance.is_file() and not args.provenance.is_symlink() and args.provenance.stat().st_size<=1024*1024,"Bounded client provenance required")
-        report["buttons"]=previews(args.client,json.loads(args.provenance.read_text()),args.images,args.output,args.source_commit)
+        report["buttons"],report["whole_logo"]=previews(args.client,json.loads(args.provenance.read_text()),args.images,args.output,args.source_commit)
     if args.client_languages is not None:
         need(args.language_report is not None and args.images is not None
              and re.fullmatch("[0-9a-f]{40}",args.source_commit or ""),"Complete language proof arguments required")
         need(args.language_report.is_file() and not args.language_report.is_symlink()
              and args.language_report.stat().st_size<=1024*1024,"Bounded language proof required")
-        report["buttons"]=previews_ios(args.client_languages,json.loads(args.language_report.read_text()),args.images,args.output,args.source_commit)
+        report["buttons"],report["whole_logo"]=previews_ios(args.client_languages,json.loads(args.language_report.read_text()),args.images,args.output,args.source_commit)
     if args.ios_base is not None: report["logo_consumer_audit"]=logo_consumers(args.ios_base)
     need("buttons" in report or "logo_consumer_audit" in report,"An actual client or pinned logo donor is required")
     report["status"]="PASS"

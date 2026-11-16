@@ -41,6 +41,28 @@ jobs:
           uv run --locked python tools/audit_static_logo_layout.py
           --android-base "$RUNNER_TEMP/moshikoi-logo-inputs/diagnostic-base.apk"
           --output "$RUNNER_TEMP/moshikoi-logo-proof/android-logo-consumers.json"
+      - name: Verify exact layout composition over current Korean text translations
+        run: |
+          uv run --locked python - <<'INLINE'
+          import hashlib,json,os,pathlib
+          from zipfile import ZipFile
+          from idoly_local import static_ui_assets,static_ui_images
+          root=pathlib.Path(os.environ['RUNNER_TEMP']);donor=root/'moshikoi-logo-inputs/diagnostic-base.apk'
+          with ZipFile(donor) as archive:
+              translated,text_proof=static_ui_assets.android_members(archive,language='ko')
+              snapshots={name:hashlib.sha256(raw).hexdigest() for name,raw in translated.items()}
+              output,proof=static_ui_images._android_logo(archive,translated)
+              assert snapshots=={name:hashlib.sha256(raw).hexdigest() for name,raw in translated.items()}
+              member=static_ui_images.LOGO_ANDROID_MEMBER
+              assert set(output)=={member}
+              proof['current_static_text_replacements_unchanged']=True
+              proof['text_translation_applied_before_layout']=member in translated
+              proof['total_static_texts_translated']=text_proof['changed_static_texts']
+              proof['source_commit']=os.environ['GITHUB_SHA']
+          with donor.open('rb') as source:assert hashlib.file_digest(source,'sha256').hexdigest()=='f5be0c0e19c2a17ea28ffa0c3205a49f5ab004f013e2e67e319aa192ca1995df'
+          (root/'moshikoi-logo-proof/android-logo-layout-proof.json').write_text(json.dumps(proof,sort_keys=True,indent=2)+'\n')
+          print(json.dumps({'status':'PASS_COMPOSED_LAYOUT','transforms':len(proof['transforms']),'text_translation_applied_before_layout':proof['text_translation_applied_before_layout']}))
+          INLINE
       - uses: actions/upload-artifact@v4
         if: always()
         with:

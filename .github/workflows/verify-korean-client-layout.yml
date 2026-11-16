@@ -38,7 +38,7 @@ jobs:
       - name: Verify finite geometry, archive, preservation and legacy cases
         run: >-
           uv run --locked python -m pytest -q tests/test_static_ui_images.py
-          tests/test_ios_client_language_builder.py tests/test_ios_client_data.py
+          tests/test_static_logo_layout.py tests/test_ios_client_language_builder.py tests/test_ios_client_data.py
           tests/test_ios_unified_packaging.py
       - name: Fetch only exact stock and Korean IPA donors
         env:

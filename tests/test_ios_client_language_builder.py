@@ -158,9 +158,17 @@ def korean_graph_fixture():
         sprites.append({"name": name, "sprite_path_id": number, "private_texture_path_id": 100 + number,
             "layout_policy": TEXT_LAYOUT_POLICY, "readback_pixel_exact": True,
             "layout_size": list(size), "original_layout_size": list(size)})
+    import base64
+    from idoly_local.static_ui_images import _logo_rect, _logo_summary
+    fixtures=json.loads((ROOT / "tests/fixtures/love-logo-rect-transforms.json").read_text())
+    transforms=[]
+    for row in fixtures["objects"]:
+        if row["platform"]!="ios": continue
+        raw=base64.b64decode(row["raw_base64"]); updated,proof=_logo_rect(raw,row["name"],"ios")
+        before.append((row["path_id"],224,raw));after.append((row["path_id"],224,updated));transforms.append(proof)
     before.append((1000, 114, b"original font, story and other UI bytes"))
     after.append(before[-1])
-    return before, after, {"sprites": sprites}
+    return before, after, {"sprites": sprites,"logo_layout":_logo_summary("ios",transforms,[])}
 
 
 def test_korean_refresh_compares_every_undeclared_resource_object(builder):
@@ -169,7 +177,7 @@ def test_korean_refresh_compares_every_undeclared_resource_object(builder):
     result = builder._compare_korean_resources(BytesIO(serialized_resource(before)), BytesIO(serialized_resource(after)), proof)
     assert result["all_other_objects_byte_identical"] is True
     assert result["unchanged_object_count"] == 1
-    assert len(result["declared_object_differences"]) == 20
+    assert len(result["declared_object_differences"]) == 23
     assert all(row["changed"] for row in result["declared_object_differences"])
 
 
@@ -185,3 +193,20 @@ def test_korean_refresh_cannot_drop_existing_font_story_or_resource_graph(builde
     elif damage == "wrong-geometry": proof["sprites"][0]["layout_size"] = [1, 1]
     with pytest.raises(ValueError):
         builder._compare_korean_resources(BytesIO(serialized_resource(before)), BytesIO(serialized_resource(after, trailer=trailer)), proof)
+
+
+@pytest.mark.parametrize("damage",("unknown-transform","nonuniform-scale","changed-position","wrong-original-hash","missing-logo","updated-corrupt-transform"))
+def test_korean_refresh_rejects_an_unproven_or_nonuniform_whole_logo(builder,damage):
+    from io import BytesIO
+    before,after,proof=korean_graph_fixture();logo=proof["logo_layout"]
+    if damage=="unknown-transform":logo["transforms"][0]["path_id"]=999
+    elif damage=="nonuniform-scale":logo["uniform_scale"]=0.5
+    elif damage=="changed-position":logo["transforms"][0]["position"]=[0,0]
+    elif damage=="wrong-original-hash":logo["transforms"][0]["input_sha256"]="0"*64
+    elif damage=="missing-logo":proof.pop("logo_layout")
+    elif damage=="updated-corrupt-transform":
+        row=logo["transforms"][0];index=next(i for i,item in enumerate(after) if item[0]==row["path_id"])
+        path,kind,raw=after[index];corrupt=bytes([raw[0]^1])+raw[1:];after[index]=(path,kind,corrupt)
+        row["output_sha256"]=hashlib.sha256(corrupt).hexdigest()
+    with pytest.raises(ValueError):
+        builder._compare_korean_resources(BytesIO(serialized_resource(before)),BytesIO(serialized_resource(after)),proof)

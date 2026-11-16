@@ -464,9 +464,11 @@ def build(args, *, resource_guard=None):
         static_parts, static_ui_report = static_ui_members(base, ui_language,
             existing_replacements=existing_replacements)
         existing_replacements.update(static_parts)
-        from idoly_local.static_ui_images import android_members as static_image_members
+        from idoly_local.static_ui_images import (LOGO_ANDROID_MEMBER, LOGO_LAYOUT_POLICY,
+            android_members as static_image_members)
         image_parts, static_images_report = static_image_members(base, language=ui_language,
-            image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko")
+            image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko",
+            existing_replacements=existing_replacements)
         from idoly_local.static_ui_textures import android_members as static_texture_members
         texture_parts, texture_report = static_texture_members(base, language=ui_language,
             image_dir=getattr(args, "image_dir", None) or ROOT / "client-presentation/images/ko")
@@ -474,7 +476,14 @@ def build(args, *, resource_guard=None):
             raise ValueError("Sprite and direct texture replacements overlap")
         image_parts.update(texture_parts)
         static_images_report["direct_textures"] = texture_report
-        if existing_replacements.keys() & image_parts.keys():
+        overlap=existing_replacements.keys() & image_parts.keys()
+        logo=static_images_report.get("logo_layout",{})
+        composed={row["member"]:row for row in logo.get("members",[])}
+        if overlap and (logo.get("policy")!=LOGO_LAYOUT_POLICY or overlap!={LOGO_ANDROID_MEMBER}
+                or set(composed)!={LOGO_ANDROID_MEMBER}
+                or any(composed[name].get("input_sha256")!=hashlib.sha256(existing_replacements[name]).hexdigest()
+                       or composed[name].get("output_sha256")!=hashlib.sha256(image_parts[name]).hexdigest()
+                       or composed[name].get("only_three_position_size_spans_changed") is not True for name in overlap)):
             raise ValueError("Static image and text/font resource replacements overlap")
         existing_replacements.update(image_parts)
         gc.collect()

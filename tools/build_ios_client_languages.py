@@ -186,8 +186,9 @@ def _korean_csv(base):
 
 
 def _compare_korean_resources(original, prepared, image_proof):
-    """Permit only the declared button Sprite/private-Texture pairs to change."""
-    from idoly_local.static_ui_images import FIXED_LOVE_TEXT, TEXT_LAYOUT_POLICY
+    """Permit the finite text Sprite/Texture pairs and three logo transforms."""
+    from idoly_local.static_ui_images import (FIXED_LOVE_TEXT, TEXT_LAYOUT_POLICY,
+        LOGO_LAYOUT_POLICY, LOGO_TRANSFORMS)
     changed = [row for row in image_proof["sprites"] if row["name"] in FIXED_LOVE_TEXT]
     _need(len(changed) == len(FIXED_LOVE_TEXT)
           and {row["name"] for row in changed} == set(FIXED_LOVE_TEXT)
@@ -197,6 +198,23 @@ def _compare_korean_resources(original, prepared, image_proof):
     allowed = {row["sprite_path_id"]: 213 for row in changed}
     allowed.update({row["private_texture_path_id"]: 28 for row in changed})
     _need(len(allowed) == 2 * len(FIXED_LOVE_TEXT), "Korean button object IDs overlap")
+    logo=image_proof.get("logo_layout",{})
+    transforms=logo.get("transforms",[])
+    _need(logo.get("policy")==LOGO_LAYOUT_POLICY and logo.get("platform")=="ios"
+          and logo.get("uniform_scale")==0.75 and logo.get("content_size")==[94.5,24.0]
+          and logo.get("full_translated_glyphs_preserved") is True
+          and logo.get("all_other_object_bytes_identical") is True
+          and len(transforms)==3 and {row["name"] for row in transforms}==set(LOGO_TRANSFORMS),
+          "Korean whole-logo layout proof is incomplete")
+    logo_hashes={}
+    for row in transforms:
+        target=LOGO_TRANSFORMS[row["name"]]; source=target["ios"]
+        _need(row.get("path_id")==source["path_id"] and row.get("class_id")==224
+              and row.get("input_sha256")==source["sha256"] and row.get("only_position_and_size_changed") is True
+              and row.get("position")==[target["x"],0.0] and row.get("size")==[target["width"],24.0]
+              and row.get("uniform_scale")==0.75 and row["path_id"] not in allowed,
+              "Korean whole-logo target differs")
+        allowed[row["path_id"]]=224; logo_hashes[row["path_id"]]=row
     before, after = _resource_index(original), _resource_index(prepared)
     _need(before["types"] == after["types"] and before["count"] == after["count"]
           and before["metadata"][:24] == after["metadata"][:24]
@@ -209,16 +227,26 @@ def _compare_korean_resources(original, prepared, image_proof):
     for old, new in zip(_resource_rows(before), _resource_rows(after)):
         _need(old[0] == new[0] and old[3] == new[3], "Korean resource object order or type changed")
         path, _, _, kind = old
-        hashes = []
+        hashes, payloads = [], []
         for number, (stream, index, row) in enumerate(((original, before, old), (prepared, after, new))):
             _skip(stream, index["offset"] + row[1] - positions[number])
             digest = hashlib.sha256(); remaining = row[2]
+            captured=bytearray() if path in logo_hashes else None
+            if captured is not None: _need(remaining==108,"Korean whole-logo object length differs")
             while remaining:
                 block = _exact(stream, min(CHUNK, remaining)); digest.update(block); remaining -= len(block)
+                if captured is not None: captured.extend(block)
+            if captured is not None: payloads.append(bytes(captured))
             positions[number] = index["offset"] + row[1] + row[2]
             hashes.append(digest.hexdigest())
         if path in allowed:
             _need(before["types"][kind][0] == allowed[path], "Declared Korean object has a different class")
+            if path in logo_hashes:
+                row=logo_hashes[path]
+                from idoly_local.static_ui_images import _logo_rect
+                expected,_=_logo_rect(payloads[0],row["name"],"ios")
+                _need(old[2]==new[2]==108 and hashes==[row["input_sha256"],row["output_sha256"]]
+                      and payloads[1]==expected,"Korean whole-logo serialized bytes differ")
             differences.append({"path_id": path, "class_id": allowed[path], "before_sha256": hashes[0],
                                 "after_sha256": hashes[1], "changed": hashes[0] != hashes[1]})
         else:
