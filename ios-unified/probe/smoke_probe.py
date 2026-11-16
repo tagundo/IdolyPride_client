@@ -920,7 +920,7 @@ class AccountFixtureHarness:
     This is test-only SQLite fixture production, never a product server command
     and never evidence of actual game progression or Files row interaction.
     """
-    def __init__(self, container, schema, *, nonce=None):
+    def __init__(self, container, schema, *, descriptor_sha256, nonce=None):
         candidate=Path(container)
         require(candidate.is_absolute() and candidate.is_dir() and not candidate.is_symlink(),"settings_account_fixture_failed")
         self.container = candidate.resolve(strict=True)
@@ -929,6 +929,10 @@ class AccountFixtureHarness:
         require(self.documents.is_dir() and not self.documents.is_symlink(),"settings_account_fixture_failed")
         self.root = self.container/"Library/Application Support/IdolyPrideLocal"
         self.schema = schema
+        # Package bytes and the canonical descriptor identity are separate:
+        # Schema sorts FileDescriptorSet entries for its account fingerprint.
+        require(_hex_digest(descriptor_sha256), "settings_account_fixture_failed")
+        self.descriptor_sha256 = descriptor_sha256
         self.nonce = nonce if nonce is not None else uuid.uuid4().hex
         require(type(self.nonce) is str and re.fullmatch(r"[0-9a-f]{32}", self.nonce), "settings_account_fixture_failed")
         self.source = "probe-acct-" + self.nonce[:12] + "-clone"
@@ -983,7 +987,10 @@ class AccountFixtureHarness:
         bundle, revision = found
         bundle = deepcopy(bundle)
         tables = bundle["tables"]
-        require(set(tables) == set(ACCOUNT_TABLES), "settings_account_fixture_failed")
+        require(set(tables) == set(ACCOUNT_TABLES)
+                and all(row["schema_sha256"] == self.schema.fingerprint
+                    for rows in tables.values() for row in rows if "schema_sha256" in row),
+                "settings_account_fixture_failed")
         suffix = PUBLIC_PROBE_FIELD if phase == "source" else PUBLIC_PROBE_FIELD[:-1] + b"\x02"
         require(19000 not in self.schema.response_type("/api.User/Get").DESCRIPTOR.fields_by_number,
                 "settings_account_fixture_failed")
@@ -1050,7 +1057,7 @@ class AccountFixtureHarness:
         mode = request["mode"]
         require(self.mode in (None, mode) and self.root.is_dir() and not self.root.is_symlink()
                 and hashlib.sha256(read_bounded(self.root/"protocol/idolypride-6.1.1.pb", MAX_DESCRIPTOR)).hexdigest()
-                    == self.schema.fingerprint
+                    == self.descriptor_sha256
                 and selection_status(self.root)["selected"][mode] == "sandbox", "settings_account_fixture_failed")
         require(not self.ack.exists() and not self.ack.is_symlink(), "settings_account_fixture_failed")
         self.mode = mode
@@ -2276,7 +2283,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 path = candidate/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         container = candidate
-        account_harness = AccountFixtureHarness(container, schema)
+        account_harness = AccountFixtureHarness(container, schema, descriptor_sha256=report["descriptor_sha256"])
         report["fresh_local_state_before_launch"] = True
         stage = "app_launch"
         try:

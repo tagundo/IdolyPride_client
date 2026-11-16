@@ -3215,13 +3215,13 @@ def account_fixture_schema(path):
         ("Photo","SwitchLock","Empty","Receipt"),("Quest","Start","Empty","Receipt")):
         entry=file.service.add(name=service)
         entry.method.add(name=method,input_type=".api."+request,output_type=".api."+response)
-    descriptor=descriptor_pb2.FileDescriptorSet(file=[file]).SerializeToString()
+    # The real package preserves descriptor order and unknown information;
+    # Schema uses sorted files for its separate canonical account identity.
+    prefix = descriptor_pb2.FileDescriptorProto(name="account-native-observer-prefix.proto", package="probe", syntax="proto3")
+    descriptor=descriptor_pb2.FileDescriptorSet(file=[file,prefix]).SerializeToString()+probe.PUBLIC_PROBE_FIELD
     path.parent.mkdir(parents=True,exist_ok=True)
     path.write_bytes(descriptor)
-    schema = Schema.from_descriptor_set(path)
-    # Bind the fixture file to Schema's canonical descriptor fingerprint, as in a packaged runtime.
-    schema.export(path)
-    return schema
+    return Schema.from_descriptor_set(path)
 
 
 @pytest.fixture
@@ -3239,7 +3239,8 @@ def real_account_observer(tmp_path):
     response.userPublic.publicUserId=identity["public_id"]
     state.save_snapshot("sandbox",response.SerializeToString()+b"\x80\x4b\x7b",schema.fingerprint,starter_version=7)
     state.login("sandbox")
-    observer=REAL_ACCOUNT_FIXTURE_HARNESS(tmp_path/"container",schema,nonce="1"*32)
+    observer=REAL_ACCOUNT_FIXTURE_HARNESS(tmp_path/"container",schema,
+        descriptor_sha256=hashlib.sha256((root/"protocol/idolypride-6.1.1.pb").read_bytes()).hexdigest(),nonce="1"*32)
     manager=AccountManager(root,schema=schema)
     manager.command("accounts_clone",{"mode":"normal","source_profile":"sandbox","profile":observer.source,
         "expected_revision":state.account_snapshot("sandbox")[1]})
@@ -3285,7 +3286,8 @@ def complete_account_observer(observer, manager, state):
 
 def test_owned_simulator_fixture_uses_real_schema_seven_tables_unknown_blobs_and_full_archive(real_account_observer):
     observer,manager,state=real_account_observer
-    assert observer.schema.fingerprint == hashlib.sha256((observer.root/"protocol/idolypride-6.1.1.pb").read_bytes()).hexdigest()
+    assert observer.descriptor_sha256 == hashlib.sha256((observer.root/"protocol/idolypride-6.1.1.pb").read_bytes()).hexdigest()
+    assert observer.schema.fingerprint != observer.descriptor_sha256
     native,source_ack,target_ack=complete_account_observer(observer,manager,state)
     proof=observer.verify(native)
     assert all(proof["checks"].values())
@@ -3296,6 +3298,27 @@ def test_owned_simulator_fixture_uses_real_schema_seven_tables_unknown_blobs_and
     assert probe.PUBLIC_PROBE_FIELD in state.snapshot(observer.source)[0]
     assert (probe.PUBLIC_PROBE_FIELD[:-1]+b"\x02") in state.snapshot(observer.target)[0]
     assert all(observer.verify_persisted()["checks"].values())
+
+
+@pytest.mark.parametrize("case",["descriptor_raw","account_schema"])
+def test_account_fixture_checks_raw_package_and_canonical_account_schema_independently(real_account_observer,case):
+    from idoly_local.schema import Schema
+    observer,manager,state=real_account_observer
+    if case == "descriptor_raw":
+        descriptor=observer.root/"protocol/idolypride-6.1.1.pb"
+        descriptor.write_bytes(descriptor.read_bytes()+probe.PUBLIC_PROBE_FIELD)
+        # Same canonical schema does not authorize different package bytes.
+        assert Schema.from_descriptor_set(descriptor).fingerprint == observer.schema.fingerprint
+        assert hashlib.sha256(descriptor.read_bytes()).hexdigest() != observer.descriptor_sha256
+    else:
+        with state.connect() as db:
+            db.execute("UPDATE snapshots SET schema_sha256=? WHERE profile=?",("0"*64,observer.source))
+    before=state.account_snapshot(observer.source)
+    account_seed_request(observer)
+    with pytest.raises(probe.ProbeError,match="settings_account_fixture_failed"):
+        observer.process()
+    assert state.account_snapshot(observer.source) == before
+    assert not observer.ack.exists()
 
 
 @pytest.mark.parametrize("case",["nonce","active_target","mode","phase","schema_bool","run_bool",
