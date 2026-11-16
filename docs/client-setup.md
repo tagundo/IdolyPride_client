@@ -1,6 +1,6 @@
 # 같은 기기에서 로컬 게임·서버 앱 실행
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)의 서버 앱과 로컬 게임 클라이언트를 함께 설치합니다. **터미널·Python·Termux 없이 서버 앱의 버튼으로 실행합니다.** Android는 같은 Android 기기에서, PlayCover는 같은 Mac에서 서버와 게임을 실행합니다.
+[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 환경에 맞는 파일을 받습니다. **Android는 서버 APK와 게임 APK 하나를 같은 기기에 설치하고, iPhone·iPad와 Mac/PlayCover는 같은 서버·게임 통합 IPA 하나를 설치합니다.** 터미널·Python·Termux 없이 앱의 버튼으로 실행합니다. 현재 공개 파일과 버전은 [README](../README.md#앱으로-실행하기)를 확인합니다. 아래의 Android v0.3.0 진단 기록은 당시 동작과 수정 이력입니다.
 
 현재 서버 앱은 [v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0)입니다. 비공개 저장소이므로 접근 권한이 있는 GitHub 계정으로 로그인해 다운로드합니다. 사용자 Android 기기에서 로컬 로그인·홈과 캐릭터 표시·편성·초기 튜토리얼 전체 진행을 확인했습니다. 일반 라이브 플레이와 PlayCover 게임의 화면 진행 검증은 남아 있습니다.
 
@@ -87,24 +87,19 @@
 
 ## Mac + PlayCover
 
-Apple Silicon Mac과 macOS 13 이상이 필요합니다. Python·Homebrew 설치는 필요하지 않습니다. 릴리스에서 다음 두 파일을 받습니다.
+Apple Silicon Mac과 PlayCover가 필요합니다. iPhone·iPad와 같은 **서버·게임 통합 IPA 하나**를 받습니다. 새 날짜 버전의 파일명은 `IdolyPride-<날짜버전>-Unified-iOS.ipa`이며, 현재 공개 v0.3.35의 이름은 `IdolyPride-6.1.1-Unified-iOS.ipa`입니다. 다음 릴리즈에는 별도 Mac 서버 앱과 별도 PlayCover IPA를 포함하지 않습니다.
 
-| 파일 | 용도 |
-| --- | --- |
-| `IdolyPride-Local-Server-macOS-arm64.app.zip` | 서버 v0.3.0 앱 |
-| `IdolyPride-6.1.1-Local-PlayCover.ipa` | PlayCover용 로컬 게임 클라이언트 |
+1. 기존 별도 Mac 서버를 사용했다면 완전히 종료합니다.
+2. PlayCover 앱 목록에서 통합 IPA를 가져와 설치·재서명합니다.
+3. 설치한 **아이프라 로컬**을 실행합니다. 앱 안에 서버가 포함되며 서버 메뉴가 먼저 열립니다.
+4. 사용할 언어를 선택하고 서버 준비가 끝나면 **게임 시작**을 누릅니다. 게임과 서버는 같은 앱에서 실행됩니다.
+5. 게임 중에는 오른쪽 위를 **2초간 길게 눌러** 서버 메뉴를 엽니다. Mac의 **로컬 서버 설정… / ⌘⇧,**도 사용할 수 있습니다.
 
-1. ZIP을 풀어 `IdolyPrideLocalServer.app`을 **응용 프로그램** 폴더로 옮깁니다.
-2. PlayCover를 먼저 열어 앱 목록 창이 표시될 때까지 기다린 뒤, 그 창에서 로컬 IPA를 가져와 설치·재서명합니다. 별도의 **아이프라 로컬**이 설치됩니다.
-3. 서버 앱을 열어 **서버 시작**을 누릅니다. 앱은 ad-hoc 서명이며 Apple 공증은 포함되지 않습니다. macOS가 실행을 차단하면 **시스템 설정 → 개인정보 보호 및 보안**에서 해당 앱의 실행을 허용합니다.
-4. **로컬 서버가 실행 중입니다**가 표시되면 PlayCover 앱 목록의 **아이프라 로컬**을 더블클릭합니다. 설치 후 첫 실행은 이 경로로 진행합니다.
-5. 게임을 사용하는 동안 서버 앱을 켜 둡니다. **중지**를 누르거나 앱을 종료하면 서버도 종료됩니다.
-
-데이터는 `~/Library/Application Support/IdolyPrideLocal`에 저장합니다. 서버 앱의 **데이터 폴더** 버튼으로 열 수 있습니다. 서버 앱 교체·업데이트와 별개로 보존하며, 백업하려면 서버를 중지한 뒤 이 폴더를 복사합니다. 로컬 게임의 bundle ID는 `game.qualiarts.idolypride.local`입니다.
+계정·설정은 통합 IPA의 앱 컨테이너 안 `Library/Application Support/IdolyPrideLocal`에 저장됩니다. 앱 삭제 전에 필요한 계정 ZIP과 리소스 ZIP을 각각 내보냅니다. 리소스 ZIP에는 계정이 포함되지 않습니다. 이전 별도 Mac 서버의 `~/Library/Application Support/IdolyPrideLocal`과는 저장 위치가 다르며 자동 이전되지 않습니다. [통합 IPA 안내](../ios-unified/README.md)와 [계정 ZIP 안내](server-user-management.md)를 참고합니다.
 
 ## 포함된 데이터와 저장 상태
 
-두 서버 앱은 게임 API `127.0.0.1:50051`, 마스터 파일 `127.0.0.1:8080`을 사용합니다. `127.0.0.1`은 게임을 실행하는 기기 자체입니다. 같은 포트의 소스 서버나 Termux 서버를 함께 실행하지 않습니다.
+Android 서버 앱과 통합 IPA의 내장 서버는 게임 API `127.0.0.1:50051`, 마스터 파일 `127.0.0.1:8080`을 사용합니다. `127.0.0.1`은 게임을 실행하는 기기 자체입니다. 같은 포트의 소스 서버나 Termux 서버를 함께 실행하지 않습니다.
 
 v0.3.0에는 6.1.1 스키마, 원본 암호화 마스터 202개, 시작 데이터용 JSON, 공개 약관·도움말 응답 10개와 공개 튜토리얼 재생·스토리 기본 목록이 포함됩니다. 첫 실행은 이 공개 데이터를 준비하며 공식 로그인이나 계정 수집을 실행하지 않습니다. 모델·음성·영상 등의 전체 Octo 리소스가 포함된 것은 아닙니다. 위 진단 게임과 서버 상태 UI는 Android용입니다.
 
@@ -130,12 +125,12 @@ v0.3.0에는 6.1.1 스키마, 원본 암호화 마스터 202개, 시작 데이�
 
 **v0.3.0 베타에는 [첫 메인 라이브 실험 기능](first-live-support.md)이 포함됩니다.** 기본값은 꺼짐이며 서버를 중지한 뒤 해당 옵션을 선택해 시작합니다. 첫 메인 퀘스트만 로컬 규칙으로 계산하고 공식 점수 일치는 검증되지 않았습니다. 실제 게임의 일반 라이브 재생·결과 화면 검증은 남아 있습니다.
 
-| 데이터 | Android 서버 앱 | Mac 서버 앱 |
+| 데이터 | Android 서버 앱 | 통합 IPA / PlayCover |
 | --- | --- | --- |
-| 상태 DB | 앱 전용 `files/data/state.db` | `~/Library/Application Support/IdolyPrideLocal/state.db` |
-| 공개 스키마·마스터·JSON | 앱 전용 `files/data/` 아래 | 위 데이터 폴더 아래 |
-| 앱 업데이트 | 같은 서명으로 설치하면 DB 유지 | 데이터 폴더 유지 |
-| 앱 삭제 | 앱 데이터도 삭제 | 데이터 폴더는 별도 보관 |
+| 상태 DB | 앱 전용 `files/data/state.db` | 앱 컨테이너 `Library/Application Support/IdolyPrideLocal/state.db` |
+| 공개 스키마·마스터·JSON | 앱 전용 `files/data/` 아래 | 위 앱 컨테이너의 데이터 폴더 아래 |
+| 앱 업데이트 | 같은 서명으로 설치하면 DB 유지 | 같은 앱의 컨테이너를 유지하는 업데이트 사용 |
+| 앱 삭제 | 앱 데이터도 삭제 | 컨테이너가 삭제될 수 있으므로 먼저 계정·리소스 내보내기 |
 
 서버 앱에는 공식 계정 인증정보가 없습니다. 기존 계정의 snapshot·응답·PlayCover Firebase archive를 보존하는 개발 도구는 [README의 계정 보존 절차](../README.md#로그인된-공식-세션에서-보존)를 참고합니다. Firebase archive는 현재 게임 세션 metadata와 다르며 새 로컬 앱이 공식 계정을 자동 복원하지 않습니다. archive·토큰·세션 파일을 채팅이나 공개 저장소에 올리지 않습니다.
 
@@ -145,7 +140,7 @@ v0.3.0에는 6.1.1 스키마, 원본 암호화 마스터 202개, 시작 데이�
 
 ARM64 스텁은 원본 해시·진입 바이트를 검사하며 Unicorn에서 반환 구조·레지스터·스택 보존을 실행 검증했습니다. Android 게임 APK의 서명·16KiB 정렬도 확인했습니다. native 코드 분석에서 `http` 주소가 `YetAnotherHttpHandler.Http2Only`를 설정하는 h2c 경로와 `https` 전용 인증서 분기를 확인했습니다. 실제 사용자 Android 기기에서 로컬 로그인·홈과 캐릭터 표시·편성·초기 튜토리얼 완료를 확인했습니다. 별도 자동 점검의 화면·요청과 한계는 [실제 게임 자동 점검](actual-game-qa.md)에 정리했습니다.
 
-Mac 서버 앱의 시작·중지와 묶음 엔진의 API 검증은 통과했지만, PlayCover 게임의 실제 화면 진행 검증은 별도 진행 중입니다. 일반 라이브 플레이는 Android·PlayCover 모두 검증이 남아 있습니다.
+Mac/PlayCover는 통합 IPA의 내장 서버를 사용합니다. Apple SDK·Simulator 검증과 PlayCover·iPhone·iPad에서의 실제 Unity 게임 실행 검증은 별개이며, 실제 기기의 일반 라이브 플레이 검증 범위는 각 릴리즈 기록을 확인합니다.
 
 Firebase Analytics·푸시 알림·구매 SDK 호출과 Octo 리소스 경로는 남아 있습니다. 현재 패치는 인증 부팅의 온라인 의존성을 줄이며 완전한 네트워크 격리나 전체 게임 플레이를 보장하지 않습니다.
 
