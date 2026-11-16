@@ -249,3 +249,26 @@ def test_missing_required_control_between_visible_event_positions_is_a_hard_fail
     with pytest.raises(RuntimeError, match="missing within"):
         probe.find_event_control(guest, "idoly.events.catalog", "missing-control")
     assert guest.actions == []
+
+
+def test_partial_overlap_with_click_center_outside_is_not_a_visible_event_target(monkeypatch):
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    actual = ET.fromstring((DIRECTORY / "fixtures/event-catalog-below-3bf.xml").read_text())
+    area = next(node for node in actual.iter("node") if node.get("class") == "android.widget.ScrollView")
+    clipped = ET.SubElement(area, "node", {"content-desc": "idoly.events.catalog", "enabled": "true", "bounds": "[88,2100][992,2232]"})
+    assert probe.event_visible(clipped, actual) is False
+    guest = NavigationGuest([ET.tostring(actual, encoding="unicode"), target_xml()])
+    found = probe.find_event_control(guest, "idoly.events.catalog", "clipped-center")
+    assert found.get("bounds") == "[88,900][992,1032]"
+    assert len(guest.actions) == 1 and guest.actions[0][:3] == ("shell", "input", "swipe")
+
+
+def test_partially_clipped_control_remains_usable_when_observed_click_center_is_inside():
+    tree = ET.fromstring(viewport_xml())
+    area = next(node for node in tree.iter("node") if node.get("class") == "android.widget.ScrollView")
+    node = ET.SubElement(area, "node", {"content-desc": "idoly.events.enabled", "bounds": "[88,2060][992,2150]"})
+    assert probe.event_visible(node, tree) is True
+    node.set("bounds", "[1000,900][1100,1000]")
+    assert probe.event_visible(node, tree) is False
+    node.set("bounds", "[1000,900][1060,1000]")
+    assert probe.event_visible(node, tree) is True

@@ -37,8 +37,10 @@ def event_visible(node, tree):
     if area is None or node.get("visible-to-user") == "false":
         return False
     viewport = event_viewport(tree)
+    center_x, center_y = (area[0]+area[2])//2, (area[1]+area[3])//2
     return (max(area[0], viewport[0]) < min(area[2], viewport[2])
-            and max(area[1], viewport[1]) < min(area[3], viewport[3]))
+            and max(area[1], viewport[1]) < min(area[3], viewport[3])
+            and viewport[0] <= center_x < viewport[2] and viewport[1] <= center_y < viewport[3])
 
 
 def event_navigation(description):
