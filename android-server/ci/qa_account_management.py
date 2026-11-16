@@ -32,7 +32,11 @@ def bounds(node):
     return None
 
 
-def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16, node_filter=None):
+def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16, node_filter=None,
+         scroll_profile="default"):
+    if scroll_profile not in ("default", "event"):
+        raise ValueError("Account QA settings scroll profile is invalid")
+    divisor, duration = (2, "975") if scroll_profile == "event" else (3, "650")
     for attempt in range(attempts):
         tree = qa.capture(stage + "-" + str(attempt))
         matching = [node for node in tree.iter("node") if predicate(node) and bounds(node)
@@ -49,9 +53,10 @@ def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16, nod
             raise RuntimeError("Account QA expected a visible settings scroll view: " + stage)
         area = max(scrolling, key=lambda node: (bounds(node)[2]-bounds(node)[0])*(bounds(node)[3]-bounds(node)[1]))
         left, top, right, bottom = bounds(area)
-        # A fast full-height swipe flings past entire button groups on API 30.
-        # Move through the central third slowly so successive observations overlap.
-        travel = max(24, (bottom-top)//3)
+        # Default account navigation retains its central third and 650ms duration.
+        # Event navigation crosses the expanded graphics/library cards in half a
+        # viewport at the same speed, keeping successive observations overlapping.
+        travel = max(24, (bottom-top)//divisor)
         x = (left+right)//2
         y1 = (top+bottom)//2 - travel//2
         y2 = y1 + travel
@@ -62,9 +67,9 @@ def find(qa, predicate, stage, direction=None, *, enabled=True, attempts=16, nod
         else:
             observed_direction = direction
         if observed_direction == "up":
-            qa.adb("shell", "input", "swipe", str(x), str(y1), str(x), str(y2), "650")
+            qa.adb("shell", "input", "swipe", str(x), str(y1), str(x), str(y2), duration)
         else:
-            qa.adb("shell", "input", "swipe", str(x), str(y2), str(x), str(y1), "650")
+            qa.adb("shell", "input", "swipe", str(x), str(y2), str(x), str(y1), duration)
         time.sleep(.25)
     raise RuntimeError("Account QA native control was not observed enabled: " + stage)
 

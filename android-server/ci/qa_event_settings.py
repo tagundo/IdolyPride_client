@@ -77,7 +77,7 @@ def event_navigation(description):
 
 def find_event_control(qa, description, stage):
     return find(qa, lambda node: node.get("content-desc") == description,
-                stage, event_navigation(description), node_filter=event_visible)
+                stage, event_navigation(description), node_filter=event_visible, scroll_profile="event")
 
 
 def runtime_settings(asset_port):

@@ -159,7 +159,7 @@ def test_captured_actual_resource_viewport_navigates_up_toward_event_card(monkey
     guest = NavigationGuest([actual, target_xml()])
     node = probe.find_event_control(guest, "idoly.events.catalog", "lower")
     assert node.get("enabled") == "true"
-    assert guest.actions == [("shell", "input", "swipe", "540", "1180", "540", "1653", "650")]
+    assert guest.actions == [("shell", "input", "swipe", "540", "1062", "540", "1771", "975")]
     assert guest.captures == ["lower-0", "lower-1"]
 
 
@@ -167,7 +167,7 @@ def test_above_account_section_navigates_down_and_visible_target_never_scrolls(m
     monkeypatch.setattr(account.time, "sleep", lambda _: None)
     guest = NavigationGuest([viewport_xml("idoly.accounts.create"), target_xml()])
     probe.find_event_control(guest, "idoly.events.catalog", "upper")
-    assert guest.actions == [("shell", "input", "swipe", "540", "1653", "540", "1180", "650")]
+    assert guest.actions == [("shell", "input", "swipe", "540", "1771", "540", "1062", "975")]
     visible = NavigationGuest([target_xml()])
     probe.find_event_control(visible, "idoly.events.catalog", "visible")
     assert visible.actions == [] and visible.captures == ["visible-0"]
@@ -272,3 +272,51 @@ def test_partially_clipped_control_remains_usable_when_observed_click_center_is_
     assert probe.event_visible(node, tree) is False
     node.set("bounds", "[1000,900][1060,1000]")
     assert probe.event_visible(node, tree) is True
+
+
+@pytest.mark.parametrize("phase", [0, 1, 354, 708])
+def test_half_viewport_event_navigation_covers_long_content_without_skipping_target(monkeypatch, phase):
+    """A 10kpx synthetic path exceeds the observed failed run's 7014px travel.
+
+    Use the actual 1419px viewport, a 132px control, and several target positions
+    across one whole 709px step. This is host navigation coverage, not Native QA.
+    """
+    monkeypatch.setattr(account.time, "sleep", lambda _: None)
+    class LongContentGuest:
+        def __init__(self):
+            self.offset, self.actions, self.captures = 10000+phase, [], []
+        def capture(self, stage):
+            self.captures.append(stage)
+            center = 1416-self.offset
+            if 66 <= center < 2300:
+                return ET.fromstring(target_xml().replace("[88,900][992,1032]",
+                    "[88,"+str(center-66)+"][992,"+str(center+66)+"]"))
+            return ET.fromstring(viewport_xml(text="그래픽·촬영 화면 ▴"))
+        def adb(self, *args):
+            self.actions.append(args)
+            self.offset -= int(args[6])-int(args[4])
+            return ""
+    guest = LongContentGuest()
+    node = probe.find_event_control(guest, "idoly.events.catalog", "long-content")
+    assert probe.event_visible(node, ET.fromstring(viewport_xml()))
+    assert 1 < len(guest.captures) <= 16 and len(guest.actions) == len(guest.captures)-1
+    assert all(action == ("shell", "input", "swipe", "540", "1062", "540", "1771", "975")
+               for action in guest.actions)
+    # Overlap is larger than a whole control and covers every intermediate center.
+    assert 1419-709 == 710 and 710 > 132
+    # 709px / 975ms preserves the previously observed 473px / 650ms speed.
+    assert abs(709/975 - 473/650) < .001
+    default_guest = LongContentGuest()
+    with pytest.raises(RuntimeError, match="not observed enabled"):
+        account.find(default_guest, lambda n: n.get("content-desc") == "idoly.events.catalog",
+                     "long-default", probe.event_navigation("idoly.events.catalog"), node_filter=probe.event_visible)
+    assert len(default_guest.captures) == 16 and len(default_guest.actions) == 16
+    assert all(action == ("shell", "input", "swipe", "540", "1180", "540", "1653", "650")
+               for action in default_guest.actions)
+
+
+def test_unknown_scroll_profile_fails_before_any_capture_or_input():
+    guest = NavigationGuest([])
+    with pytest.raises(ValueError, match="scroll profile"):
+        account.find(guest, lambda _: False, "unknown-profile", "up", scroll_profile="unobserved")
+    assert guest.captures == [] and guest.actions == []
