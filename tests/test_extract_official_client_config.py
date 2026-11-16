@@ -225,3 +225,24 @@ def test_scope_failures_name_exact_failed_check(field,value,code):
     with pytest.raises(extractor.ConfigExtractionError) as error:
         extractor.parse_ios_config(plistlib.dumps(data),plistlib.dumps(info()))
     assert error.value.code == code
+
+
+def test_real_shaped_original_arm64_split_inherits_base_version_name():
+    raw = badging(split=True).replace("versionName='6.1.1'", "versionName=''")
+    value = extractor.parse_android_badging(raw)
+    assert value["split"] == "config.arm64_v8a" and value["versionName"] == ""
+    assert value["versionCode"] == "414" and value["name"] == extractor.BUNDLE_ID
+
+
+@pytest.mark.parametrize("raw,code", [
+    (badging().replace("versionName='6.1.1'", "versionName=''"), "android_version_mismatch"),
+    (badging(split=True).replace("versionName='6.1.1'", "versionName='6.2.0'"), "android_version_mismatch"),
+    (badging(split=True).replace("versionName='6.1.1'", "versionName='' ").replace("config.arm64_v8a", "config.x86_64"), "android_split_mismatch"),
+    (badging(split=True).replace("config.arm64_v8a", "config.arm64_v8a-extra"), "android_split_mismatch"),
+    (badging(split=True).replace(" versionName='6.1.1'", ""), "android_version_mismatch"),
+    (badging(split=True).replace("versionCode='414'", "versionCode='415'").replace("versionName='6.1.1'", "versionName=''"), "android_version_code_mismatch"),
+])
+def test_split_version_inheritance_never_relaxes_base_or_split_scope(raw,code):
+    with pytest.raises(extractor.ConfigExtractionError) as stopped:
+        extractor.parse_android_badging(raw)
+    assert stopped.value.code == code

@@ -175,7 +175,14 @@ def parse_android_badging(raw, *, diagnostics=False):
             "app_version":value.get("versionName"), "version_code":value.get("versionCode"),
             "split":value.get("split", "<base>")})
     need(value.get("name") == BUNDLE_ID, "android_package_mismatch")
-    need(value.get("versionName") == APP_VERSION, "android_version_mismatch")
+    if "split" in value:
+        # The SHA-pinned ARM64 configuration split inherits the base app's
+        # versionName. SDK34 reports its own versionName as an empty string.
+        # No other split or missing/wrong version is accepted by this rule.
+        need(value["split"] == "config.arm64_v8a", "android_split_mismatch")
+        need(value.get("versionName") in ("", APP_VERSION), "android_version_mismatch")
+    else:
+        need(value.get("versionName") == APP_VERSION, "android_version_mismatch")
     need(value.get("versionCode") == "414", "android_version_code_mismatch")
     return value
 
