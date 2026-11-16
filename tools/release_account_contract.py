@@ -3,7 +3,7 @@ from copy import deepcopy
 import re
 
 TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
-          "profile_lesson_progress", "preference_receipts", "main_live_attempts")
+          "profile_lesson_progress", "preference_receipts", "main_live_attempts", "profile_love_progress")
 CHECKS = ("normal_account_created", "media_account_created", "mode_isolation",
     "clone_all_tables_preserved", "archive_full_sha256_verified",
     "new_import_all_tables_preserved", "new_import_has_no_sessions",

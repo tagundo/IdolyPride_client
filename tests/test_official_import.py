@@ -198,6 +198,12 @@ def populate(env, profile, mode="normal"):
             "5","a"*64,env.schema.fingerprint,b"\x08\x03"+UNKNOWN))
         db.execute("INSERT INTO main_live_attempts VALUES (?,?,?,?,?,?,?,?,?,?)",(profile,"9","b"*64,"/api.Quest/Start",
             env.schema.fingerprint,"master","rules","42",1800000000000,b"\x08\x04"+UNKNOWN))
+    progress = {"schema":1,"love_id":"love-23-0514","player_name":"Old Love","registered_ms":1,"exp":77,
+        "lesson_anchor_ms":1,"last_play_ms":2,"path":["love-event-story-love-23-0514-001"],
+        "choices":{},"past_choices":{},"current":None,"saves":[],"promotion_day":"2026-11-16","promotion_used":0}
+    with state.connect() as db:
+        db.execute("INSERT INTO profile_love_progress VALUES (?,?,?,?,?)",(profile,"love-23-0514",
+            json.dumps(progress,indent=1).encode()+b"\n",env.schema.fingerprint,"c"*64))
     return state
 
 
@@ -239,9 +245,9 @@ def test_fetch_stages_only_exact_user_data_and_apply_creates_normal_slot_without
     assert state.snapshot("imported") == (original,env.schema.fingerprint)
     bundle, revision = state.account_snapshot("imported")
     assert set(bundle["tables"]) == {"profiles","snapshots","starter_profiles","profile_settings",
-        "profile_lesson_progress","preference_receipts","main_live_attempts"}
+        "profile_lesson_progress","preference_receipts","main_live_attempts","profile_love_progress"}
     assert bundle["tables"]["starter_profiles"] == [{"profile":"imported","version":0}]
-    assert all(not bundle["tables"][key] for key in ("profile_settings","profile_lesson_progress","preference_receipts","main_live_attempts"))
+    assert all(not bundle["tables"][key] for key in ("profile_settings","profile_lesson_progress","preference_receipts","main_live_attempts","profile_love_progress"))
     assert state.profile("imported")["server_id"] == SERVER
     assert state.profile("imported")["public_id"] == PUBLIC
     assert result["account"]["mode"] == "normal" and result["account"]["profile"] == "imported"

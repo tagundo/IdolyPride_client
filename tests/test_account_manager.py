@@ -54,6 +54,17 @@ def schema():
                            fingerprint=hashlib.sha256(b"account-schema").hexdigest())
 
 
+
+def love_progress_bytes(name="Love QA", *, love_id="love-23-0514", exp=123):
+    episode = "love-event-story-"+love_id+"-001"
+    choices = {episode: [{"group": 1, "index": 2, "valid": True}]}
+    value = {"schema": 1, "love_id": love_id, "player_name": name, "registered_ms": 1,
+        "exp": exp, "lesson_anchor_ms": 1, "last_play_ms": 2, "path": [episode],
+        "choices": choices, "past_choices": {episode: {"1": [1, 2]}}, "current": None,
+        "saves": [{"slot": 1, "name": "Save QA", "saved_ms": 2, "path": [episode], "choices": choices}],
+        "promotion_day": "2026-11-16", "promotion_used": 1}
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=1).encode()+b"\n"
+
 def populated(state, schema, profile, label="Manager"):
     identity = state.ensure_profile(profile)
     response = schema.response_type("/api.User/Get")()
@@ -71,6 +82,8 @@ def populated(state, schema, profile, label="Manager"):
         db.execute("INSERT INTO main_live_attempts VALUES (?,?,?,?,?,?,?,?,?,?)", (
             profile, "9", "b"*64, "/api.Quest/Start", schema.fingerprint, "master", "rules-v1",
             str((1<<64)-1), 1794810000000, b"\x08\x01"+UNKNOWN))
+        db.execute("INSERT INTO profile_love_progress VALUES (?,?,?,?,?)", (profile, "love-23-0514",
+            love_progress_bytes(), schema.fingerprint, "c"*64))
     return payload
 
 
@@ -491,3 +504,100 @@ def test_abandoned_temporary_copies_are_bounded_without_rotating_restore_points(
     assert len(list((manager.base/"imports").glob("*.zip"))) == 8
     assert (manager.base/"imports"/(staged["token"]+".zip")).is_file()
     assert manager.status()["restore_points"] == []
+
+
+def legacy_v1_archive(manager, source, target):
+    with ZipFile(source) as archive:
+        manifest = accounts._decode(archive.read("manifest.json"))
+        bundle = accounts._unpack(archive.read("account.json"))
+    bundle["schema"] = 1
+    bundle["tables"].pop("profile_love_progress")
+    raw = State.account_bytes(bundle)
+    manifest.update(schema=1, account_bytes=len(raw), account_sha256=hashlib.sha256(raw).hexdigest(),
+                    revision=State.account_revision(bundle))
+    with ZipFile(target,"w",compression=ZIP_STORED) as archive:
+        archive.writestr("manifest.json",accounts._json(manifest))
+        archive.writestr("account.json",raw)
+    return manifest,bundle
+
+
+def test_new_archives_include_exact_eighth_table_and_old_v1_imports_get_empty_love(manager,tmp_path):
+    create(manager)
+    before = manager._state("normal").account_snapshot("sandbox")
+    export = exported(manager)
+    with ZipFile(export["path"]) as archive:
+        manifest = accounts._decode(archive.read("manifest.json"))
+        bundle = accounts._unpack(archive.read("account.json"))
+    assert manifest["schema"] == bundle["schema"] == 2 and len(bundle["tables"]) == 8
+    assert bundle["tables"]["profile_love_progress"][0]["response"] == love_progress_bytes()
+    old = tmp_path/"old-v1.zip"
+    old_manifest,old_bundle = legacy_v1_archive(manager,export["path"],old)
+    original_file = old.read_bytes()
+    staged = manager.command("accounts_preview",{"path":str(old)})
+    assert staged["archive"]["revision"] == old_manifest["revision"]
+    result = importing(manager,staged["token"],"from-v1")
+    saved,revision = manager._state("normal").account_snapshot("from-v1")
+    assert saved["schema"] == 2 and saved["tables"]["profile_love_progress"] == []
+    for table,rows in old_bundle["tables"].items():
+        key = "name" if table == "profiles" else "profile"
+        assert saved["tables"][table] == [{**row,key:"from-v1"} for row in rows]
+    assert result["account"]["revision"] == revision
+    assert manager._state("normal").account_snapshot("sandbox") == before and old.read_bytes() == original_file
+
+
+def test_old_v1_restorepoint_binding_survives_upgrade_and_backups_remain_full_v2(manager,tmp_path):
+    create(manager,"target")
+    state = manager._state("normal"); before,revision = state.account_snapshot("target")
+    export = exported(manager,"target")
+    token = "f"*32
+    old = manager._directory("restore-points")/(token+".zip")
+    manifest,_bundle = legacy_v1_archive(manager,export["path"],old)
+    accounts._atomic(manager.base/"restore-index.json",[{"id":token,"mode":"normal","profile":"target",
+        "created_at":1,"revision":manifest["revision"]}])
+    result = manager.command("accounts_restore",{"mode":"normal","profile":"target","id":token,"expected_revision":revision})
+    restored,new_revision = state.account_snapshot("target")
+    assert restored["schema"] == 2 and restored["tables"]["profile_love_progress"] == []
+    assert result["restore_point"]["revision"] == revision
+    manager.command("accounts_restore",{"mode":"normal","profile":"target","id":result["restore_point"]["id"],
+        "expected_revision":new_revision})
+    assert state.account_snapshot("target") == (before,revision)
+
+
+@pytest.mark.parametrize("bad", ["unknown_json_field","duplicate_json_key","wrong_love_id","invalid_ruleset"])
+def test_invalid_love_archive_never_replaces_an_account_or_invalidates_sessions(manager,tmp_path,bad):
+    create(manager); create(manager,"target")
+    state = manager._state("normal"); before = state.account_snapshot("target"); session,_ = state.login("target")
+    export = exported(manager)
+    def mutation(members):
+        bundle = accounts._unpack(members["account.json"])
+        row = bundle["tables"]["profile_love_progress"][0]
+        if bad == "invalid_ruleset": row["ruleset_sha256"] = "0"*63
+        elif bad == "duplicate_json_key": row["response"] = b'{"schema":1,"schema":1}'
+        elif bad == "wrong_love_id": row["love_id"] = "love-24-1114"
+        else:
+            value = json.loads(row["response"]);value["unknown"] = 1
+            row["response"] = json.dumps(value).encode()
+        # Ruleset syntax is checked by State; do not repair it into a valid row.
+        if bad == "invalid_ruleset":
+            raw = json.dumps(bundle,sort_keys=True,separators=(",",":"),default=lambda value:{"$bytes":base64.b64encode(value).decode()}).encode()
+            revision = hashlib.sha256(raw).hexdigest()
+        else:
+            raw = State.account_bytes(bundle);revision = State.account_revision(bundle)
+        manifest = accounts._decode(members["manifest.json"])
+        manifest.update(account_bytes=len(raw),account_sha256=hashlib.sha256(raw).hexdigest(),revision=revision)
+        members["account.json"],members["manifest.json"] = raw,accounts._json(manifest)
+    target = rewrite_zip(export["path"],tmp_path/(bad+".zip"),mutation)
+    with pytest.raises((AccountError,ValueError)):
+        manager.command("accounts_preview",{"path":str(target)})
+    assert state.account_snapshot("target") == before and state.authenticated(session,"target")
+
+
+def test_schema_one_cannot_smuggle_the_eighth_table(manager,tmp_path):
+    create(manager)
+    export = exported(manager)
+    def mutation(members):
+        manifest = accounts._decode(members["manifest.json"]);manifest["schema"] = 1
+        members["manifest.json"] = accounts._json(manifest)
+    target = rewrite_zip(export["path"],tmp_path/"wrong-version.zip",mutation)
+    with pytest.raises(AccountError,match="binding_invalid"):
+        manager.command("accounts_preview",{"path":str(target)})

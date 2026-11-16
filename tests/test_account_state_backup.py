@@ -38,7 +38,7 @@ def test_full_table_capture_is_consistent_while_lesson_transactions_commit(tmp_p
             assert revision == hashlib.sha256(State.account_bytes(bundle)).hexdigest()
             assert {key: len(rows) for key, rows in bundle["tables"].items()} == {
                 "profiles": 1, "snapshots": 1, "profile_settings": 1, "starter_profiles": 1,
-                "profile_lesson_progress": 1, "preference_receipts": 1, "main_live_attempts": 1}
+                "profile_lesson_progress": 1, "preference_receipts": 1, "main_live_attempts": 1, "profile_love_progress": 0}
         future.result()
 
 

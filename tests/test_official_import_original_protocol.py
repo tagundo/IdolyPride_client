@@ -245,8 +245,10 @@ def _assert_private_archive(path, raw):
         bundle = json.loads(payload)
     assert manifest["schema_sha256"] == CANONICAL_SCHEMA_SHA256 and manifest["mode"] == "normal"
     assert set(bundle["tables"]) == {"profiles", "snapshots", "starter_profiles", "profile_settings",
-        "profile_lesson_progress", "preference_receipts", "main_live_attempts"}
+        "profile_lesson_progress", "preference_receipts", "main_live_attempts", "profile_love_progress"}
     assert "sessions" not in bundle["tables"]
+    assert not bundle["tables"]["profile_love_progress"]
+    assert bundle["schema"] == 2
     assert base64.b64decode(bundle["tables"]["snapshots"][0]["response"]["$bytes"], validate=True) == raw
     for secret in (PASSWORD, TICKET, SEED, GAME, UID, REFRESH, _custom_token(), _id_token(), LOCAL_LOGIN_INPUT):
         assert secret.encode() not in payload
@@ -351,7 +353,7 @@ def test_original_protocol_real_client_import_reopen_export_and_local_relogin(tm
         assert hashlib.sha256(GAME.encode()).hexdigest() not in hashes
         assert {hashlib.sha256(value.encode()).hexdigest() for value in (other_token, *local_tokens)} <= hashes
         assert all(not bundle["tables"][key] for key in ("profile_settings", "profile_lesson_progress",
-                                                        "preference_receipts", "main_live_attempts"))
+                                                        "preference_receipts", "main_live_attempts", "profile_love_progress"))
         # Neither local login nor export re-enters official authentication.
         assert transports[0].calls == ["seed", "/api.System/Check", "/api.Migration/MigratePassword",
             "/api.Migration/Execute", "signin", "lookup", "/api.System/Check", LOGIN, "/api.Master/Get", USER]

@@ -22,7 +22,7 @@ import time
 import uuid
 from zipfile import ZipFile, ZIP_DEFLATED, ZIP_STORED, BadZipFile
 
-from .state import State, _ACCOUNT_TABLES
+from .state import State, _ACCOUNT_TABLES, _ACCOUNT_TABLES_V1
 
 MAX_ARCHIVE = 128 * 1024 * 1024
 MAX_ACCOUNT_JSON = 96 * 1024 * 1024
@@ -239,7 +239,8 @@ def _bounded_zip(stream, size):
 def _unpack(raw):
     value = _decode(raw)
     _need(type(value) is dict and type(value.get("tables")) is dict, "account_bundle_schema_invalid")
-    for table, _columns, _primary in _ACCOUNT_TABLES:
+    _need(type(value.get("schema")) is int and value["schema"] in (1, 2), "account_bundle_schema_invalid")
+    for table, _columns, _primary in (_ACCOUNT_TABLES_V1 if value["schema"] == 1 else _ACCOUNT_TABLES):
         rows = value["tables"].get(table)
         _need(type(rows) is list and len(rows) <= 20000, "account_rows_bound")
         for row in rows:
@@ -247,7 +248,7 @@ def _unpack(raw):
             if "response" in row:
                 wrapper = row["response"]
                 _need(type(wrapper) is dict and set(wrapper) == {"$bytes"}
-                      and type(wrapper["$bytes"]) is str and len(wrapper["$bytes"]) <= 45 * 1024 * 1024,
+                      and type(wrapper["$bytes"]) is str and len(wrapper["$bytes"]) <= (174764 if table == "profile_love_progress" else 45*1024*1024),
                       "account_blob_invalid")
                 try:
                     row["response"] = base64.b64decode(wrapper["$bytes"], validate=True)
@@ -364,7 +365,7 @@ class AccountManager:
         return _SCHEMA_CACHE[key]
 
     def _validate(self, bundle):
-        State.validate_account(bundle)
+        bundle = State.upgrade_account(bundle)
         _profile(bundle["profile"])
         schema = self._schema()
         tables = bundle["tables"]
@@ -389,6 +390,10 @@ class AccountManager:
             if tables["profile_lesson_progress"]:
                 descriptor = schema.response_type("/api.Activity/ReceiveLessonReward").DESCRIPTOR.fields_by_name["progress"].message_type
                 message_factory.GetMessageClass(descriptor).FromString(tables["profile_lesson_progress"][0]["response"])
+            if tables["profile_love_progress"]:
+                from .love import validate_progress
+                for row in tables["profile_love_progress"]:
+                    validate_progress(row["response"], row["love_id"])
             for table in ("preference_receipts", "main_live_attempts"):
                 for row in tables[table]:
                     State.live_request_id(row["request_id"])
@@ -475,10 +480,12 @@ class AccountManager:
         return state, bundle, revision
 
     def _write_archive(self, path, mode, bundle, revision):
+        bundle = State.upgrade_account(bundle)
         self._validate(bundle)
+        _need(revision == State.account_revision(bundle), "account_archive_binding_invalid")
         raw = State.account_bytes(bundle)
         _need(len(raw) <= MAX_ACCOUNT_JSON, "account_archive_extent")
-        manifest = {"kind": KIND, "schema": 1, "mode": mode, "profile": bundle["profile"],
+        manifest = {"kind": KIND, "schema": 2, "mode": mode, "profile": bundle["profile"],
                     "schema_sha256": self._schema().fingerprint, "account_bytes": len(raw),
                     "account_sha256": hashlib.sha256(raw).hexdigest(), "revision": revision,
                     "created_at": time.time_ns()//1_000_000}
@@ -528,7 +535,7 @@ class AccountManager:
                 manifest = _decode(raw_manifest)
                 _need(type(manifest) is dict and set(manifest) == {"kind", "schema", "mode", "profile", "schema_sha256",
                       "account_bytes", "account_sha256", "revision", "created_at"}
-                      and manifest["kind"] == KIND and type(manifest["schema"]) is int and manifest["schema"] == 1,
+                      and manifest["kind"] == KIND and type(manifest["schema"]) is int and manifest["schema"] in (1, 2),
                       "account_archive_kind_invalid")
                 _mode(manifest["mode"]); _profile(manifest["profile"])
                 _need(type(manifest["account_bytes"]) is int and 0 < manifest["account_bytes"] <= MAX_ACCOUNT_JSON
@@ -540,9 +547,14 @@ class AccountManager:
                 _need(len(raw) == manifest["account_bytes"] and hashlib.sha256(raw).hexdigest() == manifest["account_sha256"],
                       "account_archive_hash_differs")
                 bundle = _unpack(raw)
+                State.validate_account(bundle)
+                _need(bundle["schema"] == manifest["schema"] and bundle["profile"] == manifest["profile"]
+                      and State.account_revision(bundle) == manifest["revision"], "account_archive_binding_invalid")
+                # Validate the original version/hash first; the old seven-table
+                # bytes remain the receipt/index identity, while local installs
+                # explicitly start with no Love progress missing from v1.
+                bundle = State.upgrade_account(bundle)
                 self._validate(bundle)
-                _need(bundle["profile"] == manifest["profile"] and State.account_revision(bundle) == manifest["revision"],
-                      "account_archive_binding_invalid")
                 after = os.fstat(stream.fileno())
                 _need((before.st_size, before.st_mtime_ns, before.st_ctime_ns) == (
                     after.st_size, after.st_mtime_ns, after.st_ctime_ns), "account_file_changed")
@@ -589,7 +601,7 @@ class AccountManager:
         _need(schema_sha256 == self._schema().fingerprint, "account_protocol_schema_differs")
         token = uuid.uuid4().hex
         profile = "official-source-" + token[:16]
-        bundle = {"schema": 1, "profile": profile, "tables": {table: [] for table, _columns, _keys in _ACCOUNT_TABLES}}
+        bundle = {"schema": 2, "profile": profile, "tables": {table: [] for table, _columns, _keys in _ACCOUNT_TABLES}}
         bundle["tables"]["profiles"] = [{"name": profile, "server_id": server_id, "public_id": public_id}]
         bundle["tables"]["snapshots"] = [{"profile": profile, "response": payload, "schema_sha256": schema_sha256}]
         bundle["tables"]["starter_profiles"] = [{"profile": profile, "version": 0}]
