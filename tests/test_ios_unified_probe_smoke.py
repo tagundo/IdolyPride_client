@@ -3209,6 +3209,7 @@ def account_fixture_schema(path):
     lesson.field.add(name="progress",number=1,type=11,type_name=".api.LessonProgress")
     file.message_type.add(name="Receipt")
     for service, method, request, response in (
+        ("System","Check","Empty","Empty"),
         ("User","Get","Empty","UserGetResponse"),("Home","Login","HomeLogin","Empty"),
         ("Activity","ReceiveLessonReward","Empty","LessonResponse"),
         ("Photo","SwitchLock","Empty","Receipt"),("Quest","Start","Empty","Receipt")):
@@ -3217,7 +3218,10 @@ def account_fixture_schema(path):
     descriptor=descriptor_pb2.FileDescriptorSet(file=[file]).SerializeToString()
     path.parent.mkdir(parents=True,exist_ok=True)
     path.write_bytes(descriptor)
-    return Schema.from_descriptor_set(path)
+    schema = Schema.from_descriptor_set(path)
+    # Bind the fixture file to Schema's canonical descriptor fingerprint, as in a packaged runtime.
+    schema.export(path)
+    return schema
 
 
 @pytest.fixture
@@ -3281,6 +3285,7 @@ def complete_account_observer(observer, manager, state):
 
 def test_owned_simulator_fixture_uses_real_schema_seven_tables_unknown_blobs_and_full_archive(real_account_observer):
     observer,manager,state=real_account_observer
+    assert observer.schema.fingerprint == hashlib.sha256((observer.root/"protocol/idolypride-6.1.1.pb").read_bytes()).hexdigest()
     native,source_ack,target_ack=complete_account_observer(observer,manager,state)
     proof=observer.verify(native)
     assert all(proof["checks"].values())
