@@ -16,6 +16,7 @@ from urllib.request import urlopen
 PACKAGE = "game.qualiarts.idolypride.localserver"
 ACTIVITY = PACKAGE + "/.MainActivity"
 CREATE, CLONE, IMPORTED = "zz-qa-created", "zz-qa-clone", "zz-qa-imported"
+DOCUMENT_UI_PACKAGES = frozenset(("com.android.documentsui", "com.google.android.documentsui"))
 TABLES = ("profiles", "snapshots", "profile_settings", "starter_profiles",
           "profile_lesson_progress", "preference_receipts", "main_live_attempts")
 
@@ -117,17 +118,63 @@ def save_document(qa):
     tap_node(qa, node)
 
 
+
+def document_item(tree, filename):
+    """Resolve the actual provider row/tile containing this exact filename."""
+    parents = {child: parent for parent in tree.iter() for child in parent}
+    for title in tree.iter("node"):
+        if title.get("text") != filename or title.get("package") not in DOCUMENT_UI_PACKAGES:
+            continue
+        current = title
+        while current is not None:
+            if (current.get("resource-id", "").endswith("/item_root")
+                    and current.get("package") == title.get("package")
+                    and current.get("enabled") == "true" and bounds(current)):
+                return current
+            current = parents.get(current)
+    return None
+
+
+def find_document(qa, filename, stage, *, attempts=8):
+    for attempt in range(attempts):
+        tree = qa.capture(stage + "-" + str(attempt))
+        item = document_item(tree, filename)
+        if item is not None:
+            return item
+        time.sleep(.5)
+    raise RuntimeError("Account QA enabled document item was not observed: " + stage)
+
+
+def activate_document(qa, filename, item):
+    # A grid caption is not an actionable node in DocumentsUI. Its observed
+    # item_root owns the tile; keyboard activation is allowed only if the next
+    # fresh hierarchy confirms that this exact named item received focus.
+    tap_node(qa, item)
+    tree = qa.capture("75-account-document-activated")
+    current = document_item(tree, filename)
+    if current is None:
+        return
+    opening = [node for node in tree.iter("node")
+               if node.get("enabled") == "true" and bounds(node)
+               and node.get("package") == current.get("package")
+               and (node.get("resource-id", "").endswith("/action_menu_select")
+                    or node.get("text") in ("OPEN", "Open", "열기"))]
+    if opening:
+        tap_node(qa, opening[0])
+    elif current.get("focused") == "true":
+        qa.adb("shell", "input", "keyevent", "66")
+
 def open_document(qa, filename):
     try:
-        node = find(qa, lambda item: item.get("text") == filename, "75-account-recent-file", attempts=8)
+        node = find_document(qa, filename, "75-account-recent-file", attempts=8)
     except RuntimeError:
         node = find(qa, lambda item: item.get("content-desc") in ("Show roots", "루트 표시", "탐색 창 열기"),
                     "75-account-document-roots", attempts=4)
         tap_node(qa, node)
         tap_node(qa, find(qa, lambda item: item.get("text") in ("Downloads", "다운로드"),
                           "75-account-downloads", attempts=5))
-        node = find(qa, lambda item: item.get("text") == filename, "75-account-download-file", attempts=10)
-    tap_node(qa, node)
+        node = find_document(qa, filename, "75-account-download-file", attempts=10)
+    activate_document(qa, filename, node)
 
 
 def exercise_account_management(qa, schema, grpc_port, asset_port, startup_timeout, *,

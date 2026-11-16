@@ -739,15 +739,29 @@ static void ProbeZIPImportBegin(WKWebView *__weak weakWeb, UIViewController *__w
     if ([state[@"finished"] boolValue]) return;
     WKWebView *web=weakWeb; UIViewController *presenter=weakPresenter;
     if (!web || !presenter || presenter.presentedViewController) { finish(); return; }
-    NSMutableDictionary *pass=[NSMutableDictionary dictionary]; [state[@"passes"] addObject:pass];
+    // Account-list initialization also serializes the file buttons. Wait for
+    // the real control to become enabled inside the existing 12-second budget;
+    // retain one pass per actual click rather than recording retries as clicks.
+    NSMutableDictionary *pass=state[@"begin_pass"];
+    if (!pass) {
+        pass=[NSMutableDictionary dictionary];state[@"begin_pass"]=pass;[state[@"passes"] addObject:pass];
+    }
+    state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
     NSString *script=@"(() => {const b=document.getElementById('resources-import');const e=!!b&&!b.disabled;"
         "if(e)b.click();return {button_found:!!b,enabled_before:e,click_dispatched:e,button_disabled_while_pending:!!b&&b.disabled};})()";
     [web evaluateJavaScript:script completionHandler:^(id value,NSError *error) {
         if ([state[@"finished"] boolValue]) return;
         if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
         for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"button_disabled_while_pending"])
-            pass[key]=@([value[key] isEqual:@YES]);
-        if (![pass[@"click_dispatched"] isEqual:@YES]) { finish(); return; }
+            pass[key]=@((BOOL)[value[key] isEqual:@YES]);
+        if (![pass[@"click_dispatched"] isEqual:@YES]) {
+            if (![pass[@"button_found"] isEqual:@YES]) { finish();return; }
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
+                ProbeZIPImportBegin(weakWeb,weakPresenter,state,finish);
+            });
+            return;
+        }
+        [state removeObjectForKey:@"begin_pass"];
         ProbeZIPImportObserve(weakWeb,weakPresenter,state,finish);
     }];
 }

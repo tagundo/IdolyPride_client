@@ -92,3 +92,35 @@ def test_account_probe_runs_after_existing_engine_and_preservation_checks():
     main = source[source.index("def main():"):]
     assert main.index("result.update(exercise_main_live_checks") < main.index("from qa_account_management import")
     assert main.index("result.update(exercise_account_management") < main.index("result.update(ok=True, final_stop=True)")
+
+
+def test_document_target_is_enabled_named_item_not_inert_grid_caption():
+    tree = ET.fromstring('<hierarchy><node package="com.google.android.documentsui" resource-id="com.google.android.documentsui:id/item_root" enabled="true" focusable="true" bounds="[60,600][540,1300]"><node package="com.google.android.documentsui" text="account.zip" clickable="false" enabled="true" bounds="[200,1180][490,1240]"/></node></hierarchy>')
+    item = qa.document_item(tree, "account.zip")
+    assert item.get("resource-id").endswith("/item_root")
+    assert qa.bounds(item) == (60, 600, 540, 1300)
+    guest = Guest(['<hierarchy/>'])
+    qa.activate_document(guest, "account.zip", item)
+    assert guest.actions == [("shell", "input", "tap", "300", "950")]
+
+
+def test_document_keyboard_activation_requires_fresh_focus_on_same_named_item():
+    def hierarchy(name, focused):
+        return '<hierarchy><node package="com.google.android.documentsui" resource-id="com.google.android.documentsui:id/item_root" enabled="true" focused="'+focused+'" bounds="[60,600][540,1300]"><node package="com.google.android.documentsui" text="'+name+'" enabled="true" bounds="[200,1180][490,1240]"/></node></hierarchy>'
+    item = qa.document_item(ET.fromstring(hierarchy("account.zip", "false")), "account.zip")
+    guest = Guest([hierarchy("account.zip", "true")])
+    qa.activate_document(guest, "account.zip", item)
+    assert guest.actions[-1] == ("shell", "input", "keyevent", "66")
+    other = Guest([hierarchy("different.zip", "true")])
+    qa.activate_document(other, "account.zip", item)
+    assert len(other.actions) == 1
+
+
+def test_disabled_provider_document_cannot_be_activated():
+    tree = ET.fromstring('<hierarchy><node package="com.android.documentsui" resource-id="com.android.documentsui:id/item_root" enabled="false" bounds="[1,2][100,200]"><node package="com.android.documentsui" text="account.zip" enabled="true" bounds="[2,3][99,190]"/></node></hierarchy>')
+    assert qa.document_item(tree, "account.zip") is None
+
+
+def test_named_item_in_another_package_is_not_a_documentsui_target():
+    tree = ET.fromstring('<hierarchy><node package="unrelated.app" resource-id="com.google.android.documentsui:id/item_root" enabled="true" focused="true" bounds="[1,2][100,200]"><node package="unrelated.app" text="account.zip" enabled="true" bounds="[2,3][99,190]"/></node></hierarchy>')
+    assert qa.document_item(tree, "account.zip") is None
