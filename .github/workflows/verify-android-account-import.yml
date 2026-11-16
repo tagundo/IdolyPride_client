@@ -17,7 +17,7 @@ concurrency:
 
 env:
   PYTHONDONTWRITEBYTECODE: '1'
-  IDOLY_RELEASE_BUILD: '53'
+  IDOLY_RELEASE_BUILD: '54'
 
 # Exact Android build/emulator gates from release-all-platforms, artifact only.
 # Existing draft input downloads need write-scoped contents permission.

@@ -468,3 +468,79 @@ def test_delivery_component_inventory_cannot_introduce_arbitrary_paths(monkeypat
     monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components))
     with pytest.raises(delivery.DeliveryError,match="delivery_source_components_invalid"):
         delivery._delivery_source_paths()
+
+
+@pytest.fixture
+def language_producer_tree(tmp_path, monkeypatch):
+    pins = {}
+    for name in delivery.LANGUAGE_PRODUCER_SOURCES:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        raw = ("reviewed language producer: " + name).encode()
+        path.write_bytes(raw)
+        pins[name] = hashlib.sha256(raw).hexdigest()
+    monkeypatch.setattr(delivery, "ROOT", tmp_path)
+    return tmp_path, {"source_commit": SOURCE, "source_component_sha256": pins}
+
+
+def test_language_producer_report_binds_every_current_writer_and_profile(language_producer_tree):
+    root, report = language_producer_tree
+    assert delivery.validate_language_producer_report(report, SOURCE) is None
+    assert set(report["source_component_sha256"]) <= set(delivery.DELIVERY_SOURCES)
+    # Changing one actual writer invalidates an otherwise unchanged successful report.
+    path = root / "src/idoly_local/static_ui_images.py"
+    path.write_bytes(path.read_bytes() + b"\nchanged font layout")
+    with pytest.raises(delivery.DeliveryError, match="language_producer_source_sha256_differs"):
+        delivery.validate_language_producer_report(report, SOURCE)
+
+
+@pytest.mark.parametrize("damage", ["missing-report", "wrong-commit", "missing-commit", "pins-list",
+    "missing-writer", "extra-path", "uppercase-sha", "wrong-sha", "non-string-sha"])
+def test_language_producer_cannot_relabel_omit_or_extend_its_source_closure(language_producer_tree, damage):
+    _, report = language_producer_tree
+    if damage == "missing-report": report = None
+    elif damage == "wrong-commit": report["source_commit"] = "c" * 40
+    elif damage == "missing-commit": del report["source_commit"]
+    elif damage == "pins-list": report["source_component_sha256"] = []
+    elif damage == "missing-writer": del report["source_component_sha256"]["tools/fetch_korean_ui_images.py"]
+    elif damage == "extra-path": report["source_component_sha256"]["../private/credentials.json"] = "d" * 64
+    else:
+        report["source_component_sha256"]["src/idoly_local/static_ui_images.py"] = {
+            "uppercase-sha": "D" * 64, "wrong-sha": "d" * 64, "non-string-sha": True}[damage]
+    with pytest.raises(delivery.DeliveryError): delivery.validate_language_producer_report(report, SOURCE)
+
+
+@pytest.mark.parametrize("damage", ["missing", "empty", "symlink", "writer-oversize", "catalog-oversize"])
+def test_language_producer_source_files_stay_finite_and_regular(language_producer_tree, damage):
+    root, report = language_producer_tree
+    name = "client-presentation/translations/static-ui-v1.json" if damage == "catalog-oversize" else "tools/fetch_korean_ui_images.py"
+    path = root / name
+    if damage == "missing": path.unlink()
+    elif damage == "empty": path.write_bytes(b"")
+    elif damage == "symlink":
+        original = root / "unowned.py"; path.rename(original); path.symlink_to(original)
+    else: path.write_bytes(b"x" * (delivery.SOURCE_FILE_LIMITS.get(name, 256*1024) + 1))
+    with pytest.raises(delivery.DeliveryError, match="language_producer_source_file_bound"):
+        delivery.validate_language_producer_report(report, SOURCE)
+
+
+def test_only_static_ui_catalog_gets_the_narrow_768kib_source_allowance(language_producer_tree):
+    root, report = language_producer_tree
+    name = "client-presentation/translations/static-ui-v1.json"
+    path = root / name; path.write_bytes(b"x" * 566808)
+    report["source_component_sha256"][name] = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert delivery.validate_language_producer_report(report, SOURCE) is None
+    assert delivery.SOURCE_FILE_LIMITS[name] == 768*1024
+    assert delivery.SOURCE_FILE_LIMITS.get("src/idoly_local/static_ui_images.py", 256*1024) == 256*1024
+    assert delivery.SOURCE_FILE_LIMITS.get("arbitrary.json", 256*1024) == 256*1024
+
+
+def test_committed_language_producer_and_delivery_have_the_same_finite_closure():
+    import ast
+    tree = ast.parse((delivery.ROOT / "tools/build_ios_client_languages.py").read_text())
+    builder = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_build_source_pins")
+    assignment = next(node for node in builder.body if isinstance(node, ast.Assign)
+                      and any(isinstance(target, ast.Name) and target.id == "names" for target in node.targets))
+    actual = ast.literal_eval(assignment.value)
+    assert type(actual) is tuple and len(actual) == 11
+    assert actual == delivery.LANGUAGE_PRODUCER_SOURCES

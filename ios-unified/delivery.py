@@ -39,6 +39,24 @@ MAX_PROOF = 8 * MIB
 PROOF_GENERATED_RESERVE = MIB
 RESERVED_PROOF_NAMES = frozenset(("manifest.json","delivery-proof.json","publication.json",
                                  "proof-fetch.json","publish.log","README.md"))
+LANGUAGE_PRODUCER_SOURCES = (
+    "tools/build_ios_client_languages.py", "tools/fetch_korean_ui_images.py",
+    "src/idoly_local/static_ui_assets.py", "src/idoly_local/static_ui_images.py",
+    "src/idoly_local/static_ui_textures.py", "src/idoly_local/ui_assets.py",
+    "src/idoly_local/cdn_image_translation.py",
+    "client-presentation/images/korean-static-sprites-v1.json",
+    "client-presentation/images/korean-static-sprites-v2.json",
+    "client-presentation/images/korean-static-textures-v1.json",
+    "client-presentation/translations/static-ui-v1.json",
+)
+# Only the audited static UI catalog needs the larger source-file allowance.
+SOURCE_FILE_LIMITS = {
+    "data/latest-server-overlay.zip": 1024,
+    "data/latest-server-data-pin.json": MIB,
+    "data/love-server-data-pin.json": 512 * 1024,
+    "client-presentation/translations/static-ui-v1.json": 768 * 1024,
+}
+
 DELIVERY_SOURCES = ("ios-unified/delivery.py", ".github/workflows/build-server-apps.yml",
                     "tools/publish_binary_bundle_lfs.py",
                     "ios-unified/delivery-pins/client-languages-real-v2.manifest.json",
@@ -48,7 +66,8 @@ DELIVERY_SOURCES = ("ios-unified/delivery.py", ".github/workflows/build-server-a
                     "data/love-reference-NOTICE.txt", "src/idoly_local/love_catalog.py", "src/idoly_local/master_build.py",
                     "src/idoly_local/media_master_build.py", "src/idoly_local/master_translation_build.py",
                     "src/idoly_local/master_sort_build.py", "src/idoly_local/latest_cohort_pins.py",
-                    "src/idoly_local/love_compatibility_pins.py", "src/idoly_local/public_cohort_support.py", "LICENSE")
+                    "src/idoly_local/love_compatibility_pins.py", "src/idoly_local/public_cohort_support.py", "LICENSE",
+                    *LANGUAGE_PRODUCER_SOURCES)
 
 class DeliveryError(ValueError):
     """Fixed credential-free error codes."""
@@ -156,7 +175,7 @@ def delivery_source_pins(source):
     result = {}
     for name in _delivery_source_paths():
         path = ROOT/name
-        need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= (1024 if name=="data/latest-server-overlay.zip" else MIB if name=="data/latest-server-data-pin.json" else 512*1024 if name=="data/love-server-data-pin.json" else 256*1024),"delivery_source_file_bound")
+        need(path.is_file() and not path.is_symlink() and 0 < path.stat().st_size <= SOURCE_FILE_LIMITS.get(name, 256*1024),"delivery_source_file_bound")
         object_name = source+":"+name
         size = subprocess.check_output(["git","cat-file","-s",object_name],cwd=ROOT,timeout=30).strip()
         need(size.isdigit() and int(size) == path.stat().st_size,"delivery_committed_source_size_differs")
@@ -165,6 +184,31 @@ def delivery_source_pins(source):
         need(len(committed) == int(size) and hashlib.sha256(committed).hexdigest() == digest,"delivery_committed_source_differs")
         result[name] = digest
     return result
+
+def language_producer_source_pins():
+    """Finite current writer/profile closure, never report-supplied paths."""
+    result = {}
+    for name in LANGUAGE_PRODUCER_SOURCES:
+        path = ROOT / name
+        need(path.is_file() and not path.is_symlink()
+             and 0 < path.stat().st_size <= SOURCE_FILE_LIMITS.get(name, 256*1024),
+             "language_producer_source_file_bound")
+        result[name] = sha(path)
+    return result
+
+
+def validate_language_producer_report(report, source):
+    need(type(source) is str and re.fullmatch(r"[0-9a-f]{40}", source)
+         and type(report) is dict and report.get("source_commit") == source,
+         "language_producer_commit_differs")
+    pins = report.get("source_component_sha256")
+    need(type(pins) is dict and set(pins) == set(LANGUAGE_PRODUCER_SOURCES),
+         "language_producer_source_set_differs")
+    expected = language_producer_source_pins()
+    need(all(type(pins[name]) is str and re.fullmatch(r"[0-9a-f]{64}", pins[name])
+             and pins[name] == expected[name] for name in LANGUAGE_PRODUCER_SOURCES),
+         "language_producer_source_sha256_differs")
+
 
 def check_proof_budget(report_bytes, existing_generated_bytes):
     need(type(report_bytes) is int and report_bytes >= 0
@@ -299,6 +343,7 @@ def verify_members(members, proof, source, run, artifact, guard):
     for name,digest in local_http['source_sha256'].items():assert sha(ROOT/'ios-unified/native'/name)==digest
     for name in ('IdolyLocalHTTP.h','IdolyLocalHTTP.m'):assert native['source_sha256'][name]==local_http['source_sha256'][name]
     language_build=read(members/'client-languages-build.json');language_runtime=read(members/'client-language-runtime-check.json')
+    validate_language_producer_report(language_build, SOURCE)
     descriptor=read(members/'client-languages.json')
     assert set(descriptor)=={'schema','bytes','sha256'} and type(descriptor['schema']) is int and descriptor['schema']==1
     assert type(descriptor['bytes']) is int and 0<descriptor['bytes']<=128*MIB
@@ -345,7 +390,7 @@ def verify_members(members, proof, source, run, artifact, guard):
     from zipfile import ZipFile
     with ZipFile(path) as z:
      app_info=plistlib.loads(z.read(prefix+'Info.plist'))
-     assert app_info['CFBundleVersion']=='156.9116'
+     assert app_info['CFBundleVersion']=='156.9117'
      assert app_info['IdolyUnifiedLoopbackOrigin']=='http://127.0.0.1:8080'
      assert json.loads(z.read(prefix+'LocalServer/client-languages.json'))==descriptor
      verify_bundled_payload_pin(z,prefix,report)
@@ -356,7 +401,7 @@ def verify_members(members, proof, source, run, artifact, guard):
       assert digest.hexdigest()==descriptor['sha256']
     manifest={'schema':1,'source_commit':SOURCE,'artifacts':[{'path':str(path),'name':IPA,'bytes':report['output_bytes'],'sha256':report['output_sha256']}], 'validation':{'Actions_run':RUN,'Simulator_core':'PASS','physical_gameplay':'NOT_TESTED','PlayCover':'NOT_TESTED'}}
     (STAGE/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    (STAGE/'README.md').write_text('아이프라 통합 IPA 내부 검증 빌드 (156.9116)\n\n공개 릴리즈가 아닙니다. 서버 설정·계정 관리와 관련 게임 API를 구현하고 검증하는 소스의 빌드입니다.\n\n일본어·한국어·영어 게임 데이터를 선택하고 서버 준비 후 게임 시작을 누릅니다. 서버 화면 언어는 즉시 적용하며 게임 시작 뒤 바꾼 언어와 계정은 앱을 완전히 종료·재실행해 적용합니다. 개인 서명이 필요합니다. 게임 중 오른쪽 위 128×128 안전 영역을 2초 누르거나 Mac의 로컬 서버 설정… / ⌘⇧,로 메뉴를 엽니다.\n\n실제 시작 검사와 이전 실행의 실패 기록, 일반·감상 계정 목록·생성·복제·다음 시작 선택, 계정 ZIP 내보내기·미리보기·가져오기·자동 복구 지점을 제공합니다. 복제는 게임 내 ID를 보존하는 같은 계정의 저장 분기입니다. 계정 ZIP은 Love 진행을 포함한 8개 계정 테이블을 보존하며 로그인 세션·리소스·앱 전역 설정은 포함하지 않습니다. 계정 ZIP과 리소스 ZIP은 별개입니다. 미리보기 뒤 자료가 바뀌면 덮어쓰기를 중단합니다.\n\n기존 설정 자동 저장, 게임 시작 전 저장 대기, 리소스 ZIP 사본·진행 표시, 언어 Data 캐시·SIGPIPE 처리·그래픽/촬영 설정을 유지합니다. LiveContainer는 Fix File Picker 설정도 확인합니다.\n\n선택된 로컬 계정 조회와 미등록 생일 등록 외에 모시코이 Love API 17개를 연결합니다. 서버 설정에서 이벤트와 로컬 기간을 선택하며, 일반·감상 진행을 분리하고 감상에서는 스토리 비용을 건너뜁니다. 기존 한국어·영어 번역을 적용합니다. 원본 미확보 유우 분기 한 개와 별도 미션 보상은 지원하지 않습니다. 일본판 인계 ID·인계 비밀번호의 확인·다운로드·로컬 저장 흐름도 제공하지만 실제 공식 계정 인증은 검증하지 않았습니다. Firebase 가입·삭제·재가입이나 생일 이벤트·외부 보상 복구로 표시하지 않습니다.\n\n실제 Apple SDK 및 동일 Simulator KO→EN→JA→EN→KO 다섯 재실행 검사를 유지합니다. 계정 검사는 검사용 고정 자료와 실제 저장소의 바이트·세션·백업·복구 흐름을 대조합니다. Simulator Unity 진입점은 검사용이며 실제 게임 렌더링·전체 콘텐츠 플레이를 확인한 것이 아닙니다. 실제 PlayCover·iPhone·iPad 및 LiveContainer·SideStore Files 공급자의 기기 검사는 별도입니다.\n')
+    (STAGE/'README.md').write_text('아이프라 통합 IPA 내부 검증 빌드 (156.9117)\n\n공개 릴리즈가 아닙니다. 서버 설정·계정 관리와 관련 게임 API를 구현하고 검증하는 소스의 빌드입니다.\n\n일본어·한국어·영어 게임 데이터를 선택하고 서버 준비 후 게임 시작을 누릅니다. 서버 화면 언어는 즉시 적용하며 게임 시작 뒤 바꾼 언어와 계정은 앱을 완전히 종료·재실행해 적용합니다. 개인 서명이 필요합니다. 게임 중 오른쪽 위 128×128 안전 영역을 2초 누르거나 Mac의 로컬 서버 설정… / ⌘⇧,로 메뉴를 엽니다.\n\n실제 시작 검사와 이전 실행의 실패 기록, 일반·감상 계정 목록·생성·복제·다음 시작 선택, 계정 ZIP 내보내기·미리보기·가져오기·자동 복구 지점을 제공합니다. 복제는 게임 내 ID를 보존하는 같은 계정의 저장 분기입니다. 계정 ZIP은 Love 진행을 포함한 8개 계정 테이블을 보존하며 로그인 세션·리소스·앱 전역 설정은 포함하지 않습니다. 계정 ZIP과 리소스 ZIP은 별개입니다. 미리보기 뒤 자료가 바뀌면 덮어쓰기를 중단합니다.\n\n기존 설정 자동 저장, 게임 시작 전 저장 대기, 리소스 ZIP 사본·진행 표시, 언어 Data 캐시·SIGPIPE 처리·그래픽/촬영 설정을 유지합니다. LiveContainer는 Fix File Picker 설정도 확인합니다.\n\n선택된 로컬 계정 조회와 미등록 생일 등록 외에 모시코이 Love API 17개를 연결합니다. 서버 설정에서 이벤트와 로컬 기간을 선택하며, 일반·감상 진행을 분리하고 감상에서는 스토리 비용을 건너뜁니다. 기존 한국어·영어 번역을 적용합니다. 원본 미확보 유우 분기 한 개와 별도 미션 보상은 지원하지 않습니다. 일본판 인계 ID·인계 비밀번호의 확인·다운로드·로컬 저장 흐름도 제공하지만 실제 공식 계정 인증은 검증하지 않았습니다. Firebase 가입·삭제·재가입이나 생일 이벤트·외부 보상 복구로 표시하지 않습니다.\n\n실제 Apple SDK 및 동일 Simulator KO→EN→JA→EN→KO 다섯 재실행 검사를 유지합니다. 계정 검사는 검사용 고정 자료와 실제 저장소의 바이트·세션·백업·복구 흐름을 대조합니다. Simulator Unity 진입점은 검사용이며 실제 게임 렌더링·전체 콘텐츠 플레이를 확인한 것이 아닙니다. 실제 PlayCover·iPhone·iPad 및 LiveContainer·SideStore Files 공급자의 기기 검사는 별도입니다.\n')
     return manifest,identity
 
 class NoRedirect(HTTPRedirectHandler):
@@ -563,7 +608,7 @@ def main():
     work.mkdir(mode=0o700)
     proof = work/"proof";proof.mkdir(mode=0o700)
     members = work/"members";members.mkdir(mode=0o700)
-    state = {"schema":1,"status":"RUNNING","source_commit":args.source_commit,"run_id":args.run_id,"artifact_id":args.artifact_id,"version":"156.9116","source_sha256":source_pins}
+    state = {"schema":1,"status":"RUNNING","source_commit":args.source_commit,"run_id":args.run_id,"artifact_id":args.artifact_id,"version":"156.9117","source_sha256":source_pins}
     def save():
         (proof/"delivery-proof.json").write_text(json.dumps(state,indent=2)+"\n")
     save()
@@ -798,7 +843,7 @@ def fetch_proof(args):
          and publication.get("published") is True and publication.get("source_commit") == args.source_commit
          and publication.get("branch") == branch and publication.get("commit") == proof.get("publication_commit")
          and type(publication.get("commit")) is str and re.fullmatch(r"[0-9a-f]{40}",publication["commit"]),"publication_proof_failed")
-    need(proof.get("version") == "156.9116" and manifest.get("source_commit") == args.source_commit
+    need(proof.get("version") == "156.9117" and manifest.get("source_commit") == args.source_commit
          and manifest.get("validation",{}).get("Actions_run") == args.run_id
          and len(manifest.get("artifacts",[])) == 1
          and len(publication.get("artifacts",[])) == 1,"proof_artifact_count_differs")

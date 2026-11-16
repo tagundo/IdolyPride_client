@@ -17,7 +17,7 @@ concurrency:
 
 env:
   PYTHONDONTWRITEBYTECODE: '1'
-  IDOLY_RELEASE_BUILD: '53'
+  IDOLY_RELEASE_BUILD: '54'
 
 # Reuses the exact Mac build/smoke commands from release-all-platforms.
 # contents:write is required to GET the existing draft input assets.
