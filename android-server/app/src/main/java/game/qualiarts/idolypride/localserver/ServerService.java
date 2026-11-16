@@ -50,7 +50,7 @@ public final class ServerService extends Service {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
     private static final CopyOnWriteArrayList<Observer> OBSERVERS = new CopyOnWriteArrayList<>();
     private static final ArrayDeque<String> LOGS = new ArrayDeque<>();
-    private static volatile String status = "중지됨";
+    private static volatile StatusText status = new StatusText(R.string.status_stopped);
     private static volatile boolean running = false;
     private static volatile boolean busy = false;
     private static volatile String runtimeDetails = "{}";
@@ -88,8 +88,31 @@ public final class ServerService extends Service {
     private final AtomicBoolean resourceCancelQueued = new AtomicBoolean(false);
     private final Runnable pollState = () -> queuePoll();
 
+    /** Resolve service state using the receiving screen locale, never a cached label. */
+    public static final class StatusText {
+        private final int resourceId;
+        private final Object[] formatArgs;
+
+        StatusText(int resourceId, Object... formatArgs) {
+            if (resourceId == 0) throw new IllegalArgumentException("Status resource required");
+            this.resourceId = resourceId;
+            this.formatArgs = formatArgs.clone();
+            for (Object argument : this.formatArgs) {
+                if (argument != null && !(argument instanceof String) && !(argument instanceof Integer)
+                        && !(argument instanceof Long) && !(argument instanceof Double) && !(argument instanceof Float)
+                        && !(argument instanceof Short) && !(argument instanceof Byte) && !(argument instanceof Boolean)
+                        && !(argument instanceof Character))
+                    throw new IllegalArgumentException("Status arguments must be immutable");
+            }
+        }
+
+        String render(Context context) {
+            return context.getString(resourceId, formatArgs.clone());
+        }
+    }
+
     public interface Observer {
-        void onServerChanged(String state, boolean isRunning, boolean isBusy, List<String> logs, String detailsJson);
+        void onServerChanged(StatusText state, boolean isRunning, boolean isBusy, List<String> logs, String detailsJson);
     }
 
     /** Advances only for a validated Python status response, never a log replay. */
@@ -292,7 +315,7 @@ public final class ServerService extends Service {
         synchronized (LOGS) {
             snapshot = new ArrayList<>(LOGS);
         }
-        final String currentStatus = status;
+        final StatusText currentStatus = status;
         final boolean currentRunning = running;
         final boolean currentBusy = busy;
         final String currentDetails = runtimeDetails;
@@ -303,8 +326,8 @@ public final class ServerService extends Service {
         });
     }
 
-    private static void state(String value, boolean isRunning, boolean isBusy) {
-        status = value;
+    private static void state(int resourceId, boolean isRunning, boolean isBusy, Object... formatArgs) {
+        status = new StatusText(resourceId, formatArgs);
         running = isRunning;
         busy = isBusy;
         dispatch();
@@ -383,7 +406,7 @@ public final class ServerService extends Service {
         foreground();
         if (!startQueued.compareAndSet(false, true)) return START_NOT_STICKY;
         runtimeDetails = "{}";
-        state(getString(R.string.status_starting), false, true);
+        state(R.string.status_starting, false, true);
         appendLog("서버 데이터를 준비하고 있습니다.");
         worker.execute(() -> {
             if (stopQueued.get()) return;
@@ -409,14 +432,14 @@ public final class ServerService extends Service {
                 }
                 runtimeDetailsReceivedAt = SystemClock.elapsedRealtime();
                 if (!stopQueued.get()) {
-                    state(getString(R.string.status_running), true, false);
+                    state(R.string.status_running, true, false);
                     appendLog("게임 연결 127.0.0.1:50051 · 파일 전송 127.0.0.1:8080");
                     MAIN.postDelayed(pollState, 1500);
                 }
             } catch (Throwable error) {
                 Log.e("IdolyLocalServer", "Embedded server startup failed", error);
                 appendLog("서버 시작 실패 (" + error.getClass().getSimpleName() + "). 앱 데이터와 포함된 서버 파일을 확인해 주세요.");
-                state(getString(R.string.status_failed), false, false);
+                state(R.string.status_failed, false, false);
                 queueStop(true, true);
             }
         });
@@ -429,7 +452,7 @@ public final class ServerService extends Service {
         if (!stopQueued.compareAndSet(false, true)) return;
         ResourceTransfers.cancelLocal();
         MAIN.removeCallbacks(pollState);
-        if (!keepFailure) state(getString(R.string.status_stopping), running, true);
+        if (!keepFailure) state(R.string.status_stopping, running, true);
         try {
             worker.execute(() -> {
                 try {
@@ -444,7 +467,7 @@ public final class ServerService extends Service {
                 } finally {
                     if (!keepFailure) {
                         appendLog("서버를 중지했습니다.");
-                        state(getString(R.string.status_stopped), false, false);
+                        state(R.string.status_stopped, false, false);
                     }
                     MAIN.post(() -> {
                         stopForeground(STOP_FOREGROUND_REMOVE);

@@ -251,7 +251,10 @@ def _compare_korean_resources(original, prepared, image_proof):
                                 "after_sha256": hashes[1], "changed": hashes[0] != hashes[1]})
         else:
             _need(old[2] == new[2] and hashes[0] == hashes[1],
-                  "An undeclared Korean UI, font, story or other resource object changed")
+                  "An undeclared Korean UI, font, story or other resource object changed: "
+                  f"path_id={path}, class_id={before['types'][kind][0]}, "
+                  f"old_bytes={old[2]}, new_bytes={new[2]}, "
+                  f"old_sha256={hashes[0]}, new_sha256={hashes[1]}")
             preserved += 1
     _need({row["path_id"] for row in differences} == set(allowed), "Declared Korean object is missing")
     return {"declared_object_differences": differences, "all_other_objects_byte_identical": True,

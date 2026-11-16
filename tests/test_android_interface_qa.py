@@ -38,7 +38,7 @@ def resource_labels(language):
 TEXT = {language: resource_labels(language) for language in ("en", "ja", "ko")}
 
 
-def ui_frame(language, *, landscape=False, selected="console", damage=None):
+def ui_frame(language, *, landscape=False, selected="console", damage=None, running=False):
     # Independent observed-tree fixture: every app child is inside the app root
     # except the explicitly damaged category used by the clipped-target test.
     width, height = (1200, 600) if landscape else (600, 1000)
@@ -53,9 +53,18 @@ def ui_frame(language, *, landscape=False, selected="console", damage=None):
             attributes["content-desc"] = description
         return ET.SubElement(app, "node", attributes)
     node(text["app_name"] + "  0.3.37", "[20,10][580,50]")
-    node(text["start_server"], "[20,60][280,110]", kind="android.widget.Button")
+    status_key = "status_running" if running else "status_stopped"
+    status = TEXT["ko"][status_key] if damage == "wrong-status-" + language else text[status_key]
+    node(status, "[180,55][1180,75]" if landscape else "[20,55][580,75]")
+    if damage == "wrong-status-" + language:
+        # Another translated state label must not mask the Korean global
+        # server status in its actual top-of-screen position.
+        node(text[status_key], "[180,180][580,198]" if landscape else "[20,285][580,310]")
+    start = node(text["start_server"], "[180,80][650,130]" if landscape else "[20,80][280,130]", kind="android.widget.Button")
+    start.set("enabled", str(not running).lower())
     if damage != "missing-controls":
-        node(text["stop_server"], "[300,60][560,110]", kind="android.widget.Button")
+        stop = node(text["stop_server"], "[670,80][1180,130]" if landscape else "[300,80][560,130]", kind="android.widget.Button")
+        stop.set("enabled", str(running).lower())
     for index, category in enumerate(CATEGORIES):
         if landscape:
             left, top, right, bottom = 10, 80 + index * 60, 150, 130 + index * 60
@@ -84,8 +93,8 @@ def ui_frame(language, *, landscape=False, selected="console", damage=None):
 
 
 class Guest:
-    def __init__(self, *, damage=None, sdk="34", density="Physical density: 160\n"):
-        self.damage, self.sdk, self.density = damage, sdk, density
+    def __init__(self, *, damage=None, sdk="34", density="Physical density: 160\n", running=False):
+        self.damage, self.sdk, self.density, self.running = damage, sdk, density, running
         self.language, self.rotation, self.selected = None, 0, "console"
         self.commands, self.captures = [], []
 
@@ -131,8 +140,8 @@ class Guest:
         self.captures.append(stage)
         language = "ko" if self.damage == "wrong-ui-language" and self.language == "en" else self.language
         landscape = self.rotation == 1 and self.damage != "portrait-during-wide"
-        damage = self.damage if landscape or self.damage == "missing-controls" else None
-        return ui_frame(language, landscape=landscape, selected=self.selected, damage=damage)
+        damage = self.damage if landscape or self.damage == "missing-controls" or (self.damage or "").startswith("wrong-status-") else None
+        return ui_frame(language, landscape=landscape, selected=self.selected, damage=damage, running=self.running)
 
 
 @pytest.fixture(autouse=True)
@@ -154,6 +163,7 @@ def test_real_interface_qa_requires_three_resource_languages_and_actual_wide_the
         assert case["title"] == TEXT[language]["app_name"] + "  0.3.37"
         assert case["start"] == TEXT[language]["start_server"]
         assert case["stop"] == TEXT[language]["stop_server"]
+        assert case["status"] == TEXT[language]["status_stopped"]
     assert result["wide"]["console"]["visible_categories"] == result["wide"]["graphics"]["visible_categories"] == 5
     assert result["wide"]["console"]["minimum_navigation_target_dp"] == 50
     assert result["wide"]["console"]["help_closed"] is True
@@ -190,6 +200,22 @@ def test_wrong_or_incomplete_actual_ui_fails_within_the_original_five_observatio
     with pytest.raises(RuntimeError, match=error):
         probe.exercise_interface_configuration(guest)
     assert guest.captures == [stage + "-" + str(index) for index in range(5)]
+    assert guest.language == "ko"
+    cleanup = commands(guest, ("shell", "cmd", "locale", "set-app-locales"))[-1]
+    assert cleanup[0][-1] == "ko" and cleanup[1] == {"check": False}
+    assert not commands(guest, ("shell", "wm", "user-rotation", "lock"))
+
+@pytest.mark.parametrize("language", ("en", "ja"))
+def test_translated_title_and_buttons_cannot_hide_a_korean_server_status(language):
+    frame = ui_frame(language, damage="wrong-status-" + language)
+    assert any(node.get("text") == TEXT[language]["app_name"] + "  0.3.37" for node in frame.iter("node"))
+    assert any(node.get("text") == TEXT[language]["start_server"] for node in frame.iter("node"))
+    assert any(node.get("text") == TEXT["ko"]["status_stopped"] for node in frame.iter("node"))
+    guest = Guest(damage="wrong-status-" + language)
+    with pytest.raises(RuntimeError, match="status"):
+        probe.exercise_interface_configuration(guest)
+    preceding = ["00-interface-en-0"] if language == "ja" else []
+    assert guest.captures == preceding + ["00-interface-" + language + "-" + str(index) for index in range(5)]
     assert guest.language == "ko"
     cleanup = commands(guest, ("shell", "cmd", "locale", "set-app-locales"))[-1]
     assert cleanup[0][-1] == "ko" and cleanup[1] == {"check": False}
@@ -256,3 +282,56 @@ def test_exact_44_dp_targets_pass_but_fractionally_smaller_targets_do_not():
     # threshold must not classify it as an actual 44 dp touch target.
     with pytest.raises(RuntimeError, match="smaller than 44 dp"):
         probe.wide_proof(ui_frame("ko", landscape=True), 183, graphics=False)
+
+
+
+@pytest.mark.parametrize("area", ("[20,40][580,60]", "[20,135][580,155]"))
+def test_global_status_must_occupy_the_actual_region_between_title_and_controls(area):
+    frame = ui_frame("en")
+    textviews = [node for node in frame.iter("node") if node.get("package") == PACKAGE
+                 and node.get("class") == "android.widget.TextView"]
+    textviews[1].set("bounds", area)
+    with pytest.raises(RuntimeError, match="top status"):
+        probe.language_proof(frame, probe.labels("en"))
+
+
+def test_already_running_server_changes_all_three_interface_languages_without_service_lifecycle_commands():
+    guest = Guest(running=True)
+    result = probe.exercise_running_interface_languages(guest)
+    assert [case["language"] for case in result] == ["en", "ja", "ko"]
+    for case in result:
+        language = case["language"]
+        assert set(case) == {"language", "title", "start", "stop", "status", "actual_ui_observed"}
+        assert case["actual_ui_observed"] is True
+        assert case["title"] == TEXT[language]["app_name"] + "  0.3.37"
+        assert case["start"] == TEXT[language]["start_server"]
+        assert case["stop"] == TEXT[language]["stop_server"]
+        assert case["status"] == TEXT[language]["status_running"]
+    assert guest.captures == ["02-interface-running-en-0", "02-interface-running-ja-0", "02-interface-running-ko-0"]
+    assert guest.running is True and guest.language == "ko"
+    assert [arguments[-1] for arguments, _ in commands(guest, ("shell", "cmd", "locale", "set-app-locales"))] == ["en", "ja", "ko"]
+    assert len(commands(guest, ("shell", "cmd", "locale", "get-app-locales"))) == 3
+    assert len(commands(guest, ("shell", "am", "start", "-n", PACKAGE + "/.MainActivity"))) == 3
+    # The existing running service must survive locale configuration. Only the
+    # official locale preference and foreground-Activity commands are allowed.
+    assert all(arguments[:3] in (("shell", "cmd", "locale"), ("shell", "am", "start"))
+               for arguments, _ in guest.commands)
+
+
+@pytest.mark.parametrize("language", ("en", "ja"))
+def test_already_running_korean_status_cannot_hide_under_translated_controls(language):
+    frame = ui_frame(language, running=True, damage="wrong-status-" + language)
+    textviews = [node for node in frame.iter("node") if node.get("package") == PACKAGE
+                 and node.get("class") == "android.widget.TextView"]
+    assert textviews[1].get("text") == TEXT["ko"]["status_running"]
+    assert any(node.get("text") == TEXT[language]["status_running"] for node in textviews[2:])
+    guest = Guest(running=True, damage="wrong-status-" + language)
+    with pytest.raises(RuntimeError, match="status"):
+        probe.exercise_running_interface_languages(guest)
+    preceding = ["02-interface-running-en-0"] if language == "ja" else []
+    assert guest.captures == preceding + ["02-interface-running-" + language + "-" + str(index) for index in range(5)]
+    assert guest.running is True and guest.language == "ko"
+    cleanup = commands(guest, ("shell", "cmd", "locale", "set-app-locales"))[-1]
+    assert cleanup[0][-1] == "ko" and cleanup[1] == {"check": False}
+    assert all(arguments[:3] in (("shell", "cmd", "locale"), ("shell", "am", "start"))
+               for arguments, _ in guest.commands)

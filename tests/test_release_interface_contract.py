@@ -17,9 +17,13 @@ def passed():
     return {"actual_os_api_resource_configuration": {
         "authority": "Android public LocaleManager and WindowManager shell APIs", "sdk": 34,
         "languages": [
-            {"language": "en", "title": "IDOLY PRIDE Server  0.3.37", "start": "Start server", "stop": "Stop server", "actual_ui_observed": True},
-            {"language": "ja", "title": "アイプラサーバー  0.3.37", "start": "サーバー開始", "stop": "サーバー停止", "actual_ui_observed": True},
-            {"language": "ko", "title": "아이프라 서버  0.3.37", "start": "서버 시작", "stop": "서버 중지", "actual_ui_observed": True}],
+            {"language": "en", "title": "IDOLY PRIDE Server  0.3.37", "start": "Start server", "stop": "Stop server", "status": "Stopped", "actual_ui_observed": True},
+            {"language": "ja", "title": "アイプラサーバー  0.3.37", "start": "サーバー開始", "stop": "サーバー停止", "status": "停止中", "actual_ui_observed": True},
+            {"language": "ko", "title": "아이프라 서버  0.3.37", "start": "서버 시작", "stop": "서버 중지", "status": "중지됨", "actual_ui_observed": True}],
+        "running_languages": [
+            {"language": "en", "title": "IDOLY PRIDE Server  0.3.37", "start": "Start server", "stop": "Stop server", "status": "Running", "actual_ui_observed": True},
+            {"language": "ja", "title": "アイプラサーバー  0.3.37", "start": "サーバー開始", "stop": "サーバー停止", "status": "実行中", "actual_ui_observed": True},
+            {"language": "ko", "title": "아이프라 서버  0.3.37", "start": "서버 시작", "stop": "서버 중지", "status": "실행 중", "actual_ui_observed": True}],
         "wide": {
             "console": {"width_px": 1920, "height_px": 1080, "density_dpi": 320, "visible_categories": 5,
                 "minimum_navigation_target_dp": 44.0, "help_closed": True, "default_panel": "checks", "default_panel_expanded": False},
@@ -47,15 +51,16 @@ def test_missing_or_wrong_container_cannot_satisfy_public_os_gate(report):
 
 
 @pytest.mark.parametrize("field,value", [("authority", "synthetic resource override"), ("sdk", 33),
-    ("sdk", 35), ("sdk", True), ("sdk", 34.0), ("sdk", "34"), ("languages", None)])
+    ("sdk", 35), ("sdk", True), ("sdk", 34.0), ("sdk", "34"), ("languages", None), ("running_languages", None)])
 def test_current_authority_sdk_and_language_scope_are_exact(field, value):
     report = passed(); report[contract.FIELD][field] = value
     with pytest.raises(ValueError): contract.validate_android(report)
 
 
+@pytest.mark.parametrize("section", ["languages", "running_languages"])
 @pytest.mark.parametrize("change", ["reverse", "duplicate", "missing", "extra"])
-def test_all_three_language_readbacks_must_follow_en_ja_ko_order(change):
-    report = passed(); values = report[contract.FIELD]["languages"]
+def test_all_three_language_readbacks_must_follow_en_ja_ko_order(section, change):
+    report = passed(); values = report[contract.FIELD][section]
     if change == "reverse": values.reverse()
     elif change == "duplicate": values[1] = deepcopy(values[0])
     elif change == "missing": values.pop()
@@ -63,12 +68,13 @@ def test_all_three_language_readbacks_must_follow_en_ja_ko_order(change):
     with pytest.raises(ValueError): contract.validate_android(report)
 
 
+@pytest.mark.parametrize("section", ["languages", "running_languages"])
 @pytest.mark.parametrize("index", [0, 1, 2])
 @pytest.mark.parametrize("field,value", [("title", "아이프라 서버  0.3.37"), ("title", 1),
     ("start", "wrong"), ("stop", "wrong"), ("actual_ui_observed", False), ("actual_ui_observed", 1)])
-def test_titles_controls_and_real_ui_boolean_are_observed_in_each_language(index, field, value):
+def test_titles_controls_and_real_ui_boolean_are_observed_in_each_language(section, index, field, value):
     report = passed(); value = "wrong" if field == "title" and index == 2 else value
-    report[contract.FIELD]["languages"][index][field] = value
+    report[contract.FIELD][section][index][field] = value
     with pytest.raises(ValueError): contract.validate_android(report)
 
 
@@ -110,7 +116,7 @@ def test_actual_rotation_and_final_korean_portrait_console_restore_are_required(
     with pytest.raises(ValueError): contract.validate_android(report)
 
 
-@pytest.mark.parametrize("path", [(), ("languages", 0), ("wide",), ("wide", "console"),
+@pytest.mark.parametrize("path", [(), ("languages", 0), ("running_languages", 0), ("wide",), ("wide", "console"),
     ("wide", "graphics"), ("restored_portrait",)])
 def test_missing_and_extra_nested_claims_are_rejected(path):
     for change in ("remove", "extra"):
@@ -126,7 +132,40 @@ def test_exact_language_labels_and_server_version_match_packaged_source():
         path = ROOT / "android-server/app/src/main/res" / ("values-" + language) / "strings.xml"
         rows = {node.get("name"): "".join(node.itertext()) for node in ET.parse(path).getroot() if node.tag == "string"}
         assert tuple(rows[key] for key in ("app_name", "start_server", "stop_server")) == expected
+        assert tuple(rows[key] for key in ("status_stopped", "status_running")) == contract.STATUS_READBACKS[language]
     tree = ast.parse((ROOT / "tools/release_platform_builds.py").read_text())
     assignment = next(node for node in tree.body if isinstance(node, ast.Assign)
                       and any(isinstance(target, ast.Tuple) and any(isinstance(item, ast.Name) and item.id == "VERSION" for item in target.elts) for target in node.targets))
     assert ast.literal_eval(assignment.value)[0] == contract.VERSION
+
+
+@pytest.mark.parametrize("section", ["languages", "running_languages"])
+@pytest.mark.parametrize("index", [0, 1, 2])
+@pytest.mark.parametrize("value", [None, True, 1, "wrong"])
+def test_each_stopped_and_running_status_is_an_exact_real_language_readback(section, index, value):
+    report = passed(); report[contract.FIELD][section][index]["status"] = value
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+@pytest.mark.parametrize("section,wrong", [("languages", "중지됨"), ("running_languages", "실행 중")])
+@pytest.mark.parametrize("index", [0, 1])
+def test_observed_korean_status_regression_in_english_or_japanese_is_rejected(section, wrong, index):
+    report = passed(); report[contract.FIELD][section][index]["status"] = wrong
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+def test_cached_stopped_status_cannot_satisfy_running_service_proof():
+    report = passed(); report[contract.FIELD]["running_languages"] = deepcopy(report[contract.FIELD]["languages"])
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+@pytest.mark.parametrize("section", ["languages", "running_languages"])
+@pytest.mark.parametrize("index", [0, 1, 2])
+def test_stopped_and_running_rows_without_status_are_rejected(section, index):
+    report = passed(); del report[contract.FIELD][section][index]["status"]
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+def test_legacy_os_receipt_without_running_language_observations_is_rejected():
+    report = passed(); del report[contract.FIELD]["running_languages"]
+    with pytest.raises(ValueError): contract.validate_android(report)

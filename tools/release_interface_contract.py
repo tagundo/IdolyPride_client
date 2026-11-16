@@ -12,8 +12,9 @@ READBACKS = {
     "ja": ("アイプラサーバー", "サーバー開始", "サーバー停止"),
     "ko": ("아이프라 서버", "서버 시작", "서버 중지"),
 }
-_DETAIL = {"authority", "sdk", "languages", "wide", "restored_portrait"}
-_LANGUAGE = {"language", "title", "start", "stop", "actual_ui_observed"}
+STATUS_READBACKS = {"en": ("Stopped", "Running"), "ja": ("停止中", "実行中"), "ko": ("중지됨", "실행 중")}
+_DETAIL = {"authority", "sdk", "languages", "running_languages", "wide", "restored_portrait"}
+_LANGUAGE = {"language", "title", "start", "stop", "status", "actual_ui_observed"}
 _WIDE_PANEL = {"width_px", "height_px", "density_dpi", "visible_categories",
                "minimum_navigation_target_dp", "help_closed", "default_panel", "default_panel_expanded"}
 _PORTRAIT = {"actual_rotation", "width_px", "height_px", "interface_language", "console_selected"}
@@ -53,14 +54,17 @@ def validate_android(report):
         raise ValueError("android_public_os_interface_not_passed")
     detail = report[FIELD]
     _fields(detail, _DETAIL)
-    _need(detail["authority"] == AUTHORITY and type(detail["sdk"]) is int and detail["sdk"] == SDK
-          and type(detail["languages"]) is list and len(detail["languages"]) == len(LANGUAGES))
-    for value, language in zip(detail["languages"], LANGUAGES):
-        _fields(value, _LANGUAGE)
-        title, start, stop = READBACKS[language]
-        _need(value["language"] == language and value["title"] == title + "  " + VERSION
-              and value["start"] == start and value["stop"] == stop
-              and value["actual_ui_observed"] is True)
+    _need(detail["authority"] == AUTHORITY and type(detail["sdk"]) is int and detail["sdk"] == SDK)
+    for field, running in (("languages", False), ("running_languages", True)):
+        values = detail[field]
+        _need(type(values) is list and len(values) == len(LANGUAGES))
+        for value, language in zip(values, LANGUAGES):
+            _fields(value, _LANGUAGE)
+            title, start, stop = READBACKS[language]
+            _need(value["language"] == language and value["title"] == title + "  " + VERSION
+                  and value["start"] == start and value["stop"] == stop
+                  and value["status"] == STATUS_READBACKS[language][int(running)]
+                  and value["actual_ui_observed"] is True)
     wide = detail["wide"]
     _fields(wide, {"console", "graphics", "actual_rotation"})
     _need(type(wide["actual_rotation"]) is int and wide["actual_rotation"] == 1)

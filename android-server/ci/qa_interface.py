@@ -27,7 +27,7 @@ def labels(language):
     path = ROOT / "android-server/app/src/main/res" / ("values-" + language) / "strings.xml"
     rows = {node.get("name"): "".join(node.itertext()) for node in ET.parse(path).getroot()
             if node.tag == "string"}
-    keys = ("app_name", "start_server", "stop_server", *("nav_" + key for key in CATEGORIES))
+    keys = ("app_name", "start_server", "stop_server", "status_stopped", "status_running", *("nav_" + key for key in CATEGORIES))
     if any(not rows.get(key, "").strip() for key in keys):
         raise RuntimeError("Interface QA requires explicit translated title, controls and categories")
     return {key: rows[key] for key in keys}
@@ -51,21 +51,37 @@ def nav_node(tree, category):
     return matches[0]
 
 
-def language_proof(tree, expected):
+def language_proof(tree, expected, *, status_key="status_stopped"):
     nodes = [node for node in tree.iter("node") if node.get("package") == PACKAGE and visible_node(node, tree)]
     titles = [node for node in nodes if node.get("class") == "android.widget.TextView"
               and node.get("text", "").startswith(expected["app_name"] + "  ")]
     if len(titles) != 1:
         raise RuntimeError("Native interface title did not use the selected language")
+    controls = []
     for key in ("start_server", "stop_server"):
-        if len([node for node in nodes if node.get("class") == "android.widget.Button"
-                and node.get("text") == expected[key]]) != 1:
+        matches = [node for node in nodes if node.get("class") == "android.widget.Button"
+                   and node.get("text") == expected[key]]
+        if len(matches) != 1:
             raise RuntimeError("Native interface server controls did not use the selected language")
+        controls.append(matches[0])
+    # Observe the existing top status region, even when its text is wrong.
+    # Searching for expected text could accept a matching label elsewhere;
+    # no machine-only spoken description or production selector is added.
+    text_views = [node for node in nodes if node.get("class") == "android.widget.TextView"]
+    if len(text_views) < 2 or text_views[0] is not titles[0]:
+        raise RuntimeError("Native interface title and top status region were not observed")
+    status = text_views[1]
+    title_area, status_area = bounds(titles[0]), bounds(status)
+    if (status_area[1] < title_area[3]
+            or status_area[3] > min(bounds(node)[1] for node in controls)):
+        raise RuntimeError("Native interface top status is outside its observed region")
+    if status.get("text") != expected[status_key]:
+        raise RuntimeError("Native interface server status did not use the selected language")
     for category in CATEGORIES:
         if nav_node(tree, category).get("text") != expected["nav_" + category]:
             raise RuntimeError("Native interface category did not use the selected language")
     return {"title": titles[0].get("text"), "start": expected["start_server"],
-            "stop": expected["stop_server"], "actual_ui_observed": True}
+            "stop": expected["stop_server"], "status": status.get("text"), "actual_ui_observed": True}
 
 
 def observe(qa, stage, checker):
@@ -203,3 +219,21 @@ def exercise_interface_configuration(qa):
     return {"actual_os_api_resource_configuration": {
         "authority": "Android public LocaleManager and WindowManager shell APIs",
         "sdk": int(sdk), "languages": cases, "wide": wide, "restored_portrait": restored}}
+
+
+def exercise_running_interface_languages(qa):
+    """Observe live status through locale changes without a server restart."""
+    cases, selected = [], None
+    try:
+        for language in LANGUAGES:
+            configure_locale(qa, language)
+            selected = language
+            _, proof = observe(qa, "02-interface-running-" + language,
+                               lambda tree, expected=labels(language): language_proof(
+                                   tree, expected, status_key="status_running"))
+            cases.append({"language": language, **proof})
+    finally:
+        if selected != "ko":
+            qa.adb("shell", "cmd", "locale", "set-app-locales", PACKAGE,
+                   "--user", "0", "--locales", "ko", check=False)
+    return cases

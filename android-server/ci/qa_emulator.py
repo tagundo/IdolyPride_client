@@ -1162,7 +1162,7 @@ def main():
         print("Starting the server through its native UI", flush=True)
         from qa_launcher_guard import recover_initial_launcher
         recover_initial_launcher(qa, result["target_evidence"])
-        from qa_interface import exercise_interface_configuration
+        from qa_interface import exercise_interface_configuration, exercise_running_interface_languages
         result.update(exercise_interface_configuration(qa))
         qa.tap("서버 시작", "01-start")
         result["initial_storage_private_selected"] = complete_initial_storage_choice(qa)
@@ -1174,6 +1174,7 @@ def main():
                       bootstrap_rpc_order=["System.Check", "Refund.GetTerm", "Auth.Login"])
         if not login.gameAuthToken:
             raise RuntimeError("Local login did not return a session")
+        result["actual_os_api_resource_configuration"]["running_languages"] = exercise_running_interface_languages(qa)
         user = rpc(schema, grpc_port, "/api.User/Get", login.gameAuthToken)
         if not user.HasField("user") or not user.user.name:
             raise RuntimeError("Local User.Get snapshot is absent")

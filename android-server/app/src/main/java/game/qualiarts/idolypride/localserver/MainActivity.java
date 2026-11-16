@@ -2396,9 +2396,9 @@ public final class MainActivity extends Activity implements ServerService.Observ
         super.onStop();
     }
 
-    @Override public void onServerChanged(String value, boolean running, boolean busy, List<String> lines, String detailsJson) {
+    @Override public void onServerChanged(ServerService.StatusText value, boolean running, boolean busy, List<String> lines, String detailsJson) {
         presentationServerRunning = running;
-        status.setText(value);
+        status.setText(value.render(this));
         status.setTextColor(running ? SUCCESS : TEXT_PRIMARY);
         accountLifecycleBusy = busy;
         if (eventsSummary != null) {

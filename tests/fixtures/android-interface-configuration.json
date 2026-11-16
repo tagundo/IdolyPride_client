@@ -8,6 +8,7 @@
         "title": "IDOLY PRIDE Server  0.3.37",
         "start": "Start server",
         "stop": "Stop server",
+        "status": "Stopped",
         "actual_ui_observed": true
       },
       {
@@ -15,6 +16,7 @@
         "title": "アイプラサーバー  0.3.37",
         "start": "サーバー開始",
         "stop": "サーバー停止",
+        "status": "停止中",
         "actual_ui_observed": true
       },
       {
@@ -22,6 +24,33 @@
         "title": "아이프라 서버  0.3.37",
         "start": "서버 시작",
         "stop": "서버 중지",
+        "status": "중지됨",
+        "actual_ui_observed": true
+      }
+    ],
+    "running_languages": [
+      {
+        "language": "en",
+        "title": "IDOLY PRIDE Server  0.3.37",
+        "start": "Start server",
+        "stop": "Stop server",
+        "status": "Running",
+        "actual_ui_observed": true
+      },
+      {
+        "language": "ja",
+        "title": "アイプラサーバー  0.3.37",
+        "start": "サーバー開始",
+        "stop": "サーバー停止",
+        "status": "実行中",
+        "actual_ui_observed": true
+      },
+      {
+        "language": "ko",
+        "title": "아이프라 서버  0.3.37",
+        "start": "서버 시작",
+        "stop": "서버 중지",
+        "status": "실행 중",
         "actual_ui_observed": true
       }
     ],

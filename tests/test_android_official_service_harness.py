@@ -273,3 +273,108 @@ public final class OfficialPollingHarness {
     ran = subprocess.run([java, "-cp", str(tmp_path), "OfficialPollingHarness"], capture_output=True, text=True, timeout=30)
     assert ran.returncode == 0, ran.stdout + ran.stderr
     assert ran.stdout.strip() == "official-polling-harness PASS"
+
+
+def test_service_state_is_localized_by_current_observer_without_restarting_service(tmp_path):
+    """Exercise the real state/dispatch envelope across locale changes and failures."""
+    import json
+    import re
+    import xml.etree.ElementTree as ET
+
+    javac, java = shutil.which("javac"), shutil.which("java")
+    assert javac and java, "The service status regression requires the CI JDK"
+    production = SERVICE.read_text()
+    initial = re.search(r"^    private static volatile StatusText status = .+;$", production, re.MULTILINE)
+    assert initial and "R.string.status_stopped" in initial.group()
+    actual = "\n".join(method(production, marker) for marker in (
+        "    public static final class StatusText {", "    public interface Observer {",
+        "    private static void dispatch()", "    private static void state(", "    private static void appendLog("))
+    resources = ROOT / "android-server/app/src/main/res"
+    names = ("status_stopped", "status_starting", "status_running", "status_stopping", "status_failed")
+    tables = {}
+    for locale, directory in (("ko", "values"), ("en", "values-en"), ("ja", "values-ja")):
+        rows = {row.attrib["name"]: row.text for row in ET.parse(resources / directory / "strings.xml").getroot()
+                if row.tag == "string"}
+        tables[locale] = [rows[name] for name in names]
+    constants = ",".join(name + "=" + str(index + 1) for index, name in enumerate(names))
+    localized = "\n".join("  static final String[] " + locale.upper() + " = " +
+                            json.dumps(values, ensure_ascii=True).replace("[", "{", 1)[:-1] + "};"
+                            for locale, values in tables.items())
+    source = r'''
+import java.util.*;
+import java.util.concurrent.CopyOnWriteArrayList;
+public final class ServiceStatusHarness {
+ static void check(boolean value,String why) { if(!value)throw new AssertionError(why); }
+ static final class R { static final class string { static final int CONSTANTS,formatted=99; } }
+ LOCALIZED
+ static final class Context {
+  String locale;Object[] lastArguments;
+  Context(String locale) { this.locale=locale; }
+  String getString(int resource,Object... values) {
+   lastArguments=values;
+   if(resource==R.string.formatted)return String.format(Locale.ROOT,"%s %d",values);
+   return (locale.equals("en")?EN:locale.equals("ja")?JA:KO)[resource-1];
+  }
+ }
+ static final class Queue {
+  final ArrayDeque<Runnable> rows=new ArrayDeque<>();
+  void post(Runnable task) { rows.add(task); }
+  void drain() { while(!rows.isEmpty())rows.remove().run(); }
+ }
+ static final Queue MAIN=new Queue();
+ static final int LOG_LIMIT=400;
+ static final ArrayDeque<String> LOGS=new ArrayDeque<>();
+ static final CopyOnWriteArrayList<Observer> OBSERVERS=new CopyOnWriteArrayList<>();
+ INITIAL
+ private static volatile boolean running=false,busy=false;
+ private static volatile String runtimeDetails="{}";
+ ACTUAL
+ static final class Event {
+  final StatusText state;final boolean running,busy;final List<String> logs;final String details;
+  Event(StatusText state,boolean running,boolean busy,List<String> logs,String details) {
+   this.state=state;this.running=running;this.busy=busy;this.logs=logs;this.details=details;
+  }
+ }
+ public static void main(String[] ignored) {
+  Context screen=new Context("en");List<Event> events=new ArrayList<>();
+  OBSERVERS.add((state,running,busy,logs,details)->events.add(new Event(state,running,busy,logs,details)));
+  dispatch();check(events.isEmpty(),"status callback bypassed main queue");MAIN.drain();
+  Event stopped=events.remove(0);
+  check(stopped.state.render(screen).equals(EN[0])&&!stopped.running&&!stopped.busy,"initial EN stopped state");
+  // The same retained service snapshot must resolve in a newly selected screen locale.
+  screen.locale="ja";check(stopped.state.render(screen).equals(JA[0]),"cached service status ignored JA locale");
+  screen.locale="ko";check(stopped.state.render(screen).equals(KO[0]),"cached service status ignored KO locale");
+  int[] labels={R.string.status_starting,R.string.status_running,R.string.status_stopping,R.string.status_stopped,R.string.status_failed};
+  boolean[] expectedRunning={false,true,true,false,false},expectedBusy={true,false,true,false,false};
+  for(int index=0;index<labels.length;index++) {
+   state(labels[index],expectedRunning[index],expectedBusy[index]);MAIN.drain();Event observed=events.remove(0);
+   check(observed.running==expectedRunning[index]&&observed.busy==expectedBusy[index],"lifecycle flags changed");
+   for(String locale:new String[]{"en","ja","ko"}) {
+    screen.locale=locale;String[] table=locale.equals("en")?EN:locale.equals("ja")?JA:KO;
+    check(observed.state.render(screen).equals(table[labels[index]-1]),"known state cached an old locale");
+   }
+  }
+  Object[] arguments={"detail",7};StatusText formatted=new StatusText(R.string.formatted,arguments);
+  arguments[0]="caller changed";check(formatted.render(screen).equals("detail 7"),"caller mutated status arguments");
+  screen.lastArguments[0]="renderer changed";check(formatted.render(screen).equals("detail 7"),"renderer mutated status arguments");
+  try { new StatusText(R.string.formatted,new StringBuilder("mutable"));throw new AssertionError("mutable argument accepted"); }
+  catch(IllegalArgumentException expected) { }
+  String raw="PermissionError: [Errno 1] /etc/apache2/mime.types";
+  runtimeDetails="{\"error\":\"raw details retained\"}";appendLog(raw);MAIN.drain();Event error=events.remove(0);
+  check(error.logs.size()==1&&error.logs.get(0).equals(raw)&&error.details.equals(runtimeDetails),"raw diagnostic error changed");
+  check(error.state.render(screen).equals(KO[4])&&!error.running&&!error.busy,"failure state flags lost");
+  System.out.println("service-status-locale-harness PASS");
+ }
+}
+'''.replace("CONSTANTS", constants).replace("LOCALIZED", localized).replace("INITIAL", initial.group()).replace("ACTUAL", actual)
+    output = tmp_path / "ServiceStatusHarness.java"
+    output.write_text(source)
+    compiled = subprocess.run([javac, "-encoding", "UTF-8", str(output)], text=True, capture_output=True, timeout=30)
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    result = subprocess.run([java, "-cp", str(tmp_path), "ServiceStatusHarness"], text=True, capture_output=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "service-status-locale-harness PASS" in result.stdout
+    activity = SERVICE.with_name("MainActivity.java").read_text()
+    assert 'status.setContentDescription("idoly.server.status")' in activity
+    assert "onServerChanged(ServerService.StatusText value," in activity
+    assert "status.setText(value.render(this))" in activity

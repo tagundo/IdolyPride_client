@@ -210,3 +210,22 @@ def test_korean_refresh_rejects_an_unproven_or_nonuniform_whole_logo(builder,dam
         row["output_sha256"]=hashlib.sha256(corrupt).hexdigest()
     with pytest.raises(ValueError):
         builder._compare_korean_resources(BytesIO(serialized_resource(before)),BytesIO(serialized_resource(after)),proof)
+
+
+@pytest.mark.parametrize("same_size", (False, True))
+def test_korean_refresh_rejection_identifies_only_the_public_changed_object(builder, same_size):
+    from io import BytesIO
+    before, after, proof = korean_graph_fixture()
+    path, kind, original = before[-1]
+    changed = b"x" * len(original) if same_size else b"different resource bytes"
+    after[-1] = (path, kind, changed)
+    with pytest.raises(ValueError) as failure:
+        builder._compare_korean_resources(
+            BytesIO(serialized_resource(before)), BytesIO(serialized_resource(after)), proof)
+    assert str(failure.value) == (
+        "An undeclared Korean UI, font, story or other resource object changed: "
+        f"path_id={path}, class_id={kind}, old_bytes={len(original)}, new_bytes={len(changed)}, "
+        f"old_sha256={hashlib.sha256(original).hexdigest()}, "
+        f"new_sha256={hashlib.sha256(changed).hexdigest()}")
+    assert original.decode() not in str(failure.value)
+    assert changed.decode() not in str(failure.value)

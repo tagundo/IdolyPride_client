@@ -108,6 +108,8 @@ jobs:
           path: |
             ${{ runner.temp }}/idoly-android-qa/qa/00-interface-*.png
             ${{ runner.temp }}/idoly-android-qa/qa/00-interface-*.xml
+            ${{ runner.temp }}/idoly-android-qa/qa/02-interface-running-*.png
+            ${{ runner.temp }}/idoly-android-qa/qa/02-interface-running-*.xml
             ${{ runner.temp }}/idoly-android-qa/qa/02-running.png
             ${{ runner.temp }}/idoly-android-qa/qa/02-running.xml
             ${{ runner.temp }}/idoly-android-qa/qa/04-stopped.png
