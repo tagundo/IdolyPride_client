@@ -17,8 +17,9 @@ jobs:
   layout:
     runs-on: macos-15
     timeout-minutes: 25
+    # Existing registered draft input assets require this scope for metadata reads.
     permissions:
-      contents: read
+      contents: write
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       PYTHONPATH: src
