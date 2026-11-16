@@ -494,6 +494,16 @@ def test_language_producer_report_binds_every_current_writer_and_profile(languag
         delivery.validate_language_producer_report(report, SOURCE)
 
 
+def test_language_producer_report_binds_canonical_gpu_donor_profile(language_producer_tree):
+    root, report = language_producer_tree
+    name = "client-presentation/images/korean-ios-direct-gpu-v1.json"
+    assert name in delivery.LANGUAGE_PRODUCER_SOURCES
+    assert delivery.validate_language_producer_report(report, SOURCE) is None
+    (root / name).write_bytes(b"changed canonical GPU donor object pin")
+    with pytest.raises(delivery.DeliveryError, match="language_producer_source_sha256_differs"):
+        delivery.validate_language_producer_report(report, SOURCE)
+
+
 @pytest.mark.parametrize("damage", ["missing-report", "wrong-commit", "missing-commit", "pins-list",
     "missing-writer", "extra-path", "uppercase-sha", "wrong-sha", "non-string-sha"])
 def test_language_producer_cannot_relabel_omit_or_extend_its_source_closure(language_producer_tree, damage):
@@ -542,7 +552,7 @@ def test_committed_language_producer_and_delivery_have_the_same_finite_closure()
     assignment = next(node for node in builder.body if isinstance(node, ast.Assign)
                       and any(isinstance(target, ast.Name) and target.id == "names" for target in node.targets))
     actual = ast.literal_eval(assignment.value)
-    assert type(actual) is tuple and len(actual) == 11
+    assert type(actual) is tuple and len(actual) == 12
     assert actual == delivery.LANGUAGE_PRODUCER_SOURCES
 
 

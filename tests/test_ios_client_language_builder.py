@@ -229,3 +229,112 @@ def test_korean_refresh_rejection_identifies_only_the_public_changed_object(buil
         f"new_sha256={hashlib.sha256(changed).hexdigest()}")
     assert original.decode() not in str(failure.value)
     assert changed.decode() not in str(failure.value)
+
+
+
+def test_canonical_gpu_catalog_binds_exact_fourteen_profiles_and_signed_donor(builder):
+    from idoly_local.static_ui_textures import PROFILES
+    profiles, pins = builder._direct_gpu_catalog()
+    assert set(profiles) == set(pins) == {row["ios"]["path_id"] for row in PROFILES}
+    assert len(pins) == 14
+    assert pins[124]["output_sha256"] == "a672da882303e3c2c58e31a6090a79beaa54d94a3bafe7a5226368f70c4bc2b5"
+    assert pins[124]["source_RGBA_sha256"] == "ec2804cd55ee9e4acd0f61d445439e1568767897afeaa530f2182f21f996de10"
+    assert builder.DIRECT_GPU_PIN in builder._build_source_pins()
+
+
+@pytest.mark.parametrize("damage", ("file-hash", "base-donor", "stock", "source", "missing-object", "duplicate-id", "duplicate-name", "layout", "format", "png", "original-object", "extra-field", "duplicate-json-key"))
+def test_canonical_gpu_catalog_cannot_expand_or_rebind_approved_bytes(tmp_path, monkeypatch, builder, damage):
+    original = (builder.ROOT / builder.DIRECT_GPU_PIN).read_bytes()
+    data = json.loads(original)
+    if damage == "base-donor": data["base_ipa_sha256"] = "0" * 64
+    elif damage == "stock": data["stock_ipa_sha256"] = "0" * 64
+    elif damage == "source": data["source"]["revision"] = "0" * 40
+    elif damage == "missing-object": data["textures"].pop()
+    elif damage == "duplicate-id": data["textures"][0]["path_id"] = data["textures"][1]["path_id"]
+    elif damage == "duplicate-name": data["textures"][0]["name"] = data["textures"][1]["name"]
+    elif damage == "layout": data["textures"][0]["width"] += 1
+    elif damage == "format": data["textures"][0]["format_after"] = 4
+    elif damage == "png": data["textures"][0]["png_sha256"] = "0" * 64
+    elif damage == "original-object": data["textures"][0]["input_sha256"] = "0" * 64
+    elif damage == "extra-field": data["textures"][0]["fallback"] = True
+    raw = json.dumps(data).encode()
+    if damage == "duplicate-json-key": raw = raw.replace(b'{', b'{"schema": 1,', 1)
+    path = tmp_path / builder.DIRECT_GPU_PIN; path.parent.mkdir(parents=True); path.write_bytes(raw)
+    monkeypatch.setattr(builder, "ROOT", tmp_path)
+    if damage != "file-hash":
+        # Exercise semantic guards independently of the committed full-file pin.
+        monkeypatch.setattr(builder, "DIRECT_GPU_PIN_SHA256", hashlib.sha256(raw).hexdigest())
+    with pytest.raises(ValueError): builder._direct_gpu_catalog()
+
+
+@pytest.mark.parametrize("damage", ("none", "missing", "class", "length", "digest"))
+def test_canonical_gpu_reader_rejects_any_unpinned_object_and_ignores_other_payloads(tmp_path, builder, damage):
+    raw = b"canonical compressed GPU pixels"
+    rows = [(1, 49, b"must not be copied"), (124, 28, raw), (1000, 114, b"unrelated script")]
+    pins = {124: {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}}
+    if damage == "missing": rows.pop(1)
+    elif damage == "class": rows[1] = (124, 49, raw)
+    elif damage == "length": pins[124]["bytes"] += 1
+    elif damage == "digest": pins[124]["sha256"] = "0" * 64
+    path = tmp_path / "donor.ipa"
+    with ZipFile(path, "w") as archive:
+        archive.writestr(builder.APP + builder.RESOURCES, serialized_resource(rows))
+    with ZipFile(path) as archive:
+        if damage == "none":
+            assert builder._pinned_resource_objects(archive, pins) == {124: raw}
+        else:
+            with pytest.raises(ValueError): builder._pinned_resource_objects(archive, pins)
+
+
+@pytest.mark.parametrize("damage", ("stock", "donor", "donor-length"))
+def test_canonical_gpu_fingerprint_rejected_before_decoding(monkeypatch, builder, damage):
+    import builtins
+    from idoly_local.static_ui_textures import PROFILES
+    profile = PROFILES[0]; _, pins = builder._direct_gpu_catalog(); pin = pins[profile["ios"]["path_id"]]
+    real_import = builtins.__import__
+    def deny_optional(name, *args, **kwargs):
+        if name.split(".", 1)[0] in {"attrs", "PIL", "UnityPy"}:
+            raise AssertionError("Unpinned GPU bytes cannot reach a decoder")
+        return real_import(name, *args, **kwargs)
+    monkeypatch.setattr(builtins, "__import__", deny_optional)
+    original = b"x" * profile["ios"]["bytes"]
+    raw = b"x" * pin["output_bytes"]
+    if damage != "stock":
+        profile = {**profile, "ios": {**profile["ios"], "object_sha256": hashlib.sha256(original).hexdigest()}}
+    if damage == "donor-length": raw += b"x"
+    with pytest.raises(ValueError, match="fingerprint differs"):
+        builder._validate_direct_gpu(original, raw, profile, pin, Path("unused"))
+
+
+def test_canonical_gpu_pipeline_preserves_every_finite_donor_byte_and_never_reencodes(monkeypatch, builder):
+    from idoly_local import static_ui_textures
+    profiles, pins = builder._direct_gpu_catalog()
+    originals = {path: ("stock-" + str(path)).encode() for path in pins}
+    donors = {path: ("canonical-" + str(path)).encode() for path in pins}
+    stock, base, image_dir = object(), object(), object()
+    reads, validated = [], []
+    def read(archive, expected):
+        reads.append(archive)
+        assert set(expected) == set(pins)
+        if archive is stock:
+            assert all(expected[path]["sha256"] == profiles[path]["ios"]["object_sha256"] for path in pins)
+            return dict(originals)
+        assert archive is base
+        assert all(expected[path] == {"bytes": pins[path]["output_bytes"], "sha256": pins[path]["output_sha256"]} for path in pins)
+        return dict(donors)
+    def validate(original, raw, profile, pin, images):
+        path = pin["path_id"]
+        assert original == originals[path] and raw == donors[path] and images is image_dir
+        validated.append(path)
+    def deny_encode(*args, **kwargs): raise AssertionError("Canonical donor GPU bytes must not be reencoded")
+    monkeypatch.setattr(builder, "_pinned_resource_objects", read)
+    monkeypatch.setattr(builder, "_validate_direct_gpu", validate)
+    monkeypatch.setattr(static_ui_textures, "ios_patches", deny_encode)
+    monkeypatch.setattr(static_ui_textures, "_encoded_pixels", deny_encode)
+    replacements, proof = builder._canonical_direct_textures(stock, base, image_dir)
+    assert reads == [stock, base] and set(validated) == set(pins)
+    assert {path: row["raw"] for path, row in replacements.items()} == donors
+    assert proof["translated_textures"] == 14
+    assert proof["GPU_byte_source"]["host_reencoded"] is False
+    assert proof["GPU_byte_source"]["source_and_decoded_pixels_verified"] is True
+    assert proof["GPU_byte_source"]["pin_sha256"] == builder.DIRECT_GPU_PIN_SHA256

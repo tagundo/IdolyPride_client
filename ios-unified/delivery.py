@@ -47,6 +47,7 @@ LANGUAGE_PRODUCER_SOURCES = (
     "client-presentation/images/korean-static-sprites-v1.json",
     "client-presentation/images/korean-static-sprites-v2.json",
     "client-presentation/images/korean-static-textures-v1.json",
+    "client-presentation/images/korean-ios-direct-gpu-v1.json",
     "client-presentation/translations/static-ui-v1.json",
 )
 # Only the audited static UI catalog needs the larger source-file allowance.

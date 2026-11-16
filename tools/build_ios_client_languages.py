@@ -32,6 +32,8 @@ BASE_BYTES = 150132823
 APP = "Payload/IDOLY PRIDE.app/"
 METADATA = "Data/Managed/Metadata/global-metadata.dat"
 RESOURCES = "Data/resources.assets"
+DIRECT_GPU_PIN = "client-presentation/images/korean-ios-direct-gpu-v1.json"
+DIRECT_GPU_PIN_SHA256 = "5a15ccce17f043d4c56424e2b6318f83bdcbc7b0614f56b0207239298d190131"
 
 
 def _need(value, message):
@@ -105,6 +107,7 @@ def _build_source_pins():
              "client-presentation/images/korean-static-sprites-v1.json",
              "client-presentation/images/korean-static-sprites-v2.json",
              "client-presentation/images/korean-static-textures-v1.json",
+             "client-presentation/images/korean-ios-direct-gpu-v1.json",
              "client-presentation/translations/static-ui-v1.json")
     return {name: _hash(ROOT / name)[0] for name in names}
 
@@ -261,13 +264,153 @@ def _compare_korean_resources(original, prepared, image_proof):
             "unchanged_object_count": preserved, "type_graph_and_external_references_unchanged": True}
 
 
+def _unique_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        _need(key not in result, "Duplicate canonical GPU pin key")
+        result[key] = value
+    return result
+
+
+def _direct_gpu_catalog():
+    """Bind only the fourteen already reviewed GPU objects to their PNG pixels."""
+    from idoly_local.static_ui_textures import PROFILES, SOURCE
+    path = ROOT / DIRECT_GPU_PIN
+    _need(not path.is_symlink() and stat.S_ISREG(path.stat().st_mode)
+          and 0 < path.stat().st_size <= 32 * 1024, "Canonical GPU pin exceeds its boundary")
+    raw = path.read_bytes()
+    _need(hashlib.sha256(raw).hexdigest() == DIRECT_GPU_PIN_SHA256,
+          "Canonical GPU pin fingerprint differs")
+    data = json.loads(raw, object_pairs_hook=_unique_pairs)
+    _need(set(data) == {"schema", "policy", "source", "stock_ipa_sha256", "base_ipa_sha256", "textures"}
+          and data["schema"] == 1 and data["policy"] == "korean-ios-direct-gpu-v1"
+          and data["source"] == SOURCE and data["stock_ipa_sha256"] == STOCK_SHA256
+          and data["base_ipa_sha256"] == BASE_SHA256, "Canonical GPU donor binding differs")
+    rows = data["textures"]
+    profiles = {profile["ios"]["path_id"]: profile for profile in PROFILES}
+    _need(isinstance(rows, list) and len(rows) == len(profiles) == 14
+          and {row["path_id"] for row in rows} == set(profiles)
+          and len({row["name"] for row in rows}) == 14, "Canonical GPU object roster differs")
+    row_keys = {"name", "path_id", "input_sha256", "output_sha256", "output_bytes", "png_sha256",
+                "original_width", "original_height", "width", "height", "format_before", "format_after",
+                "GPU_bytes_before", "GPU_bytes_after", "CPU_pixel_copy_retained",
+                "original_shared_stream_unchanged", "unrelated_texture_fields_preserved", "PNG_resampled",
+                "encoding", "source_RGBA_sha256", "decoded_RGBA_sha256", "rms_RGB", "quality", "threads",
+                "GPU_bytes", "encoder_version"}
+    for row in rows:
+        _need(set(row) == row_keys, "Canonical GPU object fields differ")
+        profile = profiles[row["path_id"]]; target = profile["ios"]
+        _need(row["name"] == profile["name"] and row["png_sha256"] == profile["png_sha256"]
+              and row["input_sha256"] == target["object_sha256"]
+              and [row["original_width"], row["original_height"]] == [target["width"], target["height"]]
+              and [row["width"], row["height"]] == profile["png_size"]
+              and row["format_before"] == row["format_after"] == target["format"] == 50
+              and row["quality"] == 60 and row["threads"] == 1
+              and row["encoder_version"] == "0.1.12" and row["encoding"] == "ASTC6x6-medium"
+              and row["CPU_pixel_copy_retained"] is False and row["PNG_resampled"] is False
+              and row["original_shared_stream_unchanged"] is True
+              and row["unrelated_texture_fields_preserved"] is True,
+              "Canonical GPU source or layout differs")
+    return profiles, {row["path_id"]: row for row in rows}
+
+
+def _pinned_resource_objects(archive, pins):
+    """Read a finite positive-ID set; no undeclared donor payload is retained."""
+    result = {}
+    with archive.open(APP + RESOURCES) as incoming:
+        index = _resource_index(incoming); position = index["offset"]
+        for path, relative, length, kind in _resource_rows(index):
+            if path not in pins:
+                continue
+            expected = pins[path]
+            _need(index["types"][kind][0] == 28 and length == expected["bytes"]
+                  and 0 < length <= 1024 * 1024, "Canonical GPU object class or extent differs")
+            _skip(incoming, index["offset"] + relative - position)
+            raw = _exact(incoming, length); position = index["offset"] + relative + length
+            _need(hashlib.sha256(raw).hexdigest() == expected["sha256"],
+                  "Canonical GPU object fingerprint differs")
+            result[path] = raw
+    _need(result.keys() == pins.keys(), "Canonical GPU object is missing")
+    return result
+
+
+def _validate_direct_gpu(original, raw, profile, pin, image_dir):
+    """Decode preserved bytes and source PNG; never recompress ASTC on this host."""
+    target = profile["ios"]
+    _need(len(original) == target["bytes"]
+          and hashlib.sha256(original).hexdigest() == target["object_sha256"]
+          and len(raw) == pin["output_bytes"]
+          and hashlib.sha256(raw).hexdigest() == pin["output_sha256"],
+          "Canonical GPU source or donor fingerprint differs")
+    import attrs
+    from io import BytesIO
+    from idoly_local import static_ui_images as images
+    _, Image = images._imports()
+    png = images._png(image_dir, profile)
+    with Image.open(BytesIO(png)) as image:
+        _need(image.format == "PNG" and image.size == tuple(profile["png_size"]),
+              "Canonical GPU source PNG layout differs")
+        source = image.convert("RGBA")
+    _need(hashlib.sha256(source.tobytes()).hexdigest() == pin["source_RGBA_sha256"],
+          "Canonical GPU source pixels differ")
+    _, reader = images._mini_asset(original, 28, 9); before = reader.read()
+    _, reader = images._mini_asset(raw, 28, 9); after = reader.read()
+    old_stream, stream = before.m_StreamData, after.m_StreamData
+    _need(before.m_Name == profile["name"]
+          and [before.m_Width, before.m_Height] == [target["width"], target["height"]]
+          and int(before.m_TextureFormat) == target["format"] and before.m_MipCount == target["mips"]
+          and {"path": old_stream.path, "offset": old_stream.offset, "size": old_stream.size} == target["stream_data"],
+          "Canonical GPU original Texture2D layout differs")
+    old_gpu = ((before.m_Width + 5) // 6) * ((before.m_Height + 5) // 6) * 16
+    expected_gpu = ((source.width + 5) // 6) * ((source.height + 5) // 6) * 16
+    _need(before.m_CompleteImageSize == old_gpu == pin["GPU_bytes_before"]
+          and (old_stream.size == old_gpu and not before.image_data if old_stream.path
+               else len(before.image_data) == old_gpu)
+          and [after.m_Width, after.m_Height] == [source.width, source.height]
+          and int(after.m_TextureFormat) == target["format"] and after.m_MipCount == 1
+          and after.m_CompleteImageSize == len(after.image_data) == expected_gpu
+          == pin["GPU_bytes_after"] == pin["GPU_bytes"]
+          and not after.m_IsReadable and not stream.path and stream.offset == stream.size == 0,
+          "Canonical GPU translated Texture2D allocation differs")
+    mutable = {"image_data", "m_Width", "m_Height", "m_CompleteImageSize", "m_IsReadable", "m_StreamData"}
+    _need({key: value for key, value in attrs.asdict(before).items() if key not in mutable}
+          == {key: value for key, value in attrs.asdict(after).items() if key not in mutable},
+          "Canonical GPU unrelated Texture2D fields differ")
+    decoded = after.image.convert("RGBA")
+    _need(decoded.size == source.size
+          and hashlib.sha256(decoded.tobytes()).hexdigest() == pin["decoded_RGBA_sha256"],
+          "Canonical GPU decoded pixels differ")
+
+
+def _canonical_direct_textures(stock, base, image_dir):
+    """Keep audited donor ASTC bytes stable across x86 and ARM build hosts."""
+    from idoly_local.static_ui_textures import _proof
+    profiles, pins = _direct_gpu_catalog()
+    stock_pins = {path: {"bytes": profile["ios"]["bytes"], "sha256": profile["ios"]["object_sha256"]}
+                  for path, profile in profiles.items()}
+    donor_pins = {path: {"bytes": row["output_bytes"], "sha256": row["output_sha256"]}
+                  for path, row in pins.items()}
+    originals = _pinned_resource_objects(stock, stock_pins)
+    canonical = _pinned_resource_objects(base, donor_pins)
+    replacements = {}; rows = []
+    for path, profile in profiles.items():
+        pin = pins[path]; raw = canonical.pop(path)
+        _validate_direct_gpu(originals.pop(path), raw, profile, pin, image_dir)
+        replacements[path] = {"input_sha256": profile["ios"]["object_sha256"], "raw": raw}
+        rows.append(dict(pin))
+    proof = _proof("ios", "ko", rows)
+    proof["GPU_byte_source"] = {"policy": "preserve-canonical-donor-astc-v1",
+        "base_ipa_sha256": BASE_SHA256, "pin_sha256": DIRECT_GPU_PIN_SHA256,
+        "object_count": 14, "host_reencoded": False, "source_and_decoded_pixels_verified": True}
+    return replacements, proof
+
+
 def _korean_resources(stock, base, destination, image_dir):
     from idoly_local.static_ui_assets import patch_ios_stream
     from idoly_local.static_ui_images import ios_patches
-    from idoly_local.static_ui_textures import ios_patches as direct_patches
     csv, csv_proof = _korean_csv(base)
     replacements, appends, images = ios_patches(stock, language="ko", image_dir=image_dir)
-    direct, direct_proof = direct_patches(stock, language="ko", image_dir=image_dir)
+    direct, direct_proof = _canonical_direct_textures(stock, base, image_dir)
     _need(not replacements.keys() & direct.keys(), "Korean sprite and direct texture targets overlap")
     replacements.update(direct); images["direct_textures"] = direct_proof
     with tempfile.TemporaryFile(mode="w+b") as staged:
