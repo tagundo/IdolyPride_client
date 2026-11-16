@@ -24,6 +24,7 @@ _MAX_METADATA = 16 * 1024 * 1024
 _MAX_MANIFEST = 8 * 1024 * 1024
 _MAX_TOTAL = 48 * 1024 * 1024
 _SCHEMA = 1
+_FORMAT = 2
 _RECEIPTS = {}
 _LOCK = threading.Lock()
 _HEX = re.compile(r"[0-9a-f]{64}\Z")
@@ -70,14 +71,14 @@ def _archive(pin):
         stream.seek(max(0,size-65557));tail=stream.read(65557);at=tail.rfind(b"PK\x05\x06")
         if at<0 or at+22>len(tail):raise ValueError("Startup receipt directory is missing")
         _magic,disk,start_disk,on_disk,count,length,offset,comment=struct.unpack_from("<4s4H2IH",tail,at)
-        if (disk or start_disk or on_disk!=7 or count!=7 or not 0<length<=4096
+        if (disk or start_disk or on_disk!=5 or count!=5 or not 0<length<=4096
                 or offset+length!=size-len(tail)+at or at+22+comment!=len(tail)):
             raise ValueError("Startup receipt directory exceeds its boundary")
         stream.seek(0)
         with ZipFile(stream) as archive:
             infos=archive.infolist();expected={"index.json"}
             for language in ("ko","en"):
-                expected.update(language+"/"+name for name in ("metadata.json","base.pb","rebased.pb"))
+                expected.update(language+"/"+name for name in ("metadata.json","rebased.pb"))
             if (len(infos)!=len(expected) or {row.filename for row in infos}!=expected
                     or sum(row.file_size for row in infos)>_MAX_TOTAL):
                 raise ValueError("Startup receipt members differ")
@@ -110,7 +111,7 @@ def inspect_startup_receipt(source,*,expected_sha256,expected_bytes,platform):
         with _archive(pin) as archive:
             index=json.loads(archive.read("index.json"),object_pairs_hook=_pairs)
             if (type(index) is not dict or set(index)!={"schema","platform","layers"}
-                    or type(index["schema"]) is not int or index["schema"]!=_SCHEMA
+                    or type(index["schema"]) is not int or index["schema"]!=_FORMAT
                     or index["platform"]!=platform or type(index["layers"]) is not dict
                     or set(index["layers"])!={"ko","en"}):return result
         result["available"]=True
@@ -147,7 +148,7 @@ def encode_snapshot(snapshot):
         meta["rebase"]={"report_delta":top["report_delta"],"record_keys":list(top["record_keys"]),
                         "aliases":[[list(key),item] for key,item in top["aliases"].items()]}
     return (json.dumps(meta,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode(),
-            value["manifest"],value["manifest"] if top is None else top["manifest"])
+            value["manifest"] if top is None else top["manifest"])
 
 
 def _aliases(rows,records):
@@ -165,7 +166,20 @@ def _aliases(rows,records):
     return result
 
 
-def load_snapshot(platform,language,expected):
+def _base_manifest(directory,signature,digest):
+    path=Path(directory)/"manifest.pb"
+    descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    with os.fdopen(descriptor,"rb") as stream:
+        before=os.fstat(stream.fileno())
+        if _stamp(before)!=signature:raise ValueError("Prepared manifest changed")
+        raw=stream.read(_MAX_MANIFEST+1)
+        if (not 0<len(raw)<=_MAX_MANIFEST or len(raw)!=before.st_size
+                or hashlib.sha256(raw).hexdigest()!=digest or _stamp(os.fstat(stream.fileno()))!=signature):
+            raise ValueError("Prepared manifest changed")
+        return raw
+
+
+def load_snapshot(platform,language,expected,*,directory,signature):
     """Return exact build-validated bytes only for every currently hashed input."""
     with _LOCK:pin=_RECEIPTS.get(platform)
     if pin is None or language not in ("ko","en"):return None
@@ -173,13 +187,16 @@ def load_snapshot(platform,language,expected):
         with _archive(pin) as archive:
             index=json.loads(archive.read("index.json"),object_pairs_hook=_pairs)
             if (type(index) is not dict or set(index)!={"schema","platform","layers"}
-                    or type(index["schema"]) is not int or index["schema"]!=_SCHEMA
+                    or type(index["schema"]) is not int or index["schema"]!=_FORMAT
                     or index["platform"]!=platform or type(index["layers"]) is not dict
                     or set(index["layers"])!={"ko","en"}
                     or index["layers"][language]!=expected):return None
             prefix=language+"/"
             meta=json.loads(archive.read(prefix+"metadata.json"),object_pairs_hook=_pairs)
-            base=archive.read(prefix+"base.pb");rebased=archive.read(prefix+"rebased.pb")
+            rebased=archive.read(prefix+"rebased.pb")
+        # The base wire already exists as a prepared source. Read/hash its own
+        # held descriptor instead of duplicating it in the signed-app receipt.
+        base=_base_manifest(directory,signature[1],expected["source_sha256"][1])
         from .resource_translation_cache import _plain_metadata
         from .octo_manifest import OctoObject
         if (not _plain_metadata(meta) or type(meta) is not dict

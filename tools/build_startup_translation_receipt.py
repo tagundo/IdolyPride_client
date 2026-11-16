@@ -24,7 +24,7 @@ def build(prepared,data_dir,output,*,platform):
         raise ValueError("Use an unused public startup receipt output")
     archive_name,*_= _platform_archive(platform)
     _settings,original=load_octo_archive(data_dir/archive_name,platform=platform)
-    index={"schema":1,"platform":platform,"layers":{}}
+    index={"schema":receipt._FORMAT,"platform":platform,"layers":{}}
     weight=0;temporary=output.with_name(output.name+".part")
     if temporary.exists() or temporary.is_symlink():raise ValueError("Startup receipt staging already exists")
     with receipt._LOCK:
@@ -50,7 +50,7 @@ def build(prepared,data_dir,output,*,platform):
                     if weight>cache._MAX_METADATA_BYTES:raise ValueError("Startup receipt metadata exceeds shared cache budget")
                     rows=receipt.encode_snapshot(snapshot)
                     index["layers"][language]=receipt.binding(original,legacy,digests)
-                    for name,raw in zip(("metadata.json","base.pb","rebased.pb"),rows):
+                    for name,raw in zip(("metadata.json","rebased.pb"),rows):
                         info=ZipInfo(language+"/"+name,(1980,1,1,0,0,0))
                         info.compress_type=ZIP_DEFLATED;info.external_attr=0o100644<<16
                         archive.writestr(info,raw)

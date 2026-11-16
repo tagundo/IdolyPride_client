@@ -243,6 +243,14 @@ def validate_language_manifest(language):
     need(path.is_file() and not path.is_symlink() and path.stat().st_size == 8674
          and sha(path) == LANGUAGE_MANIFEST_SHA256 and language == read(path),
          "language_manifest_pin_differs")
+    # language_members is the producer's three-language count; the archive has
+    # five overrides (JA/EN metadata + resources, and the refreshed KO resources).
+    archived = {(code, name, row.get("member")) for code, rows in language["languages"].items()
+                for name, row in rows.items() if row["source"] == "archive"}
+    need(archived == {(code, name, code + "/" + name) for code in ("ja", "en")
+             for name in ("Data/Managed/Metadata/global-metadata.dat", "Data/resources.assets")}
+             | {("ko", "Data/resources.assets", "ko/Data/resources.assets")},
+         "language_archive_member_set_differs")
 
 
 def validate_refreshed_korean_resources(report, language):
@@ -289,8 +297,14 @@ def validate_refreshed_korean_resources(report, language):
          "korean_fixed_text_layout_differs")
     sprites = images.get("sprites")
     need(type(sprites) is list and len(sprites) == 139 and all(type(row) is dict
-         and type(row.get("name")) is str for row in sprites)
-         and len({row["name"] for row in sprites}) == 139, "korean_fixed_text_layout_differs")
+         and type(row.get("name")) is str and type(row.get("sprite_path_id")) is int for row in sprites)
+         and len({row["sprite_path_id"] for row in sprites}) == 139,
+         "korean_fixed_text_layout_differs")
+    # Sprite names need not be unique: the proven iOS roster contains two Ka
+    # objects. Bind the complete name/ID topology and require unique object IDs.
+    roster = [{"name": row["name"], "sprite_path_id": row["sprite_path_id"]} for row in sprites]
+    need(_canonical_sha(sorted(roster, key=lambda row: row["sprite_path_id"])) ==
+         "c16dc3fe1374b16f30e6bea8ab19314ff16070df3a2593c34b9d3553edbb7385", "korean_fixed_text_layout_differs")
     fixed = [row for row in sprites if row.get("layout_policy") == "original-rect-love-text-v1"]
     need(len(fixed) == 10 and {row["name"]: row.get("sprite_path_id") for row in fixed} == KOREAN_FIXED_TEXT
          and all(row.get("readback_pixel_exact") is True
@@ -387,7 +401,11 @@ def verify_bundled_startup_receipt(archive, prefix, package_report, members, gua
     # verifies them against the actual original/legacy/current source bytes.
     import io
     with ZipFile(io.BytesIO(raw)) as receipt:
+        need({row.filename for row in receipt.infolist()} == {"index.json", "ko/metadata.json",
+             "ko/rebased.pb", "en/metadata.json", "en/rebased.pb"}, "startup_receipt_members_differ")
         index = json.loads(receipt.read("index.json"))
+    need(type(index.get("schema")) is int and index["schema"] == 2,
+         "startup_receipt_index_format_differs")
     for layer in index["layers"].values():
         is_sha = lambda value: type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value)
         need(type(layer) is dict and set(layer) == {"original_sha256", "legacy_sha256", "source_sha256"}

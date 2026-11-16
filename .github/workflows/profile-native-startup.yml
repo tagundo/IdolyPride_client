@@ -51,6 +51,7 @@ jobs:
           for platform in ('android','ios'):
               builds.fetch_public_inputs(platform,donors/platform,work,guard,prepare=False)
           PYFETCH
+      # Format 2 reuses the separately SHA-checked prepared base manifest.
       - name: Build public startup receipts with the original strict validators
         run: |
           uv run --locked --all-extras python - <<'PYRECEIPT'

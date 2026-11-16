@@ -208,7 +208,7 @@ def validated_layer(directory,original_manifest,*,language,data_dir,platform,aut
         except BaseException:
             result.close();raise
     from .startup_receipt import binding,load_snapshot
-    prepared=load_snapshot(platform,language,binding(original_manifest,legacy,digests))
+    prepared=load_snapshot(platform,language,binding(original_manifest,legacy,digests),directory=directory,signature=before)
     if prepared is not None and prepared[1]<=_MAX_METADATA_BYTES:
         # Only exact signed-app receipt bytes can avoid the original constructors.
         # Source full hashes and current cohort approval above are still required.

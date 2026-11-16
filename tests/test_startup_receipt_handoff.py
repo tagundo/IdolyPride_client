@@ -21,13 +21,13 @@ def isolated_registry(monkeypatch):
     monkeypatch.setattr(startup_receipt,"_RECEIPTS",{})
 
 
-def receipt_bytes(platform):
+def receipt_bytes(platform, *, legacy=False):
     output=io.BytesIO()
     with ZipFile(output,"w") as archive:
-        archive.writestr("index.json",json.dumps({"schema":1,"platform":platform,"layers":{"ko":{},"en":{}}}))
+        archive.writestr("index.json",json.dumps({"schema":1 if legacy else 2,"platform":platform,"layers":{"ko":{},"en":{}}}))
         for language in ("ko","en"):
             archive.writestr(language+"/metadata.json","{}")
-            archive.writestr(language+"/base.pb",b"public-original")
+            if legacy:archive.writestr(language+"/base.pb",b"public-original")
             archive.writestr(language+"/rebased.pb",b"public-original")
     return output.getvalue()
 
@@ -57,7 +57,7 @@ def test_packaging_carries_exact_immutable_receipt_and_runtime_consumes_its_pin(
     assert startup_receipt._RECEIPTS["ios"][0]==signed/"startupTranslations.zip"
 
 
-@pytest.mark.parametrize("damage",("missing-pair","platform","sha","bytes","bool-bytes","extra","corrupt","symlink"))
+@pytest.mark.parametrize("damage",("missing-pair","platform","sha","bytes","bool-bytes","extra","corrupt","symlink","legacy-format"))
 def test_packager_rejects_a_provided_unbound_or_corrupt_receipt(tmp_path,damage):
     archive,pin,metadata=app_receipt(tmp_path)
     if damage=="missing-pair":
@@ -69,6 +69,9 @@ def test_packager_rejects_a_provided_unbound_or_corrupt_receipt(tmp_path,damage)
     elif damage=="bool-bytes":metadata["bytes"]=True
     elif damage=="extra":metadata["path"]="/private/account.db"
     elif damage=="corrupt":archive.write_bytes(b"invalid public receipt")
+    elif damage=="legacy-format":
+        raw=receipt_bytes("ios",legacy=True);archive.write_bytes(raw)
+        metadata["bytes"]=len(raw);metadata["sha256"]=hashlib.sha256(raw).hexdigest()
     elif damage=="symlink":
         original=tmp_path/"actual.zip";archive.rename(original);archive.symlink_to(original)
     pin.write_text(json.dumps(metadata))
@@ -79,7 +82,7 @@ def test_omitting_package_receipt_retains_legacy_full_validation_path():
     assert package.startup_translation_files(None,None)==({},{},None)
 
 
-@pytest.mark.parametrize("damage",("missing","platform","sha","bytes","bool-bytes","extra-path","corrupt","metadata-symlink","receipt-symlink"))
+@pytest.mark.parametrize("damage",("missing","platform","sha","bytes","bool-bytes","extra-path","corrupt","metadata-symlink","receipt-symlink","legacy-format"))
 def test_ios_invalid_optional_receipt_falls_back_without_reading_writable_state(tmp_path,damage):
     signed=tmp_path/"Signed.app/LocalServer";archive,pin,metadata=app_receipt(signed)
     assert ios_host._register_app_startup_receipt(signed)["available"]
@@ -91,6 +94,9 @@ def test_ios_invalid_optional_receipt_falls_back_without_reading_writable_state(
     elif damage=="bool-bytes":metadata["bytes"]=True
     elif damage=="extra-path":metadata["path"]=str(private)
     elif damage=="corrupt":archive.write_bytes(b"invalid")
+    elif damage=="legacy-format":
+        raw=receipt_bytes("ios",legacy=True);archive.write_bytes(raw)
+        metadata["bytes"]=len(raw);metadata["sha256"]=hashlib.sha256(raw).hexdigest()
     elif damage=="metadata-symlink":
         outside=tmp_path/"outside.json";pin.rename(outside);pin.symlink_to(outside)
     elif damage=="receipt-symlink":
@@ -123,9 +129,9 @@ def java_receipt(monkeypatch,raw):
     return SimpleNamespace(open=open_asset),stream,opened
 
 
-@pytest.mark.parametrize("damage",("none","sha","truncated","oversize","wrong-platform"))
+@pytest.mark.parametrize("damage",("none","sha","truncated","oversize","wrong-platform","legacy-format"))
 def test_android_reads_only_fixed_signed_asset_and_keeps_it_immutable_in_memory(tmp_path,monkeypatch,damage):
-    raw=receipt_bytes("ios" if damage=="wrong-platform" else "android")
+    raw=receipt_bytes("ios" if damage=="wrong-platform" else "android",legacy=damage=="legacy-format")
     size=len(raw);expected=hashlib.sha256(raw).hexdigest()
     if damage=="sha":expected="0"*64
     elif damage=="truncated":raw=raw[:-1]

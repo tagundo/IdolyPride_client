@@ -47,6 +47,9 @@ def register(path,pin):
 def test_generator_uses_strict_validators_and_receipt_avoids_reparse(sample,monkeypatch):
     old,_current,directory,body,data,path,pin=sample
     assert pin["bytes"]<=receipt.MAX_RECEIPT_BYTES
+    with ZipFile(path) as archive:
+        assert set(archive.namelist())=={"index.json","ko/metadata.json","ko/rebased.pb","en/metadata.json","en/rebased.pb"}
+        assert json.loads(archive.read("index.json"))["schema"]==2
     assert not receipt._RECEIPTS and not cache._CACHE
     assert register(path,pin)=={"schema":1,"available":True}
     original=translation.ResourceTranslation.__init__;calls=[]
@@ -178,3 +181,14 @@ def test_generator_rejects_invalid_prepared_input_without_publishing_receipt(sam
     with pytest.raises(ValueError):builder.build(directory.parents[1],data,output,platform="android")
     assert not output.exists() and not output.with_name(output.name+".part").exists()
     assert not list(data.glob("client-resource-revision-*.json"))
+
+
+def test_receipt_base_wire_cannot_trust_coarse_timestamps(sample,monkeypatch):
+    _old,_current,directory,_body,_data,_path,_pin=sample
+    path=directory/"manifest.pb";raw=path.read_bytes();digest=hashlib.sha256(raw).hexdigest()
+    original=receipt._stamp
+    monkeypatch.setattr(receipt,"_stamp",lambda info:original(info)[:-2]+(0,0))
+    signature=receipt._stamp(path.stat())
+    path.write_bytes(bytes([raw[0]^1])+raw[1:])
+    with pytest.raises(ValueError,match="manifest changed"):
+        receipt._base_manifest(directory,signature,digest)
