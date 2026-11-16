@@ -1,0 +1,61 @@
+name: Profile pinned native server startup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/profile-native-startup.yml
+      - tools/profile_native_startup.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-startup-profile-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  profile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION: python
+      PYTHONPATH: .:src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install locked profiling dependencies
+        run: uv sync --locked --all-extras --python 3.12
+      - name: Fetch the exact registered public latest payload
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv run --locked --all-extras python - <<'PYFETCH'
+          import os
+          from pathlib import Path
+          from tools import latest_server_data_pin as latest
+          work=Path(os.environ['RUNNER_TEMP'])/'idoly-startup-input'
+          work.mkdir(mode=0o700)
+          latest.fetch_overlay(work/'ServerData.zip')
+          PYFETCH
+      - name: Measure empty-data and preserved-data startup without asset downloads
+        run: >-
+          uv run --locked --all-extras python -B tools/profile_native_startup.py
+          --payload "$RUNNER_TEMP/idoly-startup-input/ServerData.zip"
+          --work "$RUNNER_TEMP/idoly-startup-work"
+          --output "$RUNNER_TEMP/idoly-startup-output/startup-profile.json"
+          --source-commit "$GITHUB_SHA" --runs 3
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: startup-profile-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-startup-output/*.json
+          if-no-files-found: warn
+          retention-days: 7
