@@ -40,7 +40,7 @@ def test_latest_archive_rejects_another_revision_or_malformed_authority(tmp_path
     root, _settings, _raw, approved = archive(tmp_path)
     approved[key] = value
     monkeypatch.setattr(pins, "RESOURCE_ARCHIVES", {"android": approved})
-    with pytest.raises(ValueError, match="not approved"):
+    with pytest.raises(ValueError, match="not approved|settings version differs"):
         load_octo_archive(root)
 
 

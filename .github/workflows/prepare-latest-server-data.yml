@@ -27,25 +27,6 @@ jobs:
           version: '0.13.5'
       - name: Install locked original-data compiler and offline test dependencies
         run: uv sync --locked --all-extras --python 3.12
-      - name: Test strict cohort, source-blob and semantic controls offline
-        run: |
-          test -f tests/test_prepare_latest_server_data.py
-          test -f tests/test_latest_server_data_pin.py
-          test -f tests/test_story_read_semantics.py
-          test -f tests/test_register_latest_server_data_lfs.py
-          test -f tests/test_resource_translation_rebase.py
-          test -f tests/test_resource_translation_runtime.py
-          test -f tests/test_octo_runtime_latest.py
-          test -f tests/test_public_payload_transaction.py
-          test -f tests/test_public_cohort_support.py
-          test -f tests/test_love_compatibility.py
-          uv run --no-sync python -m pytest -q \
-            tests/test_prepare_latest_server_data.py tests/test_latest_server_data_pin.py \
-            tests/test_story_read_semantics.py tests/test_register_latest_server_data_lfs.py \
-            tests/test_resource_translation_rebase.py tests/test_resource_translation_runtime.py \
-            tests/test_octo_runtime_latest.py \
-            tests/test_public_payload_transaction.py tests/test_public_cohort_support.py \
-            tests/test_love_compatibility.py
       - name: Fetch only the immutable public historical baseline
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,8 +64,34 @@ jobs:
           assert hashlib.sha256(raw).hexdigest() == 'c82cee62abdca7144d11e710a6f773211464a89d2ddede207999a0a5e7aec8ad'
           with (work / 'idolypride-6.1.1.pb').open('xb') as output:
               output.write(raw)
-          print('Verified immutable public baseline and original 6.1.1 protocol')
+          protocol = root / 'data/protocol/idolypride-6.1.1.pb'
+          protocol.parent.mkdir(parents=True, exist_ok=True)
+          if protocol.exists():
+              assert not protocol.is_symlink() and protocol.read_bytes() == raw
+          else:
+              with protocol.open('xb') as output:
+                  output.write(raw)
+          print('Verified immutable public baseline and prepared the exact original 6.1.1 protocol for tests')
           PY
+      - name: Test strict cohort, source-blob and semantic controls offline
+        run: |
+          test -f tests/test_prepare_latest_server_data.py
+          test -f tests/test_latest_server_data_pin.py
+          test -f tests/test_story_read_semantics.py
+          test -f tests/test_register_latest_server_data_lfs.py
+          test -f tests/test_resource_translation_rebase.py
+          test -f tests/test_resource_translation_runtime.py
+          test -f tests/test_octo_runtime_latest.py
+          test -f tests/test_public_payload_transaction.py
+          test -f tests/test_public_cohort_support.py
+          test -f tests/test_love_compatibility.py
+          uv run --no-sync python -m pytest -q \
+            tests/test_prepare_latest_server_data.py tests/test_latest_server_data_pin.py \
+            tests/test_story_read_semantics.py tests/test_register_latest_server_data_lfs.py \
+            tests/test_resource_translation_rebase.py tests/test_resource_translation_runtime.py \
+            tests/test_octo_runtime_latest.py \
+            tests/test_public_payload_transaction.py tests/test_public_cohort_support.py \
+            tests/test_love_compatibility.py
       - name: Collect anonymous Master.Get and public packs without accounts
         # No Create/Login/Migration/transfer/auth API is called. Raw packs and
         # collector logs stay on this remote runner and are never artifacts.

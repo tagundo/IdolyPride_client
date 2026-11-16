@@ -454,6 +454,10 @@ def audit_latest_main_live_semantics(schema, legacy_master_dir, latest_all_maste
             a,b=old.ids(table,required=True),latest.ids(table,required=True)
             _audit_need(ids <= a.keys() and ids <= b.keys(),scope,"main_reference_missing")
             _audit_equal(schema,table,[a[key] for key in sorted(ids)],[b[key] for key in sorted(ids)],scope,"main_numeric_changed")
+        # Validate complete candidate rows before selecting their used fields;
+        # an additive record is never permission to ignore unknown JSON keys.
+        for table in ("Card", "Character", "Costume", "Hair"):
+            _audit_wire(schema,table,latest.rows(table,required=True))
         cards, new_cards=old.ids("Card",required=True), latest.ids("Card",required=True)
         _audit_need(cards.keys() <= new_cards.keys() and len(new_cards)-len(cards)<=1,scope,"main_addition_scope_changed")
         _audit_equal(schema,"Card",list(cards.values()),[new_cards[key] for key in cards],scope,"main_card_changed")

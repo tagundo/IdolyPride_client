@@ -49,7 +49,9 @@ def test_payload_member_inventory_and_fixed_metadata(tmp_path):
     with ZipFile(output) as archive:
         assert m.archive_rows(archive)==m.file_rows(public)
         assert all(info.date_time==m.STAMP and not info.extra and not info.comment for info in archive.infolist())
-    with pytest.raises(FileExistsError):m.write_payload(public,output)
+    before=output.read_bytes()
+    with pytest.raises(m.PreparationError,match='latest_fresh_output_required'):m.write_payload(public,output)
+    assert output.read_bytes()==before
 
 
 def test_preservation_classifies_full_member_set_and_changed_bytes():
