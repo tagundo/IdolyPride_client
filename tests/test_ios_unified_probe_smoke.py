@@ -3972,3 +3972,31 @@ def test_zip_progress_checkpoint_and_summary_never_export_paths_urls_or_credenti
     summary=probe.safe_failure_summary({"error":"settings_zip_roundtrip_failed","native_checkpoint":clean})
     assert summary["native"]["zip_roundtrip_progress"]==clean["zip_roundtrip_progress"]
     assert "DO-NOT-EXPORT" not in json.dumps(clean)+json.dumps(summary)
+
+
+
+def test_optional_process_sample_cannot_replace_original_failure_and_runs_before_cleanup(app,tmp_path):
+    controller=FakeSimctl(tmp_path/"container")
+    observed=native_report();observed["keyboard"]["during_init"]["field_creation_count"]=2
+    sequence=[]
+    def simctl(arguments,timeout):
+        if arguments[0] in ("shutdown","delete"):sequence.append(arguments[0])
+        return controller(arguments,timeout)
+    class BrokenDiagnosticSampler:
+        def __init__(self,*args):pass
+        def prepare(self):return True
+        def clear_launch(self):pass
+        def note_launch(self,raw):pass
+        def capture(self,checkpoint):
+            sequence.append("sample")
+            raise RuntimeError("DO-NOT-EXPORT")
+    with mock.patch.object(probe.sys,"platform","darwin"), \
+            mock.patch.object(probe,"_simctl",simctl), \
+            mock.patch.object(probe,"OwnedProbeProcessSampler",BrokenDiagnosticSampler), \
+            mock.patch(__name__+".native_report",return_value=observed):
+        result=probe.run_probe(app,tmp_path/"failure-with-optional-sample.json")
+    assert result["error"]=="keyboard_during_init_failed"
+    assert result["process_sample"]["error_code"]=="sample_failed"
+    assert sequence.index("sample")<sequence.index("shutdown")<sequence.index("delete")
+    assert result["cleanup"]=={"shutdown":True,"delete":True}
+    assert "DO-NOT-EXPORT" not in json.dumps(result)

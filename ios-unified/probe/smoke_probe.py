@@ -17,6 +17,7 @@ from pathlib import Path
 import plistlib
 import re
 import socket
+import signal
 import stat
 import struct
 import subprocess
@@ -111,6 +112,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "octo_budget_registration_failed", "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
+    "settings_zip_import_begin", "settings_zip_import_before_script", "settings_zip_import_script_submitted", "settings_zip_import_script_completed", "settings_zip_import_before_presenter", "settings_zip_import_after_presenter", "settings_zip_import_picker_attached", "settings_zip_import_before_cancel", "settings_zip_import_after_cancel", "settings_zip_import_before_dismiss", "settings_zip_import_after_dismiss", "settings_zip_import_picker_detached", "settings_zip_import_before_restore_script", "settings_zip_import_restore_submitted", "settings_zip_import_restore_completed", "settings_zip_import_finished", "settings_zip_import_timeout",
     "delegate_entered", "window_ready", "server_starting", "server_ready",
     "unity_requests_captured", "premature_launch_checked", "launch_action_requested",
     "launch_action_dispatched", "unity_forwarded", "status_received", "crypto_received",
@@ -1092,12 +1094,112 @@ def zip_progress_observation(value):
     return result
 
 
+PROCESS_SAMPLE_ERRORS = frozenset(("not_attempted", "not_macos", "launch_pid_missing", "checkpoint_pid_differs",
+    "owned_container_invalid", "owned_executable_invalid", "process_identity_differs", "sample_spawn_failed",
+    "sample_failed", "sample_timed_out", "sample_output_missing", "main_thread_not_found", "identity_changed", "none"))
+PROCESS_SAMPLE_FLAGS = ("attempted", "available", "launch_pid_matched", "executable_verified", "identity_stable",
+    "main_thread_found", "truncated", "timed_out")
+PROCESS_SAMPLE_MODULES = frozenset(("Probe", "IdolyServer", "Python", "UIKit", "UIKitCore", "WebKit",
+    "JavaScriptCore", "Foundation", "CoreFoundation", "GraphicsServices", "QuartzCore", "CoreGraphics",
+    "UIFoundation", "FileProvider", "FileProviderUI", "DocumentManager", "DocumentManagerCore",
+    "DocumentManagerUICore", "ExtensionFoundation", "CoreServices", "FrontBoardServices", "BoardServices",
+    "RunningBoardServices", "CFNetwork", "Network", "XPC", "libxpc.dylib", "dyld", "libobjc.A.dylib",
+    "libdispatch.dylib", "libsystem_kernel.dylib", "libsystem_pthread.dylib", "libsystem_platform.dylib",
+    "libsystem_c.dylib", "libsystem_malloc.dylib", "libsystem_blocks.dylib", "libsystem_trace.dylib"))
+PROCESS_SAMPLE_SYMBOL_PREFIXES = ("mach_", "__mach_", "__ulock_", "__psynch_", "__pthread_", "_pthread_",
+    "pthread_", "__semwait_", "__CF", "CF", "__NS", "NS", "-[NS", "+[NS", "-[UI", "+[UI", "UI", "_UI",
+    "-[WK", "+[WK", "WK", "-[DOC", "+[DOC", "DOC", "-[FP", "+[FP", "FP", "WebKit::", "IPC::", "WTF::", "CA::", "CG", "-[CA", "dispatch_", "_dispatch_",
+    "__dispatch_", "dlopen", "dyld", "start", "_dyld_", "objc_", "_objc_", "-[IDSettingsController ",
+    "-[IDProbeCoordinator ", "Probe", "IDNative", "Idoly", "IDUnity", "IDClient", "IDKeyboard", "IDOcto",
+    "_Py", "Py", "___", "__block_", "_Block_", "xpc_", "_xpc_", "__XPC", "+[ID")
+PROCESS_SAMPLE_EXACT_SYMBOLS = frozenset(("semaphore_wait_trap","semaphore_timedwait_trap",
+    "_os_unfair_lock_lock_slow","__DISPATCH_WAIT_FOR_QUEUE__","fsync","__fsync","read","__read",
+    "write","__write","open","__open","close","__close","kevent","__kevent","kevent64","__kevent64",
+    "poll","__poll","select","__select","nanosleep","__nanosleep","usleep","__workq_kernreturn"))
+PROCESS_SAMPLE_MAX_BYTES = 256 * 1024
+PROCESS_SAMPLE_MAX_FRAMES = 48
+PROCESS_SAMPLE_CHILD = ("import os,resource,sys;resource.setrlimit(resource.RLIMIT_FSIZE,(262144,262144));"
+    "os.execv('/usr/bin/sample',['/usr/bin/sample',sys.argv[1],'1','10','-mayDie','-file',sys.argv[2]])")
+
+
+def process_sample_observation(value):
+    """The only retained sample content is a finite, known-module main stack."""
+    if type(value) is not dict or value.get("schema") != 1 or type(value.get("schema")) is not int:
+        return {}
+    result = {"schema":1, "scope":"owned-disposable-simulator-process"}
+    for key in PROCESS_SAMPLE_FLAGS:
+        if type(value.get(key)) is bool: result[key] = value[key]
+    error = value.get("error_code")
+    if type(error) is str and error in PROCESS_SAMPLE_ERRORS: result["error_code"] = error
+    for key,maximum in (("sample_seconds",1),("sample_output_bytes",PROCESS_SAMPLE_MAX_BYTES),
+                        ("thread_count",1024),("frame_count",PROCESS_SAMPLE_MAX_FRAMES)):
+        item = value.get(key)
+        if type(item) is int and 0 <= item <= maximum: result[key] = item
+    frames = []
+    rows = value.get("frames")
+    if type(rows) is list:
+        for row in rows[:PROCESS_SAMPLE_MAX_FRAMES]:
+            if type(row) is not dict: continue
+            module, symbol, count = row.get("module"), row.get("symbol"), row.get("samples")
+            if (type(module) is not str or module not in PROCESS_SAMPLE_MODULES or type(symbol) is not str
+                    or not 1 <= len(symbol) <= 160 or not (symbol in PROCESS_SAMPLE_EXACT_SYMBOLS
+                        or symbol.startswith(PROCESS_SAMPLE_SYMBOL_PREFIXES))
+                    or not re.fullmatch(r"[A-Za-z0-9_:.+$@? \[\]<>~(),&*=-]+",symbol)
+                    or type(count) is not int or not 0 <= count <= 1000000): continue
+            frames.append({"module":module,"symbol":symbol,"samples":count})
+    result["frames"] = frames
+    result["modules"] = sorted({row["module"] for row in frames})
+    result["frame_count"] = len(frames)
+    return result
+
+
+def parse_process_sample(raw, *, truncated=False):
+    if type(raw) is not bytes or len(raw) > PROCESS_SAMPLE_MAX_BYTES:
+        return process_sample_observation({"schema":1,"main_thread_found":False,"frames":[]})
+    frames = []; inside = False; found = False; threads = 0
+    for line in raw.decode("utf-8","replace").splitlines():
+        if "Thread_" in line and "(in " not in line:
+            threads = min(1024,threads+1)
+            inside = bool(re.fullmatch(r"[\s+!|:]*\d+\s+Thread_\d+\s+DispatchQueue_\d+:\s+com\.apple\.main-thread\s+\(serial\)\s*",line))
+            found = found or inside
+            continue
+        if not inside or len(frames) >= PROCESS_SAMPLE_MAX_FRAMES: continue
+        match = re.fullmatch(r"[\s+!|:]*(\d{1,9})\s+(.+?)\s+\(in ([^)]+)\)(?:\s+\+\s+\d+)?(?:\s+\[[^\]]+\])?\s*",line)
+        if match:
+            count,symbol,module = match.groups()
+            projected = process_sample_observation({"schema":1,"frames":[{"module":module,"symbol":symbol,"samples":int(count)}]})
+            frames.extend(projected["frames"])
+    return process_sample_observation({"schema":1,"main_thread_found":found,"frames":frames,
+        "thread_count":threads,"sample_output_bytes":len(raw),"truncated":truncated})
+
+
+def fit_process_sample_audit(report):
+    sample = report.get("process_sample")
+    if type(sample) is not dict: return
+    def size(): return len(json.dumps(report,separators=(",",":"),sort_keys=True,allow_nan=False).encode())+1
+    while size()>MAX_JSON and sample.get("frames"):
+        frames=sample["frames"]
+        # Keep both the top wait and initiating callers when trimming is needed.
+        frames.pop(len(frames)//2)
+        sample["frame_count"]=len(frames);sample["truncated"]=True
+        sample["modules"]=sorted({row["module"] for row in frames})
+    if size()>MAX_JSON: report.pop("process_sample",None)
+
+
+def process_sample_summary(value):
+    clean = process_sample_observation(value)
+    return {key:clean[key] for key in ("schema","scope",*PROCESS_SAMPLE_FLAGS,"error_code","sample_seconds",
+        "sample_output_bytes","thread_count","frame_count") if key in clean}
+
+
 def safe_failure_summary(report):
     """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
     code=report.get("error")
     clean={"schema":1,"scope":"owned-simulator-failure","error_code":code if type(code) is str and code in (UI_DRIVER_ERRORS | LAUNCHER_FAILURE_CODES) else "probe_failed"}
     index=report.get("failed_run_index")
     if type(index) is int and 0<=index<=4:clean["run_index"]=index
+    sample=process_sample_summary(report.get("process_sample"))
+    if sample:clean["process_sample"]=sample
     checkpoint=report.get("native_checkpoint")
     if type(checkpoint) is dict:
         native={}
@@ -2566,6 +2668,176 @@ def probe_sdk_resource(app, *, timeout=30):
         "original_revision":original.revision,"manifest_revision":wire.revision})
 
 
+def _sample_executable_identity(path):
+    path = Path(path); before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and 0 < before.st_size <= 32*1024*1024, "owned_executable_invalid")
+    fd = os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        identity = lambda v:(v.st_dev,v.st_ino,v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+        require(stat.S_ISREG(opened.st_mode) and identity(before)==identity(opened),"owned_executable_invalid")
+        digest = hashlib.sha256(); count = 0
+        while True:
+            block = os.read(fd,65536)
+            if not block: break
+            count += len(block); require(count <= 32*1024*1024,"owned_executable_invalid");digest.update(block)
+        after = os.fstat(fd)
+        require(identity(opened)==identity(after) and count==opened.st_size,"owned_executable_invalid")
+        return {"identity":identity(after),"bytes":count,"sha256":digest.hexdigest()}
+    finally: os.close(fd)
+
+
+def _terminate_owned_sample(process):
+    # start_new_session=True makes this newly spawned child's PID its own PGID.
+    # Never signal the sampled Probe PID, a default group, or unrelated targets.
+    child = getattr(process,"pid",None)
+    if type(child) is not int or child<=1: return
+    try: os.killpg(child,signal.SIGKILL)
+    except ProcessLookupError: pass
+
+
+class OwnedProbeProcessSampler:
+    """One bounded diagnostic, exclusively for this invocation's launch ACK PID."""
+    def __init__(self, simulator_udid, source_app, data_container):
+        self.udid, self.source_app, self.container = simulator_udid, Path(source_app), Path(data_container)
+        self.pid = None; self.attempted = False
+        self.launch_started = None; self.launch_ack = None
+        self.executable = None; self.executable_pin = None; self.prepare_error = "owned_container_invalid"
+
+    def prepare(self):
+        self.executable = None; self.executable_pin = None
+        # Bind the installed image while Simulator services are responsive.
+        # This optional setup cannot alter a probe's success/failure gates.
+        try:
+            require(sys.platform=="darwin","not_macos")
+            self.executable,self.executable_pin = self._owned_executable()
+            self.prepare_error = "none"
+            return True
+        except Exception as error:
+            code = str(error) if isinstance(error,ProbeError) else "owned_container_invalid"
+            self.prepare_error = code if code in PROCESS_SAMPLE_ERRORS else "owned_container_invalid"
+            return False
+
+    def clear_launch(self):
+        self.pid = None; self.launch_started = time.time(); self.launch_ack = None
+
+    def note_launch(self, raw):
+        self.pid = None; self.launch_ack = time.time()
+        if type(raw) is bytes and len(raw) <= 256:
+            try: text = raw.decode("ascii")
+            except UnicodeError: return
+            match = re.fullmatch(re.escape(BUNDLE_ID)+r": ([1-9][0-9]{0,9})\n?",text)
+            if match and int(match.group(1)) <= 2**31-1: self.pid = int(match.group(1))
+
+    def _owned_executable(self):
+        require(type(self.udid) is str and str(uuid.UUID(self.udid)).upper()==self.udid,"owned_container_invalid")
+        data = self.container.resolve(strict=True)
+        require(not self.container.is_symlink() and len(data.parents)>=5,"owned_container_invalid")
+        device = data.parents[4]
+        require(device.name==self.udid and device.parent.name=="Devices"
+            and data.relative_to(device).parts[:4]==("data","Containers","Data","Application")
+            and len(data.relative_to(device).parts)==5
+            and str(uuid.UUID(data.name)).upper()==data.name.upper(),"owned_container_invalid")
+        raw = _simctl(["get_app_container",self.udid,BUNDLE_ID,"app"],4)
+        require(type(raw) is bytes and len(raw)<=4096,"owned_container_invalid")
+        bundle = Path(raw.decode("utf-8").strip())
+        require(bundle.is_absolute() and not bundle.is_symlink(),"owned_container_invalid")
+        bundle = bundle.resolve(strict=True); parts = bundle.relative_to(device).parts
+        require(len(parts)==6 and parts[:4]==("data","Containers","Bundle","Application")
+            and str(uuid.UUID(parts[4])).upper()==parts[4].upper() and parts[5]=="Probe.app","owned_container_invalid")
+        info = plistlib.loads(read_bounded(bundle/"Info.plist",MAX_JSON))
+        require(type(info) is dict and info.get("CFBundleIdentifier")==BUNDLE_ID and info.get("CFBundleExecutable")=="Probe"
+            and info.get("CFBundleSupportedPlatforms")==["iPhoneSimulator"],"owned_container_invalid")
+        expected = _sample_executable_identity(self.source_app/"Probe")
+        executable = bundle/"Probe"; actual = _sample_executable_identity(executable)
+        require(actual["sha256"]==expected["sha256"] and actual["bytes"]==expected["bytes"],"owned_executable_invalid")
+        return executable,actual
+
+    def _process_identity(self, executable):
+        result = subprocess.run(["/bin/ps","-p",str(self.pid),"-o","pid=","-o","lstart=","-o","comm=","-ww"],
+            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=2,check=False,
+            env={**os.environ,"LC_ALL":"C","LANG":"C"})
+        require(result.returncode==0 and type(result.stdout) is bytes and 0<len(result.stdout)<=4096,"process_identity_differs")
+        text = result.stdout.decode("utf-8").strip()
+        match = re.fullmatch(r"([1-9][0-9]{0,9})\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4})\s+([^\r\n]+)",text)
+        require(match is not None and int(match.group(1))==self.pid,"process_identity_differs")
+        path = Path(match.group(3)); require(path.is_absolute() and path==executable,"process_identity_differs")
+        require(path.resolve(strict=True)==executable,"process_identity_differs")
+        started = time.mktime(time.strptime(match.group(2),"%a %b %d %H:%M:%S %Y"))
+        # ps lstart has one-second resolution. Match the independently issued
+        # launch interval, rejecting a same-image PID reused after its ACK.
+        require(type(self.launch_started) in (int,float) and type(self.launch_ack) in (int,float)
+            and math.isfinite(self.launch_started) and math.isfinite(self.launch_ack)
+            and self.launch_started<=self.launch_ack and self.launch_started-1<=started<=self.launch_ack+1,
+            "process_identity_differs")
+        return match.group(2)
+
+    def capture(self, checkpoint):
+        if self.attempted: return None
+        self.attempted = True
+        result = {"schema":1,"attempted":True,"available":False,"launch_pid_matched":False,
+            "executable_verified":False,"identity_stable":False,"sample_seconds":1,
+            "truncated":False,"timed_out":False,"error_code":"not_attempted","frames":[]}
+        process = None
+        try:
+            require(sys.platform=="darwin","not_macos")
+            require(type(self.pid) is int and 1<=self.pid<=2**31-1,"launch_pid_missing")
+            require(type(checkpoint) is dict and type(checkpoint.get("process_id")) is int
+                and checkpoint["process_id"]==self.pid,"checkpoint_pid_differs")
+            result["launch_pid_matched"] = True
+            require(self.executable is not None and type(self.executable_pin) is dict,self.prepare_error)
+            executable = self.executable; before = _sample_executable_identity(executable)
+            require(before==self.executable_pin,"owned_executable_invalid")
+            started = self._process_identity(executable)
+            result["executable_verified"] = True
+            with tempfile.TemporaryDirectory(prefix="idoly-owned-process-sample-") as temporary:
+                path = Path(temporary)/"sample.txt"
+                try:
+                    process = subprocess.Popen([sys.executable,"-I","-S","-c",PROCESS_SAMPLE_CHILD,str(self.pid),str(path)],
+                        stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
+                except OSError:
+                    raise ProbeError("sample_spawn_failed") from None
+                deadline = time.monotonic()+8
+                while process.poll() is None:
+                    if time.monotonic()>=deadline:
+                        result["timed_out"] = True;_terminate_owned_sample(process);break
+                    time.sleep(0.05)
+                try: exit_code = process.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    _terminate_owned_sample(process);exit_code = process.wait(timeout=1)
+                require(path.exists() and not path.is_symlink(),"sample_output_missing")
+                metadata = path.lstat();require(stat.S_ISREG(metadata.st_mode) and metadata.st_nlink==1,"sample_output_missing")
+                # RLIMIT_FSIZE bounds raw output. Retain the useful main-thread
+                # prefix even when many Python/Go workers reach that hard cap.
+                fd = os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+                try: raw = os.read(fd,PROCESS_SAMPLE_MAX_BYTES)
+                finally: os.close(fd)
+                truncated = metadata.st_size>=PROCESS_SAMPLE_MAX_BYTES
+                require(type(exit_code) is int and (exit_code==0 or result["timed_out"]
+                    or (exit_code==-signal.SIGXFSZ and truncated)),"sample_failed")
+                parsed = parse_process_sample(raw,truncated=truncated)
+                after_start = self._process_identity(executable); after = _sample_executable_identity(executable)
+                require(started==after_start and before==after,"identity_changed")
+                result.update(parsed);result["identity_stable"] = True
+                result["available"] = bool(parsed.get("main_thread_found") and parsed.get("frames"))
+                result["error_code"] = ("sample_timed_out" if result["timed_out"] else
+                    "none" if result["available"] else "main_thread_not_found")
+                return process_sample_observation(result)
+        except Exception as error:
+            code = str(error) if isinstance(error,ProbeError) else "sample_failed"
+            result["error_code"] = code if code in PROCESS_SAMPLE_ERRORS else "sample_failed"
+            result["frames"] = [];result["available"] = False
+            return process_sample_observation(result)
+        finally:
+            if process is not None:
+                try:
+                    if process.poll() is None:
+                        _terminate_owned_sample(process);process.wait(timeout=1)
+                except Exception:
+                    try: _terminate_owned_sample(process)
+                    except Exception: pass
+
+
 def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
     audit = Path(audit)
     require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
@@ -2577,6 +2849,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
     container = None
     account_harness = None
     ui_driver = None
+    owned_sampler = None
     current_language = "ko"
     current_run_index = 0
     start = time.monotonic()
@@ -2632,6 +2905,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 path = candidate/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         container = candidate
+        owned_sampler = OwnedProbeProcessSampler(created,app,container)
+        owned_sampler.prepare()
         account_harness = AccountFixtureHarness(container, schema, descriptor_sha256=report["descriptor_sha256"])
         report["fresh_local_state_before_launch"] = True
         stage = "official_ui_test_build_and_start"
@@ -2644,8 +2919,10 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
             remaining()
             time.sleep(min(0.1,remaining()))
         stage = "app_launch"
+        owned_sampler.clear_launch()
         try:
-            _simctl(["launch", created, BUNDLE_ID, "--idoly-probe-language=ko", "--idoly-probe-run-index=0"], remaining(180))
+            launched = _simctl(["launch", created, BUNDLE_ID, "--idoly-probe-language=ko", "--idoly-probe-run-index=0"], remaining(180))
+            owned_sampler.note_launch(launched)
         except ProbeError as error:
             if str(error) != "simctl_timeout":
                 raise
@@ -2680,9 +2957,11 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
             current_language = language
             current_run_index = run_index
             stage = "language_launch_" + language
+            owned_sampler.clear_launch()
             try:
-                _simctl(["launch",created,BUNDLE_ID,"--idoly-probe-language="+language,
+                launched = _simctl(["launch",created,BUNDLE_ID,"--idoly-probe-language="+language,
                     "--idoly-probe-run-index="+str(run_index)],remaining(30))
+                owned_sampler.note_launch(launched)
             except ProbeError as error:
                 if str(error) != "simctl_timeout": raise
                 report.setdefault("language_launch_ack_timeouts",[]).append(language)
@@ -2701,6 +2980,13 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
         report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index)
+        if owned_sampler is not None:
+            try:
+                sampled = owned_sampler.capture(report["native_checkpoint"])
+                if sampled: report["process_sample"] = process_sample_observation(sampled)
+            except Exception:
+                report["process_sample"] = process_sample_observation({"schema":1,"attempted":True,
+                    "available":False,"error_code":"sample_failed","frames":[]})
         if report["error"] == "native_startup_failed":
             report["host_startup_failure"] = read_startup_failure(container)
         if ui_driver is not None and callable(getattr(ui_driver,"failure_diagnostic",None)):
@@ -2795,6 +3081,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
                 report["native_checkpoint"] = checkpoint
         report["seconds"] = round(time.monotonic() - start, 3)
         if report.get("status")=="FAIL":
+            fit_process_sample_audit(report)
             print("IDOLY_SAFE_PROBE_FAILURE "+json.dumps(safe_failure_summary(report),sort_keys=True,separators=(",",":"),allow_nan=False))
         write_audit(audit, report)
     return report

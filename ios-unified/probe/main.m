@@ -706,6 +706,21 @@ static BOOL ProbePort(uint16_t port) {
 // Exercise the shipping WK action and public UIKit picker contract on stock
 // Simulator. Cancellation is a delegate callback plus programmatic dismissal;
 // this does not simulate a Files row tap or LiveContainer's provider/hooks.
+// Probe-only fixed checkpoints bracket potentially blocking WebKit/UIKit calls.
+// Emit each stage once per each of the two passes, with no file/UI/user data.
+static void ProbeZIPPickerCheckpoint(NSMutableDictionary *state, NSString *stage) {
+    NSArray *allowed = @[@"settings_zip_import_begin",@"settings_zip_import_before_script",@"settings_zip_import_script_submitted",@"settings_zip_import_script_completed",@"settings_zip_import_before_presenter",@"settings_zip_import_after_presenter",@"settings_zip_import_picker_attached",@"settings_zip_import_before_cancel",@"settings_zip_import_after_cancel",@"settings_zip_import_before_dismiss",@"settings_zip_import_after_dismiss",@"settings_zip_import_picker_detached",@"settings_zip_import_before_restore_script",@"settings_zip_import_restore_submitted",@"settings_zip_import_restore_completed",@"settings_zip_import_finished",@"settings_zip_import_timeout"];
+    if (![allowed containsObject:stage]) return;
+    NSUInteger pass = [state[@"passes"] count]; if (pass > 2) return;
+    NSMutableSet *seen = state[@"phase_markers"];
+    if (!seen) { seen = [NSMutableSet set]; state[@"phase_markers"] = seen; }
+    NSString *key = [NSString stringWithFormat:@"%lu:%@",(unsigned long)pass,stage];
+    if ([seen containsObject:key] || seen.count >= 64) return;
+    [seen addObject:key];
+    void (^progress)(NSString *) = state[@"progress_callback"];
+    if (progress) progress(stage);
+}
+
 static void ProbeZIPImportBegin(WKWebView *__weak web, UIViewController *__weak presenter,
                                 NSMutableDictionary *state, void (^finish)(void));
 static void ProbeZIPImportObserve(WKWebView *__weak weakWeb, UIViewController *__weak weakPresenter,
@@ -717,22 +732,32 @@ static void ProbeZIPImportObserve(WKWebView *__weak weakWeb, UIViewController *_
     NSMutableDictionary *pass=[state[@"passes"] lastObject];
     UIDocumentPickerViewController *picker=state[@"picker"];
     if (!picker) {
+        ProbeZIPPickerCheckpoint(state,@"settings_zip_import_before_presenter");
         UIViewController *shown=presenter.presentedViewController;
+        ProbeZIPPickerCheckpoint(state,@"settings_zip_import_after_presenter");
         if ([shown isKindOfClass:UIDocumentPickerViewController.class]
                 && shown.viewIfLoaded.window && !shown.isBeingPresented) {
             picker=(UIDocumentPickerViewController *)shown; state[@"picker"]=picker;
+            ProbeZIPPickerCheckpoint(state,@"settings_zip_import_picker_attached");
             pass[@"picker_presented"]=@YES; pass[@"document_picker_mode"]=@(picker.documentPickerMode);
             pass[@"single_selection"]=@((BOOL)(!picker.allowsMultipleSelection));
             pass[@"delegate_is_settings"]=@((BOOL)(picker.delegate==(id)presenter));
             if (![picker.delegate respondsToSelector:@selector(documentPickerWasCancelled:)]) { finish(); return; }
+            ProbeZIPPickerCheckpoint(state,@"settings_zip_import_before_cancel");
             [picker.delegate documentPickerWasCancelled:picker]; pass[@"cancel_delegate_invoked"]=@YES;
+            ProbeZIPPickerCheckpoint(state,@"settings_zip_import_after_cancel");
+            ProbeZIPPickerCheckpoint(state,@"settings_zip_import_before_dismiss");
             [picker dismissViewControllerAnimated:NO completion:nil]; pass[@"dismissed_programmatically"]=@YES;
+            ProbeZIPPickerCheckpoint(state,@"settings_zip_import_after_dismiss");
         }
     } else if (!presenter.presentedViewController && !picker.viewIfLoaded.window) {
         pass[@"picker_detached"]=@YES;
+        ProbeZIPPickerCheckpoint(state,@"settings_zip_import_picker_detached");
+        ProbeZIPPickerCheckpoint(state,@"settings_zip_import_before_restore_script");
         [web evaluateJavaScript:@"(() => {const b=document.getElementById('resources-import');return !!b&&!b.disabled;})()"
             completionHandler:^(id value,NSError *error) {
                 if ([state[@"finished"] boolValue]) return;
+                ProbeZIPPickerCheckpoint(state,@"settings_zip_import_restore_completed");
                 if (!error && [value isEqual:@YES]) {
                     pass[@"button_restored"]=@YES;
                     if ([state[@"passes"] count]==1) {
@@ -751,6 +776,7 @@ static void ProbeZIPImportObserve(WKWebView *__weak weakWeb, UIViewController *_
                     ProbeZIPImportObserve(weakWeb,weakPresenter,state,finish);
                 });
             }];
+        ProbeZIPPickerCheckpoint(state,@"settings_zip_import_restore_submitted");
         return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/10),dispatch_get_main_queue(),^{
@@ -772,8 +798,10 @@ static void ProbeZIPImportBegin(WKWebView *__weak weakWeb, UIViewController *__w
     state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
     NSString *script=@"(() => {const b=document.getElementById('resources-import');const e=!!b&&!b.disabled;"
         "if(e)b.click();return {button_found:!!b,enabled_before:e,click_dispatched:e,button_disabled_while_pending:!!b&&b.disabled};})()";
+    ProbeZIPPickerCheckpoint(state,@"settings_zip_import_before_script");
     [web evaluateJavaScript:ProbeSettingsScript(script,@"resources-import") completionHandler:^(id value,NSError *error) {
         if ([state[@"finished"] boolValue]) return;
+        ProbeZIPPickerCheckpoint(state,@"settings_zip_import_script_completed");
         if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
         for (NSString *key in @[@"button_found",@"enabled_before",@"click_dispatched",@"button_disabled_while_pending"])
             pass[key]=@((BOOL)[value[key] isEqual:@YES]);
@@ -787,24 +815,27 @@ static void ProbeZIPImportBegin(WKWebView *__weak weakWeb, UIViewController *__w
         [state removeObjectForKey:@"begin_pass"];
         ProbeZIPImportObserve(weakWeb,weakPresenter,state,finish);
     }];
+    ProbeZIPPickerCheckpoint(state,@"settings_zip_import_script_submitted");
 }
-static void ProbeZIPImportPicker(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+static void ProbeZIPImportPicker(WKWebView *web,UIViewController *presenter,void (^progress)(NSString *),void (^completion)(NSDictionary *)) {
     NSCAssert(NSThread.isMainThread,@"ZIP picker probe belongs on main thread");
     NSMutableArray *passes=[NSMutableArray array];
     NSMutableDictionary *metrics=[@{@"scope":@"stock-simulator",@"cancel_trigger":@"delegate-callback",
         @"timed_out":@NO,@"passes":passes} mutableCopy];
-    NSMutableDictionary *state=[@{@"finished":@NO,@"observations":@0,@"passes":passes,@"metrics":metrics} mutableCopy];
+    NSMutableDictionary *state=[@{@"finished":@NO,@"observations":@0,@"passes":passes,@"metrics":metrics,@"progress_callback":[progress copy]} mutableCopy];
     NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
     void (^finish)(void)=^{
         if ([state[@"finished"] boolValue]) return;
         state[@"finished"]=@YES; metrics[@"observations"]=state[@"observations"];
         metrics[@"elapsed_seconds"]=@(MAX(0.0,MIN(600.0,NSProcessInfo.processInfo.systemUptime-started)));
+        ProbeZIPPickerCheckpoint(state,[metrics[@"timed_out"] boolValue] ? @"settings_zip_import_timeout" : @"settings_zip_import_finished");
         completion(metrics.copy);
     };
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,12*NSEC_PER_SEC),dispatch_get_main_queue(),^{
         if ([state[@"finished"] boolValue]) return;
         metrics[@"timed_out"]=@YES; finish();
     });
+    ProbeZIPPickerCheckpoint(state,@"settings_zip_import_begin");
     ProbeZIPImportBegin(web,presenter,state,finish);
 }
 
@@ -2134,7 +2165,9 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 }
                 if(!promptOK){[self failProbe:@"settings_official_prompt_failed"];return;}
                 [self recordCheckpoint:@"settings_official_prompt_checked"];
-                ProbeZIPImportPicker(web,navigation.topViewController,^(NSDictionary *zipMetrics) {
+                ProbeZIPImportPicker(web,navigation.topViewController,^(NSString *stage) {
+                    [self recordCheckpoint:stage];
+                },^(NSDictionary *zipMetrics) {
                 self.zipImportObservation=zipMetrics; menu[@"zip_import_picker"]=zipMetrics;
                 BOOL zipOK=[zipMetrics[@"timed_out"] isEqual:@NO] && [zipMetrics[@"passes"] count]==2
                     && [zipMetrics[@"grpc_connected_after_cancel"] isEqual:@YES]
