@@ -223,6 +223,7 @@ class ProbePromptCancelDriver:
         self._log_size, self._line, self._phase_deadline = 0, b"", 0
         self._output_paths = {}
         self._failure_phase, self._test_spawned = None, False
+        self._finish_requested = False
         self._metadata_diagnostic = None
         self._phase_started = 0
         self._phase_markers = {name: False for name in PHASE_MARKERS.values()}
@@ -468,7 +469,11 @@ class ProbePromptCancelDriver:
             self._built()
         elif phase == "testing":
             _need(self._ready, "ui_driver_ready_missing")
-            self._spawn(self._result_command(), "summary", 30, self._work / "summary.json", _JSON_LIMIT)
+            # Native ZIP/account checks still use the same Simulator after the
+            # Cancel tap. Keep result extraction off that critical UI path;
+            # finish() is called only when the native final report exists.
+            # A zero test exit and marker are not result proof.
+            self._phase, self._phase_started = "waiting_native_report", time.monotonic()
         elif phase == "summary":
             raw = _read(self._output_paths["summary"], _JSON_LIMIT)
             reference = _summary(raw, self.udid)
@@ -496,7 +501,7 @@ class ProbePromptCancelDriver:
         pid = getattr(process, "pid", None) if process is not None else self._last_child_pid
         pid = pid if type(pid) is int and 1 <= pid <= 2**31-1 else None
         self._failure_observation = {"schema": 1, "scope": "owned-public-xctest-failure",
-            "phase": self._failure_phase if self._failure_phase in ("building", "testing", "summary", "tests") else "unknown",
+            "phase": self._failure_phase if self._failure_phase in ("building", "testing", "waiting_native_report", "summary", "tests") else "unknown",
             "error_code": self._error, "ready_marker_observed": self._ready, "test_spawned": self._test_spawned,
             "child_pid": pid, "child_exit_code": code,
             "phase_elapsed_seconds": round(min(900, max(0, time.monotonic()-self._phase_started)), 3),
@@ -512,11 +517,17 @@ class ProbePromptCancelDriver:
         if self._phase not in ("idle", "passed", "failed"):
             try:
                 self._budget()
-                _need(time.monotonic() < self._phase_deadline, "ui_driver_deadline")
-                self._drain()
-                code = self._process.poll()
-                if code is not None:
-                    self._ended(code)
+                if self._phase == "waiting_native_report":
+                    if self._finish_requested:
+                        self._source_unchanged()
+                        self._spawn(self._result_command(), "summary", 30,
+                                    self._work / "summary.json", _JSON_LIMIT)
+                else:
+                    _need(time.monotonic() < self._phase_deadline, "ui_driver_deadline")
+                    self._drain()
+                    code = self._process.poll()
+                    if code is not None:
+                        self._ended(code)
             except DriverError as error:
                 self._failure_phase = self._phase
                 self._error, self._phase = error.code, "failed"
@@ -575,6 +586,7 @@ class ProbePromptCancelDriver:
 
     def finish(self):
         _need(self._phase != "idle", "ui_driver_state_invalid")
+        self._finish_requested = True
         while True:
             status = self.poll()
             if status["phase"] == "passed":

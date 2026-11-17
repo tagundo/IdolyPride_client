@@ -267,3 +267,24 @@ def test_actual_restart_console_routes_to_users_before_observing_queued_selectio
     assert guest.actions == [("shell", "input", "tap", str((left+right)//2), str((top+bottom)//2)),
                              ("shell", "input", "tap", "260", "130")]
     assert guest.captures == ["restart-0", "restart-1", "restart-2"]
+
+
+def test_restart_pending_summary_recovers_upward_without_scrolling_past_it(monkeypatch):
+    monkeypatch.setattr(qa.time, "sleep", lambda _: None)
+    fixtures = Path(__file__).parent / "fixtures"
+    # Public UI captures from owned Android run 43991551798: after restart the
+    # summary query was pending, then the former downward search hid its result.
+    # The completed queued summary was observed immediately before that restart.
+    names = ("account-restart-console-2c35.xml", "account-restart-pending-cdcba71.xml",
+             "account-restart-summary-above-cdcba71.xml", "account-original-queued-cdcba71.xml")
+    guest = Guest([(fixtures / name).read_text() for name in names])
+    found = qa.find_queued_account(guest, "sandbox", "restart-pending")
+    assert found.get("text") == "현재 서버 중지 상태\n다음 시작 · 일반 sandbox / 감상 sandbox"
+    assert guest.captures == ["restart-pending-" + str(i) for i in range(4)]
+    assert guest.actions[0][:3] == ("shell", "input", "tap")
+    swipes = guest.actions[1:]
+    assert len(swipes) == 2
+    for action in swipes:
+        assert action[:3] == ("shell", "input", "swipe")
+        x1, y1, x2, y2, duration = map(int, action[3:])
+        assert x1 == x2 and y1 < y2 and duration == 650

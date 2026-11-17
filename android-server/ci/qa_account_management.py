@@ -160,10 +160,11 @@ def tap(qa, description, stage, direction=None):
 
 
 def find_queued_account(qa, profile, stage):
-    # Activity recreation intentionally opens Console. The selection summary is
-    # still under Users even when Console is too short to be scrollable.
+    # Activity recreation intentionally opens Console. Users loads its summary
+    # asynchronously above the account controls. Keep the viewport at the top
+    # while that query is pending, or recover upward from an older scroll offset.
     return find(qa, lambda node: "다음 시작 · 일반 " + profile in node.get("text", ""),
-                stage, "down", enabled=False, destination=("users", "accounts"))
+                stage, "up", enabled=False, destination=("users", "accounts"))
 
 
 def positive(qa, stage):

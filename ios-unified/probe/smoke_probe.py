@@ -983,7 +983,7 @@ def official_ui_failure_observation(value):
     if type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1 or value.get("scope") != "owned-public-xctest-failure":
         return {}
     clean={"schema":1,"scope":"owned-public-xctest-failure"}
-    if value.get("phase") in ("building","testing","summary","tests","unknown"):clean["phase"]=value["phase"]
+    if value.get("phase") in ("building","testing","waiting_native_report","summary","tests","unknown"):clean["phase"]=value["phase"]
     if type(value.get("error_code")) is str and value["error_code"] in UI_DRIVER_ERRORS:clean["error_code"]=value["error_code"]
     for key in ("ready_marker_observed","test_spawned"):
         if type(value.get(key)) is bool:clean[key]=value[key]

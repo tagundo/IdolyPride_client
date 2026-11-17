@@ -3735,16 +3735,17 @@ def test_failure_checkpoint_heartbeat_distinguishes_main_activity_without_export
     assert "DO-NOT-EXPORT" not in json.dumps(observed)
 
 
-def test_safe_ci_failure_summary_keeps_finite_phase_pid_and_markers_only():
+@pytest.mark.parametrize("phase", ["testing", "waiting_native_report"])
+def test_safe_ci_failure_summary_keeps_finite_phase_pid_and_markers_only(phase):
     report={"error":"ui_driver_deadline","native_checkpoint":{"stage":"server_starting","phase":1,
         "process_id":4321,"main_heartbeat_count":80,"checkpoint_count":83,"main_thread_checkpoint":True,
         "checkpoint_age_seconds":0.2,"status_age_seconds":0.3,"main_elapsed_seconds":20,"raw":"DO-NOT-EXPORT"},
-        "xctest_failure":{"schema":1,"scope":"owned-public-xctest-failure","phase":"testing","error_code":"ui_driver_deadline",
+        "xctest_failure":{"schema":1,"scope":"owned-public-xctest-failure","phase":phase,"error_code":"ui_driver_deadline",
             "ready_marker_observed":True,"test_spawned":True,"child_pid":1234,"child_exit_code":None,"phase_elapsed_seconds":300,
             "markers":{"foreground_observed":True,"prompt_waiting":True,"cancel_tapped":False,"unknown":"DO-NOT-EXPORT"},"raw":"DO-NOT-EXPORT"}}
     projected=probe.safe_failure_summary(report)
     assert projected["native"]["checkpoint_age_seconds"]==0.2 and projected["native"]["main_heartbeat_count"]==80
-    assert projected["xctest"]["child_exit_code"] is None and projected["xctest"]["phase"]=="testing"
+    assert projected["xctest"]["child_exit_code"] is None and projected["xctest"]["phase"]==phase
     assert projected["xctest"]["markers"]=={"foreground_observed":True,"prompt_waiting":True,"cancel_tapped":False}
     assert "DO-NOT-EXPORT" not in json.dumps(projected)
     report["error"]="DO-NOT-EXPORT";report["native_checkpoint"]["stage"]="DO-NOT-EXPORT"

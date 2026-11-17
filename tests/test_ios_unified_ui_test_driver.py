@@ -155,7 +155,7 @@ def testing(env):
     return path
 
 
-def reading_summary(env):
+def waiting_native_report(env):
     module, driver, processes, source, clock = env
     testing(env)
     processes.calls[1].emit(module.READY_MARKER + b"\n")
@@ -163,6 +163,24 @@ def reading_summary(env):
     driver._result.mkdir()
     processes.calls[1].complete(b"** TEST SUCCEEDED **\n")
     assert driver.poll()["phase"] == "running"
+    assert driver._phase == "waiting_native_report"
+    assert len(processes.calls) == 2
+
+
+def reading_summary(env):
+    module, driver, processes, source, clock = env
+    waiting_native_report(env)
+    # Yield a real finish() call at its first wait so each result command can
+    # be completed separately by this fake-process fixture.
+    class PendingResult(Exception):
+        pass
+    def yield_result(_):
+        raise PendingResult()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(module.time, "sleep", yield_result)
+        with pytest.raises(PendingResult):
+            driver.finish()
+    assert driver._phase == "summary" and driver._proof is None
     assert len(processes.calls) == 3
 
 
@@ -535,3 +553,75 @@ def test_failure_diagnostic_keeps_exact_own_child_exit_after_result_rejection(en
     diagnostic=driver.failure_diagnostic()
     assert diagnostic["child_pid"]==process.pid and diagnostic["child_exit_code"]==65
     assert diagnostic["phase"]=="testing" and diagnostic["ready_marker_observed"] is True
+
+
+def test_completed_xctest_waits_for_native_report_without_result_process_or_proof(env):
+    module, driver, processes, source, clock = env
+    waiting_native_report(env)
+    # The old testing deadline may pass while independent native checks run;
+    # the existing overall native budget still applies to every poll.
+    clock[0] += 301
+    for _ in range(3):
+        assert driver.poll() == {"phase": "running", "ready": True, "error_code": None}
+        assert driver._phase == "waiting_native_report"
+        assert driver._process is None and driver._log is None and driver._proof is None
+        assert len(processes.calls) == 2
+    work = driver._work
+    driver.close()
+    assert not work.exists() and not processes.killed
+
+
+def test_wait_for_native_report_remains_within_overall_budget(env):
+    module, driver, processes, source, clock = env
+    waiting_native_report(env)
+    driver._remaining = lambda cap=60: 0
+    assert driver.poll() == {"phase": "failed", "ready": True, "error_code": "ui_driver_deadline"}
+    observed = driver.failure_diagnostic()
+    assert observed["phase"] == "waiting_native_report"
+    assert observed["child_exit_code"] == 0 and observed["child_pid"] == processes.calls[1].pid
+    assert len(processes.calls) == 2 and not processes.killed and driver._proof is None
+    with pytest.raises(module.DriverError, match="ui_driver_deadline"):
+        driver.finish()
+
+
+def test_finish_extracts_and_validates_both_results_only_after_native_work(env, monkeypatch):
+    module, driver, processes, source, clock = env
+    waiting_native_report(env)
+    observed = []
+    def complete_result(_):
+        assert driver._proof is None
+        observed.append(driver._phase)
+        if driver._phase == "summary":
+            processes.calls[-1].complete(json.dumps(summary()).encode())
+        elif driver._phase == "tests":
+            processes.calls[-1].complete(json.dumps(results()).encode())
+        else:
+            pytest.fail("unexpected result extraction phase")
+    monkeypatch.setattr(module.time, "sleep", complete_result)
+    proof = driver.finish()
+    assert observed == ["summary", "tests"]
+    assert proof["status"] == "PASS" and proof["actual_cancel_tap"] is True
+    assert proof["tests"] == 1 and proof["failures"] == proof["skipped"] == 0
+    assert len(processes.calls) == 4
+    assert driver._phase == "passed"
+
+
+def test_source_change_while_native_work_runs_cannot_become_result_proof(env):
+    module, driver, processes, source, clock = env
+    waiting_native_report(env)
+    (source / "ui-tests/OfficialPromptCancelTests.swift").write_text("changed while waiting")
+    with pytest.raises(module.DriverError, match="ui_driver_source_changed"):
+        driver.finish()
+    assert driver._proof is None and len(processes.calls) == 2
+
+
+@pytest.mark.parametrize("phase", ["summary", "tests"])
+def test_deferred_result_commands_keep_their_thirty_second_caps(env, phase):
+    module, driver, processes, source, clock = env
+    (reading_summary if phase == "summary" else reading_tests)(env)
+    assert driver._phase == phase
+    assert driver._phase_deadline - clock[0] == 30
+    clock[0] += 30
+    assert driver.poll()["error_code"] == "ui_driver_deadline"
+    assert driver.failure_diagnostic()["phase"] == phase
+    assert driver._proof is None and processes.killed[-1][0] == processes.calls[-1].pid
