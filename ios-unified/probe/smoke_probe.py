@@ -37,6 +37,7 @@ from ui_test_driver import (ProbePromptCancelDriver, DriverError, ERROR_CODES as
 
 
 BUNDLE_ID = "game.qualiarts.idolypride.iosprobe"
+PROBE_EXECUTABLE = "IdolyEmbeddedProbe"
 # ServerData archives contain a data/ root; the installer removes that prefix
 # when creating the writable core directory. The probe reads the archive itself.
 DESCRIPTOR_MEMBER = "data/protocol/idolypride-6.1.1.pb"
@@ -1099,7 +1100,7 @@ PROCESS_SAMPLE_ERRORS = frozenset(("not_attempted", "not_macos", "launch_pid_mis
     "sample_failed", "sample_timed_out", "sample_output_missing", "main_thread_not_found", "identity_changed", "none"))
 PROCESS_SAMPLE_FLAGS = ("attempted", "available", "launch_pid_matched", "executable_verified", "identity_stable",
     "main_thread_found", "truncated", "timed_out")
-PROCESS_SAMPLE_MODULES = frozenset(("Probe", "IdolyServer", "Python", "UIKit", "UIKitCore", "WebKit",
+PROCESS_SAMPLE_MODULES = frozenset((PROBE_EXECUTABLE, "IdolyEmbeddedServer", "Python", "UIKit", "UIKitCore", "WebKit",
     "JavaScriptCore", "Foundation", "CoreFoundation", "GraphicsServices", "QuartzCore", "CoreGraphics",
     "UIFoundation", "FileProvider", "FileProviderUI", "DocumentManager", "DocumentManagerCore",
     "DocumentManagerUICore", "ExtensionFoundation", "CoreServices", "FrontBoardServices", "BoardServices",
@@ -1573,10 +1574,44 @@ class AccountFixtureHarness:
             "archive_sha256": sha, "archive_bytes": before.st_size}
 
 
+class ZIPPresenterStallWatchdog:
+    """Fail closed on one unchanged owned-run presenter checkpoint.
+
+    The native picker still has its original 12-second whole-operation timer.
+    This independent 30-second host observation catches a main queue that can
+    no longer deliver that timer. It cannot produce or replace any PASS proof.
+    """
+    def __init__(self, container, expected_language, run_index):
+        self._checkpoint = Path(container)/"Documents"/language_paths(expected_language,run_index)[2]
+        self._token = self._observed_since = None
+
+    def poll(self):
+        try:
+            value = parse_json(read_bounded(self._checkpoint,MAX_JSON))
+        except (OSError,ProbeError):
+            self._token = self._observed_since = None
+            return
+        pid = value.get("process_id") if type(value) is dict else None
+        count = value.get("checkpoint_count") if type(value) is dict else None
+        if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1
+                or value.get("stage") != "settings_zip_import_after_presenter"
+                or value.get("main_thread_checkpoint") is not True
+                or type(pid) is not int or not 1 <= pid <= 2**31-1
+                or type(count) is not int or not 1 <= count <= 100000):
+            self._token = self._observed_since = None
+            return
+        token, now = (pid,count), time.monotonic()
+        if self._token != token or self._observed_since is None or now < self._observed_since:
+            self._token, self._observed_since = token, now
+            return
+        require(now-self._observed_since < 30,"settings_zip_import_picker_failed")
+
+
 def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None, ui_driver=None, simulator_udid=None):
     documents = Path(container) / "Documents"
     final_name, waiting_name, _checkpoint_name = language_paths(expected_language,run_index)
     final, waiting = documents / final_name, documents / waiting_name
+    presenter_watchdog = ZIPPresenterStallWatchdog(container,expected_language,run_index)
     last_keyboard = {}
     last_header = {}
     last_http = {}
@@ -1670,6 +1705,7 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None,
                 raise
         except FileNotFoundError:
             pass
+        presenter_watchdog.poll()
         waiting_value = None
         try:
             waiting_value = parse_json(read_bounded(waiting, MAX_JSON))
@@ -2746,10 +2782,10 @@ class OwnedProbeProcessSampler:
         require(len(parts)==6 and parts[:4]==("data","Containers","Bundle","Application")
             and str(uuid.UUID(parts[4])).upper()==parts[4].upper() and parts[5]=="Probe.app","owned_container_invalid")
         info = plistlib.loads(read_bounded(bundle/"Info.plist",MAX_JSON))
-        require(type(info) is dict and info.get("CFBundleIdentifier")==BUNDLE_ID and info.get("CFBundleExecutable")=="Probe"
+        require(type(info) is dict and info.get("CFBundleIdentifier")==BUNDLE_ID and info.get("CFBundleExecutable")==PROBE_EXECUTABLE
             and info.get("CFBundleSupportedPlatforms")==["iPhoneSimulator"],"owned_container_invalid")
-        expected = _sample_executable_identity(self.source_app/"Probe")
-        executable = bundle/"Probe"; actual = _sample_executable_identity(executable)
+        expected = _sample_executable_identity(self.source_app/PROBE_EXECUTABLE)
+        executable = bundle/PROBE_EXECUTABLE; actual = _sample_executable_identity(executable)
         require(actual["sha256"]==expected["sha256"] and actual["bytes"]==expected["bytes"],"owned_executable_invalid")
         return executable,actual
 
