@@ -257,6 +257,14 @@ def stage_release_binaries(rows, directory, guard):
     return result
 
 
+def stage_optional_release_binaries(rows, directory, guard):
+    """An absent optional cohort contributes no files or staging directory."""
+    require_release()
+    if type(rows) is list and not rows:
+        return []
+    return stage_release_binaries(rows, directory, guard)
+
+
 def blob_sha(source, name):
     raw = subprocess.check_output(["git", "show", source + ":" + name], cwd=ROOT, timeout=30)
     return hashlib.sha256(raw).hexdigest()
@@ -1335,7 +1343,7 @@ def main(argv=None):
         for wanted in COMPANIONS:
             guard.check()
             companion_binaries.append(github.companion(wanted, companion_directory/wanted["name"], guard))
-        companion_binaries = stage_release_binaries(companion_binaries, args.work/"release-companions", guard)
+        companion_binaries = stage_optional_release_binaries(companion_binaries, args.work/"release-companions", guard)
         state["companions"] = [{key: value for key, value in row.items() if key != "path"}
                                for row in companion_binaries]
         state["all_companion_source_and_download_SHA256_verified"] = True

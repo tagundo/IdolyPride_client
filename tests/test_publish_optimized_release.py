@@ -1169,3 +1169,31 @@ def test_publication_failure_metadata_rejects_unbounded_or_noncode_delivery_mess
     class DeliveryError(ValueError):
         pass
     assert publisher.publication_failure_code(DeliveryError(value),SimpleNamespace(DeliveryError=DeliveryError)) is None
+
+
+def test_no_optional_release_files_do_not_create_a_staging_directory(tmp_path):
+    destination=tmp_path/"absent-companions"
+    assert publisher.COMPANIONS==()
+    assert publisher.stage_optional_release_binaries([],destination,TinyGuard())==[]
+    assert not destination.exists()
+    with pytest.raises(publisher.ReleaseError,match="release_staging_inventory_invalid"):
+        publisher.stage_release_binaries([],tmp_path/"required-native",TinyGuard())
+    assert not (tmp_path/"required-native").exists()
+
+
+def test_present_optional_release_files_still_verify_and_rename_exact_bytes(source_release_binaries,tmp_path):
+    original=source_release_binaries[0]
+    raw=Path(original["path"]).read_bytes()
+    staged=publisher.stage_optional_release_binaries([original],tmp_path/"optional-present",TinyGuard())
+    assert len(staged)==1 and staged[0]["source_name"]==original["name"]
+    assert staged[0]["name"]==publisher.release_name(original["name"])
+    assert Path(staged[0]["path"]).read_bytes()==raw
+    assert (staged[0]["bytes"],staged[0]["sha256"])==(original["bytes"],original["sha256"])
+    assert not Path(original["path"]).exists()
+
+
+@pytest.mark.parametrize("rows",[None,(),{}])
+def test_optional_release_staging_rejects_nonlist_empty_values(rows,tmp_path):
+    with pytest.raises(publisher.ReleaseError,match="release_staging_inventory_invalid"):
+        publisher.stage_optional_release_binaries(rows,tmp_path/"invalid",TinyGuard())
+    assert not (tmp_path/"invalid").exists()
