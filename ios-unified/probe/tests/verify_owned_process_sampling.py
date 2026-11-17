@@ -61,7 +61,7 @@ def ready(child):
         raw+=block;need(len(raw)<=255,"fixture_ready_failed")
     need(raw==READY and child.poll() is None,"fixture_ready_failed")
 
-def ps_checks(sampler, executable):
+def legacy_ps_comm_checks(sampler, executable):
     keys=("query_completed","output_bounded","utf8","row_shape","pid_equal","path_absolute",
           "path_equal","path_resolves_equal","start_parsed","launch_interval_valid","start_in_launch_window")
     result={key:False for key in keys}
@@ -108,9 +108,17 @@ def observe_case(probe, executable, case):
         sampler.note_launch((probe.BUNDLE_ID+": "+str(child.pid)+"\n").encode("ascii"))
         result["launch_ack_pid_equal"]=sampler.pid==child.pid
         ready(child);result["ready_observed"]=True
-        result["ps_before"]=ps_checks(sampler,executable)
+        result["legacy_ps_comm_before"]=legacy_ps_comm_checks(sampler,executable)
         before_code,before=identity(probe,sampler,executable)
         result["identity_before_error_code"]=before_code;result["identity_before_passed"]=before_code=="none"
+        result["kernel_path_matches_expected"]=False;result["kernel_path_error_code"]="none"
+        try:
+            kernel_path=sampler._kernel_process_path(2)
+            result["kernel_path_matches_expected"]=kernel_path==executable
+        except probe.ProbeError as error:
+            code=str(error)
+            result["kernel_path_error_code"]=code if code in probe.PROCESS_SAMPLE_ERRORS else "fixture_identity_error"
+        except Exception:result["kernel_path_error_code"]="fixture_identity_error"
         if before_code=="none":
             sampled=sampler.capture({"process_id":child.pid})
             result["sample_attempted"]=True
@@ -118,7 +126,7 @@ def observe_case(probe, executable, case):
             result["sample"]["scope"]="owned-macos-foundation-fixture"
         after_code,after=identity(probe,sampler,executable)
         result["identity_after_error_code"]=after_code;result["identity_after_passed"]=after_code=="none"
-        result["ps_after"]=ps_checks(sampler,executable)
+        result["legacy_ps_comm_after"]=legacy_ps_comm_checks(sampler,executable)
         result["start_identity_unchanged"]=before is not None and before==after
         result["executable_identity_unchanged"]=probe._sample_executable_identity(executable)==sampler.executable_pin
     finally:result["owned_child_stopped"]=stop(child)
@@ -130,7 +138,8 @@ def main():
     parser.add_argument("--output",type=Path,required=True);args=parser.parse_args()
     report={"schema":1,"status":"FAIL","scope":"owned-macos-foundation-fixture",
         "simulator_tested":False,"gameplay_tested":False,"release_pass_claimed":False,
-        "simulator_container_preparation_executed":False,"cases":[],"temporary_removed":False}
+        "simulator_container_preparation_executed":False,"legacy_ps_comm_diagnostic_only":True,
+        "cases":[],"temporary_removed":False,"all_identity_guards_passed":False,"all_samples_available":False}
     work=None;error_code="none";output_approved=False
     os.umask(0o077)
     try:
@@ -167,6 +176,11 @@ def main():
             executable=binary.resolve(strict=True);report["fixture_executable_sha256"]=digest(executable)
             for case in ("argv0_absolute","argv0_basename"):report["cases"].append(observe_case(probe,executable,case))
             need(all(row["ready_observed"] and row["owned_child_stopped"] for row in report["cases"]),"fixture_incomplete")
+            report["all_identity_guards_passed"]=all(row.get("identity_before_passed") is True
+                and row.get("identity_after_passed") is True and row.get("start_identity_unchanged") is True
+                and row.get("executable_identity_unchanged") is True for row in report["cases"])
+            report["all_samples_available"]=all(row.get("sample",{}).get("available") is True
+                and row["sample"].get("error_code")=="none" for row in report["cases"])
         report["status"]="DIAGNOSTIC_COMPLETE"
     except FixtureError as error:error_code=str(error)
     except Exception:error_code="fixture_unexpected_error"

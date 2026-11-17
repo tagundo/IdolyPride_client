@@ -1101,6 +1101,8 @@ PROCESS_SAMPLE_ERRORS = frozenset(("not_attempted", "not_macos", "launch_pid_mis
     "process_output_shape_differs", "process_pid_differs", "process_path_not_absolute", "process_path_differs",
     "process_path_resolution_failed", "process_path_resolves_elsewhere", "process_start_parse_failed",
     "process_launch_interval_invalid", "process_start_outside_launch",
+    "process_kernel_query_timeout", "process_kernel_query_failed", "process_kernel_output_invalid",
+    "process_kernel_encoding_invalid",
     "sample_failed", "sample_timed_out", "sample_output_missing", "main_thread_not_found", "identity_changed", "none"))
 PROCESS_SAMPLE_FLAGS = ("attempted", "available", "launch_pid_matched", "executable_verified", "identity_stable",
     "main_thread_found", "truncated", "timed_out")
@@ -1123,6 +1125,18 @@ PROCESS_SAMPLE_EXACT_SYMBOLS = frozenset(("semaphore_wait_trap","semaphore_timed
     "poll","__poll","select","__select","nanosleep","__nanosleep","usleep","__workq_kernreturn"))
 PROCESS_SAMPLE_MAX_BYTES = 256 * 1024
 PROCESS_SAMPLE_MAX_FRAMES = 48
+# A separate isolated child bounds the public Darwin kernel query. Never load
+# an FFI library in the probe controller or accept an argv[0] display as an image.
+PROCESS_PIDPATH_CHILD = (
+    "import ctypes,os,sys;"
+    "p=sys.argv[1];"
+    "sys.exit(2) if not (p.isascii() and p.isdecimal() and 1<=int(p)<=2147483647) else None;"
+    "lib=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True);"
+    "fn=lib.proc_pidpath;fn.argtypes=[ctypes.c_int,ctypes.c_void_p,ctypes.c_uint32];fn.restype=ctypes.c_int;"
+    "buf=ctypes.create_string_buffer(4096);count=fn(int(p),buf,4096);raw=buf.value;"
+    "sys.exit(2) if not (0<count<=4096 and 0<len(raw)<4096 and raw.startswith(b'/') "
+    "and b'\\n' not in raw and b'\\r' not in raw) else None;"
+    "sys.exit(0 if os.write(1,raw)==len(raw) else 3)")
 PROCESS_SAMPLE_CHILD = ("import os,resource,sys;resource.setrlimit(resource.RLIMIT_FSIZE,(262144,262144));"
     "os.execv('/usr/bin/sample',['/usr/bin/sample',sys.argv[1],'1','10','-mayDie','-file',sys.argv[2]])")
 
@@ -2793,10 +2807,35 @@ class OwnedProbeProcessSampler:
         require(actual["sha256"]==expected["sha256"] and actual["bytes"]==expected["bytes"],"owned_executable_invalid")
         return executable,actual
 
-    def _process_identity(self, executable):
+    def _kernel_process_path(self, timeout):
+        require(type(self.pid) is int and 1<=self.pid<=2**31-1,"launch_pid_missing")
+        require(type(timeout) in (int,float) and math.isfinite(timeout) and 0<timeout<=2,"process_kernel_query_timeout")
         try:
-            result = subprocess.run(["/bin/ps","-p",str(self.pid),"-o","pid=","-o","lstart=","-o","comm=","-ww"],
-                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=2,check=False,
+            result = subprocess.run([sys.executable,"-I","-S","-c",PROCESS_PIDPATH_CHILD,str(self.pid)],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=timeout,check=False)
+        except subprocess.TimeoutExpired:
+            raise ProbeError("process_kernel_query_timeout") from None
+        except OSError:
+            raise ProbeError("process_kernel_query_failed") from None
+        require(result.returncode==0,"process_kernel_query_failed")
+        require(type(result.stdout) is bytes and 0<len(result.stdout)<4096,"process_kernel_output_invalid")
+        try: text = result.stdout.decode("utf-8")
+        except UnicodeError: raise ProbeError("process_kernel_encoding_invalid") from None
+        require(not any(character in text for character in ("\n","\r","\0")),"process_kernel_output_invalid")
+        path = Path(text);require(path.is_absolute(),"process_path_not_absolute")
+        return path
+
+    def _process_identity(self, executable):
+        deadline = time.monotonic()+2
+        def remaining():
+            value = deadline-time.monotonic()
+            require(value>0,"process_query_timeout")
+            return min(2,value)
+        try:
+            # Darwin comm is an argv[0] display. It cannot identify the kernel
+            # image, so ps is used exclusively for the owned PID and start time.
+            result = subprocess.run(["/bin/ps","-p",str(self.pid),"-o","pid=","-o","lstart=","-ww"],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=remaining(),check=False,
                 env={**os.environ,"LC_ALL":"C","LANG":"C"})
         except subprocess.TimeoutExpired:
             raise ProbeError("process_query_timeout") from None
@@ -2806,10 +2845,10 @@ class OwnedProbeProcessSampler:
         require(type(result.stdout) is bytes and 0<len(result.stdout)<=4096,"process_output_invalid")
         try: text = result.stdout.decode("utf-8").strip()
         except UnicodeError: raise ProbeError("process_output_encoding_invalid") from None
-        match = re.fullmatch(r"([1-9][0-9]{0,9})\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4})\s+([^\r\n]+)",text)
+        match = re.fullmatch(r"([1-9][0-9]{0,9})\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4})",text)
         require(match is not None,"process_output_shape_differs")
         require(int(match.group(1))==self.pid,"process_pid_differs")
-        path = Path(match.group(3)); require(path.is_absolute(),"process_path_not_absolute")
+        path = self._kernel_process_path(remaining())
         require(path==executable,"process_path_differs")
         try: resolved = path.resolve(strict=True)
         except (OSError,RuntimeError): raise ProbeError("process_path_resolution_failed") from None
@@ -2822,6 +2861,7 @@ class OwnedProbeProcessSampler:
             and math.isfinite(self.launch_started) and math.isfinite(self.launch_ack)
             and self.launch_started<=self.launch_ack,"process_launch_interval_invalid")
         require(self.launch_started-1<=started<=self.launch_ack+1,"process_start_outside_launch")
+        remaining()  # Parsing and the kernel child share the original 2s budget.
         return match.group(2)
 
     def capture(self, checkpoint):
