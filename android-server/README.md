@@ -1,6 +1,6 @@
 # Android 서버 앱
 
-Android에서는 **서버 APK와 게임 APK 하나**를 같은 기기에 설치합니다. [현재 공개 릴리즈 2026.11.17.1](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.1)에서 서버와 한국어·일본어·영어 게임 APK를 받습니다. 파일 이름에 릴리즈 날짜와 언어가 표시됩니다.
+Android에서는 **서버 APK와 게임 APK 하나**를 같은 기기에 설치합니다. [현재 공개 릴리즈 2026.11.17.2](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.2)에서 서버와 한국어·일본어·영어 게임 APK를 받습니다. 파일 이름에 릴리즈 날짜와 언어가 표시됩니다.
 
 ## 시작하기
 
@@ -31,9 +31,9 @@ Termux나 별도 Python 설치는 필요하지 않습니다. 게임 언어는 �
 
 같은 앱·서명으로 업데이트하면 계정과 설정을 유지합니다. 앱 삭제나 Android 설정의 **데이터 지우기** 전에는 필요한 계정과 리소스를 내보냅니다.
 
-## 다음 릴리즈 준비 중
+## 이번 릴리즈
 
-현재 소스의 `0.3.37`은 다음 날짜 릴리즈를 위한 개발 버전이며, 아직 공개 파일을 교체하지 않았습니다.
+이번 날짜 릴리즈의 서버 내부 버전은 `0.3.37`(build 54)입니다. [전체 플랫폼 검증](https://github.com/tagundo/IdolyPride_client/actions/runs/44015901340)을 통과한 파일을 제공합니다. [게시 파일 검증](https://github.com/tagundo/IdolyPride_client/actions/runs/44022899574)에서는 같은 빌드 파일 5개의 전체 SHA를 재확인했습니다.
 
 - 콘솔·서버·계정·콘텐츠·그래픽 분류와 가로 화면 대응
 - 기본 접힘 설정, 짧은 안내와 필요할 때 여는 도움말

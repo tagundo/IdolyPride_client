@@ -1,12 +1,12 @@
 # 서버 설정·유저 관리 구현 범위
 
-현재 배포는 [2026.11.17.1](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.1)입니다. 계정 ZIP v2는 모시코이 진행을 포함한 8개 테이블을 보존하며 기존 v1 ZIP도 가져올 수 있습니다.
+현재 배포는 [2026.11.17.2](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.2)입니다. 계정 ZIP v2는 모시코이 진행을 포함한 8개 테이블을 보존하며 기존 v1 ZIP도 가져올 수 있습니다.
 
 Android는 서버 APK와 언어별 게임 APK 하나를 함께 설치합니다. iPhone·iPad와 Mac/PlayCover는 같은 통합 IPA를 사용하며 별도 Mac 서버 앱은 배포하지 않습니다. 다운로드와 시작 순서는 [README](../README.md#앱으로-실행하기)를 참고하세요.
 
-## 다음 릴리즈의 화면 구성
+## 화면 구성
 
-아래 메뉴 개편은 현재 개발 중인 `0.3.37`·통합 IPA `156.9117`에 해당합니다. 공개 파일은 위 `2026.11.17.1`을 유지하며 필수 검증 후 새 날짜 릴리즈로 제공합니다.
+서버 내부 버전 `0.3.37`·통합 IPA `156.9117`의 화면 구성입니다. [전체 플랫폼 빌드·실행 검증](https://github.com/tagundo/IdolyPride_client/actions/runs/44015901340)을 통과한 공개 파일을 제공합니다. [게시 파일 검증](https://github.com/tagundo/IdolyPride_client/actions/runs/44022899574)에서는 같은 빌드 파일 5개의 전체 SHA를 재확인했습니다.
 
 | 분류 | 주요 작업 |
 | --- | --- |
@@ -104,7 +104,7 @@ Sideloadly·LiveContainer·SideStore·Android·Mac 사이 계정 이동도 같�
 
 ## 초기 구현의 자동 검증 기록 (2026-11-16)
 
-아래는 당시 소스에 대한 기록입니다. 7개 테이블·별도 Mac 서버 검사와 당시의 시험 범위를 보존하며, 현재 배포 구성이나 계정 ZIP v2의 전체 검증 결과로 읽지 않습니다. 현재 공개 파일과 검증 범위는 [2026.11.17.1 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.1)를 따릅니다. 날짜 버전·파일 이름 규칙은 [릴리즈 버전 정책](release-versioning.md)에 있습니다.
+아래는 당시 소스에 대한 기록입니다. 7개 테이블·별도 Mac 서버 검사와 당시의 시험 범위를 보존하며, 현재 배포 구성이나 계정 ZIP v2의 전체 검증 결과로 읽지 않습니다. 현재 공개 파일과 검증 범위는 [2026.11.17.2 릴리즈](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.2)를 따릅니다. 날짜 버전·파일 이름 규칙은 [릴리즈 버전 정책](release-versioning.md)에 있습니다.
 
 | 검사 | 검증된 결과와 소스 |
 | --- | --- |

@@ -1,22 +1,24 @@
 # IDOLY PRIDE 로컬 서버와 통합 클라이언트
 
-**[최신 릴리즈 2026.11.17.1](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.1)** · 최신 데이터·계정 관리·모시코이 복구
+**[최신 릴리즈 2026.11.17.2](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.2)** · 서버 메뉴·가로 화면·모시코이·시작 준비 개선
 
 원본 마스터 202개와 카드 504종·의상 1,011종·헤어 1,231종을 포함한 최신 공개 데이터를 반영했습니다. 한국어·일본어·영어의 일반/감상용 데이터를 같은 원본 목록에 맞춰 검증했습니다. 리소스 목록과 모델 의존성 검사는 실제 Unity 모델·MV 재생 검증과 구분합니다.
 
 서버 설정에서 일반/감상 계정의 생성·복제·다음 시작 계정 선택과 계정 ZIP 내보내기·미리보기·가져오기·복원점을 관리합니다. 실행 중 계정을 조용히 바꾸지 않으며, 교체 전 복원점과 저장값 충돌 검사를 유지합니다. [서버 설정·계정 관리](docs/server-user-management.md)
 
-모시코이(もしも君と恋をしたら) 6개 이벤트와 72편의 목록·진행을 연결했습니다. 원문 ADV가 없는 1편을 제외한 71편의 진행·감상 경로를 제공하며, 일부 분기 가중치는 추론 자료입니다. 서버 설정에서 이벤트별 로컬 운영 기간을 지정하고, 변경값은 다음 서버 시작에 적용합니다. 기간 변경·비활성화는 기존 진행을 초기화하지 않습니다. 일반/감상 진행은 분리하고 확인되지 않은 보너스 보상은 지급하지 않습니다. [모시코이 범위와 한계](docs/love-event-recovery.md)
+모시코이(もしも君と恋をしたら) 지원 이벤트 6개를 체크 목록과 **모두 활성화·모두 비활성화**로 설정합니다. 감상 모드는 처음에 전체 이벤트를 기간 제한 없이 열고, 일반 모드의 기간·진행과 따로 관리합니다. 원문 ADV가 없는 1편을 제외한 71편의 진행·감상 경로를 제공하며 설정을 바꿔도 기존 진행은 유지합니다. [복구 범위와 제한](docs/love-event-recovery.md)
+
+메뉴를 콘솔·서버·계정·콘텐츠·그래픽으로 나누고, 긴 설명은 접힌 도움말로 옮겼습니다. 그래픽·촬영은 펼치며 검사·계정·공식 계정·모시코이·실험 설정은 접어 둡니다. 가로 화면의 상단을 줄여 첫 설정을 바로 누를 수 있고, 시작 때 번역 목록을 중복 준비하던 작업도 줄였습니다.
 
 ## 앱으로 실행하기
 
 | 파일 | 용도 |
 | --- | --- |
-| [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.1/IdolyPride-2026.11.17.1-Server-Android.apk) | Android ARM64·Android 9 이상 |
-| [Android 한국어 게임 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.1/IdolyPride-2026.11.17.1-Client-Android-arm64-ko.apk) | 검증된 v0.3.31과 동일한 바이트, 날짜 파일명으로 제공 |
-| [Android 일본어 게임 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.1/IdolyPride-2026.11.17.1-Client-Android-arm64-ja.apk) | 일본어 내장 데이터·폰트 |
-| [Android 영어 게임 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.1/IdolyPride-2026.11.17.1-Client-Android-arm64-en.apk) | 영어 내장 데이터·폰트 |
-| [서버·게임 통합 IPA](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.1/IdolyPride-2026.11.17.1-Unified-iOS.ipa) | iPhone·iPad와 Mac/PlayCover 공용 |
+| [Android 서버 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.2/IdolyPride-2026.11.17.2-Server-Android.apk) | Android ARM64·Android 9 이상 |
+| [Android 한국어 게임 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.2/IdolyPride-2026.11.17.2-Client-Android-arm64-ko.apk) | 한국어 내장 데이터·폰트·글자 비율을 수정한 새 빌드 |
+| [Android 일본어 게임 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.2/IdolyPride-2026.11.17.2-Client-Android-arm64-ja.apk) | 일본어 내장 데이터·폰트 |
+| [Android 영어 게임 APK](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.2/IdolyPride-2026.11.17.2-Client-Android-arm64-en.apk) | 영어 내장 데이터·폰트 |
+| [서버·게임 통합 IPA](https://github.com/tagundo/IdolyPride_client/releases/download/v2026.11.17.2/IdolyPride-2026.11.17.2-Unified-iOS.ipa) | iPhone·iPad와 Mac/PlayCover 공용 |
 
 Android는 서버 APK와 원하는 언어의 게임 APK **하나**를 설치합니다. KO/JA/EN 게임은 같은 앱 ID·서명을 사용하는 교체 업데이트입니다. 게임을 완전히 종료하고 원하는 언어판으로 교체한 뒤 서버의 게임 언어도 맞춰 **서버 시작 → 아이프라 실행**을 누릅니다.
 

@@ -1,26 +1,30 @@
 # 같은 기기에서 로컬 게임·서버 앱 실행
 
-[릴리스](https://github.com/tagundo/IdolyPride_client/releases)에서 환경에 맞는 파일을 받습니다. **Android는 서버 APK와 게임 APK 하나를 같은 기기에 설치하고, iPhone·iPad와 Mac/PlayCover는 같은 서버·게임 통합 IPA 하나를 설치합니다.** 터미널·Python·Termux 없이 앱의 버튼으로 실행합니다. 현재 공개 파일과 버전은 [README](../README.md#앱으로-실행하기)를 확인합니다. 아래의 Android v0.3.0 진단 기록은 당시 동작과 수정 이력입니다.
-
-다음은 [v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0) 당시의 기록입니다. 당시 사용자 Android 기기에서 로컬 로그인·홈과 캐릭터 표시·편성·초기 튜토리얼 전체 진행을 확인했으며, 일반 라이브 플레이와 PlayCover 게임의 화면 진행 검증은 남아 있었습니다. 현재 다운로드 파일과 검증 범위는 위 README와 해당 릴리즈 기록을 확인합니다.
+[현재 공개 릴리즈 2026.11.17.2](https://github.com/tagundo/IdolyPride_client/releases/tag/v2026.11.17.2)에서 환경에 맞는 파일을 받습니다. **Android는 서버 APK와 게임 APK 하나, iPhone·iPad와 Mac/PlayCover는 같은 통합 IPA 하나**를 설치합니다. 터미널·Python·Termux 없이 앱의 버튼으로 실행합니다. 현재 파일과 검증 범위는 [README](../README.md#앱으로-실행하기)를 확인합니다.
 
 ## Android
 
-서버 앱은 Android 8 이상, 게임은 Android 9 이상의 ARM64 기기가 필요합니다. 릴리스에서 다음 두 파일을 받습니다.
+게임은 Android 9 이상의 ARM64 기기가 필요합니다. 다음 서버 APK와 원하는 언어의 게임 APK 하나를 받습니다.
 
 | 파일 | 용도 |
 | --- | --- |
-| `IdolyPride-Local-Server-Android.apk` | 서버 v0.3.0 앱, 표시 이름 **아이프라 서버** |
-| `IdolyPride-6.1.1-Local-Android.apk` | 게임 클라이언트, 표시 이름 **아이프라 로컬** |
+| `IdolyPride-2026.11.17.2-Server-Android.apk` | 서버 앱 **아이프라 서버** |
+| `IdolyPride-2026.11.17.2-Client-Android-arm64-ko.apk` | 한국어 게임 |
+| `IdolyPride-2026.11.17.2-Client-Android-arm64-ja.apk` | 일본어 게임 |
+| `IdolyPride-2026.11.17.2-Client-Android-arm64-en.apk` | 영어 게임 |
 
 1. 파일 앱에서 두 APK를 설치합니다. 필요한 경우 해당 파일 앱의 APK 설치 권한을 허용합니다.
 2. **아이프라 서버**를 열고 **서버 시작**을 누릅니다. 첫 실행에는 앱에 포함된 서버 데이터를 준비합니다.
-3. **실행 중**으로 바뀌면 **아이프라 로컬 실행**을 누릅니다. 서버 실행 알림을 유지한 채 게임을 사용합니다.
+3. **실행 중**으로 바뀌면 **아이프라 실행**을 누릅니다. 서버 실행 알림을 유지한 채 게임을 사용합니다.
 4. 끝나면 서버 앱에서 **서버 중지**를 누릅니다. Android가 백그라운드 앱을 종료했다면 서버 앱을 다시 열어 시작합니다.
 
-서버 패키지는 `game.qualiarts.idolypride.localserver`, 게임 패키지는 `game.qualiarts.idolypride.local`입니다. 기존 공식 게임과 별도로 설치하며 공식 계정이 자동으로 옮겨지지는 않습니다.
+게임은 기존 공식 앱과 별도로 설치하며 공식 계정이 자동으로 옮겨지지는 않습니다. 오류가 발생하면 앱을 종료하기 전에 콘솔에서 **진단·서버 기록 내보내기**로 기록을 저장합니다. 계정과 리소스 백업은 각각의 ZIP 내보내기를 사용합니다.
 
 서버 개발 APK는 고정된 **공개 개발 서명**을 사용합니다. 같은 서명의 후속 APK를 업데이트 설치하면 앱 전용 저장소의 DB가 유지됩니다. **업데이트하려고 기존 서버 앱을 먼저 삭제하지 마세요. 앱 삭제나 설정의 데이터 지우기는 프로필·진행 DB를 삭제합니다.**
+
+## 초기 Android 진단 기록 (v0.3.0)
+
+다음은 [v0.3.0 베타](https://github.com/tagundo/IdolyPride_client/releases/tag/local-server-v0.3.0) 당시의 기록입니다. 당시 사용자 Android 기기에서 로컬 로그인·홈과 캐릭터 표시·편성·초기 튜토리얼 전체 진행을 확인했으며, 일반 라이브 플레이와 PlayCover 게임의 화면 진행 검증은 남아 있었습니다. 현재 다운로드 파일과 검증 범위는 위 README와 해당 릴리즈 기록을 확인합니다. 아래의 구형 파일·버튼·수정 버전 안내는 당시 기록이며 현재 설치 순서가 아닙니다.
 
 ### v0.2.0의 인증 오류 수정
 
@@ -87,7 +91,7 @@
 
 ## Mac + PlayCover
 
-Apple Silicon Mac과 PlayCover가 필요합니다. iPhone·iPad와 같은 **서버·게임 통합 IPA 하나**를 받습니다. 새 날짜 버전의 파일명은 `IdolyPride-<날짜버전>-Unified-iOS.ipa`이며, 현재 공개 v0.3.35의 이름은 `IdolyPride-6.1.1-Unified-iOS.ipa`입니다. 다음 릴리즈에는 별도 Mac 서버 앱과 별도 PlayCover IPA를 포함하지 않습니다.
+Apple Silicon Mac과 PlayCover가 필요합니다. iPhone·iPad와 같은 **서버·게임 통합 IPA 하나**인 `IdolyPride-2026.11.17.2-Unified-iOS.ipa`를 받습니다. 별도 Mac 서버 앱과 별도 PlayCover IPA는 배포하지 않습니다.
 
 1. 기존 별도 Mac 서버를 사용했다면 완전히 종료합니다.
 2. PlayCover 앱 목록에서 통합 IPA를 가져와 설치·재서명합니다.
@@ -100,6 +104,8 @@ Apple Silicon Mac과 PlayCover가 필요합니다. iPhone·iPad와 같은 **서�
 ## 포함된 데이터와 저장 상태
 
 Android 서버 앱과 통합 IPA의 내장 서버는 게임 API `127.0.0.1:50051`, 마스터 파일 `127.0.0.1:8080`을 사용합니다. `127.0.0.1`은 게임을 실행하는 기기 자체입니다. 같은 포트의 소스 서버나 Termux 서버를 함께 실행하지 않습니다.
+
+아래 데이터·기능 표는 초기 v0.3.0의 기록입니다. 현재 마스터·카드·의상·헤어 목록과 지원 범위는 [README](../README.md) 및 해당 날짜 릴리즈를 따릅니다.
 
 v0.3.0에는 6.1.1 스키마, 원본 암호화 마스터 202개, 시작 데이터용 JSON, 공개 약관·도움말 응답 10개와 공개 튜토리얼 재생·스토리 기본 목록이 포함됩니다. 첫 실행은 이 공개 데이터를 준비하며 공식 로그인이나 계정 수집을 실행하지 않습니다. 모델·음성·영상 등의 전체 Octo 리소스가 포함된 것은 아닙니다. 위 진단 게임과 서버 상태 UI는 Android용입니다.
 
