@@ -115,6 +115,17 @@ def need(value, code):
         raise ReleaseError(code)
 
 
+def publication_failure_code(error, delivery):
+    """Keep only the two owned fixed-code exception contracts in metadata."""
+    if isinstance(error, ReleaseError):
+        return str(error)
+    if type(error) is delivery.DeliveryError:
+        code = str(error)
+        if re.fullmatch(r"[a-z][a-z0-9_]{0,95}", code):
+            return code
+    return None
+
+
 def digest(path):
     with Path(path).open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -1393,8 +1404,9 @@ def main(argv=None):
             state["owned_release_id"] = github.owned_release_id
             state["rollback_draft_restored"] = github.rollback_draft_restored
             state["release_published"] = False if github.rollback_draft_restored is True else None
-        if isinstance(error, ReleaseError):
-            state["error_code"] = str(error)
+        error_code = publication_failure_code(error, delivery)
+        if error_code is not None:
+            state["error_code"] = error_code
         write_json(state_path, state)
         raise SystemExit("Optimization release stopped; sanitized proof saved") from None
 

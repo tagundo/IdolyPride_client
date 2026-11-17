@@ -1150,3 +1150,22 @@ def test_publication_rejects_missing_packaged_korean_image_checks(tmp_path,field
     evidence[field]=value
     with pytest.raises(publisher.ReleaseError,match="korean_client_layout"):
         publisher.validate_korean_image_readbacks(evidence,proof)
+
+
+def test_publication_failure_metadata_keeps_owned_fixed_delivery_code_only():
+    from types import SimpleNamespace
+    class DeliveryError(ValueError):
+        pass
+    delivery=SimpleNamespace(DeliveryError=DeliveryError)
+    assert publisher.publication_failure_code(DeliveryError("startup_receipt_report_differs"),delivery)=="startup_receipt_report_differs"
+    assert publisher.publication_failure_code(publisher.ReleaseError("whole_archive_api_sha256_differs"),delivery)=="whole_archive_api_sha256_differs"
+    assert publisher.publication_failure_code(ValueError("credential_canary"),delivery) is None
+    assert publisher.publication_failure_code(RuntimeError("/private/account.db?token=DO-NOT-EXPORT"),delivery) is None
+
+
+@pytest.mark.parametrize("value",("", "a"*97, "SECRET_TOKEN", "/private/account.db", "token=DO-NOT-EXPORT"))
+def test_publication_failure_metadata_rejects_unbounded_or_noncode_delivery_messages(value):
+    from types import SimpleNamespace
+    class DeliveryError(ValueError):
+        pass
+    assert publisher.publication_failure_code(DeliveryError(value),SimpleNamespace(DeliveryError=DeliveryError)) is None

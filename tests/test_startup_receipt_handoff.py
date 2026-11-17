@@ -57,6 +57,50 @@ def test_packaging_carries_exact_immutable_receipt_and_runtime_consumes_its_pin(
     assert startup_receipt._RECEIPTS["ios"][0]==signed/"startupTranslations.zip"
 
 
+def test_device_package_embeds_receipt_and_pin_for_the_actual_runtime_handoff(tmp_path):
+    runtime,native,data,translations,source,replacement,manifest,web=package_fixture(tmp_path)
+    archive,pin,metadata=app_receipt(tmp_path/"receipt")
+    original_source=source.read_bytes();receipt_raw=archive.read_bytes();pin_raw=pin.read_bytes()
+    output=tmp_path/"unified.ipa"
+    report=package.package(source,replacement,runtime,native,data,translations,output,
+        source_commit="b"*40,manifest=manifest,web_root=web,
+        startup_translations=archive,startup_translations_metadata=pin)
+    assert report["startup_translations"]==metadata
+    assert json.loads(output.with_suffix(".report.json").read_text())["startup_translations"]==metadata
+    signed=tmp_path/"Signed.app/LocalServer";signed.mkdir(parents=True)
+    with ZipFile(output) as bundled:
+        for name,raw in (("startupTranslations.zip",receipt_raw),("startupTranslations.json",pin_raw)):
+            member="Payload/Game.app/LocalServer/"+name
+            assert bundled.read(member)==raw
+            assert report["member_sha256"][member]==hashlib.sha256(raw).hexdigest()
+            (signed/name).write_bytes(bundled.read(member))
+        assert bundled.read("Payload/Game.app/Main")==b"ORIGINAL MAIN"
+        assert bundled.read("Payload/Game.app/Frameworks/SDK.framework/SDK")==b"ORIGINAL SDK"
+    assert source.read_bytes()==original_source and archive.read_bytes()==receipt_raw and pin.read_bytes()==pin_raw
+    assert startup_receipt._RECEIPTS=={},"Packaging cannot register runtime state"
+    assert ios_host._register_app_startup_receipt(signed)=={"schema":1,"available":True}
+    assert startup_receipt._RECEIPTS["ios"][0]==signed/"startupTranslations.zip"
+
+
+@pytest.mark.parametrize("damage",("missing-metadata","missing-archive","sha","platform"))
+def test_device_package_rejects_provided_invalid_receipt_before_creating_an_ipa(tmp_path,damage):
+    runtime,native,data,translations,source,replacement,manifest,web=package_fixture(tmp_path)
+    archive,pin,metadata=app_receipt(tmp_path/"receipt")
+    original_source=source.read_bytes();output=tmp_path/"unified.ipa"
+    if damage=="missing-metadata":pin=None
+    elif damage=="missing-archive":archive=None
+    else:
+        if damage=="sha":metadata["sha256"]="0"*64
+        else:metadata["platform"]="android"
+        pin.write_text(json.dumps(metadata))
+    with pytest.raises(ValueError):
+        package.package(source,replacement,runtime,native,data,translations,output,
+            source_commit="b"*40,manifest=manifest,web_root=web,
+            startup_translations=archive,startup_translations_metadata=pin)
+    assert not output.exists() and not output.with_suffix(".ipa.partial").exists()
+    assert source.read_bytes()==original_source and startup_receipt._RECEIPTS=={}
+
+
 @pytest.mark.parametrize("damage",("missing-pair","platform","sha","bytes","bool-bytes","extra","corrupt","symlink","legacy-format"))
 def test_packager_rejects_a_provided_unbound_or_corrupt_receipt(tmp_path,damage):
     archive,pin,metadata=app_receipt(tmp_path)
