@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import plistlib
 import signal
+import subprocess
 import sys
 import time
 from types import SimpleNamespace
@@ -157,8 +158,10 @@ def test_only_verified_launched_image_can_be_sampled_once_and_raw_is_deleted(own
     assert "DO-NOT-EXPORT" not in json.dumps(observed)
 
 
-@pytest.mark.parametrize("damage",["no-ack","wrong-checkpoint","same-image-reused-pid","changed-executable","symlink-executable","other-comm"])
-def test_unverified_or_reused_process_never_reaches_sample(owned,monkeypatch,probe,damage):
+@pytest.mark.parametrize("damage,code",[("no-ack","launch_pid_missing"),("wrong-checkpoint","checkpoint_pid_differs"),
+    ("same-image-reused-pid","process_launch_interval_invalid"),("changed-executable","owned_executable_invalid"),
+    ("symlink-executable","owned_executable_invalid"),("other-comm","process_path_differs")])
+def test_unverified_or_reused_process_never_reaches_sample(owned,monkeypatch,probe,damage,code):
     monkeypatch.setattr(probe.subprocess,"Popen",lambda *args,**kwargs:pytest.fail("Unverified PID must not be sampled"))
     checkpoint={"process_id":123}
     if damage=="no-ack":owned.sampler.note_launch(b"unknown bundle: 123\n")
@@ -171,7 +174,7 @@ def test_unverified_or_reused_process_never_reaches_sample(owned,monkeypatch,pro
         monkeypatch.setattr(probe.subprocess,"run",lambda *args,**kwargs:SimpleNamespace(returncode=0,
             stdout=b"123 Tue Nov 17 00:00:00 2026 /private/other.app/IdolyEmbeddedProbe\n"))
     observed=owned.sampler.capture(checkpoint)
-    assert observed["available"] is False and observed["error_code"]!="none"
+    assert observed["available"] is False and observed["error_code"]==code
 
 
 @pytest.mark.parametrize("damage",["wrong-device","wrong-bundle","wrong-executable","malformed-plist","different-source-bytes"])
@@ -221,6 +224,7 @@ def test_post_sample_identity_change_discards_stack_and_deletes_raw(owned,monkey
     monkeypatch.setattr(probe.subprocess,"run",changed)
     observed=owned.sampler.capture({"process_id":123})
     assert observed["available"] is False and observed["frames"]==[] and not calls[0].path.parent.exists()
+    assert observed["error_code"]=="process_query_failed"
 
 
 def test_timeout_kills_only_new_sample_group_and_retains_fixed_partial_stack(owned,monkeypatch,probe):
@@ -406,3 +410,58 @@ def test_final_report_precedes_watchdog_and_still_requires_full_native_validatio
         with pytest.raises(probe.ProbeError,match="^unity_original_gate_failed$"):
             probe.wait_report(tmp_path,lambda:900)
     assert checked==[True]
+
+
+@pytest.mark.parametrize("damage,code",[
+    ("query-timeout","process_query_timeout"),("query-error","process_query_failed"),("exit","process_query_failed"),
+    ("not-bytes","process_output_invalid"),("empty","process_output_invalid"),("too-big","process_output_invalid"),
+    ("encoding","process_output_encoding_invalid"),("shape","process_output_shape_differs"),
+    ("pid","process_pid_differs"),("relative-path","process_path_not_absolute"),("other-path","process_path_differs"),
+    ("resolve-error","process_path_resolution_failed"),("resolve-other","process_path_resolves_elsewhere"),
+    ("start-parse","process_start_parse_failed"),("launch-type","process_launch_interval_invalid"),
+    ("launch-nan","process_launch_interval_invalid"),("launch-order","process_launch_interval_invalid"),
+    ("start-too-old","process_start_outside_launch"),("start-too-new","process_start_outside_launch")])
+def test_process_identity_subcodes_keep_every_predicate_fail_closed_without_raw_ps_output(owned,monkeypatch,probe,damage,code):
+    monkeypatch.setattr(probe.subprocess,"Popen",lambda *args,**kwargs:pytest.fail("Unverified identity cannot reach sample"))
+    executable=owned.bundle/owned.executable
+    started=time.strftime("%a %b %d %H:%M:%S %Y",time.localtime(owned.sampler.launch_started))
+    raw=("123 "+started+" "+str(executable)+"\n").encode()
+    result=SimpleNamespace(returncode=0,stdout=raw)
+    if damage=="exit":result.returncode=1
+    elif damage=="not-bytes":result.stdout="DO-NOT-EXPORT"
+    elif damage=="empty":result.stdout=b""
+    elif damage=="too-big":result.stdout=b"DO-NOT-EXPORT"+b"x"*4096
+    elif damage=="encoding":result.stdout=b"\xffDO-NOT-EXPORT"
+    elif damage=="shape":result.stdout=b"unexpected DO-NOT-EXPORT\n"
+    elif damage=="pid":result.stdout=raw.replace(b"123 ",b"124 ",1)
+    elif damage=="relative-path":result.stdout=("123 "+started+" "+owned.executable+"\n").encode()
+    elif damage=="other-path":result.stdout=("123 "+started+" /private/DO-NOT-EXPORT/"+owned.executable+"\n").encode()
+    elif damage=="start-parse":result.stdout=("123 Tue XXX 17 00:00:00 2026 "+str(executable)+"\n").encode()
+    elif damage=="launch-type":owned.sampler.launch_started=True
+    elif damage=="launch-nan":owned.sampler.launch_ack=float("nan")
+    elif damage=="launch-order":owned.sampler.launch_ack=owned.sampler.launch_started-10
+    elif damage=="start-too-old":owned.sampler.launch_started+=100;owned.sampler.launch_ack+=100
+    elif damage=="start-too-new":owned.sampler.launch_started-=100;owned.sampler.launch_ack-=100
+    if damage in ("resolve-error","resolve-other"):
+        resolve=probe.Path.resolve
+        def changed_resolution(path,*args,**kwargs):
+            if path==executable:
+                if damage=="resolve-error":raise OSError("DO-NOT-EXPORT")
+                return Path("/private/DO-NOT-EXPORT")/owned.executable
+            return resolve(path,*args,**kwargs)
+        monkeypatch.setattr(probe.Path,"resolve",changed_resolution)
+    def query(arguments,**kwargs):
+        assert arguments==["/bin/ps","-p","123","-o","pid=","-o","lstart=","-o","comm=","-ww"]
+        assert kwargs["timeout"]==2 and kwargs["stdin"]==subprocess.DEVNULL
+        assert kwargs["stderr"]==subprocess.DEVNULL and kwargs["env"]["LC_ALL"]==kwargs["env"]["LANG"]=="C"
+        if damage=="query-timeout":raise subprocess.TimeoutExpired("DO-NOT-EXPORT",2)
+        if damage=="query-error":raise OSError("DO-NOT-EXPORT")
+        return result
+    monkeypatch.setattr(probe.subprocess,"run",query)
+    observed=owned.sampler.capture({"process_id":123})
+    assert code in probe.PROCESS_SAMPLE_ERRORS
+    assert observed["error_code"]==code and observed["available"] is False
+    assert observed["executable_verified"] is False and observed["frames"]==[]
+    assert "DO-NOT-EXPORT" not in json.dumps(observed)
+    summary=probe.safe_failure_summary({"error":"settings_zip_import_picker_failed","process_sample":observed})
+    assert summary["process_sample"]["error_code"]==code and "DO-NOT-EXPORT" not in json.dumps(summary)

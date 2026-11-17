@@ -1097,6 +1097,10 @@ def zip_progress_observation(value):
 
 PROCESS_SAMPLE_ERRORS = frozenset(("not_attempted", "not_macos", "launch_pid_missing", "checkpoint_pid_differs",
     "owned_container_invalid", "owned_executable_invalid", "process_identity_differs", "sample_spawn_failed",
+    "process_query_timeout", "process_query_failed", "process_output_invalid", "process_output_encoding_invalid",
+    "process_output_shape_differs", "process_pid_differs", "process_path_not_absolute", "process_path_differs",
+    "process_path_resolution_failed", "process_path_resolves_elsewhere", "process_start_parse_failed",
+    "process_launch_interval_invalid", "process_start_outside_launch",
     "sample_failed", "sample_timed_out", "sample_output_missing", "main_thread_not_found", "identity_changed", "none"))
 PROCESS_SAMPLE_FLAGS = ("attempted", "available", "launch_pid_matched", "executable_verified", "identity_stable",
     "main_thread_found", "truncated", "timed_out")
@@ -2790,22 +2794,34 @@ class OwnedProbeProcessSampler:
         return executable,actual
 
     def _process_identity(self, executable):
-        result = subprocess.run(["/bin/ps","-p",str(self.pid),"-o","pid=","-o","lstart=","-o","comm=","-ww"],
-            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=2,check=False,
-            env={**os.environ,"LC_ALL":"C","LANG":"C"})
-        require(result.returncode==0 and type(result.stdout) is bytes and 0<len(result.stdout)<=4096,"process_identity_differs")
-        text = result.stdout.decode("utf-8").strip()
+        try:
+            result = subprocess.run(["/bin/ps","-p",str(self.pid),"-o","pid=","-o","lstart=","-o","comm=","-ww"],
+                stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=2,check=False,
+                env={**os.environ,"LC_ALL":"C","LANG":"C"})
+        except subprocess.TimeoutExpired:
+            raise ProbeError("process_query_timeout") from None
+        except OSError:
+            raise ProbeError("process_query_failed") from None
+        require(result.returncode==0,"process_query_failed")
+        require(type(result.stdout) is bytes and 0<len(result.stdout)<=4096,"process_output_invalid")
+        try: text = result.stdout.decode("utf-8").strip()
+        except UnicodeError: raise ProbeError("process_output_encoding_invalid") from None
         match = re.fullmatch(r"([1-9][0-9]{0,9})\s+([A-Za-z]{3}\s+[A-Za-z]{3}\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+[0-9]{4})\s+([^\r\n]+)",text)
-        require(match is not None and int(match.group(1))==self.pid,"process_identity_differs")
-        path = Path(match.group(3)); require(path.is_absolute() and path==executable,"process_identity_differs")
-        require(path.resolve(strict=True)==executable,"process_identity_differs")
-        started = time.mktime(time.strptime(match.group(2),"%a %b %d %H:%M:%S %Y"))
+        require(match is not None,"process_output_shape_differs")
+        require(int(match.group(1))==self.pid,"process_pid_differs")
+        path = Path(match.group(3)); require(path.is_absolute(),"process_path_not_absolute")
+        require(path==executable,"process_path_differs")
+        try: resolved = path.resolve(strict=True)
+        except (OSError,RuntimeError): raise ProbeError("process_path_resolution_failed") from None
+        require(resolved==executable,"process_path_resolves_elsewhere")
+        try: started = time.mktime(time.strptime(match.group(2),"%a %b %d %H:%M:%S %Y"))
+        except (ValueError,OverflowError,OSError): raise ProbeError("process_start_parse_failed") from None
         # ps lstart has one-second resolution. Match the independently issued
         # launch interval, rejecting a same-image PID reused after its ACK.
         require(type(self.launch_started) in (int,float) and type(self.launch_ack) in (int,float)
             and math.isfinite(self.launch_started) and math.isfinite(self.launch_ack)
-            and self.launch_started<=self.launch_ack and self.launch_started-1<=started<=self.launch_ack+1,
-            "process_identity_differs")
+            and self.launch_started<=self.launch_ack,"process_launch_interval_invalid")
+        require(self.launch_started-1<=started<=self.launch_ack+1,"process_start_outside_launch")
         return match.group(2)
 
     def capture(self, checkpoint):
