@@ -38,20 +38,21 @@ def resource_labels(language):
 TEXT = {language: resource_labels(language) for language in ("en", "ja", "ko")}
 
 
-def ui_frame(language, *, landscape=False, selected="console", damage=None, running=False):
+def ui_frame(language, *, landscape=False, selected="console", damage=None, running=False, checked=False, other_changed=False):
     # Independent observed-tree fixture: every app child is inside the app root
     # except the explicitly damaged category used by the clipped-target test.
     width, height = (1200, 600) if landscape else (600, 1000)
     tree = ET.Element("hierarchy")
     app = ET.SubElement(tree, "node", {"package": PACKAGE, "class": "android.widget.LinearLayout",
+                                      "resource-id": "android:id/content",
                                       "bounds": f"[0,0][{width},{height}]", "enabled": "true"})
     text = TEXT[language]
-    def node(value, box, *, kind="android.widget.TextView", description=None, selected=False):
+    def node(value, box, *, kind="android.widget.TextView", description=None, selected=False, parent=None):
         attributes = {"package": PACKAGE, "class": kind, "text": value, "bounds": box,
                       "enabled": "true", "selected": str(selected).lower()}
         if description:
             attributes["content-desc"] = description
-        return ET.SubElement(app, "node", attributes)
+        return ET.SubElement(app if parent is None else parent, "node", attributes)
     node(text["app_name"] + "  0.3.37", "[20,10][580,50]")
     status_key = "status_running" if running else "status_stopped"
     status = TEXT["ko"][status_key] if damage == "wrong-status-" + language else text[status_key]
@@ -81,9 +82,30 @@ def ui_frame(language, *, landscape=False, selected="console", damage=None, runn
         if landscape and category == "content" and damage == "hidden-nav":
             nav.set("visible-to-user", "false")
     key = "graphics" if selected == "graphics" else "checks"
-    panel = node("Panel", "[180,400][580,450]" if landscape else "[20,230][580,280]",
+    scroll_box = "[180,280][1180,590]" if landscape else "[20,220][580,980]"
+    if landscape and damage == "short-body": scroll_box = "[180,350][1180,590]"
+    body = node("", scroll_box, kind="android.widget.ScrollView")
+    if landscape and damage == "duplicate-body": node("", scroll_box, kind="android.widget.ScrollView")
+    if landscape and damage == "missing-content": app.attrib.pop("resource-id")
+    if landscape and damage == "duplicate-content":
+        node("", "[0,0][1200,600]", kind="android.widget.FrameLayout").set("resource-id", "android:id/content")
+    panel = node("Panel", "[190,290][1170,340]" if landscape else "[20,230][580,280]",
                  kind="android.widget.Button", description="idoly.panel." + key,
-                 selected=key == "graphics" and damage != "closed-graphics")
+                 selected=key == "graphics" and damage != "closed-graphics", parent=body)
+    if selected == "graphics":
+        box = "[190,345][1170,395]" if landscape else "[30,290][570,340]"
+        if landscape and damage == "small-first": box = "[190,345][1170,388]"
+        if landscape and damage == "clipped-first": box = "[190,560][1170,610]"
+        first = node(text["presentation_custom_graphics"], box, kind="android.widget.CheckBox", parent=body)
+        first.set("checked", str(checked).lower()); first.set("checkable", "true"); first.set("clickable", "true")
+        if damage == "hidden-first": first.set("visible-to-user", "false")
+        if damage == "disabled-first": first.set("enabled", "false")
+        if damage == "unclickable-first": first.set("clickable", "false")
+        if damage == "uncheckable-first": first.set("checkable", "false")
+        if damage == "missing-checked-first": first.attrib.pop("checked")
+        other = node("Changed quality" if other_changed else "Original quality", "[190,410][1170,460]" if landscape else "[30,350][570,400]",
+                     kind="android.widget.Spinner", parent=body)
+        other.set("enabled", str(checked).lower())
     if damage == "open-checks" and key == "checks":
         panel.set("selected", "true")
     if landscape and damage == "help-dialog":
@@ -97,6 +119,7 @@ class Guest:
         self.damage, self.sdk, self.density, self.running = damage, sdk, density, running
         self.language, self.rotation, self.selected = None, 0, "console"
         self.commands, self.captures = [], []
+        self.checked, self.checkbox_taps = damage == "initially-checked", 0
 
     def adb(self, *arguments, **kwargs):
         arguments = tuple(str(item) for item in arguments)
@@ -129,6 +152,10 @@ class Guest:
             point = tuple(map(int, arguments[3:]))
             if point == (80, 345) and self.rotation == 1:
                 self.selected = "graphics"
+            elif point == (680, 370) and self.rotation == 1 and self.selected == "graphics":
+                self.checkbox_taps += 1
+                if self.damage != "no-toggle" and not (self.damage == "no-restore" and self.checkbox_taps > 1):
+                    self.checked = not self.checked
             elif point == (60, 165) and self.rotation == 0:
                 self.selected = "console"
             else:
@@ -141,7 +168,8 @@ class Guest:
         language = "ko" if self.damage == "wrong-ui-language" and self.language == "en" else self.language
         landscape = self.rotation == 1 and self.damage != "portrait-during-wide"
         damage = self.damage if landscape or self.damage == "missing-controls" or (self.damage or "").startswith("wrong-status-") else None
-        return ui_frame(language, landscape=landscape, selected=self.selected, damage=damage, running=self.running)
+        return ui_frame(language, landscape=landscape, selected=self.selected, damage=damage, running=self.running,
+                        checked=self.checked, other_changed=self.damage == "other-changed" and self.checkbox_taps >= 2)
 
 
 @pytest.fixture(autouse=True)
@@ -174,11 +202,11 @@ def test_real_interface_qa_requires_three_resource_languages_and_actual_wide_the
     assert result["restored_portrait"]["console_selected"] is True
     assert result["restored_portrait"]["interface_language"] == "ko"
     assert guest.captures == ["00-interface-en-0", "00-interface-ja-0", "00-interface-ko-0",
-                              "00-interface-wide-0", "00-interface-wide-1",
+                              "00-interface-wide-0", "00-interface-wide-1", "00-interface-wide-2", "00-interface-wide-3",
                               "00-interface-portrait-0", "00-interface-portrait-1"]
     assert [arguments[-1] for arguments, _ in commands(guest, ("shell", "cmd", "locale", "set-app-locales"))] == ["en", "ja", "ko"]
     assert [arguments[-1] for arguments, _ in commands(guest, ("shell", "wm", "user-rotation", "lock"))] == ["1", "0"]
-    assert [arguments[3:] for arguments, _ in commands(guest, ("shell", "input", "tap"))] == [("80", "345"), ("60", "165")]
+    assert [arguments[3:] for arguments, _ in commands(guest, ("shell", "input", "tap"))] == [("80", "345"), ("680", "370"), ("680", "370"), ("60", "165")]
     assert commands(guest, ("shell", "wm", "user-rotation", "lock"))[-1][1] == {"check": False}
 
 
@@ -239,6 +267,13 @@ def test_os_readback_is_required_before_ui_language_can_be_claimed():
     ("open-checks", "default panel state"),
     ("help-dialog", "dialog obscures"),
     ("portrait-during-wide", "not landscape"),
+    ("short-body", "less than half"), ("missing-content", "uniquely observed"),
+    ("duplicate-content", "uniquely observed"), ("duplicate-body", "uniquely observed"),
+    ("small-first", "smaller than 44 dp"), ("clipped-first", "clipped by the scroll body"),
+    ("hidden-first", "uniquely visible"), ("disabled-first", "editable checkbox"),
+    ("unclickable-first", "editable checkbox"), ("uncheckable-first", "editable checkbox"),
+    ("missing-checked-first", "editable checkbox"), ("no-toggle", "did not respond"),
+    ("no-restore", "not restored"), ("other-changed", "other visible Graphics controls changed"),
 ))
 def test_unusable_wide_layout_is_rejected_and_public_rotation_is_always_restored(damage, error):
     guest = Guest(damage=damage)
@@ -335,3 +370,59 @@ def test_already_running_korean_status_cannot_hide_under_translated_controls(lan
     assert cleanup[0][-1] == "ko" and cleanup[1] == {"check": False}
     assert all(arguments[:3] in (("shell", "cmd", "locale"), ("shell", "am", "start"))
                for arguments, _ in guest.commands)
+
+
+def test_landscape_body_uses_content_viewport_excluding_larger_decor_or_system_bars():
+    frame = ui_frame("ko", landscape=True)
+    ET.SubElement(frame, "node", {"package": PACKAGE, "class": "android.widget.FrameLayout",
+                                 "bounds": "[0,0][1200,1200]", "enabled": "true"})
+    proof = probe.wide_proof(frame, 160, graphics=False)
+    assert proof["height_px"] == 600 and proof["body_height_px"] == 310
+    assert proof["body_fraction"] == round(310/600, 6)
+
+
+def test_exact_half_body_passes_and_one_pixel_less_is_rejected():
+    frame = ui_frame("ko", landscape=True)
+    body = next(node for node in frame.iter("node") if node.get("class") == "android.widget.ScrollView")
+    body.set("bounds", "[180,290][1180,590]")
+    assert probe.wide_proof(frame, 160, graphics=False)["body_fraction"] == .5
+    body.set("bounds", "[180,291][1180,590]")
+    with pytest.raises(RuntimeError, match="less than half"):
+        probe.wide_proof(frame, 160, graphics=False)
+
+
+def test_compact_status_beside_title_still_uses_the_actual_top_status_before_actions():
+    frame = ui_frame("ko", landscape=True)
+    views = [node for node in frame.iter("node") if node.get("class") == "android.widget.TextView"]
+    views[1].set("bounds", "[590,10][1180,50]")
+    assert probe.language_proof(frame, probe.labels("ko"))["status"] == TEXT["ko"]["status_stopped"]
+    views[1].set("bounds", "[550,10][1180,50]")
+    with pytest.raises(RuntimeError, match="top status"):
+        probe.language_proof(frame, probe.labels("ko"))
+
+
+@pytest.mark.parametrize("initial", [False, True])
+def test_first_editable_control_is_really_tapped_and_original_state_is_restored(initial):
+    guest = Guest(damage="initially-checked" if initial else None)
+    proof = probe.exercise_interface_configuration(guest)["actual_os_api_resource_configuration"]["wide"]
+    assert proof["graphics"]["first_graphics_control"]["fully_visible"] is True
+    assert proof["graphics"]["first_graphics_control"]["minimum_target_dp"] == 50
+    assert proof["graphics_interaction"] == {"actual_tap": True, "changed": True, "restored": True,
+        "checked_before": initial, "checked_changed": not initial, "checked_restored": initial,
+        "other_visible_controls_unchanged": True}
+    assert guest.checked is initial and guest.checkbox_taps == 2
+    assert len([stage for stage in guest.captures if stage.startswith("00-interface-wide-")]) == 4
+
+
+def test_final_graphics_observation_remains_inside_the_original_five_capture_budget():
+    class DelayedGuest(Guest):
+        def capture(self, stage):
+            frame = super().capture(stage)
+            if stage == "00-interface-wide-2":
+                first = next(node for node in frame.iter("node") if node.get("class") == "android.widget.CheckBox")
+                first.set("checked", "false")
+            return frame
+    guest = DelayedGuest()
+    result = probe.exercise_interface_configuration(guest)["actual_os_api_resource_configuration"]
+    assert result["wide"]["graphics_interaction"]["restored"] is True
+    assert len([stage for stage in guest.captures if stage.startswith("00-interface-wide-")]) == 5

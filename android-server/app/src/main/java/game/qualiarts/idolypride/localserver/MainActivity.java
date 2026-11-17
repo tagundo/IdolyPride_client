@@ -181,7 +181,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private final java.util.HashMap<String, Integer> categoryPositions = new java.util.HashMap<>();
     private ScrollView settingsScroll;
     private String selectedCategory = "console";
-    private boolean wideSettings, splitSettings;
+    private boolean wideSettings, splitSettings, compactHeader;
 
     private LinearLayout category(LinearLayout parent, String key) {
         LinearLayout page = new LinearLayout(this);
@@ -225,6 +225,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         Button control = button(title); control.setContentDescription("idoly.nav." + key);
         control.setMinWidth(0); control.setMinimumWidth(0); control.setMaxLines(2);
         control.setPadding(dp(3), dp(8), dp(3), dp(8));
+        compactHeaderAction(control, 3);
         navigation.addView(control, wideSettings ? new LinearLayout.LayoutParams(-1, -2)
                 : new LinearLayout.LayoutParams(0, -2, 1));
         categoryButtons.put(key, control); control.setOnClickListener(view -> showCategory(key));
@@ -340,6 +341,37 @@ public final class MainActivity extends Activity implements ServerService.Observ
         return result;
     }
 
+    private void addNativeHeading(LinearLayout content, boolean compact) {
+        TextView heading = text(R.string.app_name, compactHeader ? 18 : compact ? 20 : 25, TEXT_PRIMARY);
+        heading.setText(getString(R.string.app_name) + "  " + BuildConfig.VERSION_NAME);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        status = text(R.string.status_stopped, compactHeader ? 16 : 21, TEXT_PRIMARY);
+        status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        status.setPadding(dp(compactHeader ? 8 : 14), dp(compactHeader ? 2 : 8),
+                dp(compactHeader ? 8 : 14), dp(compactHeader ? 2 : 8));
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(STATUS_BACKGROUND); background.setCornerRadius(dp(12)); status.setBackground(background);
+        if (compactHeader) {
+            LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(android.view.Gravity.CENTER_VERTICAL); row.setMinimumHeight(dp(36));
+            heading.setMaxLines(1); heading.setEllipsize(TextUtils.TruncateAt.END);
+            status.setMinHeight(dp(36)); status.setGravity(android.view.Gravity.CENTER_VERTICAL);
+            row.addView(heading, new LinearLayout.LayoutParams(0, -2, 1));
+            LinearLayout.LayoutParams statePlacement = new LinearLayout.LayoutParams(-2, -2);
+            statePlacement.setMargins(dp(8), 0, 0, 0); row.addView(status, statePlacement);
+            content.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        } else {
+            content.addView(heading);
+            content.addView(status, new LinearLayout.LayoutParams(-1, -2));
+        }
+    }
+
+    private void compactHeaderAction(Button control, int horizontalPadding) {
+        if (!compactHeader) return;
+        control.setMinHeight(dp(44)); control.setMinimumHeight(dp(44));
+        control.setPadding(dp(horizontalPadding), dp(4), dp(horizontalPadding), dp(4));
+    }
+
     private Button button(int label) {
         Button result = new Button(this);
         result.setText(label);
@@ -383,34 +415,24 @@ public final class MainActivity extends Activity implements ServerService.Observ
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
                 | View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
         boolean compact = getResources().getConfiguration().screenHeightDp < 520;
+        compactHeader = compact && getResources().getConfiguration().screenWidthDp
+                > getResources().getConfiguration().screenHeightDp;
         // Short landscape windows need horizontal navigation to keep all tabs visible.
         wideSettings = getResources().getConfiguration().screenWidthDp >= 760 && !compact;
         splitSettings = getResources().getConfiguration().screenWidthDp >= 1000;
         if (savedInstanceState != null) selectedCategory = savedInstanceState.getString("settings_category", "console");
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(16), dp(compact ? 8 : 12), dp(16), dp(8));
+        content.setPadding(dp(16), dp(compactHeader ? 4 : compact ? 8 : 12), dp(16), dp(compactHeader ? 4 : 8));
         content.setBackgroundColor(PAGE_BACKGROUND);
-        TextView heading = text(R.string.app_name, compact ? 20 : 25, TEXT_PRIMARY);
-        heading.setText(getString(R.string.app_name) + "  " + BuildConfig.VERSION_NAME);
-        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        content.addView(heading);
-
-
-        status = text(R.string.status_stopped, 21, TEXT_PRIMARY);
-        status.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        status.setPadding(dp(14), dp(8), dp(14), dp(8));
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(STATUS_BACKGROUND);
-        background.setCornerRadius(dp(12));
-        status.setBackground(background);
-        content.addView(status, new LinearLayout.LayoutParams(-1, -2));
+        addNativeHeading(content, compact);
 
         LinearLayout controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
         start = button(R.string.start_server);
         primaryButton(start);
         stop = button(R.string.stop_server);
+        compactHeaderAction(start, 12); compactHeaderAction(stop, 12);
         LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -2, 1);
         half.setMargins(0, 0, dp(4), 0);
         controls.addView(start, half);
@@ -418,7 +440,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         otherHalf.setMargins(dp(4), 0, 0, 0);
         controls.addView(stop, otherHalf);
         Button launch = button(R.string.launch_diagnostic_client);
-        primaryButton(launch);
+        primaryButton(launch); compactHeaderAction(launch, 12);
         if (wideSettings || compact) {
             controls.addView(launch, new LinearLayout.LayoutParams(0, -2, 1)); content.addView(controls);
         } else {
@@ -428,12 +450,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
         // The settings scroll independently; the single game action stays visible.
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(0, dp(12), 0, 0);
+        body.setPadding(0, dp(compactHeader ? 4 : 12), 0, 0);
         category(body, "console"); category(body, "server"); category(body, "users");
         category(body, "content"); category(body, "graphics");
         for (String key : new String[]{"server", "content", "graphics"}) {
             TextView automatic = text(R.string.settings_automatic_notice, 16, TEXT_MUTED);
-            automatic.setPadding(dp(2), 0, dp(2), dp(12));
+            automatic.setPadding(dp(2), 0, dp(2), dp(compactHeader ? 4 : 12));
             LinearLayout[] columns = categoryColumns.get(key);
             (columns == null ? categoryPages.get(key) : columns[0]).addView(automatic);
         }
@@ -569,7 +591,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         settingsScroll.addView(body, new ScrollView.LayoutParams(-1, -2));
         LinearLayout navigation = new LinearLayout(this);
         navigation.setOrientation(wideSettings ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        navigation.setPadding(0, dp(8), wideSettings ? dp(12) : 0, 0);
+        navigation.setPadding(0, dp(compactHeader ? 4 : 8), wideSettings ? dp(12) : 0, 0);
         addCategoryButton(navigation, "console", R.string.nav_console);
         addCategoryButton(navigation, "server", R.string.nav_server);
         addCategoryButton(navigation, "users", R.string.nav_users);
@@ -2169,6 +2191,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         customGraphics.setText(R.string.presentation_custom_graphics);
         customGraphics.setTextColor(TEXT_PRIMARY);
         customGraphics.setTextSize(14);
+        if (compactHeader) { customGraphics.setMinHeight(dp(44)); customGraphics.setMinimumWidth(dp(44)); }
         settings.addView(customGraphics);
         graphicsQuality = presentationSpinner(settings, R.string.presentation_quality,
                 R.array.presentation_quality_options);

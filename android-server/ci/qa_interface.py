@@ -27,7 +27,8 @@ def labels(language):
     path = ROOT / "android-server/app/src/main/res" / ("values-" + language) / "strings.xml"
     rows = {node.get("name"): "".join(node.itertext()) for node in ET.parse(path).getroot()
             if node.tag == "string"}
-    keys = ("app_name", "start_server", "stop_server", "status_stopped", "status_running", *("nav_" + key for key in CATEGORIES))
+    keys = ("app_name", "start_server", "stop_server", "status_stopped", "status_running",
+            "presentation_custom_graphics", *("nav_" + key for key in CATEGORIES))
     if any(not rows.get(key, "").strip() for key in keys):
         raise RuntimeError("Interface QA requires explicit translated title, controls and categories")
     return {key: rows[key] for key in keys}
@@ -72,7 +73,10 @@ def language_proof(tree, expected, *, status_key="status_stopped"):
         raise RuntimeError("Native interface title and top status region were not observed")
     status = text_views[1]
     title_area, status_area = bounds(titles[0]), bounds(status)
-    if (status_area[1] < title_area[3]
+    below_title = status_area[1] >= title_area[3]
+    beside_title = (status_area[0] >= title_area[2]
+                    and min(status_area[3], title_area[3]) > max(status_area[1], title_area[1]))
+    if (not (below_title or beside_title)
             or status_area[3] > min(bounds(node)[1] for node in controls)):
         raise RuntimeError("Native interface top status is outside its observed region")
     if status.get("text") != expected[status_key]:
@@ -120,9 +124,60 @@ def density_dpi(qa):
     return density
 
 
+def content_and_body_bounds(tree):
+    content = [node for node in tree.iter("node") if node.get("package") == PACKAGE
+               and node.get("resource-id") == "android:id/content" and visible_node(node, tree)]
+    body = [node for node in tree.iter("node") if node.get("package") == PACKAGE
+            and node.get("class") == "android.widget.ScrollView" and visible_node(node, tree)]
+    if len(content) != 1 or len(body) != 1:
+        raise RuntimeError("Native settings viewport and scroll body were not uniquely observed")
+    viewport, scroll = bounds(content[0]), bounds(body[0])
+    if (viewport is None or scroll is None or scroll[0] < viewport[0] or scroll[1] < viewport[1]
+            or scroll[2] > viewport[2] or scroll[3] > viewport[3]):
+        raise RuntimeError("Native settings scroll body is clipped by the application viewport")
+    fraction = (scroll[3] - scroll[1]) / (viewport[3] - viewport[1])
+    if fraction < .5:
+        raise RuntimeError("Landscape settings body occupies less than half the usable viewport")
+    return viewport, scroll, body[0], fraction
+
+
+def first_graphics_control(tree, body, area, density):
+    matches = [node for node in body.iter("node") if node.get("package") == PACKAGE
+               and node.get("class") == "android.widget.CheckBox"
+               and node.get("text") == labels("ko")["presentation_custom_graphics"]
+               and visible_node(node, tree)]
+    if len(matches) != 1:
+        raise RuntimeError("Landscape first Graphics control was not uniquely visible")
+    node = matches[0]; target = bounds(node)
+    if (target is None or target[0] < area[0] or target[1] < area[1]
+            or target[2] > area[2] or target[3] > area[3]):
+        raise RuntimeError("Landscape first Graphics control is clipped by the scroll body")
+    minimum = min(target[2] - target[0], target[3] - target[1]) * 160.0 / density
+    if minimum < 44.0:
+        raise RuntimeError("Landscape first Graphics control is smaller than 44 dp")
+    if (any(node.get(key) != "true" for key in ("enabled", "clickable", "checkable"))
+            or node.get("checked") not in ("true", "false")):
+        raise RuntimeError("Landscape first Graphics control is not an enabled editable checkbox")
+    return node, {"class": "android.widget.CheckBox", "width_px": target[2]-target[0],
+                  "height_px": target[3]-target[1], "minimum_target_dp": round(minimum, 2),
+                  "fully_visible": True, "enabled": True, "clickable": True, "checkable": True,
+                  "checked": node.get("checked") == "true"}
+
+
+def other_visible_controls(body, first):
+    # Compare only public UI properties. No private preferences or settings
+    # override is used to toggle or restore this real control.
+    return tuple((node.get("class"), node.get("content-desc", ""), node.get("text", ""),
+                  node.get("checked", ""), node.get("selected", ""), node.get("enabled", ""),
+                  tuple(child.get("text", "") for child in node.iter("node") if child is not node))
+                 for node in body.iter("node") if node is not first
+                 and node.get("class") in ("android.widget.CheckBox", "android.widget.Spinner"))
+
+
 def wide_proof(tree, density, *, graphics):
     language_proof(tree, labels("ko"))
-    left, top, right, bottom = app_bounds(tree)
+    viewport, scroll, body, fraction = content_and_body_bounds(tree)
+    left, top, right, bottom = viewport
     if right - left <= bottom - top:
         raise RuntimeError("Actual native application viewport is not landscape")
     minimum = float("inf")
@@ -144,28 +199,57 @@ def wide_proof(tree, density, *, graphics):
         raise RuntimeError("Landscape default panel state was not observed")
     if nav_node(tree, "graphics" if graphics else "console").get("selected") != "true":
         raise RuntimeError("Landscape category selection was not observed")
-    return {"width_px": right - left, "height_px": bottom - top, "density_dpi": density,
-            "visible_categories": len(CATEGORIES), "minimum_navigation_target_dp": round(minimum, 2),
-            "help_closed": True, "default_panel": key, "default_panel_expanded": graphics}
+    result = {"width_px": right - left, "height_px": bottom - top, "density_dpi": density,
+              "body_height_px": scroll[3]-scroll[1], "body_fraction": round(fraction, 6),
+              "visible_categories": len(CATEGORIES), "minimum_navigation_target_dp": round(minimum, 2),
+              "help_closed": True, "default_panel": key, "default_panel_expanded": graphics}
+    if graphics:
+        _, result["first_graphics_control"] = first_graphics_control(tree, body, scroll, density)
+    return result
 
 
 def observe_wide(qa, density):
-    # Both actual Console and Graphics observations share five attempts.
-    graphics, last, console = False, None, None
+    # Console, Graphics and the two real checkbox observations share the same
+    # five captures. A tap must change the checked state and a second tap must
+    # restore it before any legacy account/game checks can continue.
+    phase, last, console, graphics = "console", None, None, None
+    initial_checked, initial_other = None, None
     for attempt in range(OBSERVATIONS):
         tree = qa.capture("00-interface-wide-" + str(attempt))
         try:
-            proof = wide_proof(tree, density, graphics=graphics)
+            proof = wide_proof(tree, density, graphics=phase != "console")
+            if phase == "console":
+                console = proof
+                tap_node(qa, nav_node(tree, "graphics"))
+                phase = "graphics"
+                continue
+            _, scroll, body, _ = content_and_body_bounds(tree)
+            control, first = first_graphics_control(tree, body, scroll, density)
+            if phase == "graphics":
+                graphics = proof
+                initial_checked = first["checked"]
+                initial_other = other_visible_controls(body, control)
+                tap_node(qa, control)
+                phase = "changed"
+                continue
+            if phase == "changed":
+                if first["checked"] is initial_checked:
+                    raise RuntimeError("Landscape first Graphics control did not respond to the actual tap")
+                tap_node(qa, control)
+                phase = "restored"
+                continue
+            if first["checked"] is not initial_checked:
+                raise RuntimeError("Landscape first Graphics control was not restored after the second tap")
+            if other_visible_controls(body, control) != initial_other:
+                raise RuntimeError("Landscape other visible Graphics controls changed during checkbox restoration")
+            return {"console": console, "graphics": graphics, "actual_rotation": 1,
+                    "graphics_interaction": {"actual_tap": True, "changed": True, "restored": True,
+                        "checked_before": initial_checked, "checked_changed": not initial_checked,
+                        "checked_restored": first["checked"], "other_visible_controls_unchanged": True}}
         except RuntimeError as error:
             last = error
             if attempt + 1 < OBSERVATIONS:
                 time.sleep(.5)
-            continue
-        if graphics:
-            return {"console": console, "graphics": proof, "actual_rotation": 1}
-        console = proof
-        tap_node(qa, nav_node(tree, "graphics"))
-        graphics = True
     raise RuntimeError("Native landscape UI was not observed within five attempts; " + str(last))
 
 

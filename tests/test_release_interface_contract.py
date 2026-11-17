@@ -25,10 +25,14 @@ def passed():
             {"language": "ja", "title": "アイプラサーバー  0.3.37", "start": "サーバー開始", "stop": "サーバー停止", "status": "実行中", "actual_ui_observed": True},
             {"language": "ko", "title": "아이프라 서버  0.3.37", "start": "서버 시작", "stop": "서버 중지", "status": "실행 중", "actual_ui_observed": True}],
         "wide": {
-            "console": {"width_px": 1920, "height_px": 1080, "density_dpi": 320, "visible_categories": 5,
+            "console": {"width_px": 1920, "height_px": 1080, "density_dpi": 320, "body_height_px": 630, "body_fraction": 0.583333, "visible_categories": 5,
                 "minimum_navigation_target_dp": 44.0, "help_closed": True, "default_panel": "checks", "default_panel_expanded": False},
-            "graphics": {"width_px": 1920, "height_px": 1080, "density_dpi": 320, "visible_categories": 5,
-                "minimum_navigation_target_dp": 44.0, "help_closed": True, "default_panel": "graphics", "default_panel_expanded": True},
+            "graphics": {"width_px": 1920, "height_px": 1080, "density_dpi": 320, "body_height_px": 630, "body_fraction": 0.583333, "visible_categories": 5,
+                "minimum_navigation_target_dp": 44.0, "help_closed": True, "default_panel": "graphics", "default_panel_expanded": True,
+                "first_graphics_control": {"class": "android.widget.CheckBox", "width_px": 1400, "height_px": 96,
+                    "minimum_target_dp": 48.0, "fully_visible": True, "enabled": True, "clickable": True, "checkable": True, "checked": False}},
+            "graphics_interaction": {"actual_tap": True, "changed": True, "restored": True, "checked_before": False,
+                "checked_changed": True, "checked_restored": False, "other_visible_controls_unchanged": True},
             "actual_rotation": 1},
         "restored_portrait": {"actual_rotation": 0, "width_px": 1080, "height_px": 1920,
             "interface_language": "ko", "console_selected": True}}}
@@ -83,6 +87,9 @@ def test_titles_controls_and_real_ui_boolean_are_observed_in_each_language(secti
     ("width_px", 16385), ("height_px", "1080"), ("height_px", 1920), ("density_dpi", True),
     ("density_dpi", 320.0), ("density_dpi", 119), ("density_dpi", 1001),
     ("visible_categories", 4), ("visible_categories", 5.0), ("visible_categories", True),
+    ("body_height_px", True), ("body_height_px", 1081), ("body_height_px", 0),
+    ("body_fraction", True), ("body_fraction", 1), ("body_fraction", .499999),
+    ("body_fraction", float("nan")), ("body_fraction", .75),
     ("minimum_navigation_target_dp", True), ("minimum_navigation_target_dp", 44),
     ("minimum_navigation_target_dp", 43.99), ("minimum_navigation_target_dp", float("nan")),
     ("minimum_navigation_target_dp", float("inf")), ("minimum_navigation_target_dp", 541.0),
@@ -117,7 +124,8 @@ def test_actual_rotation_and_final_korean_portrait_console_restore_are_required(
 
 
 @pytest.mark.parametrize("path", [(), ("languages", 0), ("running_languages", 0), ("wide",), ("wide", "console"),
-    ("wide", "graphics"), ("restored_portrait",)])
+    ("wide", "graphics"), ("wide", "graphics", "first_graphics_control"),
+    ("wide", "graphics_interaction"), ("restored_portrait",)])
 def test_missing_and_extra_nested_claims_are_rejected(path):
     for change in ("remove", "extra"):
         report = passed(); value = report[contract.FIELD]
@@ -168,4 +176,34 @@ def test_stopped_and_running_rows_without_status_are_rejected(section, index):
 
 def test_legacy_os_receipt_without_running_language_observations_is_rejected():
     report = passed(); del report[contract.FIELD]["running_languages"]
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+@pytest.mark.parametrize("field,value", [("class", "android.widget.TextView"), ("width_px", True),
+    ("width_px", 1921), ("height_px", 87), ("height_px", 631), ("minimum_target_dp", 48),
+    ("minimum_target_dp", 43.99), ("minimum_target_dp", 49.0), ("minimum_target_dp", float("nan")),
+    ("fully_visible", False), ("enabled", 1), ("clickable", False), ("checkable", False), ("checked", 0)])
+def test_first_graphics_control_requires_actual_visible_editable_44dp_geometry(field, value):
+    report = passed(); report[contract.FIELD]["wide"]["graphics"]["first_graphics_control"][field] = value
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+@pytest.mark.parametrize("field,value", [("actual_tap", False), ("actual_tap", 1), ("changed", False),
+    ("restored", False), ("checked_before", 0), ("checked_changed", False), ("checked_changed", 1),
+    ("checked_restored", True), ("other_visible_controls_unchanged", False)])
+def test_real_checkbox_input_must_change_then_restore_the_initial_value(field, value):
+    report = passed(); report[contract.FIELD]["wide"]["graphics_interaction"][field] = value
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+def test_graphics_initial_checkbox_and_actual_tap_receipt_must_agree():
+    report = passed(); report[contract.FIELD]["wide"]["graphics"]["first_graphics_control"]["checked"] = True
+    with pytest.raises(ValueError): contract.validate_android(report)
+
+
+def test_old_landscape_report_without_content_and_input_evidence_is_rejected():
+    report = passed(); wide = report[contract.FIELD]["wide"]
+    for panel in ("console", "graphics"):
+        del wide[panel]["body_height_px"]; del wide[panel]["body_fraction"]
+    del wide["graphics"]["first_graphics_control"]; del wide["graphics_interaction"]
     with pytest.raises(ValueError): contract.validate_android(report)

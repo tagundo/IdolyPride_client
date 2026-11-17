@@ -59,6 +59,8 @@
         "width_px": 1920,
         "height_px": 1080,
         "density_dpi": 320,
+        "body_height_px": 630,
+        "body_fraction": 0.583333,
         "visible_categories": 5,
         "minimum_navigation_target_dp": 44.0,
         "help_closed": true,
@@ -69,11 +71,33 @@
         "width_px": 1920,
         "height_px": 1080,
         "density_dpi": 320,
+        "body_height_px": 630,
+        "body_fraction": 0.583333,
         "visible_categories": 5,
         "minimum_navigation_target_dp": 44.0,
         "help_closed": true,
         "default_panel": "graphics",
-        "default_panel_expanded": true
+        "default_panel_expanded": true,
+        "first_graphics_control": {
+          "class": "android.widget.CheckBox",
+          "width_px": 1400,
+          "height_px": 96,
+          "minimum_target_dp": 48.0,
+          "fully_visible": true,
+          "enabled": true,
+          "clickable": true,
+          "checkable": true,
+          "checked": false
+        }
+      },
+      "graphics_interaction": {
+        "actual_tap": true,
+        "changed": true,
+        "restored": true,
+        "checked_before": false,
+        "checked_changed": true,
+        "checked_restored": false,
+        "other_visible_controls_unchanged": true
       },
       "actual_rotation": 1
     },
