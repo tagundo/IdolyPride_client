@@ -260,7 +260,7 @@ def test_fixed_picker_phase_markers_bracket_calls_without_deadline_changes(probe
 
 
 def test_optional_diagnostic_keeps_top_wait_and_bottom_caller_under_existing_audit_cap(probe):
-    frames=[{"module":"Probe","symbol":"ProbeFrame"+str(i),"samples":1} for i in range(48)]
+    frames=[{"module":probe.PROBE_EXECUTABLE,"symbol":"ProbeFrame"+str(i),"samples":1} for i in range(48)]
     sample=probe.process_sample_observation({"schema":1,"available":True,"frames":frames})
     report={"schema":1,"status":"FAIL","original_error":"unchanged","padding":"x"*(probe.MAX_JSON-800),"process_sample":sample}
     probe.fit_process_sample_audit(report)
