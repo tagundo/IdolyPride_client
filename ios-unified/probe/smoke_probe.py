@@ -55,6 +55,10 @@ SDK_MANIFEST_PATH = "/v2/pub/a/212/v/105051/list/0"
 SDK_URL_FORMAT = MASTER_ORIGIN + "/octo/{v}/{type}/{o}/{g}"
 LANGUAGE_ORDER = ("ko", "en", "ja")
 MATRIX_LANGUAGES = ("ko", "en", "ja", "en", "ko")
+# One bounded wall-clock budget includes simulator boot/install, the public
+# XCTest cancel flow and all five cold app processes. Individual operation and
+# native UI deadlines remain smaller; a relaunch never resets this deadline.
+MAX_PROBE_SECONDS = 1200
 CANARY_PATHS = ("Data/resources.assets", "Data/Managed/Metadata/global-metadata.dat")
 MAX_CANARY_BYTES = 128 * 1024 * 1024
 HOST_TRUE_FIELDS = ("installed", "entry_captured", "host_ready", "started", "unity_window_bound",
@@ -2930,7 +2934,7 @@ class OwnedProbeProcessSampler:
                     except Exception: pass
 
 
-def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
+def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_SECONDS):
     audit = Path(audit)
     require(not audit.exists() and not audit.is_symlink(), "fresh_audit_path_required")
     report = {"schema": 1, "status": "FAIL", "execution": "ios_simulator",
@@ -2952,7 +2956,9 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
         return min(cap, value)
     try:
         require(sys.platform == "darwin", "macos_required_no_simulator_execution")
-        require(type(timeout) in (int, float) and 5 <= timeout <= 900, "invalid_probe_timeout")
+        require(type(timeout) in (int, float) and math.isfinite(timeout)
+                and 5 <= timeout <= MAX_PROBE_SECONDS, "invalid_probe_timeout")
+        report["configured_timeout_seconds"] = timeout
         app = Path(app).resolve(strict=True)
         require(app.is_dir() and app.suffix == ".app", "simulator_app_required")
         info = plistlib.loads(read_bounded(app / "Info.plist", MAX_JSON))
@@ -3067,6 +3073,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=900):
             "preserved_app_container":True,"reports":summaries})
         report["account_management_after_relaunch"] = validate_account_management_after_relaunch(
             account_harness.verify_persisted(), report["native_probe"]["menu_lifetime"]["account_management"])
+        remaining()  # Final validation cannot publish PASS after the shared deadline.
         report["status"] = "PASS"
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
@@ -3185,8 +3192,8 @@ def main(argv=None):
     parser.add_argument("--audit", type=Path, required=True)
     parser.add_argument("--device-type")
     parser.add_argument("--runtime")
-    parser.add_argument("--timeout", type=float, default=900,
-                        help="Shared deadline for boot, install and all five cold app processes (5..900 seconds)")
+    parser.add_argument("--timeout", type=float, default=MAX_PROBE_SECONDS,
+                        help="Shared deadline for boot, install, XCTest and all five cold app processes (5..1200 seconds)")
     args = parser.parse_args(argv)
     try:
         result = run_probe(args.app, args.audit, device_type=args.device_type,

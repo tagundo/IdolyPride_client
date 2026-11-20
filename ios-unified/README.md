@@ -49,4 +49,6 @@ LiveContainer에서 ZIP을 선택할 수 없으면 아이프라 개별 앱 설�
 
 자동 검증에는 실제 Apple SDK 빌드, macOS Foundation·AppKit 검사, 새 iOS Simulator의 서버·설정 UI·언어 재실행·ZIP·계정 보존 검사가 포함됩니다. Simulator의 검사용 Unity 진입점은 실제 게임 공연을 실행하는 검사가 아닙니다. iPhone·iPad·PlayCover의 전체 게임·MV 재생·성능과 LiveContainer·SideStore의 실제 Files 공급자·대용량 복원은 별도 기기 검증 범위입니다. 검사용 Unity 코드는 배포 IPA에 넣지 않습니다.
 
+Simulator 검사는 부팅·설치·XCTest와 다섯 번의 새 앱 프로세스(한국어→영어→일본어→영어→한국어)를 합쳐 최대 1,200초 안에 완료해야 합니다. 재실행해도 전체 기한은 새로 시작하지 않습니다. 개별 웹 화면 준비 10초, RPC·마스터 검사 15초, SDK 리소스 검사 30초 제한과 각 기능의 성공 조건은 별도로 유지합니다.
+
 GitHub Actions 없이 빌드하려면 전체 Xcode·iOS Simulator 런타임·Python 3.13·GitHub CLI와 여유 공간 8GiB를 준비한 Mac에서 `build_on_mac.command`를 사용합니다. 결과는 새 `~/Downloads/IdolyPride/builds/날짜-커밋/`에 생성하며 기존 게임·계정 폴더는 유지합니다.
