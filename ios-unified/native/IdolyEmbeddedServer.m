@@ -20,6 +20,8 @@
 #include <mach-o/loader.h>
 #include <mach/vm_prot.h>
 #include <stdint.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 static const NSUInteger IDJSONLimit = 65536;
 static IDGate gate;
@@ -41,6 +43,7 @@ static BOOL hookInstalled;
 static atomic_bool pythonReady;
 static PyObject *hostModule;
 static PyThreadState *pythonThread;
+static NSString *mp4ExportDirectory;
 
 // Resolve only our bundled presentation bridge. Python has released the GIL
 // before this worker-side configuration; game callbacks never call Python.
@@ -738,6 +741,118 @@ void IdolyEmbeddedServerCommand(NSString *request, void (^completion)(NSString *
         }];
     };
     if (NSThread.isMainThread) dispatchRequest(); else dispatch_async(dispatch_get_main_queue(), dispatchRequest);
+}
+static NSDictionary *mp4SessionStatus(void) {
+    typedef size_t (*Copy)(char *, size_t);
+    typedef int (*Ready)(void);
+    Copy copy = (Copy)dlsym(RTLD_DEFAULT, "IDMP4SessionStatus");
+    Ready ready = (Ready)dlsym(RTLD_DEFAULT, "IDMP4SessionReady");
+    char buffer[8192] = {0}; size_t count = copy ? copy(buffer, sizeof buffer) : 0;
+    NSData *data = count > 0 && count < sizeof buffer ? [NSData dataWithBytes:buffer length:count] : nil;
+    id decoded = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL] : nil;
+    NSDictionary *raw = [decoded isKindOfClass:NSDictionary.class] ? decoded : @{};
+    BOOL isReady = ready && ready() == 1;
+    NSMutableDictionary *status = [@{@"phase":@"idle", @"ready":@(isReady)} mutableCopy];
+    NSArray *phases = @[@"idle", @"preparing_audio", @"rendering", @"finishing", @"completed", @"cancelling", @"cancelled", @"failed"];
+    if ([phases containsObject:raw[@"phase"]]) status[@"phase"] = raw[@"phase"];
+    for (NSString *key in @[@"frames",@"total_frames",@"audio_frames",@"total_audio_frames",@"width",@"height",@"fps_num",@"fps_den",@"bytes_written"]) {
+        NSNumber *value = [raw[key] isKindOfClass:NSNumber.class] ? raw[key] : nil;
+        if (value && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()
+                && value.doubleValue >= 0 && value.doubleValue <= 9007199254740991.0
+                && value.doubleValue == value.unsignedLongLongValue) status[key] = value;
+    }
+    NSRegularExpression *code = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:0 error:NULL];
+    for (NSString *key in @[@"export_id",@"error_code"]) {
+        NSString *value = [raw[key] isKindOfClass:NSString.class] ? raw[key] : nil;
+        if (value && [code numberOfMatchesInString:value options:0 range:NSMakeRange(0,value.length)] == 1)
+            status[key] = value;
+    }
+    return status;
+}
+static BOOL mp4Choice(id value, NSArray<NSNumber *> *choices) {
+    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()
+        && [choices containsObject:value];
+}
+void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSString *)) {
+    NSData *bytes = [request dataUsingEncoding:NSUTF8StringEncoding];
+    id decoded = bytes && bytes.length <= 4096 ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+    NSDictionary *object = [decoded isKindOfClass:NSDictionary.class] ? decoded : nil;
+    NSNumber *identifier = [object[@"id"] isKindOfClass:NSNumber.class] ? object[@"id"] : nil;
+    NSString *action = [object[@"action"] isKindOfClass:NSString.class] ? object[@"action"] : nil;
+    BOOL start = [action isEqual:@"mp4_start"];
+    BOOL valid = identifier && CFGetTypeID((__bridge CFTypeRef)identifier) != CFBooleanGetTypeID()
+        && identifier.longLongValue >= 1 && identifier.longLongValue <= INT32_MAX
+        && identifier.doubleValue == identifier.longLongValue
+        && ((start && object.count == 5 && mp4Choice(object[@"fps"], @[@30,@60])
+            && mp4Choice(object[@"video_bitrate"], @[@8000000,@16000000,@32000000])
+            && mp4Choice(object[@"video_codec"], @[@1,@2]))
+            || (!start && object.count == 2 && [@[@"mp4_status",@"mp4_cancel"] containsObject:action]));
+    void (^reply)(BOOL, NSDictionary *, NSString *) = ^(BOOL ok, NSDictionary *status, NSString *error) {
+        NSString *json = JSON(ok ? @{@"id":identifier ?: @1, @"ok":@YES, @"result":status ?: @{}}
+            : @{@"id":identifier ?: @1, @"ok":@NO, @"error":@{@"code":error ?: @"mp4_unavailable", @"message":error ?: @"mp4_unavailable"}});
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(json); });
+    };
+    if (!valid || !worker) { reply(NO,nil,valid ? @"mp4_unavailable" : @"invalid_request"); return; }
+    [worker enqueue:^{
+        if ([action isEqual:@"mp4_cancel"]) {
+            typedef void (*Cancel)(void);
+            Cancel cancel = (Cancel)dlsym(RTLD_DEFAULT, "IDMP4SessionCancel");
+            if (cancel) cancel(); reply(YES,mp4SessionStatus(),nil); return;
+        }
+        if (!start) { reply(YES,mp4SessionStatus(),nil); return; }
+        if (!atomic_load(&pythonReady)) { reply(NO,nil,@"mp4_server_not_ready"); return; }
+        typedef int (*Configure)(const char *, uint64_t, const char *, const char *, int);
+        typedef int (*Start)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+        Configure configure = (Configure)dlsym(RTLD_DEFAULT, "IDMP4SessionConfigure");
+        Start begin = (Start)dlsym(RTLD_DEFAULT, "IDMP4SessionStart");
+        if (!configure || !begin) { reply(NO,nil,@"mp4_unavailable"); return; }
+        NSString *error = nil, *raw = callHost("mp4_configuration",nil,&error);
+        NSData *encoded = [raw dataUsingEncoding:NSUTF8StringEncoding];
+        id descriptorValue = encoded ? [NSJSONSerialization JSONObjectWithData:encoded options:0 error:NULL] : nil;
+        NSDictionary *descriptor = [descriptorValue isKindOfClass:NSDictionary.class] ? descriptorValue : nil;
+        NSString *directory = [descriptor[@"directory"] isKindOfClass:NSString.class] ? descriptor[@"directory"] : nil;
+        NSString *exports = [descriptor[@"export_directory"] isKindOfClass:NSString.class] ? descriptor[@"export_directory"] : nil;
+        NSString *capability = [descriptor[@"capability"] isKindOfClass:NSString.class] ? descriptor[@"capability"] : nil;
+        NSNumber *epoch = [descriptor[@"epoch"] isKindOfClass:NSNumber.class] ? descriptor[@"epoch"] : nil;
+        NSString *root = IDNativeDataDirectory().stringByResolvingSymlinksInPath;
+        NSRegularExpression *hex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9a-f]{32}$" options:0 error:NULL];
+        struct stat info;
+        BOOL trusted = !error && [descriptor[@"schema"] isEqual:@1] && [descriptor[@"available"] isEqual:@YES]
+            && directory.isAbsolutePath && exports.isAbsolutePath && root.length
+            && [directory hasPrefix:[root stringByAppendingString:@"/"]]
+            && [directory isEqual:directory.stringByResolvingSymlinksInPath]
+            && [exports isEqual:[directory stringByAppendingPathComponent:@"exports"]]
+            && [exports isEqual:exports.stringByResolvingSymlinksInPath]
+            && capability.length == 32 && [hex numberOfMatchesInString:capability options:0 range:NSMakeRange(0,capability.length)] == 1
+            && epoch && CFGetTypeID((__bridge CFTypeRef)epoch) != CFBooleanGetTypeID()
+            && epoch.doubleValue >= 1 && epoch.doubleValue <= 9007199254740991.0
+            && epoch.doubleValue == epoch.unsignedLongLongValue
+            && lstat(exports.fileSystemRepresentation,&info) == 0 && S_ISDIR(info.st_mode)
+            && info.st_uid == getuid() && !(info.st_mode & (S_IWGRP|S_IWOTH));
+        if (!trusted) { reply(NO,nil,@"mp4_descriptor_unavailable"); return; }
+        if (configure(directory.fileSystemRepresentation,epoch.unsignedLongLongValue,capability.UTF8String,
+                      exports.fileSystemRepresentation,2) != 0) { reply(NO,nil,@"mp4_configuration_failed"); return; }
+        mp4ExportDirectory = [exports copy];
+        int accepted = begin([object[@"fps"] unsignedIntValue],1,[object[@"video_codec"] unsignedIntValue],
+            [object[@"video_bitrate"] unsignedIntValue],192000);
+        if (accepted != 0) { reply(NO,nil,accepted > 0 ? @"mp4_busy" : @"mp4_scene_not_ready"); return; }
+        reply(YES,mp4SessionStatus(),nil);
+    }];
+}
+void IdolyEmbeddedServerMP4Export(void (^completion)(NSURL *, NSString *)) {
+    if (!worker) { dispatch_async(dispatch_get_main_queue(), ^{ completion(nil,@"mp4_unavailable"); }); return; }
+    [worker enqueue:^{
+        NSDictionary *status = mp4SessionStatus(); NSString *identifier = status[@"export_id"];
+        NSString *root = mp4ExportDirectory;
+        NSURL *url = root && [status[@"phase"] isEqual:@"completed"] && [identifier isKindOfClass:NSString.class]
+            ? [NSURL fileURLWithPath:[root stringByAppendingPathComponent:[identifier stringByAppendingString:@".mp4"]]] : nil;
+        struct stat info;
+        BOOL valid = url && [url.URLByResolvingSymlinksInPath.path isEqual:url.path]
+            && [url.path.stringByDeletingLastPathComponent isEqual:root]
+            && lstat(url.fileSystemRepresentation,&info) == 0 && S_ISREG(info.st_mode)
+            && info.st_nlink == 1 && info.st_uid == getuid() && info.st_size > 0;
+        dispatch_async(dispatch_get_main_queue(), ^{ completion(valid ? url : nil,valid ? nil : @"mp4_export_not_ready"); });
+    }];
 }
 void IdolyEmbeddedServerCryptoSelfTest(void (^completion)(NSString *)) {
     if (!worker || !atomic_load(&pythonReady)) {

@@ -422,6 +422,14 @@ def shared_resources_json():
         return json.dumps(configuration, ensure_ascii=False)
 
 
+def mp4_configuration_json():
+    """Trusted unified native export setup, excluded from status and HTTP."""
+    with _LOCK:
+        configuration = (_RUNTIME.mp4_configuration() if _RUNTIME is not None
+                         else {"schema": 1, "available": False})
+        return json.dumps(configuration, ensure_ascii=False)
+
+
 def status_json():
     with _LOCK:
         value = _RUNTIME.status() if _RUNTIME is not None else _LAST_STATUS

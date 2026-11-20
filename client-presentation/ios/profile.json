@@ -2179,6 +2179,146 @@
       "return_type": "System.String",
       "registration_pointer_slot_rva": 175253552,
       "prefix16": "e00301aa010080d248420014f85fbca9"
+    },
+    "mp4_presenter_update": {
+      "name": "Solis.OutGame.LivePlayerScreenPresenter.Update",
+      "module": "Assembly-CSharp.dll",
+      "type_definition_index": 7412,
+      "metadata_method_index": 36974,
+      "token_row": 36975,
+      "rva": 51322596,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 170253504,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "mp4_capture_pass": {
+      "name": "VL.Rendering.VLCapturePass.Execute",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25176,
+      "metadata_method_index": 174397,
+      "token_row": 74,
+      "rva": 124229848,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "context",
+          "metadata_type_index": 71423,
+          "type_name": "UnityEngine.Rendering.ScriptableRenderContext"
+        },
+        {
+          "name": "renderingData",
+          "metadata_type_index": 44669,
+          "type_name": "UnityEngine.Rendering.Universal.RenderingData&"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 198,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175589448,
+      "prefix16": "ff0303d1f85f08a9f65709a9f44f0aa9"
+    },
+    "mp4_end_camera": {
+      "name": "UnityEngine.Rendering.RenderPipelineManager.EndCameraRendering",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24452,
+      "metadata_method_index": 166798,
+      "token_row": 4886,
+      "rva": 126370084,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "context",
+          "metadata_type_index": 71423,
+          "type_name": "UnityEngine.Rendering.ScriptableRenderContext"
+        },
+        {
+          "name": "camera",
+          "metadata_type_index": 50645,
+          "type_name": "UnityEngine.Camera"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 147,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175686448,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "mp4_graph_mode": {
+      "name": "UnityEngine.Playables.PlayableGraph.SetTimeUpdateMode",
+      "module": "UnityEngine.CoreModule.dll",
+      "type_definition_index": 24499,
+      "metadata_method_index": 167115,
+      "token_row": 5203,
+      "rva": 126420272,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "value",
+          "metadata_type_index": 54810,
+          "type_name": "UnityEngine.Playables.DirectorUpdateMode"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175688984,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "mp4_brain_delta": {
+      "name": "Cinemachine.CinemachineBrain.GetEffectiveDeltaTime",
+      "module": "Cinemachine.dll",
+      "type_definition_index": 28296,
+      "metadata_method_index": 194080,
+      "token_row": 72,
+      "rva": 54431948,
+      "return_type_index": 72704,
+      "parameters": [
+        {
+          "name": "fixedDelta",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 129,
+      "return_type": "System.Single",
+      "registration_pointer_slot_rva": 171090136,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "mp4_core_camera": {
+      "name": "Cinemachine.CinemachineCore.UpdateVirtualCamera",
+      "module": "Cinemachine.dll",
+      "type_definition_index": 28385,
+      "metadata_method_index": 194717,
+      "token_row": 709,
+      "rva": 54630936,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "vcam",
+          "metadata_type_index": 51717,
+          "type_name": "Cinemachine.CinemachineVirtualCameraBase"
+        },
+        {
+          "name": "worldUp",
+          "metadata_type_index": 77708,
+          "type_name": "UnityEngine.Vector3"
+        },
+        {
+          "name": "deltaTime",
+          "metadata_type_index": 72704,
+          "type_name": "System.Single"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 131,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 171095232,
+      "prefix16": "ffc301d1eb2b016de923026df85f03a9"
     }
   },
   "hook_names": [
@@ -2227,7 +2367,13 @@
     "shared_is_cached",
     "shared_file_path",
     "shared_pre_download",
-    "shared_downloader_update"
+    "shared_downloader_update",
+    "mp4_presenter_update",
+    "mp4_capture_pass",
+    "mp4_end_camera",
+    "mp4_graph_mode",
+    "mp4_brain_delta",
+    "mp4_core_camera"
   ],
   "segments": {
     "__TEXT": {
@@ -2269,12 +2415,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 1472,
+    "bytes": 1664,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 368,
+    "bytes": 416,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -2435,5 +2581,14 @@
     "conditional_gateway": "Compare-and-branch uses a local taken veneer and two unconditional original-address continuations",
     "runtime_device_validation": false,
     "original_input_whole_sha256_verified": true
+  },
+  "offline_mv_export": {
+    "schema": 1,
+    "hook_count": 6,
+    "scope": "Owned MV and actor graph modes, scoped camera clock and final-frame completion",
+    "binding_profile": "client-presentation/native/mp4_game_ios_profile.json",
+    "original_input_whole_sha256_verified": true,
+    "runtime_device_validation": false,
+    "manual_graph_and_encoder_validation_required": true
   }
 }

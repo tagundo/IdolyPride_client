@@ -100,6 +100,63 @@ def test_independent_audio_checks_logical_samples_polarity_and_both_channels():
         qa.validate_independent_pcm(values.tobytes())
 
 
+def audio_metadata():
+    packets = []
+    for index, start in enumerate(range(-2048, 48000, 1024)):
+        packet = {"stream_index": 1, "pts": start, "dts": start, "duration": min(1024, 48000 - start)}
+        if index == 0:
+            packet["side_data_list"] = [{"side_data_type": "Skip Samples", "skip_samples": 2048,
+                                         "discard_padding": 0}]
+        packets.append(packet)
+    return {"streams": [{"index": 1, "codec_name": "aac", "sample_rate": "48000", "channels": 2,
+                         "time_base": "1/48000", "start_pts": 0, "duration_ts": 48000}], "packets": packets}
+
+
+def test_independent_audio_honors_verified_container_end_and_retains_raw_padding_counts():
+    presentation = qa.validate_audio_presentation(audio_metadata())
+    assert presentation["last_packet_end"] == 48000 and presentation["priming_samples"] == 2048
+    for tail in (0, 128, 1023):
+        proof = qa.validate_independent_pcm(pcm() + bytes(tail * 8), presentation)
+        assert proof["presented_sample_frames"] == 48000
+        assert proof["raw_decoded_frames"] == 48000 + tail
+        assert proof["discarded_tail_frames"] == tail
+        assert proof["channel_peaks"] == [{"positive_sample": 8000, "negative_sample": 32000}] * 2
+    # Padding outside the independently proven interval cannot hide phase errors.
+    for raw in (pcm()[:-8], pcm() + bytes(1024 * 8), pcm(2) + bytes(128 * 8), pcm(448) + bytes(128 * 8)):
+        with pytest.raises(ValueError):
+            qa.validate_independent_pcm(raw, presentation)
+    with pytest.raises(ValueError):
+        qa.validate_independent_pcm(pcm() + bytes(128 * 8), {})
+
+
+@pytest.mark.parametrize("key,value", [("duration_ts", 48128), ("duration_ts", 47999),
+    ("time_base", "1/44100"), ("start_pts", 1), ("start_pts", False),
+    ("sample_rate", "44100"), ("channels", 1), ("codec_name", "mp3")])
+def test_independent_audio_rejects_wrong_container_presentation(key, value):
+    metadata = audio_metadata()
+    metadata["streams"][0][key] = value
+    with pytest.raises(ValueError):
+        qa.validate_audio_presentation(metadata)
+
+
+@pytest.mark.parametrize("index,key,value", [(-1, "duration", 1024), (-1, "duration", 895),
+    (3, "dts", 1025), (3, "pts", 1025), (3, "duration", 1023), (3, "duration", 2048),
+    (3, "stream_index", 2), (3, "side_data_list", [{"side_data_type": "Skip Samples", "skip_samples": 2}]),
+    (0, "side_data_list", [{"side_data_type": "Skip Samples", "skip_samples": 1024, "discard_padding": 0}])])
+def test_independent_audio_rejects_packet_gaps_offsets_and_unexpected_edits(index, key, value):
+    metadata = audio_metadata()
+    metadata["packets"][index][key] = value
+    with pytest.raises(ValueError):
+        qa.validate_audio_presentation(metadata)
+
+
+def test_independent_audio_rejects_missing_and_extra_packet_blocks():
+    metadata = audio_metadata()
+    for packets in (metadata["packets"][:-1], metadata["packets"] + [dict(metadata["packets"][-1], dts=48000, pts=48000)]):
+        with pytest.raises(ValueError):
+            qa.validate_audio_presentation(dict(metadata, packets=packets))
+
+
 def manifest():
     return f'''<manifest xmlns:android="{qa.ANDROID[1:-1]}" package="{qa.PACKAGE}">
       <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35"/>

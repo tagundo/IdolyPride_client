@@ -25,8 +25,10 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
     private final Runnable showMenu = this::recognizeMenuHold;
     private final View.OnLayoutChangeListener menuLayout = (view, left, top, right, bottom,
             oldLeft, oldTop, oldRight, oldBottom) -> {
-        if (left != oldLeft || top != oldTop || right != oldRight || bottom != oldBottom)
+        if (left != oldLeft || top != oldTop || right != oldRight || bottom != oldBottom) {
             cancelWindowMenuHold();
+            UnifiedMP4Export.geometryChanged(this);
+        }
     };
 
     @Override protected void onCreate(Bundle state) {
@@ -44,6 +46,8 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         updateWindowing(isInMultiWindowMode());
         menuSurface = getWindow().getDecorView();
         menuSurface.addOnLayoutChangeListener(menuLayout);
+        UnifiedMP4Export.restoreState(this, state);
+        UnifiedMP4Export.attachGame(this);
     }
 
     private void updateWindowing(boolean multiWindow) {
@@ -83,6 +87,7 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
 
     @Override public void onConfigurationChanged(Configuration configuration) {
         cancelWindowMenuHold();
+        UnifiedMP4Export.geometryChanged(this);
         updateWindowing(isInMultiWindowMode());
         // Unity owns updating its configuration, SurfaceView and render lifecycle.
         super.onConfigurationChanged(configuration);
@@ -90,12 +95,14 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
 
     @Override public void onMultiWindowModeChanged(boolean multiWindow, Configuration configuration) {
         cancelWindowMenuHold();
+        UnifiedMP4Export.geometryChanged(this);
         updateWindowing(multiWindow);
         super.onMultiWindowModeChanged(multiWindow, configuration);
     }
 
     @Override public void onWindowFocusChanged(boolean focused) {
         if (!focused) cancelWindowMenuHold();
+        UnifiedMP4Export.focusChanged(this, focused);
         super.onWindowFocusChanged(focused);
     }
 
@@ -170,15 +177,18 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
     @Override protected void onPause() {
         discardResizedTouch = false;
         cancelMenuHold();
+        UnifiedMP4Export.gamePaused(this);
         super.onPause();
     }
 
     @Override protected void onResume() {
         updateWindowing(isInMultiWindowMode());
         super.onResume();
+        UnifiedMP4Export.gameResumed(this);
     }
 
     @Override protected void onDestroy() {
+        UnifiedMP4Export.gameDestroyed(this);
         if (windowOwner.get() == this) {
             windowOwner.clear();
             UnifiedWindowing.update(false);
@@ -190,5 +200,15 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         discardResizedTouch = false;
         cancelMenuHold();
         super.onDestroy();
+    }
+
+    @Override protected void onSaveInstanceState(Bundle state) {
+        UnifiedMP4Export.saveState(state);
+        super.onSaveInstanceState(state);
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        UnifiedMP4Export.activityResult(this, request, result, data);
     }
 }

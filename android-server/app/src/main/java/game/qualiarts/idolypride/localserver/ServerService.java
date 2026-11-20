@@ -441,6 +441,9 @@ public final class ServerService extends Service {
                             runtime.callAttr("shared_resources_json").toString());
                     appendLog(shared ? "게임 공용 리소스 저장소 연결을 준비했습니다."
                             : "공용 리소스 연결을 준비하지 못했습니다. 기존 게임 다운로드 경로를 사용합니다.");
+                    if (!stopQueued.get())
+                        UnifiedMP4Export.prepare(getApplicationContext(), runtime.callAttr("mp4_configuration_json").toString());
+                    if (stopQueued.get()) UnifiedMP4Export.serverStopped();
                 }
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
                 if (UnifiedRuntime.isEnabled(this)) details.put("native_shared_resources", UnifiedSharedResources.snapshot());
@@ -468,6 +471,7 @@ public final class ServerService extends Service {
 
     private void queueStop(boolean finishService, boolean keepFailure) {
         if (!stopQueued.compareAndSet(false, true)) return;
+        UnifiedMP4Export.serverStopped();
         ResourceTransfers.cancelLocal();
         MAIN.removeCallbacks(pollState);
         if (!keepFailure) state(R.string.status_stopping, running, true);

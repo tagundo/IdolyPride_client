@@ -240,8 +240,61 @@ def extract_archive(archive, destination):
                     shutil.copyfileobj(incoming, output, 64 * 1024)
 
 
-def validate_independent_pcm(raw):
-    need(len(raw) == 48000 * 2 * 4, "Independent AAC decoder did not present exactly 48000 stereo sample frames")
+def validate_audio_presentation(metadata):
+    streams = metadata.get("streams", [])
+    need(len(streams) == 1, "Expected one independent AAC stream")
+    stream = streams[0]
+    need(type(stream.get("index")) is int and stream["index"] >= 0
+         and stream.get("codec_name") == "aac" and stream.get("sample_rate") == "48000"
+         and stream.get("channels") == 2 and stream.get("time_base") == "1/48000"
+         and type(stream.get("start_pts")) is int and stream["start_pts"] == 0
+         and type(stream.get("duration_ts")) is int and stream["duration_ts"] == 48000,
+         "Independent AAC format or exact presentation interval differs")
+    packets = metadata.get("packets", [])
+    need(1 <= len(packets) <= 64, "Independent AAC packet count exceeds the bounded clip")
+    previous_end = None
+    priming = None
+    for index, packet in enumerate(packets):
+        need(type(packet.get("stream_index")) is int and packet["stream_index"] == stream["index"]
+             and all(type(packet.get(key)) is int for key in ("pts", "dts", "duration")),
+             "Independent AAC packet timing is missing")
+        pts, dts, duration = (packet[key] for key in ("pts", "dts", "duration"))
+        need(pts == dts and 0 < duration <= 1024
+             and (previous_end is None or dts == previous_end),
+             "Independent AAC packet clock has a gap, overlap or composition offset")
+        if index < len(packets) - 1:
+            need(duration == 1024, "Independent AAC contains a shortened interior packet")
+        side = packet.get("side_data_list", [])
+        if index == 0:
+            need(-8192 <= dts <= 0, "Independent AAC priming is outside the supported range")
+            priming = -dts
+            if priming:
+                need(len(side) == 1 and side[0].get("side_data_type") == "Skip Samples"
+                     and side[0].get("skip_samples") == priming and side[0].get("discard_padding") == 0,
+                     "Independent AAC edit priming differs from the packet clock")
+            else:
+                need(not side, "Unexpected zero-origin AAC edit data")
+        else:
+            need(not side, "Unexpected extra AAC edit or discard data")
+        previous_end = dts + duration
+    need(previous_end == 48000, "Independent AAC last packet does not end at the exact presentation boundary")
+    return {"presentation_verified": True, "time_base": "1/48000", "start_pts": 0,
+            "duration_ts": 48000, "last_packet_end": previous_end,
+            "packet_count": len(packets), "priming_samples": priming}
+
+
+def validate_independent_pcm(raw, presentation=None):
+    need(len(raw) % 8 == 0, "Independent AAC decoder returned an incomplete stereo sample frame")
+    raw_frames = len(raw) // 8
+    if presentation is None:
+        need(raw_frames == 48000, "Independent AAC decoder did not present exactly 48000 stereo sample frames")
+    else:
+        need(presentation.get("presentation_verified") is True and presentation.get("duration_ts") == 48000
+             and presentation.get("last_packet_end") == 48000, "Verify the container end before applying decoder padding")
+        # AAC decoders emit complete 1024-sample blocks. The MP4 presentation
+        # ends inside its last block; only that independently verified tail is
+        # excluded. Missing samples or another full decoded block still fail.
+        need(48000 <= raw_frames <= 48000 + 1023, "Independent AAC decoder has missing samples or extra AAC blocks")
     data = array("f")
     data.frombytes(raw)
     if sys.byteorder != "little":
@@ -255,26 +308,33 @@ def validate_independent_pcm(raw):
              and data[positive * 2 + channel] > 0.03 and data[negative * 2 + channel] < -0.03,
              "Independent AAC impulse timing, polarity or channel content differs")
         peaks.append({"positive_sample": positive, "negative_sample": negative})
-    return {"presented_sample_frames": 48000, "channels": 2, "sample_rate": 48000,
+    return {"presented_sample_frames": 48000, "raw_decoded_frames": raw_frames,
+            "discarded_tail_frames": raw_frames - 48000, "channels": 2, "sample_rate": 48000,
             "impulses_verified": True, "channel_peaks": peaks}
 
 
 def independent_audio(mp4, directory):
     ffmpeg, ffprobe = shutil.which("ffmpeg"), shutil.which("ffprobe")
     need(ffmpeg and ffprobe, "FFmpeg and ffprobe are required for independent AAC presentation checks")
-    metadata = json.loads(subprocess.check_output([ffprobe, "-v", "error", "-select_streams", "a", "-show_entries",
-        "stream=codec_name,sample_rate,channels", "-of", "json", str(mp4)], stderr=subprocess.DEVNULL, timeout=30))
-    streams = metadata.get("streams", [])
-    need(len(streams) == 1 and streams[0].get("codec_name") == "aac" and streams[0].get("sample_rate") == "48000"
-         and streams[0].get("channels") == 2, "Independent AAC metadata differs")
+    metadata_path = directory / (mp4.parent.name + "-ffprobe-audio.json")
+    need(not metadata_path.exists(), "Fresh independent metadata output required")
+    with metadata_path.open("xb") as output:
+        subprocess.run([ffprobe, "-v", "error", "-select_streams", "a", "-show_streams", "-show_packets",
+            "-of", "json", str(mp4)], stdout=output, stderr=subprocess.DEVNULL, check=True, timeout=30)
+    regular(metadata_path, MIB)
+    presentation = validate_audio_presentation(json.loads(metadata_path.read_text()))
     destination = directory / (mp4.parent.name + "-ffmpeg-decoded.f32")
     need(not destination.exists(), "Fresh independent PCM output required")
     subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", str(mp4), "-map", "0:a:0", "-vn",
         "-f", "f32le", "-acodec", "pcm_f32le", str(destination)], check=True, timeout=60,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     regular(destination, MIB)
-    return {**validate_independent_pcm(destination.read_bytes()), "decoder": "FFmpeg without resampling/remixing/trimming",
-            "decoded_sha256": sha(destination)}
+    raw = destination.read_bytes()
+    return {**validate_independent_pcm(raw, presentation),
+            "verified_container_duration": presentation,
+            "decoder": "FFmpeg raw AAC; logical samples use the verified MP4 presentation end, without resampling or remixing",
+            "decoded_sha256": sha(destination), "metadata_sha256": sha(metadata_path),
+            "presented_pcm_sha256": hashlib.sha256(raw[:48000 * 8]).hexdigest()}
 
 
 def run_device(directory, sdk, serial, timeout, root=ROOT):
@@ -356,6 +416,7 @@ def run_device(directory, sdk, serial, timeout, root=ROOT):
                              result=copied, mp4_sha256=outputs)
         except Exception as problem:
             proof["collection_error_type"] = type(problem).__name__
+            proof["collection_error"] = str(problem)[:2048]
             if error is None:
                 error = problem
         try:

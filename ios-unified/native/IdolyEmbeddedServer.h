@@ -12,4 +12,7 @@ FOUNDATION_EXPORT __attribute__((visibility("default"))) void IdolyEmbeddedServe
                                                   void (^completion)(NSString *reply));
 // Fixed NIST fixtures only; no executable source or caller-provided crypto data.
 FOUNDATION_EXPORT __attribute__((visibility("default"))) void IdolyEmbeddedServerCryptoSelfTest(void (^completion)(NSString *reply));
+// Trusted bundled settings/native overlay only. Never forwarded to HTTP/Python commands.
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSString *reply));
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4Export(void (^completion)(NSURL * _Nullable file, NSString * _Nullable error));
 NS_ASSUME_NONNULL_END

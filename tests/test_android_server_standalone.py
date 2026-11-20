@@ -61,8 +61,8 @@ def test_graphics_and_playback_controls_remain_without_any_apk_installation_path
     for control in ["addPlaybackControls(", "addPresentationControls(",
                     "getLaunchIntentForPackage(packageName)", "savePresentationControls()"]:
         assert control in activity
-    resources = ET.parse(MAIN / "res/values/strings.xml").getroot()
-    strings = {node.get("name") for node in resources.findall("string")}
+    strings = {node.get("name") for resource in (MAIN / "res/values").glob("*.xml")
+               for node in ET.parse(resource).getroot().findall("string")}
     assert "presentation_client_notice" in strings and "presentation_launch_missing" in strings
     assert not any(name.startswith("presentation_install_") for name in strings)
     # All current Java string references must resolve after deleting old install UI.

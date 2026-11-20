@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mp4_dismiss">Dismiss</string>
+    <string name="mp4_geometry">%1$d × %2$d · %3$d fps</string>
+    <string name="mp4_preparing_audio_progress">Preparing audio · %1$d/%2$d</string>
+    <string name="mp4_title">MV export</string>
+    <string name="mp4_hint">Export the full MV to MP4 during MV playback.</string>
+    <string name="mp4_fps">Frame rate</string>
+    <string name="mp4_codec">Video codec</string>
+    <string name="mp4_bitrate">Bitrate</string>
+    <string name="mp4_start">Export MP4</string>
+    <string name="mp4_cancel">Cancel</string>
+    <string name="mp4_save">Save video</string>
+    <string name="mp4_preparing_audio">Preparing music</string>
+    <string name="mp4_rendering">Creating video · %1$d/%2$d</string>
+    <string name="mp4_finishing">Finishing video</string>
+    <string name="mp4_completed">Export complete</string>
+    <string name="mp4_cancelled">Export cancelled.</string>
+    <string name="mp4_failed">Export failed: %1$s</string>
+    <string name="mp4_idle">Ready to export</string>
+    <string name="mp4_not_ready">Open the MV playback screen first.</string>
+    <string name="mp4_unavailable">MP4 export is unavailable.</string>
+    <string name="mp4_saved">Video saved.</string>
+    <string name="mp4_save_failed">Could not save the video.</string>
+    <string name="mp4_export_filename">IdolyPride-MV-%1$s.mp4</string>
+    <string name="mp4_background_cancelled">Export cancelled after leaving the app.</string>
+    <string name="mp4_progress_title">MV export</string>
+</resources>

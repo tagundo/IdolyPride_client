@@ -2,6 +2,7 @@
 """Compose an integrated iOS app using streamed, source-pinned public inputs."""
 from __future__ import annotations
 import argparse
+from datetime import date as calendar_date
 import copy
 import hashlib
 import importlib.util
@@ -19,6 +20,13 @@ LOAD_PATH = '@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer'
 UNITY = 'Frameworks/UnityFramework.framework/UnityFramework'
 PRESENTATION = 'Frameworks/IdolyPresentation.dylib'
 PACKAGED_SERVER_DATA = {'pin':'../data/latest-server-data-pin.json','policy':'latest-cohort-overlay-v1'}
+
+def candidate_bundle_version():
+    value=os.environ.get('IDOLY_RELEASE_VERSION')
+    if value is None:return '156.9117'
+    require(re.fullmatch(r'20\d{2}\.\d{2}\.\d{2}\.[1-9]\d{0,2}',value) is not None,'Invalid candidate release date version')
+    year,month,day,sequence=map(int,value.split('.'));calendar_date(year,month,day)
+    return f'{year}.{month:02}{day:02}.{sequence}'
 
 
 def _packaging_manifest(manifest):
@@ -287,7 +295,7 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
             actual_data = {i.filename[len(app):] for i in infos if i.filename.startswith(app + 'Data/') and not i.is_dir()}
             require(actual_data == set(all_data_rows), 'Base Data inventory differs from client-language manifest')
         require(source.getinfo(app + 'Info.plist').file_size <= 128 * 1024, 'Original Info.plist exceeds bound')
-        info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion='156.9117',CFBundleDisplayName='아이프라 로컬',IdolyUnifiedLoopbackOrigin='http://127.0.0.1:8080')
+        info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion=candidate_bundle_version(),CFBundleDisplayName='아이프라 로컬',IdolyUnifiedLoopbackOrigin='http://127.0.0.1:8080')
         generated['Info.plist'] = plistlib.dumps(info,fmt=plistlib.FMT_BINARY)
         if fresh:
             require(source.getinfo(app + UNITY).file_size == unity['bytes'], 'Restocked Unity file layout differs')

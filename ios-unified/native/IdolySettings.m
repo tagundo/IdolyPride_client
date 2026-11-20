@@ -1,6 +1,7 @@
 #import "IdolyEmbeddedServer.h"
 #import "IdolyNativeUI.h"
 #import "IdolyMacMenu.h"
+#import "IdolyMP4UI.h"
 #include "CornerPolicy.h"
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
@@ -571,6 +572,19 @@ static __weak IDSettingsController *launcherController;
     [self presentViewController:prompt animated:YES completion:nil];
 }
 - (void)dispatchRequest:(NSDictionary *)request {
+    if ([@[@"mp4_start",@"mp4_status",@"mp4_cancel",@"mp4_save"] containsObject:request[@"action"]]) {
+        if (([request[@"action"] isEqual:@"mp4_start"] || [request[@"action"] isEqual:@"mp4_save"])
+                && (_pendingImport || _pendingExportRequestID || _officialPrompt || self.presentedViewController)) {
+            [self localFailure:request[@"id"] message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
+        }
+        __weak typeof(self) weakSelf = self;
+        IDMP4HandleRequest(request,self,gameWindow(),^(NSString *reply) {
+            [weakSelf sendReply:request[@"id"] json:reply];
+            NSData *bytes = [reply dataUsingEncoding:NSUTF8StringEncoding];
+            NSDictionary *value = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
+            if ([request[@"action"] isEqual:@"mp4_start"] && [value[@"ok"] isEqual:@YES]) [weakSelf closeSettings];
+        }); return;
+    }
     if ([request[@"action"] isEqual:@"official_inspect"]) { [self presentOfficialPrompt:request]; return; }
     if ([request[@"action"] isEqual:@"diagnostics_copy"]) {
         // Explicit click in the trusted bundled page only. This action stays
@@ -748,6 +762,7 @@ static __weak IDSettingsController *launcherController;
     if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
     if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
     NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media", @"events_status", @"events_save",
+        @"mp4_start",@"mp4_status",@"mp4_cancel",@"mp4_save",
         @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export",
         @"official_inspect",@"official_fetch",@"official_apply",@"official_cancel",@"official_status",
         @"diagnostics_clear",@"accounts_status",@"accounts_create",@"accounts_clone",@"accounts_select",
@@ -921,6 +936,7 @@ void IDNativeSetInterfaceLanguage(NSString *language) {
         language = @"system";
     NSInteger previous = interfaceLanguageIndex;
     interfaceLanguage = [language copy];
+    IDMP4SetInterfaceLanguage(language);
     interfaceLanguageIndex = resolvedInterfaceLanguage();
     IDMacSetSettingsMenuTitle(localized(@"로컬 서버 설정…"));
     if (previous == interfaceLanguageIndex) return;
@@ -1028,6 +1044,7 @@ BOOL IDNativeLauncherVisible(void) {
 void IDNativeInstallSettings(void) {
     static IDGestureTarget *target; static dispatch_once_t once;
     dispatch_once(&once, ^{
+        IDMP4InstallLifecycle();
         target = [IDGestureTarget new];
         for (NSString *name in @[UIApplicationDidBecomeActiveNotification, UIWindowDidBecomeKeyNotification,
                 @"NSApplicationDidFinishLaunchingNotification", @"NSApplicationDidBecomeActiveNotification",

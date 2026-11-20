@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Platform-neutral offline encoder boundary. Implementations use public OS APIs.
 #pragma once
+#ifndef IDOLY_DARWIN_BRIDGE
 #include <stddef.h>
 #include <stdint.h>
+#endif
 
 #if defined(__APPLE__)
 #define IDMP4_ENCODER_API __attribute__((visibility("default")))

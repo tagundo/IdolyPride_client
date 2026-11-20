@@ -20,7 +20,7 @@ def digest(path):
 
 
 def sources():
-    return tuple(sorted(path for path in HERE.iterdir() if path.suffix in (".cpp",".hpp",".py",".json")))
+    return tuple(sorted(path for path in HERE.iterdir() if path.suffix in (".cpp",".hpp",".h",".py",".json")))
 
 
 def build(output,source_commit,*,ndk=None,cache_dir=None):

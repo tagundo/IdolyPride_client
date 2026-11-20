@@ -354,12 +354,12 @@ def source_snapshot(root, commit, allow_working):
 
 
 def build_config(asset_info):
-    gradle_version = '2026.11.20.1-unified-preview'
+    gradle_version = '2026.11.21.1-mp4-preview'
     fields = ['package ' + SERVER_PACKAGE + ';', 'public final class BuildConfig {',
         'public static final boolean DEBUG = false;',
         'public static final String APPLICATION_ID = "' + PACKAGE + '";',
         'public static final String BUILD_TYPE = "release";',
-        'public static final int VERSION_CODE = 55;',
+        'public static final int VERSION_CODE = 56;',
         'public static final String VERSION_NAME = "' + gradle_version + '";']
     for prefix, member in (("SERVER_DATA", "assets/ServerData.zip"),
             ("BUNDLED_TRANSLATIONS", "assets/bundledTranslations.zip"),

@@ -69,6 +69,7 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
             public android.content.Intent started;
             protected void onCreate(android.os.Bundle b){creates++;}protected void onPause(){pauses++;}protected void onDestroy(){destroys++;}
             protected void onResume(){resumes++;}public boolean isInMultiWindowMode(){return multiWindow;}
+            protected void onSaveInstanceState(android.os.Bundle b){}protected void onActivityResult(int r,int c,android.content.Intent i){}
             public boolean dispatchTouchEvent(android.view.MotionEvent e){dispatches++;if(e.getActionMasked()==3)cancels++;return false;}
             public void onConfigurationChanged(Configuration c){configs++;lastConfig=c;}
             public void onMultiWindowModeChanged(boolean m,Configuration c){multiWindows++;lastMultiConfig=c;multiWindow=m;}
@@ -88,6 +89,12 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
     sources[package + "UnifiedGameAssets.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedGameAssets {static int freezes;static String freeze(android.content.Context c,String l)throws java.io.IOException{freezes++;return "selected-data.zip";} }'''
     sources[package + "MainActivity.java"] = "package game.qualiarts.idolypride.localserver; public class MainActivity extends android.app.Activity {}"
+    sources[package + "UnifiedMP4Export.java"] = '''package game.qualiarts.idolypride.localserver;
+      final class UnifiedMP4Export {static void restoreState(android.content.Context c,android.os.Bundle b){}
+        static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
+        static void focusChanged(android.app.Activity a,boolean focused){}
+        static void gamePaused(android.app.Activity a){}static void gameResumed(android.app.Activity a){}static void gameDestroyed(android.app.Activity a){}
+        static void saveState(android.os.Bundle b){}static boolean activityResult(android.app.Activity a,int r,int c,android.content.Intent i){return false;} }'''
     sources[package + "UnifiedWindowing.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedWindowing {static int calls;static boolean mode;static void update(boolean m){calls++;mode=m;} }'''
     sources[package + "WindowFixture.java"] = '''package game.qualiarts.idolypride.localserver;

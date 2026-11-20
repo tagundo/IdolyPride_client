@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import date as calendar_date
 import hashlib
 import importlib.util
 import json
@@ -96,11 +97,19 @@ def prepare_presentation_bridge(inputs, work, output):
 def candidate_filename(source_commit):
     if not re.fullmatch("[0-9a-f]{40}", source_commit):
         raise ValueError("Exact candidate source commit required")
-    date = subprocess.check_output(["git", "-C", str(HERE.parent), "show", "-s", "--format=%cs", source_commit],
-                                   text=True).strip()
-    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-        raise ValueError("Candidate source date is invalid")
-    return "IdolyPride-Unified-" + date.replace("-", ".") + "-prototype-" + source_commit[:12] + "-iOS.ipa"
+    version = os.environ.get("IDOLY_RELEASE_VERSION")
+    if version is not None:
+        if not re.fullmatch(r"20\d{2}\.\d{2}\.\d{2}\.[1-9]\d{0,2}",version):
+            raise ValueError("Candidate release date version is invalid")
+        year,month,day,_ = map(int,version.split('.'))
+        calendar_date(year,month,day)
+    else:
+        date = subprocess.check_output(["git", "-C", str(HERE.parent), "show", "-s", "--format=%cs", source_commit],
+                                       text=True).strip()
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+            raise ValueError("Candidate source date is invalid")
+        version=date.replace('-','.')
+    return "IdolyPride-Unified-" + version + "-prototype-" + source_commit[:12] + "-iOS.ipa"
 
 
 def main():

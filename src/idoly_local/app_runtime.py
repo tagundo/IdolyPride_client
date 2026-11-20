@@ -40,6 +40,7 @@ class Runtime:
         self._resources = None
         self._shared_resources = None
         self._shared_resource_store = None
+        self._mp4_audio = None
         self._running = False
         self._stopped = False
         self._last_error = None
@@ -128,6 +129,8 @@ class Runtime:
             result["resource_transfer"] = self._resources.status()
         result["shared_resources"] = (self._shared_resources.status() if self._shared_resources is not None
                                       else {"schema": 1, "available": False})
+        result["mp4_audio"] = (self._mp4_audio.status() if self._mp4_audio is not None
+                               else {"schema": 1, "available": False})
         if self._presentation is not None:
             result["presentation"] = self._presentation.status()
         if self._playback is not None:
@@ -158,6 +161,17 @@ class Runtime:
         """Trusted native bridge only; private IPC paths never enter diagnostics."""
         with self._lifecycle_lock:
             broker = self._shared_resources if self._running else None
+        if broker is not None:
+            try:
+                return broker.configuration()
+            except OSError:
+                pass
+        return {"schema": 1, "available": False}
+
+    def mp4_configuration(self):
+        """Trusted native export bridge; never return private paths over HTTP."""
+        with self._lifecycle_lock:
+            broker = self._mp4_audio if self._running else None
         if broker is not None:
             try:
                 return broker.configuration()
@@ -247,9 +261,17 @@ class Runtime:
                 return
             self._running = False
             failures = []
-            if self._shared_resources is not None:
+            # Retire private IPC capabilities before their shared input store.
+            # Already advertised private bundles/exports remain for async Unity.
+            for broker in (self._mp4_audio, self._shared_resources):
+                if broker is None:
+                    continue
                 try:
-                    self._shared_resources.close()
+                    broker.close()
+                except Exception as error:
+                    failures.append(error)
+            if self._shared_resource_store is not None:
+                try:
                     self._shared_resource_store.close()
                 except Exception as error:
                     failures.append(error)
@@ -597,12 +619,21 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
             from .shared_resource_store import SharedResourceStore
             try:
                 runtime._shared_resource_store = SharedResourceStore(gateway.manifest, gateway.cache)
-                runtime._shared_resources = SharedResourceBroker(runtime._shared_resource_store, shared_resource_dir)
             except (OSError, ValueError):
-                if runtime._shared_resource_store is not None:
+                runtime._log("Shared resource file access unavailable; using local HTTP resources")
+            if runtime._shared_resource_store is not None:
+                try:
+                    runtime._shared_resources = SharedResourceBroker(runtime._shared_resource_store, shared_resource_dir)
+                except (OSError, ValueError):
+                    runtime._log("Shared resource file access unavailable; using local HTTP resources")
+                from .mp4_audio_broker import MP4AudioBroker
+                try:
+                    runtime._mp4_audio = MP4AudioBroker(runtime._shared_resource_store, shared_resource_dir)
+                except (OSError, ValueError):
+                    runtime._log("Private MV audio preparation unavailable")
+                if runtime._shared_resources is None and runtime._mp4_audio is None:
                     runtime._shared_resource_store.close()
                     runtime._shared_resource_store = None
-                runtime._log("Shared resource file access unavailable; using local HTTP resources")
         from .resource_library import ResourceLibrary
         runtime._library = ResourceLibrary.from_data_dir(root, base_url=runtime._asset_url,
             aes_cbc=aes_cbc, fetcher=resource_fetcher, active_gateway=gateway,

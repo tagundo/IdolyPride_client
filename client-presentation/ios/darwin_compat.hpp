@@ -30,6 +30,9 @@ struct sockaddr { uint8_t length, family; char data[14]; };
 struct sockaddr_in { uint8_t length, family; uint16_t port; uint32_t address; char zero[8]; };
 extern "C" {
 void *memcpy(void *, const void *, size_t);
+void *malloc(size_t); void free(void *);
+long pread(int,void *,size_t,int64_t); long pwrite(int,const void *,size_t,int64_t);
+int ftruncate(int,int64_t); void *dlsym(void *,const char *);
 void *memset(void *, int, size_t);
 int memcmp(const void *, const void *, size_t);
 int strcmp(const char *, const char *);

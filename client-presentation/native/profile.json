@@ -67,6 +67,10 @@
       {
         "file": "sound-original-pins.json",
         "sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
+      },
+      {
+        "file": "mp4_game_profile.json",
+        "sha256": "af2fb43fce1021f3aa4b35c8e437ccb032e7443744f08a83c5de0cde31925225"
       }
     ],
     "method_row_convention": "1-based metadata token row",
@@ -3331,6 +3335,122 @@
       "prefix16": "e00301aae1031faad33f0014fe0f1cf8",
       "mode": "CALL",
       "source": "pinned-shared-cache-contract-v1"
+    },
+    "mp4_presenter_update": {
+      "name": "Solis.OutGame.LivePlayerScreenPresenter.Update",
+      "rva": "0x572fe70",
+      "prefix16": "fe57bea9f44f01a9754902f0140e02d0",
+      "module": "Assembly-CSharp.dll",
+      "token_row": 36968,
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_capture_pass": {
+      "name": "VL.Rendering.VLCapturePass.Execute",
+      "rva": "0x8dfb8bc",
+      "prefix16": "ff0303d1fe5f09a9f6570aa9f44f0ba9",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "token_row": 74,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "context",
+          "type": "UnityEngine.Rendering.ScriptableRenderContext",
+          "metadata_type_index": 71554
+        },
+        {
+          "name": "renderingData",
+          "type": "UnityEngine.Rendering.Universal.RenderingData&",
+          "metadata_type_index": 44787
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_end_camera": {
+      "name": "UnityEngine.Rendering.RenderPipelineManager.EndCameraRendering",
+      "rva": "0x8fa4650",
+      "prefix16": "fe0f1df8f65701a9f44f02a9b68600d0",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 4849,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "context",
+          "type": "UnityEngine.Rendering.ScriptableRenderContext",
+          "metadata_type_index": 71554
+        },
+        {
+          "name": "camera",
+          "type": "UnityEngine.Camera",
+          "metadata_type_index": 50798
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": true
+    },
+    "mp4_graph_mode": {
+      "name": "UnityEngine.Playables.PlayableGraph.SetTimeUpdateMode",
+      "rva": "0x8fabd34",
+      "prefix16": "fe57bea9f44f01a9758600f0a26e41f9",
+      "module": "UnityEngine.CoreModule.dll",
+      "token_row": 5189,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "value",
+          "type": "UnityEngine.Playables.DirectorUpdateMode",
+          "metadata_type_index": 54963
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_brain_delta": {
+      "name": "Cinemachine.CinemachineBrain.GetEffectiveDeltaTime",
+      "rva": "0x59e92cc",
+      "prefix16": "fe0f1df8f65701a9f44f02a9b63302d0",
+      "module": "Cinemachine.dll",
+      "token_row": 72,
+      "return_type": "System.Single",
+      "parameters": [
+        {
+          "name": "fixedDelta",
+          "type": "System.Boolean",
+          "metadata_type_index": 50428
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
+    },
+    "mp4_core_camera": {
+      "name": "Cinemachine.CinemachineCore.UpdateVirtualCamera",
+      "rva": "0x5a11e4c",
+      "prefix16": "eb2bbb6de923016dfe1300f9f65703a9",
+      "module": "Cinemachine.dll",
+      "token_row": 709,
+      "return_type": "System.Void",
+      "parameters": [
+        {
+          "name": "vcam",
+          "type": "Cinemachine.CinemachineVirtualCameraBase",
+          "metadata_type_index": 51870
+        },
+        {
+          "name": "worldUp",
+          "type": "UnityEngine.Vector3",
+          "metadata_type_index": 77835
+        },
+        {
+          "name": "deltaTime",
+          "type": "System.Single",
+          "metadata_type_index": 72837
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
     }
   },
   "graphics_fields": [

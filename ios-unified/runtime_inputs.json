@@ -194,6 +194,8 @@
     "idoly_local.media_scenes",
     "idoly_local.media_settings",
     "idoly_local.media_stories",
+    "idoly_local.mp4_audio_broker",
+    "idoly_local.mp4_audio_bundle",
     "idoly_local.octo_cache",
     "idoly_local.octo_http",
     "idoly_local.octo_manifest",

@@ -33,7 +33,7 @@ def main():
     header=args.profile_header.resolve()
     if header.name!='ios_profile.hpp' or not header.is_file(): raise ValueError('Expected generated ios_profile.hpp')
     obj=output.with_suffix('.o')
-    sources=[here.parent/'native/bridge.cpp',*sorted((here.parent/'native').glob('*.hpp')),
+    sources=[here.parent/'native/bridge.cpp',*sorted((here.parent/'native').glob('*.hpp')), *sorted((here.parent/'native').glob('*.h')),
         *sorted(here.glob('*.hpp')),
         here/'libSystem.tbd',here/'libcxx.tbd',Path(__file__).resolve()]
     hashes={str(path.relative_to(here.parent.parent)):hashlib.sha256(path.read_bytes()).hexdigest() for path in sources}

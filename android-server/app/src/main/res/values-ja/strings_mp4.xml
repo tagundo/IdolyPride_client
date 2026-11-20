@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mp4_dismiss">閉じる</string>
+    <string name="mp4_geometry">%1$d × %2$d · %3$d fps</string>
+    <string name="mp4_preparing_audio_progress">音声を準備中 · %1$d/%2$d</string>
+    <string name="mp4_title">MVの書き出し</string>
+    <string name="mp4_hint">MV再生中にMV全体をMP4に書き出します。</string>
+    <string name="mp4_fps">フレームレート</string>
+    <string name="mp4_codec">動画コーデック</string>
+    <string name="mp4_bitrate">ビットレート</string>
+    <string name="mp4_start">MP4に書き出す</string>
+    <string name="mp4_cancel">中止</string>
+    <string name="mp4_save">動画を保存</string>
+    <string name="mp4_preparing_audio">楽曲を準備中</string>
+    <string name="mp4_rendering">動画を作成中 · %1$d/%2$d</string>
+    <string name="mp4_finishing">動画を仕上げています</string>
+    <string name="mp4_completed">書き出し完了</string>
+    <string name="mp4_cancelled">書き出しを中止しました。</string>
+    <string name="mp4_failed">書き出しに失敗しました: %1$s</string>
+    <string name="mp4_idle">書き出し待機中</string>
+    <string name="mp4_not_ready">先にMV再生画面を開いてください。</string>
+    <string name="mp4_unavailable">MP4の書き出しは利用できません。</string>
+    <string name="mp4_saved">動画を保存しました。</string>
+    <string name="mp4_save_failed">動画を保存できませんでした。</string>
+    <string name="mp4_export_filename">IdolyPride-MV-%1$s.mp4</string>
+    <string name="mp4_background_cancelled">アプリを離れたため、書き出しを中止しました。</string>
+    <string name="mp4_progress_title">MVの書き出し</string>
+</resources>

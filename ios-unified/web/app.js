@@ -503,6 +503,8 @@
     return typeof value === "string" && dictionary && Object.prototype.hasOwnProperty.call(dictionary, value) ? dictionary[value] : value;
   }
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+  Object.assign(UI_TRANSLATIONS.en, {"MV를 MP4로 내보내기":"Export MV as MP4","게임에서 3D MV를 연 뒤 이 메뉴를 여세요. 현재 렌더 크기로 프레임과 음원을 내보냅니다.":"Open a 3D MV in the game, then open this menu. Frames and soundtrack use the current render size.","3D MV 준비 대기":"Waiting for a 3D MV","MP4 프레임 수":"MP4 frame rate","영상 비트레이트":"Video bitrate","영상 코덱":"Video codec","MP4 진행률":"MP4 progress","MP4 내보내기":"Export MP4","MP4 저장·공유":"Save / Share MP4","취소":"Cancel","음원 준비 중":"Preparing soundtrack","MP4 렌더링":"Rendering MP4","MP4 마무리 중":"Finalizing MP4","MP4 완료":"MP4 complete","MP4 실패":"MP4 failed","게임에서 3D MV를 연 뒤 이 메뉴를 여세요.":"Open a 3D MV in the game, then open this menu.","현재 렌더 크기로 프레임과 음원을 내보냅니다.":"Frames and soundtrack use the current render size.","MP4 기능을 사용할 수 없습니다.":"MP4 export is unavailable.","3D MV 재생 화면에서 다시 시도해 주세요.":"Try again from a playing 3D MV.","다른 MP4 작업을 마친 뒤 다시 시도해 주세요.":"Finish the current MP4 job first."});
+  Object.assign(UI_TRANSLATIONS.ja, {"MV를 MP4로 내보내기":"MVをMP4に書き出す","게임에서 3D MV를 연 뒤 이 메뉴를 여세요. 현재 렌더 크기로 프레임과 음원을 내보냅니다.":"ゲームで3D MVを開いてから、このメニューを開いてください。現在の描画サイズでフレームと音源を書き出します。","3D MV 준비 대기":"3D MVの準備待ち","MP4 프레임 수":"MP4フレームレート","영상 비트레이트":"映像ビットレート","영상 코덱":"映像コーデック","MP4 진행률":"MP4進行状況","MP4 내보내기":"MP4を書き出す","MP4 저장·공유":"MP4を保存・共有","취소":"キャンセル","음원 준비 중":"音源を準備中","MP4 렌더링":"MP4レンダリング","MP4 마무리 중":"MP4を仕上げ中","MP4 완료":"MP4完了","MP4 실패":"MP4に失敗","게임에서 3D MV를 연 뒤 이 메뉴를 여세요.":"ゲームで3D MVを開いてから、このメニューを開いてください。","현재 렌더 크기로 프레임과 음원을 내보냅니다.":"現在の描画サイズでフレームと音源を書き出します。","MP4 기능을 사용할 수 없습니다.":"MP4書き出しを利用できません。","3D MV 재생 화면에서 다시 시도해 주세요.":"3D MVの再生画面で再試行してください。","다른 MP4 작업을 마친 뒤 다시 시도해 주세요.":"現在のMP4処理が完了してから再試行してください。"});
   Object.assign(UI_TRANSLATIONS.en, {"콘솔": "Console", "유저 관리": "User management", "콘텐츠": "Content", "그래픽": "Graphics", "설정 분류": "Settings categories", "서버 메뉴 안내": "Using the server menu", "서버 연결·자료 검사·진단": "Connections, data checks and diagnostics", "모두 활성화": "Enable all", "모두 비활성화": "Disable all", "모시코이 여러 이벤트 선택": "Select multiple Moshikoi events", "이벤트별 기간 조정": "Adjust individual event windows", "설정할 계정 종류": "Account mode to configure", "여러 이벤트를 한 번에 선택할 수 있습니다. 끄더라도 저장된 진행은 유지됩니다.": "Select several events at once. Disabling keeps saved progress.", "감상 계정은 처음에 지원되는 모시코이를 모두 활성화합니다. 원하는 이벤트만 남기거나 모두 끌 수 있습니다.": "Viewing accounts start with every supported Moshikoi event enabled. Keep only the events you want, or disable all.", "최신 설정에 선택한 변경을 합쳐 저장합니다.": "Merging your changes into the latest settings."});
   Object.assign(UI_TRANSLATIONS.ja, {"콘솔": "コンソール", "유저 관리": "ユーザー管理", "콘텐츠": "コンテンツ", "그래픽": "グラフィック", "설정 분류": "設定カテゴリ", "서버 메뉴 안내": "サーバーメニューの使い方", "서버 연결·자료 검사·진단": "接続・データ検査・診断", "모두 활성화": "すべて有効", "모두 비활성화": "すべて無効", "모시코이 여러 이벤트 선택": "もし恋イベントの複数選択", "이벤트별 기간 조정": "イベント別の期間設定", "설정할 계정 종류": "設定するアカウント種別", "여러 이벤트를 한 번에 선택할 수 있습니다. 끄더라도 저장된 진행은 유지됩니다.": "複数のイベントを一度に選べます。無効にしても保存済みの進行は保持します。", "감상 계정은 처음에 지원되는 모시코이를 모두 활성화합니다. 원하는 이벤트만 남기거나 모두 끌 수 있습니다.": "鑑賞アカウントは最初から対応するもし恋をすべて有効にします。必要なイベントのみ残したり、すべて無効にしたりできます。", "최신 설정에 선택한 변경을 합쳐 저장합니다.": "最新の設定に選択した変更を反映して保存します。"});
   Object.assign(UI_TRANSLATIONS.en, {"도움말": "Help", "감상 계정은 처음에 모든 이벤트가 켜집니다.": "Viewing accounts start with all events enabled.", "끄더라도 진행은 유지됩니다.": "Disabling keeps saved progress.", "일본 공식 계정 가져오기는 현재 작동하지 않습니다.": "Japanese official account import is currently unavailable.", "검사 후 가져오기를 눌러야 계정이 바뀝니다.": "The account changes only after you choose Import.", "현재 적용: ": "Active: ", "현재 적용: 대기": "Active: waiting", "다음 실행: ": "Next start: ", "다음 실행: 대기": "Next start: waiting"});
@@ -562,6 +564,9 @@
   }
 
   function validRequest(action, payload) {
+    if (["mp4_status","mp4_cancel","mp4_save"].includes(action)) return exact(payload, []);
+    if (action === "mp4_start") return exact(payload,["fps","video_bitrate","video_codec"])
+      && choice(payload.fps,[30,60]) && choice(payload.video_bitrate,[8000000,16000000,32000000]) && choice(payload.video_codec,[1,2]);
     if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
     if (action === "events_status") return exact(payload, []) || (exact(payload, ["mode"]) && choice(payload.mode, ["normal", "media"]));
     if (action === "events_save") return (exact(payload, ["settings", "expected_revision"]) || (exact(payload, ["settings", "expected_revision", "mode"]) && choice(payload.mode, ["normal", "media"]))) && validEvents(payload.settings, payload.mode === "media")
@@ -766,9 +771,10 @@
       renderAccountPreview(); accountFeedback(accountFeedbackSource,accountFeedbackDetail);
       if (snapshot) renderServerChecks(snapshot.runtime);
       renderOfficial(); renderEvents(false);
+      renderMP4();
     }
     const categoryNames = ["console","server","users","content","graphics"];
-    const panelDefaults = {diagnostics:false,options:true,accounts:false,official:false,events:false,graphics:true,playback:true,media:true,resources:false};
+    const panelDefaults = {diagnostics:false,options:true,accounts:false,official:false,events:false,graphics:true,playback:true,media:true,resources:false,mp4:true};
     const layoutKey = "idoly.settings.layout.v1";
     let selectedCategory = "console";
     function setAttribute(node,name,value) { if (typeof node.setAttribute === "function") node.setAttribute(name,String(value)); else node[name] = String(value); }
@@ -788,6 +794,7 @@
       }
       if (focus && typeof el("category-"+key).focus === "function") el("category-"+key).focus();
       saveLayout();
+      if (key === "graphics") Promise.resolve().then(() => mp4("status"));
     }
     function initializeLayout() {
       let stored = null;
@@ -827,6 +834,7 @@
       events: {fields: [], valid: value => validEvents(value, eventMode === "media"), available: false, draft: null, intents: new Map(), intentVersions: new Map(), intentSequence: 0, rebaseAttempts: 0, rebaseNeeded: false}
     };
     let snapshot = null;
+    let mp4Status = {phase:"idle",ready:false}, mp4Pending = false, mp4Feedback = "";
     let visible = document.visibilityState !== "hidden";
     let disposed = false;
     let pollTimer = null;
@@ -849,6 +857,43 @@
     const logs = [];
     let messageSource = "";
     let eventSnapshot = null, eventRows = [], eventCatalogKey = "";
+
+    function renderMP4() {
+      const phase = mp4Status.phase, active = ["preparing_audio","rendering","finishing","cancelling"].includes(phase);
+      const label = {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패"}[phase] || "3D MV 준비 대기";
+      const frames = count(mp4Status.frames), total = count(mp4Status.total_frames);
+      const geometry = integer(mp4Status.width) && integer(mp4Status.height) && mp4Status.width && mp4Status.height ? " · "+mp4Status.width+" × "+mp4Status.height : "";
+      text("mp4-summary",t(label)+(total ? " · "+frames+" / "+total : "")+geometry,false);
+      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : phase === "failed" ? plain(mp4Status.error_code,128) : "",false);
+      el("mp4-progress").hidden = !active && phase !== "completed";
+      el("mp4-progress").value = total ? Math.min(1,frames/total) : 0;
+      el("mp4-fields").disabled = mp4Pending || active;
+      el("mp4-start").disabled = mp4Pending || active || mp4Status.ready !== true || launchFlushing;
+      el("mp4-cancel").disabled = mp4Pending || !active || phase === "cancelling";
+      el("mp4-save").hidden = phase !== "completed";
+      el("mp4-save").disabled = mp4Pending;
+    }
+    async function mp4(action) {
+      if (!visible || disposed || mp4Pending || launchFlushing) return;
+      if (action === "status" && (selectedCategory !== "graphics" || !el("panel-mp4").open)) return;
+      const payload = action === "start" ? {fps:Number(el("mp4-fps").value),video_bitrate:Number(el("mp4-bitrate").value),video_codec:Number(el("mp4-codec").value)} : {};
+      if (!validRequest("mp4_"+action,payload)) return;
+      mp4Pending = true; renderMP4(); const visibility = visibilityVersion;
+      try {
+        const result = await bridge.request("mp4_"+action,payload);
+        if (!visible || disposed || visibility !== visibilityVersion) return;
+        if (action !== "save") {
+          if (!object(result) || !["idle","preparing_audio","rendering","finishing","completed","cancelling","cancelled","failed"].includes(result.phase)) throw new Error("mp4_unavailable");
+          mp4Status = result;
+        }
+        mp4Feedback = "";
+      } catch (error) {
+        if (visible && !disposed && visibility === visibilityVersion && action !== "status")
+          mp4Feedback = error.code === "mp4_scene_not_ready" ? "3D MV 재생 화면에서 다시 시도해 주세요." : error.code === "mp4_busy" ? "다른 MP4 작업을 마친 뒤 다시 시도해 주세요." : "MP4 기능을 사용할 수 없습니다.";
+      } finally {
+        mp4Pending = false; if (!disposed) renderMP4();
+      }
+    }
 
     function eventLocalTime(milliseconds) {
       const date = new Date(milliseconds);
@@ -1596,6 +1641,7 @@
       } finally {
         refreshing = false;
         if (!disposed) el("refresh").disabled = false;
+        if (visible && !disposed) mp4("status");
         schedulePoll();
       }
     }
@@ -1872,6 +1918,8 @@
     }
     initializeLayout();
     applyInterfaceLanguage(interfaceChoice);
+    for (const action of ["start","cancel","save"]) el("mp4-"+action).addEventListener("click",() => mp4(action));
+    el("panel-mp4").addEventListener("toggle",() => mp4("status"));
     updateCopyButton();
     el("diagnostics-copy").addEventListener("click", copyDiagnostics);
     el("diagnostics-clear").addEventListener("click", clearDiagnostics);

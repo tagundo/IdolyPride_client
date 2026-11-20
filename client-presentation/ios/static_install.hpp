@@ -138,7 +138,12 @@ void *install(void *) {
         HOOK(shared_file_path,shared_file_path_hook,shared_file_path_original),
         HOOK(shared_pre_download,shared_pre_download_hook,shared_pre_download_original),
         HOOK(shared_downloader_update,shared_downloader_update_hook,shared_downloader_update_original),
-
+        HOOK(mp4_presenter_update,mp4_presenter_update_hook,mp4_presenter_update_original),
+        HOOK(mp4_capture_pass,mp4_capture_pass_hook,mp4_capture_pass_original),
+        HOOK(mp4_end_camera,mp4_end_camera_hook,mp4_end_camera_original),
+        HOOK(mp4_graph_mode,mp4_graph_mode_hook,mp4_graph_mode_original),
+        HOOK(mp4_brain_delta,mp4_brain_delta_hook,mp4_brain_delta_original),
+        HOOK(mp4_core_camera,mp4_core_camera_hook,mp4_core_camera_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {

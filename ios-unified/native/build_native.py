@@ -97,14 +97,16 @@ def main():
     output = args.output.absolute()
     if output.name != 'IdolyEmbeddedServer.framework' or output.exists():
         raise ValueError('Fresh IdolyEmbeddedServer.framework output required')
-    sources = [here/name for name in ('IdolyEmbeddedServer.m','IdolySettings.m','IdolyHTTP.m','IdolyMacMenu.m','IdolyClientData.m','IdolyKeyboardLifecycle.m','IdolyLocalHTTP.m','IdolyOctoBudget.m','IdolyUnityHost.m')]
-    inputs = sources + sorted(here.glob('*.h')) + [Path(__file__).resolve()]
+    sources = [here/name for name in ('IdolyEmbeddedServer.m','IdolySettings.m','IdolyHTTP.m','IdolyMacMenu.m','IdolyClientData.m','IdolyKeyboardLifecycle.m','IdolyLocalHTTP.m','IdolyOctoBudget.m','IdolyUnityHost.m','IdolyMVEncoder.mm','IdolyMP4UI.m')]
+    inputs = sources + sorted(here.glob('*.h')) + [here/'../../client-presentation/native/mp4_encoder_api.h', Path(__file__).resolve()]
     pins = {str(p.relative_to(here)):sha(p) for p in inputs}
     command = [compiler,'-target',args.arch+'-apple-ios13.0'+('-simulator' if args.smoke_simulator else ''),
         '-isysroot',sdk,'-dynamiclib','-fobjc-arc','-fblocks','-fvisibility=hidden','-O2',
         '-Wall','-Wextra','-Werror','-Wno-deprecated-declarations','-Wno-missing-field-initializers',
         '-I',str(python/'Headers'),'-F',str(python.parent),'-framework','Python',
         '-framework','Foundation','-framework','UIKit','-framework','WebKit',
+        '-framework','AVFoundation','-framework','AudioToolbox','-framework','CoreMedia',
+        '-framework','CoreVideo','-framework','VideoToolbox','-lc++',
         '-Wl,-install_name,@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer',
         '-Wl,-headerpad_max_install_names']
     if args.presentation_library:

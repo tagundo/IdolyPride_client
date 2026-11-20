@@ -259,6 +259,24 @@
       </details>
     </section>
 
+    <section class="wide" aria-labelledby="mp4-heading">
+      <details id="panel-mp4" class="card-panel" open>
+        <summary class="panel-summary"><h2 id="mp4-heading">MV를 MP4로 내보내기</h2></summary>
+        <div class="panel-body">
+          <p class="hint">게임에서 3D MV를 연 뒤 이 메뉴를 여세요.</p>
+          <p id="mp4-summary" role="status" aria-live="polite">3D MV 준비 대기</p>
+          <fieldset id="mp4-fields">
+            <label class="row"><span>MP4 프레임 수</span><select id="mp4-fps"><option value="30">30 fps</option><option value="60" selected>60 fps</option></select></label>
+            <label class="row"><span>영상 비트레이트</span><select id="mp4-bitrate"><option value="8000000">8 Mbps</option><option value="16000000" selected>16 Mbps</option><option value="32000000">32 Mbps</option></select></label>
+            <label class="row"><span>영상 코덱</span><select id="mp4-codec"><option value="1">H.264</option><option value="2">HEVC</option></select></label>
+          </fieldset>
+          <progress id="mp4-progress" max="1" value="0" aria-label="MP4 진행률" hidden></progress>
+          <p id="mp4-feedback" class="hint" role="status" aria-live="polite"></p>
+          <div class="actions"><button id="mp4-start" type="button" disabled>MP4 내보내기</button><button id="mp4-cancel" type="button" class="secondary" disabled>취소</button><button id="mp4-save" type="button" class="secondary" hidden>MP4 저장·공유</button></div>
+          <details id="help-mp4" class="help-details"><summary>도움말</summary><p class="hint">현재 렌더 크기로 프레임과 음원을 내보냅니다.</p></details>
+        </div>
+      </details>
+    </section>
     <section aria-labelledby="playback-heading">
       <details id="panel-playback" class="card-panel" open>
         <summary class="panel-summary"><h2 id="playback-heading">MV 재생</h2></summary>

@@ -176,7 +176,7 @@ assert.ok(!html.includes('type="password"'));
 // names, preview data and credentials must never enter that storage.
 const layoutEnv=environment(),writes=[];
 const categories=['console','server','users','content','graphics'];
-const panelKeys=['diagnostics','options','accounts','official','events','graphics','playback','media','resources'];
+const panelKeys=['diagnostics','options','accounts','official','events','graphics','playback','media','resources','mp4'];
 layoutEnv.scope.localStorage={getItem:()=>null,setItem:(key,raw)=>{
   assert.equal(key,'idoly.settings.layout.v1');const value=JSON.parse(raw);
   assert.deepEqual(Object.keys(value).sort(),['category','panels','schema']);assert.equal(value.schema,1);

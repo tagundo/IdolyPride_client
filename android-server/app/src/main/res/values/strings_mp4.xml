@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="mp4_dismiss">닫기</string>
+    <string name="mp4_geometry">%1$d × %2$d · %3$d fps</string>
+    <string name="mp4_preparing_audio_progress">오디오 준비 중 · %1$d/%2$d</string>
+    <string name="mp4_title">MV 내보내기</string>
+    <string name="mp4_hint">MV 재생 중에 전체 MV를 MP4로 내보냅니다.</string>
+    <string name="mp4_fps">프레임률</string>
+    <string name="mp4_codec">영상 코덱</string>
+    <string name="mp4_bitrate">비트레이트</string>
+    <string name="mp4_start">MP4 내보내기</string>
+    <string name="mp4_cancel">취소</string>
+    <string name="mp4_save">영상 저장</string>
+    <string name="mp4_preparing_audio">음악 준비 중</string>
+    <string name="mp4_rendering">영상 만드는 중 · %1$d/%2$d</string>
+    <string name="mp4_finishing">영상 마무리 중</string>
+    <string name="mp4_completed">내보내기 완료</string>
+    <string name="mp4_cancelled">내보내기를 취소했습니다.</string>
+    <string name="mp4_failed">내보내기 실패: %1$s</string>
+    <string name="mp4_idle">내보내기 대기</string>
+    <string name="mp4_not_ready">MV 재생 화면을 먼저 여세요.</string>
+    <string name="mp4_unavailable">MP4 내보내기를 사용할 수 없습니다.</string>
+    <string name="mp4_saved">영상을 저장했습니다.</string>
+    <string name="mp4_save_failed">영상을 저장하지 못했습니다.</string>
+    <string name="mp4_export_filename">IdolyPride-MV-%1$s.mp4</string>
+    <string name="mp4_background_cancelled">앱 화면을 벗어나 내보내기를 취소했습니다.</string>
+    <string name="mp4_progress_title">MV 내보내기</string>
+</resources>

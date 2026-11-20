@@ -140,6 +140,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private Spinner maxBufferPixel;
     private Spinner antiAliasing;
     private Spinner shadowResolution;
+    private Spinner mp4Fps, mp4Codec, mp4Bitrate;
+    private TextView mp4Status;
+    private Button mp4Start, mp4Cancel, mp4Save;
+    private final Runnable mp4Refresh = this::refreshMp4;
     private TextView presentationStatus;
     private boolean presentationLoading;
     private boolean presentationSaveFailed;
@@ -389,6 +393,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         UnifiedRuntime.installResources(this);
+        UnifiedMP4Export.restoreState(this, savedInstanceState);
         if (savedInstanceState != null) {
             pendingResourcePlatform = savedInstanceState.getString("resource_platform");
             retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
@@ -504,6 +509,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
         LinearLayout graphicsCard = panel(categoryParent("graphics"), R.string.graphics_panel_title, "graphics", true);
         addPresentationControls(graphicsCard);
+        if (UnifiedRuntime.isEnabled(this)) addMp4Controls(graphicsCard);
         LinearLayout playbackCard = panel(categoryParent("graphics"), R.string.playback_section_title, "playback", true);
         addPlaybackControls(playbackCard);
 
@@ -2014,6 +2020,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private JSONObject resourceLibraryRuntime;
 
     @Override protected void onSaveInstanceState(Bundle state) {
+        UnifiedMP4Export.saveState(state);
         state.putString("settings_category", selectedCategory);
         state.putInt("settings_scroll_y_dp", settingsScroll == null ? 0
                 : Math.round(settingsScroll.getScrollY() / getResources().getDisplayMetrics().density));
@@ -2241,6 +2248,47 @@ public final class MainActivity extends Activity implements ServerService.Observ
         updatePresentationStatus();
     }
 
+    private void addMp4Controls(LinearLayout body) {
+        TextView title = text(R.string.mp4_title, 17, TEXT_PRIMARY); title.setPadding(0, dp(20), 0, dp(6)); body.addView(title);
+        body.addView(text(R.string.mp4_hint, 13, TEXT_MUTED));
+        mp4Fps = mp4Spinner(body, R.string.mp4_fps, new String[] {"30", "60"});
+        mp4Codec = mp4Spinner(body, R.string.mp4_codec, new String[] {"H.264", "HEVC"});
+        mp4Bitrate = mp4Spinner(body, R.string.mp4_bitrate, new String[] {"8 Mbps", "16 Mbps", "32 Mbps"});
+        mp4Bitrate.setSelection(1);
+        mp4Status = text(R.string.mp4_idle, 13, TEXT_MUTED); mp4Status.setPadding(0, dp(8), 0, dp(8)); body.addView(mp4Status);
+        mp4Start = button(R.string.mp4_start); body.addView(mp4Start);
+        mp4Cancel = button(R.string.mp4_cancel); body.addView(mp4Cancel);
+        mp4Save = button(R.string.mp4_save); body.addView(mp4Save);
+        mp4Start.setOnClickListener(view -> {
+            int fps = mp4Fps.getSelectedItemPosition() == 0 ? 30 : 60;
+            int codec = mp4Codec.getSelectedItemPosition() + 1;
+            int[] rates = {8_000_000, 16_000_000, 32_000_000};
+            if (!UnifiedMP4Export.requestStart(this, fps, codec, rates[mp4Bitrate.getSelectedItemPosition()]))
+                Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
+            refreshMp4();
+        });
+        mp4Cancel.setOnClickListener(view -> UnifiedMP4Export.cancel());
+        mp4Save.setOnClickListener(view -> UnifiedMP4Export.requestSave(this));
+        refreshMp4();
+    }
+
+    private Spinner mp4Spinner(LinearLayout body, int label, String[] choices) {
+        TextView caption = text(label, 13, TEXT_MUTED); caption.setPadding(0, dp(8), 0, 0); body.addView(caption);
+        Spinner control = new Spinner(this); control.setMinimumHeight(dp(48));
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, choices);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item); control.setAdapter(adapter);
+        body.addView(control, new LinearLayout.LayoutParams(-1, -2)); return control;
+    }
+
+    private void refreshMp4() {
+        if (mp4Status == null) return;
+        mp4Status.setText(UnifiedMP4Export.statusText(this));
+        boolean busy = UnifiedMP4Export.busy(); mp4Start.setEnabled(UnifiedMP4Export.ready());
+        mp4Cancel.setVisibility(busy ? View.VISIBLE : View.GONE);
+        mp4Save.setVisibility(UnifiedMP4Export.canSave() ? View.VISIBLE : View.GONE);
+        for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate}) option.setEnabled(!busy);
+    }
+
     private Spinner presentationSpinner(LinearLayout parent, int labelResource, int optionsResource) {
         TextView label = text(labelResource, 13, TEXT_MUTED);
         label.setPadding(0, dp(6), 0, 0);
@@ -2437,6 +2485,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (UnifiedMP4Export.activityResult(this, requestCode, resultCode, data)) return;
         if (requestCode == EXPORT_ACCOUNT || requestCode == IMPORT_ACCOUNT) {
             pendingAccountPicker = 0;
             if (resultCode != RESULT_OK || data == null || data.getData() == null) {
@@ -2470,6 +2519,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         super.onStart();
         presentationObserved = true;
         ServerService.observe(this);
+        if (mp4Status != null) UnifiedMP4Export.observe(mp4Refresh);
         playbackStatus.removeCallbacks(playbackRefresh);
         playbackStatus.post(playbackRefresh);
         officialStatus.removeCallbacks(officialRefresh); officialStatus.post(officialRefresh);
@@ -2497,6 +2547,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         updateRenderingStatus();
         updatePresentationStatus();
         ServerService.removeObserver(this);
+        UnifiedMP4Export.removeObserver(mp4Refresh);
         super.onStop();
     }
 
