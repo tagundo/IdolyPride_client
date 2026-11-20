@@ -78,7 +78,7 @@ def test_fold_resize_preserves_all_unity_handlers_and_unrelated_sdk_policy():
     app = before.find("application")
     original = app.find("activity")
     original_changes = ("mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|"
-                        "screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|fontScale")
+                        "screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|fontScale|colorMode")
     original.set(A + "configChanges", original_changes)
     original.set(A + "minAspectRatio", "1.4")
     app.set(A + "maxAspectRatio", "2.33334")

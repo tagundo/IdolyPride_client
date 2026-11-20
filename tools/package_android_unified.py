@@ -66,7 +66,7 @@ MAX_EXPANDED = 1536 * MIB
 JAVA_FLAGS = ("-Xmx512m", "-XX:MaxMetaspaceSize=256m", "-XX:ReservedCodeCacheSize=64m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
 ET.register_namespace("android", ANDROID[1:-1])
-WINDOW_CONFIG_CHANGES = ("orientation", "screenLayout", "screenSize", "smallestScreenSize", "density")
+WINDOW_CONFIG_CHANGES = ("orientation", "screenLayout", "screenSize", "smallestScreenSize", "density", "colorMode")
 
 
 def allow_window_resizing(node):

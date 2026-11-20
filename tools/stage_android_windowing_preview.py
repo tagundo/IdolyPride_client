@@ -25,7 +25,7 @@ REPORT = APK.removesuffix(".apk") + ".provenance.json"
 SUMS = "SHA256SUMS"
 MIB = 1024 * 1024
 CERTIFICATE = "aa4e9346ff9e542b263b70254df3e25b79211df16161208a3b509c4f113facfc"
-REQUIRED_CHANGES = {"orientation", "screenLayout", "screenSize", "smallestScreenSize", "density"}
+REQUIRED_CHANGES = {"orientation", "screenLayout", "screenSize", "smallestScreenSize", "density", "colorMode"}
 REQUIRED_SOURCES = {
     "android-server/app/src/main/AndroidManifest.xml",
     "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",

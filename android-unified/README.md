@@ -35,7 +35,7 @@ reorders the menu forward without clearing the game activity.
 
 Both the application and game activity opt into Android multi-window resizing.
 The game keeps every original Unity configuration handler, including screen size,
-smallest size, screen layout, orientation and density for foldable cover/inner
+smallest size, screen layout, orientation, density and color mode for foldable cover/inner
 display transitions. Original aspect-ratio caps are removed. Unity's original
 SurfaceView and multi-window pause/resume logic remain responsible for rendering;
 the wrapper forwards configuration/display changes and cancels stale corner holds.
