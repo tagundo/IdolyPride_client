@@ -1,0 +1,56 @@
+name: Audit pinned game resource cache metadata
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - tools/audit_game_resource_cache.py
+      - tests/test_game_resource_cache_audit.py
+      - .github/workflows/audit-game-resource-cache.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-game-resource-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  static-original-cache-audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          lfs: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - name: Install exact locked audit and fixture dependencies
+        run: uv sync --locked --extra extract --group dev --python 3.12
+      - name: Verify metadata selectors and fail-closed source and native boundaries
+        run: uv run --locked --extra extract python -B -m pytest -q -p no:cacheprovider tests/test_game_resource_cache_audit.py
+      - name: Read original SHA-pinned Android and iOS SDK metadata without executing game code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          uv run --locked --extra extract python -B tools/audit_game_resource_cache.py
+          --source-commit "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID"
+          --work "$RUNNER_TEMP/idoly-static-cache-audit-work"
+          --output "$RUNNER_TEMP/idoly-static-cache-audit-proof"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: static-game-resource-cache-audit-${{ github.sha }}
+          path: ${{ runner.temp }}/idoly-static-cache-audit-proof
+          if-no-files-found: warn
+          retention-days: 14

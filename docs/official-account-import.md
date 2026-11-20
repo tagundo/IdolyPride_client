@@ -1,5 +1,7 @@
 # Official Japanese account import: protocol evidence and client contract
 
+**Current status (2026-11-20): Japanese official account import is not working.** The app marks it as currently unavailable. The protocol and synthetic tests below do not establish a successful official-account transfer. Local account ZIP import is a separate feature.
+
 This feature uses the Japanese game's transfer ID and transfer password. They are not a Google/Apple password or a Firebase email/password login. The core client performs no local account/database mutation and never creates or recreates a game account.
 
 ## Evidence and remaining uncertainty
