@@ -22,10 +22,11 @@ def manifest():
         android:versionCode="414" android:versionName="6.1.1">
         <uses-sdk android:minSdkVersion="28" android:targetSdkVersion="36"/>
         <application android:icon="@mipmap/app_icon" android:networkSecurityConfig="@xml/network_security_config"
-            android:appComponentFactory="androidx.core.app.CoreComponentFactory">
+            android:appComponentFactory="androidx.core.app.CoreComponentFactory" android:resizeableActivity="false">
+          <meta-data android:name="android.max_aspect" android:value="2.33334"/>
           <activity android:name="{unified.ORIGINAL_ACTIVITY}" android:theme="@style/UnityThemeSelector"
               android:exported="true" android:launchMode="singleTask" android:screenOrientation="fullUser"
-              android:configChanges="orientation|screenSize" android:maxAspectRatio="2.33334">
+              android:configChanges="orientation|screenSize" android:maxAspectRatio="2.33334" android:resizeableActivity="false">
             <intent-filter><action android:name="android.intent.action.MAIN"/>
               <category android:name="android.intent.category.LAUNCHER"/></intent-filter>
             <intent-filter><action android:name="android.intent.action.VIEW"/>
@@ -50,8 +51,13 @@ def test_only_server_is_launcher_and_unity_alias_keeps_deep_links():
     game = activities[unified.GAME_ACTIVITY]
     original = before.find("application/activity")
     for name, value in original.attrib.items():
-        if name not in (A + "name", A + "exported"):
+        if name not in (A + "name", A + "exported", A + "resizeableActivity", A + "configChanges", A + "maxAspectRatio"):
             assert game.get(name) == value
+    assert game.get(A + "resizeableActivity") == app.get(A + "resizeableActivity") == "true"
+    assert not game.get(A + "maxAspectRatio")
+    assert set(original.get(A + "configChanges").split("|")) <= set(game.get(A + "configChanges").split("|"))
+    assert set(unified.WINDOW_CONFIG_CHANGES) <= set(game.get(A + "configChanges").split("|"))
+    assert not any(n.get(A + "name") == "android.max_aspect" for n in app.findall("meta-data"))
     assert game.find("meta-data").attrib == original.find("meta-data").attrib
     assert not game.findall("intent-filter")
     alias = app.find("activity-alias")
@@ -65,6 +71,30 @@ def test_only_server_is_launcher_and_unity_alias_keeps_deep_links():
     assert app.get(A + "extractNativeLibs") == "true"
     assert app.get(A + "appComponentFactory") == unified.COMPONENT_FACTORY
     assert not app.get(A + "name")
+
+
+def test_fold_resize_preserves_all_unity_handlers_and_unrelated_sdk_policy():
+    before = ET.fromstring(manifest())
+    app = before.find("application")
+    original = app.find("activity")
+    original_changes = ("mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|"
+                        "screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|fontScale")
+    original.set(A + "configChanges", original_changes)
+    original.set(A + "minAspectRatio", "1.4")
+    app.set(A + "maxAspectRatio", "2.33334")
+    sdk = ET.SubElement(app, "activity", {A + "name": "sdk.ExternalActivity", A + "resizeableActivity": "false",
+                                        A + "configChanges": "orientation|screenSize", A + "screenOrientation": "portrait"})
+    after = ET.fromstring(unified.transform_manifest(ET.tostring(before))).find("application")
+    game = next(n for n in after.findall("activity") if n.get(A + "name") == unified.GAME_ACTIVITY)
+    menu = next(n for n in after.findall("activity") if n.get(A + "name") == unified.MENU_ACTIVITY)
+    assert game.get(A + "configChanges") == original_changes
+    assert game.get(A + "screenOrientation") == "fullUser"
+    assert not game.get(A + "minAspectRatio") and not after.get(A + "maxAspectRatio")
+    assert menu.get(A + "resizeableActivity") == "true"
+    # Native menu recreation recalculates its columns and restores state; the
+    # original Unity instance receives its configuration through its superclass.
+    assert menu.get(A + "configChanges") is None
+    assert next(n for n in after.findall("activity") if n.get(A + "name") == "sdk.ExternalActivity").attrib == sdk.attrib
 
 
 @pytest.mark.parametrize("mutation", [
@@ -272,6 +302,8 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
     if not javac or not java:
         pytest.skip("JDK required for actual gesture fixture")
     sources = {
+        "android/content/res/Configuration.java": "package android.content.res; public class Configuration {}",
+        "android/view/Display.java": "package android.view; public class Display {public static final int INVALID_DISPLAY=-1;public int getDisplayId(){return 0;}}",
         "android/os/Bundle.java": "package android.os; public class Bundle {}",
         "android/os/Looper.java": "package android.os; public class Looper { public static Looper getMainLooper(){return null;} }",
         "android/os/SystemClock.java": "package android.os; public class SystemClock { public static long now; public static long uptimeMillis(){return now;} }",
@@ -292,7 +324,11 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
           public static final int FLAG_ACTIVITY_CLEAR_TOP=1,FLAG_ACTIVITY_SINGLE_TOP=2,FLAG_ACTIVITY_REORDER_TO_FRONT=4;
           public int flags;public Class<?> target;public Intent(Context c,Class<?> t){target=t;}
           public Intent addFlags(int f){flags|=f;return this;} }''',
-        "android/view/View.java": "package android.view; public class View { public int getWidth(){return 1000;}public int getHeight(){return 800;} }",
+        "android/view/View.java": '''package android.view; public class View {
+          public interface OnLayoutChangeListener { void onLayoutChange(View v,int l,int t,int r,int b,int ol,int ot,int or,int ob); }
+          public void addOnLayoutChangeListener(OnLayoutChangeListener l){}public void removeOnLayoutChangeListener(OnLayoutChangeListener l){}
+          public Display getDisplay(){return new Display();}
+          public int getWidth(){return 1000;}public int getHeight(){return 800;} }''',
         "android/view/Window.java": "package android.view; public class Window { public View getDecorView(){return new View();} }",
         "android/view/ViewConfiguration.java": '''package android.view; public class ViewConfiguration {
           public static ViewConfiguration get(android.content.Context c){return new ViewConfiguration();}
@@ -309,6 +345,10 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
         "android/app/Activity.java": '''package android.app; public class Activity extends android.content.Context {
           public int dispatches,lastAction,pauses,destroys,starts;public android.content.Intent started;
           protected void onCreate(android.os.Bundle b){}protected void onPause(){pauses++;}protected void onDestroy(){destroys++;}
+          protected void onResume(){}public boolean isInMultiWindowMode(){return false;}
+          public void onConfigurationChanged(android.content.res.Configuration c){}
+          public void onMultiWindowModeChanged(boolean m,android.content.res.Configuration c){}
+          public void onWindowFocusChanged(boolean focused){}
           public boolean dispatchTouchEvent(android.view.MotionEvent e){dispatches++;lastAction=e.getActionMasked();return false;}
           public String getPackageCodePath(){return "installed.apk";}public android.content.Intent getIntent(){return null;}
           public android.view.Window getWindow(){return new android.view.Window();}
@@ -325,6 +365,8 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
         static void installResources(android.content.Context c){}static String expectedLanguage(android.content.Intent i){return "ko";} }'''
     sources[package + "UnifiedGameAssets.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedGameAssets {static String freeze(android.content.Context c,String l)throws java.io.IOException{return "data.zip";} }'''
+    sources[package + "UnifiedWindowing.java"] = '''package game.qualiarts.idolypride.localserver;
+      final class UnifiedWindowing {static void update(boolean mode){} }'''
     sources[package + "MainActivity.java"] = "package game.qualiarts.idolypride.localserver; public class MainActivity extends android.app.Activity {}"
     sources[package + "GestureFixture.java"] = '''package game.qualiarts.idolypride.localserver;
       import android.os.Handler;import android.os.SystemClock;import android.view.MotionEvent;import android.content.Intent;

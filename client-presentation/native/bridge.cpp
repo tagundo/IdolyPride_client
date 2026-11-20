@@ -67,6 +67,9 @@ bool desktop_host = false;
 std::atomic<uintptr_t> game_thread_id{0};
 pthread_mutex_t playback_mutex = PTHREAD_MUTEX_INITIALIZER;
 PlaybackSettings playback_settings;
+#ifndef IDOLY_DARWIN_BRIDGE
+std::atomic<bool> android_multi_window{false};
+#endif
 pthread_mutex_t media_mutex = PTHREAD_MUTEX_INITIALIZER;
 MediaPolicySettings media_settings;
 bool accept_media_configuration(int schema,int64_t revision,bool use_master_order) {
@@ -86,7 +89,14 @@ bool accept_playback_configuration(int schema,int64_t revision,bool wait) {
 bool playback_wait_for_orientation() {
     pthread_mutex_lock(&playback_mutex);
     const bool wait=playback_settings.wait();
-    pthread_mutex_unlock(&playback_mutex);return wait;
+    pthread_mutex_unlock(&playback_mutex);
+#ifndef IDOLY_DARWIN_BRIDGE
+    // Android keeps a split/freeform window's shape when the game requests a
+    // physical turn. Use the existing bypass without changing the preference.
+    return wait && !android_multi_window.load(std::memory_order_acquire);
+#else
+    return wait;
+#endif
 }
 bool orientation_available() { return ready.load(std::memory_order_acquire); }
 void playback_status_json(char *output,size_t size) {
@@ -900,6 +910,11 @@ void acknowledge_resolution(void *controller, const ResolutionAttempt &attempt) 
 }
 void rebuild(void *controller) {
     // Only entered by game callbacks. Keep capture/explicit-size calls out.
+#ifndef IDOLY_DARWIN_BRIDGE
+    // Surface replacement while folding or resizing can briefly report no
+    // drawable window. Keep the current target until a valid frame retries.
+    if (!screen_width || !screen_height || screen_width(nullptr)<=0 || screen_height(nullptr)<=0) return;
+#endif
     ResolutionAttempt attempt;
     ScopedValue<void *> scope(resolution_scope, controller);
     ScopedValue<ResolutionAttempt *> attempt_scope(resolution_attempt, &attempt);
@@ -1849,6 +1864,10 @@ extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_localserver
 }
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedSharedResources_status(JNIEnv *env,jclass) {
     char json[768];shared_status_json(json,sizeof json);return env->NewStringUTF(json);
+}
+extern "C" JNIEXPORT void JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedWindowing_setMultiWindow(
+        JNIEnv *,jclass,jboolean enabled) {
+    android_multi_window.store(enabled!=0,std::memory_order_release);
 }
 
 #else

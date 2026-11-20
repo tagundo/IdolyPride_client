@@ -33,6 +33,20 @@ quarter of each window dimension. Movement, another pointer, cancellation or
 activity pause cancels the timer. Recognition sends a cancellation to Unity and
 reorders the menu forward without clearing the game activity.
 
+Both the application and game activity opt into Android multi-window resizing.
+The game keeps every original Unity configuration handler, including screen size,
+smallest size, screen layout, orientation and density for foldable cover/inner
+display transitions. Original aspect-ratio caps are removed. Unity's original
+SurfaceView and multi-window pause/resume logic remain responsible for rendering;
+the wrapper forwards configuration/display changes and cancels stale corner holds.
+While the OS reports multi-window mode, the existing two-frame orientation-ready
+path is used so a portrait split window does not wait forever for a physical turn.
+Leaving multi-window mode restores the user's saved playback preference.
+The native server menu recreates for its new window bounds, restores its selected
+category, event edits and scroll position, and leaves the service running.
+The packager decodes the compiled manifest again and records its window policy.
+Real split-screen, pop-up and foldable-device behavior still needs device testing.
+
 `tools/package_android_unified.py` requires CPython 3.13, pinned public KO/JA/EN
 clients and server APK, SDK34 tools, the pinned Chaquopy runtime JAR and APKEditor,
 and the existing diagnostic development certificate. Output names include a

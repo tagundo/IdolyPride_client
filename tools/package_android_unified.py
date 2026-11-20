@@ -66,6 +66,17 @@ MAX_EXPANDED = 1536 * MIB
 JAVA_FLAGS = ("-Xmx512m", "-XX:MaxMetaspaceSize=256m", "-XX:ReservedCodeCacheSize=64m",
               "-XX:+UseSerialGC", "-XX:ActiveProcessorCount=1")
 ET.register_namespace("android", ANDROID[1:-1])
+WINDOW_CONFIG_CHANGES = ("orientation", "screenLayout", "screenSize", "smallestScreenSize", "density")
+
+
+def allow_window_resizing(node):
+    """Opt into real window bounds, including cover/inner-display transitions."""
+    node.set(ANDROID + "resizeableActivity", "true")
+    for name in ("maxAspectRatio", "minAspectRatio"):
+        node.attrib.pop(ANDROID + name, None)
+    for metadata in list(node.findall("meta-data")):
+        if metadata.get(ANDROID + "name") == "android.max_aspect":
+            node.remove(metadata)
 
 
 def sha256(path):
@@ -215,6 +226,17 @@ def transform_manifest(raw):
     # Target is real Activity: all Unity lifecycle/meta-data attributes remain here.
     game.set(ANDROID + "name", GAME_ACTIVITY)
     game.set(ANDROID + "exported", "false")
+    # The stock game explicitly disables resize both here and on application.
+    # Android 16's large-screen override exempts game-category apps, so both
+    # declarations must opt in. Keep all original Unity configuration handlers.
+    allow_window_resizing(app)
+    allow_window_resizing(game)
+    changes = game.get(ANDROID + "configChanges", "").split("|")
+    changes = [value for value in changes if value]
+    for value in WINDOW_CONFIG_CHANGES:
+        if value not in changes:
+            changes.append(value)
+    game.set(ANDROID + "configChanges", "|".join(changes))
     alias_attrs = {ANDROID + "name": ORIGINAL_ACTIVITY, ANDROID + "targetActivity": MENU_ACTIVITY,
                    ANDROID + "exported": "true"}
     if game.get(ANDROID + "permission") is not None:
@@ -245,6 +267,31 @@ def transform_manifest(raw):
     sdks[0].set(ANDROID + "minSdkVersion", "30")
     ET.indent(tree)
     return ET.tostring(tree, encoding="utf-8", xml_declaration=True)
+
+
+def windowing_policy(raw):
+    """Read the compiled manifest back instead of trusting the input XML flags."""
+    tree = ET.fromstring(raw)
+    app = tree.find("application")
+    if app is None or app.get(ANDROID + "resizeableActivity") != "true":
+        raise ValueError("Application window resizing is not enabled")
+    activities = {n.get(ANDROID + "name"): n for n in app.findall("activity")}
+    game, menu = activities.get(GAME_ACTIVITY), activities.get(MENU_ACTIVITY)
+    if game is None or menu is None or any(n.get(ANDROID + "resizeableActivity") != "true" for n in (game, menu)):
+        raise ValueError("Game/menu window resizing is not enabled")
+    changes = sorted(set(game.get(ANDROID + "configChanges", "").split("|")))
+    if not set(WINDOW_CONFIG_CHANGES) <= set(changes):
+        raise ValueError("Fold configuration handling is missing")
+    for node in (app, game):
+        if any(node.get(ANDROID + key) is not None for key in ("minAspectRatio", "maxAspectRatio")):
+            raise ValueError("Window aspect ratio remains restricted")
+        if any(n.get(ANDROID + "name") == "android.max_aspect" for n in node.findall("meta-data")):
+            raise ValueError("Legacy window aspect ratio remains restricted")
+    if menu.get(ANDROID + "configChanges") is not None:
+        raise ValueError("Native menu must recreate its responsive layout")
+    return {"application_resizable": True, "game_resizable": True, "menu_resizable": True,
+            "game_config_changes": changes, "game_orientation": game.get(ANDROID + "screenOrientation"),
+            "menu_configuration_handling": "recreate_with_saved_state", "aspect_ratio_restricted": False}
 
 
 def server_members(infos):
@@ -307,12 +354,12 @@ def source_snapshot(root, commit, allow_working):
 
 
 def build_config(asset_info):
-    gradle_version = '0.3.37-unified-prototype'
+    gradle_version = '2026.11.20.1-unified-preview'
     fields = ['package ' + SERVER_PACKAGE + ';', 'public final class BuildConfig {',
         'public static final boolean DEBUG = false;',
         'public static final String APPLICATION_ID = "' + PACKAGE + '";',
         'public static final String BUILD_TYPE = "release";',
-        'public static final int VERSION_CODE = 54;',
+        'public static final int VERSION_CODE = 55;',
         'public static final String VERSION_NAME = "' + gradle_version + '";']
     for prefix, member in (("SERVER_DATA", "assets/ServerData.zip"),
             ("BUNDLED_TRANSLATIONS", "assets/bundledTranslations.zip"),
@@ -480,9 +527,16 @@ def rebuild_manifest(work, client, tools, env):
          "-i", small, "-o", decoded], env)
     manifest = decoded / "AndroidManifest.xml"
     manifest.write_bytes(transform_manifest(manifest.read_bytes()))
+    expected_windowing = windowing_policy(manifest.read_bytes())
     run([tools["java"], *JAVA_FLAGS, "-jar", tools["editor"], "b", "-i", decoded, "-o", rebuilt], env)
+    readback = work / "manifest-readback"
+    run([tools["java"], *JAVA_FLAGS, "-jar", tools["editor"], "d", "-dex", "-t", "xml",
+         "-i", rebuilt, "-o", readback], env)
+    actual_windowing = windowing_policy((readback / "AndroidManifest.xml").read_bytes())
+    if actual_windowing != expected_windowing:
+        raise ValueError("Compiled windowing policy differs from source")
     with ZipFile(rebuilt) as source:
-        return read(source, "AndroidManifest.xml", MIB)
+        return read(source, "AndroidManifest.xml", MIB), actual_windowing
 
 
 class RawZipWriter:
@@ -645,7 +699,7 @@ def build(args):
     root = Path(args.source_root).resolve(strict=True)
     output = Path(args.output).absolute()
     report_path = output.with_suffix(".provenance.json")
-    if (not output.parent.is_dir() or not re.fullmatch(r"IdolyPride-Unified-\d{4}\.\d{2}\.\d{2}-prototype\.apk", output.name)
+    if (not output.parent.is_dir() or not re.fullmatch(r"IdolyPride-Unified-\d{4}\.\d{2}\.\d{2}(?:\.[1-9]\d*)?-prototype\.apk", output.name)
             or any(os.path.lexists(p) for p in (output, report_path))):
         raise ValueError("Choose new dated prototype output/report paths")
     baseline_oom, started = _oom_count(), time.monotonic()
@@ -711,7 +765,7 @@ def build(args):
             if original_build.count(old_app_sha) != 1:
                 raise ValueError("Chaquopy app integrity declaration differs")
             build_json = original_build.replace(old_app_sha, hashlib.sha1(app).hexdigest().encode())
-        manifest = rebuild_manifest(work, client, tools, env)
+        manifest, windowing = rebuild_manifest(work, client, tools, env)
         unsigned, aligned = work / "unsigned.apk", work / "aligned.apk"
         before, marker = merge_apk(client, server, unsigned, manifest, dex_name, dex, resources, app, build_json,
                                    language_archive, data_descriptor, native_bridge)
@@ -728,6 +782,9 @@ def build(args):
             raise ValueError("Signed candidate certificate differs")
         run([tools["zipalign"], "-c", "4", aligned], env)
         preservation = verify_preservation(aligned, before, dex_name, definitions, native_bridge)
+        with ZipFile(aligned) as final_apk:
+            if read(final_apk, "AndroidManifest.xml", MIB) != manifest:
+                raise ValueError("Final compiled manifest differs from verified windowing policy")
         if language_data.validate_data_archive(aligned, client, embedded=True) != data_descriptor:
             raise ValueError("Final language object store differs")
         badging = run([tools["aapt2"], "dump", "badging", aligned], env)
@@ -752,12 +809,14 @@ def build(args):
                        "server_sha256": SERVER_SHA256,
                        "chaquopy_jar_sha256": CHAQUOPY_SHA256},
             "tools": {name: sha256(path) for name, path in tools.items()}, "marker": marker,
+            "windowing": windowing,
             "native_addon_build": native_receipt,
             "python_sources": python_rows, "added_dex": dex_name, "server_class_count": len(definitions),
             "preservation": preservation, "signed_certificate_sha256": CERTIFICATE,
             "apk_bytes": aligned.stat().st_size, "apk_sha256": sha256(aligned),
             "runtime_validation": {"install_and_launch": False, "gameplay": False,
-                "language_switching": False, "shared_resource_direct_reading": False},
+                "language_switching": False, "shared_resource_direct_reading": False,
+                "multi_window": False, "fold_display_transition": False},
             "release_gates": ["Android9/10 compatibility", "three language Unity Data selection on device",
                 "real arm64 install/server/game runtime", "same-process native library compatibility",
                 "client direct resource reads without duplicate cache"],

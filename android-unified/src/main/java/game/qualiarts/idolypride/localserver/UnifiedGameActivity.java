@@ -5,17 +5,29 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.content.Intent;
+import android.content.res.Configuration;
+import android.view.Display;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
+import java.lang.ref.WeakReference;
 
 /** Internal Unity entry point. The public launcher prepares the server and Data first. */
 public final class UnifiedGameActivity extends com.google.firebase.MessagingUnityPlayerActivity {
+    private static WeakReference<UnifiedGameActivity> windowOwner = new WeakReference<>(null);
     private String selectedDataPath;
     private final UnifiedMenuGesture menuGesture = new UnifiedMenuGesture();
     private final Handler menuTimer = new Handler(Looper.getMainLooper());
     private MotionEvent lastMenuEvent;
+    private View menuSurface;
+    private boolean discardResizedTouch;
+    private int menuDisplay = Display.INVALID_DISPLAY;
     private final Runnable showMenu = this::recognizeMenuHold;
+    private final View.OnLayoutChangeListener menuLayout = (view, left, top, right, bottom,
+            oldLeft, oldTop, oldRight, oldBottom) -> {
+        if (left != oldLeft || top != oldTop || right != oldRight || bottom != oldBottom)
+            cancelWindowMenuHold();
+    };
 
     @Override protected void onCreate(Bundle state) {
         if (!UnifiedRuntime.isEnabled(this)) throw new IllegalStateException("unified_marker_missing");
@@ -28,6 +40,14 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
             throw new IllegalStateException("unified_data_not_prepared", failure);
         }
         super.onCreate(state);
+        windowOwner = new WeakReference<>(this);
+        updateWindowing(isInMultiWindowMode());
+        menuSurface = getWindow().getDecorView();
+        menuSurface.addOnLayoutChangeListener(menuLayout);
+    }
+
+    private void updateWindowing(boolean multiWindow) {
+        if (windowOwner.get() == this) UnifiedWindowing.update(multiWindow);
     }
 
     /** Unity's native VFS mounts Data here; applicationInfo/nativeLibraryDir stay real. */
@@ -43,11 +63,48 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
     private void cancelMenuHold() {
         menuTimer.removeCallbacks(showMenu);
         menuGesture.cancel();
+        menuDisplay = Display.INVALID_DISPLAY;
         if (lastMenuEvent != null) { lastMenuEvent.recycle(); lastMenuEvent = null; }
+    }
+
+    /** An old pointer's coordinates cannot span window geometry or display changes. */
+    private void cancelWindowMenuHold() {
+        MotionEvent previous = lastMenuEvent;
+        lastMenuEvent = null;
+        if (menuGesture.pending() || menuGesture.claimed()) discardResizedTouch = true;
+        cancelMenuHold();
+        if (previous != null) {
+            MotionEvent cancelled = MotionEvent.obtain(previous);
+            cancelled.setAction(MotionEvent.ACTION_CANCEL);
+            try { super.dispatchTouchEvent(cancelled); }
+            finally { cancelled.recycle(); previous.recycle(); }
+        }
+    }
+
+    @Override public void onConfigurationChanged(Configuration configuration) {
+        cancelWindowMenuHold();
+        updateWindowing(isInMultiWindowMode());
+        // Unity owns updating its configuration, SurfaceView and render lifecycle.
+        super.onConfigurationChanged(configuration);
+    }
+
+    @Override public void onMultiWindowModeChanged(boolean multiWindow, Configuration configuration) {
+        cancelWindowMenuHold();
+        updateWindowing(multiWindow);
+        super.onMultiWindowModeChanged(multiWindow, configuration);
+    }
+
+    @Override public void onWindowFocusChanged(boolean focused) {
+        if (!focused) cancelWindowMenuHold();
+        super.onWindowFocusChanged(focused);
     }
 
     private void recognizeMenuHold() {
         if (!menuGesture.pending() || isFinishing() || isDestroyed()) return;
+        if (menuDisplay != currentDisplay()) {
+            cancelWindowMenuHold();
+            return;
+        }
         long now = SystemClock.uptimeMillis();
         if (!menuGesture.claim(now)) {
             menuTimer.postDelayed(showMenu, menuGesture.remaining(now));
@@ -69,8 +126,21 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         catch (RuntimeException unavailable) { cancelMenuHold(); }
     }
 
+    private int currentDisplay() {
+        Display display = getWindow().getDecorView().getDisplay();
+        return display == null ? Display.INVALID_DISPLAY : display.getDisplayId();
+    }
+
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
+        if (menuGesture.pending() && menuDisplay != currentDisplay()) cancelWindowMenuHold();
+        if (discardResizedTouch) {
+            if (action == MotionEvent.ACTION_DOWN) discardResizedTouch = false;
+            else {
+                if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) discardResizedTouch = false;
+                return true;
+            }
+        }
         if (menuGesture.claimed()) {
             if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) cancelMenuHold();
             return true;
@@ -82,6 +152,7 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
                     getResources().getDisplayMetrics().density, ViewConfiguration.get(this).getScaledTouchSlop(),
                     event.getEventTime());
             if (menuGesture.pending()) {
+                menuDisplay = currentDisplay();
                 rememberMenuEvent(event);
                 menuTimer.postDelayed(showMenu, menuGesture.remaining(SystemClock.uptimeMillis()));
             }
@@ -97,11 +168,26 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
     }
 
     @Override protected void onPause() {
+        discardResizedTouch = false;
         cancelMenuHold();
         super.onPause();
     }
 
+    @Override protected void onResume() {
+        updateWindowing(isInMultiWindowMode());
+        super.onResume();
+    }
+
     @Override protected void onDestroy() {
+        if (windowOwner.get() == this) {
+            windowOwner.clear();
+            UnifiedWindowing.update(false);
+        }
+        if (menuSurface != null) {
+            menuSurface.removeOnLayoutChangeListener(menuLayout);
+            menuSurface = null;
+        }
+        discardResizedTouch = false;
         cancelMenuHold();
         super.onDestroy();
     }

@@ -609,6 +609,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
         showCategory(selectedCategory);
         readableControls(content);
         setContentView(content);
+        // Rebuild this native menu for the new window/density while the service
+        // and the back-stack Unity activity keep their existing instances.
+        if (savedInstanceState != null) {
+            int scrollDp = Math.max(0, savedInstanceState.getInt("settings_scroll_y_dp", 0));
+            settingsScroll.post(() -> settingsScroll.scrollTo(0, dp(scrollDp)));
+        }
 
         start.setOnClickListener(view -> requestServerStart());
         stop.setOnClickListener(view -> {
@@ -2009,6 +2015,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override protected void onSaveInstanceState(Bundle state) {
         state.putString("settings_category", selectedCategory);
+        state.putInt("settings_scroll_y_dp", settingsScroll == null ? 0
+                : Math.round(settingsScroll.getScrollY() / getResources().getDisplayMetrics().density));
         state.putString("resource_platform", pendingResourcePlatform);
         state.putBoolean("storage_retry", retryStartAfterStoragePermission);
         state.putInt("account_offset", accountOffset); state.putInt("restore_offset", restoreOffset);
