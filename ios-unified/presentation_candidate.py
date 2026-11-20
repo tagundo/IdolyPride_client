@@ -25,6 +25,9 @@ MAX_LIBRARY = 8 * 1024**2
 MAX_RECEIPT = 256 * 1024
 SHARED_HOOKS = frozenset(("shared_setup", "shared_is_cached", "shared_file_path",
                          "shared_pre_download", "shared_downloader_update"))
+MP4_HOOKS = frozenset(("mp4_presenter_update", "mp4_capture_pass", "mp4_end_camera",
+                      "mp4_graph_mode", "mp4_brain_delta", "mp4_core_camera"))
+NEW_BASE_HOOKS = SHARED_HOOKS | MP4_HOOKS
 
 
 def _json(path, maximum):
@@ -168,26 +171,29 @@ def verify(stock_ipa, patched_unity, plan_path, library):
 
 
 def verify_base_delta(incoming, patched_unity, original_sha256, plan_path):
-    """Keep every previous base patch, permitting only five new hook sites.
+    """Keep every previous base patch, permitting eleven named new hook sites.
 
     This is independent of the stock reconstruction: old presentation hooks,
     bootstrap instructions and all other executable bytes must still equal the
-    translated base image. New SDK entries must have their original prefixes;
-    their added gateways must occupy old zero padding.
+    translated 41-hook base image. Five shared-resource and six MV-export
+    entries must have their original prefixes; their gateways must occupy old
+    zero padding. Existing entry points and gateways receive no exception.
     """
     plan = load_plan(plan_path)
-    require(SHARED_HOOKS <= plan["entries"].keys(), "Shared resource hook plan is incomplete")
+    require(NEW_BASE_HOOKS <= plan["entries"].keys(), "Declared additional hook plan is incomplete")
     size = regular(patched_unity).st_size
     old_header = incoming.read(min(MAX_HEADER, size))
     header, load = patched_header(old_header, size)
     writes = [(0, header)]
     checks = []
-    for name in sorted(SHARED_HOOKS):
+    for name in sorted(NEW_BASE_HOOKS):
         row = plan["entries"][name]
         entry, gateway = bytes.fromhex(row["patched_entry"]), bytes.fromhex(row["gateway_hex"])
-        require(len(entry) == 4 and len(gateway) in (28,32), "Shared static gateway extent differs")
+        original = bytes.fromhex(row["original16"])
+        require(len(entry) == 4 and len(gateway) in (28,32) and len(original) == 16,
+                "Declared static gateway extent differs")
         writes.extend(((row["rva"],entry),(row["gateway"],gateway)))
-        checks.extend(((row["rva"],bytes.fromhex(row["original16"])),
+        checks.extend(((row["rva"],original),
                        (row["gateway"],bytes(len(gateway)))))
     writes.sort()
     require(all(0 <= offset <= size-len(raw) for offset,raw in writes)
@@ -218,5 +224,5 @@ def verify_base_delta(incoming, patched_unity, original_sha256, plan_path):
                 "Pinned previous base Unity SHA or size differs")
     return {"schema":1,"base_unity_sha256":old_hash.hexdigest(),
             "output_unity_sha256":new_hash.hexdigest(),"new_shared_hooks":sorted(SHARED_HOOKS),
-            "new_hook_count":len(SHARED_HOOKS),"server_load":load,
+            "new_mp4_hooks":sorted(MP4_HOOKS),"new_hook_count":len(NEW_BASE_HOOKS),"server_load":load,
             "previous_bootstrap_and_presentation_bytes_preserved":True}

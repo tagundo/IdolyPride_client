@@ -339,6 +339,8 @@ inline void on_unity_tick() {
     }
     pthread_mutex_lock(&control_mutex);bool should_cancel=cancel_pending;pthread_mutex_unlock(&control_mutex);
     if(should_cancel)terminal("cancelled_by_user",true);
+    if(job.stage==Stage::frame_wait&&!job.captured&&job.activity&&milliseconds()-job.activity>5000)
+        terminal("selected_camera_capture_timeout");
     if(job.stage!=Stage::retiring&&job.activity&&milliseconds()-job.activity>120000)terminal("export_progress_timeout");
     if(job.stage!=Stage::retiring&&!active_broker())terminal("audio_broker_retired");
     encoder_poll();

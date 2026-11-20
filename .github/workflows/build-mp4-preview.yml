@@ -1,5 +1,5 @@
 name: Build offline MP4 APK and IPA preview (draft only)
-# Both packages and their delivery proof always refer to the same source SHA.
+# Both packages and their preservation/codec proofs use the same source SHA.
 
 on:
   push:

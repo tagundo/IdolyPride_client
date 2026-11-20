@@ -78,8 +78,8 @@ def validate_manifest(raw):
 
 
 def sources(root):
-    source_paths = sorted((root / JAVA).glob("*.java")) + [root / PROBE, root / MANIFEST,
-                                                                root / "tools/build_android_mp4_qa.py"]
+    source_paths = sorted((root / JAVA).glob("*.java")) + sorted((root / PROBE).parent.glob("*.java"))
+    source_paths += [root / MANIFEST, root / "tools/build_android_mp4_qa.py"]
     need(4 <= len(source_paths) <= 32 and any(p.name == "OfflineMp4Encoder.java" for p in source_paths), "Production codec sources missing")
     rows = {p.relative_to(root).as_posix(): {"bytes": regular(p, MIB).stat().st_size, "sha256": sha(p)} for p in source_paths}
     need(sum(row["bytes"] for row in rows.values()) <= 8 * MIB, "QA source inventory exceeds bound")

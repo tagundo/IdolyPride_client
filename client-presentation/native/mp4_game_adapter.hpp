@@ -537,7 +537,7 @@ inline Result GameAdapter::poll_private_audio() {
     if(audio_failed_)return Result::failed;
     if(audio_cancel_pending_){close_private_audio();return audio_request_?Result::waiting:fail(Result::failed,"private_audio_cancelled");}
     if(audio_clip_){const int32_t state=api_.audio_clip_load_state(get(audio_clip_),nullptr);
-        if(state==3){audio_failed_=true;return fail(Result::failed,"private_audio_decode_failed");}
+        if(state<0||state>3||state==3){audio_failed_=true;return fail(Result::failed,"private_audio_decode_failed");}
         return state==2?Result::ok:Result::waiting;}
     if(!audio_request_)return fail(Result::invalid,"private_audio_not_open");
     if(!api_.async_done(get(audio_request_),nullptr))return Result::waiting;
@@ -553,7 +553,13 @@ inline Result GameAdapter::poll_private_audio() {
         ||api_.audio_clip_channels(clip,nullptr)!=expected_audio_.channels
         ||api_.audio_clip_load_type(clip,nullptr)!=0){audio_failed_=true;return fail(Result::failed,"private_audio_identity_mismatch");}
     drop(audio_request_);
-    if(!api_.audio_clip_load_data(clip,nullptr)){audio_failed_=true;return fail(Result::failed,"private_audio_decode_rejected");}
+    // PreloadAudioData may already have completed while LoadAsset ran. Do not
+    // request a second load or treat that redundant request's false as failure.
+    const int32_t state=api_.audio_clip_load_state(clip,nullptr);
+    if(state==0&&!api_.audio_clip_load_data(clip,nullptr)){
+        const int32_t after=api_.audio_clip_load_state(clip,nullptr);
+        if(after!=1&&after!=2){audio_failed_=true;return fail(Result::failed,"private_audio_decode_rejected");}
+    }
     return poll_private_audio();
 }
 inline Result GameAdapter::read_audio_chunk(int32_t offset,int32_t frames,float* dst,size_t capacity) {

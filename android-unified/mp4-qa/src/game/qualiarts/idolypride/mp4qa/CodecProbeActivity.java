@@ -36,10 +36,13 @@ public final class CodecProbeActivity extends Activity {
         super.onCreate(state);
         label = new TextView(this); label.setText("Running actual MediaCodec A/V proof…"); setContentView(label);
         root = new File(getFilesDir(), "mp4-qa");
-        new Thread(this::runProof, "IdolyCodecQA").start();
+        if (ProbeRunOwnership.claimProcessRun()) new Thread(this::runProof, "IdolyCodecQA").start();
+        else label.setText("The codec proof has already started in this process.");
     }
     @Override public void onDestroy() {
-        stopped = true; OfflineMp4Encoder encoder = active; if (encoder != null) encoder.cancel();
+        if (!isChangingConfigurations()) {
+            stopped = true; OfflineMp4Encoder encoder = active; if (encoder != null) encoder.cancel();
+        }
         super.onDestroy();
     }
 
@@ -64,7 +67,7 @@ public final class CodecProbeActivity extends Activity {
         JSONObject proof = new JSONObject().put("name", name).put("required", required);
         cases.put(proof); report("running", false, null);
         File directory = new File(root, name);
-        if (!directory.mkdir()) throw new IOException("QA case path already exists; clear app data before rerun");
+        ProbeRunOwnership.createFreshDirectory(directory);
         File pcm = new File(directory, "source.f32"); writePcm(pcm);
         File partial = new File(directory, "partial.mp4"), output = new File(directory, "complete.mp4");
         long frameCount = OfflineMp4Math.videoFramesForAudio(RATE, numerator, denominator, RATE);

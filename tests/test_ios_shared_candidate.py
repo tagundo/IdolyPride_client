@@ -105,16 +105,19 @@ def test_unity_publication_preserves_a_concurrently_created_destination(tmp_path
     assert not output.with_suffix('.json').exists()
 
 
-def test_previous_base_delta_preserves_old_hooks_and_all_other_sdk_bytes(tmp_path,monkeypatch):
+def base_delta_fixture(tmp_path,monkeypatch):
     old=bytearray(b'old executable and existing hooks'.ljust(4096,b'\0'))
     entries={}
-    for index,name in enumerate(sorted(candidate.SHARED_HOOKS)):
+    for index,name in enumerate(sorted(candidate.NEW_BASE_HOOKS)):
         at,gateway=256+index*32,1024+index*32
         prefix=bytes([index+1])*16
         old[at:at+16]=prefix
         entries[name]={'rva':at,'gateway':gateway,'original16':prefix.hex(),
                        'patched_entry':(bytes([index+9])*4).hex(),
                        'gateway_hex':(bytes([index+19])*28).hex()}
+    # Existing branch/gateway data is outside every newly allowed span.
+    old[1800:1816]=bytes.fromhex('40000014f44f01a9fd7b02a9fd830091')
+    old[1900:1928]=bytes(range(1,29))
     expected=bytearray(old)
     expected[16]=77
     for row in entries.values():
@@ -128,8 +131,37 @@ def test_previous_base_delta_preserves_old_hooks_and_all_other_sdk_bytes(tmp_pat
         value=bytearray(raw);value[16]=77
         return bytes(value),{'unchanged_layout':True}
     monkeypatch.setattr(candidate,'patched_header',header)
+    return old,expected,path,entries
+
+
+def test_previous_base_delta_preserves_old_hooks_and_all_other_sdk_bytes(tmp_path,monkeypatch):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
     proof=candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
     assert proof['previous_bootstrap_and_presentation_bytes_preserved'] is True
+    assert proof['new_hook_count']==11
+    assert proof['new_mp4_hooks']==sorted(candidate.MP4_HOOKS)
+    assert proof['new_shared_hooks']==sorted(candidate.SHARED_HOOKS)
     expected[2000]=1;path.write_bytes(expected)
+    with pytest.raises(ValueError,match='prior bootstrap, presentation or SDK byte'):
+        candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
+
+
+@pytest.mark.parametrize('name',sorted(candidate.MP4_HOOKS))
+@pytest.mark.parametrize('offset', [0,8])
+def test_mp4_delta_rejects_changed_source_prefix_or_nonzero_gateway(tmp_path,monkeypatch,name,offset):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
+    row=entries[name]
+    at=row['rva']+offset if offset else row['gateway']
+    old[at]^=1
+    with pytest.raises(ValueError,match='prefix or zero gateway'):
+        candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
+
+
+@pytest.mark.parametrize('location',['old_entry','old_gateway','new_gateway_padding','unrelated_data'])
+def test_mp4_delta_never_allows_old_patches_padding_or_other_data_changes(tmp_path,monkeypatch,location):
+    old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
+    row=entries['mp4_presenter_update']
+    at={'old_entry':1800,'old_gateway':1900,'new_gateway_padding':row['gateway']+28,'unrelated_data':2000}[location]
+    expected[at]^=1;path.write_bytes(expected)
     with pytest.raises(ValueError,match='prior bootstrap, presentation or SDK byte'):
         candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')

@@ -2,7 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="game.qualiarts.idolypride.mp4qa">
     <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35" />
     <application android:label="Idoly MP4 Codec QA" android:debuggable="true" android:allowBackup="false">
-        <activity android:name=".CodecProbeActivity" android:exported="true">
+        <activity android:name=".CodecProbeActivity" android:exported="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|density|uiMode|keyboard|keyboardHidden|navigation|layoutDirection|locale|fontScale|fontWeightAdjustment|colorMode|mcc|mnc|touchscreen">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

@@ -4,6 +4,8 @@ from array import array
 import copy
 import io
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 import tarfile
 
@@ -211,6 +213,40 @@ def test_archive_accepts_regular_evidence_and_rejects_duplicates(tmp_path):
     archive = tar_file(tmp_path, [("mp4-qa/report.json", "file")] * 2)
     with pytest.raises(ValueError):
         qa.extract_archive(archive, tmp_path / "other")
+
+
+def test_qa_relaunch_claims_only_one_worker_and_never_reuses_case_paths(tmp_path):
+    javac, java = shutil.which("javac"), shutil.which("java")
+    if not javac or not java:
+        pytest.skip("JDK needed for actual QA ownership concurrency test")
+    source = qa.ROOT / Path(qa.PROBE).parent / "ProbeRunOwnership.java"
+    harness = tmp_path / "ProbeOwnershipFixture.java"
+    harness.write_text('''package game.qualiarts.idolypride.mp4qa;
+      import java.io.*;import java.nio.file.*;import java.util.concurrent.*;import java.util.concurrent.atomic.*;
+      public class ProbeOwnershipFixture { public static void main(String[] args)throws Exception {
+        AtomicInteger workers=new AtomicInteger();CountDownLatch ready=new CountDownLatch(32),go=new CountDownLatch(1);
+        Thread[] attempts=new Thread[32];for(int i=0;i<attempts.length;i++){
+          attempts[i]=new Thread(()->{ready.countDown();try{go.await();}catch(InterruptedException e){throw new RuntimeException(e);}
+            if(ProbeRunOwnership.claimProcessRun())workers.incrementAndGet();});attempts[i].start();}
+        if(!ready.await(10,TimeUnit.SECONDS))throw new AssertionError("launch attempts did not start");go.countDown();
+        for(Thread thread:attempts)thread.join(10000);
+        if(workers.get()!=1||ProbeRunOwnership.claimProcessRun())throw new AssertionError("duplicate/recreated activity started a worker");
+        File path=new File(args[0],"case");ProbeRunOwnership.createFreshDirectory(path);
+        Path sentinel=path.toPath().resolve("proof");Files.write(sentinel,new byte[]{17,29});
+        boolean refused=false;try{ProbeRunOwnership.createFreshDirectory(path);}catch(IOException expected){refused=true;}
+        if(!refused||Files.readAllBytes(sentinel)[1]!=29)throw new AssertionError("existing case reused or changed");
+      }}''')
+    built = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(tmp_path), str(source), str(harness)],
+                           capture_output=True, text=True, timeout=30)
+    assert built.returncode == 0, built.stderr
+    result = subprocess.run([java, "-Xmx128m", "-cp", str(tmp_path),
+                             "game.qualiarts.idolypride.mp4qa.ProbeOwnershipFixture", str(tmp_path)],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    inventory = qa.sources(qa.ROOT)[1]
+    assert source.relative_to(qa.ROOT).as_posix() in inventory
+    activity = (qa.ROOT / qa.PROBE).read_text()
+    assert "if (!isChangingConfigurations())" in activity
 
 
 def test_workflow_is_scoped_read_only_and_never_treats_an_artifact_as_a_pass():

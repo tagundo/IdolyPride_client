@@ -199,7 +199,10 @@ int main(int argc,char** argv){
     uint64_t deadline=session_core::milliseconds()+15000;
     do{
         session_core::on_unity_tick();
-        if(session_core::job.stage==session_core::Stage::frame_wait&&!session_core::job.captured){session_core::capture_pass_did_execute(ptr(pass),ptr(rendering));session_core::camera_did_render(ptr(camera));}
+        if(session_core::job.stage==session_core::Stage::frame_wait&&!session_core::job.captured){
+            if(scenario=="capture_missing")session_core::job.activity=session_core::milliseconds()-6000;
+            else {session_core::capture_pass_did_execute(ptr(pass),ptr(rendering));session_core::camera_did_render(ptr(camera));}
+        }
         if(scenario=="cancel_load"&&session_core::job.stage==session_core::Stage::audio_load&&!was_cancelled){session_core::cancel();was_cancelled=true;}
         if(scenario=="cancel_response"&&session_core::job.stage==session_core::Stage::audio_response&&!was_cancelled){session_core::cancel();was_cancelled=true;}
         if(scenario=="cancel_response"&&was_cancelled&&!cancel_marker_written&&session_core::job.stage==session_core::Stage::retiring){
@@ -416,6 +419,17 @@ def test_encoder_rejection_preserves_cleanup_and_original_scene(run_session):
     assert observed["loads"]==observed["unloads"]==1
     assert not list(Path(observed["configuration"]["export_directory"]).glob("*.mp4"))
     eventually(lambda: observed["broker"].status()["prepared_files"]==0)
+
+
+def test_missing_owned_camera_ack_fails_promptly_and_restores_the_scene(run_session):
+    observed=run_session("capture_missing")
+    assert observed["session"]["phase"]=="failed"
+    assert observed["session"]["error_code"]=="selected_camera_capture_timeout"
+    assert observed["session"]["frames"]==0 and observed["elapsed"]<5
+    assert observed["private_lifetime_verified"] and observed["loads"]==observed["unloads"]==1
+    root=Path(observed["configuration"]["export_directory"])
+    assert not list(root.glob("*.mp4"))
+    assert [path.name for path in root.glob("*.pcm")]==["observed.pcm"]
 
 
 def test_all_silent_music_is_not_reported_as_a_successful_soundtrack(run_session):

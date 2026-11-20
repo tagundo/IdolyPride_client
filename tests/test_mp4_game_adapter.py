@@ -30,7 +30,7 @@ Obj* make(const char* type,const char* name=""){auto item=std::make_unique<Obj>(
 void* ptr(Obj* o){return o?o->mem.data():nullptr;}
 template<class T>void write(Obj* o,size_t at,T value){std::memcpy(o->mem.data()+at,&value,sizeof(value));}
 Obj *presenter,*player,*controller,*director,*timeline,*camera_controller,*camera,*wrapper,*rt,*bgm,*voice,*source_clip,*private_clip,*bundle,*request,*track,*clip,*camera_track,*brain,*actor_controller,*animation_player;
-int mode=0,evals=0,unloads=0,destroys=0,graph_steps=0,graph_variant=0,actor_mode=1,actor_steps=0,actor_resets=0;bool actor_mode_known=true;GameAdapter* clock_game=nullptr;int camera_steps=0,camera_resets=0;bool camera_clock_healthy=true;double time_value=13.25;bool custom=false,done=false,load_ok=true;float shader=4,bgm_volume=.6f,voice_volume=.4f;void* active=nullptr;
+int mode=0,evals=0,unloads=0,destroys=0,graph_steps=0,graph_variant=0,actor_mode=1,actor_steps=0,actor_resets=0,audio_state=2,audio_load_calls=0;bool actor_mode_known=true;GameAdapter* clock_game=nullptr;int camera_steps=0,camera_resets=0;bool camera_clock_healthy=true;double time_value=13.25;bool custom=false,done=false,load_ok=true;float shader=4,bgm_volume=.6f,voice_volume=.4f;void* active=nullptr;
 bool istype(void* p,const char* type){auto it=objects.find(p);return it!=objects.end()&&it->second->type==type;}
 bool alive(void* p){return p&&objects.count(p);}
 uint32_t retain(void* p){if(!p)return 0;handles[serial]=p;return serial++;}
@@ -63,8 +63,8 @@ void* clips(void*,Method*){auto* a=make("array");a->array_kind=1;a->pointers={pt
 int32_t samples(void*,Method*){return 8;}int32_t channels(void*,Method*){return 2;}int32_t frequency(void*,Method*){return 48000;}
 float volume_get(void* p,Method*){return p==ptr(bgm)?bgm_volume:voice_volume;}
 void volume_set(void* p,float n,Method*){(p==ptr(bgm)?bgm_volume:voice_volume)=n;}
-int32_t loadstate(void*,Method*){return load_ok?2:3;}int32_t loadtype(void*,Method*){return 0;}
-bool load(void*,Method*){return load_ok;}
+int32_t loadstate(void*,Method*){return load_ok?audio_state:3;}int32_t loadtype(void*,Method*){return 0;}
+bool load(void*,Method*){++audio_load_calls;if(!load_ok||audio_state!=0)return false;audio_state=1;return true;}
 void* new_float(size_t n){auto* a=make("float[]");a->array_kind=2;a->floats.resize(n);return ptr(a);}
 bool get_data(void*,void* a,int32_t offset,Method*){auto& f=objects.at(a)->floats;for(size_t i=0;i<f.size();++i)f[i]=float(offset*2+int(i))/16.f;return true;}
 void* load_bundle(void*,Method*){return ptr(request);}bool isdone(void*,Method*){return done;}
@@ -97,9 +97,10 @@ int main(){
     assert(s.actor_graph_count==1);assert(a.begin_manual()==Result::ok&&mode==3&&bgm_volume==0&&voice_volume==0&&actor_mode==3&&actor_resets==1);assert(a.evaluate(2)==Result::ok&&time_value==2&&shader==2&&graph_steps==1);assert(a.evaluate(2)==Result::ok&&graph_steps==1&&actor_steps==1&&camera_steps==1);graph_variant=1;assert(a.evaluate(3)==Result::ok&&time_value==3&&graph_steps==2);graph_variant=0;assert(a.evaluate(123)==Result::invalid);
     assert(a.request_capture()==Result::ok);int32_t w=0,h=0;assert(a.capture_geometry(w,h)==Result::ok&&w==16&&h==16);std::vector<uint8_t> pixels(1024);size_t bytes=0;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);
     auto* pass=make("VL.Rendering.VLCapturePass");auto* rd=make("RenderingData");write(rd,0x90,ptr(camera));write(rd,0x158,uint8_t(1));a.observe_capture_pass(ptr(pass),ptr(rd));assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);assert(!a.after_camera(ptr(bgm)));assert(a.after_camera(ptr(camera)));format_value=97;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::unsupported);format_value=4;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::ok&&bytes==1024&&pixels[0]==15&&pixels[15*64]==0&&active==nullptr);
-    auto expected=s.audio.clips[0];assert(a.begin_private_audio("/private/derived.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::waiting);done=true;assert(a.poll_private_audio()==Result::ok);float pcm[4]{};assert(a.read_audio_chunk(2,2,pcm,4)==Result::ok&&pcm[0]==.25f&&pcm[3]==.4375f);assert(a.read_audio_chunk(7,2,pcm,4)==Result::invalid);a.close_private_audio();assert(unloads==1);
+    auto expected=s.audio.clips[0];assert(a.begin_private_audio("/private/derived.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::waiting);done=true;assert(a.poll_private_audio()==Result::ok&&audio_load_calls==0);float pcm[4]{};assert(a.read_audio_chunk(2,2,pcm,4)==Result::ok&&pcm[0]==.25f&&pcm[3]==.4375f);assert(a.read_audio_chunk(7,2,pcm,4)==Result::invalid);a.close_private_audio();assert(unloads==1);
     private_clip->name="wrong-clip";assert(a.begin_private_audio("/private/bad.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::failed);assert(a.poll_private_audio()==Result::failed);a.close_private_audio();private_clip->name=source_clip->name;assert(unloads==2);
     done=false;assert(a.begin_private_audio("/private/second.bundle",expected)==Result::waiting);const size_t held=handles.size();a.close_private_audio();assert(handles.size()==held&&unloads==2);done=true;a.maintenance();assert(unloads==3);
+    audio_state=0;assert(a.begin_private_audio("/private/unloaded.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::waiting&&audio_load_calls==1&&audio_state==1);assert(a.poll_private_audio()==Result::waiting&&audio_load_calls==1);audio_state=2;assert(a.poll_private_audio()==Result::ok);a.close_private_audio();assert(unloads==4);
     a.restore();assert(mode==0&&time_value==13.25&&bgm_volume==.6f&&voice_volume==.4f&&!custom&&destroys==1&&actor_mode==1&&camera_resets==2&&*reinterpret_cast<int32_t*>(brain->mem.data()+0x30)==2&&*reinterpret_cast<int32_t*>(brain->mem.data()+0x34)==0);a.reset_observations();assert(handles.empty());
     a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));assert(a.snapshot(s)==Result::ok&&a.begin_manual()==Result::ok);graph_variant=2;const int steps_before=graph_steps;assert(a.evaluate(1)==Result::unsupported&&graph_steps==steps_before+1);assert(a.evaluate(1)==Result::failed&&graph_steps==steps_before+1);a.reset_observations();assert(handles.empty()&&mode==0&&time_value==13.25);
 }
