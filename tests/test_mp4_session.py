@@ -436,5 +436,3 @@ def test_failed_exclusive_file_creation_never_deletes_foreign_files(run_session,
     files=list(root.glob("*"+suffix))
     assert len(files)==1 and files[0].read_bytes()==b"FOREIGN_FILE_MUST_SURVIVE"
     assert observed["calls"]==[]
-
-

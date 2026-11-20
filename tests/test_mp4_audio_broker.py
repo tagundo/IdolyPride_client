@@ -490,4 +490,3 @@ def test_actual_pinned_song_body_is_cloned_via_verified_store_without_modifying_
     finally:
         broker.close(); store.close(); cache.close()
         eventually(lambda: not broker._fds)
-

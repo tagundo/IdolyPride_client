@@ -266,4 +266,3 @@ print(json.dumps({'clip':values[83], 'bundle':values[142], 'resource_sha256':has
     assert observed["bundle"]["m_Name"] == observed["bundle"]["m_AssetBundleName"] == result.bundle_name
     assert observed["bundle"]["m_Container"][0][0] == row["name"]
     assert observed["resource_sha256"] == result.resource_sha256
-

@@ -495,4 +495,3 @@ def prepare_audio_bundle(raw, *, name, expected_size, expected_md5, expected_sha
         clip["m_BitsPerSample"], clip["m_Length"], len(resource.data),
         hashlib.sha256(resource.data).hexdigest(), expected_md5, hashlib.sha256(output).hexdigest(),
         platform_name)
-

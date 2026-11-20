@@ -5,10 +5,16 @@ on:
     branches: [feat/ios-unified-server]
     paths:
       - .github/workflows/verify-mp4-codecs.yml
+      - .github/workflows/build-mp4-preview.yml
+      - tools/stage_mp4_preview.py
+      - tests/test_mp4_preview_delivery.py
       - client-presentation/native/mp4_encoder_api.h
       - client-presentation/native/mp4_android_encoder.hpp
       - ios-unified/native/IdolyMVEncoder.mm
       - ios-unified/native/IdolyMVEncoderPolicy.h
+      - ios-unified/native/IdolyMP4UI.*
+      - ios-unified/native/build_native.py
+      - ios-unified/native/test_mp4_ui_compile.py
       - ios-unified/native/test_mv_encoder.py
       - ios-unified/native/tests/MVEncoderIntegration.mm
       - ios-unified/native/tests/mv_encoder_policy_test.c

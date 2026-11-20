@@ -512,4 +512,3 @@ class MP4AudioBroker:
             self._fds.clear()
         with self._lock:
             self._pending.clear()
-

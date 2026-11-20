@@ -197,4 +197,3 @@ def test_ios_prepare_game_start_includes_private_mp4_only_in_native_result(harne
     assert h.subject.prepare_game_start()["mp4"] == private
     assert private["directory"] not in json.dumps(h.subject.status())
     assert not host_command(h, "mp4_configuration")["ok"]
-

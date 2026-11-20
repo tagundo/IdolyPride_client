@@ -106,7 +106,7 @@ def main():
         '-I',str(python/'Headers'),'-F',str(python.parent),'-framework','Python',
         '-framework','Foundation','-framework','UIKit','-framework','WebKit',
         '-framework','AVFoundation','-framework','AudioToolbox','-framework','CoreMedia',
-        '-framework','CoreVideo','-framework','VideoToolbox','-lc++',
+        '-framework','CoreVideo','-framework','VideoToolbox','-framework','CoreGraphics','-lc++',
         '-Wl,-install_name,@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer',
         '-Wl,-headerpad_max_install_names']
     if args.presentation_library:
