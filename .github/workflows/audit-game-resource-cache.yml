@@ -23,6 +23,10 @@ jobs:
   static-original-cache-audit:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # The pinned inputs live on a draft release, as in the existing native builders.
+    # Scope draft-asset access here; the audit script sends GET requests only.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:

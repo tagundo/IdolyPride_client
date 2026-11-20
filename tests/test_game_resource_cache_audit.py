@@ -409,3 +409,38 @@ def test_public_summary_cannot_expand_scope_or_expose_unvalidated_text(damage, m
     elif damage == "cap": monkeypatch.setattr(audit, "MAX_SUMMARY", 8)
     with pytest.raises(audit.AuditError):
         audit.public_summary(value, source, run)
+
+
+@pytest.mark.parametrize("status,suffix,reported", [(400, "400", 400), (401, "401", 401),
+    (403, "403", 403), (404, "404", 404), (429, "429", 429), (500, "5xx", 500),
+    (503, "5xx", 503), (599, "5xx", 599), (618, "618", 618), (418, "other", None)])
+@pytest.mark.parametrize("api", [True, False])
+def test_asset_http_failures_expose_only_fixed_phase_status_and_code(tmp_path, monkeypatch, status, suffix, reported, api):
+    requests = []
+    class Opener:
+        def open(self, request, timeout):
+            requests.append(request)
+            assert request.get_method() == "GET"
+            if not api and len(requests) == 1:
+                raise HTTPError(request.full_url, 302, "private error body",
+                    {"Location": "https://release-assets.githubusercontent.com/fixed"}, None)
+            raise HTTPError(request.full_url, status, "fixture-token private URL and body",
+                {"X-Untrusted-Header": "fixture-token"}, None)
+    monkeypatch.setattr(audit, "build_opener", lambda *_: Opener())
+    target = tmp_path / "never-created.zip"
+    with pytest.raises(audit.AuditError) as caught:
+        audit.fetch_asset("android", target, TinyGuard(), "fixture-token")
+    error = caught.value
+    assert str(error) == "asset_" + ("api" if api else "redirect") + "_http_" + suffix
+    assert error.http_status == reported
+    assert error.transport_phase == ("github_api" if api else "signed_redirect")
+    assert "fixture-token" not in str(error)
+    assert not target.exists()
+    if not api:
+        assert requests[1].get_header("Authorization") is None
+
+
+def test_noninteger_http_diagnostics_do_not_accept_bool_or_arbitrary_phase():
+    error = audit.AuditError("fixed", http_status=True, transport_phase="https://secret.example/")
+    assert error.http_status is None and error.transport_phase is None
+    assert str(audit.asset_http_failure(True, True)) == "asset_api_http_other"

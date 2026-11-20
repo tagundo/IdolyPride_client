@@ -71,7 +71,19 @@ SELECT = re.compile(r"cache|storage|database|path|download|file|resource|asset|"
 
 
 class AuditError(ValueError):
-    pass
+    def __init__(self, code, *, http_status=None, transport_phase=None):
+        super().__init__(code)
+        known = type(http_status) is int and (http_status in (400, 401, 403, 404, 429, 618)
+                                              or 500 <= http_status <= 599)
+        self.http_status = http_status if known else None
+        self.transport_phase = transport_phase if transport_phase in ("github_api", "signed_redirect") else None
+
+
+def asset_http_failure(status, api):
+    known = type(status) is int and status in (400, 401, 403, 404, 429, 618)
+    suffix = str(status) if known else "5xx" if type(status) is int and 500 <= status <= 599 else "other"
+    return AuditError("asset_" + ("api" if api else "redirect") + "_http_" + suffix,
+                      http_status=status, transport_phase="github_api" if api else "signed_redirect")
 
 
 def need(value, code):
@@ -466,11 +478,15 @@ def fetch_asset(platform, target, guard, token):
         if parsed.hostname == "api.github.com":
             headers["Authorization"] = "Bearer " + token
         try:
-            response = opener.open(Request(url, headers=headers), timeout=30)
+            response = opener.open(Request(url, headers=headers, method="GET"), timeout=30)
             break
         except HTTPError as error:
-            need(error.code in (301, 302, 303, 307, 308), "asset_http_failure")
+            if error.code not in (301, 302, 303, 307, 308):
+                failure = asset_http_failure(error.code, parsed.hostname == "api.github.com")
+                error.close()
+                raise failure from None
             url = error.headers.get("Location", "")
+            error.close()
     need(response is not None and response.status == 200, "asset_redirect_bound")
     digest, total = hashlib.sha256(), 0
     with response, Path(target).open("xb") as outgoing:
@@ -632,6 +648,8 @@ def main(argv=None):
     except BaseException as error:
         result.update(status="FAIL", failed_stage=stage,
             error_code=str(error) if type(error) is AuditError else "static_cache_audit_failed")
+        if type(error) is AuditError and error.transport_phase is not None:
+            result["asset_http"] = {"phase": error.transport_phase, "status": error.http_status}
         if guard is not None:
             result["resources"] = guard.report()
         if output_ready:
@@ -639,7 +657,8 @@ def main(argv=None):
                 write_report(args.output / "resource-cache-audit.json", result)
             except BaseException:
                 pass
-        print(json.dumps({"status": "FAIL", "stage": stage, "error_code": result["error_code"]}))
+        print(json.dumps({"status": "FAIL", "stage": stage, "error_code": result["error_code"],
+                          "asset_http": result.get("asset_http")}))
         return 1
     finally:
         if output_ready and args.work.is_dir() and not args.work.is_symlink():
