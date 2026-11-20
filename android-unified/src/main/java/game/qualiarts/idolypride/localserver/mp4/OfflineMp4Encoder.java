@@ -269,7 +269,8 @@ public final class OfflineMp4Encoder {
                     MediaCodec.BUFFER_FLAG_END_OF_STREAM);
             muxer.writeSampleData(audioTrack, ByteBuffer.allocate(0), end);
             muxer.stop(); muxing = false; muxer.release(); muxer = null;
-            Mp4AudioTimeline.finalizeFile(config.partial, config.sampleRate, config.audioFrames, priming, encodedAudioPackets);
+            Mp4AudioTimeline.finalizeFile(config.partial, config.sampleRate, config.audioFrames, priming,
+                    encodedAudioPackets, config.fpsNumerator, config.fpsDenominator, config.videoFrames);
             check();
             synchronized (stateLock) {
                 check();

@@ -8,7 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Finalizes the sample-accurate AAC presentation interval in our private MP4. */
+/** Finalizes exact video sample clocks and the AAC presentation interval in our private MP4. */
 public final class Mp4AudioTimeline {
     private static final int MAX_MOOV_BYTES = 16 * 1024 * 1024;
     private static final long U32 = 0xffffffffL;
@@ -23,6 +23,30 @@ public final class Mp4AudioTimeline {
      */
     public static void finalizeFile(File mp4, int sampleRate, long logicalPcmFrames,
             int encoderDelayFrames, long encodedAacPackets) throws IOException {
+        finalizeFile(mp4, sampleRate, logicalPcmFrames, encoderDelayFrames, encodedAacPackets, null);
+    }
+
+    /** The producer has already verified every encoded frame's index and exact input PTS. */
+    public static void finalizeFile(File mp4, int sampleRate, long logicalPcmFrames,
+            int encoderDelayFrames, long encodedAacPackets, int fpsNumerator,
+            int fpsDenominator, long videoFrames) throws IOException {
+        require(fpsNumerator > 0 && fpsNumerator <= 1_000_000 && fpsDenominator > 0
+                && fpsDenominator <= 10_000 && videoFrames > 0 && videoFrames <= U32,
+                "Invalid verified video clock");
+        int common = (int)gcd(fpsNumerator, fpsDenominator);
+        finalizeFile(mp4, sampleRate, logicalPcmFrames, encoderDelayFrames, encodedAacPackets,
+                new VideoClock(fpsNumerator / common, fpsDenominator / common, videoFrames));
+    }
+
+    private static final class VideoClock {
+        final int numerator, denominator; final long frames;
+        VideoClock(int numerator, int denominator, long frames) {
+            this.numerator = numerator; this.denominator = denominator; this.frames = frames;
+        }
+    }
+
+    private static void finalizeFile(File mp4, int sampleRate, long logicalPcmFrames,
+            int encoderDelayFrames, long encodedAacPackets, VideoClock video) throws IOException {
         require(sampleRate > 0 && logicalPcmFrames > 0 && encoderDelayFrames >= 0
                 && encodedAacPackets > 0, "Invalid AAC timing contract");
         require(mp4 != null && mp4.isFile(), "Missing MP4 file");
@@ -57,7 +81,7 @@ public final class Mp4AudioTimeline {
             }
             require(movie != null && media, "Missing movie metadata or media data");
             byte[] rebuilt = rebuild(movie, sampleRate, logicalPcmFrames,
-                    encoderDelayFrames, encodedAacPackets, rawFrames);
+                    encoderDelayFrames, encodedAacPackets, rawFrames, video);
             require(rebuilt.length <= MAX_MOOV_BYTES, "Rebuilt movie metadata exceeds the limit");
             require(file.length() == length, "MP4 changed during finalization");
             if (movieOffset + movie.length == length) {
@@ -76,13 +100,14 @@ public final class Mp4AudioTimeline {
     }
 
     private static byte[] rebuild(byte[] data, int rate, long frames, int delay,
-            long packets, long rawFrames) throws IOException {
+            long packets, long rawFrames, VideoClock video) throws IOException {
         Box root = boxes(data, 0, data.length).get(0);
         List<Box> children = boxes(data, root.payload, root.end);
         require(root.end == data.length && "moov".equals(root.type), "Invalid moov");
         require(find(children, "mvex", false) == null, "Fragmented movie is unsupported");
         Box movieHeader = find(children, "mvhd", true);
         long oldScale = timescale(data, movieHeader), newScale = multiply(oldScale / gcd(oldScale, rate), rate);
+        if (video != null) newScale = multiply(newScale / gcd(newScale, video.numerator), video.numerator);
         require(oldScale > 0 && newScale <= U32, "Movie timescale cannot represent exact PCM samples");
         long factor = newScale / oldScale, audioDuration = multiply(frames, newScale / rate);
         int audioTracks = 0, videoTracks = 0;
@@ -101,19 +126,69 @@ public final class Mp4AudioTimeline {
             require(audio || "vide".equals(kind), "Unsupported track handler");
             long duration;
             if (audio) { audioTracks++; validateAudio(data, media, rate, packets, rawFrames); duration = audioDuration; }
-            else { videoTracks++; duration = multiply(duration(data, trackHeader), factor); }
+            else { videoTracks++; duration = video == null ? multiply(duration(data, trackHeader), factor)
+                    : multiply(multiply(video.frames, video.denominator), newScale / video.numerator); }
             movieDuration = Math.max(movieDuration, duration);
             List<byte[]> updated = new ArrayList<>();
             for (Box part : track) {
-                updated.add(part == trackHeader ? updateHeader(data, part, duration, -1) : copy(data, part));
+                updated.add(part == trackHeader ? updateHeader(data, part, duration, -1)
+                        : !audio && video != null && part == mdia ? rebuildVideo(data, mdia, video) : copy(data, part));
                 if (audio && part == trackHeader) updated.add(edit(audioDuration, delay));
             }
             result.add(box("trak", join(updated)));
         }
-        require(audioTracks == 1 && videoTracks >= 1, "Expected one AAC track and video");
+        require(audioTracks == 1 && videoTracks >= 1 && (video == null || videoTracks == 1),
+                "Expected one AAC track and one verified video track");
         for (int i = 0; i < children.size(); i++) if (children.get(i) == movieHeader)
             result.set(i, updateHeader(data, movieHeader, movieDuration, newScale));
         return box("moov", join(result));
+    }
+
+    private static byte[] rebuildVideo(byte[] data, Box mdia, VideoClock clock) throws IOException {
+        List<Box> media = boxes(data, mdia.payload, mdia.end);
+        Box header = find(media, "mdhd", true), minf = find(media, "minf", true);
+        List<Box> information = boxes(data, minf.payload, minf.end);
+        Box stbl = find(information, "stbl", true);
+        List<Box> table = boxes(data, stbl.payload, stbl.end);
+        require(find(table, "ctts", false) == null, "Reordered video samples are unsupported");
+        Box stts = find(table, "stts", true), stsz = find(table, "stsz", true), stsd = find(table, "stsd", true);
+        fullV0(data, stts); require(stts.end - stts.payload >= 8, "Truncated video timing");
+        long entries = u32(data, stts.payload + 4), count = 0;
+        require(entries <= (stts.end - stts.payload - 8) / 8
+                && entries * 8 == stts.end - stts.payload - 8, "Invalid video timing table");
+        for (int p = stts.payload + 8; p < stts.end; p += 8) {
+            long samples = u32(data, p);
+            require(samples > 0 && u32(data, p + 4) > 0 && samples <= clock.frames - count,
+                    "Invalid verified video sample count or duration"); count += samples;
+        }
+        require(count == clock.frames, "Video frame count differs from timing table");
+        fullV0(data, stsz); require(stsz.end - stsz.payload >= 12, "Truncated video sample sizes");
+        require(u32(data, stsz.payload + 8) == clock.frames, "Video frame count differs from size table");
+        long fixed = u32(data, stsz.payload + 4);
+        require(stsz.end - stsz.payload == 12 + (fixed == 0 ? multiply(clock.frames, 4) : 0), "Invalid video sample sizes");
+        if (fixed == 0) for (int p = stsz.payload + 12; p < stsz.end; p += 4)
+            require(u32(data, p) > 0, "Empty encoded video sample");
+        fullV0(data, stsd); require(stsd.end - stsd.payload >= 8 && u32(data, stsd.payload + 4) == 1,
+                "Expected one video sample description");
+        List<Box> descriptions = boxes(data, stsd.payload + 8, stsd.end);
+        require(descriptions.size() == 1 && descriptions.get(0).end - descriptions.get(0).payload >= 78
+                && ("avc1".equals(descriptions.get(0).type) || "hvc1".equals(descriptions.get(0).type)
+                    || "hev1".equals(descriptions.get(0).type)), "Unsupported video sample description");
+        long mediaDuration = multiply(clock.frames, clock.denominator);
+        long expectedOldTicks = multiply(mediaDuration, timescale(data, header)) / clock.numerator;
+        long oldDuration = duration(data, header);
+        require(oldDuration >= expectedOldTicks && oldDuration - expectedOldTicks <= 1,
+                "Video media duration differs from the verified clock");
+        byte[] timing = new byte[16]; put32(timing, 4, 1);
+        put32(timing, 8, clock.frames); put32(timing, 12, clock.denominator);
+        List<byte[]> samples = new ArrayList<>();
+        for (Box item : table) samples.add(item == stts ? box("stts", timing) : copy(data, item));
+        List<byte[]> infos = new ArrayList<>();
+        for (Box item : information) infos.add(item == stbl ? box("stbl", join(samples)) : copy(data, item));
+        List<byte[]> output = new ArrayList<>();
+        for (Box item : media) output.add(item == header ? updateHeader(data, header, mediaDuration, clock.numerator)
+                : item == minf ? box("minf", join(infos)) : copy(data, item));
+        return box("mdia", join(output));
     }
 
     private static void validateAudio(byte[] data, List<Box> media, int rate,

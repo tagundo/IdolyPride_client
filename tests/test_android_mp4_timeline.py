@@ -37,7 +37,8 @@ def descriptor(tag, payload):
 
 def movie(*, rate=48000, packets=52, logical=50000, delay=2048, movie_scale=1000,
           video_duration=1250, version=0, timing_delta=1024, audio_duration=None,
-          existing_edits=False, asc=b"\x11\x90", audio_rate=None, duplicate_audio=False):
+          existing_edits=False, asc=b"\x11\x90", audio_rate=None, duplicate_audio=False,
+          video_frames=None, video_timing=None, video_mdhd_duration=112500, video_ctts=False):
     # 0x1190 is AAC-LC/48kHz/stereo/1024 samples; no borrowed reference source.
     specific = descriptor(5, asc)
     decoder = descriptor(4, bytes([0x40, 0x15]) + bytes(11) + specific)
@@ -52,9 +53,17 @@ def movie(*, rate=48000, packets=52, logical=50000, delay=2048, movie_scale=1000
                 + (box("edts", full("elst", U32(0))) if existing_edits else b"")
                 + box("mdia", timing("mdhd", rate, audio_duration if audio_duration is not None else packets * 1024, version)
                       + full("hdlr", bytes(4) + b"soun" + bytes(12)) + box("minf", table)))
+    video_table = b""
+    if video_frames is not None:
+        durations = video_timing or [(video_frames, 1501)]
+        video_table = box("minf", box("stbl", full("stsd", U32(1) + box("avc1", bytes(78)))
+                          + full("stts", U32(len(durations)) + b"".join(U32(n) + U32(d) for n, d in durations))
+                          + full("stsz", U32(100) + U32(video_frames))
+                          + full("stco", U32(1) + U32(32))
+                          + (full("ctts", U32(1) + U32(video_frames) + U32(0)) if video_ctts else b"")))
     video = box("trak", timing("tkhd", 0, video_duration, version)
-                + box("mdia", timing("mdhd", 90000, 112500, version)
-                      + full("hdlr", bytes(4) + b"vide" + bytes(12))))
+                + box("mdia", timing("mdhd", 90000, video_mdhd_duration, version)
+                      + full("hdlr", bytes(4) + b"vide" + bytes(12)) + video_table))
     metadata = box("moov", timing("mvhd", movie_scale, 1250, version)
                    + video + audio + (audio if duplicate_audio else b"") + box("udta", b"unchanged metadata"))
     prefix = box("ftyp", b"isom" + bytes(4)) + box("mdat", bytes(range(128)))
@@ -71,7 +80,10 @@ def java_finalizer(tmp_path_factory):
     harness.write_text('''import java.io.File;import java.io.IOException;
       import game.qualiarts.idolypride.localserver.mp4.Mp4AudioTimeline;
       public class TimelineHarness {public static void main(String[] a)throws Exception {
-        try {Mp4AudioTimeline.finalizeFile(new File(a[0]),Integer.parseInt(a[1]),
+        try {if(a.length==8)Mp4AudioTimeline.finalizeFile(new File(a[0]),Integer.parseInt(a[1]),
+          Long.parseLong(a[2]),Integer.parseInt(a[3]),Long.parseLong(a[4]),Integer.parseInt(a[5]),
+          Integer.parseInt(a[6]),Long.parseLong(a[7]));
+        else Mp4AudioTimeline.finalizeFile(new File(a[0]),Integer.parseInt(a[1]),
           Long.parseLong(a[2]),Integer.parseInt(a[3]),Long.parseLong(a[4]));}
         catch(IOException e){System.err.println(e.getMessage());System.exit(2);}
       }}''')
@@ -214,6 +226,78 @@ def test_front_movie_with_invalid_clock_never_changes_file(java_finalizer, tmp_p
     result = java_finalizer(path, args)
     assert result.returncode == 2
     assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("front", [False, True])
+def test_verified_rational_video_repairs_android_muxer_fudging(java_finalizer, tmp_path, front):
+    # This is the four-entry timing pattern observed on the API35 c2 AVC writer.
+    # MediaCodec returned every exact input PTS; MediaMuxer rounded near-identical
+    # durations to avoid table growth, losing19ticks over these60frames.
+    original, args, prefix = movie(logical=48000, video_frames=60, video_duration=1001,
+                                  video_mdhd_duration=90090,
+                                  video_timing=[(44, 1501), (1, 1511), (14, 1501), (1, 1502)])
+    if front:
+        ftyp_size = struct.unpack_from(">I", prefix)[0]
+        original = prefix[:ftyp_size] + original[len(prefix):] + prefix[ftyp_size:]
+    path = tmp_path / "rational.mp4"
+    path.write_bytes(original)
+    result = java_finalizer(path, (*args, 60000, 1001, 60))
+    assert result.returncode == 0, result.stderr
+    output = path.read_bytes()
+    if front:
+        expected = bytearray(original)
+        expected[ftyp_size + 4:ftyp_size + 8] = b"free"
+        assert output[:len(original)] == expected
+    else:
+        assert output.startswith(prefix)
+    moov = named(output, "moov")[0]
+    assert struct.unpack_from(">II", named(moov, "mvhd")[0], 12) == (240000, 240240)
+    video = named(moov, "trak")[0]
+    assert struct.unpack_from(">I", named(video, "tkhd")[0], 20)[0] == 240240
+    media = named(video, "mdia")[0]
+    assert struct.unpack_from(">II", named(media, "mdhd")[0], 12) == (60000, 60060)
+    table = named(named(media, "minf")[0], "stbl")[0]
+    assert named(table, "stts")[0] == bytes(4) + U32(1) + U32(60) + U32(1001)
+    assert named(table, "stco")[0] == bytes(4) + U32(1) + U32(32)
+    # Exact packetPTS arefloor(index*1001/60000 seconds); no accumulated drift.
+    assert [index * 1001 * 1_000_000 // 60000 for index in range(60)][-1] == 984316
+
+
+def test_verified_video_and_audio_common_clock_is_exact(java_finalizer, tmp_path):
+    original, args, prefix = movie(rate=44100, logical=45877, asc=b"\x12\x10",
+                                  video_frames=32, video_duration=1068,
+                                  video_mdhd_duration=96096, video_timing=[(32, 3003)])
+    path = tmp_path / "combined-clock.mp4"
+    path.write_bytes(original)
+    result = java_finalizer(path, (*args, 30000, 1001, 32))
+    assert result.returncode == 0, result.stderr
+    moov = named(path.read_bytes(), "moov")[0]
+    assert struct.unpack_from(">II", named(moov, "mvhd")[0], 12) == (4410000, 4708704)
+    video, audio = named(moov, "trak")
+    assert struct.unpack_from(">II", named(named(video, "mdia")[0], "mdhd")[0], 12) == (30000, 32032)
+    assert struct.unpack_from(">I", named(audio, "tkhd")[0], 20)[0] == 4587700
+    assert path.read_bytes().startswith(prefix)
+
+
+@pytest.mark.parametrize("changes,clock,message", [
+    ({"video_frames": 59}, (60000, 1001, 60), "frame count"),
+    ({"video_mdhd_duration": 90000}, (60000, 1001, 60), "media duration"),
+    ({"video_ctts": True}, (60000, 1001, 60), "Reordered video"),
+    ({"video_timing": [(60, 0)]}, (60000, 1001, 60), "sample count or duration"),
+    ({}, (0, 1, 60), "verified video clock"),
+    ({}, (60000, 1001, 0x100000000), "verified video clock"),
+])
+def test_invalid_verified_video_preserves_file(java_finalizer, tmp_path, changes, clock, message):
+    options = dict(logical=48000, video_frames=60, video_duration=1001,
+                   video_mdhd_duration=90090)
+    options.update(changes)
+    original, args, _ = movie(**options)
+    path = tmp_path / "invalid-video.mp4"
+    path.write_bytes(original)
+    result = java_finalizer(path, (*args, *clock))
+    assert result.returncode == 2, result.stderr
+    assert message in result.stderr
+    assert path.read_bytes() == original
 
 
 @pytest.mark.parametrize("options,args_override,message", [
