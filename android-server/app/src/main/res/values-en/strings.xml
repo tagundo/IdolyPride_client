@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="official_title">Import a Japanese official account</string>
-    <string name="official_notice">Download data using the Japanese game user ID and transfer password, then save it in a normal local account. Do not enter an email, Apple or Google password.</string>
+    <string name="official_title">Import a Japanese official account · Currently unavailable</string>
+    <string name="official_notice">Japanese official account import is currently unavailable. Download data using the Japanese game user ID and transfer password, then save it in a normal local account. Do not enter an email, Apple or Google password.</string>
     <string name="official_warning">Official transfer authentication may affect login or transfer sessions on your existing device. The password is not saved. Review the local destination after data is downloaded.</string>
     <string name="official_inspect">Check transfer ID</string>
     <string name="official_fetch">Transfer login and download</string>
@@ -35,7 +35,7 @@
     <string name="official_error_stale">The destination account changed. Refresh the account list and confirm it again.</string>
     <string name="official_error_expired">Transfer verification expired or was cancelled. Start again by checking the transfer ID.</string>
     <string name="official_error_catalog">Official data could not be verified. Check server data preparation and the network connection.</string>
-    <string name="official_stage_idle">Enter transfer credentials to begin.</string>
+    <string name="official_stage_idle">Japanese official account import is currently unavailable.</string>
     <string name="official_stage_preparing">Preparing import</string>
     <string name="official_stage_checking">Checking transfer ID</string>
     <string name="official_stage_verifying">Verifying official account</string>
@@ -107,7 +107,7 @@
     <string name="help_details">Help</string>
     <string name="help_for">Help for %1$s</string>
     <string name="settings_automatic_notice">Changes save automatically.</string>
-    <string name="official_warning_short">Transfer may affect existing logins; passwords are not saved.</string>
+    <string name="official_warning_short">Japanese official account import is currently unavailable.</string>
     <string name="official_completed_short">Import complete · Select the account to use.</string>
     <string name="events_normal_short">Select several events at once.</string>
     <string name="events_media_short">Viewing accounts start with all events enabled without time limits.</string>

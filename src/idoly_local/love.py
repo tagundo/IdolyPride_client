@@ -506,6 +506,13 @@ class Love:
                 overall.existsHasHiddenFavorabilityObtainItemLove |= info.hasHiddenFavorabilityObtainItem
                 for mission in info.eventMissionIds:
                     if mission not in overall.eventMissionIds:overall.eventMissionIds.append(mission)
+        # One ordinary entrance opens the complete standard picker. Each Extra
+        # keeps its dedicated TitleExtra entrance; aggregate flags above still
+        # cover every standard event, including those without a Home banner.
+        standard = next((row for row in entries if row.baseType == 1), None)
+        entries = ([standard] if standard is not None else []) + [row for row in entries if row.baseType == 2]
+        for order,row in enumerate(entries):
+            row.order = order
         return overall,entries
 
     def _mutate(self, identity, event, result, operation, now, *, registering=False):

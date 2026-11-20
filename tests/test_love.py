@@ -467,7 +467,9 @@ def test_lesson_signed_amount_overflow_rolls_back_clock_experience_and_inventory
     assert stopped.value.code==RpcCode.OUT_OF_RANGE and database(game.state)==before
 
 
-def test_extra_only_schedule_keeps_dedicated_entry_and_hides_empty_standard_title_menu(game):
+@pytest.mark.parametrize("media_mode",[False,True])
+def test_extra_only_schedule_keeps_dedicated_entry_and_hides_empty_standard_title_menu(game,media_mode):
+    game.love.media_mode=media_mode
     extra=copy.deepcopy(event());extra.update(loveId=EXTRA,baseType=2,titleAssetId="love-25-0426",assetId="love-25-0426")
     game.plan["events"][EXTRA]=extra;game.love.settings=settings(EXTRA)
     home,entries=game.love.home_info()
@@ -552,3 +554,100 @@ def test_media_default_event_remains_available_years_later_without_expiry_or_acc
     assert (root / event_settings.FILENAME).read_bytes() == before_schedule
     assert not (root / event_settings.MEDIA_FILENAME).exists()
     assert game.state.authenticated(game.token, "player")
+
+
+@pytest.fixture
+def six_event_home_game(game):
+    """Finite Home-only rules plus the preserved Extra presentation metadata."""
+    standard_ids=(EV,"love-23-1114","love-24-0517","love-24-1114","love-26-0313")
+    for index,identity in enumerate(standard_ids):
+        row=copy.deepcopy(event())
+        row.update(loveId=identity,name="Synthetic standard "+str(index),
+                   bannerAssetId="img_banner_l_"+identity)
+        game.plan["events"][identity]=row
+    reference=json.loads((ROOT/"data/love-reference.json").read_text())
+    extra=copy.deepcopy(event())
+    for field in ("characterId","costumeId","characterAssetId","color","presentItemId"):
+        extra.pop(field,None)
+    extra.update(reference["events"][EXTRA]["catalog"])
+    assert len(extra["mainCharacters"])==4
+    game.plan["events"][EXTRA]=extra
+    # The chosen ordinary banner is already seen, locked and has no present.
+    # Only a hidden standard contributes each corresponding aggregate flag.
+    game.plan["events"][EV].update(unlockConditionId="cd-home-six-unmet",presentItemId="")
+    game.plan["events"][standard_ids[-1]]["eventMissionIds"]=["synthetic-hidden-standard-mission"]
+    conditions=json.loads((game.master/"Condition.json").read_text())
+    conditions.append({"id":"cd-home-six-unmet","settings":[{"clearArea":{"areaId":"area-home-six-unmet"}}]})
+    (game.master/"Condition.json").write_text(json.dumps(conditions))
+    areas=json.loads((game.master/"Area.json").read_text())
+    areas.append({"id":"area-home-six-unmet","questIds":["quest-home-six-unmet"]})
+    (game.master/"Area.json").write_text(json.dumps(areas))
+    snapshot=user(game)
+    snapshot.loves.add(loveId=EV)
+    game.state.save_snapshot("player",snapshot.SerializeToString(),game.schema.fingerprint,starter_version=7)
+    game.token,_=game.state.login("player")
+    game.love.settings=settings(*standard_ids,EXTRA,start=0,end=0)
+    game.standard_ids=standard_ids
+    return game
+
+
+@pytest.mark.parametrize("media_mode",[False,True])
+def test_all_six_events_keep_one_standard_and_dedicated_extra_home_entrances(six_event_home_game,media_mode):
+    game=six_event_home_game
+    game.love.media_mode=media_mode
+    before=database(game.state)
+    home,entries=game.love.home_info()
+    assert [row.id for row in entries]==[EV,EXTRA]
+    assert [row.order for row in entries]==[0,1]
+    ordinary,extra=entries
+    assert ordinary.baseType==1 and not ordinary.limitedExtraTitleAssetId
+    assert ordinary.isUnlocked is media_mode and ordinary.isUnplayed is media_mode
+    assert not ordinary.hasHiddenFavorabilityObtainItem
+    assert home.isViewable and home.isUnlocked and home.existsUnplayedLove
+    assert home.existsHasHiddenFavorabilityObtainItemLove is (not media_mode)
+    assert list(home.eventMissionIds)==["synthetic-hidden-standard-mission"]
+    assert extra.baseType==2 and extra.isUnlocked and extra.isUnplayed
+    assert extra.bannerAssetId=="img_banner_l_event-love-25-0426"
+    assert extra.limitedExtraTitleAssetId=="love-25-0426" and extra.endTime==0
+    title=invoke(game,"Title")
+    assert [row.loveId for row in title.loveInfos]==list(game.standard_ids)
+    dedicated=invoke(game,"TitleExtra",loveId=EXTRA)
+    assert dedicated.loveInfo.loveId==EXTRA and dedicated.loveInfo.baseType==2
+    assert dedicated.titleAssetId=="love-25-0426"
+    assert dedicated.loveInfo.mainCharacterInfo.characterId=="char-rui"
+    assert database(game.state)==before and not game.state.has_love_progress("player")
+
+
+@pytest.mark.parametrize("captured",[False,True])
+def test_all_six_home_projection_survives_authenticated_application_overlay(six_event_home_game,tmp_path,captured):
+    from idoly_local import codec
+    from idoly_local.application import Application
+    from idoly_local.catalog import FixtureStore
+    game=six_event_home_game
+    fixtures=FixtureStore(tmp_path/"six-event-fixtures",game.schema)
+    app=Application(game.schema,game.state,fixtures,profile="player",master_dir=game.master,
+                    event_settings=game.love.settings)
+    app.love._prepared=game.plan
+    app.love.clock=lambda:game.clock[0]
+    old=game.schema.response_type("/api.Home/Enter")()
+    old.currentMainAreaId="area-main-002"
+    old.bannerInfo.SetInParent()
+    old.eventInfo.loveEventInfos.add(id="stale-extra-must-not-survive")
+    old.MergeFromString(UNKNOWN)
+    raw=old.SerializeToString()
+    if captured:fixtures._responses[("/api.Home/Enter",None)]=raw
+    else:app.gameplay.handle=lambda path,_:raw if path=="/api.Home/Enter" else None
+    def abort(code,details):
+        raise RpcFailure(code,details)
+    context=SimpleNamespace(invocation_metadata=lambda:(("x-auth-token",game.token),),abort=abort)
+    before=database(game.state)
+    wire=app.handle("/api.Home/Enter",codec.encode(b""),context)
+    home=game.schema.response_type("/api.Home/Enter").FromString(wire)
+    assert home.currentMainAreaId=="area-main-002" and home.HasField("bannerInfo")
+    assert UNKNOWN in home.SerializeToString()
+    assert [row.id for row in home.eventInfo.loveEventInfos]==[EV,EXTRA]
+    extra=home.eventInfo.loveEventInfos[1]
+    assert extra.baseType==2 and extra.limitedExtraTitleAssetId=="love-25-0426"
+    assert extra.bannerAssetId=="img_banner_l_event-love-25-0426" and extra.isUnlocked
+    assert home.loveInfo.isUnlocked and home.loveInfo.existsUnplayedLove
+    assert database(game.state)==before and not game.state.has_love_progress("player")
