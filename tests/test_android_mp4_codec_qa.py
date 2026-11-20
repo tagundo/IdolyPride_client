@@ -1,0 +1,170 @@
+from __future__ import annotations
+
+from array import array
+import copy
+import io
+from pathlib import Path
+import sys
+import tarfile
+
+import pytest
+
+from tools import build_android_mp4_qa as qa
+
+
+def report():
+    cases = []
+    for name, frames, numerator, denominator in (("avc30", 30, 30, 1), ("avc60000_1001", 60, 60000, 1001)):
+        cases.append({"name": name, "required": True, "status": "passed", "frames": frames,
+            "decoded_video_frames": frames, "fps_numerator": numerator, "fps_denominator": denominator,
+            "ordered_video_pts": True, "corner_pixels_verified": True, "source_preserved": True,
+            "file": name + "/complete.mp4", "audio": {"raw_decoded_frames": 51200, "logical_frames": 48000,
+                "aac_packets": 50, "priming_samples": 1600, "impulses_verified": True, "edit_list_exact": True},
+            "encoder": {"phase": "completed", "aac_priming_samples": 1600, "audio_packets": 50}})
+    cases += [{"name": "cancel", "required": True, "status": "passed", "terminal_cleanup": True,
+               "source_preserved": True, "output_absent": True},
+              {"name": "no_overwrite", "required": True, "status": "passed", "sentinel_preserved": True, "partial_absent": True},
+              {"name": "hevc30", "required": False, "status": "unsupported", "capability_checked": True,
+               "reason": "device_has_no_supported_hevc_encoder"}]
+    return {"schema": 1, "package": qa.PACKAGE, "phase": "completed", "passed": True, "cases": cases}
+
+
+def pcm(shift=0):
+    values = array("f", [0]) * (48000 * 2)
+    for channel in range(2):
+        values[(8000 + shift) * 2 + channel] = 0.8
+        values[(32000 + shift) * 2 + channel] = -0.6
+    if sys.byteorder != "little":
+        values.byteswap()
+    return values.tobytes()
+
+
+def test_report_requires_actual_decode_and_all_terminal_ownership_checks():
+    value = report()
+    assert qa.validate_runtime_report(value) == value
+    hevc = copy.deepcopy(value["cases"][0])
+    hevc.update(name="hevc30", required=False, file="hevc30/complete.mp4")
+    value["cases"][-1] = hevc
+    assert qa.validate_runtime_report(value) == value
+
+
+@pytest.mark.parametrize("key,value", [("phase", "running"), ("phase", "failed"), ("passed", False),
+    ("passed", 1), ("package", "game.qualiarts.idolypride.local.diagnostics"), ("error", "decoder failed")])
+def test_never_accept_build_only_failed_or_another_app(key, value):
+    proof = report(); proof[key] = value
+    with pytest.raises(ValueError):
+        qa.validate_runtime_report(proof)
+
+
+@pytest.mark.parametrize("index,section,key,value", [
+    (0, None, "status", "unsupported"), (0, None, "decoded_video_frames", 29),
+    (0, None, "ordered_video_pts", False), (0, None, "corner_pixels_verified", False),
+    (0, None, "source_preserved", False), (0, None, "required", False),
+    (0, None, "file", "../../other.mp4"), (1, None, "fps_denominator", 1000),
+    (0, "audio", "raw_decoded_frames", 48000), (0, "audio", "aac_packets", 49),
+    (0, "audio", "logical_frames", 48128), (0, "audio", "priming_samples", -1),
+    (0, "audio", "impulses_verified", False), (0, "audio", "edit_list_exact", False),
+    (0, "encoder", "phase", "finishing"), (0, "encoder", "aac_priming_samples", 2048),
+    (0, "encoder", "audio_packets", 49), (2, None, "terminal_cleanup", False),
+    (2, None, "output_absent", False), (3, None, "sentinel_preserved", False),
+    (3, None, "partial_absent", False), (4, None, "status", "failed"),
+    (4, None, "capability_checked", False), (4, None, "reason", "any decoder failure"),
+])
+def test_case_proofs_are_strict(index, section, key, value):
+    proof = report()
+    target = proof["cases"][index]
+    if section is not None:
+        target = target[section]
+    target[key] = value
+    with pytest.raises(ValueError):
+        qa.validate_runtime_report(proof)
+
+
+def test_missing_and_duplicate_cases_cannot_pass():
+    for cases in (report()["cases"][:-1], report()["cases"] + [report()["cases"][0]]):
+        with pytest.raises(ValueError):
+            qa.validate_runtime_report(dict(report(), cases=cases))
+
+
+def test_independent_audio_checks_logical_samples_polarity_and_both_channels():
+    proof = qa.validate_independent_pcm(pcm())
+    assert proof["presented_sample_frames"] == 48000
+    assert proof["channel_peaks"] == [{"positive_sample": 8000, "negative_sample": 32000}] * 2
+    assert qa.validate_independent_pcm(pcm(1))["impulses_verified"] is True
+    for raw in (pcm()[:-8], pcm() + b"\0" * 1024, pcm(448), b"\0" * len(pcm())):
+        with pytest.raises(ValueError):
+            qa.validate_independent_pcm(raw)
+    values = array("f"); values.frombytes(pcm())
+    values[0] = float("nan")
+    with pytest.raises(ValueError):
+        qa.validate_independent_pcm(values.tobytes())
+
+
+def manifest():
+    return f'''<manifest xmlns:android="{qa.ANDROID[1:-1]}" package="{qa.PACKAGE}">
+      <uses-sdk android:minSdkVersion="30" android:targetSdkVersion="35"/>
+      <application android:debuggable="true" android:allowBackup="false">
+        <activity android:name=".CodecProbeActivity" android:exported="true"><intent-filter>
+          <action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/>
+        </intent-filter></activity>
+      </application></manifest>'''.encode()
+
+
+def test_isolated_qa_manifest_has_no_game_permissions_services_or_backup():
+    qa.validate_manifest(manifest())
+    for raw in (manifest().replace(qa.PACKAGE.encode(), b"game.other"),
+                manifest().replace(b'minSdkVersion="30"', b'minSdkVersion="28"'),
+                manifest().replace(b'targetSdkVersion="35"', b'targetSdkVersion="34"'),
+                manifest().replace(b'debuggable="true"', b'debuggable="false"'),
+                manifest().replace(b'allowBackup="false"', b'allowBackup="true"'),
+                manifest().replace(b"<uses-sdk", b'<uses-permission android:name="android.permission.RECORD_AUDIO"/><uses-sdk'),
+                manifest().replace(b"</application>", b'<service android:name=".Foreign"/></application>')):
+        with pytest.raises(ValueError):
+            qa.validate_manifest(raw)
+
+
+def tar_file(tmp_path, names):
+    path = tmp_path / "proof.tar"
+    with tarfile.open(path, "w") as out:
+        for name, kind in names:
+            member = tarfile.TarInfo(name)
+            if kind == "file":
+                member.size = 1; out.addfile(member, io.BytesIO(b"x"))
+            else:
+                member.type = tarfile.SYMTYPE if kind == "symlink" else tarfile.LNKTYPE
+                member.linkname = "/outside"; out.addfile(member)
+    return path
+
+
+@pytest.mark.parametrize("name,kind", [("../outside", "file"), ("/tmp/outside", "file"),
+    ("mp4-qa/../../outside", "file"), ("foreign/file", "file"),
+    ("mp4-qa/link", "symlink"), ("mp4-qa/link", "hardlink")])
+def test_device_archive_cannot_escape_owned_evidence(tmp_path, name, kind):
+    archive = tar_file(tmp_path, [(name, kind)])
+    destination = tmp_path / "extracted"
+    with pytest.raises(ValueError):
+        qa.extract_archive(archive, destination)
+    assert not destination.exists()
+
+
+def test_archive_accepts_regular_evidence_and_rejects_duplicates(tmp_path):
+    archive = tar_file(tmp_path, [("mp4-qa/report.json", "file"), ("mp4-qa/avc30/complete.mp4", "file")])
+    qa.extract_archive(archive, tmp_path / "out")
+    assert (tmp_path / "out/mp4-qa/avc30/complete.mp4").read_bytes() == b"x"
+    archive = tar_file(tmp_path, [("mp4-qa/report.json", "file")] * 2)
+    with pytest.raises(ValueError):
+        qa.extract_archive(archive, tmp_path / "other")
+
+
+def test_workflow_is_scoped_read_only_and_never_treats_an_artifact_as_a_pass():
+    root = Path(__file__).resolve().parents[1]
+    raw = (root / ".github/workflows/verify-mp4-codecs.yml").read_text()
+    assert "contents: read" in raw and "contents: write" not in raw and "GH_TOKEN" not in raw
+    assert "ref: ${{ github.sha }}" in raw and "branches: [feat/ios-unified-server]" in raw
+    assert "IdolyMVEncoder.mm" in raw and "mp4_encoder_api.h" in raw
+    assert "ios-unified/native/test_mv_encoder.py" in raw and "tools/build_android_mp4_qa.py --run-device --timeout 600" in raw
+    assert "api-level: 35" in raw and "arch: x86_64" in raw and "emulator-boot-timeout: 1200" in raw
+    assert "test -c /dev/kvm" in raw and "disable-linux-hw-accel: false" in raw
+    assert "ffmpeg -version" in raw and raw.count("if: always()") == 2
+    assert "continue-on-error" not in raw and "gh release" not in raw
+    assert "UnifiedGameActivity.java" not in raw and "mp4_game_adapter.hpp" not in raw
