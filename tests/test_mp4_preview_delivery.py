@@ -112,8 +112,10 @@ def test_codec_gate_cannot_use_old_source_or_a_skipped_platform(monkeypatch):
 
 
 def test_artifact_download_checks_complete_bytes_and_hash(tmp_path, monkeypatch):
+    commands = []
     class Process:
         def __init__(self, *args, **kwargs):
+            commands.append(args[0])
             self.stdout = io.BytesIO(b"correct")
         def wait(self, **kwargs): return 0
         def poll(self): return 0
@@ -121,6 +123,11 @@ def test_artifact_download_checks_complete_bytes_and_hash(tmp_path, monkeypatch)
     monkeypatch.setattr(delivery.subprocess, "Popen", Process)
     digest = hashlib.sha256(b"correct").hexdigest()
     delivery.download("actions/artifacts/23/zip", tmp_path / "good", size=7, digest=digest)
+    assert commands[-1][-1] == "Accept: application/vnd.github+json"
+    delivery.download("releases/assets/41", tmp_path / "release", size=7, digest=digest)
+    assert commands[-1][-1] == "Accept: application/octet-stream"
+    with pytest.raises(ValueError, match="endpoint_not_allowed"):
+        delivery.download("https://foreign.invalid/archive", tmp_path / "foreign", size=7, digest=digest)
     for size, wanted in ((6, digest), (8, digest), (7, "0" * 64)):
         with pytest.raises(ValueError):
             delivery.download("actions/artifacts/23/zip", tmp_path / (str(size) + wanted[:1]), size=size, digest=wanted)

@@ -7,6 +7,7 @@ release ID, never by a tag lookup or an external upload URL.
 """
 from __future__ import annotations
 import argparse
+from dataclasses import dataclass
 import hashlib
 import importlib.util
 import json
@@ -297,8 +298,15 @@ def wait_codecs(source):
 
 def download(path, destination, *, size, digest):
     need(not destination.exists() and not destination.is_symlink(), "fresh_download_path_required")
+    # Actions archive downloads negotiate a JSON API redirect. The octet-stream
+    # media type is supported by release assets, but returns HTTP 415 here.
+    if re.fullmatch(r"actions/artifacts/[1-9][0-9]*/zip", path):
+        accept = "application/vnd.github+json"
+    else:
+        need(re.fullmatch(r"releases/assets/[1-9][0-9]*", path), "download_endpoint_not_allowed")
+        accept = "application/octet-stream"
     process = subprocess.Popen(["gh", "api", "repos/" + REPO + "/" + path,
-        "--header", "Accept: application/octet-stream"], stdin=subprocess.DEVNULL,
+        "--header", "Accept: " + accept], stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     timer = threading.Timer(600, process.kill)
     timer.start()
@@ -309,7 +317,9 @@ def download(path, destination, *, size, digest):
                 used += len(block)
                 need(used <= size, "remote_bytes_exceed_expected_size")
                 actual.update(block); output.write(block)
-        need(process.wait(timeout=30) == 0 and used == size and actual.hexdigest() == digest, "remote_complete_readback_differs")
+        status = process.wait(timeout=30)
+        need(status == 0 and used == size and actual.hexdigest() == digest,
+             f"remote_complete_readback_differs: exit={status}, bytes={used}/{size}, sha256={actual.hexdigest()}/{digest}")
     finally:
         timer.cancel()
         if process.poll() is None:
@@ -432,25 +442,95 @@ def verify_asset(asset, path, work):
             "sha256": digest, "complete_download_verified": True}
 
 
+@dataclass(frozen=True)
+class ProducerContext:
+    """Explicit producer identity; recovery callers must validate their own workflow."""
+    run_id: int
+    attempt: int
+    artifacts: tuple[tuple[str, int, str], ...]
+    codec_run_id: int | None = None
+    delivery_source_commit: str | None = None
+    delivery_run_id: int | None = None
+    delivery_workflow: str | None = None
+
+
+def producer_context_gate(value):
+    need(type(value) is ProducerContext and type(value.run_id) is int and value.run_id > 0
+         and type(value.attempt) is int and value.attempt > 0, "explicit_producer_context_required")
+    need(type(value.artifacts) is tuple and len(value.artifacts) == 2
+         and {row[0] for row in value.artifacts} == {"android", "ios"}, "explicit_artifact_context_required")
+    for kind, identifier, digest in value.artifacts:
+        need(type(identifier) is int and identifier > 0 and canonical_sha(digest) == digest,
+             "explicit_artifact_context_required")
+    need(value.codec_run_id is None or type(value.codec_run_id) is int and value.codec_run_id > 0,
+         "explicit_codec_context_invalid")
+    delivery = (value.delivery_source_commit, value.delivery_run_id, value.delivery_workflow)
+    need(all(item is None for item in delivery) or all(item is not None for item in delivery),
+         "delivery_context_incomplete")
+    if value.delivery_source_commit is not None:
+        source_sha(value.delivery_source_commit)
+        need(type(value.delivery_run_id) is int and value.delivery_run_id > 0
+             and type(value.delivery_workflow) is str
+             and re.fullmatch(r"\.github/workflows/[a-z0-9-]+\.yml", value.delivery_workflow), "delivery_context_invalid")
+    return value
+
+
+def pinned_codec_proof(source, run_id):
+    run = api("actions/runs/" + str(run_id))
+    need(run.get("id") == run_id and run.get("head_sha") == source and run.get("path") == CODEC_WORKFLOW
+         and run.get("head_repository", {}).get("full_name") == REPO
+         and run.get("head_branch") == BRANCH.removeprefix("refs/heads/")
+         and run.get("status") == "completed" and run.get("conclusion") == "success", "pinned_codec_run_differs")
+    jobs = api("actions/runs/" + str(run_id) + "/jobs?per_page=100").get("jobs", [])
+    need(type(jobs) is list and len(jobs) <= 100, "codec_job_catalog_bound")
+    for name in ("apple-codecs", "android-codecs"):
+        selected = [job for job in jobs if job.get("name") == name]
+        need(len(selected) == 1 and selected[0].get("status") == "completed"
+             and selected[0].get("conclusion") == "success"
+             and selected[0].get("run_attempt") == run.get("run_attempt"), "pinned_codec_platform_differs")
+    return {"run_id": run_id, "source_commit": source,
+            "url": "https://github.com/" + REPO + "/actions/runs/" + str(run_id)}
+
+
 def stage(source, work):
     run_id, attempt = context(source)
+    producer = ProducerContext(run_id, attempt, tuple((kind,
+        int(os.environ[kind.upper() + "_ARTIFACT_ID"]), canonical_sha(os.environ[kind.upper() + "_ARTIFACT_SHA"]))
+        for kind in ("android", "ios")))
+    return stage_from_producer(source, work, producer=producer)
+
+
+def stage_from_producer(source, work, *, producer):
+    """Reuse every package/release gate with an explicitly validated producer.
+
+    The ordinary CLI always obtains this identity from context(). The one-time
+    recovery entry point separately validates its workflow and immutable pins;
+    it never changes GITHUB_* variables to impersonate the producer workflow.
+    """
+    source_sha(source)
+    producer_context_gate(producer)
+    run_id, attempt = producer.run_id, producer.attempt
+    inputs = {kind: (identifier, digest) for kind, identifier, digest in producer.artifacts}
     need(not work.exists() and not work.is_symlink(), "fresh_staging_directory_required")
     work.mkdir(mode=0o700, parents=True)
     receipt = work / "draft-staging-proof.json"
     proof = {"schema": 1, "source_commit": source, "tag": tag(source), "draft": True,
              "published": False, "stage": "preflight", "verified_assets": []}
+    delivery = {} if producer.delivery_source_commit is None else {
+        "delivery_source_commit": producer.delivery_source_commit,
+        "delivery_run_id": producer.delivery_run_id, "delivery_workflow": producer.delivery_workflow}
+    proof.update(delivery)
     def save():
         receipt.write_text(json.dumps(proof, indent=2) + "\n")
     save()
     try:
-        codec = wait_codecs(source)
+        codec = wait_codecs(source) if producer.codec_run_id is None else pinned_codec_proof(source, producer.codec_run_id)
         run = api("actions/runs/" + str(run_id))
         jobs = api("actions/runs/" + str(run_id) + "/jobs?per_page=100").get("jobs", [])
         need(type(jobs) is list and len(jobs) <= 100, "producer_job_catalog_bound")
         built = {}; paths = []; details = {}
         for kind in ("android", "ios"):
-            artifact_id = int(os.environ[kind.upper() + "_ARTIFACT_ID"])
-            digest = canonical_sha(os.environ[kind.upper() + "_ARTIFACT_SHA"])
+            artifact_id, digest = inputs[kind]
             artifact = producer_gate(run, jobs, api("actions/artifacts/" + str(artifact_id)), kind=kind,
                 source=source, run_id=run_id, attempt=attempt, artifact_id=artifact_id, digest=digest)
             archive = work / (kind + ".zip")
@@ -462,7 +542,7 @@ def stage(source, work):
             built[kind] = {"artifact_id": artifact_id, "artifact_sha256": digest,
                 "url": f"https://github.com/{REPO}/actions/runs/{run_id}/artifacts/{artifact_id}"}
         manifest = work / VERIFICATION
-        manifest.write_text(json.dumps({"schema": 1, "source_commit": source, "version": VERSION,
+        manifest.write_text(json.dumps({"schema": 1, "source_commit": source, "version": VERSION, **delivery,
             "producer_run_id": run_id, "producer_run_attempt": attempt, "artifacts": built,
             "codec_workflow": codec, "checks": details, "actual_game_mv_verified": False,
             "files": [{"name": path.name, "bytes": path.stat().st_size, "sha256": sha(path)} for path in paths]}, indent=2) + "\n")
