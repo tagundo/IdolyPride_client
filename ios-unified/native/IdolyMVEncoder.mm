@@ -372,12 +372,28 @@ static uint8_t IDMVsRGBTo709(uint8_t value) {
     CMTime expectedVideo = CMTimeMake((int64_t)(_config.video_frame_count * _config.fps_den),
                                       (int32_t)_config.fps_num);
     CMTime expectedAudio = CMTimeMake((int64_t)_config.audio_sample_frames, (int32_t)_config.audio_sample_rate);
+#if IDMV_ENCODER_DIAGNOSTICS
+    fprintf(stderr,"IDMV timeline video_tracks=%lu audio_tracks=%lu v_start=%lld/%d v_duration=%lld/%d v_expected=%lld/%d a_start=%lld/%d a_duration=%lld/%d a_expected=%lld/%d\n",
+        (unsigned long)videoTracks.count,(unsigned long)audioTracks.count,
+        (long long)videoTracks.firstObject.timeRange.start.value,videoTracks.firstObject.timeRange.start.timescale,
+        (long long)videoTracks.firstObject.timeRange.duration.value,videoTracks.firstObject.timeRange.duration.timescale,
+        (long long)expectedVideo.value,expectedVideo.timescale,
+        (long long)audioTracks.firstObject.timeRange.start.value,audioTracks.firstObject.timeRange.start.timescale,
+        (long long)audioTracks.firstObject.timeRange.duration.value,audioTracks.firstObject.timeRange.duration.timescale,
+        (long long)expectedAudio.value,expectedAudio.timescale);
+#endif
     if (videoTracks.count != 1 || audioTracks.count != 1
             || CMTimeCompare(videoTracks.firstObject.timeRange.start, kCMTimeZero) != 0
             || CMTimeCompare(videoTracks.firstObject.timeRange.duration, expectedVideo) != 0
             || CMTimeCompare(audioTracks.firstObject.timeRange.start, kCMTimeZero) != 0
             || fabs(CMTimeGetSeconds(CMTimeSubtract(audioTracks.firstObject.timeRange.duration, expectedAudio)))
                 > 1.0 / _config.audio_sample_rate) {
+#if IDMV_ENCODER_DIAGNOSTICS
+        // Synthetic proof builds only: retain an explicitly rejected artifact
+        // for independent timestamp/packet inspection. Never enabled in the IPA.
+        NSString *rejected = [_partialPath stringByAppendingString:@".rejected.mp4"];
+        [NSFileManager.defaultManager copyItemAtPath:_partialPath toPath:rejected error:NULL];
+#endif
         [self stopWithPhase:IDMP4_FAILED code:"encoded_timeline_mismatch"]; return;
     }
     // Cancellation and publication have one linearization point. Cancellation

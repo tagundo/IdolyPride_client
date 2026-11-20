@@ -62,7 +62,7 @@ def main() -> None:
     sdk_path = command_output([xcrun, "--sdk", "macosx", "--show-sdk-path"])
     executable = directory / "encoder-integration"
     command = [compiler, "-target", f"{architecture}-apple-macos11.0", "-isysroot", sdk_path,
-               *common, str(here / "IdolyMVEncoder.mm"), str(here / "tests/MVEncoderIntegration.mm")]
+               *common, "-DIDMV_ENCODER_DIAGNOSTICS=1", str(here / "IdolyMVEncoder.mm"), str(here / "tests/MVEncoderIntegration.mm")]
     for framework in FRAMEWORKS:
         command.extend(("-framework", framework))
     command.extend(("-o", str(executable)))
