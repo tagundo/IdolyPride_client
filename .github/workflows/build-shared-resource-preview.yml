@@ -1,0 +1,111 @@
+name: Build frozen shared-resource preview (draft staging only)
+
+on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/build-shared-resource-preview.yml
+      - tools/stage_shared_preview.py
+      - tests/test_shared_preview_delivery.py
+  workflow_dispatch:
+    inputs:
+      upload_draft:
+        description: Stage APK and successful exact-source IPA into the existing private draft; never publish
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: shared-resource-preview-876f5fb
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write
+      actions: read
+    env:
+      SOURCE_SHA: 876f5fb019d36bd7d9fc4ea2314ab49d63df0ba5
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout this transparent delivery workflow and helper
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: delivery
+          persist-credentials: false
+      - name: Checkout the exact reviewed application source
+        uses: actions/checkout@v4
+        with:
+          ref: 876f5fb019d36bd7d9fc4ea2314ab49d63df0ba5
+          path: app
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install exact SDK and NDK tools
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+      - name: Fetch SHA-pinned public inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B delivery/tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/inputs"
+      - name: Rebuild native bridge and signed three-language unified APK
+        working-directory: app
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -z "$(git status --porcelain)"
+          mkdir "$RUNNER_TEMP/native" "$RUNNER_TEMP/output"
+          python -B client-presentation/native/build_native.py --source-commit "$SOURCE_SHA" \
+            --ndk "$ANDROID_HOME/ndk/26.3.11579264" --cache-dir "$RUNNER_TEMP/native-deps" \
+            --output "$RUNNER_TEMP/native/libidoly_presentation.so"
+          umask 077
+          # This is the repository's intentionally public development key/password.
+          printf '%s\n' android > "$RUNNER_TEMP/development-password.txt"
+          python -B tools/package_android_unified.py --prototype \
+            --source-root "$PWD" --source-commit "$SOURCE_SHA" \
+            --client-apk "$RUNNER_TEMP/inputs/client-ko.apk" \
+            --client-ja-apk "$RUNNER_TEMP/inputs/client-ja.apk" \
+            --client-en-apk "$RUNNER_TEMP/inputs/client-en.apk" \
+            --server-apk "$RUNNER_TEMP/inputs/server.apk" \
+            --chaquopy-jar "$RUNNER_TEMP/inputs/chaquopy.jar" --apkeditor "$RUNNER_TEMP/inputs/APKEditor.jar" \
+            --android-jar "$ANDROID_HOME/platforms/android-34/android.jar" \
+            --build-tools "$ANDROID_HOME/build-tools/34.0.0" --jdk-bin "$JAVA_HOME/bin" \
+            --keystore android-diagnostics/local-diagnostics-development.keystore \
+            --password-file "$RUNNER_TEMP/development-password.txt" \
+            --native-bridge "$RUNNER_TEMP/native/libidoly_presentation.so" \
+            --native-receipt "$RUNNER_TEMP/native/build-receipt.json" \
+            --output "$RUNNER_TEMP/output/IdolyPride-Unified-2026.11.20-prototype.apk"
+          python -B ../delivery/tools/stage_shared_preview.py checksums --directory "$RUNNER_TEMP/output"
+      - name: Keep APK and source/signature/readback proof independently of staging
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-resource-android-preview-876f5fb-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/output
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: Verify successful exact Mac producer and stage only the existing draft
+        # The initial scoped push stages this reviewed draft. Manual runs opt in.
+        if: ${{ success() && (github.event_name == 'push' || inputs.upload_draft) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -B delivery/tools/stage_shared_preview.py stage --directory "$RUNNER_TEMP/output" --work "$RUNNER_TEMP/draft-staging"
+      - name: Keep draft staging proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shared-resource-draft-proof-876f5fb-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/draft-staging/draft-staging-proof.json
+          if-no-files-found: ignore
+          retention-days: 14
