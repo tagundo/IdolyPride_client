@@ -9,6 +9,17 @@
  * its host tests. No wall clock, renderer, microphone, or game offsets. */
 enum { IDMVMaximumPendingFrames = 3, IDMVMaximumPCMChunkFrames = 8192 };
 
+/* MP4 movie edit durations share a clock. A default audio-rate movie clock
+ * rounds fractional-rate video ends even when every video sample PTS is exact. */
+static inline bool IDMVCommonTimeScale(uint32_t videoScale, uint32_t audioScale, int32_t *out) {
+    if (!out || !videoScale || !audioScale) return false;
+    uint32_t left = videoScale, right = audioScale;
+    while (right) { uint32_t remainder = left % right; left = right; right = remainder; }
+    uint64_t multiple = (uint64_t)(videoScale / left) * audioScale;
+    if (multiple > INT32_MAX) return false;
+    *out = (int32_t)multiple; return true;
+}
+
 static inline bool IDMVMultiply(uint64_t left, uint64_t right, uint64_t *out) {
     if (!out || (right && left > UINT64_MAX / right)) return false;
     *out = left * right;

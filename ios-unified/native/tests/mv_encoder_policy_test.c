@@ -6,6 +6,11 @@ int main(void) {
     size_t bytes = 0;
     assert(IDMVMaximumPendingFrames == 3);
     assert(IDMVMaximumPCMChunkFrames == 8192);
+    int32_t movieScale = 0;
+    assert(IDMVCommonTimeScale(30000,44100,&movieScale) && movieScale == 4410000);
+    assert(IDMVCommonTimeScale(60,48000,&movieScale) && movieScale == 48000);
+    assert(!IDMVCommonTimeScale(240000,191999,&movieScale));
+    assert(!IDMVCommonTimeScale(0,44100,&movieScale));
     assert(IDMVFrameBytes(3840, 2160, &bytes) && bytes == 33177600);
     assert(IDMVFrameBytes(2160, 3840, &bytes) && bytes == 33177600);
     assert(!IDMVFrameBytes(3841, 2160, &bytes));

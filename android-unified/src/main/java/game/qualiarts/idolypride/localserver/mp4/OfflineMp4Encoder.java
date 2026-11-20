@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -202,7 +203,7 @@ public final class OfflineMp4Encoder {
     }
 
     private void encode() {
-        boolean success = false;
+        boolean success = false, finalReservationOwned = false;
         try (FileInputStream pcm = new FileInputStream(config.pcm)) {
             video = openVideo();
             audioCodecName = chooseAudioEncoder();
@@ -273,11 +274,14 @@ public final class OfflineMp4Encoder {
             synchronized (stateLock) {
                 check();
                 if (config.destination.exists()) throw new IOException("Final export path was occupied");
-                // Link publication is atomic and fails if a destination appeared meanwhile;
-                // unlike ATOMIC_MOVE it never has implementation-defined replacement behavior.
-                Files.createLink(config.destination.toPath(), config.partial.toPath());
+                // Android SELinux may deny hardlinks even inside app-private files. Reserve a
+                // new private name exclusively, then replace only our own empty reservation.
+                // No user can save it until the complete rename and terminal status publication.
+                Files.createFile(config.destination.toPath()); finalReservationOwned = true;
+                Files.move(config.partial.toPath(), config.destination.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+                finalReservationOwned = false;
                 completedPath = config.destination.getPath(); phase = "completed"; success = true;
-                config.partial.delete();
             }
         } catch (Throwable error) {
             if (failure == null && !cancelled) {
@@ -292,6 +296,7 @@ public final class OfflineMp4Encoder {
             synchronized (stateLock) {
                 frames.clear(); free.clear(); pending.clear(); planar = null;
                 if (!success) config.partial.delete();
+                if (finalReservationOwned) config.destination.delete();
                 done = true;
             }
         }

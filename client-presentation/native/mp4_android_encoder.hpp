@@ -5,7 +5,8 @@
 #include <jni.h>
 #include <climits>
 #include <cstring>
-#include <mutex>
+#include <pthread.h>
+#include <cstdlib>
 #include <new>
 
 namespace idoly_mp4_android {
@@ -17,7 +18,17 @@ struct JavaBridge {
     jmethodID cancel = nullptr, terminal = nullptr, error = nullptr;
 };
 JavaBridge bridge;
-std::mutex bridge_lock;
+pthread_mutex_t bridge_lock = PTHREAD_MUTEX_INITIALIZER;
+
+class MutexGuard {
+public:
+    explicit MutexGuard(pthread_mutex_t *lock) : lock_(lock) { pthread_mutex_lock(lock_); }
+    ~MutexGuard() { pthread_mutex_unlock(lock_); }
+private:
+    pthread_mutex_t *lock_;
+    MutexGuard(const MutexGuard &) = delete;
+    MutexGuard &operator=(const MutexGuard &) = delete;
+};
 
 void error_text(char *destination, size_t capacity, const char *code) {
     if (!destination || capacity == 0) return;
@@ -56,7 +67,7 @@ bool exception(JNIEnv *env) {
 }
 
 struct Encoder {
-    std::mutex lock;
+    pthread_mutex_t lock;
     JavaBridge java;
     jobject object = nullptr;
     uint32_t width = 0, height = 0;
@@ -69,7 +80,7 @@ bool java_error(JNIEnv *env, Encoder *encoder) {
 }
 
 bool registered(JavaBridge *copy) {
-    std::lock_guard<std::mutex> guard(bridge_lock);
+    MutexGuard guard(&bridge_lock);
     *copy = bridge; return copy->vm && copy->type;
 }
 
@@ -92,7 +103,7 @@ extern "C" JNIEXPORT jboolean JNICALL
 Java_game_qualiarts_idolypride_localserver_mp4_OfflineMp4Encoder_registerEncoderClass(
         JNIEnv *env, jclass, jclass encoder_class) {
     if (!encoder_class) return JNI_FALSE;
-    std::lock_guard<std::mutex> guard(bridge_lock);
+    MutexGuard guard(&bridge_lock);
     if (bridge.type) return env->IsSameObject(bridge.type, encoder_class) ? JNI_TRUE : JNI_FALSE;
     JavaBridge candidate;
     if (env->GetJavaVM(&candidate.vm) != JNI_OK) return JNI_FALSE;
@@ -153,16 +164,22 @@ extern "C" IDMP4EncoderHandle IDMP4EncoderCreate(const IDMP4EncoderConfig *confi
         pcm, partial, final, static_cast<jint>(config->video_codec));
     env->DeleteLocalRef(pcm); env->DeleteLocalRef(partial); env->DeleteLocalRef(final);
     if (exception(env) || !instance) { error_text(error_code, capacity, "encoder_create_failed"); return nullptr; }
-    Encoder *encoder = new (std::nothrow) Encoder;
+    void *storage = std::malloc(sizeof(Encoder));
+    Encoder *encoder = storage ? new (storage) Encoder{} : nullptr;
     if (!encoder) {
         env->CallVoidMethod(instance, java.cancel); exception(env); env->DeleteLocalRef(instance);
         error_text(error_code, capacity, "encoder_allocation_failed"); return nullptr;
+    }
+    if (pthread_mutex_init(&encoder->lock, nullptr) != 0) {
+        env->CallVoidMethod(instance, java.cancel); exception(env); env->DeleteLocalRef(instance);
+        encoder->~Encoder(); std::free(encoder);
+        error_text(error_code, capacity, "encoder_lock_allocation_failed"); return nullptr;
     }
     encoder->java = java; encoder->width = config->width; encoder->height = config->height;
     encoder->object = env->NewGlobalRef(instance);
     if (exception(env) || !encoder->object) {
         env->CallVoidMethod(instance, java.cancel); exception(env);
-        env->DeleteLocalRef(instance); delete encoder;
+        env->DeleteLocalRef(instance); pthread_mutex_destroy(&encoder->lock); encoder->~Encoder(); std::free(encoder);
         error_text(error_code, capacity, "encoder_global_reference_failed"); return nullptr;
     }
     env->DeleteLocalRef(instance); return encoder;
@@ -171,7 +188,7 @@ extern "C" IDMP4EncoderHandle IDMP4EncoderCreate(const IDMP4EncoderConfig *confi
 extern "C" int IDMP4EncoderAppendFrame(IDMP4EncoderHandle handle, const uint8_t *rgba,
         size_t row_bytes, uint64_t frame_index) {
     if (!handle || !rgba || frame_index > LLONG_MAX || row_bytes > INT_MAX) return IDMP4_ERROR;
-    Encoder *encoder = static_cast<Encoder *>(handle); std::lock_guard<std::mutex> guard(encoder->lock);
+    Encoder *encoder = static_cast<Encoder *>(handle); MutexGuard guard(&encoder->lock);
     if (row_bytes < static_cast<size_t>(encoder->width) * 4 || encoder->height == 0
             || row_bytes > static_cast<size_t>(LLONG_MAX) / encoder->height) return IDMP4_ERROR;
     size_t length = row_bytes * (encoder->height - 1) + static_cast<size_t>(encoder->width) * 4;
@@ -189,7 +206,7 @@ extern "C" int IDMP4EncoderAppendFrame(IDMP4EncoderHandle handle, const uint8_t 
 extern "C" int IDMP4EncoderPoll(IDMP4EncoderHandle handle, IDMP4EncoderStatus *status) {
     if (!handle || !status || status->struct_size != sizeof(IDMP4EncoderStatus) || status->abi_version != 1)
         return IDMP4_ERROR;
-    Encoder *encoder = static_cast<Encoder *>(handle); std::lock_guard<std::mutex> guard(encoder->lock);
+    Encoder *encoder = static_cast<Encoder *>(handle); MutexGuard guard(&encoder->lock);
     Environment scope(encoder->java.vm); JNIEnv *env = scope.get(); if (!env) return IDMP4_ERROR;
     jlongArray fields = static_cast<jlongArray>(env->CallObjectMethod(encoder->object, encoder->java.poll));
     if (java_error(env, encoder) || !fields) return IDMP4_ERROR;
@@ -212,7 +229,7 @@ extern "C" int IDMP4EncoderPoll(IDMP4EncoderHandle handle, IDMP4EncoderStatus *s
 
 extern "C" int IDMP4EncoderFinish(IDMP4EncoderHandle handle) {
     if (!handle) return IDMP4_ERROR;
-    Encoder *encoder = static_cast<Encoder *>(handle); std::lock_guard<std::mutex> guard(encoder->lock);
+    Encoder *encoder = static_cast<Encoder *>(handle); MutexGuard guard(&encoder->lock);
     Environment scope(encoder->java.vm); JNIEnv *env = scope.get(); if (!env) return IDMP4_ERROR;
     jint result = env->CallIntMethod(encoder->object, encoder->java.finish);
     return java_error(env, encoder) ? IDMP4_ERROR : result;
@@ -220,7 +237,7 @@ extern "C" int IDMP4EncoderFinish(IDMP4EncoderHandle handle) {
 
 extern "C" void IDMP4EncoderCancel(IDMP4EncoderHandle handle) {
     if (!handle) return;
-    Encoder *encoder = static_cast<Encoder *>(handle); std::lock_guard<std::mutex> guard(encoder->lock);
+    Encoder *encoder = static_cast<Encoder *>(handle); MutexGuard guard(&encoder->lock);
     Environment scope(encoder->java.vm); JNIEnv *env = scope.get(); if (!env) return;
     env->CallVoidMethod(encoder->object, encoder->java.cancel); java_error(env, encoder);
 }
@@ -229,7 +246,7 @@ extern "C" int IDMP4EncoderDestroy(IDMP4EncoderHandle handle) {
     if (!handle) return IDMP4_ACCEPTED;
     Encoder *encoder = static_cast<Encoder *>(handle);
     {
-        std::lock_guard<std::mutex> guard(encoder->lock);
+        MutexGuard guard(&encoder->lock);
         Environment scope(encoder->java.vm); JNIEnv *env = scope.get(); if (!env) return IDMP4_ERROR;
         jboolean done = env->CallBooleanMethod(encoder->object, encoder->java.terminal);
         if (java_error(env, encoder)) return IDMP4_ERROR;
@@ -237,6 +254,6 @@ extern "C" int IDMP4EncoderDestroy(IDMP4EncoderHandle handle) {
         env->DeleteGlobalRef(encoder->object); encoder->object = nullptr;
     }
     // The C ABI requires the caller to stop concurrent producers/pollers before Destroy.
-    delete encoder; return IDMP4_ACCEPTED;
+    pthread_mutex_destroy(&encoder->lock); encoder->~Encoder(); std::free(encoder); return IDMP4_ACCEPTED;
 }
 } // namespace idoly_mp4_android

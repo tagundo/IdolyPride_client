@@ -81,13 +81,14 @@ static uint8_t IDMVsRGBTo709(uint8_t value) {
     if (!self) return nil;
     _pcmFD = -1;
     uint64_t pcmBytes = 0, frameNumerator = 0, audioDenominator = 0;
-    int64_t endpoint = 0; int32_t timescale = 0;
+    int64_t endpoint = 0; int32_t timescale = 0, movieTimescale = 0;
     if (!config || config->struct_size != sizeof(*config) || config->abi_version != 1
             || config->reserved || !IDMVFrameBytes(config->width, config->height, &_frameBytes)
             || !IDMVRationalFrameTime(config->video_frame_count, config->fps_num, config->fps_den,
                                      &endpoint, &timescale)
             || !IDMVPCMBytes(config->audio_sample_frames, config->audio_channels, &pcmBytes)
             || config->audio_sample_rate < 8000 || config->audio_sample_rate > 192000
+            || !IDMVCommonTimeScale(config->fps_num, config->audio_sample_rate, &movieTimescale)
             || !IDMVMultiply(config->audio_sample_frames, config->fps_num, &frameNumerator)
             || !IDMVMultiply(config->audio_sample_rate, config->fps_den, &audioDenominator)
             || !config->video_frame_count || config->video_frame_count != frameNumerator / audioDenominator
@@ -202,6 +203,11 @@ static uint8_t IDMVsRGBTo709(uint8_t value) {
     _writer = [[AVAssetWriter alloc] initWithURL:[NSURL fileURLWithPath:_partialPath]
                                       fileType:AVFileTypeMPEG4 error:&error];
     if (!_writer) { [self stopWithPhase:IDMP4_FAILED code:"writer_creation_failed"]; return; }
+    int32_t movieTimescale = 0;
+    if (!IDMVCommonTimeScale(_config.fps_num, _config.audio_sample_rate, &movieTimescale)) {
+        [self stopWithPhase:IDMP4_FAILED code:"movie_timescale_unsupported"]; return;
+    }
+    _writer.movieTimeScale = movieTimescale;
     if (![_writer canApplyOutputSettings:videoSettings forMediaType:AVMediaTypeVideo]
             || ![_writer canApplyOutputSettings:audioSettings forMediaType:AVMediaTypeAudio]) {
         [self stopWithPhase:IDMP4_FAILED code:"codec_configuration_unsupported"]; return;
