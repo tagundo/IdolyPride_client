@@ -19,7 +19,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: shared-resource-preview-876f5fb
+  group: shared-resource-preview-1d583f4
   cancel-in-progress: false
 
 jobs:
@@ -30,7 +30,7 @@ jobs:
       contents: write
       actions: read
     env:
-      SOURCE_SHA: 876f5fb019d36bd7d9fc4ea2314ab49d63df0ba5
+      SOURCE_SHA: 1d583f4e1af17b92048cf01f5cc1781fe1905729
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
       - name: Checkout this transparent delivery workflow and helper
@@ -42,7 +42,7 @@ jobs:
       - name: Checkout the exact reviewed application source
         uses: actions/checkout@v4
         with:
-          ref: 876f5fb019d36bd7d9fc4ea2314ab49d63df0ba5
+          ref: 1d583f4e1af17b92048cf01f5cc1781fe1905729
           path: app
           persist-credentials: false
       - uses: actions/setup-python@v5
@@ -93,7 +93,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shared-resource-android-preview-876f5fb-${{ github.run_attempt }}
+          name: shared-resource-android-preview-1d583f4-${{ github.run_attempt }}
           path: ${{ runner.temp }}/output
           if-no-files-found: warn
           compression-level: 0
@@ -108,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shared-resource-draft-proof-876f5fb-${{ github.run_attempt }}
+          name: shared-resource-draft-proof-1d583f4-${{ github.run_attempt }}
           path: ${{ runner.temp }}/draft-staging/draft-staging-proof.json
           if-no-files-found: ignore
           retention-days: 14

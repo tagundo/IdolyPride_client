@@ -72,6 +72,29 @@ def test_mac_failure_does_not_wait_or_retry(monkeypatch):
     assert delivery.wait_mac() == failed
 
 
+def test_mac_pending_outside_actions_never_sleeps(monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(delivery, "api", lambda _: dict(mac(), status="in_progress", conclusion=None))
+    monkeypatch.setattr(delivery.time, "sleep", lambda _: pytest.fail("local staging must not wait"))
+    with pytest.raises(ValueError, match="still_pending"):
+        delivery.wait_mac()
+
+
+def test_actions_mac_wait_stops_at_exact_35_minute_boundary(monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(delivery, "api", lambda _: dict(mac(), status="in_progress", conclusion=None))
+    clock, sleeps = [100.0], []
+    monkeypatch.setattr(delivery.time, "monotonic", lambda: clock[0])
+    def advance(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+    monkeypatch.setattr(delivery.time, "sleep", advance)
+    with pytest.raises(ValueError, match="still_pending"):
+        delivery.wait_mac()
+    assert delivery.MAC_WAIT_SECONDS == 2100
+    assert sum(sleeps) == 2100 and sleeps == [30] * 70
+
+
 def test_existing_asset_requires_full_hash_readback(tmp_path, monkeypatch):
     path = tmp_path / "candidate.apk"
     path.write_bytes(b"correct")

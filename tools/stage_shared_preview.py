@@ -19,13 +19,14 @@ from urllib.request import urlopen
 from zipfile import ZipFile
 
 REPO = "tagundo/IdolyPride_client"
-SOURCE = "876f5fb019d36bd7d9fc4ea2314ab49d63df0ba5"
-RELEASE, MAC_RUN = 452520617, 44714216555
-TAG = "shared-resources-preview-2026.11.20-876f5fb"
+SOURCE = "1d583f4e1af17b92048cf01f5cc1781fe1905729"
+RELEASE, MAC_RUN = 452520617, 44721537092
+TAG = "shared-resources-preview-2026.11.20-" + SOURCE[:7]
 ARTIFACT = "ios-unified-prototype-" + SOURCE
 APK = "IdolyPride-Unified-2026.11.20-prototype.apk"
-IPA = "IdolyPride-Unified-2026.11.20-prototype-876f5fb019d3-iOS.ipa"
-SUMS = "SHA256SUMS-shared-preview-876f5fb.txt"
+IPA = "IdolyPride-Unified-2026.11.20-prototype-" + SOURCE[:12] + "-iOS.ipa"
+SUMS = "SHA256SUMS-shared-preview-" + SOURCE[:7] + ".txt"
+MAC_WAIT_SECONDS = 2100
 MIB = 1024 * 1024
 INPUTS = {
     "client-ko.apk": (757750249, 165128829, "f2b4555f2b56f5f388104a2e13a8cf0d50e3ffef3fca05d85281658d5a7366ae"),
@@ -95,7 +96,7 @@ def mac_gate(run, artifacts):
 
 
 def wait_mac():
-    deadline = time.monotonic() + 1200
+    deadline = time.monotonic() + MAC_WAIT_SECONDS
     while True:
         run = api(f"actions/runs/{MAC_RUN}")
         # Validate the producer even while waiting; never follow a different run/source.
@@ -107,7 +108,7 @@ def wait_mac():
         need(os.environ.get("GITHUB_ACTIONS") == "true"
              and run.get("status") in ("queued", "in_progress", "waiting")
              and time.monotonic() < deadline, "mac_producer_still_pending")
-        print("Waiting up to 20 minutes for exact Mac producer 44714216555", flush=True)
+        print(f"Waiting up to {MAC_WAIT_SECONDS // 60} minutes for exact Mac producer {MAC_RUN}", flush=True)
         time.sleep(30)
 
 
