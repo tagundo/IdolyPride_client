@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="unified_start_server">먼저 서버를 시작해 주세요.</string>
+    <string name="unified_restart_server">게임 언어를 적용하려면 서버를 중지한 뒤 다시 시작해 주세요.</string>
+    <string name="unified_restart_app">언어를 바꾸려면 앱을 완전히 종료한 뒤 다시 실행해 주세요.</string>
+    <string name="unified_preparing">선택한 언어의 게임 데이터를 준비하고 있습니다.</string>
     <string name="app_name">아이프라 서버</string>
     <string name="server_description">이 기기에서 아이프라 로컬 서버를 실행합니다.</string>
     <string name="tutorial_replay_notice">튜토리얼 라이브는 원본 기록을 재생합니다.</string>

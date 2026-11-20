@@ -281,6 +281,40 @@ def test_foreground_recovers_only_without_saved_restart_changes(harness):
     assert result["state"] == "failed" and result["restart_required"] and len(h.runtimes) == 2
 
 
+def test_native_foreground_accessor_refreshes_restarted_descriptor_without_public_export(harness, monkeypatch):
+    h = harness
+    monkeypatch.setattr(Runtime, "shared_resources_configuration", lambda self: {
+        "schema": 1, "available": self.running, "directory": str(self.root / ("ipc-" + str(id(self)))),
+        "epoch": id(self)}, raising=False)
+    assert h.subject.shared_resources_configuration() == {"schema": 1, "available": False}
+    start(h)
+    original = h.subject.shared_resources_configuration()
+    assert original["available"] is True
+    monkeypatch.setattr(host, "_HOST", h.subject)
+    assert host.shared_resources_configuration() == original
+    assert original["directory"] not in json.dumps(h.subject.status())
+    assert not command(h, "shared_resources_configuration")["ok"]
+    h.runtimes[0].alive = False
+    assert h.subject.foreground()["state"] == "ready"
+    refreshed = host.shared_resources_configuration()
+    assert refreshed["available"] is True and refreshed["epoch"] != original["epoch"]
+    assert refreshed["directory"] != original["directory"] and h.runtimes[0].stops == 1
+    assert refreshed["directory"] not in json.dumps(h.subject.status())
+    h.subject.close()
+    assert host.shared_resources_configuration() == {"schema": 1, "available": False}
+
+
+def test_native_private_accessor_falls_back_when_runtime_has_no_live_broker(harness, monkeypatch):
+    h = harness; start(h)
+    assert h.subject.shared_resources_configuration() == {"schema": 1, "available": False}
+    def unavailable():
+        raise OSError("synthetic unavailable private IPC")
+    monkeypatch.setattr(h.runtimes[-1], "shared_resources_configuration", unavailable, raising=False)
+    assert h.subject.shared_resources_configuration() == {"schema": 1, "available": False}
+    assert "synthetic unavailable" not in json.dumps(h.subject.status())
+
+
+
 def test_close_cleanup_failure_is_retained_for_retry(harness):
     h = harness; start(h); runtime = h.runtimes[0]; original = runtime.stop
     def once():

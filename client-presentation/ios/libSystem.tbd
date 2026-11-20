@@ -10,6 +10,7 @@ exports:
       _snprintf, _strtod, _atan, _tan, _round, _lround, _llround,
       _pthread_mutex_lock, _pthread_mutex_unlock, _pthread_self, _pthread_create, _pthread_detach,
       _nanosleep, _clock_gettime, _socket, _setsockopt, _connect, _send, _recv, _close,
+      _open, _openat, _read, _write, _renameat, _unlinkat, _fsync, _arc4random_buf, _fstat, _dup, _geteuid,
       __dyld_image_count, __dyld_get_image_name, __dyld_get_image_header, __dyld_get_image_vmaddr_slide,
       __tlv_bootstrap, __Unwind_Resume, dyld_stub_binder ]
 ...

@@ -51,6 +51,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     static final String RESOURCE_DOWNLOAD_PARALLELISM = "resource_download_parallelism";
 
     private static final int EXPORT_ACCOUNT = 50055, IMPORT_ACCOUNT = 50056;
+    private boolean unifiedPreparing;
     private final java.util.ArrayList<Button> accountButtons = new java.util.ArrayList<>();
     private org.json.JSONArray accountRows = new org.json.JSONArray(), restoreRows = new org.json.JSONArray();
     private JSONObject accountStatus = new JSONObject(), activeAccount = new JSONObject(), durableHistory = new JSONObject();
@@ -387,6 +388,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     @Override public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        UnifiedRuntime.installResources(this);
         if (savedInstanceState != null) {
             pendingResourcePlatform = savedInstanceState.getString("resource_platform");
             retryStartAfterStoragePermission = savedInstanceState.getBoolean("storage_retry", false);
@@ -1740,7 +1742,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         return 0;
     }
     private boolean downloadsSelected() {
-        return getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getBoolean(RESOURCE_PUBLIC_DOWNLOADS, true);
+        return !UnifiedRuntime.isEnabled(this)
+                && getSharedPreferences(SERVER_PREFS, MODE_PRIVATE).getBoolean(RESOURCE_PUBLIC_DOWNLOADS, true);
     }
     private void addResourceStorageControls(LinearLayout body) {
         resourceStorage = presentationSpinner(body, R.string.resource_storage, R.array.resource_storage_options);
@@ -1756,6 +1759,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
         resourceStorageNotice.setText(downloadsSelected() ? R.string.resource_storage_public_short : R.string.resource_storage_private_short);
+        if (UnifiedRuntime.isEnabled(this)) resourceStorage.setEnabled(false);
     }
     private void startServerWithSelectedStorage() {
         if (normalEvents.selection.dirty() || mediaEvents.selection.dirty()) {
@@ -2342,7 +2346,14 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private void launchClient(int missingMessage, String... packageNames) {
         Intent client = null;
         String selectedPackage = null;
-        for (String packageName : packageNames) {
+        try {
+            client = UnifiedRuntime.launchIntent(this);
+            if (client != null) selectedPackage = getPackageName();
+        } catch (IllegalStateException invalidUnifiedApp) {
+            Toast.makeText(this, R.string.client_launch_failed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        for (String packageName : client == null ? packageNames : new String[0]) {
             client = getPackageManager().getLaunchIntentForPackage(packageName);
             if (client != null) { selectedPackage = packageName; break; }
         }
@@ -2367,10 +2378,53 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 }
                 client.putExtra(RenderingExperiment.UNITY_ARGUMENTS, arguments);
             }
-            startActivity(client);
+            if (UnifiedRuntime.isEnabled(this)) prepareUnifiedClient(client);
+            else startActivity(client);
         } catch (RuntimeException error) {
             Toast.makeText(this, R.string.client_launch_failed, Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void prepareUnifiedClient(Intent client) {
+        if (unifiedPreparing) return;
+        LibrarySettings.Loaded loaded = LibrarySettings.load(getFilesDir());
+        final String language = loaded.settings.language;
+        if (loaded.invalidLanguage || !ServerService.resourceServerRunning()) {
+            Toast.makeText(this, R.string.unified_start_server, Toast.LENGTH_LONG).show(); return;
+        }
+        if (!language.equals(ServerService.effectiveLanguage())) {
+            Toast.makeText(this, R.string.unified_restart_server, Toast.LENGTH_LONG).show(); return;
+        }
+        String frozen = UnifiedGameAssets.frozenLanguage();
+        if (frozen != null && !frozen.equals(language)) {
+            Toast.makeText(this, R.string.unified_restart_app, Toast.LENGTH_LONG).show(); return;
+        }
+        unifiedPreparing = true;
+        Toast.makeText(this, R.string.unified_preparing, Toast.LENGTH_SHORT).show();
+        final android.content.Context application = getApplicationContext();
+        Thread preparation = new Thread(() -> {
+            boolean prepared;
+            try { UnifiedGameAssets.prepare(application, language); prepared = true; }
+            catch (IOException | RuntimeException error) { prepared = false; }
+            final boolean success = prepared;
+            runOnUiThread(() -> {
+                unifiedPreparing = false;
+                if (isFinishing() || isDestroyed()) return;
+                LibrarySettings.Loaded current = LibrarySettings.load(getFilesDir());
+                if (!success || current.invalidLanguage || !language.equals(current.settings.language)
+                        || !ServerService.resourceServerRunning() || !language.equals(ServerService.effectiveLanguage())) {
+                    Toast.makeText(this, R.string.client_launch_failed, Toast.LENGTH_LONG).show(); return;
+                }
+                try { startActivity(client); }
+                catch (RuntimeException error) { Toast.makeText(this, R.string.client_launch_failed, Toast.LENGTH_LONG).show(); }
+            });
+        }, "IdolyGamePrepare");
+        preparation.setDaemon(true); preparation.start();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -2460,7 +2514,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
         experimentalMainLive.setEnabled(!running && !busy);
         downloadMissingResources.setEnabled(!running && !busy);
         mediaMode.setEnabled(!running && !busy);
-        resourceStorage.setEnabled(!running && !busy);
+        resourceStorage.setEnabled(!UnifiedRuntime.isEnabled(this) && !running && !busy);
         stop.setEnabled(running || busy);
         export.setEnabled(!ServerService.isExporting());
         updateDiagnostics(detailsJson);

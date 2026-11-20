@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="unified_start_server">Start the server first.</string>
+    <string name="unified_restart_server">Stop and restart the server to apply the selected game language.</string>
+    <string name="unified_restart_app">Close the app completely and reopen it to change the game language.</string>
+    <string name="unified_preparing">Preparing game data for the selected language.</string>
     <string name="official_title">Import a Japanese official account · Currently unavailable</string>
     <string name="official_notice">Japanese official account import is currently unavailable. Download data using the Japanese game user ID and transfer password, then save it in a normal local account. Do not enter an email, Apple or Google password.</string>
     <string name="official_warning">Official transfer authentication may affect login or transfer sessions on your existing device. The password is not saved. Review the local destination after data is downloaded.</string>

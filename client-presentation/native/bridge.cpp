@@ -17,6 +17,9 @@
 #include <ctime>
 #include <limits.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <stdlib.h>
 
 #include "shadowhook.h"
 
@@ -1487,6 +1490,8 @@ bool shadow_hook(void *self, void *data, void **settings, int resolution, Method
     return result;
 }
 
+#include "shared_cache_hooks.hpp"
+
 #ifndef IDOLY_DARWIN_BRIDGE
 struct Image { uintptr_t base = 0; const ElfW(Phdr) *headers = nullptr; size_t count = 0; char name[PATH_MAX]{}; bool unity = false; };
 int find_image(dl_phdr_info *info, size_t, void *opaque) {
@@ -1505,6 +1510,10 @@ bool mapped(const Image &image, uintptr_t address, size_t size, unsigned flags) 
         if (h.p_type == PT_LOAD && (h.p_flags & flags) == flags && address >= begin && address + size <= begin + h.p_filesz) return true;
     }
     return false;
+}
+bool shared_patched_entry(uintptr_t rva) {
+    return rva==pin::shared_setup.rva||rva==pin::shared_is_cached.rva||rva==pin::shared_file_path.rva
+        ||rva==pin::shared_pre_download.rva||rva==pin::shared_downloader_update.rva;
 }
 bool matches(const Image &image) {
     bool build = false;
@@ -1527,9 +1536,52 @@ bool matches(const Image &image) {
     if (!build) return false;
     for (const auto &entry : pin::all) {
         const uintptr_t address = image.base + entry.rva;
+        // These five entries were checked before our own early, atomic hook
+        // publication. Their executable prefixes now contain our detours.
+        if (shared_hooks_ready.load(std::memory_order_acquire)&&image.base==shared_image_base
+                &&shared_patched_entry(entry.rva)) continue;
         if (!mapped(image, address, 16, PF_R | PF_X) || std::memcmp(reinterpret_cast<void *>(address), entry.bytes, 16)) return false;
     }
     return true;
+}
+
+std::atomic<bool> shared_installing{false},shared_early_started{false};
+void shared_install_cache_image(const Image &image) {
+    if (!image.base||shared_hooks_ready.load(std::memory_order_acquire)||shared_installing.exchange(true)) return;
+    if (!matches(image)) {shared_installing.store(false);return;}
+    image_base=image.base;shared_cache_load_calls();
+    struct EarlyHook {const pin::Entry *entry;void *replacement;void **original;void *stub;};
+#define SHARED_HOOK(entry,replacement,original) {&pin::entry,reinterpret_cast<void *>(replacement),reinterpret_cast<void **>(&original),nullptr}
+    EarlyHook hooks[]={
+        SHARED_HOOK(shared_setup,shared_setup_hook,shared_setup_original),
+        SHARED_HOOK(shared_is_cached,shared_is_cached_hook,shared_is_cached_original),
+        SHARED_HOOK(shared_file_path,shared_file_path_hook,shared_file_path_original),
+        SHARED_HOOK(shared_pre_download,shared_pre_download_hook,shared_pre_download_original),
+        SHARED_HOOK(shared_downloader_update,shared_downloader_update_hook,shared_downloader_update_original),
+    };
+#undef SHARED_HOOK
+    for (size_t i=0;i<sizeof hooks/sizeof hooks[0];++i) {
+        hooks[i].stub=shadowhook_hook_func_addr(reinterpret_cast<void *>(image.base+hooks[i].entry->rva),hooks[i].replacement,hooks[i].original);
+        if (!hooks[i].stub) {
+            for (size_t j=i;j>0;--j) shadowhook_unhook(hooks[j-1].stub);
+            shared_installing.store(false);return;
+        }
+    }
+    shared_hooks_ready.store(true,std::memory_order_release);shared_installing.store(false);
+}
+void shared_dl_post(dl_phdr_info *info,size_t size,void *) {
+    Image image;find_image(info,size,&image);
+    // ShadowHook's documented post-init callback runs before the dlopen caller
+    // can start managed SDK setup. No Unity calls or worker IO occur here.
+    if (image.base) shared_install_cache_image(image);
+}
+void shared_start_early() {
+    if (shared_early_started.exchange(true)) return;
+    if (shadowhook_init(SHADOWHOOK_MODE_UNIQUE,false)) return;
+    shadowhook_set_recordable(false);
+    if (shadowhook_register_dl_init_callback(nullptr,shared_dl_post,nullptr)) return;
+    Image image;dl_iterate_phdr(find_image,&image);
+    if (image.base) shared_install_cache_image(image);
 }
 #endif
 void pause_ms(long ms) { timespec t{ms / 1000, (ms % 1000) * 1000000}; nanosleep(&t, nullptr); }
@@ -1752,7 +1804,7 @@ void *install(void *) {
 }
 
 #ifndef IDOLY_DARWIN_BRIDGE
-extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) { return JNI_VERSION_1_6; }
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) { shared_start_early();return JNI_VERSION_1_6; }
 extern "C" JNIEXPORT void JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_start(JNIEnv *, jclass) {
     if (started.exchange(true)) return;
     pthread_t worker;
@@ -1788,7 +1840,23 @@ extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_presentatio
 extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_presentation_NativePresentation_wardrobeStatus(JNIEnv *env,jclass) {
     char json[1536];wardrobe_status_json(json,sizeof json);return env->NewStringUTF(json);
 }
+extern "C" JNIEXPORT jboolean JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedSharedResources_configure(
+        JNIEnv *env,jclass,jstring directory,jlong epoch) {
+    if (!directory||epoch<=0) return JNI_FALSE;
+    const char *path=env->GetStringUTFChars(directory,nullptr);if (!path) return JNI_FALSE;
+    const bool result=shared_configure(path,static_cast<uint64_t>(epoch));env->ReleaseStringUTFChars(directory,path);
+    return result?JNI_TRUE:JNI_FALSE;
+}
+extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_localserver_UnifiedSharedResources_status(JNIEnv *env,jclass) {
+    char json[768];shared_status_json(json,sizeof json);return env->NewStringUTF(json);
+}
 
 #else
 #include "../ios/transport.hpp"
+extern "C" __attribute__((visibility("default"))) bool IdolySharedResourcesConfigure(const char *directory,uint64_t epoch) {
+    return shared_configure(directory,epoch);
+}
+extern "C" __attribute__((visibility("default"))) size_t IdolySharedResourcesCopyStatus(char *output,size_t capacity) {
+    return shared_status_json(output,capacity);
+}
 #endif

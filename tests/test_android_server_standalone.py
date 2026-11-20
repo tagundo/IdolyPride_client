@@ -168,6 +168,13 @@ public final class CombinedDiagnosticExportHost {
   static final String VERSION_NAME="fixture-version",SERVER_DATA_SHA256="fixture-data-sha";
   static final int VERSION_CODE=52;
  }
+ static final class UnifiedRuntime {
+  static boolean enabled;
+  static boolean isEnabled(Context context) { return enabled; }
+ }
+ static final class UnifiedSharedResources {
+  static JSONObject snapshot() { return new JSONObject("{\"configured\":true,\"index_entries\":2}"); }
+ }
  static final class Toast {
   static final int LENGTH_LONG=1;static int shown;final int message;
   Toast(int message) { this.message=message; }
@@ -313,6 +320,7 @@ public final class CombinedDiagnosticExportHost {
   check(service.worker.tasks.isEmpty()&&ServerService.EXPORT_IO.tasks.size()==1,"stopped service uses retained diagnostic snapshot");
   ServerService.EXPORT_IO.drain();idle();emit(activity);
 
+  UnifiedRuntime.enabled=true;
   freshStream(activity);ServerService.activeService=service;service.worker.rejected=true;
   ServerService.lastDiagnostics="{\"phase\":\"retained\"}";ServerService.LOGS.clear();ServerService.LOGS.add("retained log");
   ServerService.exportDiagnostics(activity,new Uri());
@@ -367,9 +375,13 @@ public final class CombinedDiagnosticExportHost {
     documents = [json.loads(base64.b64decode(line.removeprefix("JSON:"), validate=True))
                  for line in result.stdout.splitlines() if line.startswith("JSON:")]
     assert len(documents) == 4
-    for document in documents:
-        assert set(document) == {"schema", "server_version", "server_version_code", "bundled_data_sha256",
-                                 "runtime", "diagnostics", "server_logs", "server_settings"}
+    for index, document in enumerate(documents):
+        expected = {"schema", "server_version", "server_version_code", "bundled_data_sha256",
+                    "runtime", "diagnostics", "server_logs", "server_settings"}
+        if index >= 2:
+            expected.add("native_shared_resources")
+            assert document["native_shared_resources"] == {"configured": True, "index_entries": 2}
+        assert set(document) == expected
         assert document["schema"] == 1 and document["server_version"] == "fixture-version"
         assert document["server_settings"] == {"startup_checks": {"scope": "previous_run"}, "durable_history": {"retained_records": 3}}
         assert document["server_version_code"] == 52 and document["bundled_data_sha256"] == "fixture-data-sha"

@@ -122,6 +122,13 @@ public final class ServerService extends Service {
         ServerService service = activeService;
         return running && !busy && service != null && !service.destroyed && !service.stopQueued.get();
     }
+    static String effectiveLanguage() {
+        if (!resourceServerRunning()) return "";
+        try {
+            JSONObject language = new JSONObject(runtimeDetails).optJSONObject("language");
+            return language == null ? "" : language.optString("effective_language", "");
+        } catch (org.json.JSONException invalid) { return ""; }
+    }
     static void resourceTransferChanged() { dispatch(); }
     /** Called only by the app-context resource I/O worker, not the lifecycle worker. */
     static String importResourceFd(int fd, String platform) throws IOException {
@@ -352,6 +359,7 @@ public final class ServerService extends Service {
 
     @Override public void onCreate() {
         super.onCreate();
+        UnifiedRuntime.installResources(this);
         activeService = this;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(CHANNEL,
@@ -367,7 +375,7 @@ public final class ServerService extends Service {
         PendingIntent stop = PendingIntent.getService(this, 1,
                 new Intent(this, ServerService.class).setAction(ACTION_STOP), flags);
         return new Notification.Builder(this, CHANNEL)
-                .setSmallIcon(R.drawable.ic_server)
+                .setSmallIcon(UnifiedRuntime.notificationIcon(this, R.drawable.ic_server))
                 .setContentTitle(getString(R.string.app_name))
                 .setContentText(getString(R.string.notification_text))
                 .setContentIntent(open)
@@ -412,7 +420,9 @@ public final class ServerService extends Service {
             if (stopQueued.get()) return;
             try {
                 String resourceCacheDirectory = null;
-                if (publicDownloads) {
+                if (UnifiedRuntime.isEnabled(this)) {
+                    resourceCacheDirectory = UnifiedRuntime.resourceDirectory(this, getFilesDir()).getAbsolutePath();
+                } else if (publicDownloads) {
                     boolean permission = Build.VERSION.SDK_INT >= 30 && Environment.isExternalStorageManager();
                     if (ResourceTransfers.storageAccess(Build.VERSION.SDK_INT, true, permission) != ResourceTransfers.STORAGE_DOWNLOADS)
                         throw new SecurityException("Downloads storage permission is required");
@@ -424,8 +434,16 @@ public final class ServerService extends Service {
                 }
                 runtime = Python.getInstance().getModule("android_server_runtime");
                 runtime.callAttr("start", getFilesDir().getAbsolutePath(), getAssets(), new LogCallback(),
-                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources, mediaMode, resourceCacheDirectory);
+                        getApplicationInfo().nativeLibraryDir, experimentalMainLive, downloadMissingResources, mediaMode, resourceCacheDirectory,
+                        UnifiedRuntime.isEnabled(this) ? getFilesDir().getAbsolutePath() : null);
+                if (UnifiedRuntime.isEnabled(this)) {
+                    boolean shared = UnifiedSharedResources.prepare(getApplicationContext(),
+                            runtime.callAttr("shared_resources_json").toString());
+                    appendLog(shared ? "게임 공용 리소스 저장소 연결을 준비했습니다."
+                            : "공용 리소스 연결을 준비하지 못했습니다. 기존 게임 다운로드 경로를 사용합니다.");
+                }
                 JSONObject details = new JSONObject(runtime.callAttr("status_json").toString());
+                if (UnifiedRuntime.isEnabled(this)) details.put("native_shared_resources", UnifiedSharedResources.snapshot());
                 runtimeDetails = details.toString();
                 if (!details.optBoolean("running", false)) {
                     throw new IllegalStateException("Runtime did not start");
@@ -500,6 +518,10 @@ public final class ServerService extends Service {
                         JSONObject details = new JSONObject(value);
                         if (!(details.opt("running") instanceof Boolean)) {
                             throw new IllegalArgumentException("Invalid runtime status");
+                        }
+                        if (UnifiedRuntime.isEnabled(this)) {
+                            details.put("native_shared_resources", UnifiedSharedResources.snapshot());
+                            value = details.toString();
                         }
                         runtimeDetailsReceivedAt = SystemClock.elapsedRealtime();
                         if (!value.equals(runtimeDetails)) {
@@ -620,6 +642,7 @@ public final class ServerService extends Service {
                 document.put("diagnostics", new JSONObject(snapshot));
                 document.put("server_logs", new JSONArray(lines));
                 document.put("server_settings", readServerSettings(context));
+                if (UnifiedRuntime.isEnabled(context)) document.put("native_shared_resources", UnifiedSharedResources.snapshot());
                 byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);
                 try (OutputStream stream = context.getContentResolver().openOutputStream(destination, "wt")) {
                     if (stream == null) throw new java.io.IOException("Document is unavailable");

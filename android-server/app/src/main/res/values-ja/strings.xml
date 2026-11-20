@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="unified_start_server">先にサーバーを起動してください。</string>
+    <string name="unified_restart_server">ゲーム言語を適用するには、サーバーを停止して再起動してください。</string>
+    <string name="unified_restart_app">ゲーム言語を変えるには、アプリを完全に終了してから再起動してください。</string>
+    <string name="unified_preparing">選択した言語のゲームデータを準備しています。</string>
     <string name="official_title">日本公式アカウントの取り込み · 現在利用不可</string>
     <string name="official_notice">日本公式アカウントの取り込みは現在利用できません。 日本版のユーザーIDと連携パスワードでデータを取得し、通常のローカルアカウントに保存します。メール・Apple・Googleのパスワードは入力しないでください。</string>
     <string name="official_warning">公式の引き継ぎ認証は既存端末のログイン・引き継ぎセッションに影響する可能性があります。パスワードは保存しません。取得後にローカル保存先を確認します。</string>

@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510",
+  "profile_sha256": "9a269b2785768ac8fe4573a34818028a0e625be7df2ab38cb30575c02a9271ff",
   "hook_names": [
     "q_set",
     "q_apply",
@@ -47,7 +47,12 @@
     "sound_voice_volume",
     "sound_voice_soundable",
     "sound_bind",
-    "sound_save"
+    "sound_save",
+    "shared_setup",
+    "shared_is_cached",
+    "shared_file_path",
+    "shared_pre_download",
+    "shared_downloader_update"
   ],
   "entries": {
     "q_set": {
@@ -459,7 +464,57 @@
       "patched_entry": "aefee915",
       "gateway_hex": "30a000b010e2279110fedfc8500000b400021fd6f657bda94d011616",
       "registration_pointer_slot": 170420960
+    },
+    "shared_setup": {
+      "rva": 115844120,
+      "original16": "fa67bba9f85f01a9f65702a9f44f03a9",
+      "gateway": 158893424,
+      "slot": 179886592,
+      "original_callable": 158893444,
+      "patched_entry": "5638a414",
+      "gateway_hex": "30a000b01002289110fedfc8500000b400021fd6fa67bba9a5c75b17",
+      "registration_pointer_slot": 175249440
+    },
+    "shared_is_cached": {
+      "rva": 115995104,
+      "original16": "830000b4632880b9040080528bf7ff17",
+      "gateway": 158893456,
+      "slot": 179886600,
+      "original_callable": 158893476,
+      "patched_entry": "eca4a314",
+      "gateway_hex": "30a000b01022289110fedfc8500000b400021fd6430000b40f5b5c17115b5c17",
+      "registration_pointer_slot": 175255832
+    },
+    "shared_file_path": {
+      "rva": 115995132,
+      "original16": "080040f9040d41f9031141f980001fd6",
+      "gateway": 158893488,
+      "slot": 179886608,
+      "original_callable": 158893508,
+      "patched_entry": "eda4a314",
+      "gateway_hex": "30a000b01042289110fedfc8500000b400021fd6080040f90e5b5c17",
+      "registration_pointer_slot": 175255840
+    },
+    "shared_pre_download": {
+      "rva": 115921016,
+      "original16": "ffc301d1fc6f01a9fa6702a9f85f03a9",
+      "gateway": 158893520,
+      "slot": 179886616,
+      "original_callable": 158893540,
+      "patched_entry": "56eda314",
+      "gateway_hex": "30a000b01062289110fedfc8500000b400021fd6ffc301d1a5125c17",
+      "registration_pointer_slot": 175253312
+    },
+    "shared_downloader_update": {
+      "rva": 115906720,
+      "original16": "f657bda9f44f01a9fd7b02a9fd830091",
+      "gateway": 158893552,
+      "slot": 179886624,
+      "original_callable": 158893572,
+      "patched_entry": "54fba314",
+      "gateway_hex": "30a000b01082289110fedfc8500000b400021fd6f657bda9a7045c17",
+      "registration_pointer_slot": 175252688
     }
   },
-  "profile_header_sha256": "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3"
+  "profile_header_sha256": "391a7a084dab898f4b5f244b3d765db6a113470290444472be2a51cff6f910cc"
 }

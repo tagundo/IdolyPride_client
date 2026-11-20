@@ -32,7 +32,7 @@ STARTUP_FAILURE_MAX = 16 * 1024
 STARTUP_FAILURE_STAGES = frozenset(("catalog", "resources", "storage", "runtime"))
 STARTUP_FAILURE_CODES = frozenset(("permission_denied", "missing_input", "address_in_use", "insufficient_space", "invalid_input", "internal_error"))
 STARTUP_FAILURE_TYPES = frozenset(("PermissionError", "FileNotFoundError", "OSError", "ValueError", "RuntimeError", "TypeError", "AttributeError", "ImportError", "ModuleNotFoundError", "KeyError", "IndexError", "LookupError", "UnicodeError", "UnicodeDecodeError", "OperationalError", "DatabaseError", "RpcFailure", "OtherError"))
-STARTUP_FAILURE_FILES = frozenset(('__init__.py', 'account_manager.py', 'app_runtime.py', 'appearance.py', 'application.py', 'assets.py', 'bundled_translations.py', 'card_level_missions.py', 'card_progression.py', 'catalog.py', 'codec.py', 'company.py', 'diagnostics.py', 'dream.py', 'dream_capture.py', 'event_settings.py', 'excursion.py', 'gameplay.py', 'h2_server.py', 'home_talk.py', 'initial_inventory.py', 'ios_client_data.py', 'ios_host.py', 'language_settings.py', 'latest_cohort_pins.py', 'lessons.py', 'live_accessories.py', 'live_assets.py', 'live_engine.py', 'live_input.py', 'live_rejection_diagnostics.py', 'love.py', 'love_catalog.py', 'love_compatibility_pins.py', 'main_live.py', 'master_sort.py', 'media_access.py', 'media_outfit_policy.py', 'media_panorama.py', 'media_profile.py', 'media_runtime.py', 'media_scenes.py', 'media_settings.py', 'media_stories.py', 'octo_cache.py', 'octo_http.py', 'octo_manifest.py', 'octo_runtime.py', 'official_account.py', 'official_account_config.py', 'official_import.py', 'official_roots.py', 'official_transport.py', 'panorama_rules.py', 'photo_names.py', 'photo_preferences.py', 'photo_shooting.py', 'playback.py', 'preference_master_data.py', 'presentation.py', 'profile_directory.py', 'profile_emblems.py', 'profile_favorites.py', 'profile_layout.py', 'profile_messages.py', 'profile_names.py', 'profile_preferences.py', 'profile_top.py', 'public_cohort_support.py', 'public_payload.py', 'public_payload_transaction.py', 'pvp.py', 'quest.py', 'render_probe.py', 'resource_archive.py', 'resource_library.py', 'resource_routes.py', 'resource_translation.py', 'resource_translation_cache.py', 'resource_translation_runtime.py', 'rpc.py', 'runtime_history.py', 'schema.py', 'social.py', 'startup_cache.py', 'startup_receipt.py', 'startup_checks.py', 'state.py', 'story_catalog.py', 'story_read_rules.py', 'story_reads.py', 'tutorial_messages.py', 'tutorial_progression.py', 'tutorial_replay.py', 'wardrobe_diagnostics.py'))
+STARTUP_FAILURE_FILES = frozenset(('__init__.py', 'account_manager.py', 'app_runtime.py', 'appearance.py', 'application.py', 'assets.py', 'bundled_translations.py', 'card_level_missions.py', 'card_progression.py', 'catalog.py', 'codec.py', 'company.py', 'diagnostics.py', 'dream.py', 'dream_capture.py', 'event_settings.py', 'excursion.py', 'gameplay.py', 'h2_server.py', 'home_talk.py', 'initial_inventory.py', 'ios_client_data.py', 'ios_host.py', 'language_settings.py', 'latest_cohort_pins.py', 'lessons.py', 'live_accessories.py', 'live_assets.py', 'live_engine.py', 'live_input.py', 'live_rejection_diagnostics.py', 'love.py', 'love_catalog.py', 'love_compatibility_pins.py', 'main_live.py', 'master_sort.py', 'media_access.py', 'media_outfit_policy.py', 'media_panorama.py', 'media_profile.py', 'media_runtime.py', 'media_scenes.py', 'media_settings.py', 'media_stories.py', 'octo_cache.py', 'octo_http.py', 'octo_manifest.py', 'octo_runtime.py', 'official_account.py', 'official_account_config.py', 'official_import.py', 'official_roots.py', 'official_transport.py', 'panorama_rules.py', 'photo_names.py', 'photo_preferences.py', 'photo_shooting.py', 'playback.py', 'preference_master_data.py', 'presentation.py', 'profile_directory.py', 'profile_emblems.py', 'profile_favorites.py', 'profile_layout.py', 'profile_messages.py', 'profile_names.py', 'profile_preferences.py', 'profile_top.py', 'public_cohort_support.py', 'public_payload.py', 'public_payload_transaction.py', 'pvp.py', 'quest.py', 'render_probe.py', 'resource_archive.py', 'resource_library.py', 'resource_routes.py', 'resource_translation.py', 'resource_translation_cache.py', 'resource_translation_runtime.py', 'rpc.py', 'runtime_history.py', 'schema.py', 'shared_resource_broker.py', 'shared_resource_store.py', 'shared_resource_views.py', 'social.py', 'startup_cache.py', 'startup_receipt.py', 'startup_checks.py', 'state.py', 'story_catalog.py', 'story_read_rules.py', 'story_reads.py', 'tutorial_messages.py', 'tutorial_progression.py', 'tutorial_replay.py', 'wardrobe_diagnostics.py'))
 
 
 def _startup_function(value):
@@ -569,6 +569,7 @@ class _Host:
                 grpc_host="127.0.0.1", grpc_port=selected_ports.grpc_port,
                 asset_host="127.0.0.1", asset_port=selected_ports.asset_port,
                 resource_platform="ios", resource_cache_dir=resources,
+                shared_resource_dir=data,
                 aes_cbc=native.aes_cbc, resource_fetcher=native.open_url,
                 media_mode=options["media_mode"], download_missing_resources=options["download_missing_resources"])
             if not self._listeners_ready(candidate):
@@ -692,12 +693,29 @@ class _Host:
             with self._condition:
                 self._prepared_account = prepared_account
                 self._game_prepared = True
+                active_runtime = self._runtime
+            private_configuration = getattr(active_runtime, "shared_resources_configuration", None)
+            shared_resources = (private_configuration() if callable(private_configuration)
+                                else {"schema": 1, "available": False})
             return {"state": result["state"], "running": result["running"],
-                    "effective_options": result["effective_options"], "client_data": prepared}
+                    "effective_options": result["effective_options"], "client_data": prepared,
+                    "shared_resources": shared_resources}
 
     def readiness(self):
         result = self.status()
         return {"state": result["state"], "running": result["running"]}
+
+    def shared_resources_configuration(self):
+        """Trusted native foreground refresh; never a Web/UI command or status."""
+        with self._condition:
+            runtime = self._runtime if self._state == "ready" and not self._closed else None
+        private_configuration = getattr(runtime, "shared_resources_configuration", None)
+        if callable(private_configuration):
+            try:
+                return private_configuration()
+            except OSError:
+                pass
+        return {"schema": 1, "available": False}
 
     def close(self):
         if self._official_import is not None:
@@ -1191,6 +1209,10 @@ def prepare_game_start():
 
 def readiness():
     return _HOST.readiness()
+
+
+def shared_resources_configuration():
+    return _HOST.shared_resources_configuration()
 
 
 def close():

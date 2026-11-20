@@ -44,7 +44,9 @@ bool verify_static_image(const void *header) {
             if (std::memcmp(reinterpret_cast<void *>(address),entry.bytes,16)) return false;
             continue;
         }
-        if (!within(text,image_base+entry.gateway,28,5)
+        uint32_t displaced=0;std::memcpy(&displaced,entry.bytes,4);
+        const bool compare_branch=(displaced&0x7e000000u)==0x34000000u;
+        if (!within(text,image_base+entry.gateway,compare_branch?32:28,5)
                 || !within(data,image_base+entry.slot,8,3) || (entry.slot&7)
                 || read<uintptr_t>(reinterpret_cast<void *>(image_base+entry.slot),0)) return false;
         uint32_t branch,back;
@@ -53,11 +55,19 @@ bool verify_static_image(const void *header) {
                 || std::memcmp(reinterpret_cast<void *>(address+4),entry.bytes+4,12)) return false;
         const intptr_t page=static_cast<intptr_t>(entry.slot>>12)-static_cast<intptr_t>(entry.gateway>>12);
         if (page<-(1<<20) || page>=(1<<20)) return false;
-        uint32_t words[7]={0x90000010u | ((static_cast<uint32_t>(page)&3)<<29)
+        uint32_t words[8]={0x90000010u | ((static_cast<uint32_t>(page)&3)<<29)
             | (((static_cast<uint32_t>(page)>>2)&0x7ffff)<<5),
             0x91000210u | static_cast<uint32_t>((entry.slot&0xfff)<<10),0xc8dffe10u,0xb4000050u,0xd61f0200u,0,back};
-        std::memcpy(&words[5],entry.bytes,4);
-        if (std::memcmp(reinterpret_cast<void *>(image_base+entry.gateway),words,sizeof words)) return false;
+        words[5]=displaced;
+        if (compare_branch) {
+            if ((displaced&31u)==16u || (displaced&31u)==17u) return false;
+            int32_t immediate=static_cast<int32_t>((displaced>>5)&0x7ffffu);
+            if (immediate&(1<<18)) immediate-=1<<19;
+            const intptr_t taken=static_cast<intptr_t>(entry.rva)+static_cast<intptr_t>(immediate)*4;
+            if (taken<0 || !arm_branch(entry.gateway+28,static_cast<uintptr_t>(taken),&words[7])) return false;
+            words[5]=(displaced&~(0x7ffffu<<5))|(2u<<5);
+        }
+        if (std::memcmp(reinterpret_cast<void *>(image_base+entry.gateway),words,compare_branch?32:28)) return false;
     }
     return true;
 }
@@ -88,6 +98,7 @@ void *install(void *) {
     image_base=reinterpret_cast<uintptr_t>(header);
     if (!verify_static_image(header)) { set_state("unsupported"); return nullptr; }
     load_calls();
+    shared_cache_load_calls();
 #define HOOK(entry, replacement, original) {&pin::entry,reinterpret_cast<void *>(replacement),reinterpret_cast<void **>(&original)}
     Hook hooks[]={
         HOOK(q_set,quality_set_hook,quality_set_original), HOOK(q_apply,quality_apply_hook,quality_apply_original),
@@ -122,6 +133,11 @@ void *install(void *) {
         HOOK(sound_voice_soundable,sound_voice_soundable_hook,sound_voice_soundable_original),
         HOOK(sound_bind,sound_bind_hook,sound_bind_original),
         HOOK(sound_save,sound_save_hook,sound_save_original),
+        HOOK(shared_setup,shared_setup_hook,shared_setup_original),
+        HOOK(shared_is_cached,shared_is_cached_hook,shared_is_cached_original),
+        HOOK(shared_file_path,shared_file_path_hook,shared_file_path_original),
+        HOOK(shared_pre_download,shared_pre_download_hook,shared_pre_download_original),
+        HOOK(shared_downloader_update,shared_downloader_update_hook,shared_downloader_update_original),
 
     };
 #undef HOOK
@@ -134,6 +150,7 @@ void *install(void *) {
     // concurrent invocation during publication takes the original path.
     for (auto &hook:hooks) __atomic_store_n(reinterpret_cast<uintptr_t *>(image_base+hook.entry->slot),
         reinterpret_cast<uintptr_t>(hook.replacement),__ATOMIC_RELEASE);
+    shared_hooks_ready.store(true,std::memory_order_release);
     pthread_mutex_lock(&status_mutex);
     state.fps=state.quality=state.resolution=state.aa=state.shadow=state.expanded=true;
     pthread_mutex_unlock(&status_mutex);

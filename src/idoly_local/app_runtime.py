@@ -38,6 +38,8 @@ class Runtime:
         self._asset_thread = None
         self._asset_started = False
         self._resources = None
+        self._shared_resources = None
+        self._shared_resource_store = None
         self._running = False
         self._stopped = False
         self._last_error = None
@@ -124,6 +126,8 @@ class Runtime:
                 "recent_requests": [dict(row) for row in self._http_recent]}
         if self._resources is not None:
             result["resource_transfer"] = self._resources.status()
+        result["shared_resources"] = (self._shared_resources.status() if self._shared_resources is not None
+                                      else {"schema": 1, "available": False})
         if self._presentation is not None:
             result["presentation"] = self._presentation.status()
         if self._playback is not None:
@@ -149,6 +153,17 @@ class Runtime:
         elif last_library_status is not None:
             result["resource_library"] = deepcopy(last_library_status)
         return result
+
+    def shared_resources_configuration(self):
+        """Trusted native bridge only; private IPC paths never enter diagnostics."""
+        with self._lifecycle_lock:
+            broker = self._shared_resources if self._running else None
+        if broker is not None:
+            try:
+                return broker.configuration()
+            except OSError:
+                pass
+        return {"schema": 1, "available": False}
 
     def diagnostics_snapshot(self) -> dict:
         """Export only safe runtime observations, never profiles or credentials."""
@@ -232,6 +247,12 @@ class Runtime:
                 return
             self._running = False
             failures = []
+            if self._shared_resources is not None:
+                try:
+                    self._shared_resources.close()
+                    self._shared_resource_store.close()
+                except Exception as error:
+                    failures.append(error)
             if self._library is not None:
                 try:
                     self._library.close()
@@ -401,7 +422,8 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
           asset_host="127.0.0.1", asset_port=8080, aes_cbc=None,
           experimental_main_live=False, live_engine_library=None,
           download_missing_resources=True, resource_fetcher=None, media_mode=False,
-          resource_platform="android", resource_cache_dir=None) -> Runtime:
+          resource_platform="android", resource_cache_dir=None,
+          shared_resource_dir=None) -> Runtime:
     """Start the local game engine and asset server without blocking the UI.
 
     ``data_dir`` contains ``protocol/idolypride-6.1.1.pb`` and
@@ -428,6 +450,12 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         resource_cache_dir = Path(resource_cache_dir)
         if not resource_cache_dir.is_absolute() or resource_cache_dir.is_symlink():
             raise ValueError("Resource cache directory must be an absolute regular directory")
+    if shared_resource_dir is not None:
+        # Only unified native launchers may supply getFilesDir/Application
+        # Support. A user-selected Downloads/resource path is not this root.
+        shared_resource_dir = Path(shared_resource_dir)
+        if not shared_resource_dir.is_absolute():
+            raise ValueError("Shared resource IPC requires trusted app-private storage")
     if not isinstance(profile, str) or not profile.strip():
         raise ValueError("A nonempty local profile is required")
     if log_callback is not None and not callable(log_callback):
@@ -564,12 +592,23 @@ def start(data_dir, profile="sandbox", log_callback=None, *,
         # Install the gateway only after binding has selected the actual port,
         # and before any HTTP serving thread is started.
         runtime._asset.octo_gateway = gateway
+        if shared_resource_dir is not None and gateway is not None:
+            from .shared_resource_broker import SharedResourceBroker
+            from .shared_resource_store import SharedResourceStore
+            try:
+                runtime._shared_resource_store = SharedResourceStore(gateway.manifest, gateway.cache)
+                runtime._shared_resources = SharedResourceBroker(runtime._shared_resource_store, shared_resource_dir)
+            except (OSError, ValueError):
+                if runtime._shared_resource_store is not None:
+                    runtime._shared_resource_store.close()
+                    runtime._shared_resource_store = None
+                runtime._log("Shared resource file access unavailable; using local HTTP resources")
         from .resource_library import ResourceLibrary
         runtime._library = ResourceLibrary.from_data_dir(root, base_url=runtime._asset_url,
             aes_cbc=aes_cbc, fetcher=resource_fetcher, active_gateway=gateway,
             resource_cache_dir=resource_cache_dir)
         if resource_cache_dir is not None:
-            runtime._log("게임 리소스를 선택한 Downloads 보관 폴더에서 직접 제공합니다.")
+            runtime._log("게임 리소스를 선택한 리소스 보관 폴더에서 직접 제공합니다.")
         # Installed before any serving thread starts, just like the gateway.
         # The handler reads this bound attribute for export/status commands.
         runtime._asset.resource_library = runtime._library

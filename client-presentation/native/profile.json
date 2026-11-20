@@ -3116,6 +3116,221 @@
       "mode": "HOOK",
       "native_ABI": "bool(void*,const MethodInfo*)",
       "source": "local-resource-post-HTTP-reachability-pins"
+    },
+    "shared_setup": {
+      "name": "Octo.OctoManager.Setup",
+      "rva": "0x8748d88",
+      "prefix16": "fe67bca9f85f01a9f65702a9f44f03a9",
+      "module": "Octo.dll",
+      "is_static": true,
+      "parameters": [
+        {
+          "name": "settings",
+          "type": {
+            "class": "Octo.OctoFullSettings"
+          }
+        },
+        {
+          "name": "reset",
+          "type": {
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.Boolean"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_is_cached": {
+      "name": "Octo.Caching.OctoCaching.IsCached",
+      "rva": "0x876be6c",
+      "prefix16": "fe0f1ff8a30000b4632880b9e4031f2a",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "bucket",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "fileName",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "item",
+          "type": {
+            "class": "Octo.Data.Item"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "Octo.Caching.CacheState"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_file_path": {
+      "name": "Octo.Caching.OctoCaching.GetFilePath",
+      "rva": "0x876be88",
+      "prefix16": "080040f9040d41f9031141f980001fd6",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "bucket",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "fileName",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "item",
+          "type": {
+            "class": "Octo.Data.Item"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.String"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_pre_download": {
+      "name": "Octo.Loader.OctoBaseLoader.PreDownload",
+      "rva": "0x875aa8c",
+      "prefix16": "ff8301d1fe6f01a9fa6702a9f85f03a9",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "name",
+          "type": {
+            "class": "System.String"
+          }
+        },
+        {
+          "name": "onComplete",
+          "type": {
+            "class": "System.Action`1<Octo.DownloadError>"
+          }
+        },
+        {
+          "name": "onProgress",
+          "type": {
+            "class": "Octo.OnDownloadProgress"
+          }
+        },
+        {
+          "name": "canAutoDelete",
+          "type": {
+            "class": "System.Boolean"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.Void"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_downloader_update": {
+      "name": "Octo.Loader.Downloader.Update",
+      "rva": "0x8758100",
+      "prefix16": "fe57bea9f44f01a9d4c80090882a5c39",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [],
+      "return_type": {
+        "class": "System.Void"
+      },
+      "mode": "HOOK",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_settings_set": {
+      "name": "Octo.OctoFullSettings.set_CachingType",
+      "rva": "0x874d34c",
+      "prefix16": "01e00039c0035fd6003c40b9c0035fd6",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "value",
+          "type": {
+            "class": "Octo.CachingType"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "System.Void"
+      },
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_bundle_item": {
+      "name": "Octo.Loader.OctoAssetBundleLoader.GetItemByName",
+      "rva": "0x875a894",
+      "prefix16": "fe57bea9f44f01a9b4c800d0358d00f0",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "name",
+          "type": {
+            "class": "System.String"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "Octo.Data.Item"
+      },
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_resource_item": {
+      "name": "Octo.Loader.OctoResourceLoader.GetItemByName",
+      "rva": "0x875bc44",
+      "prefix16": "fe57bea9f44f01a9b4c800b0358d00d0",
+      "module": "Octo.dll",
+      "is_static": false,
+      "parameters": [
+        {
+          "name": "name",
+          "type": {
+            "class": "System.String"
+          }
+        }
+      ],
+      "return_type": {
+        "class": "Octo.Data.Item"
+      },
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_string_new": {
+      "name": "il2cpp_string_new",
+      "rva": "0x419e3f8",
+      "prefix16": "e6270014e527001410280014ea270014",
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
+    },
+    "shared_resource_filename": {
+      "name": "Octo.Loader.OctoResourceLoader.GetStorageFileName",
+      "rva": "0x875bd2c",
+      "prefix16": "e00301aae1031faad33f0014fe0f1cf8",
+      "mode": "CALL",
+      "source": "pinned-shared-cache-contract-v1"
     }
   },
   "graphics_fields": [
@@ -3707,5 +3922,14 @@
     "stock_gate_proof_sha256": "af4ca9cd3384a523e73f572a3db9435e244572429f4d0889640295637ae893c2",
     "packaged_gate_proof_sha256": "b94d4d54dcd4c30ca537dfa4db24437d2574386a32378faaaa78a923e5c7baef",
     "original_packaged_native_sha256": "4517381b0dbeae559d79832797f0c57c78ba6f37cf7d3544a58d0f31f2b8def3"
+  },
+  "shared_resource_cache": {
+    "schema": 1,
+    "mode": "OctoFullCache",
+    "mode_value": 2,
+    "cache_state_latest": 3,
+    "publication": "PreDownload worker preparation then original replay on Downloader.Update",
+    "resource_representation": "raw CDN bytes, original MaskedHeaderStream preserved",
+    "device_verified": false
   }
 }

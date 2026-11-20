@@ -41,27 +41,98 @@ def test_gateway_proves_null_fallback_and_original_continuation():
 
 
 @pytest.mark.parametrize("word", [0x90000000, 0x10000000, 0x58000000, 0x14000000,
-                                  0x94000000, 0xD65F03C0, 0xF9400200])
+                                  0x94000000, 0xD65F03C0, 0xF9400200,
+                                  0xB4000010, 0xB5000011])
 def test_gateway_rejects_pc_relative_control_flow_and_x16_input(word):
     with pytest.raises(ValueError):
         p.gateway(0x10000, 0x220008, 0x20000, struct.pack("<I", word))
 
 
+@pytest.mark.parametrize("opcode", [0x34000000, 0x35000000, 0xB4000000, 0xB5000000])
+@pytest.mark.parametrize("immediate", [-(1 << 18), -1, 0, 4, (1 << 18) - 1])
+def test_compare_branch_gateway_preserves_taken_and_fallthrough_targets(opcode, immediate):
+    # The original conditional target is outside CBZ's range from the gateway.
+    # A local conditional plus two unconditional branches preserves both paths.
+    target, cave = 0x6E9F1E0, 0x97885B0
+    word = opcode | ((immediate & 0x7FFFF) << 5) | 3
+    code = p.gateway(cave, 0xAB8DA08, target, struct.pack("<I", word))
+    words = struct.unpack("<8I", code)
+    assert words[2:5] == (0xC8DFFE10, 0xB4000050, 0xD61F0200)
+    assert words[5] & ~(0x7FFFF << 5) == word & ~(0x7FFFF << 5)
+    assert cave + 20 + ((words[5] >> 5) & 0x7FFFF) * 4 == cave + 28
+    assert signed_branch_target(cave + 24, words[6]) == target + 4
+    assert signed_branch_target(cave + 28, words[7]) == target + immediate * 4
+
+
+@pytest.mark.parametrize("item_pointer", [0, 0x10004000])
+def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
+    unicorn = pytest.importorskip("unicorn")
+    from unicorn.arm64_const import UC_ARM64_REG_X3
+    target, cave = 0x6E9F1E0, 0x97885B0
+    code = p.gateway(cave, 0xAB8DA08, target, bytes.fromhex("830000b4"))
+    engine = unicorn.Uc(unicorn.UC_ARCH_ARM64, unicorn.UC_MODE_ARM)
+    engine.ctl_set_tcg_buffer_size(16 * 1024 * 1024)
+    for page in {target & ~4095, cave & ~4095}:
+        engine.mem_map(page, 4096)
+    engine.mem_write(cave, code)
+    engine.reg_write(UC_ARM64_REG_X3, item_pointer)
+    reached = []
+
+    def stop(current, pc, _size, _data):
+        if pc in (target + 4, target + 16):
+            reached.append(pc)
+            current.emu_stop()
+
+    engine.hook_add(unicorn.UC_HOOK_CODE, stop)
+    engine.emu_start(cave + 20, 0, count=8)
+    assert reached == [target + (4 if item_pointer else 16)]
+    assert engine.reg_read(UC_ARM64_REG_X3) == item_pointer
+
+
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "4c83244481923fdaa2f97ad31118f4f1dd545aa1177ed1327d8d4085f99feea3"
+    assert hashlib.sha256(header).hexdigest() == "391a7a084dab898f4b5f244b3d765db6a113470290444472be2a51cff6f910cc"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 111 and len(plan["entries"]) == 41
+    assert len(profile["aliases"]) == 121 and len(plan["entries"]) == 46
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
         assert entry["slot"] + 8 <= data["rva"] + data["vmsize"]
         assert entry["original_callable"] == entry["gateway"] + 20
-        words = struct.unpack("<7I", bytes.fromhex(entry["gateway_hex"]))
-        assert struct.pack("<I", words[5]).hex() == entry["original16"][:8]
+        code = bytes.fromhex(entry["gateway_hex"])
+        words = struct.unpack("<" + str(len(code) // 4) + "I", code)
+        if name == "shared_is_cached":
+            assert len(code) == 32 and words[5] == 0xB4000043
+            assert signed_branch_target(entry["gateway"] + 28, words[7]) == entry["rva"] + 16
+        else:
+            assert len(code) == 28
+            assert struct.pack("<I", words[5]).hex() == entry["original16"][:8]
         assert signed_branch_target(entry["rva"], int.from_bytes(bytes.fromhex(entry["patched_entry"]), "little")) == entry["gateway"]
         assert profile["aliases"][name]["rva"] == entry["rva"]
+
+
+def test_shared_cache_hooks_preserve_real_settings_and_loader_boundaries():
+    profile, plan = p.load_profile(), p.make_plan()
+    aliases = profile["aliases"]
+    hooks = {"shared_setup", "shared_is_cached", "shared_file_path",
+             "shared_pre_download", "shared_downloader_update"}
+    binds = {"shared_settings_set", "shared_bundle_item", "shared_resource_item",
+             "shared_resource_filename", "shared_string_new"}
+    assert hooks <= plan["entries"].keys()
+    assert binds.isdisjoint(plan["entries"])
+    assert aliases["shared_setup"]["parameters"][0]["type_name"] == "Octo.OctoFullSettings"
+    assert aliases["shared_settings_set"]["rva"] == 0x6E7F580
+    assert aliases["shared_settings_set"]["prefix16"].startswith("01e00039c0035fd6")
+    assert aliases["shared_pre_download"]["parameters"][1]["type_name"] == "System.Action<Octo.DownloadError>"
+    assert aliases["shared_pre_download"]["parameters"][3]["type_name"] == "System.Boolean"
+    assert aliases["shared_resource_filename"]["name"] == "Octo.Loader.OctoResourceLoader.GetStorageFileName"
+    assert aliases["shared_string_new"]["export_trie_and_symtab_agree"] is True
+    installer = (p.PROFILE.parent / "static_install.hpp").read_text()
+    assert installer.index("load_calls();") < installer.index("shared_cache_load_calls();")
+    assert installer.index("shared_cache_load_calls();") < installer.index("__atomic_store_n")
+    assert profile["shared_resource_cache"]["settings_caching_type_width_bytes"] == 1
+    assert profile["shared_resource_cache"]["runtime_device_validation"] is False
 
 
 def test_desktop_orientation_contract_preserves_original_task_and_input_getters():
@@ -115,8 +186,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 41 * 32
-    assert profile["slot_region"]["bytes"] == 41 * 8
+    assert profile["gateway_region"]["bytes"] == 46 * 32
+    assert profile["slot_region"]["bytes"] == 46 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -147,8 +218,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 41 * 32
-    assert original["slot_region"]["bytes"] == 41 * 8
+    assert original["gateway_region"]["bytes"] == 46 * 32
+    assert original["slot_region"]["bytes"] == 46 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length

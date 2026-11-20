@@ -6,5 +6,5 @@ current-version: 1
 compatibility-version: 1
 exports:
   - archs: [ arm64 ]
-    symbols: [ ___gxx_personality_v0, ___cxa_begin_catch, ___cxa_end_catch, __ZSt9terminatev ]
+    symbols: [ ___gxx_personality_v0, ___cxa_begin_catch, ___cxa_end_catch, ___cxa_rethrow, __ZSt9terminatev ]
 ...

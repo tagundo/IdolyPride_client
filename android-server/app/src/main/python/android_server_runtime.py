@@ -327,7 +327,8 @@ def _fetch_resource(url, *, timeout):
 
 
 def start(files_dir, assets, callback, native_library_dir=None, experimental_main_live=False,
-          download_missing_resources=True, media_mode=False, resource_cache_dir=None):
+          download_missing_resources=True, media_mode=False, resource_cache_dir=None,
+          shared_resource_dir=None):
     """Start the embedded loopback runtime; called on the service worker."""
     global _RUNTIME, _LAST_STATUS, _TRANSLATION_STATUS
     if type(download_missing_resources) is not bool:
@@ -387,6 +388,7 @@ def start(files_dir, assets, callback, native_library_dir=None, experimental_mai
                                      download_missing_resources=download_missing_resources,
                                      media_mode=media_mode,
                                      resource_cache_dir=resource_cache_dir,
+                                     shared_resource_dir=shared_resource_dir,
                                      resource_fetcher=_fetch_resource, **live_options)
             _LAST_STATUS = _RUNTIME.status()
             if _TRANSLATION_STATUS.get("state") != "absent":
@@ -410,6 +412,14 @@ def stop():
             _RUNTIME = None
         _LAST_STATUS = dict(_LAST_STATUS, running=False)
         return json.dumps(_LAST_STATUS, ensure_ascii=False)
+
+
+def shared_resources_json():
+    """Private same-UID unified-game configuration; never an HTTP/UI export."""
+    with _LOCK:
+        configuration = (_RUNTIME.shared_resources_configuration() if _RUNTIME is not None
+                         else {"schema": 1, "available": False})
+        return json.dumps(configuration, ensure_ascii=False)
 
 
 def status_json():

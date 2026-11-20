@@ -148,7 +148,7 @@ def native_profile_counts(root=ROOT):
     aliases = profile.get("aliases")
     if not isinstance(aliases, dict) or not 1 <= len(aliases) <= 256:
         raise ValueError("Invalid frozen native profile")
-    hooks = re.findall(r"\bHOOK\(\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*,", read_regular_public(directory / "bridge.cpp", 2 * 1024 * 1024).decode("utf-8"))
+    hooks = re.findall(r"\b(?:HOOK|SHARED_HOOK)\(\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*,", read_regular_public(directory / "bridge.cpp", 2 * 1024 * 1024).decode("utf-8"))
     hooks = [name for name in hooks if name != "entry"]  # Macro declaration.
     if not hooks or len(set(hooks)) != len(hooks) or not set(hooks) <= aliases.keys():
         raise ValueError("Native hook inventory differs from the profile")

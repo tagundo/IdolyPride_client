@@ -1947,6 +1947,238 @@
       "prefix16": "f657bda9f44f01a9fd7b02a9fd830091",
       "return_type": "System.Void",
       "parameters": []
+    },
+    "shared_setup": {
+      "name": "Octo.OctoManager.Setup",
+      "module": "Octo.dll",
+      "type_definition_index": 28869,
+      "metadata_method_index": 197306,
+      "token_row": 351,
+      "rva": 115844120,
+      "return_type_index": 50275,
+      "parameters": [
+        {
+          "name": "settings",
+          "metadata_type_index": 66459,
+          "type_name": "Octo.OctoFullSettings"
+        },
+        {
+          "name": "reset",
+          "metadata_type_index": 50298,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 2,
+      "method_flags": 150,
+      "return_type": "System.Boolean",
+      "registration_pointer_slot_rva": 175249440,
+      "prefix16": "fa67bba9f85f01a9f65702a9f44f03a9"
+    },
+    "shared_is_cached": {
+      "name": "Octo.Caching.OctoCaching.IsCached",
+      "module": "Octo.dll",
+      "type_definition_index": 29005,
+      "metadata_method_index": 198105,
+      "token_row": 1150,
+      "rva": 115995104,
+      "return_type_index": 50562,
+      "parameters": [
+        {
+          "name": "bucket",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "fileName",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "item",
+          "metadata_type_index": 61422,
+          "type_name": "Octo.Data.Item"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 486,
+      "return_type": "Octo.Caching.CacheState",
+      "registration_pointer_slot_rva": 175255832,
+      "prefix16": "830000b4632880b9040080528bf7ff17"
+    },
+    "shared_file_path": {
+      "name": "Octo.Caching.OctoCaching.GetFilePath",
+      "module": "Octo.dll",
+      "type_definition_index": 29005,
+      "metadata_method_index": 198106,
+      "token_row": 1151,
+      "rva": 115995132,
+      "return_type_index": 74127,
+      "parameters": [
+        {
+          "name": "bucket",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "fileName",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "item",
+          "metadata_type_index": 61422,
+          "type_name": "Octo.Data.Item"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 486,
+      "return_type": "System.String",
+      "registration_pointer_slot_rva": 175255840,
+      "prefix16": "080040f9040d41f9031141f980001fd6"
+    },
+    "shared_pre_download": {
+      "name": "Octo.Loader.OctoBaseLoader.PreDownload",
+      "module": "Octo.dll",
+      "type_definition_index": 28961,
+      "metadata_method_index": 197790,
+      "token_row": 835,
+      "rva": 115921016,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "name",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        },
+        {
+          "name": "onComplete",
+          "metadata_type_index": 8620,
+          "type_name": "System.Action<Octo.DownloadError>"
+        },
+        {
+          "name": "onProgress",
+          "metadata_type_index": 66508,
+          "type_name": "Octo.OnDownloadProgress"
+        },
+        {
+          "name": "canAutoDelete",
+          "metadata_type_index": 50298,
+          "type_name": "System.Boolean"
+        }
+      ],
+      "parameter_count": 4,
+      "method_flags": 486,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175253312,
+      "prefix16": "ffc301d1fc6f01a9fa6702a9f85f03a9"
+    },
+    "shared_downloader_update": {
+      "name": "Octo.Loader.Downloader.Update",
+      "module": "Octo.dll",
+      "type_definition_index": 28947,
+      "metadata_method_index": 197712,
+      "token_row": 757,
+      "rva": 115906720,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 129,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175252688,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "shared_settings_set": {
+      "name": "Octo.OctoFullSettings.set_CachingType",
+      "module": "Octo.dll",
+      "type_definition_index": 28874,
+      "metadata_method_index": 197358,
+      "token_row": 403,
+      "rva": 115864960,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "value",
+          "metadata_type_index": 50574,
+          "type_name": "Octo.CachingType"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 2182,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175249856,
+      "prefix16": "01e00039c0035fd6003c40b9c0035fd6"
+    },
+    "shared_bundle_item": {
+      "name": "Octo.Loader.OctoAssetBundleLoader.GetItemByName",
+      "module": "Octo.dll",
+      "type_definition_index": 28959,
+      "metadata_method_index": 197767,
+      "token_row": 812,
+      "rva": 115920316,
+      "return_type_index": 61422,
+      "parameters": [
+        {
+          "name": "name",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 196,
+      "return_type": "Octo.Data.Item",
+      "registration_pointer_slot_rva": 175253128,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "shared_resource_item": {
+      "name": "Octo.Loader.OctoResourceLoader.GetItemByName",
+      "module": "Octo.dll",
+      "type_definition_index": 28966,
+      "metadata_method_index": 197817,
+      "token_row": 862,
+      "rva": 115926204,
+      "return_type_index": 61422,
+      "parameters": [
+        {
+          "name": "name",
+          "metadata_type_index": 74127,
+          "type_name": "System.String"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 196,
+      "return_type": "Octo.Data.Item",
+      "registration_pointer_slot_rva": 175253528,
+      "prefix16": "f657bda9f44f01a9fd7b02a9fd830091"
+    },
+    "shared_string_new": {
+      "name": "il2cpp_string_new",
+      "rva": 136227080,
+      "is_export": true,
+      "export_trie_and_symtab_agree": true,
+      "native_ABI": "Il2CppString*(const char*)",
+      "prefix16": "c6cc0014c5cc0014f5cc0014cdcc0014",
+      "mode": "CALL"
+    },
+    "shared_resource_filename": {
+      "name": "Octo.Loader.OctoResourceLoader.GetStorageFileName",
+      "module": "Octo.dll",
+      "type_definition_index": 28966,
+      "metadata_method_index": 197820,
+      "token_row": 865,
+      "rva": 115926572,
+      "return_type_index": 74127,
+      "parameters": [
+        {
+          "name": "data",
+          "metadata_type_index": 61422,
+          "type_name": "Octo.Data.Item"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 196,
+      "return_type": "System.String",
+      "registration_pointer_slot_rva": 175253552,
+      "prefix16": "e00301aa010080d248420014f85fbca9"
     }
   },
   "hook_names": [
@@ -1990,7 +2222,12 @@
     "sound_voice_volume",
     "sound_voice_soundable",
     "sound_bind",
-    "sound_save"
+    "sound_save",
+    "shared_setup",
+    "shared_is_cached",
+    "shared_file_path",
+    "shared_pre_download",
+    "shared_downloader_update"
   ],
   "segments": {
     "__TEXT": {
@@ -2032,12 +2269,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 1312,
+    "bytes": 1472,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 328,
+    "bytes": 368,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -2183,5 +2420,20 @@
     "device_reset_trigger_verified": false,
     "device_persistence_verified": false,
     "pin_packet_sha256": "7fc7dd06182b6584b83eb2170066b22e6f694a01bec47acef4bb301d77f3906c"
+  },
+  "shared_resource_cache": {
+    "schema": 1,
+    "scope": "Pinned original Octo raw-file cache, preserving original bundle interceptor and resource file-URI readers",
+    "hook_count": 5,
+    "bind_only_count": 5,
+    "native_abi_proof": "Original metadata, real type tables, native forwarding and synthetic instruction execution",
+    "settings_caching_type_width_bytes": 1,
+    "full_cache_enum_value": 2,
+    "cache_latest_enum_value": 3,
+    "item_size_offset": 40,
+    "item_md5_offset": 48,
+    "conditional_gateway": "Compare-and-branch uses a local taken veneer and two unconditional original-address continuations",
+    "runtime_device_validation": false,
+    "original_input_whole_sha256_verified": true
   }
 }

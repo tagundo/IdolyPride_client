@@ -73,6 +73,36 @@ def compatible_runtime(sdk, catalog):
     return max(available, key=lambda r: version(r["version"]))["identifier"]
 
 
+def prepare_presentation_bridge(inputs, work, output):
+    """Build this checkout's bridge and stock-derived static gateway plan."""
+    from idoly_local.ios_presentation import prepare_presentation
+    from presentation_candidate import validate_library
+    folder = work / "presentation"
+    folder.mkdir()
+    plan, header = folder / "hook-plan.json", folder / "ios_profile.hpp"
+    prepared = prepare_presentation(inputs / "stock.ipa", plan, header)
+    clang = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--find", "clang++"], text=True).strip()
+    linker = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--find", "ld"], text=True).strip()
+    library = folder / "IdolyPresentation.dylib"
+    run(sys.executable, "-B", HERE.parent / "client-presentation/ios/build_native.py",
+        "--clang", clang, "--linker", linker, "--profile-header", header, "--output", library)
+    verified = validate_library(library, prepared)
+    (output / "presentation-native-build.json").write_bytes(library.with_suffix(".build.json").read_bytes())
+    (output / "presentation-hook-plan.json").write_bytes(plan.read_bytes())
+    (output / "presentation-verification.json").write_text(json.dumps(verified, indent=2) + "\n")
+    return library, plan
+
+
+def candidate_filename(source_commit):
+    if not re.fullmatch("[0-9a-f]{40}", source_commit):
+        raise ValueError("Exact candidate source commit required")
+    date = subprocess.check_output(["git", "-C", str(HERE.parent), "show", "-s", "--format=%cs", source_commit],
+                                   text=True).strip()
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        raise ValueError("Candidate source date is invalid")
+    return "IdolyPride-Unified-" + date.replace("-", ".") + "-prototype-" + source_commit[:12] + "-iOS.ipa"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", type=Path, required=True)
@@ -129,6 +159,7 @@ def main():
         "--output", client_languages, "--report", output / "client-languages-build.json")
     client_descriptor = client_languages.with_suffix(".json")
     (output / "client-languages.json").write_bytes(client_descriptor.read_bytes())
+    presentation_library, presentation_plan = prepare_presentation_bridge(inputs, work, output)
 
     def prepare(target, architecture):
         runtime = work / (target + "-runtime")
@@ -141,7 +172,7 @@ def main():
         framework = work / target / "IdolyEmbeddedServer.framework"
         framework.parent.mkdir()
         flags = (["--smoke-simulator"] if target == "simulator" else
-                 ["--presentation-library", inputs / "IdolyPresentation.dylib"])
+                 ["--presentation-library", presentation_library])
         run(python, "-B", native, "--sdk", "iphonesimulator" if target == "simulator" else "iphoneos",
             "--arch", architecture, "--python-framework", runtime / "Frameworks/Python.framework",
             "--output", framework, *flags)
@@ -159,15 +190,18 @@ def main():
     runtime = prepare("device", "arm64")
     framework = compile_native(runtime, "device", "arm64")
     unity = work / "UnityFramework"
-    run(python, "-B", HERE / "patch_load.py", "--source-ipa", inputs / "base.ipa", "--output", unity)
-    ipa = output / "IdolyPride-6.1.1-Unified-iOS.ipa"
+    from presentation_candidate import compose
+    compose(inputs / "stock.ipa", presentation_plan, unity)
+    ipa = output / candidate_filename(args.source_commit)
     common = ["--server-data", server_data, "--server-data-upgrade-proof", server_data_proof,
               "--translations", inputs / "bundledTranslations.zip",
               "--client-languages", client_languages, "--client-languages-metadata", client_descriptor,
               "--startup-translations",startup_translations,"--startup-translations-metadata",startup_descriptor]
     run(python, "-B", HERE / "package_unified.py", "--runtime-root", runtime,
         "--native-framework", framework, *common, "--output", ipa,
-        "--base-ipa", inputs / "base.ipa", "--patched-unity", unity, "--source-commit", args.source_commit)
+        "--base-ipa", inputs / "base.ipa", "--patched-unity", unity, "--source-commit", args.source_commit,
+        "--stock-ipa", inputs / "stock.ipa", "--presentation-library", presentation_library,
+        "--presentation-plan", presentation_plan)
     (output / "Unity-load-patch.json").write_bytes(unity.with_suffix(".json").read_bytes())
 
     arch = {"aarch64": "arm64"}.get(platform.machine(), platform.machine())
@@ -206,6 +240,8 @@ def main():
         "While playing, hold the upper-right corner for two seconds to reopen the server menu.\n"
         "Mac/PlayCover: app menu > 로컬 서버 설정… (Command+Shift+,).\n"
         "Resource files: Files > On My iPhone/iPad > 아이프라 로컬 > IdolyPride.\n"
+        "The current-source bridge and static Unity gateways replace the older bridge in the translated base IPA.\n"
+        "Shared resource reads use the verified server object store; device symlink and media playback validation is pending.\n"
         "The real iOS server framework compiled and a disposable Simulator core probe passed.\n"
         "Physical iPhone/iPad game playback and PlayCover execution remain unverified.\n"
         "The Simulator probe is excluded from the device IPA.\n"

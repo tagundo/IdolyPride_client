@@ -15,6 +15,7 @@
 #import <CommonCrypto/CommonCryptor.h>
 #include <Python.h>
 #include <stdatomic.h>
+#include <stdbool.h>
 #include <dlfcn.h>
 #include <mach-o/loader.h>
 #include <mach/vm_prot.h>
@@ -40,6 +41,43 @@ static BOOL hookInstalled;
 static atomic_bool pythonReady;
 static PyObject *hostModule;
 static PyThreadState *pythonThread;
+
+// Resolve only our bundled presentation bridge. Python has released the GIL
+// before this worker-side configuration; game callbacks never call Python.
+static BOOL prepareSharedResources(NSDictionary *descriptor) {
+#if IDOLY_SMOKE_SIMULATOR
+    (void)descriptor;
+    return NO;
+#else
+    if (![descriptor isKindOfClass:NSDictionary.class]
+            || ![descriptor[@"schema"] isEqual:@1] || ![descriptor[@"available"] isEqual:@YES]
+            || ![descriptor[@"directory"] isKindOfClass:NSString.class]
+            || ![descriptor[@"epoch"] isKindOfClass:NSNumber.class]) return NO;
+    NSString *directory = descriptor[@"directory"];
+    NSString *root = [IDNativeDataDirectory() stringByResolvingSymlinksInPath];
+    long long epoch = [descriptor[@"epoch"] longLongValue];
+    if (epoch < 1 || !root.length || ![directory hasPrefix:[root stringByAppendingString:@"/"]]
+            || ![directory isEqual:[directory stringByResolvingSymlinksInPath]]) return NO;
+    typedef bool (*Configure)(const char *, uint64_t);
+    Configure configure = (Configure)dlsym(RTLD_DEFAULT, "IdolySharedResourcesConfigure");
+    return configure && configure(directory.fileSystemRepresentation, (uint64_t)epoch);
+#endif
+}
+
+static NSDictionary *sharedResourcesInfo(void) {
+#if !IDOLY_SMOKE_SIMULATOR
+    typedef size_t (*CopyStatus)(char *, size_t);
+    CopyStatus copy = (CopyStatus)dlsym(RTLD_DEFAULT, "IdolySharedResourcesCopyStatus");
+    char buffer[4096] = {0};
+    size_t count = copy ? copy(buffer, sizeof buffer) : 0;
+    if (count > 0 && count < sizeof buffer) {
+        NSData *data = [NSData dataWithBytes:buffer length:count];
+        id value = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+        if ([value isKindOfClass:NSDictionary.class]) return value;
+    }
+#endif
+    return @{@"available":@NO};
+}
 
 // One persistent native thread owns interpreter initialization and all control
 // calls. Serving Python threads are created by app_runtime, never by UIKit.
@@ -332,6 +370,16 @@ static void recoverForeground(void) {
         NSDictionary *status = bytes ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
         if (!error && (![status isKindOfClass:NSDictionary.class] || ![status[@"running"] isEqual:@YES]))
             error = @"로컬 서버 연결을 복구하지 못했습니다. 게임을 다시 열어 주세요.";
+        if (!error) {
+            // foreground() can replace the listeners and their private broker.
+            // Refresh its capability after releasing the GIL. Reconfiguring
+            // the same live epoch preserves pending SDK callbacks.
+            NSString *configurationError = nil;
+            NSString *configuration = callHost("shared_resources_configuration", nil, &configurationError);
+            NSData *encoded = [configuration dataUsingEncoding:NSUTF8StringEncoding];
+            id descriptor = encoded ? [NSJSONSerialization JSONObjectWithData:encoded options:0 error:NULL] : nil;
+            if (!configurationError) prepareSharedResources(descriptor);
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             recovering = NO;
             if (error) { lastError = error; IDGateServerUnavailable(&gate); IDNativeSetServerState(NO, NO, @"서버 연결 확인 실패"); IDNativeStartupFailure(error); }
@@ -563,6 +611,7 @@ NSString *IdolyEmbeddedServerStatusJSON(void) {
     void (^read)(void) = ^{ result = JSON(@{@"schema":@1, @"hook_installed":@((BOOL)(hookInstalled && earlyHostInstalled)),
         @"keyboard_lifecycle":IDKeyboardLifecycleInfo(), @"keyboard_ready":@(atomic_load(&unityKeyboardReady)),
         @"octo_budget":IDOctoBudgetInfo(), @"unity_host":IDUnityHostInfo(),
+        @"shared_resources":sharedResourcesInfo(),
         @"late_startup_calls":@(lateStartupCalls),
         @"http_readiness":lastHTTPReadiness ?: (id)NSNull.null,
         @"phase":@(gate.phase), @"captured":@(gate.captured), @"forwarded":@(gate.forwarded),
@@ -598,6 +647,7 @@ void IdolyEmbeddedServerLaunchGame(void) {
             BOOL ready = !error && [status isKindOfClass:NSDictionary.class]
                 && [status[@"running"] isEqual:@YES] && [status[@"state"] isEqual:@"ready"];
             BOOL serving = ready;
+            if (ready) prepareSharedResources(status[@"shared_resources"]);
             if (!ready) {
                 NSString *healthError = nil, *health = callHost("readiness", nil, &healthError);
                 id observed = health ? [NSJSONSerialization JSONObjectWithData:[health dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL] : nil;

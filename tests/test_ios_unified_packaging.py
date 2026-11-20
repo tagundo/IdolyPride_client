@@ -127,6 +127,42 @@ def test_full_small_package_preserves_original_main_and_sdk(tmp_path):
         assert metadata['IdolyUnifiedLoopbackOrigin']=='http://127.0.0.1:8080'
         assert z.read('Payload/Game.app/LocalServer/ServerData.zip')==b'public-data'
 
+
+def test_fresh_presentation_replaces_only_owned_bridge_and_reproduced_unity(tmp_path,monkeypatch):
+    import presentation_candidate
+    runtime_root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path)
+    with ZipFile(source) as incoming:
+        original={entry.filename:incoming.read(entry) for entry in incoming.infolist()}
+    original['Payload/Game.app/'+package.PRESENTATION]=b'old owned presentation bridge'
+    with ZipFile(source,'w') as archive:
+        for name,raw in original.items():archive.writestr(name,raw)
+    manifest['inputs']['base_ipa']={'bytes':source.stat().st_size,'sha256':sha(source.read_bytes())}
+    stock=tmp_path/'stock.ipa';stock.write_bytes(b'pinned stock input')
+    manifest['inputs']['stock_ipa']={'bytes':stock.stat().st_size,'sha256':sha(stock.read_bytes())}
+    monkeypatch.setattr(package,'client_language_files',lambda *args:({},None))
+    bridge=tmp_path/'IdolyPresentation.dylib';bridge.write_bytes(b'new current-source shared resource bridge')
+    plan=tmp_path/'plan.json';plan.write_text('{}')
+    calls=[]
+    def verify(actual_stock,actual_unity,actual_plan,actual_bridge):
+        calls.append((actual_stock,actual_unity,actual_plan,actual_bridge))
+        return {'bytes':replacement.stat().st_size,'patched_sha256':sha(replacement.read_bytes()),
+                'presentation_library':{'sha256':sha(bridge.read_bytes()),'fresh_source_build':True}}
+    monkeypatch.setattr(presentation_candidate,'verify',verify)
+    monkeypatch.setattr(presentation_candidate,'verify_base_delta',lambda *args:{
+        'previous_bootstrap_and_presentation_bytes_preserved':True})
+    out=tmp_path/'fresh.ipa'
+    report=package.package(source,replacement,runtime_root,nat,data,trans,out,source_commit='b'*40,
+        manifest=manifest,web_root=web,stock_ipa=stock,presentation_library=bridge,presentation_plan=plan)
+    assert calls==[(stock,replacement,plan,bridge)]
+    assert report['original_members_preserved_except']==[package.UNITY,package.PRESENTATION,'Info.plist']
+    assert report['original_members_preserved_except_Unity_header_and_Info'] is False
+    assert report['fresh_presentation_source_build']['fresh_source_build'] is True
+    with ZipFile(out) as archive:
+        assert archive.read('Payload/Game.app/'+package.PRESENTATION)==bridge.read_bytes()
+        assert archive.read('Payload/Game.app/'+package.UNITY)==replacement.read_bytes()
+        assert archive.read('Payload/Game.app/Main')==b'ORIGINAL MAIN'
+        assert archive.read('Payload/Game.app/Frameworks/SDK.framework/SDK')==b'ORIGINAL SDK'
+
 def test_simulator_stage_needs_no_game_but_never_device_package(tmp_path):
     root,nat,data,trans,source,replacement,manifest,web=package_fixture(tmp_path,'simulator');prepared=tmp_path/'Prepared.app';package.stage_app(root,nat,data,trans,prepared,manifest=manifest,web_root=web)
     assert (prepared/'LocalServer/ServerData.zip').read_bytes()==b'public-data' and not (prepared/'Main').exists()

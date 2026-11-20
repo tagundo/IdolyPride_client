@@ -11,9 +11,9 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "0bde947f36991438e9ad56163c055f7981bd2febf18ebf8c1dbd1676e4907510"
-PROFILE_ENTRY_COUNT = 111
-PROFILE_HOOK_COUNT = 41
+PROFILE_SHA256 = "9a269b2785768ac8fe4573a34818028a0e625be7df2ab38cb30575c02a9271ff"
+PROFILE_ENTRY_COUNT = 121
+PROFILE_HOOK_COUNT = 46
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
 BOOTSTRAP_SHA256 = "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce"
 IPA_SHA256 = "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
@@ -49,8 +49,11 @@ def branch(source, target):
 
 def _displaced_allowed(word):
     # Audited first instructions: load/store pair, immediate stack arithmetic,
-    # or an unsigned-offset field load/store. No PC-relative instructions,
-    # branches, literal loads or pre-existing x16/x17 inputs are relocated.
+    # or an unsigned-offset field load/store. PC-relative instructions, literal
+    # loads and pre-existing x16/x17 inputs are rejected, except compare-and-
+    # branch, which uses two explicit original-address continuations.
+    if (word & 0x7E000000) == 0x34000000:
+        return (word & 31) not in (16, 17)
     base = (word >> 5) & 31
     if base in (16, 17):
         return False
@@ -67,11 +70,18 @@ def gateway(cave, slot, target, displaced):
     page = (slot >> 12) - (cave >> 12)
     if not -(1 << 20) <= page < (1 << 20):
         raise ValueError("Presentation data pointer is outside ADRP range")
-    return struct.pack("<7I", 0x90000010 | ((page & 3) << 29)
-                       | (((page >> 2) & 0x7FFFF) << 5),
-                       0x91000210 | ((slot & 0xFFF) << 10),
-                       0xC8DFFE10, 0xB4000050, 0xD61F0200, word,
-                       branch(cave + 24, target + 4))
+    words = [0x90000010 | ((page & 3) << 29) | (((page >> 2) & 0x7FFFF) << 5),
+             0x91000210 | ((slot & 0xFFF) << 10), 0xC8DFFE10, 0xB4000050, 0xD61F0200]
+    if (word & 0x7E000000) == 0x34000000:
+        immediate = (word >> 5) & 0x7FFFF
+        if immediate & (1 << 18):
+            immediate -= 1 << 19
+        words += [(word & ~(0x7FFFF << 5)) | (2 << 5),
+                  branch(cave + 24, target + 4),
+                  branch(cave + 28, target + immediate * 4)]
+    else:
+        words += [word, branch(cave + 24, target + 4)]
+    return struct.pack("<" + str(len(words)) + "I", *words)
 
 
 def render_header(plan, profile=None):

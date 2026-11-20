@@ -17,6 +17,7 @@ from packaging_common import *
 HERE = Path(__file__).resolve().parent
 LOAD_PATH = '@rpath/IdolyEmbeddedServer.framework/IdolyEmbeddedServer'
 UNITY = 'Frameworks/UnityFramework.framework/UnityFramework'
+PRESENTATION = 'Frameworks/IdolyPresentation.dylib'
 PACKAGED_SERVER_DATA = {'pin':'../data/latest-server-data-pin.json','policy':'latest-cohort-overlay-v1'}
 
 
@@ -261,10 +262,18 @@ def stage_app(runtime_root,native_framework,server_data,translations,output,*,ta
     return report
 
 
-def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,translations,output,*,source_commit,manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,server_data_upgrade_proof=None,startup_translations=None,startup_translations_metadata=None):
+def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,translations,output,*,source_commit,manifest=None,web_root=None,client_languages=None,client_languages_metadata=None,server_data_upgrade_proof=None,startup_translations=None,startup_translations_metadata=None,stock_ipa=None,presentation_library=None,presentation_plan=None):
     manifest = _packaging_manifest(manifest); require(re.fullmatch('[0-9a-f]{40}',source_commit or ''), 'Exact unified source commit required'); verify_file(base_ipa,manifest['inputs']['base_ipa'])
     output = Path(output); partial = output.with_suffix(output.suffix + '.partial'); require(not output.exists() and not partial.exists(), 'Fresh unified IPA output required')
     files, generated, proofs = bundle_files(runtime_root,native_framework,server_data,translations,'device',manifest,web_root,client_languages=client_languages,client_languages_metadata=client_languages_metadata,server_data_upgrade_proof=server_data_upgrade_proof,startup_translations=startup_translations,startup_translations_metadata=startup_translations_metadata)
+    fresh = any(value is not None for value in (stock_ipa,presentation_library,presentation_plan))
+    require(not fresh or all(value is not None for value in (stock_ipa,presentation_library,presentation_plan)),
+            'Stock IPA, fresh presentation library and plan are all required')
+    if fresh:
+        from presentation_candidate import verify as verify_fresh_presentation
+        require('stock_ipa' in manifest['inputs'], 'Fresh presentation requires an explicit stock IPA pin')
+        verify_file(stock_ipa,manifest['inputs']['stock_ipa'])
+        unity = verify_fresh_presentation(stock_ipa,patched_unity,presentation_plan,presentation_library)
     max_bytes = manifest['capacity']['max_ipa_bytes']; original_sha = {}; expected = {}; output.parent.mkdir(parents=True,exist_ok=True)
     with ZipFile(base_ipa) as source:
         infos = source.infolist(); require(len(infos) <= manifest['capacity']['max_archive_entries'] and len({i.filename for i in infos}) == len(infos), 'Original IPA inventory differs')
@@ -280,17 +289,34 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
         require(source.getinfo(app + 'Info.plist').file_size <= 128 * 1024, 'Original Info.plist exceeds bound')
         info_raw = source.read(app + 'Info.plist'); info = plistlib.loads(info_raw); info.update(UIFileSharingEnabled=True,LSSupportsOpeningDocumentsInPlace=True,CFBundleVersion='156.9117',CFBundleDisplayName='아이프라 로컬',IdolyUnifiedLoopbackOrigin='http://127.0.0.1:8080')
         generated['Info.plist'] = plistlib.dumps(info,fmt=plistlib.FMT_BINARY)
-        with source.open(app + UNITY) as incoming: unity = verify_unity_patch(incoming,patched_unity,manifest['inputs']['original_unity']['sha256'])
+        if fresh:
+            require(source.getinfo(app + UNITY).file_size == unity['bytes'], 'Restocked Unity file layout differs')
+            require(source.getinfo(app + PRESENTATION).file_size > 0, 'Expected existing presentation bridge')
+            from presentation_candidate import verify_base_delta
+            with source.open(app + UNITY) as incoming:
+                unity['previous_base_preservation'] = verify_base_delta(incoming,patched_unity,
+                    manifest['inputs']['original_unity']['sha256'],presentation_plan)
+        else:
+            with source.open(app + UNITY) as incoming: unity = verify_unity_patch(incoming,patched_unity,manifest['inputs']['original_unity']['sha256'])
         audit_macho(patched_unity,'device',maximum=256 * 1024**2)
         expanded = sum(i.file_size for i in infos) + sum(regular(p).st_size for p in files.values()) + sum(len(v) for v in generated.values())
+        if fresh: expanded += regular(presentation_library).st_size - source.getinfo(app + PRESENTATION).file_size
         require(expanded <= manifest['capacity']['max_expanded_bytes'], 'Unified IPA expanded capacity exceeded')
-        require(sum(i.compress_size for i in infos) + sum(regular(p).st_size for p in files.values()) + 4 * 1024**2 <= max_bytes, 'Unified IPA capacity preflight exceeded')
+        require(sum(i.compress_size for i in infos) + sum(regular(p).st_size for p in files.values())
+                + (regular(presentation_library).st_size if fresh else 0) + 4 * 1024**2 <= max_bytes, 'Unified IPA capacity preflight exceeded')
         require(not any(app + name in source.namelist() for name in files), 'Added runtime overlaps original game data')
         with ZipFile(partial,'x',allowZip64=False) as destination:
             for entry in infos:
                 info_copy = copy.copy(entry); name = entry.filename; target_hash = hashlib.sha256()
                 if name == app + UNITY:
                     with Path(patched_unity).open('rb') as incoming,destination.open(info_copy,'w') as outgoing: actual = stream_copy(incoming,outgoing,entry.file_size,unity['patched_sha256'])
+                    with source.open(entry) as incoming:
+                        for block in iter(lambda:incoming.read(CHUNK),b''): target_hash.update(block)
+                    original_sha[name] = target_hash.hexdigest()
+                elif fresh and name == app + PRESENTATION:
+                    with Path(presentation_library).open('rb') as incoming,destination.open(info_copy,'w') as outgoing:
+                        actual = stream_copy(incoming,outgoing,regular(presentation_library).st_size,
+                                             unity['presentation_library']['sha256'])
                     with source.open(entry) as incoming:
                         for block in iter(lambda:incoming.read(CHUNK),b''): target_hash.update(block)
                     original_sha[name] = target_hash.hexdigest()
@@ -320,16 +346,20 @@ def package(base_ipa,patched_unity,runtime_root,native_framework,server_data,tra
             require(h.hexdigest() == wanted, 'Unified output member SHA/CRC differs')
     os.link(partial,output); partial.unlink()
     report = {'schema':1,'source_commit':source_commit,'base_ipa_sha256':manifest['inputs']['base_ipa']['sha256'],'output_bytes':regular(output).st_size,'output_sha256':sha_file(output),'member_sha256':expected,'original_member_sha256':original_sha,'original_members_preserved_except_Unity_header_and_Info':True,'original_SDK_members_unchanged':True,'Unity_patch':unity,'client_languages':proofs['client_languages'],'runtime_target':'device','runtime_framework_count':len(proofs['runtime']['frameworks']),'max_stream_chunk_bytes':CHUNK,'capacity_bytes':max_bytes,'actual_device_or_PlayCover_execution':False,'requires_user_sideload_resigning':True}
+    if fresh:
+        report['original_members_preserved_except_Unity_header_and_Info'] = False
+        report['original_members_preserved_except'] = [UNITY,PRESENTATION,'Info.plist']
+        report['fresh_presentation_source_build'] = unity['presentation_library']
     if proofs['server_data_provenance'] is not None: report['server_data_provenance']=proofs['server_data_provenance']
     if proofs['startup_translations'] is not None: report['startup_translations']=proofs['startup_translations']
     output.with_suffix('.report.json').write_text(json.dumps(report,indent=2)+'\n'); return report
 
 
 def main():
-    p = argparse.ArgumentParser(description=__doc__); p.add_argument('--runtime-root',type=Path,required=True); p.add_argument('--native-framework',type=Path,required=True); p.add_argument('--server-data',type=Path,required=True); p.add_argument('--server-data-upgrade-proof',type=Path); p.add_argument('--startup-translations',type=Path); p.add_argument('--startup-translations-metadata',type=Path); p.add_argument('--translations',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--client-languages',type=Path); p.add_argument('--client-languages-metadata',type=Path); p.add_argument('--stage-only',action='store_true'); p.add_argument('--target',choices=tuple(PLATFORMS),default='device'); p.add_argument('--base-ipa',type=Path); p.add_argument('--patched-unity',type=Path); p.add_argument('--source-commit'); a = p.parse_args()
+    p = argparse.ArgumentParser(description=__doc__); p.add_argument('--runtime-root',type=Path,required=True); p.add_argument('--native-framework',type=Path,required=True); p.add_argument('--server-data',type=Path,required=True); p.add_argument('--server-data-upgrade-proof',type=Path); p.add_argument('--startup-translations',type=Path); p.add_argument('--startup-translations-metadata',type=Path); p.add_argument('--translations',type=Path,required=True); p.add_argument('--output',type=Path,required=True); p.add_argument('--client-languages',type=Path); p.add_argument('--client-languages-metadata',type=Path); p.add_argument('--stage-only',action='store_true'); p.add_argument('--target',choices=tuple(PLATFORMS),default='device'); p.add_argument('--base-ipa',type=Path); p.add_argument('--patched-unity',type=Path); p.add_argument('--source-commit'); p.add_argument('--stock-ipa',type=Path); p.add_argument('--presentation-library',type=Path); p.add_argument('--presentation-plan',type=Path); a = p.parse_args()
     if a.stage_only: report = stage_app(a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,target=a.target,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,base_ipa=a.base_ipa,server_data_upgrade_proof=a.server_data_upgrade_proof,startup_translations=a.startup_translations,startup_translations_metadata=a.startup_translations_metadata)
     else:
         require(a.target == 'device' and a.base_ipa and a.patched_unity and a.source_commit, 'Device IPA requires exact source, base IPA and patched Unity')
-        report = package(a.base_ipa,a.patched_unity,a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,source_commit=a.source_commit,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,server_data_upgrade_proof=a.server_data_upgrade_proof,startup_translations=a.startup_translations,startup_translations_metadata=a.startup_translations_metadata)
+        report = package(a.base_ipa,a.patched_unity,a.runtime_root,a.native_framework,a.server_data,a.translations,a.output,source_commit=a.source_commit,client_languages=a.client_languages,client_languages_metadata=a.client_languages_metadata,server_data_upgrade_proof=a.server_data_upgrade_proof,startup_translations=a.startup_translations,startup_translations_metadata=a.startup_translations_metadata,stock_ipa=a.stock_ipa,presentation_library=a.presentation_library,presentation_plan=a.presentation_plan)
     print(json.dumps({'status':'PASS_PREPARED_UNIFIED_IOS_PACKAGE','output':str(a.output),'physical_execution_verified':False}))
 if __name__ == '__main__': main()
