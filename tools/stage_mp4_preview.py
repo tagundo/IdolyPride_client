@@ -40,7 +40,7 @@ MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_encoder_api.h", "mp4_android_encoder.hpp", "mp4_game_adapter.hpp", "mp4_game_bindings.hpp", "mp4_runtime.hpp",
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
     "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
-    "mp4_controller_profile.hpp", "mp4_controller_profile.json",
+    "mp4_controller_profile.hpp",
     "shared_cache_core.hpp", "shared_cache_hooks.hpp")}
 MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",
