@@ -2,7 +2,12 @@ name: Verify actual paused 3D MV export (manual, no release)
 
 # This is the original game's normal Photography 3D flow in an official Google
 # ARM translation guest. A codec/environment probe alone can never pass it.
+# A definition-only push registers this new workflow on the feature branch;
+# subsequent native changes are tested by an explicit exact-source dispatch.
 on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths: [.github/workflows/verify-actual-mv-export.yml]
   workflow_dispatch:
     inputs:
       expected_source:
@@ -24,7 +29,7 @@ concurrency:
 
 env:
   SOURCE_SHA: ${{ github.sha }}
-  EXPECTED_SOURCE: ${{ inputs.expected_source }}
+  EXPECTED_SOURCE: ${{ inputs.expected_source || github.sha }}
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONPATH: src
 
@@ -138,7 +143,7 @@ jobs:
       DISPLAY: ':99'
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
-      SONG_LABEL: ${{ inputs.song_label }}
+      SONG_LABEL: ${{ inputs.song_label || 'Bittersweet Echo' }}
       INPUT_DIR: ${{ runner.temp }}/actual-mv-input
       EVIDENCE_DIR: ${{ runner.temp }}/actual-mv-evidence
     steps:
