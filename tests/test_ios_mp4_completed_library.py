@@ -108,9 +108,12 @@ int main(int argc,char **argv){@autoreleasepool{
  NSString *root=[[NSString stringWithUTF8String:argv[1]]stringByResolvingSymlinksInPath];
  NSString *operation=[NSString stringWithUTF8String:argv[2]],*raw=[NSString stringWithUTF8String:argv[3]],*error=nil;
  NSDictionary *arg=[NSJSONSerialization JSONObjectWithData:[raw dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
- NSArray *jobs=arg[@"jobs"]?:@[];NSString *queue=arg[@"queue_exports"];
+ // Cocoa and Python may spell macOS /private/var aliases differently. Derive
+ // every trusted native argument with the same canonicalizer as the host.
+ NSArray *jobs=arg[@"jobs"]?:@[];NSString *queue=[arg[@"queue_exports"]stringByResolvingSymlinksInPath];
+ NSString *exports=[arg[@"exports"]stringByResolvingSymlinksInPath];
  NSDictionary *reply=nil;
- if([operation isEqual:@"bookmark"]){BOOL ok=IDMP4LibraryBookmark(root,arg[@"exports"],&error);reply=@{@"ok":@(ok),@"error":ok?@"":error};}
+ if([operation isEqual:@"bookmark"]){BOOL ok=IDMP4LibraryBookmark(root,exports,&error);reply=@{@"ok":@(ok),@"error":ok?@"":error};}
  else if([operation isEqual:@"status"]){NSDictionary *status=IDMP4LibraryStatus(root,jobs,queue,[arg[@"offset"]unsignedIntegerValue],&error);reply=status?:@{@"error":error};}
  else if([operation isEqual:@"file"]){NSURL *url=IDMP4LibraryFile(root,jobs,queue,arg[@"export_id"],&error);reply=url?@{@"file":url.path}:@{@"error":error};}
  else return 3;
@@ -128,7 +131,9 @@ int main(int argc,char **argv){@autoreleasepool{
         args={key:str(Path(value).resolve()) if key in ("exports","queue_exports") else value for key,value in args.items()}
         result=subprocess.run([str(output),str(root),operation,json.dumps(args)],capture_output=True,text=True,timeout=30)
         assert result.returncode==0,result.stdout+result.stderr
-        return json.loads(result.stdout)
+        value=json.loads(result.stdout)
+        if "file" in value:value["file"]=str(Path(value["file"]).resolve())
+        return value
     return run
 
 
