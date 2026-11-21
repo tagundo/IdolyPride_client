@@ -266,20 +266,47 @@ def run_device(directory, sdk, serial, timeout, *, root=ROOT, require_committed=
             time.sleep(0.25)
         raise ValueError("Required Android UI observation timed out")
     def tree(step, *, documents=False):
-        temporary = "/data/local/tmp/idoly-save-ui-" + challenge + "-" + step + ".xml"; owned = False
-        try:
-            for flag in ("-e", "-L"):
-                need(command("shell", "test", flag, temporary, maximum=128, allow_false=True, limit=3).returncode == 1, "Fresh XML path required")
-            owned = True; command("shell", "uiautomator", "dump", temporary, maximum=4096, limit=20)
-            raw = command("exec-out", "cat", temporary, maximum=256 * 1024, limit=5); hierarchy = ET.fromstring(raw)
-            packages = {node.get("package") for node in hierarchy.iter("node") if node.get("package")}
-            expected = any(re.fullmatch(r"com\.(?:google\.android|android)\.documentsui", package) for package in packages) if documents else PACKAGE in packages
-            need(expected, "Expected DocumentsUI" if documents else "QA Activity is not visible")
-            (directory / ("ui-" + step + ".xml")).write_bytes(raw)
-            png = command("exec-out", "screencap", "-p", maximum=8 * MIB, limit=10); need(png.startswith(b"\x89PNG\r\n\x1a\n"), "PNG evidence required")
-            (directory / (step + ".png")).write_bytes(png); return hierarchy
-        finally:
-            if owned: command("shell", "rm", "-f", "--", temporary, maximum=128, limit=3)
+        # startActivityForResult returning proves an issued launch, not a visible
+        # DocumentsUI window. Wait only for the requested surface, obtaining a
+        # fresh dump on every bounded attempt. Preserve malformed/empty captures
+        # before parsing so infrastructure failures remain diagnosable.
+        for attempt in range(3):
+            need(time.monotonic() < deadline, "UI capture deadline exceeded")
+            capture = step + "-attempt" + str(attempt + 1)
+            temporary = "/data/local/tmp/idoly-save-ui-" + challenge + "-" + capture + ".xml"; owned = False
+            last = {"step": step, "attempt": attempt + 1, "expected_surface": "documentsui" if documents else PACKAGE}
+            proof["last_ui_capture"] = last
+            try:
+                for flag in ("-e", "-L"):
+                    need(command("shell", "test", flag, temporary, maximum=128, allow_false=True, limit=3).returncode == 1, "Fresh XML path required")
+                owned = True
+                dumped = command("shell", "uiautomator", "dump", temporary, maximum=4096, limit=20, allow_false=True)
+                (directory / ("dump-" + capture + ".txt")).write_bytes(dumped.stdout + b"\nSTDERR:\n" + dumped.stderr)
+                last["dump_returncode"] = dumped.returncode
+                last["dump_output"] = dumped.stdout.decode(errors="replace")[:256]
+                captured = command("exec-out", "cat", temporary, maximum=256 * 1024, limit=5, allow_false=True)
+                raw = captured.stdout
+                (directory / ("ui-" + capture + ".xml")).write_bytes(raw)
+                (directory / ("read-" + capture + ".txt")).write_bytes(captured.stderr)
+                png = command("exec-out", "screencap", "-p", maximum=8 * MIB, limit=10); need(png.startswith(b"\x89PNG\r\n\x1a\n"), "PNG evidence required")
+                (directory / (capture + ".png")).write_bytes(png)
+                last.update(raw_bytes=len(raw), raw_sha256=hashlib.sha256(raw).hexdigest(), read_returncode=captured.returncode)
+                try:
+                    hierarchy = ET.fromstring(raw)
+                except ET.ParseError as problem:
+                    last["parse_error"] = str(problem)[:256]
+                else:
+                    packages = {node.get("package") for node in hierarchy.iter("node") if node.get("package")}
+                    last["observed_packages"] = sorted(packages)[:16]
+                    expected = any(re.fullmatch(r"com\.(?:google\.android|android)\.documentsui", package) for package in packages) if documents else PACKAGE in packages
+                    if dumped.returncode == 0 and captured.returncode == 0 and expected:
+                        (directory / ("ui-" + step + ".xml")).write_bytes(raw)
+                        (directory / (step + ".png")).write_bytes(png)
+                        return hierarchy
+            finally:
+                if owned: command("shell", "rm", "-f", "--", temporary, maximum=128, limit=3)
+            if attempt < 2: time.sleep(0.5)
+        raise ValueError("Expected Android UI surface unavailable after three fresh captures; see last_ui_capture and retained raw evidence")
     def tap(description, step):
         hierarchy = tree(step)
         matches = [node for node in hierarchy.iter("node") if node.get("package") == PACKAGE and node.get("content-desc") == description
