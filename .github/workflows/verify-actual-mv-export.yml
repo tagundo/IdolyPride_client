@@ -144,13 +144,14 @@ jobs:
       LIBGL_ALWAYS_SOFTWARE: '1'
       GALLIUM_DRIVER: llvmpipe
       SONG_LABEL: ${{ inputs.song_label || 'Bittersweet Echo' }}
-      INPUT_DIR: ${{ runner.temp }}/actual-mv-input
-      EVIDENCE_DIR: ${{ runner.temp }}/actual-mv-evidence
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Set runner-local evidence directories
+        run: |
+          printf '%s\n' "INPUT_DIR=$RUNNER_TEMP/actual-mv-input" "EVIDENCE_DIR=$RUNNER_TEMP/actual-mv-evidence" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'

@@ -1,7 +1,8 @@
 # Actual paused-MV export QA
 
-`verify-actual-mv-export.yml` is manual only and never creates a release. Dispatch
-it at the exact source commit and pass the same 40-character commit in
+`verify-actual-mv-export.yml` never creates a release. Its own definition push
+registers and tests the workflow; subsequent runs are dispatched manually
+at the exact source commit and pass the same 40-character commit in
 `expected_source`. The runner builds the normal unified APK, verifies its
 complete producer/native-source receipts, then appends the emulator-only QA
 observer. Original SDK, AES, Unity and existing game members remain unchanged.
