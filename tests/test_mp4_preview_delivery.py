@@ -173,7 +173,8 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
     raw = (Path(__file__).resolve().parents[1] / delivery.WORKFLOW).read_text()
     scoped = raw.split("    paths:\n", 1)[1].split("  workflow_dispatch:", 1)[0]
     assert [line.strip()[2:] for line in scoped.splitlines() if line.strip()] == [delivery.WORKFLOW,
-        "tools/stage_mp4_preview.py", "tests/test_mp4_preview_delivery.py"]
+        "tools/stage_mp4_preview.py", "tests/test_mp4_preview_delivery.py",
+        "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 3
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw
     assert "IDOLY_RELEASE_VERSION: 2026.11.21.2" in raw and delivery.APK in raw
