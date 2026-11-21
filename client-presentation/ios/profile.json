@@ -2422,6 +2422,105 @@
       "return_type": "System.Void",
       "registration_pointer_slot_rva": 169980024,
       "prefix16": "001840f9600000b4010080d2e516fb17"
+    },
+    "mp4_native_time": {
+      "name": "TimeManager::Update",
+      "module": null,
+      "source": "pinned_original_native_engine_clock",
+      "native_abi": "void(TimeManager*, double nativeWallTimestampInD0)",
+      "native_parameter_registers": {
+        "manager": "X0",
+        "nativeWallTimestamp": "D0"
+      },
+      "rva": 13291548,
+      "prefix16": "086440f908050091086400f908d040b9",
+      "registration_pointer_slot_rva": null,
+      "relay_in": 140577348,
+      "relay_out": 140577352
+    },
+    "mp4_brain_update": {
+      "name": "Cinemachine.CinemachineBrain.ManualUpdate",
+      "module": "Cinemachine.dll",
+      "type_definition_index": 28296,
+      "metadata_method_index": 194079,
+      "token_row": 71,
+      "rva": 54428688,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 134,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 171090128,
+      "prefix16": "eb2bbb6de923016df65702a9f44f03a9"
+    },
+    "mp4_shader_set": {
+      "name": "VL.Rendering.VLShaderTimeManager.SetCustomTime",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25185,
+      "metadata_method_index": 174432,
+      "token_row": 109,
+      "rva": 124243876,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "time",
+          "metadata_type_index": 72704,
+          "type_name": "System.Single"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175589728,
+      "prefix16": "e923bd6df44f01a9fd7b02a9fd830091",
+      "native_abi": "void(float,const MethodInfo*)"
+    },
+    "mp4_shader_reset": {
+      "name": "VL.Rendering.VLShaderTimeManager.ResetCustomTime",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25185,
+      "metadata_method_index": 174433,
+      "token_row": 110,
+      "rva": 124244016,
+      "return_type_index": 78027,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 175589736,
+      "prefix16": "f44fbea9fd7b01a9fd430091d49401f0",
+      "native_abi": "void(const MethodInfo*)"
+    },
+    "mp4_actor_process": {
+      "name": "ActorSwing.ActorSwingJob.ProcessAnimation",
+      "module": "ActorSwing.Runtime.dll",
+      "type_definition_index": 31475,
+      "metadata_method_index": 211505,
+      "token_row": 235,
+      "rva": 26653192,
+      "return_type_index": 78027,
+      "parameters": [
+        {
+          "name": "stream",
+          "metadata_type_index": 48578,
+          "type_name": "UnityEngine.Animations.AnimationStream"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 486,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": 169941376,
+      "prefix16": "ef3bb86ded33016deb2b026de923036d",
+      "native_abi": "void(void* unboxedJobX0,const AnimationStream56* indirectX1,const MethodInfo* X2)"
+    },
+    "mp4_actor_burst": {
+      "name": "efaef804e44554aa5845633afa905c07",
+      "module": null,
+      "source": "pinned_original_actorswing_burst_callback",
+      "rva": 136077660,
+      "prefix16": "ef3bb96ded33016deb2b026de923036d",
+      "registration_pointer_slot_rva": null,
+      "native_abi": "void(void* jobX0,const AnimationStream56* streamX1,intptr_t methodIndexX2,JobRanges* rangesX3,int32_t jobIndexW4)"
     }
   },
   "hook_names": [
@@ -2480,7 +2579,13 @@
     "mp4_player_initialize",
     "mp4_photography_initialize",
     "mp4_photography_player_initialize",
-    "mp4_photography_end"
+    "mp4_photography_end",
+    "mp4_native_time",
+    "mp4_brain_update",
+    "mp4_shader_set",
+    "mp4_shader_reset",
+    "mp4_actor_process",
+    "mp4_actor_burst"
   ],
   "segments": {
     "__TEXT": {
@@ -2522,12 +2627,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 1792,
+    "bytes": 1984,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 448,
+    "bytes": 496,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -2697,5 +2802,15 @@
     "original_input_whole_sha256_verified": true,
     "runtime_device_validation": false,
     "manual_graph_and_encoder_validation_required": true
+  },
+  "native_relay_region": {
+    "name": "mp4_native_time",
+    "rva": 140577348,
+    "bytes": 8,
+    "original_zero": true,
+    "gap_begin": 140577348,
+    "gap_end": 140578816,
+    "after_section": "__gcc_except_tab",
+    "before_section": "__const"
   }
 }

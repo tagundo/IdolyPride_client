@@ -10,6 +10,7 @@
 #endif
 #include "mp4_timeline_camera.hpp"
 #include "mp4_timeline_audio.hpp"
+#include "mp4_playback_state.hpp"
 
 namespace idoly_mp4_game {
 using Method = void;
@@ -132,6 +133,14 @@ struct Api {
     float (*shader_current_time)(Method*)=nullptr;
     void (*shader_set_custom)(float,Method*)=nullptr;
     void (*shader_reset_custom)(Method*)=nullptr;
+    // Automatic playback is opt-in and fail closed. The bridge supplies only
+    // verified original state calls, a held native-clock observation and a
+    // proven actor/job-state snapshot/reset/restore implementation.
+    idoly_mp4_playback::OriginalApi<PlayableGraph> automatic_playback{};
+    idoly_mp4_playback::Dependents automatic_dependents{};
+    idoly_mp4_playback::ShaderLeaseApi automatic_shader{};
+    void* automatic_context=nullptr;
+    idoly_mp4_playback::ClockState (*automatic_clock_state)()=nullptr;
 };
 inline idoly_mp4_timeline_camera::Api timeline_camera_api(const Api& api) {
     return {api.is_type,api.alive,api.array_length,api.array_data,
@@ -158,11 +167,47 @@ public:
     GameAdapter& operator=(const GameAdapter&)=delete;
     bool set_api(Api api) { if(manual_||audio_request_||audio_bundle_||audio_clip_)return false;api_=api;return true; }
     bool set_api(Api api,Layout layout) { if(!set_api(api))return false;layout_=layout;return true; }
+    bool install_dependent_api(idoly_mp4_playback::OriginalApi<PlayableGraph> original,
+        idoly_mp4_playback::Dependents dependents,void* context,idoly_mp4_playback::ClockState(*clock)(),
+        idoly_mp4_playback::ShaderLeaseApi shader){
+        // Late verified installation leaves ordinary MV observations intact.
+        // It must not replace callbacks while any native/decoder scope owns
+        // their cleanup responsibility, and invokes no managed/game callback.
+        if(manual_||automatic_||automatic_scope_.active()||audio_request_||audio_bundle_||audio_clip_||audio_array_
+            ||audio_cancel_pending_||!context||!clock||!original.director_state||!original.director_play
+            ||!original.director_pause||!original.director_resume||!original.director_rebuild
+            ||!original.player_playing||!original.player_paused||!original.player_set_playing||!original.player_set_paused
+            ||!dependents.owner_current||!dependents.quiesce||!dependents.capture||!dependents.prepare
+            ||!dependents.reset||!dependents.restore||!dependents.release
+            ||!shader.begin||!shader.set_time||!shader.finish)return false;
+        api_.automatic_playback=original;api_.automatic_dependents=dependents;
+        api_.automatic_context=context;api_.automatic_clock_state=clock;api_.automatic_shader=shader;return true;
+    }
     void observe_presenter(void* presenter);
     void observe_presenter_ended(void* presenter);
+    void observe_player_initializing(void* player);
+    // Unity lifecycle observers call this before an owned player's original
+    // Initialize/Dispose, or its presenter's original Initialize/End. It only
+    // compares cached raw anchors and updates scalar ownership; no Unity/GC
+    // API or managed dereference is permitted here. Worker jobs instead use
+    // their independently published atomic generation, never this adapter.
+    void invalidate_owned_scene(void* player_or_presenter);
+    void release_shader_lease_for_scene(void* player_or_presenter){
+        if(manual_&&player_or_presenter&&(player_or_presenter==owned_player_anchor_||player_or_presenter==owned_presenter_anchor_))
+            release_shader_lease();
+    }
+    uint64_t owned_scene_generation()const{return owned_generation_;}
     void observe_camera_controller(void* controller);
     Result snapshot(Snapshot& output);
     Result begin_manual();
+    Result begin_automatic();
+    Result start_automatic();
+    Result prepare_automatic_frame(double timeline_seconds);
+    Result validate_automatic_frame(double timeline_seconds);
+    Result original_camera_updated(void* brain);
+    // Main-thread pure completion/validation boundary before the coordinator
+    // rebases source clock state. It does not rebuild/evaluate or resize.
+    Result prepare_restore();
     Result set_output_geometry(uint32_t width,uint32_t height);
     Result evaluate(double timeline_seconds);
     Result request_capture();
@@ -182,9 +227,12 @@ public:
     const Snapshot& description() const { return snapshot_; }
     const char* last_error() const { return error_; }
     bool manual() const { return manual_; }
+    bool automatic()const{return automatic_;}
+    bool restoration_pending()const{return automatic_&&automatic_scope_.active();}
     bool has_source_geometry_probe()const{return api_.source_geometry!=nullptr;}
     bool owned_scene_current()const{return manual_&&identities_current();}
-    bool owned_primary_scene_current()const{return manual_&&primary_scene_current();}
+    bool owned_primary_scene_current()const{return manual_&&primary_scene_current()
+        &&(!automatic_||automatic_scope_.restorable_owner_current());}
     SceneKind scene_kind()const{return scene_kind_;}
     void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
     void* selected_player()const {return resolve_selected_player(true);}
@@ -217,9 +265,23 @@ private:
     bool audio_scope_current(void* timeline) const;
     bool identities_current() const;
     bool primary_scene_current() const;
+    bool begin_owned_generation();
+    void release_shader_lease(){
+        if(shader_lease_active_){shader_lease_active_=false;api_.automatic_shader.finish(api_.automatic_context);}
+    }
+    void clear_owned_anchors(){owned_player_anchor_=owned_presenter_anchor_=nullptr;}
     bool camera_scope_current(void* timeline) const;
     void* resolve_selected_player(bool require_ready,void** mode=nullptr,void** data=nullptr,const char** error=nullptr) const;
     bool update_camera(float delta);
+    static bool automatic_owner(void* context);
+    static idoly_mp4_playback::Result automatic_quiesce(void* context);
+    static idoly_mp4_playback::Result automatic_capture(void* context);
+    static idoly_mp4_playback::Result automatic_prepare(void* context);
+    static idoly_mp4_playback::Result automatic_reset(void* context);
+    static idoly_mp4_playback::Result automatic_restore(void* context);
+    static idoly_mp4_playback::Result automatic_release(void* context,bool owned);
+    static const char* automatic_error(void* context);
+    Result automatic_result(idoly_mp4_playback::Result value){error_=automatic_scope_.error();return static_cast<Result>(value);}
     Result collect_actor_graphs(void* player);
     bool actor_graphs_current() const;
     void drop_actor_graphs();
@@ -247,7 +309,15 @@ private:
         capture_pass_seen_=false,capture_submitted_=false;
     SceneKind scene_kind_=SceneKind::none;
     bool owner_replaced_=false;
+    void* owned_player_anchor_=nullptr;
+    void* owned_presenter_anchor_=nullptr;
+    // Zero is a permanently exhausted generation, not a reusable epoch.
+    uint64_t owned_generation_=1;
     bool audio_cancel_pending_=false,audio_failed_=false;
+    bool automatic_=false,automatic_geometry_restored_=true;
+    bool shader_lease_active_=false;
+    bool shader_lease_superseded_=false;
+    idoly_mp4_playback::Scope<PlayableGraph> automatic_scope_;
     float previous_shader_time_=0, previous_bgm_volume_=0, previous_voice_volume_=0;
     const char* error_="none";
     const char* camera_update_error_="camera_clock_cache_rebase_failed";
@@ -268,7 +338,9 @@ inline void GameAdapter::observe_presenter(void* value) {
     const SceneKind kind=type(value,"Solis.OutGame.LivePlayerScreenPresenter")?SceneKind::out_game
         :type(value,"Solis.Photography.PhotographyLivePresenter")?SceneKind::photography:SceneKind::none;
     if(!value||kind==SceneKind::none)return;
-    if(manual_&&(get(presenter_)!=value||scene_kind_!=kind)){owner_replaced_=true;error_="selected_scene_changed";return;}
+    if(manual_&&(get(presenter_)!=value||scene_kind_!=kind)){
+        invalidate_owned_scene(owned_presenter_anchor_);owner_replaced_=true;error_="selected_scene_changed";return;
+    }
     if(get(presenter_)!=value)keep(presenter_,value);
     if(!manual_){scene_kind_=kind;owner_replaced_=false;}
 }
@@ -278,13 +350,35 @@ inline void GameAdapter::observe_presenter_ended(void* value) {
     // A retained wrapper is therefore not evidence that its MV is still open.
     if(scene_kind_!=SceneKind::photography||!value||get(presenter_)!=value
         ||!type(value,"Solis.Photography.PhotographyLivePresenter"))return;
+    invalidate_owned_scene(value);
     owner_replaced_=true;error_="selected_scene_changed";
     drop(presenter_);drop(photo_mode_);drop(photo_data_);
     scene_kind_=SceneKind::none;
 }
+inline void GameAdapter::observe_player_initializing(void* value){
+    // Original Initialize reuses this managed component but replaces its
+    // actor/native graph generation. A retained object pointer is not export
+    // ownership of the newly initialized MV. This is not Director.RebuildGraph.
+    if(value==owned_player_anchor_)invalidate_owned_scene(value);
+}
+inline bool GameAdapter::begin_owned_generation(){
+    if(!owned_generation_)return false;
+    owned_generation_=owned_generation_==~uint64_t(0)?0:owned_generation_+1;
+    if(!owned_generation_)return false;
+    owned_player_anchor_=get(player_);owned_presenter_anchor_=get(presenter_);
+    return owned_player_anchor_&&owned_presenter_anchor_;
+}
+inline void GameAdapter::invalidate_owned_scene(void* value){
+    if(!manual_||!value||(value!=owned_player_anchor_&&value!=owned_presenter_anchor_))return;
+    if(owned_generation_)owned_generation_=owned_generation_==~uint64_t(0)?0:owned_generation_+1;
+    owner_replaced_=true;
+    error_=owned_generation_?"selected_scene_reinitializing":"selected_scene_generation_exhausted";
+}
 inline void GameAdapter::observe_camera_controller(void* value) {
     if(!value||!type(value,"VL.Rendering.VLSRPCameraController"))return;
-    if(manual_&&get(camera_controller_)!=value){owner_replaced_=true;error_="selected_camera_changed";return;}
+    if(manual_&&get(camera_controller_)!=value){
+        invalidate_owned_scene(owned_player_anchor_);owner_replaced_=true;error_="selected_camera_changed";return;
+    }
     if(get(camera_controller_)!=value)keep(camera_controller_,value);
 }
 inline void* GameAdapter::resolve_selected_player(bool require_ready,void** mode,void** data,const char** error) const {
@@ -545,7 +639,10 @@ inline bool GameAdapter::camera_scope_current(void* timeline) const {
         &&current.camera_track==get(camera_timeline_track_)
         &&current.brain==get(brain_)&&current.camera==get(camera_);
 }
-inline bool GameAdapter::identities_current() const {return primary_scene_current()&&actor_graphs_current();}
+inline bool GameAdapter::identities_current() const {
+    return primary_scene_current()&&actor_graphs_current()
+        &&(!automatic_||!automatic_scope_.playing()||automatic_scope_.owned_graph_current());
+}
 inline bool GameAdapter::update_camera(float delta) {
     struct Scope { bool& active;Scope(bool& value):active(value){active=true;}~Scope(){active=false;} } scope(camera_evaluating_);
     camera_step_delta_=delta;api_.brain_manual_update(get(brain_),nullptr);
@@ -555,6 +652,155 @@ inline bool GameAdapter::update_camera(float delta) {
         camera_update_error_="output_projection_failed";return false;
     }
     return true;
+}
+inline bool GameAdapter::automatic_owner(void* context){
+    auto* self=static_cast<GameAdapter*>(context);
+    return self&&self->primary_scene_current()&&self->api_.automatic_dependents.owner_current
+        &&self->api_.automatic_dependents.owner_current(self->api_.automatic_context);
+}
+inline idoly_mp4_playback::Result GameAdapter::automatic_capture(void* context){
+    auto* self=static_cast<GameAdapter*>(context);
+    return self->api_.automatic_dependents.capture(self->api_.automatic_context);
+}
+inline idoly_mp4_playback::Result GameAdapter::automatic_quiesce(void* context){
+    auto* self=static_cast<GameAdapter*>(context);
+    return self->api_.automatic_dependents.quiesce(self->api_.automatic_context);
+}
+inline idoly_mp4_playback::Result GameAdapter::automatic_prepare(void* context){
+    using P=idoly_mp4_playback::Result;auto* self=static_cast<GameAdapter*>(context);
+    if(!automatic_owner(context))return P::stale;
+    self->api_.audio_source_set_volume(self->get(self->bgm_source_),0,nullptr);
+    if(!automatic_owner(context))return P::stale;
+    if(void* source=self->get(self->voice_source_))self->api_.audio_source_set_volume(source,0,nullptr);
+    if(!automatic_owner(context))return P::stale;
+    const P prepared=self->api_.automatic_dependents.prepare(self->api_.automatic_context);
+    if(prepared!=P::ok)return prepared;
+    if(!automatic_owner(context))return P::stale;
+    if(!self->shader_lease_active_||!self->api_.automatic_shader.set_time(self->api_.automatic_context,0)){
+        self->shader_lease_superseded_=true;return P::stale;
+    }
+    return automatic_owner(context)?P::ok:P::stale;
+}
+inline idoly_mp4_playback::Result GameAdapter::automatic_reset(void* context){
+    auto* self=static_cast<GameAdapter*>(context);
+    return self->api_.automatic_dependents.reset(self->api_.automatic_context);
+}
+inline idoly_mp4_playback::Result GameAdapter::automatic_restore(void* context){
+    using P=idoly_mp4_playback::Result;auto* self=static_cast<GameAdapter*>(context);
+    const P result=self->api_.automatic_dependents.restore(self->api_.automatic_context);
+    if(result!=P::ok)return result;
+    if(!automatic_owner(context))return P::stale;
+    self->api_.audio_source_set_volume(self->get(self->bgm_source_),self->previous_bgm_volume_,nullptr);
+    if(!automatic_owner(context))return P::stale;
+    if(void* source=self->get(self->voice_source_))self->api_.audio_source_set_volume(source,self->previous_voice_volume_,nullptr);
+    if(!automatic_owner(context))return P::stale;
+    self->release_shader_lease();
+    return automatic_owner(context)?P::ok:P::stale;
+}
+inline idoly_mp4_playback::Result GameAdapter::automatic_release(void* context,bool owned){
+    auto* self=static_cast<GameAdapter*>(context);
+    // The global lease must end even when the selected scene was replaced or
+    // actor/resource cleanup has to wait. It is not an old-scene native write.
+    self->release_shader_lease();
+    return self->api_.automatic_dependents.release(self->api_.automatic_context,owned);
+}
+inline const char* GameAdapter::automatic_error(void* context){
+    auto* self=static_cast<GameAdapter*>(context);
+    if(self->shader_lease_superseded_)return "shader_lease_superseded";
+    return self->api_.automatic_dependents.error?self->api_.automatic_dependents.error(self->api_.automatic_context):nullptr;
+}
+inline Result GameAdapter::begin_automatic(){
+    namespace p=idoly_mp4_playback;
+    if(manual_&&!automatic_)return fail(Result::invalid,"export_already_owns_scene");
+    const auto& dependencies=api_.automatic_dependents;
+    if(!api_.automatic_clock_state||!api_.automatic_context||!dependencies.owner_current||!dependencies.quiesce
+        ||!dependencies.capture||!dependencies.prepare||!dependencies.reset||!dependencies.restore||!dependencies.release
+        ||!api_.automatic_shader.begin||!api_.automatic_shader.set_time||!api_.automatic_shader.finish)
+        return fail(Result::unsupported,"original_dependent_state_unavailable");
+    const p::ClockState clock=api_.automatic_clock_state();
+    if(!clock.owned||!clock.held)return fail(Result::waiting,"original_engine_clock_not_held");
+    if(!automatic_){
+        if(!identities_current()||snapshot_.duration_seconds<=0||!snapshot_.audio.count)
+            return fail(Result::stale,"selected_scene_changed");
+        const int32_t brain_mode=field<int32_t>(get(brain_),layout_.brain_update_mode);
+        if(brain_mode<0||brain_mode>=3)
+            return fail(Result::unsupported,"original_camera_automatic_update_unavailable");
+        auto original=api_.automatic_playback;
+        original.director_mode=api_.director_get_mode;original.director_set_mode=api_.director_set_mode;
+        original.director_time=api_.director_get_time;original.director_set_time=api_.director_set_time;
+        original.director_evaluate=api_.director_evaluate;original.director_graph=api_.director_graph_injected;
+        original.graph_valid=api_.graph_valid;
+        const p::Dependents enclosed={automatic_owner,automatic_quiesce,automatic_capture,automatic_prepare,automatic_reset,
+            automatic_restore,automatic_release,automatic_error};
+        if(!automatic_scope_.install(original,enclosed))return fail(Result::invalid,"export_already_owns_scene");
+        previous_bgm_volume_=api_.audio_source_get_volume(get(bgm_source_),nullptr);
+        previous_voice_volume_=get(voice_source_)?api_.audio_source_get_volume(get(voice_source_),nullptr):0;
+        if(!std::isfinite(previous_bgm_volume_)||!std::isfinite(previous_voice_volume_))
+            return fail(Result::unsupported,"original_playback_state_unsupported");
+        if(!begin_owned_generation())return fail(Result::failed,"selected_scene_generation_unavailable");
+        manual_=automatic_=true;automatic_geometry_restored_=true;
+        shader_lease_superseded_=false;
+        if(!api_.automatic_shader.begin(api_.automatic_context)){
+            manual_=automatic_=false;clear_owned_anchors();return fail(Result::unsupported,"shader_lease_unavailable");
+        }
+        shader_lease_active_=true;
+    }
+    const p::Result acquired=automatic_scope_.acquire(get(player_),get(director_),this,clock);
+    if(acquired==p::Result::ok){
+        snapshot_.previous_time_seconds=automatic_scope_.snapshot().time;
+        snapshot_.previous_update_mode=automatic_scope_.snapshot().mode;
+    }
+    if(!automatic_scope_.active()){release_shader_lease();manual_=automatic_=false;clear_owned_anchors();}
+    return automatic_result(acquired);
+}
+inline Result GameAdapter::start_automatic(){
+    if(!automatic_||!api_.automatic_clock_state)return fail(Result::invalid,"original_playback_not_held");
+    const auto clock=api_.automatic_clock_state();
+    if(!clock.owned||!clock.held)return fail(Result::waiting,"original_engine_clock_not_held");
+    // Adoption of freshly rebuilt actor graphs can itself wait. Once the
+    // source has started at zero under a held clock, retry adoption only;
+    // never rebuild/play that source a second time.
+    const auto result=automatic_scope_.playing()?automatic_scope_.validate_frame(0):automatic_scope_.start(clock);
+    if(result!=idoly_mp4_playback::Result::ok)return automatic_result(result);
+    // RebuildGraph intentionally replaces the selected director's graph and
+    // can rebuild actor graphs. Adopt only this same retained player's exact
+    // actor graph set after dependent reset has established its ownership.
+    const Result actors=collect_actor_graphs(get(player_));
+    if(actors!=Result::ok)return actors;
+    snapshot_.actor_graph_count=actor_graph_count_;evaluated_time_=0;evaluation_failed_=false;
+    return automatic_result(result);
+}
+inline Result GameAdapter::validate_automatic_frame(double seconds){
+    if(!automatic_)return fail(Result::invalid,"original_playback_not_running");
+    if(!identities_current())return fail(Result::stale,"selected_scene_changed");
+    return automatic_result(automatic_scope_.validate_frame(seconds));
+}
+inline Result GameAdapter::prepare_automatic_frame(double seconds){
+    if(!automatic_||!api_.automatic_clock_state)return fail(Result::invalid,"original_playback_not_running");
+    if(!std::isfinite(seconds)||seconds<0||seconds>snapshot_.duration_seconds)
+        return fail(Result::invalid,"frame_time_out_of_bounds");
+    if(!api_.automatic_clock_state().owned)return fail(Result::waiting,"original_engine_clock_not_owned");
+    if(!identities_current())return fail(Result::stale,"selected_scene_changed");
+    const auto ready=automatic_scope_.validate_owner_state();
+    if(ready!=idoly_mp4_playback::Result::ok)return automatic_result(ready);
+    // This runs before the original Director/animation update. Its current
+    // timeline is intentionally still the previous frame. Only the owned
+    // shader clock is prepared; post-render validation checks actual time.
+    if(!shader_lease_active_||!api_.automatic_shader.set_time(api_.automatic_context,static_cast<float>(seconds)))
+        return fail(Result::stale,"shader_lease_superseded");
+    if(!identities_current())return fail(Result::stale,"selected_scene_changed");
+    return automatic_result(automatic_scope_.validate_owner_state());
+}
+inline Result GameAdapter::original_camera_updated(void* brain){
+    if(!automatic_||!automatic_scope_.playing()||brain!=get(brain_))return Result::waiting;
+    if(!identities_current())return fail(Result::stale,"selected_scene_changed");
+    if(output_geometry_applied_&&(!api_.output_projection||!api_.output_projection(get(camera_controller_),true)))
+        return fail(Result::unsupported,"output_projection_failed");
+    return Result::ok;
+}
+inline Result GameAdapter::prepare_restore(){
+    if(!automatic_||!api_.automatic_clock_state)return fail(Result::invalid,"original_playback_not_held");
+    return automatic_result(automatic_scope_.prepare_restore(api_.automatic_clock_state()));
 }
 inline Result GameAdapter::begin_manual() {
     if(manual_)return fail(Result::invalid,"export_already_owns_scene");
@@ -576,7 +822,8 @@ inline Result GameAdapter::begin_manual() {
         if(!api_.recorded_graph_mode(&entry.graph,&observed)||observed<0||observed>3)return fail(Result::waiting,"actor_graph_mode_not_observed");
         entry.previous_mode=observed;
     }
-    api_.director_set_mode(director,3,nullptr);manual_=true;
+    if(!begin_owned_generation())return fail(Result::failed,"selected_scene_generation_unavailable");
+    manual_=true;api_.director_set_mode(director,3,nullptr);
     const int32_t manual_mode=3,late_blend=1;
     std::memcpy(static_cast<uint8_t*>(get(brain_))+layout_.brain_update_mode,&manual_mode,sizeof(manual_mode));
     std::memcpy(static_cast<uint8_t*>(get(brain_))+layout_.brain_blend_update_mode,&late_blend,sizeof(late_blend));
@@ -596,6 +843,7 @@ inline Result GameAdapter::begin_manual() {
     return Result::ok;
 }
 inline Result GameAdapter::evaluate(double seconds) {
+    if(automatic_)return validate_automatic_frame(seconds);
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
     if(evaluation_failed_)return fail(Result::failed,"manual_graph_previously_failed");
     if(!std::isfinite(seconds)||seconds<0||seconds>snapshot_.duration_seconds
@@ -790,6 +1038,30 @@ inline void GameAdapter::close_private_audio() {
 inline Result GameAdapter::restore() {
     capture_pending_=capture_pass_seen_=capture_submitted_=false;
     close_private_audio();
+    if(automatic_){
+        const auto clock=api_.automatic_clock_state?api_.automatic_clock_state():idoly_mp4_playback::ClockState{};
+        // Lens/target restoration belongs to the same held-clock boundary as
+        // graph and actor restoration. Scene loss may still discard our CPU
+        // bookkeeping immediately, without changing the replacement scene.
+        const auto quiet=automatic_scope_.prepare_restore(clock);
+        if(quiet!=idoly_mp4_playback::Result::ok&&quiet!=idoly_mp4_playback::Result::stale)
+            return automatic_result(quiet);
+        if(output_geometry_applied_){
+            if(api_.output_geometry)automatic_geometry_restored_=api_.output_geometry(
+                owned_primary_scene_current()?get(camera_controller_):nullptr,0,0);
+            else automatic_geometry_restored_=false;
+            output_geometry_applied_=false;
+        }
+        const auto result=automatic_scope_.restore(clock);
+        if(automatic_scope_.active())return automatic_result(result);
+        release_shader_lease();
+        manual_=automatic_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
+        if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
+        drop(cpu_texture_);drop(captured_texture_);
+        if(result==idoly_mp4_playback::Result::ok&&!automatic_geometry_restored_)
+            return fail(Result::failed,"output_restore_failed");
+        return automatic_result(result);
+    }
     const auto owned=[this](){return manual_&&primary_scene_current();};
     const auto actor_current=[this](const ActorGraph& entry){
         void* animation=get(entry.player);
@@ -828,13 +1100,14 @@ inline Result GameAdapter::restore() {
             if(shader_was_custom_)api_.shader_set_custom(previous_shader_time_,nullptr);else api_.shader_reset_custom(nullptr);
         }
     }
-    manual_=false;graph_={};evaluated_time_=0;evaluation_failed_=false;
+    manual_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
     if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
     drop(cpu_texture_);drop(captured_texture_);
     return geometry_restored?Result::ok:fail(Result::failed,"output_restore_failed");
 }
 inline void GameAdapter::reset_observations() {
-    restore();drop(presenter_);drop(photo_mode_);drop(photo_data_);drop(camera_controller_);drop(player_);drop(director_);drop(timeline_asset_);drop(camera_);
+    restore();if(restoration_pending())return;
+    drop(presenter_);drop(photo_mode_);drop(photo_data_);drop(camera_controller_);drop(player_);drop(director_);drop(timeline_asset_);drop(camera_);
     drop(bgm_source_);drop(voice_source_);drop(brain_);drop_actor_graphs();drop_audio_scope();snapshot_={};error_="none";
     drop(camera_timeline_director_);drop(camera_timeline_asset_);drop(camera_timeline_track_);camera_scope_identity_=0;
     scene_kind_=SceneKind::none;owner_replaced_=false;

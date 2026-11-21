@@ -42,13 +42,16 @@ MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
     "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
     "mp4_controller_profile.hpp", "mp4_type_descriptor.hpp",
+    "mp4_engine_clock.hpp", "mp4_engine_clock_profile.hpp", "mp4_playback_state.hpp",
+    "mp4_actor_state.hpp", "mp4_actor_state_profile.hpp",
     "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp",
     "mp4_camera_owner.hpp", "mp4_timeline_camera.hpp", "mp4_timeline_audio.hpp",
     "shared_cache_core.hpp", "shared_cache_hooks.hpp")}
 # Android's actual builder hashes JSON generator evidence; Darwin's compiled
 # source receipt includes headers only. Keep these profile pins out of MP4_NATIVE.
 MP4_ANDROID_PROFILES = {"client-presentation/native/" + name for name in (
-    "mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json", "mp4_camera_owner_profile.json")}
+    "mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json", "mp4_camera_owner_profile.json",
+    "mp4_engine_clock_profile.json", "mp4_playback_state_profile.json", "mp4_actor_state_profile.json")}
 MP4_IOS_HOST = {
     "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m",
     "MP4LifecyclePolicy.h", "MP4FinalizationPolicy.h", "IdolyMP4Library.m", "IdolyMP4Library.h",

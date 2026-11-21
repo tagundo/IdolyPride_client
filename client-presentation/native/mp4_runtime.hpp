@@ -13,6 +13,7 @@
 #include <string.h>
 #include <time.h>
 #include <dlfcn.h>
+#include <atomic>
 #else
 extern "C" {
 void* malloc(size_t); void free(void*);
@@ -23,11 +24,31 @@ int ftruncate(int,int64_t); void* dlsym(void*,const char*);
 #include "mp4_encoder_api.h"
 #include "mp4_session_api.h"
 #include "mp4_game_adapter.hpp"
+#include "mp4_engine_clock.hpp"
 #include "mp4_selection_capture.hpp"
 #include "mp4_game_profile.hpp"
 #include "mp4_output_policy.hpp"
 
 namespace idoly_mp4_runtime {
+static idoly_mp4_engine_clock::Scope native_engine_clock;
+static std::atomic<bool> native_engine_clock_installed{false};
+// Published only by the completed owned frame coordinator. Dependency
+// helpers alone cannot enable export or fall back to the old manual loop.
+static bool (*native_owned_boundary)(void*,double)=nullptr;
+inline bool install_native_clock(idoly_mp4_engine_clock::Api api){
+    if(native_engine_clock_installed.load(std::memory_order_acquire)||!native_engine_clock.install(api))return false;
+    native_engine_clock_installed.store(true,std::memory_order_release);return true;
+}
+inline bool native_clock_available(){return native_engine_clock_installed.load(std::memory_order_acquire);}
+inline idoly_mp4_engine_clock::Scope& native_clock_scope(){return native_engine_clock;}
+inline bool native_clock_tick(void* manager,double wall){
+    if(!native_clock_available())return false;
+    // Passive installation is transparent. The owned frame coordinator is
+    // connected only after scene/dependent-state and worker coverage validate.
+    // This wrapper owns the native call; the bridge must never call it again
+    // when an active scope reports a lifecycle/ownership error.
+    return native_owned_boundary?native_owned_boundary(manager,wall):native_engine_clock.native_tick(manager,wall);
+}
 using idoly_mp4_game::Api;
 using idoly_mp4_game::Layout;
 using idoly_mp4_game::Result;
@@ -170,6 +191,23 @@ static uint64_t unity_ticks=0,capture_acks=0;
 inline void increment_counter(uint64_t& value){if(value<9007199254740991ULL)++value;}
 static idoly_mp4_game::GameAdapter game;
 static idoly_mp4_selection::Capture selection;
+struct NativeSceneControl {
+    // Main-thread operations on the exact retained scene. hold must finish
+    // the previously authorized jobs before closing its worker grant; grant
+    // receives a zero-based simulation tick (not an output frame index) and
+    // authorizes one step without evaluating a graph itself. A host with a
+    // nonzero serial API must map tick+1 with an overflow check.
+    Result (*hold)(void*)=nullptr;
+    Result (*grant)(void*,uint64_t)=nullptr;
+    // Ownership alone is insufficient when rebasing global fixed time. The
+    // verified scene host must also close the concrete physics dependencies.
+    bool (*source_clock_restorable)(void*)=nullptr;
+    bool valid()const{return hold&&grant&&source_clock_restorable;}
+};
+static NativeSceneControl native_scene_control;
+static void* native_scene_context=nullptr;
+static bool native_scene_installed=false,native_scene_required=false;
+inline void require_native_scene_pipeline(){native_scene_required=true;}
 static uint64_t selected_identity=0;
 // Invalidation is scalar-only so lifecycle/host callbacks never enter Unity
 // or acquire the queue owner lock while holding the control lock.
@@ -187,6 +225,50 @@ inline void queue_tick();
 inline void queue_refresh_candidate(Result readiness);
 static bool installed=false;
 enum class Stage{idle,begin,audio_request,audio_response,audio_load,audio_mix,audio_finalize,frame_request,frame_wait,frame_submit,finishing,retiring};
+// BEGIN_MP4_NATIVE_FRAME_SCHEDULE
+// The simulation proposal and the encoder acknowledgment are separate commits.
+// A rejected native clock grant must never roll back a previously accepted
+// frame, and an encoder retry must never consume a new simulation tick.
+class FrameSchedule {
+public:
+    struct Proposal { bool advance=false;uint64_t tick=0;int64_t frame=-1; };
+    bool reset(uint64_t generation,uint32_t fps,uint64_t frames){
+        *this=FrameSchedule{};
+        if(!generation||(fps!=30&&fps!=60)||!frames||frames>0x7fffffffffffffffULL)return false;
+        const uint64_t step=60/fps;
+        if(frames-1>~uint64_t(0)/step)return false;
+        generation_=generation;frames_=frames;step_=step;last_tick_=(frames-1)*step;return true;
+    }
+    Proposal propose(uint64_t generation)const{
+        if(generation!=generation_||!generation_||pending_||accepted_==frames_||next_tick_>last_tick_)return {};
+        return {true,next_tick_,next_tick_%step_?int64_t(-1):static_cast<int64_t>(next_tick_/step_)};
+    }
+    bool commit(uint64_t generation,const Proposal& proposal){
+        const Proposal expected=propose(generation);
+        if(!expected.advance||!proposal.advance||proposal.tick!=expected.tick||proposal.frame!=expected.frame)return false;
+        ++next_tick_;
+        if(proposal.frame>=0){pending_=true;pending_frame_=static_cast<uint64_t>(proposal.frame);pixels_=false;}
+        return true;
+    }
+    bool readback_received(uint64_t generation,uint64_t frame){
+        if(generation!=generation_||!pending_||pixels_||frame!=pending_frame_)return false;
+        pixels_=true;return true;
+    }
+    bool encoder_accepted(uint64_t generation,uint64_t frame){
+        if(generation!=generation_||!pending_||!pixels_||frame!=pending_frame_||frame!=accepted_)return false;
+        ++accepted_;pending_=pixels_=false;return true;
+    }
+    bool awaiting_frame()const{return pending_;}
+    bool pixels_received()const{return pending_&&pixels_;}
+    bool complete()const{return generation_&&accepted_==frames_;}
+    uint64_t accepted_frames()const{return accepted_;}
+    uint64_t next_tick()const{return next_tick_;}
+    uint64_t generation()const{return generation_;}
+private:
+    uint64_t generation_=0,frames_=0,step_=0,last_tick_=0,next_tick_=0,accepted_=0,pending_frame_=0;
+    bool pending_=false,pixels_=false;
+};
+// END_MP4_NATIVE_FRAME_SCHEDULE
 struct Job {
     Configuration config{};Options options{};Snapshot snapshot{};PublicStatus status{};
     Stage stage=Stage::idle;EncoderApi api{};IDMP4EncoderHandle encoder=nullptr;
@@ -225,6 +307,9 @@ inline void terminal(const char* error,bool cancelled=false) {
 inline bool valid_options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)&&idoly_mp4_output::bitrate(o.bitrate)&&o.audio_bitrate==192000&&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height);}
 inline Result probe_readiness(Snapshot& snapshot){
     Result result=game.snapshot(snapshot);const char* error=result==Result::ok?"none":game.last_error();
+    if(result==Result::ok&&native_scene_required&&!native_scene_installed){
+        result=Result::unsupported;error="offline_pipeline_not_verified";
+    }
     int32_t width=0,height=0;
     if(result==Result::ok&&game.has_source_geometry_probe()){
         result=game.source_geometry(width,height);
@@ -277,6 +362,29 @@ inline const char* pause_reason_name(int reason){
         case IDMP4_PAUSE_USER:return "user_paused";default:return "none";}
 }
 inline void install_game_api(const Api& api,const Layout& layout){if(installed||busy_stage())return;installed=game.set_api(api,layout)&&selection.set_api(api);}
+inline idoly_mp4_playback::ClockState native_clock_state(){
+    return {native_engine_clock.active(),native_engine_clock.held()};
+}
+inline bool install_dependent_api(
+        idoly_mp4_playback::OriginalApi<idoly_mp4_game::PlayableGraph> original,
+        idoly_mp4_playback::Dependents dependents,void* context,
+        idoly_mp4_playback::ShaderLeaseApi shader){
+    // Installation is a main-thread publication of verified original calls.
+    // It must preserve the observed MV and cannot replace an active owner.
+    pthread_mutex_lock(&control_mutex);
+    const bool available=installed&&native_clock_available()&&!control_busy&&!start_pending&&!busy_stage();
+    const bool result=available&&game.install_dependent_api(original,dependents,context,native_clock_state,shader);
+    pthread_mutex_unlock(&control_mutex);return result;
+}
+inline bool install_native_scene_api(
+        idoly_mp4_playback::OriginalApi<idoly_mp4_game::PlayableGraph> original,
+        idoly_mp4_playback::Dependents dependents,void* context,NativeSceneControl controls,
+        idoly_mp4_playback::ShaderLeaseApi shader){
+    // Partial dependency installations never enable the new render loop.
+    if(!native_owned_boundary||!context||!controls.valid()||native_scene_installed)return false;
+    if(!install_dependent_api(original,dependents,context,shader))return false;
+    native_scene_control=controls;native_scene_context=context;native_scene_installed=true;return true;
+}
 inline void observe_presenter(void* presenter){if(installed){
     game.observe_presenter(presenter);void* scope=game.selected_presenter();const uint64_t identity=selection.identity(game.selected_player());
     pthread_mutex_lock(&control_mutex);
@@ -287,6 +395,7 @@ inline void observe_presenter(void* presenter){if(installed){
 inline void observe_presenter_ended(void* presenter){
     if(!installed)return;
     const bool selected=game.selected_presenter()==presenter;
+    game.release_shader_lease_for_scene(presenter);
     game.observe_presenter_ended(presenter);
     if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;observed_presenter_scope=nullptr;published.ready=false;
         invalidate_queue_selection_locked("selected_mv_ended");
@@ -294,8 +403,8 @@ inline void observe_presenter_ended(void* presenter){
         snprintf(controller_discovery.reason,sizeof(controller_discovery.reason),"%s","selected_mv_ended");
         snprintf(readiness_error,sizeof(readiness_error),"%s","selected_mv_ended");pthread_mutex_unlock(&control_mutex);}
 }
-inline void observe_player_initializing(void* player,void* param){if(installed){invalidate_queue_selection("selected_mv_reinitializing");selection.observe(player,param);}}
-inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed){invalidate_queue_selection("selected_mv_reinitializing");selection.observe_photography(player,data,descriptors);}}
+inline void observe_player_initializing(void* player,void* param){if(installed){game.release_shader_lease_for_scene(player);game.invalidate_owned_scene(player);invalidate_queue_selection("selected_mv_reinitializing");selection.observe(player,param);}}
+inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed){game.release_shader_lease_for_scene(player);game.invalidate_owned_scene(player);invalidate_queue_selection("selected_mv_reinitializing");selection.observe_photography(player,data,descriptors);}}
 inline void observe_photography_transition(void* player,void* transition){
     if(!installed)return;
     selection.attach_photography_transition(player,transition);
@@ -476,6 +585,16 @@ inline void encoder_poll() {
         if(game.restore()!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}phase("finishing");}
 }
 inline void retire() {
+    if(game.restoration_pending()){
+        const Result restored=game.restore();
+        if(restored!=Result::ok&&restored!=Result::waiting){
+            job.terminal_success=false;stable_error(game.last_error());
+        }
+        // An owned native job or an asynchronous restoration step can outlive
+        // the UI's cancel/finish request. Retain its scene roots and buffers;
+        // a new job cannot inherit resources still owned by this one.
+        if(game.restoration_pending())return;
+    }
     if(!retire_pending_audio())return;
     if(job.encoder){const int result=job.api.destroy(job.encoder);if(result==IDMP4_RETRY)return;if(result<0){stable_error("encoder_cleanup_failed");job.terminal_success=false;}job.encoder=nullptr;}
     if(!cleanup_bundle())return; // Original Unity async bundle IO must finish first.

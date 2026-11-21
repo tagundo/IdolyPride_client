@@ -1,0 +1,669 @@
+{
+  "schema": 1,
+  "platforms": {
+    "android": {
+      "schema": 1,
+      "platform": "android",
+      "source": {
+        "native_sha256": "c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85",
+        "native_bytes": 21427000
+      },
+      "native_abi": "void(TimeManager*, double nativeWallTimestampInD0)",
+      "bindings": {
+        "get_manager": {
+          "rva": "0x6225e8",
+          "prefix": "e0008052e0d3fc17e0008052e2d3fc17",
+          "body": "e0008052e0d3fc17",
+          "bytes": 8
+        },
+        "update": {
+          "rva": "0x622000",
+          "prefix": "086440f909d040b90ae0433908050091",
+          "body": "086440f909d040b90ae043390805009129050011086400f909d000b94a000034c0035fd6027440fd033840fd88dbffb0012142bd0238621e4338631e6340621e6020211ea500005488b59852e8e4a672087c00b903000014037c00bd023800fd03d840bd6820201e4d05005404fc40bd08044339023040fd6308241e1f01007163c0221e4328631ee8179f1a6438621e05102e1e8440621e89dbffb0b018241e8020211e8adbffb026e540bd11ce251e1004502d476544bd047800bd0308066d2108261e2128271ee618211ea538261ec408241e020a251e8228221e0980019101c4102d028000bd21c1c13c240940ad0038631e007000fd01c08a3c048804ad08f907371f0403391f8400b9c0035fd608004339680000341f000339c0035fd608044339023040fd2801003489dbffb003fc40bd249d42bde8031f2a6308241e63c0221e4328631ed1ffff17037040fd050041bd0338631e6438621ea6c0221e8020661e6d00005403fc40bd1200001468dbfff0060145fd05fc40bd8020661e65000054a308211e0c00001488dbffb006103e1e07f942bda628261ed040211ec820201e064e261ec020271ea90000548340621ea308231e63c0221e4328631e28008052b2ffff17",
+          "bytes": 456
+        },
+        "fixed_work": {
+          "rva": "0x6221c8",
+          "prefix": "004840bd011840fd023040fd00c0221e",
+          "body": "004840bd011840fd023040fd00c0221e2028601e0020621e6d000054080843396800003420008052c0035fd6e0031f2ac0035fd6",
+          "bytes": 52
+        },
+        "fixed_tick": {
+          "rva": "0x6221fc",
+          "prefix": "024840bd011840fd003040fd09084339",
+          "body": "024840bd011840fd003040fd0908433942c0221e2228621e4020601ead000054c903003408c00091011c00fd0600001408c00091011c00fd69000035411ca24e020100fd02fc40bd4820201e600100542038601e013840fd032040fd42c0221e0018621e2028601e0138631e2140621e014c00bd002000fd00c1c13c010940ad2800805208e4033900c08a3c018804ad1f08033907000014000443ad02c0c73ce8031f2a1fe40339008404ad02c08a3ce003082ac0035fd6",
+          "bytes": 184
+        },
+        "fixed_cache_refresh": {
+          "rva": "0x6222b4",
+          "prefix": "004840bd01102e1e2118201e015800bd",
+          "body": "004840bd01102e1e2118201e015800bd005000bdc0035fd6",
+          "bytes": 24
+        },
+        "level_reset": {
+          "rva": "0x62232c",
+          "prefix": "003040fd28208052088001790040611e",
+          "body": "003040fd28208052088001790040611e007800fdc0035fd6",
+          "bytes": 24
+        },
+        "realtime": {
+          "rva": "0x622464",
+          "prefix": "fe4fbfa9f30300aa54000194617640fd",
+          "body": "fe4fbfa9f30300aa54000194617640fd0038611efe4fc1a8c0035fd6",
+          "bytes": 28
+        },
+        "monotonic_timestamp": {
+          "rva": "0x6625bc",
+          "prefix": "fe4fbfa9e8730090130145f9330100b5",
+          "body": "fe4fbfa9e8730090130145f9330100b5",
+          "bytes": 16
+        },
+        "application_fps_get": {
+          "rva": "0x440f88",
+          "prefix": "a7820714a98207141f1c0072e0079f1a",
+          "body": "a7820714",
+          "bytes": 4
+        },
+        "application_fps_set": {
+          "rva": "0x440f8c",
+          "prefix": "a98207141f1c0072e0079f1ade4b0b14",
+          "body": "a9820714",
+          "bytes": 4
+        },
+        "quality_manager": {
+          "rva": "0xe5c548",
+          "prefix": "6001805208ecdb17600180520aecdb17",
+          "body": "6001805208ecdb17",
+          "bytes": 8
+        },
+        "vsync_set": {
+          "rva": "0x453820",
+          "prefix": "fe4fbfa9f303002a48232894e103132a",
+          "body": "fe4fbfa9f303002a48232894e103132ae2031f2afe4fc1a8f8262814fe0f1ff8",
+          "bytes": 32
+        }
+      },
+      "getters": {
+        "time": {
+          "rva": "0x4895fc",
+          "load_rva": "0x489604",
+          "load": "004840fd",
+          "field": 144,
+          "register": "d0"
+        },
+        "delta": {
+          "rva": "0x489634",
+          "load_rva": "0x48963c",
+          "load": "00a840bd",
+          "field": 168,
+          "register": "s0"
+        },
+        "unscaled": {
+          "rva": "0x489648",
+          "load_rva": "0x489650",
+          "load": "005040fd",
+          "field": 160,
+          "register": "d0"
+        },
+        "unscaled_delta": {
+          "rva": "0x489660",
+          "load_rva": "0x489668",
+          "load": "00ac40bd",
+          "field": 172,
+          "register": "s0"
+        },
+        "fixed_delta": {
+          "rva": "0x489674",
+          "load_rva": "0x48967c",
+          "load": "004840bd",
+          "field": 72,
+          "register": "s0"
+        },
+        "maximum_delta": {
+          "rva": "0x489688",
+          "load_rva": "0x489690",
+          "load": "000041bd",
+          "field": 256,
+          "register": "s0"
+        },
+        "smooth_delta": {
+          "rva": "0x48969c",
+          "load_rva": "0x4896a4",
+          "load": "00b040bd",
+          "field": 176,
+          "register": "s0"
+        },
+        "maximum_particle_delta": {
+          "rva": "0x4896b0",
+          "load_rva": "0x4896b8",
+          "load": "000441bd",
+          "field": 260,
+          "register": "s0"
+        },
+        "time_scale": {
+          "rva": "0x4896c4",
+          "load_rva": "0x4896cc",
+          "load": "00fc40bd",
+          "field": 252,
+          "register": "s0"
+        },
+        "frame_count": {
+          "rva": "0x4896f8",
+          "load_rva": "0x489700",
+          "load": "00c840b9",
+          "field": 200,
+          "register": "w0"
+        }
+      },
+      "kernel_constants": [
+        {
+          "rva": "0x193220",
+          "bytes": "acc52737"
+        },
+        {
+          "rva": "0x1930e4",
+          "bytes": "cdcc4c3f"
+        },
+        {
+          "rva": "0x193464",
+          "bytes": "cdcc4c3e"
+        },
+        {
+          "rva": "0x19329c",
+          "bytes": "0ad7a33c"
+        },
+        {
+          "rva": "0x191a00",
+          "bytes": "00000080b5f8e43e"
+        },
+        {
+          "rva": "0x1932f8",
+          "bytes": "bd378635"
+        }
+      ],
+      "registry_slot_rva": "0x1497840",
+      "manager_vtable_rva": "0x14139c8",
+      "vtable_update_offset": 192,
+      "registry_getter": {
+        "rva": "0x55756c",
+        "bytes": "087a00900821209100d960f8c0035fd6"
+      },
+      "native_update_caller": {
+        "rva": "0x64b608",
+        "bytes": "f85bff97080040f9fe4f41a9001da84e016140f9e80742fc20001fd6"
+      },
+      "layout": {
+        "fixed_time": {
+          "offset": 48,
+          "kind": "double"
+        },
+        "fixed_previous": {
+          "offset": 56,
+          "kind": "double"
+        },
+        "fixed_unscaled": {
+          "offset": 64,
+          "kind": "double"
+        },
+        "fixed_delta": {
+          "offset": 72,
+          "kind": "float"
+        },
+        "fixed_unscaled_delta": {
+          "offset": 76,
+          "kind": "float"
+        },
+        "game_time": {
+          "offset": 96,
+          "kind": "double"
+        },
+        "fixed_cached_delta": {
+          "offset": 80,
+          "kind": "float"
+        },
+        "fixed_inverse_delta": {
+          "offset": 88,
+          "kind": "float"
+        },
+        "game_previous": {
+          "offset": 104,
+          "kind": "double"
+        },
+        "unscaled_time": {
+          "offset": 112,
+          "kind": "double"
+        },
+        "game_delta": {
+          "offset": 120,
+          "kind": "float"
+        },
+        "unscaled_delta": {
+          "offset": 124,
+          "kind": "float"
+        },
+        "smooth_delta": {
+          "offset": 128,
+          "kind": "float"
+        },
+        "inverse_delta": {
+          "offset": 136,
+          "kind": "float"
+        },
+        "render_time": {
+          "offset": 144,
+          "kind": "double"
+        },
+        "render_previous": {
+          "offset": 152,
+          "kind": "double"
+        },
+        "render_unscaled": {
+          "offset": 160,
+          "kind": "double"
+        },
+        "render_delta": {
+          "offset": 168,
+          "kind": "float"
+        },
+        "render_unscaled_delta": {
+          "offset": 172,
+          "kind": "float"
+        },
+        "render_smooth_delta": {
+          "offset": 176,
+          "kind": "float"
+        },
+        "render_inverse_delta": {
+          "offset": 184,
+          "kind": "float"
+        },
+        "capture_delta": {
+          "offset": 216,
+          "kind": "float"
+        },
+        "scaled_wall_anchor": {
+          "offset": 224,
+          "kind": "double"
+        },
+        "unscaled_wall_anchor": {
+          "offset": 232,
+          "kind": "double"
+        },
+        "level_offset": {
+          "offset": 240,
+          "kind": "double"
+        },
+        "engine_paused": {
+          "offset": 248,
+          "kind": "uint8"
+        },
+        "time_scale": {
+          "offset": 252,
+          "kind": "float"
+        },
+        "maximum_delta": {
+          "offset": 256,
+          "kind": "float"
+        },
+        "maximum_particle_delta": {
+          "offset": 260,
+          "kind": "float"
+        }
+      },
+      "preserve": {
+        "native_frame_counter": {
+          "offset": 200,
+          "kind": "uint64"
+        },
+        "native_frame_counter_secondary": {
+          "offset": 208,
+          "kind": "uint32"
+        },
+        "one_shot_flags": [
+          192,
+          193,
+          194
+        ],
+        "level_offset_on_new_scene": 240
+      },
+      "scope": {
+        "full_playerloop_executed": false,
+        "native_realtime_virtualized": false,
+        "particle_physics_culling_closure_proven": false,
+        "fixed_delta_setting_changed": false
+      }
+    },
+    "ios": {
+      "schema": 1,
+      "platform": "ios",
+      "source": {
+        "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf",
+        "native_bytes": 184900288
+      },
+      "native_abi": "void(TimeManager*, double nativeWallTimestampInD0)",
+      "bindings": {
+        "get_manager": {
+          "rva": "0xcad690",
+          "prefix": "e000805271d9fc17ff4301d1f85f01a9",
+          "body": "e000805271d9fc17",
+          "bytes": 8
+        },
+        "update": {
+          "rva": "0xcad01c",
+          "prefix": "086440f908050091086400f908d040b9",
+          "body": "086440f908050091086400f908d040b90805001108d000b908e0433948000034c0035fd6017440fd0138611e023840fd2238621e4240621e28cd03b003c940bd4020231e64000054013800fd431ca24e037c00bd02d840bd4820201e6d050054013040fd03fc40bd4208231e42c0221e2228621e090443393f010071e9179f1a4338611e6340621e037800bd04102e1e8518231e06c940bd6020261ea5cc241e058800bd28cd03d005e147bd0718502dc508251e48cd039006d548bda528261ec618251ec308231e8438261e088001910204066de108241e6128211e0114102d010d40ad04c1c13c04c08a3c018c04ad0038621e007000fd49f907371f0403391f8400b9c0035fd609004339690000341f000339c0035fd609044339013040fd290100340900805202fc40bd4acd039043d148bd4208231e42c0221e2228621ed0ffff17027040fd0238621e4338611e040041bd85c0221e6020651e6d00005402fc40bd1200001404fc40bd49cd0390259d44fd6020651e6500005402c940bd0b00001405103e1e8528251ea640211ea820201ec54c251e29cb0390269943bda020261ea90000546240621e8208221e42c0221e2228621e29008052b1ffff17",
+          "bytes": 448
+        },
+        "fixed_work": {
+          "rva": "0xcad1dc",
+          "prefix": "001840fd014840bd21c0221e0028611e",
+          "body": "001840fd014840bd21c0221e0028611e013040fd0020611e6d000054080843396800003420008052c0035fd600008052c0035fd6",
+          "bytes": 52
+        },
+        "fixed_tick": {
+          "rva": "0xcad210",
+          "prefix": "001840fd014840bd21c0221e0228611e",
+          "body": "001840fd014840bd21c0221e0228611e013040fd090843394020611ead000054c903003408c00091001c00fd0600001408c00091001c00fd69000035020100fd401ca24e02fc40bd4820201e600100540038611e013840fd42c0221e0018621e2028601e012040fd0138611e2140621e014c00bd002000fd000540ad02c1c13c02c08a3c008404ad2800805208e403391f0803390700001408008052000443ad008404ad00c0c73c00c08a3c1fe40339e00308aac0035fd6",
+          "bytes": 184
+        },
+        "fixed_cache_refresh": {
+          "rva": "0xcad2c8",
+          "prefix": "004840bd01102e1e2118201e015800bd",
+          "body": "004840bd01102e1e2118201e015800bd005000bdc0035fd6",
+          "bytes": 24
+        },
+        "level_reset": {
+          "rva": "0xcad340",
+          "prefix": "003040fd0040611e007800fd28208052",
+          "body": "003040fd0040611e007800fd2820805208800179c0035fd6",
+          "bytes": 24
+        },
+        "realtime": {
+          "rva": "0xcad4ec",
+          "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+          "body": "f44fbea9fd7b01a9fd430091f30300aaf3000194617640fd0038611efd7b41a9",
+          "bytes": 32
+        },
+        "monotonic_timestamp": {
+          "rva": "0xced8c8",
+          "prefix": "f44fbea9fd7b01a9fd430091a8dd04b0",
+          "body": "f44fbea9fd7b01a9fd430091a8dd04b0",
+          "bytes": 16
+        },
+        "application_fps_get": {
+          "rva": "0xaef7f4",
+          "prefix": "17f5061419f506141f000071e0079f1a",
+          "body": "17f50614",
+          "bytes": 4
+        },
+        "application_fps_set": {
+          "rva": "0xaef7f8",
+          "prefix": "19f506141f000071e0079f1ab3f10a14",
+          "body": "19f50614",
+          "bytes": 4
+        },
+        "quality_manager": {
+          "rva": "0x137ba44",
+          "prefix": "6001805284a0e117fc6fbca9f65701a9",
+          "body": "6001805284a0e117",
+          "bytes": 8
+        },
+        "vsync_set": {
+          "rva": "0xafdd14",
+          "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+          "body": "f44fbea9fd7b01a9fd430091f30300aa48f72194e10313aa02008052fd7b41a9",
+          "bytes": 32
+        }
+      },
+      "getters": {
+        "time": {
+          "rva": "0xb28d74",
+          "load_rva": "0xb28d80",
+          "load": "004840fd",
+          "field": 144,
+          "register": "d0"
+        },
+        "delta": {
+          "rva": "0xb28db4",
+          "load_rva": "0xb28dc0",
+          "load": "00a840bd",
+          "field": 168,
+          "register": "s0"
+        },
+        "unscaled": {
+          "rva": "0xb28dcc",
+          "load_rva": "0xb28dd8",
+          "load": "005040fd",
+          "field": 160,
+          "register": "d0"
+        },
+        "unscaled_delta": {
+          "rva": "0xb28de8",
+          "load_rva": "0xb28df4",
+          "load": "00ac40bd",
+          "field": 172,
+          "register": "s0"
+        },
+        "fixed_delta": {
+          "rva": "0xb28e00",
+          "load_rva": "0xb28e0c",
+          "load": "004840bd",
+          "field": 72,
+          "register": "s0"
+        },
+        "maximum_delta": {
+          "rva": "0xb28e18",
+          "load_rva": "0xb28e24",
+          "load": "000041bd",
+          "field": 256,
+          "register": "s0"
+        },
+        "smooth_delta": {
+          "rva": "0xb28e30",
+          "load_rva": "0xb28e3c",
+          "load": "00b040bd",
+          "field": 176,
+          "register": "s0"
+        },
+        "maximum_particle_delta": {
+          "rva": "0xb28e48",
+          "load_rva": "0xb28e54",
+          "load": "000441bd",
+          "field": 260,
+          "register": "s0"
+        },
+        "time_scale": {
+          "rva": "0xb28e60",
+          "load_rva": "0xb28e6c",
+          "load": "00fc40bd",
+          "field": 252,
+          "register": "s0"
+        },
+        "frame_count": {
+          "rva": "0xb28e9c",
+          "load_rva": "0xb28ea8",
+          "load": "00c840b9",
+          "field": 200,
+          "register": "w0"
+        }
+      },
+      "kernel_constants": [
+        {
+          "rva": "0x86520c8",
+          "bytes": "acc52737"
+        },
+        {
+          "rva": "0x86537e0",
+          "bytes": "cdcc4c3f"
+        },
+        {
+          "rva": "0x86558d4",
+          "bytes": "cdcc4c3e"
+        },
+        {
+          "rva": "0x86558d0",
+          "bytes": "0ad7a33c"
+        },
+        {
+          "rva": "0x8655938",
+          "bytes": "00000080b5f8e43e"
+        },
+        {
+          "rva": "0x8611398",
+          "bytes": "bd378635"
+        }
+      ],
+      "registry_slot_rva": "0xa85a408",
+      "manager_vtable_rva": "0x97ebb78",
+      "vtable_update_offset": 192,
+      "registry_getter": {
+        "rva": "0xbe3c58",
+        "bytes": "a8e304f008410f9100d960f8c0035fd6"
+      },
+      "native_update_caller": {
+        "rva": "0xcd5768",
+        "bytes": "ca5fff97080040f9016140f9001da84efd7b42a9f44f41a9e923c36c20001fd6"
+      },
+      "layout": {
+        "fixed_time": {
+          "offset": 48,
+          "kind": "double"
+        },
+        "fixed_previous": {
+          "offset": 56,
+          "kind": "double"
+        },
+        "fixed_unscaled": {
+          "offset": 64,
+          "kind": "double"
+        },
+        "fixed_delta": {
+          "offset": 72,
+          "kind": "float"
+        },
+        "fixed_unscaled_delta": {
+          "offset": 76,
+          "kind": "float"
+        },
+        "game_time": {
+          "offset": 96,
+          "kind": "double"
+        },
+        "fixed_cached_delta": {
+          "offset": 80,
+          "kind": "float"
+        },
+        "fixed_inverse_delta": {
+          "offset": 88,
+          "kind": "float"
+        },
+        "game_previous": {
+          "offset": 104,
+          "kind": "double"
+        },
+        "unscaled_time": {
+          "offset": 112,
+          "kind": "double"
+        },
+        "game_delta": {
+          "offset": 120,
+          "kind": "float"
+        },
+        "unscaled_delta": {
+          "offset": 124,
+          "kind": "float"
+        },
+        "smooth_delta": {
+          "offset": 128,
+          "kind": "float"
+        },
+        "inverse_delta": {
+          "offset": 136,
+          "kind": "float"
+        },
+        "render_time": {
+          "offset": 144,
+          "kind": "double"
+        },
+        "render_previous": {
+          "offset": 152,
+          "kind": "double"
+        },
+        "render_unscaled": {
+          "offset": 160,
+          "kind": "double"
+        },
+        "render_delta": {
+          "offset": 168,
+          "kind": "float"
+        },
+        "render_unscaled_delta": {
+          "offset": 172,
+          "kind": "float"
+        },
+        "render_smooth_delta": {
+          "offset": 176,
+          "kind": "float"
+        },
+        "render_inverse_delta": {
+          "offset": 184,
+          "kind": "float"
+        },
+        "capture_delta": {
+          "offset": 216,
+          "kind": "float"
+        },
+        "scaled_wall_anchor": {
+          "offset": 224,
+          "kind": "double"
+        },
+        "unscaled_wall_anchor": {
+          "offset": 232,
+          "kind": "double"
+        },
+        "level_offset": {
+          "offset": 240,
+          "kind": "double"
+        },
+        "engine_paused": {
+          "offset": 248,
+          "kind": "uint8"
+        },
+        "time_scale": {
+          "offset": 252,
+          "kind": "float"
+        },
+        "maximum_delta": {
+          "offset": 256,
+          "kind": "float"
+        },
+        "maximum_particle_delta": {
+          "offset": 260,
+          "kind": "float"
+        }
+      },
+      "preserve": {
+        "native_frame_counter": {
+          "offset": 200,
+          "kind": "uint64"
+        },
+        "native_frame_counter_secondary": {
+          "offset": 208,
+          "kind": "uint32"
+        },
+        "one_shot_flags": [
+          192,
+          193,
+          194
+        ],
+        "level_offset_on_new_scene": 240
+      },
+      "scope": {
+        "full_playerloop_executed": false,
+        "native_realtime_virtualized": false,
+        "particle_physics_culling_closure_proven": false,
+        "fixed_delta_setting_changed": false
+      }
+    }
+  }
+}

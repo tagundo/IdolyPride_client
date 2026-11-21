@@ -16,6 +16,9 @@ SOURCE = "a" * 40
 PHOTOGRAPHY_HEADERS = {"client-presentation/native/" + name for name in (
     "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp",
     "mp4_camera_owner.hpp", "mp4_timeline_camera.hpp", "mp4_timeline_audio.hpp")}
+OWNED_CLOCK_HEADERS = {"client-presentation/native/" + name for name in (
+    "mp4_engine_clock.hpp", "mp4_engine_clock_profile.hpp", "mp4_playback_state.hpp",
+    "mp4_actor_state.hpp", "mp4_actor_state_profile.hpp")}
 
 
 @pytest.fixture
@@ -33,10 +36,10 @@ def native_source_receipt(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("android", [False, True])
-@pytest.mark.parametrize("missing", sorted(PHOTOGRAPHY_HEADERS))
+@pytest.mark.parametrize("missing", sorted(PHOTOGRAPHY_HEADERS | OWNED_CLOCK_HEADERS))
 def test_both_platform_receipts_require_each_compiled_photography_replay_header(native_source_receipt, android, missing):
     _, values = native_source_receipt
-    assert PHOTOGRAPHY_HEADERS <= delivery.MP4_NATIVE
+    assert PHOTOGRAPHY_HEADERS | OWNED_CLOCK_HEADERS <= delivery.MP4_NATIVE
     assert all(Path(name).suffix in (".h", ".hpp") for name in delivery.MP4_NATIVE)
     delivery.mp4_native_sources(values, android=android)
     del values[missing]
@@ -45,7 +48,7 @@ def test_both_platform_receipts_require_each_compiled_photography_replay_header(
 
 
 @pytest.mark.parametrize("android", [False, True])
-@pytest.mark.parametrize("changed", sorted(PHOTOGRAPHY_HEADERS))
+@pytest.mark.parametrize("changed", sorted(PHOTOGRAPHY_HEADERS | OWNED_CLOCK_HEADERS))
 def test_compiled_photography_replay_header_changes_after_build_are_rejected(native_source_receipt, android, changed):
     root, values = native_source_receipt
     (root / changed).write_text("different replay implementation after native compilation")
@@ -53,7 +56,8 @@ def test_compiled_photography_replay_header_changes_after_build_are_rejected(nat
         delivery.mp4_native_sources(values, android=android)
 
 
-@pytest.mark.parametrize("profile", ["mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json", "mp4_camera_owner_profile.json"])
+@pytest.mark.parametrize("profile", ["mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json", "mp4_camera_owner_profile.json",
+                                    "mp4_engine_clock_profile.json", "mp4_playback_state_profile.json", "mp4_actor_state_profile.json"])
 def test_android_requires_actual_builder_profile_json_pins_but_darwin_does_not(native_source_receipt, profile):
     root, values = native_source_receipt
     assert "client-presentation/native/" + profile in delivery.MP4_ANDROID_PROFILES

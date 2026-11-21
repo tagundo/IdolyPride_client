@@ -3538,6 +3538,82 @@
       "parameters": [],
       "source": "mp4-original-typed-profile",
       "is_static": false
+    },
+    "mp4_brain_update": {
+      "name": "Cinemachine.CinemachineBrain.ManualUpdate",
+      "rva": "0x59e8808",
+      "prefix16": "eb2bbc6de923016dfe5702a9f44f03a9",
+      "module": "Cinemachine.dll",
+      "token_row": 71,
+      "return_type": "System.Void",
+      "parameters": [],
+      "source": "mp4-original-native-clock-camera-update",
+      "metadata_method_index": 193647,
+      "type_definition_index": 28247,
+      "registration_pointer_slot_rva": "0x9bbf318",
+      "native_abi": "void(void*,const MethodInfo*)",
+      "parameter_count": 0,
+      "method_flags": 134
+    },
+    "mp4_shader_set": {
+      "name": "VL.Rendering.VLShaderTimeManager.SetCustomTime",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25136,
+      "metadata_method_index": 173998,
+      "token_row": 109,
+      "rva": "0x8dfe698",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "time",
+          "typeindex": 72837,
+          "type": "System.Single"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00a258",
+      "prefix16": "e80f1efcfe0700f9f44f01a9b49300d0",
+      "native_abi": "void(float,const MethodInfo*)"
+    },
+    "mp4_shader_reset": {
+      "name": "VL.Rendering.VLShaderTimeManager.ResetCustomTime",
+      "module": "Unity.RenderPipelines.Universal.Runtime.dll",
+      "type_definition_index": 25136,
+      "metadata_method_index": 173999,
+      "token_row": 110,
+      "rva": "0x8dfe6fc",
+      "return_type_index": 78154,
+      "parameters": [],
+      "parameter_count": 0,
+      "method_flags": 150,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0xa00a260",
+      "prefix16": "fe0f1ef8f44f01a9b49300d0b35700b0",
+      "native_abi": "void(const MethodInfo*)"
+    },
+    "mp4_actor_process": {
+      "name": "ActorSwing.ActorSwingJob.ProcessAnimation",
+      "module": "ActorSwing.Runtime.dll",
+      "type_definition_index": 31380,
+      "metadata_method_index": 211040,
+      "token_row": 235,
+      "rva": "0x42639e0",
+      "return_type_index": 78154,
+      "parameters": [
+        {
+          "name": "stream",
+          "typeindex": 48736,
+          "type": "UnityEngine.Animations.AnimationStream"
+        }
+      ],
+      "parameter_count": 1,
+      "method_flags": 486,
+      "return_type": "System.Void",
+      "registration_pointer_slot_rva": "0x9aa69c8",
+      "prefix16": "ee0f19fced33016deb2b026de923036d",
+      "native_abi": "void(void* unboxedJobX0,const AnimationStream56* indirectX1,const MethodInfo* X2)"
     }
   },
   "graphics_fields": [

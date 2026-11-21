@@ -92,9 +92,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "e338bc6aed47963d3f13ce26fba4490d54f8ea25b6233254c81e80b7cd41de97"
+    assert hashlib.sha256(header).hexdigest() == "c675dfd6141856503282cafae6c548b86c77442b11264de46b84ec2aa97a6dc2"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 131 and len(plan["entries"]) == 56
+    assert len(profile["aliases"]) == 137 and len(plan["entries"]) == 62
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -108,8 +108,108 @@ def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
         else:
             assert len(code) == 28
             assert struct.pack("<I", words[5]).hex() == entry["original16"][:8]
-        assert signed_branch_target(entry["rva"], int.from_bytes(bytes.fromhex(entry["patched_entry"]), "little")) == entry["gateway"]
+        assert signed_branch_target(entry["rva"], int.from_bytes(bytes.fromhex(entry["patched_entry"]), "little")) == entry.get("relay_in", entry["gateway"])
+        assert signed_branch_target(entry["gateway"] + 24, words[6]) == entry.get("relay_out", entry["rva"] + 4)
         assert profile["aliases"][name]["rva"] == entry["rva"]
+
+
+def test_two_new_gateways_preserve_every_previous_profile_byte_and_mapping():
+    profile, plan = p.load_profile(), p.make_plan()
+    assert profile['hook_names'][-6:] == ['mp4_native_time', 'mp4_brain_update', 'mp4_shader_set', 'mp4_shader_reset', 'mp4_actor_process', 'mp4_actor_burst']
+    old = copy.deepcopy(profile)
+    for name in ('mp4_native_time', 'mp4_brain_update', 'mp4_shader_set', 'mp4_shader_reset', 'mp4_actor_process', 'mp4_actor_burst'):
+        del old['aliases'][name]
+        old['hook_names'].remove(name)
+    old['gateway_region']['bytes'] -= 192
+    old['slot_region']['bytes'] -= 48
+    del old['native_relay_region']
+    import json
+    assert hashlib.sha256((json.dumps(old, indent=2) + '\n').encode()).hexdigest() == '09c3106f3aef9f04ca6464b224455cb5a5ffa27ab8ded24d182a65c891242cdc'
+    for index, name in enumerate(old['hook_names']):
+        entry, row = plan['entries'][name], old['aliases'][name]
+        assert 'relay_in' not in entry
+        assert entry['gateway'] == old['gateway_region']['rva'] + 32 * index
+        assert entry['slot'] == old['slot_region']['rva'] + 8 * index
+        assert entry['gateway_hex'] == p.gateway(entry['gateway'], entry['slot'], row['rva'], bytes.fromhex(row['prefix16'][:8])).hex()
+
+
+def test_native_time_uses_native_abi_two_range_checked_relays_and_no_managed_slot():
+    profile, plan = p.load_profile(), p.make_plan()
+    row, entry = profile['aliases']['mp4_native_time'], plan['entries']['mp4_native_time']
+    assert row['rva'] == 0xcad01c and row['prefix16'] == '086440f908050091086400f908d040b9'
+    assert row['native_parameter_registers'] == {'manager': 'X0', 'nativeWallTimestamp': 'D0'}
+    assert row['registration_pointer_slot_rva'] is None and row['module'] is None
+    assert {'metadata_method_index', 'type_definition_index', 'token_row', 'method_flags'}.isdisjoint(row)
+    assert entry['gateway'] == 0x9788750 and entry['slot'] == 0xab8da78
+    assert (entry['relay_in'], entry['relay_out']) == (0x8610a44, 0x8610a48)
+    assert signed_branch_target(entry['relay_in'], int.from_bytes(bytes.fromhex(entry['relay_in_hex']), 'little')) == entry['gateway']
+    assert signed_branch_target(entry['relay_out'], int.from_bytes(bytes.fromhex(entry['relay_out_hex']), 'little')) == row['rva'] + 4
+    with pytest.raises(ValueError, match='out of range'):
+        p.branch(row['rva'], entry['gateway'])
+    with pytest.raises(ValueError, match='out of range'):
+        p.branch(entry['gateway'] + 24, row['rva'] + 4)
+    brain = profile['aliases']['mp4_brain_update']
+    assert brain['rva'] == 0x33e8410 and brain['metadata_method_index'] == 194079
+    assert brain['type_definition_index'] == 28296 and brain['method_flags'] == 134
+    assert brain['parameter_count'] == 0 and brain['return_type'] == 'System.Void'
+    assert brain['registration_pointer_slot_rva'] == 0xa32a0d0
+
+
+@pytest.mark.parametrize('field,value', [('relay_in', 0x8610a48), ('relay_out', 0x8610a4c),
+                                        ('relay_in_hex', '00000014'), ('relay_out_hex', '00000014')])
+def test_forged_native_relays_are_rejected_by_complete_plan_validation(field, value):
+    plan = p.make_plan()
+    plan['entries']['mp4_native_time'][field] = value
+    with pytest.raises(ValueError, match='pinned original'):
+        p.validate_plan(plan)
+
+
+def relay_macho_fixture():
+    raw = bytearray(1024)
+    uuid = bytes(range(16))
+    struct.pack_into('<II', raw, 0, 0xfeedfacf, 0x0100000c)
+    struct.pack_into('<II', raw, 16, 2, 24 + 72 + 160)
+    struct.pack_into('<II16s', raw, 32, 0x1b, 24, uuid)
+    struct.pack_into('<II16s4Q4I', raw, 56, 0x19, 232, b'__TEXT', 0, 1024, 0, 1024, 5, 5, 2, 0)
+    for index, (name, start, size) in enumerate(((b'__gcc_except_tab', 700, 100), (b'__const', 900, 100))):
+        struct.pack_into('<16s16sQQ', raw, 128 + index * 80, name, b'__TEXT', start, size)
+    profile = {'target': {'uuid': uuid.hex()}, 'native_relay_region': {
+        'rva': 800, 'bytes': 8, 'gap_begin': 800, 'gap_end': 900,
+        'after_section': '__gcc_except_tab', 'before_section': '__const'}}
+    return raw, profile
+
+
+def test_native_relay_requires_original_uuid_rx_mapping_and_excluded_zero_gap():
+    raw, profile = relay_macho_fixture()
+    p._validate_native_relay(raw, profile)
+
+
+@pytest.mark.parametrize('kind', ['uuid', 'protection', 'overlap', 'gap_boundary', 'nonzero', 'sections_bound', 'command_bound'])
+def test_bad_relay_mapping_rejected_before_any_owned_buffer_write(monkeypatch, kind):
+    raw, profile = relay_macho_fixture()
+    if kind == 'uuid':
+        raw[40] ^= 1
+    elif kind == 'protection':
+        struct.pack_into('<I', raw, 56 + 60, 3)
+    elif kind == 'overlap':
+        struct.pack_into('<Q', raw, 128 + 40, 108)
+    elif kind == 'gap_boundary':
+        profile['native_relay_region']['gap_end'] = 899
+    elif kind == 'nonzero':
+        raw[804] = 1
+    elif kind == 'sections_bound':
+        struct.pack_into('<I', raw, 56 + 64, 128)
+    else:
+        struct.pack_into('<I', raw, 56 + 4, 4096)
+    profile['aliases'] = {}
+    profile['gateway_region'] = {'rva': 1000, 'bytes': 24}
+    monkeypatch.setattr(p, 'validate_plan', lambda _: None)
+    monkeypatch.setattr(p, 'load_profile', lambda: profile)
+    monkeypatch.setattr(p, 'SOURCE_SHA256', hashlib.sha256(raw).hexdigest())
+    before = bytes(raw)
+    with pytest.raises(ValueError):
+        p.patch_presentation(raw, {'entries': {}, 'profile_header_sha256': 'a' * 64}, in_place=True)
+    assert bytes(raw) == before
 
 
 def test_shared_cache_hooks_preserve_real_settings_and_loader_boundaries():
@@ -207,8 +307,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 56 * 32
-    assert profile["slot_region"]["bytes"] == 56 * 8
+    assert profile["gateway_region"]["bytes"] == 62 * 32
+    assert profile["slot_region"]["bytes"] == 62 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -239,8 +339,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 56 * 32
-    assert original["slot_region"]["bytes"] == 56 * 8
+    assert original["gateway_region"]["bytes"] == 62 * 32
+    assert original["slot_region"]["bytes"] == 62 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length

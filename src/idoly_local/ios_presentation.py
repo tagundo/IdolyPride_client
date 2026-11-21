@@ -11,9 +11,9 @@ import tempfile
 from zipfile import ZipFile
 
 PROFILE = Path(__file__).resolve().parents[2] / "client-presentation/ios/profile.json"
-PROFILE_SHA256 = "09c3106f3aef9f04ca6464b224455cb5a5ffa27ab8ded24d182a65c891242cdc"
-PROFILE_ENTRY_COUNT = 131
-PROFILE_HOOK_COUNT = 56
+PROFILE_SHA256 = "60ecc264edd253ed482519c1035264647c8e67b960fe5b3b99e1c909d9a309b0"
+PROFILE_ENTRY_COUNT = 137
+PROFILE_HOOK_COUNT = 62
 SOURCE_SHA256 = "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
 BOOTSTRAP_SHA256 = "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce"
 IPA_SHA256 = "33197938a0990b267af2d67c09e9d1123694e28695fc39d9650ca4f6aa661848"
@@ -61,7 +61,7 @@ def _displaced_allowed(word):
             or (word & 0x1F000000) == 0x11000000)
 
 
-def gateway(cave, slot, target, displaced):
+def gateway(cave, slot, target, displaced, *, return_target=None):
     if cave % 4 or slot % 8 or len(displaced) != 4:
         raise ValueError("Presentation gateway alignment differs")
     word = int.from_bytes(displaced, "little")
@@ -73,6 +73,8 @@ def gateway(cave, slot, target, displaced):
     words = [0x90000010 | ((page & 3) << 29) | (((page >> 2) & 0x7FFFF) << 5),
              0x91000210 | ((slot & 0xFFF) << 10), 0xC8DFFE10, 0xB4000050, 0xD61F0200]
     if (word & 0x7E000000) == 0x34000000:
+        if return_target is not None:
+            raise ValueError("Conditional gateway cannot use a return relay")
         immediate = (word >> 5) & 0x7FFFF
         if immediate & (1 << 18):
             immediate -= 1 << 19
@@ -80,7 +82,7 @@ def gateway(cave, slot, target, displaced):
                   branch(cave + 24, target + 4),
                   branch(cave + 28, target + immediate * 4)]
     else:
-        words += [word, branch(cave + 24, target + 4)]
+        words += [word, branch(cave + 24, target + 4 if return_target is None else return_target)]
     return struct.pack("<" + str(len(words)) + "I", *words)
 
 
@@ -89,16 +91,18 @@ def render_header(plan, profile=None):
     uuid = profile["target"]["uuid"]
     lines = ["// Generated from pinned ORIGINAL iOS6.1.1 build156; do not use Android RVAs.",
              "#pragma once", "", "namespace idoly::presentation::profile {",
-             "struct Entry { const char *name; uintptr_t rva; unsigned char bytes[16]; uintptr_t gateway; uintptr_t slot; };",
+             "struct Entry { const char *name; uintptr_t rva; unsigned char bytes[16]; uintptr_t gateway; uintptr_t slot; uintptr_t relay_in=0, relay_out=0; };",
              "inline constexpr unsigned char uuid[16] = {"
              + ", ".join("0x" + uuid[i:i + 2] for i in range(0, 32, 2)) + "};", ""]
     for name, row in profile["aliases"].items():
         hook = plan["entries"].get(name, {})
+        relay = (", " + hex(hook["relay_in"]) + "u, " + hex(hook["relay_out"]) + "u"
+                 if "relay_in" in hook else "")
         lines.append("inline constexpr Entry " + name + "{" + json.dumps(row["name"])
                      + ", " + hex(row["rva"]) + "u, {"
                      + ", ".join("0x" + row["prefix16"][i:i + 2] for i in range(0, 32, 2))
                      + "}, " + hex(hook.get("gateway", 0)) + "u, "
-                     + hex(hook.get("slot", 0)) + "u};")
+                     + hex(hook.get("slot", 0)) + "u" + relay + "};")
     lines += ["", "inline constexpr Entry all[] = {",
               *("    " + name + "," for name in profile["aliases"]),
               "};", "} // namespace idoly::presentation::profile", ""]
@@ -121,6 +125,16 @@ def make_plan():
             or slot < data["section_end"] or slot < data["rva"] + data["filesize"]
             or slot + 8 * PROFILE_HOOK_COUNT > data["rva"] + data["vmsize"]):
         raise ValueError("Gateway would overlap original code or data sections")
+    relay = profile["native_relay_region"]
+    native = profile["aliases"][relay["name"]]
+    if (relay["name"] != "mp4_native_time" or relay["bytes"] != 8
+            or relay["original_zero"] is not True
+            or native["relay_in"] != relay["rva"] or native["relay_out"] != relay["rva"] + 4
+            or relay["rva"] % 4 or relay["rva"] < relay["gap_begin"]
+            or relay["rva"] + 8 > relay["gap_end"]
+            or relay["gap_end"] > text["rva"] + text["filesize"]
+            or relay["rva"] + 8 > cave):
+        raise ValueError("Native gateway relay extent differs")
     plan = {"schema": 1, "target": "ios-arm64-6.1.1-156", "source_unity_sha256": SOURCE_SHA256,
             "bootstrap_unity_sha256": BOOTSTRAP_SHA256, "metadata_sha256": METADATA_SHA256,
             "uuid": target["uuid"], "profile_sha256": PROFILE_SHA256,
@@ -129,14 +143,70 @@ def make_plan():
         row = profile["aliases"][name]
         c, s = cave + 32 * i, slot + 8 * i
         displaced = bytes.fromhex(row["prefix16"][:8])
-        code = gateway(c, s, row["rva"], displaced)
+        relay_in, relay_out = row.get("relay_in"), row.get("relay_out")
+        if (relay_in is None) != (relay_out is None) or (relay_in is not None and name != relay["name"]):
+            raise ValueError("Native gateway relay identity differs")
+        code = gateway(c, s, row["rva"], displaced, return_target=relay_out)
         plan["entries"][name] = {"rva": row["rva"], "original16": row["prefix16"],
                                   "gateway": c, "slot": s, "original_callable": c + 20,
-                                  "patched_entry": struct.pack("<I", branch(row["rva"], c)).hex(),
+                                  "patched_entry": struct.pack("<I", branch(row["rva"], c if relay_in is None else relay_in)).hex(),
                                   "gateway_hex": code.hex(),
                                   "registration_pointer_slot": row["registration_pointer_slot_rva"]}
+        if relay_in is not None:
+            plan["entries"][name].update(relay_in=relay_in, relay_out=relay_out,
+                relay_in_hex=struct.pack("<I", branch(relay_in, c)).hex(),
+                relay_out_hex=struct.pack("<I", branch(relay_out, row["rva"] + 4)).hex())
     plan["profile_header_sha256"] = hashlib.sha256(render_header(plan, profile)).hexdigest()
     return plan
+
+
+def _validate_native_relay(native, profile):
+    """Verify the relay is in original RX TEXT alignment slack, never a section."""
+    relay = profile.get("native_relay_region")
+    if relay is None:
+        return  # Small synthetic ownership fixtures have no Mach-O relay.
+    if len(native) < 32 or struct.unpack_from("<II", native) != (0xFEEDFACF, 0x0100000C):
+        raise ValueError("Original iOS Mach-O header differs")
+    count, size = struct.unpack_from("<II", native, 16)
+    if not 0 < count <= 128 or not 8 <= size <= 65536 or 32 + size > len(native):
+        raise ValueError("Original iOS Mach-O commands differ")
+    cursor, uuid, sections, text = 32, None, {}, None
+    for _ in range(count):
+        if cursor + 8 > 32 + size:
+            raise ValueError("Original iOS Mach-O command bounds differ")
+        command, length = struct.unpack_from("<II", native, cursor)
+        if length < 8 or cursor + length > 32 + size:
+            raise ValueError("Original iOS Mach-O command bounds differ")
+        if command == 0x1B:
+            if length != 24 or uuid is not None:
+                raise ValueError("Original iOS Mach-O UUID differs")
+            uuid = bytes(native[cursor + 8:cursor + 24]).hex()
+        if command == 0x19 and length >= 72:
+            name = bytes(native[cursor + 8:cursor + 24]).rstrip(b"\0")
+            va, span, fileoff, filesize = struct.unpack_from("<4Q", native, cursor + 24)
+            protection, nsects = struct.unpack_from("<II", native, cursor + 60)
+            if nsects > 128 or 72 + nsects * 80 > length:
+                raise ValueError("Original iOS Mach-O section bounds differ")
+            if name == b"__TEXT":
+                if text is not None or va != 0 or fileoff != 0 or protection & 5 != 5:
+                    raise ValueError("Original iOS executable TEXT mapping differs")
+                text = (span, filesize)
+                for index in range(nsects):
+                    at = cursor + 72 + 80 * index
+                    section = bytes(native[at:at + 16]).rstrip(b"\0").decode("ascii")
+                    start, extent = struct.unpack_from("<QQ", native, at + 32)
+                    if section in sections or start > span or extent > span - start:
+                        raise ValueError("Original iOS TEXT section extent differs")
+                    sections[section] = (start, start + extent)
+        cursor += length
+    start, end = relay["rva"], relay["rva"] + relay["bytes"]
+    if (cursor != 32 + size or uuid != profile["target"]["uuid"] or text is None
+            or end > min(text) or end > len(native)
+            or sections.get(relay["after_section"], (None, None))[1] != relay["gap_begin"]
+            or sections.get(relay["before_section"], (None, None))[0] != relay["gap_end"]
+            or any(start < hi and lo < end for lo, hi in sections.values())
+            or any(native[start:end])):
+        raise ValueError("Original iOS native relay mapping or zero slack differs")
 
 
 def validate_plan(plan):
@@ -175,6 +245,7 @@ def patch_presentation(native, plan, *, bootstrap_report=None, in_place=False):
             or bootstrap_report.get("output_sha256") != BOOTSTRAP_SHA256):
         raise ValueError("Presentation bootstrap composition differs")
     profile = load_profile()
+    _validate_native_relay(native, profile)
     for row in profile["aliases"].values():
         if native[row["rva"]:row["rva"] + 16].hex() != row["prefix16"]:
             raise ValueError("Original iOS function prefix differs")
@@ -192,6 +263,12 @@ def patch_presentation(native, plan, *, bootstrap_report=None, in_place=False):
                 or not 0 <= row["gateway"] <= len(native) - len(code)):
             raise ValueError("Presentation write exceeds the validated native buffer")
         changes.extend(((row["rva"], entry), (row["gateway"], code)))
+        if "relay_in" in row:
+            for key in ("relay_in", "relay_out"):
+                payload = bytes.fromhex(row[key + "_hex"])
+                if len(payload) != 4 or not 0 <= row[key] <= len(native) - 4:
+                    raise ValueError("Presentation relay exceeds the validated native buffer")
+                changes.append((row[key], payload))
     output = native if in_place else bytearray(native)
     for offset, payload in changes:
         output[offset:offset + len(payload)] = payload
@@ -221,6 +298,8 @@ def prepare_presentation(source, plan_output, header_output):
                for r in profile["aliases"].values()]
     cave = profile["gateway_region"]
     regions.append((cave["rva"], cave["rva"] + cave["bytes"], b"\0" * cave["bytes"]))
+    relay = profile["native_relay_region"]
+    regions.append((relay["rva"], relay["rva"] + relay["bytes"], b"\0" * relay["bytes"]))
     seen = [bytearray(end - start) for start, end, _ in regions]
     with ZipFile(source) as archive:
         with archive.open(UNITY) as stream:
