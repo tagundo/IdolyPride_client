@@ -16,7 +16,7 @@ from test_mp4_controller_lookup import _function
 ROOT = Path(__file__).resolve().parents[1]
 MODES = ("all_ok", "actor_failed", "camera_wait", "stage_failed", "world_failed",
          "actor_throw", "camera_throw", "stage_throw", "world_throw",
-         "unverified", "all_unverified", "source_changed", "empty_error")
+         "unverified", "all_unverified", "source_changed", "empty_error", "failed_none")
 
 
 @pytest.fixture(scope="module")

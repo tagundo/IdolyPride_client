@@ -30,6 +30,7 @@ concurrency:
 env:
   SOURCE_SHA: ${{ github.sha }}
   EXPECTED_SOURCE: ${{ inputs.expected_source || github.sha }}
+  PRODUCT_APK: IdolyPride-Unified-2026.11.22.1-prototype.apk
   PYTHONDONTWRITEBYTECODE: '1'
   PYTHONPATH: src
 
@@ -70,6 +71,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/actual-mv-inputs"
       - name: Build the current normal unified game without SDK or AES adaptations
+        env:
+          IDOLY_RELEASE_VERSION: 2026.11.22.1
         run: |
           mkdir "$RUNNER_TEMP/actual-mv-native" "$RUNNER_TEMP/actual-mv-product" "$RUNNER_TEMP/actual-mv-transport"
           python -B client-presentation/native/build_native.py --source-commit "$SOURCE_SHA" \
@@ -90,22 +93,22 @@ jobs:
             --password-file "$RUNNER_TEMP/actual-mv-development-password.txt" \
             --native-bridge "$RUNNER_TEMP/actual-mv-native/libidoly_presentation.so" \
             --native-receipt "$RUNNER_TEMP/actual-mv-native/build-receipt.json" \
-            --output "$RUNNER_TEMP/actual-mv-product/current-unified.apk"
+            --output "$RUNNER_TEMP/actual-mv-product/$PRODUCT_APK"
       - name: Append only the emulator-only observer and bind it to the current producer
         run: |
           python -B qa-game-ui/native/build_native.py --ndk "$ANDROID_HOME/ndk/26.3.11579264" \
             --output "$RUNNER_TEMP/actual-mv-observer-native"
-          INPUT_SHA=$(sha256sum "$RUNNER_TEMP/actual-mv-product/current-unified.apk" | cut -d' ' -f1)
-          python -B tools/package_qa_ui_client.py "$RUNNER_TEMP/actual-mv-product/current-unified.apk" \
+          INPUT_SHA=$(sha256sum "$RUNNER_TEMP/actual-mv-product/$PRODUCT_APK" | cut -d' ' -f1)
+          python -B tools/package_qa_ui_client.py "$RUNNER_TEMP/actual-mv-product/$PRODUCT_APK" \
             --input-profile unified-current --emulator-only --session-millis 21600000 \
-            --current-source-receipt "$RUNNER_TEMP/actual-mv-product/current-unified.provenance.json" \
+            --current-source-receipt "$RUNNER_TEMP/actual-mv-product/${PRODUCT_APK%.apk}.provenance.json" \
             --source-commit "$SOURCE_SHA" --expected-source-sha256 "$INPUT_SHA" \
             --native-library "$RUNNER_TEMP/actual-mv-observer-native/lib/arm64-v8a/libidoly_qa_ui_bridge.so" \
             --apkeditor "$RUNNER_TEMP/actual-mv-inputs/APKEditor.jar" \
             --android-jar "$ANDROID_HOME/platforms/android-35/android.jar" \
             --build-tools "$ANDROID_HOME/build-tools/34.0.0" --java "$JAVA_HOME/bin/java" \
             --output "$RUNNER_TEMP/actual-mv-transport/current-unified-observer.apk"
-          cp "$RUNNER_TEMP/actual-mv-product/current-unified.provenance.json" "$RUNNER_TEMP/actual-mv-transport/"
+          cp "$RUNNER_TEMP/actual-mv-product/${PRODUCT_APK%.apk}.provenance.json" "$RUNNER_TEMP/actual-mv-transport/"
           cp "$RUNNER_TEMP/actual-mv-observer-native/native-provenance.json" "$RUNNER_TEMP/actual-mv-transport/observer-native-provenance.json"
           python -B tools/emulator_environment_probe/build.py --sdk "$ANDROID_HOME" \
             --ndk "$ANDROID_HOME/ndk/26.3.11579264" --java "$JAVA_HOME/bin" \

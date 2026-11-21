@@ -60,11 +60,20 @@ struct Weak {void*value=nullptr;void*get(bool=false)const{return value;}void set
 Weak mp4_photography_presenter;
 struct Navigation {uint64_t generation=0;bool failed=false;char error[96]="none";};
 Navigation mp4_photography_navigation;
+// These focused tests have no acquired export. Full observer failures and
+// lifecycle-depth ownership execute in test_mp4_lifecycle_host.py.
+struct {uint64_t epoch=0;void*player=nullptr;void*presenter=nullptr;}mp4_actor_host;
+void mp4_scene_restore_globals_before_source_change(void*){}
+void mp4_scene_will_change(void*){}
+void mp4_actor_scene_will_change(void*){}
 namespace idoly_mp4_runtime {
 void*normalized=nullptr;
+void observe_source_will_change(void*){}
+void observe_source_handoff_failed(void*) noexcept {}
 void observe_presenter_ended(void*p){assert(p==ptr(presenter));order.push_back(6);}
 void observe_photography_initializing(void*p,void*d,void*a){assert(p==ptr(player)&&d==ptr(data));normalized=a;order.push_back(3);}
 }
+@@LIFECYCLE@@
 @@PRODUCTION@@
 Mp4UniTask original_root(void*p,void*t,void*c,Mp4CancellationToken token,Method*m){
  assert(p==ptr(presenter)&&t==ptr(transition)&&c==ptr(capture)&&token.source==reinterpret_cast<void*>(81)&&m==reinterpret_cast<void*>(82));
@@ -137,8 +146,12 @@ def photography_harness(tmp_path_factory):
     if not compiler:pytest.skip('C++17 compiler unavailable')
     source=(ROOT/'client-presentation/native/bridge.cpp').read_text()
     code=source.split('// BEGIN_MP4_PHOTOGRAPHY_HOOKS',1)[1].split('// END_MP4_PHOTOGRAPHY_HOOKS',1)[0]
+    from test_mp4_lifecycle_host import definition
+    lifecycle="unsigned mp4_original_lifecycle_depth=0;\n"
+    lifecycle+=definition(source,"struct Mp4LifecycleOriginalDepth")+";\n"
+    lifecycle+=definition(source,"template<class Observer> void mp4_lifecycle_observe_noexcept")
     work=tmp_path_factory.mktemp('photo-hooks');cpp=work/'photo.cpp';binary=work/'photo'
-    cpp.write_text(HARNESS.replace('@@PRODUCTION@@',code))
+    cpp.write_text(HARNESS.replace('@@LIFECYCLE@@',lifecycle).replace('@@PRODUCTION@@',code))
     result=subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror',str(cpp),'-o',str(binary)],capture_output=True,text=True)
     assert result.returncode==0,result.stdout+result.stderr
     return binary

@@ -19,8 +19,8 @@ def _nested_source():
             "Obj *camera_director=nullptr,*camera_timeline=nullptr;\n"
             "void* asset(void* owner,Method*){return owner==ptr(camera_director)?ptr(camera_timeline):"
             "owner==ptr(director)?ptr(timeline):nullptr;}",
-        "void* binding(void*,void*,Method*){return ptr(brain);}":
-            "void* binding(void* owner,void* track_,Method*){return owner==ptr(camera_director)"
+        'void* binding(void*,void* key,Method*){if(istype(key,"UnityEngine.Timeline.AudioTrack"))return audio_binding_override?audio_binding_override:ptr(bgm);return ptr(brain);}':
+            'void* binding(void* owner,void* track_,Method*){if(istype(track_,"UnityEngine.Timeline.AudioTrack"))return audio_binding_override?audio_binding_override:ptr(bgm);return owner==ptr(camera_director)'
             "&&track_==ptr(camera_track)?ptr(brain):nullptr;}",
         'void* tracks(void*,Method*){auto* a=make("UnityEngine.Timeline.TrackAsset[]");a->array_kind=1;a->pointers={ptr(track),ptr(camera_track)};return ptr(a);}':
             'void* tracks(void* asset_,Method*){auto* a=make("UnityEngine.Timeline.TrackAsset[]");'

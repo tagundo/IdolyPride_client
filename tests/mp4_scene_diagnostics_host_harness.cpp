@@ -14,7 +14,7 @@ namespace idoly_mp4_runtime {
 struct Game {Mp4SceneWitness current{7,reinterpret_cast<void*>(7)};bool selected_scene_witness(Mp4SceneWitness&out){out=current;return true;}}game;
 }
 int calls[4]{},throw_family=-1,change_after=-1,failed_family=-1;
-bool empty_error=false;
+bool empty_error=false,none_error=false;
 Mp4SceneResult result_for_failure=Mp4SceneResult::unsupported;
 unsigned expected_mask=0;
 Mp4SceneResult admit(void*context,const Mp4SceneWitness&witness){
@@ -26,7 +26,7 @@ Mp4SceneResult admit(void*context,const Mp4SceneWitness&witness){
     if(static_cast<int>(family)==failed_family)return result_for_failure;
     expected_mask|=1u<<family;return Mp4SceneResult::ok;
 }
-const char*error(void*){return empty_error?"":"actual_family_error";}
+const char*error(void*){return empty_error?"":none_error?"none":"actual_family_error";}
 // SHIPPING_DIAGNOSTIC_DISPATCH
 int main(int argc,char**argv){
     assert(argc==2);std::string mode=argv[1];bool verified[4]={true,true,true,true};
@@ -37,6 +37,7 @@ int main(int argc,char**argv){
     if(mode=="all_unverified")for(auto&v:verified)v=false;
     if(mode=="source_changed")change_after=0;
     if(mode=="empty_error"){failed_family=2;empty_error=true;}
+    if(mode=="failed_none"){failed_family=2;none_error=true;}
     const Mp4ScenePart parts[4]={
         {reinterpret_cast<void*>(1),admit,error},{reinterpret_cast<void*>(2),admit,error},
         {reinterpret_cast<void*>(3),admit,error},{reinterpret_cast<void*>(4),admit,error}};
@@ -51,7 +52,7 @@ int main(int argc,char**argv){
         assert(calls[i]==static_cast<int>(verified[i]));
         if(!verified[i]){assert(p.result==-1&&!std::strcmp(p.error,"diagnostic_source_bindings_unverified"));continue;}
         if(i==throw_family){assert(p.result==-3&&!std::strcmp(p.error,"diagnostic_admission_exception"));continue;}
-        if(i==failed_family){assert(p.result==static_cast<int>(result_for_failure));assert(!std::strcmp(p.error,empty_error?"diagnostic_admission_failed":"actual_family_error"));continue;}
+        if(i==failed_family){assert(p.result==static_cast<int>(result_for_failure));assert(!std::strcmp(p.error,(empty_error||none_error)?"diagnostic_admission_failed":"actual_family_error"));continue;}
         assert(p.result==0&&!std::strcmp(p.error,"none"));
     }
 }
