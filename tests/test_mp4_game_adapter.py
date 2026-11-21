@@ -126,7 +126,11 @@ int main(){
     assert(a.set_output_geometry(1920,1080)==Result::stale&&geometry_calls.empty());
     write(clip,0x38,2.0);assert(a.snapshot(s)==Result::unsupported);write(clip,0x38,1.0);assert(a.snapshot(s)==Result::ok);
     assert(s.actor_graph_count==1);assert(a.begin_manual()==Result::ok&&mode==3&&bgm_volume==0&&voice_volume==0&&actor_mode==3&&actor_resets==1);assert(a.evaluate(2)==Result::ok&&time_value==2&&shader==2&&graph_steps==1);assert(a.evaluate(2)==Result::ok&&graph_steps==1&&actor_steps==1&&camera_steps==1);graph_variant=1;assert(a.evaluate(3)==Result::ok&&time_value==3&&graph_steps==2);graph_variant=0;assert(a.evaluate(123)==Result::invalid);
-    assert(a.request_capture()==Result::ok);int32_t w=0,h=0;assert(a.capture_geometry(w,h)==Result::ok&&w==16&&h==16);std::vector<uint8_t> pixels(1024);size_t bytes=0;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);
+    assert(!a.owned_capture_wrapper(ptr(wrapper)));
+    assert(a.request_capture()==Result::ok&&a.owned_capture_wrapper(ptr(wrapper)));
+    auto* substituted_wrapper=make("VL.VLRenderTexture");write(substituted_wrapper,0x10,ptr(rt));
+    assert(!a.owned_capture_wrapper(ptr(substituted_wrapper)));
+    int32_t w=0,h=0;assert(a.capture_geometry(w,h)==Result::ok&&w==16&&h==16);std::vector<uint8_t> pixels(1024);size_t bytes=0;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);
     auto* pass=make("VL.Rendering.VLCapturePass");auto* rd=make("RenderingData");write(rd,0x90,ptr(camera));write(rd,0x158,uint8_t(1));a.observe_capture_pass(ptr(pass),ptr(rd));assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);assert(!a.after_camera(ptr(bgm)));assert(a.after_camera(ptr(camera)));format_value=97;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::unsupported);format_value=4;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::ok&&bytes==1024&&pixels[0]==15&&pixels[15*64]==0&&active==nullptr);
     auto* previous_rt=make("UnityEngine.RenderTexture");auto* external_rt=make("UnityEngine.RenderTexture");
     assert(a.request_capture()==Result::ok);a.observe_capture_pass(ptr(pass),ptr(rd));assert(a.after_camera(ptr(camera)));

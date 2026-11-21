@@ -218,6 +218,12 @@ public:
     Result set_output_geometry(uint32_t width,uint32_t height);
     Result evaluate(double timeline_seconds);
     Result request_capture();
+    // Exact wrapper observed after our real CaptureRequest returned. Matching
+    // its texture alone cannot authorize an externally substituted wrapper.
+    bool owned_capture_wrapper(void* wrapper) const {
+        return manual_&&wrapper&&get(captured_texture_)&&owned_primary_scene_current()&&get(capture_wrapper_)==wrapper
+            &&field<void*>(wrapper,layout_.wrapper_texture)==get(captured_texture_);
+    }
     void discard_capture(){capture_pending_=capture_pass_seen_=capture_submitted_=false;}
     Result capture_geometry(int32_t& width,int32_t& height) const;
     void maintenance();
@@ -378,7 +384,7 @@ private:
     ActorGraph actor_graphs_[32]{};size_t actor_graph_count_=0;
     Api api_{}; Layout layout_{}; Snapshot snapshot_{};
     uint32_t presenter_=0,photo_mode_=0,photo_data_=0,camera_controller_=0,player_=0,director_=0,timeline_asset_=0,brain_=0,bgm_source_=0,voice_source_=0,
-        camera_=0,captured_texture_=0,cpu_texture_=0,
+        camera_=0,captured_texture_=0,capture_wrapper_=0,cpu_texture_=0,
         audio_request_=0,audio_bundle_=0,audio_clip_=0,audio_array_=0;
     AudioClipProgram expected_audio_{};
     uint32_t camera_timeline_director_=0,camera_timeline_asset_=0,camera_timeline_track_=0;
@@ -1009,6 +1015,7 @@ inline Result GameAdapter::request_capture() {
     api_.camera_capture_request(get(camera_controller_),nullptr);
     void* wrapper=field<void*>(get(camera_controller_),layout_.camera_captured);
     void* texture=field<void*>(wrapper,layout_.wrapper_texture);
+    if(!wrapper||!keep(capture_wrapper_,wrapper))return fail(Result::failed,"capture_wrapper_root_failed");
     if(!live(texture)||!keep(captured_texture_,texture))return fail(Result::waiting,"capture_texture_not_ready");
     int32_t width=api_.texture_width(texture,nullptr),height=api_.texture_height(texture,nullptr);
     if(width<16||height<16||width>4096||height>4096)
@@ -1188,7 +1195,7 @@ inline Result GameAdapter::restore_impl(bool release_resources) {
         release_shader_lease();
         manual_=automatic_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
         if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
-        drop(cpu_texture_);drop(captured_texture_);
+        drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);
         if(result==idoly_mp4_playback::Result::ok&&!automatic_geometry_restored_)
             return fail(Result::failed,"output_restore_failed");
         return automatic_result(result);
@@ -1233,7 +1240,7 @@ inline Result GameAdapter::restore_impl(bool release_resources) {
     }
     manual_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
     if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
-    drop(cpu_texture_);drop(captured_texture_);
+    drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);
     return geometry_restored?Result::ok:fail(Result::failed,"output_restore_failed");
 }
 inline Result GameAdapter::abandon_automatic(const char* reason){
@@ -1250,7 +1257,7 @@ inline Result GameAdapter::abandon_automatic(const char* reason){
     if(automatic_scope_.active())return automatic_result(result);
     manual_=automatic_=false;clear_owned_anchors();graph_={};evaluated_time_=0;evaluation_failed_=false;
     if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
-    drop(cpu_texture_);drop(captured_texture_);
+    drop(cpu_texture_);drop(captured_texture_);drop(capture_wrapper_);
     return fail(static_cast<Result>(result),reason?reason:"original_engine_clock_lost");
 }
 inline void GameAdapter::reset_observations() {
