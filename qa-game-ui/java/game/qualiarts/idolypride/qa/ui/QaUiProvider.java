@@ -1,12 +1,15 @@
 package game.qualiarts.idolypride.qa.ui;
 
 import android.app.Application;
+import android.app.Activity;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -34,10 +37,45 @@ public final class QaUiProvider extends ContentProvider {
                 || !context.getPackageName().equals(Application.getProcessName()) || !emulatorHardware()) return true;
         long sessionMillis = markerSessionMillis(context);
         if (sessionMillis <= 0 || !STARTED.compareAndSet(false, true)) return true;
+        Context application = context.getApplicationContext();
+        if (application instanceof Application)
+            ((Application)application).registerActivityLifecycleCallbacks(new ActivityObservation(application));
         Thread worker = new Thread(new Bootstrap(context.getApplicationContext(), sessionMillis), "IdolyQaUiBootstrap");
         worker.setDaemon(true);
         worker.start();
         return true;
+    }
+
+    /** Fixed, bounded observations only: no Intent contents or lifecycle changes. */
+    private static final class ActivityObservation implements Application.ActivityLifecycleCallbacks {
+        private final File file;
+        private int records;
+        ActivityObservation(Context context) {
+            file = new File(context.getFilesDir(), "idoly-qa-lifecycle.txt");
+            try (FileOutputStream output = new FileOutputStream(file, false)) {
+                output.write("observer_registered\n".getBytes(StandardCharsets.US_ASCII));
+            } catch (Exception ignored) { Log.i(TAG, "activity_observer_file_unavailable"); }
+        }
+        private synchronized void record(Activity activity, String phase) {
+            if (records++ >= 128) return;
+            String name = activity.getClass().getName();
+            String role = "game.qualiarts.idolypride.localserver.MainActivity".equals(name) ? "server"
+                : "game.qualiarts.idolypride.localserver.UnifiedGameActivity".equals(name) ? "game" : "other";
+            String line = SystemClock.elapsedRealtime() + " " + role + " " + phase
+                + " finishing=" + activity.isFinishing() + " destroyed=" + activity.isDestroyed() + "\n";
+            Log.i(TAG, "activity_" + role + "_" + phase);
+            try (FileOutputStream output = new FileOutputStream(file, true)) {
+                output.write(line.getBytes(StandardCharsets.US_ASCII));
+            } catch (Exception ignored) { Log.i(TAG, "activity_observer_write_unavailable"); }
+        }
+        @Override public void onActivityPreCreated(Activity a, Bundle b) { record(a, "precreated"); }
+        @Override public void onActivityCreated(Activity a, Bundle b) { record(a, "created"); }
+        @Override public void onActivityStarted(Activity a) { record(a, "started"); }
+        @Override public void onActivityResumed(Activity a) { record(a, "resumed"); }
+        @Override public void onActivityPaused(Activity a) { record(a, "paused"); }
+        @Override public void onActivityStopped(Activity a) { record(a, "stopped"); }
+        @Override public void onActivitySaveInstanceState(Activity a, Bundle b) { record(a, "saved"); }
+        @Override public void onActivityDestroyed(Activity a) { record(a, "destroyed"); }
     }
 
     private static boolean emulatorHardware() {

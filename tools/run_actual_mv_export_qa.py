@@ -472,7 +472,8 @@ class ActualRun:
         # its Activity so a stale probe window cannot be mistaken for a game UI.
         self.device.adb("shell", "am", "force-stop", ENVIRONMENT_PROBE)
         self.record("unified_launcher_start_requested")
-        started = self.device.adb("shell", "am", "start", "-W", "-n", MAIN,
+        started = self.device.adb("shell", "am", "start", "-W", "-a", "android.intent.action.MAIN",
+                                  "-c", "android.intent.category.LAUNCHER", "-n", MAIN,
                                   timeout=120, merge_error=True)
         (self.proof / "launcher-start.txt").write_text(started[:16384])
         verified_activity_start(started)
@@ -841,7 +842,9 @@ class ActualRun:
                 resumed = [line.strip() for line in activities.splitlines()
                            if "mResumedActivity" in line or "topResumedActivity" in line]
                 (self.proof / "foreground-activity.txt").write_text("\n".join(resumed)[:4096])
-                starts = self.device.adb("logcat", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
+                lifecycle = self.device.adb("shell", "run-as", PACKAGE, "cat", "files/idoly-qa-lifecycle.txt", check=False)
+                (self.proof / "own-activity-lifecycle.txt").write_text(lifecycle[:16384])
+                starts = self.device.adb("logcat", "-b", "system", "-d", "-t", "5000", "-v", "brief", "-s", "ActivityTaskManager", check=False)
                 own = [line for line in starts.splitlines() if PACKAGE in line]
                 (self.proof / "own-activity-launch-log.txt").write_text("\n".join(own)[-65536:])
             except (Rejected, OSError, subprocess.SubprocessError):
