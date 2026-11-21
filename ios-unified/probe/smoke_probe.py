@@ -8,6 +8,7 @@ Only a UUID returned by this invocation's `simctl create` may be changed.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import hashlib
 from http.client import HTTPConnection, HTTPException
 import json
@@ -129,6 +130,9 @@ NATIVE_CHECKPOINT_STAGES = frozenset((
     "settings_diagnostics_copied", "settings_web_observed", "settings_zip_import_cancelled", "settings_zip_roundtrip_progress", "settings_zip_roundtrip_checked", "settings_account_management_checked", "settings_official_prompt_checked",
     "sigpipe_before_game_checked", "c_main_entered", "host_hooks_registered", "host_ready", "host_entry_captured", "interface_language_cycle_checked", "language_saved",
     "octo_budget_original_observed", "octo_budget_first_queued_work_observed",
+    "settings_account_management_entered", "settings_account_fixture_loaded", "settings_account_status_requested",
+    "settings_account_status_received", "settings_account_script_dispatched", "settings_account_script_started",
+    "settings_account_management_progress", "settings_account_management_finished", "settings_account_management_timeout",
 ))
 KEYBOARD_PHASES = ("before_capture", "before_launch", "during_init", "after_init")
 KEYBOARD_BOOL_FIELDS = ("ready", "returned_nil", "returned_initialized_field", "returned_same_field")
@@ -355,6 +359,12 @@ def language_paths(language, run_index=None):
     stem = ("embedded-probe", "embedded-language-en", "embedded-language-ja",
             "embedded-language-en-return", "embedded-language-ko-return")[run_index]
     return tuple(stem + suffix + ".json" for suffix in ("", "-status", "-checkpoint"))
+
+
+def language_observation_paths(language, run_index=None):
+    paths=language_paths(language,run_index)
+    stem=paths[2].removesuffix("-checkpoint.json")
+    return (*paths,stem+"-heartbeat.json",stem+"-account-progress.json")
 
 
 def _hex_digest(value):
@@ -1215,14 +1225,28 @@ def process_sample_summary(value):
         "sample_output_bytes","thread_count","frame_count") if key in clean}
 
 
+def process_termination_summary(value):
+    if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"]!=1
+            or value.get("scope")!="owned-disposable-simulator-process" or value.get("reason")!="confirmed_esrch"):
+        return {}
+    result={"schema":1,"scope":"owned-disposable-simulator-process","reason":"confirmed_esrch"}
+    for key in ("launch_ack_matched","executable_verified_before_exit","start_identity_verified_before_exit","raw_logs_retained"):
+        if type(value.get(key)) is bool: result[key]=value[key]
+    for key,low,high in (("pid",1,2**31-1),("confirmed_absence_observations",2,2),("matching_record_count",0,2)):
+        if type(value.get(key)) is int and low<=value[key]<=high: result[key]=value[key]
+    return result
+
+
 def safe_failure_summary(report):
     """One fixed scalar CI line; never dump arbitrary reports or UI logs."""
     code=report.get("error")
-    clean={"schema":1,"scope":"owned-simulator-failure","error_code":code if type(code) is str and code in (UI_DRIVER_ERRORS | LAUNCHER_FAILURE_CODES) else "probe_failed"}
+    clean={"schema":1,"scope":"owned-simulator-failure","error_code":code if type(code) is str and code in (UI_DRIVER_ERRORS | LAUNCHER_FAILURE_CODES | {"owned_probe_process_exited"}) else "probe_failed"}
     index=report.get("failed_run_index")
     if type(index) is int and 0<=index<=4:clean["run_index"]=index
     sample=process_sample_summary(report.get("process_sample"))
     if sample:clean["process_sample"]=sample
+    terminated=process_termination_summary(report.get("process_termination"))
+    if terminated:clean["process_termination"]=terminated
     checkpoint=report.get("native_checkpoint")
     if type(checkpoint) is dict:
         native={}
@@ -1243,6 +1267,22 @@ def safe_failure_summary(report):
             if save:native["language_save"]=save
         progress=zip_progress_observation(checkpoint.get("zip_roundtrip_progress"))
         if progress:native["zip_roundtrip_progress"]=progress
+        heartbeat=checkpoint.get("independent_heartbeat")
+        if type(heartbeat) is dict and heartbeat.get("main_thread_heartbeat") is True:
+            projected={"main_thread_heartbeat":True}
+            for key,bound in (("process_id",2**31-1),("main_heartbeat_count",100000),("resident_bytes",64*1024**3),("footprint_bytes",64*1024**3)):
+                if type(heartbeat.get(key)) is int and 0<=heartbeat[key]<=bound:projected[key]=heartbeat[key]
+            for key in ("main_elapsed_seconds","age_seconds"):
+                item=heartbeat.get(key)
+                if type(item) in (int,float) and math.isfinite(item) and 0<=item<=3600:projected[key]=item
+            native["independent_heartbeat"]=projected
+        account=checkpoint.get("account_management_progress")
+        if type(account) is dict:
+            projected={}
+            if account.get("phase") in ("entered","fixture_loaded","status_requested","status_received","script_dispatched","script_started","finished","timeout","none","seed-source","seed-target","export","preview","pending","original"):projected["phase"]=account["phase"]
+            if account.get("last_action") in (*ACCOUNT_UI_ACTIONS,"none"):projected["last_action"]=account["last_action"]
+            if type(account.get("observations")) is int and 0<=account["observations"]<=2000:projected["observations"]=account["observations"]
+            if projected:native["account_management_progress"]=projected
         clean["native"]=native
     startup=report.get("host_startup_failure")
     if type(startup) is dict and startup.get("available") is True:
@@ -1629,7 +1669,7 @@ class ZIPPresenterStallWatchdog:
         require(now-self._observed_since < 30,"settings_zip_import_picker_failed")
 
 
-def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None, ui_driver=None, simulator_udid=None):
+def wait_report(container, remaining, *, expected_language="ko", run_index=None, account_fixture=None, ui_driver=None, simulator_udid=None, process_sampler=None):
     documents = Path(container) / "Documents"
     final_name, waiting_name, _checkpoint_name = language_paths(expected_language,run_index)
     final, waiting = documents / final_name, documents / waiting_name
@@ -1727,6 +1767,10 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None,
                 raise
         except FileNotFoundError:
             pass
+        # No heartbeat/stage deadline is inferred here. Only a previously
+        # attested, exact owned process disappearing can fail before the budget.
+        if process_sampler is not None and callable(getattr(process_sampler,"poll_liveness",None)):
+            process_sampler.poll_liveness(lambda:parse_json(read_bounded(documents/_checkpoint_name,MAX_JSON)))
         presenter_watchdog.poll()
         waiting_value = None
         try:
@@ -2256,7 +2300,7 @@ def menu_close_observation(value):
     return clean
 
 
-def failure_checkpoint(container, expected_language="ko", run_index=None):
+def failure_checkpoint(container, expected_language="ko", run_index=None, *, expected_pid=None, launch_started=None):
     """Read only fixed scalar progress from this invocation's fresh container."""
     result = {"stage": "not_observed", "container_available": container is not None}
     if container is None:
@@ -2378,6 +2422,46 @@ def failure_checkpoint(container, expected_language="ko", run_index=None):
                     result["report_valid"] = True
                 except ProbeError:
                     result["report_valid"] = False
+    # These independent minimal files do not call native/Python status. Adopt
+    # only this launch's PID, time window and language/run-specific file names.
+    if (type(expected_pid) is int and 1<=expected_pid<=2**31-1
+            and type(launch_started) in (int,float) and math.isfinite(launch_started)):
+        stem=checkpoint_name.removesuffix("-checkpoint.json")
+        for kind in ("heartbeat","account-progress"):
+            path=documents/(stem+"-"+kind+".json")
+            try:
+                value=parse_json(read_bounded(path,8192));info=path.lstat()
+                if (type(value.get("schema")) is not int or value["schema"]!=1
+                        or type(value.get("process_id")) is not int or value["process_id"]!=expected_pid
+                        or not launch_started-1<=info.st_mtime<=time.time()+1
+                        or ("run_index" in value and (type(value["run_index"]) is not int or value["run_index"]!=run_index))): continue
+                stage=value.get("stage")
+                if type(stage) is not str or stage not in NATIVE_CHECKPOINT_STAGES: continue
+                clean=scalars(value)
+                clean["stage"]=stage
+                for key in ("resident_bytes","footprint_bytes"):
+                    if type(value.get(key)) is int and 0<=value[key]<=64*1024**3:clean[key]=value[key]
+                if kind=="heartbeat":
+                    if value.get("main_thread_heartbeat") is not True:continue
+                    clean["main_thread_heartbeat"]=True
+                    clean["age_seconds"]=round(max(0,time.time()-info.st_mtime),3)
+                    result["independent_heartbeat"]=clean
+                else:
+                    if value.get("main_thread_checkpoint") is not True:continue
+                    progress=value.get("account_management_progress")
+                    if type(progress) is not dict or type(progress.get("schema")) is not int or progress["schema"]!=1:continue
+                    if progress.get("phase") not in ("entered","fixture_loaded","status_requested","status_received","script_dispatched","script_started","finished","timeout","none","seed-source","seed-target","export","preview","pending","original"):continue
+                    current={"schema":1,"phase":progress["phase"]}
+                    if progress.get("last_action") in (*ACCOUNT_UI_ACTIONS,"none"):current["last_action"]=progress["last_action"]
+                    if type(progress.get("observations")) is int and 0<=progress["observations"]<=2000:current["observations"]=progress["observations"]
+                    elapsed=progress.get("elapsed_seconds")
+                    if type(elapsed) in (int,float) and math.isfinite(elapsed) and 0<=elapsed<=120:current["elapsed_seconds"]=elapsed
+                    code=progress.get("error_code")
+                    if type(code) is str and re.fullmatch(r"account_ui_[a-z_]{1,64}",code):current["error_code"]=code
+                    result["account_management_progress"]=current
+                    result["account_progress_checkpoint"]=clean
+                    result["stage"]=stage
+            except (OSError,ProbeError):continue
     return result
 
 
@@ -2754,6 +2838,72 @@ def _terminate_owned_sample(process):
     except ProcessLookupError: pass
 
 
+def _diagnostic_time(value):
+    if type(value) is not str or not 10 <= len(value) <= 64: return None
+    # Apple IPS uses a space before its numeric zone (and fractional seconds),
+    # while ISO timestamps usually attach Z/+hh:mm directly. Normalize only
+    # those explicit-zone forms, never arbitrary whitespace or local dates.
+    match=re.fullmatch(r"([0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?) *(Z|[+-][0-9]{2}:?[0-9]{2})",value)
+    if match is None: return None
+    zone=match[2]
+    if zone=="Z": zone="+00:00"
+    elif len(zone)==5: zone=zone[:3]+":"+zone[3:]
+    try:
+        parsed = datetime.fromisoformat(match[1]+zone)
+        return parsed.timestamp() if parsed.tzinfo is not None else None
+    except (ValueError,OverflowError,OSError): return None
+
+
+def _owned_termination_record(raw, *, pid, executable, launch_started, launch_ack, ended, owned_device=False):
+    """Project one matching owned-process IPS; never retain paths or raw reasons."""
+    if type(raw) is not bytes or not 0 < len(raw) <= 1024*1024: return None
+    try:
+        try:
+            first,rest=raw.split(b"\n",1)
+            header=parse_json(first,1024*1024); body=parse_json(rest,1024*1024)
+        except (ValueError,ProbeError):
+            header={}; body=parse_json(raw,1024*1024)
+    except ProbeError: return None
+    captured=_diagnostic_time(body.get("captureTime",body.get("date",header.get("timestamp"))))
+    if captured is None or not launch_started-1 <= captured <= ended+5: return None
+    if body.get("procName")==PROBE_EXECUTABLE and type(body.get("pid")) is int and body["pid"]==pid:
+        if body.get("procPath")!=str(executable): return None
+        began=_diagnostic_time(body.get("procLaunch"))
+        if began is None or not launch_started-1 <= began <= launch_ack+1: return None
+        result={"kind":"crash", "pid_matched":True,"executable_matched":True,
+            "launch_interval_matched":True,"capture_interval_matched":True}
+        exception=body.get("exception") if type(body.get("exception")) is dict else {}
+        termination=body.get("termination") if type(body.get("termination")) is dict else {}
+        for key,allowed in (("type",("EXC_CRASH","EXC_BAD_ACCESS","EXC_RESOURCE","EXC_GUARD","EXC_BREAKPOINT","EXC_ARITHMETIC","EXC_SOFTWARE","EXC_CORPSE_NOTIFY")),
+                            ("signal",("SIGABRT","SIGSEGV","SIGBUS","SIGILL","SIGTRAP","SIGKILL","SIGTERM","SIGQUIT","SIGPIPE"))):
+            if type(exception.get(key)) is str and exception[key] in allowed: result["exception_"+key]=exception[key]
+        namespace=termination.get("namespace")
+        if type(namespace) is str and namespace in ("SIGNAL","FRONTBOARD","RUNNINGBOARD","SPRINGBOARD","JETSAM","DYLD","TCC","CODESIGNING","WATCHDOG"):
+            result["termination_namespace"]=namespace
+        code=termination.get("code")
+        if type(code) is int and 0 <= code <= 2**64-1: result["termination_code"]=code
+        images=body.get("usedImages");threads=body.get("threads");index=body.get("faultingThread")
+        if type(images) is list and len(images)<=512 and type(threads) is list and len(threads)<=1024 and type(index) is int and 0<=index<len(threads):
+            thread=threads[index];frames=thread.get("frames") if type(thread) is dict else None; projected=[]
+            if type(frames) is list:
+                for frame in frames[:16]:
+                    if type(frame) is not dict: continue
+                    image=frame.get("imageIndex")
+                    if type(image) is not int or not 0<=image<len(images) or type(images[image]) is not dict: continue
+                    projected.append({"module":images[image].get("name"),"symbol":frame.get("symbol"),"samples":0})
+            result["frames"]=process_sample_observation({"schema":1,"frames":projected})["frames"][:8]
+        return result
+    # Jetsam tables are accepted only from this invocation's owned Simulator
+    # directory. Never read host-wide JetsamEvent tables of unrelated processes.
+    rows=body.get("processes")
+    if owned_device and type(rows) is list and len(rows)<=4096:
+        matches=[row for row in rows if type(row) is dict and type(row.get("pid")) is int and row["pid"]==pid and row.get("name")==PROBE_EXECUTABLE]
+        if len(matches)==1 and matches[0].get("reason") in ("per-process-limit","highwater","vm-pageshortage","vnode-limit","cpu-limit","zone-map-exhaustion","idle-exit","memory-pressure"):
+            return {"kind":"jetsam","pid_matched":True,"owned_simulator_matched":True,
+                "capture_interval_matched":True,"reason":matches[0]["reason"]}
+    return None
+
+
 class OwnedProbeProcessSampler:
     """One bounded diagnostic, exclusively for this invocation's launch ACK PID."""
     def __init__(self, simulator_udid, source_app, data_container):
@@ -2761,6 +2911,8 @@ class OwnedProbeProcessSampler:
         self.pid = None; self.attempted = False
         self.launch_started = None; self.launch_ack = None
         self.executable = None; self.executable_pin = None; self.prepare_error = "owned_container_invalid"
+        self.process_start_identity = None; self.last_liveness_check = None
+        self.absent_since = None; self.termination = None
 
     def prepare(self):
         self.executable = None; self.executable_pin = None
@@ -2778,6 +2930,8 @@ class OwnedProbeProcessSampler:
 
     def clear_launch(self):
         self.pid = None; self.launch_started = time.time(); self.launch_ack = None
+        self.process_start_identity = None; self.last_liveness_check = None
+        self.absent_since = None; self.termination = None
 
     def note_launch(self, raw):
         self.pid = None; self.launch_ack = time.time()
@@ -2786,6 +2940,71 @@ class OwnedProbeProcessSampler:
             except UnicodeError: return
             match = re.fullmatch(re.escape(BUNDLE_ID)+r": ([1-9][0-9]{0,9})\n?",text)
             if match and int(match.group(1)) <= 2**31-1: self.pid = int(match.group(1))
+
+    def poll_liveness(self, checkpoint):
+        if (sys.platform!="darwin" or self.executable is None or self.prepare_error!="none"
+                or type(self.pid) is not int): return
+        now=time.monotonic()
+        if self.last_liveness_check is not None and now-self.last_liveness_check<1: return
+        self.last_liveness_check=now
+        if self.process_start_identity is None:
+            try:
+                observed=checkpoint() if callable(checkpoint) else checkpoint
+                if (type(observed) is not dict or type(observed.get("process_id")) is not int
+                        or observed["process_id"]!=self.pid): return
+                if _sample_executable_identity(self.executable)!=self.executable_pin: return
+                self.process_start_identity=self._process_identity(self.executable)
+            except (OSError,ProbeError): return
+        # Initial image/start attestation may take two seconds. Measure the
+        # actual existence query, not the earlier entry time, for separation.
+        now=time.monotonic();self.last_liveness_check=now
+        try:
+            os.kill(self.pid,0)  # Existence query only; never signal the Probe.
+        except ProcessLookupError:
+            if self.absent_since is None: self.absent_since=now; return
+            if now-self.absent_since<1: return
+            self.termination={"schema":1,"scope":"owned-disposable-simulator-process",
+                "pid":self.pid,"launch_ack_matched":True,"executable_verified_before_exit":True,
+                "start_identity_verified_before_exit":True,"confirmed_absence_observations":2,
+                "reason":"confirmed_esrch","ended":time.time()}
+            error=ProbeError("owned_probe_process_exited");error.process_termination=self.termination
+            raise error
+        except OSError:
+            self.absent_since=None  # Permission/query failures cannot establish death.
+        else:
+            self.absent_since=None
+
+    def termination_evidence(self):
+        if self.termination is None: return None
+        report={key:value for key,value in self.termination.items() if key!="ended"}
+        report.update(records=[],raw_logs_retained=False)
+        device=self.container.resolve(strict=True).parents[4]
+        if device.name!=self.udid or device.parent.name!="Devices": return report
+        roots=((device/"data/Library/Logs/CrashReporter",True),
+               (Path.home()/"Library/Logs/DiagnosticReports",False))
+        deadline=time.monotonic()+2;read_bytes=0;seen=set()
+        for root,owned in roots:
+            try:
+                if root.is_symlink() or not root.is_dir(): continue
+                with os.scandir(root) as entries:
+                    for index,entry in enumerate(entries):
+                        if index>=512 or time.monotonic()>=deadline or len(report["records"])>=2: break
+                        if not (entry.name.startswith(PROBE_EXECUTABLE) or (owned and entry.name.startswith("JetsamEvent"))) or not entry.name.endswith(".ips"): continue
+                        info=entry.stat(follow_symlinks=False)
+                        if (not stat.S_ISREG(info.st_mode) or info.st_nlink!=1 or not 0<info.st_size<=1024*1024
+                                or not self.launch_started-2<=info.st_mtime<=self.termination["ended"]+10
+                                or read_bytes+info.st_size>2*1024*1024): continue
+                        raw=read_bounded(Path(entry.path),1024*1024);read_bytes+=len(raw)
+                        digest=hashlib.sha256(raw).hexdigest()
+                        if digest in seen: continue
+                        seen.add(digest)
+                        record=_owned_termination_record(raw,pid=self.pid,executable=self.executable,
+                            launch_started=self.launch_started,launch_ack=self.launch_ack,
+                            ended=self.termination["ended"],owned_device=owned)
+                        if record is not None: report["records"].append(record)
+            except (OSError,ProbeError): continue
+        report["matching_record_count"]=len(report["records"])
+        return report
 
     def _owned_executable(self):
         require(type(self.udid) is str and str(uuid.UUID(self.udid)).upper()==self.udid,"owned_container_invalid")
@@ -2999,7 +3218,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
             path = candidate / relative
             require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         for run_index,language in enumerate(MATRIX_LANGUAGES):
-            for name in language_paths(language,run_index):
+            for name in language_observation_paths(language,run_index):
                 path = candidate/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         container = candidate
@@ -3032,7 +3251,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
                 report["launch_ack_diagnostic"] = error.tool_detail
             report["launch_ack_checkpoint"] = failure_checkpoint(container)
         stage = "startup_gate_report"
-        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0, account_fixture=account_harness, ui_driver=ui_driver, simulator_udid=created)
+        report["native_probe"] = wait_report(container, remaining, expected_language="ko", run_index=0, account_fixture=account_harness, ui_driver=ui_driver, simulator_udid=created, process_sampler=owned_sampler)
         report["official_prompt_ui_test"] = report["native_probe"]["menu_lifetime"]["official_prompt"]["ui_test"]
         summaries = [validate_language_relaunch_report(report["native_probe"],"ko",run_index=0)]
         compare_language_canaries(summaries[0],"ko",canaries,report["language_canaries_sha256"])
@@ -3049,7 +3268,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
         for run_index,language in enumerate(MATRIX_LANGUAGES[1:],1):
             stage = "language_terminate_" + language
             _simctl(["terminate",created,BUNDLE_ID],remaining(30))
-            for name in language_paths(language,run_index):
+            for name in language_observation_paths(language,run_index):
                 path = container/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_language_report_rejected")
             current_language = language
@@ -3064,7 +3283,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
                 if str(error) != "simctl_timeout": raise
                 report.setdefault("language_launch_ack_timeouts",[]).append(language)
             stage = "language_report_" + language
-            native = wait_report(container,remaining,expected_language=language,run_index=run_index)
+            native = wait_report(container,remaining,expected_language=language,run_index=run_index,process_sampler=owned_sampler)
             summary = validate_language_relaunch_report(native,language,run_index=run_index)
             compare_language_canaries(summary,language,canaries,report["language_canaries_sha256"])
             summaries.append(summary)
@@ -3078,7 +3297,22 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
     except BaseException as error:
         report.update(status="FAIL", failed_stage=stage, failed_run_index=current_run_index,
                       error=(str(error) if isinstance(error, ProbeError) else type(error).__name__))
-        report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index)
+        report["native_checkpoint"] = failure_checkpoint(container,current_language,current_run_index,
+            expected_pid=getattr(owned_sampler,"pid",None),launch_started=getattr(owned_sampler,"launch_started",None))
+        if owned_sampler is not None and callable(getattr(owned_sampler,"termination_evidence",None)):
+            try:
+                termination=owned_sampler.termination_evidence()
+                if termination:
+                    report["process_termination"]=process_termination_summary(termination)
+                    diagnostic_path=audit.with_name(audit.stem+"-termination.json")
+                    write_audit(diagnostic_path,termination)
+                    raw=read_bounded(diagnostic_path,MAX_JSON)
+                    report["process_termination"]["evidence_file"]=diagnostic_path.name
+                    report["process_termination"]["evidence_sha256"]=hashlib.sha256(raw).hexdigest()
+            except (OSError,ProbeError):
+                # Optional crash reporting cannot replace the original failure.
+                if type(getattr(error,"process_termination",None)) is dict:
+                    report["process_termination"]=process_termination_summary(error.process_termination)
         if owned_sampler is not None:
             try:
                 sampled = owned_sampler.capture(report["native_checkpoint"])
@@ -3160,7 +3394,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
     finally:
         # Capture before deleting the owned container, including when an
         # otherwise passing run subsequently encounters a cleanup failure.
-        checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index)
+        checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index,
+            expected_pid=getattr(owned_sampler,"pid",None),launch_started=getattr(owned_sampler,"launch_started",None))
         if ui_driver is not None:
             try:
                 ui_driver.close()

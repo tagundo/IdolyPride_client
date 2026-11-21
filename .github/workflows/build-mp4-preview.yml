@@ -140,7 +140,7 @@ jobs:
       - name: Compile the real iOS and Simulator MP4 interface and exercise the Apple codecs
         run: |
           mkdir "$RUNNER_TEMP/mp4-ios-preflight"
-          python -B -m pytest -q tests/test_mp4_queue.py tests/test_ios_mp4_queue_host.py tests/test_ios_mp4_menu_readiness.py
+          python -B -m pytest -q tests/test_mp4_queue.py tests/test_ios_mp4_queue_host.py tests/test_ios_mp4_menu_readiness.py tests/test_ios_probe_account_guard.py tests/test_ios_probe_process_termination.py
           python -B ios-unified/native/test_mp4_ui_compile.py > "$RUNNER_TEMP/mp4-ios-preflight/mp4-ui-compile.json"
           python -B ios-unified/native/test_mv_encoder.py --output-directory "$RUNNER_TEMP/mp4-apple-codec"
       - name: Build current-source IPA and verify five cold language processes in a fresh Simulator

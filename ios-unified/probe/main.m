@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <mach/mach.h>
 #if IDOLY_SMOKE_SIMULATOR
 #import "../native/IdolyOctoBudget.h"
 #include "../native/tests/OctoBudgetFixture.h"
@@ -1124,6 +1125,46 @@ static NSDictionary *ProbeAccountSmallFile(NSString *path) {
     id value=[NSJSONSerialization JSONObjectWithData:raw options:0 error:NULL];
     return [value isKindOfClass:NSDictionary.class] ? value : nil;
 }
+// BEGIN_ACCOUNT_STATUS_GUARD
+static BOOL ProbeAccountTrue(id value) {
+    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value)==CFBooleanGetTypeID()
+        && [value isEqual:@YES];
+}
+static NSDictionary *ProbeAccountDictionary(id value) {
+    return [value isKindOfClass:NSDictionary.class] ? value : nil;
+}
+static NSDictionary *ProbeAccountStatusContext(id envelope,NSString **failure) {
+    NSDictionary *reply=ProbeAccountDictionary(envelope);
+    if (!reply) { *failure=@"account_ui_status_envelope_invalid";return nil; }
+    if (!ProbeAccountTrue(reply[@"ok"])) { *failure=@"account_ui_status_reply_rejected";return nil; }
+    NSDictionary *host=ProbeAccountDictionary(reply[@"result"]);
+    if (!host) { *failure=@"account_ui_status_result_invalid";return nil; }
+    NSDictionary *runtime=ProbeAccountDictionary(host[@"runtime"]);
+    if (!runtime) { *failure=@"account_ui_status_runtime_invalid";return nil; }
+    NSDictionary *paths=ProbeAccountDictionary(host[@"paths"]);
+    if (!paths) { *failure=@"account_ui_status_paths_invalid";return nil; }
+    id exports=paths[@"exports"],profile=runtime[@"profile"],media=runtime[@"media_mode"];
+    if (![exports isKindOfClass:NSString.class] || ![exports isAbsolutePath]) { *failure=@"account_ui_status_exports_invalid";return nil; }
+    if (![profile isKindOfClass:NSString.class] || ![profile length]) { *failure=@"account_ui_status_profile_invalid";return nil; }
+    if (![media isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)media)!=CFBooleanGetTypeID()) {
+        *failure=@"account_ui_status_mode_invalid";return nil;
+    }
+    if (!ProbeAccountTrue(runtime[@"running"])) { *failure=@"account_ui_status_not_running";return nil; }
+    return @{@"runtime":runtime,@"exports":exports,@"profile":profile,@"mode":ProbeAccountTrue(media)?@"media":@"normal"};
+}
+// END_ACCOUNT_STATUS_GUARD
+static void ProbeAccountCheckpoint(NSMutableDictionary *state,NSString *stage,NSString *phase,NSString *action) {
+    void (^checkpoint)(NSString *,NSDictionary *)=state[@"checkpoint"];
+    if (!checkpoint) return;
+    NSTimeInterval elapsed=MAX(0,NSProcessInfo.processInfo.systemUptime-[state[@"started"] doubleValue]);
+    NSMutableDictionary *progress=[@{@"schema":@1,@"phase":phase?:@"none",@"last_action":action?:@"none",
+        @"observations":state[@"observations"]?:@0,@"elapsed_seconds":@(elapsed)} mutableCopy];
+    id error=state[@"metrics"][@"error_code"];
+    NSCharacterSet *invalid=[[NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyz_"] invertedSet];
+    if ([error isKindOfClass:NSString.class] && [error hasPrefix:@"account_ui_"] && [error length]<=75
+            && [error rangeOfCharacterFromSet:invalid].location==NSNotFound) progress[@"error_code"]=error;
+    checkpoint(stage,progress);
+}
 static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
                              NSMutableDictionary *state,void (^finish)(void));
 static void ProbeAccountResume(WKWebView *web,NSString *script) {
@@ -1180,12 +1221,23 @@ static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak 
         if ([state[@"finished"] boolValue]) return;
         if (error || ![value isKindOfClass:NSDictionary.class]) { finish(); return; }
         NSMutableDictionary *metrics=state[@"metrics"];
+        state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
         metrics[@"ui_flags"]=value[@"flags"] ?: @{};
         metrics[@"ui_actions"]=value[@"ui_actions"] ?: @[];
         metrics[@"preview_copies"]=value[@"preview_evidence"] ?: @[];
         if ([value[@"error"] isKindOfClass:NSString.class]) { metrics[@"error_code"]=value[@"error"];finish();return; }
         if ([value[@"done"] isEqual:@YES]) { metrics[@"completed"]=@YES;finish();return; }
         NSString *phase=[value[@"pause"] isKindOfClass:NSString.class]?value[@"pause"]:@"";
+        NSArray *phases=@[@"seed-source",@"seed-target",@"export",@"preview",@"pending",@"original"];
+        NSString *safePhase=[phases containsObject:phase]?phase:@"none";
+        NSArray *actions=[value[@"ui_actions"] isKindOfClass:NSArray.class]?value[@"ui_actions"]:@[];
+        id latest=actions.lastObject;
+        NSString *action=[latest isKindOfClass:NSString.class] && [@[@"accounts_status",@"accounts_clone",@"accounts_export",@"accounts_preview",@"accounts_import",@"accounts_restore",@"accounts_select"] containsObject:latest]?latest:@"none";
+        NSString *transition=[safePhase stringByAppendingFormat:@":%@",action];
+        if (![state[@"last_checkpoint_transition"] isEqual:transition]) {
+            state[@"last_checkpoint_transition"]=transition;
+            ProbeAccountCheckpoint(state,@"settings_account_management_progress",safePhase,action);
+        }
         if ([phase hasPrefix:@"seed-"]) ProbeAccountSeed(web,state,[phase substringFromIndex:5],finish);
         else if ([phase isEqual:@"export"] && ![state[@"export_started"] boolValue]) {
             UIViewController *shown=presenter.presentedViewController;
@@ -1243,7 +1295,9 @@ static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak 
             state[[phase stringByAppendingString:@"_requested"]]=@YES;
             IdolyEmbeddedServerCommand(@"{\"id\":7410,\"action\":\"status\"}",^(NSString *reply){
                 if ([state[@"finished"] boolValue]) return;
-                NSDictionary *status=ProbeObject(reply)[@"result"],*runtime=status[@"runtime"],*selection=runtime[@"account_selection"];
+                NSString *failure=nil;NSDictionary *context=ProbeAccountStatusContext(ProbeObject(reply),&failure);
+                NSDictionary *runtime=context[@"runtime"],*selection=ProbeAccountDictionary(runtime[@"account_selection"]);
+                if (!context || !selection) { metrics[@"error_code"]=failure?:@"account_ui_status_selection_invalid";finish();return; }
                 NSDictionary *config=state[@"config"];
                 BOOL original=[phase isEqual:@"original"];
                 BOOL matches=[runtime[@"running"] isEqual:@YES] && [runtime[@"profile"] isEqual:config[@"active"]]
@@ -1262,34 +1316,47 @@ static void ProbeAccountPoll(WKWebView *__weak weakWeb,UIViewController *__weak 
         });
     }];
 }
-static void ProbeAccountManagement(WKWebView *web,UIViewController *presenter,void (^completion)(NSDictionary *)) {
+static void ProbeAccountManagement(WKWebView *web,UIViewController *presenter,
+                                   void (^checkpoint)(NSString *,NSDictionary *),void (^completion)(NSDictionary *)) {
     if (probeRunIndex!=0) { completion(@{@"performed":@NO,@"reason":@"first-cold-run-only"});return; }
     NSTimeInterval started=NSProcessInfo.processInfo.systemUptime;
-    NSURL *documents=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
-    NSDictionary *fixture=ProbeAccountSmallFile([[documents path] stringByAppendingPathComponent:@"probe-account-fixture.json"]);
-    NSString *nonce=[fixture[@"nonce"] isKindOfClass:NSString.class]?fixture[@"nonce"]:nil;
     NSMutableDictionary *metrics=[@{@"performed":@YES,@"scope":@"stock-simulator",@"ui_trigger":@"dom-click",
         @"selection_trigger":@"delegate-callback",@"seed_fixture_used":@YES,@"gameplay_tested":@NO,
         @"timed_out":@NO,@"completed":@NO} mutableCopy];
-    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics,@"documents":documents.path ?: @""} mutableCopy];
+    NSMutableDictionary *state=[@{@"finished":@NO,@"metrics":metrics,@"started":@(started),@"observations":@0} mutableCopy];
+    if (checkpoint) state[@"checkpoint"]=[checkpoint copy];
     void (^finish)(void)=^{
         if ([state[@"finished"] boolValue]) return;
         state[@"finished"]=@YES;metrics[@"elapsed_seconds"]=@(MAX(0,NSProcessInfo.processInfo.systemUptime-started));
+        ProbeAccountCheckpoint(state,@"settings_account_management_finished",@"finished",@"none");
+        [state removeObjectForKey:@"checkpoint"];
         completion(metrics.copy);
     };
+    ProbeAccountCheckpoint(state,@"settings_account_management_entered",@"entered",@"none");
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,120*NSEC_PER_SEC),dispatch_get_main_queue(),^{
-        if (![state[@"finished"] boolValue]) { metrics[@"timed_out"]=@YES;finish(); }
+        if (![state[@"finished"] boolValue]) {
+            metrics[@"timed_out"]=@YES;metrics[@"error_code"]=@"account_ui_native_timeout";
+            ProbeAccountCheckpoint(state,@"settings_account_management_timeout",@"timeout",@"none");finish();
+        }
     });
+    NSURL *documents=[NSFileManager.defaultManager URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask].firstObject;
+    state[@"documents"]=documents.path?:@"";
+    NSDictionary *fixture=ProbeAccountSmallFile([documents.path stringByAppendingPathComponent:@"probe-account-fixture.json"]);
+    NSString *nonce=[fixture[@"nonce"] isKindOfClass:NSString.class]?fixture[@"nonce"]:nil;
     NSRegularExpression *hex=[NSRegularExpression regularExpressionWithPattern:@"^[0-9a-f]{32}$" options:0 error:NULL];
-    if (!nonce || ![fixture[@"schema"] isEqual:@1] || [hex numberOfMatchesInString:nonce options:0 range:NSMakeRange(0,nonce.length)]!=1) {finish();return;}
+    if (!nonce || ![fixture[@"schema"] isEqual:@1] || [hex numberOfMatchesInString:nonce options:0 range:NSMakeRange(0,nonce.length)]!=1) {
+        metrics[@"error_code"]=@"account_ui_fixture_invalid";finish();return;
+    }
+    ProbeAccountCheckpoint(state,@"settings_account_fixture_loaded",@"fixture_loaded",@"none");
+    ProbeAccountCheckpoint(state,@"settings_account_status_requested",@"status_requested",@"accounts_status");
     IdolyEmbeddedServerCommand(@"{\"id\":7400,\"action\":\"status\"}",^(NSString *reply){
         if ([state[@"finished"] boolValue]) return;
-        NSDictionary *host=ProbeObject(reply)[@"result"],*runtime=host[@"runtime"];
-        NSString *exports=host[@"paths"][@"exports"];
-        if (![exports isKindOfClass:NSString.class] || !exports.isAbsolutePath) {finish();return;}
+        ProbeAccountCheckpoint(state,@"settings_account_status_received",@"status_received",@"accounts_status");
+        NSString *failure=nil;NSDictionary *context=ProbeAccountStatusContext(ProbeObject(reply),&failure);
+        if (!context) {metrics[@"error_code"]=failure?:@"account_ui_status_result_invalid";finish();return;}
+        NSString *exports=context[@"exports"],*active=context[@"profile"],*mode=context[@"mode"];
         state[@"exports"]=exports;
-        NSString *active=runtime[@"profile"],*mode=[runtime[@"media_mode"] isEqual:@YES]?@"media":@"normal";
-        if (![active isEqual:@"sandbox"] || ![runtime[@"running"] isEqual:@YES]) {finish();return;}
+        if (![active isEqual:@"sandbox"]) {metrics[@"error_code"]=@"account_ui_status_profile_changed";finish();return;}
         NSDictionary *config=@{@"nonce":nonce,@"active":active,@"mode":mode,
             @"source":[@"probe-acct-" stringByAppendingFormat:@"%@-clone",[nonce substringToIndex:12]],
             @"target":[@"probe-acct-" stringByAppendingFormat:@"%@-import",[nonce substringToIndex:12]],
@@ -1297,9 +1364,11 @@ static void ProbeAccountManagement(WKWebView *web,UIViewController *presenter,vo
         state[@"config"]=config;
         state[@"source"]=[documents.path stringByAppendingPathComponent:[@"probe-account-" stringByAppendingFormat:@"%@.zip",nonce]];
         NSString *script=[ProbeAccountScenario stringByAppendingFormat:@"(%@);",ProbeAccountJSON(config)];
+        ProbeAccountCheckpoint(state,@"settings_account_script_dispatched",@"script_dispatched",@"accounts_status");
         [web evaluateJavaScript:ProbeSettingsScript(script,@"accounts-refresh") completionHandler:^(id value,NSError *error){
             if ([state[@"finished"] boolValue]) return;
-            if (error || ![value isEqual:@YES]) { finish();return; }
+            if (error || ![value isEqual:@YES]) {metrics[@"error_code"]=@"account_ui_script_start_failed";finish();return;}
+            ProbeAccountCheckpoint(state,@"settings_account_script_started",@"script_started",@"accounts_status");
             ProbeAccountPoll(web,presenter,state,finish);
         }];
     });
@@ -1566,6 +1635,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) UIWindow *window;
 @property(nonatomic, strong) UILabel *label;
 @property(nonatomic, strong) NSTimer *waitingTimer;
+@property(nonatomic, strong) NSTimer *heartbeatTimer;
+@property(nonatomic, copy) NSString *checkpointStage;
 @property(nonatomic) NSUInteger originalCount;
 @property(nonatomic) NSUInteger mainHeartbeatCount;
 @property(nonatomic) NSUInteger checkpointCount;
@@ -1589,6 +1660,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 @property(nonatomic, strong) NSDictionary *zipRoundTripObservation;
 @property(nonatomic,strong) NSDictionary *zipRoundTripProgress;
 @property(nonatomic, strong) NSDictionary *accountManagementObservation;
+@property(nonatomic, strong) NSDictionary *accountManagementProgress;
 @property(nonatomic, strong) NSDictionary *officialPromptObservation;
 @property(nonatomic, strong) NSMutableDictionary *octoBudgetProbe;
 @property(nonatomic) NSUInteger firstOctoQueuedSnapshotCount;
@@ -1602,6 +1674,8 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 - (void)originalUnityInitialized:(UIApplication *)application controller:(UnityAppController *)controller;
 - (void)probeLauncher:(NSDictionary *)status;
 - (void)recordCheckpoint:(NSString *)stage;
+- (void)recordHeartbeat;
+- (void)recordAccountProgress:(NSString *)stage value:(NSDictionary *)progress;
 - (void)failProbe:(NSString *)code;
 - (BOOL)observeKeyboard:(NSString *)name phase:(NSUInteger)phase ready:(BOOL)ready calls:(NSUInteger)calls failure:(NSString *)code;
 - (void)probeAfterOriginalReturnedOnMain:(BOOL)originalOnMain applicationMatches:(BOOL)argumentMatches;
@@ -1618,17 +1692,19 @@ static NSDictionary *ProbeKeyboardObservation(void) {
 
 @implementation IDProbeCoordinator
 - (void)failProbe:(NSString *)code {
+    [self.heartbeatTimer invalidate];self.heartbeatTimer=nil;
     self.probeError = code;
     ProbeWrite(@"embedded-probe-status.json", @{@"schema":@1,
         @"original_called":@(self.originalCount), @"server_status":ProbeObject(IdolyEmbeddedServerStatusJSON()),
         @"probe_error":code, @"menu_close":self.menuCloseObservation ?: @{},
         @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{}, @"native_header":self.nativeHeaderProbe ?: @{},
-        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"zip_roundtrip_progress":self.zipRoundTripProgress ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
+        @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"zip_roundtrip_progress":self.zipRoundTripProgress ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"account_management_progress":self.accountManagementProgress ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
 }
 - (void)recordCheckpoint:(NSString *)stage {
+    self.checkpointStage=stage;
     NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
     ++self.checkpointCount;
     ProbeWrite(@"embedded-probe-checkpoint.json", @{@"schema":@1, @"stage":stage,
@@ -1644,10 +1720,39 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         @"keyboard_ready":ProbeScalar(status,@"keyboard_ready"),
         @"menu_close":self.menuCloseObservation ?: @{}, @"settings_web":self.settingsWebObservation ?: @{},
         @"keyboard":self.keyboardProbe.copy ?: @{},
+        @"account_management_progress":self.accountManagementProgress ?: @{},
         @"native_header":self.nativeHeaderProbe ?: @{}, @"diagnostics_copy":self.diagnosticsCopyObservation ?: @{}, @"zip_import_picker":self.zipImportObservation ?: @{}, @"zip_roundtrip":self.zipRoundTripObservation ?: @{}, @"zip_roundtrip_progress":self.zipRoundTripProgress ?: @{}, @"account_management":self.accountManagementObservation ?: @{}, @"official_prompt":self.officialPromptObservation ?: @{},
         @"octo_budget":status[@"octo_budget"] ?: @{}, @"octo_budget_probe":self.octoBudgetProbe.copy ?: @{},
         @"unity_host":status[@"unity_host"] ?: @{}, @"unity_host_probe":probeHostProof.copy ?: @{},
         @"interface_language_cycle":self.interfaceLanguageCycle.copy ?: @[], @"language_save":self.languageSave ?: @{}});
+}
+- (void)recordHeartbeat {
+    NSCAssert(NSThread.isMainThread,@"The probe heartbeat observes its own main run loop");
+    ++self.mainHeartbeatCount;
+    NSMutableDictionary *value=[@{@"schema":@1,@"process_id":@(getpid()),@"main_thread_heartbeat":@YES,
+        @"main_heartbeat_count":@(self.mainHeartbeatCount),@"stage":self.checkpointStage?:@"host_ready",
+        @"main_elapsed_seconds":@(MAX(0,NSProcessInfo.processInfo.systemUptime-self.probeStartedUptime))} mutableCopy];
+    // Public counters for this process only. Never inspect another process or
+    // include account values, SQL/paths, arguments, or arbitrary log messages.
+    task_vm_info_data_t memory={0};mach_msg_type_number_t count=TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(),TASK_VM_INFO,(task_info_t)&memory,&count)==KERN_SUCCESS) {
+        value[@"resident_bytes"]=@(memory.resident_size);
+#if defined(TASK_VM_INFO_REV1_COUNT)
+        if (count>=TASK_VM_INFO_REV1_COUNT) value[@"footprint_bytes"]=@(memory.phys_footprint);
+#endif
+    }
+    ProbeWrite(@"embedded-probe-heartbeat.json",value);
+}
+- (void)recordAccountProgress:(NSString *)stage value:(NSDictionary *)progress {
+    NSCAssert(NSThread.isMainThread,@"Account probe progress belongs to its own main loop");
+    self.checkpointStage=stage;self.accountManagementProgress=progress;++self.checkpointCount;
+    // Account progress must not acquire native host locks or the interpreter.
+    // The normal checkpoint retains the last full native state independently.
+    ProbeWrite(@"embedded-probe-account-progress.json",@{@"schema":@1,@"stage":stage,
+        @"process_id":@(getpid()),@"main_thread_checkpoint":@YES,@"original_called":@(self.originalCount),
+        @"main_heartbeat_count":@(self.mainHeartbeatCount),@"checkpoint_count":@(self.checkpointCount),
+        @"main_elapsed_seconds":@(MAX(0,NSProcessInfo.processInfo.systemUptime-self.probeStartedUptime)),
+        @"account_management_progress":progress});
 }
 - (BOOL)observeOctoBudgetBeforeOriginal {
 #if IDOLY_SMOKE_SIMULATOR
@@ -1727,11 +1832,15 @@ static NSDictionary *ProbeKeyboardObservation(void) {
         && [NSStringFromClass([hostDelegate class]) isEqual:@"IDUnityHostDelegate"]));
     self.launcherProbe=[NSMutableDictionary dictionaryWithDictionary:@{@"startup_evidence_version":@2}];
     self.keyboardProbe=[NSMutableDictionary dictionary];
+    __weak IDProbeCoordinator *weakSelf=self;
+    self.heartbeatTimer=[NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer){
+        IDProbeCoordinator *owner=weakSelf;if(!owner){[timer invalidate];return;}[owner recordHeartbeat];
+    }];
+    [[NSRunLoop mainRunLoop] addTimer:self.heartbeatTimer forMode:NSRunLoopCommonModes];
     [self recordCheckpoint:@"host_ready"];
     [self recordCheckpoint:@"window_ready"];
     self.waitingTimer = [NSTimer scheduledTimerWithTimeInterval:0.25 repeats:YES block:^(NSTimer *timer) {
         (void)timer;
-        ++self.mainHeartbeatCount;
         NSDictionary *status = ProbeObject(IdolyEmbeddedServerStatusJSON());
         [self recordCheckpoint:[status[@"phase"] isEqual:@2] ? @"server_ready" : @"server_starting"];
         [self probeLauncher:status];
@@ -2085,6 +2194,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
     BOOL written = ProbeWrite(@"embedded-probe.json", complete);
     if (!written) { [self failProbe:@"final_report_write_failed"]; return; }
     [self recordCheckpoint:@"report_written"];
+    [self recordHeartbeat];[self.heartbeatTimer invalidate];self.heartbeatTimer=nil;
     self.label.text = @"Embedded server probe: startup, menu close and listeners verified";
 }
 - (void)probeMenuAfterLaunch:(NSMutableDictionary *)report {
@@ -2198,7 +2308,9 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                 }
                 if (!roundtripOK) { [self failProbe:@"settings_zip_roundtrip_failed"]; return; }
                 [self recordCheckpoint:@"settings_zip_roundtrip_checked"];
-                ProbeAccountManagement(web,navigation.topViewController,^(NSDictionary *account){
+                ProbeAccountManagement(web,navigation.topViewController,^(NSString *stage,NSDictionary *progress){
+                    [self recordAccountProgress:stage value:progress];
+                },^(NSDictionary *account){
                 self.accountManagementObservation=account;menu[@"account_management"]=account;
                 BOOL accountOK=probeRunIndex==0 ? ([account[@"completed"] isEqual:@YES] && [account[@"timed_out"] isEqual:@NO]) : [account[@"performed"] isEqual:@NO];
                 if (!accountOK) { [self failProbe:@"settings_account_management_failed"];return; }
