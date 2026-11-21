@@ -263,7 +263,7 @@ def test_main_fetches_fixed_new_input_names_and_records_hashes(monkeypatch, tmp_
                 "pure_wheels": [], "inputs": {"base_ipa": sample, "stock_ipa": stock_pin(b"public"),
                     "english_ui": {**sample, "filename": "en.csv"},
                     "english_ui_proof": {**sample, "filename": "en-report.json"},
-                    "server_data": sample, "translations": sample}}
+                    "server_data": sample, "translations_base": sample, "translations": sample}}
     (root / "runtime_inputs.json").write_text(json.dumps(manifest))
     monkeypatch.setattr(fetch, "HERE", root)
     output = tmp_path / "inputs"
@@ -283,6 +283,7 @@ def test_main_fetches_fixed_new_input_names_and_records_hashes(monkeypatch, tmp_
     monkeypatch.setattr(fetch, "release_asset_download", lambda row, path: (calls.append(path.name), path.write_bytes(b"public")))
     monkeypatch.setattr(fetch, "copy_local_pinned", lambda name, path, row: (calls.append(path.name), path.write_bytes(b"public")))
     monkeypatch.setattr(fetch, "copy_pinned", lambda incoming, path, row: path.write_bytes(incoming.read()))
+    monkeypatch.setattr(fetch, "fetch_korean_source", lambda path: (path.write_bytes(b"public"), sample)[1])
     monkeypatch.setattr(fetch, "__name__", "ios_unified_fetch_fixture")
     monkeypatch.setattr("sys.argv", [str(MODULE), "--output", str(output)])
     fetch.main()
@@ -292,4 +293,8 @@ def test_main_fetches_fixed_new_input_names_and_records_hashes(monkeypatch, tmp_
     assert report["english_ui_sha256"] == manifest["inputs"]["english_ui"]["sha256"]
     assert report["english_ui_proof_sha256"] == manifest["inputs"]["english_ui_proof"]["sha256"]
     assert report["verified"] is True and report["Mac_executable_bundled"] is False
+    assert report["korean_translation_source"] == sample
+    assert (output / "bundledTranslations.base.zip").read_bytes() == b"public"
+    assert (output / "korean-translations-source.zip").read_bytes() == b"public"
+    assert not (output / "bundledTranslations.zip").exists()
     assert not (output / "donor-macos.zip").exists()

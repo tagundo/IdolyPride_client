@@ -32,6 +32,10 @@ private/
 # Frozen latest public payload metadata and its canonical LFS pointer only.
 !/data/latest-server-data-pin.json
 !/data/latest-server-overlay.zip
+!/data/latest-korean-translations-pin.json
+# Bounded Korean-only compiled packs and their semantic/readback pin.
+!/data/korean-master-data-pin.json
+!/data/korean-master-overlay.zip
 # Original compiler source retained solely to verify the immutable old overlay.
 !/data/legacy-sources/
 /data/legacy-sources/*

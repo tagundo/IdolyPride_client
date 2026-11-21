@@ -381,6 +381,40 @@ def test_packaging_requires_new_payload_bytes_and_independently_verified_upgrade
     with pytest.raises(ValueError):package.server_data_provenance(data,manifest,receipt)
 
 
+def test_korean_refresh_requires_independent_original_and_korean_proofs(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    data = tmp_path / 'refreshed.zip';data.write_bytes(b'new-korean-master-payload')
+    base = {'bytes':3,'sha256':sha(b'old')}
+    original = {'bytes':6,'sha256':sha(b'latest')}
+    final = {'bytes':data.stat().st_size,'sha256':sha(data.read_bytes())}
+    old_proof = {'schema':1,'recipe':'unchanged-original-cohort'}
+    new_proof = {'schema':1,'base_payload':original,'output':final}
+    old_path = tmp_path / 'original.json';old_path.write_text(json.dumps(old_proof))
+    new_path = tmp_path / 'korean.json';new_path.write_text(json.dumps(new_proof))
+    calls = []
+    def original_proof(value):
+        assert value == old_proof;calls.append('original-proof');return value
+    def korean_proof(value):
+        assert value == new_proof;calls.append('korean-proof');return value
+    verifier = SimpleNamespace(base_pin=lambda:base,output_pin=lambda:original,
+        verify_source_pointer=lambda:calls.append('original-source'),verify_upgrade_proof=original_proof)
+    korean = SimpleNamespace(output_pin=lambda:final,verify_refresh_proof=korean_proof,
+        verify_payload=lambda path:calls.append('final-payload'))
+    monkeypatch.setattr(package,'_packaged_pin_module',lambda:verifier)
+    monkeypatch.setattr(package,'_korean_pin_module',lambda:korean)
+    manifest = {'inputs':{'server_data':base},'packaged_server_data':package.PACKAGED_SERVER_DATA,
+                'korean_master_refresh':package.KOREAN_MASTER_REFRESH}
+    result = package.server_data_provenance(data,manifest,old_path,new_path)
+    assert result == {'schema':1,'policy':'korean-master-refresh-v1',
+                      'original_cohort':old_proof,'korean_master_refresh':new_proof}
+    assert calls == ['original-source','original-proof','korean-proof','final-payload']
+    assert json.loads(old_path.read_bytes()) == old_proof
+    with pytest.raises(ValueError,match='Korean master refresh proof is required'):
+        package.server_data_provenance(data,manifest,old_path)
+    with pytest.raises(ValueError,match='Server data upgrade proof is required'):
+        package.server_data_provenance(data,manifest,None,new_path)
+
+
 @pytest.mark.parametrize("target",["device","simulator"])
 def test_latest_generated_payload_pin_is_consumed_by_actual_host_validator(tmp_path,monkeypatch,target):
     from types import SimpleNamespace

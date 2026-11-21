@@ -49,7 +49,7 @@ jobs:
           python-version: '3.13'
       - name: Check draft delivery guards
         run: |
-          python -m pip install --disable-pip-version-check pytest==8.4.2
+          python -m pip install --disable-pip-version-check pytest==8.4.2 protobuf==6.33.0 pycryptodome==3.23.0
           python -B -m pytest -q -p no:cacheprovider tests/test_mp4_preview_delivery.py
       - uses: actions/setup-java@v4
         with:
@@ -67,7 +67,7 @@ jobs:
         run: python -B tools/stage_shared_preview.py fetch --directory "$RUNNER_TEMP/mp4-android-inputs"
       - name: Build current native bridge and signed MP4 preview APK
         env:
-          IDOLY_RELEASE_VERSION: 2026.11.21.3
+          IDOLY_RELEASE_VERSION: 2026.11.21.4
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"
@@ -91,7 +91,7 @@ jobs:
             --password-file "$RUNNER_TEMP/mp4-public-development-password.txt" \
             --native-bridge "$RUNNER_TEMP/mp4-native/libidoly_presentation.so" \
             --native-receipt "$RUNNER_TEMP/mp4-native/build-receipt.json" \
-            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.21.3-prototype.apk"
+            --output "$RUNNER_TEMP/mp4-android-output/IdolyPride-Unified-2026.11.21.4-prototype.apk"
           python -B tools/stage_mp4_preview.py check-android --source "$SOURCE_SHA" \
             --directory "$RUNNER_TEMP/mp4-android-output"
           test -z "$(git status --porcelain)"
@@ -146,7 +146,7 @@ jobs:
       - name: Build current-source IPA and verify five cold language processes in a fresh Simulator
         env:
           GH_TOKEN: ${{ github.token }}
-          IDOLY_RELEASE_VERSION: 2026.11.21.3
+          IDOLY_RELEASE_VERSION: 2026.11.21.4
         run: |
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           test -z "$(git status --porcelain)"

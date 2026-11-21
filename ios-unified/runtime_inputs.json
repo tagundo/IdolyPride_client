@@ -117,11 +117,11 @@
       "sha256": "37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"
     },
     "translations": {
-      "bytes": 125717042,
-      "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72",
-      "manifest_sha256": "6ce312fd735e15681c40232d0437c864d3e6f9116b56dd59c50c881ac9f4deec",
+      "bytes": 126145109,
+      "manifest_sha256": "f49c39d490ab8e70d79dd223ad6e3c7a2e29523d8dbbe874c8cd30aef405e099",
+      "sha256": "ad3ffddd7ebdb2b3278f79293a11073d2beb15fef53c6ad095dbce51a0e42304",
       "platform": "ios",
-      "version": "0.3.31"
+      "version": "ko-2026.11.16-11ecceb451833"
     },
     "stock_ipa": {
       "asset_id": 725761399,
@@ -138,6 +138,10 @@
       "filename": "en-report.json",
       "bytes": 348,
       "sha256": "298138bcadd69249a4b064b1b96ada4c15e6da2c42327d1d97e27a2b6c69cb62"
+    },
+    "translations_base": {
+      "bytes": 125717042,
+      "sha256": "987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72"
     }
   },
   "capacity": {
@@ -256,5 +260,9 @@
   "packaged_server_data": {
     "pin": "../data/latest-server-data-pin.json",
     "policy": "latest-cohort-overlay-v1"
+  },
+  "korean_master_refresh": {
+    "pin": "../data/korean-master-data-pin.json",
+    "policy": "korean-master-refresh-v1"
   }
 }

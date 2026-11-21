@@ -29,7 +29,7 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.3"
+VERSION = "2026.11.21.4"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
@@ -47,7 +47,9 @@ MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localser
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4QueueUiState.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4TitleCatalog.java",
             "android-server/app/src/main/python/android_server_runtime.py",
-            "src/idoly_local/mp4_audio_broker.py", "src/idoly_local/mp4_audio_bundle.py", "src/idoly_local/mp4_export_library.py", "src/idoly_local/mp4_titles.py"}
+            "src/idoly_local/mp4_audio_broker.py", "src/idoly_local/mp4_audio_bundle.py", "src/idoly_local/mp4_export_library.py", "src/idoly_local/mp4_titles.py",
+            "tools/refresh_korean_translation_bundle.py", "data/latest-korean-translations-pin.json",
+            "tools/korean_server_data_pin.py", "data/korean-master-data-pin.json"}
 
 
 def need(value, message):
@@ -117,6 +119,21 @@ def source_pins(values, base, required):
         need(sha(path) == digest, "source_bytes_changed")
 
 
+def korean_translation_proof(report, platform):
+    guard = module("mp4_preview_translation_guard", ROOT / "tools/refresh_korean_translation_bundle.py")
+    pin = guard.pins()
+    expected = pin["platforms"][platform]
+    need(type(report) is dict and type(report.get("schema")) is int and report["schema"] == 1 and report.get("platform") == platform
+         and report.get("source") == pin["source"]
+         and report.get("source_archive") == {key: pin["archive"][key] for key in ("bytes", "sha256")}
+         and {key: report.get(key) for key in ("bytes", "sha256", "manifest_sha256")} == expected["output"]
+         and type(report.get("coverage")) is dict and report["coverage"].get("translated") == pin["adv_count"]
+         and report.get("image_count") == expected["image_count"]
+         and report.get("preserved_image_bytes_verified") is True and report.get("new_images_generated") is False,
+         "korean_translation_refresh_differs")
+    return {key: expected["output"][key] for key in ("bytes", "sha256")}
+
+
 def android_files(folder, source):
     guard = module("mp4_preview_android_guard", ROOT / "tools/stage_android_windowing_preview.py")
     guard.APK, guard.REPORT = APK, APK_REPORT
@@ -131,11 +148,23 @@ def android_files(folder, source):
     rows = {row["path"]: row["sha256"] for row in proof["source_files"]}
     need(MP4_JAVA <= rows.keys(), "mp4_app_sources_missing")
     source_pins({name: rows[name] for name in MP4_JAVA}, ROOT, MP4_JAVA)
+    korean = module("mp4_preview_android_korean_guard", ROOT / "tools/korean_server_data_pin.py")
+    korean.verify_refresh_proof(proof.get("korean_master_refresh"))
+    translation = korean_translation_proof(proof.get("korean_translation_refresh"), "android")
     with ZipFile(paths[0]) as archive:
         raw = archive.read("lib/arm64-v8a/libidoly_presentation.so")
         need(hashlib.sha256(raw).hexdigest() == native["sha256"], "apk_native_bytes_differ")
+        for name, expected in (("assets/ServerData.zip", korean.output_pin()),
+                               ("assets/bundledTranslations.zip", translation)):
+            need(proof.get("runtime_assets", {}).get(name) == expected
+                 and archive.getinfo(name).file_size == expected["bytes"], "apk_korean_asset_pin_differs")
+            with archive.open(name) as incoming:
+                need(hashlib.file_digest(incoming, "sha256").hexdigest() == expected["sha256"],
+                     "apk_korean_asset_bytes_differ")
     return paths, {"windowing": proof["windowing"], "languages": proof["marker"]["languages"],
-        "same_process": True, "shared_cache_hooks": native["shared_cache_hooks"], "mp4_source_bound": True}
+        "same_process": True, "shared_cache_hooks": native["shared_cache_hooks"], "mp4_source_bound": True,
+        "korean_translation_revision": korean.REVISION, "server_data_sha256": korean.output_pin()["sha256"],
+        "translation_sha256": translation["sha256"]}
 
 
 def android_checksums(folder, source):
@@ -176,7 +205,15 @@ def ios_files(folder, source):
          and all(row.get("resource_only_bundle") is True for row in language_runtime["languages"]),
          "ipa_three_language_data_proof_differs")
     data_pin = module("mp4_preview_payload_guard", ROOT / "tools/latest_server_data_pin.py")
-    data_pin.verify_upgrade_proof(proof.get("server_data_provenance"))
+    korean = module("mp4_preview_ios_korean_guard", ROOT / "tools/korean_server_data_pin.py")
+    provenance = proof.get("server_data_provenance")
+    need(type(provenance) is dict and set(provenance) == {
+        "schema", "policy", "original_cohort", "korean_master_refresh"}
+        and type(provenance.get("schema")) is int and provenance["schema"] == 1 and provenance.get("policy") == korean.POLICY,
+        "ipa_korean_provenance_differs")
+    data_pin.verify_upgrade_proof(provenance["original_cohort"])
+    korean.verify_refresh_proof(provenance["korean_master_refresh"])
+    translation = korean_translation_proof(read(folder / "korean-translation-refresh.json"), "ios")
     native = read(folder / "device-native-build.json")
     need(native.get("codesign_strict_verified") is True and native.get("smoke_probe_only") is False
          and native.get("MachO", {}).get("platform") == 2, "ios_native_target_differs")
@@ -188,7 +225,8 @@ def ios_files(folder, source):
     runtime = read(folder / "device-runtime-report.json")
     need(runtime.get("target") == "device" and runtime.get("frameworks_codesign_verify_passed") is True,
          "ios_runtime_target_differs")
-    for name in ("idoly_local.mp4_audio_bundle", "idoly_local.mp4_audio_broker", "idoly_local.mp4_export_library", "idoly_local.mp4_titles"):
+    for name in ("idoly_local.mp4_audio_bundle", "idoly_local.mp4_audio_broker", "idoly_local.mp4_export_library", "idoly_local.mp4_titles",
+                 "idoly_local.ios_host", "idoly_local.resource_translation_runtime"):
         need(runtime.get("source_sha256", {}).get(name) == sha(ROOT / "src" / (name.replace(".", "/") + ".py")), "mp4_python_source_differs")
     ui, codec = read(folder / "mp4-ui-compile.json"), read(folder / "mp4-codec-report.json")
     need(ui.get("status") == "PASS_APPLE_UIKIT_COMPILE_ONLY" and codec.get("status") == "PASS_SYNTHETIC_CODEC_ONLY"
@@ -220,12 +258,15 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.3", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1121.4", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
-        need(members[app + "LocalServer/ServerData.zip"] == data_pin.output_pin()["sha256"], "ipa_server_data_pin_differs")
+        need(members[app + "LocalServer/ServerData.zip"] == korean.output_pin()["sha256"], "ipa_server_data_pin_differs")
+        need(members[app + "LocalServer/bundledTranslations.zip"] == translation["sha256"], "ipa_translation_pin_differs")
     return [ipa, proof_path], {"same_process": True, "language_order": matrix["order"],
-        "five_cold_processes_verified": True, "mp4_source_bound": True, "actual_game_mv_verified": False}
+        "five_cold_processes_verified": True, "mp4_source_bound": True, "actual_game_mv_verified": False,
+        "korean_translation_revision": korean.REVISION, "server_data_sha256": korean.output_pin()["sha256"],
+        "translation_sha256": translation["sha256"]}
 
 
 def api(path, *, body=None, method=None, absent=False):
@@ -566,7 +607,7 @@ def stage_from_producer(source, work, *, producer):
         release = find_draft(source, names)
         if release is None:
             release = api("releases", body={"tag_name": tag(source), "target_commitish": source,
-                "name": "Offline MP4 preview " + VERSION + " (" + source[:7] + ")",
+                "name": "Unified APK and IPA preview " + VERSION + " (" + source[:7] + ")",
                 "body": "APK and IPA prototype. Source " + source + ". Actual game MV export/device validation remains pending.",
                 "draft": True, "prerelease": True, "make_latest": "false"})
         release = release_gate(release, source, names)
@@ -587,6 +628,7 @@ def stage_from_producer(source, work, *, producer):
             proof["verified_assets"].append(verify_asset(matches[0], path, work)); save()
         body = ("Offline MP4 APK and IPA preview built from `" + source + "`.\n\n"
                 "Persistent MV export queue with reordering, retry and per-job saving. Android background rendering is experimental and off by default; iOS pauses and resumes when returning.\n\n"
+                "Paused Android MVs can be submitted from the server menu and are revalidated after returning to the game. Korean ADV, display text and master translations use the pinned 11ecceb source. Existing images are preserved; untranslated event banners retain their originals.\n\n"
                 "Both current-source codec jobs passed. The IPA also passed its five-process language/core Simulator checks.\n"
                 "Actual game MV rendering, device export fidelity and PlayCover execution remain unverified.\n\n"
                 "Every asset was downloaded in full and SHA-256 verified. See MP4-PREVIEW-VERIFICATION.json and SHA256SUMS.\n")

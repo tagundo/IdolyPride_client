@@ -14,6 +14,25 @@ from tools import stage_mp4_preview as delivery
 SOURCE = "a" * 40
 
 
+@pytest.mark.parametrize("platform", ["android", "ios"])
+def test_new_translation_proof_requires_exact_source_output_and_image_preservation(platform):
+    pin = json.loads((delivery.ROOT / "data/latest-korean-translations-pin.json").read_text())
+    expected = pin["platforms"][platform]
+    report = {"schema": 1, "platform": platform, "source": pin["source"],
+              "source_archive": {key: pin["archive"][key] for key in ("bytes", "sha256")},
+              **expected["output"], "coverage": {"translated": pin["adv_count"]},
+              "image_count": expected["image_count"], "preserved_image_bytes_verified": True,
+              "new_images_generated": False}
+    assert delivery.korean_translation_proof(report, platform) == {
+        key: expected["output"][key] for key in ("bytes", "sha256")}
+    for key, value in (("schema", True), ("platform", "other"), ("source", {}),
+                       ("source_archive", {}), ("sha256", "0" * 64), ("coverage", {}),
+                       ("image_count", 0), ("preserved_image_bytes_verified", False),
+                       ("new_images_generated", True)):
+        with pytest.raises(ValueError, match="korean_translation_refresh_differs"):
+            delivery.korean_translation_proof({**report, key: value}, platform)
+
+
 def release():
     return {"id": 17, "tag_name": delivery.tag(SOURCE), "target_commitish": SOURCE,
         "draft": True, "prerelease": True, "published_at": None, "assets": [],
@@ -177,7 +196,7 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 3
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw
-    assert "IDOLY_RELEASE_VERSION: 2026.11.21.3" in raw and delivery.APK in raw
+    assert "IDOLY_RELEASE_VERSION: 2026.11.21.4" in raw and delivery.APK in raw
     assert "ios-unified/native/test_mp4_ui_compile.py" in raw and "ios-unified/ci_build.py" in raw
     assert raw.index("test_mp4_ui_compile.py") < raw.index("ios-unified/ci_build.py")
     assert "stage_shared_preview.py fetch" in raw and "stage_shared_preview.py stage" not in raw

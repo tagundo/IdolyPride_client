@@ -73,6 +73,11 @@ def fetch_inputs(folder):
                     need(used <= size, "public_input_size_exceeded")
                     output.write(block)
         need(target.stat().st_size == size and sha(target) == digest, "public_input_pin_differs")
+    if __package__:
+        from . import refresh_korean_translation_bundle as korean
+    else:
+        import refresh_korean_translation_bundle as korean
+    korean.fetch_source(folder / "korean-translations-source.zip")
 
 
 def release_gate(value):

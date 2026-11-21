@@ -352,7 +352,10 @@ def source_snapshot(root, commit, allow_working):
                     raise ValueError("Python source namespace collision")
                 py_sources[member] = (name, raw)
     for name in (SERVER_MANIFEST, "android-server/app/build.gradle.kts",
-                 "tools/package_android_unified.py", "tools/build_android_language_data.py"):
+                 "tools/package_android_unified.py", "tools/build_android_language_data.py",
+                 "tools/refresh_korean_translation_bundle.py", "tools/build_startup_translation_receipt.py",
+                 "data/latest-korean-translations-pin.json", "tools/korean_server_data_pin.py",
+                 "data/korean-master-data-pin.json"):
         blobs[name] = regular(root / name, MIB).read_bytes()
     if len(blobs) > 1024 or sum(map(len, blobs.values())) > 16 * MIB:
         raise ValueError("Source snapshot exceeds bounds")
@@ -360,12 +363,12 @@ def source_snapshot(root, commit, allow_working):
 
 
 def build_config(asset_info):
-    gradle_version = '2026.11.21.3-mp4-menu-fix-preview'
+    gradle_version = '2026.11.21.4-korean-refresh-preview'
     fields = ['package ' + SERVER_PACKAGE + ';', 'public final class BuildConfig {',
         'public static final boolean DEBUG = false;',
         'public static final String APPLICATION_ID = "' + PACKAGE + '";',
         'public static final String BUILD_TYPE = "release";',
-        'public static final int VERSION_CODE = 58;',
+        'public static final int VERSION_CODE = 59;',
         'public static final String VERSION_NAME = "' + gradle_version + '";']
     for prefix, member in (("SERVER_DATA", "assets/ServerData.zip"),
             ("BUNDLED_TRANSLATIONS", "assets/bundledTranslations.zip"),
@@ -501,9 +504,9 @@ def build_resources(work, blobs, tools, env):
     return resources, generated, r
 
 
-def compile_server(work, blobs, tools, env, generated, r_source):
+def compile_server(work, blobs, tools, env, generated, r_source, asset_info=None):
     config = generated / "BuildConfig.java"
-    config.write_bytes(build_config(SERVER_ASSETS))
+    config.write_bytes(build_config(SERVER_ASSETS if asset_info is None else asset_info))
     classes, stubs, dex = work / "classes", work / "stubs", work / "dex"
     for path in (classes, stubs, dex):
         path.mkdir()
@@ -628,6 +631,18 @@ class RawZipWriter:
                      len(value), len(value), 0o100644 << 16)
         self.stream.write(value)
 
+    def stored_file(self, name, path):
+        """Stream a verified replacement asset without retaining it in memory."""
+        path = regular(path, 384 * MIB)
+        checksum, size = 0, 0
+        with path.open("rb") as incoming:
+            while block := incoming.read(CHUNK):
+                checksum = zlib.crc32(block, checksum)
+                size += len(block)
+        self._header(name, ZIP_STORED, checksum & 0xffffffff, size, size, 0o100644 << 16)
+        with path.open("rb") as incoming:
+            shutil.copyfileobj(incoming, self.stream, CHUNK)
+
     def __exit__(self, kind, value, traceback):
         try:
             if kind is None:
@@ -644,7 +659,7 @@ class RawZipWriter:
 
 
 def merge_apk(client, server, target, manifest, dex_name, dex, resources, app, build,
-              language_archive, data_descriptor, native_bridge=None):
+              language_archive, data_descriptor, native_bridge=None, asset_overrides=None):
     before = {}
     additions = {dex_name: dex, MARKER: None, RESOURCES_ASSET: resources.read_bytes()}
     marker = {"schema": 1, "prototype": True, "package": PACKAGE, "min_sdk": 30,
@@ -673,7 +688,9 @@ def merge_apk(client, server, target, manifest, dex_name, dex, resources, app, b
                 output.raw(game, info)
         for name in sorted(selected):
             value = app if name == pybundle.APP else build if name == pybundle.BUILD else None
-            if value is not None:
+            if name in (asset_overrides or {}):
+                output.stored_file(name, asset_overrides[name])
+            elif value is not None:
                 output.bytes(name, value)
             else:
                 output.raw(host, host_infos[name])
@@ -716,6 +733,47 @@ def verify_preservation(candidate, before, dex_name, definitions, native_bridge=
         "native_libraries_16k_aligned": native_count,
         "compressed_native_libraries_extracted": extracted_native_count,
         "preserved_members_sha256": hashlib.sha256(json.dumps(before, sort_keys=True).encode()).hexdigest()}
+
+
+def prepare_translation_assets(server, source_archive, work, root, env):
+    """Keep the donor immutable and compile the exact common KO source."""
+    if __package__:
+        from . import refresh_korean_translation_bundle as korean
+        from . import korean_server_data_pin as master
+    else:
+        import refresh_korean_translation_bundle as korean
+        import korean_server_data_pin as master
+    originals = {}
+    with ZipFile(server) as archive:
+        inventory(archive)
+        for name, (size, digest) in SERVER_ASSETS.items():
+            if archive.getinfo(name).file_size != size or member_hash(archive, name) != digest:
+                raise ValueError("Pinned bundled server data asset differs")
+            if name in ("assets/ServerData.zip", "assets/bundledTranslations.zip"):
+                path = work / ("original-" + Path(name).name)
+                with archive.open(name) as incoming, path.open("xb") as outgoing:
+                    shutil.copyfileobj(incoming, outgoing, CHUNK)
+                originals[name] = path
+    payload = work / "korean-ServerData.zip"
+    master_proof = master.refresh_server_data(originals["assets/ServerData.zip"], payload)
+    master.verify_refresh_proof(master_proof)
+    payload_pin = master.output_pin()
+    translated = work / "bundledTranslations.zip"
+    proof = korean.refresh(originals["assets/bundledTranslations.zip"], payload,
+        source_archive, translated, platform="android")
+    startup = work / "startupTranslations.zip"
+    receipt = work / "startupTranslations.json"
+    run([sys.executable, "-B", root / "tools/build_startup_translation_receipt.py",
+         "--payload", payload, "--payload-sha256", payload_pin["sha256"],
+         "--payload-bytes", str(payload_pin["bytes"]), "--translations", translated,
+         "--translations-sha256", proof["sha256"], "--translations-bytes", str(proof["bytes"]),
+         "--platform", "android", "--output", startup, "--receipt", receipt], env, timeout=300)
+    startup_pin = json.loads(receipt.read_bytes())
+    assets = {**SERVER_ASSETS, "assets/bundledTranslations.zip": (proof["bytes"], proof["sha256"]),
+              "assets/ServerData.zip": (payload_pin["bytes"], payload_pin["sha256"]),
+              "assets/startupTranslations.zip": (startup_pin["bytes"], startup_pin["sha256"])}
+    return assets, {"assets/ServerData.zip": payload, "assets/bundledTranslations.zip": translated,
+                    "assets/startupTranslations.zip": startup}, proof, master_proof
 
 
 def build(args):
@@ -766,8 +824,10 @@ def build(args):
         language_archive = work / "language-data.zip"
         data_descriptor = language_data.build_archive({"ko": client,
             "ja": regular(args.client_ja_apk), "en": regular(args.client_en_apk)}, language_archive)
+        translation_source = regular(args.translation_source or server.parent / "korean-translations-source.zip", 192 * MIB)
+        runtime_assets, asset_overrides, translation_proof, master_proof = prepare_translation_assets(server, translation_source, work, root, env)
         resources, generated, r = build_resources(work, blobs, tools, env)
-        dex, definitions = compile_server(work, blobs, tools, env, generated, r)
+        dex, definitions = compile_server(work, blobs, tools, env, generated, r, runtime_assets)
         with ZipFile(client) as archive:
             infos = inventory(archive)
             dex_name, old_classes = next_dex_name(infos), set()
@@ -794,7 +854,7 @@ def build(args):
         manifest, windowing = rebuild_manifest(work, client, tools, env)
         unsigned, aligned = work / "unsigned.apk", work / "aligned.apk"
         before, marker = merge_apk(client, server, unsigned, manifest, dex_name, dex, resources, app, build_json,
-                                   language_archive, data_descriptor, native_bridge)
+                                   language_archive, data_descriptor, native_bridge, asset_overrides)
         preflight(output.parent, baseline_oom)
         # SDK34 zipalign lacks -P16. The raw writer has already aligned every
         # stored native member to16KiB; ordinary 4-byte alignment preserves it.
@@ -811,6 +871,9 @@ def build(args):
         with ZipFile(aligned) as final_apk:
             if read(final_apk, "AndroidManifest.xml", MIB) != manifest:
                 raise ValueError("Final compiled manifest differs from verified windowing policy")
+            for name, (size, digest) in runtime_assets.items():
+                if final_apk.getinfo(name).file_size != size or member_hash(final_apk, name) != digest:
+                    raise ValueError("Final bundled server data or translation asset differs")
         if language_data.validate_data_archive(aligned, client, embedded=True) != data_descriptor:
             raise ValueError("Final language object store differs")
         badging = run([tools["aapt2"], "dump", "badging", aligned], env, complete_output_limit=64 * 1024)
@@ -835,6 +898,9 @@ def build(args):
             "tools": {name: sha256(path) for name, path in tools.items()}, "marker": marker,
             "windowing": windowing,
             "native_addon_build": native_receipt,
+            "korean_translation_refresh": translation_proof,
+            "korean_master_refresh": master_proof,
+            "runtime_assets": {name: {"bytes": size, "sha256": digest} for name, (size, digest) in runtime_assets.items()},
             "python_sources": python_rows, "added_dex": dex_name, "server_class_count": len(definitions),
             "preservation": preservation, "signed_certificate_sha256": CERTIFICATE,
             "apk_bytes": aligned.stat().st_size, "apk_sha256": sha256(aligned),
@@ -875,6 +941,7 @@ def main():
     parser.add_argument("--allow-working-tree", action="store_true")
     parser.add_argument("--native-bridge")
     parser.add_argument("--native-receipt")
+    parser.add_argument("--translation-source", help="Exact pinned public Korean archive; defaults beside the server APK")
     args = parser.parse_args()
     try:
         print(json.dumps(build(args), ensure_ascii=False, indent=2))

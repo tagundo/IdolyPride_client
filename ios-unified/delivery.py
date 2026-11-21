@@ -54,6 +54,8 @@ LANGUAGE_PRODUCER_SOURCES = (
 SOURCE_FILE_LIMITS = {
     "data/latest-server-overlay.zip": 1024,
     "data/latest-server-data-pin.json": MIB,
+    "data/korean-master-data-pin.json": MIB,
+    "data/korean-master-overlay.zip": 64 * MIB,
     "data/love-server-data-pin.json": 512 * 1024,
     "client-presentation/translations/static-ui-v1.json": 768 * 1024,
 }
@@ -65,6 +67,9 @@ DELIVERY_SOURCES = ("ios-unified/delivery.py", ".github/workflows/build-server-a
                     "tools/build_startup_translation_receipt.py", "src/idoly_local/startup_receipt.py",
                     "tools/prepare_latest_server_data.py", "tools/latest_server_data_pin.py", "data/latest-server-data-pin.json",
                     "data/latest-server-overlay.zip", "data/love-server-data-pin.json", "data/love-reference.json", "data/love-adv-proof.json",
+                    "tools/korean_server_data_pin.py", "tools/prepare_korean_master_data.py",
+                    "data/korean-master-data-pin.json", "data/korean-master-overlay.zip",
+                    "tools/refresh_korean_translation_bundle.py", "data/latest-korean-translations-pin.json",
                     "data/love-reference-NOTICE.txt", "src/idoly_local/love_catalog.py", "src/idoly_local/master_build.py",
                     "src/idoly_local/media_master_build.py", "src/idoly_local/master_translation_build.py",
                     "src/idoly_local/master_sort_build.py", "src/idoly_local/latest_cohort_pins.py",
@@ -96,20 +101,27 @@ def load_module(name, path):
     return module
 
 PACKAGED_SERVER_DATA = {"pin":"../data/latest-server-data-pin.json","policy":"latest-cohort-overlay-v1"}
+KOREAN_MASTER_REFRESH = {"pin":"../data/korean-master-data-pin.json","policy":"korean-master-refresh-v1"}
+
+
+def _original_server_data_verifier():
+    return load_module("delivery_latest_server_data_pin",ROOT/"tools/latest_server_data_pin.py")
 
 
 def _packaged_server_data_verifier():
-    return load_module("delivery_latest_server_data_pin",ROOT/"tools/latest_server_data_pin.py")
+    return load_module("delivery_korean_server_data_pin",ROOT/"tools/korean_server_data_pin.py")
 
 
 def _packaged_server_data_pin():
     try:
         manifest=small_json(HERE/"runtime_inputs.json")
         need(manifest.get("packaged_server_data")==PACKAGED_SERVER_DATA,"packaged_server_data_policy_differs")
+        need(manifest.get("korean_master_refresh")==KOREAN_MASTER_REFRESH,"korean_master_refresh_policy_differs")
+        original=_original_server_data_verifier()
+        need(manifest["inputs"]["server_data"]==original.base_pin(),"packaged_server_data_base_differs")
+        original.verify_source_pointer()
         verifier=_packaged_server_data_verifier()
-        need(manifest["inputs"]["server_data"]==verifier.base_pin(),"packaged_server_data_base_differs")
         pin=verifier.output_pin()
-        verifier.verify_source_pointer()
         need(type(pin) is dict and set(pin)=={"bytes","sha256"} and type(pin["bytes"]) is int
             and 0<pin["bytes"]<=512*MIB and type(pin["sha256"]) is str
             and re.fullmatch(r"[0-9a-f]{64}",pin["sha256"]),"packaged_server_data_pin_invalid")
@@ -121,12 +133,19 @@ def _packaged_server_data_pin():
 
 
 def verify_server_data_provenance(members, package_report):
-    _packaged_server_data_pin()  # Explicit committed pin is mandatory.
+    final_pin=_packaged_server_data_pin()  # Both committed source pins are mandatory.
     try:
-        verifier=_packaged_server_data_verifier()
+        original=_original_server_data_verifier()
+        korean=_packaged_server_data_verifier()
         reported=package_report.get("server_data_provenance")
         proof=small_json(members/"server-data-upgrade.json")
-        need(verifier.verify_upgrade_proof(proof)==reported,"server_data_upgrade_proof_differs")
+        original_proof=original.verify_upgrade_proof(proof)
+        korean_proof=korean.verify_refresh_proof(small_json(members/"server-data-korean-refresh.json"))
+        need(korean_proof.get("base_payload")==original.output_pin()
+             and korean_proof.get("output")==final_pin,"server_data_refresh_chain_differs")
+        expected={"schema":1,"policy":KOREAN_MASTER_REFRESH["policy"],
+                  "original_cohort":original_proof,"korean_master_refresh":korean_proof}
+        need(expected==reported,"server_data_upgrade_proof_differs")
     except DeliveryError:
         raise
     except Exception:
@@ -157,18 +176,20 @@ def verify_bundled_payload_pin(archive, prefix, package_report):
 
 
 def _delivery_source_paths():
-    components = _packaged_server_data_verifier().SOURCE_COMPONENTS
-    need(type(components) is tuple and 0 < len(components) <= 128,
-         "delivery_source_components_invalid")
     names = set(DELIVERY_SOURCES)
-    for name in components:
-        need(type(name) is str and 0 < len(name) <= 256 and "\\" not in name and "\0" not in name,
+    inventories = (_original_server_data_verifier().SOURCE_COMPONENTS,
+                   _packaged_server_data_verifier().COMPONENTS)
+    for components in inventories:
+        need(type(components) is tuple and 0 < len(components) <= 128,
              "delivery_source_components_invalid")
-        path = PurePosixPath(name)
-        need(not path.is_absolute() and str(path) == name
-             and not any(part in ("", ".", "..") for part in path.parts),
-             "delivery_source_components_invalid")
-        names.add(name)
+        for name in components:
+            need(type(name) is str and 0 < len(name) <= 256 and "\\" not in name and "\0" not in name,
+                 "delivery_source_components_invalid")
+            path = PurePosixPath(name)
+            need(not path.is_absolute() and str(path) == name
+                 and not any(part in ("", ".", "..") for part in path.parts),
+                 "delivery_source_components_invalid")
+            names.add(name)
     return tuple(sorted(names))
 
 
@@ -586,7 +607,7 @@ def verify_members(members, proof, source, run, artifact, guard):
      p=p/'__init__.py' if module=='idoly_local' else p.with_suffix('.py')
      assert sha(p)==digest
     prefix='Payload/IDOLY PRIDE.app/'
-    for rel,wanted in [('LocalServer/ServerData.zip',_packaged_server_data_pin()['sha256']),('LocalServer/bundledTranslations.zip','987fab065fbf791b37b9afe71c53979dc2186e711cde338c89ebe8e0ff905b72'),('Frameworks/IdolyPresentation.dylib','85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5')]:assert report['member_sha256'][prefix+rel]==wanted
+    for rel,wanted in [('LocalServer/ServerData.zip',_packaged_server_data_pin()['sha256']),('LocalServer/bundledTranslations.zip',runtime_inputs['inputs']['translations']['sha256']),('Frameworks/IdolyPresentation.dylib','85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5')]:assert report['member_sha256'][prefix+rel]==wanted
     assert report['member_sha256'][prefix+'Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer']==native['post_sign_binary_sha256']
     assert report['member_sha256'][prefix+'LocalServer/client-languages.zip']==descriptor['sha256']
     assert report['original_members_preserved_except_Unity_header_and_Info'] is True
@@ -894,7 +915,7 @@ def selected_members(archive):
             metadata += item.file_size
             need(metadata <= MAX_METADATA, "metadata_total_bound")
         files[base] = item
-    need({IPA, PACKAGE_REPORT, "SHA256SUMS", "README.txt", "simulator-smoke.json", "keyboard-lifecycle-native-test.json", "local-http-native-test.json", "octo-budget-native-test.json", "unity-host-native-test.json", "probe-build.json", "server-data-upgrade.json", "startupTranslations.json"} <= files.keys(), "required_artifact_members_missing")
+    need({IPA, PACKAGE_REPORT, "SHA256SUMS", "README.txt", "simulator-smoke.json", "keyboard-lifecycle-native-test.json", "local-http-native-test.json", "octo-budget-native-test.json", "unity-host-native-test.json", "probe-build.json", "server-data-upgrade.json", "server-data-korean-refresh.json", "startupTranslations.json"} <= files.keys(), "required_artifact_members_missing")
     return files
 
 

@@ -183,7 +183,8 @@ def _bundled_payload_pin(bundle):
     pin = _decode(raw.decode("utf-8"), maximum=4096)
     keys = {"schema", "policy", "bytes", "sha256", "manifest_sha256", "master_version"}
     if (type(pin) is not dict or set(pin) != keys or type(pin.get("schema")) is not int
-            or pin["schema"] != 1 or pin.get("policy") != "latest-cohort-overlay-v1"
+            or pin["schema"] != 1 or pin.get("policy") not in (
+                "latest-cohort-overlay-v1", "korean-master-refresh-v1")
             or type(pin.get("bytes")) is not int or not 0 < pin["bytes"] <= 512 * 1024**2
             or any(type(pin.get(key)) is not str or len(pin[key]) != 64
                 or any(character not in "0123456789abcdef" for character in pin[key])

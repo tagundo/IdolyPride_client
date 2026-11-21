@@ -639,9 +639,10 @@ def test_interface_only_command_rejects_missing_or_game_fields(harness):
     assert path.read_bytes() == before
 
 
-def test_package_generated_outer_payload_pin_reaches_installer_before_runtime(harness):
+@pytest.mark.parametrize("policy",["latest-cohort-overlay-v1","korean-master-refresh-v1"])
+def test_package_generated_outer_payload_pin_reaches_installer_before_runtime(harness,policy):
     h=harness
-    pin={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":123,"sha256":"a"*64,
+    pin={"schema":1,"policy":policy,"bytes":123,"sha256":"a"*64,
         "manifest_sha256":"b"*64,"master_version":"c"*64}
     (h.bundle/"payload-pin.json").write_text(json.dumps(pin))
     seen=[]

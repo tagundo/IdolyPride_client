@@ -286,6 +286,14 @@ def copy_local_pinned(filename, destination, row):
                 _retire_partial(partial, identity)
 
 
+def fetch_korean_source(destination):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("ios_translation_source", HERE.parent / "tools/refresh_korean_translation_bundle.py")
+    korean = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(korean)
+    return korean.fetch_source(destination)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
@@ -308,18 +316,19 @@ def main():
     lfs_download(DONOR, donor)
     with ZipFile(donor) as archive:
         need(len(set(archive.namelist())) == len(archive.infolist()), "Duplicate donor member")
-        for name, key in (("ServerData.zip", "server_data"), ("bundledTranslations.zip", "translations")):
+        for name, key in (("ServerData.zip", "server_data"), ("bundledTranslations.zip", "translations_base")):
             row = manifest["inputs"][key]
             info = archive.getinfo(DONOR_ROOT + name)
             need(info.file_size == row["bytes"] and not info.flag_bits & 1, "Pinned donor member differs")
             with archive.open(info) as source:
-                copy_pinned(source, output / name, row)
+                copy_pinned(source, output / ("bundledTranslations.base.zip" if key == "translations_base" else name), row)
     donor.unlink()  # Only this newly downloaded exact donor; no host/private state.
+    korean_source = fetch_korean_source(output / "korean-translations-source.zip")
     with ZipFile(output / "base.ipa") as archive:
         name = "Payload/IDOLY PRIDE.app/Frameworks/IdolyPresentation.dylib"
         with archive.open(name) as source:
             copy_pinned(source, output / "IdolyPresentation.dylib", {"bytes": 157520, "sha256": "85a445f71ac59473522aa15e15919efbc351cbbc9d2d5829062a9a22416c9cb5"})
-    (output / "fetch-report.json").write_text(json.dumps({"schema": 1, "verified": True, "base_sha256": base["sha256"], "stock_ipa_sha256": stock["sha256"], "english_ui_sha256": manifest["inputs"]["english_ui"]["sha256"], "english_ui_proof_sha256": manifest["inputs"]["english_ui_proof"]["sha256"], "support_sha256": manifest["support"]["sha256"], "donor_sha256": DONOR["sha256"], "Mac_executable_bundled": False}, indent=2) + "\n")
+    (output / "fetch-report.json").write_text(json.dumps({"schema": 1, "verified": True, "base_sha256": base["sha256"], "stock_ipa_sha256": stock["sha256"], "english_ui_sha256": manifest["inputs"]["english_ui"]["sha256"], "english_ui_proof_sha256": manifest["inputs"]["english_ui_proof"]["sha256"], "support_sha256": manifest["support"]["sha256"], "donor_sha256": DONOR["sha256"], "korean_translation_source": korean_source, "Mac_executable_bundled": False}, indent=2) + "\n")
     print("PASS_VERIFIED_IOS_UNIFIED_INPUTS")
 
 

@@ -80,7 +80,8 @@ def entry(name,size=1):
 def required_entries():
     names = (delivery.IPA,delivery.PACKAGE_REPORT,"SHA256SUMS","README.txt","simulator-smoke.json",
              "keyboard-lifecycle-native-test.json","local-http-native-test.json","octo-budget-native-test.json",
-             "unity-host-native-test.json","probe-build.json","server-data-upgrade.json","startupTranslations.json")
+             "unity-host-native-test.json","probe-build.json","server-data-upgrade.json",
+             "server-data-korean-refresh.json","startupTranslations.json")
     return [entry(name) for name in names]
 
 
@@ -374,11 +375,16 @@ def test_delivery_requires_upgraded_server_data_receipt_and_static_exact_pin(mon
     import json
     from types import SimpleNamespace
     proof={"schema":1,"recipe":"source-bound"};(tmp_path/"server-data-upgrade.json").write_text(json.dumps(proof))
-    monkeypatch.setattr(delivery,"_packaged_server_data_pin",lambda:{"bytes":1,"sha256":"b"*64})
+    original={"bytes":1,"sha256":"a"*64};final={"bytes":2,"sha256":"b"*64}
+    refreshed={"schema":1,"base_payload":original,"output":final}
+    (tmp_path/"server-data-korean-refresh.json").write_text(json.dumps(refreshed))
+    reported={"schema":1,"policy":"korean-master-refresh-v1","original_cohort":proof,"korean_master_refresh":refreshed}
+    monkeypatch.setattr(delivery,"_packaged_server_data_pin",lambda:final)
     seen=[]
     def verify(value):assert value==proof;seen.append(value);return value
-    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(verify_upgrade_proof=verify))
-    delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":proof})
+    monkeypatch.setattr(delivery,"_original_server_data_verifier",lambda:SimpleNamespace(verify_upgrade_proof=verify,output_pin=lambda:original))
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(verify_refresh_proof=lambda value:value))
+    delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":reported})
     assert seen==[proof]
     with pytest.raises(delivery.DeliveryError,match="server_data_upgrade_proof_differs"):
         delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":{"schema":1,"recipe":"old-base"}})
@@ -388,10 +394,12 @@ def test_delivery_cannot_substitute_missing_payload_pin_with_old_digest(monkeypa
     import json
     from types import SimpleNamespace
     base={"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
-    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA}))
+    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA,
+                                                         "korean_master_refresh":delivery.KOREAN_MASTER_REFRESH}))
     def missing():raise ValueError("latest_server_data_pin_missing")
     monkeypatch.setattr(delivery,"HERE",tmp_path)
-    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(base_pin=lambda:base,output_pin=missing))
+    monkeypatch.setattr(delivery,"_original_server_data_verifier",lambda:SimpleNamespace(base_pin=lambda:base,verify_source_pointer=lambda:None))
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(output_pin=missing))
     with pytest.raises(delivery.DeliveryError,match="packaged_server_data_pin_unavailable"):
         delivery._packaged_server_data_pin()
 
@@ -400,25 +408,90 @@ def test_delivery_uses_latest_source_pointer_and_fixed_payload_pin_without_large
     from types import SimpleNamespace
     base={"bytes":191343014,"sha256":"37dbf0fb9bac5d860991753d2e41ff0c269684bfca673ba41e1bcb897651c223"}
     wanted={"bytes":300*delivery.MIB,"sha256":"b"*64}
-    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA}))
+    (tmp_path/"runtime_inputs.json").write_text(json.dumps({"inputs":{"server_data":base},"packaged_server_data":delivery.PACKAGED_SERVER_DATA,
+                                                         "korean_master_refresh":delivery.KOREAN_MASTER_REFRESH}))
     calls=[]
-    verifier=SimpleNamespace(base_pin=lambda:base,output_pin=lambda:wanted,
+    verifier=SimpleNamespace(base_pin=lambda:base,
         verify_source_pointer=lambda:calls.append("pointer"))
     monkeypatch.setattr(delivery,"HERE",tmp_path)
-    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:verifier)
+    monkeypatch.setattr(delivery,"_original_server_data_verifier",lambda:verifier)
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(output_pin=lambda:wanted))
     assert delivery._packaged_server_data_pin()==wanted and calls==["pointer"]
     assert not (tmp_path/"latest-server-overlay.zip").exists()
     assert {"tools/latest_server_data_pin.py","tools/prepare_latest_server_data.py",
         "data/latest-server-data-pin.json","data/latest-server-overlay.zip",
         "src/idoly_local/master_build.py","src/idoly_local/media_master_build.py",
         "src/idoly_local/master_translation_build.py","src/idoly_local/master_sort_build.py"}<=set(delivery.DELIVERY_SOURCES)
+    assert {"tools/korean_server_data_pin.py","tools/prepare_korean_master_data.py",
+            "data/korean-master-data-pin.json","data/korean-master-overlay.zip"}<=set(delivery.DELIVERY_SOURCES)
+
+
+@pytest.mark.parametrize("marker",[None,{"pin":"../data/latest-server-data-pin.json","policy":"korean-master-refresh-v1"},
+    {"pin":"../data/korean-master-data-pin.json","policy":"accept-any-sha"}])
+def test_delivery_cannot_fall_back_when_current_korean_marker_is_missing_or_changed(tmp_path,monkeypatch,marker):
+    manifest={"packaged_server_data":delivery.PACKAGED_SERVER_DATA,"inputs":{"server_data":{}}}
+    if marker is not None:manifest["korean_master_refresh"]=marker
+    (tmp_path/"runtime_inputs.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(delivery,"HERE",tmp_path)
+    def forbidden():raise AssertionError("Invalid markers must fail before any payload source is selected")
+    monkeypatch.setattr(delivery,"_original_server_data_verifier",forbidden)
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",forbidden)
+    with pytest.raises(delivery.DeliveryError,match="korean_master_refresh_policy_differs"):
+        delivery._packaged_server_data_pin()
+
+
+def test_actual_current_delivery_pin_and_finite_source_closure_include_both_layers():
+    original=delivery._original_server_data_verifier()
+    korean=delivery._packaged_server_data_verifier()
+    assert delivery._packaged_server_data_pin()==korean.output_pin()!=original.output_pin()
+    pin=json.loads(delivery._packaged_payload_pin_bytes())
+    assert pin==korean.payload_pin() and pin["policy"]=="korean-master-refresh-v1"
+    paths=delivery._delivery_source_paths()
+    assert set(original.SOURCE_COMPONENTS)|set(korean.COMPONENTS)<=set(paths)
+    for name in paths:
+        path=delivery.ROOT/name
+        assert path.is_file() and not path.is_symlink()
+        assert 0<path.stat().st_size<=delivery.SOURCE_FILE_LIMITS.get(name,256*1024)
+    assert delivery.SOURCE_FILE_LIMITS["data/korean-master-overlay.zip"]==64*delivery.MIB
+    assert delivery.SOURCE_FILE_LIMITS.get("arbitrary-overlay.zip",256*1024)==256*1024
+
+
+@pytest.mark.parametrize("damage",[None,"missing-original","missing-korean","old-report","relabeled-original",
+    "korean-output","korean-base","incomplete-report","different-reported-korean"])
+def test_actual_current_delivery_requires_original_and_korean_proofs_unchanged(tmp_path,damage):
+    original=delivery._original_server_data_verifier().load_pin()["upgrade_proof"]
+    korean=delivery._packaged_server_data_verifier().refresh_proof()
+    old_path=tmp_path/"server-data-upgrade.json"
+    ko_path=tmp_path/"server-data-korean-refresh.json"
+    old_path.write_text(json.dumps(original));ko_path.write_text(json.dumps(korean))
+    report={"schema":1,"policy":"korean-master-refresh-v1","original_cohort":deepcopy(original),
+            "korean_master_refresh":deepcopy(korean)}
+    before=old_path.read_bytes()
+    if damage=="missing-original":old_path.unlink()
+    elif damage=="missing-korean":ko_path.unlink()
+    elif damage=="old-report":report=original
+    elif damage=="relabeled-original":
+        original["output"]={**original["output"],"sha256":korean["output"]["sha256"]}
+        old_path.write_text(json.dumps(original))
+    elif damage=="korean-output":
+        korean["output"]["sha256"]="f"*64;ko_path.write_text(json.dumps(korean))
+    elif damage=="korean-base":
+        korean["base_payload"]["sha256"]="f"*64;ko_path.write_text(json.dumps(korean))
+    elif damage=="incomplete-report":del report["original_cohort"]
+    elif damage=="different-reported-korean":report["korean_master_refresh"]["output"]["sha256"]="f"*64
+    if damage:
+        with pytest.raises(delivery.DeliveryError):
+            delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":report})
+    else:
+        delivery.verify_server_data_provenance(tmp_path,{"server_data_provenance":report})
+        assert old_path.read_bytes()==before
 
 
 @pytest.mark.parametrize("mutated",[False,True])
 def test_delivery_checks_actual_embedded_generated_payload_pin_bytes_and_report_hash(tmp_path,monkeypatch,mutated):
     from types import SimpleNamespace
     from zipfile import ZipFile
-    pin={"schema":1,"policy":"latest-cohort-overlay-v1","bytes":123,"sha256":"a"*64,
+    pin={"schema":1,"policy":"korean-master-refresh-v1","bytes":123,"sha256":"a"*64,
         "manifest_sha256":"b"*64,"master_version":"c"*64}
     monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(payload_pin=lambda:pin))
     prefix="Payload/Game.app/";name=prefix+"LocalServer/payload-pin.json"
@@ -454,18 +527,22 @@ def test_delivery_rejects_missing_oversized_or_symlink_payload_identity(tmp_path
 def test_delivery_source_inventory_includes_complete_finite_producer_closure(monkeypatch):
     from types import SimpleNamespace
     components=("src/idoly_local/deep_dependency.py","uv.lock")
-    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components))
+    korean=("tools/deep_korean_dependency.py",)
+    monkeypatch.setattr(delivery,"_original_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components))
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(COMPONENTS=korean))
     paths=delivery._delivery_source_paths()
-    assert paths==tuple(sorted(set(delivery.DELIVERY_SOURCES)|set(components)))
+    assert paths==tuple(sorted(set(delivery.DELIVERY_SOURCES)|set(components)|set(korean)))
     assert {"src/idoly_local/latest_cohort_pins.py","src/idoly_local/love_compatibility_pins.py",
         "src/idoly_local/public_cohort_support.py"}<=set(paths)
 
 
 @pytest.mark.parametrize("components",[(),["uv.lock"],("../private",),("/private",),("src//bad.py",),
     ("src/./bad.py",),("src/../bad.py",),("src\\bad.py",),("bad\0name",),(42,)])
-def test_delivery_component_inventory_cannot_introduce_arbitrary_paths(monkeypatch,components):
+@pytest.mark.parametrize("layer",["original","korean"])
+def test_delivery_component_inventory_cannot_introduce_arbitrary_paths(monkeypatch,components,layer):
     from types import SimpleNamespace
-    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components))
+    monkeypatch.setattr(delivery,"_original_server_data_verifier",lambda:SimpleNamespace(SOURCE_COMPONENTS=components if layer=="original" else ("uv.lock",)))
+    monkeypatch.setattr(delivery,"_packaged_server_data_verifier",lambda:SimpleNamespace(COMPONENTS=components if layer=="korean" else ("uv.lock",)))
     with pytest.raises(delivery.DeliveryError,match="delivery_source_components_invalid"):
         delivery._delivery_source_paths()
 
@@ -717,5 +794,11 @@ def test_delivery_requires_actual_signed_app_startup_receipt(tmp_path, damage):
 
 def test_current_delivery_artifact_requires_public_startup_receipt_pin():
     items = [item for item in required_entries() if item.filename != "startupTranslations.json"]
+    with pytest.raises(delivery.DeliveryError, match="required_artifact_members_missing"):
+        delivery.selected_members(Inventory(items))
+
+
+def test_current_delivery_artifact_requires_separate_korean_master_refresh_proof():
+    items = [item for item in required_entries() if item.filename != "server-data-korean-refresh.json"]
     with pytest.raises(delivery.DeliveryError, match="required_artifact_members_missing"):
         delivery.selected_members(Inventory(items))

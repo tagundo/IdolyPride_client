@@ -22,6 +22,7 @@ def run(*args):
 
 
 PACKAGED_SERVER_DATA = {"pin":"../data/latest-server-data-pin.json","policy":"latest-cohort-overlay-v1"}
+KOREAN_MASTER_REFRESH = {"pin":"../data/korean-master-data-pin.json","policy":"korean-master-refresh-v1"}
 
 
 def _tool_module(name):
@@ -37,6 +38,8 @@ def prepare_server_data(inputs, work, output):
     manifest=json.loads((HERE/"runtime_inputs.json").read_text())
     if manifest.get("packaged_server_data")!=PACKAGED_SERVER_DATA:
         raise ValueError("Pinned upgraded server data is required")
+    if manifest.get("korean_master_refresh")!=KOREAN_MASTER_REFRESH:
+        raise ValueError("Pinned Korean master refresh is required")
     verifier=_tool_module("latest_server_data_pin")
     if manifest["inputs"]["server_data"]!=verifier.base_pin():
         raise ValueError("Server data base pin differs")
@@ -55,7 +58,13 @@ def prepare_server_data(inputs, work, output):
     verified=verifier.verify_payload(upgraded)
     if {key:verified[key] for key in ("bytes","sha256")}!=wanted:
         raise ValueError("Upgraded server data output pin differs")
-    return upgraded,proof_path
+    korean=_tool_module("korean_server_data_pin")
+    refreshed=work/"korean-ServerData.zip"
+    korean_proof=korean.refresh_server_data(upgraded,refreshed)
+    korean.verify_refresh_proof(korean_proof)
+    korean.verify_payload(refreshed)
+    (output/"server-data-korean-refresh.json").write_text(json.dumps(korean_proof,ensure_ascii=False,indent=2)+"\n")
+    return refreshed,proof_path
 
 
 def compatible_runtime(sdk, catalog):
@@ -129,13 +138,19 @@ def main():
     python = sys.executable
     server_data,server_data_proof=prepare_server_data(inputs,work,output)
     runtime_inputs=json.loads((HERE/"runtime_inputs.json").read_text())
-    payload_pin=_tool_module("latest_server_data_pin").output_pin()
+    payload_pin=_tool_module("korean_server_data_pin").output_pin()
     translation_pin=runtime_inputs["inputs"]["translations"]
+    translations=work/"bundledTranslations.zip"
+    translation_proof=_tool_module("refresh_korean_translation_bundle").refresh(
+        inputs/"bundledTranslations.base.zip",server_data,inputs/"korean-translations-source.zip",translations,platform="ios")
+    if {key:translation_proof[key] for key in ("bytes","sha256","manifest_sha256")}!={key:translation_pin[key] for key in ("bytes","sha256","manifest_sha256")}:
+        raise ValueError("Refreshed Korean translation input pin differs")
+    (output/"korean-translation-refresh.json").write_text(json.dumps(translation_proof,ensure_ascii=False,indent=2)+"\n")
     startup_translations=work/"startupTranslations.zip"
     startup_descriptor=work/"startupTranslations.json"
     run(python,"-B",HERE.parent/"tools/build_startup_translation_receipt.py",
         "--payload",server_data,"--payload-sha256",payload_pin["sha256"],"--payload-bytes",payload_pin["bytes"],
-        "--translations",inputs/"bundledTranslations.zip","--translations-sha256",translation_pin["sha256"],
+        "--translations",translations,"--translations-sha256",translation_pin["sha256"],
         "--translations-bytes",translation_pin["bytes"],"--platform","ios",
         "--output",startup_translations,"--receipt",startup_descriptor)
     (output/"startupTranslations.json").write_bytes(startup_descriptor.read_bytes())
@@ -203,7 +218,8 @@ def main():
     compose(inputs / "stock.ipa", presentation_plan, unity)
     ipa = output / candidate_filename(args.source_commit)
     common = ["--server-data", server_data, "--server-data-upgrade-proof", server_data_proof,
-              "--translations", inputs / "bundledTranslations.zip",
+              "--server-data-korean-refresh-proof", output/"server-data-korean-refresh.json",
+              "--translations", translations,
               "--client-languages", client_languages, "--client-languages-metadata", client_descriptor,
               "--startup-translations",startup_translations,"--startup-translations-metadata",startup_descriptor]
     run(python, "-B", HERE / "package_unified.py", "--runtime-root", runtime,

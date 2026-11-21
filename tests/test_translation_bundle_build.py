@@ -122,3 +122,82 @@ def test_overlay_failure_preserves_old_archive_and_retires_only_its_partial(tmp_
         build_translation_bundle_overlay(source, overlay, tmp_path / "bad.zip", platform="android", version="new", **args)
     assert not (tmp_path / "bad.zip").exists() and not (tmp_path / "bad.zip.part").exists()
     assert source.read_bytes() == before
+
+
+def test_overlay_can_add_complete_korean_catalog_and_preserve_every_english_byte(tmp_path):
+    prepared = tmp_path / "input"; prepare(prepared)
+    source = tmp_path / "source.zip"
+    original = build_translation_bundle(prepared, source, platform="android", version="old")
+    before = source.read_bytes()
+    overlay = tmp_path / "overlay"; prepare_image_overlay(overlay)
+    text = tmp_path / "new-text"; text.mkdir()
+    catalog = {"text.json": '{"generic":{"既存":"새 번역"}}\n'.encode(),
+               "text-manifest.json": b'{"source":{"revision":"new"}}\n'}
+    for leaf, raw in catalog.items():
+        (text / leaf).write_bytes(raw)
+    result = build_translation_bundle_overlay(source, overlay, tmp_path / "new.zip",
+        platform="android", version="new", text_ko_dir=text,
+        expected_source_sha256=original["sha256"], expected_source_bytes=original["bytes"])
+    assert source.read_bytes() == before
+    assert len(result["replaced_files"]) == 5
+    assert set(result["preserved_files"]) == {"en/android/" + leaf
+                                             for leaf in ("manifest.pb", "manifest.json", "objects.zip")}
+    with ZipFile(source) as old, ZipFile(tmp_path / "new.zip") as new:
+        for name, identity in result["preserved_files"].items():
+            raw = new.read("translations/" + name)
+            assert raw == old.read("translations/" + name)
+            assert identity == {"bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+        for leaf, raw in catalog.items():
+            assert new.read("translations/ko/" + leaf) == raw
+            assert result["replaced_files"]["ko/" + leaf] == {
+                "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def test_overlay_replaces_korean_text_pair_and_retains_existing_english_text(tmp_path):
+    prepared = tmp_path / "input"; prepare(prepared)
+    text = tmp_path / "old-text"
+    for language in ("ko", "en"):
+        directory = text / language; directory.mkdir(parents=True)
+        for leaf in ("text.json", "text-manifest.json"):
+            (directory / leaf).write_bytes((language + ":old:" + leaf).encode())
+    source = tmp_path / "source.zip"
+    original = build_translation_bundle(prepared, source, platform="android", version="old", text_root=text)
+    overlay = tmp_path / "overlay"; prepare_image_overlay(overlay)
+    new_text = tmp_path / "new-text"; new_text.mkdir()
+    for leaf in ("text.json", "text-manifest.json"):
+        (new_text / leaf).write_bytes(("ko:new:" + leaf).encode())
+    result = build_translation_bundle_overlay(source, overlay, tmp_path / "new.zip",
+        platform="android", version="new", text_ko_dir=new_text,
+        expected_source_sha256=original["sha256"], expected_source_bytes=original["bytes"])
+    assert len(result["replaced_files"]) == 5 and len(result["preserved_files"]) == 5
+    with ZipFile(source) as old, ZipFile(tmp_path / "new.zip") as new:
+        for leaf in ("text.json", "text-manifest.json"):
+            assert new.read("translations/ko/" + leaf) == ("ko:new:" + leaf).encode()
+            assert new.read("translations/en/" + leaf) == old.read("translations/en/" + leaf)
+
+
+@pytest.mark.parametrize("damage", ("missing-catalog", "missing-manifest", "empty-manifest", "symlink-manifest"))
+def test_overlay_rejects_incomplete_or_nonregular_korean_text_pair(tmp_path, damage):
+    prepared = tmp_path / "input"; prepare(prepared)
+    source = tmp_path / "source.zip"
+    original = build_translation_bundle(prepared, source, platform="android", version="old")
+    before = source.read_bytes()
+    overlay = tmp_path / "overlay"; prepare_image_overlay(overlay)
+    text = tmp_path / "text"; text.mkdir()
+    (text / "text.json").write_bytes(b"catalog")
+    (text / "text-manifest.json").write_bytes(b"manifest")
+    if damage == "missing-catalog":
+        (text / "text.json").unlink()
+    elif damage == "missing-manifest":
+        (text / "text-manifest.json").unlink()
+    elif damage == "empty-manifest":
+        (text / "text-manifest.json").write_bytes(b"")
+    else:
+        (text / "text-manifest.json").unlink()
+        (text / "text-manifest.json").symlink_to(text / "text.json")
+    with pytest.raises(ValueError, match="member is unavailable"):
+        build_translation_bundle_overlay(source, overlay, tmp_path / "bad.zip",
+            platform="android", version="new", text_ko_dir=text,
+            expected_source_sha256=original["sha256"], expected_source_bytes=original["bytes"])
+    assert source.read_bytes() == before
+    assert not (tmp_path / "bad.zip").exists() and not (tmp_path / "bad.zip.part").exists()

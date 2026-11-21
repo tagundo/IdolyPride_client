@@ -91,6 +91,53 @@ def test_sdk_wire_fix_updates_an_existing_broken_revision_once_and_survives_rest
     assert original.SerializeToString() == raw
 
 
+def test_updated_korean_bytes_advance_cached_revision_without_clearing_existing_files(tmp_path):
+    """A KO bundle update must refresh an already-KO SDK, even with a reused producer revision."""
+    original = database(); original.revision = 1163
+    original_raw = original.SerializeToString()
+    state = tmp_path / "client-resource-revision-android.json"
+    source = tmp_path / "source"; source.mkdir()
+    account = tmp_path / "account.sqlite"; account.write_bytes(b"existing account must remain unchanged")
+    cache_root = tmp_path / "cache"
+    previous = None
+    for number, body in enumerate(("기존 한국어 번역", "갱신된 한국어 번역")):
+        (source / "adv_bond_ai_01_01.txt").write_text(body, encoding="utf-8")
+        directory = tmp_path / ("prepared-" + str(number))
+        build_resource_overlay(original_raw, source, directory, language="ko", revision=1164, source=SOURCE)
+        layer = ResourceTranslation(directory, original_raw, language="ko")
+        try:
+            pinned, compatible = pin_manifest_revision(layer.manifest, state, language="ko", sdk_identity_compat=True)
+            revision = Database.FromString(pinned).revision
+            gateway_manifest = OctoManifest(pinned, aes_key=KEY, client_key="synthetic",
+                base_url="http://127.0.0.1:8080", aes_cbc=aes, allow_previous_revisions=compatible,
+                object_aliases=layer.object_aliases)
+            resource = next(row for row in gateway_manifest.objects.values() if row.kind == "resources")
+            cache = OctoCache(cache_root, allow_download=False, local_source=layer.open_source)
+            try:
+                with cache.open_verified(resource) as incoming:
+                    assert incoming.read() == body.encode("utf-8")
+            finally:
+                cache.close()
+            if previous is not None:
+                assert revision == previous["revision"] + 1
+                response = gateway_manifest.manifest_response(
+                    f"/v2/pub/a/212/v/205051/list/{previous['revision']}",
+                    {"Accept": "application/x-protobuf,x-octo-app/212", "X-OCTO-KEY": "synthetic"})
+                update = Database.FromString(decrypt_manifest(response, aes_key=KEY, aes_cbc=aes))
+                assert update.revision == revision and len(update.resourceList) == 1
+                assert update.resourceList[0].md5 == resource.md5 != previous["md5"]
+                assert len(update.resourceList[0].objectName) == 6
+                assert previous["file"].read_bytes() == "기존 한국어 번역".encode("utf-8")
+            same, _ = pin_manifest_revision(layer.manifest, state, language="ko", sdk_identity_compat=True)
+            assert same == pinned
+            previous = {"revision": revision, "md5": resource.md5,
+                "file": cache_root / resource.cache_key[:2] / (resource.cache_key + ".bin")}
+            assert account.read_bytes() == b"existing account must remain unchanged"
+        finally:
+            layer.close()
+    assert len(list(cache_root.rglob("*.bin"))) == 2
+
+
 @pytest.mark.parametrize("flag", [None, 1, "true"])
 def test_sdk_identity_revision_flag_is_an_explicit_boolean(tmp_path, flag):
     with pytest.raises(ValueError, match="boolean"):

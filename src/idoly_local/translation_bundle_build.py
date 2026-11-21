@@ -90,12 +90,12 @@ def build_translation_bundle(prepared, output, *, platform, version, text_root=N
 
 def build_translation_bundle_overlay(source_bundle, overlay_ko_dir, output, *, platform, version,
                                      expected_source_sha256, expected_source_bytes,
-                                     max_bytes=128 * 1024 * 1024, checkpoint=None):
+                                     max_bytes=128 * 1024 * 1024, checkpoint=None, text_ko_dir=None):
     """Replace only the prepared Korean resource group, streaming other files.
 
-    The pinned source archive is read in place. English resources and optional
-    text groups retain their complete bytes, sizes and hashes; no old language
-    archive needs to be extracted to a second directory or held in memory.
+    The pinned source archive is read in place. English resources retain their
+    complete bytes, sizes and hashes. An explicit Korean text directory may add
+    or replace its complete catalog pair; other text groups remain unchanged.
     """
     if (platform not in ("android", "ios") or not isinstance(version, str) or not version
             or type(max_bytes) is not int or not 1 <= max_bytes <= 128 * 1024 * 1024
@@ -106,6 +106,9 @@ def build_translation_bundle_overlay(source_bundle, overlay_ko_dir, output, *, p
         raise ValueError("Use an existing prepared Korean directory and unused output")
     replacement = {f"ko/{platform}/{leaf}": overlay_ko_dir / leaf
                    for leaf in ("manifest.pb", "manifest.json", "objects.zip")}
+    if text_ko_dir is not None:
+        replacement.update({f"ko/{leaf}": Path(text_ko_dir) / leaf
+                            for leaf in ("text.json", "text-manifest.json")})
     identities = {}
     for name, path in replacement.items():
         if path.is_symlink() or not path.is_file() or not 0 < path.stat().st_size <= 128 * 1024 * 1024:
@@ -119,7 +122,8 @@ def build_translation_bundle_overlay(source_bundle, overlay_ko_dir, output, *, p
         raise ValueError("A prior incomplete language package requires explicit cleanup")
     try:
         with _bundle(source_bundle, expected_source_sha256, expected_source_bytes, platform) as (source, old_index, old_raw):
-            if not replacement.keys() <= old_index["files"].keys():
+            required = {f"ko/{platform}/{leaf}" for leaf in ("manifest.pb", "manifest.json", "objects.zip")}
+            if not required <= old_index["files"].keys():
                 raise ValueError("Pinned source lacks the complete Korean resource group")
             index = {**old_index, "version": version, "files": {**old_index["files"], **identities}}
             preserved = {name: row for name, row in old_index["files"].items() if name not in replacement}
