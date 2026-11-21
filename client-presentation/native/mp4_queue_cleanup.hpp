@@ -24,7 +24,7 @@ inline bool temporary(int fd,struct stat& s) {
 inline bool unchanged(const struct stat&a,const struct stat&b) {
     if(a.st_dev!=b.st_dev||a.st_ino!=b.st_ino||a.st_uid!=b.st_uid||a.st_mode!=b.st_mode
         ||a.st_nlink!=b.st_nlink||a.st_size!=b.st_size)return false;
-#ifdef IDOLY_DARWIN_BRIDGE
+#if defined(IDOLY_DARWIN_BRIDGE) || defined(__APPLE__)
     return a.st_mtimespec.tv_sec==b.st_mtimespec.tv_sec&&a.st_mtimespec.tv_nsec==b.st_mtimespec.tv_nsec
         &&a.st_ctimespec.tv_sec==b.st_ctimespec.tv_sec&&a.st_ctimespec.tv_nsec==b.st_ctimespec.tv_nsec;
 #else

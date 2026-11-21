@@ -107,7 +107,21 @@ inline bool safe_root(const char* value) {
 inline bool join_path(char* destination,size_t capacity,const char* root,const char* member){size_t a=strlen(root),b=strlen(member);if(a>=capacity||b>=capacity-a||a+b+2>capacity)return false;memcpy(destination,root,a);destination[a]='/';memcpy(destination+a+1,member,b+1);return true;}
 inline bool exact_read(int fd,uint8_t* dst,size_t count){size_t at=0;while(at<count){long n=read(fd,dst+at,count-at);if(n<=0)return false;at+=static_cast<size_t>(n);}uint8_t tail;return read(fd,&tail,1)==0;}
 inline bool exact_write(int fd,const uint8_t* src,size_t count){size_t at=0;while(at<count){long n=write(fd,src+at,count-at);if(n<=0)return false;at+=static_cast<size_t>(n);}return true;}
-inline bool transfer_at(int fd,void* bytes,size_t count,int64_t offset,bool writing){size_t at=0;while(at<count){long n=writing?pwrite(fd,static_cast<uint8_t*>(bytes)+at,count-at,offset+static_cast<int64_t>(at)):pread(fd,static_cast<uint8_t*>(bytes)+at,count-at,offset+static_cast<int64_t>(at));if(n<=0)return false;at+=static_cast<size_t>(n);}return true;}
+inline bool transfer_at(int fd,void* bytes,size_t count,int64_t offset,bool writing){
+    // All PCM callers supply at most 8192 stereo float frames. Bound both the
+    // buffer span and signed file position before any pointer/offset addition.
+    constexpr size_t maximum=8192*2*sizeof(float);
+    if(fd<0||(!bytes&&count)||count>maximum||offset<0
+        ||static_cast<uint64_t>(offset)>0x7fffffffffffffffULL-count)return false;
+    size_t at=0,remaining=count;
+    while(remaining){
+        const long n=writing?pwrite(fd,static_cast<uint8_t*>(bytes)+at,remaining,offset+static_cast<int64_t>(at))
+            :pread(fd,static_cast<uint8_t*>(bytes)+at,remaining,offset+static_cast<int64_t>(at));
+        if(n<=0||static_cast<uint64_t>(n)>remaining)return false;
+        const size_t completed=static_cast<size_t>(n);at+=completed;remaining-=completed;
+    }
+    return true;
+}
 
 struct Configuration {
     char broker[path_capacity]{},output[path_capacity]{};

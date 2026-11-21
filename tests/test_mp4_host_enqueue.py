@@ -259,6 +259,8 @@ def host_enqueue_binary(tmp_path_factory):
     # The existing queue error projection intentionally bounds a larger native
     # reason. GCC diagnoses that inlined snprintf; Clang has no such option.
     warnings = ["-Wno-format-truncation"] if "__GNUC__" in macros and "__clang__" not in macros else []
+    if "__linux__" in macros:
+        warnings.append("-D_FORTIFY_SOURCE=3")
     result = subprocess.run([compiler,"-std=c++17","-O1","-Wall","-Wextra","-Werror",*warnings,"-pthread",
         "-I",str(ROOT / "client-presentation/native"),str(source),"-o",str(binary)],capture_output=True,text=True,timeout=60)
     assert result.returncode == 0, result.stdout + result.stderr
@@ -296,3 +298,33 @@ def test_host_rejection_is_immediate_and_never_defers_a_unity_command(host_enque
     assert value["accepted"] is False and value["queue"]["jobs"] == []
     assert value["queue"]["command_pending"] is False
     assert value["original_callbacks"] == value["unity_ticks_advanced"] == 0
+
+
+@pytest.mark.parametrize('family',['posix','apple','freestanding-darwin'])
+def test_production_cleanup_compares_the_native_stat_timestamp_family(tmp_path,family):
+    """Exercise the actual comparison with disjoint synthetic stat layouts.
+
+    The standard POSIX host fixture above keeps its real host headers/macros.
+    This small isolated policy test also checks both Darwin compilation modes;
+    it does not claim an Apple runtime or replace the mandatory actual Mac run.
+    """
+    compiler=shutil.which('c++') or shutil.which('g++') or shutil.which('clang++')
+    if not compiler:pytest.skip('C++ compiler required')
+    header=(ROOT/'client-presentation/native/mp4_queue_cleanup.hpp').read_text()
+    body='inline bool unchanged('+header.split('inline bool unchanged(',1)[1].split('\ninline void member(',1)[0]
+    darwin=family!='posix'
+    modified,changed=('st_mtimespec','st_ctimespec') if darwin else ('st_mtim','st_ctim')
+    macros='#undef __APPLE__\n#undef IDOLY_DARWIN_BRIDGE\n'
+    if family=='apple':macros+='#define __APPLE__ 1\n'
+    elif family=='freestanding-darwin':macros+='#define IDOLY_DARWIN_BRIDGE 1\n'
+    fields=('st_dev','st_ino','st_uid','st_mode','st_nlink','st_size')
+    source=macros+'struct Stamp {long long tv_sec,tv_nsec;};\nstruct stat {'
+    source+=''.join('long long '+name+';' for name in fields)
+    source+=f'Stamp {modified},{changed};'+'};\n'+body+'\nint main(){stat a{},b{};if(!unchanged(a,b))return 1;\n'
+    for index,name in enumerate((*fields,modified+'.tv_sec',modified+'.tv_nsec',changed+'.tv_sec',changed+'.tv_nsec'),2):
+        source+=f'b=a;++b.{name};if(unchanged(a,b))return {index};\n'
+    source+='return 0;}\n'
+    path=tmp_path/'timestamps.cpp';path.write_text(source);binary=tmp_path/'timestamps'
+    built=subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror',str(path),'-o',str(binary)],capture_output=True,text=True,timeout=30)
+    assert built.returncode==0,built.stderr
+    subprocess.run([str(binary)],check=True,timeout=5)
