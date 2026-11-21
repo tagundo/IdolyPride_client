@@ -563,9 +563,41 @@
     return diagnosticSlice(value, MAX_DIAGNOSTIC_BYTES - utf8Length(marker), MAX_DIAGNOSTIC_WIRE_BYTES - markerWire).text + marker;
   }
 
+  Object.assign(UI_TRANSLATIONS.en, {"일시 정지":"Pause","계속하기":"Resume","MP4 일시 정지":"MP4 paused","MP4 일시 정지 중…":"Pausing MP4…","앱으로 돌아오면 이어서 처리합니다.":"Processing resumes when you return to the app.","게임 화면이 준비되면 계속할 수 있습니다.":"Resume when the game surface is ready.","계속하기를 누르면 이어서 처리합니다.":"Choose Resume to continue."});
+  Object.assign(UI_TRANSLATIONS.ja, {"일시 정지":"一時停止","계속하기":"再開","MP4 일시 정지":"MP4を一時停止中","MP4 일시 정지 중…":"MP4を一時停止しています…","앱으로 돌아오면 이어서 처리합니다.":"アプリに戻ると処理を再開します。","게임 화면이 준비되면 계속할 수 있습니다.":"ゲーム画面の準備ができたら再開できます。","계속하기를 누르면 이어서 처리합니다.":"再開を押すと処理を続けます。"});
+
+  Object.assign(UI_TRANSLATIONS.en, {
+    "MV를 모은 뒤 큐를 실행하세요.":"Add MVs, then run the queue.",
+    "큐 실행":"Run queue","현재 MV 추가":"Add current MV","큐 일시 정지":"Pause queue","큐 계속하기":"Resume queue",
+    "큐 실행 중":"Queue running","작업 목록":"Jobs","등록한 작업이 없습니다.":"No jobs added.","MP4 작업 목록":"MP4 jobs",
+    "앱을 나가면 멈추고 돌아오면 이어집니다.":"Export pauses when you leave the app and resumes when you return.",
+    "현재 MV 바로 내보내기":"Export current MV now","내보내는 중":"Exporting","완료":"Complete","실패":"Failed","중단됨 · 다시 시도 가능":"Interrupted · retry available",
+    "명":"performers","저장·공유":"Save / Share","위로":"Move up","아래로":"Move down","목록에서 제거":"Remove from list",
+    "파일·작업 삭제":"Delete file and job","삭제 확인":"Confirm deletion",
+    "보관 중인 MP4와 작업을 삭제합니다. 외부에 저장한 파일은 유지됩니다.":"Delete the stored MP4 and its job. Files saved elsewhere are kept.",
+    "MP4 작업을 처리하지 못했습니다. 다시 시도해 주세요.":"Couldn't process this MP4 job. Please try again."
+  });
+  Object.assign(UI_TRANSLATIONS.ja, {
+    "MV를 모은 뒤 큐를 실행하세요.":"MVを追加してからキューを実行してください。",
+    "큐 실행":"キューを実行","현재 MV 추가":"現在のMVを追加","큐 일시 정지":"キューを一時停止","큐 계속하기":"キューを再開",
+    "큐 실행 중":"キューを実行中","작업 목록":"処理リスト","등록한 작업이 없습니다.":"登録された処理はありません。","MP4 작업 목록":"MP4処理リスト",
+    "앱을 나가면 멈추고 돌아오면 이어집니다.":"アプリを離れると一時停止し、戻ると処理を再開します。",
+    "현재 MV 바로 내보내기":"現在のMVをすぐに書き出す","내보내는 중":"書き出し中","완료":"完了","실패":"失敗","중단됨 · 다시 시도 가능":"中断 · 再試行できます",
+    "명":"人","저장·공유":"保存・共有","위로":"上へ","아래로":"下へ","목록에서 제거":"リストから削除",
+    "파일·작업 삭제":"ファイルと処理を削除","삭제 확인":"削除を確定",
+    "보관 중인 MP4와 작업을 삭제합니다. 외부에 저장한 파일은 유지됩니다.":"保管中のMP4と処理を削除します。外部に保存したファイルは残ります。",
+    "MP4 작업을 처리하지 못했습니다. 다시 시도해 주세요.":"MP4の処理に失敗しました。再試行してください。"
+  });
+
   function validRequest(action, payload) {
-    if (["mp4_status","mp4_cancel","mp4_save"].includes(action)) return exact(payload, []);
-    if (action === "mp4_start") return exact(payload,["fps","video_bitrate","video_codec"])
+    const mp4ID = value => typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
+    if (["mp4_queue_status","mp4_queue_run","mp4_queue_pause","mp4_queue_resume"].includes(action)) return exact(payload, []);
+    if (["mp4_queue_cancel","mp4_queue_retry"].includes(action)) return exact(payload,["job_id"]) && mp4ID(payload.job_id);
+    if (action === "mp4_queue_remove") return mp4ID(payload.job_id) && (exact(payload,["job_id"]) || (exact(payload,["job_id","delete_output"]) && payload.delete_output === true));
+    if (action === "mp4_queue_move") return exact(payload,["job_id","position"]) && mp4ID(payload.job_id) && integer(payload.position) && payload.position <= 7;
+    if (action === "mp4_save") return exact(payload,[]) || (exact(payload,["job_id"]) && mp4ID(payload.job_id));
+    if (["mp4_status","mp4_pause","mp4_resume","mp4_cancel","mp4_save"].includes(action)) return exact(payload, []);
+    if (action === "mp4_start" || action === "mp4_enqueue") return exact(payload,["fps","video_bitrate","video_codec"])
       && choice(payload.fps,[30,60]) && choice(payload.video_bitrate,[8000000,16000000,32000000]) && choice(payload.video_codec,[1,2]);
     if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
     if (action === "events_status") return exact(payload, []) || (exact(payload, ["mode"]) && choice(payload.mode, ["normal", "media"]));
@@ -794,7 +826,7 @@
       }
       if (focus && typeof el("category-"+key).focus === "function") el("category-"+key).focus();
       saveLayout();
-      if (key === "graphics") Promise.resolve().then(() => mp4("status"));
+      if (key === "graphics") Promise.resolve().then(() => { mp4("status"); mp4Queue("status"); });
     }
     function initializeLayout() {
       let stored = null;
@@ -835,6 +867,7 @@
     };
     let snapshot = null;
     let mp4Status = {phase:"idle",ready:false}, mp4Pending = false, mp4Feedback = "";
+    let mp4QueueStatus = {available:false,running:false,phase:"idle",jobs:[]}, mp4QueuePending = false, mp4QueueFeedback = "", mp4QueueRowsKey = "";
     let visible = document.visibilityState !== "hidden";
     let disposed = false;
     let pollTimer = null;
@@ -859,19 +892,101 @@
     let eventSnapshot = null, eventRows = [], eventCatalogKey = "";
 
     function renderMP4() {
-      const phase = mp4Status.phase, active = ["preparing_audio","rendering","finishing","cancelling"].includes(phase);
-      const label = {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패"}[phase] || "3D MV 준비 대기";
+      const phase = mp4Status.phase, paused = phase === "paused" || phase === "pausing", active = ["preparing_audio","rendering","finishing","cancelling","pausing","paused"].includes(phase);
+      const queuedOutput = Boolean(mp4Status.export_id) && mp4QueueStatus.jobs.some(job => job.output_id === mp4Status.export_id);
+      const queueOwnsScene = mp4QueueStatus.running === true || mp4QueueStatus.paused === true || Boolean(mp4QueueStatus.current_job_id);
+      const label = {idle:"3D MV 준비 대기",preparing_audio:"음원 준비 중",rendering:"MP4 렌더링",finishing:"MP4 마무리 중",completed:"MP4 완료",cancelling:"취소 중",cancelled:"취소됨",failed:"MP4 실패",pausing:"MP4 일시 정지 중…",paused:"MP4 일시 정지"}[phase] || "3D MV 준비 대기";
       const frames = count(mp4Status.frames), total = count(mp4Status.total_frames);
       const geometry = integer(mp4Status.width) && integer(mp4Status.height) && mp4Status.width && mp4Status.height ? " · "+mp4Status.width+" × "+mp4Status.height : "";
       text("mp4-summary",t(label)+(total ? " · "+frames+" / "+total : "")+geometry,false);
-      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : phase === "failed" ? plain(mp4Status.error_code,128) : "",false);
+      const pauseHint = mp4Status.pause_reason === "lifecycle_background" ? "앱으로 돌아오면 이어서 처리합니다."
+        : mp4Status.pause_reason === "surface_unavailable" ? "게임 화면이 준비되면 계속할 수 있습니다." : "계속하기를 누르면 이어서 처리합니다.";
+      text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128) : "",false);
       el("mp4-progress").hidden = !active && phase !== "completed";
       el("mp4-progress").value = total ? Math.min(1,frames/total) : 0;
       el("mp4-fields").disabled = mp4Pending || active;
-      el("mp4-start").disabled = mp4Pending || active || mp4Status.ready !== true || launchFlushing;
+      el("mp4-start").disabled = mp4Pending || active || queueOwnsScene || mp4Status.ready !== true || launchFlushing;
       el("mp4-cancel").disabled = mp4Pending || !active || phase === "cancelling";
-      el("mp4-save").hidden = phase !== "completed";
+      el("mp4-cancel").hidden = queuedOutput;
+      el("mp4-pause").hidden = queuedOutput || !["preparing_audio","rendering"].includes(phase);
+      el("mp4-pause").disabled = mp4Pending;
+      el("mp4-resume").hidden = queuedOutput || phase !== "paused";
+      el("mp4-resume").disabled = mp4Pending;
+      el("mp4-save").hidden = queuedOutput || phase !== "completed";
       el("mp4-save").disabled = mp4Pending;
+      renderMP4Queue();
+    }
+    function renderMP4Queue() {
+      const q = mp4QueueStatus, jobs = q.jobs, pending = jobs.filter(job => job.state === "pending").length;
+      const locked = mp4QueuePending || q.command_pending === true || launchFlushing;
+      const paused = q.phase === "paused";
+      text("mp4-queue-summary",jobs.length ? t(paused ? "큐 일시 정지" : q.running ? "큐 실행 중" : "작업 목록")+" · "+jobs.length+" / 8" : t("등록한 작업이 없습니다."),false);
+      text("mp4-queue-feedback",mp4QueueFeedback ? t(mp4QueueFeedback) : q.error_code && q.error_code !== "none" ? plain(q.error_code,128) : "",false);
+      el("mp4-enqueue").disabled = locked || q.available !== true || q.running === true || jobs.length >= 8 || mp4Status.ready !== true;
+      el("mp4-queue-run").disabled = locked || q.available !== true || q.can_run !== true || q.running === true || !pending;
+      el("mp4-queue-pause").hidden = q.running !== true || paused;
+      el("mp4-queue-pause").disabled = locked;
+      el("mp4-queue-resume").hidden = !paused;
+      el("mp4-queue-resume").disabled = locked;
+      const rowsKey = JSON.stringify([jobs,locked,interfaceChoice]);
+      if (rowsKey === mp4QueueRowsKey) return;
+      mp4QueueRowsKey = rowsKey;
+      const labels = {pending:"대기",running:"내보내는 중",paused:"일시 정지",completed:"완료",failed:"실패",cancelled:"취소됨",interrupted:"중단됨 · 다시 시도 가능"};
+      const rows = jobs.map((job,index) => {
+        const item = document.createElement("li"); item.className = "mp4-job";
+        const title = document.createElement("h3"); title.className = "mp4-job-title";
+        const titles = object(job.title_localizations) ? job.title_localizations : {};
+        title.textContent = (index+1)+". "+(plain(titles[language] || job.title,192) || "MV "+(index+1));
+        const info = document.createElement("p"); info.className = "hint";
+        info.textContent = t(labels[job.state])+" · "+count(job.actor_count)+" "+t("명")+" · "+count(job.fps_num)+" fps · "+count(job.width)+" × "+count(job.height);
+        const controls = document.createElement("div"); controls.className = "actions";
+        const buttons = [];
+        function button(label,action,payload) { const node = document.createElement("button"); node.type = "button"; node.className = "secondary"; node.textContent = t(label); node.disabled = locked; node.addEventListener("click",() => mp4Queue(action,payload)); buttons.push(node); }
+        if (job.state === "completed") button("저장·공유","save",{job_id:job.job_id});
+        if (["failed","cancelled","interrupted"].includes(job.state)) button("다시 시도","retry",{job_id:job.job_id});
+        if (["pending","running","paused"].includes(job.state)) button("취소","cancel",{job_id:job.job_id});
+        if (job.state === "pending") {
+          if (index > 0) button("위로","move",{job_id:job.job_id,position:index-1});
+          if (index+1 < jobs.length) button("아래로","move",{job_id:job.job_id,position:index+1});
+        }
+        if (job.state === "completed") {
+          const remove = document.createElement("button"); remove.type = "button"; remove.className = "secondary danger";
+          remove.textContent = t("파일·작업 삭제"); remove.disabled = locked;
+          let confirmUntil = 0;
+          remove.addEventListener("click",() => {
+            if (Date.now() < confirmUntil) { mp4Queue("remove",{job_id:job.job_id,delete_output:true}); return; }
+            confirmUntil = Date.now()+5000; remove.textContent = t("삭제 확인");
+            error.textContent = t("보관 중인 MP4와 작업을 삭제합니다. 외부에 저장한 파일은 유지됩니다.");
+          }); buttons.push(remove);
+        } else if (!["running","paused"].includes(job.state)) button("목록에서 제거","remove",{job_id:job.job_id});
+        controls.replaceChildren(...buttons);
+        const error = document.createElement("p"); error.className = "hint";
+        error.textContent = job.error_code && job.error_code !== "none" ? plain(job.error_code,128) : "";
+        item.replaceChildren(title,info,controls,error); return item;
+      });
+      el("mp4-queue-jobs").replaceChildren(...rows);
+    }
+    async function mp4Queue(action,payload) {
+      if (!visible || disposed || mp4QueuePending || launchFlushing) return;
+      if (action === "status" && (selectedCategory !== "graphics" || !el("panel-mp4").open)) return;
+      if (action !== "status" && mp4QueueStatus.command_pending === true) return;
+      if (action === "enqueue") payload = {fps:Number(el("mp4-fps").value),video_bitrate:Number(el("mp4-bitrate").value),video_codec:Number(el("mp4-codec").value)};
+      const command = action === "enqueue" ? "mp4_enqueue" : action === "save" ? "mp4_save" : "mp4_queue_"+action;
+      payload = payload || {};
+      if (!validRequest(command,payload)) return;
+      mp4QueuePending = true; renderMP4Queue(); const visibility = visibilityVersion;
+      try {
+        const result = await bridge.request(command,payload);
+        if (!visible || disposed || visibility !== visibilityVersion) return;
+        if (action !== "save") {
+          const states = ["pending","running","paused","completed","failed","cancelled","interrupted"];
+          if (!object(result) || !Array.isArray(result.jobs) || result.jobs.length > 8 || result.jobs.some(job => !object(job) || !/^[0-9a-f]{32}$/.test(job.job_id) || !states.includes(job.state))) throw new Error("mp4_unavailable");
+          mp4QueueStatus = result;
+        }
+        mp4QueueFeedback = "";
+      } catch (error) {
+        if (visible && !disposed && visibility === visibilityVersion && action !== "status") mp4QueueFeedback = "MP4 작업을 처리하지 못했습니다. 다시 시도해 주세요.";
+      } finally { mp4QueuePending = false; if (!disposed) renderMP4(); }
     }
     async function mp4(action) {
       if (!visible || disposed || mp4Pending || launchFlushing) return;
@@ -883,7 +998,7 @@
         const result = await bridge.request("mp4_"+action,payload);
         if (!visible || disposed || visibility !== visibilityVersion) return;
         if (action !== "save") {
-          if (!object(result) || !["idle","preparing_audio","rendering","finishing","completed","cancelling","cancelled","failed"].includes(result.phase)) throw new Error("mp4_unavailable");
+          if (!object(result) || !["idle","preparing_audio","rendering","finishing","completed","cancelling","cancelled","failed","pausing","paused"].includes(result.phase)) throw new Error("mp4_unavailable");
           mp4Status = result;
         }
         mp4Feedback = "";
@@ -1641,7 +1756,7 @@
       } finally {
         refreshing = false;
         if (!disposed) el("refresh").disabled = false;
-        if (visible && !disposed) mp4("status");
+        if (visible && !disposed) { mp4("status"); mp4Queue("status"); }
         schedulePoll();
       }
     }
@@ -1918,8 +2033,10 @@
     }
     initializeLayout();
     applyInterfaceLanguage(interfaceChoice);
-    for (const action of ["start","cancel","save"]) el("mp4-"+action).addEventListener("click",() => mp4(action));
-    el("panel-mp4").addEventListener("toggle",() => mp4("status"));
+    for (const action of ["start","pause","resume","cancel","save"]) el("mp4-"+action).addEventListener("click",() => mp4(action));
+    for (const action of ["run","pause","resume"]) el("mp4-queue-"+action).addEventListener("click",() => mp4Queue(action));
+    el("mp4-enqueue").addEventListener("click",() => mp4Queue("enqueue"));
+    el("panel-mp4").addEventListener("toggle",() => { mp4("status"); mp4Queue("status"); });
     updateCopyButton();
     el("diagnostics-copy").addEventListener("click", copyDiagnostics);
     el("diagnostics-clear").addEventListener("click", clearDiagnostics);

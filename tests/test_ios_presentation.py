@@ -92,9 +92,9 @@ def test_original_cache_conditional_gateway_executes_both_paths(item_pointer):
 def test_canonical_ios_plan_binds_formal_header_and_zero_fill_slots():
     plan, profile = p.make_plan(), p.load_profile()
     header = p.render_header(plan)
-    assert hashlib.sha256(header).hexdigest() == "afbc5311f671de6535f57e86c59126f3b7235c5018d9a05a863a9512e8066d15"
+    assert hashlib.sha256(header).hexdigest() == "03f9d0302547ac13fac535c989e7db515665545f6d4c1573ee46e9daa79a45f5"
     assert header == (p.PROFILE.parent / "ios_profile.hpp").read_bytes()
-    assert len(profile["aliases"]) == 127 and len(plan["entries"]) == 52
+    assert len(profile["aliases"]) == 128 and len(plan["entries"]) == 53
     data = profile["segments"]["__DATA"]
     for name, entry in plan["entries"].items():
         assert entry["slot"] >= max(data["section_end"], data["rva"] + data["filesize"])
@@ -138,7 +138,7 @@ def test_shared_cache_hooks_preserve_real_settings_and_loader_boundaries():
 def test_offline_mv_hooks_append_only_and_preserve_final_camera_value_type_abi():
     profile, plan = p.load_profile(), p.make_plan()
     hooks = ("mp4_presenter_update", "mp4_capture_pass", "mp4_end_camera")
-    assert tuple(profile["hook_names"][-6:-3]) == hooks
+    assert tuple(profile["hook_names"][46:49]) == hooks
     expected = ((0x30F1EE4, False, []),
                 (0x76798D8, False, ["UnityEngine.Rendering.ScriptableRenderContext",
                                    "UnityEngine.Rendering.Universal.RenderingData&"]),
@@ -207,8 +207,8 @@ def test_costume_sort_uses_original_typed_method_and_appends_one_static_gateway(
     hook = plan["entries"]["costume_sorted"]
     assert hook["gateway"] == profile["gateway_region"]["rva"] + 31 * 32
     assert hook["slot"] == profile["slot_region"]["rva"] + 31 * 8
-    assert profile["gateway_region"]["bytes"] == 52 * 32
-    assert profile["slot_region"]["bytes"] == 52 * 8
+    assert profile["gateway_region"]["bytes"] == 53 * 32
+    assert profile["slot_region"]["bytes"] == 53 * 8
     assert profile["media_costume_sort"]["same_character_predicate"] is True
     assert profile["media_costume_sort"]["account_data_or_acquisition_timestamps_changed"] is False
     installer = (p.PROFILE.parent / "static_install.hpp").read_text()
@@ -239,8 +239,8 @@ def test_prepare_preserves_existing_output_and_dangling_links(tmp_path):
 
 def test_gateway_and_slot_declared_extents_cover_every_hook(monkeypatch):
     original = p.load_profile()
-    assert original["gateway_region"]["bytes"] == 52 * 32
-    assert original["slot_region"]["bytes"] == 52 * 8
+    assert original["gateway_region"]["bytes"] == 53 * 32
+    assert original["slot_region"]["bytes"] == 53 * 8
     for region, length in (("gateway_region", 32 * 32), ("slot_region", 32 * 8)):
         changed = copy.deepcopy(original)
         changed[region]["bytes"] = length

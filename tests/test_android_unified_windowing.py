@@ -64,11 +64,12 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
           public class Activity extends android.content.Context {
             public final android.view.Window window=new android.view.Window();
             public final android.content.res.Resources resources=new android.content.res.Resources();
-            public int creates,pauses,resumes,destroys,starts,dispatches,cancels,configs,multiWindows,focusEvents;
+            public int creates,pauses,resumes,destroys,starts,dispatches,cancels,configs,multiWindows,focusEvents,startCallbacks,stopCallbacks;
             public boolean lastFocus,multiWindow;public Configuration lastConfig,lastMultiConfig;
             public android.content.Intent started;
             protected void onCreate(android.os.Bundle b){creates++;}protected void onPause(){pauses++;}protected void onDestroy(){destroys++;}
-            protected void onResume(){resumes++;}public boolean isInMultiWindowMode(){return multiWindow;}
+            protected void onResume(){resumes++;}protected void onStart(){startCallbacks++;}protected void onStop(){stopCallbacks++;}
+            public boolean isInMultiWindowMode(){return multiWindow;}
             protected void onSaveInstanceState(android.os.Bundle b){}protected void onActivityResult(int r,int c,android.content.Intent i){}
             public boolean dispatchTouchEvent(android.view.MotionEvent e){dispatches++;if(e.getActionMasked()==3)cancels++;return false;}
             public void onConfigurationChanged(Configuration c){configs++;lastConfig=c;}
@@ -94,6 +95,8 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
         static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
         static void focusChanged(android.app.Activity a,boolean focused){}
         static void gamePaused(android.app.Activity a){}static void gameResumed(android.app.Activity a){}static void gameDestroyed(android.app.Activity a){}
+        static void gameStarted(android.app.Activity a){}static void gameStopped(android.app.Activity a){}
+        static void gameResuming(android.app.Activity a){}static void gamePauseCompleted(android.app.Activity a){}
         static void saveState(android.os.Bundle b){}static boolean activityResult(android.app.Activity a,int r,int c,android.content.Intent i){return false;} }'''
     sources[package + "UnifiedWindowing.java"] = '''package game.qualiarts.idolypride.localserver;
       final class UnifiedWindowing {static int calls;static boolean mode;static void update(boolean m){calls++;mode=m;} }'''
@@ -110,6 +113,7 @@ def test_window_changes_keep_game_and_cancel_old_touch_without_restart(tmp_path)
           need("selected-data.zip".equals(a.getPackageCodePath()),"Data path changed");}
         public static void main(String[] args){
           UnifiedGameActivity a=new UnifiedGameActivity();a.onCreate(null);View decor=a.getWindow().getDecorView();
+          a.onStart();a.onStop();need(a.startCallbacks==1&&a.stopCallbacks==1,"original Unity start/stop callbacks must run once");
           need(UnifiedWindowing.calls==1&&!UnifiedWindowing.mode,"initial window mode missing");
           need(decor.listenerCount()==1,"missing listener");alive(a);
           down(a,900,50);decor.layout(0,0,400,800);need(a.cancels==1,"old touch not cancelled once");

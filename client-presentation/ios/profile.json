@@ -2319,6 +2319,37 @@
       "return_type": "System.Void",
       "registration_pointer_slot_rva": 171095232,
       "prefix16": "ffc301d1eb2b016de923026df85f03a9"
+    },
+    "mp4_player_initialize": {
+      "name": "Solis.Common.SolisLivePlayer.InitializeAsync",
+      "module": "solis-submodule.Runtime.dll",
+      "type_definition_index": 23326,
+      "metadata_method_index": 159992,
+      "token_row": 1975,
+      "rva": 117040808,
+      "return_type_index": 76556,
+      "parameters": [
+        {
+          "name": "param",
+          "metadata_type_index": 73143,
+          "type_name": "Solis.Common.SolisLivePlayerParam"
+        },
+        {
+          "name": "autoSetupBinder",
+          "metadata_type_index": 50275,
+          "type_name": "System.Boolean"
+        },
+        {
+          "name": "ct",
+          "metadata_type_index": 50712,
+          "type_name": "System.Threading.CancellationToken"
+        }
+      ],
+      "parameter_count": 3,
+      "method_flags": 134,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "registration_pointer_slot_rva": 175308288,
+      "prefix16": "ff4302d1f85f05a9f65706a9f44f07a9"
     }
   },
   "hook_names": [
@@ -2373,7 +2404,8 @@
     "mp4_end_camera",
     "mp4_graph_mode",
     "mp4_brain_delta",
-    "mp4_core_camera"
+    "mp4_core_camera",
+    "mp4_player_initialize"
   ],
   "segments": {
     "__TEXT": {
@@ -2415,12 +2447,12 @@
   },
   "gateway_region": {
     "rva": 158892112,
-    "bytes": 1664,
+    "bytes": 1696,
     "original_zero": true
   },
   "slot_region": {
     "rva": 179886264,
-    "bytes": 416,
+    "bytes": 424,
     "zero_fill_after_all_sections": true
   },
   "field_offsets": {
@@ -2584,7 +2616,7 @@
   },
   "offline_mv_export": {
     "schema": 1,
-    "hook_count": 6,
+    "hook_count": 7,
     "scope": "Owned MV and actor graph modes, scoped camera clock and final-frame completion",
     "binding_profile": "client-presentation/native/mp4_game_ios_profile.json",
     "original_input_whole_sha256_verified": true,

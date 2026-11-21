@@ -103,14 +103,13 @@ class MP4AudioBroker:
 
     def __init__(self, store, app_private_dir, *, max_pending=8, max_responses=64,
                  max_prepared=64, max_prepared_bytes=512 * 1024 * 1024,
-                 response_ttl_seconds=600, poll_seconds=0.1):
+                 poll_seconds=0.1):
         if type(store) is not SharedResourceStore:
             raise TypeError("A verified shared resource store is required")
         for value, maximum in ((max_pending, 8), (max_responses, 64), (max_prepared, 64)):
             if type(value) is not int or not 1 <= value <= maximum:
                 raise ValueError("Invalid MP4 audio preparation capacity")
         if (type(max_prepared_bytes) is not int or not 1 <= max_prepared_bytes <= 512 * 1024 * 1024
-                or type(response_ttl_seconds) not in (int, float) or not 600 <= response_ttl_seconds <= 3600
                 or type(poll_seconds) not in (int, float) or not 0.005 <= poll_seconds <= 1):
             raise ValueError("Invalid MP4 audio preparation limits")
         supplied = Path(app_private_dir)
@@ -126,12 +125,18 @@ class MP4AudioBroker:
         self._selected, self._prepared = OrderedDict(), {}
         self._max_pending, self._max_responses = max_pending, max_responses
         self._max_prepared, self._max_prepared_bytes = max_prepared, max_prepared_bytes
-        self._response_ttl, self._poll_seconds = response_ttl_seconds, poll_seconds
+        self._poll_seconds = poll_seconds
         self._received = self._ready = self._failed = self._rejected = self._prepared_bytes = 0
         self._epoch, self._capability = secrets.randbelow(2**53 - 1) + 1, secrets.token_bytes(16)
         self._fds, self._directories = {}, {}
         self._active_identity = self._reaper = None
-        self._create_session()
+        from .mp4_export_library import MP4ExportLibrary
+        self._export_library = MP4ExportLibrary(self._private)
+        try:
+            self._create_session()
+        except BaseException:
+            self._export_library.close()
+            raise
         self._worker_thread = threading.Thread(target=self._worker, name="idoly-mp4-audio", daemon=True)
         self._scanner_thread = threading.Thread(target=self._scan_loop, name="idoly-mp4-audio-ipc", daemon=True)
         try:
@@ -218,12 +223,15 @@ class MP4AudioBroker:
 
     def configuration(self):
         """Private native descriptor; capability and paths never enter status."""
+        from .mp4_titles import title_catalog
         with self._fs_lock:
             self._check()
             return {"schema": 1, "available": True, "directory": str(self._root),
                     "epoch": self._epoch, "capability": self._capability.hex(),
                     "export_directory": str(self._root / "exports"),
-                    "temporary_directory": str(self._root / "tmp")}
+                    "temporary_directory": str(self._root / "tmp"),
+                    "title_catalog": title_catalog(),
+                    **self._export_library.configuration()}
 
     def status(self):
         with self._lock:
@@ -318,7 +326,7 @@ class MP4AudioBroker:
         self._check()
         with self._lock:
             self._prune_prepared_locked()
-            for name, (identity, created) in tuple(self._responses.items()):
+            for name, (identity, _created) in tuple(self._responses.items()):
                 try:
                     info = os.stat(name, dir_fd=self._fds["rsp"], follow_symlinks=False)
                 except FileNotFoundError:
@@ -326,12 +334,10 @@ class MP4AudioBroker:
                     continue
                 if _identity(info) != identity:
                     raise AudioBrokerError()
-                if monotonic() - created >= self._response_ttl:
-                    try:
-                        os.unlink(name, dir_fd=self._fds["rsp"])
-                    except FileNotFoundError:
-                        pass
-                    del self._responses[name]
+                # A suspended Unity owner may need this response hours later.
+                # Keep both success and error replies until it consumes them
+                # or this capability session retires. Capacity stays bounded
+                # by max_responses, including requests still in preparation.
             if len(self._responses) + len(self._pending) >= self._max_responses:
                 return
         with os.scandir(self._fds["req"]) as entries:
@@ -510,5 +516,6 @@ class MP4AudioBroker:
             for descriptor in self._fds.values():
                 os.close(descriptor)
             self._fds.clear()
+            self._export_library.close()
         with self._lock:
             self._pending.clear()

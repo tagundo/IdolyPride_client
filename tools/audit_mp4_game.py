@@ -117,7 +117,8 @@ def build_profile(metadata:bytes,native:bytes)->dict:
     structs={name.rsplit('.',1)[-1]:original.struct_layout(name) for name in (
         'UnityEngine.Rect','UnityEngine.Rendering.AsyncGPUReadbackRequest',
         'UnityEngine.Rendering.RenderTargetIdentifier','UnityEngine.Rendering.ScriptableRenderContext',
-        'UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream')}
+        'UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream',
+        'Cysharp.Threading.Tasks.UniTask','System.Threading.CancellationToken')}
     runtime_types={}
     for name in ('System.Single','UnityEngine.AudioClip','UnityEngine.Texture2D'):
         tid=original.type_id(name);row=original.types[tid][1];type_index=row[2];pointer=original.qword(original.type_table+type_index*8)
@@ -136,6 +137,7 @@ def render_header(android:dict,ios:dict)->str:
         'namespace idoly_mp4_game {','struct Binding { uintptr_t rva; uint8_t prefix[16]; };','struct GameProfile {']
     lines += ['    Binding '+alias+';' for alias in aliases];lines+=['};']
     for platform,profile in [('android',android),('ios',ios)]:
+        lines+=['inline constexpr char '+platform+'_original_sha256[] = "'+profile['sources']['native_sha256']+'";']
         lines+=['inline constexpr GameProfile '+platform+'_game_profile = {']
         for alias in aliases:
             method=profile['methods'][alias];prefix=bytes.fromhex(method['prefix']);need(len(prefix)==16,'prefix_length')

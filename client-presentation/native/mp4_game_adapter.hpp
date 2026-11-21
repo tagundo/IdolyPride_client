@@ -66,6 +66,9 @@ struct Api {
     void (*brain_manual_update)(void*,Method*)=nullptr;
     bool (*camera_clock_ok)()=nullptr;
     void* (*brain_output_camera)(void*,Method*)=nullptr;
+    int32_t (*camera_pixel_width)(void*,Method*)=nullptr;
+    int32_t (*camera_pixel_height)(void*,Method*)=nullptr;
+    bool (*source_geometry)(void*,int32_t*,int32_t*)=nullptr;
     void* (*director_get_asset)(void*,Method*)=nullptr;
     double (*director_get_time)(void*,Method*)=nullptr;
     double (*director_get_duration)(void*,Method*)=nullptr;
@@ -140,6 +143,18 @@ public:
     const Snapshot& description() const { return snapshot_; }
     const char* last_error() const { return error_; }
     bool manual() const { return manual_; }
+    void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
+    void* selected_player()const {void* presenter=selected_presenter();void* value=field<void*>(presenter,layout_.presenter_player);return type(value,"Solis.Common.SolisLivePlayer")&&live(value)?value:nullptr;}
+    Result source_geometry(int32_t& width,int32_t& height)const {
+        if(api_.source_geometry){
+            void* controller=get(camera_controller_);
+            if(!controller||!live(controller)||!api_.source_geometry(controller,&width,&height))return Result::waiting;
+            return width>=16&&height>=16&&width<=4096&&height<=4096&&!(width%2)&&!(height%2)?Result::ok:Result::unsupported;
+        }
+        void* camera=get(camera_);if(!camera||!live(camera)||!api_.camera_pixel_width||!api_.camera_pixel_height)return Result::waiting;
+        width=api_.camera_pixel_width(camera,nullptr);height=api_.camera_pixel_height(camera,nullptr);
+        return width>=16&&height>=16&&width<=4096&&height<=4096&&!(width%2)&&!(height%2)?Result::ok:Result::unsupported;
+    }
 private:
     template<class T> static T field(const void* p,size_t offset) { T value{};if(p)std::memcpy(&value,static_cast<const uint8_t*>(p)+offset,sizeof(T));return value; }
     bool type(void* p,const char* name) const { return p&&api_.is_type&&api_.is_type(p,name); }

@@ -29,7 +29,7 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.1"
+VERSION = "2026.11.21.2"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
@@ -38,10 +38,16 @@ MAX_FILE = 768 * MIB
 CODEC_WAIT = 2400
 MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_encoder_api.h", "mp4_android_encoder.hpp", "mp4_game_adapter.hpp", "mp4_game_bindings.hpp", "mp4_runtime.hpp",
+    "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
+    "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp",
     "shared_cache_core.hpp", "shared_cache_hooks.hpp")}
 MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Background.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Service.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4QueueUiState.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4TitleCatalog.java",
             "android-server/app/src/main/python/android_server_runtime.py",
-            "src/idoly_local/mp4_audio_broker.py", "src/idoly_local/mp4_audio_bundle.py"}
+            "src/idoly_local/mp4_audio_broker.py", "src/idoly_local/mp4_audio_bundle.py", "src/idoly_local/mp4_export_library.py", "src/idoly_local/mp4_titles.py"}
 
 
 def need(value, message):
@@ -120,7 +126,8 @@ def android_files(folder, source):
     source_pins(native.get("source_sha256"), ROOT, MP4_NATIVE | {"client-presentation/native/mp4_android_session.hpp"})
     exports = native.get("jni_exports", [])
     need(type(exports) is list and {"Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_native" + method
-        for method in ("Configure", "Start", "Status", "Cancel", "Ready")} <= set(exports), "mp4_native_exports_missing")
+        for method in ("Configure", "Start", "Status", "Cancel", "Ready", "Suspend", "Resume",
+                       "QueueConfigure", "QueueEnqueue", "QueueRun", "QueuePause", "QueueResume", "QueueCommand", "QueueStatus")} <= set(exports), "mp4_native_exports_missing")
     rows = {row["path"]: row["sha256"] for row in proof["source_files"]}
     need(MP4_JAVA <= rows.keys(), "mp4_app_sources_missing")
     source_pins({name: rows[name] for name in MP4_JAVA}, ROOT, MP4_JAVA)
@@ -174,14 +181,14 @@ def ios_files(folder, source):
     need(native.get("codesign_strict_verified") is True and native.get("smoke_probe_only") is False
          and native.get("MachO", {}).get("platform") == 2, "ios_native_target_differs")
     source_pins(native.get("source_sha256"), ROOT / "ios-unified/native", {
-        "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m",
+        "IdolyMP4UI.h", "IdolyMP4UI.m", "IdolyMVEncoder.mm", "IdolyEmbeddedServer.m", "IdolySettings.m", "MP4LifecyclePolicy.h",
         "../../client-presentation/native/mp4_encoder_api.h"})
     presentation = read(folder / "presentation-native-build.json")
     source_pins(presentation.get("source_sha256"), ROOT, MP4_NATIVE)
     runtime = read(folder / "device-runtime-report.json")
     need(runtime.get("target") == "device" and runtime.get("frameworks_codesign_verify_passed") is True,
          "ios_runtime_target_differs")
-    for name in ("idoly_local.mp4_audio_bundle", "idoly_local.mp4_audio_broker"):
+    for name in ("idoly_local.mp4_audio_bundle", "idoly_local.mp4_audio_broker", "idoly_local.mp4_export_library", "idoly_local.mp4_titles"):
         need(runtime.get("source_sha256", {}).get(name) == sha(ROOT / "src" / (name.replace(".", "/") + ".py")), "mp4_python_source_differs")
     ui, codec = read(folder / "mp4-ui-compile.json"), read(folder / "mp4-codec-report.json")
     need(ui.get("status") == "PASS_APPLE_UIKIT_COMPILE_ONLY" and codec.get("status") == "PASS_SYNTHETIC_CODEC_ONLY"
@@ -213,7 +220,7 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.1", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1121.2", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
         need(members[app + "LocalServer/ServerData.zip"] == data_pin.output_pin()["sha256"], "ipa_server_data_pin_differs")
@@ -545,6 +552,9 @@ def stage_from_producer(source, work, *, producer):
         manifest.write_text(json.dumps({"schema": 1, "source_commit": source, "version": VERSION, **delivery,
             "producer_run_id": run_id, "producer_run_attempt": attempt, "artifacts": built,
             "codec_workflow": codec, "checks": details, "actual_game_mv_verified": False,
+            "queue": {"persistent": True, "actual_game_sequential_mv_verified": False},
+            "background": {"android": "experimental_opt_in", "android_device_verified": False,
+                           "ios": "pause_and_resume", "ios_background_rendering": False},
             "files": [{"name": path.name, "bytes": path.stat().st_size, "sha256": sha(path)} for path in paths]}, indent=2) + "\n")
         paths.append(manifest)
         sums = work / "SHA256SUMS"
@@ -576,6 +586,7 @@ def stage_from_producer(source, work, *, producer):
             need(len(matches) == 1, "uploaded_asset_missing_or_duplicate")
             proof["verified_assets"].append(verify_asset(matches[0], path, work)); save()
         body = ("Offline MP4 APK and IPA preview built from `" + source + "`.\n\n"
+                "Persistent MV export queue with reordering, retry and per-job saving. Android background rendering is experimental and off by default; iOS pauses and resumes when returning.\n\n"
                 "Both current-source codec jobs passed. The IPA also passed its five-process language/core Simulator checks.\n"
                 "Actual game MV rendering, device export fidelity and PlayCover execution remain unverified.\n\n"
                 "Every asset was downloaded in full and SHA-256 verified. See MP4-PREVIEW-VERIFICATION.json and SHA256SUMS.\n")

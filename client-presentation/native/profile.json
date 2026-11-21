@@ -3451,6 +3451,33 @@
       ],
       "source": "mp4-original-typed-profile",
       "is_static": false
+    },
+    "mp4_player_initialize": {
+      "name": "Solis.Common.SolisLivePlayer.InitializeAsync",
+      "rva": "0x884690c",
+      "prefix16": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "module": "solis-submodule.Runtime.dll",
+      "token_row": 1975,
+      "return_type": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "Solis.Common.SolisLivePlayerParam",
+          "metadata_type_index": 73276
+        },
+        {
+          "name": "autoSetupBinder",
+          "type": "System.Boolean",
+          "metadata_type_index": 50428
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "source": "mp4-original-typed-profile",
+      "is_static": false
     }
   },
   "graphics_fields": [

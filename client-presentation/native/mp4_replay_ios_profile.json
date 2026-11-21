@@ -1,0 +1,572 @@
+{
+  "schema": 1,
+  "platform": "ios",
+  "sources": {
+    "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
+    "native_sha256": "b03bee7ede0f8e74c84b3e171f79bc3596e074281b42640eb70bd106474ff5bf"
+  },
+  "methods": {
+    "out_game_param_ctor": {
+      "type": "Solis.OutGame.OutGameLivePlayerParam",
+      "name": ".ctor",
+      "parameter_count": 2,
+      "static": false,
+      "rva": "0x2173648",
+      "prefix": "030080d216ab3815fa67bba9f85f01a9",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "stageAssetName",
+          "type": "System.String",
+          "metadata_type_index": 74127
+        },
+        {
+          "name": "timelineAssetName",
+          "type": "System.String",
+          "metadata_type_index": 74127
+        }
+      ],
+      "metadata_method_index": 7998,
+      "token_row": 7999,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa225340",
+      "native_abi": "void(void*,void*,void*,const MethodInfo*)"
+    },
+    "actor_descriptor_ctor": {
+      "type": "Solis.Common.SolisActorDescriptor",
+      "name": ".ctor",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x6f8712c",
+      "prefix": "010080d2ebae3014f657bda9f44f01a9",
+      "return": "System.Void",
+      "parameters": [],
+      "metadata_method_index": 159631,
+      "token_row": 1614,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0xa72f2b8",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "transition_param_ctor": {
+      "type": "Solis.OutGame.LivePlayerTransitionParam",
+      "name": ".ctor",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x30f5434",
+      "prefix": "010080d2d1cef814003840f9c0035fd6",
+      "return": "System.Void",
+      "parameters": [],
+      "metadata_method_index": 37042,
+      "token_row": 37043,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa25dee0",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "param_add_actor": {
+      "type": "Solis.Common.SolisLivePlayerParam",
+      "name": "AddActor",
+      "parameter_count": 6,
+      "static": false,
+      "rva": "0x6f9e33c",
+      "prefix": "fc6fbaa9fa6701a9f85f02a9f65703a9",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "characterId",
+          "type": "System.String",
+          "metadata_type_index": 74127
+        },
+        {
+          "name": "descriptor",
+          "type": "Solis.Common.SolisActorDescriptor",
+          "metadata_type_index": 73023
+        },
+        {
+          "name": "audienceAmount",
+          "type": "System.Int32",
+          "metadata_type_index": 61162
+        },
+        {
+          "name": "psylliumColerType",
+          "type": "System.Int32",
+          "metadata_type_index": 61162
+        },
+        {
+          "name": "actorIndex",
+          "type": "System.Int32",
+          "metadata_type_index": 61162
+        },
+        {
+          "name": "trackIndex",
+          "type": "System.Int32",
+          "metadata_type_index": 61162
+        }
+      ],
+      "metadata_method_index": 159979,
+      "token_row": 1962,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0xa72fd98",
+      "native_abi": "void(void*,void*,void*,int32_t,int32_t,int32_t,int32_t,const MethodInfo*)"
+    },
+    "scene_instance": {
+      "type": "Solis.OutGame.OutGameScenePresenter",
+      "name": "get_Instance",
+      "parameter_count": 0,
+      "static": true,
+      "rva": "0x2bf09d8",
+      "prefix": "f44fbea9fd7b01a9fd43009193e80390",
+      "return": "Solis.OutGame.OutGameScenePresenter",
+      "parameters": [],
+      "metadata_method_index": 19398,
+      "token_row": 19399,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa23b780",
+      "native_abi": "void*(const MethodInfo*)"
+    },
+    "scene_busy": {
+      "type": "Solis.OutGame.OutGameScenePresenter",
+      "name": "get_IsBusy",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x2bf0a94",
+      "prefix": "010080d2e1d80c15004440f9600000b4",
+      "return": "System.Boolean",
+      "parameters": [],
+      "metadata_method_index": 19403,
+      "token_row": 19404,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa23b7a8",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    },
+    "live_state": {
+      "type": "Solis.OutGame.ScreenState",
+      "name": "get_LivePlayer",
+      "parameter_count": 0,
+      "static": true,
+      "rva": "0x2c2c130",
+      "prefix": "f657bda9f44f01a9fd7b02a9fd830091",
+      "return": "Solis.OutGame.ScreenState",
+      "parameters": [],
+      "metadata_method_index": 20030,
+      "token_row": 20031,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa23cb40",
+      "native_abi": "void*(const MethodInfo*)"
+    },
+    "tree_with_param": {
+      "type": "Qua.UI.TF",
+      "name": "Tree",
+      "parameter_count": 2,
+      "static": true,
+      "rva": "0x6f28a38",
+      "prefix": "f85fbca9f65701a9f44f02a9fd7b03a9",
+      "return": "Qua.UI.TransitionTree",
+      "parameters": [
+        {
+          "name": "state",
+          "type": "Qua.UI.IWindowNodeState",
+          "metadata_type_index": 60923
+        },
+        {
+          "name": "param",
+          "type": "Qua.UI.TransitionParam",
+          "metadata_type_index": 75997
+        }
+      ],
+      "metadata_method_index": 191956,
+      "token_row": 1432,
+      "module": "quaunity-ui.Runtime.dll",
+      "registration_pointer_slot": "0xa72b0c8",
+      "native_abi": "void*(void*,void*,const MethodInfo*)"
+    },
+    "open_tree": {
+      "type": "Qua.UI.WindowPresenterBase",
+      "name": "OpenTree",
+      "parameter_count": 2,
+      "static": false,
+      "rva": "0x6f2a004",
+      "prefix": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "return": "System.Void",
+      "parameters": [
+        {
+          "name": "tree",
+          "type": "Qua.UI.TransitionTree",
+          "metadata_type_index": 76006
+        },
+        {
+          "name": "optionalData",
+          "type": "Qua.UI.TransitionOptionalData",
+          "metadata_type_index": 75996
+        }
+      ],
+      "metadata_method_index": 192061,
+      "token_row": 1537,
+      "module": "quaunity-ui.Runtime.dll",
+      "registration_pointer_slot": "0xa72b410",
+      "native_abi": "void(void*,void*,void*,const MethodInfo*)"
+    },
+    "top_screen": {
+      "type": "Qua.UI.WindowPresenterBase",
+      "name": "get_TopScreen",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x6f2a138",
+      "prefix": "f44fbea9fd7b01a9fd430091f30300aa",
+      "return": "Qua.UI.ScreenPresenterBase",
+      "parameters": [],
+      "metadata_method_index": 192050,
+      "token_row": 1526,
+      "module": "quaunity-ui.Runtime.dll",
+      "registration_pointer_slot": "0xa72b3b8",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "presenter_end": {
+      "type": "Solis.OutGame.LivePlayerScreenPresenter",
+      "name": "EndAsync",
+      "parameter_count": 1,
+      "static": false,
+      "rva": "0x30f1e48",
+      "prefix": "ffc301d1f65704a9f44f05a9fd7b06a9",
+      "return": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50712
+        }
+      ],
+      "metadata_method_index": 36973,
+      "token_row": 36974,
+      "module": "Assembly-CSharp.dll",
+      "registration_pointer_slot": "0xa25dcb8",
+      "native_abi": "UniTask16(void*,CancellationToken8,const MethodInfo*)"
+    },
+    "task_status": {
+      "type": "Cysharp.Threading.Tasks.UniTask",
+      "name": "get_Status",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x75ce8f8",
+      "prefix": "f44fbea9fd7b01a9fd430091f40300aa",
+      "return": "Cysharp.Threading.Tasks.UniTaskStatus",
+      "parameters": [],
+      "metadata_method_index": 200202,
+      "token_row": 141,
+      "module": "UniTask.dll",
+      "registration_pointer_slot": "0xa769d10",
+      "native_abi": "int32_t(void*,const MethodInfo*)"
+    },
+    "task_get_awaiter": {
+      "type": "Cysharp.Threading.Tasks.UniTask",
+      "name": "GetAwaiter",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x75cea90",
+      "prefix": "080440a9e00308aac0035fd6080441a9",
+      "return": ".Awaiter",
+      "parameters": [],
+      "metadata_method_index": 200203,
+      "token_row": 142,
+      "module": "UniTask.dll",
+      "registration_pointer_slot": "0xa769d18",
+      "native_abi": "UniTask16(void*,const MethodInfo*)"
+    },
+    "task_get_result": {
+      "type": "Cysharp.Threading.Tasks.UniTask/Awaiter",
+      "name": "GetResult",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x75d22f4",
+      "prefix": "f44fbea9fd7b01a9fd430091f40300aa",
+      "return": "System.Void",
+      "parameters": [],
+      "metadata_method_index": 200251,
+      "token_row": 190,
+      "module": "UniTask.dll",
+      "registration_pointer_slot": "0xa769e98",
+      "native_abi": "void(void*,const MethodInfo*)"
+    },
+    "player_ready": {
+      "type": "Solis.Common.SolisLivePlayer",
+      "name": "get_IsReady",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x6f9e5e4",
+      "prefix": "00c04139c0035fd6004040f9c0035fd6",
+      "return": "System.Boolean",
+      "parameters": [],
+      "metadata_method_index": 159988,
+      "token_row": 1971,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0xa72fde0",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    }
+  },
+  "runtime_types": {
+    "out_game_param_type": {
+      "type": "Solis.OutGame.OutGameLivePlayerParam",
+      "kind": 18,
+      "rva": "0xa542520",
+      "prefix": "d7040000000000000000120000000000",
+      "metadata_type_index": 66619,
+      "metadata_type_definition_index": 1239,
+      "type_table_pointer_slot": "0x9d799e0"
+    },
+    "actor_descriptor_type": {
+      "type": "Solis.Common.SolisActorDescriptor",
+      "kind": 18,
+      "rva": "0xa55a5f0",
+      "prefix": "c35a0000000000000000120000000000",
+      "metadata_type_index": 73023,
+      "metadata_type_definition_index": 23235,
+      "type_table_pointer_slot": "0x9d86200"
+    },
+    "transition_param_type": {
+      "type": "Solis.OutGame.LivePlayerTransitionParam",
+      "kind": 18,
+      "rva": "0xa5347b0",
+      "prefix": "f81c0000000000000000120000000000",
+      "metadata_type_index": 62955,
+      "metadata_type_definition_index": 7416,
+      "type_table_pointer_slot": "0x9d72760"
+    }
+  },
+  "exports": {
+    "field_set_value": {
+      "export": "il2cpp_field_set_value",
+      "rva": "0x81ea698",
+      "prefix": "b1700114fe700114b5700114e0700114",
+      "native_abi": "void(void*,const void*,const void*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "field_from_name": {
+      "export": "il2cpp_class_get_field_from_name",
+      "rva": "0x81e9f48",
+      "prefix": "2881011490810114c781011453cf3d16",
+      "native_abi": "void*(void*,const char*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "field_type": {
+      "export": "il2cpp_field_get_type",
+      "rva": "0x81ea688",
+      "prefix": "8ad405169a6e01140e6f0114b1700114",
+      "native_abi": "const void*(const void*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "class_from_type": {
+      "export": "il2cpp_class_from_type",
+      "rva": "0x81e9fcc",
+      "prefix": "210080523a7f011400800091c0035fd6",
+      "native_abi": "void*(const void*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "class_method": {
+      "export": "il2cpp_class_get_method_from_name",
+      "rva": "0x81e9f50",
+      "prefix": "c781011453cf3d16303eb617e4ce3d16",
+      "native_abi": "const void*(void*,const char*,int32_t)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "object_new": {
+      "export": "il2cpp_object_new",
+      "rva": "0x81ea8a0",
+      "prefix": "fd7bbfa9fd0300912ad60094fd7bc1a8",
+      "native_abi": "void*(void*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    },
+    "type_get_type": {
+      "export": "il2cpp_type_get_type",
+      "rva": "0x81ea984",
+      "prefix": "046001147f630114ff0301d1f44f02a9",
+      "native_abi": "int32_t(const void*)",
+      "dynamic_symbol": true,
+      "has_method_info_argument": false,
+      "export_trie_and_symtab_agree": true
+    }
+  },
+  "fields": {
+    "stage_capacity": {
+      "owner": "Solis.OutGame.OutGameLivePlayerParam",
+      "name": "stageMaxCapacity",
+      "offset": 44,
+      "type": "System.Int32",
+      "metadata_field_index": 6233
+    },
+    "detach_actors": {
+      "owner": "Solis.Common.SolisLivePlayerParam",
+      "name": "detachActorsOnPlayerDestroyed",
+      "offset": 40,
+      "type": "System.Boolean",
+      "metadata_field_index": 107846
+    },
+    "assets": {
+      "owner": "VL.Core.VLActorDescriptor",
+      "name": "_assets",
+      "offset": 16,
+      "type": "System.Collections.Generic.List`1<System.String>",
+      "metadata_field_index": 129916
+    },
+    "descriptor_name": {
+      "owner": "VL.Core.VLActorDescriptor",
+      "name": "_name",
+      "offset": 24,
+      "type": "System.String",
+      "metadata_field_index": 129917
+    },
+    "game_objects": {
+      "owner": "VL.Core.VLActorDescriptor",
+      "name": "_gameObjects",
+      "offset": 32,
+      "type": "UnityEngine.GameObject[]",
+      "metadata_field_index": 129918
+    },
+    "humanoid": {
+      "owner": "VL.VLDefaultActorDescriptor",
+      "name": "_humanoid",
+      "offset": 40,
+      "type": "System.Boolean",
+      "metadata_field_index": 129503
+    },
+    "collider": {
+      "owner": "VL.VLDefaultActorDescriptor",
+      "name": "_colliderType",
+      "offset": 44,
+      "type": "VL.VLActorColliderType",
+      "metadata_field_index": 129504
+    },
+    "collider_trigger": {
+      "owner": "VL.VLDefaultActorDescriptor",
+      "name": "_colliderTrigger",
+      "offset": 48,
+      "type": "System.Boolean",
+      "metadata_field_index": 129505
+    },
+    "blink_disabled": {
+      "owner": "Solis.Common.SolisActorDescriptor",
+      "name": "_autoBlinkDisabled",
+      "offset": 49,
+      "type": "System.Boolean",
+      "metadata_field_index": 107521
+    },
+    "adv_settings": {
+      "owner": "Solis.Common.SolisActorDescriptor",
+      "name": "_useADVSettings",
+      "offset": 50,
+      "type": "System.Boolean",
+      "metadata_field_index": 107522
+    },
+    "render_layer": {
+      "owner": "Solis.Common.SolisActorDescriptor",
+      "name": "_renderingLayerMaskBaseIndex",
+      "offset": 52,
+      "type": "System.Int32",
+      "metadata_field_index": 107523
+    },
+    "transition_live": {
+      "owner": "Solis.OutGame.LivePlayerTransitionParam",
+      "name": "liveParam",
+      "offset": 24,
+      "type": "Solis.OutGame.OutGameLivePlayerParam",
+      "metadata_field_index": 33043
+    },
+    "transition_debug": {
+      "owner": "Solis.OutGame.LivePlayerTransitionParam",
+      "name": "isDebugMode",
+      "offset": 32,
+      "type": "System.Boolean",
+      "metadata_field_index": 33044
+    }
+  },
+  "structs": {
+    "UniTask": {
+      "bytes": 16,
+      "fields": {
+        "source": 0,
+        "token": 8
+      },
+      "metadata_type_definition_index": 29463,
+      "size_table_instance_bytes": 32,
+      "size_table_native_bytes": 4294967295,
+      "contains_managed_references": true,
+      "abi_scope": "original_managed_call_not_native_marshaling"
+    },
+    "CancellationToken": {
+      "bytes": 8,
+      "fields": {
+        "_source": 0
+      },
+      "metadata_type_definition_index": 19106,
+      "size_table_instance_bytes": 24,
+      "size_table_native_bytes": 4294967295,
+      "contains_managed_references": true,
+      "abi_scope": "original_managed_call_not_native_marshaling"
+    },
+    "Awaiter": {
+      "bytes": 16,
+      "fields": {
+        "task": 0
+      },
+      "contains_managed_references": true,
+      "metadata_type_definition_index": 29420
+    }
+  },
+  "task_status_values": {
+    "Pending": 0,
+    "Succeeded": 1,
+    "Faulted": 2,
+    "Canceled": 3
+  },
+  "task_status_proof": {
+    "Pending": {
+      "type": "Cysharp.Threading.Tasks.UniTaskStatus",
+      "name": "Pending",
+      "metadata_field_index": 133066,
+      "default_data_index": 1552580,
+      "signed_compressed_byte": 0,
+      "underlying": "System.Int32"
+    },
+    "Succeeded": {
+      "type": "Cysharp.Threading.Tasks.UniTaskStatus",
+      "name": "Succeeded",
+      "metadata_field_index": 133067,
+      "default_data_index": 1552581,
+      "signed_compressed_byte": 2,
+      "underlying": "System.Int32"
+    },
+    "Faulted": {
+      "type": "Cysharp.Threading.Tasks.UniTaskStatus",
+      "name": "Faulted",
+      "metadata_field_index": 133068,
+      "default_data_index": 1552582,
+      "signed_compressed_byte": 4,
+      "underlying": "System.Int32"
+    },
+    "Canceled": {
+      "type": "Cysharp.Threading.Tasks.UniTaskStatus",
+      "name": "Canceled",
+      "metadata_field_index": 133069,
+      "default_data_index": 1552583,
+      "signed_compressed_byte": 6,
+      "underlying": "System.Int32"
+    }
+  },
+  "scope": {
+    "static_original_binding_proof": true,
+    "game_executed": false,
+    "runtime_verified": false,
+    "original_screen_router": true,
+    "independent_concurrent_scene": false
+  }
+}

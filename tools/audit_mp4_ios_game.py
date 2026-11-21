@@ -24,6 +24,8 @@ DEFAULT_OUTPUT = ROOT/'client-presentation/native/mp4_game_ios_profile.json'
 # name, parameter count, optional exact managed parameter types.
 SELECT = {
  'presenter_update': ('Solis.OutGame.LivePlayerScreenPresenter','Update',0),
+ 'player_initialize': ('Solis.Common.SolisLivePlayer','InitializeAsync',3,
+    ('Solis.Common.SolisLivePlayerParam','System.Boolean','System.Threading.CancellationToken')),
  'director_get_asset': ('UnityEngine.Playables.PlayableDirector','get_playableAsset',0),
  'director_get_time': ('UnityEngine.Playables.PlayableDirector','get_time',0),
  'director_set_time': ('UnityEngine.Playables.PlayableDirector','set_time',1),
@@ -82,6 +84,8 @@ SELECT = {
  'shader_set_custom': ('VL.Rendering.VLShaderTimeManager','SetCustomTime',1),
  'shader_reset_custom': ('VL.Rendering.VLShaderTimeManager','ResetCustomTime',0),
  'camera_main': ('UnityEngine.Camera','get_main',0),
+ 'camera_pixel_width': ('UnityEngine.Camera','get_scaledPixelWidth',0),
+ 'camera_pixel_height': ('UnityEngine.Camera','get_scaledPixelHeight',0),
  'supports_async_readback': ('UnityEngine.SystemInfo','get_supportsAsyncGPUReadback',0),
  'readback_texture_injected': ('UnityEngine.Rendering.AsyncGPUReadback','Request_Internal_Texture_2_Injected',5),
  'readback_done': ('UnityEngine.Rendering.AsyncGPUReadbackRequest','get_done',0),
@@ -97,6 +101,26 @@ SELECT = {
  'swing_update_instance': ('ActorSwing.ActorSwingManager','UpdateInstance',0),
 }
 FIELD_SELECT = {
+ 'selection_actors': ('Solis.Common.SolisLivePlayerParam','_actors'),
+ 'selection_stage': ('Solis.Common.SolisLivePlayerParam','stageAssetName'),
+ 'selection_timeline': ('Solis.Common.SolisLivePlayerParam','timelineAssetName'),
+ 'selection_detach': ('Solis.Common.SolisLivePlayerParam','detachActorsOnPlayerDestroyed'),
+ 'selection_stage_max_capacity': ('Solis.OutGame.OutGameLivePlayerParam','stageMaxCapacity'),
+ 'selection_actor_character': ('.SolisLiveActorParam','characterId'),
+ 'selection_actor_index': ('.SolisLiveActorParam','actorIndex'),
+ 'selection_actor_psyllium': ('.SolisLiveActorParam','psylliumColerType'),
+ 'selection_actor_track_index': ('.SolisLiveActorParam','trackIndex'),
+ 'selection_actor_descriptor': ('.SolisLiveActorParam','descriptor'),
+ 'selection_actor_audience': ('.SolisLiveActorParam','audienceAmount'),
+ 'selection_descriptor_assets': ('VL.Core.VLActorDescriptor','_assets'),
+ 'selection_descriptor_name': ('VL.Core.VLActorDescriptor','_name'),
+ 'selection_descriptor_game_objects': ('VL.Core.VLActorDescriptor','_gameObjects'),
+ 'selection_descriptor_humanoid': ('VL.VLDefaultActorDescriptor','_humanoid'),
+ 'selection_descriptor_collider': ('VL.VLDefaultActorDescriptor','_colliderType'),
+ 'selection_descriptor_trigger': ('VL.VLDefaultActorDescriptor','_colliderTrigger'),
+ 'selection_descriptor_auto_blink': ('Solis.Common.SolisActorDescriptor','_autoBlinkDisabled'),
+ 'selection_descriptor_adv': ('Solis.Common.SolisActorDescriptor','_useADVSettings'),
+ 'selection_descriptor_render_layer': ('Solis.Common.SolisActorDescriptor','_renderingLayerMaskBaseIndex'),
  'presenter_player': ('Solis.OutGame.LivePlayerScreenPresenter','_player'),
  'player_director_controller': ('Solis.Common.Live.SolisLivePlayerBase','_timelineController'),
  'brain_update_mode': ('Cinemachine.CinemachineBrain','m_UpdateMethod'),
@@ -264,6 +288,8 @@ class Original:
             'System.Single':'float','System.Double':'double','System.IntPtr':'void*'}
         if name in scalar:return scalar[name]
         aggregate={'UnityEngine.Rendering.ScriptableRenderContext':'ScriptableRenderContext8',
+            'Cysharp.Threading.Tasks.UniTask':'UniTask16',
+            'System.Threading.CancellationToken':'CancellationToken8',
             # AAPCS64 lowers this 56-byte, non-HFA by-value aggregate to a pointer.
             'UnityEngine.Animations.AnimationStream':'void*'}
         if name in aggregate:return aggregate[name]
@@ -290,6 +316,23 @@ class Original:
     def struct_layout(self,name):
         tid=self.type_id(name);size_pointer=self.qword(self.size_table+tid*8)
         instance,native,_,_=struct.unpack_from('<4I',self.b,self.offset(size_pointer))
+        if name in ('Cysharp.Threading.Tasks.UniTask','System.Threading.CancellationToken'):
+            # These value types contain managed references, so IL2CPP reports
+            # no native marshaling size. Their original ARM64 managed-call
+            # ABI still uses the boxed instance payload (16 / 8 bytes).
+            need(native==0xffffffff and instance==(32 if name.endswith('UniTask') else 24),
+                 'managed_value_size_differs:'+name)
+            fields={}
+            for key,value in self.fields(name).items():
+                _,kind,_=struct.unpack_from('<3I',self.m,self.h[24]+value['metadata_field_index']*12)
+                pointer=self.qword(self.type_table+kind*8)
+                attributes=struct.unpack_from('<I',self.b,self.offset(pointer)+8)[0]&65535
+                if not attributes&16:fields[key]=value['offset']-16
+            need(fields==({'source':0,'token':8} if name.endswith('UniTask') else {'_source':0}),
+                 'managed_value_fields_differ:'+name)
+            return {'bytes':instance-16,'fields':fields,'metadata_type_definition_index':tid,
+                'size_table_instance_bytes':instance,'size_table_native_bytes':native,
+                'contains_managed_references':True,'abi_scope':'original_managed_call_not_native_marshaling'}
         need(instance>=16 and native==instance-16,'struct_native_size_differs:'+name)
         return {'bytes':native,'fields':{key:value['offset']-16 for key,value in self.fields(name).items()
             if value['offset']>=16},'metadata_type_definition_index':tid,
@@ -389,6 +432,7 @@ def build_profile(metadata:bytes,native:bytes)->dict:
         'UnityEngine.Rect','UnityEngine.Rendering.AsyncGPUReadbackRequest',
         'UnityEngine.Rendering.RenderTargetIdentifier','UnityEngine.Rendering.ScriptableRenderContext',
         'UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream',
+        'Cysharp.Threading.Tasks.UniTask','System.Threading.CancellationToken',
         'ActorSwing.ActorSwingJob')}
     runtime_types={}
     for name in ('System.Single','UnityEngine.AudioClip','UnityEngine.Texture2D'):

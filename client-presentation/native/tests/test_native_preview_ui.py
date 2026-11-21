@@ -29,7 +29,7 @@ def test_common_preview_helper_preserves_original_and_user_visibility(tmp_path):
 def test_android_preview_original_fields_and_bind_are_source_bound():
     profile = json.loads((NATIVE / "profile.json").read_text())
     entries = profile["aliases"]
-    assert len(entries) == 149
+    assert len(entries) == 150
     for name, rva, result, parameters in [
         ("preview_ui_bind", "0x5657df0", "System.Void", 0),
         ("preview_ui_get", "0x5657a7c", "System.Boolean", 0),

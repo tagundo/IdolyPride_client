@@ -21,7 +21,10 @@ int ftruncate(int,int64_t); void* dlsym(void*,const char*);
 }
 #endif
 #include "mp4_encoder_api.h"
+#include "mp4_session_api.h"
 #include "mp4_game_adapter.hpp"
+#include "mp4_selection_capture.hpp"
+#include "mp4_game_profile.hpp"
 
 namespace idoly_mp4_runtime {
 using idoly_mp4_game::Api;
@@ -116,14 +119,27 @@ struct PublicStatus {
     char phase[24]="idle",id[33]{},error[192]="none";
     uint64_t frames=0,total_frames=0,audio=0,total_audio=0,bytes=0;
     uint32_t width=0,height=0,fps_num=30,fps_den=1;
-    bool ready=false;
+    bool ready=false,pausable=false;
 };
 static pthread_mutex_t control_mutex=PTHREAD_MUTEX_INITIALIZER;
 static Configuration configured;
 static Options pending_options;
 static PublicStatus published;
 static bool configured_valid=false,start_pending=false,cancel_pending=false,control_busy=false;
+static bool queue_scene_owned=false;
+static char pending_queue_output[33]{},pending_queue_exports[path_capacity]{};
+static int pending_queue_exports_fd=-1;
+static uint32_t pending_queue_width=0,pending_queue_height=0;
+// Host threads only write requests. The Unity tick acknowledges suspension
+// before touching another original Unity action; pending work remains intact.
+static int requested_pause_reason=IDMP4_PAUSE_NONE;
+static bool pause_acknowledged=false,reset_watchdog_pending=false;
+static uint64_t unity_ticks=0,capture_acks=0;
+inline void increment_counter(uint64_t& value){if(value<9007199254740991ULL)++value;}
 static idoly_mp4_game::GameAdapter game;
+static idoly_mp4_selection::Capture selection;
+static uint64_t selected_identity=0;
+inline void queue_tick();
 static bool installed=false;
 enum class Stage{idle,begin,audio_request,audio_response,audio_load,audio_mix,audio_finalize,frame_request,frame_wait,frame_submit,finishing,retiring};
 struct Job {
@@ -138,11 +154,12 @@ struct Job {
     uint64_t activity=0,last_encoder_progress=0;
     struct stat pcm_identity{},bundle_identity{};
     uint64_t finalized_audio=0;
+    uint32_t expected_width=0,expected_height=0;
     bool pcm_owned=false,bundle_owned=false,pending_broker=false,audible_energy=false,captured=false,terminal_success=false,terminal_cancel=false;
 };
 static Job job;
 inline bool busy_stage(){return job.stage!=Stage::idle;}
-inline void publish(){pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;pthread_mutex_unlock(&control_mutex);}
+inline void publish(){pthread_mutex_lock(&control_mutex);const bool ready=published.ready;published=job.status;published.ready=ready;published.pausable=job.stage!=Stage::idle&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring;pthread_mutex_unlock(&control_mutex);}
 inline void progress(){job.activity=milliseconds();}
 inline void phase(const char* value){snprintf(job.status.phase,sizeof(job.status.phase),"%s",value);progress();publish();}
 inline void stable_error(const char* value){size_t at=0;for(;value&&value[at]&&at<sizeof(job.status.error)-1;++at){char c=value[at];job.status.error[at]=((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_')?c:'_';}job.status.error[at]=0;if(!at)snprintf(job.status.error,sizeof(job.status.error),"export_failed");}
@@ -173,13 +190,31 @@ inline bool configure(const char* broker,uint64_t epoch,const char*cap,const cha
     if(control_busy||start_pending){pthread_mutex_unlock(&control_mutex);close_configuration(next);return false;}
     close_configuration(configured);configured=next;configured_valid=true;pthread_mutex_unlock(&control_mutex);return true;
 }
-inline bool start(Options options){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&published.ready&&valid_options(options);if(ok){pending_options=options;start_pending=true;cancel_pending=false;control_busy=true;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}pthread_mutex_unlock(&control_mutex);return ok;}
+inline bool start(Options options,bool queued=false){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&(queued||!queue_scene_owned)&&published.ready&&valid_options(options);if(ok){if(!queued){pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;pending_queue_width=pending_queue_height=0;}pending_options=options;start_pending=true;cancel_pending=false;control_busy=true;published.pausable=true;pause_acknowledged=false;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}pthread_mutex_unlock(&control_mutex);return ok;}
 inline void cancel(){pthread_mutex_lock(&control_mutex);if(control_busy)cancel_pending=true;pthread_mutex_unlock(&control_mutex);}
-inline void install_game_api(const Api& api,const Layout& layout){if(installed||busy_stage())return;installed=game.set_api(api,layout);}
-inline void observe_presenter(void* presenter){if(installed)game.observe_presenter(presenter);}
+inline void suspend(int reason){
+    if(reason<IDMP4_PAUSE_LIFECYCLE_BACKGROUND||reason>IDMP4_PAUSE_USER)return;
+    pthread_mutex_lock(&control_mutex);requested_pause_reason=reason;pthread_mutex_unlock(&control_mutex);
+}
+inline void resume(){
+    pthread_mutex_lock(&control_mutex);
+    // A lifecycle can stop the original engine before its next tick. Reset
+    // deadlines even if no tick was available to acknowledge the request.
+    if(requested_pause_reason!=IDMP4_PAUSE_NONE||pause_acknowledged)reset_watchdog_pending=true;
+    requested_pause_reason=IDMP4_PAUSE_NONE;pause_acknowledged=false;
+    pthread_mutex_unlock(&control_mutex);
+}
+inline const char* pause_reason_name(int reason){
+    switch(reason){case IDMP4_PAUSE_LIFECYCLE_BACKGROUND:return "lifecycle_background";
+        case IDMP4_PAUSE_SURFACE_UNAVAILABLE:return "surface_unavailable";
+        case IDMP4_PAUSE_USER:return "user_paused";default:return "none";}
+}
+inline void install_game_api(const Api& api,const Layout& layout){if(installed||busy_stage())return;installed=game.set_api(api,layout)&&selection.set_api(api);}
+inline void observe_presenter(void* presenter){if(installed){game.observe_presenter(presenter);pthread_mutex_lock(&control_mutex);selected_identity=selection.identity(game.selected_player());pthread_mutex_unlock(&control_mutex);}}
+inline void observe_player_initializing(void* player,void* param){if(installed)selection.observe(player,param);}
 inline void observe_camera_controller(void* camera){if(installed)game.observe_camera_controller(camera);}
 inline void capture_pass_did_execute(void* pass,const void*data){if(installed)game.observe_capture_pass(pass,data);}
-inline void camera_did_render(void*camera){if(installed&&job.stage==Stage::frame_wait&&game.after_camera(camera))job.captured=true;}
+inline void camera_did_render(void*camera){if(installed&&job.stage==Stage::frame_wait&&!job.captured&&game.after_camera(camera)){job.captured=true;pthread_mutex_lock(&control_mutex);increment_counter(capture_acks);pthread_mutex_unlock(&control_mutex);}}
 inline bool camera_delta_override(void*brain,float*delta){return installed&&game.camera_delta_override(brain,delta);}
 
 inline bool begin_job() {
@@ -187,9 +222,16 @@ inline bool begin_job() {
     if(!start_pending){pthread_mutex_unlock(&control_mutex);return false;}
     job=Job{};job.options=pending_options;job.config=configured;
     job.config.root=dup(configured.root);job.config.req=dup(configured.req);job.config.rsp=dup(configured.rsp);job.config.prepared=dup(configured.prepared);job.config.exports=dup(configured.exports);
+    if(pending_queue_output[0]){
+        snprintf(job.status.id,sizeof(job.status.id),"%s",pending_queue_output);
+        close(job.config.exports);job.config.exports=dup(pending_queue_exports_fd);
+        snprintf(job.config.output,sizeof(job.config.output),"%s",pending_queue_exports);
+        job.expected_width=pending_queue_width;job.expected_height=pending_queue_height;
+        pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;
+    }
     start_pending=false;job.stage=Stage::begin;pthread_mutex_unlock(&control_mutex);
     job.api=platform_encoder();job.status.fps_num=job.options.fps_num;job.status.fps_den=job.options.fps_den;
-    uint8_t id[16]{};if(!random_bytes(id,sizeof(id))){terminal("random_unavailable");return true;}hex(id,sizeof(id),job.status.id);
+    if(!job.status.id[0]){uint8_t id[16]{};if(!random_bytes(id,sizeof(id))){terminal("random_unavailable");return true;}hex(id,sizeof(id),job.status.id);}
     if(!job.api.valid()){terminal("platform_encoder_unavailable");return true;}
     if(!active_broker()){terminal("audio_broker_retired");return true;}
     if(game.snapshot(job.snapshot)!=Result::ok){terminal(game.last_error());return true;}
@@ -300,6 +342,8 @@ inline void request_frame() {
     const double time=static_cast<double>(job.frame)*job.options.fps_den/job.options.fps_num;
     if(game.evaluate(time)!=Result::ok||game.request_capture()!=Result::ok){terminal(game.last_error());return;}
     int32_t width=0,height=0;if(game.capture_geometry(width,height)!=Result::ok){terminal(game.last_error());return;}
+    if((job.expected_width&&job.expected_width!=static_cast<uint32_t>(width))
+        ||(job.expected_height&&job.expected_height!=static_cast<uint32_t>(height))){terminal("queued_capture_geometry_changed");return;}
     if(job.status.width&&(job.status.width!=static_cast<uint32_t>(width)||job.status.height!=static_cast<uint32_t>(height))){terminal("capture_geometry_changed");return;}
     job.status.width=static_cast<uint32_t>(width);job.status.height=static_cast<uint32_t>(height);
     const size_t needed=static_cast<size_t>(width)*static_cast<size_t>(height)*4;
@@ -331,14 +375,40 @@ inline void retire() {
 }
 inline void on_unity_tick() {
     if(!installed)return;
+    queue_tick();
+    pthread_mutex_lock(&control_mutex);
+    increment_counter(unity_ticks);
+    const bool should_cancel=cancel_pending;
+    if(should_cancel&&start_pending&&!busy_stage()){
+        // A parked start has acquired no Unity or encoder state yet.
+        start_pending=false;control_busy=false;cancel_pending=false;pause_acknowledged=false;
+        job.status=PublicStatus{};
+        if(pending_queue_output[0])snprintf(job.status.id,sizeof(job.status.id),"%s",pending_queue_output);
+        pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;
+        snprintf(job.status.phase,sizeof(job.status.phase),"cancelled");
+        snprintf(job.status.error,sizeof(job.status.error),"cancelled_by_user");
+        const bool ready=published.ready;published=job.status;published.ready=ready;
+        pthread_mutex_unlock(&control_mutex);return;
+    }
+    const bool can_park=start_pending||(busy_stage()&&job.stage!=Stage::finishing&&job.stage!=Stage::retiring);
+    if(requested_pause_reason!=IDMP4_PAUSE_NONE&&!should_cancel&&can_park){
+        pause_acknowledged=true;reset_watchdog_pending=true;
+        pthread_mutex_unlock(&control_mutex);return;
+    }
+    const bool reset_watchdog=reset_watchdog_pending;
+    reset_watchdog_pending=false;pause_acknowledged=false;
+    pthread_mutex_unlock(&control_mutex);
+    if(reset_watchdog&&busy_stage())progress();
     game.maintenance();
     if(!busy_stage()){
         Snapshot ready{};bool can=game.snapshot(ready)==Result::ok;
         pthread_mutex_lock(&control_mutex);published.ready=can;pthread_mutex_unlock(&control_mutex);
         begin_job();if(!busy_stage())return;
     }
-    pthread_mutex_lock(&control_mutex);bool should_cancel=cancel_pending;pthread_mutex_unlock(&control_mutex);
-    if(should_cancel)terminal("cancelled_by_user",true);
+    // Read once more after begin_job: a host command may arrive while its
+    // bounded original Unity setup runs. Never interrupt an original method.
+    pthread_mutex_lock(&control_mutex);const bool cancel_after_begin=cancel_pending;pthread_mutex_unlock(&control_mutex);
+    if(cancel_after_begin)terminal("cancelled_by_user",true);
     if(job.stage==Stage::frame_wait&&!job.captured&&job.activity&&milliseconds()-job.activity>5000)
         terminal("selected_camera_capture_timeout");
     if(job.stage!=Stage::retiring&&job.activity&&milliseconds()-job.activity>120000)terminal("export_progress_timeout");
@@ -359,16 +429,15 @@ inline void on_unity_tick() {
     }
     publish();
 }
-inline size_t status(char*buffer,size_t capacity){if(!buffer||!capacity)return 0;pthread_mutex_lock(&control_mutex);const PublicStatus s=published;pthread_mutex_unlock(&control_mutex);int n=snprintf(buffer,capacity,"{\"schema\":1,\"ready\":%s,\"phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu}",s.ready?"true":"false",s.phase,s.id,s.error,static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes));return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;}
+inline size_t status(char*buffer,size_t capacity){if(!buffer||!capacity)return 0;pthread_mutex_lock(&control_mutex);const PublicStatus s=published;const uint64_t ticks=unity_ticks,acks=capture_acks;const bool requested=control_busy&&s.pausable&&requested_pause_reason!=IDMP4_PAUSE_NONE,paused=requested&&pause_acknowledged;const int reason=requested?requested_pause_reason:IDMP4_PAUSE_NONE;pthread_mutex_unlock(&control_mutex);const char* current_phase=requested?(paused?"paused":"pausing"):s.phase;int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu}",static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",current_phase,paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes));return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;}
 } // namespace idoly_mp4_runtime
 
-#ifdef IDOLY_DARWIN_BRIDGE
-#define IDMP4_SESSION_API __attribute__((visibility("default")))
-#else
-#define IDMP4_SESSION_API __attribute__((visibility("hidden")))
-#endif
+#include "mp4_queue_runtime.hpp"
+
 extern "C" IDMP4_SESSION_API int IDMP4SessionConfigure(const char*b,uint64_t e,const char*c,const char*o,int p){return idoly_mp4_runtime::configure(b,e,c,o,p)?0:-1;}
 extern "C" IDMP4_SESSION_API int IDMP4SessionStart(uint32_t n,uint32_t d,uint32_t c,uint32_t v,uint32_t a){return idoly_mp4_runtime::start({n,d,c,v,a})?0:-1;}
 extern "C" IDMP4_SESSION_API size_t IDMP4SessionStatus(char*b,size_t c){return idoly_mp4_runtime::status(b,c);}
 extern "C" IDMP4_SESSION_API void IDMP4SessionCancel(){idoly_mp4_runtime::cancel();}
+extern "C" IDMP4_SESSION_API void IDMP4SessionSuspend(int reason){idoly_mp4_runtime::suspend(reason);}
+extern "C" IDMP4_SESSION_API void IDMP4SessionResume(){idoly_mp4_runtime::resume();}
 extern "C" IDMP4_SESSION_API int IDMP4SessionReady(){pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);bool ready=idoly_mp4_runtime::published.ready;pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);return ready?1:0;}

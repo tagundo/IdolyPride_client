@@ -30,6 +30,7 @@ import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -143,6 +144,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private Spinner mp4Fps, mp4Codec, mp4Bitrate;
     private TextView mp4Status;
     private Button mp4Start, mp4Cancel, mp4Save;
+    private Button mp4Enqueue, mp4QueueRun, mp4QueuePause, mp4QueueResume;
+    private TextView mp4QueueStatus, mp4BackgroundStatus;
+    private LinearLayout mp4QueueRows;
+    private CheckBox mp4Background;
+    private boolean mp4BackgroundLoading;
+    private String mp4QueueRendered;
     private final Runnable mp4Refresh = this::refreshMp4;
     private TextView presentationStatus;
     private boolean presentationLoading;
@@ -2250,20 +2257,53 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void addMp4Controls(LinearLayout body) {
         TextView title = text(R.string.mp4_title, 17, TEXT_PRIMARY); title.setPadding(0, dp(20), 0, dp(6)); body.addView(title);
-        body.addView(text(R.string.mp4_hint, 13, TEXT_MUTED));
+        body.addView(text(R.string.mp4_queue_hint, 13, TEXT_MUTED));
         mp4Fps = mp4Spinner(body, R.string.mp4_fps, new String[] {"30", "60"});
         mp4Codec = mp4Spinner(body, R.string.mp4_codec, new String[] {"H.264", "HEVC"});
         mp4Bitrate = mp4Spinner(body, R.string.mp4_bitrate, new String[] {"8 Mbps", "16 Mbps", "32 Mbps"});
         mp4Bitrate.setSelection(1);
         mp4Status = text(R.string.mp4_idle, 13, TEXT_MUTED); mp4Status.setPadding(0, dp(8), 0, dp(8)); body.addView(mp4Status);
-        mp4Start = button(R.string.mp4_start); body.addView(mp4Start);
+
+        mp4Enqueue = button(R.string.mp4_queue_add); body.addView(mp4Enqueue);
+        mp4QueueRun = button(R.string.mp4_queue_run); primaryButton(mp4QueueRun); body.addView(mp4QueueRun);
+        LinearLayout queueActions = new LinearLayout(this); queueActions.setOrientation(LinearLayout.HORIZONTAL);
+        mp4QueuePause = button(R.string.mp4_queue_pause); queueActions.addView(mp4QueuePause, new LinearLayout.LayoutParams(0, -2, 1));
+        mp4QueueResume = button(R.string.mp4_queue_resume); queueActions.addView(mp4QueueResume, new LinearLayout.LayoutParams(0, -2, 1));
+        body.addView(queueActions, new LinearLayout.LayoutParams(-1, -2));
+        mp4QueueStatus = text(R.string.mp4_queue_empty, 13, TEXT_MUTED); mp4QueueStatus.setPadding(0, dp(8), 0, dp(8)); body.addView(mp4QueueStatus);
+        mp4QueueRows = new LinearLayout(this); mp4QueueRows.setOrientation(LinearLayout.VERTICAL);
+        body.addView(mp4QueueRows, new LinearLayout.LayoutParams(-1, -2));
+
+        mp4Background = new CheckBox(this); mp4Background.setText(R.string.mp4_queue_background_experimental);
+        mp4Background.setTextColor(TEXT_PRIMARY); mp4Background.setMinHeight(dp(48));
+        mp4Background.setChecked(UnifiedMP4Export.experimentalBackgroundEnabled(this)); body.addView(mp4Background);
+        mp4BackgroundStatus = text(R.string.mp4_queue_background_off, 13, TEXT_MUTED);
+        mp4BackgroundStatus.setPadding(0, 0, 0, dp(8)); body.addView(mp4BackgroundStatus);
+        mp4Background.setOnCheckedChangeListener((control, enabled) -> {
+            if (mp4BackgroundLoading) return;
+            UnifiedMP4Export.setExperimentalBackgroundEnabled(this, enabled);
+            refreshMp4();
+        });
+
+        mp4Start = button(R.string.mp4_queue_immediate); body.addView(mp4Start);
         mp4Cancel = button(R.string.mp4_cancel); body.addView(mp4Cancel);
         mp4Save = button(R.string.mp4_save); body.addView(mp4Save);
+        mp4Enqueue.setOnClickListener(view -> {
+            if (!UnifiedMP4Export.requestEnqueue(this, mp4SelectedFps(), mp4SelectedCodec(), mp4SelectedBitrate()))
+                Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
+            refreshMp4();
+        });
+        mp4QueueRun.setOnClickListener(view -> {
+            if (!UnifiedMP4Export.requestQueueRun(this)) Toast.makeText(this, R.string.mp4_queue_action_failed, Toast.LENGTH_LONG).show();
+            refreshMp4();
+        });
+        mp4QueuePause.setOnClickListener(view -> { UnifiedMP4Export.queuePause(); refreshMp4(); });
+        mp4QueueResume.setOnClickListener(view -> {
+            if (!UnifiedMP4Export.queueResume(this)) Toast.makeText(this, R.string.mp4_queue_action_failed, Toast.LENGTH_LONG).show();
+            refreshMp4();
+        });
         mp4Start.setOnClickListener(view -> {
-            int fps = mp4Fps.getSelectedItemPosition() == 0 ? 30 : 60;
-            int codec = mp4Codec.getSelectedItemPosition() + 1;
-            int[] rates = {8_000_000, 16_000_000, 32_000_000};
-            if (!UnifiedMP4Export.requestStart(this, fps, codec, rates[mp4Bitrate.getSelectedItemPosition()]))
+            if (!UnifiedMP4Export.requestStart(this, mp4SelectedFps(), mp4SelectedCodec(), mp4SelectedBitrate()))
                 Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
             refreshMp4();
         });
@@ -2271,6 +2311,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         mp4Save.setOnClickListener(view -> UnifiedMP4Export.requestSave(this));
         refreshMp4();
     }
+
+    private int mp4SelectedFps() { return mp4Fps.getSelectedItemPosition() == 0 ? 30 : 60; }
+    private int mp4SelectedCodec() { return mp4Codec.getSelectedItemPosition() + 1; }
+    private int mp4SelectedBitrate() { return new int[] {8_000_000, 16_000_000, 32_000_000}[mp4Bitrate.getSelectedItemPosition()]; }
 
     private Spinner mp4Spinner(LinearLayout body, int label, String[] choices) {
         TextView caption = text(label, 13, TEXT_MUTED); caption.setPadding(0, dp(8), 0, 0); body.addView(caption);
@@ -2282,11 +2326,148 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void refreshMp4() {
         if (mp4Status == null) return;
-        mp4Status.setText(UnifiedMP4Export.statusText(this));
-        boolean busy = UnifiedMP4Export.busy(); mp4Start.setEnabled(UnifiedMP4Export.ready());
-        mp4Cancel.setVisibility(busy ? View.VISIBLE : View.GONE);
-        mp4Save.setVisibility(UnifiedMP4Export.canSave() ? View.VISIBLE : View.GONE);
-        for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate}) option.setEnabled(!busy);
+        setTextIfChanged(mp4Status, UnifiedMP4Export.statusText(this));
+        JSONObject queue = UnifiedMP4Export.queueSnapshot();
+        org.json.JSONArray jobs = queue.optJSONArray("jobs");
+        int count = jobs == null ? 0 : Math.min(Mp4QueueUiState.CAPACITY, jobs.length()), pending = 0;
+        boolean ownsCurrent = false;
+        String exportId = UnifiedMP4Export.snapshot().optString("export_id");
+        for (int index = 0; index < count; index++) {
+            JSONObject job = jobs.optJSONObject(index); if (job == null) continue;
+            if ("pending".equals(job.optString("state"))) pending++;
+            if (!exportId.isEmpty() && exportId.equals(job.optString("output_id"))) ownsCurrent = true;
+        }
+        boolean commandPending = queue.optBoolean("command_pending"), busy = UnifiedMP4Export.busy();
+        boolean running = queue.optBoolean("running"), paused = queue.optBoolean("paused");
+        Mp4QueueUiState.Controls controls = new Mp4QueueUiState.Controls(queue.optBoolean("available"), commandPending,
+                running, paused, busy, UnifiedMP4Export.ready(), queue.optBoolean("can_run", false), pending, count);
+        mp4Enqueue.setEnabled(controls.enqueue); mp4QueueRun.setEnabled(controls.run);
+        mp4QueuePause.setEnabled(controls.pause); mp4QueueResume.setEnabled(controls.resume);
+        mp4QueuePause.setVisibility(running && !paused ? View.VISIBLE : View.GONE);
+        mp4QueueResume.setVisibility(paused ? View.VISIBLE : View.GONE);
+        mp4Start.setEnabled(controls.immediate);
+        mp4Cancel.setVisibility(busy && !ownsCurrent ? View.VISIBLE : View.GONE);
+        mp4Save.setVisibility(UnifiedMP4Export.canSave() && !ownsCurrent ? View.VISIBLE : View.GONE);
+        for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate}) option.setEnabled(!busy && !commandPending);
+
+        String summary = count == 0 ? getString(R.string.mp4_queue_empty)
+                : getString(R.string.mp4_queue_count, count, Mp4QueueUiState.CAPACITY, pending);
+        if (commandPending) summary += "\n" + getString(R.string.mp4_queue_working);
+        else if (paused) summary += "\n" + getString(R.string.mp4_queue_paused);
+        else if ("waiting_for_scene".equals(queue.optString("phase"))) summary += "\n" + getString(R.string.mp4_queue_waiting_scene);
+        else if (running) summary += "\n" + getString(R.string.mp4_queue_running);
+        String error = queue.optString("error_code");
+        if (!error.isEmpty() && !"none".equals(error)) summary += "\n" + getString(R.string.mp4_queue_error, mp4SafeCode(error));
+        setTextIfChanged(mp4QueueStatus, summary);
+
+        String rendered = (jobs == null ? "[]" : jobs.toString()) + ":" + commandPending
+                + ":" + getResources().getConfiguration().getLocales().toLanguageTags();
+        if (!rendered.equals(mp4QueueRendered)) { mp4QueueRendered = rendered; renderMp4Queue(jobs, count, commandPending); }
+        refreshMp4Background();
+    }
+
+    private static String mp4SafeCode(String value) {
+        return value != null && value.matches("[a-z0-9_]{1,64}") ? value : "export_failed";
+    }
+
+    private int mp4QueueStateLabel(String state) {
+        switch (state) {
+            case "pending": return R.string.mp4_queue_pending;
+            case "running": return R.string.mp4_queue_active;
+            case "paused": return R.string.mp4_queue_paused;
+            case "completed": return R.string.mp4_queue_completed;
+            case "failed": return R.string.mp4_queue_failed;
+            case "cancelled": return R.string.mp4_queue_cancelled;
+            default: return R.string.mp4_queue_interrupted;
+        }
+    }
+
+    private void renderMp4Queue(org.json.JSONArray jobs, int count, boolean commandPending) {
+        mp4QueueRows.removeAllViews();
+        for (int index = 0; index < count; index++) {
+            JSONObject job = jobs.optJSONObject(index); if (job == null) continue;
+            String id = job.optString("job_id"), state = job.optString("state");
+            if (!Mp4QueueUiState.jobId(id) || !Mp4QueueUiState.state(state)) continue;
+            final int position = index, actions = Mp4QueueUiState.actions(state, index, count, commandPending);
+            LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(dp(12), dp(8), dp(12), dp(8));
+            GradientDrawable background = new GradientDrawable(); background.setColor(CONTROL_BACKGROUND); background.setCornerRadius(dp(12)); row.setBackground(background);
+            LinearLayout.LayoutParams placement = new LinearLayout.LayoutParams(-1, -2); placement.setMargins(0, 0, 0, dp(8)); mp4QueueRows.addView(row, placement);
+            TextView name = text(R.string.mp4_queue_item, 16, TEXT_PRIMARY);
+            String title = Mp4TitleCatalog.title(job, getResources().getConfiguration().getLocales().get(0));
+            name.setText(title.isEmpty() ? getString(R.string.mp4_queue_unknown_title, index + 1)
+                    : getString(R.string.mp4_queue_item, index + 1, title));
+            name.setTypeface(Typeface.DEFAULT, Typeface.BOLD); row.addView(name);
+            TextView details = text(mp4QueueStateLabel(state), 14, "failed".equals(state) || "interrupted".equals(state) ? WARNING : TEXT_MUTED);
+            int width = job.optInt("width"), height = job.optInt("height"), fps = job.optInt("fps_num");
+            String description = getString(mp4QueueStateLabel(state));
+            if (width > 0 && width <= 16384 && height > 0 && height <= 16384 && (fps == 30 || fps == 60))
+                description += " · " + getString(R.string.mp4_geometry, width, height, fps);
+            int cast = job.optInt("actor_count"); if (cast > 0 && cast <= 32) description += " · " + getString(R.string.mp4_queue_cast, cast);
+            String error = job.optString("error_code");
+            if ("failed".equals(state) && !error.isEmpty() && !"none".equals(error)) description += "\n" + mp4SafeCode(error);
+            details.setText(description); row.addView(details);
+            LinearLayout buttons = new LinearLayout(this); buttons.setOrientation(LinearLayout.HORIZONTAL); row.addView(buttons);
+            if ((actions & Mp4QueueUiState.SAVE) != 0) {
+                Button save = button(R.string.mp4_save); save.setOnClickListener(view -> UnifiedMP4Export.requestSave(this, id));
+                buttons.addView(save, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            if ((actions & Mp4QueueUiState.RETRY) != 0) {
+                Button retry = button(R.string.mp4_queue_retry); retry.setOnClickListener(view -> mp4QueueCommand(3, id, 0));
+                buttons.addView(retry, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            if ((actions & Mp4QueueUiState.CANCEL) != 0 && ("running".equals(state) || "paused".equals(state))) {
+                Button cancel = button(R.string.mp4_cancel); cancel.setOnClickListener(view -> mp4QueueCommand(1, id, 0));
+                buttons.addView(cancel, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            Button menu = button(R.string.mp4_queue_actions); menu.setEnabled(actions != 0);
+            menu.setContentDescription(getString(R.string.mp4_queue_item_actions, index + 1));
+            menu.setOnClickListener(view -> {
+                PopupMenu popup = new PopupMenu(this, menu);
+                if ((actions & Mp4QueueUiState.UP) != 0) popup.getMenu().add(0, 4, 0, R.string.mp4_queue_move_up);
+                if ((actions & Mp4QueueUiState.DOWN) != 0) popup.getMenu().add(0, 5, 1, R.string.mp4_queue_move_down);
+                if ((actions & Mp4QueueUiState.CANCEL) != 0) popup.getMenu().add(0, 1, 2, R.string.mp4_cancel);
+                if ((actions & Mp4QueueUiState.REMOVE) != 0) popup.getMenu().add(0, 2, 3,
+                        "completed".equals(state) ? R.string.mp4_queue_delete_file_job : R.string.mp4_queue_remove);
+                popup.setOnMenuItemClickListener(item -> {
+                    int action = item.getItemId();
+                    if (action == 2) requestMp4QueueRemoval(id, state);
+                    else mp4QueueCommand(action == 5 ? 4 : action, id, action == 4 ? position - 1 : action == 5 ? position + 1 : 0);
+                    return true;
+                });
+                popup.show();
+            });
+            // Active jobs already have an explicit cancel button, so an empty
+            // duplicate menu is unnecessary while their renderer owns the MV.
+            if ((actions & (Mp4QueueUiState.UP | Mp4QueueUiState.DOWN | Mp4QueueUiState.REMOVE)) != 0 || commandPending)
+                buttons.addView(menu, new LinearLayout.LayoutParams(0, -2, 1));
+        }
+    }
+
+    private void mp4QueueCommand(int operation, String id, int position) {
+        UnifiedMP4Export.queueCommand(operation, id, position); refreshMp4();
+    }
+
+    private void requestMp4QueueRemoval(String id, String state) {
+        if (!Mp4QueueUiState.jobId(id)) return;
+        if (!"completed".equals(state)) { mp4QueueCommand(2, id, 0); return; }
+        new AlertDialog.Builder(this).setTitle(R.string.mp4_queue_delete_file_job)
+                .setMessage(R.string.mp4_queue_delete_confirm)
+                .setPositiveButton(R.string.mp4_queue_delete_file_job, (dialog, which) -> mp4QueueCommand(2, id, 1))
+                .setNegativeButton(android.R.string.cancel, null).show();
+    }
+
+    private void refreshMp4Background() {
+        boolean enabled = UnifiedMP4Export.experimentalBackgroundEnabled(this);
+        mp4BackgroundLoading = true; mp4Background.setChecked(enabled); mp4BackgroundLoading = false;
+        JSONObject background = UnifiedMP4Export.backgroundSnapshot();
+        String state = background.optString("state");
+        int text = !enabled ? R.string.mp4_queue_background_off
+                : "failed".equals(state) || "paused".equals(state) ? R.string.mp4_queue_background_fallback
+                : "running".equals(state) && background.optBoolean("capture_verified") && background.optBoolean("heartbeat_verified") ? R.string.mp4_queue_background_active
+                : R.string.mp4_queue_background_unverified;
+        setTextIfChanged(mp4BackgroundStatus, getString(text));
+        mp4BackgroundStatus.setTextColor(enabled ? WARNING : TEXT_MUTED);
     }
 
     private Spinner presentationSpinner(LinearLayout parent, int labelResource, int optionsResource) {

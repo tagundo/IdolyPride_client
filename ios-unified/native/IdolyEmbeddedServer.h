@@ -15,4 +15,14 @@ FOUNDATION_EXPORT __attribute__((visibility("default"))) void IdolyEmbeddedServe
 // Trusted bundled settings/native overlay only. Never forwarded to HTTP/Python commands.
 FOUNDATION_EXPORT void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSString *reply));
 FOUNDATION_EXPORT void IdolyEmbeddedServerMP4Export(void (^completion)(NSURL * _Nullable file, NSString * _Nullable error));
+// A queue job ID is resolved natively to a completed, owned library output.
+// Callers never select an output filename or filesystem path.
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4ExportJob(NSString * _Nullable jobID,
+    void (^completion)(NSURL * _Nullable file, NSString * _Nullable error));
+// Synchronous native-only pause request before Unity's original lifecycle runs.
+// Returning to the foreground never overrides an explicit user pause.
+FOUNDATION_EXPORT void IdolyEmbeddedServerMP4SetLifecycleActive(BOOL active);
+// Fresh native snapshot only; safe during a lifecycle notification on main.
+// No interpreter work, Unity calls, or visible progress view is required.
+FOUNDATION_EXPORT BOOL IdolyEmbeddedServerMP4IsFinishing(void);
 NS_ASSUME_NONNULL_END

@@ -162,6 +162,19 @@ static uint8_t IDMVsRGBTo709(uint8_t value) {
     }
 }
 
+- (BOOL)securePartial {
+    if (!_partialOwned) return NO;
+    int fd = open(_partialPath.fileSystemRepresentation, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    struct stat owned, current;
+    BOOL valid = fd >= 0 && fstat(fd, &owned) == 0 && IDMVSameFile(&_partialIdentity, &owned)
+        && S_ISREG(owned.st_mode) && owned.st_nlink == 1 && owned.st_uid == getuid();
+    if (valid) valid = fchmod(fd, 0600) == 0 && fstat(fd, &owned) == 0
+        && (owned.st_mode & 0777) == 0600
+        && lstat(_partialPath.fileSystemRepresentation, &current) == 0 && IDMVSameFile(&owned, &current);
+    if (fd >= 0) close(fd);
+    return valid;
+}
+
 - (void)stopWithPhase:(uint32_t)phase code:(const char *)code {
     if (_workerStopped) return;
     if (_timer) { dispatch_source_cancel(_timer); _timer = nil; }
@@ -239,6 +252,7 @@ static uint8_t IDMVsRGBTo709(uint8_t value) {
     if (![_writer startWriting]) { [self rememberPartial];
         [self stopWithPhase:IDMP4_FAILED code:"writer_start_failed"]; return; }
     [self rememberPartial];
+    if (![self securePartial]) { [self stopWithPhase:IDMP4_FAILED code:"private_output_permissions_failed"]; return; }
     [_writer startSessionAtSourceTime:kCMTimeZero];
     [_lock lock]; _status.phase = IDMP4_ENCODING; [_lock unlock];
     _timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, _queue);

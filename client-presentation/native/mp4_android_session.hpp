@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 #pragma once
 #include <jni.h>
+#include "mp4_session_api.h"
 // The encoder class is registered by its app ClassLoader in the companion
 // adapter. Session methods contain no lookup from an attached foreign thread.
 extern "C" JNIEXPORT jint JNICALL
@@ -31,5 +32,39 @@ Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStatus(JNIEnv*
 }
 extern "C" JNIEXPORT void JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeCancel(JNIEnv*,jclass){IDMP4SessionCancel();}
+extern "C" JNIEXPORT void JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeSuspend(JNIEnv*,jclass,jint reason){IDMP4SessionSuspend(reason);}
+extern "C" JNIEXPORT void JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeResume(JNIEnv*,jclass){IDMP4SessionResume();}
 extern "C" JNIEXPORT jboolean JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeReady(JNIEnv*,jclass){return IDMP4SessionReady()?JNI_TRUE:JNI_FALSE;}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueConfigure(JNIEnv* env,jclass,jstring root,jstring exports){
+    if(!root||!exports)return -1;
+    const char* r=env->GetStringUTFChars(root,nullptr);
+    const char* e=r?env->GetStringUTFChars(exports,nullptr):nullptr;
+    const int result=e&&!env->ExceptionCheck()?IDMP4QueueConfigure(r,e):-1;
+    if(e)env->ReleaseStringUTFChars(exports,e);if(r)env->ReleaseStringUTFChars(root,r);return result;
+}
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueEnqueue(JNIEnv*,jclass,jint n,jint d,jint c,jint v,jint a){
+    return n>0&&d>0&&c>0&&v>0&&a>0?IDMP4QueueEnqueue(n,d,c,v,a):-1;
+}
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueRun(JNIEnv*,jclass){return IDMP4QueueRun();}
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueuePause(JNIEnv*,jclass){return IDMP4QueuePause();}
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueResume(JNIEnv*,jclass){return IDMP4QueueResume();}
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueCommand(JNIEnv* env,jclass,jint operation,jstring id,jint position){
+    if(!id)return -1;const char* value=env->GetStringUTFChars(id,nullptr);
+    const int result=value&&!env->ExceptionCheck()?IDMP4QueueCommand(operation,value,position):-1;
+    if(value)env->ReleaseStringUTFChars(id,value);return result;
+}
+extern "C" JNIEXPORT jstring JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueStatus(JNIEnv* env,jclass){
+    char json[16384]{};return env->NewStringUTF(IDMP4QueueStatus(json,sizeof(json))?json:
+        "{\"schema\":1,\"available\":false,\"error_code\":\"queue_status_unavailable\",\"jobs\":[]}");
+}

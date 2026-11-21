@@ -42,6 +42,7 @@ PRELUDE = """
 #include <unistd.h>
 #include <fstream>
 #include <iostream>
+#include <thread>
 const char* fault_case="";
 bool foreign_created=false;
 int host_openat(int directory,const char* name,int flags,...){
@@ -78,6 +79,7 @@ std::vector<float> camera_deltas;
 unsigned delayed_ticks=0;
 bool was_cancelled=false,private_lifetime_verified=false;
 bool cancel_marker_written=false;
+unsigned suspension_checks=0;
 double session_duration(void*,Method*){return selected_duration;}
 int32_t session_samples(void*,Method*){return sample_rate*2;}
 int32_t session_rate(void*,Method*){return sample_rate;}
@@ -180,6 +182,42 @@ extern "C" int IDMP4EncoderDestroy(IDMP4EncoderHandle value){
     assert(access(e->pcm.c_str(),F_OK)==0);
     if(e->destroy_calls++<2){++destroy_retries;return IDMP4_RETRY;}delete e;return IDMP4_ACCEPTED;
 }
+void check_suspension(bool cancel_parked=false){
+    const auto stage=session_core::job.stage;const uint64_t frame=session_core::job.frame,mixed=session_core::job.mixed;
+    const size_t clip_index=session_core::job.clip;const int before_data=data_calls,before_loads=loads;
+    const size_t before_frames=submitted_times.size();const int before_graph=graph_steps,before_actor=actor_steps;
+    const double before_time=time_value;char state[2048]{};
+    std::thread requester([]{IDMP4SessionSuspend(IDMP4_PAUSE_LIFECYCLE_BACKGROUND);});requester.join();
+    assert(IDMP4SessionStatus(state,sizeof(state))&&std::strstr(state,"\"phase\":\"pausing\"")
+        &&std::strstr(state,"\"paused\":false")&&std::strstr(state,"\"pause_requested\":true"));
+    // No managed method may run on the host thread, including while paused.
+    std::thread invalid([]{IDMP4SessionSuspend(99);});invalid.join();
+    for(unsigned i=0;i<6;++i){
+        // Simulate suspension longer than both watchdogs without sleeping.
+        session_core::job.activity=session_core::milliseconds()-180000;
+        session_core::on_unity_tick();
+        assert(session_core::job.stage==stage&&session_core::job.frame==frame&&session_core::job.mixed==mixed
+            &&session_core::job.clip==clip_index&&data_calls==before_data&&loads==before_loads
+            &&submitted_times.size()==before_frames&&graph_steps==before_graph&&actor_steps==before_actor
+            &&time_value==before_time);
+        assert(IDMP4SessionStatus(state,sizeof(state))&&std::strstr(state,"\"phase\":\"paused\"")
+            &&std::strstr(state,"\"paused\":true")&&std::strstr(state,"\"pause_reason\":\"lifecycle_background\""));
+        if(i==2&&scenario=="pause_capture_arrives"){
+            auto* pass=make("VL.Rendering.VLCapturePass");auto* rendering=make("RenderingData");
+            write(rendering,0x90,ptr(camera));write(rendering,0x158,uint8_t(1));
+            session_core::capture_pass_did_execute(ptr(pass),ptr(rendering));
+            session_core::camera_did_render(ptr(camera));
+            assert(session_core::job.captured&&session_core::job.frame==frame);
+        }
+    }
+    if(cancel_parked){IDMP4SessionCancel();was_cancelled=true;}
+    else {
+        std::thread resumed([]{IDMP4SessionResume();IDMP4SessionResume();});resumed.join();
+        assert(IDMP4SessionStatus(state,sizeof(state))&&!std::strstr(state,"\"phase\":\"paused\"")
+            &&std::strstr(state,"\"pause_requested\":false")&&std::strstr(state,"\"pause_reason\":\"none\""));
+    }
+    ++suspension_checks;
+}
 int main(int argc,char** argv){
     assert(argc==9);const char* directory=argv[1];uint64_t epoch=std::strtoull(argv[2],nullptr,10);
     output_root=argv[4];int platform=std::atoi(argv[5]);sample_rate=std::atoi(argv[6]);fps=std::atoi(argv[7]);scenario=argv[8];fault_case=argv[8];
@@ -194,12 +232,35 @@ int main(int argc,char** argv){
     bool configured=session_core::configure(directory,epoch,argv[3],output_root.c_str(),platform);
     if(!configured){std::printf("{\"configured\":false}\n");return 0;}
     assert(session_core::start({static_cast<uint32_t>(fps),1,1,16000000,192000}));
+    if(scenario=="pause_before_start"||scenario=="pause_before_start_cancel")
+        check_suspension(scenario=="pause_before_start_cancel");
     auto* pass=make("VL.Rendering.VLCapturePass");auto* rendering=make("RenderingData");
     write(rendering,0x90,ptr(camera));write(rendering,0x158,uint8_t(1));
     uint64_t deadline=session_core::milliseconds()+15000;
     do{
+        if(!suspension_checks){
+            using S=session_core::Stage;const auto s=session_core::job.stage;
+            const bool pause=(scenario=="pause_audio_response"&&s==S::audio_response)
+                ||(scenario=="pause_audio_load"&&s==S::audio_load)
+                ||(scenario=="pause_audio_mix"&&s==S::audio_mix)
+                ||(scenario=="pause_audio_finalize"&&s==S::audio_finalize)
+                ||(scenario=="pause_frame_request"&&s==S::frame_request)
+                ||(scenario=="pause_frame_wait"&&s==S::frame_wait)
+                ||(scenario=="pause_frame_submit"&&s==S::frame_submit&&session_core::job.frame==2)
+                ||(scenario=="pause_cancel"&&s==S::frame_submit&&session_core::job.frame==2);
+            if(pause)check_suspension(scenario=="pause_cancel");
+            if(scenario=="pause_before_ack"&&s==S::frame_wait){
+                IDMP4SessionSuspend(IDMP4_PAUSE_SURFACE_UNAVAILABLE);
+                session_core::job.activity=session_core::milliseconds()-180000;
+                // The original engine stops before acknowledging. Its first
+                // resumed tick must not time out an otherwise owned capture.
+                IDMP4SessionResume();++suspension_checks;
+            }
+        }
         session_core::on_unity_tick();
         if(session_core::job.stage==session_core::Stage::frame_wait&&!session_core::job.captured){
+            if(!suspension_checks&&(scenario=="pause_capture_pending"||scenario=="pause_capture_arrives"))
+                check_suspension();
             if(scenario=="capture_missing")session_core::job.activity=session_core::milliseconds()-6000;
             else {session_core::capture_pass_did_execute(ptr(pass),ptr(rendering));session_core::camera_did_render(ptr(camera));}
         }
@@ -220,8 +281,8 @@ int main(int argc,char** argv){
     assert(brain_mode==1&&brain_blend==0);float outside=0;assert(!session_core::camera_delta_override(ptr(brain),&outside));
     for(const auto& path:loaded_bundles)assert(access(path.c_str(),F_OK)!=0);
     char status[2048]{};assert(session_core::status(status,sizeof(status)));
-    std::printf("{\"configured\":true,\"session\":%s,\"loads\":%d,\"unloads\":%d,\"data_calls\":%d,\"retries\":%d,\"destroy_retries\":%d,\"graph_steps\":%d,\"actor_steps\":%d,\"private_lifetime_verified\":%s,\"delayed_ticks\":%u,\"times\":[",
-        status,loads,unloads,data_calls,retries,destroy_retries,graph_steps,actor_steps,private_lifetime_verified?"true":"false",delayed_ticks);
+    std::printf("{\"configured\":true,\"session\":%s,\"loads\":%d,\"unloads\":%d,\"data_calls\":%d,\"retries\":%d,\"destroy_retries\":%d,\"graph_steps\":%d,\"actor_steps\":%d,\"private_lifetime_verified\":%s,\"delayed_ticks\":%u,\"suspension_checks\":%u,\"times\":[",
+        status,loads,unloads,data_calls,retries,destroy_retries,graph_steps,actor_steps,private_lifetime_verified?"true":"false",delayed_ticks,suspension_checks);
     for(size_t i=0;i<submitted_times.size();++i)std::printf("%s%.12f",i?",":"",submitted_times[i]);
     std::printf("],\"camera_deltas\":[");
     for(size_t i=0;i<camera_deltas.size();++i)std::printf("%s%.12f",i?",":"",camera_deltas[i]);
@@ -354,6 +415,44 @@ def test_overlapping_tracks_accumulate_before_one_final_clamp(run_session):
         assert left==pytest.approx(expected,abs=1e-6) and right==pytest.approx(expected,abs=1e-6)
     assert len(observed["calls"])==1
     eventually(lambda: observed["broker"].status()["prepared_files"]==0)
+
+
+@pytest.mark.parametrize("boundary", ["before_start", "audio_response", "audio_load", "audio_mix",
+    "audio_finalize", "frame_request", "frame_wait", "frame_submit", "before_ack",
+    "capture_pending", "capture_arrives"])
+def test_lifecycle_pause_preserves_pending_work_clock_pts_and_watchdogs(run_session, boundary):
+    observed=run_session("pause_"+boundary)
+    session=observed["session"]
+    assert observed["suspension_checks"]==1 and session["phase"]=="completed"
+    assert session["error_code"]=="none" and session["paused"] is False
+    assert session["pause_requested"] is False and session["pause_reason"]=="none"
+    count=math.ceil(round(1.0001*48000)*30/48000)
+    assert session["frames"]==count and observed["graph_steps"]==count-1
+    assert observed["times"]==pytest.approx([index/30 for index in range(count)],abs=1e-7)
+    assert observed["loads"]==observed["unloads"]==1 and observed["private_lifetime_verified"]
+    assert observed["offsets"][0]==[1,9600,8192]
+    assert sum(item[2] for item in observed["offsets"])==28800
+    eventually(lambda: observed["broker"].status()["prepared_files"]==0)
+
+
+def test_cancel_overrides_suspension_without_submitting_pending_frame(run_session):
+    observed=run_session("pause_cancel")
+    assert observed["suspension_checks"]==1 and observed["session"]["phase"]=="cancelled"
+    assert observed["session"]["error_code"]=="cancelled_by_user"
+    assert observed["session"]["paused"] is False and observed["session"]["pause_requested"] is False
+    assert observed["times"]==pytest.approx([0,1/30],abs=1e-7)
+    assert observed["loads"]==observed["unloads"]==1 and observed["private_lifetime_verified"]
+    assert not list(Path(observed["configuration"]["export_directory"]).glob("*.mp4"))
+    eventually(lambda: observed["broker"].status()["prepared_files"]==0)
+
+
+def test_cancel_parked_start_never_acquires_unity_or_audio_resources(run_session):
+    observed=run_session("pause_before_start_cancel")
+    assert observed["suspension_checks"]==1 and observed["session"]["phase"]=="cancelled"
+    assert observed["session"]["error_code"]=="cancelled_by_user"
+    assert observed["loads"]==observed["unloads"]==observed["data_calls"]==0
+    assert observed["graph_steps"]==observed["actor_steps"]==0 and observed["times"]==[]
+    assert observed["calls"]==[]
 
 
 def test_cancel_waits_for_original_async_bundle_load_before_owned_file_retirement(run_session):

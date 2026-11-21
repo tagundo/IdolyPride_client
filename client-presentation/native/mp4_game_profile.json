@@ -21,6 +21,37 @@
       "registration_pointer_slot": "0x9af2cd0",
       "native_abi": "void(void*,const MethodInfo*)"
     },
+    "player_initialize": {
+      "type": "Solis.Common.SolisLivePlayer",
+      "name": "InitializeAsync",
+      "parameter_count": 3,
+      "static": false,
+      "rva": "0x884690c",
+      "prefix": "ff4302d1fe2b00f9f85f06a9f65707a9",
+      "return": "Cysharp.Threading.Tasks.UniTask",
+      "parameters": [
+        {
+          "name": "param",
+          "type": "Solis.Common.SolisLivePlayerParam",
+          "metadata_type_index": 73276
+        },
+        {
+          "name": "autoSetupBinder",
+          "type": "System.Boolean",
+          "metadata_type_index": 50428
+        },
+        {
+          "name": "ct",
+          "type": "System.Threading.CancellationToken",
+          "metadata_type_index": 50865
+        }
+      ],
+      "metadata_method_index": 159573,
+      "token_row": 1975,
+      "module": "solis-submodule.Runtime.dll",
+      "registration_pointer_slot": "0x9fc5cc0",
+      "native_abi": "UniTask16(void*,void*,bool,CancellationToken8,const MethodInfo*)"
+    },
     "director_get_asset": {
       "type": "UnityEngine.Playables.PlayableDirector",
       "name": "get_playableAsset",
@@ -1104,6 +1135,36 @@
       "registration_pointer_slot": "0xa019da0",
       "native_abi": "void*(const MethodInfo*)"
     },
+    "camera_pixel_width": {
+      "type": "UnityEngine.Camera",
+      "name": "get_scaledPixelWidth",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x8f3d4c0",
+      "prefix": "fe0f1ef8f44f01a9d48900b0812647f9",
+      "return": "System.Int32",
+      "parameters": [],
+      "metadata_method_index": 162022,
+      "token_row": 530,
+      "module": "UnityEngine.CoreModule.dll",
+      "registration_pointer_slot": "0xa019c10",
+      "native_abi": "int32_t(void*,const MethodInfo*)"
+    },
+    "camera_pixel_height": {
+      "type": "UnityEngine.Camera",
+      "name": "get_scaledPixelHeight",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x8f3d4fc",
+      "prefix": "fe0f1ef8f44f01a9d48900b0812a47f9",
+      "return": "System.Int32",
+      "parameters": [],
+      "metadata_method_index": 162023,
+      "token_row": 531,
+      "module": "UnityEngine.CoreModule.dll",
+      "registration_pointer_slot": "0xa019c18",
+      "native_abi": "int32_t(void*,const MethodInfo*)"
+    },
     "supports_async_readback": {
       "type": "UnityEngine.SystemInfo",
       "name": "get_supportsAsyncGPUReadback",
@@ -1339,6 +1400,26 @@
     }
   },
   "fields": {
+    "selection_actors": 16,
+    "selection_stage": 24,
+    "selection_timeline": 32,
+    "selection_detach": 40,
+    "selection_stage_max_capacity": 44,
+    "selection_actor_character": 16,
+    "selection_actor_index": 24,
+    "selection_actor_psyllium": 28,
+    "selection_actor_track_index": 32,
+    "selection_actor_descriptor": 40,
+    "selection_actor_audience": 48,
+    "selection_descriptor_assets": 16,
+    "selection_descriptor_name": 24,
+    "selection_descriptor_game_objects": 32,
+    "selection_descriptor_humanoid": 40,
+    "selection_descriptor_collider": 44,
+    "selection_descriptor_trigger": 48,
+    "selection_descriptor_auto_blink": 49,
+    "selection_descriptor_adv": 50,
+    "selection_descriptor_render_layer": 52,
     "presenter_player": 224,
     "player_director_controller": 56,
     "brain_update_mode": 48,
@@ -1382,6 +1463,126 @@
     "rendering_final_target": 344
   },
   "field_proof": {
+    "selection_actors": {
+      "type": "System.Collections.Generic.List`1<.SolisLiveActorParam>",
+      "name": "_actors",
+      "offset": 16,
+      "metadata_field_index": 107720
+    },
+    "selection_stage": {
+      "type": "System.String",
+      "name": "stageAssetName",
+      "offset": 24,
+      "metadata_field_index": 107721
+    },
+    "selection_timeline": {
+      "type": "System.String",
+      "name": "timelineAssetName",
+      "offset": 32,
+      "metadata_field_index": 107722
+    },
+    "selection_detach": {
+      "type": "System.Boolean",
+      "name": "detachActorsOnPlayerDestroyed",
+      "offset": 40,
+      "metadata_field_index": 107723
+    },
+    "selection_stage_max_capacity": {
+      "type": "System.Int32",
+      "name": "stageMaxCapacity",
+      "offset": 44,
+      "metadata_field_index": 6230
+    },
+    "selection_actor_character": {
+      "type": "System.String",
+      "name": "characterId",
+      "offset": 16,
+      "metadata_field_index": 107724
+    },
+    "selection_actor_index": {
+      "type": "System.Int32",
+      "name": "actorIndex",
+      "offset": 24,
+      "metadata_field_index": 107725
+    },
+    "selection_actor_psyllium": {
+      "type": "System.Int32",
+      "name": "psylliumColerType",
+      "offset": 28,
+      "metadata_field_index": 107726
+    },
+    "selection_actor_track_index": {
+      "type": "System.Int32",
+      "name": "trackIndex",
+      "offset": 32,
+      "metadata_field_index": 107727
+    },
+    "selection_actor_descriptor": {
+      "type": "Solis.Common.SolisActorDescriptor",
+      "name": "descriptor",
+      "offset": 40,
+      "metadata_field_index": 107728
+    },
+    "selection_actor_audience": {
+      "type": "System.Int32",
+      "name": "audienceAmount",
+      "offset": 48,
+      "metadata_field_index": 107729
+    },
+    "selection_descriptor_assets": {
+      "type": "System.Collections.Generic.List`1<System.String>",
+      "name": "_assets",
+      "offset": 16,
+      "metadata_field_index": 129704
+    },
+    "selection_descriptor_name": {
+      "type": "System.String",
+      "name": "_name",
+      "offset": 24,
+      "metadata_field_index": 129705
+    },
+    "selection_descriptor_game_objects": {
+      "type": "UnityEngine.GameObject[]",
+      "name": "_gameObjects",
+      "offset": 32,
+      "metadata_field_index": 129706
+    },
+    "selection_descriptor_humanoid": {
+      "type": "System.Boolean",
+      "name": "_humanoid",
+      "offset": 40,
+      "metadata_field_index": 129289
+    },
+    "selection_descriptor_collider": {
+      "type": "VL.VLActorColliderType",
+      "name": "_colliderType",
+      "offset": 44,
+      "metadata_field_index": 129290
+    },
+    "selection_descriptor_trigger": {
+      "type": "System.Boolean",
+      "name": "_colliderTrigger",
+      "offset": 48,
+      "metadata_field_index": 129291
+    },
+    "selection_descriptor_auto_blink": {
+      "type": "System.Boolean",
+      "name": "_autoBlinkDisabled",
+      "offset": 49,
+      "metadata_field_index": 107398
+    },
+    "selection_descriptor_adv": {
+      "type": "System.Boolean",
+      "name": "_useADVSettings",
+      "offset": 50,
+      "metadata_field_index": 107399
+    },
+    "selection_descriptor_render_layer": {
+      "type": "System.Int32",
+      "name": "_renderingLayerMaskBaseIndex",
+      "offset": 52,
+      "metadata_field_index": 107400
+    },
     "presenter_player": {
       "type": "Solis.Common.SolisLivePlayer",
       "name": "_player",
@@ -1820,6 +2021,29 @@
       "metadata_type_definition_index": 30787,
       "size_table_instance_bytes": 72,
       "size_table_native_bytes": 56
+    },
+    "UniTask": {
+      "bytes": 16,
+      "fields": {
+        "source": 0,
+        "token": 8
+      },
+      "metadata_type_definition_index": 29422,
+      "size_table_instance_bytes": 32,
+      "size_table_native_bytes": 4294967295,
+      "contains_managed_references": true,
+      "abi_scope": "original_managed_call_not_native_marshaling"
+    },
+    "CancellationToken": {
+      "bytes": 8,
+      "fields": {
+        "_source": 0
+      },
+      "metadata_type_definition_index": 19123,
+      "size_table_instance_bytes": 24,
+      "size_table_native_bytes": 4294967295,
+      "contains_managed_references": true,
+      "abi_scope": "original_managed_call_not_native_marshaling"
     }
   },
   "scope": {

@@ -5,7 +5,7 @@
   "bootstrap_unity_sha256": "2e61bc5754d9b934c1264e294ee2689c9ae9c016d0c197e374882db6f1c529ce",
   "metadata_sha256": "d11a50fd75d1e6744ae10f2a6e7081ea87bcca267a42ba0a72fe497057cd2bda",
   "uuid": "cd2fb04c5a5b3c298383bbc20b923b91",
-  "profile_sha256": "d58bc7e47cab4b1d0809748e73af596db7c42fd131560ed19df754983db0bba8",
+  "profile_sha256": "652ee72fb7d81e21596d8149eff7b124481b2a842353d5bc0f03e1a9b222a30b",
   "hook_names": [
     "q_set",
     "q_apply",
@@ -58,7 +58,8 @@
     "mp4_end_camera",
     "mp4_graph_mode",
     "mp4_brain_delta",
-    "mp4_core_camera"
+    "mp4_core_camera",
+    "mp4_player_initialize"
   ],
   "entries": {
     "q_set": {
@@ -580,7 +581,17 @@
       "patched_entry": "26bb8d15",
       "gateway_hex": "30a000b01042299110fedfc8500000b400021fd6ffc301d1d5447216",
       "registration_pointer_slot": 171095232
+    },
+    "mp4_player_initialize": {
+      "rva": 117040808,
+      "original16": "ff4302d1f85f05a9f65706a9f44f07a9",
+      "gateway": 158893776,
+      "slot": 179886680,
+      "original_callable": 158893796,
+      "patched_entry": "0aa89f14",
+      "gateway_hex": "30a000b01062299110fedfc8500000b400021fd6ff4302d1f1576017",
+      "registration_pointer_slot": 175308288
     }
   },
-  "profile_header_sha256": "afbc5311f671de6535f57e86c59126f3b7235c5018d9a05a863a9512e8066d15"
+  "profile_header_sha256": "03f9d0302547ac13fac535c989e7db515665545f6d4c1573ee46e9daa79a45f5"
 }

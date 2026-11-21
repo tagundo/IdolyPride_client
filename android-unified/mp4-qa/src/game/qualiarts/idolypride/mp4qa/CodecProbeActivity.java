@@ -8,6 +8,7 @@ import android.media.MediaCodecInfo;
 import android.media.MediaExtractor;
 import android.media.MediaFormat;
 import android.os.Bundle;
+import android.system.Os;
 import android.widget.TextView;
 import game.qualiarts.idolypride.localserver.mp4.OfflineMp4Encoder;
 import game.qualiarts.idolypride.localserver.mp4.OfflineMp4Math;
@@ -75,6 +76,9 @@ public final class CodecProbeActivity extends Activity {
         OfflineMp4Encoder encoder = OfflineMp4Encoder.create(WIDTH, HEIGHT, numerator, denominator,
                 2_000_000, RATE, CHANNELS, RATE, frameCount, pcm.getPath(), partial.getPath(), output.getPath(), codec);
         active = encoder;
+        boolean partialPermissionsChecked = partial.isFile();
+        if (partialPermissionsChecked) require((Os.lstat(partial.getPath()).st_mode & 0777) == 0600,
+                "Owned partial export permissions");
         ByteBuffer rgba = ByteBuffer.allocateDirect(WIDTH * HEIGHT * 4);
         for (long index = 0; index < frameCount;) {
             check(deadline); pixels(rgba, index);
@@ -97,6 +101,9 @@ public final class CodecProbeActivity extends Activity {
             throw new IOException(name + " encoder failed: " + encoderStatus);
         }
         require(output.isFile() && output.length() > 0 && !partial.exists(), "Final file ownership");
+        require(partialPermissionsChecked && (Os.lstat(output.getPath()).st_mode & 0777) == 0600,
+                "Owned final export permissions");
+        proof.put("private_partial_permissions", true).put("private_final_permissions", true);
         require(pcm.length() == RATE * CHANNELS * 4L, "PCM source preserved");
         proof.put("width", WIDTH).put("height", HEIGHT).put("fps_numerator", numerator).put("fps_denominator", denominator);
         proof.put("frames", frameCount).put("file", name + "/complete.mp4");

@@ -4,6 +4,23 @@
 
 static NSString *IDMP4Language = @"system";
 static BOOL IDMP4FileSheetVisible;
+static UIBackgroundTaskIdentifier IDMP4FinalizationTask = UIBackgroundTaskInvalid;
+static void IDMP4EndFinalizationTask(void) {
+    UIBackgroundTaskIdentifier task = IDMP4FinalizationTask;
+    IDMP4FinalizationTask = UIBackgroundTaskInvalid;
+    if (task != UIBackgroundTaskInvalid) [UIApplication.sharedApplication endBackgroundTask:task];
+}
+static void IDMP4AllowFinalization(void) {
+    // Only the encoder's already captured frames may finish here. This bounded
+    // assertion never promises background Unity rendering or begins another MV.
+    if (!IdolyEmbeddedServerMP4IsFinishing() || IDMP4FinalizationTask != UIBackgroundTaskInvalid) return;
+    IDMP4FinalizationTask = [UIApplication.sharedApplication beginBackgroundTaskWithName:@"Idoly MP4 finalization"
+        expirationHandler:^{ IDMP4EndFinalizationTask(); }];
+    UIBackgroundTaskIdentifier token = IDMP4FinalizationTask;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (IDMP4FinalizationTask == token) IDMP4EndFinalizationTask();
+    });
+}
 static NSString *IDMP4Text(NSString *ko, NSString *ja, NSString *en) {
     NSString *language = [IDMP4Language isEqual:@"system"] ? NSLocale.preferredLanguages.firstObject.lowercaseString : IDMP4Language;
     return [language hasPrefix:@"ko"] ? ko : [language hasPrefix:@"ja"] ? ja : en;
@@ -42,10 +59,10 @@ static IDMP4SaveDelegate *IDMP4PickerDelegate;
     (void)popover; [self retire];
 }
 @end
-static void IDMP4Save(UIViewController *presenter, void (^completion)(BOOL)) {
+static void IDMP4Save(UIViewController *presenter, NSString *jobID, void (^completion)(BOOL)) {
     if (IDMP4FileSheetVisible || !presenter.viewIfLoaded.window) { completion(NO); return; }
     IDMP4FileSheetVisible = YES;
-    IdolyEmbeddedServerMP4Export(^(NSURL *file, NSString *error) {
+    IdolyEmbeddedServerMP4ExportJob(jobID, ^(NSURL *file, NSString *error) {
         (void)error;
         UIViewController *target = IDMP4TopPresenter(presenter);
         if (!file || !target.viewIfLoaded.window || target.presentedViewController) {
@@ -92,14 +109,19 @@ static void IDMP4Save(UIViewController *presenter, void (^completion)(BOOL)) {
 @property(nonatomic,strong) UILabel *label;
 @property(nonatomic,strong) UIProgressView *progress;
 @property(nonatomic,strong) UIButton *button;
+@property(nonatomic,strong) UIButton *pauseButton;
 @property(nonatomic,strong) NSTimer *timer;
 @property(nonatomic,weak) UIWindow *gameWindow;
 @property(nonatomic) BOOL polling;
 @property(nonatomic) BOOL terminal;
 @property(nonatomic) BOOL completed;
+@property(nonatomic) BOOL paused;
+@property(nonatomic) BOOL pausePending;
+@property(nonatomic) BOOL queueMode;
 - (void)show:(UIWindow *)window;
 - (void)tick;
 - (void)buttonPressed;
+- (void)pausePressed;
 @end
 static IDMP4Progress *IDMP4ActiveProgress;
 @implementation IDMP4Progress
@@ -120,6 +142,13 @@ static IDMP4Progress *IDMP4ActiveProgress;
     _label.text = IDMP4Text(@"MP4 준비 중…",@"MP4を準備中…",@"Preparing MP4…");
     _progress = [UIProgressView new];
     _progress.transform = CGAffineTransformMakeScale(1,scale);
+    _pauseButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    [_pauseButton setTitle:IDMP4Text(@"일시 정지",@"一時停止",@"Pause") forState:UIControlStateNormal];
+    [_pauseButton addTarget:self action:@selector(pausePressed) forControlEvents:UIControlEventTouchUpInside];
+    _pauseButton.titleLabel.font = [[UIFontMetrics metricsForTextStyle:UIFontTextStyleHeadline]
+        scaledFontForFont:[UIFont systemFontOfSize:17*scale weight:UIFontWeightSemibold]];
+    _pauseButton.titleLabel.adjustsFontForContentSizeCategory = YES;
+    [_pauseButton.heightAnchor constraintGreaterThanOrEqualToConstant:44*scale].active = YES;
     _button = [UIButton buttonWithType:UIButtonTypeSystem];
     [_button setTitle:IDMP4Text(@"취소",@"キャンセル",@"Cancel") forState:UIControlStateNormal];
     [_button addTarget:self action:@selector(buttonPressed) forControlEvents:UIControlEventTouchUpInside];
@@ -127,7 +156,10 @@ static IDMP4Progress *IDMP4ActiveProgress;
         scaledFontForFont:[UIFont systemFontOfSize:17*scale weight:UIFontWeightSemibold]];
     _button.titleLabel.adjustsFontForContentSizeCategory = YES;
     [_button.heightAnchor constraintGreaterThanOrEqualToConstant:44*scale].active = YES;
-    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_label,_progress,_button]];
+    UIStackView *controls = [[UIStackView alloc] initWithArrangedSubviews:@[_pauseButton,_button]];
+    controls.axis = UILayoutConstraintAxisHorizontal; controls.distribution = UIStackViewDistributionFillEqually;
+    controls.spacing = 12*scale;
+    UIStackView *stack = [[UIStackView alloc] initWithArrangedSubviews:@[_label,_progress,controls]];
     stack.translatesAutoresizingMaskIntoConstraints = NO; stack.axis = UILayoutConstraintAxisVertical; stack.spacing = 8*scale;
     [_panel addSubview:stack]; [window addSubview:_panel];
     UILayoutGuide *safe = window.safeAreaLayoutGuide;
@@ -148,36 +180,83 @@ static IDMP4Progress *IDMP4ActiveProgress;
 - (void)tick {
     if (_polling || _terminal) return; _polling = YES;
     __weak IDMP4Progress *weakSelf = self;
-    IdolyEmbeddedServerMP4Command(@"{\"id\":1,\"action\":\"mp4_status\"}", ^(NSString *reply) {
+    NSString *request = _queueMode ? @"{\"id\":1,\"action\":\"mp4_queue_status\"}" : @"{\"id\":1,\"action\":\"mp4_status\"}";
+    IdolyEmbeddedServerMP4Command(request, ^(NSString *reply) {
         IDMP4Progress *owner = weakSelf; if (!owner) return; owner.polling = NO;
         NSDictionary *envelope = IDMP4Decode(reply);
-        NSDictionary *status = [envelope[@"result"] isKindOfClass:NSDictionary.class] ? envelope[@"result"] : @{};
+        NSDictionary *result = [envelope[@"result"] isKindOfClass:NSDictionary.class] ? envelope[@"result"] : @{};
+        NSDictionary *status = owner.queueMode && [result[@"session"] isKindOfClass:NSDictionary.class] ? result[@"session"] : result;
         NSString *phase = status[@"phase"];
+        NSUInteger done = 0, remaining = 0, failures = 0;
+        if (owner.queueMode) {
+            for (NSDictionary *row in result[@"jobs"]) {
+                if ([row[@"state"] isEqual:@"completed"]) ++done;
+                if ([@[@"pending",@"running",@"paused"] containsObject:row[@"state"]]) ++remaining;
+                if ([@[@"failed",@"interrupted"] containsObject:row[@"state"]]) ++failures;
+            }
+            BOOL running = [result[@"running"] isEqual:@YES], paused = [result[@"paused"] isEqual:@YES];
+            BOOL terminal = !running && !paused && ![result[@"command_pending"] isEqual:@YES] && remaining == 0;
+            if (![envelope[@"ok"] isEqual:@YES] || ![result[@"available"] isEqual:@YES]) phase = @"failed";
+            else if (terminal) phase = failures ? @"failed" : done ? @"completed" : @"cancelled";
+            else if (paused) phase = @"paused";
+            else if (!running || [@[@"idle",@"completed",@"cancelled",@"failed"] containsObject:phase]) phase = @"queued";
+        }
+        owner.paused = [phase isEqual:@"paused"] || [phase isEqual:@"pausing"] || [status[@"pause_requested"] isEqual:@YES];
         BOOL completed = [phase isEqual:@"completed"], failed = [phase isEqual:@"failed"], cancelled = [phase isEqual:@"cancelled"];
         owner.completed = completed; owner.terminal = completed || failed || cancelled;
         NSString *text = completed ? IDMP4Text(@"MP4 완료",@"MP4完了",@"MP4 complete")
             : failed ? IDMP4Text(@"MP4 실패",@"MP4に失敗",@"MP4 failed")
             : cancelled ? IDMP4Text(@"취소됨",@"キャンセル済み",@"Cancelled")
+            : [phase isEqual:@"paused"] ? ([status[@"pause_reason"] isEqual:@"user_paused"]
+                ? IDMP4Text(@"내보내기 일시 정지",@"書き出しを一時停止中",@"Export paused")
+                : IDMP4Text(@"앱으로 돌아오면 계속합니다",@"アプリに戻ると再開します",@"Resumes when you return to the app"))
+            : [phase isEqual:@"pausing"] ? IDMP4Text(@"안전하게 일시 정지 중",@"安全に一時停止しています",@"Pausing safely")
             : [phase isEqual:@"preparing_audio"] ? IDMP4Text(@"음원 준비 중",@"音源を準備中",@"Preparing soundtrack")
             : [phase isEqual:@"finishing"] ? IDMP4Text(@"MP4 마무리 중",@"MP4を仕上げ中",@"Finalizing MP4")
             : [phase isEqual:@"cancelling"] ? IDMP4Text(@"취소 중",@"キャンセル中",@"Cancelling")
+            : [phase isEqual:@"queued"] ? IDMP4Text(@"다음 MV 준비 중",@"次のMVを準備中",@"Preparing the next MV")
             : IDMP4Text(@"MP4 렌더링",@"MP4レンダリング",@"Rendering MP4");
         unsigned long long frames = [status[@"frames"] unsignedLongLongValue], total = [status[@"total_frames"] unsignedLongLongValue];
         owner.label.text = total ? [NSString stringWithFormat:@"%@ · %llu / %llu\n%@ × %@",text,frames,total,status[@"width"] ?: @0,status[@"height"] ?: @0] : text;
+        if (owner.queueMode) {
+            owner.label.numberOfLines = 3;
+            owner.label.text = [owner.label.text stringByAppendingFormat:@"\n%@ · %lu / %lu MV",IDMP4Text(@"작업 목록",@"処理リスト",@"Queue"),(unsigned long)done,(unsigned long)[result[@"jobs"] count]];
+            [owner.button setTitle:owner.terminal ? IDMP4Text(@"닫기",@"閉じる",@"Close") : IDMP4Text(@"숨기기",@"非表示",@"Hide") forState:UIControlStateNormal];
+        }
         owner.progress.progress = total ? (float)MIN(1.0,(double)frames/(double)total) : 0;
+        owner.pauseButton.hidden = owner.terminal;
+        owner.pauseButton.enabled = !owner.pausePending && (owner.paused || [phase isEqual:@"preparing_audio"] || [phase isEqual:@"rendering"] || (owner.queueMode && [phase isEqual:@"queued"]));
+        [owner.pauseButton setTitle:owner.paused ? IDMP4Text(@"계속",@"再開",@"Resume")
+            : IDMP4Text(@"일시 정지",@"一時停止",@"Pause") forState:UIControlStateNormal];
         if (owner.terminal) {
+            IDMP4EndFinalizationTask();
             [owner.timer invalidate]; owner.timer = nil;
             owner.button.enabled = YES;
-            [owner.button setTitle:completed ? IDMP4Text(@"저장·공유",@"保存・共有",@"Save / Share") : IDMP4Text(@"닫기",@"閉じる",@"Close") forState:UIControlStateNormal];
-            if (failed && [status[@"error_code"] isKindOfClass:NSString.class])
-                owner.label.text = [text stringByAppendingFormat:@"\n%@",status[@"error_code"]];
+            [owner.button setTitle:completed && !owner.queueMode ? IDMP4Text(@"저장·공유",@"保存・共有",@"Save / Share") : IDMP4Text(@"닫기",@"閉じる",@"Close") forState:UIControlStateNormal];
+            NSString *errorCode = owner.queueMode ? result[@"error_code"] : status[@"error_code"];
+            if (failed && [errorCode isKindOfClass:NSString.class]) owner.label.text = [text stringByAppendingFormat:@"\n%@",errorCode];
         }
     });
 }
+- (void)pausePressed {
+    if (_terminal || _pausePending) return;
+    _pausePending = YES; _pauseButton.enabled = NO;
+    NSString *action = _queueMode ? (_paused ? @"mp4_queue_resume" : @"mp4_queue_pause") : (_paused ? @"mp4_resume" : @"mp4_pause");
+    NSString *request = IDMP4Encode(@{@"id":@1,@"action":action});
+    __weak IDMP4Progress *weakSelf = self;
+    IdolyEmbeddedServerMP4Command(request, ^(NSString *reply) {
+        (void)reply; IDMP4Progress *owner = weakSelf;
+        if (!owner) return; owner.pausePending = NO; [owner tick];
+    });
+}
 - (void)buttonPressed {
-    if (_completed) {
+    if (_queueMode) {
+        // Hiding this progress view does not cancel pending jobs. Per-job
+        // cancellation and saved outputs remain in the server queue panel.
+        [_timer invalidate]; _timer = nil; [_panel removeFromSuperview]; IDMP4ActiveProgress = nil;
+    } else if (_completed) {
         UIViewController *presenter = IDMP4TopPresenter(_gameWindow.rootViewController);
-        if (presenter) IDMP4Save(presenter, ^(BOOL presented) {
+        if (presenter) IDMP4Save(presenter, nil, ^(BOOL presented) {
             if (presented) { [self.panel removeFromSuperview]; IDMP4ActiveProgress = nil; }
         });
     } else if (_terminal) {
@@ -191,24 +270,37 @@ static IDMP4Progress *IDMP4ActiveProgress;
 void IDMP4InstallLifecycle(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationWillResignActiveNotification
+            object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+                (void)notification; IdolyEmbeddedServerMP4SetLifecycleActive(NO);
+            }];
         [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidEnterBackgroundNotification
             object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
                 (void)notification;
-                IdolyEmbeddedServerMP4Command(@"{\"id\":1,\"action\":\"mp4_cancel\"}", ^(NSString *reply) { (void)reply; });
+                IdolyEmbeddedServerMP4SetLifecycleActive(NO); IDMP4AllowFinalization();
+            }];
+        [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidBecomeActiveNotification
+            object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *notification) {
+                (void)notification; IDMP4EndFinalizationTask(); IdolyEmbeddedServerMP4SetLifecycleActive(YES);
+                [IDMP4ActiveProgress tick];
             }];
     });
 }
 void IDMP4HandleRequest(NSDictionary *request, UIViewController *presenter, UIWindow *window, void (^reply)(NSString *)) {
     NSNumber *identifier = request[@"id"];
     if ([request[@"action"] isEqual:@"mp4_save"]) {
-        if (request.count != 2) { reply(IDMP4Encode(@{@"id":identifier,@"ok":@NO,@"error":@{@"code":@"invalid_request",@"message":@"invalid_request"}})); return; }
-        IDMP4Save(presenter, ^(BOOL presented) {
+        NSString *jobID = [request[@"job_id"] isKindOfClass:NSString.class] ? request[@"job_id"] : nil;
+        NSCharacterSet *invalid = [[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdef"] invertedSet];
+        BOOL queueJob = request.count == 3 && jobID.length == 32 && [jobID rangeOfCharacterFromSet:invalid].location == NSNotFound;
+        if (!(request.count == 2 && !request[@"job_id"]) && !queueJob) { reply(IDMP4Encode(@{@"id":identifier,@"ok":@NO,@"error":@{@"code":@"invalid_request",@"message":@"invalid_request"}})); return; }
+        IDMP4Save(presenter, jobID, ^(BOOL presented) {
             reply(IDMP4Encode(@{@"id":identifier,@"ok":@(presented),@"result":@{@"presented":@(presented)}}));
         }); return;
     }
     IdolyEmbeddedServerMP4Command(IDMP4Encode(request), ^(NSString *response) {
-        if ([request[@"action"] isEqual:@"mp4_start"] && [IDMP4Decode(response)[@"ok"] isEqual:@YES] && window) {
-            IDMP4Progress *progress = [IDMP4Progress new]; [progress show:window];
+        if ([@[@"mp4_start",@"mp4_queue_run",@"mp4_queue_resume"] containsObject:request[@"action"]]
+                && [IDMP4Decode(response)[@"ok"] isEqual:@YES] && window) {
+            IDMP4Progress *progress = [IDMP4Progress new]; progress.queueMode = ![request[@"action"] isEqual:@"mp4_start"]; [progress show:window];
         }
         reply(response);
     });

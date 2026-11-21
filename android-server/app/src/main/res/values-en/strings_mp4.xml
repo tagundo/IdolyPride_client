@@ -10,6 +10,11 @@
     <string name="mp4_bitrate">Bitrate</string>
     <string name="mp4_start">Export MP4</string>
     <string name="mp4_cancel">Cancel</string>
+    <string name="mp4_pause">Pause</string>
+    <string name="mp4_resume">Resume</string>
+    <string name="mp4_pausing">Pausing safely</string>
+    <string name="mp4_paused">Export paused</string>
+    <string name="mp4_background_paused">Export resumes when you return to the app.</string>
     <string name="mp4_save">Save video</string>
     <string name="mp4_preparing_audio">Preparing music</string>
     <string name="mp4_rendering">Creating video · %1$d/%2$d</string>

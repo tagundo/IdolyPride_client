@@ -10,6 +10,11 @@
     <string name="mp4_bitrate">ビットレート</string>
     <string name="mp4_start">MP4に書き出す</string>
     <string name="mp4_cancel">中止</string>
+    <string name="mp4_pause">一時停止</string>
+    <string name="mp4_resume">再開</string>
+    <string name="mp4_pausing">安全に一時停止しています</string>
+    <string name="mp4_paused">書き出しを一時停止中</string>
+    <string name="mp4_background_paused">アプリに戻ると書き出しを再開します。</string>
     <string name="mp4_save">動画を保存</string>
     <string name="mp4_preparing_audio">楽曲を準備中</string>
     <string name="mp4_rendering">動画を作成中 · %1$d/%2$d</string>

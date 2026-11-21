@@ -34,6 +34,8 @@
 #include "mp4_game_bindings.hpp"
 #include "mp4_graph_modes.hpp"
 #include "mp4_camera_clock.hpp"
+#include "mp4_replay_profile.hpp"
+#include "mp4_replay_factories.hpp"
 #ifndef IDOLY_DARWIN_BRIDGE
 #include "mp4_android_encoder.hpp"
 #endif
@@ -65,6 +67,8 @@ using ObjectMethod = void *(*)(void *, Method *);
 
 pthread_mutex_t config_mutex = PTHREAD_MUTEX_INITIALIZER;
 Config pending;
+bool mp4_queue_graphics_override=false;
+Config mp4_queue_graphics;
 bool configured = false;
 std::atomic<bool> started{false}, ready{false};
 uintptr_t image_base;
@@ -228,8 +232,8 @@ void render_probe_status_json(char *output, size_t capacity) {
 
 Config configuration(bool *has = nullptr) {
     pthread_mutex_lock(&config_mutex);
-    Config result = pending;
-    if (has) *has = configured;
+    Config result = mp4_queue_graphics_override?mp4_queue_graphics:pending;
+    if (has) *has = configured||mp4_queue_graphics_override;
     pthread_mutex_unlock(&config_mutex);
     return result;
 }
@@ -809,6 +813,15 @@ void mp4_owned_brain_manual_update(void*,mp4game::Method*);
 bool mp4_camera_clock_ok();
 bool mp4_recorded_graph_mode(const mp4game::PlayableGraph*,int32_t*);
 bool mp4_source_verified=false,mp4_api_installed=false;
+bool mp4_replay_verified=false;
+idoly_mp4_replay_factories::Factory mp4_replay_factory;
+#ifdef IDOLY_DARWIN_BRIDGE
+constexpr const auto& mp4_replay_profile=idoly_mp4_replay::ios_replay_profile;
+constexpr const auto& mp4_replay_bindings=idoly_mp4_replay::ios_replay_bindings;
+#else
+constexpr const auto& mp4_replay_profile=idoly_mp4_replay::android_replay_profile;
+constexpr const auto& mp4_replay_bindings=idoly_mp4_replay::android_replay_bindings;
+#endif
 void *mp4_single_class=nullptr,*mp4_texture_class=nullptr;
 uint32_t mp4_audio_type_handle=0;
 void *(*mp4_array_new)(void*,uintptr_t);
@@ -860,6 +873,7 @@ bool mp4_hook_was_statically_verified(const mp4game::Binding &binding) {
     // load_calls. The independent typed profile must attest the SAME originals.
     const pin::Entry *entry=nullptr;
     if(binding.rva==pin::mp4_presenter_update.rva)entry=&pin::mp4_presenter_update;
+    else if(binding.rva==pin::mp4_player_initialize.rva)entry=&pin::mp4_player_initialize;
     else if(binding.rva==pin::mp4_capture_pass.rva)entry=&pin::mp4_capture_pass;
     else if(binding.rva==pin::mp4_end_camera.rva)entry=&pin::mp4_end_camera;
     else if(binding.rva==pin::mp4_graph_mode.rva)entry=&pin::mp4_graph_mode;
@@ -882,6 +896,13 @@ void mp4_verify_original_calls() {
     mp4_string_new=reinterpret_cast<decltype(mp4_string_new)>(image_base+runtime.string_new.rva);
     mp4_type_get_object=reinterpret_cast<decltype(mp4_type_get_object)>(image_base+runtime.type_get_object.rva);
     mp4_source_verified=true;
+    mp4_replay_verified=true;
+    for(const auto& binding:mp4_replay_bindings){
+        const bool data=binding.rva==mp4_replay_profile.actor_descriptor_type.rva
+            ||binding.rva==mp4_replay_profile.out_game_param_type.rva||binding.rva==mp4_replay_profile.transition_param_type.rva;
+        const uintptr_t address=image_base+binding.rva;
+        if(!mp4_mapped(address,16,!data)||std::memcmp(reinterpret_cast<void*>(address),binding.prefix,16))mp4_replay_verified=false;
+    }
 }
 bool mp4_type_is(void *object,const char *qualified) {
     if(!object||!qualified)return false;
@@ -925,6 +946,77 @@ size_t mp4_string_utf8(void *text,char *destination,size_t capacity) {
     }
     destination[written]=0;return written;
 }
+bool mp4_queue_snapshot_graphics(idoly_mp4_queue::Graphics& out){
+    Config current=configuration();void* manager=quality_manager.get(true);
+    // Zero means follow the mutable original user preference. Freeze the
+    // original manager's effective quality/FPS before serializing a queue job.
+    if(!manager||!object_alive(manager,nullptr))return false;
+    if(!current.custom_graphics||!current.quality)current.quality=read<int32_t>(manager,0x24);
+    if(!current.custom_graphics||!current.target_fps){
+        const float observed=read<float>(manager,0x20);
+        if(!std::isfinite(observed)||observed<0||observed>120||std::fabs(observed-std::round(observed))>.001f)return false;
+        current.target_fps=static_cast<int>(observed);
+    }
+    current.custom_graphics=true;
+    if(!config_valid(1,current)||!current.quality||!current.target_fps)return false;
+    out.revision=current.revision;out.custom_graphics=1;out.quality=current.quality;out.target_fps=current.target_fps;
+    out.render_scale=current.render_scale;out.max_buffer_pixel=current.max_buffer_pixel;out.aa_mode=current.aa_mode;
+    out.shadow_resolution=current.shadow_resolution;out.expand_photography=current.expand_photography?1:0;return true;
+}
+bool mp4_actual_source_geometry(void* controller,int32_t* width,int32_t* height){
+    if(!width||!height||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")||!mp4_alive(controller))return false;
+    // The controller's original target already includes the original URP
+    // scale and our verified max-buffer rule. Screen/scaledPixel dimensions
+    // can differ from this actual render texture on large desktop windows.
+    void* wrapper=rt_target(controller,nullptr);
+    if(!mp4_type_is(wrapper,"VL.VLRenderTexture"))return false;
+    void* texture=target_to_texture(wrapper,nullptr);
+    if(!mp4_type_is(texture,"UnityEngine.RenderTexture")||!mp4_alive(texture))return false;
+    *width=rt_width(texture,nullptr);*height=rt_height(texture,nullptr);return true;
+}
+bool mp4_queue_apply_graphics(const idoly_mp4_queue::Graphics* value){
+    Config next{};
+    if(value){next.revision=value->revision;next.custom_graphics=value->custom_graphics!=0;next.quality=value->quality;next.target_fps=value->target_fps;
+        next.render_scale=value->render_scale;next.max_buffer_pixel=value->max_buffer_pixel;next.aa_mode=value->aa_mode;
+        next.shadow_resolution=value->shadow_resolution;next.expand_photography=value->expand_photography!=0;
+        if(!config_valid(1,next))return false;}
+    pthread_mutex_lock(&config_mutex);mp4_queue_graphics=next;mp4_queue_graphics_override=value!=nullptr;pthread_mutex_unlock(&config_mutex);return true;
+}
+void* mp4_replay_new_object(idoly_mp4_replay::Kind kind){return mp4_replay_factory.new_object(kind);}
+void* mp4_replay_new_list(void* owner,const char* field){return mp4_replay_factory.new_field_list(owner,field);}
+bool mp4_replay_add(void* list,void* value){return mp4_replay_factory.list_add(list,value);}
+bool mp4_replay_set_object(void* owner,const char* field,void* value){return mp4_replay_factory.set_object(owner,field,value);}
+bool mp4_replay_set_i32(void* owner,const char* field,int32_t value){return mp4_replay_factory.set_i32(owner,field,value);}
+bool mp4_replay_set_bool(void* owner,const char* field,bool value){return mp4_replay_factory.set_bool(owner,field,value);}
+void mp4_install_replay_runtime(){
+    if(!mp4_replay_verified)return;
+    namespace factories=idoly_mp4_replay_factories;
+    factories::Calls calls{};calls.object_class=object_class;calls.class_name=class_name;calls.class_namespace=class_namespace;
+    calls.class_parent=class_parent;calls.field=font_field;calls.field_type=font_field_type;calls.class_from_type=font_class_type;
+    calls.object_new=font_new;calls.method=font_method;calls.strong_new=font_strong;calls.target=weak_get;calls.release=weak_free;
+    calls.type_get_type=reinterpret_cast<decltype(calls.type_get_type)>(image_base+mp4_replay_profile.type_get_type.rva);
+    calls.field_set_value=reinterpret_cast<decltype(calls.field_set_value)>(image_base+mp4_replay_profile.field_set_value.rva);
+    factories::Classes classes{};
+    classes.out_game_param=font_class_type(reinterpret_cast<void*>(image_base+mp4_replay_profile.out_game_param_type.rva));
+    classes.actor_descriptor=font_class_type(reinterpret_cast<void*>(image_base+mp4_replay_profile.actor_descriptor_type.rva));
+    classes.transition_param=font_class_type(reinterpret_cast<void*>(image_base+mp4_replay_profile.transition_param_type.rva));
+    if(!mp4_replay_factory.configure(calls,classes))return;
+    idoly_mp4_replay::Api api{};api.is_type=mp4_type_is;api.alive=mp4_alive;api.retain=mp4_retain;api.retained=weak_get;api.release=weak_free;
+    api.new_object=mp4_replay_new_object;api.new_string=mp4_string_new;api.new_field_list=mp4_replay_new_list;api.list_add=mp4_replay_add;
+    api.set_object=mp4_replay_set_object;api.set_i32=mp4_replay_set_i32;api.set_bool=mp4_replay_set_bool;
+#define MP4_REPLAY_CALL(name) api.name=reinterpret_cast<decltype(api.name)>(image_base+mp4_replay_profile.name.rva)
+    MP4_REPLAY_CALL(out_game_param_ctor);MP4_REPLAY_CALL(actor_descriptor_ctor);MP4_REPLAY_CALL(transition_param_ctor);MP4_REPLAY_CALL(param_add_actor);
+    MP4_REPLAY_CALL(scene_instance);MP4_REPLAY_CALL(scene_busy);MP4_REPLAY_CALL(live_state);MP4_REPLAY_CALL(tree_with_param);MP4_REPLAY_CALL(open_tree);
+    MP4_REPLAY_CALL(presenter_end);MP4_REPLAY_CALL(task_status);MP4_REPLAY_CALL(task_get_awaiter);MP4_REPLAY_CALL(task_get_result);MP4_REPLAY_CALL(top_screen);MP4_REPLAY_CALL(player_ready);
+#undef MP4_REPLAY_CALL
+    idoly_mp4_runtime::install_queue_api(api,mp4_queue_snapshot_graphics,mp4_queue_apply_graphics,
+#ifdef IDOLY_DARWIN_BRIDGE
+        mp4game::ios_original_sha256
+#else
+        mp4game::android_original_sha256
+#endif
+    );
+}
 bool mp4_prepare_runtime() {
     if(mp4_api_installed)return true;
     if(!mp4_source_verified||!game_call())return false;
@@ -942,9 +1034,11 @@ bool mp4_prepare_runtime() {
     helpers.new_float_array=mp4_float_array;helpers.new_texture2d=mp4_new_texture;
     helpers.audio_clip_type=weak_get(mp4_audio_type_handle);
     helpers.recorded_graph_mode=mp4_recorded_graph_mode;helpers.camera_clock_ok=mp4_camera_clock_ok;
+    helpers.source_geometry=mp4_actual_source_geometry;
     mp4_api=mp4game::with_original_calls(helpers,mp4_profile,image_base);
     mp4_api.brain_manual_update=mp4_owned_brain_manual_update;
     idoly_mp4_runtime::install_game_api(mp4_api,mp4game::Layout{});
+    mp4_install_replay_runtime();
     mp4_api_installed=true;return true;
 }
 void *mp4_selected_controller(void *presenter) {
@@ -979,6 +1073,20 @@ void *mp4_selected_controller(void *presenter) {
 }
 void mp4_unity_tick() {
     if(mp4_prepare_runtime())idoly_mp4_runtime::on_unity_tick();
+}
+// Original managed-call value aggregates. These are not P/Invoke marshaling
+// structs; both original ARM64 clients pass/return the exact payload registers.
+struct Mp4UniTask {void* source;short token;uint8_t padding[6];};
+struct Mp4CancellationToken {void* source;};
+static_assert(sizeof(Mp4UniTask)==16&&sizeof(Mp4CancellationToken)==8,"Original async ABI differs");
+using Mp4PlayerInitialize=Mp4UniTask(*)(void*,void*,bool,Mp4CancellationToken,Method*);
+Mp4PlayerInitialize mp4_player_initialize_original;
+Mp4UniTask mp4_player_initialize_hook(void* self,void* param,bool auto_setup,Mp4CancellationToken token,Method* method){
+    // The original actor loader mutates descriptor rendering masks. Capture
+    // the caller's immutable selection before starting that original task.
+    if(ready.load(std::memory_order_acquire)&&game_call(true)&&mp4_prepare_runtime())
+        idoly_mp4_runtime::observe_player_initializing(self,param);
+    return mp4_player_initialize_original(self,param,auto_setup,token,method);
 }
 VoidMethod mp4_presenter_update_original;
 struct Mp4RenderContext { void *pointer; };
@@ -2089,6 +2197,7 @@ void *install(void *) {
         HOOK(wardrobe_unload_unused,wardrobe_unload_unused_hook,wardrobe_unload_unused_original),
         HOOK(bulk_costume_filter,bulk_costume_filter_hook,bulk_costume_filter_original),
         HOOK(bulk_hair_filter,bulk_hair_filter_hook,bulk_hair_filter_original),
+        HOOK(mp4_player_initialize,mp4_player_initialize_hook,mp4_player_initialize_original),
         HOOK(mp4_presenter_update,mp4_presenter_update_hook,mp4_presenter_update_original),
         HOOK(mp4_capture_pass,mp4_capture_pass_hook,mp4_capture_pass_original),
         HOOK(mp4_end_camera,mp4_end_camera_hook,mp4_end_camera_original),

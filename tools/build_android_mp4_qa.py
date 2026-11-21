@@ -198,6 +198,7 @@ def validate_runtime_report(value):
                  and case.get("fps_numerator") == numerator
                  and case.get("fps_denominator") == denominator and case.get("ordered_video_pts") is True
                  and case.get("corner_pixels_verified") is True and case.get("source_preserved") is True
+                 and case.get("private_partial_permissions") is True and case.get("private_final_permissions") is True
                  and case.get("file") == name + "/complete.mp4", "Decoded video/PTS/pixel/source proof differs")
             audio, encoder = case.get("audio", {}), case.get("encoder", {})
             need(type(audio) is dict and type(encoder) is dict and encoder.get("phase") == "completed"

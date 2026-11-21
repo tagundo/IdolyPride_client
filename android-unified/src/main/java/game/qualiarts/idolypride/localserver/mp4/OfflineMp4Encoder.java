@@ -7,7 +7,12 @@ import android.media.MediaCodecInfo;
 import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
+import android.system.ErrnoException;
+import android.system.Os;
+import android.system.OsConstants;
+import android.system.StructStat;
 import java.io.File;
+import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -130,7 +135,7 @@ public final class OfflineMp4Encoder {
 
     public OfflineMp4Encoder(Config config) throws IOException {
         this.config = config;
-        if (!config.partial.createNewFile()) throw new IOException("Partial export path already exists");
+        createPrivatePartial(config.partial);
         try {
             int pixels = OfflineMp4Math.pixels(config.width, config.height);
             for (int i = 0; i < SLOTS; i++) free.add(new byte[pixels * 4]);
@@ -138,6 +143,35 @@ public final class OfflineMp4Encoder {
             Thread worker = new Thread(this::encode, "IdolyOfflineMp4");
             worker.setDaemon(true); worker.start();
         } catch (RuntimeException | Error error) { config.partial.delete(); throw error; }
+    }
+
+    private static void createPrivatePartial(File path) throws IOException {
+        FileDescriptor descriptor = null;
+        StructStat owned = null;
+        boolean secured = false;
+        try {
+            descriptor = Os.open(path.getPath(), OsConstants.O_WRONLY | OsConstants.O_CREAT
+                    | OsConstants.O_EXCL | OsConstants.O_NOFOLLOW | OsConstants.O_CLOEXEC, 0600);
+            owned = Os.fstat(descriptor);
+            if (!OsConstants.S_ISREG(owned.st_mode) || owned.st_uid != Os.geteuid() || owned.st_nlink != 1)
+                throw new IOException("Partial export ownership changed");
+            Os.fchmod(descriptor, 0600);
+            StructStat current = Os.lstat(path.getPath()), changed = Os.fstat(descriptor);
+            if (current.st_dev != owned.st_dev || current.st_ino != owned.st_ino
+                    || changed.st_dev != owned.st_dev || changed.st_ino != owned.st_ino
+                    || (changed.st_mode & 0777) != 0600)
+                throw new IOException("Partial export ownership changed");
+            secured = true;
+        } catch (ErrnoException error) {
+            throw new IOException("Private partial export creation failed", error);
+        } finally {
+            if (!secured && owned != null) try {
+                StructStat current = Os.lstat(path.getPath());
+                if (current.st_dev == owned.st_dev && current.st_ino == owned.st_ino)
+                    Os.remove(path.getPath());
+            } catch (ErrnoException ignored) { /* Never remove a replaced path. */ }
+            if (descriptor != null) try { Os.close(descriptor); } catch (ErrnoException ignored) { }
+        }
     }
 
     /** ACCEPT means every source byte has been copied; RETRY leaves the clock and data untouched. */

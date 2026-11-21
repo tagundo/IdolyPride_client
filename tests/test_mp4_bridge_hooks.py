@@ -6,6 +6,46 @@ import pytest
 
 ROOT=Path(__file__).resolve().parents[1]
 
+
+def test_initialize_hook_copies_original_selection_before_loader_mutation_and_preserves_async_abi(tmp_path):
+    compiler=shutil.which('g++') or shutil.which('clang++')
+    if not compiler:pytest.skip('C++ compiler unavailable')
+    source=(ROOT/'client-presentation/native/bridge.cpp').read_text()
+    begin=source.index('struct Mp4UniTask {')
+    end=source.index('VoidMethod mp4_presenter_update_original;',begin)
+    wrappers=source[begin:end]
+    fixture=r'''
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+using Method=const void;
+std::atomic<bool> ready{true};bool unity=true,available=true;
+std::vector<int> order;void* player=reinterpret_cast<void*>(7);void* param=reinterpret_cast<void*>(8);
+bool game_call(bool=false){return unity;}bool mp4_prepare_runtime(){return available;}
+namespace idoly_mp4_runtime {void observe_player_initializing(void*p,void*q){assert(p==player&&q==param);order.push_back(1);}}
+'''+wrappers+r'''
+Mp4UniTask original(void*p,void*q,bool setup,Mp4CancellationToken ct,Method*m){
+ assert(p==player&&q==param&&setup&&ct.source==reinterpret_cast<void*>(9)&&m==reinterpret_cast<void*>(10));
+ order.push_back(2);Mp4UniTask result{};result.source=reinterpret_cast<void*>(11);result.token=-13;
+ for(unsigned i=0;i<6;++i){result.padding[i]=uint8_t(i+20);}return result;
+}
+int main(){
+ mp4_player_initialize_original=original;
+ for(unsigned test=0;test<4;++test){
+  unity=test!=1;available=test!=2;ready.store(test!=3);order.clear();
+  Mp4UniTask result=mp4_player_initialize_hook(player,param,true,{reinterpret_cast<void*>(9)},reinterpret_cast<void*>(10));
+  assert(result.source==reinterpret_cast<void*>(11)&&result.token==-13);
+  for(unsigned i=0;i<6;++i)assert(result.padding[i]==i+20);
+  assert(order==(test==0?std::vector<int>{1,2}:std::vector<int>{2}));
+ }
+}
+'''
+    path=tmp_path/'initialize.cpp';path.write_text(fixture);binary=tmp_path/'initialize'
+    subprocess.run([compiler,'-std=c++17','-Wall','-Wextra','-Werror',str(path),'-o',str(binary)],check=True,capture_output=True,text=True)
+    subprocess.run([str(binary)],check=True,capture_output=True,text=True)
+
 def test_typed_original_first_hooks_and_thread_guards(tmp_path):
     compiler=shutil.which('g++') or shutil.which('clang++')
     if not compiler:pytest.skip('C++ compiler unavailable')

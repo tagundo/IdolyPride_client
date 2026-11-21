@@ -29,6 +29,9 @@ def test_generated_cross_platform_header_and_typed_hook_boundaries():
         methods=profile['methods']
         assert len(methods)>=63
         assert methods['presenter_update']['native_abi']=='void(void*,const MethodInfo*)'
+        assert methods['player_initialize']['native_abi']=='UniTask16(void*,void*,bool,CancellationToken8,const MethodInfo*)'
+        assert methods['camera_pixel_width']['return']=='System.Int32'
+        assert methods['camera_pixel_height']['return']=='System.Int32'
         assert methods['capture_pass_execute']['native_abi']=='void(void*,ScriptableRenderContext8,void*,const MethodInfo*)'
         assert methods['end_camera_rendering']['native_abi']=='void(ScriptableRenderContext8,void*,const MethodInfo*)'
         assert methods['texture2d_read_pixels_injected']['parameters'][0]['type']=='UnityEngine.Rect&'
@@ -36,6 +39,14 @@ def test_generated_cross_platform_header_and_typed_hook_boundaries():
         assert not methods['bundle_load_asset']['static']
         assert methods['audio_clip_get_data']['parameters'][1]['type']=='System.Int32'
         assert profile['structs']['PlayableGraph']['bytes']==16
+        assert profile['structs']['UniTask']['bytes']==16
+        assert profile['structs']['UniTask']['fields']=={'source':0,'token':8}
+        assert profile['structs']['CancellationToken']['bytes']==8
+        assert profile['structs']['CancellationToken']['fields']=={'_source':0}
+        assert profile['fields']['selection_actor_descriptor']==0x28
+        assert profile['fields']['selection_descriptor_assets']==0x10
+        assert profile['fields']['selection_descriptor_game_objects']==0x20
+        assert profile['fields']['selection_descriptor_render_layer']==0x34
         assert profile['structs']['AnimationStream']['bytes']==56
         assert profile['structs']['RenderTargetIdentifier']['bytes']==40
         assert profile['fields']['rendering_camera']==0x90

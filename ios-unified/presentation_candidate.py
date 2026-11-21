@@ -26,7 +26,7 @@ MAX_RECEIPT = 256 * 1024
 SHARED_HOOKS = frozenset(("shared_setup", "shared_is_cached", "shared_file_path",
                          "shared_pre_download", "shared_downloader_update"))
 MP4_HOOKS = frozenset(("mp4_presenter_update", "mp4_capture_pass", "mp4_end_camera",
-                      "mp4_graph_mode", "mp4_brain_delta", "mp4_core_camera"))
+                      "mp4_graph_mode", "mp4_brain_delta", "mp4_core_camera", "mp4_player_initialize"))
 NEW_BASE_HOOKS = SHARED_HOOKS | MP4_HOOKS
 
 

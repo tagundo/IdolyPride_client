@@ -144,6 +144,7 @@ void *install(void *) {
         HOOK(mp4_graph_mode,mp4_graph_mode_hook,mp4_graph_mode_original),
         HOOK(mp4_brain_delta,mp4_brain_delta_hook,mp4_brain_delta_original),
         HOOK(mp4_core_camera,mp4_core_camera_hook,mp4_core_camera_original),
+        HOOK(mp4_player_initialize,mp4_player_initialize_hook,mp4_player_initialize_original),
     };
 #undef HOOK
     for (auto &hook:hooks) {

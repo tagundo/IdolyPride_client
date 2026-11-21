@@ -345,7 +345,7 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
         "android/app/Activity.java": '''package android.app; public class Activity extends android.content.Context {
           public int dispatches,lastAction,pauses,destroys,starts;public android.content.Intent started;
           protected void onCreate(android.os.Bundle b){}protected void onPause(){pauses++;}protected void onDestroy(){destroys++;}
-          protected void onResume(){}public boolean isInMultiWindowMode(){return false;}
+          protected void onResume(){}protected void onStart(){}protected void onStop(){}public boolean isInMultiWindowMode(){return false;}
           protected void onSaveInstanceState(android.os.Bundle b){}protected void onActivityResult(int r,int c,android.content.Intent i){}
           public void onConfigurationChanged(android.content.res.Configuration c){}
           public void onMultiWindowModeChanged(boolean m,android.content.res.Configuration c){}
@@ -374,6 +374,8 @@ def test_game_menu_hold_policy_and_original_touch_dispatch(tmp_path):
         static void attachGame(android.app.Activity a){}static void geometryChanged(android.app.Activity a){}
         static void focusChanged(android.app.Activity a,boolean focused){}
         static void gamePaused(android.app.Activity a){}static void gameResumed(android.app.Activity a){}static void gameDestroyed(android.app.Activity a){}
+        static void gameStarted(android.app.Activity a){}static void gameStopped(android.app.Activity a){}
+        static void gameResuming(android.app.Activity a){}static void gamePauseCompleted(android.app.Activity a){}
         static void saveState(android.os.Bundle b){}static boolean activityResult(android.app.Activity a,int r,int c,android.content.Intent i){return false;} }'''
     sources[package + "GestureFixture.java"] = '''package game.qualiarts.idolypride.localserver;
       import android.os.Handler;import android.os.SystemClock;import android.view.MotionEvent;import android.content.Intent;

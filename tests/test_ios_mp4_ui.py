@@ -10,6 +10,7 @@ const e=environment();const bridge=api.createBridge(e.scope,e.timers);
 for(const [action,payload] of [
  ['mp4_save',{path:'/private/song.mp4'}],['mp4_save',{export_id:'other-job'}],
  ['mp4_status',{directory:'/private'}],['mp4_cancel',{id:3}],
+ ['mp4_pause',{reason:'lifecycle_background'}],['mp4_resume',{export_id:'foreign'}],
  ['mp4_start',{fps:120,video_bitrate:16000000,video_codec:1}],
  ['mp4_start',{fps:60,video_bitrate:16000000,video_codec:1,output_path:'/tmp/a.mp4'}],
  ['mp4_start',{fps:true,video_bitrate:16000000,video_codec:1}]
@@ -18,6 +19,31 @@ assert.equal(e.posted.length,0);
 const operation=bridge.request('mp4_start',{fps:60,video_bitrate:16000000,video_codec:2});
 assert.deepEqual(e.posted[0],{id:1,action:'mp4_start',fps:60,video_bitrate:16000000,video_codec:2});
 e.respond(e.posted[0],{phase:'preparing_audio',ready:false});await operation;bridge.dispose();
+""")
+
+
+def test_mp4_pause_preserves_progress_and_requires_explicit_resume_for_user_pause():
+    run_js(r"""
+const e=environment();const app=api.createSettingsApp(e.scope,e.document,e.timers);
+e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
+e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'rendering',ready:false,frames:41,total_frames:100});await flush();
+assert.equal(e.elements.get('mp4-pause').hidden,false);
+e.elements.get('mp4-pause').fire('click');await flush();
+const pause=e.posted.find(x=>x.action==='mp4_pause');assert.deepEqual(Object.keys(pause).sort(),['action','id']);
+e.respond(pause,{phase:'paused',ready:false,frames:41,total_frames:100,pause_reason:'user_paused',resume_phase:'rendering'});await flush();
+assert.equal(e.elements.get('mp4-progress').value,.41);
+assert.equal(e.elements.get('mp4-start').disabled,true);
+assert.equal(e.elements.get('mp4-cancel').disabled,false);
+assert.equal(e.elements.get('mp4-resume').hidden,false);
+assert.match(e.elements.get('mp4-feedback').textContent,/계속하기/);
+e.elements.get('mp4-resume').fire('click');await flush();
+const resume=e.posted.find(x=>x.action==='mp4_resume');assert.deepEqual(Object.keys(resume).sort(),['action','id']);
+e.respond(resume,{phase:'rendering',ready:false,frames:41,total_frames:100});await flush();
+assert.equal(e.elements.get('mp4-resume').hidden,true);
+assert.equal(e.elements.get('mp4-progress').value,.41);
+assert.equal(api.translateUI('MP4 일시 정지','en'),'MP4 paused');
+assert.equal(api.translateUI('MP4 일시 정지','ja'),'MP4を一時停止中');app.dispose();
 """)
 
 

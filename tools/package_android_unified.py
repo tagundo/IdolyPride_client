@@ -41,6 +41,7 @@ GAME_ACTIVITY = SERVER_PACKAGE + ".UnifiedGameActivity"
 MENU_ACTIVITY = SERVER_PACKAGE + ".MainActivity"
 COMPONENT_FACTORY = SERVER_PACKAGE + ".UnifiedComponentFactory"
 SERVICE = SERVER_PACKAGE + ".ServerService"
+MP4_SERVICE = SERVER_PACKAGE + ".UnifiedMP4Service"
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 JAVA_ROOT = "android-server/app/src/main/java/"
 UNIFIED_JAVA_ROOT = "android-unified/src/main/java/"
@@ -257,8 +258,13 @@ def transform_manifest(raw):
     app.append(alias)
     ET.SubElement(app, "service", {ANDROID + "name": SERVICE, ANDROID + "exported": "false",
         ANDROID + "foregroundServiceType": "dataSync"})
+    # API 35 resources define mediaProcessing. The service explicitly selects
+    # mediaProcessing on Android 15 and dataSync on earlier supported systems.
+    ET.SubElement(app, "service", {ANDROID + "name": MP4_SERVICE, ANDROID + "exported": "false",
+        ANDROID + "foregroundServiceType": "dataSync|mediaProcessing"})
     permissions = {p.get(ANDROID + "name") for p in tree.findall("uses-permission")}
     for value in ("android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+                  "android.permission.FOREGROUND_SERVICE_MEDIA_PROCESSING", "android.permission.WAKE_LOCK",
                   "android.permission.POST_NOTIFICATIONS", "android.permission.MANAGE_EXTERNAL_STORAGE"):
         if value not in permissions:
             tree.insert(list(tree).index(app), ET.Element("uses-permission", {ANDROID + "name": value}))
@@ -354,12 +360,12 @@ def source_snapshot(root, commit, allow_working):
 
 
 def build_config(asset_info):
-    gradle_version = '2026.11.21.1-mp4-preview'
+    gradle_version = '2026.11.21.2-mp4-queue-preview'
     fields = ['package ' + SERVER_PACKAGE + ';', 'public final class BuildConfig {',
         'public static final boolean DEBUG = false;',
         'public static final String APPLICATION_ID = "' + PACKAGE + '";',
         'public static final String BUILD_TYPE = "release";',
-        'public static final int VERSION_CODE = 56;',
+        'public static final int VERSION_CODE = 57;',
         'public static final String VERSION_NAME = "' + gradle_version + '";']
     for prefix, member in (("SERVER_DATA", "assets/ServerData.zip"),
             ("BUNDLED_TRANSLATIONS", "assets/bundledTranslations.zip"),

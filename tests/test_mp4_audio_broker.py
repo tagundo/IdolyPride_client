@@ -443,7 +443,7 @@ def test_fatal_directory_failure_retires_only_owned_active_marker(setup):
     assert (root / "prepared").is_dir()
 
 
-def test_expired_response_records_do_not_delete_prepared_bundles(setup, tmp_path, monkeypatch):
+def test_long_suspension_keeps_response_and_prepared_bundle_until_native_consumption(setup, tmp_path, monkeypatch):
     _first, store, _, _, calls, _ = setup
     broker = MP4AudioBroker(store, tmp_path, max_responses=1)
     try:
@@ -458,8 +458,11 @@ def test_expired_response_records_do_not_delete_prepared_bundles(setup, tmp_path
         time.sleep(0.08)
         assert queued.exists()
         baseline = module.monotonic()
-        monkeypatch.setattr(module, "monotonic", lambda: baseline + 601)
-        eventually(lambda: not reply.exists())
+        monkeypatch.setattr(module, "monotonic", lambda: baseline + 24 * 3600)
+        broker._scan()
+        assert reply.exists() and queued.exists() and prepared.read_bytes() == before
+        first_status, first_path = receive(configuration, first)
+        assert first_status == READY and first_path == prepared
         status, second_path = receive(configuration, second)
         assert status == READY and prepared.read_bytes() == before
         assert second_path.exists() and len(calls) == 1

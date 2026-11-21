@@ -10,6 +10,11 @@
     <string name="mp4_bitrate">비트레이트</string>
     <string name="mp4_start">MP4 내보내기</string>
     <string name="mp4_cancel">취소</string>
+    <string name="mp4_pause">일시 정지</string>
+    <string name="mp4_resume">계속</string>
+    <string name="mp4_pausing">안전하게 일시 정지 중</string>
+    <string name="mp4_paused">내보내기 일시 정지</string>
+    <string name="mp4_background_paused">앱으로 돌아오면 내보내기를 계속합니다.</string>
     <string name="mp4_save">영상 저장</string>
     <string name="mp4_preparing_audio">음악 준비 중</string>
     <string name="mp4_rendering">영상 만드는 중 · %1$d/%2$d</string>

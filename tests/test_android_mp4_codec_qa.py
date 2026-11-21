@@ -20,6 +20,7 @@ def report():
         cases.append({"name": name, "required": True, "status": "passed", "frames": frames,
             "decoded_video_frames": frames, "fps_numerator": numerator, "fps_denominator": denominator,
             "ordered_video_pts": True, "corner_pixels_verified": True, "source_preserved": True,
+            "private_partial_permissions": True, "private_final_permissions": True,
             "file": name + "/complete.mp4", "audio": {"raw_decoded_frames": 51200, "logical_frames": 48000,
                 "aac_packets": 50, "priming_samples": 1600, "impulses_verified": True, "edit_list_exact": True},
             "encoder": {"phase": "completed", "aac_priming_samples": 1600, "audio_packets": 50}})
@@ -62,6 +63,7 @@ def test_never_accept_build_only_failed_or_another_app(key, value):
     (0, None, "status", "unsupported"), (0, None, "decoded_video_frames", 29),
     (0, None, "ordered_video_pts", False), (0, None, "corner_pixels_verified", False),
     (0, None, "source_preserved", False), (0, None, "required", False),
+    (0, None, "private_partial_permissions", False), (0, None, "private_final_permissions", False),
     (0, None, "file", "../../other.mp4"), (1, None, "fps_denominator", 1000),
     (0, "audio", "raw_decoded_frames", 48000), (0, "audio", "aac_packets", 49),
     (0, "audio", "logical_frames", 48128), (0, "audio", "priming_samples", -1),

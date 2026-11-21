@@ -102,8 +102,8 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
 
     @Override public void onWindowFocusChanged(boolean focused) {
         if (!focused) cancelWindowMenuHold();
-        UnifiedMP4Export.focusChanged(this, focused);
         super.onWindowFocusChanged(focused);
+        UnifiedMP4Export.focusChanged(this, focused);
     }
 
     private void recognizeMenuHold() {
@@ -179,12 +179,25 @@ public final class UnifiedGameActivity extends com.google.firebase.MessagingUnit
         cancelMenuHold();
         UnifiedMP4Export.gamePaused(this);
         super.onPause();
+        UnifiedMP4Export.gamePauseCompleted(this);
     }
 
     @Override protected void onResume() {
         updateWindowing(isInMultiWindowMode());
+        UnifiedMP4Export.gameResuming(this);
         super.onResume();
         UnifiedMP4Export.gameResumed(this);
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        UnifiedMP4Export.gameStarted(this);
+    }
+
+    @Override protected void onStop() {
+        UnifiedMP4Export.gameStopped(this);
+        super.onStop();
+        UnifiedMP4Export.gamePauseCompleted(this);
     }
 
     @Override protected void onDestroy() {

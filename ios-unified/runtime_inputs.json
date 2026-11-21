@@ -196,6 +196,8 @@
     "idoly_local.media_stories",
     "idoly_local.mp4_audio_broker",
     "idoly_local.mp4_audio_bundle",
+    "idoly_local.mp4_export_library",
+    "idoly_local.mp4_titles",
     "idoly_local.octo_cache",
     "idoly_local.octo_http",
     "idoly_local.octo_manifest",

@@ -270,9 +270,15 @@
             <label class="row"><span>영상 비트레이트</span><select id="mp4-bitrate"><option value="8000000">8 Mbps</option><option value="16000000" selected>16 Mbps</option><option value="32000000">32 Mbps</option></select></label>
             <label class="row"><span>영상 코덱</span><select id="mp4-codec"><option value="1">H.264</option><option value="2">HEVC</option></select></label>
           </fieldset>
+          <p class="hint">MV를 모은 뒤 큐를 실행하세요.</p>
+          <div class="actions"><button id="mp4-queue-run" type="button" disabled>큐 실행</button><button id="mp4-enqueue" type="button" class="secondary" disabled>현재 MV 추가</button><button id="mp4-queue-pause" type="button" class="secondary" hidden>큐 일시 정지</button><button id="mp4-queue-resume" type="button" class="secondary" hidden>큐 계속하기</button></div>
+          <p id="mp4-queue-summary" role="status" aria-live="polite">등록한 작업이 없습니다.</p>
+          <p id="mp4-queue-feedback" class="hint" role="status" aria-live="polite"></p>
+          <ol id="mp4-queue-jobs" class="mp4-jobs" aria-label="MP4 작업 목록"></ol>
+          <p class="hint">앱을 나가면 멈추고 돌아오면 이어집니다.</p>
           <progress id="mp4-progress" max="1" value="0" aria-label="MP4 진행률" hidden></progress>
           <p id="mp4-feedback" class="hint" role="status" aria-live="polite"></p>
-          <div class="actions"><button id="mp4-start" type="button" disabled>MP4 내보내기</button><button id="mp4-cancel" type="button" class="secondary" disabled>취소</button><button id="mp4-save" type="button" class="secondary" hidden>MP4 저장·공유</button></div>
+          <details><summary>현재 MV 바로 내보내기</summary><div class="actions"><button id="mp4-start" type="button" disabled>MP4 내보내기</button><button id="mp4-pause" type="button" class="secondary" hidden>일시 정지</button><button id="mp4-resume" type="button" class="secondary" hidden>계속하기</button><button id="mp4-cancel" type="button" class="secondary" disabled>취소</button><button id="mp4-save" type="button" class="secondary" hidden>MP4 저장·공유</button></div></details>
           <details id="help-mp4" class="help-details"><summary>도움말</summary><p class="hint">현재 렌더 크기로 프레임과 음원을 내보냅니다.</p></details>
         </div>
       </details>

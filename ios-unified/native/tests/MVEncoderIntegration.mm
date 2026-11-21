@@ -7,6 +7,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static void Require(BOOL condition, NSString *message) {
@@ -172,6 +173,12 @@ static void EncodeCase(NSString *directory, uint32_t codec, uint32_t rate, uint3
     IDMP4EncoderHandle encoder = IDMP4EncoderCreate(&config, error, sizeof(error));
     Require(encoder != NULL, [NSString stringWithFormat:@"create: %s", error]);
     Require(IDMP4EncoderDestroy(encoder) == IDMP4_RETRY, @"active worker cannot be destroyed");
+    double permissionDeadline = Now() + 10;
+    while (Status(encoder).phase == IDMP4_STARTING && Now() < permissionDeadline) usleep(1000);
+    Require(Status(encoder).phase == IDMP4_ENCODING, @"writer prepared before frames");
+    struct stat partialMode;
+    Require(lstat(partial.fileSystemRepresentation, &partialMode) == 0 && (partialMode.st_mode & 0777) == 0600,
+        @"owned partial permissions are 0600 before encoding");
     const size_t rowBytes = config.width * 4 + 16;
     NSMutableData *frame = [NSMutableData dataWithLength:rowBytes * config.height];
     double deadline = Now() + 90; uint64_t retryCount = 0;
@@ -203,6 +210,9 @@ static void EncodeCase(NSString *directory, uint32_t codec, uint32_t rate, uint3
         && terminal.audio_frames == audioFrames && terminal.bytes_written > 0, @"exact producer totals");
     Require(IDMP4EncoderDestroy(encoder) == IDMP4_ACCEPTED, @"terminal worker released");
     Require(![[NSFileManager defaultManager] fileExistsAtPath:partial], @"partial moved only on completion");
+    struct stat finalMode;
+    Require(lstat(final.fileSystemRepresentation, &finalMode) == 0 && (finalMode.st_mode & 0777) == 0600,
+        @"owned final permissions remain 0600 after publication");
     AVURLAsset *asset = [AVURLAsset URLAssetWithURL:[NSURL fileURLWithPath:final]
         options:@{AVURLAssetPreferPreciseDurationAndTimingKey:@YES}];
     DecodeVideo(asset, &config); DecodeAudio(asset, &config);

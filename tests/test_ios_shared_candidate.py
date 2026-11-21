@@ -138,7 +138,7 @@ def test_previous_base_delta_preserves_old_hooks_and_all_other_sdk_bytes(tmp_pat
     old,expected,path,entries=base_delta_fixture(tmp_path,monkeypatch)
     proof=candidate.verify_base_delta(io.BytesIO(old),path,hashlib.sha256(old).hexdigest(),'plan.json')
     assert proof['previous_bootstrap_and_presentation_bytes_preserved'] is True
-    assert proof['new_hook_count']==11
+    assert proof['new_hook_count']==12
     assert proof['new_mp4_hooks']==sorted(candidate.MP4_HOOKS)
     assert proof['new_shared_hooks']==sorted(candidate.SHARED_HOOKS)
     expected[2000]=1;path.write_bytes(expected)
