@@ -24,18 +24,17 @@ def method(source, name, occurrence=0):
     return source[match.start():at]
 
 
-def test_generic_save_resolves_completed_queue_ownership_and_preserves_one_shots(tmp_path):
+def test_current_session_save_preserves_queue_ownership_without_falling_back_to_other_outputs(tmp_path):
     javac, java = shutil.which("javac"), shutil.which("java")
     if not javac or not java:
         pytest.skip("JDK required")
     source = SOURCE.read_text()
-    selected = [method(source, name) for name in ["queuedSaveTarget", "currentSaveTarget", "canSave", "openSave", "requestSave", "completedFile"]]
+    selected = [method(source, name) for name in ["queuedSaveTarget", "sessionSaveTarget", "completedFile"]]
     fixture = tmp_path / "SaveHarness.java"
     fixture.write_text(r'''
 import java.io.*;import java.nio.file.*;import java.util.*;
 public class SaveHarness {
-  static File exportRoot,persistentExportRoot,pendingSaveRoot;static String pendingSaveId;static boolean saving;
-  static final int SAVE_DOCUMENT=50057;static JSONObject last=new JSONObject(),lastQueue=new JSONObject();
+  static File exportRoot,persistentExportRoot;static JSONObject last=new JSONObject(),lastQueue=new JSONObject();
   static class SaveTarget {final File root;final String outputId,jobId;
     SaveTarget(File root,String outputId,String jobId){this.root=root;this.outputId=outputId;this.jobId=jobId;}}
   static class JSONObject {Map<String,Object> map=new HashMap<>();JSONObject put(String k,Object v){map.put(k,v);return this;}
@@ -43,14 +42,9 @@ public class SaveHarness {
     JSONArray optJSONArray(String k){return map.get(k) instanceof JSONArray?(JSONArray)map.get(k):null;}}
   static class JSONArray {ArrayList<JSONObject> values=new ArrayList<>();JSONArray put(JSONObject v){values.add(v);return this;}
     int length(){return values.size();}JSONObject optJSONObject(int i){return values.get(i);}}
-  static class Intent {static final String ACTION_CREATE_DOCUMENT="create",CATEGORY_OPENABLE="openable",EXTRA_TITLE="title";
-    String action,type,title;Intent(String action){this.action=action;}Intent addCategory(String ignored){return this;}
-    Intent setType(String type){this.type=type;return this;}Intent putExtra(String k,String value){title=value;return this;}}
-  static class Activity {int launches,request;Intent picker;String getString(int id,Object... args){return "IdolyPride-MV-"+args[0]+".mp4";}
-    void startActivityForResult(Intent intent,int request){launches++;picker=intent;this.request=request;}}
-  static class R {static class string {static final int mp4_export_filename=1,mp4_save_failed=2;}}
-  static class Toast {static final int LENGTH_LONG=1;static Toast makeText(Activity a,int s,int l){return new Toast();}void show(){}}
   static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
+  interface Read {SaveTarget run()throws IOException;}
+  static void rejects(Read action,String message)throws Exception{try{action.run();}catch(IOException expected){return;}throw new AssertionError(message);}
   static void file(File root,String id)throws Exception{Files.write(new File(root,id+".mp4").toPath(),new byte[]{1,2,3});}
   static JSONObject job(String id,String output,String state){return new JSONObject().put("job_id",id).put("output_id",output).put("state",state);}
 ''' + "\n".join(selected) + r'''
@@ -60,27 +54,24 @@ public class SaveHarness {
     file(exportRoot,"queued_a");file(persistentExportRoot,"queued_a");
     last.put("phase","completed").put("export_id","queued_a");
     lastQueue.put("jobs",new JSONArray().put(job("stable_job","queued_a","completed")));
-    SaveTarget queued=currentSaveTarget();
-    need(canSave()&&queued.root.equals(persistentExportRoot)&&queued.jobId.equals("stable_job"),"queued completion uses persistent owned output");
-    Activity activity=new Activity();requestSave(activity);
-    need(activity.launches==1&&activity.request==SAVE_DOCUMENT&&pendingSaveRoot.equals(persistentExportRoot)&&pendingSaveId.equals("queued_a"),"generic overlay Save opens the queued file");
-    need(activity.picker.type.equals("video/mp4")&&activity.picker.title.equals("IdolyPride-MV-queued_a.mp4"),"picker exposes only a filename");
+    SaveTarget queued=sessionSaveTarget();
+    need(queued.root.equals(persistentExportRoot)&&queued.jobId.equals("stable_job"),"current queued completion uses persistent owned output");
     lastQueue.put("jobs",new JSONArray().put(job("stable_job","queued_a","running")));
-    need(!canSave(),"queued running state never falls back to same-named temporary file");requestSave(activity);need(activity.launches==1,"unconfirmed output cannot open picker");
+    rejects(()->sessionSaveTarget(),"queued running state must not fall back to same-named temporary file");
     lastQueue.put("jobs",new JSONArray().put(job("../foreign","queued_a","completed")));
-    need(!canSave(),"malformed stable identity rejected");
+    rejects(()->sessionSaveTarget(),"malformed stable queue identity must be rejected");
     lastQueue.put("jobs",new JSONArray().put(job("stable_job","queued_a","completed")));
     file(persistentExportRoot,"foreign");last.put("export_id","foreign");
-    need(!canSave(),"unknown persistent file is not an owned queue result");requestSave(activity);need(activity.launches==1,"foreign output cannot open picker");
-    last.put("export_id","../foreign");need(!canSave(),"path traversal rejected");
+    rejects(()->sessionSaveTarget(),"unknown persistent file must not become the current session result");
+    last.put("export_id","../foreign");rejects(()->sessionSaveTarget(),"path traversal must be rejected");
     last.put("export_id","queued_a");File queuedFile=new File(persistentExportRoot,"queued_a.mp4");queuedFile.delete();
     Files.createSymbolicLink(queuedFile.toPath(),new File(persistentExportRoot,"foreign.mp4").toPath());
-    need(!canSave(),"symlink cannot bypass persistent file ownership or fall back to temporary output");
-    file(exportRoot,"one_shot");last.put("export_id","one_shot");SaveTarget one=currentSaveTarget();
-    need(canSave()&&one.root.equals(exportRoot)&&one.jobId==null,"one-shot output keeps its original directory");
-    requestSave(activity);need(activity.launches==2&&pendingSaveRoot.equals(exportRoot)&&pendingSaveId.equals("one_shot"),"one-shot picker still works");
-    saving=true;need(!canSave(),"do not overlap document writes");requestSave(activity);need(activity.launches==2,"busy write cannot start a second picker");
-    System.out.println("PASS owned queued and one-shot Save");
+    rejects(()->sessionSaveTarget(),"symlink must not bypass persistent ownership or fall back to temporary output");
+    file(exportRoot,"one_shot");last.put("export_id","one_shot");SaveTarget one=sessionSaveTarget();
+    need(one.root.equals(exportRoot)&&one.jobId==null,"current one-shot keeps its original directory");
+    last.put("phase","idle");rejects(()->sessionSaveTarget(),"an idle native session must not claim a previous completed output");
+    last.put("phase","rendering");rejects(()->sessionSaveTarget(),"an active native session must not claim an earlier owned output");
+    System.out.println("PASS current session output ownership");
   }
 }
 ''')
@@ -91,7 +82,7 @@ public class SaveHarness {
     result = subprocess.run([java, "-Xmx128m", "-cp", str(classes), "SaveHarness", str(tmp_path / "files")],
                             capture_output=True, text=True, timeout=15)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "PASS owned queued and one-shot Save"
+    assert result.stdout.strip() == "PASS current session output ownership"
 
 
 def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_path):
@@ -108,7 +99,7 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
 public final class ControllerHarness {
-  static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady;
+  static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady,completionStorageReady=true;
   static int[] pending,startedOptions,enqueuedOptions;static long pendingDeadline,menuHandoffDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues,queueRuns,backgroundPrepares,invalidations,enqueueCalls;static boolean enqueueWasResumed,allowQueueRun=true,allowEnqueue=true,backgroundOwns;
   static WeakReference<Activity> game=new WeakReference<>(null);
   static JSONObject last=new JSONObject(),lastQueue=new JSONObject();static final Handler MAIN=new Handler();static final Runnable BEGIN=()->{};
@@ -127,6 +118,7 @@ public final class ControllerHarness {
   static class R {static class string {static final int mp4_not_ready=1,mp4_unavailable=2;}}
   static class Toast {static final int LENGTH_LONG=1;static Toast makeText(Activity a,int s,int l){return new Toast();}void show(){}}
   static boolean nativeReady(){return allowNative;}
+  static boolean oneShotCompletionReady(){return completionStorageReady;}
   static int nativeStartV2(int n,int d,int c,int v,int a,int width,int height){starts++;startedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
   static void nativeCancel(){cancels++;}static void nativeSuspend(int value){suspends++;reason=value;}
   static void nativeResume(){resumes++;}static void wake(){wakes++;}
@@ -141,6 +133,9 @@ public final class ControllerHarness {
     suffix = r'''
   public static void main(String[] args)throws Exception {
     Activity live=new Activity(),menu=new Activity();game=new WeakReference<>(live);
+    completionStorageReady=false;
+    require(!requestStart(menu,60,2,17250000,3840,2160)&&menu.intent==null&&pending==null&&starts==0,"failed completion recovery admission cannot navigate or start capture");
+    completionStorageReady=true;
     require(requestStart(menu,60,2,17250000,3840,2160),"custom bitrate and output geometry accepted");
     require(!dismissed,"next job restores dismissed progress UI");
     require(menu.intent.target==live.getClass()&&menu.intent.flags==3,"existing explicit game/reorder/singleTop");
@@ -175,7 +170,9 @@ public final class ControllerHarness {
     Mp4QueueUiState.Controls menuControls=new Mp4QueueUiState.Controls(true,false,false,false,false,ready(),true,0,0);
     require(menuControls.immediate&&menuControls.enqueue,"both real server-menu buttons stay enabled for paused MV");
     menu.intent=null;int resumesBeforeAdd=resumes,preparesBeforeAdd=backgroundPrepares;long deadlineBeforeAdd=pendingDeadline;
-    require(requestEnqueue(menu,30,1,8000000)&&enqueues==1&&!enqueueWasResumed,"paused selection commits without needing a Unity frame");
+    completionStorageReady=false;
+    require(requestEnqueue(menu,30,1,8000000)&&enqueues==1&&!enqueueWasResumed,"queue admission remains independent of one-shot recovery admission");
+    completionStorageReady=true;
     require(menu.intent==null&&resumes==resumesBeforeAdd&&backgroundPrepares==preparesBeforeAdd&&pendingDeadline==deadlineBeforeAdd,
       "Add keeps server UI, lifecycle and background transport unchanged");
     require(starts==1,"adding a paused selection does not capture while original Unity is stopped");
@@ -327,7 +324,8 @@ def test_diagnostics_copies_only_bounded_public_state_without_private_payloads(t
     fixture.write_text(r'''
 import java.util.*;import java.lang.ref.WeakReference;
 public class DiagnosticsHarness {
- static boolean configured=true,initialized=true,resumed,gameFocused,stopped=true,foregroundSelectionReady=true;
+ static boolean configured=true,initialized=true,resumed,gameFocused,stopped=true,foregroundSelectionReady=true,saving;
+ static String pendingSaveId;
  static class Activity {boolean isDestroyed(){return false;}boolean isFinishing(){return false;}}
  static WeakReference<Activity> game=new WeakReference<>(new Activity());static boolean queueConfigured=true;
  static JSONObject last=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
@@ -340,6 +338,7 @@ public class DiagnosticsHarness {
   long optLong(String k){Object v=map.get(k);return v instanceof Number?((Number)v).longValue():0;}
   JSONArray optJSONArray(String k){return map.get(k) instanceof JSONArray?(JSONArray)map.get(k):null;}}
  static class JSONArray {int size;JSONArray(int n){size=n;}int length(){return size;}}
+ static JSONArray documentDiagnostics(){return new JSONArray(0);}
  static JSONObject queueSnapshot(){return queue;}
  static String nativeStatus(){JSONObject.refs.put("native",nativeValue);return "native";}
  static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
@@ -448,7 +447,7 @@ def test_status_keeps_queue_handoffs_distinct_from_idle_or_previous_completion(t
     harness = tmp_path / "QueueStatusHarness.java"
     harness.write_text(r'''import java.util.*;
 public final class QueueStatusHarness {
- static boolean configured=true,saving,pendingQueueRun,mvReady;static int[] pending;static int readyCalls;
+ static boolean configured=true,saving,pendingQueueRun,mvReady,completedOutput;static int[] pending;static int readyCalls;
  static JSONObject last=new JSONObject(),lastQueue=new JSONObject();
  static final class JSONObject {
   final Map<String,Object> values=new HashMap<>();
@@ -461,6 +460,7 @@ public final class QueueStatusHarness {
  static final class Context {String getString(int resource,Object...args){return "resource="+resource+Arrays.toString(args);}}
  static final class R {static final class string {''' + declarations + r'''}}
  static boolean ready(){readyCalls++;return mvReady;}
+ static boolean hasCompletedOutput(){return completedOutput;}
  static void need(boolean condition,String message){if(!condition)throw new AssertionError(message);}
  static void expect(Context context,int resource,String message){need(statusText(context).startsWith("resource="+resource+"["),message);}
 ''' + production + r'''
@@ -492,6 +492,8 @@ public final class QueueStatusHarness {
   last.put("phase","failed").put("error_code","encoder_failed");expect(context,R.string.mp4_failed,"a terminal error outside queue work is not hidden");
   last.put("phase","cancelled");expect(context,R.string.mp4_cancelled,"a real terminal cancellation outside queue work is not hidden");
   last.put("phase","idle");expect(context,R.string.mp4_not_ready,"an ordinary idle scene still requests the MV");
+  completedOutput=true;expect(context,R.string.mp4_completed,"a retained completed output remains discoverable after native idle");
+  completedOutput=false;
   mvReady=true;expect(context,R.string.mp4_idle,"a genuinely ready idle MV retains the idle message");
   configured=false;expect(context,R.string.mp4_unavailable,"an unavailable idle exporter retains its existing status");
   System.out.println("PASS queue-aware Android MP4 status");
@@ -598,5 +600,7 @@ final class UnifiedMP4Background {{
     compiled = subprocess.run([javac, "-J-Xmx256m", "--release", "17", "-cp", str(android),
                                "-d", str(tmp_path / "classes"), str(SOURCE),
                                str(SOURCE.with_name("Mp4TitleCatalog.java")), str(SOURCE.with_name("Mp4ExportSettings.java")),
+                               str(SOURCE.with_name("Mp4CompletedExports.java")),
+                               str(SOURCE.with_name("DocumentPickerHistory.java")),
                                *map(str, paths)], capture_output=True, text=True, timeout=60)
     assert compiled.returncode == 0, compiled.stderr

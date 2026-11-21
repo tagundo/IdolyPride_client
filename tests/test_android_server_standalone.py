@@ -176,6 +176,8 @@ public final class CombinedDiagnosticExportHost {
   static JSONObject snapshot() { return new JSONObject("{\"configured\":true,\"index_entries\":2}"); }
  }
  static final class UnifiedMP4Export {
+  static void noteDocumentLaunch(Object c,int r,Intent i,String origin){}
+  static void noteDocumentUnavailable(Object c,int r){}
   static int calls;static String value="{\"ready\":false,\"readiness_error\":\"selected_capture_geometry_not_ready\",\"source_width\":1921}";
   static JSONObject diagnostics() {
    check(Looper.myLooper()==Looper.getMainLooper(),"MP4 observation captured on main thread");

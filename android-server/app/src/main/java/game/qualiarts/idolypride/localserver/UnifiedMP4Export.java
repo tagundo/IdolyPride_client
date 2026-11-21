@@ -24,6 +24,8 @@ import java.lang.ref.WeakReference;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.Set;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
@@ -35,6 +37,9 @@ public final class UnifiedMP4Export {
     private static volatile boolean configured, initialized, saving;
     private static volatile File exportRoot;
     private static volatile File persistentExportRoot;
+    private static volatile Context application;
+    private static volatile Mp4CompletedExports completedExports;
+    private static DocumentPickerHistory documentHistory;
     private static boolean queueConfigured;
     private static JSONObject last = new JSONObject();
     private static JSONObject lastQueue = new JSONObject();
@@ -53,6 +58,7 @@ public final class UnifiedMP4Export {
     private static boolean dismissed;
     private static String pendingSaveId;
     private static File pendingSaveRoot;
+    private static String pendingSaveOwner;
     private static final Runnable POLL = UnifiedMP4Export::poll;
     private static final Runnable BEGIN = UnifiedMP4Export::beginPending;
     private UnifiedMP4Export() {}
@@ -81,6 +87,7 @@ public final class UnifiedMP4Export {
 
     /** Only ServerService's trusted worker supplies this private Python descriptor. */
     static boolean prepare(Context context, String descriptor) {
+        restoreCompleted(context);
         configured = false;
         foregroundSelectionReady = false; menuHandoffDeadline = 0;
         titleCatalog = Mp4TitleCatalog.empty();
@@ -107,7 +114,9 @@ public final class UnifiedMP4Export {
                 queueConfigured = nativeQueueConfigure(queue.getPath(), completed.getPath()) == 0;
                 if (queueConfigured) persistentExportRoot = completed;
             }
-            exportRoot = output; configured = true; MAIN.post(UnifiedMP4Export::wake); return true;
+            exportRoot = output;
+            if (completedExports != null) completedExports.rememberDirectory(output);
+            configured = true; MAIN.post(UnifiedMP4Export::wake); return true;
         } catch (Exception | LinkageError unavailable) { configured = false; return false; }
     }
 
@@ -193,6 +202,8 @@ public final class UnifiedMP4Export {
                     .put("game_attached", owner != null && !owner.isDestroyed() && !owner.isFinishing())
                     .put("game_resumed", resumed).put("game_focused", gameFocused).put("game_stopped", stopped)
                     .put("verified_foreground_selection", foregroundSelectionReady);
+            result.put("save_picker_pending", pendingSaveId != null).put("save_copy_active", saving)
+                    .put("document_picker_events", documentDiagnostics());
             JSONObject state = snapshot();
             if (initialized) try {
                 String raw = nativeStatus();
@@ -332,7 +343,7 @@ public final class UnifiedMP4Export {
     static boolean requestStart(Activity caller, int fps, int codec, int bitrate, int outputWidth, int outputHeight) {
         if (!ready() || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
                 || !Mp4ExportSettings.validBitrate(bitrate)
-                || !Mp4ExportSettings.validResolution(outputWidth, outputHeight)) return false;
+                || !Mp4ExportSettings.validResolution(outputWidth, outputHeight) || !oneShotCompletionReady()) return false;
         Activity current = game.get();
         if (current == null) return false;
         pending = new int[] {fps, 1, codec, bitrate, 192_000, outputWidth, outputHeight};
@@ -383,18 +394,23 @@ public final class UnifiedMP4Export {
     }
     static void attachGame(Activity activity) {
         observeGameOwner(activity);
-        LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.HORIZONTAL);
+        restoreCompleted(activity);
+        LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.VERTICAL);
         bar.setGravity(Gravity.CENTER_VERTICAL); bar.setBackgroundColor(0xe6222630);
         int padding = Math.round(10 * activity.getResources().getDisplayMetrics().density);
         bar.setPadding(padding, padding / 2, padding, padding / 2);
         TextView message = new TextView(activity); message.setTextColor(Color.WHITE); message.setTextSize(14);
-        bar.addView(message, new LinearLayout.LayoutParams(0, -2, 1));
+        bar.addView(message, new LinearLayout.LayoutParams(-1, -2));
+        // Keep each action in its own stable slot. Completing an export must
+        // never replace the Cancel button underneath an existing pointer.
+        LinearLayout actions = new LinearLayout(activity); actions.setOrientation(LinearLayout.HORIZONTAL);
+        bar.addView(actions, new LinearLayout.LayoutParams(-1, -2));
         Button pause = new Button(activity); pause.setText(R.string.mp4_pause);
-        pause.setOnClickListener(view -> togglePause()); bar.addView(pause);
-        Button stop = new Button(activity); stop.setText(R.string.mp4_cancel); stop.setOnClickListener(view -> cancel()); bar.addView(stop);
-        Button save = new Button(activity); save.setText(R.string.mp4_save); save.setOnClickListener(view -> requestSave(activity)); bar.addView(save);
+        pause.setOnClickListener(view -> togglePause()); actions.addView(pause, new LinearLayout.LayoutParams(0, -2, 1));
+        Button stop = new Button(activity); stop.setText(R.string.mp4_cancel); stop.setOnClickListener(view -> cancel()); actions.addView(stop, new LinearLayout.LayoutParams(0, -2, 1));
+        Button save = new Button(activity); save.setText(R.string.mp4_save); actions.addView(save, new LinearLayout.LayoutParams(0, -2, 1));
         Button dismiss = new Button(activity); dismiss.setText(R.string.mp4_dismiss);
-        dismiss.setOnClickListener(view -> { dismissed = true; bar.setVisibility(View.GONE); }); bar.addView(dismiss);
+        dismiss.setOnClickListener(view -> { dismissed = true; bar.setVisibility(View.GONE); }); actions.addView(dismiss, new LinearLayout.LayoutParams(0, -2, 1));
         FrameLayout.LayoutParams layout = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
         activity.addContentView(bar, layout);
         overlay = bar; overlayText = message; overlaySave = save; overlayCancel = stop; overlayPause = pause; overlayDismiss = dismiss; bar.setVisibility(View.GONE);
@@ -529,6 +545,7 @@ public final class UnifiedMP4Export {
                 if (queue != null && queue.length() <= 65536) lastQueue = new JSONObject(queue);
             }
         } catch (Exception | LinkageError unavailable) { /* Keep last complete user-visible snapshot. */ }
+        rememberCompletedOutputs();
         UnifiedMP4Background.sample(last);
         Activity activity = game.get();
         if (activity != null) observeForegroundReadiness(last.optBoolean("ready"));
@@ -536,19 +553,22 @@ public final class UnifiedMP4Export {
                 && UnifiedMP4Background.snapshot().optString("state").equals("off")) prepareBackground(activity);
         if (overlay != null && activity != null) {
             String phase = last.optString("phase");
-            boolean complete = phase.equals("completed");
+            boolean complete = !busy() && hasCompletedOutput();
             boolean terminal = complete || phase.equals("failed") || phase.equals("cancelled");
             if (busy()) dismissed = false;
             overlay.setVisibility(!dismissed && (busy() || terminal || saving) ? View.VISIBLE : View.GONE);
-            overlayText.setText(statusText(activity)); overlaySave.setVisibility(complete ? View.VISIBLE : View.GONE);
+            overlayText.setText(statusText(activity));
+            bindSaveButton(overlaySave, activity);
+            overlaySave.setText(phase.equals("completed") ? R.string.mp4_save : R.string.mp4_save_completed);
+            overlaySave.setVisibility(complete ? View.VISIBLE : View.INVISIBLE);
             overlaySave.setEnabled(complete && canSave());
-            overlayCancel.setVisibility(busy() ? View.VISIBLE : View.GONE);
+            overlayCancel.setVisibility(busy() ? View.VISIBLE : View.INVISIBLE);
             boolean pausable = phase.equals("preparing_audio") || phase.equals("rendering")
                     || phase.equals("pausing") || phase.equals("paused");
-            overlayPause.setVisibility(pausable ? View.VISIBLE : View.GONE);
+            overlayPause.setVisibility(pausable ? View.VISIBLE : View.INVISIBLE);
             overlayPause.setText(userPaused || phase.equals("paused") ? R.string.mp4_resume : R.string.mp4_pause);
             overlayPause.setEnabled(!stopped && (resumed || activity.isInMultiWindowMode()));
-            overlayDismiss.setVisibility(terminal && !saving ? View.VISIBLE : View.GONE);
+            overlayDismiss.setVisibility(terminal && !saving ? View.VISIBLE : View.INVISIBLE);
         }
         for (Runnable observer : new ArrayList<>(observers)) observer.run();
         if (configured && (resumed || !observers.isEmpty()) || initialized && (busy() || backgroundQueueHasWork())
@@ -580,6 +600,7 @@ public final class UnifiedMP4Export {
             case "cancelled": return context.getString(R.string.mp4_cancelled);
             case "failed": return context.getString(R.string.mp4_failed, last.optString("error_code", "export_failed"));
             default:
+                if (hasCompletedOutput()) return context.getString(R.string.mp4_completed);
                 if (!configured) return context.getString(R.string.mp4_unavailable);
                 if (ready()) return context.getString(R.string.mp4_idle);
                 String reason = last.optString("readiness_error");
@@ -590,10 +611,11 @@ public final class UnifiedMP4Export {
         }
     }
 
-    private static final class SaveTarget {
+    static final class SaveTarget {
         final File root;
         final String outputId, jobId;
         SaveTarget(File root, String outputId, String jobId) { this.root = root; this.outputId = outputId; this.jobId = jobId; }
+        String identity() { return root.getPath() + "\n" + outputId; }
     }
     private static SaveTarget queuedSaveTarget(String jobId) throws IOException {
         if (persistentExportRoot == null || jobId == null || !jobId.matches("[A-Za-z0-9_-]{1,80}")) throw new IOException("Invalid queue job");
@@ -608,7 +630,7 @@ public final class UnifiedMP4Export {
         }
         throw new IOException("Queue job unavailable");
     }
-    private static SaveTarget currentSaveTarget() throws IOException {
+    private static SaveTarget sessionSaveTarget() throws IOException {
         if (!last.optString("phase").equals("completed")) throw new IOException("Export is not complete");
         String output = last.optString("export_id");
         JSONArray jobs = lastQueue.optJSONArray("jobs");
@@ -623,29 +645,172 @@ public final class UnifiedMP4Export {
         completedFile(exportRoot, output);
         return new SaveTarget(exportRoot, output, null);
     }
-    static boolean canSave() {
-        if (saving) return false;
+    private static synchronized void restoreCompleted(Context context) {
+        application = context.getApplicationContext();
+        if (documentHistory == null) {
+            try {
+                android.content.SharedPreferences preferences = application.getSharedPreferences("mp4_export", Context.MODE_PRIVATE);
+                documentHistory = new DocumentPickerHistory(new DocumentPickerHistory.Store() {
+                    public String read() { return preferences.getString("document_picker_events", ""); }
+                    public void write(String value) { preferences.edit().putString("document_picker_events", value).apply(); }
+                });
+            } catch (RuntimeException unavailable) { /* Optional diagnostics never prevent a save. */ }
+        }
+        if (completedExports != null) return;
+        try {
+            android.content.SharedPreferences preferences = application.getSharedPreferences("mp4_export", Context.MODE_PRIVATE);
+            completedExports = new Mp4CompletedExports(application.getFilesDir(), new Mp4CompletedExports.Store() {
+                public Set<String> read() { return new HashSet<>(preferences.getStringSet("completed_outputs", java.util.Collections.emptySet())); }
+                public boolean write(Set<String> values) { return preferences.edit().putStringSet("completed_outputs", new HashSet<>(values)).commit(); }
+            });
+            completedExports.recoverLegacyOneShots();
+        } catch (IOException | RuntimeException unavailable) { /* Native queue rows remain reachable while storage recovers. */ }
+    }
+    private static void rememberCompletedOutputs() {
+        Mp4CompletedExports registry = completedExports;
+        if (registry == null) return;
+        try {
+            SaveTarget target = sessionSaveTarget(); registry.remember(target.root, target.outputId, target.jobId);
+        } catch (IOException | RuntimeException unavailable) { /* A transient session is never a completed bookmark. */ }
+        JSONArray jobs = lastQueue.optJSONArray("jobs");
+        if (jobs != null) for (int index = 0; index < Math.min(8, jobs.length()); index++) {
+            JSONObject job = jobs.optJSONObject(index);
+            if (job == null || !"completed".equals(job.optString("state"))) continue;
+            try {
+                SaveTarget target = queuedSaveTarget(job.optString("job_id"));
+                registry.remember(target.root, target.outputId, target.jobId);
+            } catch (IOException | RuntimeException unavailable) { /* Never adopt partial or missing output. */ }
+        }
+    }
+    static ArrayList<SaveTarget> completedOutputs() {
+        ArrayList<SaveTarget> result = new ArrayList<>();
+        try { result.add(sessionSaveTarget()); } catch (IOException unavailable) { }
+        Mp4CompletedExports registry = completedExports;
+        if (registry != null) for (Mp4CompletedExports.Entry entry : registry.entries())
+            addCompleted(result, new SaveTarget(entry.root, entry.outputId, entry.jobId));
+        JSONArray jobs = lastQueue.optJSONArray("jobs");
+        if (jobs != null) for (int index = jobs.length() - 1; index >= 0; index--) {
+            JSONObject job = jobs.optJSONObject(index); if (job == null) continue;
+            try { addCompleted(result, queuedSaveTarget(job.optString("job_id"))); } catch (IOException unavailable) { }
+        }
+        return result;
+    }
+    private static void addCompleted(ArrayList<SaveTarget> outputs, SaveTarget target) {
+        for (SaveTarget known : outputs) if (known.identity().equals(target.identity())) return;
+        outputs.add(target);
+    }
+    private static SaveTarget currentSaveTarget() throws IOException {
+        ArrayList<SaveTarget> outputs = completedOutputs();
+        if (outputs.isEmpty()) throw new IOException("No completed export");
+        return outputs.get(0);
+    }
+    static boolean hasCompletedOutput() {
         try { currentSaveTarget(); return true; } catch (IOException invalid) { return false; }
     }
+    static boolean oneShotCompletionReady() {
+        try { return completedExports != null && exportRoot != null && completedExports.rememberDirectory(exportRoot); }
+        catch (IOException | RuntimeException unavailable) { return false; }
+    }
+    static boolean canSave() {
+        if (saving || pendingSaveId != null) return false;
+        try { currentSaveTarget(); return true; } catch (IOException invalid) { return false; }
+    }
+    static boolean saveInProgress() { return saving || pendingSaveId != null; }
+    static void noteDocumentLaunch(Context context, int request, Intent intent, String origin) {
+        try {
+            restoreCompleted(context);
+            if (documentHistory != null && intent != null) documentHistory.launch(request, intent.getAction(), intent.getType(), origin);
+        } catch (RuntimeException unavailable) { /* Optional diagnostics. */ }
+    }
+    static void noteDocumentResult(Context context, int request, int result) {
+        try {
+            restoreCompleted(context);
+            if (documentHistory != null) documentHistory.result(request,
+                    result == Activity.RESULT_OK ? "ok" : result == Activity.RESULT_CANCELED ? "cancelled" : "other");
+        } catch (RuntimeException unavailable) { /* Optional diagnostics. */ }
+    }
+    static void noteDocumentUnavailable(Context context, int request) {
+        try {
+            restoreCompleted(context);
+            if (documentHistory != null) documentHistory.result(request, "unavailable");
+        } catch (RuntimeException unavailable) { /* Optional diagnostics. */ }
+    }
+    private static JSONArray documentDiagnostics() {
+        JSONArray rows = new JSONArray();
+        if (documentHistory != null) for (DocumentPickerHistory.Event event : documentHistory.snapshot()) try {
+            rows.put(new JSONObject().put("request_code", event.request).put("event", event.event).put("action", event.action)
+                    .put("mime", event.mime).put("origin", event.origin).put("result", event.result));
+        } catch (Exception invalid) { /* Only fixed bounded scalars are exported. */ }
+        return rows;
+    }
+    static void bindSaveButton(Button button, Activity activity) {
+        SaveTarget target = null;
+        try { target = currentSaveTarget(); } catch (IOException unavailable) { }
+        bindSaveButton(button, activity, target);
+    }
+    static void bindSaveButton(Button button, Activity activity, SaveTarget target) {
+        final SaveTarget rendered = target;
+        final String binding = last.optString("phase") + "\n" + (target == null ? "" : target.identity());
+        button.setEnabled(target != null && !saveInProgress());
+        if (binding.equals(button.getTag())) return;
+        button.cancelPendingInputEvents(); button.setPressed(false); button.setTag(binding);
+        button.setOnClickListener(view -> {
+            // A queued click from a replaced phase/output cannot select a
+            // different completed movie or launch an external Activity.
+            if (rendered == null || !binding.equals(button.getTag())
+                    || !binding.equals(last.optString("phase") + "\n" + rendered.identity())) return;
+            requestSave(activity, rendered);
+        });
+    }
     private static void openSave(Activity activity, SaveTarget target) {
-        pendingSaveId = target.outputId; pendingSaveRoot = target.root;
+        if (activity == null || activity.isDestroyed() || activity.isFinishing() || saving || pendingSaveId != null) return;
+        pendingSaveId = target.outputId; pendingSaveRoot = target.root; pendingSaveOwner = activity.getClass().getName();
+        dismissed = false;
         Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/mp4")
                 .putExtra(Intent.EXTRA_TITLE, activity.getString(R.string.mp4_export_filename, pendingSaveId));
-        try { activity.startActivityForResult(picker, SAVE_DOCUMENT); }
-        catch (RuntimeException unavailable) { pendingSaveId = null; pendingSaveRoot = null; Toast.makeText(activity, R.string.mp4_save_failed, Toast.LENGTH_LONG).show(); }
+        try { noteDocumentLaunch(activity, SAVE_DOCUMENT, picker, "mp4_save"); activity.startActivityForResult(picker, SAVE_DOCUMENT); }
+        catch (RuntimeException unavailable) { noteDocumentUnavailable(activity, SAVE_DOCUMENT); clearPendingSave(); Toast.makeText(activity, R.string.mp4_save_failed, Toast.LENGTH_LONG).show(); wake(); }
     }
     static void requestSave(Activity activity) {
-        if (saving) return;
+        if (saving || pendingSaveId != null) return;
         try { openSave(activity, currentSaveTarget()); } catch (IOException invalid) { /* Keep unavailable outputs private. */ }
     }
     static void requestSave(Activity activity, String jobId) {
-        if (saving) return;
+        if (saving || pendingSaveId != null) return;
         try { openSave(activity, queuedSaveTarget(jobId)); } catch (IOException invalid) { /* The completed file stays available for retry. */ }
     }
+    static void requestSave(Activity activity, SaveTarget target) {
+        if (target == null || saving || pendingSaveId != null) return;
+        for (SaveTarget known : completedOutputs()) if (known.identity().equals(target.identity())) {
+            try { completedFile(known.root, known.outputId); openSave(activity, known); } catch (IOException unavailable) { }
+            return;
+        }
+    }
+    static boolean canDeleteCompleted(SaveTarget target) {
+        return target != null && !saveInProgress() && (target.jobId == null
+                || queueConfigured && lastQueue.optBoolean("available") && !lastQueue.optBoolean("command_pending"));
+    }
+    /** Called only by the affirmative button of the completed-video deletion dialog. */
+    static boolean deleteCompleted(SaveTarget target) {
+        if (!canDeleteCompleted(target)) return false;
+        for (SaveTarget known : completedOutputs()) if (known.identity().equals(target.identity())) {
+            if (known.jobId != null) return queueCommand(2, known.jobId, 1);
+            try {
+                File source = completedFile(known.root, known.outputId);
+                Files.delete(source.toPath());
+                if (completedExports != null) completedExports.forget(new Mp4CompletedExports.Entry(known.root, known.outputId, known.jobId));
+                wake(); return true;
+            } catch (IOException | RuntimeException unavailable) { return false; }
+        }
+        return false;
+    }
+    private static void clearPendingSave() { pendingSaveId = null; pendingSaveRoot = null; pendingSaveOwner = null; }
     static boolean activityResult(Activity activity, int request, int result, Intent data) {
         if (request != SAVE_DOCUMENT) return false;
-        String id = pendingSaveId; File root = pendingSaveRoot; pendingSaveId = null; pendingSaveRoot = null;
-        if (result != Activity.RESULT_OK || data == null || data.getData() == null || id == null) return true;
+        noteDocumentResult(activity, request, result);
+        if (pendingSaveOwner != null && !pendingSaveOwner.equals(activity.getClass().getName())) return true;
+        String id = pendingSaveId; File root = pendingSaveRoot; clearPendingSave(); dismissed = false;
+        if (result != Activity.RESULT_OK || data == null || data.getData() == null || id == null) { wake(); return true; }
         Uri destination = data.getData(); Context context = activity.getApplicationContext(); saving = true; wake();
         new Thread(() -> {
             boolean success = false;
@@ -673,15 +838,19 @@ public final class UnifiedMP4Export {
         return source;
     }
     static void saveState(Bundle state) {
-        if (pendingSaveId != null && pendingSaveRoot != null) { state.putString("mp4_save_id", pendingSaveId); state.putString("mp4_save_root", pendingSaveRoot.getPath()); }
+        if (pendingSaveId != null && pendingSaveRoot != null) {
+            state.putString("mp4_save_id", pendingSaveId); state.putString("mp4_save_root", pendingSaveRoot.getPath());
+            state.putString("mp4_save_owner", pendingSaveOwner);
+        }
     }
     static void restoreState(Context context, Bundle state) {
+        restoreCompleted(context);
         if (state == null || pendingSaveId != null) return;
         try {
             String id = state.getString("mp4_save_id"), path = state.getString("mp4_save_root");
             if (id == null || path == null) return;
             File root = privateDirectory(context.getFilesDir().getCanonicalFile(), path); completedFile(root, id);
-            pendingSaveId = id; pendingSaveRoot = root;
+            pendingSaveId = id; pendingSaveRoot = root; pendingSaveOwner = state.getString("mp4_save_owner");
         } catch (IOException invalid) { /* A stale picker cannot select an arbitrary private file. */ }
     }
 }

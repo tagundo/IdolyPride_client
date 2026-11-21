@@ -54,7 +54,11 @@ public final class PickerLifecycleHarness extends Parent {
  String error;JSONObject pendingAccountExport;
  final FakeView playbackStatus=new FakeView(),officialStatus=new FakeView(),accountOperation=new FakeView(),mp4Status=new FakeView();
  final Runnable playbackRefresh=()->{},officialRefresh=()->{},mp4Refresh=()->{};
- static final class UnifiedMP4Export { static void observe(Runnable observer) {} }
+ static final class UnifiedMP4Export {
+  static void observe(Runnable observer) {}
+  static void noteDocumentLaunch(Object c,int r,Intent i,String origin){}
+  static void noteDocumentUnavailable(Object c,int r){}
+ }
  static final class FakeView {
   void removeCallbacks(Runnable callback) {} void post(Runnable callback) {} void setText(int value) {}
  }

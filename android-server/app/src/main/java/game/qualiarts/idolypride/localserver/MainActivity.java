@@ -40,6 +40,7 @@ import android.widget.Toast;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.ArrayList;
 import java.io.IOException;
 import java.io.File;
 import org.json.JSONObject;
@@ -151,6 +152,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private boolean mp4OptionsLoading;
     private TextView mp4Status;
     private Button mp4Start, mp4Cancel, mp4Save;
+    private LinearLayout mp4CompletedRows;
+    private String mp4CompletedRendered = "";
     private Button mp4Enqueue, mp4QueueRun, mp4QueuePause, mp4QueueResume;
     private TextView mp4QueueStatus, mp4BackgroundStatus;
     private LinearLayout mp4QueueRows;
@@ -1458,8 +1461,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
 
     private void openAccountDocumentPicker(Intent picker, int requestCode) {
         pendingAccountPicker = requestCode;
-        try { startActivityForResult(picker, requestCode); }
+        try {
+            UnifiedMP4Export.noteDocumentLaunch(this, requestCode, picker, requestCode == EXPORT_ACCOUNT ? "account_export" : "account_import");
+            startActivityForResult(picker, requestCode);
+        }
         catch (RuntimeException error) {
+            UnifiedMP4Export.noteDocumentUnavailable(this, requestCode);
             pendingAccountPicker = 0;
             accountError("account_picker_unavailable");
         }
@@ -1757,8 +1764,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
                 .setType("application/json")
                 .putExtra(Intent.EXTRA_TITLE, "IdolyPride-diagnostics.json");
         try {
+            UnifiedMP4Export.noteDocumentLaunch(this, EXPORT_DIAGNOSTICS, destination, "diagnostics_export");
             startActivityForResult(destination, EXPORT_DIAGNOSTICS);
         } catch (RuntimeException error) {
+            UnifiedMP4Export.noteDocumentUnavailable(this, EXPORT_DIAGNOSTICS);
             Toast.makeText(this, R.string.export_picker_failed, Toast.LENGTH_LONG).show();
         }
     }
@@ -1948,8 +1957,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
             Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
             resourcePickerLocation(picker);
             picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            try { startActivityForResult(picker, IMPORT_RESOURCES); }
-            catch (RuntimeException unavailable) { Toast.makeText(this, R.string.library_picker_failed, Toast.LENGTH_LONG).show(); }
+            try { UnifiedMP4Export.noteDocumentLaunch(this, IMPORT_RESOURCES, picker, "resource_import"); startActivityForResult(picker, IMPORT_RESOURCES); }
+            catch (RuntimeException unavailable) { UnifiedMP4Export.noteDocumentUnavailable(this, IMPORT_RESOURCES); Toast.makeText(this, R.string.library_picker_failed, Toast.LENGTH_LONG).show(); }
         });
         cancelLibrary.setOnClickListener(view -> ServerService.cancelResourceJob(currentLibraryJob));
         updateResourceLibrary(new JSONObject());
@@ -1963,8 +1972,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
             Intent picker = new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/zip");
             resourcePickerLocation(picker);
             picker.putExtra(Intent.EXTRA_TITLE, "IdolyPride-Resources-" + pendingResourcePlatform + ".zip");
-            try { startActivityForResult(picker, EXPORT_RESOURCES); }
-            catch (RuntimeException unavailable) { Toast.makeText(this, R.string.library_picker_failed, Toast.LENGTH_LONG).show(); }
+            try { UnifiedMP4Export.noteDocumentLaunch(this, EXPORT_RESOURCES, picker, "resource_export"); startActivityForResult(picker, EXPORT_RESOURCES); }
+            catch (RuntimeException unavailable) { UnifiedMP4Export.noteDocumentUnavailable(this, EXPORT_RESOURCES); Toast.makeText(this, R.string.library_picker_failed, Toast.LENGTH_LONG).show(); }
         }
     }
     private static boolean terminalResourceJob(String state) {
@@ -2302,6 +2311,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
         mp4QueueStatus = text(R.string.mp4_queue_empty, 13, TEXT_MUTED); mp4QueueStatus.setPadding(0, dp(8), 0, dp(8)); body.addView(mp4QueueStatus);
         mp4QueueRows = new LinearLayout(this); mp4QueueRows.setOrientation(LinearLayout.VERTICAL);
         body.addView(mp4QueueRows, new LinearLayout.LayoutParams(-1, -2));
+        TextView completedTitle = text(R.string.mp4_completed_videos, 16, TEXT_PRIMARY);
+        completedTitle.setPadding(0, dp(16), 0, dp(6)); body.addView(completedTitle);
+        body.addView(text(R.string.mp4_completed_hint, 12, TEXT_MUTED));
+        mp4CompletedRows = new LinearLayout(this); mp4CompletedRows.setOrientation(LinearLayout.VERTICAL);
+        mp4CompletedRendered = "";
+        body.addView(mp4CompletedRows, new LinearLayout.LayoutParams(-1, -2));
 
         mp4Background = new CheckBox(this); mp4Background.setText(R.string.mp4_queue_background_experimental);
         mp4Background.setTextColor(TEXT_PRIMARY); mp4Background.setMinHeight(dp(48));
@@ -2339,7 +2354,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
             refreshMp4();
         });
         mp4Cancel.setOnClickListener(view -> UnifiedMP4Export.cancel());
-        mp4Save.setOnClickListener(view -> UnifiedMP4Export.requestSave(this));
+        UnifiedMP4Export.bindSaveButton(mp4Save, this);
         refreshMp4();
     }
 
@@ -2460,9 +2475,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
         mp4QueuePause.setEnabled(controls.pause); mp4QueueResume.setEnabled(controls.resume);
         mp4QueuePause.setVisibility(running && !paused ? View.VISIBLE : View.GONE);
         mp4QueueResume.setVisibility(paused ? View.VISIBLE : View.GONE);
-        mp4Start.setEnabled(controls.immediate && optionsValid);
+        mp4Start.setEnabled(controls.immediate && optionsValid && UnifiedMP4Export.oneShotCompletionReady());
         mp4Cancel.setVisibility(busy && !ownsCurrent ? View.VISIBLE : View.GONE);
-        mp4Save.setVisibility(UnifiedMP4Export.canSave() && !ownsCurrent ? View.VISIBLE : View.GONE);
+        UnifiedMP4Export.bindSaveButton(mp4Save, this);
+        mp4Save.setVisibility(UnifiedMP4Export.hasCompletedOutput() && !ownsCurrent ? View.VISIBLE : View.GONE);
         for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate, mp4Resolution}) option.setEnabled(!busy && !commandPending);
         for (EditText field : new EditText[] {mp4BitrateValue, mp4Width, mp4Height}) field.setEnabled(!busy && !commandPending);
         refreshMp4Options();
@@ -2480,7 +2496,44 @@ public final class MainActivity extends Activity implements ServerService.Observ
         String rendered = (jobs == null ? "[]" : jobs.toString()) + ":" + commandPending
                 + ":" + getResources().getConfiguration().getLocales().toLanguageTags();
         if (!rendered.equals(mp4QueueRendered)) { mp4QueueRendered = rendered; renderMp4Queue(jobs, count, commandPending); }
+        refreshMp4Completed();
         refreshMp4Background();
+    }
+
+    private void refreshMp4Completed() {
+        if (mp4CompletedRows == null) return;
+        ArrayList<UnifiedMP4Export.SaveTarget> outputs = UnifiedMP4Export.completedOutputs();
+        StringBuilder identity = new StringBuilder().append(UnifiedMP4Export.saveInProgress())
+                .append(':').append(UnifiedMP4Export.snapshot().optString("phase"))
+                .append(':').append(getResources().getConfiguration().getLocales().toLanguageTags());
+        for (UnifiedMP4Export.SaveTarget output : outputs) identity.append('\n').append(output.identity());
+        for (UnifiedMP4Export.SaveTarget output : outputs) identity.append(':').append(UnifiedMP4Export.canDeleteCompleted(output));
+        String rendered = identity.toString();
+        if (rendered.equals(mp4CompletedRendered)) return;
+        mp4CompletedRendered = rendered; mp4CompletedRows.removeAllViews();
+        if (outputs.isEmpty()) { mp4CompletedRows.addView(text(R.string.mp4_completed_empty, 13, TEXT_MUTED)); return; }
+        for (int index = 0; index < outputs.size(); index++) {
+            UnifiedMP4Export.SaveTarget output = outputs.get(index);
+            LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(0, dp(8), 0, dp(8)); mp4CompletedRows.addView(row, new LinearLayout.LayoutParams(-1, -2));
+            TextView title = text(R.string.mp4_completed_videos, 14, TEXT_PRIMARY);
+            title.setText(getString(R.string.mp4_completed_video, index + 1)); row.addView(title);
+            File source = new File(output.root, output.outputId + ".mp4");
+            String completedAt = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.SHORT, java.text.DateFormat.SHORT,
+                    getResources().getConfiguration().getLocales().get(0)).format(new java.util.Date(source.lastModified()));
+            row.addView(mp4Text(completedAt + " · " + formatBytes(source.length()), 12, TEXT_MUTED));
+            LinearLayout actions = new LinearLayout(this); actions.setOrientation(LinearLayout.HORIZONTAL); row.addView(actions);
+            Button save = button(R.string.mp4_save); UnifiedMP4Export.bindSaveButton(save, this, output);
+            actions.addView(save, new LinearLayout.LayoutParams(0, -2, 1));
+            Button delete = button(R.string.mp4_delete_video); delete.setEnabled(UnifiedMP4Export.canDeleteCompleted(output));
+            delete.setOnClickListener(view -> new AlertDialog.Builder(this).setTitle(R.string.mp4_delete_video)
+                    .setMessage(R.string.mp4_delete_video_confirm)
+                    .setPositiveButton(R.string.mp4_delete_video, (dialog, which) -> {
+                        if (!UnifiedMP4Export.deleteCompleted(output)) Toast.makeText(this, R.string.mp4_save_failed, Toast.LENGTH_LONG).show();
+                        mp4CompletedRendered = ""; refreshMp4();
+                    }).setNegativeButton(android.R.string.cancel, null).show());
+            actions.addView(delete, new LinearLayout.LayoutParams(0, -2, 1));
+        }
     }
 
     private static String mp4SafeCode(String value) {
@@ -2788,6 +2841,7 @@ public final class MainActivity extends Activity implements ServerService.Observ
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
         if (UnifiedMP4Export.activityResult(this, requestCode, resultCode, data)) return;
+        UnifiedMP4Export.noteDocumentResult(this, requestCode, resultCode);
         if (requestCode == EXPORT_ACCOUNT || requestCode == IMPORT_ACCOUNT) {
             pendingAccountPicker = 0;
             if (resultCode != RESULT_OK || data == null || data.getData() == null) {

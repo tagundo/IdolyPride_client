@@ -16,10 +16,17 @@
     <string name="mp4_paused">Export paused</string>
     <string name="mp4_background_paused">Export resumes when you return to the app.</string>
     <string name="mp4_save">Save video</string>
+    <string name="mp4_save_completed">Save completed video</string>
     <string name="mp4_preparing_audio">Preparing music</string>
     <string name="mp4_rendering">Creating video · %1$d/%2$d</string>
     <string name="mp4_finishing">Finishing video</string>
     <string name="mp4_completed">Export complete</string>
+    <string name="mp4_completed_videos">Completed videos</string>
+    <string name="mp4_completed_video">Completed video %1$d</string>
+    <string name="mp4_completed_empty">No completed videos.</string>
+    <string name="mp4_completed_hint">Tap Save to choose a destination. Cancelling the picker or returning to the game keeps the video in this list.</string>
+    <string name="mp4_delete_video">Delete video</string>
+    <string name="mp4_delete_video_confirm">Delete the completed video kept in the app? Copies saved elsewhere will remain.</string>
     <string name="mp4_cancelled">Export cancelled.</string>
     <string name="mp4_failed">Export failed: %1$s</string>
     <string name="mp4_idle">Ready to export</string>

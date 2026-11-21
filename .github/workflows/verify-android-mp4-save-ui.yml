@@ -1,0 +1,100 @@
+name: Verify Android MP4 Save UI (synthetic fixture only)
+
+on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-android-mp4-save-ui.yml
+      - android-unified/mp4-save-qa/**
+      - tools/build_android_mp4_save_qa.py
+      - tools/build_android_queue_qa.py
+      - tools/build_android_mp4_qa.py
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4CompletedExports.java
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/DocumentPickerHistory.java
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4ExportSettings.java
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4TitleCatalog.java
+      - android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4QueueUiState.java
+      - android-server/app/src/main/res/values-en/strings_mp4*.xml
+      - tests/test_android_mp4_save_lifecycle.py
+      - tests/test_android_mp4_completed_exports.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-mp4-save-ui-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  ordinary-app-save-ui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Verify actual Java registry, JNI lifecycle and strict UI result gate
+        run: |
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+          python -B -m pytest -q -p no:cacheprovider tests/test_android_mp4_save_lifecycle.py tests/test_android_mp4_completed_exports.py android-unified/mp4-save-qa/test_save_ui_gate.py
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned SDK/NDK and verify complete synthetic fixture
+        run: |
+          sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+          if ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+      - name: Require KVM for a disposable enforcing emulator
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Build signed fixture using exact committed production Java
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          python -B tools/build_android_mp4_save_qa.py --require-committed \
+            --output-directory "$RUNNER_TEMP/idoly-mp4-save-ui-proof" --android-sdk "$ANDROID_HOME"
+          test -z "$(git status --porcelain)"
+      - name: Exercise real Android DocumentsUI cancel, Activity recreation and new-process restore
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          cores: 2
+          ram-size: 2048M
+          disk-size: 4G
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-boot-timeout: 1200
+          script: >-
+            python -B tools/build_android_mp4_save_qa.py --run-device --require-committed --timeout 300
+            --output-directory "$RUNNER_TEMP/idoly-mp4-save-ui-proof" --android-sdk "$ANDROID_HOME"
+      - name: Retain bounded source receipts, app reports, UI trees, screenshots and own-PID logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-mp4-save-ui-proof-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/idoly-mp4-save-ui-proof
+          if-no-files-found: warn
+          retention-days: 14
