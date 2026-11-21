@@ -6,8 +6,8 @@
 #include <stdexcept>
 #include "cine-volume-producer.inc"
 using namespace idoly_mp4_cine_volume_producer;
-struct O {int type=0,layer=3;bool alive=true,registered=false,abandoned=false;O* go=nullptr;void* shared=nullptr;void* internal=nullptr;float priority=1,weight=.4f;};
-struct H {Scope scope;O brain{},asset{},go{1},volume{2},created_go{1},created_volume{2},foreign_go{1},foreign_volume{2};bool current=true,fail_restore=false;int touches=0,transfers=0,destroys=0;std::unordered_map<uint32_t,void*> roots;uint32_t next=1;H(){volume.go=&go;volume.registered=true;created_go.alive=false;created_volume.go=&created_go;foreign_volume.go=&foreign_go;}};
+struct O {int type=0,layer=3;bool alive=true,registered=false,abandoned=false,detached=false;O* go=nullptr;void* shared=nullptr;void* internal=nullptr;float priority=1,weight=.4f;};
+struct H {Scope scope;O brain{},asset{},go{1},volume{2},created_go{1},created_volume{2},foreign_go{1},foreign_volume{2};bool current=true,fail_restore=false,gpu=true;int touches=0,transfers=0,destroys=0;std::unordered_map<uint32_t,void*> roots;uint32_t next=1;H(){volume.go=&go;volume.registered=true;created_go.alive=false;created_volume.go=&created_go;foreign_volume.go=&foreign_go;}};
 H* host=nullptr;
 VolumeImage image(O& v){return {&v,v.go,v.shared,v.internal,v.priority,0,v.weight,1,3,true};}
 Api api(H& h){Api a{};a.context=&h;a.source_asset=&h.asset;a.producer_method=0x1234;
@@ -23,6 +23,10 @@ Api api(H& h){Api a{};a.context=&h;a.source_asset=&h.asset;a.producer_method=0x1
  a.created_current=[](void*,void* p,Kind,void*){return static_cast<O*>(p)->alive;};
  a.destroy_created_immediate=[](void* p,void* v,Kind){auto& h=*static_cast<H*>(p);++h.destroys;auto& x=*static_cast<O*>(v);x.alive=false;x.registered=false;return true;};
  a.created_unregistered=[](void*,void* p,Kind){auto& x=*static_cast<O*>(p);return !x.alive&&!x.registered;};
+ a.withdraw_created=[](void*,void* p,Kind,void*){auto& x=*static_cast<O*>(p);x.detached=true;x.registered=false;x.shared=x.internal=nullptr;return true;};
+ a.created_withdrawn=[](void*,void* p,Kind,void*){return static_cast<O*>(p)->detached;};
+ a.cleanup_fenced=[](void* p){return static_cast<H*>(p)->gpu;};
+ a.destroy_detached=[](void* p,void* v,Kind,void*){auto& h=*static_cast<H*>(p);++h.destroys;auto& x=*static_cast<O*>(v);x.alive=false;x.registered=false;return true;};a.detached_destroyed=a.created_unregistered;
  a.abandon_created=[](void* p,void* v,Kind)noexcept{auto& h=*static_cast<H*>(p);++h.transfers;static_cast<O*>(v)->abandoned=true;};
  a.current_profile=[](void*,void* p,void** profile){auto& v=*static_cast<O*>(p);*profile=v.internal?v.internal:v.shared;return true;};return a;}
 void begin(H& h){host=&h;assert(h.scope.capture(api(h),7,&h.brain));}
@@ -36,4 +40,7 @@ int main(){
  {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);h.volume.priority=77;assert(h.scope.end_apply(token));h.fail_restore=true;assert(h.scope.restore()==Result::failed);h.fail_restore=false;assert(h.scope.restore()==Result::ok);assert(h.scope.release(true)==Result::ok);}
  {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);assert(token);h.scope.abandon_before_source_change();const auto touches=h.touches;assert(!h.scope.end_apply(token));assert(h.scope.restore()==Result::stale&&h.touches==touches);assert(h.scope.release(false)==Result::ok);}
  {H h;begin(h);uint64_t tokens[16]{};for(auto& t:tokens){t=h.scope.begin_apply(&h.brain);assert(t);}assert(!h.scope.begin_apply(&h.brain));assert(h.scope.release(false)==Result::waiting);for(auto t:tokens)assert(h.scope.end_apply(t));assert(h.scope.release(true)==Result::ok);}
+ {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);created(h);assert(h.scope.end_apply(token));h.gpu=false;assert(h.scope.before_source_change()==Result::ok&&h.destroys==0&&h.created_volume.alive&&h.created_go.alive&&h.scope.owns_created_volume_raw(&h.created_volume));h.current=false;assert(h.scope.release(false)==Result::waiting&&h.destroys==0&&!h.roots.empty());h.gpu=true;assert(h.scope.release(false)==Result::ok&&h.destroys==2&&h.roots.empty());}
+ {H h;begin(h);auto token=h.scope.begin_apply(&h.brain);created(h);assert(h.scope.end_apply(token));h.gpu=false;const auto touches=h.touches;assert(h.scope.restore()==Result::waiting&&h.touches==touches&&h.destroys==0);h.gpu=true;assert(h.scope.release(true)==Result::ok);}
+
 }

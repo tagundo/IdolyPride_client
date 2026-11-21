@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
 #endif
 namespace idoly_mp4_game {
 // Receiver and Type must come from the already verified timeline camera and
@@ -979,13 +980,13 @@ struct Api {
 };
 struct Layout {
     size_t pipeline_renderers=32,pipeline_data=64,pipeline_default=72,additional_index=56;
-    size_t features=32,feature_map=40,data_post=48,post_compute=96,post_use_compute=88,cached_native=16,data_rendering_mode=92,renderer_rendering_mode=936,post_shader_variants=80;
+    size_t features=32,feature_map=40,data_post=48,post_compute=96,post_use_compute=88,cached_native=16,data_rendering_mode=92,renderer_rendering_mode=936,post_shader_variants=80,data_xr=56;
 };
 class Lease {
     struct Root {void* object=nullptr;uint32_t root=0;};
     struct Clone {Root held{};void* source=nullptr;void* klass=nullptr;uintptr_t native=0;};
     struct Source {void* additional=nullptr;void* renderer=nullptr;void* asset=nullptr;void* renderers=nullptr;void* data_array=nullptr;
-        void* data=nullptr;void* post=nullptr;void* compute=nullptr;void* variants=nullptr;void* features=nullptr;void* feature_map=nullptr;int32_t configured=-2,index=-1;bool use_compute=false;};
+        void* data=nullptr;void* xr=nullptr;void* post=nullptr;void* compute=nullptr;void* variants=nullptr;void* features=nullptr;void* feature_map=nullptr;int32_t configured=-2,index=-1;bool use_compute=false;};
     Api api_{};Layout layout_{};uint64_t epoch_=0;Source source_{};Root roots_[16]{};size_t root_count_=0;
     Clone clones_[3]{};size_t clone_count_=0;bool captured_=false,prepared_=false,published_=false;const char* error_="none";
     bool fail(const char* error){error_=error;return false;}
@@ -1017,7 +1018,7 @@ class Lease {
         if(!array_item(out.renderers,out.index,actual_renderer)||actual_renderer!=renderer||!array_item(out.data_array,out.index,out.data)
             ||!api_.exact_type(out.data,"VL.Rendering.VLSRPRendererData")||!api_.alive(out.data)
             ||!read(out.data,layout_.features,out.features)||!read(out.data,layout_.feature_map,out.feature_map)
-            ||!empty_list(out.features)||!empty_list(out.feature_map)||!read(out.data,layout_.data_post,out.post)
+            ||!empty_list(out.features)||!empty_list(out.feature_map)||!read(out.data,layout_.data_xr,out.xr)||!read(out.data,layout_.data_post,out.post)
             ||!out.post||!api_.exact_type(out.post,"VL.Rendering.VLPostProcessData")||!api_.alive(out.post)
             ||!read(out.post,layout_.post_compute,out.compute))return false;
         int32_t data_mode=-1,renderer_mode=-1;
@@ -1030,7 +1031,7 @@ class Lease {
         return (!out.compute||(api_.is_type(out.compute,"UnityEngine.ComputeShader")&&api_.alive(out.compute)))&&(!out.use_compute||out.compute);
     }
     bool same(const Source& a,const Source& b)const{return a.additional==b.additional&&a.renderer==b.renderer&&a.asset==b.asset&&a.renderers==b.renderers
-        &&a.data_array==b.data_array&&a.data==b.data&&a.post==b.post&&a.compute==b.compute&&a.variants==b.variants&&a.features==b.features&&a.feature_map==b.feature_map
+        &&a.data_array==b.data_array&&a.data==b.data&&a.xr==b.xr&&a.post==b.post&&a.compute==b.compute&&a.variants==b.variants&&a.features==b.features&&a.feature_map==b.feature_map
         &&a.configured==b.configured&&a.index==b.index&&a.use_compute==b.use_compute;}
     bool clone(void* original,const char* type,Clone& out){
         if(!current()||!api_.private_phase_held(api_.context))return false;
@@ -1072,7 +1073,7 @@ public:
         if(!api.owner_thread||!api.current||!api.routes_verified||!api.refresh_maps||!api.mapped||!api.is_type||!api.exact_type||!api.class_of||!api.alive
             ||!api.retain||!api.target||!api.release||!api.array_length||!api.array_data||!api.render_asset||!api.instantiate||!api.destroy||!api.write_ref||!api.cleanup_fenced||!api.private_phase_held||!api.variant_warmed
             ||!api.owner_thread()||!api.current(api.context,epoch)||!api.routes_verified(api.context)||!inspect(source_,additional,renderer))return fail("private_renderer_source_data_unavailable");
-        void* values[]={source_.additional,source_.renderer,source_.asset,source_.renderers,source_.data_array,source_.data,source_.post,source_.compute,source_.variants,source_.features,source_.feature_map};
+        void* values[]={source_.additional,source_.renderer,source_.asset,source_.renderers,source_.data_array,source_.data,source_.xr,source_.post,source_.compute,source_.variants,source_.features,source_.feature_map};
         for(void* value:values)if(!keep(value))return fail("private_renderer_source_root_failed");
         captured_=true;return current();
     }
@@ -1086,8 +1087,15 @@ public:
         if(!set_ref(clones_[1],layout_.post_compute,source_.compute?clones_[0].held.object:nullptr))return fail("private_renderer_compute_bind_failed");
         clone_count_=3;if(!clone(source_.data,"VL.Rendering.VLSRPRendererData",clones_[2]))return fail("private_renderer_data_clone_failed");
         if(!set_ref(clones_[2],layout_.data_post,clones_[1].held.object))return fail("private_renderer_post_bind_failed");
+        // The ordinary non-XR selected camera never consumes XR passes. The
+        // original renderer ctor nevertheless calls shared XRSystem.Initialize:
+        // nonnull XRData destroys/replaces its global materials. Clear ONLY the
+        // private renderer-data clone before ctor; the source asset is retained.
+        if(!set_ref(clones_[2],layout_.data_xr,nullptr))return fail("private_renderer_xr_detach_failed");
         prepared_=true;return true;
     }
+    // Source-role/shader validation runs BEFORE any private Instantiate and
+    // remains tied to exact retained asset/index/source renderer provenance.
     void* source_renderer_data()const{return current()?source_.data:nullptr;}
     void* source_post_data()const{return current()?source_.post:nullptr;}
     void* source_compute_shader()const{return current()?source_.compute:nullptr;}
@@ -1112,6 +1120,7 @@ public:
     }
 };
 } // namespace idoly_mp4_private_renderer_data
+
 // END_MP4_PRIVATE_RENDERER_DATA
 
 // BEGIN_MP4_PRIVATE_RENDERER_ROOT
@@ -1203,6 +1212,232 @@ public:
 } // namespace idoly_mp4_private_renderer_root
 // END_MP4_PRIVATE_RENDERER_ROOT
 
+// BEGIN_MP4_FOCUS_EXTRA_STATE
+// Exact CinemachineExtension.mExtraState reference lease. No old dictionary
+// contents/native handles are copied. The host supplies the pinned closed class
+// and original constructor, and source identity excludes this leased field.
+namespace idoly_mp4_focus_private {
+struct Owner {void*extension=nullptr;void*camera=nullptr;void*target=nullptr;uintptr_t native_extension=0;float offset=0;};
+struct ExtraApi {
+ bool(*current)(void*,uint64_t,const Owner&)=nullptr;bool(*owner_thread)()=nullptr;bool(*held)(void*)=nullptr;
+ bool(*dictionary_class)(void*,const Owner&,void**)=nullptr;
+ void*(*dictionary_get)(void*)=nullptr;
+ bool(*dictionary_set)(void*,void*expected,void*replacement)=nullptr; // compare then original GC barrier
+ void*(*dictionary_new)(void*,void*klass)=nullptr;
+ void(*dictionary_ctor)(void*,void*)=nullptr;
+ bool(*dictionary_is)(void*,void*,void*klass)=nullptr;
+ uint32_t(*retain)(void*)=nullptr;void*(*retained)(uint32_t)=nullptr;void(*release)(uint32_t)=nullptr;
+ bool(*detached)(void*,const Owner&,void*private_dictionary)=nullptr;
+};
+struct Suspension {uint64_t epoch=0;uint32_t depth=0;bool active=false;};
+class ExtraStateLease {
+ ExtraApi api_{};void*context_=nullptr;Owner owner_{};uint64_t epoch_=0;void*klass_=nullptr,*old_=nullptr,*private_=nullptr;
+ uint32_t roots_[3]{},old_root_=0,private_root_=0,depth_=0;bool captured_=false,constructed_=false,duty_=false,ever_installed_=false;
+ bool constructing_=false,abandoned_=false,poisoned_=false;const char*error_="none";
+ bool fail(const char*s){poisoned_=true;error_=s;return false;}
+ bool keep(void*p,uint32_t&root){if(!p){root=0;return true;}root=api_.retain(p);return root&&api_.retained(root)==p;}
+ bool source()const{return captured_&&!abandoned_&&api_.owner_thread()&&api_.current(context_,epoch_,owner_)
+  &&api_.retained(roots_[0])==owner_.extension&&api_.retained(roots_[1])==owner_.camera
+  &&(!owner_.target||api_.retained(roots_[2])==owner_.target)
+  &&(!old_||api_.retained(old_root_)==old_)&&(!private_||api_.retained(private_root_)==private_);}
+ bool valid_dictionary(void*p)const{return !p||api_.dictionary_is(context_,p,klass_);}
+ void drop(uint32_t&root){if(root)api_.release(root);root=0;}
+public:
+ bool capture(ExtraApi api,void*ctx,uint64_t epoch,const Owner&owner){
+  if(captured_||epoch_||!ctx||!epoch||!owner.extension||!owner.camera||!owner.native_extension||!std::isfinite(owner.offset)
+   ||!api.current||!api.owner_thread||!api.held||!api.dictionary_class||!api.dictionary_get||!api.dictionary_set
+   ||!api.dictionary_new||!api.dictionary_ctor||!api.dictionary_is||!api.retain||!api.retained||!api.release||!api.detached
+   ||!api.owner_thread()||!api.current(ctx,epoch,owner))return false;
+  api_=api;context_=ctx;epoch_=epoch;owner_=owner;
+  if(!keep(owner.extension,roots_[0])||!keep(owner.camera,roots_[1])||!keep(owner.target,roots_[2])
+   ||!api_.dictionary_class(ctx,owner,&klass_)||!klass_)return fail("focus_extra_class_or_roots");
+  old_=api_.dictionary_get(owner.extension);
+  if(!valid_dictionary(old_)||!keep(old_,old_root_)||!api_.current(ctx,epoch,owner))return fail("focus_extra_baseline");
+  captured_=true;return true;
+ }
+ bool prepare(){
+  if(!source()||poisoned_||depth_||!api_.held(context_))return fail("focus_extra_prepare_owner");
+  if(duty_)return constructed_&&api_.dictionary_get(owner_.extension)==private_;
+  if(private_||api_.dictionary_get(owner_.extension)!=old_)return fail("focus_extra_prepare_changed");
+  private_=api_.dictionary_new(context_,klass_);
+  if(!private_||private_==old_||private_==owner_.extension||private_==owner_.camera
+   ||!valid_dictionary(private_)||!keep(private_,private_root_))return fail("focus_extra_new_dictionary");
+  constructing_=true;
+  try{api_.dictionary_ctor(context_,private_);}catch(...){constructing_=false;fail("focus_extra_dictionary_ctor");throw;}
+  constructing_=false;
+  if(!source()||!valid_dictionary(private_))return fail("focus_extra_ctor_owner");
+  constructed_=true;duty_=true;ever_installed_=true; // before first possibly throwing GC barrier
+  if(!api_.dictionary_set(owner_.extension,old_,private_)||api_.dictionary_get(owner_.extension)!=private_)return fail("focus_extra_install");
+  return source();
+ }
+ bool installed()const{return duty_&&!depth_&&!abandoned_;}
+ bool current(){return source()&&!poisoned_&&constructed_&&duty_&&!depth_&&api_.dictionary_get(owner_.extension)==private_;}
+ bool suspend(Suspension&token){
+  if(token.active)return false;
+  token={};
+  if(!duty_||abandoned_)return true;
+  if(!source()||poisoned_)return fail("focus_extra_suspend_owner");
+  token.epoch=epoch_;token.depth=depth_+1;
+  if(!depth_&&!api_.dictionary_set(owner_.extension,private_,old_))return fail("focus_extra_suspend_reference");
+  ++depth_;token.active=true;return true;
+ }
+ bool resume(Suspension&token){
+  if(!token.active)return true;
+  if(abandoned_||!duty_||token.epoch!=epoch_){token.active=false;return false;}
+  if(token.depth!=depth_||!source()){abandon();token.active=false;return false;}
+  if(depth_==1){
+   void*latest=api_.dictionary_get(owner_.extension);
+   if(latest==private_||!valid_dictionary(latest)){abandon();token.active=false;return fail("focus_extra_ambient_dictionary");}
+   uint32_t root=0;if(latest!=old_&&!keep(latest,root)){abandon();token.active=false;return fail("focus_extra_ambient_root");}
+   if(latest!=old_){drop(old_root_);old_root_=root;old_=latest;}
+   if(!api_.dictionary_set(owner_.extension,latest,private_)){abandon();token.active=false;return fail("focus_extra_resume_reference");}
+  }
+  --depth_;token.active=false;return source();
+ }
+ // Must run before original source restore Rebuild/Evaluate so normal Focus
+ // cache creation belongs to the original dictionary, not the export cache.
+ bool restore_reference(){
+  if(abandoned_)return false;
+  if(!captured_||constructing_||!source()||depth_||!api_.held(context_))return false;
+  if(!duty_)return true;
+  void*actual=api_.dictionary_get(owner_.extension);
+  if(actual==private_){if(!api_.dictionary_set(owner_.extension,private_,old_))return fail("focus_extra_restore_reference");}
+  else if(actual!=old_)return fail("focus_extra_restore_changed");
+  duty_=false;return true;
+ }
+ // Trusted raw source initializer/End observer, BEFORE original source work.
+ // An accepted render/clock grant can still be on stack. Withdraw only this
+ // field publication; actual readers/constructed resources remain retained.
+ bool withdraw_before_source_change(){
+  if(abandoned_)return true;
+  if(!captured_||!duty_){abandoned_=true;return true;}
+  if(constructing_||!source())return fail("focus_extra_withdraw_owner");
+  void*actual=api_.dictionary_get(owner_.extension);
+  if(depth_){
+   // Unrelated nested execution currently owns its ambient field. Preserve any
+   // progress it made; an outstanding resume must never reinstall private.
+   if(actual==private_)return fail("focus_extra_withdraw_suspension");
+  }else if(actual==private_){
+   if(!api_.dictionary_set(owner_.extension,private_,old_))return fail("focus_extra_withdraw_reference");
+  }else if(actual!=old_)return fail("focus_extra_withdraw_changed");
+  duty_=false;abandoned_=true;error_="focus_extra_withdrawn";return true;
+ }
+ // Pure observer-failure path. Never get/set a former/new source dictionary.
+ void abandon(){abandoned_=true;duty_=false;poisoned_=true;error_="focus_extra_abandoned";}
+ bool release(){
+  if(constructing_||(depth_&&!abandoned_)||duty_)return false;
+  if(private_&&ever_installed_&&!api_.detached(context_,owner_,private_))return false;
+  drop(private_root_);
+  drop(old_root_);
+  for(auto&root:roots_)drop(root);
+  captured_=constructed_=ever_installed_=constructing_=abandoned_=poisoned_=false;epoch_=depth_=0;context_=klass_=old_=private_=nullptr;owner_={};return true;
+ }
+ void*private_dictionary()const{return private_;}
+ bool abandoned()const{return abandoned_;}
+ uint64_t epoch()const{return epoch_;}
+ const char*error()const{return error_;}
+};
+} // namespace idoly_mp4_focus_private
+
+// END_MP4_FOCUS_EXTRA_STATE
+
+// BEGIN_MP4_FOCUS_FACTORY_LEDGER
+// Exact Focus ScriptableObject CreateInstance request ledger. The engine binds
+// native.cachedPtr before managed construction. ENTRY/RESULT provenance is
+// mandatory; a global active flag plus matching class is not ownership proof.
+namespace idoly_mp4_focus_private {
+enum class Role:uint32_t{profile=1,dof=2};
+enum class Observe:uint8_t{forward,owned,reject};
+struct FactoryApi {
+ bool(*current)(void*,uint64_t)=nullptr;bool(*owner_thread)()=nullptr;
+ bool(*entry)(void*,uint64_t,uint64_t,Role)=nullptr; // exact owned Focus callback + factory entry
+ bool(*receiver)(void*,uint64_t,Role,void*,uintptr_t)=nullptr; // exact factory request including late RESULT
+ uint32_t(*retain)(void*)=nullptr;void*(*retained)(uint32_t)=nullptr;void(*release)(uint32_t)=nullptr;
+ bool(*detached)(void*,uint64_t)=nullptr; // all private publications + actual GPU fence
+ bool(*alive)(void*,void*,uintptr_t)=nullptr; // exact managed/native pair, no old pointer reuse
+ bool(*destroy)(void*,void*,uintptr_t)=nullptr; // original Unity destroy; private only
+};
+class FactoryLedger {
+ struct Record{void*object=nullptr;uintptr_t native=0;uint32_t root=0;Role role=Role::profile;bool destroy_requested=false;};
+ static constexpr size_t capacity=512;FactoryApi api_{};void*context_=nullptr;uint64_t epoch_=0,serial_=0,last_serial_=0;
+ Role role_=Role::profile;Record records_[capacity]{};size_t count_=0;void*unrooted_=nullptr;
+ bool active_=false,request_seen_=false,abandoned_=false,failed_=false,unknown_=false;const char*error_="none";
+ bool fail(const char*s){failed_=true;error_=s;return false;}
+ bool current()const{return epoch_&&!abandoned_&&api_.owner_thread()&&api_.current(context_,epoch_);}
+ Observe remember(uint64_t serial,Role role,void*object,uintptr_t native){
+  if(!active_||serial!=serial_||role!=role_)return Observe::forward;
+  if(!object||!native||!api_.owner_thread()||!api_.receiver(context_,serial,role,object,native)){unknown_=true;fail("focus_factory_receiver");return Observe::reject;}
+  for(size_t i=0;i<count_;++i){auto&r=records_[i];
+   if(r.object==object||r.native==native){if(r.object==object&&r.native==native&&r.role==role&&api_.retained(r.root)==object){request_seen_=true;return Observe::owned;}unknown_=true;fail("focus_factory_alias");return Observe::reject;}
+  }
+  if(count_==capacity){unknown_=true;fail("focus_factory_capacity");return Observe::reject;}
+  uint32_t root=api_.retain(object);
+  if(!root||api_.retained(root)!=object){if(root)api_.release(root);unrooted_=object;unknown_=true;fail("focus_factory_root");return Observe::reject;}
+  records_[count_++]={object,native,root,role,false};
+  request_seen_=true;
+  if(unrooted_==object){unrooted_=nullptr;unknown_=false;}
+  return Observe::owned;
+ }
+public:
+ bool configure(FactoryApi api,void*ctx,uint64_t epoch){
+  if(epoch_||!ctx||!epoch||!api.current||!api.owner_thread||!api.entry||!api.receiver||!api.retain||!api.retained||!api.release||!api.detached||!api.alive||!api.destroy||!api.owner_thread()||!api.current(ctx,epoch))return false;
+  api_=api;context_=ctx;epoch_=epoch;return true;
+ }
+ bool begin(uint64_t serial,Role role){
+  if(!current()||failed_||active_||!serial||serial<=last_serial_||(role!=Role::profile&&role!=Role::dof)||!api_.entry(context_,epoch_,serial,role))return fail("focus_factory_entry");
+  serial_=serial;last_serial_=serial;role_=role;active_=true;request_seen_=false;return true;
+ }
+ // before-base is already native-bound. Result fallback covers a derived ctor
+ // exception before base. An old in-flight result can still be rooted after a
+ // source handoff using the exact recorded factory receipt, never source writes.
+ Observe before_base(uint64_t serial,Role role,void*object,uintptr_t native){return remember(serial,role,object,native);}
+ Observe result(uint64_t serial,Role role,void*object,uintptr_t native){return remember(serial,role,object,native);}
+ bool end(uint64_t serial,bool factory_failed_without_receiver=false){
+  if(!active_||serial!=serial_)return fail("focus_factory_end");
+  if(factory_failed_without_receiver||!request_seen_){unknown_=true;fail("focus_factory_unobservable_failure");}
+  active_=false;serial_=0;return !failed_;
+ }
+ // Pure source-observer failure: no Unity/getter/current/destroy callbacks.
+ // Preserve active receipt so its unavoidable late RESULT can be quarantined.
+ void abandon(){abandoned_=true;failed_=true;error_="focus_factory_abandoned";}
+ bool cleanup(){
+  if(!epoch_)return true;
+  if(active_||unknown_||!api_.owner_thread()||!api_.detached(context_,epoch_))return false;
+  for(size_t i=count_;i>0;--i){auto&r=records_[i-1];
+   if(api_.retained(r.root)!=r.object)return fail("focus_factory_lost_root");
+   if(!api_.alive(context_,r.object,r.native))continue;
+   if(r.destroy_requested)return false;
+   r.destroy_requested=true; // before a potentially throwing original destroy
+   if(!api_.destroy(context_,r.object,r.native))return fail("focus_factory_destroy");
+  }
+  return true;
+ }
+ bool release(){
+  if(!epoch_)return true;
+  if(!cleanup())return false;
+  for(size_t i=0;i<count_;++i){const auto&r=records_[i];if(api_.retained(r.root)!=r.object||api_.alive(context_,r.object,r.native))return false;}
+  for(size_t i=0;i<count_;++i){api_.release(records_[i].root);records_[i]={};}
+  epoch_=serial_=last_serial_=0;count_=0;context_=nullptr;active_=request_seen_=abandoned_=failed_=unknown_=false;unrooted_=nullptr;return true;
+ }
+ // Raw birth identity only: does not query Unity/source/current or prove live
+ // native state. Roots remain ledger-owned through abandon/quarantine.
+ bool owns_object_raw(void*object)const noexcept{
+  if(!object)return false;
+  for(size_t i=0;i<count_;++i)if(records_[i].root&&records_[i].object==object)return true;
+  return false;
+ }
+ void*object_at(size_t i)const{
+  return i<count_&&records_[i].root&&api_.retained(records_[i].root)==records_[i].object?records_[i].object:nullptr;
+ }
+ Role role_at(size_t i)const noexcept{return i<count_?records_[i].role:static_cast<Role>(0);}
+ uintptr_t native_at(size_t i)const noexcept{return i<count_?records_[i].native:0;}
+ bool in_progress()const{return active_;}bool abandoned()const{return abandoned_;}size_t count()const{return count_;}
+ const char*error()const{return error_;}
+};
+} // namespace idoly_mp4_focus_private
+
+// END_MP4_FOCUS_FACTORY_LEDGER
+
 // BEGIN_MP4_CINE_VOLUME_PRODUCER
 // Exact selected CinemachineVolumeSettings.ApplyPostFX ownership transaction.
 // The concrete host must pin its original callbacks and hidden-child creator
@@ -1234,6 +1469,11 @@ struct Api {
     bool(*created_current)(void*,void*,Kind,void*)=nullptr;
     bool(*destroy_created_immediate)(void*,void*,Kind)=nullptr;
     bool(*created_unregistered)(void*,void*,Kind)=nullptr;
+    bool(*withdraw_created)(void*,void*,Kind,void*)=nullptr;
+    bool(*created_withdrawn)(void*,void*,Kind,void*)=nullptr;
+    bool(*cleanup_fenced)(void*)=nullptr;
+    bool(*destroy_detached)(void*,void*,Kind,void*)=nullptr;
+    bool(*detached_destroyed)(void*,void*,Kind)=nullptr;
     // After a failed pre-init handoff these published scene resources may have
     // been adopted by the replacement scene. Relinquish our ledger without
     // touching those scene objects; do not later destroy them as old resources.
@@ -1244,7 +1484,7 @@ struct Api {
 class Scope {
     static constexpr size_t max_gos=16,max_volumes=64,max_created=80,max_readers=16;
     struct Held {void* object=nullptr;uint32_t root=0;};
-    struct Created {Held held{};Kind kind=Kind::volume;void* game_object=nullptr;uint64_t serial=0;bool retired=false;};
+    struct Created {Held held{};Kind kind=Kind::volume;void* game_object=nullptr;uint64_t serial=0;bool retired=false,detached=false;};
     inline static uint64_t next_reader_=0;
     Api api_{};void* brain_=nullptr;Held brain_root_{},asset_root_{};
     GameObjectImage gos_[max_gos]{};VolumeImage volumes_[max_volumes]{};
@@ -1257,7 +1497,8 @@ class Scope {
     bool complete()const{return api_.owner_thread&&api_.current&&api_.routes_verified&&api_.retain&&api_.target&&api_.release
         &&api_.inventory&&api_.membership_current&&api_.volume_current&&api_.game_object_current&&api_.restore_game_object&&api_.verify_game_object
         &&api_.restore_volume&&api_.verify_volume&&api_.fresh_game_object&&api_.volume_subject&&api_.created_current
-        &&api_.destroy_created_immediate&&api_.created_unregistered&&api_.abandon_created&&api_.current_profile&&api_.producer_method&&api_.source_asset;}
+        &&api_.destroy_created_immediate&&api_.created_unregistered&&api_.withdraw_created&&api_.created_withdrawn
+        &&api_.cleanup_fenced&&api_.destroy_detached&&api_.detached_destroyed&&api_.abandon_created&&api_.current_profile&&api_.producer_method&&api_.source_asset;}
     bool current()const{return configured_&&!withdrawn_&&!abandoned_&&!failed_&&api_.owner_thread()
         &&brain_root_.root&&api_.target(brain_root_.root)==brain_&&asset_root_.root&&api_.target(asset_root_.root)==api_.source_asset&&api_.current(api_.context,epoch_)&&api_.routes_verified(api_.context);}
     bool hold(Held& out,void* object){out.object=object;out.root=object?api_.retain(object):0;return !object||(out.root&&api_.target(out.root)==object);}
@@ -1274,6 +1515,14 @@ public:
     const char* error()const{return error_;}bool active()const{return configured_;}
     bool in_apply()const{return in_original();}bool restored()const{return restored_&&!abandoned_;}
     size_t readers()const{return reader_count_;}
+    // Pure birth ledger: strong roots prevent raw managed receiver reuse. Old
+    // detached Volume.Update stays suppressed while source ownership is gone.
+    bool owns_created_volume_raw(void* object)const noexcept {
+        if(!configured_||abandoned_||!object)return false;
+        for(size_t i=0;i<created_count_;++i){const auto& c=created_[i];
+            if(c.kind==Kind::volume&&!c.retired&&c.held.root&&c.held.object==object)return true;}
+        return false;
+    }
     bool capture(Api api,uint64_t epoch,void* brain){
         if(configured_||!epoch||!brain)return false;
         api_=api;epoch_=epoch;brain_=brain;configured_=true;
@@ -1344,6 +1593,7 @@ public:
     Result restore(){
         if(!configured_)return Result::ok;
         if(abandoned_)return Result::stale;
+        if(created_count_&&!api_.cleanup_fenced(api_.context))return Result::waiting;
         if(!api_.owner_thread()||!api_.current(api_.context,epoch_)||!source_current())return Result::stale;
         // Complete identity preflight precedes the first native scene write.
         for(size_t i=0;i<created_count_;++i){const auto& c=created_[i];if(!c.retired&&(!c.held.root||api_.target(c.held.root)!=c.held.object||!api_.created_current(api_.context,c.held.object,c.kind,c.game_object)))return Result::stale;}
@@ -1354,12 +1604,35 @@ public:
         for(size_t i=0;i<volume_count_;++i)if(!api_.restore_volume(api_.context,volumes_[i]))return Result::failed;
         restored_=true;return verify_restored()?Result::ok:Result::failed;
     }
-    Result before_source_change(){const auto result=restore();withdrawn_=true;return result;}
+    Result before_source_change(){
+        if(!configured_)return Result::ok;
+        if(abandoned_||!api_.owner_thread()||!api_.current(api_.context,epoch_)||!source_current())return Result::stale;
+        for(size_t i=0;i<created_count_;++i){const auto& c=created_[i];
+            if(!c.retired&&!c.detached&&(!c.held.root||api_.target(c.held.root)!=c.held.object
+                ||!api_.created_current(api_.context,c.held.object,c.kind,c.game_object)))return Result::stale;}
+        // This is source withdrawal, not resource destruction. Reverse order
+        // unregisters/disables Volumes before removing their private child GO.
+        for(size_t i=created_count_;i>0;--i){auto& c=created_[i-1];if(c.retired||c.detached)continue;
+            if(!api_.withdraw_created(api_.context,c.held.object,c.kind,c.game_object)
+                ||!api_.created_withdrawn(api_.context,c.held.object,c.kind,c.game_object))return Result::failed;
+            c.detached=true;}
+        for(size_t i=0;i<go_count_;++i)if(!api_.restore_game_object(api_.context,gos_[i]))return Result::failed;
+        for(size_t i=0;i<volume_count_;++i)if(!api_.restore_volume(api_.context,volumes_[i]))return Result::failed;
+        restored_=true;withdrawn_=true;return verify_restored()?Result::ok:Result::failed;
+    }
     void abandon_before_source_change()noexcept{withdrawn_=abandoned_=true;restored_=false;}
     Result release(bool owned){
         if(!configured_)return Result::ok;
         if(reader_count_)return Result::waiting;
-        if(owned&&!abandoned_){const auto r=restore();if(r!=Result::ok)return r;}
+        if(owned&&!abandoned_&&!withdrawn_){const auto r=restore();if(r!=Result::ok)return r;}
+        if(owned&&!abandoned_&&withdrawn_&&!verify_restored())return Result::stale;
+        if(created_count_&&!api_.cleanup_fenced(api_.context))return Result::waiting;
+        for(size_t i=created_count_;i>0;--i){auto& c=created_[i-1];if(c.retired||!c.detached)continue;
+            if(!c.held.root||api_.target(c.held.root)!=c.held.object
+                ||!api_.created_withdrawn(api_.context,c.held.object,c.kind,c.game_object))return Result::stale;
+            if(!api_.destroy_detached(api_.context,c.held.object,c.kind,c.game_object)
+                ||!api_.detached_destroyed(api_.context,c.held.object,c.kind))return Result::failed;
+            c.retired=true;}
         for(auto& c:created_)if(c.held.root){if((abandoned_||!owned)&&!c.retired)api_.abandon_created(api_.context,c.held.object,c.kind);api_.release(c.held.root);c.held={};}
         for(auto& r:source_roots_)if(r.root){api_.release(r.root);r={};}
         if(brain_root_.root)api_.release(brain_root_.root);
@@ -1996,6 +2269,7 @@ struct Profile {
  Binding transform_children;
  Binding transform_child;
  Binding transform_parent;
+ Binding transform_set_parent;
  Binding string_equal;
  Binding volume_enable;
  Binding volume_disable;
@@ -2225,6 +2499,7 @@ inline constexpr Profile android_profile={
  {0x8f8e92c,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x54,0x87,0x00,0xf0,0x81,0x9a,0x44,0xf9}}, // transform_children
  {0x8f8ef48,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x55,0x87,0x00,0xf0,0xa2,0xce,0x44,0xf9}}, // transform_child
  {0x8f8bc60,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x74,0x87,0x00,0xd0,0x81,0x52,0x44,0xf9}}, // transform_parent
+ {0x8f8cab0,{0xfe,0x0f,0x1d,0xf8,0xf6,0x57,0x01,0xa9,0xf4,0x4f,0x02,0xa9,0x76,0x87,0x00,0xb0}}, // transform_set_parent
  {0x84cac24,{0x47,0xff,0xff,0x17,0xfe,0x0f,0x1f,0xf8,0x45,0xff,0xff,0x97,0xe8,0x03,0x20,0x2a}}, // string_equal
  {0x8de5e34,{0xfe,0x0f,0x1e,0xf8,0xf4,0x4f,0x01,0xa9,0x74,0x94,0x00,0xf0,0x88,0x92,0x54,0x39}}, // volume_enable
  {0x8de5ebc,{0xfe,0x57,0xbe,0xa9,0xf4,0x4f,0x01,0xa9,0x74,0x94,0x00,0xf0,0x75,0x5f,0x00,0x90}}, // volume_disable
@@ -2353,6 +2628,7 @@ inline constexpr Profile ios_profile={
  {0x7863a44,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xd3,0x85,0x01,0xb0}}, // transform_children
  {0x786422c,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // transform_child
  {0x785f254,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xf3,0x85,0x01,0xd0}}, // transform_parent
+ {0x7860d84,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // transform_set_parent
  {0x6b6b488,{0x1f,0x00,0x01,0xeb,0xa0,0x01,0x00,0x54,0x08,0x00,0x80,0x52,0xc0,0x01,0x00,0xb4}}, // string_equal
  {0x76617d0,{0xf4,0x4f,0xbe,0xa9,0xfd,0x7b,0x01,0xa9,0xfd,0x43,0x00,0x91,0xf3,0x03,0x00,0xaa}}, // volume_enable
  {0x766185c,{0xf6,0x57,0xbd,0xa9,0xf4,0x4f,0x01,0xa9,0xfd,0x7b,0x02,0xa9,0xfd,0x83,0x00,0x91}}, // volume_disable
@@ -2375,6 +2651,73 @@ inline constexpr Profile ios_profile={
  {0x81ea6a0,{0xb5,0x70,0x01,0x14,0xe0,0x70,0x01,0x14,0x08,0x04,0x40,0xf9,0x08,0x21,0x40,0x39}}, // field_static_get
  {0x81ea6a4,{0xe0,0x70,0x01,0x14,0x08,0x04,0x40,0xf9,0x08,0x21,0x40,0x39,0x00,0x19,0x06,0x53}}, // field_static_set
  {0x81ea8ec,{0x21,0x76,0x01,0x14,0xd9,0x6e,0x01,0x14,0xbd,0x77,0x01,0x14,0xbe,0x77,0x01,0x14}}, // runtime_invoke
+};
+struct TypeName {const char* space;const char* leaf;};
+struct TypeNames {
+ TypeName tracker;
+ TypeName target_cache;
+ TypeName impulse_listener;
+ TypeName impulse_source;
+ TypeName impulse_independent;
+ TypeName transform;
+ TypeName impulse_manager;
+ TypeName motion_data;
+ TypeName post_process;
+ TypeName post_shader_constants;
+ TypeName renderer;
+ TypeName renderer_data;
+ TypeName post_data;
+ TypeName compute_shader;
+ TypeName post_library;
+ TypeName lut_pass;
+ TypeName compute_pass;
+ TypeName shader_variants;
+ TypeName forward_lights;
+ TypeName cine_volume;
+ TypeName volume;
+ TypeName volume_profile;
+ TypeName focus_extension;
+ TypeName focus_state;
+ TypeName focus_dof;
+ TypeName height_extension;
+ TypeName virtual_actor;
+ TypeName component;
+ TypeName material;
+ TypeName shader;
+ TypeName int32;
+};
+inline constexpr TypeNames type_names={
+ {"Cinemachine","UpdateTracker"}, // tracker
+ {"Cinemachine","TargetPositionCache"}, // target_cache
+ {"Cinemachine","CinemachineImpulseListener"}, // impulse_listener
+ {"Cinemachine","CinemachineImpulseSource"}, // impulse_source
+ {"Cinemachine","CinemachineIndependentImpulseListener"}, // impulse_independent
+ {"UnityEngine","Transform"}, // transform
+ {"Cinemachine","CinemachineImpulseManager"}, // impulse_manager
+ {"UnityEngine.Rendering.Universal","MotionVectorsPersistentData"}, // motion_data
+ {"VL.Rendering.Internal","VLPostProcessPass"}, // post_process
+ {"","ShaderConstants"}, // post_shader_constants
+ {"VL.Rendering","VLSRPRenderer"}, // renderer
+ {"VL.Rendering","VLSRPRendererData"}, // renderer_data
+ {"VL.Rendering","VLPostProcessData"}, // post_data
+ {"UnityEngine","ComputeShader"}, // compute_shader
+ {"","MaterialLibrary"}, // post_library
+ {"UnityEngine.Rendering.Universal.Internal","ColorGradingLutPass"}, // lut_pass
+ {"VL.Rendering","ColorGradingComputePass"}, // compute_pass
+ {"UnityEngine","ShaderVariantCollection"}, // shader_variants
+ {"UnityEngine.Rendering.Universal.Internal","ForwardLights"}, // forward_lights
+ {"Cinemachine.PostFX","CinemachineVolumeSettings"}, // cine_volume
+ {"UnityEngine.Rendering","Volume"}, // volume
+ {"UnityEngine.Rendering","VolumeProfile"}, // volume_profile
+ {"VL","VLCinemachineFocusPoint"}, // focus_extension
+ {"","VcamFocusPointState"}, // focus_state
+ {"VL.PostProcessing","VLDOF"}, // focus_dof
+ {"Solis.Common","SolisCinemachineHeightController"}, // height_extension
+ {"Solis.Common","SolisVirtualActorController"}, // virtual_actor
+ {"UnityEngine","Component"}, // component
+ {"UnityEngine","Material"}, // material
+ {"UnityEngine","Shader"}, // shader
+ {"System","Int32"}, // int32
 };
 struct Types {
  Binding tracker;
@@ -2405,6 +2748,9 @@ struct Types {
  Binding height_extension;
  Binding virtual_actor;
  Binding component;
+ Binding material;
+ Binding shader;
+ Binding int32;
 };
 inline constexpr Types android_types={
  {0x9dfe990,{0xd8,0x6e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // tracker
@@ -2435,6 +2781,9 @@ inline constexpr Types android_types={
  {0x9df0e50,{0xd3,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // height_extension
  {0x9df1710,{0xa6,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // virtual_actor
  {0x9d870b0,{0xb2,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // component
+ {0x9d89630,{0x1e,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // material
+ {0x9debbb0,{0x1d,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // shader
+ {0x9d88aa0,{0xae,0x49,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x08,0x80,0x00,0x00,0x00,0x00}}, // int32
 };
 inline constexpr Types ios_types={
  {0xa568500,{0x09,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // tracker
@@ -2465,6 +2814,9 @@ inline constexpr Types ios_types={
  {0xa55a9a0,{0x01,0x5b,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // height_extension
  {0xa55b260,{0xd4,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // virtual_actor
  {0xa4f0c90,{0xe2,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // component
+ {0xa4f3210,{0x4e,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // material
+ {0xa555700,{0x4d,0x5d,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00}}, // shader
+ {0xa4f2680,{0x9d,0x49,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x08,0x80,0x00,0x00,0x00,0x00}}, // int32
 };
 struct NativeAudio {const char*sha256;uint32_t cached_ptr,paused_offset,fast_flag,primary,supplementary_head,supplementary_tail,supplementary_count;Binding pause,unpause,playing;};
 inline constexpr NativeAudio android_native_audio={"c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85",16,940,917,864,792,800,1024,{0x9393e4,{0x28,0x00,0x80,0x52,0x08,0xb0,0x0e,0x39,0x0a,0xdd,0xff,0x17,0xfe,0x0f,0x1c,0xf8}},{0x939030,{0x1f,0xb0,0x0e,0x39,0xf8,0xdd,0xff,0x17,0xff,0x83,0x02,0xd1,0xfe,0x3b,0x00,0xf9}},{0x9300fc,{0xff,0x83,0x00,0xd1,0xfe,0x4f,0x01,0xa9,0x08,0x54,0x4e,0x39,0xa8,0x00,0x00,0x34}}};
@@ -2556,6 +2908,7 @@ inline constexpr uint32_t android_refs_126[]={0,8};
 inline constexpr uint32_t android_refs_127[]={0};
 inline constexpr uint32_t android_refs_128[]={0,8,24,40};
 inline constexpr uint32_t android_refs_137[]={0};
+inline constexpr uint32_t android_refs_142[]={0,8,24};
 inline constexpr Schema android_schemas[]={
  {"Solis.Common.SolisCinemachineHeightController","Solis.Common","SolisCinemachineHeightController",23251,32,32,0x9df0e50,{0xd3,0x5a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},android_refs_0,4,-1,-1,-1,-1},
  {"UnityEngine.Events.UnityEventTools","UnityEngine.Events","UnityEventTools",24098,16,0,0x9dfde90,{0x22,0x5e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
@@ -2672,6 +3025,7 @@ inline constexpr Schema android_schemas[]={
  {"Cinemachine.Utility.UnityVectorExtensions","Cinemachine.Utility","UnityVectorExtensions",28415,16,0,0x9dfe400,{0xff,0x6e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
  {"Cinemachine.Utility.UnityQuaternionExtensions","Cinemachine.Utility","UnityQuaternionExtensions",28416,16,0,0x9dfdfd0,{0x00,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
  {"Cinemachine.Utility.UnityRectExtensions","Cinemachine.Utility","UnityRectExtensions",28417,16,0,0x9dfdfe0,{0x01,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
+ {"VL.VLCinemachineFocusPoint","VL","VLCinemachineFocusPoint",33301,32,32,0x9e00d10,{0x15,0x82,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},android_refs_142,3,-1,-1,-1,-1},
 };
 inline constexpr uint32_t ios_refs_0[]={0,8,16,24};
 inline constexpr uint32_t ios_refs_2[]={0,8,24};
@@ -2745,6 +3099,7 @@ inline constexpr uint32_t ios_refs_126[]={0,8};
 inline constexpr uint32_t ios_refs_127[]={0};
 inline constexpr uint32_t ios_refs_128[]={0,8,24,40};
 inline constexpr uint32_t ios_refs_137[]={0};
+inline constexpr uint32_t ios_refs_142[]={0,8,24};
 inline constexpr Schema ios_schemas[]={
  {"Solis.Common.SolisCinemachineHeightController","Solis.Common","SolisCinemachineHeightController",23297,32,32,0xa55a9a0,{0x01,0x5b,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},ios_refs_0,4,-1,-1,-1,-1},
  {"UnityEngine.Events.UnityEventTools","UnityEngine.Events","UnityEventTools",24145,16,0,0xa5679f0,{0x51,0x5e,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
@@ -2861,6 +3216,7 @@ inline constexpr Schema ios_schemas[]={
  {"Cinemachine.Utility.UnityVectorExtensions","Cinemachine.Utility","UnityVectorExtensions",28464,16,0,0xa567f50,{0x30,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
  {"Cinemachine.Utility.UnityQuaternionExtensions","Cinemachine.Utility","UnityQuaternionExtensions",28465,16,0,0xa567b20,{0x31,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
  {"Cinemachine.Utility.UnityRectExtensions","Cinemachine.Utility","UnityRectExtensions",28466,16,0,0xa567b30,{0x32,0x6f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},nullptr,0,-1,-1,-1,-1},
+ {"VL.VLCinemachineFocusPoint","VL","VLCinemachineFocusPoint",33412,32,32,0xa56a8f0,{0x84,0x82,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x12,0x00,0x00,0x00,0x00,0x00},ios_refs_142,3,-1,-1,-1,-1},
 };
 inline constexpr uint32_t android_value_refs_0[]={0,24};
 inline constexpr uint32_t android_value_refs_10[]={8};

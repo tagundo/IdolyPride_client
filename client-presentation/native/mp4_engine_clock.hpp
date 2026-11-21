@@ -701,6 +701,13 @@ namespace idoly_mp4_world {
 // Actual native loop callbacks have void(void) ABI. A grant is independent of
 // deltaTime: frame/tick zero must run once, while every held retry runs none.
 struct AnimationApi {void(*original[8])(){};bool(*owner_thread)()=nullptr;};
+// Mandatory source/transaction checks around an actual Deferred-only original
+// invocation. This is independent from an accepted simulation frame grant.
+struct AnimationMaintenanceApi {
+    void* context=nullptr;
+    bool(*before)(void*,uint64_t)=nullptr;
+    bool(*after)(void*,uint64_t)=nullptr;
+};
 class AnimationGate {
     AnimationApi api_{};
     alignas(8) uint64_t epoch_=0;
@@ -708,7 +715,7 @@ class AnimationGate {
     uint64_t tick_=0;
     uint8_t next_=0,seen_=0;
     alignas(8) uint64_t permission_=0;
-    bool have_tick_=false,pair_=false,inside_=false;
+    bool have_tick_=false,pair_=false,inside_=false,maintenance_=false;
     bool open(uint64_t epoch)const{return epoch&&__atomic_load_n(&permission_,__ATOMIC_ACQUIRE)==epoch;}
     void close(){__atomic_store_n(&permission_,uint64_t(0),__ATOMIC_RELEASE);}
     void poison(){__atomic_store_n(&dirty_,1u,__ATOMIC_RELEASE);close();}
@@ -734,14 +741,34 @@ public:
         if(!epoch||!installed()||!api_.owner_thread()||__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE))return false;
         uint64_t empty=0;
         if(!__atomic_compare_exchange_n(&epoch_,&empty,epoch,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return false;
-        have_tick_=pair_=inside_=false;close();tick_=0;next_=seen_=0;return true;
+        have_tick_=pair_=inside_=maintenance_=false;close();tick_=0;next_=seen_=0;return true;
     }
     bool healthy(uint64_t epoch)const{return epoch&&__atomic_load_n(&epoch_,__ATOMIC_ACQUIRE)==epoch
         &&!__atomic_load_n(&dirty_,__ATOMIC_ACQUIRE);}
     bool closed(uint64_t epoch)const{return healthy(epoch)&&!open(epoch)&&!pair_&&!inside_;}
     // Read-only receipt for lifecycle caused by an actually executing accepted
     // native phase. Cleanup End after scalar revoke deliberately returns false.
-    bool granted_inflight(uint64_t epoch)const{return healthy(epoch)&&inside_&&open(epoch);}
+    bool granted_inflight(uint64_t epoch)const{return healthy(epoch)&&inside_&&!maintenance_&&open(epoch);}
+    bool maintenance_inflight(uint64_t epoch)const{return healthy(epoch)&&inside_&&maintenance_&&!open(epoch)&&!pair_;}
+    // Runs exactly the original DeferredEvaluate (phase5). Does not grant Time,
+    // sample a frame, touch tick/seen/next, or create an animation Begin/End pair.
+    // Caller keeps RNG isolated, all workers/Mono/render grants closed, and
+    // supplies finite current+retired pending/producer receipts in both checks.
+    bool maintenance(uint64_t epoch,AnimationMaintenanceApi checks){
+        if(!checks.before||!checks.after||!api_.owner_thread||!api_.owner_thread()
+            ||!closed(epoch)||maintenance_||!checks.before(checks.context,epoch)
+            ||!closed(epoch))return false;
+        struct Exit {
+            AnimationGate&gate;bool complete=false;
+            ~Exit(){gate.maintenance_=false;if(!complete)gate.poison();}
+        } exit{*this};
+        maintenance_=true;
+        (void)original(5);
+        if(!healthy(epoch)||!closed(epoch)||!checks.after(checks.context,epoch)||!closed(epoch)){
+            poison();return false;
+        }
+        exit.complete=true;return true;
+    }
     bool prepare(uint64_t epoch,uint64_t tick)const{
         return api_.owner_thread&&api_.owner_thread()&&closed(epoch)
             &&(!have_tick_?tick==0:tick_!=~uint64_t(0)&&tick==tick_+1);
@@ -1162,9 +1189,13 @@ struct DirectorRegistryApi {
     // Must prove captured callbacks and all simulation/Mono/render gates closed.
     bool(*maintenance_closed)(void*)=nullptr;
     bool(*pending_authorized)(void*,const DirectorPending&,DirectorAuthorization*)=nullptr;
+    // Fallback only for an exact source-pinned entry whose bytes were replaced
+    // by this process's verified typed hook. Must validate actual target,
+    // original gateway and current installed patch/publication; never broad true.
+    bool(*native_code_verified)(const CodeBinding&)=nullptr;
 };
 inline bool director_registry_profile_matches(const DirectorRegistryProfile& profile,uintptr_t base,
-        bool(*mapped)(uintptr_t,size_t)){
+        bool(*mapped)(uintptr_t,size_t),bool(*native_code_verified)(const CodeBinding&)=nullptr){
     if(!mapped)return false;
     const CodeBinding* calls[]={&profile.registry_getter,&profile.sample_category,&profile.rebuild,&profile.append,
         &profile.category,&profile.callbacks_rebuild,&profile.callbacks_dispatch,&profile.output_callbacks,
@@ -1172,7 +1203,9 @@ inline bool director_registry_profile_matches(const DirectorRegistryProfile& pro
         &profile.deferred_append_a,&profile.deferred_append_b,&profile.graph_create,&profile.graph_destroy,
         &profile.atomic_push,&profile.atomic_pop};
     auto code=[&](const CodeBinding& call){const uintptr_t at=base+call.rva;
-        return call.rva&&at>=base&&mapped(at,16)&&!::memcmp(reinterpret_cast<const void*>(at),call.prefix,16);};
+        if(!call.rva||at<base||!mapped(at,16))return false;
+        return !::memcmp(reinterpret_cast<const void*>(at),call.prefix,16)
+            ||(native_code_verified&&native_code_verified(call));};
     for(const auto* call:calls)if(!code(*call))return false;
     for(size_t i=0;i<3;++i){const auto& output=profile.outputs[i];
         if(output.count!=(output.animation?2u:1u)||!output.vtable||base+output.vtable<base
@@ -1467,7 +1500,7 @@ class DirectorRegistryAdmission {
         if(measuring_)return fail(Result::invalid,"world_director_recursive_query");
         api_=api;context_=context;profile_=&profile;base_=base;summary_=DirectorRegistrySummary{};
         if(!api_ready()||!context_||!api_.routes_ready()||!api_.owner_thread()
-            ||!director_registry_profile_matches(profile,base,api_.mapped))
+            ||!director_registry_profile_matches(profile,base,api_.mapped,api_.native_code_verified))
             return fail(Result::unsupported,"world_director_registry_api_unverified");
         epoch_=api_.source_epoch(context_);if(!epoch_)return fail(Result::stale,"world_director_source_changed");
         measuring_=true;struct Exit{bool& flag;~Exit(){flag=false;}} exit{measuring_};

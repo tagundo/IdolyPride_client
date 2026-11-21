@@ -1353,7 +1353,8 @@ bool mp4_shader_lease_set_time(void* context,float seconds){
 [[maybe_unused]] bool mp4_shader_suspend_for_unowned(Mp4ShaderSuspension& token){
     if(token.active||!game_call())return false;
     Mp4ShaderLock lock;auto& lease=mp4_shader_lease;
-    if(!lease.active||!lease.have_owned_time||lease.generation!=mp4_shader_generation||lease.suspended==16)return false;
+    if(!lease.active||!lease.have_owned_time)return true;
+    if(lease.generation!=mp4_shader_generation||lease.suspended==16)return false;
     if(!lease.suspended){
         if(!mp4_api.shader_use_custom||!mp4_api.shader_current_time||!mp4_api.shader_use_custom(nullptr)
             ||mp4_api.shader_current_time(nullptr)!=lease.owned_time)return false;
@@ -2167,7 +2168,26 @@ struct Mp4TemporalHost {
   mp4nt::Layout layouts[5]{};
   Mp4TemporalImage source{}, current{};
   const char *error = "temporal_not_bound";
-} mp4_temporal_hosts[32];
+};
+// BEGIN_MP4_TEMPORAL_HEAP_HOST
+// A Host contains large default-initialized history arrays. Only actual bound
+// actors allocate one; ordinary startup maps no 32-object initialized image.
+// Storage lasts for the native process. Explicit drop still releases roots and
+// resets only fenced hosts, and no unload-time destructor enters Unity/GC.
+Mp4TemporalHost* mp4_temporal_hosts[32]{};
+static_assert(noexcept(Mp4TemporalHost{}),"Temporal host initialization must not throw");
+Mp4TemporalHost* mp4_temporal_host_slot(size_t index) noexcept {
+    if(!game_call()||index>=32)return nullptr;
+    auto*&slot=mp4_temporal_hosts[index];
+    if(!slot){
+        void*memory=::malloc(sizeof(Mp4TemporalHost));
+        if(!memory)return nullptr;
+        slot=new(idoly_mp4_actor_placement::Address{memory})Mp4TemporalHost{};
+    }
+    return slot;
+}
+// END_MP4_TEMPORAL_HEAP_HOST
+
 uint32_t mp4_temporal_type_roots[8]{};
 constexpr const char *mp4_temporal_type_names[] = {
     "UnityEngine.Animations.AnimationMixerPlayable",
@@ -2215,7 +2235,9 @@ bool mp4_temporal_keep(Mp4TemporalHost &h, void *p) {
   return true;
 }
 [[maybe_unused]] void mp4_temporal_drop_context() {
-  for (auto &h : mp4_temporal_hosts) {
+  for (auto *entry : mp4_temporal_hosts) {
+    if (!entry) continue;
+    auto &h = *entry;
     if (h.depth) {
       h.poisoned = true;
       continue;
@@ -3141,7 +3163,9 @@ Mp4TemporalHost *mp4_temporal_context(const mp4actor::Owner &owner) {
     }
   if (index == 32)
     return nullptr;
-  auto &h = mp4_temporal_hosts[index];
+  auto *slot = mp4_temporal_host_slot(index);
+  if (!slot) return nullptr;
+  auto &h = *slot;
   if (h.epoch) {
     if (h.epoch != mp4_actor_host.epoch || h.owner.actor != owner.actor ||
         !mp4_temporal_same(h.owner.graph, owner.graph))
@@ -3546,8 +3570,13 @@ void mp4_actor_drop_context(){
     mp4_actor_host.player=mp4_actor_host.presenter=mp4_actor_host.director=nullptr;
     mp4_actor_host.epoch=0;mp4_actor_host.count=0;mp4_actor_host.invalidated=false;
 }
+bool mp4_persistent_animation_capture();
+bool mp4_persistent_animation_current();
+bool mp4_persistent_animation_captured();
+void mp4_persistent_animation_release();
 bool mp4_actor_configure_context(){
-    auto& host=mp4_actor_host;if(host.scope.active())return host.scope.presentation_bound();
+    auto& host=mp4_actor_host;if(host.scope.active())return host.scope.presentation_bound()
+        &&(mp4_persistent_animation_captured()?mp4_persistent_animation_current():mp4_persistent_animation_capture());
     if(!mp4_actor_selected_source(nullptr)||!mp4_actor_routes(nullptr)||!mp4_actor_refresh_maps())return false;
     host.player=idoly_mp4_runtime::game.selected_player();host.presenter=idoly_mp4_runtime::game.selected_presenter();
     host.epoch=idoly_mp4_runtime::game.owned_scene_generation();host.invalidated=false;
@@ -3584,6 +3613,7 @@ bool mp4_actor_configure_context(){
         host.error="actor_presentation_bindings_not_ready";
         if(mp4_actor_presentation_scope.active())(void)mp4_actor_presentation_scope.release(false);
         return false;}
+    if(!mp4_persistent_animation_capture()){host.error="actor_animation_output_capture_failed";return false;}
     host.error="none";return true;
 }
 mp4actor::Result mp4_actor_quiesce(void*){
@@ -3595,15 +3625,17 @@ mp4actor::Result mp4_actor_capture(void*){return mp4_actor_host.scope.capture();
 mp4actor::Result mp4_actor_prepare(void*){return mp4_actor_host.scope.prepare();}
 mp4actor::Result mp4_actor_reset(void*){return mp4_actor_host.scope.reset();}
 mp4actor::Result mp4_actor_restore(void*){
+    if(!mp4_persistent_animation_captured()||!mp4_persistent_animation_current()){
+        mp4_actor_host.error="actor_animation_output_input_changed";return mp4actor::Result::stale;}
     const auto result=mp4_actor_host.scope.restore();
     mp4_actor_host.restoration_verified=result==mp4actor::Result::ok
-        &&mp4_actor_host.scope.active()&&mp4_actor_selected_source(nullptr);
+        &&mp4_actor_host.scope.active()&&mp4_actor_selected_source(nullptr)&&mp4_persistent_animation_current();
     return result;
 }
 mp4actor::Result mp4_actor_release(void*,bool owned){
-    if(!owned)mp4_actor_host.restoration_verified=false;
+    if(!owned){mp4_actor_host.restoration_verified=false;mp4_persistent_animation_release();}
     const auto result=mp4_actor_host.scope.release(owned);
-    if(!mp4_actor_host.scope.active()){mp4_temporal_drop_context();mp4_actor_drop_context();}return result;
+    if(!mp4_actor_host.scope.active()){mp4_persistent_animation_release();mp4_temporal_drop_context();mp4_actor_drop_context();}return result;
 }
 const char* mp4_actor_error(void*){
     const char* code=mp4_actor_host.scope.error();
@@ -4278,7 +4310,8 @@ Mp4SceneResult mp4_scene_actor_configure(void*,const Mp4SceneWitness& source){
     return Mp4SceneResult::ok;
 }
 bool mp4_scene_actor_current(void*){
-    if(!mp4_actor_selected_source(nullptr)||!mp4_actor_host.scope.owner_current())return false;
+    if(!mp4_actor_selected_source(nullptr)||!mp4_actor_host.scope.owner_current()
+        ||(mp4_persistent_animation_captured()&&!mp4_persistent_animation_current()))return false;
     const auto api=mp4_actor_state_api();
     for(size_t i=0;i<mp4_actor_host.count;++i)
         if(api.animator_mode(mp4_actor_host.owners[i].animator,nullptr)!=0
@@ -4407,8 +4440,8 @@ bool mp4_director_boundary_closed(void*){
     // The temporal host independently checks every selected Animator, AABB and
     // FootShadow stored JobHandle and scheduled flag. It never calls Complete
     // or creates a fence here. The same proof is re-read on every nested hold.
-    for(auto& host:mp4_temporal_hosts)
-        if(host.epoch==epoch&&host.owner.actor&&mp4_temporal_physical_fenced(host))return true;
+    for(auto* host:mp4_temporal_hosts)
+        if(host&&host->epoch==epoch&&host->owner.actor&&mp4_temporal_physical_fenced(*host))return true;
     return false;
 }
 bool mp4_director_pending(void*,const mp4world::DirectorPending& pending,mp4world::DirectorAuthorization* out){
@@ -7825,6 +7858,159 @@ public:
 }
 
 // END_MP4_ANIMATION_OUTPUT_PAYLOAD_HOST
+// BEGIN_MP4_ANIMATION_OUTPUT_LEDGER_HOST
+// Persistent Actor output ledger. Idle inspection is read-only; capture/current
+// compare every ordered output, including multiple outputs on one Animator.
+namespace idoly_mp4_animation_output {
+constexpr size_t ledger_max_outputs=512;
+struct Record {Owner owner{};View view{};};
+struct LedgerApi {
+ bool(*source_current)(void*,uint64_t)=nullptr;
+ bool(*owner_thread)()=nullptr;
+ bool(*capture_ready)(void*)=nullptr; // held owned clock + Actor configure roots
+ bool(*collect)(void*,Record*,size_t,size_t*,uint64_t*)=nullptr;
+};
+class Ledger {
+ LedgerApi api_{};void*context_=nullptr;Record source_[ledger_max_outputs]{},scratch_[ledger_max_outputs]{};
+ size_t count_=0;uint64_t epoch_=0;bool bound_=false;const char*error_="none";
+ bool fail(const char*s){error_=s;return false;}
+ bool collect(size_t&count,uint64_t&epoch){
+  count=0;epoch=0;
+  if(!bound_||!api_.owner_thread()||!api_.collect(context_,scratch_,ledger_max_outputs,&count,&epoch)
+   ||!epoch||!count||count>ledger_max_outputs||!api_.source_current(context_,epoch))return fail("animation_output_ledger_collect");
+  for(size_t i=0;i<count;++i){const auto&r=scratch_[i];
+   if(!r.owner.actor||!r.owner.animator||!same(r.owner.graph,r.view.graph)||!same(r.owner.output,r.view.output)
+    ||!r.view.native_graph||!r.view.native_output||!r.view.native_target||!r.view.native_source
+    ||!r.view.source.slot||!std::isfinite(r.view.weight)||r.view.stream>=2||r.view.sorting>65535)return fail("animation_output_ledger_record");
+   for(size_t j=0;j<i;++j)if(r.view.native_output==scratch_[j].view.native_output||same(r.owner.output,scratch_[j].owner.output))return fail("animation_output_ledger_duplicate");
+  }
+  return true;
+ }
+public:
+ bool bind(LedgerApi api,void*context){
+  if(bound_||!context||!api.source_current||!api.owner_thread||!api.capture_ready||!api.collect)return false;
+  api_=api;context_=context;bound_=true;return true;
+ }
+ bool captured()const{return epoch_!=0;}
+ uint64_t epoch()const{return epoch_;}
+ // A successful idle result grants no worker/graph/Mono permission and retains
+ // no source/native object. Its callers use the selected read-only inventory.
+ bool inspect(uintptr_t graph,uintptr_t output){
+  if(epoch_)return current()&&contains(graph,output);
+  size_t count=0;uint64_t epoch=0;if(!collect(count,epoch))return false;
+  for(size_t i=0;i<count;++i)if(scratch_[i].view.native_graph==graph&&scratch_[i].view.native_output==output)return true;
+  return false;
+ }
+ bool capture(){
+  if(epoch_)return current();
+  if(!bound_||!api_.owner_thread()||!api_.capture_ready(context_))return fail("animation_output_ledger_not_held");
+  size_t count=0;uint64_t epoch=0;if(!collect(count,epoch))return false;
+  for(size_t i=0;i<count;++i)source_[i]=scratch_[i];
+  count_=count;epoch_=epoch;return true;
+ }
+ bool contains(uintptr_t graph,uintptr_t output)const{
+  if(!epoch_)return false;
+  for(size_t i=0;i<count_;++i)if(source_[i].view.native_graph==graph&&source_[i].view.native_output==output)return true;
+  return false;
+ }
+ bool current(){
+  if(!epoch_||!api_.owner_thread()||!api_.source_current(context_,epoch_))return fail("animation_output_ledger_owner");
+  size_t count=0;uint64_t epoch=0;if(!collect(count,epoch)||epoch!=epoch_||count!=count_)return fail("animation_output_ledger_shape");
+  for(size_t i=0;i<count_;++i){const auto&a=source_[i];const auto&b=scratch_[i];
+   if(a.owner.actor!=b.owner.actor||a.owner.animator!=b.owner.animator||!same(a.view,b.view))return fail("animation_output_input_changed");
+  }
+  return true;
+ }
+ // release(false)/observer abandon perform no current/mapped/Unity callback.
+ // Existing Actor Scope still owns roots and worker/job retirement separately.
+ void release(){for(size_t i=0;i<count_;++i)source_[i]={};count_=0;epoch_=0;}
+ const char*error()const{return error_;}
+};
+} // namespace idoly_mp4_animation_output
+
+// All persistent Actor graphs, all of their Animation outputs. This collector
+// does not configure Actor/Mono/worker gates during an idle readiness probe.
+namespace mp4aout=idoly_mp4_animation_output;
+mp4aout::Ledger mp4_persistent_animation_outputs;
+struct Mp4PersistentAnimationContext{bool bound=false;}mp4_persistent_animation_context;
+bool(*mp4_rebuilt_animation_output_closed)(const mp4world::DirectorGraphIdentity&,uintptr_t)=nullptr;
+bool mp4_persistent_animation_owners(mp4actor::Owner*out,size_t capacity,size_t*used,uint64_t*epoch){
+ if(!out||!used||!epoch||capacity>32||!game_call()||!mp4_actor_source_verified)return false;
+ *used=0;*epoch=0;Mp4SceneWitness scene{};
+ if(!idoly_mp4_runtime::game.selected_scene_witness(scene)||!scene.generation||!scene.player)return false;
+ void*binder=nullptr;void*list=nullptr;void**actors=nullptr;size_t count=0;
+ if(!mp4_actor_field(scene.player,mp4game::Layout{}.player_binder,binder)
+  ||!mp4_type_is(binder,"Solis.Common.Live.SolisLiveBinder")
+  ||!mp4_actor_field(binder,mp4game::Layout{}.binder_actors,list)
+  ||!mp4_actor_list(list,&actors,&count,capacity)||!count)return false;
+ const auto&f=mp4_actor_profile.fields;const auto api=mp4_actor_state_api();
+ for(size_t i=0;i<count;++i){mp4actor::Owner owner{};owner.actor=actors[i];void*extensions=nullptr;void**values=nullptr;size_t n=0;
+  if(!mp4_type_is(owner.actor,"VL.Core.VLActorController")||!mp4_alive(owner.actor)
+   ||!mp4_actor_field(owner.actor,f.actor_extensions,extensions)||!mp4_actor_list(extensions,&values,&n,64))return false;
+  for(size_t j=0;j<n;++j)if(mp4_type_is(values[j],"VL.VLActorActorSwing")){if(owner.extension)return false;owner.extension=values[j];}
+  void*animation=nullptr;void*actual=nullptr;
+  if(!owner.extension||!mp4_actor_field(owner.actor,f.actor_player,animation)||!mp4_type_is(animation,"VL.VLAnimationClipPlayer")
+   ||!mp4_actor_field(owner.actor,f.actor_animator,owner.animator)||!mp4_alive(owner.animator)
+   ||!mp4_actor_field(animation,f.player_animator,actual)||actual!=owner.animator
+   ||!mp4_actor_field(animation,f.player_graph,owner.graph)||!api.graph_valid(&owner.graph,nullptr)
+   ||!mp4_actor_field(owner.extension,f.extension_player,actual)||actual!=animation
+   ||!mp4_actor_field(owner.extension,f.extension_rig,owner.rig)||!owner.rig
+   ||!mp4_actor_field(owner.extension,f.extension_builder,owner.builder)||!owner.builder
+   ||!mp4_actor_field(owner.builder,f.builder_rig,actual)||actual!=owner.rig
+   ||!mp4_actor_field(owner.builder,f.builder_playable,owner.playable)||!api.playable_valid(&owner.playable,nullptr)
+   ||!mp4_actor_field(owner.builder,f.builder_output,owner.output)||api.output_target(&owner.output,nullptr)!=owner.animator)return false;
+  for(size_t j=0;j<i;++j)if(out[j].actor==owner.actor||(out[j].graph.handle==owner.graph.handle&&out[j].graph.version==owner.graph.version))return false;
+  out[(*used)++]=owner;
+ }
+ Mp4SceneWitness after{};if(!idoly_mp4_runtime::game.selected_scene_witness(after)||after.generation!=scene.generation||after.player!=scene.player||after.director!=scene.director)return false;
+ *epoch=scene.generation;return true;
+}
+bool mp4_persistent_animation_source(void*,uint64_t epoch){
+ Mp4SceneWitness source{};return game_call()&&mp4_actor_selected_source(nullptr)
+  &&idoly_mp4_runtime::game.selected_scene_witness(source)&&source.generation==epoch;
+}
+bool mp4_persistent_animation_ready(void*){return game_call()&&mp4_actor_clock_held(nullptr)
+ &&mp4_actor_host.scope.active()&&mp4_actor_host.scope.presentation_bound()&&mp4_actor_host.count&&mp4_actor_host.epoch;}
+bool mp4_persistent_animation_collect(void*,mp4aout::Record*out,size_t capacity,size_t*used,uint64_t*epoch){
+ if(!out||!used||!epoch||capacity>mp4aout::ledger_max_outputs||!mp4_verify_output_calls())return false;
+ *used=0;mp4actor::Owner owners[32]{};size_t count=0;
+ if(!mp4_persistent_animation_owners(owners,32,&count,epoch))return false;
+ using Count=int32_t(*)(mp4actor::Handle*,Method*);using Get=void(*)(mp4actor::Handle*,int32_t,mp4world::AnimationOutput*,Method*);
+ const auto outputs=reinterpret_cast<Count>(image_base+mp4_world_profile.graph_output_count.rva);
+ const auto output_at=reinterpret_cast<Get>(image_base+mp4_world_profile.graph_output.rva);
+ for(size_t i=0;i<count;++i){auto&owner=owners[i];uintptr_t native_graph=0;uint32_t version=0;
+  if(!mp4_actor_field(reinterpret_cast<void*>(owner.graph.handle),0x20,version)||version!=(owner.graph.version&~1u)||(version&1u)
+   ||!mp4_actor_field(reinterpret_cast<void*>(owner.graph.handle),mp4_actor_profile.native_graph.node_graph,native_graph)||!native_graph)return false;
+  mp4world::DirectorGraphIdentity identity{};identity.native=native_graph;identity.slot=owner.graph.handle;identity.version=version;
+  const int32_t n=outputs(&owner.graph,nullptr);if(n<1||n>64||static_cast<size_t>(n)>capacity-*used)return false;
+  for(int32_t k=0;k<n;++k){mp4world::AnimationOutput output{};output_at(&owner.graph,k,&output,nullptr);uintptr_t native=0;
+   if(!output.handle||!mp4_actor_field(reinterpret_cast<void*>(output.handle),mp4_actor_profile.native_output.slot_output,native)||!native)return false;
+   mp4aout::View image{};if(!mp4_actor_animation_output_payload(owner,identity,native,image))return false;
+   auto&r=out[(*used)++];r.owner={owner.actor,owner.animator,image.graph,image.output};r.view=image;
+  }
+  if(outputs(&owner.graph,nullptr)!=n)return false;
+ }
+ return mp4_persistent_animation_source(nullptr,*epoch);
+}
+bool mp4_persistent_animation_bind(){
+ auto&context=mp4_persistent_animation_context;if(context.bound)return true;
+ mp4aout::LedgerApi api{mp4_persistent_animation_source,[](){return game_call();},mp4_persistent_animation_ready,mp4_persistent_animation_collect};
+ context.bound=mp4_persistent_animation_outputs.bind(api,&context);return context.bound;
+}
+[[maybe_unused]] bool mp4_persistent_animation_capture(){return mp4_persistent_animation_bind()&&mp4_persistent_animation_outputs.capture();}
+[[maybe_unused]] bool mp4_persistent_animation_current(){return mp4_persistent_animation_outputs.captured()&&mp4_persistent_animation_outputs.current();}
+[[maybe_unused]] bool mp4_persistent_animation_captured(){return mp4_persistent_animation_outputs.captured();}
+[[maybe_unused]] void mp4_persistent_animation_release(){mp4_persistent_animation_outputs.release();}
+[[maybe_unused]] bool mp4_persistent_or_rebuilt_animation_output_closed(const mp4world::DirectorGraphIdentity&identity,uintptr_t output){
+ if(!mp4_persistent_animation_bind())return false;
+ mp4actor::Owner owners[32]{};size_t count=0;uint64_t epoch=0;if(!mp4_persistent_animation_owners(owners,32,&count,&epoch))return false;
+ for(size_t i=0;i<count;++i)if(owners[i].graph.handle==identity.slot&&(owners[i].graph.version&~1u)==identity.version)
+  return mp4_persistent_animation_outputs.inspect(identity.native,output);
+ return mp4_rebuilt_animation_output_closed&&mp4_rebuilt_animation_output_closed(identity,output);
+}
+
+// END_MP4_ANIMATION_OUTPUT_LEDGER_HOST
+
 
 
 
@@ -8910,6 +9096,591 @@ Mp4SceneResult (*mp4_camera_begin_gpu_draw)(const Mp4RenderSubmission&)=nullptr;
 bool (*mp4_camera_record_submit)(const Mp4RenderSubmission&)=nullptr;
 void (*mp4_camera_submit_failed)(const Mp4RenderSubmission&)=nullptr;
 bool (*mp4_camera_end_gpu_draw)(const Mp4RenderSubmission&)=nullptr;
+// BEGIN_MP4_GL_NATIVE_SERVICE
+#ifndef IDOLY_DARWIN_BRIDGE
+// This reader is intentionally independent of Unity/GC and the main-thread
+// Actor maps. Kernel copying returns failure for departed native mappings.
+int mp4_gl_memory_fd=-1;
+bool mp4_gl_native_read(void*,uintptr_t address,void* output,size_t bytes){
+    if(mp4_gl_memory_fd<0||!address||!output||!bytes||bytes>4096||address+bytes<address)return false;
+    const uintptr_t untagged=address&0x00ffffffffffffffULL;
+    if(untagged+bytes<untagged||untagged+bytes>0x0100000000000000ULL)return false;
+    return pread64(mp4_gl_memory_fd,output,bytes,static_cast<off64_t>(untagged))==static_cast<ssize_t>(bytes);
+}
+bool mp4_gl_file_read(int fd,uint64_t length,uint64_t at,void* output,size_t bytes){
+    return fd>=0&&output&&bytes&&at<=length&&bytes<=length-at
+        &&pread64(fd,output,bytes,static_cast<off64_t>(at))==static_cast<ssize_t>(bytes);
+}
+// Official libEGL symbol size + file/runtime prefix equivalence. Avoid using an
+// unknown tiny platform thunk as a 16-byte inline-hook footprint.
+bool mp4_gl_platform_symbol(void* address,const char* wanted,size_t minimum,uint8_t (&prefix)[16],uint8_t& prefix_size){
+    Dl_info info{};if(!address||!wanted||!dladdr(address,&info)||!info.dli_fbase||!info.dli_fname)return false;
+    const char* leaf=info.dli_fname;for(const char*c=leaf;*c;++c)if(*c=='/')leaf=c+1;
+    if(std::strcmp(leaf,"libEGL.so"))return false;
+    const int fd=open(info.dli_fname,O_RDONLY|O_CLOEXEC);if(fd<0)return false;
+    struct Close{int fd;~Close(){close(fd);}}close_file{fd};struct stat status{};
+    if(fstat(fd,&status)||status.st_size<static_cast<off_t>(sizeof(Elf64_Ehdr)))return false;
+    const uint64_t length=static_cast<uint64_t>(status.st_size);Elf64_Ehdr header{};
+    if(!mp4_gl_file_read(fd,length,0,&header,sizeof header)||std::memcmp(header.e_ident,ELFMAG,SELFMAG)
+        ||header.e_ident[EI_CLASS]!=ELFCLASS64||header.e_ident[EI_DATA]!=ELFDATA2LSB
+        ||header.e_machine!=EM_AARCH64||header.e_type!=ET_DYN||header.e_shentsize!=sizeof(Elf64_Shdr)
+        ||!header.e_shnum||header.e_shnum>8192||header.e_phentsize!=sizeof(Elf64_Phdr)||header.e_phnum>128)return false;
+    Elf64_Sym found{};bool present=false;
+    for(size_t i=0;i<header.e_shnum;++i){Elf64_Shdr section{};
+        if(!mp4_gl_file_read(fd,length,header.e_shoff+i*sizeof section,&section,sizeof section))return false;
+        if(section.sh_type!=SHT_DYNSYM)continue;
+        if(section.sh_entsize!=sizeof(Elf64_Sym)||section.sh_size%sizeof(Elf64_Sym)
+            ||section.sh_size/sizeof(Elf64_Sym)>65536||section.sh_link>=header.e_shnum)return false;
+        Elf64_Shdr strings{};if(!mp4_gl_file_read(fd,length,header.e_shoff+section.sh_link*sizeof strings,&strings,sizeof strings)
+            ||strings.sh_type!=SHT_STRTAB||strings.sh_offset>length||strings.sh_size>length-strings.sh_offset)return false;
+        for(size_t k=0;k<section.sh_size/sizeof(Elf64_Sym);++k){Elf64_Sym symbol{};
+            if(!mp4_gl_file_read(fd,length,section.sh_offset+k*sizeof symbol,&symbol,sizeof symbol))return false;
+            if(ELF64_ST_TYPE(symbol.st_info)!=STT_FUNC||!symbol.st_value||symbol.st_name>=strings.sh_size)continue;
+            char name[64]{};size_t n=0;
+            for(;n<sizeof(name)-1;++n){
+                if(symbol.st_name+n>=strings.sh_size
+                    ||!mp4_gl_file_read(fd,length,strings.sh_offset+symbol.st_name+n,name+n,1))return false;
+                if(!name[n])break;
+            }
+            if(n==sizeof(name)-1||std::strcmp(name,wanted))continue;
+            if(present||symbol.st_size<minimum||reinterpret_cast<uintptr_t>(info.dli_fbase)+symbol.st_value!=reinterpret_cast<uintptr_t>(address))return false;
+            found=symbol;present=true;
+        }
+    }
+    if(!present)return false;
+    prefix_size=static_cast<uint8_t>(found.st_size<16?found.st_size:16);uint8_t source[16]{};bool mapped=false;
+    for(size_t i=0;i<header.e_phnum;++i){Elf64_Phdr ph{};
+        if(!mp4_gl_file_read(fd,length,header.e_phoff+i*sizeof ph,&ph,sizeof ph))return false;
+        if(ph.p_type!=PT_LOAD||(ph.p_flags&PF_X)==0||found.st_value<ph.p_vaddr
+            ||found.st_value-ph.p_vaddr>ph.p_filesz||prefix_size>ph.p_filesz-(found.st_value-ph.p_vaddr))continue;
+        if(!mp4_gl_file_read(fd,length,ph.p_offset+found.st_value-ph.p_vaddr,source,prefix_size))return false;
+        mapped=true;break;
+    }
+    return mapped&&mp4_gl_native_read(nullptr,reinterpret_cast<uintptr_t>(address),prefix,prefix_size)
+        &&!std::memcmp(prefix,source,prefix_size);
+}
+#endif
+// END_MP4_GL_NATIVE_SERVICE
+
+#ifndef IDOLY_DARWIN_BRIDGE
+// BEGIN_MP4_GL_COMPLETION_OBSERVER
+// Shared-only: embed in an EXISTING native input. Pure native callback observer.
+// This does not install hooks, walk Unity objects, invoke GL, or authorize a draw.
+#ifndef IDOLY_DARWIN_BRIDGE
+#endif
+namespace mp4_gl_completion {
+enum class Result:int {ok=0,waiting=1,unsupported=-1,invalid=-2,stale=-3};
+enum class Kind:uint8_t {update=1,cleanup=2};
+struct Code{uintptr_t rva=0;
+uint8_t prefix[16]{};
+uint8_t prefix_size=0;
+};
+struct Pins{
+    const char*engine_sha=nullptr;
+    uintptr_t manager_cell=0,device_cell=0,caps_cell=0,api_cell=0,device_vtable=0;
+    Code update{},cleanup{},singleton_destroy{},driver_create{},driver_query{},caps_getter{},supports_getter{},load_procs{},resolve_proc{},name_bindings{};
+};
+// Origin is supplied ONLY by the actual typed native hook's thread-local
+// invocation receipt. Entry must verify target/original/hook installation;
+// thread/context are real native execution identity + EGLGetCurrentContext.
+struct Origin {Kind kind=Kind::update;
+uintptr_t manager=0,target=0,thread=0,gl_context=0;
+uint64_t invocation=0;
+};
+struct Api {
+    void*context=nullptr;
+    uintptr_t engine_base=0;
+    bool(*sources)(void*,const Pins&)=nullptr;
+    bool(*hooks_current)(void*)=nullptr;
+    bool(*entry)(void*,Kind,uintptr_t,Origin*)=nullptr;
+    bool(*read)(void*,uintptr_t,void*,size_t)=nullptr;
+};
+struct Witness {uintptr_t manager=0,device=0,gl_context=0;
+uint64_t generation=0;
+uint32_t minimum_serial=0;
+};
+struct Ticket {uint64_t generation=0,sequence=0,reset=0;
+uintptr_t manager=0,thread=0,gl_context=0;
+uint64_t invocation=0;
+};
+class Observer {
+    static constexpr size_t max_nodes=256;
+    struct Node {uintptr_t address=0,previous=0,next=0,sync=0;
+    uint32_t serial=0;
+    };
+    struct Snapshot {
+        uintptr_t manager=0,device=0,vtable=0,caps=0,api=0,create=0,wait=0,erase=0,head=0,tail=0;
+        uint32_t current=0,completed=0;
+        uint64_t count=0;
+        uint8_t supported=0,real_sync=0;
+        Node nodes[max_nodes]{};
+    } before_{},after_{};
+    Api api_{};
+    Pins pins_{};
+    bool configured_=false,active_=false,inflight_=false,have_real_=false,capable_=false;
+    unsigned char lock_=0;
+    uint64_t reset_=1,generation_=0,sequence_=0,abandoned_=0;
+    uintptr_t tracked_manager_=0,tracked_context_=0,tracked_thread_=0;
+    uint32_t current_=0,real_completed_=0;
+    uintptr_t manager_=0,device_=0,context_=0,caps_=0,api_table_=0,create_=0,wait_=0,erase_=0;
+    const char*error_="gl_observer_not_configured";
+    uint64_t reset_value()const{return __atomic_load_n(&reset_,__ATOMIC_ACQUIRE);
+    }
+    bool lock(){return !__atomic_test_and_set(&lock_,__ATOMIC_ACQUIRE);
+    }
+    void unlock(){__atomic_clear(&lock_,__ATOMIC_RELEASE);
+    }
+    struct Locked{Observer&owner;
+    explicit Locked(Observer&o):owner(o){}~Locked(){owner.unlock();
+    }};
+    Result fail(Result r,const char*e){__atomic_store_n(&error_,e,__ATOMIC_RELEASE);
+    return r;
+    }
+    bool configured()const{return __atomic_load_n(&configured_,__ATOMIC_ACQUIRE);
+    }
+    void success(){const char*none="none";
+    __atomic_store_n(&error_,none,__ATOMIC_RELEASE);
+    }
+    void clear_state(uint64_t generation){
+        generation_=generation;
+        active_=inflight_=have_real_=capable_=false;
+        manager_=device_=context_=caps_=api_table_=create_=wait_=erase_=0;
+        current_=real_completed_=0;
+        __atomic_store_n(&tracked_manager_,uintptr_t(0),__ATOMIC_RELEASE);
+        __atomic_store_n(&tracked_context_,uintptr_t(0),__ATOMIC_RELEASE);
+        __atomic_store_n(&tracked_thread_,uintptr_t(0),__ATOMIC_RELEASE);
+    }
+    bool synchronize(){uint64_t r=reset_value();
+    if(!r)return false;
+    if(generation_!=r)clear_state(r);
+    return true;
+    }
+    void invalidate(){
+        // No wrap: zero is a permanent exhausted/unknown generation.
+        uint64_t old=__atomic_load_n(&reset_,__ATOMIC_ACQUIRE);
+        while(old){const uint64_t next=old==~uint64_t(0)?0:old+1;
+            if(__atomic_compare_exchange_n(&reset_,&old,next,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE))return;
+            }
+    }
+    template<class T>bool read(uintptr_t p,size_t offset,T&out)const{
+        const uintptr_t at=p+offset;
+        return p&&at>=p&&at+sizeof(T)>=at&&api_.read(api_.context,at,&out,sizeof(T));
+    }
+    bool identity(const Snapshot&s,const Origin&o)const{
+        return active_&&s.manager==manager_&&s.device==device_&&o.gl_context==context_&&s.api==api_table_
+            &&s.caps==caps_&&s.create==create_&&s.wait==wait_&&s.erase==erase_;
+    }
+    bool source(Snapshot&s,uintptr_t manager){
+        s.manager=manager;
+        uintptr_t actual_manager=0;
+        if(!manager||!read(api_.engine_base+pins_.manager_cell,0,actual_manager)||actual_manager!=manager
+            ||!read(api_.engine_base+pins_.device_cell,0,s.device)||!s.device||!read(s.device,0,s.vtable)
+            ||s.vtable!=api_.engine_base+pins_.device_vtable
+            ||!read(api_.engine_base+pins_.caps_cell,0,s.caps)||!s.caps||!read(s.caps,0x496,s.supported)||s.supported>1
+            ||!read(s.caps,0x585,s.real_sync)||s.real_sync>1
+            ||!read(api_.engine_base+pins_.api_cell,0,s.api)||!s.api
+            ||!read(s.api,0x310,s.create)||!s.create||!read(s.api,0x318,s.wait)||!s.wait||!read(s.api,0x320,s.erase)||!s.erase
+            ||!read(manager,0,s.current)||s.current<4||s.current==~uint32_t(0)
+            ||!read(manager,0x148,s.completed)||s.completed>=s.current
+            ||!read(manager,0x130,s.tail)||!read(manager,0x138,s.head)||!read(manager,0x140,s.count)||s.count>max_nodes)return false;
+        const uintptr_t sentinel=manager+0x130;
+        if(sentinel<manager)return false;
+        uintptr_t cursor=s.head,previous=sentinel;
+        for(size_t i=0;i<size_t(s.count);++i){auto&n=s.nodes[i];
+        n={};
+        n.address=cursor;
+            if(!cursor||cursor==sentinel||(cursor&7u)||!read(cursor,0,n.previous)||n.previous!=previous
+                ||!read(cursor,8,n.next)||!n.next||!read(cursor,16,n.sync)||!n.sync||!read(cursor,24,n.serial)
+                ||n.serial<4||n.serial>=s.current||(i&&n.serial<=s.nodes[i-1].serial))return false;
+            for(size_t j=0;j<i;++j)if(s.nodes[j].address==cursor)return false;
+            previous=cursor;
+            cursor=n.next;
+        }
+        if(cursor!=sentinel||s.tail!=previous)return false;
+        return s.count||(s.head==sentinel&&s.tail==sentinel);
+    }
+    bool origin(Kind kind,uintptr_t manager,Origin&o)const{
+        const uintptr_t expected=api_.engine_base+(kind==Kind::update?pins_.update.rva:pins_.cleanup.rva);
+        return api_.hooks_current(api_.context)&&api_.entry(api_.context,kind,manager,&o)&&o.kind==kind
+            &&o.manager==manager&&o.target==expected&&o.thread&&o.invocation
+            &&(kind!=Kind::update||o.gl_context);
+    }
+    static bool same_live(const Node&a,const Node&b){return a.address==b.address&&a.sync==b.sync&&a.serial==b.serial;
+    }
+public:
+    Observer()=default;
+    Observer(const Observer&)=delete;
+    Observer&operator=(const Observer&)=delete;
+    const char*error()const{return __atomic_load_n(&error_,__ATOMIC_ACQUIRE);
+    }
+    Result configure(Api api,Pins pins){
+        if(configured()||!api.engine_base||!api.sources||!api.hooks_current||!api.entry||!api.read
+            ||!pins.engine_sha||!pins.manager_cell||!pins.device_cell||!pins.caps_cell||!pins.api_cell||!pins.device_vtable
+            ||!pins.update.rva||!pins.cleanup.rva||!api.sources(api.context,pins))return fail(Result::unsupported,"gl_sources_unverified");
+        api_=api;
+        pins_=pins;
+        __atomic_store_n(&configured_,true,__ATOMIC_RELEASE);
+        success();
+        return Result::ok;
+    }
+    // Call before original, on the actual native graphics callback stack.
+    // Observation failure never changes whether the original executes.
+    Result before_update(uintptr_t manager,Ticket&ticket){
+        ticket={};
+        if(!configured())return fail(Result::unsupported,"gl_sources_unverified");
+        if(!lock())return Result::waiting;
+        Locked held(*this);
+        if(!synchronize())return fail(Result::unsupported,"gl_generation_exhausted");
+        Origin o{};
+        if(!origin(Kind::update,manager,o))return fail(Result::unsupported,"gl_callback_origin_unverified");
+        if(inflight_&&__atomic_load_n(&abandoned_,__ATOMIC_ACQUIRE)==sequence_)inflight_=false;
+        if(inflight_)return fail(Result::waiting,"gl_nested_update_unobserved");
+        if(active_&&o.gl_context!=context_){invalidate();
+        if(!synchronize())return fail(Result::unsupported,"gl_generation_exhausted");
+        }
+        const uint64_t before_reset=reset_value();
+        if(!source(before_,manager)||before_reset!=reset_value()){
+            if(active_){invalidate();
+            (void)synchronize();
+            }
+            return fail(Result::waiting,"gl_native_snapshot_unavailable");
+        }
+        if(active_&&(!identity(before_,o)||before_.current<current_)){
+            invalidate();
+            if(!synchronize())return fail(Result::unsupported,"gl_generation_exhausted");
+        }
+        capable_=before_.supported&&before_.real_sync;
+        if(!active_){manager_=manager;
+        device_=before_.device;
+        context_=o.gl_context;
+        caps_=before_.caps;
+        api_table_=before_.api;
+            create_=before_.create;
+            wait_=before_.wait;
+            erase_=before_.erase;
+            current_=before_.current;
+            active_=true;
+            __atomic_store_n(&tracked_manager_,manager,__ATOMIC_RELEASE);
+            __atomic_store_n(&tracked_context_,context_,__ATOMIC_RELEASE);
+        }
+        __atomic_store_n(&tracked_thread_,o.thread,__ATOMIC_RELEASE);
+        if(sequence_==~uint64_t(0))return fail(Result::unsupported,"gl_sequence_exhausted");
+        inflight_=true;
+        ticket={generation_,++sequence_,reset_value(),manager,o.thread,o.gl_context,o.invocation};
+        return Result::ok;
+    }
+    Result after_update(const Ticket&ticket){
+        if(!ticket.sequence)return Result::waiting;
+        if(!lock()){__atomic_store_n(&abandoned_,ticket.sequence,__ATOMIC_RELEASE);
+        return Result::waiting;
+        }Locked held(*this);
+        // Reset/cleanup was observed: do NOT read the departed manager/nodes.
+        if(ticket.reset!=reset_value()){(void)synchronize();
+        return fail(Result::stale,"gl_context_generation_changed");
+        }
+        if(!inflight_||ticket.generation!=generation_||ticket.sequence!=sequence_||ticket.manager!=manager_)return fail(Result::stale,"gl_update_ticket_changed");
+        inflight_=false;
+        Origin o{};
+        if(!origin(Kind::update,ticket.manager,o)||o.thread!=ticket.thread||o.gl_context!=ticket.gl_context||o.invocation!=ticket.invocation
+            ||!source(after_,ticket.manager)||ticket.reset!=reset_value()||!identity(after_,o)){
+            invalidate();
+            (void)synchronize();
+            return fail(Result::stale,"gl_update_owner_changed");
+        }
+        if(before_.current==~uint32_t(0)||after_.current!=before_.current+1){invalidate();
+        (void)synchronize();
+        return fail(Result::stale,"gl_serial_reset_or_wrap");
+        }
+        current_=after_.current;
+        capable_=after_.supported&&after_.real_sync;
+        // CPU fallback increments completed but never unlinks/creates a sync.
+        // Only the actual native true branch can exhibit this exact mutation.
+        if(!before_.supported||!after_.supported||!before_.real_sync||!after_.real_sync)return fail(Result::waiting,"gl_hardware_sync_unavailable");
+        if(!after_.count||after_.count>before_.count+1)return fail(Result::waiting,"gl_sync_transition_unverified");
+        const size_t removed=size_t(before_.count)+1-size_t(after_.count);
+        if(removed>size_t(before_.count))return fail(Result::waiting,"gl_sync_transition_unverified");
+        const size_t surviving=size_t(before_.count)-removed;
+        for(size_t i=0;i<surviving;++i)if(!same_live(before_.nodes[removed+i],after_.nodes[i]))return fail(Result::waiting,"gl_pending_prefix_changed");
+        const auto&created=after_.nodes[surviving];
+        if(created.serial!=before_.current||!created.sync)return fail(Result::waiting,"gl_new_sync_unverified");
+        // Allocator/GL can reuse removed addresses/handles. Identity is the new
+        // serial + CURRENT live list; no old freed object is dereferenced.
+        if(!removed){if(after_.completed!=before_.completed)return fail(Result::waiting,"gl_unqueried_completion_change");
+        success();
+        return Result::ok;
+        }
+        const uint32_t completed=before_.nodes[removed-1].serial;
+        if(after_.completed!=completed||(have_real_&&completed<=real_completed_))return fail(Result::waiting,"gl_wait_completion_unverified");
+        real_completed_=completed;
+        have_real_=true;
+        success();
+        return Result::ok;
+    }
+    void abort_update(const Ticket&ticket){
+        if(!ticket.sequence)return;
+        if(!lock()){__atomic_store_n(&abandoned_,ticket.sequence,__ATOMIC_RELEASE);
+        return;
+        }Locked held(*this);
+        if(ticket.reset==reset_value()&&ticket.generation==generation_&&ticket.sequence==sequence_)inflight_=false;
+    }
+    // Actual cleanup hook: pure identity/atomic invalidation, no manager read.
+    void will_cleanup(uintptr_t manager){
+        Origin o{};
+        if(!configured()||!origin(Kind::cleanup,manager,o))return;
+        if(manager&&__atomic_load_n(&tracked_manager_,__ATOMIC_ACQUIRE)==manager)invalidate();
+    }
+    // Optional/required-by-host context lifetime observer must come from the
+    // actual EGL destroy/reset route. Foreign contexts do not invalidate ours.
+    void will_destroy_context(uintptr_t context){
+        if(context&&__atomic_load_n(&tracked_context_,__ATOMIC_ACQUIRE)==context)invalidate();
+    }
+    void will_make_current(uintptr_t thread,uintptr_t next_context){
+        const uintptr_t current=__atomic_load_n(&tracked_context_,__ATOMIC_ACQUIRE);
+        if(next_context&&current&&next_context!=current
+            &&thread&&thread==__atomic_load_n(&tracked_thread_,__ATOMIC_ACQUIRE))invalidate();
+    }
+    // CPU-only, no old scene/manager/list/GL accesses. Bind witness before our
+    // exclusive command executes; reject unavailable actual callback history.
+    Result witness(Witness&out){
+        out={};
+        if(!configured()||!lock())return Result::waiting;
+        Locked held(*this);
+        if(!synchronize()||!active_||!capable_||!api_.hooks_current(api_.context))return Result::waiting;
+        out={manager_,device_,context_,generation_,current_};
+        return Result::ok;
+    }
+    bool completed(const Witness&w,uintptr_t hardware_serial){
+        if(!hardware_serial||hardware_serial>~uint32_t(0)||!configured()||!lock())return false;
+        Locked held(*this);
+        const uint64_t before_reset=reset_value();
+        if(!synchronize()||!active_||!have_real_||!api_.hooks_current(api_.context))return false;
+        const uint32_t serial=uint32_t(hardware_serial);
+        return w.generation&&w.generation==generation_&&w.manager==manager_&&w.device==device_&&w.gl_context==context_
+            &&w.minimum_serial>=4&&serial>=w.minimum_serial&&serial<current_&&serial<=real_completed_
+            &&before_reset==reset_value();
+    }
+};
+} // namespace mp4_gl_completion
+// Actual Android source pins; runtime verifier honors Code.prefix_size.
+static mp4_gl_completion::Pins mp4_gl_source_pins(){
+ mp4_gl_completion::Pins p{};
+ p.engine_sha="c36ea39e5040fbcd0577f7c49d08e149e2e7dc62449d90aadce761118a816c85";
+ p.manager_cell=0x151d400; p.device_cell=0x1518548; p.caps_cell=0x14dfd00; p.api_cell=0x151d670; p.device_vtable=0x1434410;
+ p.update={0xcc1ee4, {0xfe, 0xf, 0x1c, 0xf8, 0xf8, 0x5f, 0x1, 0xa9, 0xf6, 0x57, 0x2, 0xa9, 0xf4, 0x4f, 0x3, 0xa9}, 16};
+ p.cleanup={0xcc1a2c, {0xfe, 0x57, 0xbe, 0xa9, 0xf4, 0x4f, 0x1, 0xa9, 0xf3, 0x3, 0x0, 0xaa, 0x39, 0x0, 0x0, 0x94}, 16};
+ p.singleton_destroy={0xcc276c, {0xfe, 0xf, 0x1e, 0xf8, 0xf4, 0x4f, 0x1, 0xa9, 0xd4, 0x42, 0x0, 0xf0, 0x93, 0x2, 0x42, 0xf9}, 16};
+ p.driver_create={0xcd8510, {0xfe, 0x4f, 0xbf, 0xa9, 0xf3, 0x3, 0x1, 0xaa, 0x56, 0xa8, 0xff, 0x97, 0x8, 0x0, 0x40, 0xb9}, 16};
+ p.driver_query={0xcd852c, {0xfe, 0x4f, 0xbf, 0xa9, 0xf3, 0x3, 0x1, 0xaa, 0x4f, 0xa8, 0xff, 0x97, 0x8, 0x48, 0x41, 0xb9}, 16};
+ p.caps_getter={0x68cffc, {0x88, 0x72, 0x0, 0xf0, 0x0, 0x81, 0x46, 0xf9, 0xc0, 0x3, 0x5f, 0xd6}, 12};
+ p.supports_getter={0x68fb4c, {0xfe, 0xf, 0x1f, 0xf8, 0x2b, 0xf5, 0xff, 0x97, 0x0, 0x58, 0x52, 0x39, 0xfe, 0x7, 0x41, 0xf8}, 16};
+ p.load_procs={0xcc6b30, {0xfe, 0xf, 0x1c, 0xf8, 0xf8, 0x5f, 0x1, 0xa9, 0xf6, 0x57, 0x2, 0xa9, 0xf4, 0x4f, 0x3, 0xa9}, 16};
+ p.resolve_proc={0xce8300, {0xfe, 0xf, 0x1e, 0xf8, 0xf4, 0x4f, 0x1, 0xa9, 0xb4, 0x41, 0x0, 0xb0, 0x88, 0x42, 0x43, 0xf9}, 16};
+ p.name_bindings={0xcc754c, {0x80, 0xa0, 0xff, 0xf0, 0x0, 0x88, 0x2d, 0x91, 0x6b, 0x83, 0x0, 0x94, 0x60, 0x8a, 0x1, 0xf9}, 16};
+ return p;
+}
+// Shared-only typed integration draft. Embed in an EXISTING bridge input.
+// Services must be bound to actual source/hook publication receipts, not bools.
+// No Unity CAPI, GC, actor_mapped, GL wait, allocation or game_call here.
+namespace mp4_gl_host {
+using ManagerFn=void(*)(void*);
+using EglContextFn=void*(*)();
+using EglDestroyFn=unsigned int(*)(void*,void*);
+using EglMakeCurrentFn=unsigned int(*)(void*,void*,void*,void*);
+struct Services {
+ void* context=nullptr;
+ uintptr_t engine_base=0;
+ bool(*source_pins)(void*,const mp4_gl_completion::Pins&)=nullptr;
+ bool(*hook_publications_current)(void*)=nullptr;
+ bool(*native_read)(void*,uintptr_t,void*,size_t)=nullptr;
+ uintptr_t(*thread_identity)(void*)=nullptr;
+ EglContextFn egl_get_current_context=nullptr;
+};
+struct LocalOrigin {mp4_gl_completion::Origin value{};bool entered=false;};
+static Services services{};
+static mp4_gl_completion::Pins pins{};
+static mp4_gl_completion::Observer observer{};
+static ManagerFn update_original=nullptr,cleanup_original=nullptr;
+static EglDestroyFn egl_destroy_original=nullptr;
+static EglMakeCurrentFn egl_make_current_original=nullptr;
+static thread_local LocalOrigin local{};
+static thread_local uint64_t invocation=0;
+static bool hook_current(void*) {
+ return services.hook_publications_current && services.hook_publications_current(services.context)
+  && update_original && cleanup_original && egl_destroy_original && egl_make_current_original
+  && services.egl_get_current_context && services.thread_identity;
+}
+static bool source(void*,const mp4_gl_completion::Pins&p) {
+ return services.source_pins && services.source_pins(services.context,p);
+}
+static bool native_read(void*,uintptr_t at,void*out,size_t size) {
+ return services.native_read && services.native_read(services.context,at,out,size);
+}
+static bool entry(void*,mp4_gl_completion::Kind kind,uintptr_t manager,mp4_gl_completion::Origin*out) {
+ if(!out || !local.entered || local.value.kind!=kind || local.value.manager!=manager || !hook_current(nullptr))return false;
+ *out=local.value;
+ return true;
+}
+struct Enter {
+ LocalOrigin prior{};
+ Enter(mp4_gl_completion::Kind kind,void*manager):prior(local) {
+  local={};
+  if(invocation==~uint64_t(0) || !hook_current(nullptr))return;
+  const uintptr_t thread=services.thread_identity(services.context);
+  const uintptr_t context=reinterpret_cast<uintptr_t>(services.egl_get_current_context());
+  local.value={kind,reinterpret_cast<uintptr_t>(manager),services.engine_base+
+    (kind==mp4_gl_completion::Kind::update?pins.update.rva:pins.cleanup.rva),thread,context,++invocation};
+  local.entered=thread!=0;
+ }
+ ~Enter(){local=prior;}
+};
+// Install ONLY after all original gateways and actual platform EGL hooks have
+// been published and their source/patch/official-import receipts are verified.
+static bool configure(Services svc,mp4_gl_completion::Pins source_pins,
+ ManagerFn update_gateway,ManagerFn cleanup_gateway,EglDestroyFn destroy_gateway,EglMakeCurrentFn current_gateway) {
+ services=svc;pins=source_pins;update_original=update_gateway;cleanup_original=cleanup_gateway;
+ egl_destroy_original=destroy_gateway;egl_make_current_original=current_gateway;
+ mp4_gl_completion::Api api{};api.context=nullptr;api.engine_base=services.engine_base;
+ api.sources=source;api.hooks_current=hook_current;api.entry=entry;api.read=native_read;
+ return hook_current(nullptr) && observer.configure(api,pins)==mp4_gl_completion::Result::ok;
+}
+// Exact Android engine ABI: void(Manager*). Ordinary forwards exactly once;
+// observer failures change only export retirement eligibility.
+static void update_hook(void*manager) {
+ Enter entered(mp4_gl_completion::Kind::update,manager);
+ mp4_gl_completion::Ticket ticket{};
+ (void)observer.before_update(reinterpret_cast<uintptr_t>(manager),ticket);
+ update_original(manager);
+ (void)observer.after_update(ticket);
+}
+static void cleanup_hook(void*manager) {
+ Enter entered(mp4_gl_completion::Kind::cleanup,manager);
+ observer.will_cleanup(reinterpret_cast<uintptr_t>(manager));
+ cleanup_original(manager);
+}
+// Actual official platform functions, not a Unity icall or managed alias.
+// Conservative invalidation BEFORE attempted destroy/rebind is safe even if
+// the platform rejects it. It never suppresses the original operation.
+static unsigned int egl_destroy_hook(void*display,void*context) {
+ observer.will_destroy_context(reinterpret_cast<uintptr_t>(context));
+ return egl_destroy_original(display,context);
+}
+static unsigned int egl_make_current_hook(void*display,void*draw,void*read,void*context) {
+ const uintptr_t thread=services.thread_identity?services.thread_identity(services.context):0;
+ observer.will_make_current(thread,reinterpret_cast<uintptr_t>(context));
+ return egl_make_current_original(display,draw,read,context);
+}
+} // namespace mp4_gl_host
+// END_MP4_GL_COMPLETION_OBSERVER
+#endif
+
+// BEGIN_MP4_GL_INSTALL_HOST
+#ifndef IDOLY_DARWIN_BRIDGE
+using Mp4GlManager=void(*)(void*);
+using Mp4EglDestroy=unsigned int(*)(void*,void*);
+using Mp4EglCurrent=unsigned int(*)(void*,void*,void*,void*);
+Mp4GlManager mp4_gl_update_original=nullptr,mp4_gl_cleanup_original=nullptr;
+Mp4EglDestroy mp4_gl_egl_destroy_original=nullptr;Mp4EglCurrent mp4_gl_egl_current_original=nullptr;
+std::atomic<bool> mp4_gl_observer_published{false},mp4_gl_hooks_published{false},mp4_gl_cohort_verified{false};
+struct Mp4GlPatch{void*target=nullptr;void*stub=nullptr;uint8_t prefix[16]{};};
+Mp4GlPatch mp4_gl_patches[4]{};void*mp4_gl_egl_library=nullptr;void*mp4_gl_egl_get_current=nullptr;
+uint8_t mp4_gl_get_context_prefix[16]{},mp4_gl_get_context_prefix_size=0;
+const char*mp4_gl_install_error="gl_observer_not_installed";
+void mp4_gl_update_entry(void*manager){
+    if(!mp4_gl_observer_published.load(std::memory_order_acquire)){mp4_gl_update_original(manager);return;}
+    mp4_gl_host::update_hook(manager);
+}
+void mp4_gl_cleanup_entry(void*manager){
+    if(!mp4_gl_observer_published.load(std::memory_order_acquire)){mp4_gl_cleanup_original(manager);return;}
+    mp4_gl_host::cleanup_hook(manager);
+}
+unsigned int mp4_gl_egl_destroy_entry(void*display,void*context){
+    if(!mp4_gl_observer_published.load(std::memory_order_acquire))return mp4_gl_egl_destroy_original(display,context);
+    return mp4_gl_host::egl_destroy_hook(display,context);
+}
+unsigned int mp4_gl_egl_current_entry(void*display,void*draw,void*read,void*context){
+    if(!mp4_gl_observer_published.load(std::memory_order_acquire))return mp4_gl_egl_current_original(display,draw,read,context);
+    return mp4_gl_host::egl_make_current_hook(display,draw,read,context);
+}
+bool mp4_gl_hook_receipts(void*){
+    if(!mp4_gl_hooks_published.load(std::memory_order_acquire)||!mp4_gl_cohort_verified.load(std::memory_order_acquire))return false;
+    uint8_t actual[16]{};
+    for(const auto&p:mp4_gl_patches)if(!p.target||!p.stub||!mp4_gl_native_read(nullptr,reinterpret_cast<uintptr_t>(p.target),actual,16)
+        ||std::memcmp(actual,p.prefix,16))return false;
+    return mp4_gl_egl_get_current&&mp4_gl_get_context_prefix_size
+        &&mp4_gl_native_read(nullptr,reinterpret_cast<uintptr_t>(mp4_gl_egl_get_current),actual,mp4_gl_get_context_prefix_size)
+        &&!std::memcmp(actual,mp4_gl_get_context_prefix,mp4_gl_get_context_prefix_size);
+}
+bool mp4_gl_sources(void*,const mp4_gl_completion::Pins&pins){
+    if(!mp4_gl_hook_receipts(nullptr)||!pins.engine_sha||std::strcmp(pins.engine_sha,mp4_native_profile.native_sha256))return false;
+    const auto expected=mp4_gl_source_pins();
+    if(pins.manager_cell!=expected.manager_cell||pins.device_cell!=expected.device_cell||pins.caps_cell!=expected.caps_cell
+        ||pins.api_cell!=expected.api_cell||pins.device_vtable!=expected.device_vtable)return false;
+    const mp4_gl_completion::Code*actual[]={&pins.update,&pins.cleanup,&pins.singleton_destroy,&pins.driver_create,&pins.driver_query,
+        &pins.caps_getter,&pins.supports_getter,&pins.load_procs,&pins.resolve_proc,&pins.name_bindings};
+    const mp4_gl_completion::Code*source[]={&expected.update,&expected.cleanup,&expected.singleton_destroy,&expected.driver_create,&expected.driver_query,
+        &expected.caps_getter,&expected.supports_getter,&expected.load_procs,&expected.resolve_proc,&expected.name_bindings};
+    for(unsigned i=0;i<10;++i){const auto&pin=*actual[i];const auto&known=*source[i];uint8_t bytes[16]{};
+        if(pin.rva!=known.rva||pin.prefix_size!=known.prefix_size||!pin.prefix_size||pin.prefix_size>16
+            ||std::memcmp(pin.prefix,known.prefix,pin.prefix_size))return false;
+        if(i<2)continue; // Exact own-installed entry receipts checked above.
+        if(mp4_native_base+pin.rva<mp4_native_base
+            ||!mp4_gl_native_read(nullptr,mp4_native_base+pin.rva,bytes,pin.prefix_size)||std::memcmp(bytes,pin.prefix,pin.prefix_size))return false;
+    }
+    return true;
+}
+// No main-thread or source helper is reachable from these four actual native
+// entries. TLS origin, OS reader and official EGL are the only services.
+bool mp4_install_gl_observer(){
+    if(mp4_gl_observer_published.load(std::memory_order_acquire))return true;
+    if(!game_call()||!mp4_source_verified||!mp4_native_clock_source_ready.load(std::memory_order_acquire)||!mp4_native_base)return false;
+    if(mp4_gl_memory_fd<0)mp4_gl_memory_fd=open("/proc/self/mem",O_RDONLY|O_CLOEXEC);
+    if(mp4_gl_memory_fd<0){mp4_gl_install_error="gl_native_memory_reader_unavailable";return false;}
+    const auto pins=mp4_gl_source_pins();
+    if(std::strcmp(pins.engine_sha,mp4_native_profile.native_sha256))return false;
+    const mp4_gl_completion::Code*code[]={&pins.update,&pins.cleanup,&pins.singleton_destroy,&pins.driver_create,&pins.driver_query,
+        &pins.caps_getter,&pins.supports_getter,&pins.load_procs,&pins.resolve_proc,&pins.name_bindings};
+    for(unsigned i=0;i<10;++i){if(i<2&&mp4_gl_patches[i].stub)continue;uint8_t actual[16]{};
+        if(!code[i]->prefix_size||code[i]->prefix_size>16||mp4_native_base+code[i]->rva<mp4_native_base
+            ||!mp4_gl_native_read(nullptr,mp4_native_base+code[i]->rva,actual,code[i]->prefix_size)
+            ||std::memcmp(actual,code[i]->prefix,code[i]->prefix_size)){mp4_gl_install_error="gl_original_code_unverified";return false;}}
+    if(!mp4_gl_egl_library)mp4_gl_egl_library=dlopen("libEGL.so",RTLD_NOW|RTLD_LOCAL);
+    if(!mp4_gl_egl_library){mp4_gl_install_error="gl_official_egl_unavailable";return false;}
+    void*targets[]={reinterpret_cast<void*>(mp4_native_base+pins.update.rva),reinterpret_cast<void*>(mp4_native_base+pins.cleanup.rva),
+        dlsym(mp4_gl_egl_library,"eglDestroyContext"),dlsym(mp4_gl_egl_library,"eglMakeCurrent")};
+    mp4_gl_egl_get_current=dlsym(mp4_gl_egl_library,"eglGetCurrentContext");
+    const uintptr_t imports[]={0x145bcf0,0x145bbb0,0x145bd30};void*official[]={targets[2],targets[3],mp4_gl_egl_get_current};
+    const char*names[]={"eglDestroyContext","eglMakeCurrent","eglGetCurrentContext"};
+    for(unsigned i=0;i<3;++i){uintptr_t imported=0;uint8_t prefix[16]{},size=0;
+        if(!official[i]||!mp4_gl_native_read(nullptr,mp4_native_base+imports[i],&imported,sizeof imported)
+            ||imported!=reinterpret_cast<uintptr_t>(official[i])){mp4_gl_install_error="gl_official_import_unverified";return false;}
+        if(i<2&&mp4_gl_patches[i+2].stub)continue;
+        if(!mp4_gl_platform_symbol(official[i],names[i],i<2?16:4,prefix,size)){mp4_gl_install_error="gl_platform_symbol_unverified";return false;}
+        if(i==2){mp4_gl_get_context_prefix_size=size;std::memcpy(mp4_gl_get_context_prefix,prefix,size);}
+    }
+    void*hooks[]={reinterpret_cast<void*>(mp4_gl_update_entry),reinterpret_cast<void*>(mp4_gl_cleanup_entry),
+        reinterpret_cast<void*>(mp4_gl_egl_destroy_entry),reinterpret_cast<void*>(mp4_gl_egl_current_entry)};
+    void**originals[]={reinterpret_cast<void**>(&mp4_gl_update_original),reinterpret_cast<void**>(&mp4_gl_cleanup_original),
+        reinterpret_cast<void**>(&mp4_gl_egl_destroy_original),reinterpret_cast<void**>(&mp4_gl_egl_current_original)};
+    for(unsigned i=0;i<4;++i){auto&patch=mp4_gl_patches[i];if(patch.stub){if(patch.target!=targets[i])return false;continue;}
+        patch.target=targets[i];
+        patch.stub=shadowhook_hook_func_addr(targets[i],hooks[i],originals[i]);
+        // Keep a failed partial installation as typed passthrough. A concurrent
+        // RenderThread can hold its original trampoline; never free it here.
+        if(!patch.stub||!*originals[i]||!mp4_gl_native_read(nullptr,reinterpret_cast<uintptr_t>(targets[i]),patch.prefix,16)){
+            mp4_gl_install_error="gl_native_hook_install_failed";return false;}
+    }
+    mp4_gl_cohort_verified.store(true,std::memory_order_release);mp4_gl_hooks_published.store(true,std::memory_order_release);
+    mp4_gl_host::Services services{};services.engine_base=mp4_native_base;services.source_pins=mp4_gl_sources;
+    services.hook_publications_current=mp4_gl_hook_receipts;services.native_read=mp4_gl_native_read;
+    services.thread_identity=[](void*){return static_cast<uintptr_t>(gettid());};
+    services.egl_get_current_context=reinterpret_cast<mp4_gl_host::EglContextFn>(mp4_gl_egl_get_current);
+    if(!mp4_gl_host::configure(services,pins,mp4_gl_update_original,mp4_gl_cleanup_original,mp4_gl_egl_destroy_original,mp4_gl_egl_current_original)){
+        mp4_gl_install_error="gl_observer_configuration_failed";return false;}
+    mp4_gl_install_error="none";mp4_gl_observer_published.store(true,std::memory_order_release);return true;
+}
+#endif
+// END_MP4_GL_INSTALL_HOST
+
 // BEGIN_MP4_GPU_FENCE_CORE
 // SHARED REVIEW DRAFT. Embed in an existing native input only after source pins
 // and the caller's real private-render/context/queue closure are wired.
@@ -10413,8 +11184,11 @@ struct Mp4CineTempRoot {uint32_t root=0;Mp4CineTempRoot()=default;explicit Mp4Ci
 bool mp4_cine_hooks_verified() noexcept;
 extern VoidMethod mp4_volume_update_original;
 struct Mp4CineRoot {void* object=nullptr;uint32_t root=0;};
+bool (*mp4_cine_cleanup_fence_ready)(uint64_t,uint64_t)=nullptr;
+struct Mp4CineDetached {void* object=nullptr,*game_object=nullptr;uintptr_t native=0,native_go=0;mp4cine::Kind kind=mp4cine::Kind::volume;bool unregistered=false;};
 struct Mp4CineVolumeHost {
-    mp4cine::Scope scope;Mp4SceneWitness source{};void* asset=nullptr;uint64_t epoch=0;
+    mp4cine::Scope scope;Mp4SceneWitness source{};void* asset=nullptr;uint64_t epoch=0,job_generation=0;
+    Mp4CineDetached detached[80]{};size_t detached_count=0;
     void* type_class=nullptr,*owner_field=nullptr,*list_field=nullptr,*owner_name=nullptr,*source_list=nullptr,*private_list=nullptr;
     Mp4CineRoot roots[128]{};size_t root_count=0;void* source_items[64]{};size_t source_item_count=0;
     uint32_t volume_type=0,component_type=0;void* brain_go=nullptr,*brain_transform=nullptr;
@@ -10438,12 +11212,12 @@ bool mp4_cine_current(void*,uint64_t epoch){
     return true;
 }
 bool mp4_cine_routes(void*){
-    if(!mp4_cine_hooks_verified()||!mp4_volume_update_original||!mp4_type_get_object||!font_method||!font_new)return false;
+    if(!mp4_cine_cleanup_fence_ready||!mp4_cine_hooks_verified()||!mp4_volume_update_original||!mp4_type_get_object||!font_method||!font_new)return false;
     const mp4camp::Binding* pins[]={&mp4_cam_profile.cine_apply_postfx,&mp4_cam_profile.cine_dynamic_volumes,
         &mp4_cam_profile.object_name,&mp4_cam_profile.object_hide_flags,&mp4_cam_profile.object_destroy_immediate,
         &mp4_cam_profile.game_object_ctor_name,&mp4_cam_profile.game_object_transform,&mp4_cam_profile.game_object_layer,&mp4_cam_profile.game_object_set_layer,
         &mp4_cam_profile.object_active_hierarchy,&mp4_cam_profile.transform_children,&mp4_cam_profile.transform_child,
-        &mp4_cam_profile.transform_parent,&mp4_cam_profile.string_equal,&mp4_cam_profile.volume_enable,
+        &mp4_cam_profile.transform_parent,&mp4_cam_profile.transform_set_parent,&mp4_cam_profile.component_set_enabled,&mp4_cam_profile.object_set_active,&mp4_cam_profile.string_equal,&mp4_cam_profile.volume_enable,
         &mp4_cam_profile.volume_disable,&mp4_cam_profile.volume_update,&mp4_cam_profile.component_transform,
         &mp4_cam_profile.component_object,&mp4_cam_profile.component_enabled,&mp4_cam_profile.get_components,
         &mp4_cam_profile.field_static_get,&mp4_cam_profile.field_static_set,&mp4_cam_profile.runtime_invoke};
@@ -10698,10 +11472,77 @@ void mp4_cine_abandon_globals() noexcept;
     return restored&&closed;
 }
 
+// No source-scene query is needed to prove a retained detached resource's
+// birth identity. Native pointers are captured while its source is still owned.
+Mp4CineDetached* mp4_cine_detached_record(void* object,mp4cine::Kind kind,void* go){
+    auto& h=mp4_cine_host;
+    for(size_t i=0;i<h.detached_count;++i){auto& r=h.detached[i];if(r.object==object&&r.kind==kind&&r.game_object==go)return &r;}
+    return nullptr;
+}
+bool mp4_cine_withdraw_created(void*,void* object,mp4cine::Kind kind,void* go){
+    auto& h=mp4_cine_host;
+    if(!mp4_cine_current(nullptr,h.epoch)||!mp4_cine_created_current(nullptr,object,kind,go))return false;
+    Mp4CineDetached* record=mp4_cine_detached_record(object,kind,go);
+    if(!record){if(h.detached_count==80)return false;record=&h.detached[h.detached_count++];
+        *record={object,go,0,0,kind};
+        if(!mp4_actor_field(object,16,record->native)||!record->native
+            ||!mp4_actor_field(go,16,record->native_go)||!record->native_go)return false;}
+    if(kind==mp4cine::Kind::volume){
+        const float zero=0;
+        if(!mp4_cine_write(object,mp4camp::RenderLayout::volume_weight,zero)
+            ||!mp4_cine_write_ref(object,mp4camp::RenderLayout::volume_shared,nullptr)
+            ||!mp4_cine_write_ref(object,mp4camp::RenderLayout::volume_internal,nullptr))return false;
+        using Set=void(*)(void*,bool,Method*);mp4_cam_call<Set>(mp4_cam_profile.component_set_enabled)(object,false,nullptr);
+        using Get=void*(*)(Method*);void* manager=mp4_cam_call<Get>(mp4_cam_profile.volume_instance)(nullptr);void* list=nullptr;
+        if(!manager||!mp4_actor_field(manager,40,list))return false;
+        void** values=nullptr;size_t count=0;if(!mp4_actor_list(list,&values,&count,256))return false;
+        for(size_t i=0;i<count;++i)if(values[i]==object)return false;
+        record->unregistered=true;
+    }else{
+        using Set=void(*)(void*,bool,Method*);using Get=void*(*)(void*,Method*);
+        mp4_cam_call<Set>(mp4_cam_profile.object_set_active)(object,false,nullptr);
+        void* transform=mp4_cam_call<Get>(mp4_cam_profile.game_object_transform)(object,nullptr);
+        if(!mp4_type_is(transform,"UnityEngine.Transform")||!mp4_alive(transform))return false;
+        using Parent=void(*)(void*,void*,bool,Method*);mp4_cam_call<Parent>(mp4_cam_profile.transform_set_parent)(transform,nullptr,false,nullptr);
+    }
+    return mp4_cine_current(nullptr,h.epoch);
+}
+bool mp4_cine_created_withdrawn(void*,void* object,mp4cine::Kind kind,void* go){
+    if(!game_call())return false;
+    const auto* record=mp4_cine_detached_record(object,kind,go);uintptr_t native=0,native_go=0;
+    if(!record||!mp4_actor_field(object,16,native)||native!=record->native
+        ||!mp4_actor_field(go,16,native_go)||native_go!=record->native_go)return false;
+    if(kind==mp4cine::Kind::volume){
+        void* shared=nullptr,*internal=nullptr;float weight=1;
+        return record->unregistered&&mp4_exact_type(object,"UnityEngine.Rendering.Volume")&&mp4_cine_game_object(object)==go&&!mp4_cine_enabled(object)
+            &&mp4_actor_field(object,mp4camp::RenderLayout::volume_shared,shared)&&!shared
+            &&mp4_actor_field(object,mp4camp::RenderLayout::volume_internal,internal)&&!internal
+            &&mp4_actor_field(object,mp4camp::RenderLayout::volume_weight,weight)&&weight==0;
+    }
+    using Get=void*(*)(void*,Method*);void* transform=mp4_cam_call<Get>(mp4_cam_profile.game_object_transform)(go,nullptr);
+    return object==go&&mp4_exact_type(go,"UnityEngine.GameObject")&&!mp4_cine_active(go)&&mp4_alive(transform)
+        &&mp4_actor_state_api().transform_parent(transform,nullptr)==nullptr;
+}
+bool mp4_cine_cleanup_fenced(void*){
+    const auto& h=mp4_cine_host;
+    return game_call()&&h.epoch&&h.job_generation&&mp4_cine_cleanup_fence_ready
+        &&mp4_cine_cleanup_fence_ready(h.epoch,h.job_generation);
+}
+bool mp4_cine_destroy_detached(void*,void* object,mp4cine::Kind kind,void* go){
+    if(!mp4_cine_cleanup_fenced(nullptr)||!mp4_cine_created_withdrawn(nullptr,object,kind,go))return false;
+    using Destroy=void(*)(void*,bool,Method*);mp4_cam_call<Destroy>(mp4_cam_profile.object_destroy_immediate)(object,false,nullptr);
+    return mp4_actor_refresh_maps()&&!mp4_alive(object);
+}
+bool mp4_cine_detached_destroyed(void*,void* object,mp4cine::Kind){
+    if(!game_call())return false;
+    uintptr_t native=1;
+    return mp4_actor_field(object,16,native)&&native==0;
+}
+bool mp4_cine_owns_created_volume_raw(void* object) noexcept {return mp4_cine_host.scope.owns_created_volume_raw(object);}
 [[maybe_unused]] bool mp4_cine_capture(){
     auto& h=mp4_cine_host;if(h.configured||!mp4_camera_host.verified||mp4_camera_host.invalidated||!mp4_cine_routes(nullptr))return false;
-    h.source=mp4_camera_host.source;h.epoch=h.source.generation;h.asset=mp4_api.director_get_asset(h.source.director,nullptr);h.configured=true;
-    if(!h.epoch||!h.asset||!mp4_cine_current(nullptr,h.epoch))return false;
+    h.source=mp4_camera_host.source;h.epoch=h.source.generation;h.job_generation=idoly_mp4_runtime::job.generation;h.asset=mp4_api.director_get_asset(h.source.director,nullptr);h.configured=true;
+    if(!h.epoch||!h.job_generation||!h.asset||!mp4_cine_current(nullptr,h.epoch))return false;
     h.type_class=mp4_resolved_type_class(mp4_cam_types.cine_volume,"Cinemachine.PostFX","CinemachineVolumeSettings");
     h.owner_field=mp4_camera_static_field(h.type_class,"sVolumeOwnerName",14);h.list_field=mp4_camera_static_field(h.type_class,"sVolumes",21);
     if(!h.owner_field||!h.list_field)return false;
@@ -10733,6 +11574,8 @@ void mp4_cine_abandon_globals() noexcept;
     api.restore_volume=mp4_cine_restore_volume;api.verify_volume=mp4_cine_verify_volume;
     api.fresh_game_object=mp4_cine_fresh_go;api.volume_subject=mp4_cine_subject;
     api.created_current=mp4_cine_created_current;api.destroy_created_immediate=mp4_cine_destroy_created;api.created_unregistered=mp4_cine_unregistered;
+    api.withdraw_created=mp4_cine_withdraw_created;api.created_withdrawn=mp4_cine_created_withdrawn;
+    api.cleanup_fenced=mp4_cine_cleanup_fenced;api.destroy_detached=mp4_cine_destroy_detached;api.detached_destroyed=mp4_cine_detached_destroyed;
     api.abandon_created=mp4_cine_abandon_created;api.current_profile=mp4_cine_profile;
     api.producer_method=mp4_cine_apply_postfx_method();api.source_asset=h.asset;
     h.captured=h.scope.capture(api,h.epoch,h.source.brain);return h.captured;
@@ -10866,6 +11709,7 @@ struct Api {
   void *context = nullptr;
   bool (*thread)() = nullptr;
   bool (*held_fenced)(void *, uint64_t) = nullptr;
+  bool (*consumed_tick)(void *, uint64_t, uint64_t) = nullptr;
   bool (*routes_verified)(void *) = nullptr;
   bool (*owner_current)(void *, const Owner &) = nullptr;
   bool (*inventory_exact)(void *, const Owner *, size_t) = nullptr;
@@ -10932,9 +11776,9 @@ class Scope {
   void *caches_[256]{};
   size_t cache_count_ = 0;
   void *inside_owner_ = nullptr;
-  uint64_t epoch_ = 0, grant_ = 0;
+  uint64_t epoch_ = 0, grant_ = 0, pending_ = 0, last_granted_ = 0;
   bool captured_ = false, prepared_ = false, inside_ = false, poisoned_ = false,
-       restored_ = false;
+       restored_ = false, raw_withdrawn_ = false;
   const char *error_ = "none";
   Result fail(Result r, const char *m) {
     error_ = m;
@@ -11122,6 +11966,36 @@ class Scope {
              ref(i.owner.component, 80, i.source.renderer) &&
              ref(i.owner.component, 88, i.source.volume)));
   }
+  bool private_refs_withdrawn() const {
+    if (!api_.thread() || !roots())
+      return false;
+    for (size_t n = 0; n < count_; ++n) {
+      const auto &i = items_[n];
+      if (!api_.exact_type(i.owner.component,
+                           i.owner.kind == Kind::mirror
+                               ? "VL.Rendering.MirrorVolume"
+                               : "Solis.Rendering.VolumetricHeightFogVolume"))
+        return false;
+      SourceRefs refs{};
+      if (!source_refs(i, refs))
+        return false;
+      void *values[] = {refs.shared, refs.internal, refs.cached, refs.block};
+      for (void *value : values) {
+        if (!value)
+          continue;
+        for (size_t p = 0; p < profile_count_; ++p)
+          if (profiles_[p] == value)
+            return false;
+        for (size_t p = 0; p < cache_count_; ++p)
+          if (caches_[p] == value)
+            return false;
+        for (size_t p = 0; p < block_count_; ++p)
+          if (blocks_[p] == value)
+            return false;
+      }
+    }
+    return true;
+  }
 
 public:
   const char *error() const { return error_; }
@@ -11130,8 +12004,8 @@ public:
   // This cleanup is deliberately separate from a successfully captured or
   // prepared scope, which must restore or quarantine instead.
   Result discard_unpublished_capture() {
-    if (captured_ || prepared_ || inside_ || grant_ || profile_count_ ||
-        block_count_ || cache_count_)
+    if (captured_ || prepared_ || inside_ || grant_ || pending_ ||
+        profile_count_ || block_count_ || cache_count_)
       return Result::invalid;
     if (!root_count_) {
       *this = Scope{};
@@ -11156,12 +12030,12 @@ public:
     return Result::ok;
   }
   bool ready() const {
-    return api_.thread && api_.held_fenced && api_.routes_verified &&
-           api_.owner_current && api_.inventory_exact && api_.mapped &&
-           api_.exact_type && api_.alive && api_.retain && api_.target &&
-           api_.release && api_.reference_set && api_.profile_get &&
-           api_.profile_clone_closed && api_.profile_contains &&
-           api_.mesh_readonly && api_.active_enabled &&
+    return api_.thread && api_.held_fenced && api_.consumed_tick &&
+           api_.routes_verified && api_.owner_current && api_.inventory_exact &&
+           api_.mapped && api_.exact_type && api_.alive && api_.retain &&
+           api_.target && api_.release && api_.reference_set &&
+           api_.profile_get && api_.profile_clone_closed &&
+           api_.profile_contains && api_.mesh_readonly && api_.active_enabled &&
            api_.lifecycle_authorized && api_.transform_changed &&
            api_.set_transform_changed && api_.renderer_enabled &&
            api_.set_renderer_enabled && api_.hide_flags &&
@@ -11304,19 +12178,37 @@ public:
     prepared_ = true;
     return Result::ok;
   }
-  bool grant(uint64_t epoch, uint64_t serial) {
+  bool prepare_grant(uint64_t epoch, uint64_t serial) {
     if (epoch != epoch_ || !serial || !prepared_ || restored_ || poisoned_ ||
-        inside_ || grant_ || !held())
+        inside_ || grant_ || pending_ || last_granted_ == ~uint64_t(0) ||
+        serial != last_granted_ + 1 || !held())
       return false;
+    for (size_t n = 0; n < count_; ++n)
+      if (!current(items_[n]))
+        return false;
+    pending_ = serial;
+    return true;
+  }
+  bool grant(uint64_t epoch, uint64_t serial) {
+    if (epoch != epoch_ || !serial || serial != pending_ || !prepared_ ||
+        restored_ || poisoned_ || inside_ || grant_ || !api_.thread() ||
+        !roots() || !api_.routes_verified(api_.context) ||
+        !api_.consumed_tick(api_.context, epoch, serial - 1))
+      return false;
+    for (size_t n = 0; n < count_; ++n)
+      if (!current(items_[n]))
+        return false;
+    pending_ = 0;
+    last_granted_ = serial;
     grant_ = serial;
     return true;
   }
   void revoke_grants(uint64_t epoch) noexcept {
     if (epoch == epoch_)
-      grant_ = 0;
+      grant_ = pending_ = 0;
   }
   bool closed(uint64_t epoch) const {
-    return epoch == epoch_ && !grant_ && !inside_;
+    return epoch == epoch_ && !grant_ && !pending_ && !inside_;
   }
   bool granted(uint64_t epoch) const noexcept {
     return epoch == epoch_ && grant_ && prepared_ && !restored_ && !poisoned_;
@@ -11432,7 +12324,7 @@ public:
     }
   }
   void abandon() noexcept {
-    grant_ = 0;
+    grant_ = pending_ = 0;
     poisoned_ = true;
     prepared_ = false;
   }
@@ -11443,7 +12335,7 @@ public:
   // withdraw its global render bindings and close other domains. Returning
   // false forbids forwarding a destructive original against unproved refs.
   bool raw_source_handoff() {
-    grant_ = 0;
+    grant_ = pending_ = 0;
     poisoned_ = true;
     if (!captured_)
       return root_count_ == 0;
@@ -11472,6 +12364,7 @@ public:
       items_[n].prepared = false;
     }
     prepared_ = false;
+    raw_withdrawn_ = true;
     return true;
   }
   bool complete_grant(uint64_t epoch, uint64_t serial) {
@@ -11491,7 +12384,7 @@ public:
   // After final saved-time original evaluation and all transform pose owners.
   // Before Source Volume collector restore/verification of original refs.
   Result restore() {
-    if (!captured_ || inside_ || grant_ || !held())
+    if (!captured_ || inside_ || grant_ || pending_ || !held())
       return Result::invalid;
     for (size_t n = 0; n < count_; ++n) {
       const auto &i = items_[n];
@@ -11537,6 +12430,7 @@ public:
       i.restored = true;
     }
     restored_ = true;
+    raw_withdrawn_ = true;
     poisoned_ = false;
     return Result::ok;
   }
@@ -11623,15 +12517,17 @@ public:
     }
     return false;
   }
-  Result release() {
+  Result release(bool owned = true) {
     if (!captured_ && !root_count_)
       return Result::ok;
-    if (inside_ || grant_ || !api_.thread || !api_.thread() ||
-        !api_.private_unpublished_or_fenced(api_.context, epoch_) || !restored_)
+    if (inside_ || grant_ || pending_ || !api_.thread || !api_.thread() ||
+        !api_.private_unpublished_or_fenced(api_.context, epoch_) ||
+        (owned ? !restored_ : (!raw_withdrawn_ || !private_refs_withdrawn())))
       return Result::waiting;
-    for (size_t n = 0; n < count_; ++n)
-      if (!items_[n].restored)
-        return Result::waiting;
+    if (owned)
+      for (size_t n = 0; n < count_; ++n)
+        if (!items_[n].restored)
+          return Result::waiting;
     for (size_t n = 0; n < profile_count_; ++n)
       if (api_.alive(profiles_[n]))
         api_.destroy_profile(api_.context, profiles_[n]);
@@ -12120,6 +13016,14 @@ bool mp4_volume_mono_fenced(void *, uint64_t epoch) {
          mp4_director_boundary_closed(nullptr) &&
          !mp4_volume_factory_host.in_frame;
 }
+bool mp4_volume_mono_consumed(void *, uint64_t epoch, uint64_t tick) {
+  if (!mp4_volume_mono_host_current() ||
+      epoch != mp4_volume_mono_host.source.generation)
+    return false;
+  const auto &clock = idoly_mp4_runtime::native_clock_scope();
+  return clock.active() && !clock.restoring() && clock.have_tick() &&
+         clock.tick() == tick;
+}
 void mp4_volume_mono_reference(void *object, uint32_t offset, void *value) {
   if (!game_call() ||
       !mp4_actor_mapped(static_cast<uint8_t *>(object) + offset, 8, true))
@@ -12249,6 +13153,7 @@ mp4vm::Api mp4_volume_mono_api() {
   mp4vm::Api a{};
   a.thread = []() { return game_call(); };
   a.held_fenced = mp4_volume_mono_fenced;
+  a.consumed_tick = mp4_volume_mono_consumed;
   a.routes_verified = mp4_volume_mono_routes;
   a.owner_current = mp4_volume_mono_owner;
   a.inventory_exact = mp4_volume_mono_inventory;
@@ -12388,9 +13293,9 @@ bool mp4_volume_mono_source_catalog() {
   return h.captured;
 }
 // Calls Scope.release itself. Abandon/orphan never uses this.
-[[maybe_unused]] bool mp4_volume_mono_host_release() {
+[[maybe_unused]] bool mp4_volume_mono_host_release(bool owned = true) {
   auto &h = mp4_volume_mono_host;
-  if (!h.captured || mp4_volume_mono_scope.release() != mp4vm::Result::ok)
+  if (!h.captured || mp4_volume_mono_scope.release(owned) != mp4vm::Result::ok)
     return false;
   for (size_t n = 0; n < h.root_count; ++n)
     weak_free(h.roots[n].root);
@@ -12410,7 +13315,6 @@ bool mp4_volume_mono_source_catalog() {
   h = Mp4VolumeMonoHost{};
   return true;
 }
-
 // END_MP4_VOLUME_MONO_HOST
 bool mp4_cine_private_volume(void* value,uint64_t epoch,uintptr_t asset,mp4vs::DynamicVolumeWitness* output){
     mp4cine::Receipt receipt{};
@@ -13021,7 +13925,7 @@ void mp4_source_volume_drop(){
     h.grant_open=true;
     return true;
 }
-bool mp4_source_volume_owned(void*object){return mp4_source_volume_scope.owns_volume(object);
+bool mp4_source_volume_owned(void*object){return mp4_cine_owns_created_volume_raw(object)||mp4_source_volume_scope.owns_volume(object);
 }
 bool mp4_source_volume_permit(void*object){
     auto&h=mp4_source_volume_host;
@@ -13081,10 +13985,13 @@ mp4cam::Owner mp4_camera_owner(const Mp4SceneWitness& source){
     return {source.player,source.director,source.camera,source.controller,source.brain,source.bgm,source.voice,source.generation};
 }
 Mp4SceneResult mp4_camera_result(mp4cam::Result result){return static_cast<Mp4SceneResult>(static_cast<int>(result));}
+extern bool (*mp4_camera_suspend_extra_render)(uint64_t*);
+extern bool (*mp4_camera_resume_extra_render)(uint64_t);
 bool mp4_camera_available(void*){
     if(!game_call()||(!mp4_camera_host.verified&&!mp4_verify_camera_calls()))return false;
     return mp4_camera_render_history_ready&&mp4_camera_restore_extra_render_globals&&mp4_camera_abandon_extra_render_globals
-        &&mp4_camera_gpu_preflight&&mp4_camera_begin_gpu_draw&&mp4_camera_record_submit&&mp4_camera_submit_failed&&mp4_camera_end_gpu_draw&&mp4_camera_render_history_ready();
+        &&mp4_camera_gpu_preflight&&mp4_camera_begin_gpu_draw&&mp4_camera_record_submit&&mp4_camera_submit_failed&&mp4_camera_end_gpu_draw
+        &&mp4_camera_suspend_extra_render&&mp4_camera_resume_extra_render&&mp4_camera_render_history_ready();
 }
 Mp4SceneResult mp4_camera_admit(void*,const Mp4SceneWitness& source){
     auto& host=mp4_camera_host;if(host.scope.active())return Mp4SceneResult::invalid;
@@ -13151,7 +14058,11 @@ Mp4SceneResult mp4_camera_prepare_render(void*,uint64_t tick){
     if(!mp4_camera_host.scope.arm_render_retry(tick)){mp4_camera_host.error="camera_render_tick_unavailable";return Mp4SceneResult::invalid;}
     return Mp4SceneResult::ok;
 }
-void mp4_camera_revoke_grants(void*){mp4_camera_host.scope.revoke_grants();}
+void mp4_camera_revoke_grants(void*) noexcept {
+    mp4_camera_host.scope.revoke_grants();
+    mp4_source_volume_hold(mp4_source_volume_host.epoch);
+    mp4_volume_mono_scope.revoke_grants(mp4_volume_mono_host.source.generation);
+}
 [[maybe_unused]] Mp4ScenePart mp4_scene_camera_part(){
     Mp4ScenePart part{};part.context=&mp4_camera_host;part.available=mp4_camera_available;part.configure=mp4_camera_configure;
     part.owner_current=mp4_camera_source_current;part.quiesce=mp4_camera_quiesce;part.capture=mp4_camera_capture;
@@ -13778,6 +14689,8 @@ bool mp4_prepare_runtime() {
     helpers.output_projection=mp4_output_projection;
     mp4_api=mp4game::with_original_calls(helpers,mp4_profile,image_base);
     mp4_api.brain_manual_update=mp4_owned_brain_manual_update;
+    mp4_audio_root_port_closed=mp4_root_track_port_closed;
+    mp4_director_output_closed[0]=mp4_persistent_or_rebuilt_animation_output_closed;
     // Pure source observation (including an already paused MV) precedes
     // acquisition of the offline scene. It must use the nine independently
     // verified original calls, not an invented flag/playing fallback.
@@ -13878,6 +14791,13 @@ void mp4_observe_photography_presenter() {
 void mp4_unity_tick() {
     if(mp4_prepare_runtime()){
         if(mp4_prepare_actor_types())(void)mp4_install_animation_root();
+#ifndef IDOLY_DARWIN_BRIDGE
+        static uint64_t gl_attempt_at=0;const uint64_t gl_now=idoly_mp4_runtime::milliseconds();
+        if(!mp4_gl_observer_published.load(std::memory_order_acquire)
+            &&(!gl_attempt_at||gl_now<gl_attempt_at||gl_now-gl_attempt_at>=1000)){
+            gl_attempt_at=gl_now;(void)mp4_install_gl_observer();
+        }
+#endif
         mp4_observe_photography_presenter();
         idoly_mp4_runtime::on_unity_tick();
         // Observe this frame's cancel/pause commands before any scene handoff.
@@ -14153,10 +15073,300 @@ void* mp4_selected_renderer_hook(void* additional,Method* method){
     }
     return mp4_selected_renderer_original(additional,method);
 }
+// BEGIN_MP4_PRIVATE_RENDERER_HOST
+// Concrete fresh Forward renderer factory. No opaque source renderer state or
+// native target is cloned. The original getter remains the source witness.
+namespace mp4rc=idoly_mp4_private_render_construction;
+namespace mp4rd=idoly_mp4_private_renderer_data;
+namespace mp4rr=idoly_mp4_private_renderer_root;
+extern void* (*mp4_selected_renderer_original)(void*,Method*);
+extern mp4cam::RendererPublication mp4_renderer_publication;
+extern bool (*mp4_private_constructor_scope)() noexcept;
+extern bool (*mp4_private_material_before)(void*,void*);
+extern bool (*mp4_private_library_before)(void*,void*);
+extern void (*mp4_material_ctor_shader_original)(void*,void*,Method*);
+extern void (*mp4_render_library_ctor_original)(void*,void*,Method*);
+// Assembly supplies real graphics witnesses for the captured job, independent
+// of replacement scene ownership. draw_fenced must not seal a running job.
+bool (*mp4_renderer_source_program_verified)()=nullptr;
+bool (*mp4_renderer_draw_fence_ready)(uint64_t,uint64_t)=nullptr;
+bool (*mp4_renderer_final_fence_ready)(uint64_t,uint64_t)=nullptr;
+struct Mp4PrivateRendererHost {
+    mp4rd::Lease data;mp4rc::Factory construction;mp4rr::Check check;
+    Mp4SceneWitness source{};uint64_t epoch=0,job=0;void* additional=nullptr,*source_renderer=nullptr;
+    void* classes[8]{};void* bloom_fields[2]{};uint32_t roots[96]{};void* root_objects[96]{};size_t root_count=0;
+    void* shader_sources[2]{};void* shaders[21]{};
+    int32_t fresh_dither[2]{};bool configured=false,data_started=false,factory_started=false,publication_started=false,constructor_returned=false,captured=false,prepared=false,published=false,disposed=false,abandoned=false,restored=false;
+    const char* error="private_renderer_host_not_captured";
+} mp4_private_renderer;
+bool mp4_renderer_pin(const mp4camp::Binding& pin){mp4game::Binding b{};b.rva=pin.rva;std::memcpy(b.prefix,pin.prefix,16);return mp4_prefix(b)||mp4_hook_was_statically_verified(b);}
+void* mp4_renderer_class(const mp4camp::Binding& pin,const mp4camp::TypeName& name){return mp4_resolved_type_class(pin,name.space,name.leaf);}
+bool mp4_renderer_keep(void* object){
+    auto& h=mp4_private_renderer;if(!object)return true;
+    for(size_t i=0;i<h.root_count;++i)if(h.root_objects[i]==object)return weak_get(h.roots[i])==object;
+    if(h.root_count==96)return false;
+    const uint32_t root=mp4_retain(object);if(!root||weak_get(root)!=object){if(root)weak_free(root);return false;}
+    h.root_objects[h.root_count]=object;h.roots[h.root_count++]=root;return true;
+}
+bool mp4_renderer_current(void*,uint64_t epoch){
+    auto& h=mp4_private_renderer;Mp4SceneWitness live{};
+    if(!h.configured||h.abandoned||!game_call()||epoch!=h.epoch||!idoly_mp4_runtime::game.selected_scene_witness(live)
+        ||!mp4_scene_same_source(live,h.source)||idoly_mp4_runtime::job.generation!=h.job)return false;
+    for(size_t i=0;i<h.root_count;++i)if(!h.roots[i]||weak_get(h.roots[i])!=h.root_objects[i])return false;
+    return true;
+}
+bool mp4_renderer_phase_held(void*){return mp4_renderer_current(nullptr,mp4_private_renderer.epoch)&&mp4_actor_clock_held(nullptr);}
+bool mp4_renderer_final_fenced(void*){
+    const auto& h=mp4_private_renderer;
+    return game_call()&&h.epoch&&h.job&&mp4_renderer_final_fence_ready&&mp4_renderer_final_fence_ready(h.epoch,h.job);
+}
+bool mp4_renderer_routes(void*){
+    for(const auto* entry:{&pin::mp4_material_ctor_shader,&pin::mp4_render_library_ctor}){mp4game::Binding b{};b.rva=entry->rva;std::memcpy(b.prefix,entry->bytes,16);
+        if(!mp4_hook_was_statically_verified(b))return false;}
+    if(!mp4_selected_renderer_original||!mp4_material_ctor_shader_original||!mp4_render_library_ctor_original
+        ||!mp4_renderer_draw_fence_ready||!mp4_renderer_final_fence_ready||!mp4_renderer_source_program_verified
+        ||!mp4_renderer_source_program_verified()||!font_method||!font_new)return false;
+    for(const auto* p:{&mp4_cam_profile.renderer_ctor,&mp4_cam_profile.renderer_dispose,&mp4_cam_profile.selected_renderer,
+        &mp4_cam_profile.library_ctor,&mp4_cam_profile.instantiate,&mp4_cam_profile.render_asset,&mp4_cam_profile.shader_variant_warmed,
+        &mp4_cam_profile.object_destroy_immediate,&mp4_cam_profile.post_process_reset,&mp4_cam_profile.class_element,
+        &mp4_cam_profile.class_rank,&mp4_cam_profile.class_value_size,&mp4_cam_profile.field_static_get,&mp4_cam_profile.field_static_set,
+        &mp4_cam_profile.write_barrier,&mp4_cam_profile.runtime_invoke,&mp4_cam_profile.use_structured_buffer})if(!mp4_renderer_pin(*p))return false;
+    return true;
+}
+void* mp4_renderer_asset(){using Get=void*(*)(Method*);return mp4_cam_call<Get>(mp4_cam_profile.render_asset)(nullptr);}
+void* mp4_renderer_instantiate(void* source){using Copy=void*(*)(void*,Method*);return mp4_cam_call<Copy>(mp4_cam_profile.instantiate)(source,nullptr);}
+void mp4_renderer_destroy(void* object){using Destroy=void(*)(void*,bool,Method*);mp4_cam_call<Destroy>(mp4_cam_profile.object_destroy_immediate)(object,false,nullptr);}
+bool mp4_renderer_variants_warmed(void* object){using Get=bool(*)(void*,Method*);return mp4_cam_call<Get>(mp4_cam_profile.shader_variant_warmed)(object,nullptr);}
+bool mp4_renderer_role(void* object,mp4rr::Role role){
+    const auto& h=mp4_private_renderer;const size_t at=static_cast<size_t>(role);
+    return object&&at<5&&object_class(object)==h.classes[at];
+}
+bool mp4_renderer_shader_alive(void* shader){return shader&&object_class(shader)==mp4_private_renderer.classes[6]&&mp4_alive(shader);}
+bool mp4_renderer_material_alive(void* material){return material&&object_class(material)==mp4_private_renderer.classes[5]&&mp4_alive(material);}
+bool mp4_renderer_owns_material(void*,void* value){return mp4_private_renderer.construction.owns_material(value);}
+bool mp4_renderer_owns_library(void*,void* value){return mp4_private_renderer.construction.owns_library(value);}
+bool mp4_renderer_shader_list(void* data,void* post,void** sources,void** shaders){
+    if(!data||!post||!mp4_actor_field(data,mp4camp::RenderLayout::renderer_data_shaders,sources[0])
+        ||!mp4_actor_field(post,mp4camp::RenderLayout::post_shaders,sources[1])||!sources[0]||!sources[1])return false;
+    size_t n=0;
+    for(uint32_t at:mp4camp::RenderLayout::renderer_ctor_shaders)if(!mp4_actor_field(sources[0],at,shaders[n++]))return false;
+    if(!mp4_actor_field(data,mp4camp::RenderLayout::renderer_data_blend_shader,shaders[n++]))return false;
+    for(uint32_t at:mp4camp::RenderLayout::post_standard_shaders)if(!mp4_actor_field(sources[1],at,shaders[n++]))return false;
+    for(uint32_t at:mp4camp::RenderLayout::post_vl_shaders)if(!mp4_actor_field(post,at,shaders[n++]))return false;
+    return n==21;
+}
+bool mp4_renderer_source_inputs(){
+    auto& h=mp4_private_renderer;if(!h.captured||!mp4_renderer_current(nullptr,h.epoch)||!h.data.current())return false;
+    void* sources[2]{};void* shaders[21]{};
+    if(!mp4_renderer_shader_list(h.data.source_renderer_data(),h.data.source_post_data(),sources,shaders)
+        ||sources[0]!=h.shader_sources[0]||sources[1]!=h.shader_sources[1])return false;
+    for(size_t i=0;i<21;++i)if(shaders[i]!=h.shaders[i]||!mp4_renderer_shader_alive(shaders[i]))return false;
+    // Original literal-false structured-buffer path has only fresh managed
+    // arrays. It cannot touch the shared ShaderData native ComputeBuffers.
+    using Get=bool(*)(Method*);if(mp4_cam_call<Get>(mp4_cam_profile.use_structured_buffer)(nullptr))return false;
+    void* lights=nullptr;uint8_t structured=1;
+    if(!mp4_actor_field(h.source_renderer,mp4camp::RenderLayout::renderer_forward_lights,lights)
+        ||!lights||object_class(lights)!=h.classes[7]||!mp4_actor_field(lights,mp4camp::RenderLayout::forward_structured,structured)||structured)return false;
+    return true;
+}
+// This is the real readonly source-program witness required by the finite
+// Volume asset guard. Source consumer semantics are additionally pinned by the
+// source/GPU audit; this function never substitutes source-current alone.
+bool mp4_renderer_inputs_witness(){return mp4_renderer_source_program_verified&&mp4_renderer_source_program_verified()&&mp4_renderer_source_inputs();}
+bool mp4_renderer_int_array7(void* array,void** data){
+    if(!array||!data||!mp4_type_is(array,"System.Array"))return false;
+    using Rank=int32_t(*)(void*);using Element=void*(*)(void*);using Size=int32_t(*)(void*,uint32_t*);
+    void* klass=object_class(array);
+    void* declared=mp4_private_renderer.bloom_fields[0]?font_class_type(font_field_type(mp4_private_renderer.bloom_fields[0])):nullptr;
+    if(!declared||klass!=declared)return false;
+    void* element=mp4_cam_call<Element>(mp4_cam_profile.class_element)(klass);uint32_t align=0;
+    void* bounds=nullptr;
+    if(mp4_cam_call<Rank>(mp4_cam_profile.class_rank)(klass)!=1
+        ||!element||!class_name(element)||!class_namespace(element)||std::strcmp(class_name(element),"Int32")||std::strcmp(class_namespace(element),"System")
+        ||mp4_cam_call<Size>(mp4_cam_profile.class_value_size)(element,&align)!=4||align!=4
+        ||!mp4_actor_field(array,16,bounds)||bounds||mp4_array_length(array)!=7)return false;
+    *data=mp4_array_data(array);return *data&&mp4_actor_mapped(*data,28,true);
+}
+void* mp4_renderer_static_get(void*,unsigned index){
+    auto& h=mp4_private_renderer;if(index>=2||!h.bloom_fields[index])return nullptr;
+    void* value=nullptr;mp4_cam_call<Mp4CameraStatic>(mp4_cam_profile.field_static_get)(h.bloom_fields[index],&value);return value;
+}
+void mp4_renderer_static_set(void*,unsigned index,void* value){
+    auto& h=mp4_private_renderer;if(index>=2||!h.bloom_fields[index])return;
+    mp4_cam_call<Mp4CameraStatic>(mp4_cam_profile.field_static_set)(h.bloom_fields[index],value);
+}
+bool mp4_renderer_ctor_admitted(void*){return mp4_renderer_phase_held(nullptr)&&mp4_renderer_source_inputs();}
+bool mp4_renderer_root_type(void*,void* root){return root&&object_class(root)==mp4_private_renderer.classes[0];}
+void* mp4_renderer_allocate_root(void*){return font_new(mp4_private_renderer.classes[0]);}
+bool mp4_renderer_private_complete(void*,void* root){
+    auto& h=mp4_private_renderer;
+    void* xr=reinterpret_cast<void*>(1);
+    if(!h.data.prepared()||!mp4_actor_field(h.data.renderer_data(),56,xr)||xr||!mp4_renderer_source_inputs()
+        ||!h.check.private_complete(root,h.data.renderer_data(),h.data.post_data(),h.data.compute_shader()))return false;
+    void* source_lights=nullptr,*private_lights=nullptr;uint8_t structured=1;
+    if(!mp4_actor_field(h.source_renderer,mp4camp::RenderLayout::renderer_forward_lights,source_lights)
+        ||!mp4_actor_field(root,mp4camp::RenderLayout::renderer_forward_lights,private_lights)
+        ||!private_lights||private_lights==source_lights||object_class(private_lights)!=h.classes[7]
+        ||!mp4_actor_field(private_lights,mp4camp::RenderLayout::forward_structured,structured)||structured)return false;
+    for(uint32_t at:mp4camp::RenderLayout::forward_light_arrays){void* a=nullptr,*b=nullptr;
+        if(!mp4_actor_field(source_lights,at,a)||!mp4_actor_field(private_lights,at,b)||!a||!b||a==b)return false;}
+    return true;
+}
+bool mp4_renderer_construct_original(void*,void* root){
+    auto& h=mp4_private_renderer;using Ctor=void(*)(void*,void*,Method*);
+    if(!mp4_renderer_phase_held(nullptr)||!h.data.prepared())return false;
+    bool maps=false;
+    if(!mp4_actor_mono_gate.isolate([&]{mp4_cam_call<Ctor>(mp4_cam_profile.renderer_ctor)(root,h.data.renderer_data(),nullptr);h.constructor_returned=true;maps=mp4_actor_refresh_maps();}))return false;
+    return maps&&mp4_renderer_current(nullptr,h.epoch);
+}
+bool mp4_renderer_fresh_material(void*,void* receiver,void* shader){
+    uintptr_t native=1;auto& h=mp4_private_renderer;
+    return mp4_renderer_current(nullptr,h.epoch)&&receiver&&object_class(receiver)==h.classes[5]
+        &&mp4_actor_field(receiver,16,native)&&!native&&h.check.shader_admitted(shader);
+}
+bool mp4_renderer_fresh_library(void*,void* receiver){return receiver&&object_class(receiver)==mp4_private_renderer.classes[2];}
+bool mp4_renderer_factory_in_constructor() noexcept {return mp4_private_renderer.construction.construction_in_progress();}
+bool mp4_renderer_factory_material_before(void* receiver,void* shader){return mp4_private_renderer.construction.material_before(receiver,shader);}
+bool mp4_renderer_factory_library_before(void* receiver,void* data){
+    auto& h=mp4_private_renderer;return data==h.data.post_data()&&h.construction.library_before(receiver);
+}
+mp4rd::Api mp4_renderer_data_api(){
+    mp4rd::Api a{};a.context=&mp4_private_renderer;a.owner_thread=[](){return game_call();};a.current=mp4_renderer_current;
+    a.routes_verified=mp4_renderer_routes;a.refresh_maps=mp4_actor_refresh_maps;a.mapped=mp4_actor_mapped;a.is_type=mp4_type_is;
+    a.exact_type=mp4_exact_type;a.class_of=object_class;a.alive=mp4_alive;a.retain=mp4_retain;a.target=weak_get;a.release=weak_free;
+    a.array_length=mp4_array_length;a.array_data=mp4_array_data;a.render_asset=mp4_renderer_asset;a.instantiate=mp4_renderer_instantiate;
+    a.destroy=mp4_renderer_destroy;a.write_ref=mp4_camera_barrier;a.cleanup_fenced=mp4_renderer_final_fenced;
+    a.private_phase_held=mp4_renderer_phase_held;a.variant_warmed=mp4_renderer_variants_warmed;return a;
+}
+mp4rr::Api mp4_renderer_check_api(){
+    mp4rr::Api a{};a.context=&mp4_private_renderer;a.mapped=mp4_actor_mapped;a.role=mp4_renderer_role;a.shader_alive=mp4_renderer_shader_alive;
+    a.material_alive=mp4_renderer_material_alive;a.owns_material=mp4_renderer_owns_material;a.owns_library=mp4_renderer_owns_library;return a;
+}
+mp4rc::Api mp4_renderer_factory_api(){
+    mp4rc::Api a{};a.context=&mp4_private_renderer;a.owner_thread=[](){return game_call();};a.current=mp4_renderer_current;
+    a.routes_verified=mp4_renderer_routes;a.constructor_admitted=mp4_renderer_ctor_admitted;
+    a.retain=mp4_retain;a.target=weak_get;a.release=weak_free;a.mapped=mp4_actor_mapped;a.int32_array7=mp4_renderer_int_array7;
+    a.static_get=mp4_renderer_static_get;a.static_set_ref=mp4_renderer_static_set;a.root_type=mp4_renderer_root_type;
+    a.allocate_root=mp4_renderer_allocate_root;a.construct_original=mp4_renderer_construct_original;a.root_complete=mp4_renderer_private_complete;
+    a.fresh_material_receiver=mp4_renderer_fresh_material;a.fresh_library_receiver=mp4_renderer_fresh_library;
+    a.material_alive=mp4_renderer_material_alive;a.material_destroy=mp4_renderer_destroy;a.cleanup_fenced=mp4_renderer_final_fenced;return a;
+}
+bool mp4_renderer_publication_source(void*){return mp4_renderer_source_inputs();}
+bool mp4_renderer_publication_ready(void*){auto& h=mp4_private_renderer;return h.prepared&&!h.disposed&&h.construction.constructed()&&h.construction.static_restored()&&mp4_renderer_private_complete(nullptr,h.construction.root());}
+void* mp4_renderer_original_getter(void*,void* additional){return mp4_selected_renderer_original?mp4_selected_renderer_original(additional,nullptr):nullptr;}
+[[maybe_unused]] bool mp4_renderer_capture(){
+    auto& h=mp4_private_renderer;if(h.configured||!mp4_renderer_routes(nullptr)||!mp4_camera_host.verified)return false;
+    h.source=mp4_camera_host.source;h.epoch=h.source.generation;h.job=idoly_mp4_runtime::job.generation;h.configured=true;
+    if(!h.epoch||!h.job||!mp4_renderer_current(nullptr,h.epoch))return false;
+    const mp4camp::Binding* pins[]={&mp4_cam_types.renderer,&mp4_cam_types.post_process,&mp4_cam_types.post_library,&mp4_cam_types.lut_pass,&mp4_cam_types.compute_pass,&mp4_cam_types.material,&mp4_cam_types.shader,&mp4_cam_types.forward_lights};
+    const mp4camp::TypeName* names[]={&mp4camp::type_names.renderer,&mp4camp::type_names.post_process,&mp4camp::type_names.post_library,&mp4camp::type_names.lut_pass,&mp4camp::type_names.compute_pass,&mp4camp::type_names.material,&mp4camp::type_names.shader,&mp4camp::type_names.forward_lights};
+    for(size_t i=0;i<8;++i)if(!(h.classes[i]=mp4_renderer_class(*pins[i],*names[i])))return false;
+    if(!mp4_actor_field(h.source.controller,mp4camp::RenderLayout::controller_additional,h.additional)||!h.additional||!mp4_renderer_keep(h.additional))return false;
+    h.source_renderer=mp4_selected_renderer_original(h.additional,nullptr);
+    if(!h.source_renderer||!mp4_renderer_keep(h.source_renderer))return false;
+    h.data_started=true;
+    if(!h.data.capture(mp4_renderer_data_api(),{},h.epoch,h.additional,h.source_renderer)
+        ||!h.check.capture(mp4_renderer_check_api(),h.source_renderer,h.data.source_renderer_data(),h.data.source_post_data()))return false;
+    if(!mp4_renderer_shader_list(h.data.source_renderer_data(),h.data.source_post_data(),h.shader_sources,h.shaders))return false;
+    for(void* object:h.shader_sources)if(!mp4_renderer_keep(object))return false;
+    for(void* shader:h.shaders)if(!mp4_renderer_keep(shader))return false;
+    void* constants=mp4_renderer_class(mp4_cam_types.post_shader_constants,mp4camp::type_names.post_shader_constants);
+    if(!constants)return false;
+    const char* fields[]={"_BloomMipUp","_BloomMipDown"};const uint32_t offsets[]={144,152};
+    for(size_t i=0;i<2;++i){h.bloom_fields[i]=font_field(constants,fields[i]);
+        if(!h.bloom_fields[i]||!(mp4_cam_call<Mp4CameraFlag>(mp4_cam_profile.field_flags)(h.bloom_fields[i])&16u)
+            ||mp4_cam_call<Mp4CameraOffset>(mp4_cam_profile.field_offset)(h.bloom_fields[i])!=offsets[i])return false;
+        void* data=nullptr;if(!mp4_renderer_int_array7(mp4_renderer_static_get(nullptr,unsigned(i)),&data))return false;}
+    h.captured=true;mp4_camera_renderer_inputs_witness=mp4_renderer_inputs_witness;h.error="none";return mp4_renderer_source_inputs();
+}
+[[maybe_unused]] mp4cam::Result mp4_renderer_prepare(){
+    auto& h=mp4_private_renderer;if(h.prepared)return mp4_renderer_publication_ready(nullptr)?mp4cam::Result::ok:mp4cam::Result::stale;
+    if(!h.captured||!mp4_renderer_phase_held(nullptr)||!mp4_renderer_source_inputs())return mp4cam::Result::stale;
+    if(!h.data.prepare())return mp4cam::Result::failed;
+    mp4_private_constructor_scope=mp4_renderer_factory_in_constructor;
+    mp4_private_material_before=mp4_renderer_factory_material_before;mp4_private_library_before=mp4_renderer_factory_library_before;
+    h.factory_started=true;
+    if(!h.construction.begin(mp4_renderer_factory_api(),h.epoch,h.check.expected_materials())||!h.construction.construct())return mp4cam::Result::failed;
+    void* root=h.construction.root();
+    for(size_t i=0;i<2;++i){void* pass=nullptr;
+        if(!mp4_actor_field(root,i?mp4camp::RenderLayout::renderer_final_post_process:mp4camp::RenderLayout::renderer_post_process,pass)
+            ||!mp4_actor_field(pass,mp4camp::RenderLayout::post_dither_index,h.fresh_dither[i])||h.fresh_dither[i]!=0)return mp4cam::Result::failed;}
+    h.prepared=true;
+    mp4cam::RendererPublicationApi api{};api.source_current=mp4_renderer_publication_source;api.private_ready=mp4_renderer_publication_ready;
+    api.original_renderer=mp4_renderer_original_getter;api.cleanup_ready=mp4_renderer_final_fenced;
+    api.retain=mp4_retain;api.target=weak_get;api.release=weak_free;
+    h.publication_started=true;
+    if(mp4_renderer_publication.configure(api,&h,h.additional,h.source_renderer,root,h.epoch)!=mp4cam::Result::ok
+        ||!h.construction.publish()||!h.data.publish()||mp4_renderer_publication.publish()!=mp4cam::Result::ok)return mp4cam::Result::failed;
+    h.published=true;return mp4cam::Result::ok;
+}
+[[maybe_unused]] uint64_t mp4_renderer_begin_draw(){
+    auto& h=mp4_private_renderer;
+    if(!mp4_renderer_publication_ready(nullptr)||!mp4_renderer_source_inputs())return 0;
+    return mp4_renderer_publication.begin_draw(h.construction.root());
+}
+[[maybe_unused]] bool mp4_renderer_end_draw(uint64_t token){return mp4_renderer_publication.end_draw(token);}
+[[maybe_unused]] mp4cam::Result mp4_renderer_reset_after_prewarm(){
+    auto& h=mp4_private_renderer;if(!mp4_renderer_publication_ready(nullptr)||!mp4_renderer_phase_held(nullptr))return mp4cam::Result::stale;
+    if(!mp4_renderer_draw_fence_ready(h.epoch,h.job))return mp4cam::Result::waiting;
+    const auto& f=mp4camp::RenderLayout{};void* root=h.construction.root();
+    for(size_t i=0;i<2;++i){void* pass=nullptr;if(!mp4_actor_field(root,i?f.renderer_final_post_process:f.renderer_post_process,pass))return mp4cam::Result::failed;
+        using Reset=void(*)(void*,Method*);mp4_cam_call<Reset>(mp4_cam_profile.post_process_reset)(pass,nullptr);
+        if(!mp4_actor_mapped(static_cast<uint8_t*>(pass)+f.post_dither_index,4,true)
+            ||!mp4_actor_mapped(static_cast<uint8_t*>(pass)+f.post_bokeh_kernel,sizeof(void*),true)
+            ||!mp4_actor_mapped(static_cast<uint8_t*>(pass)+f.post_bokeh_hash,4,true))return mp4cam::Result::failed;
+        std::memcpy(static_cast<uint8_t*>(pass)+f.post_dither_index,&h.fresh_dither[i],4);
+        mp4_camera_barrier(pass,reinterpret_cast<void**>(static_cast<uint8_t*>(pass)+f.post_bokeh_kernel),nullptr);
+        const int32_t zero=0;std::memcpy(static_cast<uint8_t*>(pass)+f.post_bokeh_hash,&zero,4);
+        bool reset=false;void* kernel=reinterpret_cast<void*>(1);int32_t dither=-1,hash=-1;
+        if(!mp4_actor_field(pass,f.post_reset,reset)||!reset||!mp4_actor_field(pass,f.post_dither_index,dither)||dither!=h.fresh_dither[i]
+            ||!mp4_actor_field(pass,f.post_bokeh_kernel,kernel)||kernel||!mp4_actor_field(pass,f.post_bokeh_hash,hash)||hash)return mp4cam::Result::failed;}
+    return mp4_renderer_private_complete(nullptr,root)?mp4cam::Result::ok:mp4cam::Result::stale;
+}
+[[maybe_unused]] bool mp4_renderer_before_source_change(){
+    auto& h=mp4_private_renderer;mp4_renderer_publication.before_source_change();return !h.factory_started||h.construction.restore_static();
+}
+[[maybe_unused]] void mp4_renderer_abandon_globals() noexcept {
+    auto& h=mp4_private_renderer;h.abandoned=true;mp4_renderer_publication.abandon_globals_before_source_change();if(h.factory_started)h.construction.abandon_static_before_source_change();
+}
+[[maybe_unused]] mp4cam::Result mp4_renderer_restore(){
+    auto& h=mp4_private_renderer;if(!h.configured)return mp4cam::Result::ok;
+    mp4_renderer_publication.withdraw();
+    if((h.factory_started&&!h.construction.restore_static())||!mp4_renderer_source_inputs())return mp4cam::Result::stale;
+    h.restored=mp4_selected_renderer_original(h.additional,nullptr)==h.source_renderer;
+    return h.restored?mp4cam::Result::ok:mp4cam::Result::stale;
+}
+[[maybe_unused]] bool mp4_renderer_verify_restored(){return mp4_private_renderer.restored&&mp4_renderer_source_inputs()
+    &&mp4_selected_renderer_original(mp4_private_renderer.additional,nullptr)==mp4_private_renderer.source_renderer;}
+[[maybe_unused]] mp4cam::Result mp4_renderer_release(bool){
+    auto& h=mp4_private_renderer;if(!h.configured)return mp4cam::Result::ok;
+    mp4_renderer_publication.withdraw();if(!mp4_renderer_final_fenced(nullptr))return mp4cam::Result::waiting;
+    if(h.publication_started&&mp4_renderer_publication.release(false)!=mp4cam::Result::ok)return mp4cam::Result::waiting;
+    if(h.constructor_returned&&!h.disposed){
+        h.disposed=true;using Dispose=void(*)(void*,bool,Method*);mp4_cam_call<Dispose>(mp4_cam_profile.renderer_dispose)(h.construction.root(),true,nullptr);}
+    if(h.factory_started&&!h.construction.release())return mp4cam::Result::waiting;
+    h.factory_started=false;
+    if(h.data_started&&!h.data.release())return mp4cam::Result::waiting;
+    h.data_started=false;
+    for(size_t i=0;i<h.root_count;++i)if(h.roots[i])weak_free(h.roots[i]);
+    // Non-copyable owners cannot be replaced by an aggregate assignment.
+    h.check=mp4rr::Check{};h.source={};h.epoch=h.job=0;h.additional=h.source_renderer=nullptr;
+    for(auto& c:h.classes)c=nullptr;
+    for(auto& f:h.bloom_fields)f=nullptr;
+    for(auto& p:h.shader_sources)p=nullptr;
+    for(auto& p:h.shaders)p=nullptr;
+    for(size_t i=0;i<96;++i){h.roots[i]=0;h.root_objects[i]=nullptr;}h.root_count=0;
+    h.configured=h.data_started=h.factory_started=h.publication_started=h.constructor_returned=h.captured=h.prepared=h.published=h.disposed=h.abandoned=h.restored=false;h.error="private_renderer_host_not_captured";
+    return mp4cam::Result::ok;
+}
+// END_MP4_PRIVATE_RENDERER_HOST
+
 using Mp4RenderCamera=void(*)(Mp4RenderContext,void*,Method*);
 Mp4RenderCamera mp4_render_stack_original=nullptr,mp4_render_camera_original=nullptr;
 Mp4SceneResult (*mp4_camera_begin_extra_draw)(uint64_t*)=nullptr;
 bool (*mp4_camera_end_extra_draw)(uint64_t)=nullptr;
+bool (*mp4_camera_suspend_extra_render)(uint64_t*)=nullptr;
+bool (*mp4_camera_resume_extra_render)(uint64_t)=nullptr;
 unsigned mp4_owned_render_depth=0;void* mp4_owned_render_camera=nullptr;
 Mp4RenderSubmission mp4_owned_render_submission{};
 unsigned mp4_owned_render_submits=0;bool mp4_owned_render_submission_failed=false,mp4_owned_render_ticket_active=false;
@@ -14176,9 +15386,56 @@ void mp4_context_submit_hook(void* context_pointer,Method* method){
     if(owned){
         bool recorded=false;
         try{recorded=mp4_camera_record_submit&&mp4_camera_record_submit(submission);}catch(...){recorded=false;}
-        if(recorded)++mp4_owned_render_submits;else mp4_owned_render_submission_failed=true;
+        if(recorded)++mp4_owned_render_submits;
+        else {
+            mp4_owned_render_submission_failed=true;
+            // An earlier matching Submit/fence does not cover a later failed
+            // observer. Conservatively retain this draw's GPU resources.
+            if(mp4_camera_submit_failed)try{mp4_camera_submit_failed(submission);}catch(...){}
+        }
     }
 }
+
+// BEGIN_MP4_UNOWNED_RENDER_HOST
+unsigned mp4_unowned_render_depth=0;
+// Ordinary cameras execute with their ambient globals/RNG, including when an
+// original selected renderer nests their draw on the same context. Their
+// Submit cannot acknowledge the selected camera's suspended draw ticket.
+void mp4_unowned_render_call(Mp4RenderCamera original,Mp4RenderContext context,void* camera,Method* method){
+    struct Exit {
+        idoly_mp4_actor::RandomSuspension random{};Mp4ShaderSuspension shader{};
+        Mp4RenderSubmission submission{};uint64_t extra=0;bool ticket=false,failed=false;
+        ~Exit() noexcept {
+            bool good=!failed;
+            try{if(random.active)good=mp4_actor_mono_gate.resume_rng_after_unowned(random)&&good;}catch(...){good=false;}
+            try{if(shader.active)good=mp4_shader_resume_after_unowned(shader)&&good;}catch(...){good=false;}
+            try{if(extra)good=mp4_camera_resume_extra_render&&mp4_camera_resume_extra_render(extra)&&good;}catch(...){good=false;}
+            auto& host=mp4_camera_host;
+            if(!good){host.invalidated=true;host.error="camera_unowned_draw_globals_restore_failed";}
+            --mp4_unowned_render_depth;
+            if(ticket&&!host.invalidated&&mp4_owned_render_depth
+                &&mp4_owned_render_submission.source_generation==submission.source_generation
+                &&mp4_owned_render_submission.job_generation==submission.job_generation
+                &&mp4_owned_render_submission.draw_token==submission.draw_token)
+                mp4_owned_render_ticket_active=true;
+        }
+    } exit;
+    exit.ticket=mp4_owned_render_ticket_active;exit.submission=mp4_owned_render_submission;
+    mp4_owned_render_ticket_active=false;
+    const bool outer_unowned=mp4_unowned_render_depth++==0;
+    try{
+        if(outer_unowned&&mp4_camera_suspend_extra_render){
+            if(!mp4_camera_resume_extra_render||!mp4_camera_suspend_extra_render(&exit.extra))exit.failed=true;
+        }else if(outer_unowned&&mp4_owned_render_depth)exit.failed=true;
+        if(!mp4_shader_suspend_for_unowned(exit.shader))exit.failed=true;
+        if(!mp4_actor_mono_gate.suspend_rng_for_unowned(exit.random))exit.failed=true;
+    }catch(...){exit.failed=true;}
+    if(exit.failed){mp4_camera_host.invalidated=true;mp4_camera_host.error="camera_unowned_draw_globals_suspend_failed";}
+    // Observation/rollback errors invalidate the export, never suppress or
+    // retry an unrelated original render (including its own exception).
+    original(context,camera,method);
+}
+// END_MP4_UNOWNED_RENDER_HOST
 
 void mp4_owned_render_call(Mp4RenderCamera original,Mp4RenderContext context,void* camera,Method* method){
     if(!game_call()){
@@ -14186,10 +15443,11 @@ void mp4_owned_render_call(Mp4RenderCamera original,Mp4RenderContext context,voi
         original(context,camera,method);return;
     }
     auto& host=mp4_camera_host;
-    if(!host.scope.active()||camera!=host.source.camera){original(context,camera,method);return;}
+    if(!host.scope.active()||camera!=host.source.camera){mp4_unowned_render_call(original,context,camera,method);return;}
     if(!mp4_camera_source_current(nullptr)||!mp4_camera_render_route_admit()){
         host.invalidated=true;host.error="camera_owned_draw_route_changed";return;
     }
+    if(mp4_unowned_render_depth){host.invalidated=true;host.error="camera_selected_reentry_from_unowned";return;}
     if(mp4_owned_render_depth){
         if(mp4_owned_render_camera!=camera||context.pointer!=mp4_owned_render_submission.context.pointer){host.invalidated=true;host.error="camera_nested_draw_owner_changed";return;}
         original(context,camera,method);return;

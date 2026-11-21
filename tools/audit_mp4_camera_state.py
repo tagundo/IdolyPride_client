@@ -99,6 +99,7 @@ METHODS={
  'transform_children':('UnityEngine.Transform','get_childCount',0),
  'transform_child':('UnityEngine.Transform','GetChild',1),
  'transform_parent':('UnityEngine.Transform','get_parent',0),
+ 'transform_set_parent':('UnityEngine.Transform','SetParent',2),
  'string_equal':('System.String','op_Equality',2),
  'volume_enable':('UnityEngine.Rendering.Volume','OnEnable',0),
  'volume_disable':('UnityEngine.Rendering.Volume','OnDisable',0),
@@ -149,6 +150,7 @@ TYPES={
  'height_extension':'Solis.Common.SolisCinemachineHeightController',
  'virtual_actor':'Solis.Common.SolisVirtualActorController',
  'component':'UnityEngine.Component',
+ 'material':'UnityEngine.Material','shader':'UnityEngine.Shader',
 
 }
 RENDER_FIELDS={
@@ -172,6 +174,7 @@ RENDER_FIELDS={
  'renderer_data_feature_map':('UnityEngine.Rendering.Universal.ScriptableRendererData','m_RendererFeatureMap'),
  'renderer_data_post':('UnityEngine.Rendering.Universal.ForwardRendererData','postProcessData'),
  'renderer_data_shaders':('UnityEngine.Rendering.Universal.ForwardRendererData','shaders'),
+ 'renderer_data_xr':('UnityEngine.Rendering.Universal.ForwardRendererData','xrSystemData'),
  'renderer_data_mode':('UnityEngine.Rendering.Universal.ForwardRendererData','m_RenderingMode'),
  'renderer_mode':('VL.Rendering.VLSRPRenderer','m_RenderingMode'),
  'renderer_data_blend_shader':('VL.Rendering.VLSRPRendererData','vlBlendDownscale'),
@@ -257,7 +260,7 @@ def cell(o,p,depth=0):
 def schemas(o):
  result=[]
  for tid,(name,row)in o.types.items():
-  if not(qualified(o,tid).startswith(('Cinemachine.','UnityEngine.Events.'))or name in('.CinemachineMixer','.CinemachineShotPlayable','UnityEngine.Rendering.Volume','UnityEngine.Rendering.VolumeProfile','Solis.Common.SolisCinemachineHeightController')):continue
+  if not(qualified(o,tid).startswith(('Cinemachine.','UnityEngine.Events.'))or name in('.CinemachineMixer','.CinemachineShotPlayable','UnityEngine.Rendering.Volume','UnityEngine.Rendering.VolumeProfile','Solis.Common.SolisCinemachineHeightController','VL.VLCinemachineFocusPoint')):continue
   # Pure value schemas are referenced through fields/arrays, not object roots.
   if row[24]&1:continue
   ancestry=[];at=tid;seen=set()
@@ -336,7 +339,7 @@ def build(o,platform):
  for name,field in [('camera_data_camera','camera'),('camera_data_aspect','aspectRatio'),('camera_data_xr','xr'),('camera_data_dither','isDitheringEnabled')]:
   value=o.fields('UnityEngine.Rendering.Universal.CameraData')[field]
   render_fields[name]={'owner':'UnityEngine.Rendering.Universal.CameraData','name':field,**value,'offset':value['offset']-16,'unboxed':True}
- return {'platform':platform,'native_sha256':hashlib.sha256(o.b).hexdigest(),'metadata_sha256':hashlib.sha256(o.m).hexdigest(),'methods':methods,'exports':c_exports(o,platform,selected=EXPORTS),'types':{name:runtime_type(o,owner,18)for name,owner in TYPES.items()},'schemas':schemas(o),'values':value_schemas(o),'render_fields':render_fields,'render_arrays':{name:[{'owner':owner,'name':field,**o.fields(owner)[field]}for field in fields]for name,(owner,fields)in RENDER_ARRAY_FIELDS.items()},'render_context':context,'enums':{name:{'value':o.enum_value(owner,field)[0],'proof':o.enum_value(owner,field)[1]}for name,owner,field in [('camera_base','UnityEngine.Rendering.Universal.CameraRenderType','Base'),('projection_explicit','UnityEngine.Camera/ProjectionMatrixMode','Explicit'),('projection_implicit','UnityEngine.Camera/ProjectionMatrixMode','Implicit'),('projection_physical','UnityEngine.Camera/ProjectionMatrixMode','PhysicalPropertiesBased'),('camera_late','Cinemachine.CinemachineBrain/UpdateMethod','LateUpdate'),('camera_smart','Cinemachine.CinemachineBrain/UpdateMethod','SmartUpdate'),('cache_disabled','Cinemachine.TargetPositionCache/Mode','Disabled'),('blend_late','Cinemachine.CinemachineBrain/BrainUpdateMethod','LateUpdate')]},'fields':{name:o.fields(name)for name in ['.CinemachineMixer','.CinemachineShotPlayable','Cinemachine.CinemachineBrain','Cinemachine.CinemachineBrain/BrainFrame','Cinemachine.CinemachineCore','Cinemachine.CinemachineCore/UpdateStatus','Cinemachine.UpdateTracker','Cinemachine.UpdateTracker/UpdateStatus','Cinemachine.TargetPositionCache','Cinemachine.CinemachineVirtualCamera','Cinemachine.CinemachineVirtualCameraBase','Cinemachine.CinemachineComponentBase','Cinemachine.CinemachineBasicMultiChannelPerlin','Cinemachine.CinemachineImpulseManager','UnityEngine.Events.UnityEventBase','UnityEngine.Events.InvokableCallList','UnityEngine.Events.PersistentCallGroup']}}
+ return {'platform':platform,'native_sha256':hashlib.sha256(o.b).hexdigest(),'metadata_sha256':hashlib.sha256(o.m).hexdigest(),'methods':methods,'exports':c_exports(o,platform,selected=EXPORTS),'types':{name:runtime_type(o,owner,8 if owner=='System.Int32'else 18)for name,owner in TYPES.items()},'type_names':{name:{'space':o.string(o.types[o.type_id(owner)][1][1]),'leaf':o.string(o.types[o.type_id(owner)][1][0])}for name,owner in TYPES.items()},'schemas':schemas(o),'values':value_schemas(o),'render_fields':render_fields,'render_arrays':{name:[{'owner':owner,'name':field,**o.fields(owner)[field]}for field in fields]for name,(owner,fields)in RENDER_ARRAY_FIELDS.items()},'render_context':context,'enums':{name:{'value':o.enum_value(owner,field)[0],'proof':o.enum_value(owner,field)[1]}for name,owner,field in [('camera_base','UnityEngine.Rendering.Universal.CameraRenderType','Base'),('projection_explicit','UnityEngine.Camera/ProjectionMatrixMode','Explicit'),('projection_implicit','UnityEngine.Camera/ProjectionMatrixMode','Implicit'),('projection_physical','UnityEngine.Camera/ProjectionMatrixMode','PhysicalPropertiesBased'),('camera_late','Cinemachine.CinemachineBrain/UpdateMethod','LateUpdate'),('camera_smart','Cinemachine.CinemachineBrain/UpdateMethod','SmartUpdate'),('cache_disabled','Cinemachine.TargetPositionCache/Mode','Disabled'),('blend_late','Cinemachine.CinemachineBrain/BrainUpdateMethod','LateUpdate')]},'fields':{name:o.fields(name)for name in ['.CinemachineMixer','.CinemachineShotPlayable','Cinemachine.CinemachineBrain','Cinemachine.CinemachineBrain/BrainFrame','Cinemachine.CinemachineCore','Cinemachine.CinemachineCore/UpdateStatus','Cinemachine.UpdateTracker','Cinemachine.UpdateTracker/UpdateStatus','Cinemachine.TargetPositionCache','Cinemachine.CinemachineVirtualCamera','Cinemachine.CinemachineVirtualCameraBase','Cinemachine.CinemachineComponentBase','Cinemachine.CinemachineBasicMultiChannelPerlin','Cinemachine.CinemachineImpulseManager','UnityEngine.Events.UnityEventBase','UnityEngine.Events.InvokableCallList','UnityEngine.Events.PersistentCallGroup']}}
 
 def native_audio(o,platform,native):
  raw=native.read_bytes();digest=hashlib.sha256(raw).hexdigest()
@@ -390,6 +393,13 @@ def render(data):
    r=(d['methods']if name in METHODS else d['exports'])[name];prefix=r['prefix']
    lines.append(' {'+r['rva']+',{'+','.join('0x'+prefix[i:i+2]for i in range(0,32,2))+'}}, // '+name)
   lines+=['};']
+ lines+=['struct TypeName {const char* space;const char* leaf;};','struct TypeNames {']
+ for name in TYPES:lines.append(' TypeName '+name+';')
+ lines+=['};','inline constexpr TypeNames type_names={']
+ for name in TYPES:
+  values=[d['type_names'][name]for d in data.values()];need(all(v==values[0]for v in values),'camera_type_names_differ:'+name)
+  lines.append(' {'+json.dumps(values[0]['space'])+','+json.dumps(values[0]['leaf'])+'}, // '+name)
+ lines+=['};']
  lines+=['struct Types {']
  for name in TYPES:lines.append(' Binding '+name+';')
  lines+=['};']

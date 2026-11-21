@@ -252,6 +252,16 @@ void *components(void *go, void *type, bool typed, bool recursive,
   return a;
 }
 
+namespace idoly_mp4_runtime {
+struct FixtureClock {
+  bool active() const {return true;}
+  bool restoring() const {return false;}
+  bool have_tick() const {return true;}
+  uint64_t tick() const {return 0;}
+};
+const FixtureClock&native_clock_scope(){static FixtureClock c;return c;}
+}
+
 // SHIPPING_VOLUME_MONO_ADAPTER
 void *new_list(const std::vector<void *> &v) {
   void *l = object("System.Collections.Generic.List`1");

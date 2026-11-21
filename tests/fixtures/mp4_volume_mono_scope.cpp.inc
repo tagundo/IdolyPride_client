@@ -59,6 +59,16 @@ bool live = true, fenced = true, readonly_mesh = true, closed_profile = true,
      invoke_reentrant = false, lose_capture_fence = false;
 vm::Scope *active_scope = nullptr;
 int32_t hide_flags = 12;
+uint64_t native_tick = 0;
+bool consumed(void *, uint64_t epoch, uint64_t tick) {
+  return epoch == 17 && tick == native_tick;
+}
+bool grant(vm::Scope &scope, uint64_t epoch, uint64_t serial) {
+  if (!scope.prepare_grant(epoch, serial))
+    return false;
+  native_tick = serial - 1;
+  return scope.grant(epoch, serial);
+}
 unsigned invokes = 0, destroys = 0, clear_calls = 0;
 std::map<void *, std::vector<int>> blocks, renderer_blocks;
 std::map<void *, void *> profile_component;
@@ -217,6 +227,7 @@ vm::Api api() {
   vm::Api a{};
   a.thread = thread;
   a.held_fenced = held;
+  a.consumed_tick = consumed;
   a.routes_verified = routes;
   a.owner_current = current;
   a.inventory_exact = inventory;
@@ -264,7 +275,7 @@ int main(int argc, char **argv) {
       assert(scope.capture(api(), 17, nullptr, 0) == vm::Result::ok);
       assert(scope.enumerate_volumes(nullptr, 0, &count) && count == 0);
       assert(scope.prepare() == vm::Result::ok);
-      assert(scope.grant(17, 1) && scope.complete_grant(17, 1));
+      assert(grant(scope, 17, 1) && scope.complete_grant(17, 1));
       assert(scope.restore() == vm::Result::ok);
       assert(scope.release() == vm::Result::ok);
     }
@@ -369,6 +380,30 @@ int main(int argc, char **argv) {
     assert(scope.release() == vm::Result::waiting);
     goto done;
   }
+  if (mode == "raw_handoff_cleanup" || mode == "raw_handoff_cleanup_alias") {
+    void *private_profile = get<void *>(owner.volume, 64);
+    assert(scope.raw_source_handoff());
+    live = false;
+    void *replacement = new_profile(k, 88);
+    put(owner.volume, 64, replacement);
+    put(owner.component, 104, profile_component[replacement]);
+    void *new_block = block_new();
+    put(owner.component, 96, new_block);
+    renderer_blocks[owner.renderer] = {55};
+    frame_fenced = false;
+    assert(scope.release(false) == vm::Result::waiting);
+    frame_fenced = true;
+    if (mode == "raw_handoff_cleanup_alias") {
+      put(owner.volume, 64, private_profile);
+      assert(scope.release(false) == vm::Result::waiting);
+      put(owner.volume, 64, replacement);
+    }
+    assert(scope.release(false) == vm::Result::ok);
+    assert(get<void *>(owner.volume, 64) == replacement &&
+           get<void *>(owner.component, 96) == new_block &&
+           renderer_blocks[owner.renderer] == std::vector<int>{55});
+    goto done;
+  }
   if (mode == "raw_handoff" || mode == "raw_handoff_superseded") {
     live = false;
     if (mode == "raw_handoff_superseded") {
@@ -414,7 +449,7 @@ int main(int argc, char **argv) {
                                                     : 96;
     void *old = get<void *>(object, offset);
     put(object, offset, obj("Foreign"));
-    assert(scope.grant(17, 1));
+    assert(grant(scope, 17, 1));
     assert(!scope.route(k, vm::Phase::late, owner.component) && !invokes);
     assert(scope.restore() == vm::Result::stale);
     put(object, offset, old);
@@ -429,7 +464,26 @@ int main(int argc, char **argv) {
     assert(!scope.route(k, vm::Phase::late, owner.component));
     assert(!invokes);
   }
-  assert(scope.grant(17, 1));
+  if (mode == "pending_revoke" || mode == "stale_consumed_tick") {
+    assert(scope.prepare_grant(17, 1) && !scope.closed(17));
+    if (mode == "stale_consumed_tick") {
+      native_tick = 9;
+      assert(!scope.grant(17, 1));
+    }
+    scope.revoke_grants(18);
+    assert(!scope.closed(17));
+    scope.revoke_grants(17);
+    assert(scope.closed(17));
+  }
+  if (mode == "grant_requires_prepare")
+    assert(!scope.grant(17, 1));
+  if (mode == "consumed_nonheld") {
+    assert(scope.prepare_grant(17, 1));
+    fenced = false;
+    native_tick = 0;
+    assert(scope.grant(17, 1));
+  } else
+    assert(grant(scope, 17, 1));
   invoke_nested = mode == "mirror_nested_parameters";
   invoke_reentrant = mode == "reentrant";
   if (mode == "late_throw")
@@ -460,24 +514,25 @@ int main(int argc, char **argv) {
     assert(clear_calls == 1 && renderer_blocks[owner.renderer].empty());
     assert(alive(source) && alive(profile_component[source]));
     assert(!scope.route(k, vm::Phase::enable, owner.component));
-    assert(scope.grant(17, 2));
+    assert(grant(scope, 17, 2));
     assert(!scope.route(k, vm::Phase::late, owner.component));
     assert(scope.complete_grant(17, 2));
     assert(get<void *>(owner.volume, 64) != source);
   }
   if (mode == "revoke") {
-    assert(scope.grant(17, 3));
+    assert(grant(scope, 17, 2));
     scope.revoke_grants(17);
     assert(scope.closed(17));
     assert(!scope.route(k, vm::Phase::late, owner.component));
   }
+  fenced = true;
   assert(scope.restore() == vm::Result::ok);
   assert(get<void *>(owner.volume, 64) == (dormant ? nullptr : source) &&
          get<void *>(owner.component, k == vm::Kind::mirror ? 136 : 104) ==
              (dormant ? nullptr : profile_component[source]));
   assert(scope.source_restored(owner.volume));
   assert(hide_flags == 12);
-  assert(!scope.grant(17, 4));
+  assert(!grant(scope, 17, 4));
   if (mode == "postrestore_forward")
     assert(!scope.route(k, vm::Phase::late, owner.component));
   if (k == vm::Kind::height_fog) {

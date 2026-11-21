@@ -16,7 +16,7 @@ HEADER = ROOT / "client-presentation/native/mp4_camera_owner.hpp"
 
 @pytest.mark.parametrize("marker,harness,header,receipt", [
     ("MP4_PRIVATE_RENDER_CONSTRUCTION", "mp4_private_render_construction_harness.cpp", "mp4-private-render-construction.hpp.inc", "44 bounded private constructor scenarios passed"),
-    ("MP4_PRIVATE_RENDERER_DATA", "mp4_private_renderer_data_harness.cpp", "mp4-private-renderer-data-lease.hpp.inc", "28 private renderer data provenance/clone cases passed"),
+    ("MP4_PRIVATE_RENDERER_DATA", "mp4_private_renderer_data_harness.cpp", "mp4-private-renderer-data-lease.hpp.inc", "31 private renderer data provenance/clone cases passed"),
     ("MP4_PRIVATE_RENDERER_ROOT", "mp4_private_renderer_root_harness.cpp", "mp4-private-renderer-root-check.hpp.inc", "90 private renderer source-role ownership cases passed"),
 ])
 def test_shipping_private_factory_ownership(tmp_path, marker, harness, header, receipt):

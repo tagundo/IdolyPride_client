@@ -42,6 +42,10 @@ bool get_active(void*p,Method*){++queries;return states[p].active;}
 bool get_enabled(void*p,Method*){++queries;return states[p].enabled;}
 int32_t get_layer(void*p,Method*){++queries;return states[p].layer;}
 void set_layer(void*p,int32_t n,Method*){++writes;states[p].layer=n;}
+void set_enabled(void*p,bool enabled,Method*){++writes;states[p].enabled=enabled;if(!enabled){void*l=nullptr;assert(mp4_actor_field(manager,40,l));void**v=nullptr;size_t n=0;assert(mp4_actor_list(l,&v,&n,256));std::vector<void*> left;for(size_t i=0;i<n;++i)if(v[i]!=p)left.push_back(v[i]);list_set(l,left);}}
+void set_active(void*p,bool active,Method*){++writes;states[p].active=active;}
+void set_parent(void*t,void*par,bool,Method*){++writes;auto*old=states[t].parent;if(old){auto&v=states[old].children;for(auto i=v.begin();i!=v.end();++i)if(*i==t){v.erase(i);break;}}states[t].parent=par;if(par)states[par].children.push_back(t);}
+
 int32_t get_hide(void*p,Method*){++queries;return states[p].hide;}
 void*get_name(void*p,Method*){++queries;return states[p].name;}
 bool equal(void*a,void*b,Method*){return a==b;}
@@ -57,7 +61,7 @@ void mp4_camera_barrier(void*owner,void**at,void*v){barrier(owner,at,v);}
 void static_get(const void*f,void*out){++queries;void*v=f==&fieldOwner?ownerName:staticList;std::memcpy(out,&v,8);}
 void static_set(const void*f,void*v){++writes;assert(f==&fieldList);staticList=v;if(throw_static){throw_static=false;throw std::runtime_error("setter after write");}}
 void*volume_instance(Method*){return manager;}
-void destroy(void*p,bool,Method*){++writes;field<uintptr_t>(p,16,0);if(mp4_exact_type(p,"UnityEngine.GameObject")){for(void*c:states[p].components)field<uintptr_t>(c,16,0);void*t=states[p].transform,*par=states[t].parent;if(par){auto&v=states[par].children;for(auto i=v.begin();i!=v.end();++i)if(*i==t){v.erase(i);break;}}}void*l=nullptr;assert(mp4_actor_field(manager,40,l));void**v=nullptr;size_t n=0;assert(mp4_actor_list(l,&v,&n,64));std::vector<void*> remaining;for(size_t i=0;i<n;++i)if(mp4_alive(v[i]))remaining.push_back(v[i]);list_set(l,remaining);}
+void destroy(void*p,bool,Method*){++writes;field<uintptr_t>(p,16,0);const bool detached=!states[p].enabled||(mp4_exact_type(p,"UnityEngine.GameObject")&&!states[p].active);if(mp4_exact_type(p,"UnityEngine.GameObject")){for(void*c:states[p].components)field<uintptr_t>(c,16,0);void*t=states[p].transform,*par=states[t].parent;if(par){auto&v=states[par].children;for(auto i=v.begin();i!=v.end();++i)if(*i==t){v.erase(i);break;}}}if(detached)return;void*l=nullptr;assert(mp4_actor_field(manager,40,l));void**v=nullptr;size_t n=0;assert(mp4_actor_list(l,&v,&n,64));std::vector<void*> remaining;for(size_t i=0;i<n;++i)if(mp4_alive(v[i]))remaining.push_back(v[i]);list_set(l,remaining);}
 uintptr_t image_base=0;
 mp4camp::Profile mp4_cam_profile{};const auto&mp4_cam_types=mp4camp::android_types;
 template<class F>F mp4_cam_call(const mp4camp::Binding&v){return reinterpret_cast<F>(v.rva);}
@@ -81,7 +85,7 @@ struct Mp4SceneWitness{void*brain=nullptr,*director=nullptr;uint64_t generation=
 bool mp4_scene_same_source(const Mp4SceneWitness&a,const Mp4SceneWitness&b){return a.brain==b.brain&&a.director==b.director&&a.generation==b.generation;}
 struct DummyScope{bool granted=true;bool frame_granted()const{return granted;}};
 struct {DummyScope scope{};bool verified=true,invalidated=false;const char*error="none";Mp4SceneWitness source{};}mp4_camera_host;
-namespace idoly_mp4_runtime {struct {bool selected_scene_witness(Mp4SceneWitness&out){++queries;if(!current)return false;out=mp4_camera_host.source;return true;}}game;}
+namespace idoly_mp4_runtime {struct {uint64_t generation=17;}job;struct {bool selected_scene_witness(Mp4SceneWitness&out){++queries;if(!current)return false;out=mp4_camera_host.source;return true;}}game;}
 void*get_asset(void*,Method*){++queries;return sourceAsset;}
 struct {void*(*director_get_asset)(void*,Method*)=get_asset;}mp4_api;
 void original(void*,Method*){}void original_ctor(void*,void*,Method*){}
@@ -95,9 +99,11 @@ Object* create_owned(Fixture& f){
  auto*v=make(&kVolume);states[v].go=go;states[v].transform=t;states[go].components.push_back(v);field<uint8_t>(v,32,1);field<float>(v,36,1);field<float>(v,40,0);field<float>(v,44,1);field<void*>(v,48,nullptr);field<int32_t>(v,56,3);field<float>(v,60,1);field<void*>(v,64,nullptr);assert(mp4_cine_volume_before_enable_impl(v)==mp4cine::Observe::owned);
  void*list=nullptr;assert(mp4_actor_field(manager,40,list));list_set(list,{f.volume,v});return v;
 }
+bool gpu_ready=true;bool cleanup_fence(uint64_t source,uint64_t job){return gpu_ready&&source==7&&job==17;}
 int main(){
+ mp4_cine_cleanup_fence_ready=cleanup_fence;
 #define B(k,f) mp4_cam_profile.k.rva=reinterpret_cast<uintptr_t>(&f)
- B(cine_apply_postfx,original);B(component_object,get_go);B(component_transform,get_transform);B(component_enabled,get_enabled);B(object_active_hierarchy,get_active);B(game_object_layer,get_layer);B(game_object_set_layer,set_layer);B(object_hide_flags,get_hide);B(object_name,get_name);B(string_equal,equal);B(transform_children,child_count);B(transform_child,child);B(transform_parent,parent);B(game_object_transform,get_transform);B(get_components,get_components);B(field_static_get,static_get);B(field_static_set,static_set);B(runtime_invoke,runtime_invoke);B(volume_instance,volume_instance);B(object_destroy_immediate,destroy);
+ B(cine_apply_postfx,original);B(transform_set_parent,set_parent);B(component_set_enabled,set_enabled);B(object_set_active,set_active);B(component_object,get_go);B(component_transform,get_transform);B(component_enabled,get_enabled);B(object_active_hierarchy,get_active);B(game_object_layer,get_layer);B(game_object_set_layer,set_layer);B(object_hide_flags,get_hide);B(object_name,get_name);B(string_equal,equal);B(transform_children,child_count);B(transform_child,child);B(transform_parent,parent);B(game_object_transform,get_transform);B(get_components,get_components);B(field_static_get,static_get);B(field_static_set,static_set);B(runtime_invoke,runtime_invoke);B(volume_instance,volume_instance);B(object_destroy_immediate,destroy);
 #undef B
  {Fixture f;uint64_t token=0;assert(mp4_cine_enter_impl(f.brain,&token)==mp4cine::Observe::owned&&token);assert(staticList==mp4_cine_host.private_list);states[f.vg].layer=8;field<float>(f.volume,36,99);assert(mp4_cine_leave_impl(token));assert(staticList==f.sourceList);assert(mp4_cine_restore());assert(states[f.vg].layer==3);float value=0;assert(mp4_actor_field(f.volume,36,value)&&value==1);}
  {Fixture f;uint64_t token=0;auto calls=queries;assert(mp4_cine_enter_impl(f.go,&token)==mp4cine::Observe::forward);assert(mp4_cine_game_object_before_impl(f.go,nullptr)==mp4cine::Observe::forward);assert(mp4_cine_volume_before_enable_impl(f.volume)==mp4cine::Observe::forward);assert(calls==queries);}
@@ -110,5 +116,7 @@ int main(){
  {Fixture f;uint64_t token=0;assert(mp4_cine_enter_impl(f.brain,&token)==mp4cine::Observe::owned);auto*v=make(&kVolume);states[v].go=f.go;states[v].transform=f.bt;assert(mp4_cine_volume_before_enable_impl(v)==mp4cine::Observe::reject);assert(mp4_camera_host.invalidated);assert(!mp4_cine_leave_impl(token));assert(staticList==f.sourceList&&mp4_cine_host.scope.readers()==0);assert(mp4_cine_restore());}
  {Fixture f;list_set(f.sourceList,{});uint64_t token=0;assert(mp4_cine_enter_impl(f.brain,&token)==mp4cine::Observe::reject);assert(mp4_camera_host.invalidated&&mp4_cine_host.scope.readers()==0);}
  {Fixture f;uint64_t token=0;assert(mp4_cine_enter_impl(f.brain,&token)==mp4cine::Observe::owned);auto*go=make(&kGo,false);assert(mp4_cine_game_object_before_impl(go,ownerName)==mp4cine::Observe::owned);field<uintptr_t>(go,16,reinterpret_cast<uintptr_t>(go));states[go].name=ownerName;states[go].hide=0;auto*t=make(&kTransform);states[go].transform=t;states[go].components={t};states[t].go=go;assert(mp4_cine_leave_impl(token));assert(mp4_cine_restore()&&!mp4_alive(go));}
+
+ {Fixture f;uint64_t token=0;assert(mp4_cine_enter_impl(f.brain,&token)==mp4cine::Observe::owned);auto*v=create_owned(f);assert(mp4_cine_leave_impl(token));gpu_ready=false;assert(mp4_cine_before_source_change());assert(mp4_alive(v)&&!states[v].enabled&&!states[states[v].go].active&&states[states[v].transform].parent==nullptr&&mp4_cine_owns_created_volume_raw(v));current=false;assert(!mp4_cine_cleanup(false));gpu_ready=true;assert(mp4_cine_cleanup(false)&&!mp4_alive(v)&&roots.empty());}
 
 }
