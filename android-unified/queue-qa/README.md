@@ -27,7 +27,11 @@ and after reopen. Unsupported or missing cases fail the run.
 The runner requires enforcing SELinux before and after the run, native and Java
 UID/PID agreement with the package UID, the compiled source hashes, a fresh
 challenge, and every detailed case result. It never roots the device or changes
-SELinux policy. `build-report.json` alone is explicitly **not** a runtime pass.
+SELinux policy. If the app cannot read `selinuxfs/enforce`, it reports the exact
+EPERM/EACCES errno and a null native enforcing value. The host must still attest
+`getenforce=Enforcing` both before and after the cases; an unavailable native read
+never becomes a claim that the app observed enforcing. Other read failures fail.
+`build-report.json` alone is explicitly **not** a runtime pass.
 `runtime-report.json` records the terminal gate result. These checks do not prove
 game rendering, UI queue admission, or MP4 encoding. The runner also attempts
 optional UI-tree/screenshot capture while the probe is visible and retains only

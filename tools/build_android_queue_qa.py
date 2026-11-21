@@ -145,8 +145,11 @@ def build(directory, sdk, *, root=ROOT, require_committed=False):
     print(json.dumps(report, indent=2))
 
 
-def validate_runtime_report(value, built, challenge, app_uid):
+def validate_runtime_report(value, built, challenge, app_uid, host_enforcement):
     need(type(challenge) is str and re.fullmatch(r"[0-9a-f]{64}", challenge), "Fresh bounded challenge required")
+    need(type(host_enforcement) is dict and host_enforcement.get("source") == "adb_shell_getenforce"
+         and host_enforcement.get("before") == "Enforcing" and host_enforcement.get("after") == "Enforcing",
+         "Independent host SELinux Enforcing attestations required both before and after")
     need(type(value) is dict and value.get("schema") == 1 and value.get("package") == PACKAGE
          and value.get("phase") == "completed" and value.get("passed") is True and not value.get("error")
          and value.get("challenge") == challenge, "Probe did not complete with the fresh challenge")
@@ -158,9 +161,15 @@ def validate_runtime_report(value, built, challenge, app_uid):
          and type(native.get("uid")) is int and type(native.get("euid")) is int
          and type(value.get("java_pid")) is int and value["java_pid"] > 1 and native.get("pid") == value["java_pid"]
          and type(value.get("android_api")) is int and value["android_api"] >= 30, "Ordinary app execution proof differs")
-    need(native.get("challenge") == challenge and native.get("selinux_enforcing") is True
+    need(native.get("challenge") == challenge
          and re.fullmatch(r"u:r:untrusted_app(?:_[0-9]+)?:s0(?::c[0-9]+(?:,c[0-9]+)*)?", native.get("selinux_context", ""))
-         and native.get("private_storage_owner_mode") is True, "Enforcing untrusted_app/private storage attestation required")
+         and native.get("private_storage_owner_mode") is True, "untrusted_app/private storage attestation required")
+    read_errno = native.get("selinux_enforce_read_errno")
+    need(native.get("selinux_enforcement_source") == "app_selinuxfs_enforce" and type(read_errno) is int
+         and "selinux_enforcing" in native
+         and ((native.get("selinux_enforce_read_status") == "read" and read_errno == 0 and native["selinux_enforcing"] is True)
+              or (native.get("selinux_enforce_read_status") == "unavailable" and read_errno in (1, 13)
+                  and native["selinux_enforcing"] is None)), "Native SELinux read result must be exact; never synthesize enforcing")
     need(native.get("production_queue_sha256") == built.get("production_queue_sha256")
          and native.get("source_snapshot_sha256") == built.get("source_snapshot_sha256")
          and re.fullmatch(r"[0-9a-f]{64}", native.get("production_queue_sha256", ""))
@@ -255,14 +264,16 @@ def run_device(directory, sdk, serial, timeout, *, root=ROOT, require_committed=
     challenge = secrets.token_hex(32)
     proof = {"schema": 1, "status": "FAILED", "package": PACKAGE, "serial": serial, "challenge": challenge,
              "apk_sha256": built["apk_sha256"], "source_commit": built["source_commit"],
-             "actual_android_app_storage_verified": False, "actual_game_mv_verified": False}
+             "actual_android_app_storage_verified": False, "actual_game_mv_verified": False,
+             "selinux_enforcement": {"source": "adb_shell_getenforce", "before": None, "after": None}}
     terminal, failure = None, None
     def command(*args, limit=30):
         result = subprocess.run([*base, *map(str, args)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=limit)
         need(len(result.stdout) <= MIB and result.returncode == 0, "ADB command failed")
         return result.stdout.decode("utf-8", "strict")
     try:
-        need(command("shell", "getenforce").strip() == "Enforcing", "SELinux enforcing is required; never disable it")
+        proof["selinux_enforcement"]["before"] = command("shell", "getenforce").strip()
+        need(proof["selinux_enforcement"]["before"] == "Enforcing", "SELinux enforcing is required; never disable it")
         command("install", "-r", apk, limit=90)
         command("shell", "am", "force-stop", PACKAGE)
         need(command("shell", "pm", "clear", PACKAGE).strip() == "Success", "Fresh private app storage required")
@@ -285,8 +296,8 @@ def run_device(directory, sdk, serial, timeout, *, root=ROOT, require_committed=
             time.sleep(1)
         need(terminal is not None, "Missing terminal ordinary-app storage report")
         (directory / "terminal-report.json").write_text(json.dumps(terminal, indent=2) + "\n")
-        validate_runtime_report(terminal, built, challenge, app_uid)
-        need(command("shell", "getenforce").strip() == "Enforcing", "SELinux state changed during QA")
+        proof["selinux_enforcement"]["after"] = command("shell", "getenforce").strip()
+        validate_runtime_report(terminal, built, challenge, app_uid, proof["selinux_enforcement"])
         need(sources(root) == built["source_sha256"], "Production source changed during runtime QA")
         proof.update(status="PASS_ANDROID_APP_QUEUE_STORAGE_ONLY", actual_android_app_storage_verified=True, result=terminal)
     except Exception as error:

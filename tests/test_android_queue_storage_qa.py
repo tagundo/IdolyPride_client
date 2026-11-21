@@ -11,6 +11,7 @@ from tools import build_android_queue_qa as qa
 CHALLENGE = "a" * 64
 UID = 10123
 BUILT = {"production_queue_sha256": "b" * 64, "source_snapshot_sha256": "c" * 64}
+HOST_ENFORCEMENT = {"source": "adb_shell_getenforce", "before": "Enforcing", "after": "Enforcing"}
 
 
 def report():
@@ -33,11 +34,13 @@ def report():
             "android_api": 35, "phase": "completed", "passed": True,
             "native": {"uid": UID, "euid": UID, "pid": 1234, "challenge": CHALLENGE,
                        "selinux_enforcing": True, "selinux_context": "u:r:untrusted_app:s0:c123,c256,c512,c768",
+                       "selinux_enforcement_source": "app_selinuxfs_enforce", "selinux_enforce_read_status": "read",
+                       "selinux_enforce_read_errno": 0,
                        "private_storage_owner_mode": True, **BUILT, "cases": cases}}
 
 
 def validate(value):
-    return qa.validate_runtime_report(value, BUILT, CHALLENGE, UID)
+    return qa.validate_runtime_report(value, BUILT, CHALLENGE, UID, HOST_ENFORCEMENT)
 
 
 def test_accept_actual_policy_denial_and_all_production_queue_proofs():
@@ -109,7 +112,43 @@ def test_missing_diagnostics_and_other_app_uid_fail():
         proof = report(); del proof["native"]["cases"][2][field]
         with pytest.raises(ValueError): validate(proof)
     for uid in (0, 2000, 9999, 20000, 99000, True, "10123"):
-        with pytest.raises(ValueError): qa.validate_runtime_report(report(), BUILT, CHALLENGE, uid)
+        with pytest.raises(ValueError): qa.validate_runtime_report(report(), BUILT, CHALLENGE, uid, HOST_ENFORCEMENT)
+
+
+@pytest.mark.parametrize("read_errno", (1, 13))
+def test_native_enforce_read_denial_is_explicit_and_needs_both_host_attestations(read_errno):
+    proof = report(); proof["native"].update(selinux_enforcing=None, selinux_enforce_read_status="unavailable",
+                                            selinux_enforce_read_errno=read_errno)
+    assert validate(proof) == proof
+    for field in ("before", "after", "source"):
+        for invalid in (None, "Permissive", "Disabled", True, ""):
+            host = dict(HOST_ENFORCEMENT); host[field] = invalid
+            with pytest.raises(ValueError): qa.validate_runtime_report(proof, BUILT, CHALLENGE, UID, host)
+        host = dict(HOST_ENFORCEMENT); del host[field]
+        with pytest.raises(ValueError): qa.validate_runtime_report(proof, BUILT, CHALLENGE, UID, host)
+    for host in (None, {}, "Enforcing"):
+        with pytest.raises(ValueError): qa.validate_runtime_report(proof, BUILT, CHALLENGE, UID, host)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("selinux_enforcement_source", "assumed"), ("selinux_enforce_read_status", "unsupported"),
+    ("selinux_enforce_read_errno", 0), ("selinux_enforce_read_errno", 2), ("selinux_enforce_read_errno", 38),
+    ("selinux_enforce_read_errno", True), ("selinux_enforcing", True), ("selinux_enforcing", False),
+])
+def test_unavailable_native_enforce_read_cannot_be_guessed_or_hide_other_errors(field, value):
+    proof = report(); proof["native"].update(selinux_enforcing=None, selinux_enforce_read_status="unavailable",
+                                            selinux_enforce_read_errno=13)
+    proof["native"][field] = value
+    with pytest.raises(ValueError): validate(proof)
+
+
+def test_native_and_host_enforcement_fields_are_required_even_for_read_success():
+    for field in ("selinux_enforcement_source", "selinux_enforce_read_status", "selinux_enforce_read_errno", "selinux_enforcing"):
+        proof = report(); del proof["native"][field]
+        with pytest.raises(ValueError): validate(proof)
+    for field in ("before", "after"):
+        host = dict(HOST_ENFORCEMENT); host[field] = "Permissive"
+        with pytest.raises(ValueError): qa.validate_runtime_report(report(), BUILT, CHALLENGE, UID, host)
 
 
 def test_snapshot_receipt_covers_production_queue_and_changes_when_source_changes():

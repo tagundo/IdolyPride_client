@@ -87,12 +87,31 @@ string run(const string& root, const string& challenge) {
     string context = read_file("/proc/self/attr/current", 512);
     while (!context.empty() && (context.back() == '\n' || context.back() == '\0')) context.pop_back();
     report.text("selinux_context", context);
-    string enforcing = read_file("/sys/fs/selinux/enforce", 16);
-    const bool enforced = enforcing == "1" || enforcing == "1\n";
-    report.yes("selinux_enforcing", enforced);
+    // Android may deny untrusted_app reads of selinuxfs/enforce. Preserve that
+    // exact result instead of claiming the app observed an enforcing value.
+    // The host gate independently requires getenforce=Enforcing before/after.
+    report.text("selinux_enforcement_source", "app_selinuxfs_enforce");
+    int enforcing_fd = open("/sys/fs/selinux/enforce", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int enforcing_error = enforcing_fd < 0 ? errno : 0;
+    string enforcing;
+    if (enforcing_fd >= 0) {
+        char bytes[16]; const ssize_t n = read(enforcing_fd, bytes, sizeof(bytes));
+        if (n < 0) enforcing_error = errno;
+        else enforcing.assign(bytes, static_cast<size_t>(n));
+        close(enforcing_fd);
+    }
+    report.number("selinux_enforce_read_errno", enforcing_error);
+    if (enforcing_error) {
+        report.text("selinux_enforce_read_status", "unavailable"); report.add("selinux_enforcing", "null");
+        require(enforcing_error == EPERM || enforcing_error == EACCES, "unexpected_enforce_read_error");
+    } else {
+        report.text("selinux_enforce_read_status", "read");
+        const bool enforced = enforcing == "1" || enforcing == "1\n";
+        report.yes("selinux_enforcing", enforced); require(enforced, "app_observed_selinux_not_enforcing");
+    }
     const uid_t appid = getuid() % 100000;
     require(getuid() == geteuid() && appid >= 10000 && appid < 20000, "ordinary_app_uid_required");
-    require(context.find("u:r:untrusted_app") == 0 && enforced, "enforcing_untrusted_app_required");
+    require(context.find("u:r:untrusted_app") == 0, "untrusted_app_required");
     struct stat root_stat{}; require(lstat(root.c_str(), &root_stat) == 0 && S_ISDIR(root_stat.st_mode)
         && root_stat.st_uid == getuid() && (root_stat.st_mode & 0777) == 0700, "private_root_required");
     report.yes("private_storage_owner_mode", true);
