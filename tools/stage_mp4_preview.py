@@ -29,10 +29,11 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.5"
+VERSION = "2026.11.21.6"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
+ANDROID_VERIFICATION = "ANDROID-MP4-PREVIEW-VERIFICATION.json"
 MIB = 1024 * 1024
 MAX_FILE = 768 * MIB
 CODEC_WAIT = 2400
@@ -40,7 +41,7 @@ MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_encoder_api.h", "mp4_android_encoder.hpp", "mp4_game_adapter.hpp", "mp4_game_bindings.hpp", "mp4_runtime.hpp",
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
     "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
-    "mp4_controller_profile.hpp",
+    "mp4_controller_profile.hpp", "mp4_type_descriptor.hpp",
     "shared_cache_core.hpp", "shared_cache_hooks.hpp")}
 MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",
@@ -66,8 +67,12 @@ def source_sha(source):
     return source
 
 
-def tag(source):
-    return "mp4-preview-" + VERSION + "-" + source_sha(source)[:7]
+def tag(source, *, android_only=False, producer_identity=None):
+    result = ("android-mp4-preview-" if android_only else "mp4-preview-") + VERSION + "-" + source_sha(source)[:7]
+    if android_only:
+        android_producer_marker(producer_identity)
+        result += "-r" + str(producer_identity[0]) + "-a" + str(producer_identity[1])
+    return result
 
 
 def ipa_name(source):
@@ -262,7 +267,7 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.5", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1121.6", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
         need(members[app + "LocalServer/ServerData.zip"] == korean.output_pin()["sha256"], "ipa_server_data_pin_differs")
@@ -288,13 +293,16 @@ def api(path, *, body=None, method=None, absent=False):
     return decode(result.stdout)
 
 
-def context(source):
+def context(source, *, android_only=False):
     source_sha(source)
     need(os.environ.get("GITHUB_ACTIONS") == "true" and os.environ.get("GITHUB_REPOSITORY") == REPO
          and os.environ.get("GITHUB_SHA") == source and os.environ.get("GITHUB_REF") == BRANCH
          and os.environ.get("GITHUB_WORKFLOW_REF") == REPO + "/" + WORKFLOW + "@" + BRANCH
          and os.environ.get("GITHUB_EVENT_NAME") in ("push", "workflow_dispatch"), "exact_actions_context_required")
-    for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "ANDROID_ARTIFACT_ID", "IOS_ARTIFACT_ID"):
+    need(os.environ.get("GITHUB_JOB") == ("android-draft-stage" if android_only else "draft-stage"),
+         "staging_job_not_allowed")
+    identifiers = ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "ANDROID_ARTIFACT_ID")
+    for key in identifiers + (() if android_only else ("IOS_ARTIFACT_ID",)):
         need(re.fullmatch(r"[1-9][0-9]*", os.environ.get(key, "")), "current_run_identifier_required")
     return int(os.environ["GITHUB_RUN_ID"]), int(os.environ["GITHUB_RUN_ATTEMPT"])
 
@@ -398,11 +406,23 @@ def extract_artifact(archive, destination):
                     output.write(block)
 
 
-def release_gate(value, source, names, release_id=None):
+def android_producer_marker(identity):
+    need(type(identity) is tuple and len(identity) == 2
+         and all(type(value) is int and value > 0 for value in identity), "android_producer_identity_required")
+    return "<!-- android-mp4-producer:" + str(identity[0]) + "/" + str(identity[1]) + " -->"
+
+
+def release_gate(value, source, names, release_id=None, *, android_only=False, producer_identity=None):
     need(type(value) is dict and type(value.get("id")) is int and value["id"] > 0
-         and (release_id is None or value["id"] == release_id) and value.get("tag_name") == tag(source)
+         and (release_id is None or value["id"] == release_id)
+         and value.get("tag_name") == tag(source, android_only=android_only, producer_identity=producer_identity)
          and value.get("target_commitish") == source and value.get("draft") is True
          and value.get("prerelease") is True and value.get("published_at") is None, "exact_unpublished_draft_required")
+    if android_only:
+        marker = android_producer_marker(producer_identity)
+        need(type(value.get("body")) is str and value["body"].count(marker) == 1
+             and re.findall(r"<!-- android-mp4-producer:[1-9][0-9]*/[1-9][0-9]* -->", value["body"]) == [marker],
+             "android_draft_producer_attempt_differs")
     expected_upload = "https://uploads.github.com/repos/" + REPO + "/releases/" + str(value["id"]) + "/assets{?name,label}"
     need(value.get("upload_url") == expected_upload, "draft_upload_identity_differs")
     assets = value.get("assets")
@@ -413,26 +433,27 @@ def release_gate(value, source, names, release_id=None):
     return value
 
 
-def final_page_url(value, source):
+def final_page_url(value, source, *, android_only=False, producer_identity=None):
     prefix = "https://github.com/" + REPO + "/releases/tag/"
-    need(type(value) is str and re.fullmatch(re.escape(prefix) + "(?:" + re.escape(tag(source))
+    need(type(value) is str and re.fullmatch(re.escape(prefix) + "(?:" + re.escape(tag(source, android_only=android_only, producer_identity=producer_identity))
          + r"|untagged-[A-Za-z0-9-]+)", value), "final_draft_url_invalid")
     return value
 
 
-def final_asset_url(value, source, name):
+def final_asset_url(value, source, name, *, android_only=False, producer_identity=None):
     prefix = "https://github.com/" + REPO + "/releases/download/"
-    need(type(value) is str and re.fullmatch(re.escape(prefix) + "(?:" + re.escape(tag(source))
+    need(type(value) is str and re.fullmatch(re.escape(prefix) + "(?:" + re.escape(tag(source, android_only=android_only, producer_identity=producer_identity))
          + r"|untagged-[A-Za-z0-9-]+)/" + re.escape(quote(name, safe="")), value), "final_asset_url_invalid")
     return value
 
 
-def find_draft(source, names):
+def find_draft(source, names, *, android_only=False, producer_identity=None):
+    expected_tag = tag(source, android_only=android_only, producer_identity=producer_identity)
     matches = []
     for page in range(1, 11):
         rows = api(f"releases?per_page=100&page={page}")
         need(type(rows) is list and len(rows) <= 100, "release_catalog_bound")
-        matches.extend(row for row in rows if row.get("tag_name") == tag(source))
+        matches.extend(row for row in rows if row.get("tag_name") == expected_tag)
         if len(rows) < 100:
             break
     else:
@@ -440,11 +461,12 @@ def find_draft(source, names):
     need(len(matches) <= 1, "duplicate_preview_drafts_rejected")
     if not matches:
         return None
-    return release_gate(api("releases/" + str(matches[0]["id"])), source, names, matches[0]["id"])
+    return release_gate(api("releases/" + str(matches[0]["id"])), source, names, matches[0]["id"],
+                        android_only=android_only, producer_identity=producer_identity)
 
 
-def tag_source_gate(source):
-    value = api("git/ref/tags/" + tag(source), absent=True)
+def tag_source_gate(source, *, android_only=False, producer_identity=None):
+    value = api("git/ref/tags/" + tag(source, android_only=android_only, producer_identity=producer_identity), absent=True)
     if value is None:
         return
     obj = value.get("object", {})
@@ -506,11 +528,12 @@ class ProducerContext:
     delivery_workflow: str | None = None
 
 
-def producer_context_gate(value):
+def producer_context_gate(value, *, android_only=False):
     need(type(value) is ProducerContext and type(value.run_id) is int and value.run_id > 0
          and type(value.attempt) is int and value.attempt > 0, "explicit_producer_context_required")
-    need(type(value.artifacts) is tuple and len(value.artifacts) == 2
-         and {row[0] for row in value.artifacts} == {"android", "ios"}, "explicit_artifact_context_required")
+    kinds = {"android"} if android_only else {"android", "ios"}
+    need(type(value.artifacts) is tuple and len(value.artifacts) == len(kinds)
+         and {row[0] for row in value.artifacts} == kinds, "explicit_artifact_context_required")
     for kind, identifier, digest in value.artifacts:
         need(type(identifier) is int and identifier > 0 and canonical_sha(digest) == digest,
              "explicit_artifact_context_required")
@@ -552,7 +575,15 @@ def stage(source, work):
     return stage_from_producer(source, work, producer=producer)
 
 
-def stage_from_producer(source, work, *, producer):
+def stage_android(source, work):
+    """Stage only the current Android producer from its dedicated Actions job."""
+    run_id, attempt = context(source, android_only=True)
+    producer = ProducerContext(run_id, attempt, (("android", int(os.environ["ANDROID_ARTIFACT_ID"]),
+        canonical_sha(os.environ["ANDROID_ARTIFACT_SHA"])),))
+    return stage_from_producer(source, work, producer=producer, android_only=True)
+
+
+def stage_from_producer(source, work, *, producer, android_only=False):
     """Reuse every package/release gate with an explicitly validated producer.
 
     The ordinary CLI always obtains this identity from context(). The one-time
@@ -560,14 +591,21 @@ def stage_from_producer(source, work, *, producer):
     it never changes GITHUB_* variables to impersonate the producer workflow.
     """
     source_sha(source)
-    producer_context_gate(producer)
+    producer_context_gate(producer, android_only=android_only)
+    need(not android_only or producer.delivery_source_commit is None, "android_delivery_context_not_allowed")
     run_id, attempt = producer.run_id, producer.attempt
+    producer_identity = (run_id, attempt) if android_only else None
     inputs = {kind: (identifier, digest) for kind, identifier, digest in producer.artifacts}
     need(not work.exists() and not work.is_symlink(), "fresh_staging_directory_required")
     work.mkdir(mode=0o700, parents=True)
-    receipt = work / "draft-staging-proof.json"
-    proof = {"schema": 1, "source_commit": source, "tag": tag(source), "draft": True,
+    receipt = work / ("android-draft-staging-proof.json" if android_only else "draft-staging-proof.json")
+    scope = {"scope": "android-only", "ios_package_verified": False,
+             "core_runtime_execution_verified": False, "device_execution_verified": False} if android_only else {}
+    proof = {"schema": 1, "source_commit": source,
+             "tag": tag(source, android_only=android_only, producer_identity=producer_identity), "draft": True, **scope,
              "published": False, "stage": "preflight", "verified_assets": []}
+    if android_only:
+        proof.update(producer_run_id=run_id, producer_run_attempt=attempt)
     delivery = {} if producer.delivery_source_commit is None else {
         "delivery_source_commit": producer.delivery_source_commit,
         "delivery_run_id": producer.delivery_run_id, "delivery_workflow": producer.delivery_workflow}
@@ -581,7 +619,7 @@ def stage_from_producer(source, work, *, producer):
         jobs = api("actions/runs/" + str(run_id) + "/jobs?per_page=100").get("jobs", [])
         need(type(jobs) is list and len(jobs) <= 100, "producer_job_catalog_bound")
         built = {}; paths = []; details = {}
-        for kind in ("android", "ios"):
+        for kind in (("android",) if android_only else ("android", "ios")):
             artifact_id, digest = inputs[kind]
             artifact = producer_gate(run, jobs, api("actions/artifacts/" + str(artifact_id)), kind=kind,
                 source=source, run_id=run_id, attempt=attempt, artifact_id=artifact_id, digest=digest)
@@ -593,28 +631,29 @@ def stage_from_producer(source, work, *, producer):
             paths.extend(files); details[kind] = summary
             built[kind] = {"artifact_id": artifact_id, "artifact_sha256": digest,
                 "url": f"https://github.com/{REPO}/actions/runs/{run_id}/artifacts/{artifact_id}"}
-        manifest = work / VERIFICATION
-        manifest.write_text(json.dumps({"schema": 1, "source_commit": source, "version": VERSION, **delivery,
+        manifest = work / (ANDROID_VERIFICATION if android_only else VERIFICATION)
+        manifest.write_text(json.dumps({"schema": 1, "source_commit": source, "version": VERSION, **delivery, **scope,
             "producer_run_id": run_id, "producer_run_attempt": attempt, "artifacts": built,
             "codec_workflow": codec, "checks": details, "actual_game_mv_verified": False,
             "queue": {"persistent": True, "actual_game_sequential_mv_verified": False},
-            "background": {"android": "experimental_opt_in", "android_device_verified": False,
-                           "ios": "pause_and_resume", "ios_background_rendering": False},
+            "background": ({"android": "experimental_opt_in", "android_device_verified": False} if android_only else
+                           {"android": "experimental_opt_in", "android_device_verified": False,
+                            "ios": "pause_and_resume", "ios_background_rendering": False}),
             "files": [{"name": path.name, "bytes": path.stat().st_size, "sha256": sha(path)} for path in paths]}, indent=2) + "\n")
         paths.append(manifest)
         sums = work / "SHA256SUMS"
         sums.write_text("".join(f"{sha(path)}  {path.name}\n" for path in sorted(paths)))
         paths.append(sums)
         names = {path.name for path in paths}
-        need(len(names) == 6, "preview_asset_set_differs")
-        tag_source_gate(source)
-        release = find_draft(source, names)
+        need(len(names) == (4 if android_only else 6), "preview_asset_set_differs")
+        tag_source_gate(source, android_only=android_only, producer_identity=producer_identity)
+        release = find_draft(source, names, android_only=android_only, producer_identity=producer_identity)
         if release is None:
-            release = api("releases", body={"tag_name": tag(source), "target_commitish": source,
-                "name": "Unified APK and IPA preview " + VERSION + " (" + source[:7] + ")",
-                "body": "APK and IPA prototype. Source " + source + ". Actual game MV export/device validation remains pending.",
+            release = api("releases", body={"tag_name": tag(source, android_only=android_only, producer_identity=producer_identity), "target_commitish": source,
+                "name": ("Android MP4 preview " if android_only else "Unified APK and IPA preview ") + VERSION + " (" + source[:7] + ")",
+                "body": ((android_producer_marker(producer_identity) + "\nAndroid-only prototype. ") if android_only else "APK and IPA prototype. ") + "Source " + source + ". Actual game MV export/device validation remains pending.",
                 "draft": True, "prerelease": True, "make_latest": "false"})
-        release = release_gate(release, source, names)
+        release = release_gate(release, source, names, android_only=android_only, producer_identity=producer_identity)
         release_id = release["id"]
         proof.update(stage="upload_and_readback", release_id=release_id, artifacts=built, codec_workflow=codec)
         save()
@@ -622,11 +661,13 @@ def stage_from_producer(source, work, *, producer):
         for asset in release["assets"]:
             verify_asset(asset, local[asset["name"]], work)
         for path in paths:
-            release = release_gate(api("releases/" + str(release_id)), source, names, release_id)
+            release = release_gate(api("releases/" + str(release_id)), source, names, release_id,
+                                   android_only=android_only, producer_identity=producer_identity)
             matches = [asset for asset in release["assets"] if asset["name"] == path.name]
             if not matches:
                 upload(release, path)
-                release = release_gate(api("releases/" + str(release_id)), source, names, release_id)
+                release = release_gate(api("releases/" + str(release_id)), source, names, release_id,
+                                       android_only=android_only, producer_identity=producer_identity)
                 matches = [asset for asset in release["assets"] if asset["name"] == path.name]
             need(len(matches) == 1, "uploaded_asset_missing_or_duplicate")
             proof["verified_assets"].append(verify_asset(matches[0], path, work)); save()
@@ -637,22 +678,32 @@ def stage_from_producer(source, work, *, producer):
                 "Both current-source codec jobs passed. The IPA also passed its five-process language/core Simulator checks.\n"
                 "Actual game MV rendering, device export fidelity and PlayCover execution remain unverified.\n\n"
                 "Every asset was downloaded in full and SHA-256 verified. See MP4-PREVIEW-VERIFICATION.json and SHA256SUMS.\n")
+        if android_only:
+            body = (android_producer_marker(producer_identity) + "\n\nAndroid-only MP4 preview built from `" + source + "`.\n\n"
+                    "APK signatures, current-source preservation/provenance and pinned Korean data were verified. "
+                    "Both current-source synthetic codec jobs passed. The IPA is not part of this draft.\n\n"
+                    "Core runtime/device execution and actual game MV export have not been verified by this staging job.\n\n"
+                    "Every asset was downloaded in full and SHA-256 verified. "
+                    "See ANDROID-MP4-PREVIEW-VERIFICATION.json and SHA256SUMS.\n")
         # Keep identity explicit during this final notes update. GitHub may
         # assign an untagged draft URL even when tag_name is correct. Capture
         # the last API URL; do not attempt further edits to repair its spelling.
-        final = api("releases/" + str(release_id), method="PATCH", body={"tag_name": tag(source),
+        final = api("releases/" + str(release_id), method="PATCH",
+            body={"tag_name": tag(source, android_only=android_only, producer_identity=producer_identity),
             "target_commitish": source, "draft": True, "prerelease": True,
             "make_latest": "false", "body": body})
-        release_gate(final, source, names, release_id)
-        final = release_gate(api("releases/" + str(release_id)), source, names, release_id)
-        url = final_page_url(final.get("html_url"), source)
+        release_gate(final, source, names, release_id, android_only=android_only, producer_identity=producer_identity)
+        final = release_gate(api("releases/" + str(release_id)), source, names, release_id,
+                             android_only=android_only, producer_identity=producer_identity)
+        url = final_page_url(final.get("html_url"), source, android_only=android_only, producer_identity=producer_identity)
         need({row["name"] for row in final["assets"]} == names, "final_draft_assets_differ")
         final_assets = {row["name"]: row for row in final["assets"]}
         for verified in proof["verified_assets"]:
             row = final_assets[verified["name"]]
             need(row["id"] == verified["asset_id"] and row.get("size") == verified["bytes"]
                  and row.get("digest") in (None, "sha256:" + verified["sha256"]), "final_asset_identity_changed")
-            verified["browser_download_url"] = final_asset_url(row.get("browser_download_url"), source, row["name"])
+            verified["browser_download_url"] = final_asset_url(row.get("browser_download_url"), source, row["name"],
+                android_only=android_only, producer_identity=producer_identity)
         proof.update(stage="verified_exact_draft", release_url=url); save()
         print(json.dumps(proof, indent=2))
         return proof
@@ -663,7 +714,7 @@ def stage_from_producer(source, work, *, producer):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("check-android", "stage"))
+    parser.add_argument("action", choices=("check-android", "stage", "stage-android"))
     parser.add_argument("--source", required=True)
     parser.add_argument("--directory", type=Path)
     parser.add_argument("--work", type=Path)
@@ -673,7 +724,7 @@ def main():
         android_checksums(args.directory, args.source)
     else:
         need(args.work is not None, "staging_work_directory_required")
-        stage(args.source, args.work)
+        (stage_android if args.action == "stage-android" else stage)(args.source, args.work)
 
 
 if __name__ == "__main__":

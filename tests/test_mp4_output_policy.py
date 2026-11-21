@@ -1,4 +1,4 @@
-"""Real output pixels, immutable options, and v1 journal migration.
+"""Exact render dimensions, immutable options, and v1 journal migration.
 
 The original GPU and codecs are synthetic in the integration harness. The
 production output policy/session/journal execute; no device result is claimed.
@@ -34,27 +34,13 @@ int main(int argc,char** argv){assert(argc==3);const char* mode=argv[1];
         assert(out::recommended_bitrate(4096,4096,60,1)==140930000);
         assert(out::resolved_bitrate(12340000,1920,1080,30,1)==12340000);
         assert(out::recommended_bitrate(1919,1080,30,1)==0);
-    }else if(!std::strcmp(mode,"pixels")){
-        std::vector<uint8_t> source(16*16*4);
-        for(unsigned y=0;y<16;++y)for(unsigned x=0;x<16;++x){auto i=(y*16+x)*4;source[i]=x*16;source[i+1]=y*16;source[i+2]=200;source[i+3]=17;}
-        std::vector<uint8_t> output(32*16*4+16,0x5a);uint8_t* pixels=output.data()+8;
-        assert(out::resample_rgba(source.data(),source.size(),16,16,pixels,32*16*4,32,16));
-        for(unsigned y=0;y<16;++y)for(unsigned x=0;x<32;++x){size_t i=(y*32+x)*4;
-            assert(pixels[i+3]==255);
-            if(x<8||x>=24)assert(!pixels[i]&&!pixels[i+1]&&!pixels[i+2]);
-            else assert(pixels[i]==(x-8)*16&&pixels[i+1]==y*16&&pixels[i+2]==200);
-        }
-        for(size_t i=0;i<8;++i)assert(output[i]==0x5a&&output[output.size()-1-i]==0x5a);
-        output.resize(32*32*4);assert(out::resample_rgba(source.data(),source.size(),16,16,output.data(),output.size(),32,32));
-        assert(output[0]==0&&output[4]==4&&output[31*4]==240&&output[(31*32)*4+1]==240);
-        assert(!out::resample_rgba(source.data(),source.size()-1,16,16,output.data(),output.size(),32,32));
-        assert(!out::resample_rgba(source.data(),source.size(),16,16,output.data(),10,32,32));
-        assert(!out::resample_rgba(source.data(),source.size(),16,16,source.data(),source.size(),32,16));
-    }else if(!std::strcmp(mode,"odd_pixels")){
-        std::vector<uint8_t> source(17*19*4,90),output(16*18*4);
-        assert(out::resample_rgba(source.data(),source.size(),17,19,output.data(),output.size(),16,18));
-        const auto fitted=out::fit(17,19,16,18);assert(fitted.width==16&&fitted.height==17);
-        assert(output[0]==90&&output[(16*16)*4]==90&&output[(17*16)*4]==0&&output.back()==255);
+    }else if(!std::strcmp(mode,"dimensions")){
+        uint32_t width=0,height=0;
+        assert(out::resolved_dimensions(1920,1080,1080,1920,width,height)&&width==1080&&height==1920);
+        assert(out::resolved_dimensions(1920,1080,4000,1000,width,height)&&width==4000&&height==1000);
+        assert(out::resolved_dimensions(1919,1079,0,0,width,height)&&width==1918&&height==1078);
+        assert(!out::resolved_dimensions(1920,1080,0,1080,width,height));
+        assert(!out::resolved_dimensions(4097,1080,1920,1080,width,height));
     }else if(!std::strcmp(mode,"legacy")||!std::strcmp(mode,"options")){
         const char* profile="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         qm::Options o{};o.width=17;o.height=19;o.output_width=32;o.output_height=18;o.video_bitrate=12340000;
@@ -94,7 +80,7 @@ def policy_executable(tmp_path_factory):
     return binary
 
 
-@pytest.mark.parametrize("mode", ["policy", "pixels", "odd_pixels", "legacy", "options"])
+@pytest.mark.parametrize("mode", ["policy", "dimensions", "legacy", "options"])
 def test_output_pixels_recommendation_and_immutable_legacy_queue(policy_executable, tmp_path, mode):
     root = tmp_path / "queue"
     root.mkdir(mode=0o700)

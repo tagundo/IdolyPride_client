@@ -99,10 +99,12 @@ unsigned delayed_ticks=0;
 bool was_cancelled=false,private_lifetime_verified=false;
 bool cancel_marker_written=false;
 unsigned suspension_checks=0,source_wait_checks=0;
-unsigned geometry_apply_calls=0,geometry_restore_calls=0;
+unsigned geometry_apply_calls=0,geometry_restore_calls=0,projection_apply_calls=0,projection_verify_calls=0;
+int previous_capture_width=16,previous_capture_height=16;
 bool source_geometry_valid=true;
 bool session_source_geometry(void* controller,int32_t* width,int32_t* height){assert(controller==ptr(camera_controller));if(!source_geometry_valid)return false;*width=capture_width;*height=capture_height;return true;}
-bool session_output_geometry(void* controller,int32_t width,int32_t height){assert(controller==ptr(camera_controller));if(!width&&!height){capture_width=capture_height=16;++geometry_restore_calls;}else{capture_width=width;capture_height=height;++geometry_apply_calls;}return true;}
+bool session_output_geometry(void* controller,int32_t width,int32_t height){assert(controller==ptr(camera_controller));if(!width&&!height){capture_width=previous_capture_width;capture_height=previous_capture_height;++geometry_restore_calls;}else{if(!geometry_apply_calls){previous_capture_width=capture_width;previous_capture_height=capture_height;}capture_width=width;capture_height=height;++geometry_apply_calls;}return scenario!="custom_render_failed"||(!width&&!height);}
+bool session_output_projection(void* controller,bool apply){assert(controller==ptr(camera_controller)&&mode==3&&!camera_deltas.empty());if(apply)++projection_apply_calls;else ++projection_verify_calls;return scenario!="custom_projection_failed"&&(apply||scenario!="projection_lost_after_render");}
 double session_duration(void*,Method*){return selected_duration;}
 int32_t session_samples(void*,Method*){return sample_rate*2;}
 int32_t session_rate(void*,Method*){return sample_rate;}
@@ -169,7 +171,7 @@ void connect_scene(){
 struct FakeEncoder {IDMP4EncoderConfig config{};std::string pcm,partial,final;
     uint64_t frames=0;uint32_t phase=IDMP4_ENCODING;unsigned destroy_calls=0;bool retry=true;};
 extern "C" IDMP4EncoderHandle IDMP4EncoderCreate(const IDMP4EncoderConfig* c,char*,size_t){
-    const bool custom_output=scenario=="custom_output"||scenario=="custom_render";
+    const bool custom_output=scenario=="custom_output"||scenario=="custom_render"||scenario=="projection_lost_after_render";
     assert(c&&c->abi_version==1&&c->width==(custom_output?32U:16U)&&c->height==(scenario=="odd_source_output"?18U:16U)&&c->audio_channels==2);
     if(custom_output||scenario=="odd_source_output")assert(c->video_bitrate==250000);
     if(scenario=="custom_bitrate")assert(c->video_bitrate==12340000);
@@ -185,9 +187,8 @@ extern "C" IDMP4EncoderHandle IDMP4EncoderCreate(const IDMP4EncoderConfig* c,cha
 }
 extern "C" int IDMP4EncoderAppendFrame(IDMP4EncoderHandle value,const uint8_t* rgba,size_t row,uint64_t index){
     auto* e=static_cast<FakeEncoder*>(value);assert(index==e->frames&&row==e->config.width*4&&rgba[3]==255);
-    if(scenario=="custom_output")assert(rgba[0]==0&&rgba[8*4]==15&&rgba[8*4+1]==0&&rgba[23*4+1]==15&&rgba[24*4]==0);
-    else if(scenario=="custom_render")assert(rgba[0]==15&&rgba[31*4+1]==31);
-    else if(scenario=="odd_source_output")assert(rgba[0]==18&&rgba[17*row]==0&&rgba[17*row+3]==255);
+    if(scenario=="custom_render")assert(rgba[0]==15&&rgba[31*4+1]==31);
+    else if(scenario=="odd_source_output")assert(rgba[0]==17&&rgba[17*row]==0&&rgba[17*row+1]==0&&rgba[17*row+2]==77&&rgba[17*row+3]==255);
     else assert(rgba[0]==15);
     assert(std::fabs(time_value-static_cast<double>(index)/fps)<1e-6);
     if(scenario=="encoder_failure"&&index==2)return IDMP4_ERROR;
@@ -259,13 +260,15 @@ int main(int argc,char** argv){
     selected.bundle_unload=session_unload;
     selected.brain_manual_update=session_brain_update;selected.camera_clock_ok=session_camera_clock_ok;
     if(scenario=="source_lost_before_begin")selected.source_geometry=session_source_geometry;
-    if(scenario=="custom_output"||scenario=="custom_render"||scenario=="custom_bitrate"||scenario=="odd_source_output")selected.source_geometry=session_source_geometry;
-    if(scenario=="custom_render")selected.output_geometry=session_output_geometry;
+    if(scenario=="custom_output"||scenario=="custom_render"||scenario=="custom_bitrate"||scenario=="odd_source_output"||scenario=="custom_render_failed"||scenario=="custom_projection_failed"||scenario=="projection_lost_after_render")selected.source_geometry=session_source_geometry;
+    if(scenario=="custom_render"||scenario=="odd_source_output"||scenario=="custom_render_failed"||scenario=="custom_projection_failed"||scenario=="projection_lost_after_render"){
+        selected.output_geometry=session_output_geometry;selected.output_projection=session_output_projection;
+    }
     session_core::install_game_api(selected,Layout{});session_core::observe_presenter(ptr(presenter));session_core::observe_camera_controller(ptr(camera_controller));
     session_core::on_unity_tick();
     bool configured=session_core::configure(directory,epoch,argv[3],output_root.c_str(),platform);
     if(!configured){std::printf("{\"configured\":false}\n");return 0;}
-    if(scenario=="custom_output"||scenario=="custom_render")assert(IDMP4SessionStartV2(fps,1,1,0,192000,32,16)==0);
+    if(scenario=="custom_output"||scenario=="custom_render"||scenario=="custom_render_failed"||scenario=="custom_projection_failed"||scenario=="projection_lost_after_render")assert(IDMP4SessionStartV2(fps,1,1,0,192000,32,16)==0);
     else if(scenario=="odd_source_output")assert(IDMP4SessionStartV2(fps,1,1,0,192000,0,0)==0);
     else if(scenario=="custom_bitrate")assert(IDMP4SessionStartV2(fps,1,1,12340000,192000,0,0)==0);
     else assert(session_core::start({static_cast<uint32_t>(fps),1,1,16000000,192000}));
@@ -330,7 +333,9 @@ int main(int argc,char** argv){
     assert(brain_mode==1&&brain_blend==0);float outside=0;assert(!session_core::camera_delta_override(ptr(brain),&outside));
     for(const auto& path:loaded_bundles)assert(access(path.c_str(),F_OK)!=0);
     char status[2048]{};assert(session_core::status(status,sizeof(status)));
-    if(scenario=="custom_render")assert(geometry_apply_calls==1&&geometry_restore_calls==1&&capture_width==16&&capture_height==16);
+    if(scenario=="custom_render"||scenario=="custom_render_failed"||scenario=="custom_projection_failed"||scenario=="projection_lost_after_render")assert(geometry_apply_calls==1&&geometry_restore_calls==1&&capture_width==16&&capture_height==16);
+    if(scenario=="custom_render")assert(projection_apply_calls==62&&projection_verify_calls==31);
+    if(scenario=="odd_source_output")assert(geometry_apply_calls==1&&geometry_restore_calls==1&&capture_width==17&&capture_height==19);
     std::printf("{\"configured\":true,\"source_wait_checks\":%u,\"session\":%s,\"loads\":%d,\"unloads\":%d,\"data_calls\":%d,\"retries\":%d,\"destroy_retries\":%d,\"graph_steps\":%d,\"actor_steps\":%d,\"private_lifetime_verified\":%s,\"delayed_ticks\":%u,\"suspension_checks\":%u,\"times\":[",
         source_wait_checks,status,loads,unloads,data_calls,retries,destroy_retries,graph_steps,actor_steps,private_lifetime_verified?"true":"false",delayed_ticks,suspension_checks);
     for(size_t i=0;i<submitted_times.size();++i)std::printf("%s%.12f",i?",":"",submitted_times[i]);
@@ -456,12 +461,12 @@ def test_actual_session_ipc_offsets_lead_tail_rational_clock_and_backpressure(ru
 
 
 @pytest.mark.parametrize("scenario,width,height,bitrate", [
-    ("custom_output",32,16,250000), ("custom_render",32,16,250000),
+    ("custom_render",32,16,250000),
     ("odd_source_output",16,18,250000), ("custom_bitrate",16,16,12340000),
 ])
 def test_v2_output_reaches_encoder_with_actual_pixels_and_restores_original_render_target(run_session,scenario,width,height,bitrate):
-    # The harness checks every submitted buffer's real stride, black bars or
-    # newly rerendered source pixels. A header-only size change cannot pass.
+    # Every pixel comes from the resized original render target, including
+    # its last row/column. A header-only change or padded image cannot pass.
     observed=run_session(scenario)
     session=observed["session"]
     assert session["phase"]=="completed" and session["error_code"]=="none"
@@ -470,6 +475,20 @@ def test_v2_output_reaches_encoder_with_actual_pixels_and_restores_original_rend
     assert len(observed["times"])==31 and observed["retries"]==31
     assert session["source_width"]== (17 if scenario=="odd_source_output" else 16)
     assert session["source_height"]== (19 if scenario=="odd_source_output" else 16)
+
+
+@pytest.mark.parametrize("scenario,error", [
+    ("custom_output","output_render_projection_unavailable"),
+    ("custom_render_failed","output_render_geometry_failed"),
+    ("custom_projection_failed","output_projection_failed"),
+    ("projection_lost_after_render","output_projection_verification_failed"),
+])
+def test_custom_output_fails_without_genuine_render_and_projection_and_restores_state(run_session,scenario,error):
+    observed=run_session(scenario)
+    assert observed["session"]["phase"]=="failed"
+    assert observed["session"]["error_code"]==error
+    assert observed["session"]["frames"]==0
+    assert not list(Path(observed["configuration"]["export_directory"]).glob("*.mp4"))
 
 
 def test_overlapping_tracks_accumulate_before_one_final_clamp(run_session):

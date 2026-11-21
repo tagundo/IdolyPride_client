@@ -33,8 +33,10 @@ def test_new_translation_proof_requires_exact_source_output_and_image_preservati
             delivery.korean_translation_proof({**report, key: value}, platform)
 
 
-def release():
-    return {"id": 17, "tag_name": delivery.tag(SOURCE), "target_commitish": SOURCE,
+def release(*, android_only=False):
+    return {"id": 17, "tag_name": delivery.tag(SOURCE, android_only=android_only,
+                                             producer_identity=(101, 1) if android_only else None), "target_commitish": SOURCE,
+        "body": delivery.android_producer_marker((101, 1)) if android_only else "Combined preview",
         "draft": True, "prerelease": True, "published_at": None, "assets": [],
         "upload_url": "https://uploads.github.com/repos/" + delivery.REPO + "/releases/17/assets{?name,label}"}
 
@@ -194,7 +196,7 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
     assert [line.strip()[2:] for line in scoped.splitlines() if line.strip()] == [delivery.WORKFLOW,
         "tools/stage_mp4_preview.py", "tests/test_mp4_preview_delivery.py",
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
-    assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 3
+    assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 4
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw
     assert "IDOLY_RELEASE_VERSION: " + delivery.VERSION in raw and delivery.APK in raw
     assert "ios-unified/native/test_mp4_ui_compile.py" in raw and "ios-unified/ci_build.py" in raw
@@ -206,7 +208,8 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
     assert "continue-on-error" not in raw
 
 
-def stage_fixture(monkeypatch, *, corrupt_readback=False, untagged_final=False):
+def stage_fixture(monkeypatch, *, corrupt_readback=False, untagged_final=False, android_only=False,
+                  producer_damage=None, release_damage=None, existing_attempt=None):
     archives = {}
     for kind in ("android", "ios"):
         buffer = io.BytesIO()
@@ -218,19 +221,23 @@ def stage_fixture(monkeypatch, *, corrupt_readback=False, untagged_final=False):
                 output.writestr(delivery.ipa_name(SOURCE), b"ipa")
                 output.writestr(delivery.ipa_name(SOURCE).removesuffix(".ipa") + ".report.json", b"{}")
         archives[kind] = buffer.getvalue()
-    state = {"release": None, "writes": [], "bytes": {}, "patches": []}
-    monkeypatch.setattr(delivery, "context", lambda source: (101, 1))
+    state = {"release": None, "writes": [], "bytes": {}, "patches": [], "requests": []}
+    if existing_attempt is not None:
+        state["release"] = release(android_only=True)
+        state["release"]["body"] = delivery.android_producer_marker((101, existing_attempt))
+    monkeypatch.setattr(delivery, "context", lambda source, **kwargs: (101, 1))
     monkeypatch.setattr(delivery, "wait_codecs", lambda source: {"run_id": 301, "source_commit": source})
     for kind, identifier in (("android", 23), ("ios", 24)):
         monkeypatch.setenv(kind.upper() + "_ARTIFACT_ID", str(identifier))
         monkeypatch.setenv(kind.upper() + "_ARTIFACT_SHA", hashlib.sha256(archives[kind]).hexdigest())
 
     def api(path, *, body=None, method=None, absent=False):
+        state["requests"].append(path)
         if path == "actions/runs/101":
-            return producer()
+            return dict(producer(), **(producer_damage or {}))
         if path == "actions/runs/101/jobs?per_page=100":
             return {"jobs": [{"name": kind + "-build", "status": "completed", "conclusion": "success", "run_attempt": 1}
-                             for kind in ("android", "ios")]}
+                             for kind in (("android",) if android_only else ("android", "ios"))]}
         if path.startswith("actions/artifacts/"):
             identifier = int(path.rsplit("/", 1)[1]); kind = "android" if identifier == 23 else "ios"
             return dict(artifact(), id=identifier, name=f"mp4-{kind}-preview-{SOURCE}-1",
@@ -241,15 +248,19 @@ def stage_fixture(monkeypatch, *, corrupt_readback=False, untagged_final=False):
             return [] if state["release"] is None else [copy.deepcopy(state["release"])]
         if path == "releases" and body is not None:
             assert body["draft"] is body["prerelease"] is True
-            assert body["tag_name"] == delivery.tag(SOURCE) and body["target_commitish"] == SOURCE
+            assert body["tag_name"] == delivery.tag(SOURCE, android_only=android_only,
+                                                     producer_identity=(101, 1) if android_only else None) and body["target_commitish"] == SOURCE
             assert state["release"] is None
             state["writes"].append("create")
-            state["release"] = release()
+            state["release"] = dict(release(android_only=android_only), **(release_damage or {}))
+            state["release"]["body"] = body["body"]
             state["release"]["html_url"] = "https://github.com/" + delivery.REPO + "/releases/tag/untagged-fixture"
         elif path == "releases/17" and method == "PATCH":
             assert body["draft"] is body["prerelease"] is True
-            assert body["tag_name"] == delivery.tag(SOURCE) and body["target_commitish"] == SOURCE
+            assert body["tag_name"] == delivery.tag(SOURCE, android_only=android_only,
+                                                     producer_identity=(101, 1) if android_only else None) and body["target_commitish"] == SOURCE
             state["patches"].append(body)
+            state["release"]["body"] = body["body"]
             slug = "untagged-fixture-token" if untagged_final else body["tag_name"]
             state["release"]["html_url"] = "https://github.com/" + delivery.REPO + "/releases/tag/" + slug
             for item in state["release"]["assets"]:
@@ -280,7 +291,10 @@ def stage_fixture(monkeypatch, *, corrupt_readback=False, untagged_final=False):
     monkeypatch.setattr(delivery, "download", download)
     monkeypatch.setattr(delivery, "upload", upload)
     monkeypatch.setattr(delivery, "android_files", lambda folder, source: ([folder / delivery.APK, folder / delivery.APK_REPORT], {"same_process": True}))
-    monkeypatch.setattr(delivery, "ios_files", lambda folder, source: ([folder / delivery.ipa_name(source), folder / delivery.ipa_name(source).replace(".ipa", ".report.json")], {"same_process": True}))
+    def ios_files(folder, source):
+        assert not android_only, "Android-only staging must never inspect or require an IPA"
+        return [folder / delivery.ipa_name(source), folder / delivery.ipa_name(source).replace(".ipa", ".report.json")], {"same_process": True}
+    monkeypatch.setattr(delivery, "ios_files", ios_files)
     return state
 
 
@@ -319,3 +333,212 @@ def test_readback_failure_never_patches_publishes_or_uploads_later_assets(tmp_pa
     assert state["patches"] == [] and state["release"]["draft"] is True
     proof = json.loads((tmp_path / "work/draft-staging-proof.json").read_text())
     assert proof["stage"] == "stopped" and proof["published"] is False
+
+
+def actions_context(monkeypatch, *, android_only):
+    values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": delivery.REPO, "GITHUB_SHA": SOURCE,
+              "GITHUB_REF": delivery.BRANCH, "GITHUB_WORKFLOW_REF": delivery.REPO + "/" + delivery.WORKFLOW + "@" + delivery.BRANCH,
+              "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_RUN_ID": "101", "GITHUB_RUN_ATTEMPT": "2",
+              "GITHUB_JOB": "android-draft-stage" if android_only else "draft-stage", "ANDROID_ARTIFACT_ID": "23"}
+    for key, value in values.items():monkeypatch.setenv(key, value)
+    monkeypatch.delenv("IOS_ARTIFACT_ID", raising=False)
+    if not android_only:monkeypatch.setenv("IOS_ARTIFACT_ID", "24")
+
+
+def test_android_context_accepts_only_the_dedicated_current_source_job_without_ipa(monkeypatch):
+    actions_context(monkeypatch, android_only=True)
+    assert delivery.context(SOURCE, android_only=True) == (101, 2)
+    with pytest.raises(ValueError, match="staging_job_not_allowed"):
+        delivery.context(SOURCE)
+    for key, value in (("GITHUB_JOB", "draft-stage"), ("GITHUB_SHA", "b" * 40), ("GITHUB_REPOSITORY", "foreign/repo"),
+                       ("GITHUB_EVENT_NAME", "pull_request"), ("GITHUB_REF", "refs/heads/main"),
+                       ("GITHUB_RUN_ATTEMPT", "0"), ("ANDROID_ARTIFACT_ID", "")):
+        with monkeypatch.context() as scoped:
+            scoped.setenv(key, value)
+            with pytest.raises(ValueError):delivery.context(SOURCE, android_only=True)
+    actions_context(monkeypatch, android_only=False)
+    assert delivery.context(SOURCE) == (101, 2)
+    with pytest.raises(ValueError, match="staging_job_not_allowed"):
+        delivery.context(SOURCE, android_only=True)
+
+
+def test_android_only_producer_context_cannot_be_used_for_combined_or_recovery_delivery():
+    android = delivery.ProducerContext(101, 2, (("android", 23, "b" * 64),))
+    assert delivery.producer_context_gate(android, android_only=True) == android
+    with pytest.raises(ValueError, match="explicit_artifact_context_required"):
+        delivery.producer_context_gate(android)
+    combined = delivery.ProducerContext(101, 2, (("android", 23, "b" * 64), ("ios", 24, "c" * 64)))
+    assert delivery.producer_context_gate(combined) == combined
+    with pytest.raises(ValueError, match="explicit_artifact_context_required"):
+        delivery.producer_context_gate(combined, android_only=True)
+
+
+@pytest.mark.parametrize("untagged", [False, True])
+def test_android_first_stages_four_fully_read_back_assets_without_claiming_ipa_or_execution(tmp_path, monkeypatch, untagged):
+    state = stage_fixture(monkeypatch, android_only=True, untagged_final=untagged)
+    monkeypatch.delenv("IOS_ARTIFACT_ID", raising=False)
+    monkeypatch.delenv("IOS_ARTIFACT_SHA", raising=False)
+    proof = delivery.stage_android(SOURCE, tmp_path / "android-work")
+    assert proof["tag"] == "android-mp4-preview-" + delivery.VERSION + "-" + SOURCE[:7] + "-r101-a1"
+    assert proof["tag"] != delivery.tag(SOURCE)
+    assert proof["stage"] == "verified_exact_draft" and proof["published"] is False
+    assert proof["scope"] == "android-only"
+    assert len(proof["verified_assets"]) == 4
+    assert {row["name"] for row in proof["verified_assets"]} == {
+        delivery.APK, delivery.APK_REPORT, delivery.ANDROID_VERIFICATION, "SHA256SUMS"}
+    assert all(row["complete_download_verified"] is True for row in proof["verified_assets"])
+    assert set(proof["artifacts"]) == {"android"}
+    assert "actions/artifacts/24" not in state["requests"]
+    assert len(state["patches"]) == 1
+    assert state["patches"][0]["draft"] is state["patches"][0]["prerelease"] is True
+    manifest = json.loads((tmp_path / "android-work" / delivery.ANDROID_VERIFICATION).read_text())
+    assert manifest["scope"] == "android-only" and set(manifest["checks"]) == {"android"}
+    for key in ("ios_package_verified", "core_runtime_execution_verified", "device_execution_verified", "actual_game_mv_verified"):
+        assert manifest[key] is False
+    assert manifest["producer_run_id"] == 101 and manifest["producer_run_attempt"] == 1
+    assert manifest["codec_workflow"]["source_commit"] == SOURCE
+    assert "ios" not in manifest["background"]
+    assert (tmp_path / "android-work/android-draft-staging-proof.json").is_file()
+    assert not (tmp_path / "android-work/draft-staging-proof.json").exists()
+    assert (tmp_path / "android-work/SHA256SUMS").read_text() == "".join(
+        f"{delivery.sha(tmp_path / 'android-work' / name) if name == delivery.ANDROID_VERIFICATION else delivery.sha(tmp_path / 'android-work/android' / name)}  {name}\n"
+        for name in sorted((delivery.APK, delivery.APK_REPORT, delivery.ANDROID_VERIFICATION)))
+
+
+@pytest.mark.parametrize("damage", [{"head_sha": "b" * 40}, {"head_repository": {"full_name": "foreign/repo"}},
+                                    {"id": 100}, {"path": ".github/workflows/foreign.yml"}])
+def test_android_first_rejects_foreign_or_stale_source_before_release_mutation(tmp_path, monkeypatch, damage):
+    state = stage_fixture(monkeypatch, android_only=True, producer_damage=damage)
+    with pytest.raises(ValueError, match="producer_run_source_differs"):
+        delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["writes"] == [] and state["patches"] == []
+
+
+@pytest.mark.parametrize("damage", [{"draft": False}, {"published_at": "2026-11-21"}, {"target_commitish": "b" * 40},
+                                    {"upload_url": "https://uploads.github.com/repos/foreign/repo/releases/17/assets{?name,label}"}])
+def test_android_first_never_uploads_to_foreign_published_or_wrong_source_release(tmp_path, monkeypatch, damage):
+    state = stage_fixture(monkeypatch, android_only=True, release_damage=damage)
+    with pytest.raises(ValueError):delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["writes"] == ["create"] and state["patches"] == []
+
+
+def test_android_first_rejects_previous_attempt_draft_before_upload(tmp_path, monkeypatch):
+    state = stage_fixture(monkeypatch, android_only=True, existing_attempt=2)
+    with pytest.raises(ValueError, match="android_draft_producer_attempt_differs"):
+        delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["writes"] == [] and state["patches"] == []
+
+
+def test_android_first_resumes_only_same_attempt_exact_asset_bytes(tmp_path, monkeypatch):
+    state = stage_fixture(monkeypatch, android_only=True, existing_attempt=1)
+    state["bytes"][999] = b"apk"
+    state["release"]["assets"] = [{"id":999,"name":delivery.APK,"size":3,"state":"uploaded",
+                                   "digest":"sha256:" + hashlib.sha256(b"apk").hexdigest()}]
+    proof = delivery.stage_android(SOURCE, tmp_path / "work")
+    assert proof["stage"] == "verified_exact_draft"
+    assert len(proof["verified_assets"]) == 4
+    assert len(state["writes"]) == 3 and "upload:" + delivery.APK not in state["writes"]
+
+
+@pytest.mark.parametrize("damage", [{"id":22}, {"digest":"sha256:" + "f" * 64}, {"expired":True},
+    {"name":"mp4-android-preview-" + SOURCE + "-2"}, {"workflow_run":{"id":100,"head_sha":SOURCE}},
+    {"workflow_run":{"id":101,"head_sha":"b" * 40}}])
+def test_android_first_checks_authoritative_artifact_id_digest_source_and_attempt(tmp_path, monkeypatch, damage):
+    state = stage_fixture(monkeypatch, android_only=True)
+    api = delivery.api
+    def damaged(path, **kwargs):
+        value = api(path, **kwargs)
+        return {**value, **damage} if path == "actions/artifacts/23" else value
+    monkeypatch.setattr(delivery, "api", damaged)
+    with pytest.raises(ValueError, match="artifact_source_or_identity_differs"):
+        delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["writes"] == [] and state["patches"] == []
+
+
+def test_android_first_rejects_failed_package_source_checks_before_any_release_api(tmp_path, monkeypatch):
+    state = stage_fixture(monkeypatch, android_only=True)
+    def invalid_package(folder, source):raise ValueError("source_bytes_changed")
+    monkeypatch.setattr(delivery, "android_files", invalid_package)
+    with pytest.raises(ValueError, match="source_bytes_changed"):
+        delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["writes"] == [] and not any(path.startswith("releases") for path in state["requests"])
+
+
+def test_android_draft_cannot_absorb_combined_assets_or_combined_tag_urls():
+    names = {delivery.APK, delivery.APK_REPORT, delivery.ANDROID_VERIFICATION, "SHA256SUMS"}
+    wrong = release(android_only=True)
+    wrong["assets"] = [{"id":42,"name":delivery.ipa_name(SOURCE)}]
+    with pytest.raises(ValueError, match="draft_unknown_or_duplicate_assets"):
+        delivery.release_gate(wrong, SOURCE, names, android_only=True, producer_identity=(101, 1))
+    with pytest.raises(ValueError, match="final_draft_url_invalid"):
+        delivery.final_page_url("https://github.com/" + delivery.REPO + "/releases/tag/" + delivery.tag(SOURCE),
+                                SOURCE, android_only=True, producer_identity=(101, 1))
+    with pytest.raises(ValueError, match="final_asset_url_invalid"):
+        delivery.final_asset_url("https://github.com/" + delivery.REPO + "/releases/download/" + delivery.tag(SOURCE) + "/" + delivery.APK,
+                                 SOURCE, delivery.APK, android_only=True, producer_identity=(101, 1))
+
+
+def test_android_producer_tags_separate_same_source_attempts_and_independent_runs(monkeypatch):
+    contexts = ((101, 1), (101, 2), (102, 1))
+    tags = {identity:delivery.tag(SOURCE, android_only=True, producer_identity=identity) for identity in contexts}
+    assert len(set(tags.values())) == 3
+    assert delivery.tag(SOURCE) not in tags.values()
+    assert tags[(101, 1)].endswith("-r101-a1") and tags[(101, 2)].endswith("-r101-a2")
+    old = release(android_only=True)
+    calls = []
+    def api(path, **kwargs):
+        calls.append(path)
+        assert path == "releases?per_page=100&page=1", "A new producer must not fetch or reuse the old producer's release"
+        return [old]
+    monkeypatch.setattr(delivery, "api", api)
+    for identity in contexts[1:]:
+        assert delivery.find_draft(SOURCE, {delivery.APK}, android_only=True, producer_identity=identity) is None
+        with pytest.raises(ValueError, match="exact_unpublished_draft_required"):
+            delivery.release_gate(old, SOURCE, {delivery.APK}, android_only=True, producer_identity=identity)
+    assert calls == ["releases?per_page=100&page=1"] * 2
+
+
+@pytest.mark.parametrize("identity", [None, (101, True), (0, 1), [101, 1], (101,), ("101", 1)])
+def test_android_namespace_requires_exact_positive_producer_identity_before_any_api(monkeypatch, identity):
+    def forbidden(*args, **kwargs):raise AssertionError("Missing producer context must fail before API access")
+    monkeypatch.setattr(delivery, "api", forbidden)
+    for action in (lambda:delivery.tag(SOURCE, android_only=True, producer_identity=identity),
+                   lambda:delivery.tag_source_gate(SOURCE, android_only=True, producer_identity=identity),
+                   lambda:delivery.find_draft(SOURCE, {delivery.APK}, android_only=True, producer_identity=identity)):
+        with pytest.raises(ValueError, match="android_producer_identity_required"):action()
+
+
+def test_android_first_readback_failure_keeps_draft_and_stops_all_later_assets(tmp_path, monkeypatch):
+    state = stage_fixture(monkeypatch, android_only=True, corrupt_readback=True)
+    with pytest.raises(ValueError, match="readback"):
+        delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["writes"] == ["create", "upload:" + delivery.APK]
+    assert state["patches"] == [] and state["release"]["draft"] is True
+    proof = json.loads((tmp_path / "work/android-draft-staging-proof.json").read_text())
+    assert proof["stage"] == "stopped" and proof["published"] is False
+
+
+def test_android_first_waits_for_current_source_codec_gate_before_any_release_api(tmp_path, monkeypatch):
+    state = stage_fixture(monkeypatch, android_only=True)
+    def failed(source):
+        assert source == SOURCE
+        raise ValueError("current_source_codec_workflow_failed")
+    monkeypatch.setattr(delivery, "wait_codecs", failed)
+    with pytest.raises(ValueError, match="current_source_codec_workflow_failed"):
+        delivery.stage_android(SOURCE, tmp_path / "work")
+    assert state["requests"] == [] and state["writes"] == []
+
+
+def test_android_first_job_has_only_android_dependency_and_distinct_proof_without_context_spoofing():
+    raw = (delivery.ROOT / delivery.WORKFLOW).read_text()
+    job = raw.split("  android-draft-stage:\n", 1)[1].split("  ios-build:\n", 1)[0]
+    assert "needs: [android-build]" in job and "ios-build" not in job
+    assert "github.event_name == 'push' || inputs.upload_draft" in job
+    assert "stage-android --source" in job
+    assert "ANDROID_ARTIFACT_ID: ${{ needs.android-build.outputs.artifact_id }}" in job
+    assert "ANDROID_ARTIFACT_SHA: ${{ needs.android-build.outputs.artifact_sha }}" in job
+    assert "IOS_ARTIFACT_ID" not in job and "GITHUB_JOB:" not in job
+    assert "mp4-android-draft-proof-${{ github.sha }}-${{ github.run_attempt }}" in job
+    assert "android-draft-staging-proof.json" in job
+    assert "contents: write" in job and "actions: read" in job
+    assert "tests/test_mp4_runtime_type_validation.py" in raw

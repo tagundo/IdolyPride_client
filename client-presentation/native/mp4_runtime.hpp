@@ -152,7 +152,7 @@ struct Job {
     char request_hex[33]{},request_name[48]{},response_name[48]{},bundle_name[48]{},bundle_path[path_capacity]{};
     uint8_t request_id[16]{};size_t clip=0;
     uint64_t total_audio=0,total_frames=0,frame=0,mixed=0,start_sample=0,source_offset=0,clip_frames=0;
-    uint32_t rate=0;int pcm=-1;uint8_t*rgba=nullptr,*output_rgba=nullptr;size_t rgba_capacity=0,output_capacity=0;
+    uint32_t rate=0;int pcm=-1;uint8_t*rgba=nullptr;size_t rgba_capacity=0;
     float source[8192*2]{},mixed_pcm[8192*2]{};
     uint64_t activity=0,last_encoder_progress=0;
     struct stat pcm_identity{},bundle_identity{};
@@ -176,7 +176,8 @@ inline bool cleanup_bundle(){if(!game.private_audio_quiescent())return false;if(
 inline void terminal(const char* error,bool cancelled=false) {
     if(job.stage==Stage::idle||job.stage==Stage::retiring)return;
     job.terminal_success=false;job.terminal_cancel=cancelled;stable_error(error);
-    game.restore();if(job.encoder)job.api.cancel(job.encoder);
+    if(game.restore()!=Result::ok)stable_error(game.last_error());
+    if(job.encoder)job.api.cancel(job.encoder);
     job.stage=Stage::retiring;phase(cancelled?"cancelling":"failed");
 }
 inline bool valid_options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)&&idoly_mp4_output::bitrate(o.bitrate)&&o.audio_bitrate==192000&&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height);}
@@ -253,11 +254,17 @@ inline bool begin_job() {
     if(!job.api.valid()){terminal("platform_encoder_unavailable");return true;}
     if(!active_broker()){terminal("audio_broker_retired");return true;}
     if(probe_readiness(job.snapshot)!=Result::ok){terminal(readiness_error);return true;}
+    int32_t source_width=0,source_height=0;const Result geometry=game.source_geometry(source_width,source_height);
+    uint32_t output_width=job.options.output_width,output_height=job.options.output_height;
+    if(geometry==Result::ok&&!idoly_mp4_output::resolved_dimensions(source_width,source_height,output_width,output_height,output_width,output_height)){
+        terminal("output_geometry_invalid");return true;
+    }
     if(game.begin_manual()!=Result::ok){terminal(game.last_error());return true;}
-    if(job.options.output_width){
-        const Result resized=game.set_output_geometry(job.options.output_width,job.options.output_height);
-        if(resized==Result::ok){job.expected_width=job.options.output_width;job.expected_height=job.options.output_height;}
-        else if(resized!=Result::unsupported){terminal(game.last_error());return true;}
+    const bool normalize_odd=geometry==Result::ok&&((source_width&1)||(source_height&1));
+    if(job.options.output_width||normalize_odd){
+        if(!output_width||!output_height){terminal("output_render_geometry_unavailable");return true;}
+        if(game.set_output_geometry(output_width,output_height)!=Result::ok){terminal(game.last_error());return true;}
+        job.expected_width=output_width;job.expected_height=output_height;
     }
     for(size_t i=0;i<job.snapshot.audio.count;++i){const auto& c=job.snapshot.audio.clips[i];if(!c.muted&&c.track_gain*c.clip_gain*c.source_gain>0){if(!job.rate)job.rate=static_cast<uint32_t>(c.sample_rate);if(job.rate!=static_cast<uint32_t>(c.sample_rate)){terminal("mixed_sample_rates_unsupported");return true;}}}
     if(!job.rate){terminal("selected_mv_has_no_audible_music");return true;}
@@ -377,10 +384,8 @@ inline void request_frame() {
     if(!job.status.video_bitrate){terminal("invalid_export_options");return;}
     const size_t needed=static_cast<size_t>(width)*static_cast<size_t>(height)*4;
     if(!job.rgba){job.rgba=static_cast<uint8_t*>(malloc(needed));job.rgba_capacity=needed;if(!job.rgba){terminal("frame_buffer_allocation_failed");return;}}
-    if((job.status.width!=static_cast<uint32_t>(width)||job.status.height!=static_cast<uint32_t>(height))&&!job.output_rgba){
-        job.output_capacity=static_cast<size_t>(job.status.width)*job.status.height*4;
-        job.output_rgba=static_cast<uint8_t*>(malloc(job.output_capacity));
-        if(!job.output_rgba){terminal("output_buffer_allocation_failed");return;}
+    if(job.status.width!=static_cast<uint32_t>(width)||job.status.height!=static_cast<uint32_t>(height)){
+        terminal("output_render_geometry_mismatch");return;
     }
     if(!job.encoder){IDMP4EncoderConfig c{};c.struct_size=sizeof(c);c.abi_version=1;c.width=job.status.width;c.height=job.status.height;c.fps_num=job.options.fps_num;c.fps_den=job.options.fps_den;c.video_codec=job.options.codec;c.video_bitrate=job.status.video_bitrate;c.audio_sample_rate=job.rate;c.audio_channels=2;c.audio_bitrate=job.options.audio_bitrate;c.audio_sample_frames=job.total_audio;c.video_frame_count=job.total_frames;c.pcm_f32_path=job.pcm_path;c.partial_path=job.partial_path;c.final_path=job.final_path;char error[192]{};job.encoder=job.api.create(&c,error,sizeof(error));if(!job.encoder){terminal(error);return;}}
     job.captured=false;job.stage=Stage::frame_wait;progress();publish();
@@ -394,7 +399,8 @@ inline void encoder_poll() {
     if(count!=job.last_encoder_progress){job.last_encoder_progress=count;progress();}
     if(s.phase==IDMP4_FAILED){terminal(s.error_code);return;}
     if(s.phase==IDMP4_CANCELLED&&job.stage!=Stage::retiring){terminal("encoder_cancelled",true);return;}
-    if(s.phase==IDMP4_COMPLETED&&job.stage==Stage::finishing){job.terminal_success=true;job.stage=Stage::retiring;game.restore();phase("finishing");}
+    if(s.phase==IDMP4_COMPLETED&&job.stage==Stage::finishing){job.terminal_success=true;job.stage=Stage::retiring;
+        if(game.restore()!=Result::ok){job.terminal_success=false;stable_error(game.last_error());}phase("finishing");}
 }
 inline void retire() {
     if(!retire_pending_audio())return;
@@ -403,7 +409,6 @@ inline void retire() {
     if(job.pcm>=0){close(job.pcm);job.pcm=-1;}
     if(job.pcm_owned)unlink_owned(job.config.exports,job.pcm_name,job.pcm_identity);
     if(job.rgba){free(job.rgba);job.rgba=nullptr;}
-    if(job.output_rgba){free(job.output_rgba);job.output_rgba=nullptr;}
     close_configuration(job.config);
     job.stage=Stage::idle;phase(job.terminal_success?"completed":job.terminal_cancel?"cancelled":"failed");
     pthread_mutex_lock(&control_mutex);control_busy=false;cancel_pending=false;pthread_mutex_unlock(&control_mutex);
@@ -465,9 +470,8 @@ inline void on_unity_tick() {
         case Stage::frame_request:request_frame();break;
         case Stage::frame_wait:if(job.captured){size_t count=0;int32_t w=0,h=0;Result r=game.readback_rgba(job.rgba,job.rgba_capacity,count,w,h);if(r==Result::ok){
             if(static_cast<uint32_t>(w)!=job.status.source_width||static_cast<uint32_t>(h)!=job.status.source_height||count!=job.rgba_capacity){terminal("capture_geometry_changed");break;}
-            if(job.output_rgba&&!idoly_mp4_output::resample_rgba(job.rgba,count,static_cast<uint32_t>(w),static_cast<uint32_t>(h),job.output_rgba,job.output_capacity,job.status.width,job.status.height)){terminal("output_resize_failed");break;}
             job.stage=Stage::frame_submit;progress();}else if(r!=Result::waiting)terminal(game.last_error());}break;
-        case Stage::frame_submit:{int r=job.api.append(job.encoder,job.output_rgba?job.output_rgba:job.rgba,static_cast<size_t>(job.status.width)*4,job.frame);if(r==IDMP4_ACCEPTED){++job.frame;job.status.frames=job.frame;job.stage=Stage::frame_request;progress();}else if(r!=IDMP4_RETRY)terminal("encoder_frame_rejected");break;}
+        case Stage::frame_submit:{int r=job.api.append(job.encoder,job.rgba,static_cast<size_t>(job.status.width)*4,job.frame);if(r==IDMP4_ACCEPTED){++job.frame;job.status.frames=job.frame;job.stage=Stage::frame_request;progress();}else if(r!=IDMP4_RETRY)terminal("encoder_frame_rejected");break;}
         case Stage::finishing:break;
         case Stage::retiring:retire();break;
         default:break;

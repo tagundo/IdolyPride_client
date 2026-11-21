@@ -31,6 +31,8 @@ void* ptr(Obj* o){return o?o->mem.data():nullptr;}
 template<class T>void write(Obj* o,size_t at,T value){std::memcpy(o->mem.data()+at,&value,sizeof(value));}
 Obj *presenter,*player,*controller,*director,*timeline,*camera_controller,*camera,*wrapper,*rt,*bgm,*voice,*source_clip,*private_clip,*bundle,*request,*track,*clip,*camera_track,*brain,*actor_controller,*animation_player;
 int mode=0,evals=0,unloads=0,destroys=0,graph_steps=0,graph_variant=0,actor_mode=1,actor_steps=0,actor_resets=0,audio_state=2,audio_load_calls=0;bool actor_mode_known=true;GameAdapter* clock_game=nullptr;int camera_steps=0,camera_resets=0;bool camera_clock_healthy=true;double time_value=13.25;bool custom=false,done=false,load_ok=true;float shader=4,bgm_volume=.6f,voice_volume=.4f;void* active=nullptr;
+bool rebuild_actor_on_reset=false,transition_during_evaluate=false,transition_during_resize_restore=false;unsigned geometry_cleanup_calls=0;
+void take_over_scene(){timeline=make("UnityEngine.Timeline.TimelineAsset");time_value=9;mode=2;bgm_volume=.3f;voice_volume=.7f;actor_mode=2;custom=true;shader=77;}
 bool istype(void* p,const char* type){auto it=objects.find(p);return it!=objects.end()&&it->second->type==type;}
 bool alive(void* p){return p&&objects.count(p);}
 uint32_t retain(void* p){if(!p)return 0;handles[serial]=p;return serial++;}
@@ -51,13 +53,13 @@ double duration(void*,Method*){return 122;}
 int32_t get_mode(void*,Method*){return mode;}
 void set_mode(void*,int32_t n,Method*){mode=n;}
 void set_time(void*,double n,Method*){time_value=n;}
-void evaluate(void*,Method*){++evals;}
+void evaluate(void*,Method*){++evals;if(transition_during_evaluate)take_over_scene();}
 void get_graph(void*,PlayableGraph* out,Method*){out->handle=reinterpret_cast<void*>(0x1234);out->version=7;}
 void graph_step(PlayableGraph* graph,float dt,Method*){if(graph->handle==reinterpret_cast<void*>(0x2222)){assert(actor_mode==3);if(dt>0)++actor_steps;return;}++graph_steps;if(graph_variant==0)time_value+=dt;else if(graph_variant==2)time_value+=dt*2;}
 void graph_mode(PlayableGraph* graph,int32_t mode,Method*){assert(graph->handle==reinterpret_cast<void*>(0x2222));actor_mode=mode;}
 bool graph_valid(PlayableGraph* graph,Method*){return graph->handle!=nullptr;}
 bool recorded_mode(const PlayableGraph* graph,int32_t* out){if(!actor_mode_known||graph->handle!=reinterpret_cast<void*>(0x2222))return false;*out=1;return true;}
-void reset_player(void*,float t,Method*){time_value=t;++evals;++actor_resets;}
+void reset_player(void*,float t,Method*){time_value=t;++evals;++actor_resets;if(rebuild_actor_on_reset){write(animation_player,0x28,PlayableGraph{reinterpret_cast<void*>(0x3333),10,0});actor_mode=2;}}
 void* tracks(void*,Method*){auto* a=make("array");a->array_kind=1;a->pointers={ptr(track),ptr(camera_track)};return ptr(a);}
 void* clips(void*,Method*){auto* a=make("array");a->array_kind=1;a->pointers={ptr(clip)};return ptr(a);}
 int32_t samples(void*,Method*){return 8;}int32_t channels(void*,Method*){return 2;}int32_t frequency(void*,Method*){return 48000;}
@@ -74,7 +76,8 @@ void unload(void*,bool all,Method*){assert(all);++unloads;}
 void capture(void*,Method*){}
 int32_t capture_width=16,capture_height=16,source_width=4096,source_height=2458;
 std::vector<std::array<int32_t,2>> geometry_calls;bool geometry_resize_good=true;
-bool resize_output(void* value,int32_t w,int32_t h){assert(value==ptr(camera_controller));geometry_calls.push_back({w,h});return geometry_resize_good||(!w&&!h);}
+bool resize_output(void* value,int32_t w,int32_t h){if(!value){assert(!w&&!h);++geometry_cleanup_calls;return true;}assert(value==ptr(camera_controller));geometry_calls.push_back({w,h});if(!w&&!h&&transition_during_resize_restore)take_over_scene();return geometry_resize_good||(!w&&!h);}
+bool project_output(void* value,bool){assert(value==ptr(camera_controller));return true;}
 int32_t width(void*,Method*){return capture_width;}int32_t height(void*,Method*){return capture_height;}
 int32_t format_value=4;int32_t format(void*,Method*){return format_value;}bool srgb(void*,Method*){return true;}
 void* active_get(Method*){return active;}void active_set(void* p,Method*){active=p;}
@@ -97,7 +100,7 @@ int main(){
     setup();camera_track=make(".CinemachineTrack");brain=make("Cinemachine.CinemachineBrain");write(brain,0x30,int32_t(2));write(brain,0x34,int32_t(0));
     write(presenter,0xe0,ptr(player));write(player,0x38,ptr(controller));write(controller,0x20,ptr(director));write(player,0x28,ptr(bgm));write(player,0x30,ptr(voice));write(camera_controller,0x50,ptr(camera));write(camera_controller,0xa0,ptr(wrapper));write(wrapper,0x10,ptr(rt));
     auto* ap=make("UnityEngine.Timeline.AudioPlayableAsset");auto* props=make("UnityEngine.Timeline.AudioMixerProperties");auto* cp=make("UnityEngine.Timeline.AudioClipProperties");write(props,0x10,1.f);write(cp,0x10,1.f);write(track,0xa0,ptr(props));write(clip,0x28,ptr(ap));write(ap,0x18,ptr(source_clip));write(ap,0x28,ptr(cp));write(clip,0x18,2.0);write(clip,0x20,0.0);write(clip,0x30,116.0);write(clip,0x38,1.0);write(clip,0x58,-1.0);write(clip,0x60,-1.0);
-    Api selected_api=api();selected_api.camera_pixel_width=logical_width;selected_api.camera_pixel_height=logical_height;selected_api.source_geometry=actual_source_geometry;selected_api.output_geometry=resize_output;
+    Api selected_api=api();selected_api.camera_pixel_width=logical_width;selected_api.camera_pixel_height=logical_height;selected_api.source_geometry=actual_source_geometry;selected_api.output_geometry=resize_output;selected_api.output_projection=project_output;
     GameAdapter a(selected_api);clock_game=&a;a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));Snapshot s{};assert(a.snapshot(s)==Result::ok);assert(s.audio.count==1&&s.audio.clips[0].start_seconds==2&&s.duration_seconds==122&&s.audio.clips[0].source_gain==.6f&&!s.procedural_physics_determinism_proven);
     int32_t actual_width=0,actual_height=0;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4096&&actual_height==2458);
     source_width=4095;source_height=2457;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4095&&actual_height==2457);
@@ -131,6 +134,35 @@ int main(){
     assert(a.set_output_geometry(3840,2160)==Result::failed);
     a.reset_observations();assert(geometry_calls.size()==4&&geometry_calls.back()[0]==0&&geometry_calls.back()[1]==0&&handles.empty());
     a.reset_observations();assert(geometry_calls.size()==4);
+    const auto normal_scene=[&](){mode=0;time_value=13.25;bgm_volume=.6f;voice_volume=.4f;actor_mode=1;custom=false;shader=4;
+        write(animation_player,0x28,PlayableGraph{reinterpret_cast<void*>(0x2222),9,0});geometry_resize_good=true;};
+    const auto observe=[&](){a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));assert(a.snapshot(s)==Result::ok);};
+    // Rebuilding only an actor graph must still roll back this same director,
+    // camera and audio state, while never writing the actor's replacement graph.
+    normal_scene();observe();rebuild_actor_on_reset=true;
+    assert(a.begin_manual()==Result::unsupported&&!std::strcmp(a.last_error(),"actor_graph_rebuilt_during_reset"));
+    assert(mode==0&&time_value==13.25&&bgm_volume==.6f&&voice_volume==.4f&&actor_mode==2&&!custom);
+    rebuild_actor_on_reset=false;a.reset_observations();assert(handles.empty());
+    normal_scene();observe();assert(a.begin_manual()==Result::ok);
+    write(animation_player,0x28,PlayableGraph{reinterpret_cast<void*>(0x3333),10,0});actor_mode=2;
+    assert(a.restore()==Result::ok&&mode==0&&bgm_volume==.6f&&voice_volume==.4f&&actor_mode==2);
+    a.reset_observations();assert(handles.empty());
+    // A reused primary scene (even the same controller/camera addresses) must
+    // receive no saved RT/lens/time/audio writes from the former owner.
+    normal_scene();observe();assert(a.begin_manual()==Result::ok&&a.set_output_geometry(1920,1080)==Result::ok);
+    const auto before_calls=geometry_calls.size();take_over_scene();
+    assert(a.restore()==Result::ok&&geometry_calls.size()==before_calls&&geometry_cleanup_calls==1);
+    assert(mode==2&&time_value==9&&bgm_volume==.3f&&voice_volume==.7f&&actor_mode==2&&custom&&shader==77);
+    a.reset_observations();assert(handles.empty());
+    // Original director evaluation and RT target callbacks may themselves
+    // transition a pooled scene. Recheck ownership after each callback.
+    normal_scene();observe();assert(a.begin_manual()==Result::ok);transition_during_evaluate=true;
+    assert(a.restore()==Result::ok&&mode==2&&time_value==9&&bgm_volume==.3f&&voice_volume==.7f&&actor_mode==2&&custom&&shader==77);
+    transition_during_evaluate=false;a.reset_observations();assert(handles.empty());
+    normal_scene();observe();assert(a.begin_manual()==Result::ok&&a.set_output_geometry(1920,1080)==Result::ok);
+    transition_during_resize_restore=true;
+    assert(a.restore()==Result::ok&&mode==2&&time_value==9&&bgm_volume==.3f&&voice_volume==.7f&&actor_mode==2&&custom&&shader==77);
+    transition_during_resize_restore=false;a.reset_observations();assert(handles.empty());
 }
 '''
 

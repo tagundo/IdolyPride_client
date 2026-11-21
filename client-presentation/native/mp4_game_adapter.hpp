@@ -72,6 +72,9 @@ struct Api {
     // Original controller target resize. A zero pair restores the target
     // dimensions captured by the host; only the owned manual scene may set it.
     bool (*output_geometry)(void*,int32_t,int32_t)=nullptr;
+    // Apply after the original manual Cinemachine update; verify without
+    // writes after rendering. A custom output never falls back to pixel scaling.
+    bool (*output_projection)(void*,bool)=nullptr;
     void* (*director_get_asset)(void*,Method*)=nullptr;
     double (*director_get_time)(void*,Method*)=nullptr;
     double (*director_get_duration)(void*,Method*)=nullptr;
@@ -142,13 +145,14 @@ public:
     void close_private_audio();
     bool camera_delta_override(void* brain,float* output) const { if(!manual_||!camera_evaluating_||brain!=get(brain_)||!output)return false;*output=camera_step_delta_;return true; }
     bool private_audio_quiescent() const { return !audio_request_&&!audio_bundle_&&!audio_clip_; }
-    void restore();
+    Result restore();
     void reset_observations();
     const Snapshot& description() const { return snapshot_; }
     const char* last_error() const { return error_; }
     bool manual() const { return manual_; }
     bool has_source_geometry_probe()const{return api_.source_geometry!=nullptr;}
     bool owned_scene_current()const{return manual_&&identities_current();}
+    bool owned_primary_scene_current()const{return manual_&&primary_scene_current();}
     void* selected_presenter()const {void* value=get(presenter_);return value&&live(value)?value:nullptr;}
     void* selected_player()const {void* presenter=selected_presenter();void* value=field<void*>(presenter,layout_.presenter_player);return type(value,"Solis.Common.SolisLivePlayer")&&live(value)?value:nullptr;}
     Result source_geometry(int32_t& width,int32_t& height)const {
@@ -175,6 +179,7 @@ private:
     bool valid_api() const;
     Result append_track(void* track,const char* track_name,AudioProgram& output);
     bool identities_current() const;
+    bool primary_scene_current() const;
     bool update_camera(float delta);
     Result collect_actor_graphs(void* player);
     bool actor_graphs_current() const;
@@ -182,7 +187,7 @@ private:
     struct ActorGraph { uint32_t player=0;PlayableGraph graph{};int32_t previous_mode=0; };
     ActorGraph actor_graphs_[32]{};size_t actor_graph_count_=0;
     Api api_{}; Layout layout_{}; Snapshot snapshot_{};
-    uint32_t presenter_=0,camera_controller_=0,player_=0,director_=0,brain_=0,bgm_source_=0,voice_source_=0,
+    uint32_t presenter_=0,camera_controller_=0,player_=0,director_=0,timeline_asset_=0,brain_=0,bgm_source_=0,voice_source_=0,
         camera_=0,captured_texture_=0,cpu_texture_=0,
         audio_request_=0,audio_bundle_=0,audio_clip_=0,audio_array_=0;
     AudioClipProgram expected_audio_{};
@@ -195,6 +200,7 @@ private:
     bool audio_cancel_pending_=false,audio_failed_=false;
     float previous_shader_time_=0, previous_bgm_volume_=0, previous_voice_volume_=0;
     const char* error_="none";
+    const char* camera_update_error_="camera_clock_cache_rebase_failed";
 };
 } // namespace idoly_mp4_game
 
@@ -348,7 +354,7 @@ inline Result GameAdapter::snapshot(Snapshot& output) {
     void* bgm=field<void*>(player,layout_.player_bgm_source), *voice=field<void*>(player,layout_.player_voice_source);
     if(!type(bgm,"UnityEngine.AudioSource")||!live(bgm))return fail(Result::waiting,"bgm_source_not_ready");
     if(voice&&(!type(voice,"UnityEngine.AudioSource")||!live(voice)))return fail(Result::invalid,"invalid_voice_source");
-    if(!keep(player_,player)||!keep(director_,director)||!keep(camera_,camera)||!keep(bgm_source_,bgm)
+    if(!keep(player_,player)||!keep(director_,director)||!keep(timeline_asset_,asset)||!keep(camera_,camera)||!keep(bgm_source_,bgm)
         ||(voice&&!keep(voice_source_,voice)))return fail(Result::failed,"managed_handle_allocation_failed");
     if(!voice)drop(voice_source_);
     void* tracks=api_.timeline_get_tracks(asset,nullptr);
@@ -384,19 +390,26 @@ inline Result GameAdapter::snapshot(Snapshot& output) {
     next.actor_graph_count=actor_graph_count_;
     snapshot_=next;output=next;error_="none";return Result::ok;
 }
-inline bool GameAdapter::identities_current() const {
+inline bool GameAdapter::primary_scene_current() const {
     void* presenter=get(presenter_),*player=get(player_),*director=get(director_),*controller=get(camera_controller_);
     if(!presenter||!live(player)||!live(director)||!live(controller))return false;
     if(field<void*>(presenter,layout_.presenter_player)!=player)return false;
     void* timeline=field<void*>(player,layout_.player_director_controller);
     return timeline&&field<void*>(timeline,layout_.controller_master)==director
-        &&field<void*>(controller,layout_.camera_main)==get(camera_)&&actor_graphs_current()
+        &&api_.director_get_asset(director,nullptr)==get(timeline_asset_)
+        &&field<void*>(controller,layout_.camera_main)==get(camera_)
         &&live(get(brain_))&&api_.brain_output_camera(get(brain_),nullptr)==get(camera_);
 }
+inline bool GameAdapter::identities_current() const {return primary_scene_current()&&actor_graphs_current();}
 inline bool GameAdapter::update_camera(float delta) {
     struct Scope { bool& active;Scope(bool& value):active(value){active=true;}~Scope(){active=false;} } scope(camera_evaluating_);
     camera_step_delta_=delta;api_.brain_manual_update(get(brain_),nullptr);
-    return api_.camera_clock_ok();
+    camera_update_error_="camera_clock_cache_rebase_failed";
+    if(!api_.camera_clock_ok())return false;
+    if(output_geometry_applied_&&(!api_.output_projection||!api_.output_projection(get(camera_controller_),true))){
+        camera_update_error_="output_projection_failed";return false;
+    }
+    return true;
 }
 inline Result GameAdapter::begin_manual() {
     if(manual_)return fail(Result::invalid,"export_already_owns_scene");
@@ -431,7 +444,7 @@ inline Result GameAdapter::begin_manual() {
     api_.shader_set_custom(0,nullptr);
     graph_={};api_.director_graph_injected(director,&graph_,nullptr);
     evaluated_time_=0;evaluation_failed_=false;
-    if(!update_camera(-1)){restore();return fail(Result::unsupported,"camera_clock_cache_rebase_failed");}
+    if(!update_camera(-1)){restore();return fail(Result::unsupported,camera_update_error_);}
     if(!graph_.handle||std::fabs(api_.director_get_time(director,nullptr))>1e-4){
         restore();return fail(Result::unsupported,"manual_graph_initialization_failed");
     }
@@ -468,7 +481,7 @@ inline Result GameAdapter::evaluate(double seconds) {
         }
     }
     for(size_t i=0;i<actor_graph_count_;++i)api_.graph_evaluate_injected(&actor_graphs_[i].graph,delta,nullptr);
-    if(!update_camera(delta)){evaluation_failed_=true;return fail(Result::unsupported,"camera_clock_cache_rebase_failed");}
+    if(!update_camera(delta)){evaluation_failed_=true;return fail(Result::unsupported,camera_update_error_);}
     evaluated_time_=seconds;
     api_.shader_set_custom(static_cast<float>(seconds),nullptr);
     return Result::ok;
@@ -477,12 +490,15 @@ inline Result GameAdapter::set_output_geometry(uint32_t width,uint32_t height) {
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
     if(width<16||height<16||width>4096||height>4096||width%2||height%2)
         return fail(Result::invalid,"output_geometry_invalid");
-    if(!api_.output_geometry)return Result::unsupported;
+    if(!api_.output_geometry||!api_.output_projection)
+        return fail(Result::unsupported,"output_render_projection_unavailable");
     // The original resize can fail after it has released the previous target.
     // Always retain restoration responsibility once the callback is entered.
     output_geometry_applied_=true;
     if(!api_.output_geometry(get(camera_controller_),static_cast<int32_t>(width),static_cast<int32_t>(height)))
         return fail(Result::failed,"output_render_geometry_failed");
+    if(!api_.output_projection(get(camera_controller_),true))
+        return fail(Result::failed,"output_projection_failed");
     return Result::ok;
 }
 inline Result GameAdapter::capture_geometry(int32_t& width,int32_t& height) const {
@@ -492,6 +508,8 @@ inline Result GameAdapter::capture_geometry(int32_t& width,int32_t& height) cons
 inline Result GameAdapter::request_capture() {
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
     if(capture_pending_)return fail(Result::invalid,"capture_already_pending");
+    if(output_geometry_applied_&&(!api_.output_projection||!api_.output_projection(get(camera_controller_),true)))
+        return fail(Result::unsupported,"output_projection_failed");
     if(!api_.camera_capture_request||!api_.texture_width||!api_.texture_height)
         return fail(Result::unsupported,"capture_api_unavailable");
     api_.camera_capture_request(get(camera_controller_),nullptr);
@@ -523,6 +541,8 @@ inline Result GameAdapter::readback_rgba(uint8_t* dst,size_t capacity,size_t& by
     bytes=0;width=height=0;
     if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
     if(!capture_pending_||!capture_submitted_)return Result::waiting;
+    if(output_geometry_applied_&&(!api_.output_projection||!api_.output_projection(get(camera_controller_),false)))
+        return fail(Result::unsupported,"output_projection_verification_failed");
     if(!dst||!api_.rt_active_get||!api_.rt_active_set||!api_.new_texture2d||!api_.texture2d_ctor_rgba
         ||!api_.texture2d_read_pixels_injected||!api_.texture2d_raw_data||!api_.object_destroy
         ||!api_.texture_graphics_format||!api_.texture_srgb)
@@ -622,39 +642,54 @@ inline void GameAdapter::close_private_audio() {
     if(void* bundle=get(audio_bundle_))if(api_.bundle_unload)api_.bundle_unload(bundle,true,nullptr);
     drop(audio_bundle_);drop(audio_request_);expected_audio_={};audio_cancel_pending_=false;audio_failed_=false;
 }
-inline void GameAdapter::restore() {
+inline Result GameAdapter::restore() {
     capture_pending_=capture_pass_seen_=capture_submitted_=false;
     close_private_audio();
+    const auto owned=[this](){return manual_&&primary_scene_current();};
+    const auto actor_current=[this](const ActorGraph& entry){
+        void* animation=get(entry.player);
+        const PlayableGraph current=animation&&live(animation)?field<PlayableGraph>(animation,layout_.animation_player_graph):PlayableGraph{};
+        return current.handle==entry.graph.handle&&current.version==entry.graph.version;
+    };
+    bool geometry_restored=true;
     if(output_geometry_applied_){
-        if(void* controller=get(camera_controller_))if(live(controller)&&api_.output_geometry)
-            (void)api_.output_geometry(controller,0,0);
+        // A pooled controller/camera may already belong to another scene.
+        // A null owner clears bridge bookkeeping without any Unity writes.
+        if(api_.output_geometry)geometry_restored=api_.output_geometry(owned()?get(camera_controller_):nullptr,0,0);
         output_geometry_applied_=false;
     }
-    if(manual_){
+    if(owned()){
         if(void* director=get(director_))if(live(director)){
             api_.director_set_time(director,snapshot_.previous_time_seconds,nullptr);
-            api_.director_evaluate(director,nullptr);
-            for(size_t i=0;i<actor_graph_count_;++i)if(api_.graph_valid(&actor_graphs_[i].graph,nullptr))
-                api_.graph_evaluate_injected(&actor_graphs_[i].graph,0,nullptr);
-            api_.director_set_mode(director,snapshot_.previous_update_mode,nullptr);
+            if(owned())api_.director_evaluate(director,nullptr);
+            for(size_t i=0;i<actor_graph_count_&&owned();++i)
+                if(actor_current(actor_graphs_[i])&&api_.graph_valid(&actor_graphs_[i].graph,nullptr))
+                    api_.graph_evaluate_injected(&actor_graphs_[i].graph,0,nullptr);
+            if(owned())api_.director_set_mode(director,snapshot_.previous_update_mode,nullptr);
         }
-        if(live(get(brain_))){
+        if(owned()&&live(get(brain_))){
             (void)update_camera(-1);
-            std::memcpy(static_cast<uint8_t*>(get(brain_))+layout_.brain_update_mode,&previous_brain_update_,sizeof(previous_brain_update_));
-            std::memcpy(static_cast<uint8_t*>(get(brain_))+layout_.brain_blend_update_mode,&previous_brain_blend_,sizeof(previous_brain_blend_));
+            if(owned()){
+                std::memcpy(static_cast<uint8_t*>(get(brain_))+layout_.brain_update_mode,&previous_brain_update_,sizeof(previous_brain_update_));
+                std::memcpy(static_cast<uint8_t*>(get(brain_))+layout_.brain_blend_update_mode,&previous_brain_blend_,sizeof(previous_brain_blend_));
+            }
         }
-        for(size_t i=0;i<actor_graph_count_;++i)if(api_.graph_valid(&actor_graphs_[i].graph,nullptr))
-            api_.graph_set_mode_injected(&actor_graphs_[i].graph,actor_graphs_[i].previous_mode,nullptr);
-        if(void* source=get(bgm_source_))if(live(source))api_.audio_source_set_volume(source,previous_bgm_volume_,nullptr);
-        if(void* source=get(voice_source_))if(live(source))api_.audio_source_set_volume(source,previous_voice_volume_,nullptr);
-        if(shader_was_custom_)api_.shader_set_custom(previous_shader_time_,nullptr);else api_.shader_reset_custom(nullptr);
+        for(size_t i=0;i<actor_graph_count_&&owned();++i)
+            if(actor_current(actor_graphs_[i])&&api_.graph_valid(&actor_graphs_[i].graph,nullptr))
+                api_.graph_set_mode_injected(&actor_graphs_[i].graph,actor_graphs_[i].previous_mode,nullptr);
+        if(owned())if(void* source=get(bgm_source_))if(live(source))api_.audio_source_set_volume(source,previous_bgm_volume_,nullptr);
+        if(owned())if(void* source=get(voice_source_))if(live(source))api_.audio_source_set_volume(source,previous_voice_volume_,nullptr);
+        if(owned()){
+            if(shader_was_custom_)api_.shader_set_custom(previous_shader_time_,nullptr);else api_.shader_reset_custom(nullptr);
+        }
     }
     manual_=false;graph_={};evaluated_time_=0;evaluation_failed_=false;
     if(void* cpu=get(cpu_texture_))if(api_.object_destroy)api_.object_destroy(cpu,nullptr);
     drop(cpu_texture_);drop(captured_texture_);
+    return geometry_restored?Result::ok:fail(Result::failed,"output_restore_failed");
 }
 inline void GameAdapter::reset_observations() {
-    restore();drop(presenter_);drop(camera_controller_);drop(player_);drop(director_);drop(camera_);
+    restore();drop(presenter_);drop(camera_controller_);drop(player_);drop(director_);drop(timeline_asset_);drop(camera_);
     drop(bgm_source_);drop(voice_source_);drop(brain_);drop_actor_graphs();snapshot_={};error_="none";
 }
 } // namespace idoly_mp4_game

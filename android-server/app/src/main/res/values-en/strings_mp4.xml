@@ -37,7 +37,7 @@
     <string name="mp4_resolution_current">Current MV size</string>
     <string name="mp4_width_pixels">Width (pixels)</string>
     <string name="mp4_height_pixels">Height (pixels)</string>
-    <string name="mp4_output_resolution_hint">Changes output size. Different aspect ratios add letterboxing.</string>
+    <string name="mp4_output_resolution_hint">Renders the MV at the selected size and aspect ratio.</string>
     <string name="mp4_bitrate_invalid">Enter a bitrate from 0.1 to 200 Mbps.</string>
     <string name="mp4_resolution_invalid">Enter an even width and height from 16 to 4096.</string>
     <string name="mp4_bitrate_recommendation">Recommended: %1$s Mbps</string>

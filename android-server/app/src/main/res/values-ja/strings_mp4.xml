@@ -37,7 +37,7 @@
     <string name="mp4_resolution_current">現在のMVサイズ</string>
     <string name="mp4_width_pixels">横 (ピクセル)</string>
     <string name="mp4_height_pixels">縦 (ピクセル)</string>
-    <string name="mp4_output_resolution_hint">出力サイズを変更します。縦横比が違う場合は余白を追加します。</string>
+    <string name="mp4_output_resolution_hint">選択した解像度・縦横比でMVを描画します。</string>
     <string name="mp4_bitrate_invalid">ビットレートを0.1～200 Mbpsの数値で入力してください。</string>
     <string name="mp4_resolution_invalid">横・縦をそれぞれ16～4096の偶数で入力してください。</string>
     <string name="mp4_bitrate_recommendation">推奨 %1$s Mbps</string>

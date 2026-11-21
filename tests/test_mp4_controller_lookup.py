@@ -82,12 +82,17 @@ HARNESS = r"""
 #include <unordered_map>
 #include <vector>
 #include <cstdio>
+#include "mp4_type_descriptor.hpp"
+namespace mp4game=idoly_mp4_game;
+using Binding=mp4game::Binding;
 using Method=void;
-struct Binding {uintptr_t rva=0;uint8_t prefix[16]{};};
 struct ControllerProfile {Binding has_instance,instance,metadata_initialize;uintptr_t has_slot=0,instance_slot=0,has_cell=0,instance_cell=0;bool indirect_slots=false;};
 struct RuntimeProfile {Binding camera_status_try_get,array_new,string_new,type_get_object,single_type,audio_clip_type,texture2d_type;};
 struct ReplayProfile {Binding actor_descriptor_type,out_game_param_type,transition_param_type;};
 uintptr_t image_base=0;
+char mp4_binding_error[96]="none";
+mp4game::TypeMetadataProfile mp4_type_metadata_profile=mp4game::android_type_metadata_profile;
+alignas(16) unsigned char type_descriptors[3][16]{};
 bool mp4_source_verified=false,mp4_replay_verified=false,on_unity=true,resolve_cells=true,has_existing=true;
 uintptr_t has_cell=1,instance_cell=3,has_outer=0,instance_outer=0;
 alignas(16) uint64_t has_info[2]{},instance_info[2]{};
@@ -155,6 +160,8 @@ Api mp4_api{get_asset,get_tracks,get_binding,get_camera};
 void reset(bool indirect=true){
     events.clear();initialized=has_calls=instance_calls=cached=0;
     mp4_source_verified=true;mp4_replay_verified=false;on_unity=resolve_cells=has_existing=true;
+    std::snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s","none");
+    mp4_type_metadata_profile=indirect?mp4game::android_type_metadata_profile:mp4game::ios_type_metadata_profile;
     has_cell=1;instance_cell=3;rejected_mapping=rejected_binding=0;
     has_outer=reinterpret_cast<uintptr_t>(&has_cell);instance_outer=reinterpret_cast<uintptr_t>(&instance_cell);
     mp4_controller_profile={};
@@ -169,7 +176,14 @@ void reset(bool indirect=true){
     mp4_bindings[0].rva=7;
     mp4_runtime_profile={};
     Binding* bindings[]={&mp4_runtime_profile.camera_status_try_get,&mp4_runtime_profile.array_new,&mp4_runtime_profile.string_new,&mp4_runtime_profile.type_get_object,&mp4_runtime_profile.single_type,&mp4_runtime_profile.audio_clip_type,&mp4_runtime_profile.texture2d_type};
-    for(size_t i=0;i<7;++i)bindings[i]->rva=10+i;
+    for(size_t i=0;i<4;++i)bindings[i]->rva=10+i;
+    const auto& original=indirect?mp4game::android_runtime_profile:mp4game::ios_runtime_profile;
+    const Binding* original_types[]={&original.single_type,&original.audio_clip_type,&original.texture2d_type};
+    for(size_t i=0;i<3;++i){
+        *bindings[4+i]=*original_types[i];
+        std::memcpy(type_descriptors[i],original_types[i]->prefix,16);
+        bindings[4+i]->rva=reinterpret_cast<uintptr_t>(type_descriptors[i]);
+    }
     mp4_replay_bindings[0].rva=reinterpret_cast<uintptr_t>(replay_bytes);
     mp4_replay_profile={};
     objects.clear();
@@ -186,6 +200,7 @@ void reset(bool indirect=true){
 }
 int main(int argc,char** argv){
     assert(argc==2);std::string test=argv[1];reset();
+    if(test.rfind("ios_",0)==0&&test!="ios_direct_verified"){reset(false);test=test.substr(4);}
     if(test=="verified_existing"){
         assert(mp4_original_current_controller()==ptr(controller));assert(initialized==2&&has_calls==1&&instance_calls==1);
     }else if(test=="unverified"||test=="wrong_thread"){
@@ -233,6 +248,35 @@ int main(int argc,char** argv){
         if(test=="dead_brain")objects.at(ptr(brain)).alive=false;
         if(test=="dead_camera")objects.at(ptr(camera)).alive=false;
         assert(mp4_selected_controller(ptr(presenter))==nullptr&&initialized==0);
+    }else if(test=="descriptor_file_state"||test=="descriptor_resolved_row_state"){
+        if(test=="descriptor_resolved_row_state")for(size_t i=0;i<3;++i){
+            const uintptr_t row=0x70000000+(i+1)*88;
+            std::memcpy(type_descriptors[i],&row,sizeof(row));
+        }
+        // This installer-thread check attests shape only. Exact metadata-row
+        // and class checks remain in the production Unity-thread gate.
+        mp4_verify_original_calls();assert(mp4_source_verified&&mp4_replay_verified);
+        assert(std::strcmp(mp4_binding_error,"none")==0);
+    }else if(test=="descriptor_tail_changed"){
+        Binding* types[]={&mp4_runtime_profile.single_type,&mp4_runtime_profile.audio_clip_type,&mp4_runtime_profile.texture2d_type};
+        for(size_t type=0;type<3;++type)for(size_t byte=8;byte<16;++byte){
+            type_descriptors[type][byte]^=1;
+            mp4_verify_original_calls();assert(!mp4_source_verified);
+            char expected[96]{};std::snprintf(expected,sizeof(expected),"original_mv_type_shape_%llx",static_cast<unsigned long long>(types[type]->rva));
+            assert(std::strcmp(mp4_binding_error,expected)==0);
+            type_descriptors[type][byte]^=1;
+            mp4_verify_original_calls();assert(mp4_source_verified);
+        }
+    }else if(test=="descriptor_unmapped"){
+        rejected_mapping=mp4_runtime_profile.single_type.rva;
+        mp4_verify_original_calls();assert(!mp4_source_verified);
+        char expected[96]{};std::snprintf(expected,sizeof(expected),"original_mv_type_shape_%llx",static_cast<unsigned long long>(rejected_mapping));
+        assert(std::strcmp(mp4_binding_error,expected)==0);
+    }else if(test=="metadata_base_unmapped"||test=="metadata_header_unmapped"){
+        rejected_mapping=test=="metadata_base_unmapped"?mp4_type_metadata_profile.metadata_base_slot:mp4_type_metadata_profile.metadata_header_slot;
+        mp4_verify_original_calls();assert(!mp4_source_verified);
+        char expected[96]{};std::snprintf(expected,sizeof(expected),"original_mv_metadata_slots_%llx",static_cast<unsigned long long>(mp4_type_metadata_profile.metadata_base_slot));
+        assert(std::strcmp(mp4_binding_error,expected)==0);
     }else if(test=="android_outer_verified"||test=="ios_direct_verified"){
         if(test=="ios_direct_verified")reset(false);
         mp4_source_verified=false;mp4_verify_original_calls();assert(mp4_source_verified&&mp4_replay_verified);
@@ -266,7 +310,7 @@ def controller_harness(tmp_path_factory):
     cpp, binary = work / "lookup.cpp", work / "lookup"
     cpp.write_text(HARNESS.replace("@@PRODUCTION@@", functions))
     compile_result = subprocess.run([compiler, "-std=c++17", "-O1", "-Wall", "-Wextra", "-Werror",
-                                     str(cpp), "-o", str(binary)], capture_output=True, text=True, timeout=45)
+                                     "-I", str(ROOT / "client-presentation/native"), str(cpp), "-o", str(binary)], capture_output=True, text=True, timeout=45)
     assert compile_result.returncode == 0, compile_result.stdout + compile_result.stderr
     return binary
 
@@ -276,6 +320,10 @@ def controller_harness(tmp_path_factory):
     "tagged_has", "tagged_instance", "has_false", "wrong_class", "dead", "cold_fallback", "main_current", "candidate_current",
     "wrong_cached_camera", "wrong_original_camera", "camera_changed_after_cache", "ambiguous_timeline_cameras", "no_camera_track",
     "invalid_presenter", "dead_player", "invalid_timeline", "dead_director", "invalid_asset", "dead_brain", "dead_camera",
+    "descriptor_file_state", "descriptor_resolved_row_state", "descriptor_tail_changed", "descriptor_unmapped",
+    "metadata_base_unmapped", "metadata_header_unmapped",
+    "ios_descriptor_file_state", "ios_descriptor_resolved_row_state", "ios_descriptor_tail_changed",
+    "ios_descriptor_unmapped", "ios_metadata_base_unmapped", "ios_metadata_header_unmapped",
     "android_outer_verified", "ios_direct_verified", "wrong_outer_slot", "unmapped_cell", "unmapped_slot",
     "unverified_getter", "unverified_resolver",
 ))

@@ -110,7 +110,7 @@ for(const patch of [{width:0},{height:0},{width:17},{height:4098},{width:true},{
 const options={schema:1,fps:30,video_codec:2,bitrate_mode:'custom',video_bitrate:100000,resolution_mode:'custom',width:1280,height:720};
 for(const patch of [{fps:true},{fps:120},{width:0},{height:17},{video_bitrate:0},{video_bitrate:200000001},{bitrate_mode:'other'},{path:'/tmp/movie.mp4'}])await assert.rejects(bridge.request('mp4_options_save',{options:{...options,...patch}}));
 assert.equal(e.posted.length,0);bridge.dispose();
-for(const source of ['출력 크기','권장값 자동 계산','가로 (픽셀)','세로 (픽셀)','비트레이트는 0.1~200 Mbps로 입력해 주세요.']){
+for(const source of ['출력 크기','권장값 자동 계산','가로 (픽셀)','세로 (픽셀)','비트레이트는 0.1~200 Mbps로 입력해 주세요.','선택한 크기와 화면비로 여백 없이 촬영합니다.']){
  assert.notEqual(api.translateUI(source,'en'),source);assert.notEqual(api.translateUI(source,'ja'),source);
 }
 """)

@@ -33,6 +33,7 @@
 #include "sound_persistence.hpp"
 #include "mp4_game_bindings.hpp"
 #include "mp4_controller_profile.hpp"
+#include "mp4_type_descriptor.hpp"
 #include "mp4_graph_modes.hpp"
 #include "mp4_camera_clock.hpp"
 #include "mp4_replay_profile.hpp"
@@ -801,11 +802,13 @@ constexpr const auto &mp4_profile=mp4game::ios_game_profile;
 constexpr const auto &mp4_runtime_profile=mp4game::ios_runtime_profile;
 constexpr const auto &mp4_bindings=mp4game::ios_game_bindings;
 constexpr const auto &mp4_controller_profile=mp4game::ios_controller_profile;
+constexpr const auto &mp4_type_metadata_profile=mp4game::ios_type_metadata_profile;
 #else
 constexpr const auto &mp4_profile=mp4game::android_game_profile;
 constexpr const auto &mp4_runtime_profile=mp4game::android_runtime_profile;
 constexpr const auto &mp4_bindings=mp4game::android_game_bindings;
 constexpr const auto &mp4_controller_profile=mp4game::android_controller_profile;
+constexpr const auto &mp4_type_metadata_profile=mp4game::android_type_metadata_profile;
 #endif
 mp4game::Api mp4_api;
 pthread_mutex_t mp4_graph_mode_mutex=PTHREAD_MUTEX_INITIALIZER;
@@ -817,12 +820,20 @@ bool mp4_camera_clock_ok();
 bool mp4_recorded_graph_mode(const mp4game::PlayableGraph*,int32_t*);
 bool mp4_source_verified=false,mp4_api_installed=false;
 bool mp4_replay_verified=false;
+char mp4_binding_error[96]="original_mv_bindings_unverified";
 // The game owns the controller and the texture. Exporting only scopes an
 // original UpdateRenderTarget call, then restores the pre-export pixel size.
 Weak mp4_geometry_controller;
+Weak mp4_geometry_camera;
 int32_t mp4_geometry_width=0,mp4_geometry_height=0;
 int32_t mp4_geometry_previous_width=0,mp4_geometry_previous_height=0;
 bool mp4_geometry_active=false;
+struct Mp4Projection {
+    bool saved=false,required_known=false;
+    float reference_aspect=0,base_fov=0,base_focal=0,restore_fov=0,restore_focal=0;
+    bool restore_physical=false;
+    Frustum required{};
+} mp4_projection;
 idoly_mp4_replay_factories::Factory mp4_replay_factory;
 #ifdef IDOLY_DARWIN_BRIDGE
 constexpr const auto& mp4_replay_profile=idoly_mp4_replay::ios_replay_profile;
@@ -876,6 +887,43 @@ bool mp4_prefix(const mp4game::Binding &binding,bool executable=true) {
     return address>=image_base&&mp4_mapped(address,16,executable)
         &&!std::memcmp(reinterpret_cast<void*>(address),binding.prefix,16);
 }
+#ifdef IDOLY_DARWIN_BRIDGE
+extern "C" {
+extern unsigned int mach_task_self_;
+int mach_vm_region(unsigned int,uint64_t*,uint64_t*,int,int*,unsigned int*,unsigned int*);
+int mach_port_deallocate(unsigned int,unsigned int);
+}
+#endif
+bool mp4_readable_memory(uintptr_t address,size_t bytes){
+    if(!address||!bytes||bytes>64*1024*1024||address+bytes<address)return false;
+    const uintptr_t end=address+bytes;uintptr_t cursor=address;
+#ifdef IDOLY_DARWIN_BRIDGE
+    // Public Mach VM query, including metadata mmap regions outside the image.
+    // Only VM_PROT_READ is used from VM_REGION_BASIC_INFO_64 (flavor 9).
+    for(unsigned attempt=0;attempt<64&&cursor<end;++attempt){
+        uint64_t begin=cursor,span=0;int info[16]{};unsigned int count=16,object=0;
+        const int result=mach_vm_region(mach_task_self_,&begin,&span,9,info,&count,&object);
+        if(object)(void)mach_port_deallocate(mach_task_self_,object);
+        if(result||count<1||!(info[0]&1)||begin>cursor||!span||begin+span<begin||begin+span<=cursor)return false;
+        cursor=begin+span<end?begin+span:end;
+    }
+#else
+    // Own-process maps are public on Android. Bound this one-time startup
+    // scan; no profile paths or mapping contents leave the native validator.
+    FILE* maps=fopen("/proc/self/maps","r");if(!maps)return false;
+    char line[512]{};unsigned lines=0;
+    while(cursor<end&&lines++<16384&&fgets(line,sizeof(line),maps)){
+        unsigned long long begin=0,limit=0;char permissions[5]{};
+        if(sscanf(line,"%llx-%llx %4s",&begin,&limit,permissions)!=3)continue;
+        if(begin>cursor)break;
+        if(limit<=cursor)continue;
+        if(permissions[0]!='r')break;
+        cursor=limit<end?static_cast<uintptr_t>(limit):end;
+    }
+    fclose(maps);
+#endif
+    return cursor==end;
+}
 bool mp4_hook_was_statically_verified(const mp4game::Binding &binding) {
 #ifdef IDOLY_DARWIN_BRIDGE
     // verify_static_image checked all patched entry branches and gateways before
@@ -894,34 +942,65 @@ bool mp4_hook_was_statically_verified(const mp4game::Binding &binding) {
 #endif
 }
 void mp4_verify_original_calls() {
-    mp4_source_verified=false;
-    for(const auto &binding:mp4_bindings)
-        if(!mp4_prefix(binding)&&!mp4_hook_was_statically_verified(binding))return;
+    mp4_source_verified=false;mp4_replay_verified=false;
+    auto fail=[](const char* group,uintptr_t rva){
+        snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s_%llx",group,static_cast<unsigned long long>(rva));
+        return false;
+    };
+    auto code=[&](const mp4game::Binding& binding){
+        return mp4_prefix(binding)||mp4_hook_was_statically_verified(binding)
+            ||fail("original_mv_code_prefix",binding.rva);
+    };
+    auto descriptor=[&](const auto& binding){
+        const uintptr_t address=image_base+binding.rva;
+        return (address>=image_base&&mp4_mapped(address,16,false)
+                &&mp4game::type_descriptor_shape(binding,reinterpret_cast<const void*>(address)))
+            ||fail("original_mv_type_shape",binding.rva);
+    };
+    for(const auto &binding:mp4_bindings)if(!code(binding))return;
     const auto &runtime=mp4_runtime_profile;
-    if(!mp4_prefix(runtime.camera_status_try_get)||!mp4_prefix(runtime.array_new)||!mp4_prefix(runtime.string_new)||!mp4_prefix(runtime.type_get_object)
-        ||!mp4_prefix(runtime.single_type,false)||!mp4_prefix(runtime.audio_clip_type,false)
-        ||!mp4_prefix(runtime.texture2d_type,false))return;
+    for(const auto* binding:{&runtime.camera_status_try_get,&runtime.array_new,&runtime.string_new,&runtime.type_get_object})
+        if(!code(*binding))return;
+    // GlobalMetadata.Initialize rewrites every selected descriptor's data
+    // index into a metadata-row pointer. Only its immutable tail is attested
+    // on the installer thread. Exact resolved-row and class identity checks
+    // run below on the original Unity thread before any API is installed.
+    for(const auto* binding:{&runtime.single_type,&runtime.audio_clip_type,&runtime.texture2d_type})
+        if(!descriptor(*binding))return;
+    const auto& metadata=mp4_type_metadata_profile;
+    if(!mp4_mapped(image_base+metadata.metadata_base_slot,sizeof(void*),false)
+            ||!mp4_mapped(image_base+metadata.metadata_header_slot,sizeof(void*),false)){
+        (void)fail("original_mv_metadata_slots",metadata.metadata_base_slot);return;
+    }
     const auto& locator=mp4_controller_profile;
-    if(!mp4_prefix(locator.has_instance)||!mp4_prefix(locator.instance)||!mp4_prefix(locator.metadata_initialize)
-            ||!mp4_mapped(image_base+locator.has_cell,sizeof(void*),false)
-            ||!mp4_mapped(image_base+locator.instance_cell,sizeof(void*),false)
-            ||!mp4_mapped(image_base+locator.has_slot,sizeof(void*),false)
-            ||!mp4_mapped(image_base+locator.instance_slot,sizeof(void*),false))return;
+    if(!code(locator.has_instance)||!code(locator.instance)||!code(locator.metadata_initialize))return;
+    for(uintptr_t rva:{locator.has_cell,locator.instance_cell,locator.has_slot,locator.instance_slot})
+        if(!mp4_mapped(image_base+rva,sizeof(void*),false)){(void)fail("original_mv_controller_slot",rva);return;}
     if(locator.indirect_slots
             &&(read<uintptr_t>(reinterpret_cast<void*>(image_base+locator.has_slot),0)!=image_base+locator.has_cell
-                ||read<uintptr_t>(reinterpret_cast<void*>(image_base+locator.instance_slot),0)!=image_base+locator.instance_cell))return;
+                ||read<uintptr_t>(reinterpret_cast<void*>(image_base+locator.instance_slot),0)!=image_base+locator.instance_cell)){
+        (void)fail("original_mv_controller_link",locator.has_slot);return;
+    }
     mp4_array_new=reinterpret_cast<decltype(mp4_array_new)>(image_base+runtime.array_new.rva);
     mp4_string_new=reinterpret_cast<decltype(mp4_string_new)>(image_base+runtime.string_new.rva);
     mp4_type_get_object=reinterpret_cast<decltype(mp4_type_get_object)>(image_base+runtime.type_get_object.rva);
     mp4_source_verified=true;
+    snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s","none");
     mp4_replay_verified=true;
     for(const auto& binding:mp4_replay_bindings){
         const bool data=binding.rva==mp4_replay_profile.actor_descriptor_type.rva
             ||binding.rva==mp4_replay_profile.out_game_param_type.rva||binding.rva==mp4_replay_profile.transition_param_type.rva;
-        const uintptr_t address=image_base+binding.rva;
-        if(!mp4_mapped(address,16,!data)||std::memcmp(reinterpret_cast<void*>(address),binding.prefix,16))mp4_replay_verified=false;
+        if(data){if(!descriptor(binding))mp4_replay_verified=false;}
+        else {
+            const uintptr_t address=image_base+binding.rva;
+            if(address<image_base||!mp4_mapped(address,16,true)
+                    ||std::memcmp(reinterpret_cast<const void*>(address),binding.prefix,16)){
+                (void)fail("original_mv_replay_code_prefix",binding.rva);mp4_replay_verified=false;
+            }
+        }
     }
 }
+
 bool mp4_type_is(void *object,const char *qualified) {
     if(!object||!qualified)return false;
     const char *name=qualified;const char *separator=nullptr;
@@ -934,6 +1013,43 @@ bool mp4_type_is(void *object,const char *qualified) {
     return *name&&class_matches(object,space,name);
 }
 bool mp4_alive(void *object) { return object&&object_alive(object,nullptr); }
+struct Mp4MetadataRange {uintptr_t base=0;uint32_t offset=0,bytes=0;};
+Mp4MetadataRange mp4_metadata_readable;
+template<class BindingType>
+void* mp4_resolved_type_class(const BindingType& binding,const char* space,const char* name){
+    auto fail=[&](const char* group){
+        snprintf(mp4_binding_error,sizeof(mp4_binding_error),"%s_%llx",group,static_cast<unsigned long long>(binding.rva));
+        return static_cast<void*>(nullptr);
+    };
+    if(!mp4_source_verified||!game_call())return fail("original_mv_type_thread");
+    const auto& profile=mp4_type_metadata_profile;
+    void* base=read<void*>(reinterpret_cast<void*>(image_base+profile.metadata_base_slot),0);
+    void* header=read<void*>(reinterpret_cast<void*>(image_base+profile.metadata_header_slot),0);
+    // Both originals publish this same mapped metadata image as base/header.
+    if(!base||base!=header||(reinterpret_cast<uintptr_t>(base)&3))return fail("original_mv_metadata_not_ready");
+    const uintptr_t first=reinterpret_cast<uintptr_t>(base);
+    if(mp4_metadata_readable.base!=first&&!mp4_readable_memory(first,0xa8))return fail("original_mv_metadata_unreadable");
+    const uint32_t offset=read<uint32_t>(header,0xa0),bytes=read<uint32_t>(header,0xa4);
+    if(!mp4game::type_metadata_layout(profile,read<uint32_t>(header,0),read<uint32_t>(header,4),offset,bytes))
+        return fail("original_mv_metadata_layout");
+    const uintptr_t definitions=first+offset;
+    if(definitions<first||definitions+bytes<definitions)return fail("original_mv_metadata_layout");
+    if(mp4_metadata_readable.base!=first||mp4_metadata_readable.offset!=offset||mp4_metadata_readable.bytes!=bytes){
+        if(!mp4_readable_memory(first,0xa8)||!mp4_readable_memory(definitions,bytes))return fail("original_mv_metadata_unreadable");
+        mp4_metadata_readable={first,offset,bytes};
+    }
+    const uintptr_t address=image_base+binding.rva;
+    if(address<image_base
+            ||!mp4_mapped(address,16,false)
+            ||!mp4game::resolved_type_descriptor(binding,reinterpret_cast<const void*>(address),definitions,bytes))
+        return fail("original_mv_type_row");
+    void* klass=font_class_type(reinterpret_cast<const void*>(address));
+    const char* actual_name=klass?class_name(klass):nullptr;
+    const char* actual_space=klass?class_namespace(klass):nullptr;
+    if(!actual_name||!actual_space||std::strcmp(actual_name,name)||std::strcmp(actual_space,space))
+        return fail("original_mv_type_identity");
+    return klass;
+}
 void* mp4_original_current_controller(){
     if(!mp4_source_verified||!game_call())return nullptr;
     const auto& locator=mp4_controller_profile;
@@ -1010,46 +1126,169 @@ bool mp4_actual_source_geometry(void* controller,int32_t* width,int32_t* height)
     if(!mp4_type_is(texture,"UnityEngine.RenderTexture")||!mp4_alive(texture))return false;
     *width=rt_width(texture,nullptr);*height=rt_height(texture,nullptr);return true;
 }
+// BEGIN_MP4_OUTPUT_PROJECTION
 bool mp4_output_geometry_owned(void* controller){
     return mp4_geometry_active&&controller&&mp4_geometry_controller.get(true)==controller
-        &&idoly_mp4_runtime::game.manual();
+        &&idoly_mp4_runtime::game.owned_primary_scene_current();
+}
+bool mp4_output_projection_owned(void* camera){
+    return camera&&mp4_geometry_camera.get(true)==camera&&mp4_projection.saved
+        &&mp4_output_geometry_owned(mp4_geometry_controller.get(true));
+}
+void mp4_clear_output_geometry(){
+    mp4_geometry_controller.clear();mp4_geometry_camera.clear();mp4_projection=Mp4Projection{};
+    mp4_geometry_active=false;mp4_geometry_width=mp4_geometry_height=0;
+    mp4_geometry_previous_width=mp4_geometry_previous_height=0;
+}
+bool mp4_projection_api_available(){
+    return rt_original&&rt_camera&&camera_rect_get&&orthographic&&physical_get&&fov_get_original&&fov_set_original
+        &&focal_get_original&&focal_set_original&&aspect_get_original&&camera_aspect_set_original&&camera_aspect_reset&&projection_get;
+}
+class Mp4DynamicTargetScope {
+    void* controller_;void* camera_;bool previous_=false,active_=true;
+public:
+    explicit Mp4DynamicTargetScope(void* controller):controller_(controller),camera_(mp4_geometry_camera.get(true)){
+        std::memcpy(&previous_,static_cast<unsigned char*>(controller_)+0x30,sizeof(previous_));
+        const bool disabled=false;std::memcpy(static_cast<unsigned char*>(controller_)+0x30,&disabled,sizeof(disabled));
+    }
+    bool finish(){
+        const bool owned=idoly_mp4_runtime::game.owned_primary_scene_current()
+            &&mp4_geometry_controller.get(true)==controller_&&mp4_geometry_camera.get(true)==camera_
+            &&camera_&&rt_camera(controller_,nullptr)==camera_;
+        if(active_&&owned)std::memcpy(static_cast<unsigned char*>(controller_)+0x30,&previous_,sizeof(previous_));
+        active_=false;return owned;
+    }
+    ~Mp4DynamicTargetScope(){if(active_)finish();}
+};
+bool mp4_remember_output_projection(void* controller,void* camera,int32_t width,int32_t height){
+    if(!mp4_projection_api_available()||!camera||!mp4_alive(camera)||orthographic(camera,nullptr))return false;
+    Rect rect{};camera_rect_get(camera,&rect,nullptr);
+    ProjectionMatrix matrix{};Frustum measured{};projection_get(camera,&matrix,nullptr);
+    const float aspect=aspect_get_original(camera,nullptr),expected=static_cast<float>(width)/height;
+    const float raw=fov_get_original(camera,nullptr),focal=focal_get_original(camera,nullptr);
+    if(!full_rect(rect)||!perspective_frustum(matrix,&measured)||std::fabs(frustum_aspect(measured)-expected)>.005f
+        ||!std::isfinite(aspect)||std::fabs(aspect-expected)>.005f||!std::isfinite(raw)||raw<=0||raw>=179
+        ||!std::isfinite(focal)||focal<=0)return false;
+    mp4_geometry_camera.set(camera);if(mp4_geometry_camera.get(true)!=camera)return false;
+    mp4_projection=Mp4Projection{};mp4_projection.saved=true;
+    mp4_projection.reference_aspect=aspect;mp4_projection.base_fov=mp4_projection.restore_fov=raw;
+    mp4_projection.base_focal=mp4_projection.restore_focal=focal;
+    mp4_projection.restore_physical=physical_get(camera,nullptr);
+    // Reuse the original unexpanded MV framing when this very camera already
+    // participates in the game's verified expanded photography view.
+    if(photo.expanded&&photo.base_known&&photo.controller.get(true)==controller&&photo.camera.get(true)==camera
+        &&camera_valid(photo.original)&&frustum_valid(photo.original_frustum)){
+        mp4_projection.reference_aspect=photo.original.aspect;
+        mp4_projection.base_fov=photo.original.vertical_fov;mp4_projection.base_focal=photo.original_focal;
+    }
+    return std::isfinite(mp4_projection.reference_aspect)&&mp4_projection.reference_aspect>0
+        &&mp4_projection.reference_aspect<=256&&std::isfinite(mp4_projection.base_focal)&&mp4_projection.base_focal>0;
+}
+bool mp4_verify_output_projection(void* controller){
+    if(!mp4_output_geometry_owned(controller)||!mp4_projection.required_known||!mp4_projection_api_available())return false;
+    void* camera=mp4_geometry_camera.get(true);
+    if(!camera||!mp4_alive(camera)||rt_camera(controller,nullptr)!=camera||orthographic(camera,nullptr))return false;
+    int32_t width=0,height=0;if(!mp4_actual_source_geometry(controller,&width,&height)
+        ||width!=mp4_geometry_width||height!=mp4_geometry_height)return false;
+    Rect rect{};camera_rect_get(camera,&rect,nullptr);
+    ProjectionMatrix matrix{};Frustum actual{};projection_get(camera,&matrix,nullptr);
+    const float aspect=static_cast<float>(width)/height;
+    return full_rect(rect)&&std::fabs(aspect_get_original(camera,nullptr)-aspect)<.0001f
+        &&perspective_frustum(matrix,&actual)&&frustum_contains(actual,mp4_projection.required)
+        &&std::fabs(frustum_aspect(actual)-aspect)<.005f;
+}
+bool mp4_output_projection(void* controller,bool apply){
+    if(!game_call()||!mp4_output_geometry_owned(controller)||!mp4_projection_api_available())return false;
+    if(!apply)return mp4_verify_output_projection(controller);
+    void* camera=mp4_geometry_camera.get(true);
+    if(!camera||!mp4_alive(camera)||rt_camera(controller,nullptr)!=camera||orthographic(camera,nullptr))return false;
+    int32_t width=0,height=0;if(!mp4_actual_source_geometry(controller,&width,&height)
+        ||width!=mp4_geometry_width||height!=mp4_geometry_height)return false;
+    Rect rect{};camera_rect_get(camera,&rect,nullptr);if(!full_rect(rect))return false;
+    const float target_aspect=static_cast<float>(width)/height;
+    // Prove that the original RT owns this aspect before borrowing a ratio.
+    // A manual aspect that merely matched the old RT must fail without being
+    // silently converted to automatic mode by ResetAspect.
+    if(std::fabs(aspect_get_original(camera,nullptr)-target_aspect)>.0001f)return false;
+    ScopedValue<bool> internal(internal_camera,true);
+    // Cinemachine getters see these baseline values, and its setters update
+    // them. Never measure last frame's expanded lens as a new original lens.
+    if(physical_get(camera,nullptr))focal_set_original(camera,mp4_projection.base_focal,nullptr);
+    else fov_set_original(camera,mp4_projection.base_fov,nullptr);
+    const float raw=fov_get_original(camera,nullptr),focal=focal_get_original(camera,nullptr);
+    if(!std::isfinite(raw)||raw<=0||raw>=179||!std::isfinite(focal)||focal<=0)return false;
+    mp4_projection.base_fov=raw;mp4_projection.base_focal=focal;
+    ProjectionMatrix matrix{};Frustum required{},fitted{};
+    if(std::fabs(mp4_projection.reference_aspect-target_aspect)<.0001f)projection_get(camera,&matrix,nullptr);
+    else {
+        camera_aspect_set_original(camera,mp4_projection.reference_aspect,nullptr);
+        projection_get(camera,&matrix,nullptr);
+        camera_aspect_reset(camera,nullptr); // The actual RT remains the sole aspect owner.
+    }
+    if(!perspective_frustum(matrix,&required)
+        ||std::fabs(frustum_aspect(required)-mp4_projection.reference_aspect)>.005f)return false;
+    if(std::fabs(aspect_get_original(camera,nullptr)-target_aspect)>.0001f)return false;
+    projection_get(camera,&matrix,nullptr);float expanded=0;
+    if(!perspective_frustum(matrix,&fitted)||!expanded_raw_fov(required,fitted,raw,&expanded))return false;
+    fov_set_original(camera,expanded,nullptr);
+    mp4_projection.required=required;mp4_projection.required_known=true;
+    return mp4_verify_output_projection(controller);
 }
 bool mp4_set_output_geometry(void* controller,int32_t width,int32_t height){
-    if(!game_call()||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")||!mp4_alive(controller))return false;
-    if(mp4_geometry_active&&!mp4_geometry_controller.get(true)){
-        mp4_geometry_controller.clear();mp4_geometry_active=false;
-        mp4_geometry_width=mp4_geometry_height=0;mp4_geometry_previous_width=mp4_geometry_previous_height=0;
-    }
+    if(!game_call())return false;
     const bool restore=width==0&&height==0;
     if(restore){
-        if(!mp4_geometry_active||mp4_geometry_controller.get(true)!=controller)return false;
-        width=mp4_geometry_previous_width;height=mp4_geometry_previous_height;
-        mp4_geometry_active=false;
-    }else{
-        if(!idoly_mp4_runtime::game.manual()||width<16||height<16||width>4096||height>4096||width%2||height%2)return false;
-        if(mp4_geometry_active&&mp4_geometry_controller.get(true)!=controller)return false;
-        if(!mp4_geometry_active){
-            int32_t previous_width=0,previous_height=0;
-            if(!mp4_actual_source_geometry(controller,&previous_width,&previous_height)
-                    ||previous_width<16||previous_height<16||previous_width>4096||previous_height>4096)return false;
-            mp4_geometry_controller.set(controller);
-            if(mp4_geometry_controller.get(true)!=controller)return false;
-            mp4_geometry_previous_width=previous_width;mp4_geometry_previous_height=previous_height;
+        // A lost or pooled scene invalidates ownership. Discard only our
+        // bookkeeping and never write the next scene's reused objects.
+        if(!controller){mp4_clear_output_geometry();return true;}
+        if(!mp4_geometry_active&&!mp4_projection.saved){mp4_clear_output_geometry();return true;}
+        if(!mp4_output_geometry_owned(controller)){mp4_clear_output_geometry();return false;}
+        void* camera=mp4_geometry_camera.get(true);
+        const int32_t previous_width=mp4_geometry_previous_width,previous_height=mp4_geometry_previous_height;
+        bool good=camera&&mp4_alive(camera)&&rt_camera(controller,nullptr)==camera;
+        mp4_geometry_active=false; // Original target callbacks must not reapply the export size while restoring.
+        if(good){
+            ScopedValue<bool> internal(internal_camera,true);
+            Mp4DynamicTargetScope dynamic(controller);
+            rt_original(controller,previous_width,previous_height,false,nullptr);
+            // Original target-change callbacks can transition or reuse this
+            // camera. Recheck after that call before any saved lens write.
+            const bool same_dynamic_owner=dynamic.finish();
+            if(!same_dynamic_owner||!idoly_mp4_runtime::game.owned_primary_scene_current()
+                ||mp4_geometry_controller.get(true)!=controller||mp4_geometry_camera.get(true)!=camera
+                ||rt_camera(controller,nullptr)!=camera){mp4_clear_output_geometry();return true;}
+            if(mp4_projection.restore_physical)focal_set_original(camera,mp4_projection.restore_focal,nullptr);
+            else fov_set_original(camera,mp4_projection.restore_fov,nullptr);
+            int32_t actual_width=0,actual_height=0;
+            good=mp4_actual_source_geometry(controller,&actual_width,&actual_height)
+                &&actual_width==previous_width&&actual_height==previous_height;
         }
-        mp4_geometry_width=width;mp4_geometry_height=height;mp4_geometry_active=true;
+        mp4_clear_output_geometry();return good;
     }
-    // The verified original resizes, disposes its former texture, rebinds the
-    // main camera and dispatches the game's normal target-change callbacks.
-    // Suppress dynamic scaling during this one call, retaining its preference.
-    ScopedMemory<bool> dynamic(controller,0x30,true);dynamic.set(false);
+    if(!idoly_mp4_runtime::game.owned_primary_scene_current()||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")
+        ||!mp4_alive(controller)||width<16||height<16||width>4096||height>4096||width%2||height%2)return false;
+    if(mp4_geometry_active&&!mp4_geometry_controller.get(true))mp4_clear_output_geometry();
+    if(mp4_geometry_active&&mp4_geometry_controller.get(true)!=controller)return false;
+    if(!mp4_geometry_active){
+        int32_t previous_width=0,previous_height=0;
+        if(!mp4_actual_source_geometry(controller,&previous_width,&previous_height)
+            ||previous_width<16||previous_height<16||previous_width>4096||previous_height>4096)return false;
+        if(!mp4_remember_output_projection(controller,rt_camera(controller,nullptr),previous_width,previous_height)){
+            mp4_clear_output_geometry();return false;
+        }
+        mp4_geometry_controller.set(controller);
+        if(mp4_geometry_controller.get(true)!=controller){mp4_clear_output_geometry();return false;}
+        mp4_geometry_previous_width=previous_width;mp4_geometry_previous_height=previous_height;
+    }
+    mp4_geometry_width=width;mp4_geometry_height=height;mp4_geometry_active=true;
+    ScopedValue<bool> internal(internal_camera,true);
+    Mp4DynamicTargetScope dynamic(controller);
     rt_original(controller,width,height,false,nullptr);
+    if(!dynamic.finish()){mp4_clear_output_geometry();return false;}
     int32_t actual_width=0,actual_height=0;
-    const bool good=mp4_actual_source_geometry(controller,&actual_width,&actual_height)
-        &&actual_width==width&&actual_height==height;
-    if(restore){mp4_geometry_controller.set(nullptr);mp4_geometry_width=mp4_geometry_height=0;
-        mp4_geometry_previous_width=mp4_geometry_previous_height=0;}
-    return good;
+    return mp4_actual_source_geometry(controller,&actual_width,&actual_height)&&actual_width==width&&actual_height==height;
 }
+// END_MP4_OUTPUT_PROJECTION
 bool mp4_queue_apply_graphics(const idoly_mp4_queue::Graphics* value){
     Config next{};
     if(value){next.revision=value->revision;next.custom_graphics=value->custom_graphics!=0;next.quality=value->quality;next.target_fps=value->target_fps;
@@ -1073,9 +1312,10 @@ void mp4_install_replay_runtime(){
     calls.type_get_type=reinterpret_cast<decltype(calls.type_get_type)>(image_base+mp4_replay_profile.type_get_type.rva);
     calls.field_set_value=reinterpret_cast<decltype(calls.field_set_value)>(image_base+mp4_replay_profile.field_set_value.rva);
     factories::Classes classes{};
-    classes.out_game_param=font_class_type(reinterpret_cast<void*>(image_base+mp4_replay_profile.out_game_param_type.rva));
-    classes.actor_descriptor=font_class_type(reinterpret_cast<void*>(image_base+mp4_replay_profile.actor_descriptor_type.rva));
-    classes.transition_param=font_class_type(reinterpret_cast<void*>(image_base+mp4_replay_profile.transition_param_type.rva));
+    classes.out_game_param=mp4_resolved_type_class(mp4_replay_profile.out_game_param_type,"Solis.OutGame","OutGameLivePlayerParam");
+    classes.actor_descriptor=mp4_resolved_type_class(mp4_replay_profile.actor_descriptor_type,"Solis.Common","SolisActorDescriptor");
+    classes.transition_param=mp4_resolved_type_class(mp4_replay_profile.transition_param_type,"Solis.OutGame","LivePlayerTransitionParam");
+    if(!classes.out_game_param||!classes.actor_descriptor||!classes.transition_param)return;
     if(!mp4_replay_factory.configure(calls,classes))return;
     idoly_mp4_replay::Api api{};api.is_type=mp4_type_is;api.alive=mp4_alive;api.retain=mp4_retain;api.retained=weak_get;api.release=weak_free;
     api.new_object=mp4_replay_new_object;api.new_string=mp4_string_new;api.new_field_list=mp4_replay_new_list;api.list_add=mp4_replay_add;
@@ -1102,12 +1342,14 @@ bool mp4_prepare_runtime() {
         pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);
         return false;
     };
-    if(!mp4_source_verified)return unavailable("original_mv_bindings_unverified");
+    if(!mp4_source_verified)return unavailable(mp4_binding_error);
     if(!game_call())return false;
-    mp4_single_class=font_class_type(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.single_type.rva));
-    mp4_texture_class=font_class_type(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.texture2d_type.rva));
-    void *audio_class=font_class_type(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.audio_clip_type.rva));
-    if(!mp4_single_class||!mp4_texture_class||!audio_class)return unavailable("mv_runtime_types_not_ready");
+    mp4_single_class=mp4_resolved_type_class(mp4_runtime_profile.single_type,"System","Single");
+    if(!mp4_single_class)return unavailable(mp4_binding_error);
+    mp4_texture_class=mp4_resolved_type_class(mp4_runtime_profile.texture2d_type,"UnityEngine","Texture2D");
+    if(!mp4_texture_class)return unavailable(mp4_binding_error);
+    void *audio_class=mp4_resolved_type_class(mp4_runtime_profile.audio_clip_type,"UnityEngine","AudioClip");
+    if(!audio_class)return unavailable(mp4_binding_error);
     void *audio_type=mp4_type_get_object(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.audio_clip_type.rva));
     if(!audio_type)return unavailable("mv_audio_type_not_ready");
     mp4_audio_type_handle=mp4_retain(audio_type);if(!mp4_audio_type_handle)return unavailable("mv_audio_type_handle_failed");
@@ -1120,6 +1362,7 @@ bool mp4_prepare_runtime() {
     helpers.recorded_graph_mode=mp4_recorded_graph_mode;helpers.camera_clock_ok=mp4_camera_clock_ok;
     helpers.source_geometry=mp4_actual_source_geometry;
     helpers.output_geometry=mp4_set_output_geometry;
+    helpers.output_projection=mp4_output_projection;
     mp4_api=mp4game::with_original_calls(helpers,mp4_profile,image_base);
     mp4_api.brain_manual_update=mp4_owned_brain_manual_update;
     idoly_mp4_runtime::install_game_api(mp4_api,mp4game::Layout{});
@@ -1632,8 +1875,10 @@ void rt_hook(void *self, int width, int height, bool alpha, Method *method) {
         if(updated&&object_alive(updated,nullptr))remember_controller(self);
     };
     if(mp4_output_geometry_owned(self)){
-        ScopedMemory<bool> dynamic(self,0x30,true);dynamic.set(false);
-        rt_original(self,mp4_geometry_width,mp4_geometry_height,alpha,method);observe_after();return;
+        Mp4DynamicTargetScope dynamic(self);
+        rt_original(self,mp4_geometry_width,mp4_geometry_height,alpha,method);
+        if(dynamic.finish())observe_after();
+        return;
     }
     // A selected MV can create its original target with explicit dimensions.
     // Observe that owner too, while preserving the original explicit-size
@@ -1728,11 +1973,22 @@ bool remember_original_lens(void *camera) {
     return true;
 }
 float fov_get_hook(void *camera, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call() && !internal_camera
+            && mp4_output_projection_owned(camera)) return mp4_projection.base_fov;
     if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
             && photo.camera.get(true) == camera && !internal_camera) return photo.original.vertical_fov;
     return fov_get_original(camera, method);
 }
 void fov_set_hook(void *camera, float value, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call() && !internal_camera
+            && mp4_output_projection_owned(camera) && value > 0 && value < 179 && std::isfinite(value)) {
+        ScopedValue<bool> internal(internal_camera, true);
+        fov_set_original(camera, value, method);
+        mp4_projection.base_fov = fov_get_original(camera, nullptr);
+        if (physical_get(camera, nullptr)) mp4_projection.base_focal = focal_get_original(camera, nullptr);
+        mp4_projection.required_known = false;
+        return;
+    }
     if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
             && photo.camera.get(true) == camera && !internal_camera && value > 0 && value < 179 && std::isfinite(value)) {
         // Observe the original setter's actual clamping/physical conversion
@@ -1745,11 +2001,22 @@ void fov_set_hook(void *camera, float value, Method *method) {
     fov_set_original(camera, value, method);
 }
 float focal_get_hook(void *camera, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call() && !internal_camera
+            && mp4_output_projection_owned(camera)) return mp4_projection.base_focal;
     if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
             && photo.camera.get(true) == camera && !internal_camera) return photo.original_focal;
     return focal_get_original(camera, method);
 }
 void focal_set_hook(void *camera, float value, Method *method) {
+    if (ready.load(std::memory_order_acquire) && game_call() && !internal_camera
+            && mp4_output_projection_owned(camera) && value > 0 && std::isfinite(value)) {
+        ScopedValue<bool> internal(internal_camera, true);
+        focal_set_original(camera, value, method);
+        mp4_projection.base_focal = focal_get_original(camera, nullptr);
+        if (physical_get(camera, nullptr)) mp4_projection.base_fov = fov_get_original(camera, nullptr);
+        mp4_projection.required_known = false;
+        return;
+    }
     if (ready.load(std::memory_order_acquire) && game_call() && photo.expanded
             && photo.camera.get(true) == camera && !internal_camera && value > 0 && std::isfinite(value)) {
         // Cinemachine's physical branch writes focalLength in LateUpdate and
@@ -1763,6 +2030,9 @@ void focal_set_hook(void *camera, float value, Method *method) {
 }
 bool apply_photography(Config config) {
     geometry_unsupported = false;
+    // The export owns this exact camera's framing until it restores the RT
+    // and lens. Keep the surrounding photo state for the ordinary view.
+    if (mp4_output_geometry_owned(photo.controller.get(true))) return true;
     if (!photo.active || !photo.owner.get()) {
         if (photo.active) clear_photography();
         return !config.expand_photography;

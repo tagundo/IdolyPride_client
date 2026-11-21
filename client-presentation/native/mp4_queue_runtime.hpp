@@ -195,9 +195,12 @@ inline void queue_process(const QueueRequest& request){
         int32_t width=0,height=0;if(game.source_geometry(width,height)!=Result::ok){queue_set_error("selected_capture_geometry_unsupported");return;}
         queue_model::Options options{};options.fps_num=request.options.fps_num;options.fps_den=request.options.fps_den;options.codec=request.options.codec;
         options.audio_bitrate=request.options.audio_bitrate;options.width=static_cast<uint32_t>(width);options.height=static_cast<uint32_t>(height);
-        options.output_width=request.options.output_width?request.options.output_width:options.width&~1U;
-        options.output_height=request.options.output_height?request.options.output_height:options.height&~1U;
-        options.video_bitrate=idoly_mp4_output::resolved_bitrate(request.options.bitrate,options.output_width,options.output_height,options.fps_num,options.codec);
+        options.output_width=request.options.output_width;options.output_height=request.options.output_height;
+        uint32_t output_width=0,output_height=0;
+        if(!idoly_mp4_output::resolved_dimensions(options.width,options.height,options.output_width,options.output_height,output_width,output_height)){
+            queue_set_error("invalid_export_options");return;
+        }
+        options.video_bitrate=idoly_mp4_output::resolved_bitrate(request.options.bitrate,output_width,output_height,options.fps_num,options.codec);
         if(!options.video_bitrate){queue_set_error("invalid_export_options");return;}
         if(!queue_graphics_snapshot||!queue_graphics_snapshot(options.graphics)){queue_set_error("selected_graphics_unavailable");return;}
         const auto result=queue_store().enqueue(queue_descriptor_work,options,queue_last_added);
