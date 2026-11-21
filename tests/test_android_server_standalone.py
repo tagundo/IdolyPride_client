@@ -113,9 +113,9 @@ def test_combined_diagnostics_export_contains_server_records_in_one_document():
     assert "startActivityForResult(destination, EXPORT_DIAGNOSTICS)" in request
     assert "ServerService.exportDiagnostics(getApplicationContext(), destination)" in finish
     assert "LOG_LIMIT = 400" in service and "line.length() > 2000" in service
-    export = _java_method(service, "private static void writeExport(Context context, Uri destination, String snapshot)")
+    export = _java_method(service, "private static void writeExport(Context context, Uri destination, String snapshot, String mp4)")
     assert export.index("EXPORT_IO.execute(") < export.index("openOutputStream(")
-    for field in ("runtime", "diagnostics", "server_logs", "server_version", "bundled_data_sha256"):
+    for field in ("runtime", "diagnostics", "server_logs", "server_version", "bundled_data_sha256", "mp4_export"):
         assert 'document.put("' + field + '"' in export
 
 
@@ -138,7 +138,7 @@ def test_actual_combined_android_export_and_exception_methods_on_host_java(tmp_p
     finish = _java_method(activity, "private void finishDiagnosticsExport(int resultCode, Intent data)")
     capture = _java_method(service, "private String captureDiagnostics()")
     export = _java_method(service, "public static void exportDiagnostics(Context context, Uri destination)")
-    write = _java_method(service, "private static void writeExport(Context context, Uri destination, String snapshot)")
+    write = _java_method(service, "private static void writeExport(Context context, Uri destination, String snapshot, String mp4)")
     frame_policy = _java_method(activity, "private static boolean infrastructureExceptionFrame(String frame)")
     frame_summary = _java_method(activity, "private static String exceptionFrameSummary(org.json.JSONArray frames)")
     # Native APIs and JSON construction are seams. The shipping export methods
@@ -175,6 +175,17 @@ public final class CombinedDiagnosticExportHost {
  static final class UnifiedSharedResources {
   static JSONObject snapshot() { return new JSONObject("{\"configured\":true,\"index_entries\":2}"); }
  }
+ static final class UnifiedMP4Export {
+  static int calls;static String value="{\"ready\":false,\"readiness_error\":\"selected_capture_geometry_not_ready\",\"source_width\":1921}";
+  static JSONObject diagnostics() {
+   check(Looper.myLooper()==Looper.getMainLooper(),"MP4 observation captured on main thread");
+   calls++;return new JSONObject(value);
+  }
+ }
+ static final class Looper {
+  static final Looper MAIN=new Looper(),WORKER=new Looper();static Looper current=MAIN;
+  static Looper myLooper(){return current;}static Looper getMainLooper(){return MAIN;}
+ }
  static final class Toast {
   static final int LENGTH_LONG=1;static int shown;final int message;
   Toast(int message) { this.message=message; }
@@ -202,9 +213,15 @@ public final class CombinedDiagnosticExportHost {
  static final class Queue {
   final ArrayDeque<Runnable> tasks=new ArrayDeque<>();boolean rejected;
   void execute(Runnable task) { if(rejected)throw new RejectedExecutionException("stopped worker");tasks.add(task); }
-  void drain() { while(!tasks.isEmpty())tasks.remove().run(); }
+  void drain() {
+   Looper previous=Looper.current;Looper.current=Looper.WORKER;
+   try { while(!tasks.isEmpty())tasks.remove().run(); } finally {Looper.current=previous;}
+  }
  }
- static final class Main { void post(Runnable task) { task.run(); } }
+ static final class Main { void post(Runnable task) {
+  Looper previous=Looper.current;Looper.current=Looper.MAIN;
+  try {task.run();} finally {Looper.current=previous;}
+ } }
  static String quote(String value) {
   StringBuilder result=new StringBuilder("\"");
   for(int i=0;i<value.length();i++) {
@@ -324,6 +341,8 @@ public final class CombinedDiagnosticExportHost {
   freshStream(activity);ServerService.activeService=service;service.worker.rejected=true;
   ServerService.lastDiagnostics="{\"phase\":\"retained\"}";ServerService.LOGS.clear();ServerService.LOGS.add("retained log");
   ServerService.exportDiagnostics(activity,new Uri());
+  check(UnifiedMP4Export.calls==1,"MP4 captured before export worker fallback");
+  UnifiedMP4Export.value="{\"ready\":true,\"source_width\":1280}";
   check(service.worker.tasks.isEmpty()&&ServerService.EXPORT_IO.tasks.size()==1&&service.runtime.calls==1,"rejected capture worker falls back");
   ServerService.EXPORT_IO.drain();idle();emit(activity);
 
@@ -341,6 +360,11 @@ public final class CombinedDiagnosticExportHost {
    check(failure==2||activity.resolver.stream.closed,"failure closes document");
    check(ServerService.LOGS.peek().equals("retained log"),"failure preserves retained records");
   }
+  freshStream(activity);int captures=UnifiedMP4Export.calls;
+  Looper.current=Looper.WORKER;ServerService.exportDiagnostics(activity,new Uri());
+  check(Looper.current==Looper.WORKER&&UnifiedMP4Export.calls==captures+1,"non-UI caller hands observation to main once");
+  Looper.current=Looper.MAIN;ServerService.EXPORT_IO.drain();idle();
+  check(Toast.shown==R.string.export_saved,"non-UI caller still saves one chosen document");
   String caller="Game.Home.ShowIn";
   for(String prefix:new String[]{"System.","Cysharp.Threading.Tasks.","UnityEngine.","Unity.","Google.Protobuf.","Grpc."}) {
    String first=prefix+"Infrastructure";org.json.JSONArray frames=new org.json.JSONArray(first,"","UnityEngine.Wait",caller);
@@ -380,6 +404,7 @@ public final class CombinedDiagnosticExportHost {
                     "runtime", "diagnostics", "server_logs", "server_settings"}
         if index >= 2:
             expected.add("native_shared_resources")
+            expected.add("mp4_export")
             assert document["native_shared_resources"] == {"configured": True, "index_entries": 2}
         assert set(document) == expected
         assert document["schema"] == 1 and document["server_version"] == "fixture-version"
@@ -391,5 +416,7 @@ public final class CombinedDiagnosticExportHost {
     assert documents[1]["runtime"] == {"running": False}
     assert documents[1]["diagnostics"] == documents[0]["diagnostics"]
     assert documents[1]["server_logs"] == ["보관된 기록"]
+    assert documents[2]["mp4_export"] == {"ready": False, "readiness_error": "selected_capture_geometry_not_ready", "source_width": 1921}
+    assert documents[3]["mp4_export"] == {"ready": True, "source_width": 1280}
     assert all(document["diagnostics"] == {"phase": "retained"} and document["server_logs"] == ["retained log"]
                for document in documents[2:])

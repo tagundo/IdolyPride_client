@@ -40,6 +40,8 @@ thread_local void *resolution_scope=nullptr;
 thread_local ResolutionAttempt *resolution_attempt=nullptr;
 int destroy_calls=0,create_calls=0,acknowledge_calls=0;
 int64_t acknowledged_revision=-1;
+void *owned_export_controller=nullptr;
+bool mp4_output_geometry_owned(void *controller){return controller&&controller==owned_export_controller;}
 void destroy(void *controller,Method*){
  assert(resolution_scope==controller&&resolution_attempt);
  bool dynamic=true;std::memcpy(&dynamic,(char*)controller+0x30,sizeof dynamic);
@@ -59,6 +61,13 @@ void acknowledge_resolution(void *controller,const ResolutionAttempt &attempt){
 int main(){
  alignas(8) char controller[0x40]{};bool enabled=true;std::memcpy(controller+0x30,&enabled,sizeof enabled);
  ResolutionAttempt outer;void *previous=(void*)0x1234;resolution_scope=previous;resolution_attempt=&outer;
+ // An active MP4 owns its exact target size. Ordinary graphics refresh must
+ // not destroy or recreate that target, even with a valid drawable window.
+ owned_export_controller=controller;rebuild(controller);
+ assert(!destroy_calls&&!create_calls&&!acknowledge_calls&&acknowledged_revision==-1);
+ bool unchanged=false;std::memcpy(&unchanged,controller+0x30,sizeof unchanged);assert(unchanged);
+ assert(resolution_scope==previous&&resolution_attempt==&outer&&!outer.computed&&pending.revision==77);
+ owned_export_controller=nullptr;
 #ifndef IDOLY_DARWIN_BRIDGE
  for(auto dimensions:{Dimensions{0,600},Dimensions{800,0},Dimensions{0,0},Dimensions{-1,600},Dimensions{800,-1}}){
   window_width=dimensions.width;window_height=dimensions.height;

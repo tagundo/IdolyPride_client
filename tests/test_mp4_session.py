@@ -9,6 +9,7 @@ from dataclasses import replace
 import json
 import math
 import os
+import re
 from pathlib import Path
 import shutil
 import struct
@@ -64,15 +65,24 @@ int host_openat(int directory,const char* name,int flags,...){
 """
 BASE = ADAPTER_SOURCE.split("int main(){", 1)[0].replace(
     '#include "mp4_game_adapter.hpp"', '#include "mp4_runtime.hpp"')
-# The output tests vary the original source independently of encoder dimensions.
-# Every other session/queue fixture retains the original 16x16 callbacks.
-BASE = BASE.replace('int32_t width(void*,Method*){return 16;}int32_t height(void*,Method*){return 16;}',
-    'int fixture_width=16,fixture_height=16;int32_t width(void*,Method*){return fixture_width;}int32_t height(void*,Method*){return fixture_height;}')
-BASE = BASE.replace('assert(w==16&&h==16&&f==4&&!m&&!linear)',
-    'assert(w==fixture_width&&h==fixture_height&&f==4&&!m&&!linear)')
-BASE = BASE.replace('rect->width==16&&x==0', 'rect->width==fixture_width&&rect->height==fixture_height&&x==0')
-BASE = BASE.replace('a->bytes.resize(16*16*4);for(int y=0;y<16;++y)for(int x=0;x<16;++x){a->bytes[(y*16+x)*4]=uint8_t(y);a->bytes[(y*16+x)*4+3]=255;}',
-    'a->bytes.resize(fixture_width*fixture_height*4);for(int y=0;y<fixture_height;++y)for(int x=0;x<fixture_width;++x){a->bytes[(y*fixture_width+x)*4]=uint8_t(y);a->bytes[(y*fixture_width+x)*4+1]=uint8_t(x);a->bytes[(y*fixture_width+x)*4+2]=77;a->bytes[(y*fixture_width+x)*4+3]=255;}')
+# The output tests vary the source independently of encoder dimensions. Reuse
+# the adapter fixture's declared capture dimensions rather than creating a
+# second pair through a silent replacement of its former hard-coded getters.
+# Check each callback anchor so future fixture changes fail at this boundary.
+def _fixture_callback(source, signature, replacement):
+    source, count = re.subn(r"^" + re.escape(signature) + r"[^\n]*$", replacement,
+                            source, flags=re.MULTILINE)
+    assert count == 1, f"Shared adapter fixture callback changed: {signature}"
+    return source
+
+
+assert "int32_t capture_width=16,capture_height=16," in BASE
+BASE = _fixture_callback(BASE, "void ctor(",
+    "void ctor(void*,int32_t w,int32_t h,int32_t f,bool m,bool linear,Method*){assert(w==capture_width&&h==capture_height&&f==4&&!m&&!linear);}")
+BASE = _fixture_callback(BASE, "void readpixels(",
+    "void readpixels(void*,const Rect* rect,int32_t x,int32_t y,bool m,Method*){assert(active==ptr(rt)&&rect->width==capture_width&&rect->height==capture_height&&x==0&&y==0&&!m);}")
+BASE = _fixture_callback(BASE, "void* raw_data(",
+    'void* raw_data(void*,Method*){auto* a=make("byte[]");a->array_kind=3;a->bytes.resize(capture_width*capture_height*4);for(int y=0;y<capture_height;++y)for(int x=0;x<capture_width;++x){a->bytes[(y*capture_width+x)*4]=uint8_t(y);a->bytes[(y*capture_width+x)*4+1]=uint8_t(x);a->bytes[(y*capture_width+x)*4+2]=77;a->bytes[(y*capture_width+x)*4+3]=255;}return ptr(a);}')
 HARNESS = r'''
 #undef openat
 namespace session_core = idoly_mp4_runtime;
@@ -91,8 +101,8 @@ bool cancel_marker_written=false;
 unsigned suspension_checks=0,source_wait_checks=0;
 unsigned geometry_apply_calls=0,geometry_restore_calls=0;
 bool source_geometry_valid=true;
-bool session_source_geometry(void* controller,int32_t* width,int32_t* height){assert(controller==ptr(camera_controller));if(!source_geometry_valid)return false;*width=fixture_width;*height=fixture_height;return true;}
-bool session_output_geometry(void* controller,int32_t width,int32_t height){assert(controller==ptr(camera_controller));if(!width&&!height){fixture_width=fixture_height=16;++geometry_restore_calls;}else{fixture_width=width;fixture_height=height;++geometry_apply_calls;}return true;}
+bool session_source_geometry(void* controller,int32_t* width,int32_t* height){assert(controller==ptr(camera_controller));if(!source_geometry_valid)return false;*width=capture_width;*height=capture_height;return true;}
+bool session_output_geometry(void* controller,int32_t width,int32_t height){assert(controller==ptr(camera_controller));if(!width&&!height){capture_width=capture_height=16;++geometry_restore_calls;}else{capture_width=width;capture_height=height;++geometry_apply_calls;}return true;}
 double session_duration(void*,Method*){return selected_duration;}
 int32_t session_samples(void*,Method*){return sample_rate*2;}
 int32_t session_rate(void*,Method*){return sample_rate;}
@@ -241,7 +251,7 @@ void check_suspension(bool cancel_parked=false){
 int main(int argc,char** argv){
     assert(argc==9);const char* directory=argv[1];uint64_t epoch=std::strtoull(argv[2],nullptr,10);
     output_root=argv[4];int platform=std::atoi(argv[5]);sample_rate=std::atoi(argv[6]);fps=std::atoi(argv[7]);scenario=argv[8];fault_case=argv[8];
-    if(scenario=="odd_source_output"){fixture_width=17;fixture_height=19;}
+    if(scenario=="odd_source_output"){capture_width=17;capture_height=19;}
     connect_scene();Api selected=api();selected.director_get_duration=session_duration;
     selected.audio_clip_samples=session_samples;selected.audio_clip_frequency=session_rate;
     selected.timeline_get_tracks=session_tracks;selected.track_get_clips=session_clips;
@@ -320,7 +330,7 @@ int main(int argc,char** argv){
     assert(brain_mode==1&&brain_blend==0);float outside=0;assert(!session_core::camera_delta_override(ptr(brain),&outside));
     for(const auto& path:loaded_bundles)assert(access(path.c_str(),F_OK)!=0);
     char status[2048]{};assert(session_core::status(status,sizeof(status)));
-    if(scenario=="custom_render")assert(geometry_apply_calls==1&&geometry_restore_calls==1&&fixture_width==16&&fixture_height==16);
+    if(scenario=="custom_render")assert(geometry_apply_calls==1&&geometry_restore_calls==1&&capture_width==16&&capture_height==16);
     std::printf("{\"configured\":true,\"source_wait_checks\":%u,\"session\":%s,\"loads\":%d,\"unloads\":%d,\"data_calls\":%d,\"retries\":%d,\"destroy_retries\":%d,\"graph_steps\":%d,\"actor_steps\":%d,\"private_lifetime_verified\":%s,\"delayed_ticks\":%u,\"suspension_checks\":%u,\"times\":[",
         source_wait_checks,status,loads,unloads,data_calls,retries,destroy_retries,graph_steps,actor_steps,private_lifetime_verified?"true":"false",delayed_ticks,suspension_checks);
     for(size_t i=0;i<submitted_times.size();++i)std::printf("%s%.12f",i?",":"",submitted_times[i]);
