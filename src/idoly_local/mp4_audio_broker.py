@@ -1,7 +1,7 @@
 """Private same-UID IPC for offline MV audio preparation.
 
 The caller supplies a trusted app-private root and the existing verified Octo
-store. Requests carry only an exact logical music name and source-clip shape,
+store. Requests carry only an admitted logical audio name and source-clip shape,
 never URLs or filesystem paths. One worker prepares a uniquely named private
 bundle; the original cache and game AudioClip remain unchanged.
 
@@ -25,7 +25,9 @@ import struct
 import threading
 from time import monotonic
 
-from .mp4_audio_bundle import AudioBundleError, MAX_BUNDLE_BYTES, prepare_audio_bundle
+from .mp4_audio_bundle import (
+    AudioBundleError, MAX_BUNDLE_BYTES, prepare_audio_bundle, supported_audio_name,
+)
 from .shared_resource_store import SharedResourceError, SharedResourceStore
 
 REQUEST = struct.Struct("<8sHBBQ16s16sHBBIQ")
@@ -34,7 +36,6 @@ ACTIVE = struct.Struct("<8sQ")
 REQUEST_MAGIC, RESPONSE_MAGIC, ACTIVE_MAGIC = b"IDMPAUD1", b"IDMPARS1", b"IDMPACT1"
 READY, NOT_FOUND, FAILED, CANCELLED, UNSUPPORTED = range(5)
 MAX_REQUEST = 260
-_CLIP = re.compile(r"sud_music_[a-z0-9][a-z0-9_-]{0,111}\Z")
 _REQUEST_FILE = re.compile(r"([0-9a-f]{32})\.req\Z")
 
 
@@ -74,7 +75,7 @@ def decode_request(raw, *, epoch, capability, request_id):
         name = raw[REQUEST.size:].decode("ascii")
     except UnicodeError:
         raise AudioBrokerError() from None
-    if _CLIP.fullmatch(name) is None:
+    if not supported_audio_name(name):
         raise AudioBrokerError()
     return AudioRequest("android" if platform == 1 else "ios", epoch, capability,
                         request_id, name, channels, rate, samples)

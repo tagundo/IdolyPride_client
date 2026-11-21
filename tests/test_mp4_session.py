@@ -115,8 +115,8 @@ void session_brain_update(void* object,Method*){
     camera_deltas.push_back(delta);
 }
 bool session_camera_clock_ok(){return true;}
-void* session_tracks(void*,Method*){auto* a=make("array");a->array_kind=1;a->pointers=selected_tracks;return ptr(a);}
-void* session_clips(void* object,Method*){auto* a=make("array");a->array_kind=1;a->pointers=scheduled_clips.at(object);return ptr(a);}
+void* session_tracks(void*,Method*){auto* a=make("UnityEngine.Timeline.TrackAsset[]");a->array_kind=1;a->pointers=selected_tracks;return ptr(a);}
+void* session_clips(void* object,Method*){auto* a=make("UnityEngine.Timeline.TimelineClip[]");a->array_kind=1;a->pointers=scheduled_clips.at(object);return ptr(a);}
 void* session_load_bundle(void* path,Method*){
     std::string value=objects.at(path)->name;last_bundle=value;loaded_bundles.push_back(value);++loads;
     int fd=open(value.c_str(),O_RDONLY|O_NOFOLLOW);struct stat info{};

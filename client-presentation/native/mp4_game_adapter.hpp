@@ -8,6 +8,8 @@
 #include <cstring>
 #include <cmath>
 #endif
+#include "mp4_timeline_camera.hpp"
+#include "mp4_timeline_audio.hpp"
 
 namespace idoly_mp4_game {
 using Method = void;
@@ -31,6 +33,7 @@ struct Snapshot {
     AudioProgram audio{};
 };
 struct Rect { float x,y,width,height; };
+using PropertyName4=idoly_mp4_timeline_camera::PropertyName4;
 struct PlayableGraph { void* handle=nullptr; int32_t version=0; int32_t padding=0; };
 static_assert(sizeof(PlayableGraph)==16,"Original ARM64 PlayableGraph layout");
 struct Layout {
@@ -39,7 +42,7 @@ struct Layout {
         presenter_player=0xe0, player_director_controller=0x38,
         photo_root_mode=0x30,photo_mode_player=0x20,photo_mode_data=0x30,player_built=0x70,
         player_duration=0x20, player_bgm_source=0x28, player_voice_source=0x30,
-        controller_master=0x20, camera_main=0x50, camera_captured=0xa0,
+        controller_master=0x20, controller_directors=0x28, camera_main=0x50, camera_captured=0xa0,
         wrapper_texture=0x10, wrapper_identifier=0x18, pass_identifier=0x88,
         rendering_camera=0x90, rendering_final_target=0x158,
         track_muted=0x29, audio_track_properties=0xa0,
@@ -66,6 +69,9 @@ struct Api {
     void* audio_clip_type=nullptr;
     void* (*object_get_name)(void*,Method*)=nullptr;
     void* (*director_get_binding)(void*,void*,Method*)=nullptr;
+    void* (*director_get_reference)(void*,PropertyName4,bool*,Method*)=nullptr;
+    void* (*component_game_object)(void*,Method*)=nullptr;
+    bool (*track_muted_hierarchy)(void*,Method*)=nullptr;
     void (*brain_manual_update)(void*,Method*)=nullptr;
     bool (*camera_clock_ok)()=nullptr;
     void* (*brain_output_camera)(void*,Method*)=nullptr;
@@ -127,6 +133,24 @@ struct Api {
     void (*shader_set_custom)(float,Method*)=nullptr;
     void (*shader_reset_custom)(Method*)=nullptr;
 };
+inline idoly_mp4_timeline_camera::Api timeline_camera_api(const Api& api) {
+    return {api.is_type,api.alive,api.array_length,api.array_data,
+        api.director_get_asset,api.timeline_get_tracks,api.director_get_binding,api.brain_output_camera};
+}
+inline idoly_mp4_timeline_audio::Api timeline_audio_api(const Api& api) {
+    return {timeline_camera_api(api),api.track_get_clips,api.object_get_name,api.string_utf8,
+        api.director_get_reference,api.component_game_object,api.track_muted_hierarchy,
+        api.director_get_duration,api.active_enabled};
+}
+inline idoly_mp4_timeline_audio::Layout timeline_audio_layout(const Layout& layout) {
+    idoly_mp4_timeline_audio::Layout output{};
+    output.owned={layout.controller_master,layout.controller_directors};
+    output.clip_start=layout.clip_start;output.clip_in=layout.clip_in;output.clip_asset=layout.clip_asset;
+    output.clip_duration=layout.clip_duration;output.clip_scale=layout.clip_scale;
+    output.clip_ease_in=layout.clip_ease_in;output.clip_ease_out=layout.clip_ease_out;
+    output.clip_blend_in=layout.clip_blend_in;output.clip_blend_out=layout.clip_blend_out;
+    return output;
+}
 class GameAdapter {
 public:
     explicit GameAdapter(Api api={},Layout layout={}) : api_(api), layout_(layout) {}
@@ -186,9 +210,14 @@ private:
     void drop(uint32_t& h) { if(h&&api_.release)api_.release(h);h=0; }
     Result fail(Result code,const char* message) { error_=message;return code; }
     bool valid_api() const;
+    Result snapshot_selected(Snapshot& output);
     Result append_track(void* track,const char* track_name,AudioProgram& output);
+    Result collect_audio_tracks(void* timeline,double duration,AudioProgram& output);
+    void drop_audio_scope();
+    bool audio_scope_current(void* timeline) const;
     bool identities_current() const;
     bool primary_scene_current() const;
+    bool camera_scope_current(void* timeline) const;
     void* resolve_selected_player(bool require_ready,void** mode=nullptr,void** data=nullptr,const char** error=nullptr) const;
     bool update_camera(float delta);
     Result collect_actor_graphs(void* player);
@@ -201,6 +230,15 @@ private:
         camera_=0,captured_texture_=0,cpu_texture_=0,
         audio_request_=0,audio_bundle_=0,audio_clip_=0,audio_array_=0;
     AudioClipProgram expected_audio_{};
+    uint32_t camera_timeline_director_=0,camera_timeline_asset_=0,camera_timeline_track_=0;
+    uint64_t camera_scope_identity_=0;
+    struct AudioScope {uint32_t director=0,asset=0,track=0;const char* name=nullptr;};
+    AudioScope audio_scope_[idoly_mp4_timeline_audio::max_audio_tracks]{};
+    size_t audio_scope_count_=0;double audio_scope_duration_=0;
+    struct SnapshotAttempt {
+        GameAdapter& owner;bool committed=false;
+        ~SnapshotAttempt(){if(!committed)owner.drop_audio_scope();}
+    };
     PlayableGraph graph_{};
     double evaluated_time_=0;
     bool evaluation_failed_=false,camera_evaluating_=false;
@@ -283,27 +321,36 @@ inline void* GameAdapter::resolve_selected_player(bool require_ready,void** mode
     return player;
 }
 inline Result GameAdapter::append_track(void* track,const char* track_name,AudioProgram& output) {
-    void* clips=api_.track_get_clips(track,nullptr);
-    if(!clips)return fail(Result::invalid,"audio_track_has_no_clip_array");
-    const size_t count=api_.array_length(clips);
-    if(count>max_audio_clips-output.count)return fail(Result::unsupported,"too_many_audio_clips");
-    auto** data=static_cast<void**>(api_.array_data(clips));
-    if(count&&!data)return fail(Result::invalid,"invalid_audio_clip_array");
     void* props=field<void*>(track,layout_.audio_track_properties);
     if(!type(props,"UnityEngine.Timeline.AudioMixerProperties"))return fail(Result::invalid,"invalid_audio_track_properties");
     const float gain=field<float>(props,layout_.properties_gain);
     const float pan=field<float>(props,layout_.mixer_pan), spatial=field<float>(props,layout_.mixer_spatial);
     if(!std::isfinite(gain)||gain<0||gain>16||!std::isfinite(pan)||!std::isfinite(spatial))
         return fail(Result::unsupported,"unsupported_audio_mixer_values");
-    const bool muted=field<uint8_t>(track,layout_.track_muted)!=0;
+    const bool muted=api_.track_muted_hierarchy?api_.track_muted_hierarchy(track,nullptr):field<uint8_t>(track,layout_.track_muted)!=0;
     void* source=get(std::strcmp(track_name,"BGM")==0?bgm_source_:voice_source_);
     const float source_gain=source?api_.audio_source_get_volume(source,nullptr):0;
     if(!std::isfinite(source_gain)||source_gain<0||source_gain>1)return fail(Result::invalid,"invalid_source_gain");
+    // A verified silent track contributes no samples. Its clip may be an
+    // unloaded placeholder or live in a different original bundle; exporting
+    // zero must not wait for or privately decode that unused resource.
+    if(muted||gain==0||source_gain==0)return Result::ok;
+    void* clips=api_.track_get_clips(track,nullptr);
+    if(!type(clips,"UnityEngine.Timeline.TimelineClip[]"))return fail(Result::invalid,"audio_track_has_no_clip_array");
+    const size_t count=api_.array_length(clips);
+    if(count>max_audio_clips-output.count)return fail(Result::unsupported,"too_many_audio_clips");
+    auto** data=static_cast<void**>(api_.array_data(clips));
+    if(count&&!data)return fail(Result::invalid,"invalid_audio_clip_array");
     for(size_t i=0;i<count;++i){
         void* clip=data[i];
         if(!type(clip,"UnityEngine.Timeline.TimelineClip"))return fail(Result::invalid,"invalid_timeline_clip");
         void* asset=field<void*>(clip,layout_.clip_asset);
         if(!type(asset,"UnityEngine.Timeline.AudioPlayableAsset"))return fail(Result::unsupported,"unsupported_audio_playable");
+        void* clip_props=field<void*>(asset,layout_.audio_asset_properties);
+        if(!type(clip_props,"UnityEngine.Timeline.AudioClipProperties"))return fail(Result::invalid,"invalid_audio_clip_properties");
+        const float clip_gain=field<float>(clip_props,layout_.properties_gain);
+        if(!std::isfinite(clip_gain)||clip_gain<0||clip_gain>16)return fail(Result::unsupported,"unsupported_audio_timing_or_mix");
+        if(clip_gain==0)continue;
         void* audio=field<void*>(asset,layout_.audio_asset_clip);
         if(!type(audio,"UnityEngine.AudioClip")||!live(audio))return fail(Result::waiting,"selected_audio_not_loaded");
         AudioClipProgram entry{};
@@ -322,9 +369,7 @@ inline Result GameAdapter::append_track(void* track,const char* track_name,Audio
         entry.loop=field<uint8_t>(asset,layout_.audio_asset_loop)!=0;
         entry.muted=muted;
         entry.track_gain=gain;entry.source_gain=source_gain;entry.stereo_pan=pan;entry.spatial_blend=spatial;
-        void* clip_props=field<void*>(asset,layout_.audio_asset_properties);
-        if(!type(clip_props,"UnityEngine.Timeline.AudioClipProperties"))return fail(Result::invalid,"invalid_audio_clip_properties");
-        entry.clip_gain=field<float>(clip_props,layout_.properties_gain);
+        entry.clip_gain=clip_gain;
         entry.samples=api_.audio_clip_samples(audio,nullptr);
         entry.channels=api_.audio_clip_channels(audio,nullptr);
         entry.sample_rate=api_.audio_clip_frequency(audio,nullptr);
@@ -386,8 +431,48 @@ inline Result GameAdapter::collect_actor_graphs(void* player) {
     }
     return Result::ok;
 }
+inline void GameAdapter::drop_audio_scope() {
+    for(size_t i=0;i<audio_scope_count_;++i){
+        drop(audio_scope_[i].director);drop(audio_scope_[i].asset);drop(audio_scope_[i].track);
+        audio_scope_[i].name=nullptr;
+    }
+    audio_scope_count_=0;audio_scope_duration_=0;
+}
+inline Result GameAdapter::collect_audio_tracks(void* timeline,double duration,AudioProgram& output) {
+    const auto selected=idoly_mp4_timeline_audio::scan(timeline,duration,timeline_audio_api(api_),timeline_audio_layout(layout_));
+    if(!selected.ok())return fail(Result::unsupported,selected.error);
+    audio_scope_duration_=duration;
+    for(size_t i=0;i<selected.count;++i){
+        const auto& ref=selected.tracks[i];auto& scope=audio_scope_[i];
+        audio_scope_count_=i+1;scope.name=ref.name;
+        void* asset=api_.director_get_asset(ref.director,nullptr);
+        if(!type(asset,"UnityEngine.Timeline.TimelineAsset")||!live(asset))return fail(Result::waiting,"selected_audio_timeline_not_loaded");
+        if(!keep(scope.director,ref.director)||!keep(scope.asset,asset)||!keep(scope.track,ref.track))
+            return fail(Result::failed,"selected_audio_scope_handle_failed");
+        const Result appended=append_track(ref.track,ref.name,output);
+        if(appended!=Result::ok)return appended;
+    }
+    return output.count?Result::ok:fail(Result::unsupported,"selected_music_not_found");
+}
+inline bool GameAdapter::audio_scope_current(void* timeline) const {
+    if(!audio_scope_count_||audio_scope_duration_<=0)return false;
+    const auto current=idoly_mp4_timeline_audio::scan(timeline,audio_scope_duration_,timeline_audio_api(api_),timeline_audio_layout(layout_));
+    if(!current.ok()||current.count!=audio_scope_count_)return false;
+    for(size_t i=0;i<current.count;++i){
+        const auto& ref=current.tracks[i];const auto& scope=audio_scope_[i];
+        if(ref.director!=get(scope.director)||ref.track!=get(scope.track)
+            ||api_.director_get_asset(ref.director,nullptr)!=get(scope.asset)
+            ||!scope.name||std::strcmp(ref.name,scope.name))return false;
+    }
+    return true;
+}
 inline Result GameAdapter::snapshot(Snapshot& output) {
     if(manual_)return fail(Result::invalid,"export_already_owns_scene");
+    camera_scope_identity_=0;
+    drop_audio_scope();SnapshotAttempt attempt{*this};
+    const Result result=snapshot_selected(output);attempt.committed=result==Result::ok;return result;
+}
+inline Result GameAdapter::snapshot_selected(Snapshot& output) {
     if(!valid_api())return fail(Result::unsupported,"game_api_unavailable");
     void* presenter=get(presenter_), *controller=get(camera_controller_);
     if(!presenter||!live(presenter))return fail(Result::waiting,"selected_presenter_missing");
@@ -420,37 +505,20 @@ inline Result GameAdapter::snapshot(Snapshot& output) {
     if(scene_kind_==SceneKind::photography){
         if(!keep(photo_mode_,selected_mode)||!keep(photo_data_,selected_data))return fail(Result::failed,"managed_handle_allocation_failed");
     }else{drop(photo_mode_);drop(photo_data_);}
-    void* tracks=api_.timeline_get_tracks(asset,nullptr);
-    const size_t count=tracks?api_.array_length(tracks):0;
-    if(!tracks||count>256)return fail(Result::unsupported,"timeline_tracks_out_of_bounds");
-    auto** data=static_cast<void**>(api_.array_data(tracks));
-    if(count&&!data)return fail(Result::invalid,"invalid_timeline_track_array");
-    bool found_bgm=false;void* selected_output_camera=nullptr;void* selected_brain=nullptr;
-    for(size_t i=0;i<count;++i){
-        void* track=data[i];
-        if(type(track,".CinemachineTrack")){
-            void* brain=api_.director_get_binding(director,track,nullptr);
-            if(!type(brain,"Cinemachine.CinemachineBrain")||!live(brain))return fail(Result::waiting,"selected_camera_binding_not_ready");
-            void* output_camera=api_.brain_output_camera(brain,nullptr);
-            if(!live(output_camera))return fail(Result::waiting,"selected_output_camera_not_ready");
-            if(selected_brain&&selected_brain!=brain)return fail(Result::unsupported,"ambiguous_selected_brains");
-            selected_brain=brain;
-            if(selected_output_camera&&selected_output_camera!=output_camera)return fail(Result::unsupported,"ambiguous_selected_cameras");
-            selected_output_camera=output_camera;
-        }
-        if(!type(track,"UnityEngine.Timeline.AudioTrack"))continue;
-        char name[32]{};
-        const size_t length=api_.string_utf8(api_.object_get_name(track,nullptr),name,sizeof(name));
-        if(length>=sizeof(name))return fail(Result::unsupported,"track_name_out_of_bounds");
-        if(std::strcmp(name,"BGM")&&std::strcmp(name,"Voice"))continue;
-        if(!std::strcmp(name,"BGM")){if(found_bgm)return fail(Result::unsupported,"ambiguous_bgm_track");found_bgm=true;}
-        Result r=append_track(track,name,next.audio);if(r!=Result::ok)return r;
-    }
-    if(selected_output_camera!=camera)return fail(Result::waiting,"selected_mv_camera_not_observed");
-    if(!keep(brain_,selected_brain))return fail(Result::failed,"camera_brain_handle_failed");
-    if(!found_bgm||!next.audio.count)return fail(Result::unsupported,"selected_music_not_found");
+    const auto selected_camera=idoly_mp4_timeline_camera::scan(timeline,timeline_camera_api(api_),
+        {layout_.controller_master,layout_.controller_directors});
+    if(!selected_camera.ok())return fail(Result::waiting,selected_camera.error);
+    if(selected_camera.camera!=camera)return fail(Result::waiting,"selected_mv_camera_not_observed");
+    if(!keep(brain_,selected_camera.brain)
+        ||!keep(camera_timeline_director_,selected_camera.camera_director)
+        ||!keep(camera_timeline_asset_,selected_camera.camera_asset)
+        ||!keep(camera_timeline_track_,selected_camera.camera_track))
+        return fail(Result::failed,"camera_brain_handle_failed");
+    const Result audio_ready=collect_audio_tracks(timeline,next.duration_seconds,next.audio);
+    if(audio_ready!=Result::ok)return audio_ready;
     const Result actors_ready=collect_actor_graphs(player);if(actors_ready!=Result::ok)return actors_ready;
     next.actor_graph_count=actor_graph_count_;
+    camera_scope_identity_=selected_camera.identity;
     snapshot_=next;output=next;error_="none";return Result::ok;
 }
 inline bool GameAdapter::primary_scene_current() const {
@@ -463,7 +531,19 @@ inline bool GameAdapter::primary_scene_current() const {
     return timeline&&field<void*>(timeline,layout_.controller_master)==director
         &&api_.director_get_asset(director,nullptr)==get(timeline_asset_)
         &&field<void*>(controller,layout_.camera_main)==get(camera_)
-        &&live(get(brain_))&&api_.brain_output_camera(get(brain_),nullptr)==get(camera_);
+        &&live(get(brain_))&&api_.brain_output_camera(get(brain_),nullptr)==get(camera_)
+        &&camera_scope_current(timeline)&&audio_scope_current(timeline);
+}
+inline bool GameAdapter::camera_scope_current(void* timeline) const {
+    if(!camera_scope_identity_||!live(get(camera_timeline_director_))
+        ||!live(get(camera_timeline_asset_))||!live(get(camera_timeline_track_)))return false;
+    const auto current=idoly_mp4_timeline_camera::scan(timeline,timeline_camera_api(api_),
+        {layout_.controller_master,layout_.controller_directors});
+    return current.ok()&&current.identity==camera_scope_identity_
+        &&current.camera_director==get(camera_timeline_director_)
+        &&current.camera_asset==get(camera_timeline_asset_)
+        &&current.camera_track==get(camera_timeline_track_)
+        &&current.brain==get(brain_)&&current.camera==get(camera_);
 }
 inline bool GameAdapter::identities_current() const {return primary_scene_current()&&actor_graphs_current();}
 inline bool GameAdapter::update_camera(float delta) {
@@ -755,7 +835,8 @@ inline Result GameAdapter::restore() {
 }
 inline void GameAdapter::reset_observations() {
     restore();drop(presenter_);drop(photo_mode_);drop(photo_data_);drop(camera_controller_);drop(player_);drop(director_);drop(timeline_asset_);drop(camera_);
-    drop(bgm_source_);drop(voice_source_);drop(brain_);drop_actor_graphs();snapshot_={};error_="none";
+    drop(bgm_source_);drop(voice_source_);drop(brain_);drop_actor_graphs();drop_audio_scope();snapshot_={};error_="none";
+    drop(camera_timeline_director_);drop(camera_timeline_asset_);drop(camera_timeline_track_);camera_scope_identity_=0;
     scene_kind_=SceneKind::none;owner_replaced_=false;
 }
 } // namespace idoly_mp4_game

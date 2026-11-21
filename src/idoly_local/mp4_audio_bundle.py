@@ -1,9 +1,10 @@
 """Prepare a private, readable AudioClip bundle without touching game storage.
 
-Only manifest-verified sud_music_* bundles with the audited serialized-file 22
-AudioClip/AssetBundle schemas are accepted. UnityFS blocks are decoded with a
-bounded pure-Python LZ4 decoder and repacked uncompressed. The FSB resource stays
-byte-for-byte identical: Unity's original decoder supplies PCM later.
+Only manifest-verified sud_music_* bundles and the two audited live-cheer clips
+with the serialized-file 22 AudioClip/AssetBundle schemas are accepted. UnityFS
+blocks are decoded with a bounded pure-Python LZ4 decoder and repacked
+uncompressed. The FSB resource stays byte-for-byte identical: Unity's original
+decoder supplies PCM later.
 
 No paths, URLs, runtime dependencies or original cache mutations are involved.
 The caller must publish the returned bytes in its private export workspace and
@@ -23,6 +24,7 @@ MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 MAX_EXPANDED_BYTES = 96 * 1024 * 1024
 MAX_SERIALIZED_BYTES = 1024 * 1024
 _NAME = re.compile(r"sud_music_[a-z0-9][a-z0-9_-]{0,111}\Z")
+_AUDITED_CHEERS = frozenset(("sud_se_live_cheers-mix-l", "sud_se_live_cheers-clap-l"))
 _HEX32 = re.compile(r"[0-9a-f]{32}\Z")
 _HEX64 = re.compile(r"[0-9a-f]{64}\Z")
 _CAB = re.compile(r"CAB-([0-9a-f]{32})\Z")
@@ -46,6 +48,11 @@ class AudioBundleError(ValueError):
     def __init__(self, code="audio_bundle_invalid"):
         self.code = code
         super().__init__(code)
+
+
+def supported_audio_name(name):
+    """One exact admission policy for private IPC and bundle verification."""
+    return type(name) is str and (_NAME.fullmatch(name) is not None or name in _AUDITED_CHEERS)
 
 
 def _need(condition, code="audio_bundle_invalid"):
@@ -413,7 +420,7 @@ def prepare_audio_bundle(raw, *, name, expected_size, expected_md5, expected_sha
     and MD5. A supplied nonce must be a fresh 32-hex export-session identifier;
     normally this function generates it with the OS random source.
     """
-    _need(type(name) is str and _NAME.fullmatch(name) is not None, "audio_bundle_identity_invalid")
+    _need(supported_audio_name(name), "audio_bundle_identity_invalid")
     _need(expected_platform is None or type(expected_platform) is str
           and expected_platform in ("android", "ios"), "audio_bundle_identity_invalid")
     _need(type(expected_size) is int and 0 < expected_size <= MAX_BUNDLE_BYTES
@@ -447,10 +454,13 @@ def prepare_audio_bundle(raw, *, name, expected_size, expected_md5, expected_sha
     clip, clip_spans, clip_id = values[83]
     bundle, bundle_spans, _bundle_id = values[142]
     source = "archive:/" + serialized.name + "/" + resource.name
-    _need(clip["m_LoadType"] == 2 and clip["m_PreloadAudioData"] in (0, 1)
+    # The audited cheer clips are PCM/DecompressOnLoad on both platforms;
+    # music remains restricted to the original Streaming/Vorbis shape.
+    load_type, compression = (0, 0) if name in _AUDITED_CHEERS else (2, 1)
+    _need(clip["m_LoadType"] == load_type and clip["m_PreloadAudioData"] in (0, 1)
           and clip["m_LoadInBackground"] in (0, 1) and clip["m_IsTrackerFormat"] == 0
           and clip["m_Ambisonic"] == 0 and clip["m_SubsoundIndex"] == 0
-          and clip["m_CompressionFormat"] == 1 and clip["m_Resource"]["m_Source"] == source
+          and clip["m_CompressionFormat"] == compression and clip["m_Resource"]["m_Source"] == source
           and clip["m_Resource"]["m_Offset"] == 0
           and clip["m_Resource"]["m_Size"] == len(resource.data),
           "audio_bundle_clip_unsupported")

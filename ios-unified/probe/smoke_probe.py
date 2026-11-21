@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import select
 import socket
 import signal
 import stat
@@ -118,7 +119,7 @@ LAUNCHER_FAILURE_CODES = frozenset((
     "octo_budget_registration_failed", "octo_budget_preinit_failed", "octo_budget_original_failed", "octo_budget_queued_work_failed",
 ))
 NATIVE_CHECKPOINT_STAGES = frozenset((
-    "settings_zip_import_begin", "settings_zip_import_before_script", "settings_zip_import_script_submitted", "settings_zip_import_script_completed", "settings_zip_import_before_presenter", "settings_zip_import_after_presenter", "settings_zip_import_picker_attached", "settings_zip_import_before_cancel", "settings_zip_import_after_cancel", "settings_zip_import_before_dismiss", "settings_zip_import_after_dismiss", "settings_zip_import_picker_detached", "settings_zip_import_before_restore_script", "settings_zip_import_restore_submitted", "settings_zip_import_restore_completed", "settings_zip_import_finished", "settings_zip_import_timeout",
+    "settings_zip_import_begin", "settings_zip_import_before_script", "settings_zip_import_script_submitted", "settings_zip_import_script_completed", "settings_zip_import_before_presenter", "settings_zip_import_after_presenter", "settings_zip_import_picker_attached", "settings_zip_import_before_cancel", "settings_zip_import_after_cancel", "settings_zip_import_before_dismiss", "settings_zip_import_after_dismiss", "settings_zip_import_dismiss_completed", "settings_zip_import_picker_detached", "settings_zip_import_before_restore_script", "settings_zip_import_restore_submitted", "settings_zip_import_restore_completed", "settings_zip_import_finished", "settings_zip_import_timeout",
     "delegate_entered", "window_ready", "server_starting", "server_ready",
     "unity_requests_captured", "premature_launch_checked", "launch_action_requested",
     "launch_action_dispatched", "unity_forwarded", "status_received", "crypto_received",
@@ -149,7 +150,7 @@ DIAGNOSTICS_COPY_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatc
                                 "feedback_success", "pasteboard_matches", "clipboard_seeded", "clipboard_cleared")
 ZIP_IMPORT_PASS_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatched", "button_disabled_while_pending",
     "picker_presented", "single_selection", "delegate_is_settings", "cancel_delegate_invoked",
-    "dismissed_programmatically", "picker_detached", "button_restored")
+    "dismissed_programmatically", "dismissal_completion_observed", "transition_idle_before_restore", "picker_detached", "button_restored")
 ZIP_IMPORT_SERVER_FLAGS = ("grpc_connected_after_cancel", "assets_connected_after_cancel")
 ZIP_ROUNDTRIP_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
     "picker_presented", "picker_import_mode", "picker_single_selection", "selection_delegate_invoked",
@@ -1225,6 +1226,22 @@ def process_sample_summary(value):
         "sample_output_bytes","thread_count","frame_count") if key in clean}
 
 
+def process_exit_observation(value):
+    """Only Darwin's owned-launch exit status; never process arguments/logs."""
+    if type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1: return {}
+    state=value.get("state");code=value.get("error_code")
+    if state not in ("unsupported","armed","unavailable","exited"): return {}
+    if code not in ("none","unsupported","registration_failed","identity_changed","read_failed","event_invalid"): return {}
+    clean={"schema":1,"source":"darwin-kqueue","state":state,"error_code":code}
+    if state=="exited" and code=="none":
+        status=value.get("wait_status")
+        if type(status) is not int or not 0<=status<=65535: return {}
+        if os.WIFEXITED(status): clean.update(wait_status=status,exit_code=os.WEXITSTATUS(status))
+        elif os.WIFSIGNALED(status): clean.update(wait_status=status,signal=os.WTERMSIG(status))
+        else: return {}
+    return clean
+
+
 def process_termination_summary(value):
     if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"]!=1
             or value.get("scope")!="owned-disposable-simulator-process" or value.get("reason")!="confirmed_esrch"):
@@ -1234,6 +1251,8 @@ def process_termination_summary(value):
         if type(value.get(key)) is bool: result[key]=value[key]
     for key,low,high in (("pid",1,2**31-1),("confirmed_absence_observations",2,2),("matching_record_count",0,2)):
         if type(value.get(key)) is int and low<=value[key]<=high: result[key]=value[key]
+    observer=process_exit_observation(value.get("exit_observer"))
+    if observer: result["exit_observer"]=observer
     return result
 
 
@@ -2913,6 +2932,86 @@ class OwnedProbeProcessSampler:
         self.executable = None; self.executable_pin = None; self.prepare_error = "owned_container_invalid"
         self.process_start_identity = None; self.last_liveness_check = None
         self.absent_since = None; self.termination = None
+        self._exit_queue=None; self._exit_attempted=False; self._exit_bound_pid=None
+        self._exit_bound_identity=None; self._exit_observation={};self._exit_birth_identity=None
+
+    def _kernel_birth_identity(self):
+        # Public libproc PROC_PIDTBSDINFO. Its microsecond process birth identity
+        # disambiguates same-image PID reuse within ps lstart's one-second tick.
+        # The other struct fields are never copied into a report or log.
+        import ctypes
+        class BSDInfo(ctypes.Structure):
+            _fields_=[("prefix",ctypes.c_uint32*12),("comm",ctypes.c_char*16),("name",ctypes.c_char*32),
+                ("suffix",ctypes.c_uint32*6),("start_seconds",ctypes.c_uint64),("start_microseconds",ctypes.c_uint64)]
+        require(type(self.pid) is int and 1<=self.pid<=2**31-1,"process_birth_invalid")
+        library=ctypes.CDLL("/usr/lib/libproc.dylib",use_errno=True)
+        function=library.proc_pidinfo
+        function.argtypes=(ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int)
+        function.restype=ctypes.c_int
+        info=BSDInfo();size=ctypes.sizeof(info)
+        require(size==136 and function(self.pid,3,0,ctypes.byref(info),size)==size,"process_birth_unavailable")
+        require(info.prefix[3]==self.pid and info.prefix[5]==os.getuid()
+            and info.start_seconds>0 and info.start_microseconds<1000000,"process_birth_invalid")
+        return info.start_seconds,info.start_microseconds
+
+    def close(self):
+        queue,self._exit_queue=self._exit_queue,None
+        self._exit_bound_pid=self._exit_bound_identity=None
+        if queue is not None:
+            try: queue.close()
+            except OSError: pass
+
+    def _arm_exit_observer(self):
+        # At most one FD for an already image/start-attested owned launch.
+        # NOTE_EXITSTATUS is a public Darwin flag (sys/event.h), available for
+        # a child or another process this user is allowed to signal. It does
+        # not signal, reap, suspend, or otherwise change the target process.
+        if self._exit_attempted or self.process_start_identity is None: return
+        self._exit_attempted=True
+        if sys.platform!="darwin" or not hasattr(select,"kqueue"):
+            self._exit_observation={"schema":1,"state":"unsupported","error_code":"unsupported"}; return
+        queue=None
+        try:
+            if self._exit_birth_identity is None or self._kernel_birth_identity()!=self._exit_birth_identity:
+                self._exit_observation={"schema":1,"state":"unavailable","error_code":"identity_changed"};return
+            queue=select.kqueue()
+            event=select.kevent(self.pid,filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD|select.KQ_EV_ENABLE|select.KQ_EV_ONESHOT,
+                fflags=select.KQ_NOTE_EXIT|0x04000000)  # NOTE_EXITSTATUS
+            queue.control([event],0,0)
+            # Registration alone cannot bind a recycled PID. Recheck the same
+            # image/start identity across registration before accepting events.
+            if (self._process_identity(self.executable)!=self.process_start_identity
+                    or self._kernel_birth_identity()!=self._exit_birth_identity):
+                self._exit_observation={"schema":1,"state":"unavailable","error_code":"identity_changed"}; return
+            self._exit_queue=queue;queue=None
+            self._exit_bound_pid=self.pid;self._exit_bound_identity=(self.process_start_identity,self._exit_birth_identity)
+            self._exit_observation={"schema":1,"state":"armed","error_code":"none"}
+        except (OSError,ProbeError,AttributeError,ValueError):
+            self._exit_observation={"schema":1,"state":"unavailable","error_code":"registration_failed"}
+        finally:
+            if queue is not None:
+                try: queue.close()
+                except OSError: pass
+
+    def _poll_exit_observer(self):
+        if self._exit_queue is None: return
+        if self.pid!=self._exit_bound_pid or (self.process_start_identity,self._exit_birth_identity)!=self._exit_bound_identity:
+            self._exit_observation={"schema":1,"state":"unavailable","error_code":"identity_changed"};self.close();return
+        try:
+            events=self._exit_queue.control(None,1,0)
+            if not events: return
+            event=events[0]
+            if (event.ident!=self._exit_bound_pid or event.filter!=select.KQ_FILTER_PROC
+                    or event.flags&select.KQ_EV_ERROR or not event.fflags&select.KQ_NOTE_EXIT
+                    or not event.fflags&0x04000000):
+                self._exit_observation={"schema":1,"state":"unavailable","error_code":"event_invalid"}
+            else:
+                value=process_exit_observation({"schema":1,"state":"exited","error_code":"none","wait_status":event.data})
+                self._exit_observation=value or {"schema":1,"state":"unavailable","error_code":"event_invalid"}
+            self.close()
+        except (OSError,ValueError):
+            self._exit_observation={"schema":1,"state":"unavailable","error_code":"read_failed"};self.close()
 
     def prepare(self):
         self.executable = None; self.executable_pin = None
@@ -2929,6 +3028,7 @@ class OwnedProbeProcessSampler:
             return False
 
     def clear_launch(self):
+        self.close();self._exit_attempted=False;self._exit_observation={};self._exit_birth_identity=None
         self.pid = None; self.launch_started = time.time(); self.launch_ack = None
         self.process_start_identity = None; self.last_liveness_check = None
         self.absent_since = None; self.termination = None
@@ -2953,8 +3053,18 @@ class OwnedProbeProcessSampler:
                 if (type(observed) is not dict or type(observed.get("process_id")) is not int
                         or observed["process_id"]!=self.pid): return
                 if _sample_executable_identity(self.executable)!=self.executable_pin: return
+                birth=None
+                if hasattr(select,"kqueue"):
+                    try:birth=self._kernel_birth_identity()
+                    except (OSError,ProbeError,AttributeError):pass
                 self.process_start_identity=self._process_identity(self.executable)
+                if birth is not None:
+                    try:
+                        if self._kernel_birth_identity()==birth:self._exit_birth_identity=birth
+                    except (OSError,ProbeError,AttributeError):pass
             except (OSError,ProbeError): return
+        self._arm_exit_observer()
+        self._poll_exit_observer()
         # Initial image/start attestation may take two seconds. Measure the
         # actual existence query, not the earlier entry time, for separation.
         now=time.monotonic();self.last_liveness_check=now
@@ -2967,6 +3077,8 @@ class OwnedProbeProcessSampler:
                 "pid":self.pid,"launch_ack_matched":True,"executable_verified_before_exit":True,
                 "start_identity_verified_before_exit":True,"confirmed_absence_observations":2,
                 "reason":"confirmed_esrch","ended":time.time()}
+            observer=process_exit_observation(self._exit_observation)
+            if observer:self.termination["exit_observer"]=observer
             error=ProbeError("owned_probe_process_exited");error.process_termination=self.termination
             raise error
         except OSError:
@@ -2976,7 +3088,10 @@ class OwnedProbeProcessSampler:
 
     def termination_evidence(self):
         if self.termination is None: return None
+        self._poll_exit_observer()
         report={key:value for key,value in self.termination.items() if key!="ended"}
+        observer=process_exit_observation(self._exit_observation)
+        if observer:report["exit_observer"]=observer
         report.update(records=[],raw_logs_retained=False)
         device=self.container.resolve(strict=True).parents[4]
         if device.name!=self.udid or device.parent.name!="Devices": return report
@@ -3396,6 +3511,8 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
         # otherwise passing run subsequently encounters a cleanup failure.
         checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index,
             expected_pid=getattr(owned_sampler,"pid",None),launch_started=getattr(owned_sampler,"launch_started",None))
+        if owned_sampler is not None and callable(getattr(owned_sampler,"close",None)):
+            owned_sampler.close()
         if ui_driver is not None:
             try:
                 ui_driver.close()

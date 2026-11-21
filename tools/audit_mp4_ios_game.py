@@ -41,6 +41,9 @@ SELECT = {
  'director_evaluate': ('UnityEngine.Playables.PlayableDirector','Evaluate',0),
  'director_get_duration': ('UnityEngine.Playables.PlayableDirector','get_duration',0),
  'director_get_binding': ('UnityEngine.Playables.PlayableDirector','GetGenericBinding',1),
+ 'director_get_reference': ('UnityEngine.Playables.PlayableDirector','GetReferenceValue',2,('UnityEngine.PropertyName','System.Boolean&')),
+ 'component_game_object': ('UnityEngine.Component','get_gameObject',0),
+ 'track_muted_hierarchy': ('UnityEngine.Timeline.TrackAsset','get_mutedInHierarchy',0),
  'brain_manual_update': ('Cinemachine.CinemachineBrain','ManualUpdate',0),
  'brain_effective_delta': ('Cinemachine.CinemachineBrain','GetEffectiveDeltaTime',1),
  'core_update_camera': ('Cinemachine.CinemachineCore','UpdateVirtualCamera',3),
@@ -153,6 +156,11 @@ FIELD_SELECT = {
  'player_bgm_source': ('Solis.Common.Live.SolisLivePlayerBase','_bgmSource'),
  'player_voice_source': ('Solis.Common.Live.SolisLivePlayerBase','_voiceSource'),
  'controller_master': ('VL.Timeline.VLTimelineController','_master'),
+ 'controller_directors': ('VL.Timeline.VLTimelineController','_directors'),
+ 'control_source': ('UnityEngine.Timeline.ControlPlayableAsset','sourceGameObject'),
+ 'control_prefab': ('UnityEngine.Timeline.ControlPlayableAsset','prefabGameObject'),
+ 'control_update_director': ('UnityEngine.Timeline.ControlPlayableAsset','updateDirector'),
+ 'control_search_hierarchy': ('UnityEngine.Timeline.ControlPlayableAsset','searchHierarchy'),
  'camera_main': ('VL.Rendering.VLSRPCameraController','_mainCamera'),
  'camera_captured': ('VL.Rendering.VLSRPCameraController','<capturedTexture>k__BackingField'),
  'wrapper_texture': ('VL.VLRenderTexture','texture'),
@@ -302,7 +310,8 @@ class Original:
             'System.UInt32':'uint32_t','System.Int64':'int64_t','System.UInt64':'uint64_t',
             'System.Single':'float','System.Double':'double','System.IntPtr':'void*'}
         if name in scalar:return scalar[name]
-        aggregate={'UnityEngine.Rendering.ScriptableRenderContext':'ScriptableRenderContext8',
+        aggregate={'UnityEngine.PropertyName':'PropertyName4',
+            'UnityEngine.Rendering.ScriptableRenderContext':'ScriptableRenderContext8',
             'Cysharp.Threading.Tasks.UniTask':'UniTask16',
             'System.Threading.CancellationToken':'CancellationToken8',
             # AAPCS64 lowers this 56-byte, non-HFA by-value aggregate to a pointer.
@@ -509,7 +518,7 @@ def build_profile(metadata:bytes,native:bytes)->dict:
     structs={name.rsplit('.',1)[-1]:original.struct_layout(name) for name in (
         'UnityEngine.Rect','UnityEngine.Rendering.AsyncGPUReadbackRequest',
         'UnityEngine.Rendering.RenderTargetIdentifier','UnityEngine.Rendering.ScriptableRenderContext',
-        'UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream',
+        'UnityEngine.PropertyName','UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream',
         'Cysharp.Threading.Tasks.UniTask','System.Threading.CancellationToken',
         'ActorSwing.ActorSwingJob')}
     runtime_types={}

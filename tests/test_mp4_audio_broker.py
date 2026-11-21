@@ -22,7 +22,10 @@ from idoly_local.mp4_audio_bundle import _serialized, _unpack_fs
 from idoly_local.octo_cache import OctoCache
 from idoly_local.octo_manifest import Database, OctoManifest
 from idoly_local.shared_resource_store import SharedResourceStore
-from test_mp4_audio_bundle import NAME, RESOURCE, SAMPLES, bundle, masked
+from test_mp4_audio_bundle import (
+    NAME, CHEERS, RESOURCE, SAMPLES, CHEER_SAMPLE_ROWS, CHEER_RESOURCE_PINS,
+    bundle, masked, cheer_sample,
+)
 from test_shared_resource_store import Response
 
 
@@ -274,14 +277,76 @@ def test_malformed_capability_shape_or_epoch_rejected_before_manifest_io(setup, 
     assert broker.status()["rejected_requests"] == 1
 
 
-@pytest.mark.parametrize("name", ["../sud_music_x", "mdl_other", "sud_music_X", "sud_music_x/../../other"])
-def test_request_accepts_no_paths_or_non_music_names(setup, name):
+@pytest.mark.parametrize("name", ["../sud_music_x", "mdl_other", "sud_music_X", "sud_music_x/../../other",
+    "sud_se_live_cheers-mix-r", "sud_se_live_cheers-clap-r", "sud_se_live_cheers-mix",
+    "sud_se_live_cheers-mix-l/../other", "../sud_se_live_cheers-clap-l",
+    "sud_se_live_cheers-clap-l-extra", "sud_se_live_cheers-MIX-l", "sud_se_other",
+    "sud_se_live_cheers-mix-l\n", "sud_se_live_cheers-clap-l\0"])
+def test_request_accepts_no_paths_or_unaudited_effect_names(setup, name):
     broker, _, _, _, calls, _ = setup
     configuration = broker.configuration()
     request_id, raw = request(configuration, name=name)
     target = send(configuration, request_id, raw)
     eventually(lambda: not target.exists())
     assert calls == [] and broker.status()["rejected_requests"] == 1
+
+
+@pytest.mark.parametrize("platform,number", [("android", 1), ("ios", 2)])
+@pytest.mark.parametrize("name", CHEERS)
+def test_exact_audited_cheers_private_ipc_preserves_source_and_capability(tmp_path, platform, number, name):
+    raw = masked(bundle(name, platform=13 if number == 1 else 9,
+        audio_values={"load": 0, "compression": 0}), name)
+    row = dict(name=name, object="ABC123", upload=202050 if number == 1 else 102050,
+        generation=11, size=len(raw), md5=hashlib.md5(raw, usedforsecurity=False).hexdigest())
+    store, cache, record, calls, original = make_store(tmp_path, raw, platform=platform, row=row)
+    broker = MP4AudioBroker(store, tmp_path)
+    try:
+        configuration = broker.configuration()
+        request_id, packet = request(configuration, name=name, platform=number)
+        decoded = decode_request(packet, epoch=configuration["epoch"],
+            capability=bytes.fromhex(configuration["capability"]), request_id=request_id)
+        assert decoded.clip_name == name and decoded.platform == platform
+        send(configuration, request_id, packet)
+        status, prepared = receive(configuration, request_id)
+        assert status == READY and stat.S_IMODE(prepared.stat().st_mode) == 0o400
+        private = _unpack_fs(prepared.read_bytes())
+        assert private.entries[1].data == RESOURCE
+        assert prepared.stat().st_uid == os.geteuid() and prepared.stat().st_nlink == 1
+        canonical = cache.root / record.cache_key[:2] / (record.cache_key + ".bin")
+        assert canonical.read_bytes() == original and canonical.stat().st_ino != prepared.stat().st_ino
+        assert len(calls) == 1 and store.status()["active_leases"] == 0
+    finally:
+        broker.close(); store.close(); cache.close(); eventually(lambda: not broker._fds)
+
+
+@pytest.mark.parametrize("name", CHEERS)
+@pytest.mark.parametrize("failure", ["hash", "size", "bundle_platform", "request_platform", "capability"])
+def test_cheers_never_bypasses_manifest_platform_or_session_validation(tmp_path, name, failure):
+    raw = masked(bundle(name, platform=9 if failure == "bundle_platform" else 13,
+        audio_values={"load": 0, "compression": 0}), name)
+    row = dict(name=name, object="ABC123", upload=202050, generation=11,
+        size=len(raw) + (failure == "size"),
+        md5="0" * 32 if failure == "hash" else hashlib.md5(raw, usedforsecurity=False).hexdigest())
+    store, cache, _record, calls, _original = make_store(tmp_path, raw, row=row)
+    broker = MP4AudioBroker(store, tmp_path)
+    try:
+        configuration = broker.configuration()
+        options = {"platform": 2} if failure == "request_platform" else {}
+        if failure == "capability":
+            options["capability"] = bytes(16)
+        request_id, packet = request(configuration, name=name, **options)
+        target = send(configuration, request_id, packet)
+        if failure == "capability":
+            eventually(lambda: not target.exists())
+            assert broker.status()["rejected_requests"] == 1 and calls == []
+        else:
+            status, prepared = receive(configuration, request_id)
+            assert status == (UNSUPPORTED if failure == "request_platform" else FAILED)
+            assert not prepared.exists()
+            assert len(calls) == (0 if failure == "request_platform" else 1)
+        assert not list((Path(configuration["directory"]) / "prepared").iterdir())
+    finally:
+        broker.close(); store.close(); cache.close(); eventually(lambda: not broker._fds)
 
 
 def test_request_id_in_record_must_equal_private_filename(setup):
@@ -493,3 +558,26 @@ def test_actual_pinned_song_body_is_cloned_via_verified_store_without_modifying_
     finally:
         broker.close(); store.close(); cache.close()
         eventually(lambda: not broker._fds)
+
+
+@pytest.mark.parametrize("row", CHEER_SAMPLE_ROWS, ids=lambda row: row["platform"] + "-" + row["name"])
+def test_actual_cheers_body_is_cloned_via_verified_store_without_modifying_source(tmp_path, row):
+    source, raw = cheer_sample(row)
+    store, cache, record, calls, original = make_store(tmp_path, raw, platform=row["platform"], row=row)
+    broker = MP4AudioBroker(store, tmp_path)
+    try:
+        configuration = broker.configuration()
+        request_id, packet = request(configuration, name=row["name"],
+            platform=1 if row["platform"] == "android" else 2,
+            samples=round(CHEER_RESOURCE_PINS[row["name"]][2] * 48000))
+        send(configuration, request_id, packet)
+        status, prepared = receive(configuration, request_id)
+        assert status == READY
+        resource = _unpack_fs(prepared.read_bytes()).entries[1].data
+        assert (len(resource), hashlib.sha256(resource).hexdigest()) == CHEER_RESOURCE_PINS[row["name"]][:2]
+        canonical = cache.root / record.cache_key[:2] / (record.cache_key + ".bin")
+        assert canonical.read_bytes() == source.read_bytes() == original and len(calls) == 1
+        assert stat.S_IMODE(prepared.stat().st_mode) == 0o400 and prepared.stat().st_ino != canonical.stat().st_ino
+        assert calls == [f"https://d2ilil7yh5oi1v.cloudfront.net/solis-{row['upload']}-assetbundle/{row['object']}?generation={row['generation']}&alt=media"]
+    finally:
+        broker.close(); store.close(); cache.close(); eventually(lambda: not broker._fds)

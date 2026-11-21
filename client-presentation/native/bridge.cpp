@@ -33,6 +33,7 @@
 #include "sound_persistence.hpp"
 #include "mp4_game_bindings.hpp"
 #include "mp4_controller_profile.hpp"
+#include "mp4_camera_owner.hpp"
 #include "mp4_type_descriptor.hpp"
 #include "mp4_graph_modes.hpp"
 #include "mp4_camera_clock.hpp"
@@ -804,12 +805,14 @@ constexpr const auto &mp4_profile=mp4game::ios_game_profile;
 constexpr const auto &mp4_runtime_profile=mp4game::ios_runtime_profile;
 constexpr const auto &mp4_bindings=mp4game::ios_game_bindings;
 constexpr const auto &mp4_controller_profile=mp4game::ios_controller_profile;
+constexpr const auto &mp4_camera_owner_profile=mp4game::ios_camera_owner_profile;
 constexpr const auto &mp4_type_metadata_profile=mp4game::ios_type_metadata_profile;
 #else
 constexpr const auto &mp4_profile=mp4game::android_game_profile;
 constexpr const auto &mp4_runtime_profile=mp4game::android_runtime_profile;
 constexpr const auto &mp4_bindings=mp4game::android_game_bindings;
 constexpr const auto &mp4_controller_profile=mp4game::android_controller_profile;
+constexpr const auto &mp4_camera_owner_profile=mp4game::android_camera_owner_profile;
 constexpr const auto &mp4_type_metadata_profile=mp4game::android_type_metadata_profile;
 #endif
 mp4game::Api mp4_api;
@@ -822,6 +825,7 @@ bool mp4_camera_clock_ok();
 bool mp4_recorded_graph_mode(const mp4game::PlayableGraph*,int32_t*);
 bool mp4_source_verified=false,mp4_api_installed=false;
 bool mp4_replay_verified=false;
+uint32_t mp4_controller_type_handle=0;
 char mp4_binding_error[96]="original_mv_bindings_unverified";
 // The game owns the controller and the texture. Exporting only scopes an
 // original UpdateRenderTarget call, then restores the pre-export pixel size.
@@ -1016,6 +1020,8 @@ void mp4_verify_original_calls() {
     // run below on the original Unity thread before any API is installed.
     for(const auto* binding:{&runtime.single_type,&runtime.audio_clip_type,&runtime.texture2d_type})
         if(!descriptor(*binding))return;
+    if(!code(mp4_camera_owner_profile.component_get_component)
+        ||!descriptor(mp4_camera_owner_profile.controller_type))return;
     const auto& metadata=mp4_type_metadata_profile;
     if(!mp4_mapped(image_base+metadata.metadata_base_slot,sizeof(void*),false)
             ||!mp4_mapped(image_base+metadata.metadata_header_slot,sizeof(void*),false)){
@@ -1641,6 +1647,14 @@ bool mp4_prepare_runtime() {
     if(!mp4_single_class)return unavailable(mp4_binding_error);
     mp4_texture_class=mp4_resolved_type_class(mp4_runtime_profile.texture2d_type,"UnityEngine","Texture2D");
     if(!mp4_texture_class)return unavailable(mp4_binding_error);
+    if(!mp4_controller_type_handle){
+        if(!mp4_resolved_type_class(mp4_camera_owner_profile.controller_type,"VL.Rendering","VLSRPCameraController"))
+            return unavailable(mp4_binding_error);
+        void* controller_type=mp4_type_get_object(reinterpret_cast<const void*>(image_base+mp4_camera_owner_profile.controller_type.rva));
+        if(!controller_type)return unavailable("selected_controller_type_not_ready");
+        mp4_controller_type_handle=mp4_retain(controller_type);
+        if(!mp4_controller_type_handle)return unavailable("selected_controller_type_handle_failed");
+    }
     void *audio_class=mp4_resolved_type_class(mp4_runtime_profile.audio_clip_type,"UnityEngine","AudioClip");
     if(!audio_class)return unavailable(mp4_binding_error);
     void *audio_type=mp4_type_get_object(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.audio_clip_type.rva));
@@ -1662,54 +1676,65 @@ bool mp4_prepare_runtime() {
     mp4_install_replay_runtime();
     mp4_api_installed=true;return true;
 }
+// BEGIN_MP4_SELECTED_CONTROLLER
 void *mp4_selected_controller(void *presenter) {
+    idoly_mp4_timeline_camera::Counters counts{};
+    uint32_t candidates=0;
+    const auto reject=[&](const char* reason)->void*{
+        idoly_mp4_runtime::observe_controller_discovery(reason,"none",counts,candidates);return nullptr;
+    };
+    const auto accept=[&](void* controller,const char* source)->void*{
+        idoly_mp4_runtime::observe_controller_discovery("none",source,counts,candidates);return controller;
+    };
     void *player=nullptr;
     if(mp4_type_is(presenter,"Solis.OutGame.LivePlayerScreenPresenter")) {
         player=read<void*>(presenter,0xe0);
-        if(!mp4_type_is(player,"Solis.Common.SolisLivePlayer"))return nullptr;
+        if(!mp4_type_is(player,"Solis.Common.SolisLivePlayer"))return reject("selected_mv_not_loaded");
     } else if(mp4_type_is(presenter,"Solis.Photography.PhotographyLivePresenter")) {
-        if(!mp4_alive(presenter)||!mp4_api.active_enabled(presenter,nullptr))return nullptr;
+        if(!mp4_alive(presenter)||!mp4_api.active_enabled(presenter,nullptr))return reject("selected_presenter_inactive");
         void* mode=read<void*>(presenter,0x30);
         if(!mp4_type_is(mode,"Solis.Photography.PhotographyLiveModePresenter")||!mp4_alive(mode)
-            ||!mp4_api.active_enabled(mode,nullptr)
-            ||!mp4_type_is(read<void*>(mode,0x30),"Solis.Photography.Data.PhotographyLiveTransitionData")
-            ||mp4_api.photo_mode_is_mv(mode,nullptr))return nullptr;
+            ||!mp4_api.active_enabled(mode,nullptr))return reject("selected_photography_mode_not_loaded");
+        if(!mp4_type_is(read<void*>(mode,0x30),"Solis.Photography.Data.PhotographyLiveTransitionData"))
+            return reject("selected_photography_data_not_loaded");
+        if(mp4_api.photo_mode_is_mv(mode,nullptr))return reject("selected_video_mv_unsupported");
         player=read<void*>(mode,0x20);
         if(!mp4_type_is(player,"Solis.Common.Photography.PhotographyLive3DPresenter")
-            ||!mp4_alive(player)||!mp4_api.active_enabled(player,nullptr)||!read<bool>(player,0x70))return nullptr;
-    } else return nullptr;
-    if(!mp4_alive(player))return nullptr;
-    void *timeline=read<void*>(player,0x38);
-    if(!mp4_type_is(timeline,"Solis.Common.Live.SolisLiveTimelineController")||!mp4_alive(timeline))return nullptr;
-    void *director=read<void*>(timeline,0x20);
-    if(!mp4_type_is(director,"UnityEngine.Playables.PlayableDirector")||!mp4_alive(director))return nullptr;
-    void *asset=mp4_api.director_get_asset(director,nullptr);
-    if(!mp4_type_is(asset,"UnityEngine.Timeline.TimelineAsset")||!mp4_alive(asset))return nullptr;
-    void *tracks=mp4_api.timeline_get_tracks(asset,nullptr);
-    const size_t count=mp4_array_length(tracks);if(!tracks||count>256)return nullptr;
-    auto **data=static_cast<void**>(mp4_array_data(tracks));void *camera=nullptr;
-    for(size_t i=0;i<count;++i){
-        if(!mp4_type_is(data[i],".CinemachineTrack"))continue;
-        void *brain=mp4_api.director_get_binding(director,data[i],nullptr);
-        if(!mp4_type_is(brain,"Cinemachine.CinemachineBrain")||!mp4_alive(brain))return nullptr;
-        void *output=mp4_api.brain_output_camera(brain,nullptr);
-        if(!mp4_alive(output)||(camera&&camera!=output))return nullptr;
-        camera=output;
+            ||!mp4_alive(player)||!mp4_api.active_enabled(player,nullptr)||!read<bool>(player,0x70))
+            return reject("selected_photography_3d_not_built");
+    } else return reject("selected_presenter_missing");
+    if(!mp4_alive(player))return reject("selected_mv_not_loaded");
+    void* timeline=read<void*>(player,0x38);
+    const auto selected=idoly_mp4_timeline_camera::scan(timeline,mp4game::timeline_camera_api(mp4_api));
+    counts=selected.counts;
+    if(!selected.ok())return reject(selected.error);
+    void* camera=selected.camera;
+    void* main=main_controller.get(true);
+    if(main){++candidates;if(rt_camera(main,nullptr)==camera)return accept(main,"observed");}
+    for(const auto& candidate:controller_candidates){
+        void* controller=candidate.get(true);
+        if(controller){++candidates;if(rt_camera(controller,nullptr)==camera)return accept(controller,"observed");}
     }
-    if(!camera)return nullptr;
-    void *main=main_controller.get(true);
-    if(main&&rt_camera(main,nullptr)==camera)return main;
-    for(const auto &candidate:controller_candidates){
-        void *controller=candidate.get(true);
-        if(controller&&rt_camera(controller,nullptr)==camera)return controller;
-    }
-    // A persistent controller can predate hook installation or leave the
-    // bounded creation-observation cache. Recover the game's original existing
-    // singleton only when its camera is the selected MV timeline's camera.
     void* original=mp4_original_current_controller();
-    if(original&&rt_camera(original,nullptr)==camera){remember_controller(original);return original;}
-    return nullptr;
+    if(original){++candidates;if(rt_camera(original,nullptr)==camera){remember_controller(original);return accept(original,"singleton");}}
+    // GetComponent is scoped to the exact already-bound timeline camera. It
+    // never searches a scene, creates a component or substitutes Camera.main.
+    mp4game::CameraOwnerCalls owner{};
+    owner.is_type=mp4_type_is;owner.alive=mp4_alive;owner.retain=mp4_retain;owner.retained=weak_get;owner.release=weak_free;
+    owner.get_component=reinterpret_cast<decltype(owner.get_component)>(image_base+mp4_camera_owner_profile.component_get_component.rva);
+    owner.controller_camera=rt_camera;
+    const auto recovered=mp4game::recover_camera_controller(camera,weak_get(mp4_controller_type_handle),owner);
+    if(!recovered.handle)return reject(recovered.error);
+    void* controller=weak_get(recovered.handle);
+    // Adopt while the helper's strong root is still held; a raw pointer alone
+    // cannot bridge a subsequent handle allocation or managed collection.
+    idoly_mp4_runtime::observe_camera_controller(controller);
+    remember_controller(controller);
+    weak_free(recovered.handle);
+    return accept(controller,"camera_component");
 }
+
+// END_MP4_SELECTED_CONTROLLER
 Weak mp4_photography_presenter;
 void mp4_observe_photography_presenter() {
     void* presenter=mp4_photography_presenter.get(true);

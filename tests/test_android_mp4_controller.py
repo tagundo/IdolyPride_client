@@ -1,5 +1,6 @@
 """Run actual controller transition/path methods without substituting the game lifecycle."""
 from pathlib import Path
+import os
 import re
 import shutil
 import subprocess
@@ -280,7 +281,8 @@ def test_diagnostics_copies_only_bounded_public_state_without_private_payloads(t
     javac, java = shutil.which("javac"), shutil.which("java")
     if not javac or not java:
         pytest.skip("JDK required")
-    selected = method(SOURCE.read_text(), "diagnostics")
+    source = SOURCE.read_text()
+    selected = "\n".join(method(source, name) for name in ("controllerDiscovery", "snapshot", "diagnostics"))
     fixture = tmp_path / "DiagnosticsHarness.java"
     fixture.write_text(r'''
 import java.util.*;import java.lang.ref.WeakReference;
@@ -288,19 +290,22 @@ public class DiagnosticsHarness {
  static boolean configured=true,initialized=true,resumed,gameFocused,stopped=true,foregroundSelectionReady=true;
  static class Activity {boolean isDestroyed(){return false;}boolean isFinishing(){return false;}}
  static WeakReference<Activity> game=new WeakReference<>(new Activity());static boolean queueConfigured=true;
- static JSONObject state=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
+ static JSONObject last=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
  static class JSONObject {static final Map<String,JSONObject> refs=new HashMap<>();final Map<String,Object> map=new LinkedHashMap<>();
   JSONObject(){}JSONObject(String raw){map.putAll(refs.get(raw).map);}JSONObject put(String k,Object v){map.put(k,v);return this;}
+  Object opt(String key){return map.get(key);}Object remove(String key){return map.remove(key);}int length(){return map.size();}
+  JSONObject optJSONObject(String key){return map.get(key) instanceof JSONObject?(JSONObject)map.get(key):null;}
+  public String toString(){String key="json_"+refs.size();refs.put(key,this);return key;}
   boolean optBoolean(String k){return Boolean.TRUE.equals(map.get(k));}String optString(String k,String fallback){Object v=map.get(k);return v instanceof String?(String)v:fallback;}
   long optLong(String k){Object v=map.get(k);return v instanceof Number?((Number)v).longValue():0;}
   JSONArray optJSONArray(String k){return map.get(k) instanceof JSONArray?(JSONArray)map.get(k):null;}}
  static class JSONArray {int size;JSONArray(int n){size=n;}int length(){return size;}}
- static JSONObject snapshot(){return state;}static JSONObject queueSnapshot(){return queue;}
+ static JSONObject queueSnapshot(){return queue;}
  static String nativeStatus(){JSONObject.refs.put("native",nativeValue);return "native";}
  static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
 ''' + selected + r'''
  public static void main(String[] args){
-  state.put("phase","stale");
+  last.put("phase","stale");
   nativeValue.put("ready",false).put("phase","idle").put("readiness_error","selected_capture_geometry_unsupported")
    .put("error_code","../private/broker.capability").put("pause_reason","none")
    .put("width",0).put("height",0).put("source_width",4095).put("source_height",2457)
@@ -308,6 +313,12 @@ public class DiagnosticsHarness {
    .put("frames",Long.MAX_VALUE).put("total_frames",100L)
    .put("directory","/private/broker").put("capability","b6bcf1ca5802a5b5bd5376fb893ff190")
    .put("export_id","01234567890123456789012345678901").put("pcm_path","/private/exports/private.pcm");
+  JSONObject discovered=new JSONObject().put("reason","selected_render_controller_missing").put("source","camera_component")
+   .put("listed_directors",17).put("unique_directors",8L).put("assets",32).put("output_tracks",65537L)
+   .put("camera_tracks",Long.MAX_VALUE).put("null_assets",Long.MIN_VALUE).put("candidate_controllers",0)
+   .put("raw_address","0x1234abcd").put("director_pointer",123456789L).put("capability","private")
+   .put("controllers",new JSONArray(1000)).put("unknown",new JSONObject().put("nested_address","0xfeed"));
+  nativeValue.put("controller_discovery",discovered);
   queue.put("available",true).put("running",false).put("paused",true).put("jobs",new JSONArray(100))
    .put("queue_root","/private/queue").put("selected_characters","unpublished private payload");
   JSONObject result=diagnostics();
@@ -321,6 +332,44 @@ public class DiagnosticsHarness {
   for(String key:new String[]{"directory","capability","export_id","pcm_path","jobs","queue_root","selected_characters"})
    need(!result.map.containsKey(key),"private field omitted: "+key);
   need(result.map.get("verified_foreground_selection").equals(true)&&result.map.get("game_attached").equals(true),"lifecycle facts preserved");
+  JSONObject copied=result.optJSONObject("controller_discovery");
+  need(copied!=null&&copied.length()==9,"only the nine whitelisted discovery fields survive");
+  need(copied.map.get("reason").equals("selected_render_controller_missing")&&copied.map.get("source").equals("camera_component"),"current native controller reason and source survive diagnostics");
+  need(copied.map.get("listed_directors").equals(17L)&&copied.map.get("unique_directors").equals(8L)&&copied.map.get("assets").equals(32L),"integer observations preserved");
+  need(copied.map.get("output_tracks").equals(65536L)&&copied.map.get("camera_tracks").equals(65536L)&&copied.map.get("null_assets").equals(0L),"discovery counts saturate without overflow");
+  for(String key:new String[]{"raw_address","director_pointer","capability","controllers","unknown"})need(!copied.map.containsKey(key),"discovery field redacted: "+key);
+  last.put("phase","paused").put("export_id","owned_output").put("controller_discovery",discovered);
+  JSONObject ui=snapshot();JSONObject uiDiscovery=ui.optJSONObject("controller_discovery");
+  need(ui.map.get("phase").equals("paused")&&ui.map.get("export_id").equals("owned_output"),"existing snapshot fields remain unchanged");
+  need(uiDiscovery!=null&&uiDiscovery.length()==9,"the actual UI snapshot uses the same bounded discovery whitelist");
+  uiDiscovery.put("reason","changed_copy");need(discovered.map.get("reason").equals("selected_render_controller_missing"),"sanitized copies cannot mutate native state");
+  need(discovered.map.containsKey("raw_address"),"sanitizing output never mutates source observations");
+  for(String origin:new String[]{"none","observed","singleton","camera_component"}){
+   last.put("controller_discovery",new JSONObject().put("source",origin));
+   need(snapshot().optJSONObject("controller_discovery").map.get("source").equals(origin),"known discovery source survives: "+origin);
+  }
+  for(Object invalid:new Object[]{"",new JSONArray(2),"/private/path","0x1234abcd","unknown_source",new String(new char[25]).replace('\0','a'),17,true}){
+   last.put("controller_discovery",new JSONObject().put("reason","safe_reason").put("source",invalid));
+   need(!snapshot().optJSONObject("controller_discovery").map.containsKey("source"),"unknown or malformed source omitted");
+  }
+  String exactReason=new String(new char[96]).replace('\0','a');
+  last.put("controller_discovery",new JSONObject().put("reason",exactReason));
+  need(snapshot().optJSONObject("controller_discovery").map.get("reason").equals(exactReason),"96 character ASCII reason allowed");
+  for(Object invalid:new Object[]{"",exactReason+"a","private/address","line\nbreak","한글",17,true,new JSONObject()}){
+   last.put("controller_discovery",new JSONObject().put("reason",invalid).put("assets",2));
+   JSONObject safe=snapshot().optJSONObject("controller_discovery");need(safe.length()==1&&safe.map.get("assets").equals(2L),"invalid reason omitted without discarding valid counters");
+  }
+  last.put("controller_discovery",new JSONObject().put("listed_directors","10").put("unique_directors",true)
+   .put("assets",1.5).put("output_tracks",1.0).put("camera_tracks",Double.NaN).put("null_assets",Double.POSITIVE_INFINITY)
+   .put("candidate_controllers",new JSONObject()));
+  need(snapshot().optJSONObject("controller_discovery")==null,"noninteger values are not coerced to public counts");
+  for(Object invalid:new Object[]{"0xraw",new JSONArray(4),new JSONObject().put("raw_pointer","0xabc")}){
+   last.put("controller_discovery",invalid);need(!snapshot().map.containsKey("controller_discovery"),"invalid or unknown-only discovery omitted");
+  }
+  last.remove("controller_discovery");need(!snapshot().map.containsKey("controller_discovery"),"absent optional discovery stays absent");
+  nativeValue.put("controller_discovery",new JSONObject().put("raw_address","0xabc"));
+  need(!diagnostics().map.containsKey("controller_discovery"),"unknown-only current native object cannot leak into exported diagnostics");
+  last.put("phase","stale");
   initialized=false;JSONObject cold=diagnostics();need(cold.map.get("phase").equals("stale"),"cold diagnostics never tries unavailable JNI");
   System.out.println("PASS bounded public MP4 diagnostics");
  }
@@ -459,3 +508,40 @@ public final class ServerStopHarness {
                          capture_output=True, text=True, timeout=15)
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "PASS queue parking before server retirement"
+
+
+def test_real_android_controller_and_json_snapshot_api_compile(tmp_path):
+    javac = shutil.which("javac")
+    homes = [Path(os.environ.get("ANDROID_HOME", "/nonexistent")), Path("/workspace/.setup/android-sdk")]
+    android = next((home / f"platforms/android-{version}/android.jar"
+                    for version in (35, 34) for home in homes
+                    if (home / f"platforms/android-{version}/android.jar").is_file()), None)
+    if not javac or android is None:
+        pytest.skip("JDK and actual Android SDK required")
+    package = "game.qualiarts.idolypride.localserver"
+    resource_names = sorted(set(re.findall(r"R\.string\.([A-Za-z0-9_]+)", SOURCE.read_text())))
+    resources = "".join(f"static final int {name}={index};" for index, name in enumerate(resource_names, 1))
+    stubs = {
+        "R.java": f"package {package}; final class R {{static class string {{{resources}}}}}",
+        "UnifiedRuntime.java": f"package {package}; final class UnifiedRuntime {{static boolean isEnabled(android.content.Context c){{return false;}}}}",
+        "UnifiedMP4Background.java": f"""package {package};
+final class UnifiedMP4Background {{
+ interface Host {{org.json.JSONObject status();void park();void resume();boolean userPaused();void changed();}}
+ static org.json.JSONObject snapshot(){{return new org.json.JSONObject();}}
+ static void prepare(android.app.Activity a,Host host){{}}
+ static void stopCurrent(){{}}static void backgrounded(android.app.Activity a){{}}
+ static void foregrounding(android.app.Activity a){{}}static void focusLost(android.app.Activity a){{}}
+ static boolean ownsSurface(android.app.Activity a){{return false;}}
+ static void sample(org.json.JSONObject state){{}}static boolean expectsService(){{return false;}}
+}}""",
+    }
+    paths = []
+    for name, content in stubs.items():
+        path = tmp_path / name
+        path.write_text(content)
+        paths.append(path)
+    compiled = subprocess.run([javac, "-J-Xmx256m", "--release", "17", "-cp", str(android),
+                               "-d", str(tmp_path / "classes"), str(SOURCE),
+                               str(SOURCE.with_name("Mp4TitleCatalog.java")), str(SOURCE.with_name("Mp4ExportSettings.java")),
+                               *map(str, paths)], capture_output=True, text=True, timeout=60)
+    assert compiled.returncode == 0, compiled.stderr

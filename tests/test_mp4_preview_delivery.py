@@ -14,7 +14,8 @@ from tools import stage_mp4_preview as delivery
 
 SOURCE = "a" * 40
 PHOTOGRAPHY_HEADERS = {"client-presentation/native/" + name for name in (
-    "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp")}
+    "mp4_photography_replay_factory.hpp", "mp4_photography_replay_profile.hpp",
+    "mp4_camera_owner.hpp", "mp4_timeline_camera.hpp", "mp4_timeline_audio.hpp")}
 
 
 @pytest.fixture
@@ -52,7 +53,7 @@ def test_compiled_photography_replay_header_changes_after_build_are_rejected(nat
         delivery.mp4_native_sources(values, android=android)
 
 
-@pytest.mark.parametrize("profile", ["mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json"])
+@pytest.mark.parametrize("profile", ["mp4_photography_replay_android_profile.json", "mp4_photography_replay_ios_profile.json", "mp4_camera_owner_profile.json"])
 def test_android_requires_actual_builder_profile_json_pins_but_darwin_does_not(native_source_receipt, profile):
     root, values = native_source_receipt
     assert "client-presentation/native/" + profile in delivery.MP4_ANDROID_PROFILES
@@ -260,6 +261,13 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
         "tools/stage_mp4_preview.py", "tests/test_mp4_preview_delivery.py",
         "tests/test_mp4_field_reference_abi.py", "tests/test_mp4_photography_bridge.py", "tests/test_mp4_replay_factories.py",
         "tests/test_mp4_small_stack.py",
+        "tests/test_mp4_camera_owner.py",
+        "tests/test_mp4_timeline_camera.py",
+        "tests/test_mp4_timeline_audio.py",
+        "tests/test_mp4_timeline_camera_adapter.py",
+        "tests/test_mp4_timeline_audio_adapter.py",
+        "tests/test_mp4_selected_controller.py",
+        "tests/test_mp4_controller_diagnostics.py",
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 4
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw

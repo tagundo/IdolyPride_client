@@ -292,6 +292,62 @@
       "registration_pointer_slot": "0xa790ce8",
       "native_abi": "void*(void*,void*,const MethodInfo*)"
     },
+    "director_get_reference": {
+      "type": "UnityEngine.Playables.PlayableDirector",
+      "name": "GetReferenceValue",
+      "parameter_count": 2,
+      "static": false,
+      "rva": "0x789d610",
+      "prefix": "ff0301d1f65701a9f44f02a9fd7b03a9",
+      "return": "UnityEngine.Object",
+      "parameters": [
+        {
+          "name": "id",
+          "type": "UnityEngine.PropertyName",
+          "metadata_type_index": 69039
+        },
+        {
+          "name": "idValid",
+          "type": "System.Boolean&",
+          "metadata_type_index": 44349
+        }
+      ],
+      "metadata_method_index": 222553,
+      "token_row": 30,
+      "module": "UnityEngine.DirectorModule.dll",
+      "registration_pointer_slot": "0xa790ce0",
+      "native_abi": "void*(void*,PropertyName4,void*,const MethodInfo*)"
+    },
+    "component_game_object": {
+      "type": "UnityEngine.Component",
+      "name": "get_gameObject",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x7849a74",
+      "prefix": "f44fbea9fd7b01a9fd430091938601f0",
+      "return": "UnityEngine.GameObject",
+      "parameters": [],
+      "metadata_method_index": 165080,
+      "token_row": 3168,
+      "module": "UnityEngine.CoreModule.dll",
+      "registration_pointer_slot": "0xa788d80",
+      "native_abi": "void*(void*,const MethodInfo*)"
+    },
+    "track_muted_hierarchy": {
+      "type": "UnityEngine.Timeline.TrackAsset",
+      "name": "get_mutedInHierarchy",
+      "parameter_count": 0,
+      "static": false,
+      "rva": "0x77842bc",
+      "prefix": "fa67bba9f85f01a9f65702a9f44f03a9",
+      "return": "System.Boolean",
+      "parameters": [],
+      "metadata_method_index": 205124,
+      "token_row": 345,
+      "module": "Unity.Timeline.dll",
+      "registration_pointer_slot": "0xa77ceb8",
+      "native_abi": "bool(void*,const MethodInfo*)"
+    },
     "brain_manual_update": {
       "type": "Cinemachine.CinemachineBrain",
       "name": "ManualUpdate",
@@ -1751,6 +1807,11 @@
     "player_bgm_source": 40,
     "player_voice_source": 48,
     "controller_master": 32,
+    "controller_directors": 40,
+    "control_source": 24,
+    "control_prefab": 40,
+    "control_update_director": 56,
+    "control_search_hierarchy": 58,
     "camera_main": 80,
     "camera_captured": 160,
     "wrapper_texture": 16,
@@ -2049,6 +2110,36 @@
       "offset": 32,
       "metadata_field_index": 129713
     },
+    "controller_directors": {
+      "type": "System.Collections.Generic.List`1<UnityEngine.Playables.PlayableDirector>",
+      "name": "_directors",
+      "offset": 40,
+      "metadata_field_index": 129714
+    },
+    "control_source": {
+      "type": "UnityEngine.ExposedReference`1<UnityEngine.GameObject>",
+      "name": "sourceGameObject",
+      "offset": 24,
+      "metadata_field_index": 135663
+    },
+    "control_prefab": {
+      "type": "UnityEngine.GameObject",
+      "name": "prefabGameObject",
+      "offset": 40,
+      "metadata_field_index": 135664
+    },
+    "control_update_director": {
+      "type": "System.Boolean",
+      "name": "updateDirector",
+      "offset": 56,
+      "metadata_field_index": 135667
+    },
+    "control_search_hierarchy": {
+      "type": "System.Boolean",
+      "name": "searchHierarchy",
+      "offset": 58,
+      "metadata_field_index": 135669
+    },
     "camera_main": {
       "type": "UnityEngine.Camera",
       "name": "_mainCamera",
@@ -2309,6 +2400,15 @@
       "metadata_type_definition_index": 24457,
       "size_table_instance_bytes": 24,
       "size_table_native_bytes": 8
+    },
+    "PropertyName": {
+      "bytes": 4,
+      "fields": {
+        "id": 0
+      },
+      "metadata_type_definition_index": 24004,
+      "size_table_instance_bytes": 20,
+      "size_table_native_bytes": 4
     },
     "PlayableGraph": {
       "bytes": 16,

@@ -121,7 +121,7 @@ def build_profile(metadata:bytes,native:bytes)->dict:
     structs={name.rsplit('.',1)[-1]:original.struct_layout(name) for name in (
         'UnityEngine.Rect','UnityEngine.Rendering.AsyncGPUReadbackRequest',
         'UnityEngine.Rendering.RenderTargetIdentifier','UnityEngine.Rendering.ScriptableRenderContext',
-        'UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream',
+        'UnityEngine.PropertyName','UnityEngine.Playables.PlayableGraph','UnityEngine.Animations.AnimationStream',
         'Cysharp.Threading.Tasks.UniTask','System.Threading.CancellationToken')}
     runtime_types={}
     for name in ('System.Single','UnityEngine.AudioClip','UnityEngine.Texture2D'):

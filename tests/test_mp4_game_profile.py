@@ -91,3 +91,21 @@ def test_photography_bindings_preserve_actual_owner_async_abi_and_lazy_producer(
         assert fields['photo_select_source']==0x10 and fields['photo_select_selector']==0x18
         assert select['generic_proof']['constructor_instructions'][-1]['word']=='b44e01a9'
         assert select['generic_proof']['declared_return'].endswith('[]')
+
+
+def test_owned_control_reference_bindings_preserve_property_name_value_abi():
+    for name in ('mp4_game_profile.json','mp4_game_ios_profile.json'):
+        profile=json.loads((NATIVE/name).read_text())
+        methods=profile['methods'];fields=profile['fields']
+        reference=methods['director_get_reference']
+        assert [parameter['type'] for parameter in reference['parameters']]==['UnityEngine.PropertyName','System.Boolean&']
+        assert reference['native_abi']=='void*(void*,PropertyName4,void*,const MethodInfo*)'
+        assert methods['component_game_object']['native_abi']=='void*(void*,const MethodInfo*)'
+        assert methods['track_muted_hierarchy']['native_abi']=='bool(void*,const MethodInfo*)'
+        assert profile['structs']['PropertyName']['bytes']==4
+        assert profile['structs']['PropertyName']['fields']=={'id':0}
+        assert fields['controller_directors']==0x28
+        assert {key:fields[key] for key in ('control_source','control_prefab','control_update_director','control_search_hierarchy')}=={
+            'control_source':0x18,'control_prefab':0x28,'control_update_director':0x38,'control_search_hierarchy':0x3a}
+        assert profile['field_proof']['controller_directors']['type']=='System.Collections.Generic.List`1<UnityEngine.Playables.PlayableDirector>'
+        assert profile['field_proof']['control_source']['type']=='UnityEngine.ExposedReference`1<UnityEngine.GameObject>'

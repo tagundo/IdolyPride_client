@@ -127,6 +127,21 @@ static Configuration configured;
 static Options pending_options;
 static PublicStatus published;
 static char readiness_error[96]="open_selected_mv_first";
+struct ControllerDiscovery {
+    char reason[96]="selected_render_controller_missing";
+    char source[24]="none";
+    idoly_mp4_timeline_camera::Counters counts{};
+    uint32_t candidates=0;
+};
+static ControllerDiscovery controller_discovery;
+inline void observe_controller_discovery(const char* reason,const char* source,
+        const idoly_mp4_timeline_camera::Counters& counts={},uint32_t candidates=0){
+    pthread_mutex_lock(&control_mutex);
+    snprintf(controller_discovery.reason,sizeof(controller_discovery.reason),"%s",reason);
+    snprintf(controller_discovery.source,sizeof(controller_discovery.source),"%s",source);
+    controller_discovery.counts=counts;controller_discovery.candidates=candidates;
+    pthread_mutex_unlock(&control_mutex);
+}
 static bool configured_valid=false,start_pending=false,cancel_pending=false,control_busy=false;
 static uint64_t start_wait_started=0;
 static bool queue_scene_owned=false;
@@ -190,6 +205,8 @@ inline Result probe_readiness(Snapshot& snapshot){
     }
     if(result==Result::ok&&!game.has_source_geometry_probe())game.source_geometry(width,height);
     pthread_mutex_lock(&control_mutex);published.ready=result==Result::ok;
+    if(result!=Result::ok&&!strcmp(error,"selected_render_controller_missing")
+        &&strcmp(controller_discovery.reason,"none"))error=controller_discovery.reason;
     // This is an observed original render texture, never a Screen estimate.
     published.source_width=result==Result::ok&&idoly_mp4_output::source_dimensions(width,height)?static_cast<uint32_t>(width):0;
     published.source_height=published.source_width?static_cast<uint32_t>(height):0;
@@ -235,6 +252,8 @@ inline void observe_presenter_ended(void* presenter){
     const bool selected=game.selected_presenter()==presenter;
     game.observe_presenter_ended(presenter);
     if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;published.ready=false;
+        controller_discovery=ControllerDiscovery{};
+        snprintf(controller_discovery.reason,sizeof(controller_discovery.reason),"%s","selected_mv_ended");
         snprintf(readiness_error,sizeof(readiness_error),"%s","selected_mv_ended");pthread_mutex_unlock(&control_mutex);}
 }
 inline void observe_player_initializing(void* player,void* param){if(installed)selection.observe(player,param);}
@@ -495,17 +514,20 @@ inline size_t status(char*buffer,size_t capacity){
     if(!buffer||!capacity)return 0;
     pthread_mutex_lock(&control_mutex);
     const PublicStatus s=published;char readiness[96]{};snprintf(readiness,sizeof(readiness),"%s",readiness_error);
+    const ControllerDiscovery discovery=controller_discovery;
     const uint64_t ticks=unity_ticks,acks=capture_acks;
     const bool requested=control_busy&&s.pausable&&requested_pause_reason!=IDMP4_PAUSE_NONE,paused=requested&&pause_acknowledged;
     const int reason=requested?requested_pause_reason:IDMP4_PAUSE_NONE;
     pthread_mutex_unlock(&control_mutex);
     const char* current_phase=requested?(paused?"paused":"pausing"):s.phase;
-    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu}",
+    int n=snprintf(buffer,capacity,"{\"schema\":1,\"unity_ticks\":%llu,\"capture_acks\":%llu,\"ready\":%s,\"readiness_error\":\"%s\",\"phase\":\"%s\",\"paused\":%s,\"pause_requested\":%s,\"pause_reason\":\"%s\",\"resume_phase\":\"%s\",\"export_id\":\"%s\",\"error_code\":\"%s\",\"frames\":%llu,\"total_frames\":%llu,\"audio_frames\":%llu,\"total_audio_frames\":%llu,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"fps_num\":%u,\"fps_den\":%u,\"bytes_written\":%llu,\"controller_discovery\":{\"reason\":\"%s\",\"source\":\"%s\",\"listed_directors\":%u,\"unique_directors\":%u,\"assets\":%u,\"output_tracks\":%u,\"camera_tracks\":%u,\"null_assets\":%u,\"candidate_controllers\":%u}}",
         static_cast<unsigned long long>(ticks),static_cast<unsigned long long>(acks),s.ready?"true":"false",readiness,current_phase,
         paused?"true":"false",requested?"true":"false",pause_reason_name(reason),requested?s.phase:"none",s.id,s.error,
         static_cast<unsigned long long>(s.frames),static_cast<unsigned long long>(s.total_frames),
         static_cast<unsigned long long>(s.audio),static_cast<unsigned long long>(s.total_audio),s.width,s.height,s.source_width,s.source_height,
-        s.video_codec,s.video_bitrate,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes));
+        s.video_codec,s.video_bitrate,s.fps_num,s.fps_den,static_cast<unsigned long long>(s.bytes),
+        discovery.reason,discovery.source,discovery.counts.listed_directors,discovery.counts.unique_directors,
+        discovery.counts.assets,discovery.counts.output_tracks,discovery.counts.camera_tracks,discovery.counts.null_assets,discovery.candidates);
     return n>0&&static_cast<size_t>(n)<capacity?static_cast<size_t>(n):0;
 }
 } // namespace idoly_mp4_runtime

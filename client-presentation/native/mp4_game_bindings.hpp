@@ -11,6 +11,9 @@ inline Api with_original_calls(Api api,const GameProfile& profile,uintptr_t imag
     IDMP4_GAME_CALL(active_enabled);
     IDMP4_GAME_CALL(director_get_asset);
     IDMP4_GAME_CALL(director_get_binding);
+    IDMP4_GAME_CALL(director_get_reference);
+    IDMP4_GAME_CALL(component_game_object);
+    IDMP4_GAME_CALL(track_muted_hierarchy);
     IDMP4_GAME_CALL(brain_output_camera);
     IDMP4_GAME_CALL(camera_pixel_width);
     IDMP4_GAME_CALL(camera_pixel_height);

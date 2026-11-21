@@ -14,6 +14,7 @@ from idoly_local import mp4_audio_bundle as audio
 from idoly_local.mp4_audio_bundle import AudioBundleError, prepare_audio_bundle
 
 NAME = "sud_music_short_tri-004"
+CHEERS = ("sud_se_live_cheers-mix-l", "sud_se_live_cheers-clap-l")
 CAB = "CAB-a6930837b387dee77f81c34c3fd30443"
 RESOURCE = b"FSB5" + bytes(range(256)) * 7
 AUDIO_ROWS = [[0,"AudioClip","Base",-1,32768,1,0,0],[1,"string","m_Name",-1,557057,1,0,0],[2,"Array","Array",-1,540673,1,1,0],[3,"int","size",4,524289,1,0,0],[3,"char","data",1,524289,1,0,0],[1,"int","m_LoadType",4,0,1,0,0],[1,"int","m_Channels",4,0,1,0,0],[1,"int","m_Frequency",4,0,1,0,0],[1,"int","m_BitsPerSample",4,0,1,0,0],[1,"float","m_Length",4,0,1,0,0],[1,"bool","m_IsTrackerFormat",1,0,1,0,0],[1,"bool","m_Ambisonic",1,16384,1,0,0],[1,"int","m_SubsoundIndex",4,0,1,0,0],[1,"bool","m_PreloadAudioData",1,0,1,0,0],[1,"bool","m_LoadInBackground",1,0,1,0,0],[1,"bool","m_Legacy3D",1,16384,1,0,0],[1,"StreamedResource","m_Resource",-1,32768,1,0,0],[2,"string","m_Source",-1,32769,1,0,0],[3,"Array","Array",-1,16385,1,1,0],[4,"int","size",4,1,1,0,0],[4,"char","data",1,1,1,0,0],[2,"FileSize","m_Offset",8,1,1,0,0],[2,"UInt64","m_Size",8,1,1,0,0],[1,"int","m_CompressionFormat",4,16384,1,0,0]]
@@ -96,9 +97,10 @@ def masked(raw, name):
 
 
 @pytest.mark.parametrize("platform,label", [(13, "android"), (9, "ios")])
-@pytest.mark.parametrize("name", [NAME, "sud_music_x", "sud_music_" + "a" * 80])
+@pytest.mark.parametrize("name", [NAME, "sud_music_x", "sud_music_" + "a" * 80, *CHEERS])
 def test_metadata_driven_patch_preserves_resource_and_only_changes_private_clip_loading(platform, label, name):
-    original = bundle(name, platform=platform)
+    source_values = {"load": 0, "compression": 0} if name in CHEERS else {}
+    original = bundle(name, platform=platform, audio_values=source_values)
     result = prepare(masked(original, name), name, nonce="1" * 32)
     parsed = audio._unpack_fs(result.bundle_bytes)
     values, actual_platform = audio._serialized(parsed.entries[0].data, name, bundle_name=result.bundle_name)
@@ -116,7 +118,7 @@ def test_metadata_driven_patch_preserves_resource_and_only_changes_private_clip_
     assert result.resource_sha256 == hashlib.sha256(RESOURCE).hexdigest() and result.resource_bytes == len(RESOURCE)
     assert (result.channels, result.frequency, result.bits_per_sample, result.length_seconds) == (2, 48000, 16, 116.0)
     assert result.bundle_sha256 == hashlib.sha256(result.bundle_bytes).hexdigest()
-    assert original == bundle(name, platform=platform)
+    assert original == bundle(name, platform=platform, audio_values=source_values)
     # This proves exact field spans, rather than a search/replace over the FSB.
     old, _ = audio._serialized(audio._unpack_fs(original).entries[0].data, name)
     allowed = set()
@@ -162,13 +164,76 @@ def test_requested_platform_must_match_original_unity_target(platform):
         prepare(bundle(platform=13), expected_platform=platform)
 
 
-@pytest.mark.parametrize("values", [{"load": 0}, {"channels": 0}, {"channels": 9},
+@pytest.mark.parametrize("values", [{"load": 0}, {"load": 1}, {"channels": 0}, {"channels": 9},
     {"frequency": 0}, {"bits": 8}, {"length": float("nan")}, {"length": 0},
-    {"tracker": 1}, {"ambisonic": 1}, {"subsound": 1}, {"compression": 2},
+    {"tracker": 1}, {"ambisonic": 1}, {"subsound": 1}, {"compression": 0}, {"compression": 2},
     {"offset": 1}, {"size": len(RESOURCE) - 1}, {"source": "https://foreign.invalid/file"}])
 def test_unsupported_clip_or_resource_identity_is_rejected(values):
     with pytest.raises(AudioBundleError):
         prepare(bundle(audio_values=values))
+
+
+@pytest.mark.parametrize("name", CHEERS)
+@pytest.mark.parametrize("values", [
+    {"load": 1}, {"load": 2}, {"compression": 1}, {"compression": 2},
+    {"source": "../other.resource"}, {"source": "archive:/foreign/foreign.resource"},
+    {"source": "https://foreign.invalid/clip"}, {"offset": 1},
+    {"size": len(RESOURCE) - 1}, {"size": len(RESOURCE) + 1}, {"subsound": 1},
+])
+def test_cheers_admits_only_audited_pcm_load_shape_and_own_full_resource(name, values):
+    clip = {"load": 0, "compression": 0, **values}
+    with pytest.raises(AudioBundleError, match="clip_unsupported"):
+        prepare(bundle(name, audio_values=clip), name)
+
+
+@pytest.mark.parametrize("name", [
+    "sud_se_live_cheers-mix-r", "sud_se_live_cheers-clap-r", "sud_se_live_cheers-mix",
+    "sud_se_live_cheers-clap-l-extra", "sud_se_live_cheers-mix-l/../other",
+    "../sud_se_live_cheers-mix-l", "sud_se_live_cheers-MIX-l", "sud_se_other",
+    "sud_se_live_cheers-mix-l\n", "sud_se_live_cheers-mix-l\0",
+])
+def test_other_effect_names_near_matches_and_paths_are_not_admitted(name):
+    assert audio.supported_audio_name(name) is False
+    with pytest.raises(AudioBundleError, match="identity_invalid"):
+        prepare(bundle(CHEERS[0], audio_values={"load": 0, "compression": 0}), name)
+
+
+@pytest.mark.parametrize("name", CHEERS)
+@pytest.mark.parametrize("change", ["size", "md5", "sha256", "platform", "clip_name"])
+def test_cheers_keeps_manifest_and_serialized_identity_checks(name, change):
+    raw = bundle(name, audio_values={"load": 0, "compression": 0})
+    arguments = dict(name=name, expected_size=len(raw), expected_platform="android",
+        expected_md5=hashlib.md5(raw, usedforsecurity=False).hexdigest(),
+        expected_sha256=hashlib.sha256(raw).hexdigest())
+    if change == "clip_name":
+        arguments["name"] = next(other for other in CHEERS if other != name)
+    elif change == "platform":
+        arguments["expected_platform"] = "ios"
+    else:
+        arguments["expected_" + change] = len(raw) - 1 if change == "size" else "0" * (64 if change == "sha256" else 32)
+    with pytest.raises(AudioBundleError):
+        prepare_audio_bundle(raw, **arguments)
+
+
+@pytest.mark.parametrize("name", CHEERS)
+@pytest.mark.parametrize("field,value,code", [
+    (("m_PreloadTable", 0, "m_FileID"), 1, "i"),
+    (("m_PreloadTable", 0, "m_PathID"), 99, "q"),
+    (("m_Container", 0, "second", "asset", "m_FileID"), 1, "i"),
+    (("m_Container", 0, "second", "asset", "m_PathID"), 99, "q"),
+])
+def test_cheers_rejects_foreign_or_unlinked_source_clip_graph(name, field, value, code):
+    archive = audio._unpack_fs(bundle(name, audio_values={"load": 0, "compression": 0}))
+    entry = archive.entries[0]
+    objects, _ = audio._serialized(entry.data, name)
+    at, size = objects[142][1][field]
+    changed = bytearray(entry.data)
+    assert struct.calcsize(code) == size
+    changed[at:at + size] = struct.pack("<" + code, value)
+    raw = audio._pack_fs(audio._Archive(archive.version, archive.player, archive.engine,
+        (audio._Entry(entry.name, entry.flags, bytes(changed)), archive.entries[1])))
+    with pytest.raises(AudioBundleError, match="clip_unsupported"):
+        prepare(raw, name)
 
 
 def test_modified_schema_is_rejected_instead_of_using_a_fixed_object_offset():
@@ -216,6 +281,90 @@ def test_no_production_dependency_or_file_network_side_effects(monkeypatch):
 
 
 SAMPLES = Path("/workspace/shared/idoly-sdk-cache-analysis")
+CHEER_SAMPLES = Path("/workspace/shared/mp4-cheers-audit")
+# Public manifest rows independently audited against both original bundles.
+CHEER_SAMPLE_ROWS = [dict(zip(("platform", "name", "object", "upload", "generation", "size", "md5", "sha256"), row)) for row in (
+    ("android", CHEERS[0], "txO1r1", 202050, 1711343330408308, 1286544,
+     "4371ac46bd00c129133607447dcb3eb5", "b2eb20c554bb715b4dc6003d4f8db2a73d1aaff6637c132e92bc309b90618739"),
+    ("android", CHEERS[1], "aceCGY", 202050, 1711343274854978, 3213868,
+     "824fd8092b0b06b56b0759acb9e5ea19", "e51e3cfbb9cc61ac73f31e612544e76f5dc75eb771c3fc9ba22d83d1181d275a"),
+    ("ios", CHEERS[0], "SwtdG4", 102050, 1711099804274458, 1286544,
+     "190621a43efdd01a135a0942c44780c0", "f115d9a5e8f4a871c7e3253b36be7aa6fe89903459af6a4e29f61c6fee68f689"),
+    ("ios", CHEERS[1], "7rz7m5", 102050, 1711099979856181, 3213869,
+     "102352320f930451f3771477a22ea586", "f1f776a408702c9f086c8c26c63d97984720063505b733511a7182e0a1bbd7ea"),
+)]
+CHEER_RESOURCE_PINS = {
+    CHEERS[0]: (1292192, "8381f13b473b147134a0a85c337d4096c2166fb1bc03c7d364b4df6fd1a56291", 6.729416847229004),
+    CHEERS[1]: (3243520, "cee8e635443efde18cc3d43f2d01f46c35d33b26c215d44bfd284e69a23eb1dd", 16.89262580871582),
+}
+
+
+def cheer_sample(row):
+    source = CHEER_SAMPLES / (row["platform"] + "-" + row["name"] + ".bin")
+    if not source.is_file():
+        pytest.skip("Pinned public cheer sample is an optional local audit input")
+    raw = source.read_bytes()
+    assert len(raw) == row["size"] and hashlib.md5(raw, usedforsecurity=False).hexdigest() == row["md5"]
+    assert hashlib.sha256(raw).hexdigest() == row["sha256"]
+    return source, raw
+
+
+@pytest.mark.parametrize("row", CHEER_SAMPLE_ROWS, ids=lambda row: row["platform"] + "-" + row["name"])
+def test_actual_cheers_manifest_and_independent_private_bundle_readback(row, tmp_path):
+    source, original = cheer_sample(row)
+    python = Path(os.environ.get("IDOLY_UNITYPY_PYTHON", "/workspace/.setup/venvs/toolkit/bin/python"))
+    manifest = SAMPLES / "catalogs/data" / ("public-octo" if row["platform"] == "android" else "public-octo-ios") / "manifest.pb"
+    if not python.is_file() or not manifest.is_file():
+        pytest.skip("Independent pinned UnityPy and original public manifest are optional audit inputs")
+    from idoly_local.octo_manifest import Database
+    manifest_pin = ("51dcb276625e9e669f43715cb69d92ef2cffadf1e7ecc7a3b4130f3db42c2ead" if row["platform"] == "android"
+                    else "2696d17d4f6ba5c6deac43f6b16ab9e04a594d327699d7c9ffee8f673ea2edf3")
+    manifest_bytes = manifest.read_bytes()
+    assert hashlib.sha256(manifest_bytes).hexdigest() == manifest_pin
+    matches = [item for item in Database.FromString(manifest_bytes).assetBundleList if item.name == row["name"]]
+    assert len(matches) == 1
+    item = matches[0]
+    assert (item.objectName, item.uploadVersionId, item.generation, item.size, item.md5) == (
+        row["object"], row["upload"], row["generation"], row["size"], row["md5"])
+    before = source.stat()
+    result = prepare_audio_bundle(original, name=row["name"], expected_size=row["size"],
+        expected_md5=row["md5"], expected_sha256=row["sha256"], expected_platform=row["platform"])
+    assert source.read_bytes() == original
+    after = source.stat()
+    assert (before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns, before.st_ctime_ns) == (
+        after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns, after.st_ctime_ns)
+    assert (result.channels, result.frequency, result.bits_per_sample) == (2, 48000, 16)
+    assert (result.resource_bytes, result.resource_sha256, result.length_seconds) == CHEER_RESOURCE_PINS[row["name"]]
+    target = tmp_path / "private.bundle"
+    target.write_bytes(result.bundle_bytes)
+    script = """
+import hashlib,json,sys
+from pathlib import Path
+import UnityPy
+assert UnityPy.__version__ == '1.25.4'
+UnityPy.config.FALLBACK_UNITY_VERSION='2022.3.57f1'
+env=UnityPy.load(Path(sys.argv[1]).read_bytes())
+objects=list(env.objects)
+assert len(objects)==2 and {obj.class_id for obj in objects}=={83,142}
+values={obj.class_id:obj.read_typetree() for obj in objects}
+assert all(len(obj.assets_file.externals)==0 for obj in objects)
+bundle=next(iter(env.files.values()))
+resource=next(value.bytes for key,value in bundle.files.items() if key.endswith('.resource'))
+print(json.dumps({'clip':values[83], 'bundle':values[142], 'platform':int(objects[0].assets_file.target_platform),
+ 'resource_sha256':hashlib.sha256(resource).hexdigest(), 'resource_bytes':len(resource)}))
+"""
+    output = subprocess.run([str(python), "-c", script, str(target)],
+        check=True, capture_output=True, text=True, timeout=20)
+    observed = json.loads(output.stdout)
+    clip, bundle_values = observed["clip"], observed["bundle"]
+    assert (clip["m_Name"], clip["m_LoadType"], clip["m_CompressionFormat"],
+        clip["m_PreloadAudioData"], clip["m_LoadInBackground"]) == (row["name"], 0, 0, True, False)
+    assert clip["m_Resource"] == dict(m_Source="archive:/" + result.cab_name + "/" + result.cab_name + ".resource",
+        m_Offset=0, m_Size=result.resource_bytes)
+    assert bundle_values["m_Name"] == bundle_values["m_AssetBundleName"] == result.bundle_name != row["name"]
+    assert bundle_values["m_Container"][0][0] == row["name"] and bundle_values["m_Dependencies"] == []
+    assert observed["platform"] == (13 if row["platform"] == "android" else 9)
+    assert (observed["resource_bytes"], observed["resource_sha256"]) == CHEER_RESOURCE_PINS[row["name"]][:2]
 
 @pytest.mark.parametrize("platform", ["android", "ios"])
 def test_actual_audited_song_bundles_have_identical_resource_after_private_roundtrip(platform):

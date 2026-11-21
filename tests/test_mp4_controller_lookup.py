@@ -83,6 +83,9 @@ HARNESS = r"""
 #include <vector>
 #include <cstdio>
 #include "mp4_type_descriptor.hpp"
+#include "mp4_game_adapter.hpp"
+#include "mp4_camera_owner.hpp"
+#include "mp4_controller_profile.hpp"
 namespace mp4game=idoly_mp4_game;
 using Binding=mp4game::Binding;
 using Method=void;
@@ -102,6 +105,9 @@ uintptr_t rejected_mapping=0,rejected_binding=0;
 ControllerProfile mp4_controller_profile;
 RuntimeProfile mp4_runtime_profile;
 ReplayProfile mp4_replay_profile;
+mp4game::CameraOwnerProfile mp4_camera_owner_profile;
+alignas(16) unsigned char camera_owner_type_descriptor[16]{};
+uint32_t mp4_controller_type_handle=0;
 Binding mp4_bindings[1];
 alignas(16) unsigned char replay_bytes[16]{};
 Binding mp4_replay_bindings[1];
@@ -117,7 +123,7 @@ template<class T>T read(void* p,size_t offset){T value{};if(p)std::memcpy(&value
 struct Object {alignas(16) uint8_t storage[512]{};};
 struct Info {std::string type;bool alive=true;void* camera=nullptr;};
 std::unordered_map<void*,Info> objects;
-Object photo_mode,photo_data,presenter,player,timeline,director,asset,track,track_other,brain,brain_other,camera,other_camera,controller,other_controller;
+Object photo_mode,photo_data,presenter,player,timeline,director,director_list,asset,track,track_other,brain,brain_other,camera,other_camera,controller,other_controller;
 void* ptr(Object& object){return object.storage;}
 void typed(Object& object,const char* type){objects[ptr(object)]={type,true,nullptr};}
 template<class T>void field(Object& object,size_t offset,T value){std::memcpy(object.storage+offset,&value,sizeof(value));}
@@ -142,9 +148,9 @@ void* fake_instance(const Method* info){
 struct Weak {void* value=nullptr;void* get(bool unity=false)const{return value&&(!unity||mp4_alive(value))?value:nullptr;}void set(void* p){value=p;}};
 Weak main_controller,controller_candidates[4];
 unsigned candidate_cursor=0;
-void* rt_camera(void* p,Method*){return objects.at(p).camera;}
+void* rt_camera(void* p,const Method*){return objects.at(p).camera;}
 struct Array {std::vector<void*> entries;};
-Array tracks;
+Array tracks,owned_directors;
 size_t mp4_array_length(void* p){return p?static_cast<Array*>(p)->entries.size():0;}
 void* mp4_array_data(void* p){return p?static_cast<Array*>(p)->entries.data():nullptr;}
 void* get_asset(void* p,Method*){assert(p==ptr(director));return ptr(asset);}
@@ -152,8 +158,17 @@ void* get_tracks(void* p,Method*){assert(p==ptr(asset));return &tracks;}
 void* get_binding(void* p,void* t,Method*){assert(p==ptr(director)&&mp4_type_is(t,".CinemachineTrack"));return t==ptr(track_other)?ptr(brain_other):ptr(brain);}
 void* get_camera(void* p,Method*){assert(p==ptr(brain)||p==ptr(brain_other));return objects.at(p).camera;}
 bool active=true,video=false;bool active_enabled(void*,Method*){return active;}bool is_mv(void*,Method*){return video;}
-struct Api {bool(*active_enabled)(void*,Method*);bool(*photo_mode_is_mv)(void*,Method*);void*(*director_get_asset)(void*,Method*);void*(*timeline_get_tracks)(void*,Method*);void*(*director_get_binding)(void*,void*,Method*);void*(*brain_output_camera)(void*,Method*);};
-Api mp4_api{active_enabled,is_mv,get_asset,get_tracks,get_binding,get_camera};
+mp4game::Api mp4_api;
+// Component recovery has dedicated production-block/GC tests. This singleton
+// fixture has no camera component, so it cannot hide a failed singleton gate.
+uint32_t mp4_retain(void*){assert(false);return 0;}
+void* weak_get(uint32_t){return nullptr;}
+void weak_free(uint32_t){assert(false);}
+void* absent_component(void*,void*,const void*){assert(false);return nullptr;}
+namespace idoly_mp4_runtime {
+void observe_controller_discovery(const char*,const char*,const idoly_mp4_timeline_camera::Counters&,uint32_t){}
+void observe_camera_controller(void*){assert(false);}
+}
 
 // Actual source functions are injected below this line.
 @@PRODUCTION@@
@@ -187,6 +202,13 @@ void reset(bool indirect=true){
     }
     mp4_replay_bindings[0].rva=reinterpret_cast<uintptr_t>(replay_bytes);
     mp4_replay_profile={};
+    mp4_camera_owner_profile=indirect?mp4game::android_camera_owner_profile:mp4game::ios_camera_owner_profile;
+    std::memcpy(camera_owner_type_descriptor,mp4_camera_owner_profile.controller_type.prefix,16);
+    mp4_camera_owner_profile.controller_type.rva=reinterpret_cast<uintptr_t>(camera_owner_type_descriptor);
+    mp4_camera_owner_profile.component_get_component.rva=reinterpret_cast<uintptr_t>(&absent_component);
+    mp4_api={};mp4_api.is_type=mp4_type_is;mp4_api.alive=mp4_alive;mp4_api.array_length=mp4_array_length;mp4_api.array_data=mp4_array_data;
+    mp4_api.active_enabled=active_enabled;mp4_api.photo_mode_is_mv=is_mv;mp4_api.director_get_asset=get_asset;
+    mp4_api.timeline_get_tracks=get_tracks;mp4_api.director_get_binding=get_binding;mp4_api.brain_output_camera=get_camera;
     objects.clear();
     typed(presenter,"Solis.OutGame.LivePlayerScreenPresenter");typed(player,"Solis.Common.SolisLivePlayer");
     typed(timeline,"Solis.Common.Live.SolisLiveTimelineController");typed(director,"UnityEngine.Playables.PlayableDirector");
@@ -194,6 +216,9 @@ void reset(bool indirect=true){
     typed(camera,"UnityEngine.Camera");typed(other_camera,"UnityEngine.Camera");
     typed(controller,"VL.Rendering.VLSRPCameraController");typed(other_controller,"VL.Rendering.VLSRPCameraController");
     field(presenter,0xe0,ptr(player));field(player,0x38,ptr(timeline));field(timeline,0x20,ptr(director));
+    typed(director_list,"System.Collections.Generic.List`1");objects[&owned_directors]={"UnityEngine.Playables.PlayableDirector[]",true,nullptr};
+    objects[&tracks]={"UnityEngine.Timeline.TrackAsset[]",true,nullptr};owned_directors.entries.clear();
+    field(director_list,0x10,static_cast<void*>(&owned_directors));field(director_list,0x18,int32_t(0));field(timeline,0x28,ptr(director_list));
     objects.at(ptr(brain)).camera=ptr(camera);objects.at(ptr(brain_other)).camera=ptr(other_camera);objects.at(ptr(controller)).camera=ptr(camera);
     objects.at(ptr(other_controller)).camera=ptr(other_camera);existing_controller=ptr(controller);
     main_controller.value=nullptr;for(auto& candidate:controller_candidates)candidate.value=nullptr;candidate_cursor=0;

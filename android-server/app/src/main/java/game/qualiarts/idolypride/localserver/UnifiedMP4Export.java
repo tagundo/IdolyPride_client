@@ -147,7 +147,34 @@ public final class UnifiedMP4Export {
             foregroundSelectionReady = nativeReady;
     }
     static JSONObject snapshot() {
-        try { return new JSONObject(last.toString()); } catch (Exception ignored) { return new JSONObject(); }
+        try {
+            JSONObject result = new JSONObject(last.toString());
+            JSONObject discovery = controllerDiscovery(result);
+            result.remove("controller_discovery");
+            if (discovery != null) result.put("controller_discovery", discovery);
+            return result;
+        } catch (Exception ignored) { return new JSONObject(); }
+    }
+    private static JSONObject controllerDiscovery(JSONObject state) {
+        JSONObject source = state.optJSONObject("controller_discovery");
+        if (source == null) return null;
+        JSONObject result = new JSONObject();
+        try {
+            Object reason = source.opt("reason");
+            if (reason instanceof String && ((String) reason).matches("[A-Za-z0-9_]{1,96}"))
+                result.put("reason", reason);
+            Object origin = source.opt("source");
+            if (origin instanceof String && ((String) origin).matches("[A-Za-z0-9_]{1,24}")
+                    && (origin.equals("none") || origin.equals("observed") || origin.equals("singleton")
+                        || origin.equals("camera_component"))) result.put("source", origin);
+            for (String key : new String[] {"listed_directors", "unique_directors", "assets", "output_tracks",
+                    "camera_tracks", "null_assets", "candidate_controllers"}) {
+                Object value = source.opt(key);
+                if (value instanceof Byte || value instanceof Short || value instanceof Integer || value instanceof Long)
+                    result.put(key, Math.max(0L, Math.min(65536L, ((Number) value).longValue())));
+            }
+        } catch (Exception ignored) { /* Retain only the bounded public observations already copied. */ }
+        return result.length() == 0 ? null : result;
     }
     /** Bounded public observations only: no broker paths, capabilities or job payloads. */
     static JSONObject diagnostics() {
@@ -171,6 +198,8 @@ public final class UnifiedMP4Export {
             for (String key : new String[] {"unity_ticks", "capture_acks", "width", "height", "source_width", "source_height",
                     "fps_num", "fps_den", "video_bitrate", "frames", "total_frames"})
                 result.put(key, Math.max(0L, Math.min(9007199254740991L, state.optLong(key))));
+            JSONObject discovery = controllerDiscovery(state);
+            if (discovery != null) result.put("controller_discovery", discovery);
             JSONObject queue = queueSnapshot();
             JSONArray jobs = queue.optJSONArray("jobs");
             result.put("queue_available", queueConfigured && queue.optBoolean("available"))
