@@ -51,7 +51,9 @@ Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueConfigure
     const char* r=env->GetStringUTFChars(root,nullptr);
     const char* e=r?env->GetStringUTFChars(exports,nullptr):nullptr;
     const int result=e&&!env->ExceptionCheck()?IDMP4QueueConfigure(r,e):-1;
-    if(e)env->ReleaseStringUTFChars(exports,e);if(r)env->ReleaseStringUTFChars(root,r);return result;
+    if(e)env->ReleaseStringUTFChars(exports,e);
+    if(r)env->ReleaseStringUTFChars(root,r);
+    return result;
 }
 extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueEnqueue(JNIEnv*,jclass,jint n,jint d,jint c,jint v,jint a){
@@ -61,6 +63,8 @@ extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueEnqueueV2(JNIEnv*,jclass,jint n,jint d,jint c,jint v,jint a,jint w,jint h){
     return n>0&&d>0&&c>0&&v>=0&&a>0&&w>=0&&h>=0?IDMP4QueueEnqueueV2(n,d,c,v,a,w,h):-1;
 }
+extern "C" JNIEXPORT void JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeInvalidateQueueSelection(JNIEnv*,jclass){IDMP4QueueInvalidateSelection();}
 extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueRun(JNIEnv*,jclass){return IDMP4QueueRun();}
 extern "C" JNIEXPORT jint JNICALL
@@ -69,9 +73,11 @@ extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueResume(JNIEnv*,jclass){return IDMP4QueueResume();}
 extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueCommand(JNIEnv* env,jclass,jint operation,jstring id,jint position){
-    if(!id)return -1;const char* value=env->GetStringUTFChars(id,nullptr);
+    if(!id)return -1;
+    const char* value=env->GetStringUTFChars(id,nullptr);
     const int result=value&&!env->ExceptionCheck()?IDMP4QueueCommand(operation,value,position):-1;
-    if(value)env->ReleaseStringUTFChars(id,value);return result;
+    if(value)env->ReleaseStringUTFChars(id,value);
+    return result;
 }
 extern "C" JNIEXPORT jstring JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueStatus(JNIEnv* env,jclass){

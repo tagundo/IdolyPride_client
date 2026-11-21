@@ -385,3 +385,121 @@ def test_reset_closes_one_live_observer_fd_before_relaunch(owned,exit_queue):
     {"schema":1,"state":"exited","error_code":"none","wait_status":-1}])
 def test_exit_status_projection_rejects_non_scalar_or_nonterminal_wait_status(value):
     assert probe.process_exit_observation(value)=={}
+
+
+@pytest.fixture
+def failed_early_setup(owned,monkeypatch):
+    import plistlib
+    (owned.executable.parent/'Info.plist').write_bytes(plistlib.dumps({
+        'CFBundleIdentifier':probe.BUNDLE_ID,'CFBundleExecutable':probe.PROBE_EXECUTABLE,
+        'CFBundleSupportedPlatforms':['iPhoneSimulator']}))
+    queries=[];fail=[True]
+    def query(arguments,timeout):
+        queries.append((arguments,timeout))
+        if fail[0]:raise probe.ProbeError('simctl_timeout')
+        return (str(owned.executable.parent)+'\n').encode()
+    monkeypatch.setattr(probe,'_simctl',query)
+    assert owned.sampler.prepare() is False
+    assert owned.sampler.attestation()=={'schema':1,'stage':'bundle_query','error_code':'owned_bundle_query_timeout',
+        'attempts':1,'post_launch_retry':False,'available':False}
+    documents=owned.container/'Documents';documents.mkdir()
+    checkpoint=documents/probe.language_paths('ko',0)[2]
+    checkpoint.write_text(json.dumps({'schema':1,'process_id':123,'main_thread_checkpoint':True}))
+    fail[0]=False;alive=[]
+    monkeypatch.setattr(probe.os,'kill',lambda pid,sig:alive.append((pid,sig)))
+    return SimpleNamespace(owned=owned,queries=queries,checkpoint=checkpoint,alive=alive)
+
+
+def test_single_postlaunch_setup_recovery_requires_same_owned_image_and_live_fresh_ack(failed_early_setup):
+    f=failed_early_setup;s=f.owned.sampler
+    s.poll_liveness({'process_id':123},checkpoint_path=f.checkpoint)
+    assert s.prepare_error=='none' and s.prepare_attempts==2 and s._post_launch_prepare_attempted
+    assert s.executable==f.owned.executable and s.process_start_identity=='verified launch start'
+    assert len(f.queries)==2 and all(row[0]==['get_app_container',s.udid,probe.BUNDLE_ID,'app'] for row in f.queries)
+    assert f.alive==[(123,0),(123,0)]
+    assert s.attestation()['stage']=='complete' and s.attestation()['available'] is True
+    s.prepare();s._retry_prepare_after_launch(f.checkpoint)
+    assert len(f.queries)==2
+
+
+@pytest.mark.parametrize('damage',['wrong-pid','missing-ack','dead','unowned-path','stale-file','symlink','symlink-directory',
+    'already-attested','already-armed','no-source-pin'])
+def test_postlaunch_setup_does_not_retry_unowned_dead_stale_or_bound_launch(failed_early_setup,monkeypatch,tmp_path,damage):
+    f=failed_early_setup;s=f.owned.sampler;p=f.checkpoint
+    if damage=='wrong-pid':p.write_text(json.dumps({'schema':1,'process_id':999,'main_thread_checkpoint':True}))
+    elif damage=='missing-ack':s.launch_ack=None
+    elif damage=='dead':monkeypatch.setattr(probe.os,'kill',lambda pid,sig:(_ for _ in ()).throw(ProcessLookupError()))
+    elif damage=='unowned-path':p=tmp_path/p.name;p.write_text(f.checkpoint.read_text())
+    elif damage=='stale-file':os.utime(p,(s.launch_started-10,s.launch_started-10))
+    elif damage=='symlink':target=p.with_name('other.json');p.rename(target);p.symlink_to(target)
+    elif damage=='symlink-directory':
+        target=p.parent.with_name('PrivateDocuments');p.parent.rename(target);p.parent.symlink_to(target,target_is_directory=True)
+    elif damage=='already-attested':s.process_start_identity='already bound'
+    elif damage=='already-armed':s._exit_attempted=True
+    elif damage=='no-source-pin':s._source_pin=None
+    s._retry_prepare_after_launch(p)
+    assert len(f.queries)==1 and s.prepare_attempts==1 and s._post_launch_prepare_attempted is False
+
+
+def test_postlaunch_retry_cannot_replace_changed_source_or_repeat_across_cold_launches(failed_early_setup):
+    f=failed_early_setup;s=f.owned.sampler
+    f.owned.executable.write_bytes(b'changed source image, never adopt')
+    s.poll_liveness({'process_id':123},checkpoint_path=f.checkpoint)
+    assert s.prepare_error=='owned_executable_invalid' and s.executable is None
+    assert s.prepare_attempts==2 and s._post_launch_prepare_attempted
+    s.clear_launch();s.note_launch((probe.BUNDLE_ID+': 123\n').encode())
+    f.checkpoint.write_text(json.dumps({'schema':1,'process_id':123,'main_thread_checkpoint':True}))
+    s.poll_liveness({'process_id':123},checkpoint_path=f.checkpoint)
+    assert s.prepare_attempts==2 and len(f.queries)==2
+
+
+def test_postlaunch_retry_uses_original_deadline_and_query_budget(failed_early_setup):
+    f=failed_early_setup;s=f.owned.sampler
+    s._remaining=lambda:0.375
+    s.poll_liveness({'process_id':123},checkpoint_path=f.checkpoint)
+    assert f.queries[-1][1]==0.375
+
+
+def test_expired_original_deadline_prevents_postlaunch_prepare_attempt(failed_early_setup):
+    f=failed_early_setup;s=f.owned.sampler
+    s._remaining=lambda:(_ for _ in ()).throw(probe.ProbeError('probe_deadline_exceeded'))
+    with pytest.raises(probe.ProbeError,match='^probe_deadline_exceeded$'):
+        s.poll_liveness({'process_id':123},checkpoint_path=f.checkpoint)
+    assert s.prepare_attempts==1 and not s._post_launch_prepare_attempted and len(f.queries)==1
+
+
+@pytest.mark.parametrize('error,code',[(probe.ProbeError('simctl_failed'),'owned_bundle_query_failed'),
+    (probe.ProbeError('simctl_output_bound'),'owned_bundle_query_output_invalid'),
+    (PermissionError('DO-NOT-EXPORT'),'owned_preparation_io_failed'),
+    (ValueError('DO-NOT-EXPORT'),'owned_preparation_parse_failed'),
+    (RuntimeError('DO-NOT-EXPORT'),'owned_preparation_exception')])
+def test_preparation_stage_and_error_are_bounded_without_exception_text(owned,monkeypatch,error,code):
+    def broken():owned.sampler.prepare_stage='bundle_query';raise error
+    monkeypatch.setattr(owned.sampler,'_owned_executable',broken)
+    assert not owned.sampler.prepare()
+    clean=owned.sampler.attestation()
+    assert clean['stage']=='bundle_query' and clean['error_code']==code and clean['attempts']==1
+    summary=probe.safe_failure_summary({'process_attestation':{**clean,'path':'DO-NOT-EXPORT','message':'DO-NOT-EXPORT'}})
+    assert summary['process_attestation']==clean and 'DO-NOT-EXPORT' not in json.dumps(summary)
+
+
+def test_roundtrip_dismissal_ack_is_required_before_polling_recovery_with_original_budget():
+    source=(ROOT/'ios-unified/probe/main.m').read_text()
+    body=source.split('static void ProbeZIPRoundTripDismissal(',1)[1].split('static void ProbeZIPRoundTripOpen(',1)[0]
+    assert 'completion:nil' not in body
+    assert 'ProbeZIPPickerRestoreAllowed(' in body
+    assert 'metrics[@"dismissal_completion_observed"]=@YES' in body
+    assert 'state[@"metrics"][@"transition_idle_before_restore"]=@YES' in body
+    assert 'ProbeZIPRoundTripDismissal(weakWeb,weakPresenter,state,finish)' in body
+    assert 'ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish)' in body
+    for flag in ('dismissal_completion_observed','transition_idle_before_restore'):
+        assert flag in probe.ZIP_ROUNDTRIP_FLAGS and flag in probe.ZIP_PROGRESS_FLAGS
+    assert 'dismiss_waiting' in probe.ZIP_PROGRESS_PHASES
+    assert '120*NSEC_PER_SEC' in source.split('static void ProbeZIPRoundTrip(WKWebView',1)[1].split('static void ProbeAccount',1)[0]
+
+
+@pytest.mark.parametrize('value',[{'schema':True,'stage':'complete','error_code':'none'},
+    {'schema':1,'stage':[],'error_code':'none'},{'schema':1,'stage':'complete','error_code':{}},
+    {'schema':1,'stage':'path/DO-NOT-EXPORT','error_code':'none'}])
+def test_attestation_projection_rejects_unapproved_types_and_stages(value):
+    assert probe.process_attestation_observation(value)=={}

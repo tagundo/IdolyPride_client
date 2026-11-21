@@ -72,6 +72,7 @@ public final class UnifiedMP4Export {
     private static native int nativeQueueEnqueue(int fpsNum, int fpsDen, int codec, int videoBitrate, int audioBitrate);
     private static native int nativeQueueEnqueueV2(int fpsNum, int fpsDen, int codec, int videoBitrate,
                                                    int audioBitrate, int outputWidth, int outputHeight);
+    private static native void nativeInvalidateQueueSelection();
     private static native int nativeQueueRun();
     private static native int nativeQueuePause();
     private static native int nativeQueueResume();
@@ -123,8 +124,14 @@ public final class UnifiedMP4Export {
         // Park it on the host thread before retiring the server/encoder path.
         if (initialized && queueConfigured) try { nativeQueuePause(); }
         catch (LinkageError unavailable) { /* Optional addon; still retire the session below. */ }
+        invalidateQueueSelection();
         configured = false; queueConfigured = false; foregroundSelectionReady = false; menuHandoffDeadline = 0;
         MAIN.post(() -> { cancel(); pending = null; wake(); });
+    }
+    private static void invalidateQueueSelection() {
+        foregroundSelectionReady = false;
+        if (initialized) try { nativeInvalidateQueueSelection(); }
+        catch (LinkageError unavailable) { /* Optional addon; eligibility is still retired locally. */ }
     }
     static boolean available() { return configured; }
     static boolean ready() {
@@ -132,8 +139,9 @@ public final class UnifiedMP4Export {
         Activity current = game.get();
         if (current == null || current.isDestroyed() || current.isFinishing()) return false;
         // Opening the separate server Activity pauses Unity. Retain only this
-        // live Activity's last verified foreground selection to offer a request;
-        // actual capture still revalidates after the original player resumes.
+        // live Activity's last verified foreground selection to offer a request.
+        // Native queue admission validates its immutable snapshot without
+        // resuming Unity; immediate capture revalidates after player resume.
         if ((!resumed || !gameFocused) && foregroundSelectionReady) return true;
         try { return nativeReady(); } catch (LinkageError unavailable) { return false; }
     }
@@ -206,6 +214,17 @@ public final class UnifiedMP4Export {
                     .put("queue_running", queue.optBoolean("running"))
                     .put("queue_paused", queue.optBoolean("paused"))
                     .put("queue_job_count", jobs == null ? 0 : Math.min(8, jobs.length()));
+            String queueError = queue.optString("error_code", "unknown");
+            result.put("queue_error_code", queueError.matches("[A-Za-z0-9_]{1,96}") ? queueError : "unknown");
+            String storageStage = queue.optString("storage_stage", "none");
+            if (java.util.Arrays.asList("none", "allocate_state", "allocate_store", "allocate_wire",
+                    "open_temp", "stat_temp", "write_temp", "sync_temp", "validate_temp",
+                    "install_new", "replace_journal", "validate_installed", "sync_directory").contains(storageStage))
+                result.put("queue_storage_stage", storageStage);
+            Object storageErrno = queue.opt("storage_errno");
+            if (storageErrno instanceof Byte || storageErrno instanceof Short
+                    || storageErrno instanceof Integer || storageErrno instanceof Long)
+                result.put("queue_storage_errno", Math.max(0L, Math.min(4095L, ((Number) storageErrno).longValue())));
         } catch (Exception ignored) { /* Keep the bounded observations already collected. */ }
         return result;
     }
@@ -228,8 +247,8 @@ public final class UnifiedMP4Export {
         if (current == null || current.isDestroyed() || current.isFinishing()) return false;
         try {
             if (nativeQueueEnqueueV2(fps, 1, codec, bitrate, 192_000, outputWidth, outputHeight) != 0) return false;
-            caller.startActivity(new Intent(caller, current.getClass())
-                    .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+            // Add commits an already observed selection; only Run or immediate
+            // export needs to bring the original player window forward.
             wake(); return true;
         } catch (RuntimeException | LinkageError unavailable) { return false; }
     }
@@ -355,9 +374,15 @@ public final class UnifiedMP4Export {
         wake();
     }
 
-    static void attachGame(Activity activity) {
+    private static void observeGameOwner(Activity activity) {
+        if (game.get() != activity) {
+            invalidateQueueSelection(); resumed = false; stopped = true;
+        }
         game = new WeakReference<>(activity);
         foregroundSelectionReady = false; gameFocused = false; menuHandoffDeadline = 0;
+    }
+    static void attachGame(Activity activity) {
+        observeGameOwner(activity);
         LinearLayout bar = new LinearLayout(activity); bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL); bar.setBackgroundColor(0xe6222630);
         int padding = Math.round(10 * activity.getResources().getDisplayMetrics().density);
@@ -457,16 +482,15 @@ public final class UnifiedMP4Export {
         if (game.get() == activity) menuHandoffDeadline = 0;
     }
     static void geometryChanged(Activity activity) {
-        if (game.get() == activity && pending == null && !UnifiedMP4Background.ownsSurface(activity)) {
+        if (game.get() == activity && !UnifiedMP4Background.ownsSurface(activity)) {
             boolean menuHandoff = menuHandoffDeadline > 0
                     && android.os.SystemClock.uptimeMillis() <= menuHandoffDeadline;
             boolean activePlayerWindow = resumed || (!stopped && activity.isInMultiWindowMode());
-            // A background Unity resize can release only its render target,
-            // while its logical MV remains selected. Native enqueue fixes that
-            // identity and revalidates the actual source after returning.
-            if (!menuHandoff && activePlayerWindow) foregroundSelectionReady = false;
+            // Keep the last immutable MV through the explicit server-menu
+            // handoff. A real active-window resize requires a fresh snapshot.
+            if (!menuHandoff && activePlayerWindow) invalidateQueueSelection();
             // An existing capture still cancels on every real geometry change.
-            cancel();
+            if (pending == null) cancel();
         }
     }
     static void focusChanged(Activity activity, boolean focused) {
@@ -480,6 +504,7 @@ public final class UnifiedMP4Export {
     }
     static void gameDestroyed(Activity activity) {
         if (game.get() != activity) return;
+        invalidateQueueSelection();
         cancel(); pending = null; game.clear(); resumed = false; stopped = true;
         foregroundSelectionReady = false; gameFocused = false; menuHandoffDeadline = 0;
         if (overlay != null && overlay.getParent() instanceof ViewGroup) ((ViewGroup) overlay.getParent()).removeView(overlay);

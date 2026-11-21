@@ -157,7 +157,20 @@ inline void increment_counter(uint64_t& value){if(value<9007199254740991ULL)++va
 static idoly_mp4_game::GameAdapter game;
 static idoly_mp4_selection::Capture selection;
 static uint64_t selected_identity=0;
+// Invalidation is scalar-only so lifecycle/host callbacks never enter Unity
+// or acquire the queue owner lock while holding the control lock.
+static uint64_t queue_selection_generation=1;
+static char queue_selection_reason[65]="selected_mv_snapshot_missing";
+static void* observed_presenter_scope=nullptr; // Compared only on Unity.
+inline void invalidate_queue_selection_locked(const char* reason){
+    if(queue_selection_generation)queue_selection_generation=queue_selection_generation==~uint64_t(0)?0:queue_selection_generation+1;
+    snprintf(queue_selection_reason,sizeof(queue_selection_reason),"%s",queue_selection_generation?reason:"selection_generation_exhausted");
+}
+inline void invalidate_queue_selection(const char* reason="selected_mv_snapshot_invalidated"){
+    pthread_mutex_lock(&control_mutex);invalidate_queue_selection_locked(reason);pthread_mutex_unlock(&control_mutex);
+}
 inline void queue_tick();
+inline void queue_refresh_candidate(Result readiness);
 static bool installed=false;
 enum class Stage{idle,begin,audio_request,audio_response,audio_load,audio_mix,audio_finalize,frame_request,frame_wait,frame_submit,finishing,retiring};
 struct Job {
@@ -224,7 +237,11 @@ inline bool configure(const char* broker,uint64_t epoch,const char*cap,const cha
     if(!private_directory(next.root)||!private_directory(next.req)||!private_directory(next.rsp)||!private_directory(next.prepared)||!private_directory(next.exports)){close_configuration(next);return false;}
     pthread_mutex_lock(&control_mutex);
     if(control_busy||start_pending){pthread_mutex_unlock(&control_mutex);close_configuration(next);return false;}
-    close_configuration(configured);configured=next;configured_valid=true;pthread_mutex_unlock(&control_mutex);return true;
+    const bool replaced=!configured_valid||configured.epoch!=next.epoch||configured.platform!=next.platform
+        ||strcmp(configured.broker,next.broker)||strcmp(configured.output,next.output)||memcmp(configured.capability,next.capability,16);
+    close_configuration(configured);configured=next;configured_valid=true;
+    if(replaced)invalidate_queue_selection_locked("server_configuration_changed");
+    pthread_mutex_unlock(&control_mutex);return true;
 }
 inline bool start(Options options,bool queued=false){pthread_mutex_lock(&control_mutex);bool ok=configured_valid&&!control_busy&&!start_pending&&(queued||!queue_scene_owned)&&published.ready&&valid_options(options);if(ok){if(!queued){pending_queue_output[0]=pending_queue_exports[0]=0;pending_queue_exports_fd=-1;pending_queue_width=pending_queue_height=0;}pending_options=options;start_pending=true;start_wait_started=0;cancel_pending=false;control_busy=true;published.pausable=true;pause_acknowledged=false;snprintf(published.phase,sizeof(published.phase),"preparing_audio");snprintf(published.error,sizeof(published.error),"none");}pthread_mutex_unlock(&control_mutex);return ok;}
 inline void cancel(){pthread_mutex_lock(&control_mutex);if(control_busy)cancel_pending=true;pthread_mutex_unlock(&control_mutex);}
@@ -246,22 +263,32 @@ inline const char* pause_reason_name(int reason){
         case IDMP4_PAUSE_USER:return "user_paused";default:return "none";}
 }
 inline void install_game_api(const Api& api,const Layout& layout){if(installed||busy_stage())return;installed=game.set_api(api,layout)&&selection.set_api(api);}
-inline void observe_presenter(void* presenter){if(installed){game.observe_presenter(presenter);pthread_mutex_lock(&control_mutex);selected_identity=selection.identity(game.selected_player());pthread_mutex_unlock(&control_mutex);}}
+inline void observe_presenter(void* presenter){if(installed){
+    game.observe_presenter(presenter);void* scope=game.selected_presenter();const uint64_t identity=selection.identity(game.selected_player());
+    pthread_mutex_lock(&control_mutex);
+    if(scope!=observed_presenter_scope||(identity&&selected_identity&&identity!=selected_identity))
+        invalidate_queue_selection_locked("selected_mv_selection_changed");
+    observed_presenter_scope=scope;selected_identity=identity;pthread_mutex_unlock(&control_mutex);
+}}
 inline void observe_presenter_ended(void* presenter){
     if(!installed)return;
     const bool selected=game.selected_presenter()==presenter;
     game.observe_presenter_ended(presenter);
-    if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;published.ready=false;
+    if(selected){pthread_mutex_lock(&control_mutex);selected_identity=0;observed_presenter_scope=nullptr;published.ready=false;
+        invalidate_queue_selection_locked("selected_mv_ended");
         controller_discovery=ControllerDiscovery{};
         snprintf(controller_discovery.reason,sizeof(controller_discovery.reason),"%s","selected_mv_ended");
         snprintf(readiness_error,sizeof(readiness_error),"%s","selected_mv_ended");pthread_mutex_unlock(&control_mutex);}
 }
-inline void observe_player_initializing(void* player,void* param){if(installed)selection.observe(player,param);}
-inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed)selection.observe_photography(player,data,descriptors);}
+inline void observe_player_initializing(void* player,void* param){if(installed){invalidate_queue_selection("selected_mv_reinitializing");selection.observe(player,param);}}
+inline void observe_photography_initializing(void* player,void* data,void* descriptors){if(installed){invalidate_queue_selection("selected_mv_reinitializing");selection.observe_photography(player,data,descriptors);}}
 inline void observe_photography_transition(void* player,void* transition){
     if(!installed)return;
     selection.attach_photography_transition(player,transition);
-    pthread_mutex_lock(&control_mutex);selected_identity=selection.identity(game.selected_player());pthread_mutex_unlock(&control_mutex);
+    const uint64_t identity=selection.identity(game.selected_player());
+    pthread_mutex_lock(&control_mutex);if(identity&&selected_identity&&identity!=selected_identity)
+        invalidate_queue_selection_locked("selected_mv_selection_changed");
+    selected_identity=identity;pthread_mutex_unlock(&control_mutex);
 }
 inline void observe_camera_controller(void* camera){if(installed)game.observe_camera_controller(camera);}
 inline void capture_pass_did_execute(void* pass,const void*data){if(installed)game.observe_capture_pass(pass,data);}
@@ -474,6 +501,7 @@ inline void on_unity_tick() {
     game.maintenance();
     if(!busy_stage()){
         Snapshot ready{};const Result readiness=probe_readiness(ready);
+        queue_refresh_candidate(readiness);
         pthread_mutex_lock(&control_mutex);const bool pending=start_pending;pthread_mutex_unlock(&control_mutex);
         if(pending&&readiness==Result::waiting){
             const uint64_t now=milliseconds();

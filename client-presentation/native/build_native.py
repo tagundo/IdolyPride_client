@@ -23,6 +23,15 @@ def sources():
     return tuple(sorted(path for path in HERE.iterdir() if path.suffix in (".cpp",".hpp",".h",".py",".json")))
 
 
+def session_jni_exports():
+    source=(ROOT/"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java").read_text()
+    methods=re.findall(r"\bstatic\s+native\s+[\w<>\[\]]+\s+(\w+)\s*\(",source)
+    if not methods or len(methods)!=len(set(methods)):
+        raise ValueError("Session Java native contract is invalid")
+    prefix="Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_"
+    return {prefix+name for name in methods}
+
+
 def build(output,source_commit,*,ndk=None,cache_dir=None):
     if not re.fullmatch(r"[a-f0-9]{40}",source_commit):
         raise ValueError("An exact source commit is required")
@@ -36,6 +45,7 @@ def build(output,source_commit,*,ndk=None,cache_dir=None):
         raise ValueError("Output already exists")
     paths=(*sources(),helper)
     hashes={path.relative_to(ROOT).as_posix():digest(path) for path in paths}
+    session_exports=session_jni_exports()
     command=[str(compiler.with_name("aarch64-linux-android28-clang++")),"-std=c++17","-O2","-fPIC",
         "-fvisibility=hidden","-fexceptions","-fno-rtti","-Wall","-Wextra","-Werror","-nostdlib++",
         "-ffunction-sections","-fdata-sections","-Wl,--gc-sections","-Wl,--exclude-libs,ALL",
@@ -58,6 +68,9 @@ def build(output,source_commit,*,ndk=None,cache_dir=None):
         exports=[line.split()[-1] for line in symbols.splitlines() if line.split()]
         if not exports or any(name!="JNI_OnLoad" and not name.startswith("Java_game_qualiarts_idolypride_") for name in exports):
             raise ValueError("Unexpected exported runtime symbol")
+        prefix="Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_"
+        if session_exports!={name for name in exports if name.startswith(prefix)} or session_exports!=session_jni_exports():
+            raise ValueError("Native session JNI exports differ from current Java contract")
     except BaseException:
         output.unlink(missing_ok=True)
         raise
@@ -68,7 +81,7 @@ def build(output,source_commit,*,ndk=None,cache_dir=None):
         "source_sha256":hashes,"bytes":output.stat().st_size,"sha256":digest(output),
         "profile_prefix_count":len(profile["aliases"]),"profile_hook_count":len(hook_names),
         "shared_cache_hooks":5,"early_install":"ShadowHook post dl-init callback before managed Setup",
-        "dependency":dependency,"needed":needed,"jni_exports":sorted(exports),"runtime_symbols_hidden":True,
+        "dependency":dependency,"needed":needed,"jni_exports":sorted(exports),"session_jni_exports":sorted(session_exports),"runtime_symbols_hidden":True,
         "physical_device_verified":False}
     output.with_name("build-receipt.json").write_text(json.dumps(report,indent=2)+"\n")
     return report

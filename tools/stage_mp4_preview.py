@@ -29,7 +29,7 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.10"
+VERSION = "2026.11.21.11"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
@@ -142,6 +142,16 @@ def mp4_native_sources(values, *, android=False):
     source_pins(values, ROOT, required)
 
 
+def mp4_session_jni_exports(exports, java_source):
+    """Bind the complete trusted session class ABI, including newer methods."""
+    prefix = "Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_"
+    methods = re.findall(r"\bstatic\s+native\s+[\w<>\[\]]+\s+(\w+)\s*\(", java_source)
+    need(methods and len(methods) == len(set(methods)), "mp4_java_native_contract_invalid")
+    need(type(exports) is list and all(type(name) is str for name in exports), "mp4_native_exports_missing")
+    need({name for name in exports if name.startswith(prefix)} == {prefix + name for name in methods},
+         "mp4_native_exports_differ")
+
+
 def korean_translation_proof(report, platform):
     guard = module("mp4_preview_translation_guard", ROOT / "tools/refresh_korean_translation_bundle.py")
     pin = guard.pins()
@@ -171,6 +181,7 @@ def android_files(folder, source):
     rows = {row["path"]: row["sha256"] for row in proof["source_files"]}
     need(MP4_JAVA <= rows.keys(), "mp4_app_sources_missing")
     source_pins({name: rows[name] for name in MP4_JAVA}, ROOT, MP4_JAVA)
+    mp4_session_jni_exports(exports, (ROOT / "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java").read_text())
     korean = module("mp4_preview_android_korean_guard", ROOT / "tools/korean_server_data_pin.py")
     korean.verify_refresh_proof(proof.get("korean_master_refresh"))
     translation = korean_translation_proof(proof.get("korean_translation_refresh"), "android")
@@ -281,7 +292,7 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.10", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1121.11", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
         need(members[app + "LocalServer/ServerData.zip"] == korean.output_pin()["sha256"], "ipa_server_data_pin_differs")

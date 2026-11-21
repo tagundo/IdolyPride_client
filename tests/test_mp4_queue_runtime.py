@@ -56,6 +56,7 @@ bool rp_ready(void* value,replay::Method*){return alive(value)&&get<uint8_t>(val
 replay::Api replay_api(){replay::Api a{};a.is_type=istype;a.alive=alive;a.retain=retain;a.retained=target;a.release=release;a.new_object=rp_new;a.new_string=string_new;a.new_field_list=rp_list;a.list_add=rp_add;a.set_object=rp_set_object;a.set_i32=rp_set_i32;a.set_bool=rp_set_bool;a.out_game_param_ctor=rp_param_ctor;a.actor_descriptor_ctor=rp_noop_ctor;a.transition_param_ctor=rp_noop_ctor;a.param_add_actor=rp_param_actor;a.scene_instance=rp_scene;a.scene_busy=rp_busy;a.live_state=rp_state;a.tree_with_param=rp_tree;a.open_tree=rp_open;a.top_screen=rp_top;a.presenter_end=rp_end;a.task_status=rp_task_status;a.task_get_awaiter=rp_awaiter;a.task_get_result=rp_result;a.player_ready=rp_ready;return a;}
 bool queue_graphics_valid=true;
 bool graphics_snapshot(qm::Graphics& out){if(!queue_graphics_valid)return false;out=current_graphics;return true;}
+bool graphics_revision(int64_t& out){out=current_graphics.revision;return true;}
 bool graphics_apply(const qm::Graphics* value){graphics_override=value!=nullptr;if(value){effective_graphics=*value;applied_scales.push_back(value->render_scale);}else effective_graphics=current_graphics;return true;}
 int32_t pixel_width(void*,Method*){return reported_width;}int32_t pixel_height(void*,Method*){return 16;}
 void pump(){
@@ -96,49 +97,37 @@ int main(int argc,char** argv){
     connect_scene();Api selected=api();selected.director_get_duration=session_duration;selected.audio_clip_samples=session_samples;selected.audio_clip_frequency=session_rate;selected.timeline_get_tracks=session_tracks;selected.track_get_clips=session_clips;selected.bundle_load_file_async=session_load_bundle;selected.audio_clip_get_data=session_get_data;selected.bundle_unload=session_unload;selected.brain_manual_update=session_brain_update;selected.camera_clock_ok=session_camera_clock_ok;selected.camera_pixel_width=pixel_width;selected.camera_pixel_height=pixel_height;
     if(scenario.rfind("capture_resume_",0)==0)selected.source_geometry=queue_source_geometry;
     session_core::install_game_api(selected,Layout{});
-    session_core::install_queue_api(replay_api(),graphics_snapshot,graphics_apply,idoly_mp4_game::android_original_sha256);
+    session_core::install_queue_api(replay_api(),graphics_snapshot,graphics_apply,idoly_mp4_game::android_original_sha256,graphics_revision);
     assert(IDMP4SessionConfigure(argv[1],std::strtoull(argv[2],nullptr,10),argv[3],argv[4],1)==0);
     assert(IDMP4QueueConfigure(argv[9],argv[4])==0);
     // Paused/pending jobs are visible before any new original scene begins.
     char status[16384]{};assert(IDMP4QueueStatus(status,sizeof(status))&&std::strstr(status,"\"jobs\":[]"));
     if(scenario.rfind("capture_resume_",0)==0){
-        void* a=make_selection("A");select_param(a);pump();
-        char native[2048]{};assert(IDMP4SessionStatus(native,sizeof(native))&&std::strstr(native,"\"ready\":true"));
+        void* a=make_selection("A");select_param(a);
+        if(scenario=="capture_resume_timeout")queue_source_valid=false;
+        pump();
+        char native[2048]{};assert(IDMP4SessionStatus(native,sizeof native));
         const int graph_before=graph_steps,actors_before=actor_steps,loads_before=loads,data_before=data_calls;const double time_before=time_value;
-        IDMP4SessionSuspend(IDMP4_PAUSE_LIFECYCLE_BACKGROUND);queue_source_valid=false;pump();
-        assert(IDMP4SessionStatus(native,sizeof(native))&&std::strstr(native,"\"ready\":false")&&std::strstr(native,"\"readiness_error\":\"selected_capture_geometry_not_ready\""));
-        assert(IDMP4QueueEnqueue(60,1,2,32000000,192000)==0);
+        IDMP4SessionSuspend(IDMP4_PAUSE_LIFECYCLE_BACKGROUND);queue_source_valid=false;
+        // Mutate original input storage after the verified snapshot. Host Add
+        // must use the captured values without waiting for another Unity tick.
         obj(get<void*>(a,0x20))->name="timeline_MUTATED";
         auto* original_actor=obj(obj(get<void*>(get<void*>(a,0x10),0x10))->pointers[0]);auto* original_descriptor=obj(get<void*>(ptr(original_actor),0x28));auto* original_assets=obj(get<void*>(get<void*>(ptr(original_descriptor),0x10),0x10));obj(original_assets->pointers[0])->name="body_MUTATED";
-        for(int i=0;i<4;++i){pump();assert(session_core::queue_request.kind==session_core::QueueCommandKind::enqueue&&session_core::queue_store().count()==0);assert(graph_steps==graph_before&&actor_steps==actors_before&&loads==loads_before&&data_calls==data_before&&time_value==time_before);}
-        IDMP4SessionResume();
-        for(int i=0;i<3;++i){pump();assert(session_core::queue_request.kind==session_core::QueueCommandKind::enqueue&&session_core::queue_store().count()==0);assert(graph_steps==graph_before&&actor_steps==actors_before&&loads==loads_before&&data_calls==data_before&&time_value==time_before);}
-        assert(IDMP4QueueStatus(status,sizeof(status))&&std::strstr(status,"\"command_pending\":true"));
-        if(scenario=="capture_resume_changed"){
-            select_param(make_selection("B"));pump();
-            assert(!std::strcmp(session_core::queue_error,"selection_changed_before_enqueue"));
-        }else if(scenario=="capture_resume_timeout"){
-            assert(session_core::queue_capture_wait_started);session_core::queue_capture_wait_started=session_core::milliseconds()-16000;pump();
-            assert(!std::strcmp(session_core::queue_error,"selected_mv_resume_timeout"));
-        }else if(scenario=="capture_resume_graphics_timeout"){
-            queue_source_valid=true;queue_graphics_valid=false;
-            assert(session_core::queue_capture_wait_started);session_core::queue_capture_wait_started=session_core::milliseconds()-16000;pump();
-            assert(!std::strcmp(session_core::queue_error,"selected_graphics_snapshot_unavailable"));
-        }else if(scenario=="capture_resume_graphics_restore"){
-            queue_source_valid=true;queue_graphics_valid=false;pump();
-            assert(session_core::queue_request.kind==session_core::QueueCommandKind::enqueue&&session_core::queue_store().count()==0);
-            queue_graphics_valid=true;
-        }
-        queue_source_valid=true;pump();
+        if(scenario=="capture_resume_changed")select_param(make_selection("B"));
+        if(scenario=="capture_resume_graphics_timeout")++current_graphics.revision;
+        if(scenario=="capture_resume_graphics_restore")queue_graphics_valid=false;
+        const bool accepted=scenario=="capture_resume_restore"||scenario=="capture_resume_graphics_restore";
+        assert((IDMP4QueueEnqueue(60,1,2,32000000,192000)==0)==accepted);
         assert(session_core::queue_request.kind==session_core::QueueCommandKind::none);
-        if(scenario=="capture_resume_restore"||scenario=="capture_resume_graphics_restore"){
+        assert(graph_steps==graph_before&&actor_steps==actors_before&&loads==loads_before&&data_calls==data_before&&time_value==time_before);
+        if(accepted){
             assert(session_core::queue_store().count()==1);const auto* saved=session_core::queue_store().at(0);
             assert(!std::strcmp(saved->descriptor.timeline_asset,"timeline_A")&&!std::strcmp(saved->descriptor.actors[0].assets[0],"body_A"));
             assert(saved->options.fps_num==60&&saved->options.fps_den==1&&saved->options.codec==2&&saved->options.video_bitrate==32000000&&saved->options.audio_bitrate==192000);
         }else assert(session_core::queue_store().count()==0);
-        assert(graph_steps==graph_before&&actor_steps==actors_before&&loads==loads_before&&data_calls==data_before);
-        assert(IDMP4QueueStatus(status,sizeof(status))&&IDMP4SessionStatus(native,sizeof(native)));
-        std::printf("{\"queue\":%s,\"session\":%s,\"waiting_ticks\":7}\n",status,native);
+        queue_source_valid=queue_graphics_valid=true;IDMP4SessionResume();pump();
+        assert(IDMP4QueueStatus(status,sizeof status)&&IDMP4SessionStatus(native,sizeof native));
+        std::printf("{\"queue\":%s,\"session\":%s,\"waiting_ticks\":0}\n",status,native);
         session_core::queue_replay().reset();session_core::selection.reset();session_core::game.reset_observations();assert(handles.empty());session_core::queue_store().close();if(session_core::queue_exports>=0)close(session_core::queue_exports);session_core::close_configuration(session_core::configured);return 0;
     }
     void* a=make_selection("A");select_param(a);current_graphics.render_scale=1.0f;current_graphics.quality=30;
@@ -365,24 +354,24 @@ def test_completed_remove_rejects_symlink_without_removing_record(run_queue):
     assert sum(path.is_symlink() for path in result["exports"].glob("*.mp4")) == 1
 
 
-def test_paused_enqueue_waits_for_original_target_and_preserves_selection_options(run_queue):
+def test_paused_enqueue_persists_without_unity_resume_and_preserves_selection_options(run_queue):
     result = run_queue("capture_resume_restore")
-    assert result["waiting_ticks"] == 7
+    assert result["waiting_ticks"] == 0
     assert result["queue"]["command_pending"] is False
     assert result["queue"]["error_code"] == "none"
     assert [(job["timeline"], job["fps_num"], job["video_codec"]) for job in result["queue"]["jobs"]] == [("timeline_A", 60, 2)]
     assert result["session"]["ready"] is True
 
 
-@pytest.mark.parametrize("scenario,error", [("changed", "selection_changed_before_enqueue"), ("timeout", "selected_mv_resume_timeout"), ("graphics_timeout", "selected_graphics_snapshot_unavailable")])
-def test_paused_enqueue_does_not_substitute_selection_or_wait_forever(run_queue, scenario, error):
+@pytest.mark.parametrize("scenario,error", [("changed", "selected_mv_selection_changed"), ("timeout", "selected_mv_snapshot_missing"), ("graphics_timeout", "selected_graphics_changed_before_enqueue")])
+def test_paused_enqueue_rejects_changed_or_unverified_snapshot_without_waiting(run_queue, scenario, error):
     result = run_queue("capture_resume_" + scenario)
     assert result["queue"]["jobs"] == []
     assert result["queue"]["command_pending"] is False
     assert result["queue"]["error_code"] == error
 
 
-def test_ready_mv_waits_for_graphics_snapshot_then_persists_one_job(run_queue):
+def test_paused_mv_uses_frozen_effective_graphics_without_managed_snapshot_calls(run_queue):
     result = run_queue("capture_resume_graphics_restore")
     assert result["queue"]["command_pending"] is False
     assert result["queue"]["error_code"] == "none"

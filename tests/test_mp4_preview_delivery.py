@@ -78,6 +78,22 @@ def test_actual_android_native_builder_emits_all_new_compiled_and_profile_source
     assert len(emitted) + 1 <= 64  # The package validator also counts its pinned dependency builder.
 
 
+def test_complete_session_jni_contract_includes_invalidation_and_v2_apis():
+    source = (Path(__file__).resolve().parents[1] / "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java").read_text()
+    prefix = "Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_"
+    names = re.findall(r"\bstatic\s+native\s+[\w<>\[\]]+\s+(\w+)\s*\(", source)
+    exports = [prefix + name for name in names]
+    assert {"nativeInvalidateQueueSelection","nativeStartV2","nativeQueueEnqueueV2"} <= set(names)
+    builder = delivery.module("mp4_session_jni_build_contract",Path(__file__).resolve().parents[1] / "client-presentation/native/build_native.py")
+    assert builder.session_jni_exports() == set(exports)
+    delivery.mp4_session_jni_exports(exports + ["JNI_OnLoad"],source)
+    for name in ("nativeInvalidateQueueSelection","nativeStartV2","nativeQueueEnqueueV2"):
+        with pytest.raises(ValueError,match="mp4_native_exports_differ"):
+            delivery.mp4_session_jni_exports([value for value in exports if value != prefix + name],source)
+    with pytest.raises(ValueError,match="mp4_native_exports_differ"):
+        delivery.mp4_session_jni_exports(exports + [prefix + "nativeUndeclared"],source)
+
+
 @pytest.mark.parametrize("platform", ["android", "ios"])
 def test_new_translation_proof_requires_exact_source_output_and_image_preservation(platform):
     pin = json.loads((delivery.ROOT / "data/latest-korean-translations-pin.json").read_text())
@@ -269,6 +285,8 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
         "tests/test_mp4_selected_controller.py",
         "tests/test_mp4_controller_diagnostics.py",
         "tests/test_mp4_graphics_snapshot.py",
+        "tests/test_mp4_host_enqueue.py",
+        "tests/test_mp4_queue_storage.py",
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py",
         "tests/test_ios_probe_process_termination.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 4

@@ -1182,7 +1182,18 @@ size_t mp4_string_utf8(void *text,char *destination,size_t capacity) {
     destination[written]=0;return written;
 }
 bool mp4_queue_snapshot_graphics(idoly_mp4_queue::Graphics& out){
-    Config current=configuration();void* manager=quality_manager.get(true);
+    bool has_configuration=false;Config current=configuration(&has_configuration);
+    if(has_configuration){
+        // A menu may leave Unity ticking while a new host setting is pending.
+        // Freeze only a revision acknowledged by the existing quality/FPS,
+        // render-target and projection readbacks, never a merely desired one.
+        pthread_mutex_lock(&status_mutex);
+        const bool applied=state.revision==current.revision
+            &&(!std::strcmp(state.state,"applied")||!std::strcmp(state.state,"disabled"));
+        pthread_mutex_unlock(&status_mutex);
+        if(!applied)return false;
+    }
+    void* manager=quality_manager.get(true);
     // Zero means follow the mutable original user preference. Freeze the
     // original manager's effective quality/FPS before serializing a queue job.
     if(!manager||!object_alive(manager,nullptr))return false;
@@ -1199,6 +1210,11 @@ bool mp4_queue_snapshot_graphics(idoly_mp4_queue::Graphics& out){
     out.revision=current.revision;out.custom_graphics=1;out.quality=current.quality;out.target_fps=current.target_fps;
     out.render_scale=current.render_scale;out.max_buffer_pixel=current.max_buffer_pixel;out.aa_mode=current.aa_mode;
     out.shadow_resolution=current.shadow_resolution;out.expand_photography=current.expand_photography?1:0;return true;
+}
+bool mp4_queue_snapshot_revision(int64_t& revision){
+    // Configuration is native POD under config_mutex. Host Add must never
+    // query the live quality manager to resolve an unapplied user preference.
+    revision=configuration().revision;return revision>=0;
 }
 bool mp4_actual_source_geometry(void* controller,int32_t* width,int32_t* height){
     if(!width||!height||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")||!mp4_alive(controller))return false;
@@ -1628,11 +1644,11 @@ void mp4_install_replay_runtime(){
 #undef MP4_REPLAY_CALL
     idoly_mp4_runtime::install_queue_api(api,mp4_queue_snapshot_graphics,mp4_queue_apply_graphics,
 #ifdef IDOLY_DARWIN_BRIDGE
-        mp4game::ios_original_sha256
+        mp4game::ios_original_sha256,
 #else
-        mp4game::android_original_sha256
+        mp4game::android_original_sha256,
 #endif
-    );
+        mp4_queue_snapshot_revision);
 }
 bool mp4_prepare_runtime() {
     if(mp4_api_installed)return true;

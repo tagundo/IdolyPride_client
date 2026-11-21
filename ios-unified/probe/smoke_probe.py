@@ -154,7 +154,7 @@ ZIP_IMPORT_PASS_BOOL_FIELDS = ("button_found", "enabled_before", "click_dispatch
 ZIP_IMPORT_SERVER_FLAGS = ("grpc_connected_after_cancel", "assets_connected_after_cancel")
 ZIP_ROUNDTRIP_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
     "picker_presented", "picker_import_mode", "picker_single_selection", "selection_delegate_invoked",
-    "dismissed_programmatically", "picker_detached", "import_reply_accepted", "native_copy_queued",
+    "dismissed_programmatically", "dismissal_completion_observed", "transition_idle_before_restore", "picker_detached", "import_reply_accepted", "native_copy_queued",
     "copy_bytes_match", "owned_copy_found", "copy_source_distinct", "source_preserved", "source_copy_sha256_match",
     "backend_ready", "backend_success", "dom_completed", "button_restored", "upstream_requests_unchanged")
 ZIP_ROUNDTRIP_COUNTS = ("source_bytes", "copied_bytes", "total_bytes", "exported_files", "imported_files", "failed_files")
@@ -1079,10 +1079,10 @@ def read_startup_failure(container):
 
 
 ZIP_PROGRESS_PHASES = frozenset(("status_requested", "export_requested", "export_waiting", "export_ready",
-    "source_hashing", "import_control_waiting", "picker_waiting", "selection_dispatched", "import_waiting",
+    "source_hashing", "import_control_waiting", "picker_waiting", "selection_dispatched", "dismiss_waiting", "import_waiting",
     "import_ready", "dom_waiting", "copy_hashing", "finished", "failed", "timed_out"))
 ZIP_PROGRESS_FLAGS = ("export_accepted", "export_ready", "export_archive_complete", "wk_import_dispatched",
-    "picker_presented", "selection_delegate_invoked", "backend_ready", "backend_success", "dom_completed",
+    "picker_presented", "selection_delegate_invoked", "dismissal_completion_observed", "transition_idle_before_restore", "backend_ready", "backend_success", "dom_completed",
     "button_restored", "source_copy_sha256_match", "timed_out")
 ZIP_PROGRESS_BACKEND_STATES = frozenset(("pending", "running", "export_ready", "completed", "partial", "cancelled", "failed"))
 
@@ -1112,6 +1112,8 @@ def zip_progress_observation(value):
 
 PROCESS_SAMPLE_ERRORS = frozenset(("not_attempted", "not_macos", "launch_pid_missing", "checkpoint_pid_differs",
     "owned_container_invalid", "owned_executable_invalid", "process_identity_differs", "sample_spawn_failed",
+    "owned_bundle_query_timeout", "owned_bundle_query_failed", "owned_bundle_query_output_invalid",
+    "owned_preparation_io_failed", "owned_preparation_parse_failed", "owned_preparation_exception",
     "process_query_timeout", "process_query_failed", "process_output_invalid", "process_output_encoding_invalid",
     "process_output_shape_differs", "process_pid_differs", "process_path_not_absolute", "process_path_differs",
     "process_path_resolution_failed", "process_path_resolves_elsewhere", "process_start_parse_failed",
@@ -1226,6 +1228,21 @@ def process_sample_summary(value):
         "sample_output_bytes","thread_count","frame_count") if key in clean}
 
 
+PREPARE_STAGES=frozenset(("not_attempted","source_image","validate_container","bundle_query",
+    "validate_bundle","bundle_info","source_recheck","installed_image","complete"))
+
+
+def process_attestation_observation(value):
+    if (type(value) is not dict or type(value.get("schema")) is not int or value["schema"]!=1
+            or type(value.get("stage")) is not str or value["stage"] not in PREPARE_STAGES
+            or type(value.get("error_code")) is not str or value["error_code"] not in PROCESS_SAMPLE_ERRORS): return {}
+    result={"schema":1,"stage":value["stage"],"error_code":value["error_code"]}
+    if type(value.get("attempts")) is int and 0<=value["attempts"]<=2:result["attempts"]=value["attempts"]
+    for key in ("post_launch_retry","available"):
+        if type(value.get(key)) is bool:result[key]=value[key]
+    return result
+
+
 def process_exit_observation(value):
     """Only Darwin's owned-launch exit status; never process arguments/logs."""
     if type(value) is not dict or type(value.get("schema")) is not int or value["schema"] != 1: return {}
@@ -1264,6 +1281,8 @@ def safe_failure_summary(report):
     if type(index) is int and 0<=index<=4:clean["run_index"]=index
     sample=process_sample_summary(report.get("process_sample"))
     if sample:clean["process_sample"]=sample
+    attestation=process_attestation_observation(report.get("process_attestation"))
+    if attestation:clean["process_attestation"]=attestation
     terminated=process_termination_summary(report.get("process_termination"))
     if terminated:clean["process_termination"]=terminated
     checkpoint=report.get("native_checkpoint")
@@ -1789,7 +1808,8 @@ def wait_report(container, remaining, *, expected_language="ko", run_index=None,
         # No heartbeat/stage deadline is inferred here. Only a previously
         # attested, exact owned process disappearing can fail before the budget.
         if process_sampler is not None and callable(getattr(process_sampler,"poll_liveness",None)):
-            process_sampler.poll_liveness(lambda:parse_json(read_bounded(documents/_checkpoint_name,MAX_JSON)))
+            process_sampler.poll_liveness(lambda:parse_json(read_bounded(documents/_checkpoint_name,MAX_JSON)),
+                checkpoint_path=documents/_checkpoint_name)
         presenter_watchdog.poll()
         waiting_value = None
         try:
@@ -2925,7 +2945,7 @@ def _owned_termination_record(raw, *, pid, executable, launch_started, launch_ac
 
 class OwnedProbeProcessSampler:
     """One bounded diagnostic, exclusively for this invocation's launch ACK PID."""
-    def __init__(self, simulator_udid, source_app, data_container):
+    def __init__(self, simulator_udid, source_app, data_container, *, remaining=None):
         self.udid, self.source_app, self.container = simulator_udid, Path(source_app), Path(data_container)
         self.pid = None; self.attempted = False
         self.launch_started = None; self.launch_ack = None
@@ -2934,6 +2954,8 @@ class OwnedProbeProcessSampler:
         self.absent_since = None; self.termination = None
         self._exit_queue=None; self._exit_attempted=False; self._exit_bound_pid=None
         self._exit_bound_identity=None; self._exit_observation={};self._exit_birth_identity=None
+        self._remaining=remaining;self._source_pin=None;self.prepare_stage="not_attempted"
+        self.prepare_attempts=0;self._post_launch_prepare_attempted=False
 
     def _kernel_birth_identity(self):
         # Public libproc PROC_PIDTBSDINFO. Its microsecond process birth identity
@@ -3013,19 +3035,65 @@ class OwnedProbeProcessSampler:
         except (OSError,ValueError):
             self._exit_observation={"schema":1,"state":"unavailable","error_code":"read_failed"};self.close()
 
-    def prepare(self):
+    def attestation(self):
+        return process_attestation_observation({"schema":1,"stage":self.prepare_stage,"error_code":self.prepare_error,
+            "attempts":self.prepare_attempts,"post_launch_retry":self._post_launch_prepare_attempted,
+            "available":self.executable is not None and self.prepare_error=="none"})
+
+    def _prepare_attempt(self):
         self.executable = None; self.executable_pin = None
         # Bind the installed image while Simulator services are responsive.
         # This optional setup cannot alter a probe's success/failure gates.
         try:
             require(sys.platform=="darwin","not_macos")
+            if self._source_pin is None:
+                self.prepare_stage="source_image"
+                self._source_pin=_sample_executable_identity(self.source_app/PROBE_EXECUTABLE)
             self.executable,self.executable_pin = self._owned_executable()
-            self.prepare_error = "none"
+            self.prepare_error = "none";self.prepare_stage="complete"
             return True
         except Exception as error:
-            code = str(error) if isinstance(error,ProbeError) else "owned_container_invalid"
-            self.prepare_error = code if code in PROCESS_SAMPLE_ERRORS else "owned_container_invalid"
+            if isinstance(error,ProbeError):
+                code={"simctl_timeout":"owned_bundle_query_timeout","simctl_failed":"owned_bundle_query_failed",
+                    "simctl_output_bound":"owned_bundle_query_output_invalid"}.get(str(error),str(error))
+                self.prepare_error=code if code in PROCESS_SAMPLE_ERRORS else "owned_preparation_exception"
+            elif isinstance(error,OSError):self.prepare_error="owned_preparation_io_failed"
+            elif isinstance(error,(ValueError,TypeError,UnicodeError,plistlib.InvalidFileException)):
+                self.prepare_error="owned_preparation_parse_failed"
+            else:self.prepare_error="owned_preparation_exception"
             return False
+
+    def prepare(self):
+        if self.prepare_attempts:return self.executable is not None and self.prepare_error=="none"
+        self.prepare_attempts=1
+        return self._prepare_attempt()
+
+    def _retry_prepare_after_launch(self,checkpoint_path):
+        # Exactly one recovery of optional early setup, never a CI/app retry.
+        # An already bound image/start/observer can never be replaced here.
+        if (self.prepare_attempts!=1 or self._post_launch_prepare_attempted or self.prepare_error=="none"
+                or self._source_pin is None or self.executable is not None or self.process_start_identity is not None
+                or self._exit_queue is not None or self._exit_attempted or type(self.pid) is not int
+                or self.launch_started is None or self.launch_ack is None or checkpoint_path is None):return
+        try:
+            path=Path(checkpoint_path)
+            allowed={language_paths(language,index)[2] for index,language in enumerate(MATRIX_LANGUAGES)}
+            require(path.parent==self.container/"Documents" and path.name in allowed
+                and path.resolve(strict=True)==path and not path.parent.is_symlink(),"owned_container_invalid")
+            before=path.lstat()
+            require(stat.S_ISREG(before.st_mode) and before.st_nlink==1
+                and self.launch_started<=before.st_mtime<=time.time()+1,"owned_container_invalid")
+            observed=parse_json(read_bounded(path,MAX_JSON));after=path.lstat()
+            require((before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)
+                ==(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns),"owned_container_invalid")
+            require(type(observed) is dict and type(observed.get("schema")) is int and observed["schema"]==1
+                and observed.get("main_thread_checkpoint") is True and type(observed.get("process_id")) is int
+                and observed["process_id"]==self.pid,"checkpoint_pid_differs")
+            os.kill(self.pid,0)  # Existence only, before retrying the same owned source/path checks.
+        except (OSError,ProbeError,ValueError):return
+        if callable(self._remaining):self._remaining()  # Preserve the original overall deadline.
+        self._post_launch_prepare_attempted=True;self.prepare_attempts=2
+        self._prepare_attempt()
 
     def clear_launch(self):
         self.close();self._exit_attempted=False;self._exit_observation={};self._exit_birth_identity=None
@@ -3041,7 +3109,8 @@ class OwnedProbeProcessSampler:
             match = re.fullmatch(re.escape(BUNDLE_ID)+r": ([1-9][0-9]{0,9})\n?",text)
             if match and int(match.group(1)) <= 2**31-1: self.pid = int(match.group(1))
 
-    def poll_liveness(self, checkpoint):
+    def poll_liveness(self, checkpoint, *, checkpoint_path=None):
+        if sys.platform=="darwin" and self.executable is None:self._retry_prepare_after_launch(checkpoint_path)
         if (sys.platform!="darwin" or self.executable is None or self.prepare_error!="none"
                 or type(self.pid) is not int): return
         now=time.monotonic()
@@ -3122,6 +3191,7 @@ class OwnedProbeProcessSampler:
         return report
 
     def _owned_executable(self):
+        self.prepare_stage="validate_container"
         require(type(self.udid) is str and str(uuid.UUID(self.udid)).upper()==self.udid,"owned_container_invalid")
         data = self.container.resolve(strict=True)
         require(not self.container.is_symlink() and len(data.parents)>=5,"owned_container_invalid")
@@ -3130,17 +3200,25 @@ class OwnedProbeProcessSampler:
             and data.relative_to(device).parts[:4]==("data","Containers","Data","Application")
             and len(data.relative_to(device).parts)==5
             and str(uuid.UUID(data.name)).upper()==data.name.upper(),"owned_container_invalid")
-        raw = _simctl(["get_app_container",self.udid,BUNDLE_ID,"app"],4)
+        self.prepare_stage="bundle_query"
+        budget=self._remaining() if callable(self._remaining) else 4
+        require(type(budget) in (int,float) and math.isfinite(budget) and budget>0,"probe_deadline_exceeded")
+        raw = _simctl(["get_app_container",self.udid,BUNDLE_ID,"app"],min(4,budget))
         require(type(raw) is bytes and len(raw)<=4096,"owned_container_invalid")
+        self.prepare_stage="validate_bundle"
         bundle = Path(raw.decode("utf-8").strip())
         require(bundle.is_absolute() and not bundle.is_symlink(),"owned_container_invalid")
         bundle = bundle.resolve(strict=True); parts = bundle.relative_to(device).parts
         require(len(parts)==6 and parts[:4]==("data","Containers","Bundle","Application")
             and str(uuid.UUID(parts[4])).upper()==parts[4].upper() and parts[5]=="Probe.app","owned_container_invalid")
+        self.prepare_stage="bundle_info"
         info = plistlib.loads(read_bounded(bundle/"Info.plist",MAX_JSON))
         require(type(info) is dict and info.get("CFBundleIdentifier")==BUNDLE_ID and info.get("CFBundleExecutable")==PROBE_EXECUTABLE
             and info.get("CFBundleSupportedPlatforms")==["iPhoneSimulator"],"owned_container_invalid")
+        self.prepare_stage="source_recheck"
         expected = _sample_executable_identity(self.source_app/PROBE_EXECUTABLE)
+        require(self._source_pin is None or expected==self._source_pin,"owned_executable_invalid")
+        self.prepare_stage="installed_image"
         executable = bundle/PROBE_EXECUTABLE; actual = _sample_executable_identity(executable)
         require(actual["sha256"]==expected["sha256"] and actual["bytes"]==expected["bytes"],"owned_executable_invalid")
         return executable,actual
@@ -3337,7 +3415,7 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
                 path = candidate/"Documents"/name
                 require(not path.exists() and not path.is_symlink(), "preexisting_probe_state_rejected")
         container = candidate
-        owned_sampler = OwnedProbeProcessSampler(created,app,container)
+        owned_sampler = OwnedProbeProcessSampler(created,app,container,remaining=remaining)
         owned_sampler.prepare()
         account_harness = AccountFixtureHarness(container, schema, descriptor_sha256=report["descriptor_sha256"])
         report["fresh_local_state_before_launch"] = True
@@ -3512,6 +3590,14 @@ def run_probe(app, audit, *, device_type=None, runtime=None, timeout=MAX_PROBE_S
         checkpoint = report.get("native_checkpoint") or failure_checkpoint(container,current_language,current_run_index,
             expected_pid=getattr(owned_sampler,"pid",None),launch_started=getattr(owned_sampler,"launch_started",None))
         if owned_sampler is not None and callable(getattr(owned_sampler,"close",None)):
+            if callable(getattr(owned_sampler,"attestation",None)):
+                try:
+                    attestation=process_attestation_observation(owned_sampler.attestation())
+                    if attestation:report["process_attestation"]=attestation
+                except Exception:
+                    # Optional observer metadata cannot replace the gate error.
+                    report["process_attestation"]={"schema":1,"stage":"not_attempted",
+                        "error_code":"owned_preparation_exception"}
             owned_sampler.close()
         if ui_driver is not None:
             try:

@@ -102,13 +102,14 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "observeForegroundReadiness", "requestStart", "requestEnqueue",
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
                 "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel",
-                "requestQueueRun", "bringQueueToForeground", "serverMenuOpening", "serverMenuOpenFailed", "geometryChanged"]]
+                "requestQueueRun", "bringQueueToForeground", "serverMenuOpening", "serverMenuOpenFailed", "geometryChanged",
+                "invalidateQueueSelection", "observeGameOwner"]]
     selected += [method(source, "requestStart", 1), method(source, "requestEnqueue", 1)]
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
 public final class ControllerHarness {
   static boolean configured=true,initialized=true,queueConfigured=true,saving,resumed,stopped=true,userPaused,allowNative=true,dismissed=true,pendingQueueRun,gameFocused,foregroundSelectionReady;
-  static int[] pending,startedOptions,enqueuedOptions;static long pendingDeadline,menuHandoffDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues,queueRuns,backgroundPrepares;static boolean enqueueWasResumed,allowQueueRun=true;
+  static int[] pending,startedOptions,enqueuedOptions;static long pendingDeadline,menuHandoffDeadline;static int starts,cancels,suspends,resumes,reason,wakes,enqueues,queueRuns,backgroundPrepares,invalidations,enqueueCalls;static boolean enqueueWasResumed,allowQueueRun=true,allowEnqueue=true,backgroundOwns;
   static WeakReference<Activity> game=new WeakReference<>(null);
   static JSONObject last=new JSONObject(),lastQueue=new JSONObject();static final Handler MAIN=new Handler();static final Runnable BEGIN=()->{};
   static ViewGroup overlay;static Object overlayText,overlaySave,overlayCancel,overlayPause,overlayDismiss;
@@ -129,9 +130,10 @@ public final class ControllerHarness {
   static int nativeStartV2(int n,int d,int c,int v,int a,int width,int height){starts++;startedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
   static void nativeCancel(){cancels++;}static void nativeSuspend(int value){suspends++;reason=value;}
   static void nativeResume(){resumes++;}static void wake(){wakes++;}
+  static void nativeInvalidateQueueSelection(){invalidations++;}
   static int nativeQueueRun(){if(!allowQueueRun)return -1;queueRuns++;return 0;}static void prepareBackground(Activity a){backgroundPrepares++;}
-  static int nativeQueueEnqueueV2(int n,int d,int c,int v,int a,int width,int height){enqueues++;enqueueWasResumed=resumed;enqueuedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
-  static class UnifiedMP4Background {static void stopCurrent(){}static void focusLost(Activity a){}static boolean ownsSurface(Activity a){return false;}}
+  static int nativeQueueEnqueueV2(int n,int d,int c,int v,int a,int width,int height){enqueueCalls++;if(!allowEnqueue)return -1;enqueues++;enqueueWasResumed=resumed;enqueuedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
+  static class UnifiedMP4Background {static void stopCurrent(){}static void focusLost(Activity a){}static boolean ownsSurface(Activity a){return backgroundOwns;}}
   static void require(boolean b,String message){if(!b)throw new AssertionError(message);}
   interface Action {void run()throws Exception;}
   static void rejects(Action a)throws Exception {try{a.run();}catch(IOException expected){return;}throw new AssertionError("unsafe path accepted");}
@@ -172,7 +174,10 @@ public final class ControllerHarness {
     require(ready(),"opening server menu preserves a verified paused MV selection");
     Mp4QueueUiState.Controls menuControls=new Mp4QueueUiState.Controls(true,false,false,false,false,ready(),true,0,0);
     require(menuControls.immediate&&menuControls.enqueue,"both real server-menu buttons stay enabled for paused MV");
-    require(requestEnqueue(menu,30,1,8000000)&&enqueues==1&&!enqueueWasResumed,"queue request retains selection identity before returning to game");
+    menu.intent=null;int resumesBeforeAdd=resumes,preparesBeforeAdd=backgroundPrepares;long deadlineBeforeAdd=pendingDeadline;
+    require(requestEnqueue(menu,30,1,8000000)&&enqueues==1&&!enqueueWasResumed,"paused selection commits without needing a Unity frame");
+    require(menu.intent==null&&resumes==resumesBeforeAdd&&backgroundPrepares==preparesBeforeAdd&&pendingDeadline==deadlineBeforeAdd,
+      "Add keeps server UI, lifecycle and background transport unchanged");
     require(starts==1,"adding a paused selection does not capture while original Unity is stopped");
     require(requestStart(menu,30,1,8000000),"one-shot request accepted from paused server menu");
     beginPending();require(starts==1&&pending!=null,"do not capture before original Activity resume");
@@ -192,10 +197,9 @@ public final class ControllerHarness {
     menu.intent=null;
     require(requestEnqueue(menu,60,2,0,1920,1080)&&enqueues==2&&!enqueueWasResumed,"paused cached MV accepts its exact V2 queue request");
     require(Arrays.equals(enqueuedOptions,new int[]{60,1,2,0,192000,1920,1080}),"recommended bitrate sentinel and custom dimensions reach queue admission unchanged");
-    require(game.get()==photo&&menu.intent.target==photo.getClass()&&menu.intent.flags==3,"enqueue brings the existing live Activity forward without creating another player");
+    require(game.get()==photo&&menu.intent==null&&!resumed,"Add leaves the existing paused player and server Activity in place");
     require(pending==null&&!pendingQueueRun&&starts==startsBeforeQueue,"enqueue does not silently start a one-shot or start the queue");
-    gameResumed(photo);beginPending();
-    require(resumes==resumesBeforeQueue+1&&starts==startsBeforeQueue,"original onResume clears the lifecycle park while native source reconstruction remains independent");
+    require(resumes==resumesBeforeQueue&&backgroundPrepares==preparesBeforeQueue,"Add never resumes Unity or prepares offscreen capture");
     // The production C++ capture_resume_* tests execute the target wait and
     // immutable admission. Here a failed native Run must not reorder the UI.
     allowQueueRun=false;menu.intent=null;
@@ -246,6 +250,42 @@ public final class ControllerHarness {
     require(foregroundSelectionReady&&cancels==cancelsBeforeGeometry+1&&!ready(),"background selection retention never suppresses active capture cancellation or busy ownership");
     last=new JSONObject();allowNative=true;serverMenuOpening(rotating);gameDestroyed(rotating);
     require(!foregroundSelectionReady&&menuHandoffDeadline==0&&!ready(),"destroy clears both logical eligibility and menu ownership");
+    int invalidationsBeforeOwner=invalidations;
+    Activity split=new Activity();observeGameOwner(split);split.multiWindow=true;last=new JSONObject();allowNative=true;
+    require(invalidations==invalidationsBeforeOwner+1&&!resumed&&stopped,"a new Activity cannot inherit the prior owner's immutable selection or lifecycle");
+    gameResumed(split);gameFocused=true;observeForegroundReadiness(true);gamePaused(split);allowNative=false;
+    menu.intent=null;resumesBeforeAdd=resumes;preparesBeforeAdd=backgroundPrepares;deadlineBeforeAdd=pendingDeadline;
+    int invalidationsBeforePause=invalidations;userPaused=true;
+    require(requestEnqueue(menu,30,1,16000000)&&menu.intent==null,"split-window Add does not reorder either window");
+    require(userPaused&&!pendingQueueRun&&pending==null&&resumes==resumesBeforeAdd&&backgroundPrepares==preparesBeforeAdd&&pendingDeadline==deadlineBeforeAdd,
+      "Add preserves explicit pause and all execution bookkeeping");
+    gameStopped(split);
+    require(invalidations==invalidationsBeforePause&&foregroundSelectionReady,"onPause and onStop preserve the immutable logical selection");
+    require(requestEnqueue(menu,30,1,16000000)&&menu.intent==null,"a stopped original player can add its validated snapshot without navigation");
+    int accepted=enqueues,calls=enqueueCalls;allowEnqueue=false;
+    require(!requestEnqueue(menu,30,1,16000000)&&enqueues==accepted&&enqueueCalls==calls+1&&menu.intent==null,
+      "native snapshot rejection never becomes UI success or a foreground launch");allowEnqueue=true;
+    split.destroyed=true;calls=enqueueCalls;
+    require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls&&menu.intent==null,"destroyed owner rejects before JNI");split.destroyed=false;
+    split.finishing=true;require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls,"finishing owner rejects before JNI");split.finishing=false;
+    foregroundSelectionReady=false;require(!requestEnqueue(menu,30,1,16000000)&&enqueueCalls==calls,"unverified owner cannot add a snapshot");
+    foregroundSelectionReady=true;
+    require(!requestEnqueue(menu,24,1,16000000)&&!requestEnqueue(menu,30,3,16000000)
+      &&!requestEnqueue(menu,30,1,1)&&!requestEnqueue(menu,30,1,16000000,1919,1080)&&enqueueCalls==calls,"invalid options do not reach JNI");
+    int beforeSameOwner=invalidations;observeGameOwner(split);require(invalidations==beforeSameOwner,"reattaching the same Activity does not discard native selection");
+    Activity replacement=new Activity();observeGameOwner(replacement);
+    require(invalidations==beforeSameOwner+1&&!foregroundSelectionReady&&game.get()==replacement,"replacement Activity retires the old owner snapshot");
+    int beforeStaleDestroy=invalidations;gameDestroyed(split);require(invalidations==beforeStaleDestroy&&game.get()==replacement,"stale owner destruction cannot invalidate the replacement");
+    resumed=true;stopped=false;allowNative=true;serverMenuOpening(replacement);int beforeHandoff=invalidations;
+    geometryChanged(replacement);gamePaused(replacement);gameStopped(replacement);geometryChanged(replacement);
+    require(invalidations==beforeHandoff&&foregroundSelectionReady,"menu handoff geometry and pause/stop keep the same snapshot");
+    gameResumed(replacement);allowNative=false;gameFocused=true;geometryChanged(replacement);
+    require(invalidations==beforeHandoff+1&&!foregroundSelectionReady,"real active-window resize invalidates native and Java snapshot eligibility");
+    foregroundSelectionReady=true;pending=new int[]{30,1,1,16000000,192000};int cancelsBeforePending=cancels;
+    geometryChanged(replacement);require(invalidations==beforeHandoff+2&&pending!=null&&cancels==cancelsBeforePending,"pending immediate start still invalidates stale Add geometry without cancelling its own resume wait");pending=null;
+    backgroundOwns=true;foregroundSelectionReady=true;int beforeOwnedGeometry=invalidations;
+    geometryChanged(replacement);require(invalidations==beforeOwnedGeometry&&foregroundSelectionReady,"owned offscreen transport geometry is not replaced by a UI-window resize");backgroundOwns=false;
+    gameDestroyed(replacement);require(invalidations==beforeOwnedGeometry+1,"current owner destruction retires the native snapshot");
     File root=new File(args[0]).getCanonicalFile();root.mkdirs();File out=new File(root,"exports");out.mkdir();
     require(privateDirectory(root,out.getPath()).equals(out),"private output root");
     rejects(()->privateDirectory(root,new File(root,"../elsewhere").getPath()));
@@ -320,6 +360,7 @@ public class DiagnosticsHarness {
    .put("controllers",new JSONArray(1000)).put("unknown",new JSONObject().put("nested_address","0xfeed"));
   nativeValue.put("controller_discovery",discovered);
   queue.put("available",true).put("running",false).put("paused",true).put("jobs",new JSONArray(100))
+   .put("error_code","queue_install_new_failed").put("storage_stage","install_new").put("storage_errno",1)
    .put("queue_root","/private/queue").put("selected_characters","unpublished private payload");
   JSONObject result=diagnostics();
   need(result.map.get("phase").equals("idle"),"diagnostics obtains current native status rather than stale UI snapshot");
@@ -329,6 +370,17 @@ public class DiagnosticsHarness {
   need(result.map.get("video_bitrate").equals(17250000L)&&result.map.get("fps_num").equals(60L),"actual encoder scalars survive");
   need(result.map.get("capture_acks").equals(0L)&&result.map.get("frames").equals(9007199254740991L),"numeric fields bounded");
   need(result.map.get("queue_job_count").equals(8)&&result.map.get("queue_paused").equals(true),"queue count bounded without job contents");
+  need(result.map.get("queue_error_code").equals("queue_install_new_failed")
+   &&result.map.get("queue_storage_stage").equals("install_new")&&result.map.get("queue_storage_errno").equals(1L),"queue storage stage and errno survive without paths");
+  queue.put("error_code","/private/queue").put("storage_stage","/private/path").put("storage_errno",Long.MAX_VALUE);
+  JSONObject invalidStorage=diagnostics();
+  need(invalidStorage.map.get("queue_error_code").equals("unknown")&&!invalidStorage.map.containsKey("queue_storage_stage")
+   &&invalidStorage.map.get("queue_storage_errno").equals(4095L),"storage observations reject paths and saturate integers");
+  for(Object invalid:new Object[]{"1",true,1.0,Double.NaN,new JSONObject()}){
+   queue.put("storage_errno",invalid);need(!diagnostics().map.containsKey("queue_storage_errno"),"storage errno never coerces noninteger input");
+  }
+  queue.put("storage_stage","unknown_private_token").put("storage_errno",Long.MIN_VALUE);
+  need(!diagnostics().map.containsKey("queue_storage_stage")&&diagnostics().map.get("queue_storage_errno").equals(0L),"only known stage tokens and bounded errno are exported");
   for(String key:new String[]{"directory","capability","export_id","pcm_path","jobs","queue_root","selected_characters"})
    need(!result.map.containsKey(key),"private field omitted: "+key);
   need(result.map.get("verified_foreground_selection").equals(true)&&result.map.get("game_attached").equals(true),"lifecycle facts preserved");
@@ -459,11 +511,11 @@ def test_server_stop_parks_native_queue_before_disabling_it_and_cancelling_sessi
     javac, java = shutil.which("javac"), shutil.which("java")
     if not javac or not java:
         pytest.skip("JDK required")
-    production = method(SOURCE.read_text(), "serverStopped")
+    production = "\n".join(method(SOURCE.read_text(), name) for name in ("serverStopped", "invalidateQueueSelection"))
     harness = tmp_path / "ServerStopHarness.java"
     harness.write_text(r'''import java.util.*;
 public final class ServerStopHarness {
- static boolean configured,initialized,queueConfigured,foregroundSelectionReady,throwPause,queueParked;
+ static boolean configured,initialized,queueConfigured,foregroundSelectionReady,throwPause,throwInvalidate,queueParked;
  static long menuHandoffDeadline;static int[] pending;static int pauseResult;
  static final List<String> events=new ArrayList<>();static final Handler MAIN=new Handler();
  static final class Handler {
@@ -475,28 +527,31 @@ public final class ServerStopHarness {
   events.add("pause");if(throwPause)throw new UnsatisfiedLinkError("optional addon unavailable");
   if(pauseResult==0)queueParked=true;return pauseResult;
  }
+ static void nativeInvalidateQueueSelection(){events.add("invalidate");if(throwInvalidate)throw new UnsatisfiedLinkError("optional snapshot addon unavailable");}
  static void cancel(){events.add("cancel");}
  static void wake(){events.add("wake");}
  static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
  static void reset(boolean loaded,boolean queued){
   configured=true;initialized=loaded;queueConfigured=queued;foregroundSelectionReady=true;menuHandoffDeadline=8000;
-  pending=new int[]{60,1,2};throwPause=false;queueParked=false;pauseResult=0;events.clear();MAIN.work.clear();
+  pending=new int[]{60,1,2};throwPause=false;throwInvalidate=false;queueParked=false;pauseResult=0;events.clear();MAIN.work.clear();
  }
 ''' + production + r'''
  public static void main(String[]arguments){
   reset(true,true);serverStopped();
-  need(events.equals(Arrays.asList("pause"))&&queueParked,"native queue is parked synchronously without waiting for the paused Unity main loop");
+  need(events.equals(Arrays.asList("pause","invalidate"))&&queueParked,"native queue is parked and its Add snapshot retired synchronously without waiting for paused Unity");
   need(!configured&&!queueConfigured&&!foregroundSelectionReady&&menuHandoffDeadline==0,"server stop retires host availability and cached menu eligibility");
   need(MAIN.work.size()==1&&pending!=null,"existing main-thread session cleanup remains deferred");
-  MAIN.drain();need(events.equals(Arrays.asList("pause","cancel","wake"))&&pending==null&&queueParked,"session cancellation follows queue parking without resuming the queue");
+  MAIN.drain();need(events.equals(Arrays.asList("pause","invalidate","cancel","wake"))&&pending==null&&queueParked,"session cancellation follows queue parking without resuming the queue");
   serverStopped();need(Collections.frequency(events,"pause")==1,"a repeated stop cannot call an already-retired queue");MAIN.drain();
-  reset(true,false);serverStopped();need(events.isEmpty(),"an unconfigured queue never receives JNI pause");MAIN.drain();
-  need(events.equals(Arrays.asList("cancel","wake")),"queue absence preserves existing session cleanup");
+  reset(true,false);serverStopped();need(events.equals(Arrays.asList("invalidate")),"an unconfigured queue still retires cached selection without receiving pause");MAIN.drain();
+  need(events.equals(Arrays.asList("invalidate","cancel","wake")),"queue absence preserves existing session cleanup");
   reset(false,true);serverStopped();need(events.isEmpty(),"an uninitialized optional native addon never receives queue pause");MAIN.drain();
   reset(true,true);throwPause=true;serverStopped();MAIN.drain();
-  need(events.equals(Arrays.asList("pause","cancel","wake"))&&!configured&&!queueConfigured&&pending==null,"optional JNI absence cannot prevent server/session retirement");
+  need(events.equals(Arrays.asList("pause","invalidate","cancel","wake"))&&!configured&&!queueConfigured&&pending==null,"optional JNI absence cannot prevent server/session retirement");
   reset(true,true);pauseResult=-1;serverStopped();MAIN.drain();
-  need(events.equals(Arrays.asList("pause","cancel","wake"))&&!configured&&!queueConfigured,"a rejected host pause cannot prevent safe host cleanup");
+  need(events.equals(Arrays.asList("pause","invalidate","cancel","wake"))&&!configured&&!queueConfigured,"a rejected host pause cannot prevent safe host cleanup");
+  reset(true,true);throwInvalidate=true;serverStopped();MAIN.drain();
+  need(events.equals(Arrays.asList("pause","invalidate","cancel","wake"))&&!configured&&!queueConfigured&&!foregroundSelectionReady,"optional snapshot JNI absence cannot preserve stale UI eligibility or block cleanup");
   System.out.println("PASS queue parking before server retirement");
  }
 }''')

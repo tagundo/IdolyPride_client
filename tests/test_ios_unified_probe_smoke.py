@@ -4003,13 +4003,15 @@ def test_optional_process_sample_cannot_replace_original_failure_and_runs_before
         if arguments[0] in ("shutdown","delete"):sequence.append(arguments[0])
         return controller(arguments,timeout)
     class BrokenDiagnosticSampler:
-        def __init__(self,*args):pass
+        def __init__(self,*args,**kwargs):pass
         def prepare(self):return True
         def clear_launch(self):pass
         def note_launch(self,raw):pass
         def capture(self,checkpoint):
             sequence.append("sample")
             raise RuntimeError("DO-NOT-EXPORT")
+        def attestation(self):raise RuntimeError("DO-NOT-EXPORT")
+        def close(self):sequence.append("observer_closed")
     with mock.patch.object(probe.sys,"platform","darwin"), \
             mock.patch.object(probe,"_simctl",simctl), \
             mock.patch.object(probe,"OwnedProbeProcessSampler",BrokenDiagnosticSampler), \
@@ -4017,6 +4019,7 @@ def test_optional_process_sample_cannot_replace_original_failure_and_runs_before
         result=probe.run_probe(app,tmp_path/"failure-with-optional-sample.json")
     assert result["error"]=="keyboard_during_init_failed"
     assert result["process_sample"]["error_code"]=="sample_failed"
-    assert sequence.index("sample")<sequence.index("shutdown")<sequence.index("delete")
+    assert result["process_attestation"]["error_code"]=="owned_preparation_exception"
+    assert sequence.index("sample")<sequence.index("observer_closed")<sequence.index("shutdown")<sequence.index("delete")
     assert result["cleanup"]=={"shutdown":True,"delete":True}
     assert "DO-NOT-EXPORT" not in json.dumps(result)

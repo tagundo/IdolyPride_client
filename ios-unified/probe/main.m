@@ -859,12 +859,12 @@ static void ProbeZIPImportPicker(WKWebView *web,UIViewController *presenter,void
 // Fixed scalars only: do not copy backend job dictionaries, paths, or UI text.
 static void ProbeZIPRoundTripProgress(NSMutableDictionary *state,NSString *phase) {
     if (![@[@"status_requested",@"export_requested",@"export_waiting",@"export_ready",@"source_hashing",
-            @"import_control_waiting",@"picker_waiting",@"selection_dispatched",@"import_waiting",
+            @"import_control_waiting",@"picker_waiting",@"selection_dispatched",@"dismiss_waiting",@"import_waiting",
             @"import_ready",@"dom_waiting",@"copy_hashing",@"finished",@"failed",@"timed_out"] containsObject:phase]) return;
     NSMutableDictionary *clean=[@{@"schema":@1,@"phase":phase} mutableCopy];
     NSDictionary *metrics=state[@"metrics"], *job=state[@"backend_job"];
     for (NSString *key in @[@"export_accepted",@"export_ready",@"export_archive_complete",@"wk_import_dispatched",
-            @"picker_presented",@"selection_delegate_invoked",@"backend_ready",@"backend_success",@"dom_completed",
+            @"picker_presented",@"selection_delegate_invoked",@"dismissal_completion_observed",@"transition_idle_before_restore",@"backend_ready",@"backend_success",@"dom_completed",
             @"button_restored",@"source_copy_sha256_match",@"timed_out"]) {
         id value=metrics[key];
         if ([value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value)==CFBooleanGetTypeID()) clean[key]=value;
@@ -892,13 +892,31 @@ static void ProbeZIPRoundTripProgress(NSMutableDictionary *state,NSString *phase
 
 static void ProbeZIPRoundTripPoll(WKWebView *__weak web,UIViewController *__weak presenter,
                                   NSMutableDictionary *state,void (^finish)(void));
+static void ProbeZIPRoundTripDismissal(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
+                                      NSMutableDictionary *state,void (^finish)(void)) {
+    if ([state[@"finished"] boolValue]) return;
+    UIViewController *presenter=weakPresenter; UIDocumentPickerViewController *picker=state[@"picker"];
+    if (!weakWeb || !presenter || !picker) { finish();return; }
+    ProbeZIPRoundTripProgress(state,@"dismiss_waiting");
+    if (ProbeZIPPickerRestoreAllowed([state[@"dismissal_completed"] boolValue],
+            presenter.presentedViewController!=nil,picker.viewIfLoaded.window!=nil,
+            ProbeZIPPickerTransitionBusy(presenter),ProbeZIPPickerTransitionBusy(picker))) {
+        state[@"metrics"][@"transition_idle_before_restore"]=@YES;
+        [state removeObjectForKey:@"picker"];
+        state[@"phase"]=@"import";ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish);return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/4),dispatch_get_main_queue(),^{
+        ProbeZIPRoundTripDismissal(weakWeb,weakPresenter,state,finish);
+    });
+}
 static void ProbeZIPRoundTripPicker(WKWebView *__weak weakWeb,UIViewController *__weak weakPresenter,
                                     NSMutableDictionary *state,void (^finish)(void)) {
     if ([state[@"finished"] boolValue]) return;
     UIViewController *presenter=weakPresenter; UIViewController *shown=presenter.presentedViewController;
     state[@"observations"]=@([state[@"observations"] unsignedIntegerValue]+1);
     ProbeZIPRoundTripProgress(state,@"picker_waiting");
-    if ([shown isKindOfClass:UIDocumentPickerViewController.class] && shown.viewIfLoaded.window && !shown.isBeingPresented) {
+    if ([shown isKindOfClass:UIDocumentPickerViewController.class] && shown.viewIfLoaded.window
+            && !ProbeZIPPickerTransitionBusy(shown) && !ProbeZIPPickerTransitionBusy(presenter)) {
         UIDocumentPickerViewController *picker=(UIDocumentPickerViewController *)shown;
         NSMutableDictionary *metrics=state[@"metrics"];
         metrics[@"picker_presented"]=@YES; metrics[@"picker_import_mode"]=@((BOOL)(picker.documentPickerMode==UIDocumentPickerModeImport));
@@ -906,9 +924,13 @@ static void ProbeZIPRoundTripPicker(WKWebView *__weak weakWeb,UIViewController *
         if (![picker.delegate respondsToSelector:@selector(documentPicker:didPickDocumentsAtURLs:)]) { finish(); return; }
         [picker.delegate documentPicker:picker didPickDocumentsAtURLs:@[[NSURL fileURLWithPath:state[@"source"]]]];
         metrics[@"selection_delegate_invoked"]=@YES;
-        [picker dismissViewControllerAnimated:NO completion:nil]; metrics[@"dismissed_programmatically"]=@YES;
-        state[@"phase"]=@"import"; ProbeZIPRoundTripProgress(state,@"selection_dispatched");
-        ProbeZIPRoundTripPoll(weakWeb,weakPresenter,state,finish); return;
+        state[@"picker"]=picker;state[@"dismissal_completed"]=@NO;
+        [picker dismissViewControllerAnimated:NO completion:^{
+            if ([state[@"finished"] boolValue]) return;
+            state[@"dismissal_completed"]=@YES;metrics[@"dismissal_completion_observed"]=@YES;
+        }]; metrics[@"dismissed_programmatically"]=@YES;
+        ProbeZIPRoundTripProgress(state,@"selection_dispatched");
+        ProbeZIPRoundTripDismissal(weakWeb,weakPresenter,state,finish); return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW,NSEC_PER_SEC/4),dispatch_get_main_queue(),^{
         ProbeZIPRoundTripPicker(weakWeb,weakPresenter,state,finish);
@@ -2317,7 +2339,7 @@ static NSDictionary *ProbeKeyboardObservation(void) {
                     roundtripOK=[roundtrip[@"timed_out"] isEqual:@NO];
                     for (NSString *key in @[@"export_accepted",@"export_ready",@"export_archive_complete",@"wk_import_dispatched",
                             @"picker_presented",@"picker_import_mode",@"picker_single_selection",@"selection_delegate_invoked",
-                            @"dismissed_programmatically",@"picker_detached",@"import_reply_accepted",@"native_copy_queued",
+                            @"dismissed_programmatically",@"dismissal_completion_observed",@"transition_idle_before_restore",@"picker_detached",@"import_reply_accepted",@"native_copy_queued",
                             @"copy_bytes_match",@"owned_copy_found",@"copy_source_distinct",@"source_preserved",
                             @"source_copy_sha256_match",@"backend_ready",@"backend_success",@"dom_completed",@"button_restored",
                             @"upstream_requests_unchanged"]) roundtripOK=roundtripOK && [roundtrip[key] isEqual:@YES];

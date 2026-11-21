@@ -47,8 +47,9 @@ IDMP4_SESSION_API void IDMP4SessionSuspend(int reason);
 // lifecycle foreground event cannot accidentally resume a user-paused export.
 IDMP4_SESSION_API void IDMP4SessionResume(void);
 
-// Queue commands copy only bounded scalar options/opaque IDs on host threads.
-// Selection, graphics and source geometry are captured on the Unity tick.
+// Selection, graphics and source geometry are frozen on the Unity tick.
+// Enqueue persists that verified POD candidate synchronously on the host,
+// without resuming Unity. Other commands retain their original tick scheduling.
 // Return 0 for accepted; inspect QueueStatus for completion or a stable error.
 // Configure inspects the journal synchronously without Unity calls; inactive
 // job edits also work in a cold server menu. The host runs file work off its UI.
@@ -58,6 +59,9 @@ IDMP4_SESSION_API int IDMP4QueueEnqueue(uint32_t fps_num, uint32_t fps_den,
 IDMP4_SESSION_API int IDMP4QueueEnqueueV2(uint32_t fps_num, uint32_t fps_den,
     uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate,
     uint32_t output_width, uint32_t output_height);
+// Scalar-only invalidation for destroyed/replaced host owners and real active
+// window changes. Menu pause and menu-only target loss preserve the candidate.
+IDMP4_SESSION_API void IDMP4QueueInvalidateSelection(void);
 IDMP4_SESSION_API int IDMP4QueueRun(void);
 IDMP4_SESSION_API int IDMP4QueuePause(void);
 IDMP4_SESSION_API int IDMP4QueueResume(void);

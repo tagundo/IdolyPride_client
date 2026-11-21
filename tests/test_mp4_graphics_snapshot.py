@@ -22,13 +22,17 @@ HARNESS = r'''
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <pthread.h>
 #include <string>
 using namespace idoly::presentation;
 Config current_config{};
+bool has_configuration=true;
+pthread_mutex_t status_mutex=PTHREAD_MUTEX_INITIALIZER;
+struct Status {int64_t revision=123;const char* state="applied";}state;
 std::array<uint8_t,256> manager{};
 bool present=true,live=true;
 struct Weak {void* get(bool)const{return present?manager.data():nullptr;}}quality_manager;
-Config configuration(){return current_config;}
+Config configuration(bool* has=nullptr){if(has)*has=has_configuration;return current_config;}
 bool object_alive(void*,const void*){return live;}
 template<class T>T read(void* p,size_t offset){T value{};std::memcpy(&value,static_cast<uint8_t*>(p)+offset,sizeof value);return value;}
 template<class T>void put(size_t offset,T value){std::memcpy(manager.data()+offset,&value,sizeof value);}
@@ -40,6 +44,11 @@ int main(int argc,char**argv){
     current_config.aa_mode=2;current_config.shadow_resolution=2048;
     current_config.expand_photography=true;current_config.revision=123;
     bool ok=true;int fps=60,quality=30;
+    if(scenario=="revision_pending"){state.revision=122;ok=false;}
+    if(scenario=="revision_waiting"){state.state="waiting_for_scene";ok=false;}
+    if(scenario=="revision_unsupported"){state.state="unsupported";ok=false;}
+    if(scenario=="revision_disabled")state.state="disabled";
+    if(scenario=="unconfigured_original"){has_configuration=false;state.state="waiting";state.revision=0;}
     if(scenario=="scale_half")put(0x20,.5f);
     if(scenario=="scale_nan")put(0x20,__builtin_nanf(""));
     if(scenario=="fps30"){put(0xa0,30.0f);fps=30;}
@@ -101,6 +110,8 @@ def snapshot_binary(tmp_path_factory):
     "explicit_quality", "disabled_overrides", "absent", "dead", "fps_nan",
     "fps_fraction", "fps_zero", "fps_negative", "fps_unsupported", "scale_not_fps",
     "invalid_quality", "zero_quality",
+    "revision_pending", "revision_waiting", "revision_unsupported", "revision_disabled",
+    "unconfigured_original",
 ])
 def test_queue_captures_actual_original_fps_without_mutating_preferences(snapshot_binary, scenario):
     result = subprocess.run([str(snapshot_binary), scenario], capture_output=True, text=True)

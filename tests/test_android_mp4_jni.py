@@ -110,3 +110,62 @@ extern "C" JNIEXPORT jstring JNICALL Java_game_qualiarts_idolypride_localserver_
     assert run.returncode == 0, run.stdout + run.stderr
     assert run.stdout.strip() == "PASS JNI"
     assert "WARNING in native method" not in run.stderr + run.stdout
+
+
+def test_real_session_jni_invalidates_host_snapshot_without_unity(tmp_path):
+    javac, java, cxx = shutil.which("javac"), shutil.which("java"), shutil.which("g++")
+    if not javac or not java or not cxx:
+        pytest.skip("JDK and C++ compiler required")
+    root = Path(__file__).resolve().parents[1]
+    include = Path(javac).resolve().parents[1] / "include"
+    if not (include / "jni.h").is_file():
+        pytest.skip("JDK JNI development headers required")
+    source = tmp_path / "session.cpp"
+    source.write_text(r'''
+#include "mp4_android_encoder.hpp"
+#include "mp4_runtime.hpp"
+#include "mp4_android_session.hpp"
+extern "C" JNIEXPORT jlong JNICALL Java_game_qualiarts_idolypride_localserver_SessionHarness_generation(JNIEnv*,jclass){
+    pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);
+    const auto value=idoly_mp4_runtime::queue_selection_generation;
+    pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);return static_cast<jlong>(value);
+}
+''')
+    harness = tmp_path / "SessionHarness.java"
+    harness.write_text(r'''
+package game.qualiarts.idolypride.localserver;
+final class UnifiedMP4Export {
+  static native void nativeInvalidateQueueSelection();
+  static native boolean nativeReady();
+  static native int nativeQueueEnqueueV2(int n,int d,int codec,int bitrate,int audio,int width,int height);
+  static native String nativeQueueStatus();
+}
+public final class SessionHarness {
+  static native long generation();
+  public static void main(String[] args)throws Exception {
+    System.load(args[0]);long before=generation();
+    UnifiedMP4Export.nativeInvalidateQueueSelection();
+    Thread foreign=new Thread(UnifiedMP4Export::nativeInvalidateQueueSelection);foreign.start();foreign.join();
+    if(generation()!=before+2)throw new AssertionError("real JNI did not reach scalar invalidation");
+    if(UnifiedMP4Export.nativeReady())throw new AssertionError("cold runtime became ready");
+    if(UnifiedMP4Export.nativeQueueEnqueueV2(30,1,1,0,192000,0,0)!=-1)
+      throw new AssertionError("cold host admission accepted without captured Unity selection");
+    if(!UnifiedMP4Export.nativeQueueStatus().contains("queue_not_configured"))
+      throw new AssertionError("actual native queue status missing");
+    System.out.println("PASS SESSION JNI");
+  }
+}
+''')
+    library = tmp_path / "libsession.so"
+    compiled = subprocess.run([cxx,"-std=c++17","-shared","-fPIC","-pthread","-fvisibility=hidden",
+        "-Wall","-Wextra","-Werror","-I",str(include),"-I",str(include / "linux"),
+        "-I",str(root / "client-presentation/native"),str(source),"-o",str(library)],capture_output=True,text=True,timeout=45)
+    assert compiled.returncode == 0,compiled.stderr
+    classes = tmp_path / "classes"
+    compiled = subprocess.run([javac,"-J-Xmx256m","--release","17","-d",str(classes),str(harness)],capture_output=True,text=True,timeout=30)
+    assert compiled.returncode == 0,compiled.stderr
+    result = subprocess.run([java,"-Xcheck:jni","-Xmx128m","-cp",str(classes),
+        "game.qualiarts.idolypride.localserver.SessionHarness",str(library)],capture_output=True,text=True,timeout=30)
+    assert result.returncode == 0,result.stdout + result.stderr
+    assert result.stdout.strip() == "PASS SESSION JNI"
+    assert "WARNING in native method" not in result.stderr + result.stdout
