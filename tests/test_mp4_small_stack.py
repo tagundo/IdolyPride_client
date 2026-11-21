@@ -122,7 +122,14 @@ def small_stack_binaries(tmp_path_factory):
     # Match the shared managed-heap fixture's warning settings; its compact
     # callback definitions and deliberate value-storage poisoning are reused.
     warning_flags = ["-Wno-misleading-indentation"]
-    if "g++" in Path(compiler).name:
+    predefined = subprocess.run([compiler,"-dM","-E","-x","c++","-"],input="",
+        capture_output=True,text=True,timeout=10)
+    assert predefined.returncode == 0, predefined.stderr
+    macros = {line.split()[1] for line in predefined.stdout.splitlines() if line.startswith("#define ")}
+    assert "__cplusplus" in macros
+    # Clang defines __GNUC__ for compatibility; executable names and wrappers
+    # do not identify which compiler's warning options are actually supported.
+    if "__GNUC__" in macros and "__clang__" not in macros:
         warning_flags += ["-Wno-class-memaccess", "-Wno-format-truncation"]
     for name, program in programs.items():
         source, executable = folder / f"{name}.cpp", folder / name

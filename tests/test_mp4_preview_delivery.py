@@ -259,6 +259,7 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
     assert [line.strip()[2:] for line in scoped.splitlines() if line.strip()] == [delivery.WORKFLOW,
         "tools/stage_mp4_preview.py", "tests/test_mp4_preview_delivery.py",
         "tests/test_mp4_field_reference_abi.py", "tests/test_mp4_photography_bridge.py", "tests/test_mp4_replay_factories.py",
+        "tests/test_mp4_small_stack.py",
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 4
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw
