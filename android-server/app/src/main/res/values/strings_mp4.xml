@@ -30,4 +30,17 @@
     <string name="mp4_export_filename">IdolyPride-MV-%1$s.mp4</string>
     <string name="mp4_background_cancelled">앱 화면을 벗어나 내보내기를 취소했습니다.</string>
     <string name="mp4_progress_title">MV 내보내기</string>
+    <string name="mp4_bitrate_recommended">추천값 사용</string>
+    <string name="mp4_custom">직접 입력</string>
+    <string name="mp4_bitrate_mbps">비트레이트 (Mbps)</string>
+    <string name="mp4_output_resolution">출력 해상도</string>
+    <string name="mp4_resolution_current">현재 MV 크기</string>
+    <string name="mp4_width_pixels">가로 (픽셀)</string>
+    <string name="mp4_height_pixels">세로 (픽셀)</string>
+    <string name="mp4_output_resolution_hint">출력 크기를 바꿉니다. 화면 비율이 다르면 여백을 넣습니다.</string>
+    <string name="mp4_bitrate_invalid">비트레이트를 0.1–200 Mbps 사이의 숫자로 입력하세요.</string>
+    <string name="mp4_resolution_invalid">가로·세로를 각각 16–4096 사이의 짝수로 입력하세요.</string>
+    <string name="mp4_bitrate_recommendation">추천 %1$s Mbps</string>
+    <string name="mp4_bitrate_recommended_waiting">추천값 · MV 크기 확인 대기</string>
+    <string name="mp4_not_ready_reason">MV 준비를 확인하지 못했습니다. (%1$s)</string>
 </resources>

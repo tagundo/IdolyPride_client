@@ -32,6 +32,7 @@
 #include "photography_ui.hpp"
 #include "sound_persistence.hpp"
 #include "mp4_game_bindings.hpp"
+#include "mp4_controller_profile.hpp"
 #include "mp4_graph_modes.hpp"
 #include "mp4_camera_clock.hpp"
 #include "mp4_replay_profile.hpp"
@@ -799,10 +800,12 @@ namespace mp4game = idoly_mp4_game;
 constexpr const auto &mp4_profile=mp4game::ios_game_profile;
 constexpr const auto &mp4_runtime_profile=mp4game::ios_runtime_profile;
 constexpr const auto &mp4_bindings=mp4game::ios_game_bindings;
+constexpr const auto &mp4_controller_profile=mp4game::ios_controller_profile;
 #else
 constexpr const auto &mp4_profile=mp4game::android_game_profile;
 constexpr const auto &mp4_runtime_profile=mp4game::android_runtime_profile;
 constexpr const auto &mp4_bindings=mp4game::android_game_bindings;
+constexpr const auto &mp4_controller_profile=mp4game::android_controller_profile;
 #endif
 mp4game::Api mp4_api;
 pthread_mutex_t mp4_graph_mode_mutex=PTHREAD_MUTEX_INITIALIZER;
@@ -814,6 +817,12 @@ bool mp4_camera_clock_ok();
 bool mp4_recorded_graph_mode(const mp4game::PlayableGraph*,int32_t*);
 bool mp4_source_verified=false,mp4_api_installed=false;
 bool mp4_replay_verified=false;
+// The game owns the controller and the texture. Exporting only scopes an
+// original UpdateRenderTarget call, then restores the pre-export pixel size.
+Weak mp4_geometry_controller;
+int32_t mp4_geometry_width=0,mp4_geometry_height=0;
+int32_t mp4_geometry_previous_width=0,mp4_geometry_previous_height=0;
+bool mp4_geometry_active=false;
 idoly_mp4_replay_factories::Factory mp4_replay_factory;
 #ifdef IDOLY_DARWIN_BRIDGE
 constexpr const auto& mp4_replay_profile=idoly_mp4_replay::ios_replay_profile;
@@ -892,6 +901,15 @@ void mp4_verify_original_calls() {
     if(!mp4_prefix(runtime.camera_status_try_get)||!mp4_prefix(runtime.array_new)||!mp4_prefix(runtime.string_new)||!mp4_prefix(runtime.type_get_object)
         ||!mp4_prefix(runtime.single_type,false)||!mp4_prefix(runtime.audio_clip_type,false)
         ||!mp4_prefix(runtime.texture2d_type,false))return;
+    const auto& locator=mp4_controller_profile;
+    if(!mp4_prefix(locator.has_instance)||!mp4_prefix(locator.instance)||!mp4_prefix(locator.metadata_initialize)
+            ||!mp4_mapped(image_base+locator.has_cell,sizeof(void*),false)
+            ||!mp4_mapped(image_base+locator.instance_cell,sizeof(void*),false)
+            ||!mp4_mapped(image_base+locator.has_slot,sizeof(void*),false)
+            ||!mp4_mapped(image_base+locator.instance_slot,sizeof(void*),false))return;
+    if(locator.indirect_slots
+            &&(read<uintptr_t>(reinterpret_cast<void*>(image_base+locator.has_slot),0)!=image_base+locator.has_cell
+                ||read<uintptr_t>(reinterpret_cast<void*>(image_base+locator.instance_slot),0)!=image_base+locator.instance_cell))return;
     mp4_array_new=reinterpret_cast<decltype(mp4_array_new)>(image_base+runtime.array_new.rva);
     mp4_string_new=reinterpret_cast<decltype(mp4_string_new)>(image_base+runtime.string_new.rva);
     mp4_type_get_object=reinterpret_cast<decltype(mp4_type_get_object)>(image_base+runtime.type_get_object.rva);
@@ -916,6 +934,24 @@ bool mp4_type_is(void *object,const char *qualified) {
     return *name&&class_matches(object,space,name);
 }
 bool mp4_alive(void *object) { return object&&object_alive(object,nullptr); }
+void* mp4_original_current_controller(){
+    if(!mp4_source_verified||!game_call())return nullptr;
+    const auto& locator=mp4_controller_profile;
+    using Initialize=void(*)(uintptr_t*);
+    using HasInstance=bool(*)(const Method*);
+    using Instance=void*(*)(const Method*);
+    auto initialize=reinterpret_cast<Initialize>(image_base+locator.metadata_initialize.rva);
+    auto* has_cell=reinterpret_cast<uintptr_t*>(image_base+locator.has_cell);
+    auto* instance_cell=reinterpret_cast<uintptr_t*>(image_base+locator.instance_cell);
+    initialize(has_cell);initialize(instance_cell);
+    const uintptr_t has_info=*has_cell,instance_info=*instance_cell;
+    // The encoded metadata-usage form is tagged. It may never be passed as a
+    // MethodInfo pointer if original metadata initialization did not resolve it.
+    if(!has_info||!instance_info||(has_info&1)||(instance_info&1))return nullptr;
+    if(!reinterpret_cast<HasInstance>(image_base+locator.has_instance.rva)(reinterpret_cast<const Method*>(has_info)))return nullptr;
+    void* controller=reinterpret_cast<Instance>(image_base+locator.instance.rva)(reinterpret_cast<const Method*>(instance_info));
+    return mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")&&mp4_alive(controller)?controller:nullptr;
+}
 uint32_t mp4_retain(void *object) { return object?font_strong(object,false):0; }
 size_t mp4_array_length(void *array) { return array?read<uintptr_t>(array,0x18):0; }
 void *mp4_array_data(void *array) { return array?static_cast<unsigned char*>(array)+0x20:nullptr; }
@@ -974,6 +1010,46 @@ bool mp4_actual_source_geometry(void* controller,int32_t* width,int32_t* height)
     if(!mp4_type_is(texture,"UnityEngine.RenderTexture")||!mp4_alive(texture))return false;
     *width=rt_width(texture,nullptr);*height=rt_height(texture,nullptr);return true;
 }
+bool mp4_output_geometry_owned(void* controller){
+    return mp4_geometry_active&&controller&&mp4_geometry_controller.get(true)==controller
+        &&idoly_mp4_runtime::game.manual();
+}
+bool mp4_set_output_geometry(void* controller,int32_t width,int32_t height){
+    if(!game_call()||!mp4_type_is(controller,"VL.Rendering.VLSRPCameraController")||!mp4_alive(controller))return false;
+    if(mp4_geometry_active&&!mp4_geometry_controller.get(true)){
+        mp4_geometry_controller.clear();mp4_geometry_active=false;
+        mp4_geometry_width=mp4_geometry_height=0;mp4_geometry_previous_width=mp4_geometry_previous_height=0;
+    }
+    const bool restore=width==0&&height==0;
+    if(restore){
+        if(!mp4_geometry_active||mp4_geometry_controller.get(true)!=controller)return false;
+        width=mp4_geometry_previous_width;height=mp4_geometry_previous_height;
+        mp4_geometry_active=false;
+    }else{
+        if(!idoly_mp4_runtime::game.manual()||width<16||height<16||width>4096||height>4096||width%2||height%2)return false;
+        if(mp4_geometry_active&&mp4_geometry_controller.get(true)!=controller)return false;
+        if(!mp4_geometry_active){
+            int32_t previous_width=0,previous_height=0;
+            if(!mp4_actual_source_geometry(controller,&previous_width,&previous_height)
+                    ||previous_width<16||previous_height<16||previous_width>4096||previous_height>4096)return false;
+            mp4_geometry_controller.set(controller);
+            if(mp4_geometry_controller.get(true)!=controller)return false;
+            mp4_geometry_previous_width=previous_width;mp4_geometry_previous_height=previous_height;
+        }
+        mp4_geometry_width=width;mp4_geometry_height=height;mp4_geometry_active=true;
+    }
+    // The verified original resizes, disposes its former texture, rebinds the
+    // main camera and dispatches the game's normal target-change callbacks.
+    // Suppress dynamic scaling during this one call, retaining its preference.
+    ScopedMemory<bool> dynamic(controller,0x30,true);dynamic.set(false);
+    rt_original(controller,width,height,false,nullptr);
+    int32_t actual_width=0,actual_height=0;
+    const bool good=mp4_actual_source_geometry(controller,&actual_width,&actual_height)
+        &&actual_width==width&&actual_height==height;
+    if(restore){mp4_geometry_controller.set(nullptr);mp4_geometry_width=mp4_geometry_height=0;
+        mp4_geometry_previous_width=mp4_geometry_previous_height=0;}
+    return good;
+}
 bool mp4_queue_apply_graphics(const idoly_mp4_queue::Graphics* value){
     Config next{};
     if(value){next.revision=value->revision;next.custom_graphics=value->custom_graphics!=0;next.quality=value->quality;next.target_fps=value->target_fps;
@@ -1019,14 +1095,22 @@ void mp4_install_replay_runtime(){
 }
 bool mp4_prepare_runtime() {
     if(mp4_api_installed)return true;
-    if(!mp4_source_verified||!game_call())return false;
+    auto unavailable=[](const char* reason){
+        pthread_mutex_lock(&idoly_mp4_runtime::control_mutex);
+        idoly_mp4_runtime::published.ready=false;
+        snprintf(idoly_mp4_runtime::readiness_error,sizeof(idoly_mp4_runtime::readiness_error),"%s",reason);
+        pthread_mutex_unlock(&idoly_mp4_runtime::control_mutex);
+        return false;
+    };
+    if(!mp4_source_verified)return unavailable("original_mv_bindings_unverified");
+    if(!game_call())return false;
     mp4_single_class=font_class_type(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.single_type.rva));
     mp4_texture_class=font_class_type(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.texture2d_type.rva));
     void *audio_class=font_class_type(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.audio_clip_type.rva));
-    if(!mp4_single_class||!mp4_texture_class||!audio_class)return false;
+    if(!mp4_single_class||!mp4_texture_class||!audio_class)return unavailable("mv_runtime_types_not_ready");
     void *audio_type=mp4_type_get_object(reinterpret_cast<const void*>(image_base+mp4_runtime_profile.audio_clip_type.rva));
-    if(!audio_type)return false;
-    mp4_audio_type_handle=mp4_retain(audio_type);if(!mp4_audio_type_handle)return false;
+    if(!audio_type)return unavailable("mv_audio_type_not_ready");
+    mp4_audio_type_handle=mp4_retain(audio_type);if(!mp4_audio_type_handle)return unavailable("mv_audio_type_handle_failed");
     mp4game::Api helpers{};
     helpers.is_type=mp4_type_is;helpers.alive=mp4_alive;helpers.retain=mp4_retain;
     helpers.retained=weak_get;helpers.release=weak_free;helpers.new_string=mp4_string_new;
@@ -1035,6 +1119,7 @@ bool mp4_prepare_runtime() {
     helpers.audio_clip_type=weak_get(mp4_audio_type_handle);
     helpers.recorded_graph_mode=mp4_recorded_graph_mode;helpers.camera_clock_ok=mp4_camera_clock_ok;
     helpers.source_geometry=mp4_actual_source_geometry;
+    helpers.output_geometry=mp4_set_output_geometry;
     mp4_api=mp4game::with_original_calls(helpers,mp4_profile,image_base);
     mp4_api.brain_manual_update=mp4_owned_brain_manual_update;
     idoly_mp4_runtime::install_game_api(mp4_api,mp4game::Layout{});
@@ -1069,6 +1154,11 @@ void *mp4_selected_controller(void *presenter) {
         void *controller=candidate.get(true);
         if(controller&&rt_camera(controller,nullptr)==camera)return controller;
     }
+    // A persistent controller can predate hook installation or leave the
+    // bounded creation-observation cache. Recover the game's original existing
+    // singleton only when its camera is the selected MV timeline's camera.
+    void* original=mp4_original_current_controller();
+    if(original&&rt_camera(original,nullptr)==camera){remember_controller(original);return original;}
     return nullptr;
 }
 void mp4_unity_tick() {
@@ -1310,6 +1400,7 @@ void acknowledge_resolution(void *controller, const ResolutionAttempt &attempt) 
     pthread_mutex_unlock(&status_mutex);
 }
 void rebuild(void *controller) {
+    if(mp4_output_geometry_owned(controller))return;
     // Only entered by game callbacks. Keep capture/explicit-size calls out.
 #ifndef IDOLY_DARWIN_BRIDGE
     // Surface replacement while folding or resizing can briefly report no
@@ -1530,14 +1621,30 @@ uint64_t limited_hook(int width, int height, Vec2 ratio, int max_pixel, float sc
     return static_cast<uint32_t>(result.width) | (static_cast<uint64_t>(static_cast<uint32_t>(result.height)) << 32);
 }
 void rt_hook(void *self, int width, int height, bool alpha, Method *method) {
-    if (!ready.load(std::memory_order_acquire) || !self || !game_call() || (width > 0 && height > 0)) {
+    if (!ready.load(std::memory_order_acquire) || !self || !game_call()) {
         rt_original(self, width, height, alpha, method); return;
     }
-    Config config = configuration();
     void *camera = rt_camera(self, nullptr);
     if (camera && object_alive(camera, nullptr)) remember_controller(self);
+    auto observe_after=[self](){
+        if(!mp4_type_is(self,"VL.Rendering.VLSRPCameraController")||!mp4_alive(self))return;
+        void* updated=rt_camera(self,nullptr);
+        if(updated&&object_alive(updated,nullptr))remember_controller(self);
+    };
+    if(mp4_output_geometry_owned(self)){
+        ScopedMemory<bool> dynamic(self,0x30,true);dynamic.set(false);
+        rt_original(self,mp4_geometry_width,mp4_geometry_height,alpha,method);observe_after();return;
+    }
+    // A selected MV can create its original target with explicit dimensions.
+    // Observe that owner too, while preserving the original explicit-size
+    // call. Export selection still requires the timeline's bound output camera
+    // to match this controller; arbitrary remembered cameras are ineligible.
+    if (width > 0 && height > 0) {
+        rt_original(self, width, height, alpha, method);observe_after();return;
+    }
+    Config config = configuration();
     bool primary = camera && object_alive(camera, nullptr) && (main_controller.get(true) == self || scene_enter);
-    if (!primary) { rt_original(self, width, height, alpha, method); return; }
+    if (!primary) { rt_original(self, width, height, alpha, method);observe_after();return; }
     main_controller.set(self);
     if (scene_enter && !scene_exit) {
         void *previous_controller = photo.controller.get(true), *previous_camera = photo.camera.get(true);
@@ -1553,6 +1660,7 @@ void rt_hook(void *self, int width, int height, bool alpha, Method *method) {
     ScopedValue<void *> scope(resolution_scope, self);
     ScopedValue<ResolutionAttempt *> attempt_scope(resolution_attempt, &attempt);
     rt_original(self, width, height, alpha, method);
+    observe_after();
     acknowledge_resolution(self, attempt);
 }
 void target_update_hook(void *self, void *texture, Method *method) {

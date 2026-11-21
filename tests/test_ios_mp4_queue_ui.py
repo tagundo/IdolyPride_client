@@ -26,6 +26,7 @@ def test_cold_queue_cannot_run_and_completed_deletion_requires_second_click():
 const e=environment(), app=api.createSettingsApp(e.scope,e.document,e.timers);
 e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
 e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
 e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'completed',ready:false,export_id:'b'.repeat(32)});
 const completed={job_id:'a'.repeat(32),output_id:'b'.repeat(32),timeline:'tln_live_secret',title_localizations:{ko:'노래 이름',en:'Song title',ja:'曲名'},state:'completed',actor_count:5,fps_num:30,width:1280,height:720};
 const pending={...completed,job_id:'c'.repeat(32),output_id:'',state:'pending'};
@@ -49,6 +50,7 @@ def test_queue_displays_distinct_mv_snapshots_and_moves_by_id_without_paths():
 const e=environment(), app=api.createSettingsApp(e.scope,e.document,e.timers);
 e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
 e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
 e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'idle',ready:true});
 const a={job_id:'a'.repeat(32),timeline:'tri-004',title_localizations:{ko:'첫 번째 노래',ja:'最初の曲',en:'First song'},state:'pending',actor_count:5,fps_num:60,width:1920,height:1080};
 const b={...a,job_id:'b'.repeat(32),timeline:'tri-005',title_localizations:{ko:'두 번째 노래',ja:'次の曲',en:'Second song'},fps_num:30};
@@ -63,7 +65,8 @@ assert.match(e.elements.get('mp4-queue-jobs').children[0].children[0].textConten
 assert.equal(e.elements.get('mp4-queue-run').disabled,false);
 e.elements.get('mp4-fps').value='60';e.elements.get('mp4-codec').value='1';e.elements.get('mp4-bitrate').value='16000000';
 e.elements.get('mp4-enqueue').fire('click');await flush();
-const add=e.posted.find(x=>x.action==='mp4_enqueue');assert.ok(add);assert.deepEqual(Object.keys(add).sort(),['action','fps','id','video_bitrate','video_codec']);
+const add=e.posted.find(x=>x.action==='mp4_enqueue');assert.ok(add);assert.deepEqual(Object.keys(add).sort(),['action','fps','height','id','video_bitrate','video_codec','width']);
+assert.equal(add.video_bitrate,0);assert.equal(add.width,0);assert.equal(add.height,0);
 e.respond(add,{available:true,can_run:true,command_pending:true,running:false,phase:'idle',jobs:[b,a]});await flush();
 assert.equal(e.elements.get('mp4-queue-run').disabled,true);app.dispose();
 """)
@@ -74,6 +77,7 @@ def test_completed_job_save_and_interrupted_retry_use_original_stable_job_ids():
 const e=environment(), app=api.createSettingsApp(e.scope,e.document,e.timers);
 e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
 e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
 e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'idle',ready:true});
 const completed={job_id:'c'.repeat(32),output_id:'d'.repeat(32),timeline:'done',state:'completed',actor_count:5,fps_num:30,width:1280,height:720};
 const interrupted={...completed,job_id:'e'.repeat(32),output_id:'f'.repeat(32),timeline:'interrupted',state:'interrupted',error_code:'process_interrupted'};

@@ -762,14 +762,14 @@ static NSDictionary *mp4SessionStatus(void) {
     NSMutableDictionary *status = [@{@"phase":@"idle", @"ready":@(isReady)} mutableCopy];
     NSArray *phases = @[@"idle", @"preparing_audio", @"rendering", @"finishing", @"completed", @"cancelling", @"cancelled", @"failed", @"pausing", @"paused"];
     if ([phases containsObject:raw[@"phase"]]) status[@"phase"] = raw[@"phase"];
-    for (NSString *key in @[@"frames",@"total_frames",@"audio_frames",@"total_audio_frames",@"width",@"height",@"fps_num",@"fps_den",@"bytes_written",@"unity_ticks",@"capture_acks"]) {
+    for (NSString *key in @[@"frames",@"total_frames",@"audio_frames",@"total_audio_frames",@"width",@"height",@"source_width",@"source_height",@"video_bitrate",@"fps_num",@"fps_den",@"bytes_written",@"unity_ticks",@"capture_acks"]) {
         NSNumber *value = [raw[key] isKindOfClass:NSNumber.class] ? raw[key] : nil;
         if (value && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID()
                 && value.doubleValue >= 0 && value.doubleValue <= 9007199254740991.0
                 && value.doubleValue == value.unsignedLongLongValue) status[key] = value;
     }
     NSRegularExpression *code = [NSRegularExpression regularExpressionWithPattern:@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" options:0 error:NULL];
-    for (NSString *key in @[@"export_id",@"error_code",@"pause_reason",@"resume_phase"]) {
+    for (NSString *key in @[@"export_id",@"error_code",@"readiness_error",@"pause_reason",@"resume_phase"]) {
         NSString *value = [raw[key] isKindOfClass:NSString.class] ? raw[key] : nil;
         if (value && [code numberOfMatchesInString:value options:0 range:NSMakeRange(0,value.length)] == 1)
             status[key] = value;
@@ -968,6 +968,26 @@ static BOOL mp4EnsureConfiguration(BOOL queueRequired, NSString **failure) {
     }
     return YES;
 }
+static NSDictionary *mp4DefaultOptions(void) {
+    return @{@"schema":@1,@"fps":@60,@"video_codec":@1,@"bitrate_mode":@"recommended",@"video_bitrate":@16000000,
+        @"resolution_mode":@"current",@"width":@1920,@"height":@1080};
+}
+static BOOL mp4ValidOptions(id candidate) {
+    if (![candidate isKindOfClass:NSDictionary.class]) return NO;
+    NSDictionary *value = candidate;
+    NSSet *keys = [NSSet setWithArray:@[@"schema",@"fps",@"video_codec",@"bitrate_mode",@"video_bitrate",@"resolution_mode",@"width",@"height"]];
+    return value.count == keys.count && [[NSSet setWithArray:value.allKeys] isEqual:keys]
+        && mp4Choice(value[@"schema"],@[@1]) && mp4Choice(value[@"fps"],@[@30,@60]) && mp4Choice(value[@"video_codec"],@[@1,@2])
+        && [@[@"recommended",@"custom"] containsObject:value[@"bitrate_mode"] ?: @""]
+        && mp4Integer(value[@"video_bitrate"],200000000) && [value[@"video_bitrate"] unsignedIntValue] >= 100000
+        && [@[@"current",@"custom"] containsObject:value[@"resolution_mode"] ?: @""]
+        && mp4Integer(value[@"width"],4096) && [value[@"width"] unsignedIntValue] >= 16 && [value[@"width"] unsignedIntValue] % 2 == 0
+        && mp4Integer(value[@"height"],4096) && [value[@"height"] unsignedIntValue] >= 16 && [value[@"height"] unsignedIntValue] % 2 == 0;
+}
+static NSDictionary *mp4SavedOptions(void) {
+    id value = [NSUserDefaults.standardUserDefaults objectForKey:@"IdolyMP4ExportOptions.v1"];
+    return mp4ValidOptions(value) ? value : mp4DefaultOptions();
+}
 void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSString *)) {
     NSData *bytes = [request dataUsingEncoding:NSUTF8StringEncoding];
     id decoded = bytes && bytes.length <= 4096 ? [NSJSONSerialization JSONObjectWithData:bytes options:0 error:NULL] : nil;
@@ -976,8 +996,16 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
     NSString *action = [object[@"action"] isKindOfClass:NSString.class] ? object[@"action"] : nil;
     BOOL start = [action isEqual:@"mp4_start"], enqueue = [action isEqual:@"mp4_enqueue"];
     BOOL queueAction = enqueue || [action hasPrefix:@"mp4_queue_"];
-    BOOL preset = (start || enqueue) && object.count == 5 && mp4Choice(object[@"fps"],@[@30,@60])
-        && mp4Choice(object[@"video_bitrate"],@[@8000000,@16000000,@32000000]) && mp4Choice(object[@"video_codec"],@[@1,@2]);
+    BOOL dimensions = object.count == 7 && mp4Integer(object[@"width"],4096) && mp4Integer(object[@"height"],4096)
+        && (([object[@"width"] unsignedIntValue] == 0 && [object[@"height"] unsignedIntValue] == 0)
+            || ([object[@"width"] unsignedIntValue] >= 16 && [object[@"width"] unsignedIntValue] % 2 == 0
+                && [object[@"height"] unsignedIntValue] >= 16 && [object[@"height"] unsignedIntValue] % 2 == 0));
+    BOOL preset = (start || enqueue) && (object.count == 5 || dimensions) && mp4Choice(object[@"fps"],@[@30,@60])
+        && mp4Integer(object[@"video_bitrate"],200000000)
+        && ([object[@"video_bitrate"] unsignedIntValue] == 0 || [object[@"video_bitrate"] unsignedIntValue] >= 100000)
+        && mp4Choice(object[@"video_codec"],@[@1,@2]);
+    BOOL optionsRead = [action isEqual:@"mp4_options"] && object.count == 2;
+    BOOL optionsSave = [action isEqual:@"mp4_options_save"] && object.count == 3 && mp4ValidOptions(object[@"options"]);
     BOOL noFields = object.count == 2 && [@[@"mp4_status",@"mp4_cancel",@"mp4_pause",@"mp4_resume",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume"] containsObject:action];
     BOOL jobAction = object.count == 3 && mp4Identifier(object[@"job_id"])
         && [@[@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry"] containsObject:action];
@@ -988,13 +1016,20 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
     BOOL move = [action isEqual:@"mp4_queue_move"] && object.count == 4 && mp4Identifier(object[@"job_id"]) && mp4Integer(object[@"position"],7);
     BOOL valid = identifier && CFGetTypeID((__bridge CFTypeRef)identifier) != CFBooleanGetTypeID()
         && identifier.longLongValue >= 1 && identifier.longLongValue <= INT32_MAX && identifier.doubleValue == identifier.longLongValue
-        && (preset || noFields || jobAction || deleteCompleted || move);
+        && (preset || optionsRead || optionsSave || noFields || jobAction || deleteCompleted || move);
     void (^reply)(BOOL,NSDictionary *,NSString *) = ^(BOOL ok,NSDictionary *status,NSString *error) {
         NSString *json = JSON(ok ? @{@"id":identifier ?: @1,@"ok":@YES,@"result":status ?: @{}}
             : @{@"id":identifier ?: @1,@"ok":@NO,@"error":@{@"code":error ?: @"mp4_unavailable",@"message":error ?: @"mp4_unavailable"}});
         dispatch_async(dispatch_get_main_queue(), ^{ completion(json); });
     };
-    if (!valid || !worker) { reply(NO,nil,valid ? @"mp4_unavailable" : @"invalid_request"); return; }
+    if (!valid) { reply(NO,nil,@"invalid_request"); return; }
+    // This app-owned preference survives the intentionally in-memory WebKit
+    // data store. It never contains an output path or a queue identity.
+    if (optionsRead || optionsSave) {
+        if (optionsSave) [NSUserDefaults.standardUserDefaults setObject:object[@"options"] forKey:@"IdolyMP4ExportOptions.v1"];
+        reply(YES,@{@"options":mp4SavedOptions()},nil); return;
+    }
+    if (!worker) { reply(NO,nil,@"mp4_unavailable"); return; }
     [worker enqueue:^{
         if ([action isEqual:@"mp4_cancel"]) {
             typedef void (*Cancel)(void); Cancel cancel = (Cancel)dlsym(RTLD_DEFAULT,"IDMP4SessionCancel");
@@ -1011,9 +1046,10 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
             if ([action isEqual:@"mp4_queue_status"]) { reply(YES,mp4QueueStatus(),nil); return; }
             int accepted = -1;
             if (enqueue) {
-                typedef int (*Enqueue)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
-                Enqueue add = (Enqueue)dlsym(RTLD_DEFAULT,"IDMP4QueueEnqueue");
-                if (add) accepted = add([object[@"fps"] unsignedIntValue],1,[object[@"video_codec"] unsignedIntValue],[object[@"video_bitrate"] unsignedIntValue],192000);
+                typedef int (*Enqueue)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+                Enqueue add = (Enqueue)dlsym(RTLD_DEFAULT,"IDMP4QueueEnqueueV2");
+                if (add) accepted = add([object[@"fps"] unsignedIntValue],1,[object[@"video_codec"] unsignedIntValue],[object[@"video_bitrate"] unsignedIntValue],192000,
+                    dimensions ? [object[@"width"] unsignedIntValue] : 0,dimensions ? [object[@"height"] unsignedIntValue] : 0);
             } else if ([@[@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume"] containsObject:action]) {
                 if (([action isEqual:@"mp4_queue_run"] || [action isEqual:@"mp4_queue_resume"]) && ![mp4QueueStatus()[@"can_run"] isEqual:@YES]) {
                     reply(NO,nil,@"mp4_scene_not_ready"); return;
@@ -1029,10 +1065,11 @@ void IdolyEmbeddedServerMP4Command(NSString *request, void (^completion)(NSStrin
             }
             reply(accepted == 0,accepted == 0 ? mp4QueueStatus() : nil,accepted == 0 ? nil : @"mp4_queue_busy"); return;
         }
-        typedef int (*Start)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
-        Start begin = (Start)dlsym(RTLD_DEFAULT,"IDMP4SessionStart");
+        typedef int (*Start)(uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t,uint32_t);
+        Start begin = (Start)dlsym(RTLD_DEFAULT,"IDMP4SessionStartV2");
         if (!begin) { reply(NO,nil,@"mp4_unavailable"); return; }
-        int accepted = begin([object[@"fps"] unsignedIntValue],1,[object[@"video_codec"] unsignedIntValue],[object[@"video_bitrate"] unsignedIntValue],192000);
+        int accepted = begin([object[@"fps"] unsignedIntValue],1,[object[@"video_codec"] unsignedIntValue],[object[@"video_bitrate"] unsignedIntValue],192000,
+            dimensions ? [object[@"width"] unsignedIntValue] : 0,dimensions ? [object[@"height"] unsignedIntValue] : 0);
         if (accepted != 0) { reply(NO,nil,accepted > 0 ? @"mp4_busy" : @"mp4_scene_not_ready"); return; }
         mp4SetUserPaused(NO); reply(YES,mp4SessionStatus(),nil);
     }];

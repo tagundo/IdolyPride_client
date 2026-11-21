@@ -560,21 +560,26 @@ public final class ServerService extends Service {
     /** User-picked document only; capture Python on the service worker, write off it. */
     public static void exportDiagnostics(Context context, Uri destination) {
         Context application = context.getApplicationContext();
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            MAIN.post(() -> exportDiagnostics(application, destination));
+            return;
+        }
         if (!EXPORT_BUSY.compareAndSet(false, true)) return;
+        final String mp4 = UnifiedRuntime.isEnabled(application) ? UnifiedMP4Export.diagnostics().toString() : null;
         dispatch();
         ServerService service = activeService;
         if (service != null && !service.destroyed) {
             try {
                 service.worker.execute(() -> {
                     lastDiagnostics = service.captureDiagnostics();
-                    writeExport(application, destination, lastDiagnostics);
+                    writeExport(application, destination, lastDiagnostics, mp4);
                 });
                 return;
             } catch (RejectedExecutionException ignored) {
                 // The stopped service's last safe snapshot remains available.
             }
         }
-        writeExport(application, destination, lastDiagnostics);
+        writeExport(application, destination, lastDiagnostics, mp4);
     }
 
     /** Export only the displayed immutable snapshot using the existing document worker. */
@@ -630,7 +635,7 @@ public final class ServerService extends Service {
         return missing;
     }
 
-    private static void writeExport(Context context, Uri destination, String snapshot) {
+    private static void writeExport(Context context, Uri destination, String snapshot, String mp4) {
         final String details = runtimeDetails;
         final List<String> lines;
         synchronized (LOGS) { lines = new ArrayList<>(LOGS); }
@@ -646,6 +651,7 @@ public final class ServerService extends Service {
                 document.put("diagnostics", new JSONObject(snapshot));
                 document.put("server_logs", new JSONArray(lines));
                 document.put("server_settings", readServerSettings(context));
+                if (mp4 != null) document.put("mp4_export", new JSONObject(mp4));
                 if (UnifiedRuntime.isEnabled(context)) document.put("native_shared_resources", UnifiedSharedResources.snapshot());
                 byte[] encoded = document.toString(2).getBytes(StandardCharsets.UTF_8);
                 try (OutputStream stream = context.getContentResolver().openOutputStream(destination, "wt")) {

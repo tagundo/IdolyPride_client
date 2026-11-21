@@ -10,9 +10,10 @@ import pytest
 SOURCE = Path(__file__).resolve().parents[1] / "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java"
 
 
-def method(source, name):
-    match = re.search(r"^    (?:private )?static [^\n]+\b" + name + r"\([^\n]*\)\s*(?:throws [^{]+)?\{", source, re.M)
-    assert match, name
+def method(source, name, occurrence=0):
+    matches = list(re.finditer(r"^    (?:private )?static [^\n]+\b" + name + r"\([^\n]*\)\s*(?:throws [^{]+)?\{", source, re.M))
+    assert len(matches) > occurrence, name
+    match = matches[occurrence]
     start = source.index("{", match.start())
     depth = 1
     at = start + 1
@@ -100,6 +101,7 @@ def test_controller_waits_for_live_game_and_resumes_without_recreating_it(tmp_pa
     selected = [method(source, name) for name in ["privateDirectory", "completedFile", "busy", "ready", "observeForegroundReadiness", "requestStart", "requestEnqueue",
                 "beginPending", "gameResumed", "gamePaused", "gameStarted", "gameStopped", "suspendForLifecycle",
                 "resumeForLifecycle", "togglePause", "requestPause", "requestResume", "focusChanged", "gameDestroyed", "cancel"]]
+    selected += [method(source, "requestStart", 1), method(source, "requestEnqueue", 1)]
     prefix = r'''package game.qualiarts.idolypride.localserver;
 import java.io.*;import java.nio.file.*;import java.lang.ref.WeakReference;import java.util.*;
 public final class ControllerHarness {
@@ -122,11 +124,11 @@ public final class ControllerHarness {
   static class R {static class string {static final int mp4_not_ready=1,mp4_unavailable=2;}}
   static class Toast {static final int LENGTH_LONG=1;static Toast makeText(Activity a,int s,int l){return new Toast();}void show(){}}
   static boolean nativeReady(){return allowNative;}
-  static int nativeStart(int n,int d,int c,int v,int a){starts++;startedOptions=new int[]{n,d,c,v,a};return 0;}
+  static int nativeStartV2(int n,int d,int c,int v,int a,int width,int height){starts++;startedOptions=new int[]{n,d,c,v,a,width,height};return 0;}
   static void nativeCancel(){cancels++;}static void nativeSuspend(int value){suspends++;reason=value;}
   static void nativeResume(){resumes++;}static void wake(){wakes++;}
   static int nativeQueueRun(){return 0;}static void prepareBackground(Activity a){}
-  static int nativeQueueEnqueue(int n,int d,int c,int v,int a){enqueues++;enqueueWasResumed=resumed;return 0;}
+  static int nativeQueueEnqueueV2(int n,int d,int c,int v,int a,int width,int height){enqueues++;enqueueWasResumed=resumed;return 0;}
   static class UnifiedMP4Background {static void stopCurrent(){}static void focusLost(Activity a){}}
   static void require(boolean b,String message){if(!b)throw new AssertionError(message);}
   interface Action {void run()throws Exception;}
@@ -135,14 +137,14 @@ public final class ControllerHarness {
     suffix = r'''
   public static void main(String[] args)throws Exception {
     Activity live=new Activity(),menu=new Activity();game=new WeakReference<>(live);
-    require(requestStart(menu,60,2,16000000),"start accepted");
+    require(requestStart(menu,60,2,17250000,3840,2160),"custom bitrate and output geometry accepted");
     require(!dismissed,"next job restores dismissed progress UI");
     require(menu.intent.target==live.getClass()&&menu.intent.flags==3,"existing explicit game/reorder/singleTop");
     require(starts==0,"never start while original Unity is paused");
     beginPending();require(starts==0&&pending!=null&&MAIN.scheduled>0,"wait for original onResume");
     resumed=true;allowNative=false;beginPending();require(starts==0&&pending!=null,"MV readiness recheck");
     allowNative=true;beginPending();require(starts==1&&pending==null&&busy(),"accepted start visible immediately");
-    require(Arrays.equals(startedOptions,new int[]{60,1,2,16000000,192000}),"exact codec clock/bitrate options");
+    require(Arrays.equals(startedOptions,new int[]{60,1,2,17250000,192000,3840,2160}),"exact codec clock, numeric bitrate, and output geometry options");
     gamePaused(new Activity());require(suspends==0,"stale instance cannot pause current export");
     gamePaused(live);require(suspends==1&&reason==1&&cancels==0&&!resumed,"background parks current session");
     last.put("phase","paused");require(busy()&&!ready(),"paused export retains ownership");
@@ -200,10 +202,70 @@ public final class ControllerHarness {
     clock.parent.mkdir(parents=True)
     clock.write_text("package android.os; public class SystemClock {public static long now;public static long uptimeMillis(){return now;}}")
     policy = SOURCE.with_name("Mp4QueueUiState.java")
-    compile_result = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(tmp_path / "classes"), str(harness), str(clock), str(policy)],
+    compile_result = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(tmp_path / "classes"), str(harness), str(clock), str(policy), str(SOURCE.with_name("Mp4ExportSettings.java"))],
                                     capture_output=True, text=True, timeout=30)
     assert compile_result.returncode == 0, compile_result.stderr
     run = subprocess.run([java, "-Xmx128m", "-cp", str(tmp_path / "classes"), "game.qualiarts.idolypride.localserver.ControllerHarness", str(tmp_path / "files")],
                          capture_output=True, text=True, timeout=15)
     assert run.returncode == 0, run.stderr
     assert run.stdout.strip() == "PASS controller"
+
+
+def test_diagnostics_copies_only_bounded_public_state_without_private_payloads(tmp_path):
+    javac, java = shutil.which("javac"), shutil.which("java")
+    if not javac or not java:
+        pytest.skip("JDK required")
+    selected = method(SOURCE.read_text(), "diagnostics")
+    fixture = tmp_path / "DiagnosticsHarness.java"
+    fixture.write_text(r'''
+import java.util.*;import java.lang.ref.WeakReference;
+public class DiagnosticsHarness {
+ static boolean configured=true,initialized=true,resumed,gameFocused,stopped=true,foregroundSelectionReady=true;
+ static class Activity {boolean isDestroyed(){return false;}boolean isFinishing(){return false;}}
+ static WeakReference<Activity> game=new WeakReference<>(new Activity());static boolean queueConfigured=true;
+ static JSONObject state=new JSONObject(),queue=new JSONObject(),nativeValue=new JSONObject();
+ static class JSONObject {static final Map<String,JSONObject> refs=new HashMap<>();final Map<String,Object> map=new LinkedHashMap<>();
+  JSONObject(){}JSONObject(String raw){map.putAll(refs.get(raw).map);}JSONObject put(String k,Object v){map.put(k,v);return this;}
+  boolean optBoolean(String k){return Boolean.TRUE.equals(map.get(k));}String optString(String k,String fallback){Object v=map.get(k);return v instanceof String?(String)v:fallback;}
+  long optLong(String k){Object v=map.get(k);return v instanceof Number?((Number)v).longValue():0;}
+  JSONArray optJSONArray(String k){return map.get(k) instanceof JSONArray?(JSONArray)map.get(k):null;}}
+ static class JSONArray {int size;JSONArray(int n){size=n;}int length(){return size;}}
+ static JSONObject snapshot(){return state;}static JSONObject queueSnapshot(){return queue;}
+ static String nativeStatus(){JSONObject.refs.put("native",nativeValue);return "native";}
+ static void need(boolean value,String message){if(!value)throw new AssertionError(message);}
+''' + selected + r'''
+ public static void main(String[] args){
+  state.put("phase","stale");
+  nativeValue.put("ready",false).put("phase","idle").put("readiness_error","selected_capture_geometry_unsupported")
+   .put("error_code","../private/broker.capability").put("pause_reason","none")
+   .put("width",0).put("height",0).put("source_width",4095).put("source_height",2457)
+   .put("fps_num",60).put("fps_den",1).put("video_bitrate",17250000).put("unity_ticks",51L).put("capture_acks",-1L)
+   .put("frames",Long.MAX_VALUE).put("total_frames",100L)
+   .put("directory","/private/broker").put("capability","b6bcf1ca5802a5b5bd5376fb893ff190")
+   .put("export_id","01234567890123456789012345678901").put("pcm_path","/private/exports/private.pcm");
+  queue.put("available",true).put("running",false).put("paused",true).put("jobs",new JSONArray(100))
+   .put("queue_root","/private/queue").put("selected_characters","unpublished private payload");
+  JSONObject result=diagnostics();
+  need(result.map.get("phase").equals("idle"),"diagnostics obtains current native status rather than stale UI snapshot");
+  need(result.map.get("readiness_error").equals("selected_capture_geometry_unsupported"),"actual readiness reason survives");
+  need(result.map.get("error_code").equals("unknown"),"non-code/path error text is not copied");
+  need(result.map.get("source_width").equals(4095L)&&result.map.get("source_height").equals(2457L),"idle source geometry survives");
+  need(result.map.get("video_bitrate").equals(17250000L)&&result.map.get("fps_num").equals(60L),"actual encoder scalars survive");
+  need(result.map.get("capture_acks").equals(0L)&&result.map.get("frames").equals(9007199254740991L),"numeric fields bounded");
+  need(result.map.get("queue_job_count").equals(8)&&result.map.get("queue_paused").equals(true),"queue count bounded without job contents");
+  for(String key:new String[]{"directory","capability","export_id","pcm_path","jobs","queue_root","selected_characters"})
+   need(!result.map.containsKey(key),"private field omitted: "+key);
+  need(result.map.get("verified_foreground_selection").equals(true)&&result.map.get("game_attached").equals(true),"lifecycle facts preserved");
+  initialized=false;JSONObject cold=diagnostics();need(cold.map.get("phase").equals("stale"),"cold diagnostics never tries unavailable JNI");
+  System.out.println("PASS bounded public MP4 diagnostics");
+ }
+}
+''')
+    classes = tmp_path / "classes"
+    compiled = subprocess.run([javac, "-J-Xmx128m", "--release", "17", "-d", str(classes), str(fixture)],
+                              capture_output=True, text=True, timeout=30)
+    assert compiled.returncode == 0, compiled.stderr
+    result = subprocess.run([java, "-Xmx128m", "-cp", str(classes), "DiagnosticsHarness"],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "PASS bounded public MP4 diagnostics"

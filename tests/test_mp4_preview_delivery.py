@@ -196,7 +196,7 @@ def test_workflow_binds_both_builds_and_never_invokes_old_staging_or_standalone_
         "tools/package_android_unified.py", "tests/test_android_unified_badging.py", "tests/test_ios_mp4_queue_host.py"]
     assert "SOURCE_SHA: ${{ github.sha }}" in raw and raw.count("ref: ${{ github.sha }}") == 3
     assert "needs: [android-build, ios-build]" in raw and "inputs.upload_draft" in raw
-    assert "IDOLY_RELEASE_VERSION: 2026.11.21.4" in raw and delivery.APK in raw
+    assert "IDOLY_RELEASE_VERSION: " + delivery.VERSION in raw and delivery.APK in raw
     assert "ios-unified/native/test_mp4_ui_compile.py" in raw and "ios-unified/ci_build.py" in raw
     assert raw.index("test_mp4_ui_compile.py") < raw.index("ios-unified/ci_build.py")
     assert "stage_shared_preview.py fetch" in raw and "stage_shared_preview.py stage" not in raw

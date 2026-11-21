@@ -69,6 +69,9 @@ struct Api {
     int32_t (*camera_pixel_width)(void*,Method*)=nullptr;
     int32_t (*camera_pixel_height)(void*,Method*)=nullptr;
     bool (*source_geometry)(void*,int32_t*,int32_t*)=nullptr;
+    // Original controller target resize. A zero pair restores the target
+    // dimensions captured by the host; only the owned manual scene may set it.
+    bool (*output_geometry)(void*,int32_t,int32_t)=nullptr;
     void* (*director_get_asset)(void*,Method*)=nullptr;
     double (*director_get_time)(void*,Method*)=nullptr;
     double (*director_get_duration)(void*,Method*)=nullptr;
@@ -125,6 +128,7 @@ public:
     void observe_camera_controller(void* controller);
     Result snapshot(Snapshot& output);
     Result begin_manual();
+    Result set_output_geometry(uint32_t width,uint32_t height);
     Result evaluate(double timeline_seconds);
     Result request_capture();
     Result capture_geometry(int32_t& width,int32_t& height) const;
@@ -151,11 +155,14 @@ public:
         if(api_.source_geometry){
             void* controller=get(camera_controller_);
             if(!controller||!live(controller)||!api_.source_geometry(controller,&width,&height))return Result::waiting;
-            return width>=16&&height>=16&&width<=4096&&height<=4096&&!(width%2)&&!(height%2)?Result::ok:Result::unsupported;
+            // These are source RGBA pixels, not an encoder configuration.
+            // Original mobile aspect ratios may legitimately produce an odd
+            // edge; the output stage separately chooses even codec dimensions.
+            return width>=16&&height>=16&&width<=4096&&height<=4096?Result::ok:Result::unsupported;
         }
         void* camera=get(camera_);if(!camera||!live(camera)||!api_.camera_pixel_width||!api_.camera_pixel_height)return Result::waiting;
         width=api_.camera_pixel_width(camera,nullptr);height=api_.camera_pixel_height(camera,nullptr);
-        return width>=16&&height>=16&&width<=4096&&height<=4096&&!(width%2)&&!(height%2)?Result::ok:Result::unsupported;
+        return width>=16&&height>=16&&width<=4096&&height<=4096?Result::ok:Result::unsupported;
     }
 private:
     template<class T> static T field(const void* p,size_t offset) { T value{};if(p)std::memcpy(&value,static_cast<const uint8_t*>(p)+offset,sizeof(T));return value; }
@@ -183,7 +190,7 @@ private:
     double evaluated_time_=0;
     bool evaluation_failed_=false,camera_evaluating_=false;
     float camera_step_delta_=0;int32_t previous_brain_update_=0,previous_brain_blend_=0;
-    bool manual_=false,shader_was_custom_=false,capture_pending_=false,
+    bool manual_=false,output_geometry_applied_=false,shader_was_custom_=false,capture_pending_=false,
         capture_pass_seen_=false,capture_submitted_=false;
     bool audio_cancel_pending_=false,audio_failed_=false;
     float previous_shader_time_=0, previous_bgm_volume_=0, previous_voice_volume_=0;
@@ -466,6 +473,18 @@ inline Result GameAdapter::evaluate(double seconds) {
     api_.shader_set_custom(static_cast<float>(seconds),nullptr);
     return Result::ok;
 }
+inline Result GameAdapter::set_output_geometry(uint32_t width,uint32_t height) {
+    if(!manual_||!identities_current())return fail(Result::stale,"selected_scene_changed");
+    if(width<16||height<16||width>4096||height>4096||width%2||height%2)
+        return fail(Result::invalid,"output_geometry_invalid");
+    if(!api_.output_geometry)return Result::unsupported;
+    // The original resize can fail after it has released the previous target.
+    // Always retain restoration responsibility once the callback is entered.
+    output_geometry_applied_=true;
+    if(!api_.output_geometry(get(camera_controller_),static_cast<int32_t>(width),static_cast<int32_t>(height)))
+        return fail(Result::failed,"output_render_geometry_failed");
+    return Result::ok;
+}
 inline Result GameAdapter::capture_geometry(int32_t& width,int32_t& height) const {
     width=snapshot_.width;height=snapshot_.height;
     return width>0&&height>0?Result::ok:Result::waiting;
@@ -480,7 +499,7 @@ inline Result GameAdapter::request_capture() {
     void* texture=field<void*>(wrapper,layout_.wrapper_texture);
     if(!live(texture)||!keep(captured_texture_,texture))return fail(Result::waiting,"capture_texture_not_ready");
     int32_t width=api_.texture_width(texture,nullptr),height=api_.texture_height(texture,nullptr);
-    if(width<16||height<16||width>4096||height>4096||width%2||height%2)
+    if(width<16||height<16||width>4096||height>4096)
         return fail(Result::unsupported,"capture_geometry_not_supported");
     snapshot_.width=width;snapshot_.height=height;
     capture_pending_=true;capture_pass_seen_=capture_submitted_=false;return Result::ok;
@@ -606,6 +625,11 @@ inline void GameAdapter::close_private_audio() {
 inline void GameAdapter::restore() {
     capture_pending_=capture_pass_seen_=capture_submitted_=false;
     close_private_audio();
+    if(output_geometry_applied_){
+        if(void* controller=get(camera_controller_))if(live(controller)&&api_.output_geometry)
+            (void)api_.output_geometry(controller,0,0);
+        output_geometry_applied_=false;
+    }
     if(manual_){
         if(void* director=get(director_))if(live(director)){
             api_.director_set_time(director,snapshot_.previous_time_seconds,nullptr);

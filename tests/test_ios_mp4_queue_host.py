@@ -132,18 +132,19 @@ static atomic_bool pythonReady;
 static IDMP4LifecyclePolicy mp4Lifecycle=ID_MP4_LIFECYCLE_POLICY_INITIALIZER;
 static NSDictionary *descriptor,*nativeQueue;
 static unsigned configurations,queueConfigurations,enqueues,starts,operations,runs,pauses,resumes,nativeResumes;
+static uint32_t lastVideoBitrate,lastWidth,lastHeight;
 static int operationCode,operationPosition,lastSuspend;
 static NSString *operationJob;
 static NSString *nativeSessionPhase=@"rendering";
 static bool nativeSceneReady=true;
-static size_t fakeStatus(char *p,size_t cap){int n=snprintf(p,cap,"{\"phase\":\"%s\",\"frames\":5,\"total_frames\":100,\"ready\":false,\"unity_ticks\":9,\"capture_acks\":5}",nativeSessionPhase.UTF8String);return n>0&&(size_t)n<cap?(size_t)n:0;}
+static size_t fakeStatus(char *p,size_t cap){int n=snprintf(p,cap,"{\"phase\":\"%s\",\"frames\":5,\"total_frames\":100,\"ready\":false,\"source_width\":1921,\"source_height\":1081,\"video_bitrate\":17420000,\"readiness_error\":\"scene_surface_pending\",\"unity_ticks\":9,\"capture_acks\":5}",nativeSessionPhase.UTF8String);return n>0&&(size_t)n<cap?(size_t)n:0;}
 static int fakeReady(void){return nativeSceneReady?1:0;}
 static NSString *JSON(id value){return [[NSString alloc]initWithData:[NSJSONSerialization dataWithJSONObject:value options:0 error:NULL] encoding:NSUTF8StringEncoding];}
 static size_t fakeQueueStatus(char*p,size_t cap){NSData*d=[JSON(nativeQueue)dataUsingEncoding:NSUTF8StringEncoding];if(d.length>=cap)return 0;memcpy(p,d.bytes,d.length);p[d.length]=0;return d.length;}
 static int fakeConfigure(const char*b,uint64_t e,const char*c,const char*o,int p){assert(b&&e&&c&&o&&p==2);++configurations;return 0;}
 static int fakeConfigureQueue(const char*q,const char*o){assert(q&&o);++queueConfigurations;return 0;}
-static int fakeEnqueue(uint32_t f,uint32_t d,uint32_t c,uint32_t v,uint32_t a){assert(f==60&&d==1&&c==2&&v==16000000&&a==192000);++enqueues;return 0;}
-static int fakeStart(uint32_t f,uint32_t d,uint32_t c,uint32_t v,uint32_t a){assert(f==60&&d==1&&c==2&&v==16000000&&a==192000);++starts;return nativeSceneReady?0:-1;}
+static int fakeEnqueue(uint32_t f,uint32_t d,uint32_t c,uint32_t v,uint32_t a,uint32_t w,uint32_t h){assert(f==60&&d==1&&c==2&&a==192000);lastVideoBitrate=v;lastWidth=w;lastHeight=h;++enqueues;return 0;}
+static int fakeStart(uint32_t f,uint32_t d,uint32_t c,uint32_t v,uint32_t a,uint32_t w,uint32_t h){assert(f==60&&d==1&&c==2&&a==192000);lastVideoBitrate=v;lastWidth=w;lastHeight=h;++starts;return nativeSceneReady?0:-1;}
 static int fakeRun(void){++runs;return 0;}
 static int fakePause(void){++pauses;return 0;}
 static int fakeResume(void){++resumes;return 0;}
@@ -157,8 +158,8 @@ static void* fakeDlsym(void*scope,const char*name){(void)scope;
  if(!strcmp(name,"IDMP4SessionConfigure"))return(void*)fakeConfigure;
  if(!strcmp(name,"IDMP4QueueConfigure"))return(void*)fakeConfigureQueue;
  if(!strcmp(name,"IDMP4QueueStatus"))return(void*)fakeQueueStatus;
- if(!strcmp(name,"IDMP4QueueEnqueue"))return(void*)fakeEnqueue;
- if(!strcmp(name,"IDMP4SessionStart"))return(void*)fakeStart;
+ if(!strcmp(name,"IDMP4QueueEnqueueV2"))return(void*)fakeEnqueue;
+ if(!strcmp(name,"IDMP4SessionStartV2"))return(void*)fakeStart;
  if(!strcmp(name,"IDMP4QueueRun"))return(void*)fakeRun;
  if(!strcmp(name,"IDMP4QueuePause"))return(void*)fakePause;
  if(!strcmp(name,"IDMP4QueueResume"))return(void*)fakeResume;
@@ -183,7 +184,29 @@ static NSString *callHost(const char*name,NSString*argument,NSString**error){ass
 static NSDictionary *request(NSDictionary *value){__block NSDictionary *reply=nil;IdolyEmbeddedServerMP4Command(JSON(value),^(NSString*r){reply=[NSJSONSerialization JSONObjectWithData:[r dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];});assert(reply);return reply;}
 static void mkdirs(NSString*p){BOOL good=[NSFileManager.defaultManager createDirectoryAtPath:p withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions:@0700} error:NULL];assert(good);assert(chmod(p.fileSystemRepresentation,0700)==0);}
 int main(int argc,char**argv){@autoreleasepool{
- assert(argc==2);rootDirectory=[[NSString stringWithUTF8String:argv[1]]stringByResolvingSymlinksInPath];worker=[TestWorker new];atomic_store(&pythonReady,true);
+ assert(argc==2||argc==3);rootDirectory=[[NSString stringWithUTF8String:argv[1]]stringByResolvingSymlinksInPath];
+ if(argc==3){
+   NSString *phase=[NSString stringWithUTF8String:argv[2]];
+   NSDictionary *options=@{@"schema":@1,@"fps":@30,@"video_codec":@2,@"bitrate_mode":@"custom",@"video_bitrate":@12345678,@"resolution_mode":@"custom",@"width":@1280,@"height":@720};
+   if([phase isEqual:@"prefs-write"]){
+     [NSUserDefaults.standardUserDefaults removeObjectForKey:@"IdolyMP4ExportOptions.v1"];
+     assert([request(@{@"id":@1,@"action":@"mp4_options"})[@"result"][@"options"]isEqual:mp4DefaultOptions()]);
+     NSDictionary *r=request(@{@"id":@2,@"action":@"mp4_options_save",@"options":options});assert([r[@"ok"]isEqual:@YES]&&[r[@"result"][@"options"]isEqual:options]);
+     for(NSDictionary *change in @[@{@"width":@17},@{@"height":@YES},@{@"video_bitrate":@99999},@{@"video_bitrate":@200000001},@{@"fps":@120},@{@"path":@"/private/forbidden"}]){
+       NSMutableDictionary *bad=[options mutableCopy];[bad addEntriesFromDictionary:change];assert([request(@{@"id":@3,@"action":@"mp4_options_save",@"options":bad})[@"ok"]isEqual:@NO]);
+     }
+     assert([request(@{@"id":@4,@"action":@"mp4_options"})[@"result"][@"options"]isEqual:options]);
+     // Force the preference daemon flush in this short-lived command-line
+     // harness before the independent process checks normal relaunch storage.
+     assert([NSUserDefaults.standardUserDefaults synchronize]);puts("PASS persistent MP4 preferences write");return 0;
+   }
+   assert([phase isEqual:@"prefs-read"]);
+   assert([request(@{@"id":@5,@"action":@"mp4_options"})[@"result"][@"options"]isEqual:options]);
+   [NSUserDefaults.standardUserDefaults setObject:@{@"width":@YES}forKey:@"IdolyMP4ExportOptions.v1"];
+   assert([request(@{@"id":@6,@"action":@"mp4_options"})[@"result"][@"options"]isEqual:mp4DefaultOptions()]);
+   [NSUserDefaults.standardUserDefaults removeObjectForKey:@"IdolyMP4ExportOptions.v1"];puts("PASS persistent MP4 preferences relaunch");return 0;
+ }
+ worker=[TestWorker new];atomic_store(&pythonReady,true);
  NSString *session=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-audio-test"];
  NSString *exports=[session stringByAppendingPathComponent:@"exports"],*library=[rootDirectory stringByAppendingPathComponent:@".idoly-mp4-library"];
  NSString *queue=[library stringByAppendingPathComponent:@"queue"],*persistent=[library stringByAppendingPathComponent:@"exports"];
@@ -198,18 +221,26 @@ int main(int argc,char**argv){@autoreleasepool{
  nativeSessionPhase=@"finishing";assert(IdolyEmbeddedServerMP4IsFinishing());nativeSessionPhase=@"rendering";
  NSDictionary*r=request(@{@"id":@1,@"action":@"mp4_enqueue",@"fps":@60,@"video_codec":@2,@"video_bitrate":@16000000});
  assert([r[@"ok"]isEqual:@YES]&&enqueues==1&&configurations==1&&queueConfigurations==1);assert([JSON(r)rangeOfString:@"secret-must-not-leak"].location==NSNotFound);
+ assert(lastVideoBitrate==16000000&&lastWidth==0&&lastHeight==0);
  assert([request(@{@"id":@2,@"action":@"mp4_queue_status"})[@"ok"]isEqual:@YES]);assert(configurations==1&&queueConfigurations==1);
  // The native host forwards a ready paused source MV. It must not override a
  // genuinely false snapshot or permanently cache that failure in the menu.
  nativeSessionPhase=@"idle";nativeSceneReady=false;
  assert([request(@{@"id":@2,@"action":@"mp4_status"})[@"result"][@"ready"]isEqual:@NO]);
+ NSDictionary *preview=request(@{@"id":@2,@"action":@"mp4_status"})[@"result"];
+ assert([preview[@"source_width"]isEqual:@1921]&&[preview[@"source_height"]isEqual:@1081]&&[preview[@"video_bitrate"]isEqual:@17420000]&&[preview[@"readiness_error"]isEqual:@"scene_surface_pending"]);
  r=request(@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@16000000});assert([r[@"ok"]isEqual:@NO]&&[r[@"error"][@"code"]isEqual:@"mp4_scene_not_ready"]&&starts==1);
  nativeSceneReady=true;
  assert([request(@{@"id":@2,@"action":@"mp4_status"})[@"result"][@"ready"]isEqual:@YES]);
  r=request(@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@16000000});assert([r[@"ok"]isEqual:@YES]&&starts==2);
+ r=request(@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@0,@"width":@1280,@"height":@720});assert([r[@"ok"]isEqual:@YES]&&starts==3&&lastVideoBitrate==0&&lastWidth==1280&&lastHeight==720);
+ r=request(@{@"id":@2,@"action":@"mp4_enqueue",@"fps":@60,@"video_codec":@2,@"video_bitrate":@12345678,@"width":@3840,@"height":@2160});assert([r[@"ok"]isEqual:@YES]&&enqueues==2&&lastVideoBitrate==12345678&&lastWidth==3840&&lastHeight==2160);
+ for(NSDictionary *change in @[@{@"width":@0},@{@"width":@17},@{@"height":@4098},@{@"height":@YES},@{@"video_bitrate":@99999},@{@"video_bitrate":@200000001}]){
+   NSMutableDictionary *bad=[@{@"id":@2,@"action":@"mp4_start",@"fps":@60,@"video_codec":@2,@"video_bitrate":@0,@"width":@1280,@"height":@720}mutableCopy];[bad addEntriesFromDictionary:change];assert([request(bad)[@"ok"]isEqual:@NO]);
+ }
  nativeSessionPhase=@"rendering";
  NSArray *invalid=@[@{@"id":@YES,@"action":@"mp4_queue_run"},@{@"id":@3,@"action":@"mp4_queue_move",@"job_id":@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",@"position":@YES},@{@"id":@3,@"action":@"mp4_enqueue",@"fps":@YES,@"video_codec":@2,@"video_bitrate":@16000000},@{@"id":@3,@"action":@"mp4_queue_status",@"path":@"/private"},@{@"id":@3,@"action":@"mp4_queue_cancel",@"job_id":@"../aaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},@{@"id":@3,@"action":@"mp4_queue_run_unknown"}];
- for(NSDictionary*i in invalid)assert([request(i)[@"ok"]isEqual:@NO]);assert(operations==0&&runs==0&&enqueues==1);
+ for(NSDictionary*i in invalid)assert([request(i)[@"ok"]isEqual:@NO]);assert(operations==0&&runs==0&&enqueues==2);
  NSString *embedded=[@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"stringByAppendingFormat:@"%Cevil",(unichar)0];assert([request(@{@"id":@4,@"action":@"mp4_queue_cancel",@"job_id":embedded})[@"ok"]isEqual:@NO]);
  r=request(@{@"id":@5,@"action":@"mp4_queue_move",@"job_id":@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",@"position":@0});assert([r[@"ok"]isEqual:@YES]&&operations==1&&operationCode==4&&[operationJob isEqual:@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]);
  for(id consent in @[@NO,@1,@"true",NSNull.null])assert([request(@{@"id":@5,@"action":@"mp4_queue_remove",@"job_id":@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",@"delete_output":consent})[@"ok"]isEqual:@NO]);
@@ -249,3 +280,7 @@ int main(int argc,char**argv){@autoreleasepool{
     result = subprocess.run([str(output),str(tmp_path)],check=False,capture_output=True,text=True,timeout=10)
     assert result.returncode == 0, "Foundation queue host execution failed:\n" + result.stdout + result.stderr
     assert result.stdout.strip() == "PASS Foundation queue host requests and private outputs"
+    for phase,expected in (("prefs-write","PASS persistent MP4 preferences write"),("prefs-read","PASS persistent MP4 preferences relaunch")):
+        result = subprocess.run([str(output),str(tmp_path),phase],check=False,capture_output=True,text=True,timeout=10)
+        assert result.returncode == 0, "Foundation preferences execution failed:\n" + result.stdout + result.stderr
+        assert result.stdout.strip() == expected

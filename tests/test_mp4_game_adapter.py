@@ -72,7 +72,10 @@ void* bundle_result(void*,Method*){return ptr(bundle);}
 void* load_asset(void*,void*,void*,Method*){return ptr(private_clip);}
 void unload(void*,bool all,Method*){assert(all);++unloads;}
 void capture(void*,Method*){}
-int32_t width(void*,Method*){return 16;}int32_t height(void*,Method*){return 16;}
+int32_t capture_width=16,capture_height=16,source_width=4096,source_height=2458;
+std::vector<std::array<int32_t,2>> geometry_calls;bool geometry_resize_good=true;
+bool resize_output(void* value,int32_t w,int32_t h){assert(value==ptr(camera_controller));geometry_calls.push_back({w,h});return geometry_resize_good||(!w&&!h);}
+int32_t width(void*,Method*){return capture_width;}int32_t height(void*,Method*){return capture_height;}
 int32_t format_value=4;int32_t format(void*,Method*){return format_value;}bool srgb(void*,Method*){return true;}
 void* active_get(Method*){return active;}void active_set(void* p,Method*){active=p;}
 void* new_texture(){return ptr(make("UnityEngine.Texture2D"));}
@@ -83,7 +86,7 @@ void destroy(void*,Method*){++destroys;}
 bool shader_custom(Method*){return custom;}float shader_time(Method*){return shader;}
 void shader_set(float n,Method*){shader=n;custom=true;}void shader_reset(Method*){custom=false;}
 int32_t logical_width(void*,Method*){return 3600;}int32_t logical_height(void*,Method*){return 2160;}
-bool actual_source_geometry(void* value,int32_t* w,int32_t* h){assert(value==ptr(camera_controller));*w=4096;*h=2458;return true;}
+bool actual_source_geometry(void* value,int32_t* w,int32_t* h){assert(value==ptr(camera_controller));*w=source_width;*h=source_height;return true;}
 Api api(){Api a{};a.is_type=istype;a.alive=alive;a.retain=retain;a.retained=target;a.release=release;a.new_string=string_new;a.string_utf8=utf8;a.array_length=length;a.array_data=data;a.new_float_array=new_float;a.new_texture2d=new_texture;a.audio_clip_type=reinterpret_cast<void*>(1);a.object_get_name=name;a.director_get_asset=asset;a.director_get_binding=binding;a.brain_output_camera=output_camera;a.brain_manual_update=brain_manual;a.camera_clock_ok=camera_clock_ok;a.director_get_time=get_time;a.director_get_duration=duration;a.director_get_mode=get_mode;a.director_set_mode=set_mode;a.director_set_time=set_time;a.director_evaluate=evaluate;a.director_graph_injected=get_graph;a.graph_evaluate_injected=graph_step;a.graph_set_mode_injected=graph_mode;a.graph_valid=graph_valid;a.recorded_graph_mode=recorded_mode;a.player_set_time=reset_player;a.timeline_get_tracks=tracks;a.track_get_clips=clips;a.audio_source_get_volume=volume_get;a.audio_source_set_volume=volume_set;a.audio_clip_samples=samples;a.audio_clip_channels=channels;a.audio_clip_frequency=frequency;a.audio_clip_load_state=loadstate;a.audio_clip_load_type=loadtype;a.audio_clip_load_data=load;a.audio_clip_get_data=get_data;a.bundle_load_file_async=load_bundle;a.async_done=isdone;a.bundle_request_get_bundle=bundle_result;a.bundle_load_asset=load_asset;a.bundle_unload=unload;a.camera_capture_request=capture;a.texture_width=width;a.texture_height=height;a.texture_graphics_format=format;a.texture_srgb=srgb;a.rt_active_get=active_get;a.rt_active_set=active_set;a.texture2d_ctor_rgba=ctor;a.texture2d_read_pixels_injected=readpixels;a.texture2d_raw_data=raw_data;a.object_destroy=destroy;a.shader_use_custom=shader_custom;a.shader_current_time=shader_time;a.shader_set_custom=shader_set;a.shader_reset_custom=shader_reset;return a;}
 void setup(){presenter=make("Solis.OutGame.LivePlayerScreenPresenter");player=make("Solis.Common.SolisLivePlayer");controller=make("Solis.Common.Live.SolisLiveTimelineController");director=make("UnityEngine.Playables.PlayableDirector");timeline=make("UnityEngine.Timeline.TimelineAsset");camera_controller=make("VL.Rendering.VLSRPCameraController");camera=make("UnityEngine.Camera");wrapper=make("VL.VLRenderTexture");rt=make("UnityEngine.RenderTexture");bgm=make("UnityEngine.AudioSource");voice=make("UnityEngine.AudioSource");source_clip=make("UnityEngine.AudioClip","sud_music_short_tri-004");private_clip=make("UnityEngine.AudioClip",source_clip->name.c_str());bundle=make("UnityEngine.AssetBundle");request=make("UnityEngine.AssetBundleCreateRequest");track=make("UnityEngine.Timeline.AudioTrack","BGM");clip=make("UnityEngine.Timeline.TimelineClip");
     auto* binder=make("Solis.Common.Live.SolisLiveBinder");auto* actor_list=make("System.Collections.Generic.List`1");auto* actor_array=make("array");actor_array->array_kind=1;actor_controller=make("VL.Core.VLActorController");animation_player=make("VL.VLAnimationClipPlayer");actor_array->pointers={ptr(actor_controller)};write(player,0x58,ptr(binder));write(binder,0x40,ptr(actor_list));write(actor_list,0x10,ptr(actor_array));write(actor_list,0x18,int32_t(1));write(actor_controller,0x20,ptr(animation_player));write(animation_player,0x28,PlayableGraph{reinterpret_cast<void*>(0x2222),9,0});
@@ -94,9 +97,12 @@ int main(){
     setup();camera_track=make(".CinemachineTrack");brain=make("Cinemachine.CinemachineBrain");write(brain,0x30,int32_t(2));write(brain,0x34,int32_t(0));
     write(presenter,0xe0,ptr(player));write(player,0x38,ptr(controller));write(controller,0x20,ptr(director));write(player,0x28,ptr(bgm));write(player,0x30,ptr(voice));write(camera_controller,0x50,ptr(camera));write(camera_controller,0xa0,ptr(wrapper));write(wrapper,0x10,ptr(rt));
     auto* ap=make("UnityEngine.Timeline.AudioPlayableAsset");auto* props=make("UnityEngine.Timeline.AudioMixerProperties");auto* cp=make("UnityEngine.Timeline.AudioClipProperties");write(props,0x10,1.f);write(cp,0x10,1.f);write(track,0xa0,ptr(props));write(clip,0x28,ptr(ap));write(ap,0x18,ptr(source_clip));write(ap,0x28,ptr(cp));write(clip,0x18,2.0);write(clip,0x20,0.0);write(clip,0x30,116.0);write(clip,0x38,1.0);write(clip,0x58,-1.0);write(clip,0x60,-1.0);
-    Api selected_api=api();selected_api.camera_pixel_width=logical_width;selected_api.camera_pixel_height=logical_height;selected_api.source_geometry=actual_source_geometry;
+    Api selected_api=api();selected_api.camera_pixel_width=logical_width;selected_api.camera_pixel_height=logical_height;selected_api.source_geometry=actual_source_geometry;selected_api.output_geometry=resize_output;
     GameAdapter a(selected_api);clock_game=&a;a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));Snapshot s{};assert(a.snapshot(s)==Result::ok);assert(s.audio.count==1&&s.audio.clips[0].start_seconds==2&&s.duration_seconds==122&&s.audio.clips[0].source_gain==.6f&&!s.procedural_physics_determinism_proven);
     int32_t actual_width=0,actual_height=0;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4096&&actual_height==2458);
+    source_width=4095;source_height=2457;assert(a.source_geometry(actual_width,actual_height)==Result::ok&&actual_width==4095&&actual_height==2457);
+    source_width=4097;assert(a.source_geometry(actual_width,actual_height)==Result::unsupported);source_width=4096;source_height=2458;
+    assert(a.set_output_geometry(1920,1080)==Result::stale&&geometry_calls.empty());
     write(clip,0x38,2.0);assert(a.snapshot(s)==Result::unsupported);write(clip,0x38,1.0);assert(a.snapshot(s)==Result::ok);
     assert(s.actor_graph_count==1);assert(a.begin_manual()==Result::ok&&mode==3&&bgm_volume==0&&voice_volume==0&&actor_mode==3&&actor_resets==1);assert(a.evaluate(2)==Result::ok&&time_value==2&&shader==2&&graph_steps==1);assert(a.evaluate(2)==Result::ok&&graph_steps==1&&actor_steps==1&&camera_steps==1);graph_variant=1;assert(a.evaluate(3)==Result::ok&&time_value==3&&graph_steps==2);graph_variant=0;assert(a.evaluate(123)==Result::invalid);
     assert(a.request_capture()==Result::ok);int32_t w=0,h=0;assert(a.capture_geometry(w,h)==Result::ok&&w==16&&h==16);std::vector<uint8_t> pixels(1024);size_t bytes=0;assert(a.readback_rgba(pixels.data(),pixels.size(),bytes,w,h)==Result::waiting);
@@ -107,6 +113,24 @@ int main(){
     audio_state=0;assert(a.begin_private_audio("/private/unloaded.bundle",expected)==Result::waiting);assert(a.poll_private_audio()==Result::waiting&&audio_load_calls==1&&audio_state==1);assert(a.poll_private_audio()==Result::waiting&&audio_load_calls==1);audio_state=2;assert(a.poll_private_audio()==Result::ok);a.close_private_audio();assert(unloads==4);
     a.restore();assert(mode==0&&time_value==13.25&&bgm_volume==.6f&&voice_volume==.4f&&!custom&&destroys==1&&actor_mode==1&&camera_resets==2&&*reinterpret_cast<int32_t*>(brain->mem.data()+0x30)==2&&*reinterpret_cast<int32_t*>(brain->mem.data()+0x34)==0);a.reset_observations();assert(handles.empty());
     a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));assert(a.snapshot(s)==Result::ok&&a.begin_manual()==Result::ok);graph_variant=2;const int steps_before=graph_steps;assert(a.evaluate(1)==Result::unsupported&&graph_steps==steps_before+1);assert(a.evaluate(1)==Result::failed&&graph_steps==steps_before+1);a.reset_observations();assert(handles.empty()&&mode==0&&time_value==13.25);
+    // Source readback accepts odd phone/aspect dimensions. Only the separately
+    // selected encoded output is constrained to even dimensions.
+    graph_variant=0;capture_width=17;capture_height=19;
+    a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));
+    assert(a.snapshot(s)==Result::ok&&a.begin_manual()==Result::ok);
+    assert(a.request_capture()==Result::ok&&a.capture_geometry(w,h)==Result::ok&&w==17&&h==19);
+    assert(a.set_output_geometry(1921,1080)==Result::invalid&&geometry_calls.empty());
+    assert(a.set_output_geometry(1920,1080)==Result::ok);
+    assert((geometry_calls==std::vector<std::array<int32_t,2>>{{1920,1080}}));
+    a.reset_observations();assert((geometry_calls==std::vector<std::array<int32_t,2>>{{1920,1080},{0,0}})&&handles.empty());
+    // Even a callback failure can follow original texture destruction, so it
+    // must retain its restoration obligation during terminal cleanup.
+    geometry_resize_good=false;
+    a.observe_presenter(ptr(presenter));a.observe_camera_controller(ptr(camera_controller));
+    assert(a.snapshot(s)==Result::ok&&a.begin_manual()==Result::ok);
+    assert(a.set_output_geometry(3840,2160)==Result::failed);
+    a.reset_observations();assert(geometry_calls.size()==4&&geometry_calls.back()[0]==0&&geometry_calls.back()[1]==0&&handles.empty());
+    a.reset_observations();assert(geometry_calls.size()==4);
 }
 '''
 

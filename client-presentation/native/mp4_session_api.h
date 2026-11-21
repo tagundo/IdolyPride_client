@@ -27,6 +27,12 @@ IDMP4_SESSION_API int IDMP4SessionConfigure(const char *broker, uint64_t epoch,
     const char *capability, const char *output, int platform);
 IDMP4_SESSION_API int IDMP4SessionStart(uint32_t fps_num, uint32_t fps_den,
     uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate);
+// V2: video_bitrate=0 uses the output size/FPS/codec recommendation. Explicit
+// output dimensions must both be even 16..4096; (0,0) follows the source with
+// odd edges rounded down to an encoder-compatible size. V1 remains available.
+IDMP4_SESSION_API int IDMP4SessionStartV2(uint32_t fps_num, uint32_t fps_den,
+    uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate,
+    uint32_t output_width, uint32_t output_height);
 IDMP4_SESSION_API size_t IDMP4SessionStatus(char *buffer, size_t capacity);
 IDMP4_SESSION_API void IDMP4SessionCancel(void);
 IDMP4_SESSION_API int IDMP4SessionReady(void);
@@ -49,6 +55,9 @@ IDMP4_SESSION_API void IDMP4SessionResume(void);
 IDMP4_SESSION_API int IDMP4QueueConfigure(const char *queue_directory, const char *export_directory);
 IDMP4_SESSION_API int IDMP4QueueEnqueue(uint32_t fps_num, uint32_t fps_den,
     uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate);
+IDMP4_SESSION_API int IDMP4QueueEnqueueV2(uint32_t fps_num, uint32_t fps_den,
+    uint32_t codec, uint32_t video_bitrate, uint32_t audio_bitrate,
+    uint32_t output_width, uint32_t output_height);
 IDMP4_SESSION_API int IDMP4QueueRun(void);
 IDMP4_SESSION_API int IDMP4QueuePause(void);
 IDMP4_SESSION_API int IDMP4QueueResume(void);

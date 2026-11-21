@@ -22,6 +22,7 @@ namespace idoly_mp4_queue_placement { struct Address { void* value; }; }
 inline void*operator new(size_t,idoly_mp4_queue_placement::Address address)noexcept{return address.value;}
 inline void operator delete(void*,idoly_mp4_queue_placement::Address)noexcept{}
 #endif
+#include "mp4_output_policy.hpp"
 
 namespace idoly_mp4_queue {
 constexpr size_t max_jobs=8, max_actors=32, max_assets=16, name_capacity=193;
@@ -63,7 +64,8 @@ struct Graphics {
     int32_t max_buffer_pixel=4096,aa_mode=-1,shadow_resolution=0;
     uint8_t expand_photography=0;
 };
-struct Options { uint32_t fps_num=30,fps_den=1,codec=1,video_bitrate=16000000,audio_bitrate=192000,width=0,height=0;Graphics graphics{}; };
+struct Options { uint32_t fps_num=30,fps_den=1,codec=1,video_bitrate=16000000,audio_bitrate=192000,width=0,height=0;
+    uint32_t output_width=0,output_height=0;Graphics graphics{}; };
 struct Job {
     char id[33]{},output_id[33]{};Descriptor descriptor{};Options options{};
     State state=State::pending;uint32_t attempts=0;char error[65]{},pause_reason[65]{};
@@ -110,8 +112,9 @@ inline bool graphics(const Graphics&g){return g.revision>=0&&g.custom_graphics<=
     &&g.max_buffer_pixel>=256&&g.max_buffer_pixel<=4096&&!(g.max_buffer_pixel&1)&&g.aa_mode>=-1&&g.aa_mode<=2
     &&(g.shadow_resolution==0||g.shadow_resolution==512||g.shadow_resolution==1024||g.shadow_resolution==2048||g.shadow_resolution==4096);}
 inline bool options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps_num==60)&&(o.codec==1||o.codec==2)
-    &&(o.video_bitrate==8000000||o.video_bitrate==16000000||o.video_bitrate==32000000)&&o.audio_bitrate==192000
-    &&o.width>=16&&o.height>=16&&o.width<=16384&&o.height<=16384&&!(o.width&1)&&!(o.height&1)&&graphics(o.graphics);}
+    &&o.video_bitrate>=100000&&o.video_bitrate<=200000000&&o.audio_bitrate==192000
+    &&o.width>=16&&o.height>=16&&o.width<=16384&&o.height<=16384
+    &&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height)&&graphics(o.graphics);}
 inline bool safe_file(int fd,struct stat& s){return fd>=0&&::fstat(fd,&s)==0&&(s.st_mode&0170000)==0100000&&(s.st_mode&0777)==0600&&s.st_uid==geteuid()&&s.st_nlink==1&&s.st_size>=0&&static_cast<uint64_t>(s.st_size)<=max_wire_bytes;}
 inline bool same(const struct stat&a,const struct stat&b){
     if(a.st_dev!=b.st_dev||a.st_ino!=b.st_ino||a.st_uid!=b.st_uid||a.st_mode!=b.st_mode||a.st_nlink!=b.st_nlink||a.st_size!=b.st_size)return false;
@@ -140,16 +143,19 @@ struct Reader {
     uint64_t u64(){uint8_t b[8]{};raw(b,8);return get64(b);}
     void str(char*s,size_t cap){uint8_t b[2]{};raw(b,2);size_t n=size_t(b[0])|(size_t(b[1])<<8);if(!ok||n>=cap){ok=false;return;}raw(s,n);if(ok)s[n]=0;}
 };
-inline void encode(Writer&w,const Job&j){
+inline void encode(Writer&w,const Job&j,uint32_t version=2){
     w.str(j.id,33);w.str(j.output_id,33);w.u32(static_cast<uint32_t>(j.state));w.u32(j.attempts);w.str(j.error,65);w.str(j.pause_reason,65);
     const Options&o=j.options;for(uint32_t v:{o.fps_num,o.fps_den,o.codec,o.video_bitrate,o.audio_bitrate,o.width,o.height})w.u32(v);
+    if(version>=2){w.u32(o.output_width);w.u32(o.output_height);}
     const Graphics&g=o.graphics;w.u64(static_cast<uint64_t>(g.revision));w.u32(g.custom_graphics);w.u32(static_cast<uint32_t>(g.quality));w.u32(static_cast<uint32_t>(g.target_fps));uint32_t scale=0;memcpy(&scale,&g.render_scale,4);w.u32(scale);w.u32(static_cast<uint32_t>(g.max_buffer_pixel));w.u32(static_cast<uint32_t>(g.aa_mode));w.u32(static_cast<uint32_t>(g.shadow_resolution));w.u32(g.expand_photography);
     const Descriptor&d=j.descriptor;w.str(d.stage_asset,name_capacity);w.str(d.timeline_asset,name_capacity);w.u32(static_cast<uint32_t>(d.stage_max_capacity));w.u32(d.detach_actors_on_player_destroyed);w.u32(d.actor_count);
     for(size_t i=0;i<d.actor_count;++i){const Actor&a=d.actors[i];w.str(a.character_id,name_capacity);w.str(a.descriptor_name,name_capacity);for(int32_t v:{a.actor_index,a.track_index,a.audience_amount,a.psyllium_color_type,a.collider_type,a.render_layer_base})w.u32(static_cast<uint32_t>(v));w.u32(a.humanoid);w.u32(a.trigger);w.u32(a.auto_blink_disabled);w.u32(a.use_adv_settings);w.u32(a.name_is_null);w.u32(a.asset_count);for(size_t k=0;k<a.asset_count;++k)w.str(a.assets[k],name_capacity);}
 }
-inline bool decode(Reader&r,Job&j){
+inline bool decode(Reader&r,Job&j,uint32_t version=2){
     r.str(j.id,33);r.str(j.output_id,33);uint32_t s=r.u32();if(s<1||s>7)return false;j.state=static_cast<State>(s);j.attempts=r.u32();r.str(j.error,65);r.str(j.pause_reason,65);
     Options&o=j.options;o.fps_num=r.u32();o.fps_den=r.u32();o.codec=r.u32();o.video_bitrate=r.u32();o.audio_bitrate=r.u32();o.width=r.u32();o.height=r.u32();
+    if(version>=2){o.output_width=r.u32();o.output_height=r.u32();}
+    else {o.output_width=o.output_height=0;}
     Graphics&g=o.graphics;g.revision=static_cast<int64_t>(r.u64());uint32_t custom=r.u32();g.quality=static_cast<int32_t>(r.u32());g.target_fps=static_cast<int32_t>(r.u32());uint32_t scale=r.u32();memcpy(&g.render_scale,&scale,4);g.max_buffer_pixel=static_cast<int32_t>(r.u32());g.aa_mode=static_cast<int32_t>(r.u32());g.shadow_resolution=static_cast<int32_t>(r.u32());uint32_t expanded=r.u32();if(custom>1||expanded>1)return false;g.custom_graphics=static_cast<uint8_t>(custom);g.expand_photography=static_cast<uint8_t>(expanded);
     Descriptor&d=j.descriptor;r.str(d.stage_asset,name_capacity);r.str(d.timeline_asset,name_capacity);d.stage_max_capacity=static_cast<int32_t>(r.u32());uint32_t detach=r.u32();if(detach>1)return false;d.detach_actors_on_player_destroyed=static_cast<uint8_t>(detach);d.actor_count=r.u32();if(d.actor_count>max_actors)return false;
     for(size_t i=0;i<d.actor_count;++i){Actor&a=d.actors[i];r.str(a.character_id,name_capacity);r.str(a.descriptor_name,name_capacity);a.actor_index=static_cast<int32_t>(r.u32());a.track_index=static_cast<int32_t>(r.u32());a.audience_amount=static_cast<int32_t>(r.u32());a.psyllium_color_type=static_cast<int32_t>(r.u32());a.collider_type=static_cast<int32_t>(r.u32());a.render_layer_base=static_cast<int32_t>(r.u32());uint32_t human=r.u32(),trigger=r.u32(),blink=r.u32(),adv=r.u32(),isnull=r.u32();if(human>1||trigger>1||blink>1||adv>1||isnull>1)return false;a.humanoid=static_cast<uint8_t>(human);a.trigger=static_cast<uint8_t>(trigger);a.auto_blink_disabled=static_cast<uint8_t>(blink);a.use_adv_settings=static_cast<uint8_t>(adv);a.name_is_null=static_cast<uint8_t>(isnull);a.asset_count=r.u32();if(a.asset_count>max_assets)return false;for(size_t k=0;k<a.asset_count;++k)r.str(a.assets[k],name_capacity);}
@@ -181,12 +187,13 @@ public:
         size_t at=0;while(at<n){long got=::read(fd,bytes+at,n-at);if(got<0&&detail::error_number()==4)continue;if(got<=0)break;at+=static_cast<size_t>(got);}uint8_t tail=0;long extra=::read(fd,&tail,1);struct stat after{};
         bool stable=::fstat(fd,&after)==0&&detail::same(s,after);::close(fd);
         Error result=Error::corrupt;
-        if(at==n&&extra==0&&stable&&memcmp(bytes,"IDMPQ001",8)==0&&detail::get32(bytes+8)==1&&detail::get32(bytes+12)==header_bytes
+        const uint32_t version=detail::get32(bytes+8);
+        if(at==n&&extra==0&&stable&&memcmp(bytes,"IDMPQ001",8)==0&&(version==1||version==2)&&detail::get32(bytes+12)==header_bytes
             &&detail::get32(bytes+92)==n-header_bytes&&detail::get32(bytes+88)<=max_jobs
             &&detail::get64(bytes+96)==detail::checksum(bytes+header_bytes,n-header_bytes,detail::checksum(bytes,96))){
             if(memcmp(bytes+16,profile_,64)!=0)result=Error::profile_mismatch;
             else {state_->generation=detail::get64(bytes+80);state_->count=detail::get32(bytes+88);detail::Reader r{bytes+header_bytes,n-header_bytes};bool valid=true;size_t active=0;
-                for(size_t i=0;i<state_->count&&valid;++i){valid=detail::decode(r,state_->jobs[i]);for(size_t j=0;j<i&&valid;++j)if(!strcmp(state_->jobs[i].id,state_->jobs[j].id)||(state_->jobs[i].output_id[0]&&!strcmp(state_->jobs[i].output_id,state_->jobs[j].output_id)))valid=false;if(state_->jobs[i].state==State::running||state_->jobs[i].state==State::paused)++active;}
+                for(size_t i=0;i<state_->count&&valid;++i){valid=detail::decode(r,state_->jobs[i],version);for(size_t j=0;j<i&&valid;++j)if(!strcmp(state_->jobs[i].id,state_->jobs[j].id)||(state_->jobs[i].output_id[0]&&!strcmp(state_->jobs[i].output_id,state_->jobs[j].output_id)))valid=false;if(state_->jobs[i].state==State::running||state_->jobs[i].state==State::paused)++active;}
                 if(valid&&r.ok&&r.at==r.cap&&active<=1){identity_=s;has_journal_=true;result=Error::ok;}
             }
         }free(bytes);if(result!=Error::ok){close();return result;}
@@ -222,6 +229,8 @@ public:
     Error remove(const char*id){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(active(state_->jobs[i]))return Error::busy;Store*next=clone();if(!next)return Error::io;for(size_t k=static_cast<size_t>(i)+1;k<next->count;++k)next->jobs[k-1]=next->jobs[k];--next->count;next->jobs[next->count]=Job{};return commit(next);}
     Error move(const char*id,size_t target){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(target>=state_->count)return Error::invalid_argument;if(state_->jobs[i].state!=State::pending)return Error::invalid_state;if(target==static_cast<size_t>(i))return Error::ok;Store*next=clone();if(!next)return Error::io;Job*saved=detail::allocate<Job>();if(!saved){free(next);return Error::io;}*saved=next->jobs[i];if(target<static_cast<size_t>(i))for(size_t k=static_cast<size_t>(i);k>target;--k)next->jobs[k]=next->jobs[k-1];else for(size_t k=static_cast<size_t>(i);k<target;++k)next->jobs[k]=next->jobs[k+1];next->jobs[target]=*saved;free(saved);return commit(next);}
 private:
+    // Keep the owned path/lock stable while the checked header advances to v2.
+    // Old jobs migrate only on the next ordinary transactional mutation.
     static const char*filename(){return "queue-v1.bin";}
     static bool active(const Job&j){return j.state==State::running||j.state==State::paused;}
     int index(const char*id)const{if(!state_||!detail::hex(id,32))return -1;for(size_t i=0;i<state_->count;++i)if(!strcmp(id,state_->jobs[i].id))return static_cast<int>(i);return -1;}
@@ -231,7 +240,7 @@ private:
     Error commit(Store*next){
         if(!state_||blocked_){free(next);return Error::not_open;}if(!current()){free(next);return Error::changed_storage;}if(state_->generation==~uint64_t(0)){free(next);return Error::invalid_state;}next->generation=state_->generation+1;
         uint8_t*bytes=static_cast<uint8_t*>(malloc(max_wire_bytes));if(!bytes){free(next);return Error::io;}memset(bytes,0,header_bytes);detail::Writer w{bytes+header_bytes,max_wire_bytes-header_bytes};for(size_t i=0;i<next->count;++i)detail::encode(w,next->jobs[i]);if(!w.ok){free(bytes);free(next);return Error::invalid_descriptor;}
-        memcpy(bytes,"IDMPQ001",8);detail::put32(bytes+8,1);detail::put32(bytes+12,header_bytes);memcpy(bytes+16,profile_,64);detail::put64(bytes+80,next->generation);detail::put32(bytes+88,next->count);detail::put32(bytes+92,static_cast<uint32_t>(w.at));detail::put64(bytes+96,detail::checksum(bytes+header_bytes,w.at,detail::checksum(bytes,96)));size_t length=header_bytes+w.at;
+        memcpy(bytes,"IDMPQ001",8);detail::put32(bytes+8,2);detail::put32(bytes+12,header_bytes);memcpy(bytes+16,profile_,64);detail::put64(bytes+80,next->generation);detail::put32(bytes+88,next->count);detail::put32(bytes+92,static_cast<uint32_t>(w.at));detail::put64(bytes+96,detail::checksum(bytes+header_bytes,w.at,detail::checksum(bytes,96)));size_t length=header_bytes+w.at;
         uint8_t nonce[16];if(!random_(random_context_,nonce,16)){free(bytes);free(next);return Error::random_failed;}char temp[64];static const char alphabet[]="0123456789abcdef";memcpy(temp,".queue-",7);for(size_t i=0;i<16;++i){temp[7+i*2]=alphabet[nonce[i]>>4];temp[8+i*2]=alphabet[nonce[i]&15];}memcpy(temp+39,".tmp",5);
         int fd=::openat(directory_,temp,detail::wr|detail::create|detail::exclusive|detail::nofollow,0600);struct stat owned{};bool created=fd>=0&&::fstat(fd,&owned)==0;size_t at=0;
         while(created&&at<length){long n=::write(fd,bytes+at,length-at);if(n<0&&detail::error_number()==4)continue;if(n<=0)break;at+=static_cast<size_t>(n);}free(bytes);bool good=created&&at==length&&::fsync(fd)==0;struct stat ready{};good=good&&detail::safe_file(fd,ready);if(fd>=0)::close(fd);

@@ -25,9 +25,15 @@ Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStart(
     if(n<=0||d<=0||c<=0||v<=0||a<=0)return -1;
     return IDMP4SessionStart(static_cast<uint32_t>(n),static_cast<uint32_t>(d),static_cast<uint32_t>(c),static_cast<uint32_t>(v),static_cast<uint32_t>(a));
 }
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStartV2(
+    JNIEnv*,jclass,jint n,jint d,jint c,jint v,jint a,jint w,jint h) {
+    if(n<=0||d<=0||c<=0||v<0||a<=0||w<0||h<0)return -1;
+    return IDMP4SessionStartV2(n,d,c,v,a,w,h);
+}
 extern "C" JNIEXPORT jstring JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeStatus(JNIEnv*env,jclass) {
-    char json[1024]{};
+    char json[2048]{};
     return env->NewStringUTF(IDMP4SessionStatus(json,sizeof(json))?json:"{\"phase\":\"failed\",\"error_code\":\"status_unavailable\"}");
 }
 extern "C" JNIEXPORT void JNICALL
@@ -50,6 +56,10 @@ Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueConfigure
 extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueEnqueue(JNIEnv*,jclass,jint n,jint d,jint c,jint v,jint a){
     return n>0&&d>0&&c>0&&v>0&&a>0?IDMP4QueueEnqueue(n,d,c,v,a):-1;
+}
+extern "C" JNIEXPORT jint JNICALL
+Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueEnqueueV2(JNIEnv*,jclass,jint n,jint d,jint c,jint v,jint a,jint w,jint h){
+    return n>0&&d>0&&c>0&&v>=0&&a>0&&w>=0&&h>=0?IDMP4QueueEnqueueV2(n,d,c,v,a,w,h):-1;
 }
 extern "C" JNIEXPORT jint JNICALL
 Java_game_qualiarts_idolypride_localserver_UnifiedMP4Export_nativeQueueRun(JNIEnv*,jclass){return IDMP4QueueRun();}

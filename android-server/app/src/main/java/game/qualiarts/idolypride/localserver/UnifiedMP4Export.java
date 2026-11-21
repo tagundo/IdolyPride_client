@@ -60,6 +60,8 @@ public final class UnifiedMP4Export {
     private static native int nativeConfigure(String brokerDirectory, long epoch, String capability,
                                                String exportDirectory, int platform);
     private static native int nativeStart(int fpsNumerator, int fpsDenominator, int codec, int videoBitrate, int audioBitrate);
+    private static native int nativeStartV2(int fpsNumerator, int fpsDenominator, int codec, int videoBitrate,
+                                             int audioBitrate, int outputWidth, int outputHeight);
     private static native String nativeStatus();
     private static native void nativeCancel();
     private static native void nativeSuspend(int reason);
@@ -67,6 +69,8 @@ public final class UnifiedMP4Export {
     private static native boolean nativeReady();
     private static native int nativeQueueConfigure(String queueRoot, String exportsRoot);
     private static native int nativeQueueEnqueue(int fpsNum, int fpsDen, int codec, int videoBitrate, int audioBitrate);
+    private static native int nativeQueueEnqueueV2(int fpsNum, int fpsDen, int codec, int videoBitrate,
+                                                   int audioBitrate, int outputWidth, int outputHeight);
     private static native int nativeQueueRun();
     private static native int nativeQueuePause();
     private static native int nativeQueueResume();
@@ -134,6 +138,37 @@ public final class UnifiedMP4Export {
     static JSONObject snapshot() {
         try { return new JSONObject(last.toString()); } catch (Exception ignored) { return new JSONObject(); }
     }
+    /** Bounded public observations only: no broker paths, capabilities or job payloads. */
+    static JSONObject diagnostics() {
+        JSONObject result = new JSONObject();
+        try {
+            Activity owner = game.get();
+            result.put("schema", 1).put("available", configured).put("initialized", initialized)
+                    .put("game_attached", owner != null && !owner.isDestroyed() && !owner.isFinishing())
+                    .put("game_resumed", resumed).put("game_focused", gameFocused).put("game_stopped", stopped)
+                    .put("verified_foreground_selection", foregroundSelectionReady);
+            JSONObject state = snapshot();
+            if (initialized) try {
+                String raw = nativeStatus();
+                if (raw != null && raw.length() <= 65536) state = new JSONObject(raw);
+            } catch (Exception | LinkageError ignored) { }
+            result.put("ready", state.optBoolean("ready"));
+            for (String key : new String[] {"phase", "readiness_error", "error_code", "pause_reason"}) {
+                String value = state.optString(key, "unknown");
+                result.put(key, value.matches("[A-Za-z0-9_]{1,96}") ? value : "unknown");
+            }
+            for (String key : new String[] {"unity_ticks", "capture_acks", "width", "height", "source_width", "source_height",
+                    "fps_num", "fps_den", "video_bitrate", "frames", "total_frames"})
+                result.put(key, Math.max(0L, Math.min(9007199254740991L, state.optLong(key))));
+            JSONObject queue = queueSnapshot();
+            JSONArray jobs = queue.optJSONArray("jobs");
+            result.put("queue_available", queueConfigured && queue.optBoolean("available"))
+                    .put("queue_running", queue.optBoolean("running"))
+                    .put("queue_paused", queue.optBoolean("paused"))
+                    .put("queue_job_count", jobs == null ? 0 : Math.min(8, jobs.length()));
+        } catch (Exception ignored) { /* Keep the bounded observations already collected. */ }
+        return result;
+    }
     static JSONObject queueSnapshot() {
         try { return titleCatalog.enrich(lastQueue).put("available", queueConfigured && lastQueue.optBoolean("available")); }
         catch (Exception ignored) { return new JSONObject(); }
@@ -143,12 +178,16 @@ public final class UnifiedMP4Export {
         return pendingQueueRun || lastQueue.optBoolean("running") || lastQueue.optBoolean("command_pending");
     }
     static boolean requestEnqueue(Activity caller, int fps, int codec, int bitrate) {
+        return requestEnqueue(caller, fps, codec, bitrate, 0, 0);
+    }
+    static boolean requestEnqueue(Activity caller, int fps, int codec, int bitrate, int outputWidth, int outputHeight) {
         if (!queueConfigured || !ready() || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
-                || (bitrate != 8_000_000 && bitrate != 16_000_000 && bitrate != 32_000_000)) return false;
+                || !Mp4ExportSettings.validBitrate(bitrate)
+                || !Mp4ExportSettings.validResolution(outputWidth, outputHeight)) return false;
         Activity current = game.get();
         if (current == null || current.isDestroyed() || current.isFinishing()) return false;
         try {
-            if (nativeQueueEnqueue(fps, 1, codec, bitrate, 192_000) != 0) return false;
+            if (nativeQueueEnqueueV2(fps, 1, codec, bitrate, 192_000, outputWidth, outputHeight) != 0) return false;
             caller.startActivity(new Intent(caller, current.getClass())
                     .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP));
             wake(); return true;
@@ -229,11 +268,15 @@ public final class UnifiedMP4Export {
     static void removeObserver(Runnable observer) { observers.remove(observer); }
 
     static boolean requestStart(Activity caller, int fps, int codec, int bitrate) {
+        return requestStart(caller, fps, codec, bitrate, 0, 0);
+    }
+    static boolean requestStart(Activity caller, int fps, int codec, int bitrate, int outputWidth, int outputHeight) {
         if (!ready() || (fps != 30 && fps != 60) || (codec != 1 && codec != 2)
-                || (bitrate != 8_000_000 && bitrate != 16_000_000 && bitrate != 32_000_000)) return false;
+                || !Mp4ExportSettings.validBitrate(bitrate)
+                || !Mp4ExportSettings.validResolution(outputWidth, outputHeight)) return false;
         Activity current = game.get();
         if (current == null) return false;
-        pending = new int[] {fps, 1, codec, bitrate, 192_000};
+        pending = new int[] {fps, 1, codec, bitrate, 192_000, outputWidth, outputHeight};
         dismissed = false;
         pendingDeadline = android.os.SystemClock.uptimeMillis() + 8000;
         try {
@@ -263,7 +306,7 @@ public final class UnifiedMP4Export {
             if (!nativeReady()) { MAIN.postDelayed(BEGIN, 100); return; }
             int[] options = pending; pending = null;
             userPaused = false;
-            if (nativeStart(options[0], options[1], options[2], options[3], options[4]) != 0)
+            if (nativeStartV2(options[0], options[1], options[2], options[3], options[4], options[5], options[6]) != 0)
                 Toast.makeText(current, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
             else { last = new JSONObject().put("phase", "preparing_audio"); prepareBackground(current); }
         } catch (Exception | LinkageError unavailable) {
@@ -447,7 +490,14 @@ public final class UnifiedMP4Export {
             case "completed": return context.getString(R.string.mp4_completed);
             case "cancelled": return context.getString(R.string.mp4_cancelled);
             case "failed": return context.getString(R.string.mp4_failed, last.optString("error_code", "export_failed"));
-            default: return context.getString(!configured ? R.string.mp4_unavailable : ready() ? R.string.mp4_idle : R.string.mp4_not_ready);
+            default:
+                if (!configured) return context.getString(R.string.mp4_unavailable);
+                if (ready()) return context.getString(R.string.mp4_idle);
+                String reason = last.optString("readiness_error");
+                return reason.matches("[A-Za-z0-9_]{1,96}") && !reason.equals("none")
+                        && !reason.equals("open_selected_mv_first")
+                        ? context.getString(R.string.mp4_not_ready_reason, reason)
+                        : context.getString(R.string.mp4_not_ready);
         }
     }
 

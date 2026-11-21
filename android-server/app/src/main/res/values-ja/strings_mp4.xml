@@ -30,4 +30,17 @@
     <string name="mp4_export_filename">IdolyPride-MV-%1$s.mp4</string>
     <string name="mp4_background_cancelled">アプリを離れたため、書き出しを中止しました。</string>
     <string name="mp4_progress_title">MVの書き出し</string>
+    <string name="mp4_bitrate_recommended">推奨値を使用</string>
+    <string name="mp4_custom">直接入力</string>
+    <string name="mp4_bitrate_mbps">ビットレート (Mbps)</string>
+    <string name="mp4_output_resolution">出力解像度</string>
+    <string name="mp4_resolution_current">現在のMVサイズ</string>
+    <string name="mp4_width_pixels">横 (ピクセル)</string>
+    <string name="mp4_height_pixels">縦 (ピクセル)</string>
+    <string name="mp4_output_resolution_hint">出力サイズを変更します。縦横比が違う場合は余白を追加します。</string>
+    <string name="mp4_bitrate_invalid">ビットレートを0.1～200 Mbpsの数値で入力してください。</string>
+    <string name="mp4_resolution_invalid">横・縦をそれぞれ16～4096の偶数で入力してください。</string>
+    <string name="mp4_bitrate_recommendation">推奨 %1$s Mbps</string>
+    <string name="mp4_bitrate_recommended_waiting">推奨値 · MVサイズの確認待ち</string>
+    <string name="mp4_not_ready_reason">MVの準備状態を確認できません。(%1$s)</string>
 </resources>

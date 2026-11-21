@@ -590,6 +590,39 @@
     "보관 중인 MP4와 작업을 삭제합니다. 외부에 저장한 파일은 유지됩니다.":"保管中のMP4と処理を削除します。外部に保存したファイルは残ります。",
     "MP4 작업을 처리하지 못했습니다. 다시 시도해 주세요.":"MP4の処理に失敗しました。再試行してください。"
   });
+  Object.assign(UI_TRANSLATIONS.en, {
+    "출력 크기":"Output size","현재 렌더 크기":"Current render size","가로 (픽셀)":"Width (pixels)","세로 (픽셀)":"Height (pixels)",
+    "권장값 자동 계산":"Automatic recommendation","비트레이트 (Mbps)":"Bitrate (Mbps)","권장 비트레이트":"Recommended bitrate",
+    "MV가 준비되면 권장값을 표시합니다.":"The recommendation appears when the MV is ready.",
+    "MP4 크기와 게임 렌더 품질은 별도입니다.":"MP4 size and game render quality are separate.",
+    "비트레이트는 0.1~200 Mbps로 입력해 주세요.":"Enter a bitrate from 0.1 to 200 Mbps.",
+    "가로·세로는 16~4096의 짝수 픽셀로 입력해 주세요.":"Enter an even width and height from 16 to 4096 pixels.",
+    "MP4 설정을 저장하지 못했습니다. 값을 바꾸면 다시 저장합니다.":"MP4 settings could not be saved. Change a value to retry.",
+    "MP4 설정을 불러오지 못했습니다.":"MP4 settings could not be loaded.","MP4 설정 확인 중…":"Checking MP4 settings…"
+  });
+  Object.assign(UI_TRANSLATIONS.ja, {
+    "출력 크기":"出力サイズ","현재 렌더 크기":"現在の描画サイズ","가로 (픽셀)":"横（ピクセル）","세로 (픽셀)":"縦（ピクセル）",
+    "권장값 자동 계산":"推奨値を自動計算","비트레이트 (Mbps)":"ビットレート（Mbps）","권장 비트레이트":"推奨ビットレート",
+    "MV가 준비되면 권장값을 표시합니다.":"MVの準備ができると推奨値を表示します。",
+    "MP4 크기와 게임 렌더 품질은 별도입니다.":"MP4サイズとゲームの描画品質は別です。",
+    "비트레이트는 0.1~200 Mbps로 입력해 주세요.":"ビットレートは0.1〜200 Mbpsで入力してください。",
+    "가로·세로는 16~4096의 짝수 픽셀로 입력해 주세요.":"横・縦は16〜4096の偶数ピクセルで入力してください。",
+    "MP4 설정을 저장하지 못했습니다. 값을 바꾸면 다시 저장합니다.":"MP4設定を保存できませんでした。値を変更すると再試行します。",
+    "MP4 설정을 불러오지 못했습니다.":"MP4設定を読み込めませんでした。","MP4 설정 확인 중…":"MP4設定を確認中…"
+  });
+  const MP4_OPTION_DEFAULTS = Object.freeze({schema:1,fps:60,video_codec:1,bitrate_mode:"recommended",video_bitrate:16000000,resolution_mode:"current",width:1920,height:1080});
+  const mp4Dimension = value => integer(value) && value >= 16 && value <= 4096 && value % 2 === 0;
+  function validMP4ExportOptions(value) {
+    return exact(value,["schema","fps","video_codec","bitrate_mode","video_bitrate","resolution_mode","width","height"])
+      && value.schema === 1 && choice(value.fps,[30,60]) && choice(value.video_codec,[1,2])
+      && choice(value.bitrate_mode,["recommended","custom"]) && integer(value.video_bitrate) && value.video_bitrate >= 100000 && value.video_bitrate <= 200000000
+      && choice(value.resolution_mode,["current","custom"]) && mp4Dimension(value.width) && mp4Dimension(value.height);
+  }
+  function recommendedMP4Bitrate(width,height,fps,codec) {
+    if (!integer(width) || !integer(height) || width < 16 || height < 16 || width > 4096 || height > 4096 || !choice(fps,[30,60]) || !choice(codec,[1,2])) return null;
+    width -= width % 2;height -= height % 2;
+    return Math.max(250000,Math.min(200000000,Math.floor((width*height*fps*(codec === 1 ? 14 : 9)+500000)/1000000)*10000));
+  }
 
   function validRequest(action, payload) {
     const mp4ID = value => typeof value === "string" && /^[0-9a-f]{32}$/.test(value);
@@ -599,8 +632,11 @@
     if (action === "mp4_queue_move") return exact(payload,["job_id","position"]) && mp4ID(payload.job_id) && integer(payload.position) && payload.position <= 7;
     if (action === "mp4_save") return exact(payload,[]) || (exact(payload,["job_id"]) && mp4ID(payload.job_id));
     if (["mp4_status","mp4_pause","mp4_resume","mp4_cancel","mp4_save"].includes(action)) return exact(payload, []);
-    if (action === "mp4_start" || action === "mp4_enqueue") return exact(payload,["fps","video_bitrate","video_codec"])
-      && choice(payload.fps,[30,60]) && choice(payload.video_bitrate,[8000000,16000000,32000000]) && choice(payload.video_codec,[1,2]);
+    if (action === "mp4_options") return exact(payload,[]);
+    if (action === "mp4_options_save") return exact(payload,["options"]) && validMP4ExportOptions(payload.options);
+    if (action === "mp4_start" || action === "mp4_enqueue") return (exact(payload,["fps","video_bitrate","video_codec"])
+      || exact(payload,["fps","video_bitrate","video_codec","width","height"]) && ((payload.width === 0 && payload.height === 0) || mp4Dimension(payload.width) && mp4Dimension(payload.height)))
+      && choice(payload.fps,[30,60]) && integer(payload.video_bitrate) && (payload.video_bitrate === 0 || payload.video_bitrate >= 100000 && payload.video_bitrate <= 200000000) && choice(payload.video_codec,[1,2]);
     if (["status", "official_status", "official_inspect"].includes(action)) return exact(payload, []);
     if (action === "events_status") return exact(payload, []) || (exact(payload, ["mode"]) && choice(payload.mode, ["normal", "media"]));
     if (action === "events_save") return (exact(payload, ["settings", "expected_revision"]) || (exact(payload, ["settings", "expected_revision", "mode"]) && choice(payload.mode, ["normal", "media"]))) && validEvents(payload.settings, payload.mode === "media")
@@ -828,7 +864,7 @@
       }
       if (focus && typeof el("category-"+key).focus === "function") el("category-"+key).focus();
       saveLayout();
-      if (key === "graphics") Promise.resolve().then(() => { mp4("status"); mp4Queue("status"); });
+      if (key === "graphics") Promise.resolve().then(() => { loadMP4Options();mp4("status");mp4Queue("status"); });
     }
     function initializeLayout() {
       let stored = null;
@@ -868,8 +904,11 @@
       events: {fields: [], valid: value => validEvents(value, eventMode === "media"), available: false, draft: null, intents: new Map(), intentVersions: new Map(), intentSequence: 0, rebaseAttempts: 0, rebaseNeeded: false}
     };
     let snapshot = null;
-    let mp4Status = {phase:"idle",ready:false}, mp4Pending = false, mp4Feedback = "";
+    let mp4Status = {phase:"idle",ready:false}, mp4Pending = false, mp4Mutating = false, mp4Feedback = "";
     let mp4QueueStatus = {available:false,running:false,phase:"idle",jobs:[]}, mp4QueuePending = false, mp4QueueFeedback = "", mp4QueueRowsKey = "";
+    let mp4OptionBase = {...MP4_OPTION_DEFAULTS}, mp4OptionsLoaded = false, mp4OptionsLoading = false, mp4OptionsVersion = 0, mp4OptionsError = "";
+    const mp4EditedOptions = new Set(), mp4SavingOptions = new Set();
+    const mp4OptionFields = {"mp4-fps":"fps","mp4-codec":"video_codec","mp4-bitrate-mode":"bitrate_mode","mp4-bitrate":"video_bitrate","mp4-resolution-mode":"resolution_mode","mp4-width":"width","mp4-height":"height"};
     let visible = document.visibilityState !== "hidden";
     let disposed = false;
     let pollTimer = null;
@@ -893,7 +932,78 @@
     let messageSource = "";
     let eventSnapshot = null, eventRows = [], eventCatalogKey = "";
 
+    function mp4DraftOptions() {
+      const value = {...mp4OptionBase,fps:Number(el("mp4-fps").value),video_codec:Number(el("mp4-codec").value),
+        bitrate_mode:el("mp4-bitrate-mode").value,resolution_mode:el("mp4-resolution-mode").value};
+      const bitrateText = el("mp4-bitrate").value.trim(), widthText = el("mp4-width").value.trim(), heightText = el("mp4-height").value.trim();
+      const bitrate = /^\d+(?:\.\d{1,6})?$/.test(bitrateText) ? Math.round(Number(bitrateText)*1000000) : NaN;
+      const width = /^\d+$/.test(widthText) ? Number(widthText) : NaN, height = /^\d+$/.test(heightText) ? Number(heightText) : NaN;
+      const validBitrate = integer(bitrate) && bitrate >= 100000 && bitrate <= 200000000;
+      if (validBitrate) value.video_bitrate = bitrate;
+      if (mp4Dimension(width)) value.width = width;
+      if (mp4Dimension(height)) value.height = height;
+      const error = value.bitrate_mode === "custom" && !validBitrate ? "비트레이트는 0.1~200 Mbps로 입력해 주세요."
+        : value.resolution_mode === "custom" && (!mp4Dimension(width) || !mp4Dimension(height)) ? "가로·세로는 16~4096의 짝수 픽셀로 입력해 주세요."
+        : !validMP4ExportOptions(value) ? "입력값의 범위를 확인해 주세요. 유효한 값만 자동으로 저장합니다." : "";
+      return {options:value,error,validBitrate,validWidth:mp4Dimension(width),validHeight:mp4Dimension(height)};
+    }
+    function applyMP4Options(options, preserveEdits = false) {
+      mp4OptionBase = {...options};
+      for (const [id,key] of Object.entries(mp4OptionFields)) {
+        if (!preserveEdits || !mp4EditedOptions.has(key)) el(id).value = String(key === "video_bitrate" ? options[key]/1000000 : options[key]);
+      }
+    }
+    function renderMP4Options() {
+      const draft = mp4DraftOptions(), options = draft.options;
+      el("mp4-dimensions").hidden = options.resolution_mode !== "custom";
+      el("mp4-custom-bitrate").hidden = options.bitrate_mode !== "custom";
+      setAttribute(el("mp4-bitrate"),"aria-invalid",options.bitrate_mode === "custom" && !draft.validBitrate);
+      setAttribute(el("mp4-width"),"aria-invalid",options.resolution_mode === "custom" && !draft.validWidth);
+      setAttribute(el("mp4-height"),"aria-invalid",options.resolution_mode === "custom" && !draft.validHeight);
+      let width = options.resolution_mode === "custom" ? draft.validWidth && options.width : integer(mp4Status.source_width) ? mp4Status.source_width : mp4Status.width;
+      let height = options.resolution_mode === "custom" ? draft.validHeight && options.height : integer(mp4Status.source_height) ? mp4Status.source_height : mp4Status.height;
+      const bitrate = recommendedMP4Bitrate(width,height,options.fps,options.video_codec);
+      if (bitrate !== null) {width -= width % 2;height -= height % 2;}
+      text("mp4-recommendation",bitrate === null ? t("MV가 준비되면 권장값을 표시합니다.") : t("권장 비트레이트")+" · "+(bitrate/1000000).toFixed(2)+" Mbps · "+width+" × "+height,false);
+      text("mp4-options-feedback",draft.error || mp4OptionsError || (!mp4OptionsLoaded ? "MP4 설정 확인 중…" : mp4SavingOptions.size ? "저장 중…" : ""));
+      return !draft.error;
+    }
+    function saveMP4Options() {
+      const draft = mp4DraftOptions();
+      if (!mp4OptionsLoaded || draft.error || disposed || !visible) { renderMP4();return; }
+      const version = mp4OptionsVersion, options = {...draft.options};
+      mp4OptionBase = options;mp4SavingOptions.add(version);mp4OptionsError = "";renderMP4();
+      bridge.request("mp4_options_save",{options}).then(result => {
+        if (!object(result) || !validMP4ExportOptions(result.options)) throw new Error("mp4_options_invalid");
+        if (version === mp4OptionsVersion) mp4OptionsError = "";
+      }).catch(() => {
+        if (!disposed && visible && version === mp4OptionsVersion) mp4OptionsError = "MP4 설정을 저장하지 못했습니다. 값을 바꾸면 다시 저장합니다.";
+      }).finally(() => {mp4SavingOptions.delete(version);if (!disposed) renderMP4();});
+    }
+    async function loadMP4Options() {
+      if (mp4OptionsLoaded || mp4OptionsLoading || disposed || !visible) return;
+      mp4OptionsLoading = true;
+      try {
+        const result = await bridge.request("mp4_options");
+        if (disposed) return;
+        if (!object(result) || !validMP4ExportOptions(result.options)) throw new Error("mp4_options_invalid");
+        applyMP4Options(result.options,true);mp4OptionsError = "";
+      } catch (_) {if (!disposed && visible) mp4OptionsError = "MP4 설정을 불러오지 못했습니다.";}
+      finally {
+        // Hiding the page rejects bridge promises. Retry that unfinished read
+        // when shown rather than treating in-memory defaults as loaded prefs.
+        mp4OptionsLoading = false;mp4OptionsLoaded = visible;
+        if (!disposed) {if (mp4EditedOptions.size) saveMP4Options();else renderMP4();}
+      }
+    }
+    function mp4ExportPayload() {
+      const draft = mp4DraftOptions();if (draft.error) {renderMP4();return null;}
+      const options = draft.options;
+      return {fps:options.fps,video_codec:options.video_codec,video_bitrate:options.bitrate_mode === "recommended" ? 0 : options.video_bitrate,
+        width:options.resolution_mode === "current" ? 0 : options.width,height:options.resolution_mode === "current" ? 0 : options.height};
+    }
     function renderMP4() {
+      const validOptions = renderMP4Options();
       const phase = mp4Status.phase, paused = phase === "paused" || phase === "pausing", active = ["preparing_audio","rendering","finishing","cancelling","pausing","paused"].includes(phase);
       const queuedOutput = Boolean(mp4Status.export_id) && mp4QueueStatus.jobs.some(job => job.output_id === mp4Status.export_id);
       const queueOwnsScene = mp4QueueStatus.running === true || mp4QueueStatus.paused === true || Boolean(mp4QueueStatus.current_job_id);
@@ -906,8 +1016,8 @@
       text("mp4-feedback",mp4Feedback ? t(mp4Feedback) : paused ? t(pauseHint) : phase === "failed" ? plain(mp4Status.error_code,128) : "",false);
       el("mp4-progress").hidden = !active && phase !== "completed";
       el("mp4-progress").value = total ? Math.min(1,frames/total) : 0;
-      el("mp4-fields").disabled = mp4Pending || active;
-      el("mp4-start").disabled = mp4Pending || active || queueOwnsScene || mp4Status.ready !== true || launchFlushing;
+      el("mp4-fields").disabled = !mp4OptionsLoaded || mp4Mutating || active;
+      el("mp4-start").disabled = !mp4OptionsLoaded || !validOptions || mp4Pending || active || queueOwnsScene || mp4Status.ready !== true || launchFlushing;
       el("mp4-cancel").disabled = mp4Pending || !active || phase === "cancelling";
       el("mp4-cancel").hidden = queuedOutput;
       el("mp4-pause").hidden = queuedOutput || !["preparing_audio","rendering"].includes(phase);
@@ -924,7 +1034,7 @@
       const paused = q.phase === "paused";
       text("mp4-queue-summary",jobs.length ? t(paused ? "큐 일시 정지" : q.running ? "큐 실행 중" : "작업 목록")+" · "+jobs.length+" / 8" : t("등록한 작업이 없습니다."),false);
       text("mp4-queue-feedback",mp4QueueFeedback ? t(mp4QueueFeedback) : q.error_code && q.error_code !== "none" ? plain(q.error_code,128) : "",false);
-      el("mp4-enqueue").disabled = locked || q.available !== true || q.running === true || jobs.length >= 8 || mp4Status.ready !== true;
+      el("mp4-enqueue").disabled = !mp4OptionsLoaded || Boolean(mp4DraftOptions().error) || locked || q.available !== true || q.running === true || jobs.length >= 8 || mp4Status.ready !== true;
       el("mp4-queue-run").disabled = locked || q.available !== true || q.can_run !== true || q.running === true || !pending;
       el("mp4-queue-pause").hidden = q.running !== true || paused;
       el("mp4-queue-pause").disabled = locked;
@@ -972,7 +1082,7 @@
       if (!visible || disposed || mp4QueuePending || launchFlushing) return;
       if (action === "status" && (selectedCategory !== "graphics" || !el("panel-mp4").open)) return;
       if (action !== "status" && mp4QueueStatus.command_pending === true) return;
-      if (action === "enqueue") payload = {fps:Number(el("mp4-fps").value),video_bitrate:Number(el("mp4-bitrate").value),video_codec:Number(el("mp4-codec").value)};
+      if (action === "enqueue") {payload = mp4ExportPayload();if (!payload) return;}
       const command = action === "enqueue" ? "mp4_enqueue" : action === "save" ? "mp4_save" : "mp4_queue_"+action;
       payload = payload || {};
       if (!validRequest(command,payload)) return;
@@ -993,9 +1103,10 @@
     async function mp4(action) {
       if (!visible || disposed || mp4Pending || launchFlushing) return;
       if (action === "status" && (selectedCategory !== "graphics" || !el("panel-mp4").open)) return;
-      const payload = action === "start" ? {fps:Number(el("mp4-fps").value),video_bitrate:Number(el("mp4-bitrate").value),video_codec:Number(el("mp4-codec").value)} : {};
+      const payload = action === "start" ? mp4ExportPayload() : {};
+      if (!payload) return;
       if (!validRequest("mp4_"+action,payload)) return;
-      mp4Pending = true; renderMP4(); const visibility = visibilityVersion;
+      mp4Pending = true;mp4Mutating = action !== "status";renderMP4();const visibility = visibilityVersion;
       try {
         const result = await bridge.request("mp4_"+action,payload);
         if (!visible || disposed || visibility !== visibilityVersion) return;
@@ -1008,7 +1119,7 @@
         if (visible && !disposed && visibility === visibilityVersion && action !== "status")
           mp4Feedback = error.code === "mp4_scene_not_ready" ? "3D MV 재생 화면에서 다시 시도해 주세요." : error.code === "mp4_busy" ? "다른 MP4 작업을 마친 뒤 다시 시도해 주세요." : "MP4 기능을 사용할 수 없습니다.";
       } finally {
-        mp4Pending = false; if (!disposed) renderMP4();
+        mp4Pending = false;mp4Mutating = false;if (!disposed) renderMP4();
       }
     }
 
@@ -1763,7 +1874,7 @@
       } finally {
         refreshing = false;
         if (!disposed) el("refresh").disabled = false;
-        if (visible && !disposed) { mp4("status"); mp4Queue("status"); }
+        if (visible && !disposed) {if (selectedCategory === "graphics") loadMP4Options();mp4("status");mp4Queue("status");}
         schedulePoll();
       }
     }
@@ -1980,7 +2091,7 @@
       mutationVersion++;
       visibilityVersion++;
       stopPolling();
-      if (visible) { bridge.resume(); Promise.resolve().then(refresh); }
+      if (visible) { bridge.resume(); Promise.resolve().then(() => {refresh();if (selectedCategory === "graphics") loadMP4Options();}); }
       else {
         if (launchFlushing) releaseSettingsFlush(flushNonce);
         for (const [name, form] of Object.entries(forms)) {
@@ -2039,11 +2150,17 @@
       });
     }
     initializeLayout();
+    applyMP4Options(MP4_OPTION_DEFAULTS);
     applyInterfaceLanguage(interfaceChoice);
+    for (const [id,key] of Object.entries(mp4OptionFields)) {
+      el(id).addEventListener(el(id).type === "number" ? "input" : "change",() => {
+        mp4EditedOptions.add(key);mp4OptionsVersion++;mp4OptionsError = "";saveMP4Options();
+      });
+    }
     for (const action of ["start","pause","resume","cancel","save"]) el("mp4-"+action).addEventListener("click",() => mp4(action));
     for (const action of ["run","pause","resume"]) el("mp4-queue-"+action).addEventListener("click",() => mp4Queue(action));
     el("mp4-enqueue").addEventListener("click",() => mp4Queue("enqueue"));
-    el("panel-mp4").addEventListener("toggle",() => { mp4("status"); mp4Queue("status"); });
+    el("panel-mp4").addEventListener("toggle",() => { if (selectedCategory === "graphics" && el("panel-mp4").open) loadMP4Options();mp4("status");mp4Queue("status"); });
     updateCopyButton();
     el("diagnostics-copy").addEventListener("click", copyDiagnostics);
     el("diagnostics-clear").addEventListener("click", clearDiagnostics);
@@ -2101,6 +2218,6 @@
     return {dispose};
   }
 
-  if (typeof module !== "undefined" && module.exports) module.exports = {createBridge, createSettingsApp, formatBytes, resolveInterfaceLanguage, translateUI};
+  if (typeof module !== "undefined" && module.exports) module.exports = {createBridge, createSettingsApp, formatBytes, resolveInterfaceLanguage, translateUI,validMP4ExportOptions,recommendedMP4Bitrate};
   else if (root.document) createSettingsApp(root, root.document);
 })(typeof window !== "undefined" ? window : globalThis);

@@ -17,6 +17,8 @@ import android.net.Uri;
 import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.text.InputType;
 import android.text.InputFilter;
 import android.view.WindowManager;
@@ -141,7 +143,12 @@ public final class MainActivity extends Activity implements ServerService.Observ
     private Spinner maxBufferPixel;
     private Spinner antiAliasing;
     private Spinner shadowResolution;
-    private Spinner mp4Fps, mp4Codec, mp4Bitrate;
+    private Spinner mp4Fps, mp4Codec, mp4Bitrate, mp4Resolution;
+    private EditText mp4BitrateValue, mp4Width, mp4Height;
+    private LinearLayout mp4CustomBitrate, mp4CustomResolution;
+    private TextView mp4OptionsSummary, mp4OptionsError;
+    private Mp4ExportSettings mp4Settings;
+    private boolean mp4OptionsLoading;
     private TextView mp4Status;
     private Button mp4Start, mp4Cancel, mp4Save;
     private Button mp4Enqueue, mp4QueueRun, mp4QueuePause, mp4QueueResume;
@@ -2266,8 +2273,24 @@ public final class MainActivity extends Activity implements ServerService.Observ
         body.addView(text(R.string.mp4_queue_hint, 13, TEXT_MUTED));
         mp4Fps = mp4Spinner(body, R.string.mp4_fps, new String[] {"30", "60"});
         mp4Codec = mp4Spinner(body, R.string.mp4_codec, new String[] {"H.264", "HEVC"});
-        mp4Bitrate = mp4Spinner(body, R.string.mp4_bitrate, new String[] {"8 Mbps", "16 Mbps", "32 Mbps"});
-        mp4Bitrate.setSelection(1);
+        mp4Bitrate = mp4Spinner(body, R.string.mp4_bitrate,
+                new String[] {getString(R.string.mp4_bitrate_recommended), getString(R.string.mp4_custom)});
+        mp4CustomBitrate = new LinearLayout(this); mp4CustomBitrate.setOrientation(LinearLayout.VERTICAL);
+        mp4BitrateValue = mp4NumberField(R.string.mp4_bitrate_mbps, true);
+        mp4CustomBitrate.addView(mp4BitrateValue, new LinearLayout.LayoutParams(-1, -2)); body.addView(mp4CustomBitrate);
+        mp4Resolution = mp4Spinner(body, R.string.mp4_output_resolution,
+                new String[] {getString(R.string.mp4_resolution_current), getString(R.string.mp4_custom)});
+        mp4CustomResolution = new LinearLayout(this); mp4CustomResolution.setOrientation(LinearLayout.HORIZONTAL);
+        mp4Width = mp4NumberField(R.string.mp4_width_pixels, false);
+        mp4Height = mp4NumberField(R.string.mp4_height_pixels, false);
+        mp4CustomResolution.addView(mp4Width, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView separator = mp4Text("×", 17, TEXT_MUTED); separator.setPadding(dp(8), dp(12), dp(8), 0);
+        mp4CustomResolution.addView(separator, new LinearLayout.LayoutParams(-2, -2));
+        mp4CustomResolution.addView(mp4Height, new LinearLayout.LayoutParams(0, -2, 1)); body.addView(mp4CustomResolution);
+        body.addView(text(R.string.mp4_output_resolution_hint, 12, TEXT_MUTED));
+        mp4OptionsSummary = mp4Text("", 13, TEXT_MUTED); mp4OptionsSummary.setPadding(0, dp(8), 0, 0); body.addView(mp4OptionsSummary);
+        mp4OptionsError = mp4Text("", 13, Color.rgb(180, 40, 40)); mp4OptionsError.setPadding(0, dp(4), 0, dp(4)); body.addView(mp4OptionsError);
+        restoreMp4Options();
         mp4Status = text(R.string.mp4_idle, 13, TEXT_MUTED); mp4Status.setPadding(0, dp(8), 0, dp(8)); body.addView(mp4Status);
 
         mp4Enqueue = button(R.string.mp4_queue_add); body.addView(mp4Enqueue);
@@ -2295,7 +2318,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
         mp4Cancel = button(R.string.mp4_cancel); body.addView(mp4Cancel);
         mp4Save = button(R.string.mp4_save); body.addView(mp4Save);
         mp4Enqueue.setOnClickListener(view -> {
-            if (!UnifiedMP4Export.requestEnqueue(this, mp4SelectedFps(), mp4SelectedCodec(), mp4SelectedBitrate()))
+            if (!UnifiedMP4Export.requestEnqueue(this, mp4Settings.fps, mp4Settings.codec, mp4Settings.requestBitrate(),
+                    mp4Settings.requestWidth(), mp4Settings.requestHeight()))
                 Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
             refreshMp4();
         });
@@ -2309,7 +2333,8 @@ public final class MainActivity extends Activity implements ServerService.Observ
             refreshMp4();
         });
         mp4Start.setOnClickListener(view -> {
-            if (!UnifiedMP4Export.requestStart(this, mp4SelectedFps(), mp4SelectedCodec(), mp4SelectedBitrate()))
+            if (!UnifiedMP4Export.requestStart(this, mp4Settings.fps, mp4Settings.codec, mp4Settings.requestBitrate(),
+                    mp4Settings.requestWidth(), mp4Settings.requestHeight()))
                 Toast.makeText(this, R.string.mp4_not_ready, Toast.LENGTH_LONG).show();
             refreshMp4();
         });
@@ -2318,9 +2343,92 @@ public final class MainActivity extends Activity implements ServerService.Observ
         refreshMp4();
     }
 
-    private int mp4SelectedFps() { return mp4Fps.getSelectedItemPosition() == 0 ? 30 : 60; }
-    private int mp4SelectedCodec() { return mp4Codec.getSelectedItemPosition() + 1; }
-    private int mp4SelectedBitrate() { return new int[] {8_000_000, 16_000_000, 32_000_000}[mp4Bitrate.getSelectedItemPosition()]; }
+    private Mp4ExportSettings.Store mp4OptionsStore() {
+        android.content.SharedPreferences preferences = getSharedPreferences(Mp4ExportSettings.PREFS, MODE_PRIVATE);
+        return new Mp4ExportSettings.Store() {
+            @Override public String read(String key, String fallback) {
+                try { return preferences.getString(key, fallback); }
+                catch (ClassCastException invalid) { return fallback; }
+            }
+            @Override public void write(java.util.Map<String, String> values) {
+                android.content.SharedPreferences.Editor editor = preferences.edit();
+                for (java.util.Map.Entry<String, String> value : values.entrySet()) editor.putString(value.getKey(), value.getValue());
+                editor.apply();
+            }
+        };
+    }
+
+    private TextView mp4Text(String value, int size, int color) {
+        TextView result = new TextView(this); result.setText(value);
+        result.setTextSize(Math.max(16, size)); result.setLineSpacing(dp(2), 1.1f); result.setTextColor(color);
+        return result;
+    }
+
+    private EditText mp4NumberField(int hint, boolean decimal) {
+        EditText field = new EditText(this); field.setSingleLine(true); field.setHint(hint);
+        field.setTextColor(TEXT_PRIMARY); field.setTextSize(15); field.setMinHeight(dp(48));
+        field.setContentDescription(getString(hint));
+        field.setInputType(InputType.TYPE_CLASS_NUMBER | (decimal ? InputType.TYPE_NUMBER_FLAG_DECIMAL : 0));
+        field.setFilters(new InputFilter[] {new InputFilter.LengthFilter(32)});
+        field.setImeOptions(EditorInfo.IME_ACTION_DONE); field.setSelectAllOnFocus(true);
+        return field;
+    }
+
+    private void restoreMp4Options() {
+        mp4OptionsLoading = true;
+        mp4Settings = Mp4ExportSettings.load(mp4OptionsStore());
+        mp4Fps.setSelection(mp4Settings.fps == 60 ? 1 : 0); mp4Codec.setSelection(mp4Settings.codec - 1);
+        mp4Bitrate.setSelection(mp4Settings.customBitrate ? 1 : 0);
+        mp4Resolution.setSelection(mp4Settings.customResolution ? 1 : 0);
+        mp4BitrateValue.setText(mp4Settings.bitrateMbps); mp4Width.setText(mp4Settings.width); mp4Height.setText(mp4Settings.height);
+        mp4OptionsLoading = false;
+        AdapterView.OnItemSelectedListener selected = new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { saveMp4Options(); }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        };
+        for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate, mp4Resolution}) option.setOnItemSelectedListener(selected);
+        TextWatcher changed = new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { saveMp4Options(); }
+            @Override public void afterTextChanged(Editable text) { }
+        };
+        for (EditText field : new EditText[] {mp4BitrateValue, mp4Width, mp4Height}) field.addTextChangedListener(changed);
+        refreshMp4Options();
+    }
+
+    private void saveMp4Options() {
+        if (mp4OptionsLoading || mp4Settings == null) return;
+        mp4Settings = new Mp4ExportSettings(mp4Fps.getSelectedItemPosition() == 1 ? 60 : 30,
+                mp4Codec.getSelectedItemPosition() + 1, mp4Bitrate.getSelectedItemPosition() == 1,
+                mp4BitrateValue.getText().toString(), mp4Resolution.getSelectedItemPosition() == 1,
+                mp4Width.getText().toString(), mp4Height.getText().toString());
+        mp4Settings.save(mp4OptionsStore());
+        refreshMp4Options();
+        if (mp4Enqueue != null && mp4Status != null) refreshMp4();
+    }
+
+    private void refreshMp4Options() {
+        if (mp4Settings == null || mp4OptionsSummary == null) return;
+        mp4CustomBitrate.setVisibility(mp4Settings.customBitrate ? View.VISIBLE : View.GONE);
+        mp4CustomResolution.setVisibility(mp4Settings.customResolution ? View.VISIBLE : View.GONE);
+        String error = !mp4Settings.bitrateValid() ? getString(R.string.mp4_bitrate_invalid)
+                : !mp4Settings.resolutionValid() ? getString(R.string.mp4_resolution_invalid) : "";
+        setTextIfChanged(mp4OptionsError, error); mp4OptionsError.setVisibility(error.isEmpty() ? View.GONE : View.VISIBLE);
+        JSONObject state = UnifiedMP4Export.snapshot();
+        int width = mp4Settings.customResolution ? mp4Settings.requestWidth() : state.optInt("source_width", 0);
+        int height = mp4Settings.customResolution ? mp4Settings.requestHeight() : state.optInt("source_height", 0);
+        if (!mp4Settings.customResolution && width >= 16 && width <= 4096 && height >= 16 && height <= 4096) {
+            width -= width % 2; height -= height % 2;
+        }
+        int recommended = Mp4ExportSettings.recommendedBitrate(width, height, mp4Settings.fps, mp4Settings.codec);
+        String bitrate = mp4Settings.customBitrate
+                ? (mp4Settings.bitrateValid() ? String.format(Locale.ROOT, "%.2f Mbps", mp4Settings.requestBitrate() / 1_000_000.0) : "")
+                : recommended > 0 ? getString(R.string.mp4_bitrate_recommendation, String.format(Locale.ROOT, "%.2f", recommended / 1_000_000.0))
+                : getString(R.string.mp4_bitrate_recommended_waiting);
+        String geometry = Mp4ExportSettings.validResolution(width, height) && width > 0
+                ? String.format(Locale.ROOT, "%d × %d", width, height) : getString(R.string.mp4_resolution_current);
+        setTextIfChanged(mp4OptionsSummary, geometry + " · " + mp4Settings.fps + " fps · " + bitrate);
+    }
 
     private Spinner mp4Spinner(LinearLayout body, int label, String[] choices) {
         TextView caption = text(label, 13, TEXT_MUTED); caption.setPadding(0, dp(8), 0, 0); body.addView(caption);
@@ -2347,14 +2455,17 @@ public final class MainActivity extends Activity implements ServerService.Observ
         boolean running = queue.optBoolean("running"), paused = queue.optBoolean("paused");
         Mp4QueueUiState.Controls controls = new Mp4QueueUiState.Controls(queue.optBoolean("available"), commandPending,
                 running, paused, busy, UnifiedMP4Export.ready(), queue.optBoolean("can_run", false), pending, count);
-        mp4Enqueue.setEnabled(controls.enqueue); mp4QueueRun.setEnabled(controls.run);
+        boolean optionsValid = mp4Settings != null && mp4Settings.valid();
+        mp4Enqueue.setEnabled(controls.enqueue && optionsValid); mp4QueueRun.setEnabled(controls.run);
         mp4QueuePause.setEnabled(controls.pause); mp4QueueResume.setEnabled(controls.resume);
         mp4QueuePause.setVisibility(running && !paused ? View.VISIBLE : View.GONE);
         mp4QueueResume.setVisibility(paused ? View.VISIBLE : View.GONE);
-        mp4Start.setEnabled(controls.immediate);
+        mp4Start.setEnabled(controls.immediate && optionsValid);
         mp4Cancel.setVisibility(busy && !ownsCurrent ? View.VISIBLE : View.GONE);
         mp4Save.setVisibility(UnifiedMP4Export.canSave() && !ownsCurrent ? View.VISIBLE : View.GONE);
-        for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate}) option.setEnabled(!busy && !commandPending);
+        for (Spinner option : new Spinner[] {mp4Fps, mp4Codec, mp4Bitrate, mp4Resolution}) option.setEnabled(!busy && !commandPending);
+        for (EditText field : new EditText[] {mp4BitrateValue, mp4Width, mp4Height}) field.setEnabled(!busy && !commandPending);
+        refreshMp4Options();
 
         String summary = count == 0 ? getString(R.string.mp4_queue_empty)
                 : getString(R.string.mp4_queue_count, count, Mp4QueueUiState.CAPACITY, pending);
@@ -2409,6 +2520,10 @@ public final class MainActivity extends Activity implements ServerService.Observ
             String description = getString(mp4QueueStateLabel(state));
             if (width > 0 && width <= 16384 && height > 0 && height <= 16384 && (fps == 30 || fps == 60))
                 description += " · " + getString(R.string.mp4_geometry, width, height, fps);
+            int codec = job.optInt("video_codec"), bitrate = job.optInt("video_bitrate");
+            if ((codec == 1 || codec == 2) && bitrate >= Mp4ExportSettings.MIN_BITRATE && bitrate <= Mp4ExportSettings.MAX_BITRATE)
+                description += " · " + (codec == 2 ? "HEVC" : "H.264") + " · "
+                        + java.math.BigDecimal.valueOf(bitrate, 6).stripTrailingZeros().toPlainString() + " Mbps";
             int cast = job.optInt("actor_count"); if (cast > 0 && cast <= 32) description += " · " + getString(R.string.mp4_queue_cast, cast);
             String error = job.optString("error_code");
             if ("failed".equals(state) && !error.isEmpty() && !"none".equals(error)) description += "\n" + mp4SafeCode(error);

@@ -27,6 +27,7 @@ def test_mp4_pause_preserves_progress_and_requires_explicit_resume_for_user_paus
 const e=environment();const app=api.createSettingsApp(e.scope,e.document,e.timers);
 e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
 e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
 e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'rendering',ready:false,frames:41,total_frames:100});await flush();
 assert.equal(e.elements.get('mp4-pause').hidden,false);
 e.elements.get('mp4-pause').fire('click');await flush();
@@ -53,6 +54,7 @@ const e=environment();const app=api.createSettingsApp(e.scope,e.document,e.timer
 const initial=e.posted.find(x=>x.action==='status');e.respond(initial,status());await flush();
 assert.equal(e.posted.some(x=>x.action==='mp4_status'),false);
 e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
 const probe=e.posted.find(x=>x.action==='mp4_status');assert.ok(probe);
 e.respond(probe,{phase:'idle',ready:true,width:3840,height:2160});await flush();
 assert.equal(e.elements.get('mp4-start').disabled,false);
@@ -77,6 +79,7 @@ def test_completed_mp4_save_sends_no_file_identity_and_translates():
 const e=environment();const app=api.createSettingsApp(e.scope,e.document,e.timers);
 e.respond(e.posted.find(x=>x.action==='status'),status());await flush();
 e.elements.get('category-graphics').fire('click');await flush();
+e.respond(e.posted.find(x=>x.action==='mp4_options'),{options:{schema:1,fps:60,video_codec:1,bitrate_mode:'recommended',video_bitrate:16000000,resolution_mode:'current',width:1920,height:1080}});await flush();
 e.respond(e.posted.find(x=>x.action==='mp4_status'),{phase:'completed',ready:true,width:1920,height:1080,frames:60,total_frames:60,export_id:'private-owned-id'});await flush();
 assert.equal(e.elements.get('mp4-save').hidden,false);
 e.elements.get('mp4-save').fire('click');await flush();

@@ -572,7 +572,7 @@ static __weak IDSettingsController *launcherController;
     [self presentViewController:prompt animated:YES completion:nil];
 }
 - (void)dispatchRequest:(NSDictionary *)request {
-    if ([@[@"mp4_start",@"mp4_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",@"mp4_enqueue",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume",@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry",@"mp4_queue_move"] containsObject:request[@"action"]]) {
+    if ([@[@"mp4_options",@"mp4_options_save",@"mp4_start",@"mp4_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",@"mp4_enqueue",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume",@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry",@"mp4_queue_move"] containsObject:request[@"action"]]) {
         if (([@[@"mp4_start",@"mp4_enqueue",@"mp4_queue_run",@"mp4_queue_resume",@"mp4_save"] containsObject:request[@"action"]])
                 && (_pendingImport || _pendingExportRequestID || _officialPrompt || self.presentedViewController)) {
             [self localFailure:request[@"id"] message:@"진행 중인 파일 작업을 마친 후 다시 시도해 주세요."]; return;
@@ -762,7 +762,7 @@ static __weak IDSettingsController *launcherController;
     if ([action isEqual:@"diagnostics_copy"]) { [self dispatchRequest:request]; return; }
     if (!encode(request)) { [self localFailure:identifier message:@"요청이 너무 큽니다."]; return; }
     NSSet *actions = [NSSet setWithArray:@[@"status",@"save_interface_language",@"save_options",@"save_presentation",@"save_playback",@"save_media", @"events_status", @"events_save",
-        @"mp4_start",@"mp4_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",
+        @"mp4_options",@"mp4_options_save",@"mp4_start",@"mp4_status",@"mp4_pause",@"mp4_resume",@"mp4_cancel",@"mp4_save",
         @"mp4_enqueue",@"mp4_queue_status",@"mp4_queue_run",@"mp4_queue_pause",@"mp4_queue_resume",@"mp4_queue_cancel",@"mp4_queue_remove",@"mp4_queue_retry",@"mp4_queue_move",
         @"resources_preview",@"resources_download",@"resources_cancel",@"resources_import",@"resources_export",
         @"official_inspect",@"official_fetch",@"official_apply",@"official_cancel",@"official_status",

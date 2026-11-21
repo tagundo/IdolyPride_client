@@ -29,7 +29,7 @@ REPO = "tagundo/IdolyPride_client"
 WORKFLOW = ".github/workflows/build-mp4-preview.yml"
 CODEC_WORKFLOW = ".github/workflows/verify-mp4-codecs.yml"
 BRANCH = "refs/heads/feat/ios-unified-server"
-VERSION = "2026.11.21.4"
+VERSION = "2026.11.21.5"
 APK = "IdolyPride-Unified-" + VERSION + "-prototype.apk"
 APK_REPORT = APK.removesuffix(".apk") + ".provenance.json"
 VERIFICATION = "MP4-PREVIEW-VERIFICATION.json"
@@ -39,13 +39,17 @@ CODEC_WAIT = 2400
 MP4_NATIVE = {"client-presentation/native/" + name for name in (
     "mp4_encoder_api.h", "mp4_android_encoder.hpp", "mp4_game_adapter.hpp", "mp4_game_bindings.hpp", "mp4_runtime.hpp",
     "mp4_session_api.h", "mp4_queue.hpp", "mp4_queue_runtime.hpp", "mp4_queue_cleanup.hpp", "mp4_selection_capture.hpp",
-    "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp",
+    "mp4_replay.hpp", "mp4_replay_profile.hpp", "mp4_replay_factories.hpp", "mp4_output_policy.hpp",
+    "mp4_controller_profile.hpp", "mp4_controller_profile.json",
     "shared_cache_core.hpp", "shared_cache_hooks.hpp")}
 MP4_JAVA = {"android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Export.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/MainActivity.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/ServerService.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Background.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/UnifiedMP4Service.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4QueueUiState.java",
             "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4TitleCatalog.java",
+            "android-server/app/src/main/java/game/qualiarts/idolypride/localserver/Mp4ExportSettings.java",
             "android-server/app/src/main/python/android_server_runtime.py",
             "src/idoly_local/mp4_audio_broker.py", "src/idoly_local/mp4_audio_bundle.py", "src/idoly_local/mp4_export_library.py", "src/idoly_local/mp4_titles.py",
             "tools/refresh_korean_translation_bundle.py", "data/latest-korean-translations-pin.json",
@@ -258,7 +262,7 @@ def ios_files(folder, source):
                 need(hashlib.file_digest(incoming, "sha256").hexdigest() == members[row.filename], "ipa_member_bytes_differ")
         app = "Payload/IDOLY PRIDE.app/"
         info = plistlib.loads(archive.read(app + "Info.plist"))
-        need(info.get("CFBundleVersion") == "2026.1121.4", "ipa_preview_version_differs")
+        need(info.get("CFBundleVersion") == "2026.1121.5", "ipa_preview_version_differs")
         need(members[app + "Frameworks/IdolyEmbeddedServer.framework/IdolyEmbeddedServer"] == native["post_sign_binary_sha256"]
              and members[app + "Frameworks/IdolyPresentation.dylib"] == presentation["sha256"], "ipa_native_source_binding_differs")
         need(members[app + "LocalServer/ServerData.zip"] == korean.output_pin()["sha256"], "ipa_server_data_pin_differs")
@@ -628,7 +632,8 @@ def stage_from_producer(source, work, *, producer):
             proof["verified_assets"].append(verify_asset(matches[0], path, work)); save()
         body = ("Offline MP4 APK and IPA preview built from `" + source + "`.\n\n"
                 "Persistent MV export queue with reordering, retry and per-job saving. Android background rendering is experimental and off by default; iOS pauses and resumes when returning.\n\n"
-                "Paused Android MVs can be submitted from the server menu and are revalidated after returning to the game. Korean ADV, display text and master translations use the pinned 11ecceb source. Existing images are preserved; untranslated event banners retain their originals.\n\n"
+                "Export frame rate, codec, bitrate mode and output size are saved automatically. Bitrate supports a numeric recommendation and custom Mbps; width and height can be entered separately. Existing queue jobs keep the options captured when registered.\n\n"
+                "MV target discovery includes explicit-size and already-created targets; odd source sizes are normalized for the encoder. Paused Android MVs are revalidated after returning to the game. Korean ADV, display text and master translations retain the pinned 11ecceb source; untranslated event banners retain their originals.\n\n"
                 "Both current-source codec jobs passed. The IPA also passed its five-process language/core Simulator checks.\n"
                 "Actual game MV rendering, device export fidelity and PlayCover execution remain unverified.\n\n"
                 "Every asset was downloaded in full and SHA-256 verified. See MP4-PREVIEW-VERIFICATION.json and SHA256SUMS.\n")

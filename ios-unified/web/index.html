@@ -267,9 +267,18 @@
           <p id="mp4-summary" role="status" aria-live="polite">3D MV 준비 대기</p>
           <fieldset id="mp4-fields">
             <label class="row"><span>MP4 프레임 수</span><select id="mp4-fps"><option value="30">30 fps</option><option value="60" selected>60 fps</option></select></label>
-            <label class="row"><span>영상 비트레이트</span><select id="mp4-bitrate"><option value="8000000">8 Mbps</option><option value="16000000" selected>16 Mbps</option><option value="32000000">32 Mbps</option></select></label>
             <label class="row"><span>영상 코덱</span><select id="mp4-codec"><option value="1">H.264</option><option value="2">HEVC</option></select></label>
+            <label class="row"><span>출력 크기</span><select id="mp4-resolution-mode"><option value="current" selected>현재 렌더 크기</option><option value="custom">직접 입력</option></select></label>
+            <div id="mp4-dimensions" hidden>
+              <label class="row"><span>가로 (픽셀)</span><input id="mp4-width" type="number" min="16" max="4096" step="2" value="1920" inputmode="numeric"></label>
+              <label class="row"><span>세로 (픽셀)</span><input id="mp4-height" type="number" min="16" max="4096" step="2" value="1080" inputmode="numeric"></label>
+            </div>
+            <label class="row"><span>영상 비트레이트</span><select id="mp4-bitrate-mode"><option value="recommended" selected>권장값 자동 계산</option><option value="custom">직접 입력</option></select></label>
+            <label id="mp4-custom-bitrate" class="row" hidden><span>비트레이트 (Mbps)</span><input id="mp4-bitrate" type="number" min="0.1" max="200" step="0.01" value="16" inputmode="decimal"></label>
+            <p id="mp4-recommendation" class="hint" role="status" aria-live="polite"></p>
+            <p class="hint">MP4 크기와 게임 렌더 품질은 별도입니다.</p>
           </fieldset>
+          <p id="mp4-options-feedback" class="hint" role="status" aria-live="polite"></p>
           <p class="hint">MV를 모은 뒤 큐를 실행하세요.</p>
           <div class="actions"><button id="mp4-queue-run" type="button" disabled>큐 실행</button><button id="mp4-enqueue" type="button" class="secondary" disabled>현재 MV 추가</button><button id="mp4-queue-pause" type="button" class="secondary" hidden>큐 일시 정지</button><button id="mp4-queue-resume" type="button" class="secondary" hidden>큐 계속하기</button></div>
           <p id="mp4-queue-summary" role="status" aria-live="polite">등록한 작업이 없습니다.</p>

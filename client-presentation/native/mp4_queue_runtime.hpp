@@ -72,9 +72,11 @@ inline void queue_publish(){
         queue_available?"true":"false",command_pending?"true":"false",queue_error,queue_last_added,
         queue_running?"true":"false",queue_paused?"true":"false",queue_phase,queue_active_id,queue_replay_available?"true":"false",queue_can_run?"true":"false");
     for(size_t i=0;i<queue_store().count();++i){const auto* queued=queue_store().at(i);if(!queued)continue;
-        append("%s{\"job_id\":\"%s\",\"output_id\":\"%s\",\"timeline\":\"%s\",\"actor_count\":%u,\"width\":%u,\"height\":%u,\"fps_num\":%u,\"video_codec\":%u,\"state\":\"%s\",\"error_code\":\"%s\"}",
+        append("%s{\"job_id\":\"%s\",\"output_id\":\"%s\",\"timeline\":\"%s\",\"actor_count\":%u,\"width\":%u,\"height\":%u,\"source_width\":%u,\"source_height\":%u,\"fps_num\":%u,\"video_codec\":%u,\"video_bitrate\":%u,\"state\":\"%s\",\"error_code\":\"%s\"}",
             i?",":"",queued->id,queued->output_id,queued->descriptor.timeline_asset,queued->descriptor.actor_count,
-            queued->options.width,queued->options.height,queued->options.fps_num,queued->options.codec,
+            queued->options.output_width?queued->options.output_width:queued->options.width&~1U,
+            queued->options.output_height?queued->options.output_height:queued->options.height&~1U,
+            queued->options.width,queued->options.height,queued->options.fps_num,queued->options.codec,queued->options.video_bitrate,
             queue_model::state_name(queued->state),queued->error[0]?queued->error:"none");
     }append("%s","]}");
     if(at>=sizeof(next))snprintf(next,sizeof(next),"{\"schema\":1,\"available\":false,\"error_code\":\"queue_status_overflow\",\"jobs\":[]}");
@@ -192,7 +194,11 @@ inline void queue_process(const QueueRequest& request){
         if(selection.selected(player,queue_descriptor_work)!=Result::ok){queue_set_error(selection.error());return;}
         int32_t width=0,height=0;if(game.source_geometry(width,height)!=Result::ok){queue_set_error("selected_capture_geometry_unsupported");return;}
         queue_model::Options options{};options.fps_num=request.options.fps_num;options.fps_den=request.options.fps_den;options.codec=request.options.codec;
-        options.video_bitrate=request.options.bitrate;options.audio_bitrate=request.options.audio_bitrate;options.width=static_cast<uint32_t>(width);options.height=static_cast<uint32_t>(height);
+        options.audio_bitrate=request.options.audio_bitrate;options.width=static_cast<uint32_t>(width);options.height=static_cast<uint32_t>(height);
+        options.output_width=request.options.output_width?request.options.output_width:options.width&~1U;
+        options.output_height=request.options.output_height?request.options.output_height:options.height&~1U;
+        options.video_bitrate=idoly_mp4_output::resolved_bitrate(request.options.bitrate,options.output_width,options.output_height,options.fps_num,options.codec);
+        if(!options.video_bitrate){queue_set_error("invalid_export_options");return;}
         if(!queue_graphics_snapshot||!queue_graphics_snapshot(options.graphics)){queue_set_error("selected_graphics_unavailable");return;}
         const auto result=queue_store().enqueue(queue_descriptor_work,options,queue_last_added);
         if(result!=queue_model::Error::ok)queue_set_error(queue_model::error_code(result));
@@ -291,7 +297,7 @@ inline void queue_execute(){
     snprintf(pending_queue_exports,sizeof(pending_queue_exports),"%s",queue_export_root);
     pending_queue_exports_fd=queue_exports;pending_queue_width=next->options.width;pending_queue_height=next->options.height;
     pthread_mutex_unlock(&control_mutex);
-    if(!start({next->options.fps_num,next->options.fps_den,next->options.codec,next->options.video_bitrate,next->options.audio_bitrate},true))return;
+    if(!start({next->options.fps_num,next->options.fps_den,next->options.codec,next->options.video_bitrate,next->options.audio_bitrate,next->options.output_width,next->options.output_height},true))return;
     queue_export_started=true;snprintf(queue_phase,sizeof(queue_phase),"rendering");
 }
 inline void queue_tick(){
@@ -338,6 +344,7 @@ inline bool queue_command(int operation,const char* id,int position){
 
 extern "C" IDMP4_SESSION_API int IDMP4QueueConfigure(const char*r,const char*e){return idoly_mp4_runtime::queue_configure(r,e)?0:-1;}
 extern "C" IDMP4_SESSION_API int IDMP4QueueEnqueue(uint32_t n,uint32_t d,uint32_t c,uint32_t v,uint32_t a){return idoly_mp4_runtime::queue_accept(idoly_mp4_runtime::QueueCommandKind::enqueue,{n,d,c,v,a})?0:-1;}
+extern "C" IDMP4_SESSION_API int IDMP4QueueEnqueueV2(uint32_t n,uint32_t d,uint32_t c,uint32_t v,uint32_t a,uint32_t w,uint32_t h){return idoly_mp4_runtime::queue_accept(idoly_mp4_runtime::QueueCommandKind::enqueue,{n,d,c,v,a,w,h})?0:-1;}
 extern "C" IDMP4_SESSION_API int IDMP4QueueRun(){return idoly_mp4_runtime::queue_accept(idoly_mp4_runtime::QueueCommandKind::run)?0:-1;}
 extern "C" IDMP4_SESSION_API int IDMP4QueuePause(){return idoly_mp4_runtime::queue_accept(idoly_mp4_runtime::QueueCommandKind::pause)?0:-1;}
 extern "C" IDMP4_SESSION_API int IDMP4QueueResume(){return idoly_mp4_runtime::queue_accept(idoly_mp4_runtime::QueueCommandKind::resume)?0:-1;}
