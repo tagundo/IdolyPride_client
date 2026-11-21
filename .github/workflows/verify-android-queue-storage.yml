@@ -1,0 +1,88 @@
+name: Verify Android app queue storage
+
+on:
+  push:
+    branches: [feat/ios-unified-server]
+    paths:
+      - .github/workflows/verify-android-queue-storage.yml
+      - client-presentation/native/mp4_queue.hpp
+      - client-presentation/native/mp4_output_policy.hpp
+      - android-unified/queue-qa/**
+      - tools/build_android_queue_qa.py
+      - tools/build_android_mp4_qa.py
+      - tests/test_android_queue_storage_qa.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-queue-storage-${{ github.sha }}
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  ordinary-app-storage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify strict source, app-context and required-case gates
+        run: |
+          python -m pip install --disable-pip-version-check pytest==8.4.2
+          python -B -m pytest -q -p no:cacheprovider tests/test_android_queue_storage_qa.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: Install pinned standalone JNI probe tools
+        run: sdkmanager 'platforms;android-34' 'build-tools;34.0.0' 'ndk;26.3.11579264'
+      - name: Require KVM for a disposable enforcing emulator
+        run: |
+          test -c /dev/kvm
+          sudo chmod 0666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Build signed probe from the exact committed production Queue
+        run: |
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
+          python -B tools/build_android_queue_qa.py --require-committed \
+            --output-directory "$RUNNER_TEMP/idoly-queue-storage-proof" --android-sdk "$ANDROID_HOME"
+          test -z "$(git status --porcelain)"
+      - name: Exercise actual Queue under ordinary app UID and enforcing SELinux
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_4
+          cores: 2
+          ram-size: 2048M
+          disk-size: 4G
+          emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -accel on
+          disable-linux-hw-accel: false
+          disable-animations: true
+          emulator-boot-timeout: 1200
+          script: >-
+            python -B tools/build_android_queue_qa.py --run-device --require-committed --timeout 120
+            --output-directory "$RUNNER_TEMP/idoly-queue-storage-proof" --android-sdk "$ANDROID_HOME"
+      - name: Retain bounded source, syscall and app-context reports after success or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-queue-storage-proof-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/idoly-queue-storage-proof
+          if-no-files-found: warn
+          retention-days: 14

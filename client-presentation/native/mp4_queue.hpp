@@ -13,6 +13,9 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/file.h>
+#if defined(__linux__)
+#include <sys/syscall.h>
+#endif
 #include <errno.h>
 #include <initializer_list>
 #include <new>
@@ -153,7 +156,21 @@ inline bool options(const Options& o){return o.fps_den==1&&(o.fps_num==30||o.fps
     &&o.video_bitrate>=100000&&o.video_bitrate<=200000000&&o.audio_bitrate==192000
     &&o.width>=16&&o.height>=16&&o.width<=16384&&o.height<=16384
     &&idoly_mp4_output::requested_dimensions(o.output_width,o.output_height)&&graphics(o.graphics);}
-inline bool safe_file(int fd,struct stat& s){return fd>=0&&::fstat(fd,&s)==0&&(s.st_mode&0170000)==0100000&&(s.st_mode&0777)==0600&&s.st_uid==geteuid()&&s.st_nlink==1&&s.st_size>=0&&static_cast<uint64_t>(s.st_size)<=max_wire_bytes;}
+inline bool safe_file_stat(const struct stat& s){return (s.st_mode&0170000)==0100000&&(s.st_mode&0777)==0600&&s.st_uid==geteuid()&&s.st_nlink==1&&s.st_size>=0&&static_cast<uint64_t>(s.st_size)<=max_wire_bytes;}
+inline bool safe_file(int fd,struct stat& s){return fd>=0&&::fstat(fd,&s)==0&&safe_file_stat(s);}
+inline int install_new(int directory,const char* temporary,const char* journal){
+#if defined(__linux__)
+    // Android's untrusted-app SELinux policy forbids hard links, including
+    // app-private files. Use the kernel no-replace rename rather than the
+    // libc renameat2 symbol, which was added only in Android API 30.
+    // Unsupported kernels/filesystems must fail; never overwrite a new owner.
+    return static_cast<int>(::syscall(SYS_renameat2,directory,temporary,directory,journal,1U));
+#else
+    const int result=::linkat(directory,temporary,directory,journal,0);
+    if(result==0)::unlinkat(directory,temporary,0);
+    return result;
+#endif
+}
 inline bool same(const struct stat&a,const struct stat&b){
     if(a.st_dev!=b.st_dev||a.st_ino!=b.st_ino||a.st_uid!=b.st_uid||a.st_mode!=b.st_mode||a.st_nlink!=b.st_nlink||a.st_size!=b.st_size)return false;
 #if defined(IDOLY_DARWIN_BRIDGE) || defined(__APPLE__)
@@ -226,18 +243,18 @@ public:
     ~Queue(){close();}
     Queue(const Queue&)=delete;Queue&operator=(const Queue&)=delete;
     Error open(const char* path,const char* profile){
-        close();if(!path||path[0]!='/'||!detail::hex(profile,64))return Error::invalid_argument;
+        close();clear_storage_error();if(!path||path[0]!='/'||!detail::hex(profile,64))return Error::invalid_argument;
         directory_=::open(path,detail::rd|detail::nofollow|detail::directory);struct stat d{};
         if(directory_<0||::fstat(directory_,&d)!=0||(d.st_mode&0170000)!=0040000||(d.st_mode&0777)!=0700||d.st_uid!=geteuid()){close();return Error::unsafe_storage;}
         lock_=::openat(directory_,".queue-v1.lock",detail::rw|detail::create|detail::nofollow|detail::nonblock,0600);
         struct stat lock_identity{};if(!detail::safe_file(lock_,lock_identity)||lock_identity.st_size!=0){close();return Error::unsafe_storage;}
         // LOCK_EX | LOCK_NB have the same public values on Darwin and Linux.
         if(::flock(lock_,2|4)!=0){close();return Error::busy;}
-        state_=detail::allocate<Store>();if(!state_){close();return Error::io;}memcpy(profile_,profile,65);
+        state_=detail::allocate<Store>();if(!state_){storage_failed("allocate_state",12);close();return Error::io;}memcpy(profile_,profile,65);
         int fd=::openat(directory_,filename(),detail::rd|detail::nofollow|detail::nonblock);
         if(fd<0){if(detail::error_number()!=2){close();return Error::unsafe_storage;}return Error::ok;}
         struct stat s{};if(!detail::safe_file(fd,s)||s.st_size<static_cast<int64_t>(header_bytes)){::close(fd);close();return Error::corrupt;}
-        size_t n=static_cast<size_t>(s.st_size);uint8_t* bytes=static_cast<uint8_t*>(malloc(n));if(!bytes){::close(fd);close();return Error::io;}
+        size_t n=static_cast<size_t>(s.st_size);uint8_t* bytes=static_cast<uint8_t*>(malloc(n));if(!bytes){storage_failed("allocate_wire",12);::close(fd);close();return Error::io;}
         size_t at=0;while(at<n){long got=::read(fd,bytes+at,n-at);if(got<0&&detail::error_number()==4)continue;if(got<=0)break;at+=static_cast<size_t>(got);}uint8_t tail=0;long extra=::read(fd,&tail,1);struct stat after{};
         bool stable=::fstat(fd,&after)==0&&detail::same(s,after);::close(fd);
         Error result=Error::corrupt;
@@ -257,6 +274,8 @@ public:
     }
     void close(){if(lock_>=0)::close(lock_);lock_=-1;if(directory_>=0)::close(directory_);directory_=-1;if(state_)free(state_);state_=nullptr;has_journal_=false;blocked_=false;profile_[0]=0;}
     size_t count()const{return state_?state_->count:0;}
+    const char* storage_stage()const{return storage_stage_;}
+    int storage_errno()const{return storage_errno_;}
     uint64_t generation()const{return state_?state_->generation:0;}
     const Job* at(size_t i)const{return state_&&i<state_->count?&state_->jobs[i]:nullptr;}
     const Job* find(const char*id)const{int i=index(id);return i<0?nullptr:&state_->jobs[i];}
@@ -281,25 +300,49 @@ public:
     Error cancel(const char*id){return transition(id,State::cancelled,nullptr);}
     Error retry(const char*id){return transition(id,State::pending,nullptr);}
     Error remove(const char*id){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(active(state_->jobs[i]))return Error::busy;Store*next=clone();if(!next)return Error::io;for(size_t k=static_cast<size_t>(i)+1;k<next->count;++k)next->jobs[k-1]=next->jobs[k];--next->count;detail::reset_value(next->jobs[next->count]);return commit(next);}
-    Error move(const char*id,size_t target){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(target>=state_->count)return Error::invalid_argument;if(state_->jobs[i].state!=State::pending)return Error::invalid_state;if(target==static_cast<size_t>(i))return Error::ok;Store*next=clone();if(!next)return Error::io;Job*saved=detail::allocate<Job>();if(!saved){free(next);return Error::io;}*saved=next->jobs[i];if(target<static_cast<size_t>(i))for(size_t k=static_cast<size_t>(i);k>target;--k)next->jobs[k]=next->jobs[k-1];else for(size_t k=static_cast<size_t>(i);k<target;++k)next->jobs[k]=next->jobs[k+1];next->jobs[target]=*saved;free(saved);return commit(next);}
+    Error move(const char*id,size_t target){if(!state_||blocked_)return Error::not_open;int i=index(id);if(i<0)return Error::not_found;if(target>=state_->count)return Error::invalid_argument;if(state_->jobs[i].state!=State::pending)return Error::invalid_state;if(target==static_cast<size_t>(i))return Error::ok;Store*next=clone();if(!next)return Error::io;Job*saved=detail::allocate<Job>();if(!saved){storage_failed("allocate_store",12);free(next);return Error::io;}*saved=next->jobs[i];if(target<static_cast<size_t>(i))for(size_t k=static_cast<size_t>(i);k>target;--k)next->jobs[k]=next->jobs[k-1];else for(size_t k=static_cast<size_t>(i);k<target;++k)next->jobs[k]=next->jobs[k+1];next->jobs[target]=*saved;free(saved);return commit(next);}
 private:
     // Keep the owned path/lock stable while the checked header advances to v3.
     // Old jobs migrate only on the next ordinary transactional mutation.
     static const char*filename(){return "queue-v1.bin";}
     static bool active(const Job&j){return j.state==State::running||j.state==State::paused;}
     int index(const char*id)const{if(!state_||!detail::hex(id,32))return -1;for(size_t i=0;i<state_->count;++i)if(!strcmp(id,state_->jobs[i].id))return static_cast<int>(i);return -1;}
-    Store*clone(){Store*n=detail::allocate<Store>();if(n)*n=*state_;return n;}
+    void clear_storage_error(){storage_stage_="none";storage_errno_=0;}
+    void storage_failed(const char* stage,int number){storage_stage_=stage;storage_errno_=number>0&&number<=4095?number:0;}
+    Store*clone(){clear_storage_error();Store*n=detail::allocate<Store>();if(n)*n=*state_;else storage_failed("allocate_store",12);return n;}
     bool new_id(char out[33]){for(unsigned attempt=0;attempt<8;++attempt){uint8_t raw[16];if(!random_(random_context_,raw,16))return false;static const char digits[]="0123456789abcdef";for(size_t i=0;i<16;++i){out[2*i]=digits[raw[i]>>4];out[2*i+1]=digits[raw[i]&15];}out[32]=0;bool unique=true;for(size_t i=0;i<state_->count;++i)if(!strcmp(out,state_->jobs[i].id)||!strcmp(out,state_->jobs[i].output_id))unique=false;if(unique)return true;}return false;}
     bool current(){int fd=::openat(directory_,filename(),detail::rd|detail::nofollow|detail::nonblock);if(fd<0)return !has_journal_&&detail::error_number()==2;struct stat s{};bool good=has_journal_&&detail::safe_file(fd,s)&&detail::same(identity_,s);::close(fd);return good;}
     Error commit(Store*next){
         if(!state_||blocked_){free(next);return Error::not_open;}if(!current()){free(next);return Error::changed_storage;}if(state_->generation==~uint64_t(0)){free(next);return Error::invalid_state;}next->generation=state_->generation+1;
-        uint8_t*bytes=static_cast<uint8_t*>(malloc(max_wire_bytes));if(!bytes){free(next);return Error::io;}memset(bytes,0,header_bytes);detail::Writer w{bytes+header_bytes,max_wire_bytes-header_bytes};for(size_t i=0;i<next->count;++i)detail::encode(w,next->jobs[i]);if(!w.ok){free(bytes);free(next);return Error::invalid_descriptor;}
+        clear_storage_error();uint8_t*bytes=static_cast<uint8_t*>(malloc(max_wire_bytes));if(!bytes){storage_failed("allocate_wire",12);free(next);return Error::io;}memset(bytes,0,header_bytes);detail::Writer w{bytes+header_bytes,max_wire_bytes-header_bytes};for(size_t i=0;i<next->count;++i)detail::encode(w,next->jobs[i]);if(!w.ok){free(bytes);free(next);return Error::invalid_descriptor;}
         memcpy(bytes,"IDMPQ001",8);detail::put32(bytes+8,3);detail::put32(bytes+12,header_bytes);memcpy(bytes+16,profile_,64);detail::put64(bytes+80,next->generation);detail::put32(bytes+88,next->count);detail::put32(bytes+92,static_cast<uint32_t>(w.at));detail::put64(bytes+96,detail::checksum(bytes+header_bytes,w.at,detail::checksum(bytes,96)));size_t length=header_bytes+w.at;
         uint8_t nonce[16];if(!random_(random_context_,nonce,16)){free(bytes);free(next);return Error::random_failed;}char temp[64];static const char alphabet[]="0123456789abcdef";memcpy(temp,".queue-",7);for(size_t i=0;i<16;++i){temp[7+i*2]=alphabet[nonce[i]>>4];temp[8+i*2]=alphabet[nonce[i]&15];}memcpy(temp+39,".tmp",5);
-        int fd=::openat(directory_,temp,detail::wr|detail::create|detail::exclusive|detail::nofollow,0600);struct stat owned{};bool created=fd>=0&&::fstat(fd,&owned)==0;size_t at=0;
-        while(created&&at<length){long n=::write(fd,bytes+at,length-at);if(n<0&&detail::error_number()==4)continue;if(n<=0)break;at+=static_cast<size_t>(n);}free(bytes);bool good=created&&at==length&&::fsync(fd)==0;struct stat ready{};good=good&&detail::safe_file(fd,ready);if(fd>=0)::close(fd);
+        int fd=::openat(directory_,temp,detail::wr|detail::create|detail::exclusive|detail::nofollow,0600);struct stat owned{};bool created=false;
+        if(fd<0)storage_failed("open_temp",detail::error_number());
+        else if(::fstat(fd,&owned)!=0)storage_failed("stat_temp",detail::error_number());
+        else created=true;
+        size_t at=0;
+        while(created&&at<length){long n=::write(fd,bytes+at,length-at);if(n<0&&detail::error_number()==4)continue;if(n<=0){storage_failed("write_temp",n<0?detail::error_number():0);break;}at+=static_cast<size_t>(n);}
+        free(bytes);bool good=created&&at==length;struct stat ready{};
+        if(good&&::fsync(fd)!=0){storage_failed("sync_temp",detail::error_number());good=false;}
+        if(good&&::fstat(fd,&ready)!=0){storage_failed("validate_temp",detail::error_number());good=false;}
+        if(good&&!detail::safe_file_stat(ready)){storage_failed("validate_temp",0);good=false;}
+        if(fd>=0)::close(fd);
         Error result=Error::io;if(good&&!current())result=Error::changed_storage;
-        else if(good){int moved;if(has_journal_)moved=::renameat(directory_,temp,directory_,filename());else {moved=::linkat(directory_,temp,directory_,filename(),0);if(moved==0)::unlinkat(directory_,temp,0);}if(moved==0){int now=::openat(directory_,filename(),detail::rd|detail::nofollow|detail::nonblock);struct stat identity{};bool installed=detail::safe_file(now,identity)&&identity.st_dev==ready.st_dev&&identity.st_ino==ready.st_ino;if(now>=0)::close(now);if(installed){free(state_);state_=next;next=nullptr;identity_=identity;has_journal_=true;if(::fsync(directory_)==0)result=Error::ok;else {blocked_=true;result=Error::durability_uncertain;}}else {blocked_=true;result=Error::durability_uncertain;}}}
+        else if(good){
+            const int moved=has_journal_?::renameat(directory_,temp,directory_,filename()):detail::install_new(directory_,temp,filename());
+            if(moved!=0){const int number=detail::error_number();storage_failed(has_journal_?"replace_journal":"install_new",number);if(!has_journal_&&number==17)result=Error::changed_storage;}
+            else {
+                int now=::openat(directory_,filename(),detail::rd|detail::nofollow|detail::nonblock);struct stat identity{};bool installed=false;
+                if(now<0)storage_failed("validate_installed",detail::error_number());
+                else if(::fstat(now,&identity)!=0)storage_failed("validate_installed",detail::error_number());
+                else if(!detail::safe_file_stat(identity)||identity.st_dev!=ready.st_dev||identity.st_ino!=ready.st_ino)storage_failed("validate_installed",0);
+                else installed=true;
+                if(now>=0)::close(now);
+                if(installed){free(state_);state_=next;next=nullptr;identity_=identity;has_journal_=true;if(::fsync(directory_)==0)result=Error::ok;else {storage_failed("sync_directory",detail::error_number());blocked_=true;result=Error::durability_uncertain;}}
+                else {blocked_=true;result=Error::durability_uncertain;}
+            }
+        }
         if(created){int check=::openat(directory_,temp,detail::rd|detail::nofollow|detail::nonblock);struct stat s{};bool ours=check>=0&&::fstat(check,&s)==0&&s.st_dev==owned.st_dev&&s.st_ino==owned.st_ino;if(check>=0)::close(check);if(ours)::unlinkat(directory_,temp,0);}if(next)free(next);return result;
     }
     Error transition(const char*id,State target,const char*message){
@@ -313,5 +356,6 @@ private:
         Store*next=clone();if(!next)return Error::io;Job&j=next->jobs[i];j.state=target;j.error[0]=j.pause_reason[0]=0;if(target==State::pending)j.output_id[0]=0;if(target==State::failed)snprintf(j.error,65,"%s",message);if(target==State::paused)snprintf(j.pause_reason,65,"%s",message);return commit(next);
     }
     int directory_=-1,lock_=-1;Store*state_=nullptr;char profile_[65]{};struct stat identity_{};bool has_journal_=false,blocked_=false;Random random_;void*random_context_;
+    const char* storage_stage_="none";int storage_errno_=0;
 };
 } // namespace idoly_mp4_queue
